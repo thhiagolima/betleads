@@ -1,0 +1,1 @@
+UPDATE public.email_templates SET body_html = $MIG$REPLACE_ME$MIG$, updated_at = now() WHERE id = '68fa1936-7ea4-4cd8-ade9-e0028651669a';

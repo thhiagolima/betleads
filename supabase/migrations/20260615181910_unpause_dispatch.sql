@@ -1,0 +1,3 @@
+UPDATE public.dispatch_pause_state
+   SET paused = false, paused_at = NULL, reason = NULL, updated_at = now()
+ WHERE paused = true;

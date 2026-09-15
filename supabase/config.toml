@@ -1,0 +1,4 @@
+project_id = "fnonshammxhurrwwqkcp"
+
+[functions.ai-player-insights]
+verify_jwt = true

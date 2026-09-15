@@ -1,0 +1,3 @@
+UPDATE public.sms_send_logs SET delivery_status = 'delivered' WHERE delivery_status IN ('message.sent','message.delivered','delivrd','entregue','received');
+UPDATE public.sms_send_logs SET delivery_status = 'sent' WHERE delivery_status IN ('message.queued','queued','accepted','submitted','enviado');
+UPDATE public.sms_send_logs SET delivery_status = 'failed' WHERE delivery_status IN ('message.failed','message.undelivered','undelivered','undeliverable','rejected','error','falhou','webhook.test');

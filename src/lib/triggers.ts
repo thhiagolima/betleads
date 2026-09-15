@@ -1,0 +1,46 @@
+// Nomes e significados dos 12 gatilhos — seguro para client e server.
+export const TRIGGER_NAMES = {
+  lead_cadastrado: "Lead cadastrado",
+  recuperacao_vip: "Recuperação VIP",
+  vip_esfriando: "VIP esfriando",
+  receita_em_queda: "Receita em queda",
+  lead_quente_esfriando: "Lead quente esfriando",
+  quase_vip: "Quase VIP",
+  alto_potencial: "Alto potencial",
+  reativacao_em_curso: "Reativação em curso",
+  dinheiro_parado: "Dinheiro parado",
+  engajado_sem_converter: "Engajado sem converter",
+  frequencia_caindo: "Frequência de queda",
+  cadastrados_sem_deposito: "Cadastrados sem depósito",
+  sem_login_7_14: "7 a 14 dias sem login",
+  sem_login_15_24: "15 a 24 dias sem login",
+  sem_login_25_34: "25 a 34 dias sem login",
+  sem_login_35_44: "35 a 44 dias sem login",
+  sem_login_45_59: "45 a 59 dias sem login",
+  sem_login_60_mais: "60+ dias sem login",
+  cashback_pago: "Cashback pago",
+} as const;
+
+export const TRIGGER_MEANINGS = {
+  lead_cadastrado: "Lead recém-cadastrado pelo link do expert (CRM Expert)",
+  recuperacao_vip: "VIP sem login há 7+ dias",
+  vip_esfriando: "VIP sem jogar há 2+ dias",
+  receita_em_queda: "Depósitos caíram 50%+ vs período anterior (antes ≥ R$ 200)",
+  lead_quente_esfriando: "Depositava 5+ dias seguidos e parou há 3–7 dias",
+  quase_vip: "Total depositado entre R$ 800 e R$ 999",
+  alto_potencial: "10+ logins, depósitos crescendo e login recente",
+  reativacao_em_curso: "Voltou a depositar após 14+ dias parado",
+  dinheiro_parado: "Saldo ≥ R$ 50 e sem jogar há 5+ dias",
+  engajado_sem_converter: "8+ logins em 30 dias e sem depósito há 14+ dias",
+  frequencia_caindo: "Frequência de login caiu 50%+",
+  cadastrados_sem_deposito: "Cadastrou e nunca fez o primeiro depósito (sai ao depositar)",
+  sem_login_7_14: "Último login entre 7 e 14 dias atrás (sai ao logar)",
+  sem_login_15_24: "Último login entre 15 e 24 dias atrás (sai ao logar)",
+  sem_login_25_34: "Último login entre 25 e 34 dias atrás (sai ao logar)",
+  sem_login_35_44: "Último login entre 35 e 44 dias atrás (sai ao logar)",
+  sem_login_45_59: "Último login entre 45 e 59 dias atrás (sai ao logar)",
+  sem_login_60_mais: "Sem login há 60+ dias (sai ao logar)",
+  cashback_pago: "Player recebeu cashback hoje (via webhook)",
+} as const;
+
+export type TriggerType = keyof typeof TRIGGER_NAMES;

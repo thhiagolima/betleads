@@ -1,0 +1,1 @@
+ALTER TABLE public.antiban_settings ADD COLUMN IF NOT EXISTS cooldown_hours integer NOT NULL DEFAULT 48;

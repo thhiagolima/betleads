@@ -1,0 +1,1 @@
+ALTER TABLE public.players ADD COLUMN IF NOT EXISTS last_cashback_sms_template_sent INTEGER NOT NULL DEFAULT -1;

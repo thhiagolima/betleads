@@ -1,0 +1,1 @@
+UPDATE public.rules SET flow_id = '6f54c3a8-deca-401d-aac3-fc2f380ad76f' WHERE id = 'f27036dc-a521-4b31-bab7-10775100a0c6';

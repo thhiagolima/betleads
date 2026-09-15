@@ -1,0 +1,1 @@
+UPDATE public.activation_runs SET status = 'error', error = COALESCE(error, 'timed_out'), finished_at = now() WHERE status = 'running' AND started_at < now() - interval '10 minutes';

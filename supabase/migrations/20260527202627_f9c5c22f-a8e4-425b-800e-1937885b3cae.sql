@@ -1,0 +1,2 @@
+REVOKE EXECUTE ON FUNCTION public.increment_player_totals(uuid, numeric, numeric, boolean, boolean, boolean) FROM PUBLIC, authenticated, anon;
+GRANT EXECUTE ON FUNCTION public.increment_player_totals(uuid, numeric, numeric, boolean, boolean, boolean) TO service_role;

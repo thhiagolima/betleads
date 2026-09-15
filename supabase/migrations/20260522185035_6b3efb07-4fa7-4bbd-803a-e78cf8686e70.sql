@@ -1,0 +1,1 @@
+ALTER TYPE public.followup_acao ADD VALUE IF NOT EXISTS 'copiar';

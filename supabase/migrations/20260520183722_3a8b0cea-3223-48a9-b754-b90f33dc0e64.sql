@@ -1,0 +1,1 @@
+TRUNCATE TABLE public.events, public.deposits, public.withdrawals, public.sessions, public.ai_logs, public.webhook_logs, public.players RESTART IDENTITY CASCADE;
