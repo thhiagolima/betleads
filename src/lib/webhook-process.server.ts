@@ -54,12 +54,19 @@ export async function processWebhookEvent(
       .maybeSingle();
     const tenantCrmModel = (tenantRow?.crm_model as string | null) ?? null;
     const isExpertTenant = tenantCrmModel === "CRM_EXPERT";
-    const tracking = (data.tracking ?? {}) as Record<string, unknown>;
-    const affiliate = (data.affiliate ?? {}) as Record<string, unknown>;
+    const tracking = asRecord(data.tracking);
+    const signupAttribution = asRecord(data.signupAttribution ?? data.signup_attribution);
+    const subject = asRecord(payload.subject);
+    const utm = resolveUtm(data, tracking, signupAttribution);
+    const affiliate = asRecord(data.affiliate);
     const affiliateId =
-      (affiliate.referredBy as string | undefined) ??
-      (affiliate.affiliate_id as string | undefined) ??
-      null;
+      firstString(
+        affiliate.referredBy,
+        affiliate.affiliate_id,
+        data.affiliate_id,
+        data.axioAffId,
+        data.axio_aff_id,
+      ) ?? null;
 
     let expertNome: string | null = null;
     if (affiliateId) {
@@ -72,37 +79,56 @@ export async function processWebhookEvent(
       expertNome = exp?.nome ?? null;
     }
 
-    const externalId =
-      (data.userId as string | undefined) ??
-      (data.external_id as string | undefined) ??
-      (data.id as string | undefined) ??
-      (payload.user_id as string | undefined) ??
-      (payload.player_id as string | undefined);
+    const externalId = resolveExternalId(evento, payload, data);
 
     const rawValor = data.amount ?? data.valor ?? payload.amount ?? payload.valor;
     const valor = rawValor != null ? Math.abs(Number(rawValor)) || null : null;
 
     const nome =
-      (data.fullName as string) ??
-      (data.nome as string) ??
-      (data.name as string) ??
-      "Novo player";
-    const email = (data.email as string) ?? null;
-    const telefone = (data.phone as string) ?? (data.telefone as string) ?? null;
+      firstString(
+        data.fullName,
+        data.full_name,
+        data.nome,
+        data.name,
+        asRecord(data.profile).name,
+        asRecord(data.user).name,
+        asRecord(data.player).name,
+      ) ?? "Novo player";
+    const email =
+      firstString(
+        data.email,
+        asRecord(data.profile).email,
+        asRecord(data.user).email,
+        asRecord(data.player).email,
+      ) ?? null;
+    const telefone =
+      firstString(
+        data.phone,
+        data.telefone,
+        data.mobile,
+        data.whatsapp,
+        asRecord(data.profile).phone,
+        asRecord(data.user).phone,
+        asRecord(data.player).phone,
+      ) ?? null;
     const origem =
-      (tracking.landing_page as string) ??
-      (tracking.referer as string) ??
-      (data.origem as string) ??
-      null;
+      firstString(
+        tracking.landing_page,
+        tracking.referer,
+        data.origem,
+        utm.utm_source,
+        signupAttribution.fbclid ? "fb" : undefined,
+      ) ?? null;
     const metodo =
-      (data.paymentMethod as string) ??
-      (data.metodo as string) ??
-      (data.method as string) ??
-      null;
+      (data.paymentMethod as string) ?? (data.metodo as string) ?? (data.method as string) ?? null;
     const transactionId =
-      (data.transactionId as string | undefined) ??
-      (data.transaction_id as string | undefined) ??
-      null;
+      firstString(
+        data.transactionId,
+        data.transaction_id,
+        data.referenceId,
+        data.operationId,
+        subject.type === "payment_transaction" ? subject.id : undefined,
+      ) ?? null;
 
     let playerId: string | null = null;
 
@@ -124,6 +150,7 @@ export async function processWebhookEvent(
             email,
             telefone,
             origem,
+            ...utm,
             player_external_id: externalId,
             status: "ativo",
             affiliate_id: affiliateId,
@@ -146,13 +173,14 @@ export async function processWebhookEvent(
           email,
           telefone,
           origem,
+          ...utm,
           player_external_id: externalId,
           status: "ativo",
           affiliate_id: affiliateId,
           expert: expertNome,
           tenant_id: tenantId,
-            created_at: eventIso,
-            updated_at: eventIso,
+          created_at: eventIso,
+          updated_at: eventIso,
         })
         .select("id")
         .single();
@@ -162,6 +190,11 @@ export async function processWebhookEvent(
     if (playerId) {
       const now = new Date().toISOString();
       const updates: Record<string, unknown> = { updated_at: now };
+
+      if (utm.utm_source) updates.utm_source = utm.utm_source;
+      if (utm.utm_medium) updates.utm_medium = utm.utm_medium;
+      if (utm.utm_campaign) updates.utm_campaign = utm.utm_campaign;
+      if (origem) updates.origem = origem;
 
       if (affiliateId) {
         const { data: cur } = await sb
@@ -184,7 +217,6 @@ export async function processWebhookEvent(
           .maybeSingle();
         if (!curCpf?.cpf) updates.cpf = cpfFromPayload;
       }
-
 
       const ACTIVITY_EVENTS = new Set([
         "login",
@@ -215,11 +247,7 @@ export async function processWebhookEvent(
           return Response.json({ ok: false, evento, error: depErr.message }, { status: 200 });
         }
         if (inserted?.id) {
-          const { data: p } = await sb
-            .from("players")
-            .select("ftd_em")
-            .eq("id", playerId)
-            .single();
+          const { data: p } = await sb.from("players").select("ftd_em").eq("id", playerId).single();
           const { error: incErr } = await sb.rpc("increment_player_totals", {
             p_player_id: playerId,
             p_delta_deposito: valor,
@@ -232,8 +260,8 @@ export async function processWebhookEvent(
             await markLog("erro", { step: "increment_totals", error: incErr.message });
             return Response.json({ ok: false, evento, error: incErr.message }, { status: 200 });
           }
-            updates.ultimo_deposito = eventIso;
-            if (!p?.ftd_em) updates.ftd_em = eventIso;
+          updates.ultimo_deposito = eventIso;
+          if (!p?.ftd_em) updates.ftd_em = eventIso;
         }
       }
 
@@ -268,7 +296,7 @@ export async function processWebhookEvent(
             await markLog("erro", { step: "increment_totals", error: incErr.message });
             return Response.json({ ok: false, evento, error: incErr.message }, { status: 200 });
           }
-            updates.ultimo_saque = eventIso;
+          updates.ultimo_saque = eventIso;
         }
       }
 
@@ -279,43 +307,35 @@ export async function processWebhookEvent(
           (data.id as string | undefined) ??
           null;
         const campaign =
-          (data.campaign as string | undefined) ??
-          (payload.campaign as string | undefined) ??
-          null;
+          (data.campaign as string | undefined) ?? (payload.campaign as string | undefined) ?? null;
         const cashbackStatus =
-          (data.status as string | undefined) ??
-          (payload.status as string | undefined) ??
-          "paid";
+          (data.status as string | undefined) ?? (payload.status as string | undefined) ?? "paid";
         const currency =
           (data.currency as string | undefined) ??
           (payload.currency as string | undefined) ??
           "BRL";
         const paidAtRaw =
-          (data.paid_at as string | undefined) ??
-          (payload.paid_at as string | undefined) ??
-          now;
+          (data.paid_at as string | undefined) ?? (payload.paid_at as string | undefined) ?? now;
         const paidAt = (() => {
           const t = Date.parse(paidAtRaw);
           return Number.isNaN(t) ? now : new Date(t).toISOString();
         })();
 
-        const { error: cbErr } = await sb
-          .from("cashback_payments")
-          .insert({
-            tenant_id: tenantId,
-            player_id: playerId,
-            platform_user_id: externalId ?? null,
-            nome,
-            telefone,
-            email,
-            cashback_amount: valor,
-            currency,
-            paid_at: paidAt,
-            campaign,
-            status: cashbackStatus,
-            event_id: eventIdRaw,
-            raw_payload: payload,
-          });
+        const { error: cbErr } = await sb.from("cashback_payments").insert({
+          tenant_id: tenantId,
+          player_id: playerId,
+          platform_user_id: externalId ?? null,
+          nome,
+          telefone,
+          email,
+          cashback_amount: valor,
+          currency,
+          paid_at: paidAt,
+          campaign,
+          status: cashbackStatus,
+          event_id: eventIdRaw,
+          raw_payload: payload,
+        });
         if (cbErr && cbErr.code !== "23505") {
           await markLog("erro", { step: "insert_cashback", error: cbErr.message });
           return Response.json({ ok: false, evento, error: cbErr.message }, { status: 200 });
@@ -330,7 +350,8 @@ export async function processWebhookEvent(
             .eq("id", playerId)
             .single();
           updates.total_cashback_paid =
-            Number((curCb as { total_cashback_paid?: number } | null)?.total_cashback_paid ?? 0) + valor;
+            Number((curCb as { total_cashback_paid?: number } | null)?.total_cashback_paid ?? 0) +
+            valor;
 
           // Contato de contingência: a casa nem sempre envia telefone/email no
           // evento de cashback. Nesse caso usamos os dados já cadastrados no
@@ -384,7 +405,8 @@ export async function processWebhookEvent(
                     next_run_at: priorityAt,
                   })
                   .eq("id", existing.id);
-                if (rErr) await markLog("erro", { step: "reenroll_sms_cashback", error: rErr.message });
+                if (rErr)
+                  await markLog("erro", { step: "reenroll_sms_cashback", error: rErr.message });
               } else {
                 const { error: iErr } = await sb.from("sms_flow_leads").insert({
                   tenant_id: tenantId,
@@ -395,7 +417,8 @@ export async function processWebhookEvent(
                   current_step_index: 0,
                   next_run_at: priorityAt,
                 });
-                if (iErr) await markLog("erro", { step: "enroll_sms_cashback", error: iErr.message });
+                if (iErr)
+                  await markLog("erro", { step: "enroll_sms_cashback", error: iErr.message });
               }
             }
           }
@@ -434,7 +457,8 @@ export async function processWebhookEvent(
                     next_run_at: priorityAt,
                   })
                   .eq("id", existing.id);
-                if (rErr) await markLog("erro", { step: "reenroll_email_cashback", error: rErr.message });
+                if (rErr)
+                  await markLog("erro", { step: "reenroll_email_cashback", error: rErr.message });
               } else {
                 const { error: iErr } = await sb.from("email_flow_leads").insert({
                   tenant_id: tenantId,
@@ -445,12 +469,12 @@ export async function processWebhookEvent(
                   current_block_index: 0,
                   next_run_at: priorityAt,
                 });
-                if (iErr) await markLog("erro", { step: "enroll_email_cashback", error: iErr.message });
+                if (iErr)
+                  await markLog("erro", { step: "enroll_email_cashback", error: iErr.message });
               }
             }
           }
-        }
-        else if (!cbErr && isExpertTenant) {
+        } else if (!cbErr && isExpertTenant) {
           // No CRM Expert ainda atualizamos os agregados de cashback, mas
           // NÃO enfileiramos em fluxos — a única entrada permitida é
           // `lead_cadastrado`.
@@ -462,7 +486,8 @@ export async function processWebhookEvent(
             .eq("id", playerId)
             .single();
           updates.total_cashback_paid =
-            Number((curCb as { total_cashback_paid?: number } | null)?.total_cashback_paid ?? 0) + valor;
+            Number((curCb as { total_cashback_paid?: number } | null)?.total_cashback_paid ?? 0) +
+            valor;
         }
       }
 
@@ -604,6 +629,26 @@ export async function processWebhookEvent(
       }
     }
 
+    if (!playerId) {
+      await markLog("sem_player", {
+        step: "resolve_player",
+        reason: externalId ? "external_id_without_player" : "missing_external_id",
+        provider_event: payload.event,
+        subject_type: subject.type,
+        subject_id: subject.id,
+        data_keys: Object.keys(data).slice(0, 40),
+        expected_any_of: [
+          "data.userId",
+          "data.external_id",
+          "data.id",
+          "payload.user_id",
+          "payload.player_id",
+          "payload.subject.id for auth.signup.success",
+        ],
+      });
+      return Response.json({ ok: true, evento, ignored: true, reason: "sem_player" });
+    }
+
     await markLog("processado");
 
     // Espelhamento para CRMs Expert.
@@ -617,11 +662,15 @@ export async function processWebhookEvent(
           string,
           unknown
         >;
-        const aff = (data2.affiliate ?? {}) as Record<string, unknown>;
+        const aff = asRecord(data2.affiliate);
         let affId =
-          (aff.referredBy as string | undefined) ??
-          (aff.affiliate_id as string | undefined) ??
-          null;
+          firstString(
+            aff.referredBy,
+            aff.affiliate_id,
+            data2.affiliate_id,
+            data2.axioAffId,
+            data2.axio_aff_id,
+          ) ?? null;
         if (typeof affId === "string") affId = affId.trim() || null;
         // Fallback: eventos financeiros (deposito-aprovado, saque-*, cashback-pago,
         // jogo-iniciado, logout) normalmente NÃO trazem o bloco `affiliate` no
@@ -655,10 +704,11 @@ export async function processWebhookEvent(
             }
           }
           if (!affId) {
-            console.warn(
-              "[webhook] mirror skipped — no affiliate_id resolved",
-              { tenantId, evento, externalCandidates: candidates },
-            );
+            console.warn("[webhook] mirror skipped — no affiliate_id resolved", {
+              tenantId,
+              evento,
+              externalCandidates: candidates,
+            });
           }
         }
         if (affId) {
@@ -696,6 +746,117 @@ export async function processWebhookEvent(
 }
 
 // Valida CPF (11 dígitos + dígitos verificadores). Rejeita máscaras/parciais.
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function stringFrom(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return undefined;
+}
+
+function firstString(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    const normalized = stringFrom(value);
+    if (normalized) return normalized;
+  }
+  return undefined;
+}
+
+function resolveExternalId(
+  evento: string,
+  payload: Record<string, unknown>,
+  data: Record<string, unknown>,
+): string | undefined {
+  const user = asRecord(data.user);
+  const player = asRecord(data.player);
+  const profile = asRecord(data.profile);
+  const subject = asRecord(payload.subject);
+
+  const direct = firstString(
+    data.userId,
+    data.user_id,
+    data.external_id,
+    data.player_external_id,
+    data.playerId,
+    data.player_id,
+    data.customerId,
+    data.customer_id,
+    data.id,
+    user.id,
+    user.userId,
+    user.external_id,
+    player.id,
+    player.userId,
+    player.external_id,
+    profile.id,
+    payload.userId,
+    payload.user_id,
+    payload.playerId,
+    payload.player_id,
+    payload.external_id,
+  );
+  if (direct) return direct;
+
+  const providerEvent = stringFrom(payload.event);
+  const subjectType = stringFrom(subject.type);
+  const subjectId = stringFrom(subject.id);
+  if (
+    evento === "cadastro" &&
+    providerEvent === "auth.signup.success" &&
+    subjectType === "session" &&
+    subjectId
+  ) {
+    return `session:${subjectId}`;
+  }
+  if (["user", "player", "account", "customer"].includes(subjectType ?? "") && subjectId) {
+    return subjectId;
+  }
+  return undefined;
+}
+
+function resolveUtm(
+  data: Record<string, unknown>,
+  tracking: Record<string, unknown>,
+  signupAttribution: Record<string, unknown>,
+): { utm_source: string | null; utm_medium: string | null; utm_campaign: string | null } {
+  return {
+    utm_source:
+      firstString(
+        data.utm_source,
+        data.utmSource,
+        tracking.utm_source,
+        tracking.utmSource,
+        signupAttribution.utmSource,
+        signupAttribution.utm_source,
+      ) ?? null,
+    utm_medium:
+      firstString(
+        data.utm_medium,
+        data.utmMedium,
+        tracking.utm_medium,
+        tracking.utmMedium,
+        signupAttribution.utmMedium,
+        signupAttribution.utm_medium,
+      ) ?? null,
+    utm_campaign:
+      firstString(
+        data.utm_campaign,
+        data.utmCampaign,
+        tracking.utm_campaign,
+        tracking.utmCampaign,
+        signupAttribution.utmCampaign,
+        signupAttribution.utm_campaign,
+      ) ?? null,
+  };
+}
+
 function isValidCpf(digits: string): boolean {
   if (!/^\d{11}$/.test(digits)) return false;
   if (/^(\d)\1{10}$/.test(digits)) return false;
@@ -722,16 +883,13 @@ function extractCpf(data: Record<string, unknown>): string | null {
   return null;
 }
 
-
 function resolveEventTimestamp(
   evento: string,
   payload: Record<string, unknown>,
   data: Record<string, unknown>,
 ): string {
   const candidates = [
-    evento.includes("aprovado") || evento.includes("concluido")
-      ? data.completedAt
-      : undefined,
+    evento.includes("aprovado") || evento.includes("concluido") ? data.completedAt : undefined,
     data.completed_at,
     data.paid_at,
     data.paidAt,

@@ -17,19 +17,22 @@ export const Route = createFileRoute("/api/public/hooks/webhook-replay")({
           return Response.json({ ok: false, error: "Server misconfigured" }, { status: 500 });
         }
 
-        const body = await request.json().catch(() => ({} as Record<string, unknown>));
+        const body = await request.json().catch(() => ({}) as Record<string, unknown>);
         const tenantId = typeof body.tenant_id === "string" ? body.tenant_id : undefined;
+        const status = typeof body.status === "string" ? body.status : "recebido";
+        const evento = typeof body.evento === "string" ? body.evento : undefined;
         const limitRaw = Number(body.limit ?? 100);
         const limit = Math.min(Math.max(Number.isFinite(limitRaw) ? limitRaw : 100, 1), 500);
 
         let query = sb
           .from("webhook_logs")
           .select("id, tenant_id, evento, payload")
-          .eq("status", "recebido")
+          .eq("status", status)
           .order("created_at", { ascending: true })
           .limit(limit);
 
         if (tenantId) query = query.eq("tenant_id", tenantId);
+        if (evento) query = query.eq("evento", evento);
 
         const { data: rows, error } = await query;
         if (error) return Response.json({ ok: false, error: error.message }, { status: 500 });
