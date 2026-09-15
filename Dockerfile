@@ -2,8 +2,10 @@ FROM node:22-bookworm-slim AS deps
 
 WORKDIR /app
 
+ARG NPM_VERSION=11.19.0
+
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm install -g npm@${NPM_VERSION} && npm ci
 
 FROM deps AS build
 
