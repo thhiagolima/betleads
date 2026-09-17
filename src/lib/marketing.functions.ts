@@ -31,7 +31,19 @@ type Integration = {
 type CreativeRow = {
   creative: string;
   campaign: string | null;
+  campaign_id: string | null;
   ad_id: string | null;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  players: number;
+  ftd: number;
+  revenue: number;
+};
+
+type CampaignRow = {
+  campaign: string;
+  campaign_id: string | null;
   spend: number;
   impressions: number;
   clicks: number;
@@ -78,7 +90,21 @@ function emptyCreative(name: string): CreativeRow {
   return {
     creative: name,
     campaign: null,
+    campaign_id: null,
     ad_id: null,
+    spend: 0,
+    impressions: 0,
+    clicks: 0,
+    players: 0,
+    ftd: 0,
+    revenue: 0,
+  };
+}
+
+function emptyCampaign(name: string): CampaignRow {
+  return {
+    campaign: name,
+    campaign_id: null,
     spend: 0,
     impressions: 0,
     clicks: 0,
@@ -112,7 +138,7 @@ export const getMarketingOverview = createServerFn({ method: "GET" })
       db
         .from("marketing_ad_metrics_daily")
         .select(
-          "provider, campaign_name, ad_id, ad_name, creative_name, metric_date, spend, impressions, clicks",
+          "provider, campaign_id, campaign_name, ad_id, ad_name, creative_name, metric_date, spend, impressions, clicks",
         )
         .eq("tenant_id", tenantId)
         .gte("metric_date", sinceDate),
@@ -131,17 +157,27 @@ export const getMarketingOverview = createServerFn({ method: "GET" })
 
     const byCreative = new Map<string, CreativeRow>();
     const byAdId = new Map<string, CreativeRow>();
+    const byCampaign = new Map<string, CampaignRow>();
 
     for (const row of (metricsRes.data ?? []) as DbRow[]) {
       const name = String(row.creative_name || row.ad_name || row.ad_id || "Sem criativo");
       const item = byCreative.get(keyOf(name)) ?? emptyCreative(name);
       item.campaign = item.campaign ?? row.campaign_name ?? null;
+      item.campaign_id = item.campaign_id ?? (row.campaign_id as string | null) ?? null;
       item.ad_id = item.ad_id ?? row.ad_id ?? null;
       item.spend += toNumber(row.spend);
       item.impressions += toNumber(row.impressions);
       item.clicks += toNumber(row.clicks);
       byCreative.set(keyOf(name), item);
       if (row.ad_id) byAdId.set(keyOf(row.ad_id), item);
+
+      const campaignName = String(row.campaign_name || row.campaign_id || "Sem campanha");
+      const campaign = byCampaign.get(keyOf(campaignName)) ?? emptyCampaign(campaignName);
+      campaign.campaign_id = campaign.campaign_id ?? (row.campaign_id as string | null) ?? null;
+      campaign.spend += toNumber(row.spend);
+      campaign.impressions += toNumber(row.impressions);
+      campaign.clicks += toNumber(row.clicks);
+      byCampaign.set(keyOf(campaignName), campaign);
     }
 
     let markedPlayers = 0;
@@ -167,9 +203,19 @@ export const getMarketingOverview = createServerFn({ method: "GET" })
       item.revenue += toNumber(player.total_depositado);
       byCreative.set(keyOf(item.creative), item);
       if (item.ad_id) byAdId.set(keyOf(item.ad_id), item);
+
+      const campaignName = String(player.utm_campaign || "Sem campanha");
+      const campaign = byCampaign.get(keyOf(campaignName)) ?? emptyCampaign(campaignName);
+      campaign.players += 1;
+      if (player.ftd_em) campaign.ftd += 1;
+      campaign.revenue += toNumber(player.total_depositado);
+      byCampaign.set(keyOf(campaignName), campaign);
     }
 
     const creatives = Array.from(byCreative.values())
+      .sort((a, b) => b.revenue - a.revenue || b.spend - a.spend || b.players - a.players)
+      .slice(0, 50);
+    const campaigns = Array.from(byCampaign.values())
       .sort((a, b) => b.revenue - a.revenue || b.spend - a.spend || b.players - a.players)
       .slice(0, 50);
 
@@ -191,6 +237,7 @@ export const getMarketingOverview = createServerFn({ method: "GET" })
         ftd,
         cpaFtd: ftd > 0 && spend > 0 ? spend / ftd : null,
       },
+      campaigns,
       creatives,
     };
   });
