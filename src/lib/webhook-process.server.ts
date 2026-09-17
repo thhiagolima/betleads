@@ -495,6 +495,18 @@ export async function processWebhookEvent(
       }
 
       await sb.from("players").update(updates).eq("id", playerId);
+      if (evento === "cadastro") {
+        await savePlayerAttribution(sb, {
+          tenantId,
+          playerId,
+          payload,
+          data,
+          tracking,
+          signupAttribution,
+          utm,
+          capturedAt: eventIso,
+        });
+      }
 
       await sb.from("events").insert({
         player_id: playerId,
@@ -892,6 +904,102 @@ function resolveUtm(
         signupAttribution.utm_id,
       ) ?? null,
   };
+}
+
+type ResolvedUtm = ReturnType<typeof resolveUtm>;
+
+async function savePlayerAttribution(
+  sb: SupabaseClient,
+  args: {
+    tenantId: string;
+    playerId: string;
+    payload: Record<string, unknown>;
+    data: Record<string, unknown>;
+    tracking: Record<string, unknown>;
+    signupAttribution: Record<string, unknown>;
+    utm: ResolvedUtm;
+    capturedAt: string;
+  },
+) {
+  const clickIds = {
+    fbclid:
+      firstString(args.data.fbclid, args.tracking.fbclid, args.signupAttribution.fbclid) ?? null,
+    gclid: firstString(args.data.gclid, args.tracking.gclid, args.signupAttribution.gclid) ?? null,
+    gbraid:
+      firstString(args.data.gbraid, args.tracking.gbraid, args.signupAttribution.gbraid) ?? null,
+    wbraid:
+      firstString(args.data.wbraid, args.tracking.wbraid, args.signupAttribution.wbraid) ?? null,
+    ttclid:
+      firstString(args.data.ttclid, args.tracking.ttclid, args.signupAttribution.ttclid) ?? null,
+    msclkid:
+      firstString(args.data.msclkid, args.tracking.msclkid, args.signupAttribution.msclkid) ?? null,
+    trackgram_click_id:
+      firstString(
+        args.data.trackgramClickId,
+        args.data.trackgram_click_id,
+        args.tracking.trackgramClickId,
+        args.tracking.trackgram_click_id,
+        args.signupAttribution.trackgramClickId,
+        args.signupAttribution.trackgram_click_id,
+      ) ?? null,
+  };
+  const hasUtm = Object.values(args.utm).some(Boolean);
+  const hasClickId = Object.values(clickIds).some(Boolean);
+  const provider = inferAttributionProvider(args.utm, clickIds);
+
+  if (!hasUtm && !hasClickId) return;
+
+  await sb.from("player_attributions").upsert(
+    {
+      tenant_id: args.tenantId,
+      player_id: args.playerId,
+      event_id:
+        firstString(
+          args.payload.eventId,
+          args.payload.event_id,
+          args.data.eventId,
+          args.data.event_id,
+        ) ?? null,
+      event_type: "signup",
+      provider,
+      ...args.utm,
+      ...clickIds,
+      raw_payload: {
+        data: args.data,
+        signupAttribution: args.signupAttribution,
+        tracking: args.tracking,
+      },
+      match_status: hasUtm ? "orphan_campaign" : "missing_utm",
+      match_confidence: 0,
+      captured_at: args.capturedAt,
+    },
+    { onConflict: "tenant_id,player_id,event_type" },
+  );
+}
+
+function inferAttributionProvider(
+  utm: ResolvedUtm,
+  clickIds: {
+    fbclid: string | null;
+    gclid: string | null;
+    gbraid: string | null;
+    wbraid: string | null;
+    ttclid: string | null;
+    msclkid: string | null;
+    trackgram_click_id: string | null;
+  },
+) {
+  const source = String(utm.utm_source ?? "").toLowerCase();
+  if (source.includes("fb") || source.includes("facebook") || source.includes("ig")) return "meta";
+  if (source.includes("google")) return "google";
+  if (source.includes("tiktok")) return "tiktok";
+  if (source.includes("kwai")) return "kwai";
+  if (clickIds.fbclid) return "meta";
+  if (clickIds.gclid || clickIds.gbraid || clickIds.wbraid) return "google";
+  if (clickIds.ttclid) return "tiktok";
+  if (clickIds.msclkid) return "microsoft";
+  if (clickIds.trackgram_click_id) return "trackgram";
+  return source || null;
 }
 
 function isValidCpf(digits: string): boolean {

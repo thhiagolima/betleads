@@ -62,6 +62,9 @@ type MarketingTotals = {
   spend: number;
   revenue: number;
   roas: number | null;
+  players: number;
+  markedPlayers: number;
+  orphanPlayers: number;
   ftd: number;
   cpaFtd: number | null;
 };
@@ -69,9 +72,21 @@ type MarketingTotals = {
 type CampaignRow = {
   campaign: string;
   campaign_id: string | null;
+  match_status: string;
   spend: number;
   impressions: number;
   clicks: number;
+  players: number;
+  ftd: number;
+  revenue: number;
+};
+
+type OrphanAttributionRow = {
+  campaign: string;
+  creative: string;
+  adset: string | null;
+  source: string | null;
+  provider: string | null;
   players: number;
   ftd: number;
   revenue: number;
@@ -93,6 +108,7 @@ type MarketingOverview = {
   totals: MarketingTotals;
   campaigns: CampaignRow[];
   creatives: CreativeRow[];
+  orphanAttributions: OrphanAttributionRow[];
 };
 
 type MetaAccount = {
@@ -481,9 +497,9 @@ function VisualizacaoSection({
         />
         <Kpi title="ROAS" value={ratio(totals?.roas)} detail="receita / midia" tone="info" />
         <Kpi
-          title="CPA FTD"
-          value={totals?.cpaFtd ? brl(totals.cpaFtd) : "-"}
-          detail={`${num(totals?.ftd)} FTD`}
+          title="UTM sem midia"
+          value={num(totals?.orphanPlayers)}
+          detail={`${num(totals?.markedPlayers)} players marcados`}
         />
       </div>
 
@@ -491,6 +507,8 @@ function VisualizacaoSection({
         <CampaignTable campaigns={data?.campaigns ?? []} isLoading={isLoading} />
         <CreativeTable creatives={data?.creatives ?? []} isLoading={isLoading} />
       </div>
+
+      <OrphanAttributionTable rows={data?.orphanAttributions ?? []} isLoading={isLoading} />
     </div>
   );
 }
@@ -681,6 +699,32 @@ function ConnectedAccounts({ accounts }: { accounts: MetaAccount[] }) {
   );
 }
 
+function attributionStatusLabel(status: string) {
+  if (status === "matched_ad_id") return "anuncio";
+  if (status === "matched_ad_name") return "criativo";
+  if (status === "matched_campaign_name") return "campanha";
+  if (status === "orphan_campaign") return "sem BM";
+  if (status === "missing_utm") return "sem UTM";
+  return "pendente";
+}
+
+function AttributionBadge({ status }: { status: string }) {
+  const orphan = status === "orphan_campaign" || status === "missing_utm";
+  const matched = status.startsWith("matched_");
+  return (
+    <Badge
+      variant="outline"
+      className={cn(
+        "border-border/60 text-[10px]",
+        matched && "border-emerald-500/30 bg-emerald-500/10 text-emerald-400",
+        orphan && "border-amber-500/30 bg-amber-500/10 text-amber-300",
+      )}
+    >
+      {attributionStatusLabel(status)}
+    </Badge>
+  );
+}
+
 function CampaignTable({ campaigns, isLoading }: { campaigns: CampaignRow[]; isLoading: boolean }) {
   return (
     <DataCard
@@ -713,6 +757,7 @@ function CampaignTable({ campaigns, isLoading }: { campaigns: CampaignRow[]; isL
               <TableHead className="text-right">FTD</TableHead>
               <TableHead className="text-right">Receita</TableHead>
               <TableHead className="text-right">ROAS</TableHead>
+              <TableHead className="text-right">Status</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -733,6 +778,76 @@ function CampaignTable({ campaigns, isLoading }: { campaigns: CampaignRow[]; isL
                 <TableCell className="text-right">
                   {ratio(row.spend > 0 ? row.revenue / row.spend : null)}
                 </TableCell>
+                <TableCell className="text-right">
+                  <AttributionBadge status={row.match_status} />
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+    </DataCard>
+  );
+}
+
+function OrphanAttributionTable({
+  rows,
+  isLoading,
+}: {
+  rows: OrphanAttributionRow[];
+  isLoading: boolean;
+}) {
+  return (
+    <DataCard
+      title="UTMs sem midia vinculada"
+      description="Players que chegaram marcados, mas nao casaram com nenhuma campanha/anuncio das contas conectadas."
+      icon={<ShieldCheck className="h-4 w-4" />}
+      bodyClassName="overflow-x-auto"
+    >
+      {rows.length === 0 ? (
+        <EmptyState
+          icon={
+            isLoading ? (
+              <Loader2 className="h-6 w-6 animate-spin" />
+            ) : (
+              <ShieldCheck className="h-6 w-6" />
+            )
+          }
+          title={isLoading ? "Conferindo atribuicoes" : "Nenhum orfao no periodo"}
+          description="Quando uma UTM chegar de uma campanha fora das BMs conectadas, ela aparece aqui sem gerar ROAS artificial."
+        />
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Campanha declarada</TableHead>
+              <TableHead>Criativo</TableHead>
+              <TableHead>Conjunto</TableHead>
+              <TableHead>Origem</TableHead>
+              <TableHead className="text-right">Players</TableHead>
+              <TableHead className="text-right">FTD</TableHead>
+              <TableHead className="text-right">Receita</TableHead>
+              <TableHead className="text-right">Investido</TableHead>
+              <TableHead className="text-right">ROAS</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((row) => (
+              <TableRow key={`${row.campaign}-${row.creative}-${row.source ?? ""}`}>
+                <TableCell className="font-semibold">{row.campaign}</TableCell>
+                <TableCell>{row.creative}</TableCell>
+                <TableCell>{row.adset ?? "-"}</TableCell>
+                <TableCell>
+                  <div className="flex items-center gap-2">
+                    <span>{row.source ?? row.provider ?? "-"}</span>
+                    <AttributionBadge status="orphan_campaign" />
+                  </div>
+                </TableCell>
+                <TableCell className="text-right">{num(row.players)}</TableCell>
+                <TableCell className="text-right">{num(row.ftd)}</TableCell>
+                <TableCell className="text-right">{brl(row.revenue)}</TableCell>
+                <TableCell className="text-right text-muted-foreground">nao encontrado</TableCell>
+                <TableCell className="text-right text-muted-foreground">nao calculado</TableCell>
               </TableRow>
             ))}
           </TableBody>

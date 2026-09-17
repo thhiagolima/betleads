@@ -44,9 +44,21 @@ type CreativeRow = {
 type CampaignRow = {
   campaign: string;
   campaign_id: string | null;
+  match_status: string;
   spend: number;
   impressions: number;
   clicks: number;
+  players: number;
+  ftd: number;
+  revenue: number;
+};
+
+type OrphanAttributionRow = {
+  campaign: string;
+  creative: string;
+  adset: string | null;
+  source: string | null;
+  provider: string | null;
   players: number;
   ftd: number;
   revenue: number;
@@ -105,6 +117,7 @@ function emptyCampaign(name: string): CampaignRow {
   return {
     campaign: name,
     campaign_id: null,
+    match_status: "unmatched",
     spend: 0,
     impressions: 0,
     clicks: 0,
@@ -112,6 +125,38 @@ function emptyCampaign(name: string): CampaignRow {
     ftd: 0,
     revenue: 0,
   };
+}
+
+function emptyOrphan(campaign: string, creative: string): OrphanAttributionRow {
+  return {
+    campaign,
+    creative,
+    adset: null,
+    source: null,
+    provider: null,
+    players: 0,
+    ftd: 0,
+    revenue: 0,
+  };
+}
+
+function attributionStatus(args: {
+  utm_id: unknown;
+  utm_content: unknown;
+  utm_campaign: unknown;
+  utm_source: unknown;
+  adIds: Set<string>;
+  creativeKeys: Set<string>;
+  campaignKeys: Set<string>;
+}) {
+  const idKey = keyOf(args.utm_id);
+  const contentKey = keyOf(args.utm_content);
+  const campaignKey = keyOf(args.utm_campaign);
+  if (idKey && args.adIds.has(idKey)) return "matched_ad_id";
+  if (contentKey && args.creativeKeys.has(contentKey)) return "matched_ad_name";
+  if (campaignKey && args.campaignKeys.has(campaignKey)) return "matched_campaign_name";
+  if (idKey || contentKey || campaignKey || keyOf(args.utm_source)) return "orphan_campaign";
+  return "missing_utm";
 }
 
 export const getMarketingOverview = createServerFn({ method: "GET" })
@@ -127,7 +172,7 @@ export const getMarketingOverview = createServerFn({ method: "GET" })
 
     const db = context.supabase as unknown as DbClient;
 
-    const [integrationsRes, metricsRes, playersRes] = await Promise.all([
+    const [integrationsRes, metricsRes, playersRes, attributionsRes] = await Promise.all([
       db
         .from("marketing_integrations")
         .select(
@@ -145,19 +190,32 @@ export const getMarketingOverview = createServerFn({ method: "GET" })
       db
         .from("players")
         .select(
-          "id, created_at, ftd_em, total_depositado, utm_source, utm_campaign, utm_content, utm_id",
+          "id, created_at, ftd_em, total_depositado, utm_source, utm_campaign, utm_content, utm_term, utm_id",
         )
         .eq("tenant_id", tenantId)
         .gte("created_at", sinceIso),
+      db
+        .from("player_attributions")
+        .select(
+          "player_id, provider, utm_source, utm_medium, utm_campaign, utm_content, utm_term, utm_id, fbclid, gclid, ttclid, captured_at",
+        )
+        .eq("tenant_id", tenantId)
+        .gte("captured_at", sinceIso),
     ]);
 
     if (integrationsRes.error) throw new Error(integrationsRes.error.message);
     if (metricsRes.error) throw new Error(metricsRes.error.message);
     if (playersRes.error) throw new Error(playersRes.error.message);
+    if (attributionsRes.error) throw new Error(attributionsRes.error.message);
 
     const byCreative = new Map<string, CreativeRow>();
     const byAdId = new Map<string, CreativeRow>();
     const byCampaign = new Map<string, CampaignRow>();
+    const byOrphan = new Map<string, OrphanAttributionRow>();
+    const metricAdIds = new Set<string>();
+    const metricCreativeKeys = new Set<string>();
+    const metricCampaignKeys = new Set<string>();
+    const attributionByPlayer = new Map<string, DbRow>();
 
     for (const row of (metricsRes.data ?? []) as DbRow[]) {
       const name = String(row.creative_name || row.ad_name || row.ad_id || "Sem criativo");
@@ -169,47 +227,88 @@ export const getMarketingOverview = createServerFn({ method: "GET" })
       item.impressions += toNumber(row.impressions);
       item.clicks += toNumber(row.clicks);
       byCreative.set(keyOf(name), item);
-      if (row.ad_id) byAdId.set(keyOf(row.ad_id), item);
+      metricCreativeKeys.add(keyOf(name));
+      if (row.ad_name) metricCreativeKeys.add(keyOf(row.ad_name));
+      if (row.ad_id) {
+        byAdId.set(keyOf(row.ad_id), item);
+        metricAdIds.add(keyOf(row.ad_id));
+      }
 
       const campaignName = String(row.campaign_name || row.campaign_id || "Sem campanha");
       const campaign = byCampaign.get(keyOf(campaignName)) ?? emptyCampaign(campaignName);
       campaign.campaign_id = campaign.campaign_id ?? (row.campaign_id as string | null) ?? null;
+      campaign.match_status = "matched_campaign_name";
       campaign.spend += toNumber(row.spend);
       campaign.impressions += toNumber(row.impressions);
       campaign.clicks += toNumber(row.clicks);
       byCampaign.set(keyOf(campaignName), campaign);
+      metricCampaignKeys.add(keyOf(campaignName));
+      if (row.campaign_id) metricCampaignKeys.add(keyOf(row.campaign_id));
+    }
+
+    for (const attribution of (attributionsRes.data ?? []) as DbRow[]) {
+      if (attribution.player_id)
+        attributionByPlayer.set(String(attribution.player_id), attribution);
     }
 
     let markedPlayers = 0;
     for (const player of (playersRes.data ?? []) as DbRow[]) {
-      const contentKey = keyOf(player.utm_content);
-      const idKey = keyOf(player.utm_id);
-      const source = keyOf(player.utm_source);
+      const attribution = attributionByPlayer.get(String(player.id)) ?? {};
+      const utmSource = attribution.utm_source ?? player.utm_source;
+      const utmCampaign = attribution.utm_campaign ?? player.utm_campaign;
+      const utmContent = attribution.utm_content ?? player.utm_content;
+      const utmTerm = attribution.utm_term ?? player.utm_term;
+      const utmId = attribution.utm_id ?? player.utm_id;
+      const contentKey = keyOf(utmContent);
+      const idKey = keyOf(utmId);
+      const source = keyOf(utmSource);
       if (contentKey || idKey || source) markedPlayers += 1;
 
-      const fallbackName = String(
-        player.utm_content || player.utm_id || player.utm_campaign || "(sem marcacao)",
-      );
+      const matchStatus = attributionStatus({
+        utm_id: utmId,
+        utm_content: utmContent,
+        utm_campaign: utmCampaign,
+        utm_source: utmSource,
+        adIds: metricAdIds,
+        creativeKeys: metricCreativeKeys,
+        campaignKeys: metricCampaignKeys,
+      });
+      const fallbackName = String(utmContent || utmId || utmCampaign || "(sem marcacao)");
       const item =
         (idKey ? byAdId.get(idKey) : undefined) ??
         (contentKey ? byCreative.get(contentKey) : undefined) ??
         byCreative.get(keyOf(fallbackName)) ??
         emptyCreative(fallbackName);
 
-      item.campaign = item.campaign ?? player.utm_campaign ?? null;
-      item.ad_id = item.ad_id ?? player.utm_id ?? null;
+      item.campaign = item.campaign ?? utmCampaign ?? null;
+      item.ad_id = item.ad_id ?? utmId ?? null;
       item.players += 1;
       if (player.ftd_em) item.ftd += 1;
       item.revenue += toNumber(player.total_depositado);
       byCreative.set(keyOf(item.creative), item);
       if (item.ad_id) byAdId.set(keyOf(item.ad_id), item);
 
-      const campaignName = String(player.utm_campaign || "Sem campanha");
+      const campaignName = String(utmCampaign || "Sem campanha");
       const campaign = byCampaign.get(keyOf(campaignName)) ?? emptyCampaign(campaignName);
+      campaign.match_status =
+        campaign.match_status === "matched_campaign_name" ? campaign.match_status : matchStatus;
       campaign.players += 1;
       if (player.ftd_em) campaign.ftd += 1;
       campaign.revenue += toNumber(player.total_depositado);
       byCampaign.set(keyOf(campaignName), campaign);
+
+      if (matchStatus === "orphan_campaign") {
+        const creativeName = String(utmContent || utmId || "(sem criativo)");
+        const orphanKey = `${keyOf(campaignName)}|${keyOf(creativeName)}`;
+        const orphan = byOrphan.get(orphanKey) ?? emptyOrphan(campaignName, creativeName);
+        orphan.adset = orphan.adset ?? (utmTerm as string | null) ?? null;
+        orphan.source = orphan.source ?? (utmSource as string | null) ?? null;
+        orphan.provider = orphan.provider ?? (attribution.provider as string | null) ?? null;
+        orphan.players += 1;
+        if (player.ftd_em) orphan.ftd += 1;
+        orphan.revenue += toNumber(player.total_depositado);
+        byOrphan.set(orphanKey, orphan);
+      }
     }
 
     const creatives = Array.from(byCreative.values())
@@ -218,11 +317,15 @@ export const getMarketingOverview = createServerFn({ method: "GET" })
     const campaigns = Array.from(byCampaign.values())
       .sort((a, b) => b.revenue - a.revenue || b.spend - a.spend || b.players - a.players)
       .slice(0, 50);
+    const orphanAttributions = Array.from(byOrphan.values())
+      .sort((a, b) => b.revenue - a.revenue || b.players - a.players)
+      .slice(0, 50);
 
     const spend = creatives.reduce((sum, row) => sum + row.spend, 0);
     const revenue = creatives.reduce((sum, row) => sum + row.revenue, 0);
     const players = (playersRes.data ?? []).length;
     const ftd = ((playersRes.data ?? []) as DbRow[]).filter((p) => Boolean(p.ftd_em)).length;
+    const orphanPlayers = orphanAttributions.reduce((sum, row) => sum + row.players, 0);
 
     return {
       tenantId,
@@ -234,11 +337,13 @@ export const getMarketingOverview = createServerFn({ method: "GET" })
         roas: spend > 0 ? revenue / spend : null,
         players,
         markedPlayers,
+        orphanPlayers,
         ftd,
         cpaFtd: ftd > 0 && spend > 0 ? spend / ftd : null,
       },
       campaigns,
       creatives,
+      orphanAttributions,
     };
   });
 
