@@ -18,6 +18,7 @@ import {
   Phone,
   ChevronRight,
   ShieldCheck,
+  BarChart3,
   type LucideIcon,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -26,11 +27,7 @@ import { useWhatsappUnreadTotal } from "@/hooks/use-whatsapp-unread";
 import { useAuthSession } from "@/components/auth-gate";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   Sidebar,
   SidebarContent,
@@ -59,6 +56,7 @@ type NavItem = {
 
 const menuItems: NavItem[] = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
+  { title: "Midia e LTV", url: "/midia-ltv", icon: BarChart3 },
   { title: "Players", url: "/players", icon: Users },
   { title: "Inteligência IA", url: "/inteligencia", icon: Brain },
   { title: "Treino IA", url: "/treino-ia", icon: GraduationCap },
@@ -121,9 +119,7 @@ const engajamentoItems: NavItem[] = [
   { title: "Webhooks", url: "/webhooks", icon: Webhook },
 ];
 
-const sistemaItems: NavItem[] = [
-  { title: "Configurações", url: "/configuracoes", icon: Settings },
-];
+const sistemaItems: NavItem[] = [{ title: "Configurações", url: "/configuracoes", icon: Settings }];
 
 const superAdminItems: NavItem[] = [
   { title: "Painel Super Admin", url: "/admin", icon: ShieldCheck },
@@ -257,14 +253,9 @@ function CollapsibleNavItem({
               const href = sub.hash ? `${item.url}#${sub.hash}` : item.url;
               const normalizedHash = hash.replace(/^#/, "");
               const subActive =
-                active &&
-                (sub.hash
-                  ? normalizedHash === sub.hash
-                  : normalizedHash === "");
+                active && (sub.hash ? normalizedHash === sub.hash : normalizedHash === "");
               const firstSubActive =
-                active &&
-                !normalizedHash &&
-                item.subItems![0]?.hash === sub.hash;
+                active && !normalizedHash && item.subItems![0]?.hash === sub.hash;
               const isOn = subActive || firstSubActive;
               return (
                 <SidebarMenuSubItem key={sub.title}>
@@ -337,7 +328,10 @@ export function AppSidebar() {
       <SidebarFooter className="border-t border-sidebar-border p-3">
         <div className="flex items-center gap-2 rounded-md bg-sidebar-accent/40 px-2.5 py-1.5 text-xs text-muted-foreground mb-2">
           <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400 pulse-realtime" />
-          <span className="truncate group-data-[collapsible=icon]:hidden" title={userEmail ?? undefined}>
+          <span
+            className="truncate group-data-[collapsible=icon]:hidden"
+            title={userEmail ?? undefined}
+          >
             {userEmail ?? "Sistema online"}
           </span>
         </div>

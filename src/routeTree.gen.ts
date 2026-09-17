@@ -19,6 +19,7 @@ import { Route as EventosRouteImport } from './routes/eventos'
 import { Route as ExpertsRouteImport } from './routes/experts'
 import { Route as InteligenciaRouteImport } from './routes/inteligencia'
 import { Route as LigacoesRouteImport } from './routes/ligacoes'
+import { Route as MidiaLtvRouteImport } from './routes/midia-ltv'
 import { Route as PlayersRouteImport } from './routes/players'
 import { Route as RegrasRouteImport } from './routes/regras'
 import { Route as SmsRouteImport } from './routes/sms'
@@ -100,6 +101,11 @@ const InteligenciaRoute = InteligenciaRouteImport.update({
 const LigacoesRoute = LigacoesRouteImport.update({
   id: '/ligacoes',
   path: '/ligacoes',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MidiaLtvRoute = MidiaLtvRouteImport.update({
+  id: '/midia-ltv',
+  path: '/midia-ltv',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PlayersRoute = PlayersRouteImport.update({
@@ -292,6 +298,7 @@ export interface FileRoutesByFullPath {
   '/experts': typeof ExpertsRoute
   '/inteligencia': typeof InteligenciaRoute
   '/ligacoes': typeof LigacoesRoute
+  '/midia-ltv': typeof MidiaLtvRoute
   '/players': typeof PlayersRoute
   '/regras': typeof RegrasRoute
   '/sms': typeof SmsRoute
@@ -336,6 +343,7 @@ export interface FileRoutesByTo {
   '/experts': typeof ExpertsRoute
   '/inteligencia': typeof InteligenciaRoute
   '/ligacoes': typeof LigacoesRoute
+  '/midia-ltv': typeof MidiaLtvRoute
   '/players': typeof PlayersRoute
   '/regras': typeof RegrasRoute
   '/sms': typeof SmsRoute
@@ -381,6 +389,7 @@ export interface FileRoutesById {
   '/experts': typeof ExpertsRoute
   '/inteligencia': typeof InteligenciaRoute
   '/ligacoes': typeof LigacoesRoute
+  '/midia-ltv': typeof MidiaLtvRoute
   '/players': typeof PlayersRoute
   '/regras': typeof RegrasRoute
   '/sms': typeof SmsRoute
@@ -427,6 +436,7 @@ export interface FileRouteTypes {
     | '/experts'
     | '/inteligencia'
     | '/ligacoes'
+    | '/midia-ltv'
     | '/players'
     | '/regras'
     | '/sms'
@@ -471,6 +481,7 @@ export interface FileRouteTypes {
     | '/experts'
     | '/inteligencia'
     | '/ligacoes'
+    | '/midia-ltv'
     | '/players'
     | '/regras'
     | '/sms'
@@ -515,6 +526,7 @@ export interface FileRouteTypes {
     | '/experts'
     | '/inteligencia'
     | '/ligacoes'
+    | '/midia-ltv'
     | '/players'
     | '/regras'
     | '/sms'
@@ -560,6 +572,7 @@ export interface RootRouteChildren {
   ExpertsRoute: typeof ExpertsRoute
   InteligenciaRoute: typeof InteligenciaRoute
   LigacoesRoute: typeof LigacoesRoute
+  MidiaLtvRoute: typeof MidiaLtvRoute
   PlayersRoute: typeof PlayersRoute
   RegrasRoute: typeof RegrasRoute
   SmsRoute: typeof SmsRoute
@@ -664,6 +677,13 @@ declare module '@tanstack/react-router' {
       path: '/ligacoes'
       fullPath: '/ligacoes'
       preLoaderRoute: typeof LigacoesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/midia-ltv': {
+      id: '/midia-ltv'
+      path: '/midia-ltv'
+      fullPath: '/midia-ltv'
+      preLoaderRoute: typeof MidiaLtvRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/players': {
@@ -904,6 +924,7 @@ const rootRouteChildren: RootRouteChildren = {
   ExpertsRoute: ExpertsRoute,
   InteligenciaRoute: InteligenciaRoute,
   LigacoesRoute: LigacoesRoute,
+  MidiaLtvRoute: MidiaLtvRoute,
   PlayersRoute: PlayersRoute,
   RegrasRoute: RegrasRoute,
   SmsRoute: SmsRoute,

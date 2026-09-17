@@ -194,6 +194,9 @@ export async function processWebhookEvent(
       if (utm.utm_source) updates.utm_source = utm.utm_source;
       if (utm.utm_medium) updates.utm_medium = utm.utm_medium;
       if (utm.utm_campaign) updates.utm_campaign = utm.utm_campaign;
+      if (utm.utm_content) updates.utm_content = utm.utm_content;
+      if (utm.utm_term) updates.utm_term = utm.utm_term;
+      if (utm.utm_id) updates.utm_id = utm.utm_id;
       if (origem) updates.origem = origem;
 
       if (affiliateId) {
@@ -825,7 +828,14 @@ function resolveUtm(
   data: Record<string, unknown>,
   tracking: Record<string, unknown>,
   signupAttribution: Record<string, unknown>,
-): { utm_source: string | null; utm_medium: string | null; utm_campaign: string | null } {
+): {
+  utm_source: string | null;
+  utm_medium: string | null;
+  utm_campaign: string | null;
+  utm_content: string | null;
+  utm_term: string | null;
+  utm_id: string | null;
+} {
   return {
     utm_source:
       firstString(
@@ -853,6 +863,33 @@ function resolveUtm(
         tracking.utmCampaign,
         signupAttribution.utmCampaign,
         signupAttribution.utm_campaign,
+      ) ?? null,
+    utm_content:
+      firstString(
+        data.utm_content,
+        data.utmContent,
+        tracking.utm_content,
+        tracking.utmContent,
+        signupAttribution.utmContent,
+        signupAttribution.utm_content,
+      ) ?? null,
+    utm_term:
+      firstString(
+        data.utm_term,
+        data.utmTerm,
+        tracking.utm_term,
+        tracking.utmTerm,
+        signupAttribution.utmTerm,
+        signupAttribution.utm_term,
+      ) ?? null,
+    utm_id:
+      firstString(
+        data.utm_id,
+        data.utmId,
+        tracking.utm_id,
+        tracking.utmId,
+        signupAttribution.utmId,
+        signupAttribution.utm_id,
       ) ?? null,
   };
 }
