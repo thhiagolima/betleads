@@ -33,6 +33,7 @@ import { PageHeader } from "@/components/ui-premium/page-header";
 import { DataCard } from "@/components/ui-premium/data-card";
 import { EmptyState } from "@/components/ui-premium/empty-state";
 import { getMarketingOverview, saveMarketingIntegration } from "@/lib/marketing.functions";
+import { createMetaOAuthUrl, getMetaConnectionSummary } from "@/lib/meta.functions";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/midia-ltv")({
@@ -94,6 +95,8 @@ function MediaLtvPage() {
   const qc = useQueryClient();
   const fetchOverview = useServerFn(getMarketingOverview);
   const saveIntegration = useServerFn(saveMarketingIntegration);
+  const createMetaUrl = useServerFn(createMetaOAuthUrl);
+  const fetchMetaSummary = useServerFn(getMetaConnectionSummary);
   const [days, setDays] = useState(7);
   const [platform, setPlatform] = useState<Platform>("meta");
   const [houseUrl, setHouseUrl] = useState("https://sua-casa.com/cadastro");
@@ -101,6 +104,12 @@ function MediaLtvPage() {
   const { data, isLoading, error } = useQuery({
     queryKey: ["marketing-overview", days],
     queryFn: () => fetchOverview({ data: { days } }),
+    refetchInterval: 30000,
+  });
+
+  const { data: metaSummary } = useQuery({
+    queryKey: ["meta-connection-summary"],
+    queryFn: () => fetchMetaSummary(),
     refetchInterval: 30000,
   });
 
@@ -129,6 +138,14 @@ function MediaLtvPage() {
       qc.invalidateQueries({ queryKey: ["marketing-overview"] });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Erro ao salvar"),
+  });
+
+  const connectMetaMutation = useMutation({
+    mutationFn: () => createMetaUrl({ data: { returnTo: "/midia-ltv" } }),
+    onSuccess: (res) => {
+      window.location.assign(res.url);
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Erro ao iniciar OAuth Meta"),
   });
 
   const integrations = data?.integrations ?? [];
@@ -186,16 +203,38 @@ function MediaLtvPage() {
             </p>
             <Button
               className="w-full gap-2"
-              onClick={() => saveMutation.mutate("meta")}
-              disabled={saveMutation.isPending}
+              onClick={() => connectMetaMutation.mutate()}
+              disabled={connectMetaMutation.isPending}
             >
-              {saveMutation.isPending ? (
+              {connectMetaMutation.isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 <ShieldCheck className="h-4 w-4" />
               )}
-              Preparar conexao Meta
+              Conectar Meta
             </Button>
+            {metaSummary?.accounts?.length ? (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold text-muted-foreground">
+                  {num(metaSummary.accounts.length)} conta(s) conectada(s)
+                </p>
+                <div className="space-y-1.5">
+                  {metaSummary.accounts.slice(0, 3).map((account) => (
+                    <div
+                      key={account.id}
+                      className="flex items-center justify-between gap-3 rounded-md border border-border/50 bg-background/40 px-3 py-2"
+                    >
+                      <span className="truncate text-xs font-medium">
+                        {account.name ?? account.meta_ad_account_id}
+                      </span>
+                      <span className="shrink-0 text-[10px] text-muted-foreground">
+                        {account.currency ?? "BRL"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </div>
         </DataCard>
 
