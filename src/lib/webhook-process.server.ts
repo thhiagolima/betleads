@@ -80,6 +80,7 @@ export async function processWebhookEvent(
     }
 
     const externalId = resolveExternalId(evento, payload, data);
+    const signupEvent = isSignupEvent(evento, payload);
 
     const rawValor = data.amount ?? data.valor ?? payload.amount ?? payload.valor;
     const valor = rawValor != null ? Math.abs(Number(rawValor)) || null : null;
@@ -142,7 +143,7 @@ export async function processWebhookEvent(
 
       if (existing) {
         playerId = existing.id;
-      } else if (evento === "cadastro") {
+      } else if (signupEvent) {
         const { data: created } = await sb
           .from("players")
           .insert({
@@ -165,7 +166,7 @@ export async function processWebhookEvent(
       }
     }
 
-    if (!playerId && externalId && evento !== "cadastro") {
+    if (!playerId && externalId && !signupEvent) {
       const { data: created } = await sb
         .from("players")
         .insert({
@@ -495,7 +496,7 @@ export async function processWebhookEvent(
       }
 
       await sb.from("players").update(updates).eq("id", playerId);
-      if (evento === "cadastro") {
+      if (signupEvent) {
         await savePlayerAttribution(sb, {
           tenantId,
           playerId,
@@ -522,7 +523,7 @@ export async function processWebhookEvent(
       // affiliate_id), enfileira o player em todos os fluxos ativos de
       // SMS, Email e Ligações com gatilho `lead_cadastrado` deste tenant.
       // Idempotente: pula se já existe enrollment pending/running/active.
-      if (isExpertTenant && evento === "cadastro") {
+      if (isExpertTenant && signupEvent) {
         const phoneDigits = telefone ? telefone.replace(/\D/g, "") : "";
         // SMS
         if (phoneDigits.length >= 10) {
@@ -784,6 +785,10 @@ function firstString(...values: unknown[]): string | undefined {
   return undefined;
 }
 
+function isSignupEvent(evento: string, payload: Record<string, unknown>): boolean {
+  return evento === "cadastro" || stringFrom(payload.event) === "auth.signup.success";
+}
+
 function resolveExternalId(
   evento: string,
   payload: Record<string, unknown>,
@@ -823,7 +828,7 @@ function resolveExternalId(
   const subjectType = stringFrom(subject.type);
   const subjectId = stringFrom(subject.id);
   if (
-    evento === "cadastro" &&
+    isSignupEvent(evento, payload) &&
     providerEvent === "auth.signup.success" &&
     subjectType === "session" &&
     subjectId

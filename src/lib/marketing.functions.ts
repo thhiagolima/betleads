@@ -153,8 +153,12 @@ function attributionStatus(args: {
   const contentKey = keyOf(args.utm_content);
   const campaignKey = keyOf(args.utm_campaign);
   if (idKey && args.adIds.has(idKey)) return "matched_ad_id";
+  if (campaignKey) {
+    if (!args.campaignKeys.has(campaignKey)) return "orphan_campaign";
+    if (contentKey && args.creativeKeys.has(contentKey)) return "matched_ad_name";
+    return "matched_campaign_name";
+  }
   if (contentKey && args.creativeKeys.has(contentKey)) return "matched_ad_name";
-  if (campaignKey && args.campaignKeys.has(campaignKey)) return "matched_campaign_name";
   if (idKey || contentKey || campaignKey || keyOf(args.utm_source)) return "orphan_campaign";
   return "missing_utm";
 }
