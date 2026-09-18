@@ -142,7 +142,7 @@ export async function runSmsDispatcher({ limit = 30 }: { limit?: number } = {}) 
       channel,
       queue_before: queueBefore,
       stop_reason: "paused",
-      provider: "businesscode",
+      provider: "short-brasil",
     });
     return { processed: 0, paused: true };
   }
@@ -152,7 +152,7 @@ export async function runSmsDispatcher({ limit = 30 }: { limit?: number } = {}) 
       channel,
       queue_before: queueBefore,
       stop_reason: "outside_window",
-      provider: "businesscode",
+      provider: "short-brasil",
     });
     return { processed: 0, deferred_until: deferTo };
   }
@@ -169,7 +169,7 @@ export async function runSmsDispatcher({ limit = 30 }: { limit?: number } = {}) 
       queue_before: queueBefore,
       stop_reason: "rate_limited",
       target_rate: rate?.target_per_minute ?? null,
-      provider: "businesscode",
+      provider: "short-brasil",
       last_provider_error: rate?.last_provider_error ?? null,
     });
     return { processed: 0, throttled: true };
@@ -188,7 +188,7 @@ export async function runSmsDispatcher({ limit = 30 }: { limit?: number } = {}) 
       channel,
       queue_before: queueBefore,
       stop_reason: `claim_error: ${claimErr.message.slice(0, 200)}`,
-      provider: "businesscode",
+      provider: "short-brasil",
     });
     return { processed: 0, error: claimErr.message };
   }
@@ -201,7 +201,7 @@ export async function runSmsDispatcher({ limit = 30 }: { limit?: number } = {}) 
       claimed: 0,
       stop_reason: "queue_empty",
       target_rate: rate?.target_per_minute ?? null,
-      provider: "businesscode",
+      provider: "short-brasil",
     });
     return { processed: 0 };
   }
@@ -424,7 +424,7 @@ export async function runSmsDispatcher({ limit = 30 }: { limit?: number } = {}) 
       claimed: all.length,
       stop_reason: "nothing_to_send",
       target_rate: rate?.target_per_minute ?? null,
-      provider: "businesscode",
+      provider: "short-brasil",
     });
     return { processed: 0 };
   }
@@ -452,7 +452,7 @@ export async function runSmsDispatcher({ limit = 30 }: { limit?: number } = {}) 
       claimed: all.length,
       stop_reason: "throttled_by_minute_cap",
       target_rate: rate?.target_per_minute ?? null,
-      provider: "businesscode",
+      provider: "short-brasil",
     });
     return { processed: 0, throttled: true };
   }
@@ -475,7 +475,7 @@ export async function runSmsDispatcher({ limit = 30 }: { limit?: number } = {}) 
 
   // ============ FASE 3: envia em paralelo (pool reduzido) ============
   // Pool de 10 = suficiente para a cadência <=70/min sem rajada que dispara
-  // 429 na BusinessCode. Quando o provedor responde 429, registra throttle
+  // 429 na Short Brasil. Quando o provedor responde 429, registra throttle
   // global (backoff) e reagenda os pendentes do tick.
   let processed = 0;
   let errors = 0;
@@ -574,7 +574,7 @@ export async function runSmsDispatcher({ limit = 30 }: { limit?: number } = {}) 
         await registerThrottle("sms", 600, `auth_error_${status}: ${lastProviderError}`);
       }
 
-      // Sem saldo na BusinessCode: pausa o canal de SMS pra todos os tenants
+      // Sem saldo na Short Brasil: pausa o canal de SMS pra todos os tenants
       // e reagenda o lead. Sem isso, o motor queimaria toda a fila como "failed".
       if (insufficient) {
         await pauseChannelForInsufficientFunds("sms", lastProviderError);
@@ -639,7 +639,7 @@ export async function runSmsDispatcher({ limit = 30 }: { limit?: number } = {}) 
     target_rate: rate?.target_per_minute ?? null,
     actual_rate: processed,
     stop_reason: rateLimited > 0 ? "provider_rate_limited" : "ok",
-    provider: "businesscode",
+    provider: "short-brasil",
     last_provider_error: lastProviderError,
   });
   return { processed, errors, rescheduled, rate_limited: rateLimited };

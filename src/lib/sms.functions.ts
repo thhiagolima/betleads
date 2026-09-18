@@ -1,8 +1,7 @@
-// Integração com a API SMS BusinessCode.
-// Doc do cliente: POST https://dash.businesscode.com.br/api/v1/messaging/sms
-// Headers: Authorization: Bearer <TOKEN>, Idempotency-Key: <uuid>
-// Body: { to: "+55DDDNNNN", content: "Olá {primeiro_nome}...", variables: { primeiro_nome: "Pedro", ... } }
-// Placeholders sem valor em `variables` permanecem como `{token}` na entrega.
+// Integracao com a API SMS Short Brasil.
+// Doc do cliente: POST http://lp01-short.painelsms.com/bot/single-sms.php
+// Headers: usuario: <usuario>, chave: <chave>, Content-Type: application/json
+// Body: { celular: "11988887777", mensagem: "...", parceiroId?: "<id>" }
 import { createServerFn } from "@tanstack/react-start";
 import { dbUuid } from "@/lib/zod-helpers";
 import { z } from "zod";
@@ -11,29 +10,30 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { buildPlayerVariables } from "./template-vars.server";
 import type { Json } from "@/integrations/supabase/types";
 
-const BUSINESSCODE_URL = "https://dash.businesscode.com.br/api/v1/messaging/sms";
-const BUSINESSCODE_DISPATCH_URL =
-  "https://dash.businesscode.com.br/api/v1/messaging/dispatches";
+const DEFAULT_SHORT_BRASIL_SINGLE_URL = "http://lp01-short.painelsms.com/bot/single-sms.php";
+const DEFAULT_SHORT_BRASIL_BULK_URL = "http://lp01-short.painelsms.com/bot/bulk-sms.php";
 
-function normalizeBusinessCodeToken(raw: string): string {
-  // Remove caracteres invisíveis (BOM, zero-width), aspas, prefixos colados
-  // junto, e qualquer espaço/quebra de linha — tudo que possa ter vindo
-  // grudado quando o token foi colado no segredo.
-  let t = (raw || "").replace(/[\u200B-\u200D\uFEFF]/g, "");
-  t = t.trim().replace(/^['"]+|['"]+$/g, "").trim();
-  // pode vir como `Authorization: Bearer xxx` ou só `Bearer xxx`
-  t = t.replace(/^Authorization\s*:\s*/i, "").trim();
-  t = t.replace(/^Bearer\s+/i, "").trim();
-  // remove qualquer whitespace interno (token JWT/opaco não tem espaços)
-  t = t.replace(/\s+/g, "");
-  return t;
+function shortBrasilSingleUrl(): string {
+  return process.env.SHORT_BRASIL_SMS_SINGLE_URL ?? DEFAULT_SHORT_BRASIL_SINGLE_URL;
 }
 
-/** Fingerprint curto e irreversível só pra confirmar nos logs qual token
- *  está sendo usado, sem expor o valor. */
-async function tokenFingerprint(token: string): Promise<string> {
+function shortBrasilBulkUrl(): string {
+  return process.env.SHORT_BRASIL_SMS_BULK_URL ?? DEFAULT_SHORT_BRASIL_BULK_URL;
+}
+
+function cleanCredential(raw: string | undefined): string {
+  return (raw ?? "")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .trim()
+    .replace(/^['"]+|['"]+$/g, "")
+    .trim();
+}
+
+/** Fingerprint curto e irreversivel so pra confirmar nos logs quais credenciais
+ *  estao sendo usadas, sem expor os valores. */
+async function credentialFingerprint(value: string): Promise<string> {
   try {
-    const buf = new TextEncoder().encode(token);
+    const buf = new TextEncoder().encode(value);
     const hash = await crypto.subtle.digest("SHA-256", buf);
     const hex = Array.from(new Uint8Array(hash))
       .map((b) => b.toString(16).padStart(2, "0"))
@@ -55,57 +55,92 @@ function normalizeE164BR(raw: string): string {
   return `+${withCountry}`;
 }
 
-async function callBusinessCode(
+function toShortBrasilCell(e164OrRaw: string): string {
+  const digits = e164OrRaw.replace(/\D/g, "");
+  const local = digits.startsWith("55") ? digits.slice(2) : digits;
+  if (local.length < 10 || local.length > 11) {
+    throw new Error(`Telefone invalido para Short Brasil: ${e164OrRaw}`);
+  }
+  return local;
+}
+
+function renderSmsVariables(
+  content: string,
+  variables?: Record<string, string | number> | null,
+): string {
+  if (!variables || Object.keys(variables).length === 0) return content;
+  return content.replace(/\{([a-zA-Z0-9_]+)\}/g, (match, key: string) => {
+    const value = variables[key];
+    return value === undefined || value === null ? match : String(value);
+  });
+}
+
+function shortBrasilCredentials(): { usuario: string; chave: string } {
+  return {
+    usuario: cleanCredential(process.env.SHORT_BRASIL_SMS_USUARIO),
+    chave: cleanCredential(process.env.SHORT_BRASIL_SMS_CHAVE),
+  };
+}
+
+function getShortBrasilAppStatus(body: unknown): number | null {
+  if (!body || typeof body !== "object") return null;
+  const raw = (body as Record<string, unknown>).status;
+  if (typeof raw === "number") return raw;
+  if (typeof raw === "string" && /^\d+$/.test(raw)) return Number(raw);
+  return null;
+}
+
+function isShortBrasilApplicationError(body: unknown): boolean {
+  const status = getShortBrasilAppStatus(body);
+  return status === 101 || status === 303 || status === 404 || status === 505;
+}
+
+async function callShortBrasil(
   to: string,
   content: string,
   variables?: Record<string, string | number> | null,
 ) {
-  const rawToken = process.env.BUSINESSCODE_SMS_TOKEN;
-  const normalizedToken = rawToken ? normalizeBusinessCodeToken(rawToken) : "";
-  if (!normalizedToken) {
-    console.error("SMS BusinessCode token missing");
+  const { usuario, chave } = shortBrasilCredentials();
+  if (!usuario || !chave) {
+    console.error("SMS Short Brasil credentials missing");
     return {
       ok: false as const,
       status: 0,
-      body: { error: "BUSINESSCODE_SMS_TOKEN não configurado" },
+      body: { error: "SHORT_BRASIL_SMS_USUARIO/SHORT_BRASIL_SMS_CHAVE nao configurados" },
       idempotencyKey: "",
     };
   }
-  const fp = await tokenFingerprint(normalizedToken);
-  const rawLen = rawToken?.length ?? 0;
-  const normLen = normalizedToken.length;
-  const trimmedChars = rawLen - normLen;
+  const usuarioFp = await credentialFingerprint(usuario);
   const idempotencyKey = crypto.randomUUID();
   let res: Response;
-  const payload: Record<string, unknown> = { to, content };
-  if (variables && Object.keys(variables).length > 0) {
-    payload.variables = variables;
-  }
+  const payload = {
+    celular: toShortBrasilCell(to),
+    mensagem: renderSmsVariables(content, variables),
+    parceiroId: idempotencyKey,
+  };
   const maxAttempts = 6;
   let attempt = 0;
   while (true) {
     attempt++;
     try {
-      console.info("SMS BusinessCode request started", {
+      console.info("SMS Short Brasil request started", {
         to,
         idempotencyKey,
-        tokenFp: fp,
-        tokenLen: normLen,
-        trimmedChars,
+        usuarioFp,
         attempt,
       });
-      res = await fetch(BUSINESSCODE_URL, {
+      res = await fetch(shortBrasilSingleUrl(), {
         method: "POST",
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
-          Authorization: `Bearer ${normalizedToken}`,
-          "Idempotency-Key": idempotencyKey,
+          usuario,
+          chave,
         },
         body: JSON.stringify(payload),
       });
     } catch (err) {
-      console.error("SMS BusinessCode request failed before response", {
+      console.error("SMS Short Brasil request failed before response", {
         to,
         idempotencyKey,
         attempt,
@@ -123,7 +158,7 @@ async function callBusinessCode(
       };
     }
     if (res.status >= 500 && res.status <= 599 && attempt < maxAttempts) {
-      console.warn("SMS BusinessCode 5xx — retrying", {
+      console.warn("SMS Short Brasil 5xx - retrying", {
         to,
         idempotencyKey,
         status: res.status,
@@ -139,8 +174,6 @@ async function callBusinessCode(
   try {
     body = text ? JSON.parse(text) : null;
   } catch {
-    // Provedor respondeu algo que não é JSON (geralmente HTML de erro).
-    // Guardamos só um trecho curto pra não poluir banco/logs.
     const snippet = text.slice(0, 400);
     const looksLikeHtml = /<html|<!doctype/i.test(text);
     body = {
@@ -150,26 +183,27 @@ async function callBusinessCode(
       snippet,
     };
   }
-  console.info("SMS BusinessCode response received", {
+  const appError = isShortBrasilApplicationError(body);
+  console.info("SMS Short Brasil response received", {
     to,
     idempotencyKey,
     status: res.status,
-    ok: res.ok,
+    ok: res.ok && !appError,
     attempts: attempt,
   });
-  return { ok: res.ok, status: res.status, body, idempotencyKey };
+  return { ok: res.ok && !appError, status: res.status, body, idempotencyKey };
 }
 
 /**
- * Envia 1 SMS para N destinatários em uma única chamada HTTP usando o
- * endpoint /messaging/dispatches da BusinessCode. Esse endpoint aceita
- * milhares de destinatários por dispatch — é o que destrava o throughput.
+ * Envia 1 SMS para N destinatarios em uma unica chamada HTTP usando o
+ * endpoint /bot/bulk-sms.php da Short Brasil. O provedor aceita ate
+ * 5000 mensagens por requisicao.
  *
- * Retorna 1 dispatchId que cobre todos os destinatários do lote.
+ * Mantemos o nome exportado antigo para compatibilidade interna.
  */
-export async function callBusinessCodeSmsDispatch(args: {
+export async function callShortBrasilSmsBulk(args: {
   content: string;
-  recipients: string[]; // já normalizados E.164
+  recipients: string[]; // ja normalizados E.164
   variables?: Record<string, string | number> | null;
 }): Promise<{
   ok: boolean;
@@ -179,38 +213,38 @@ export async function callBusinessCodeSmsDispatch(args: {
   dispatchId: string | null;
   temporary?: boolean;
 }> {
-  const rawToken = process.env.BUSINESSCODE_SMS_TOKEN;
-  const normalizedToken = rawToken ? normalizeBusinessCodeToken(rawToken) : "";
-  if (!normalizedToken) {
+  const { usuario, chave } = shortBrasilCredentials();
+  if (!usuario || !chave) {
     return {
       ok: false,
       status: 0,
-      body: { error: "BUSINESSCODE_SMS_TOKEN não configurado" },
+      body: { error: "SHORT_BRASIL_SMS_USUARIO/SHORT_BRASIL_SMS_CHAVE nao configurados" },
       idempotencyKey: "",
       dispatchId: null,
     };
   }
   const idempotencyKey = crypto.randomUUID();
-  const payload: Record<string, unknown> = {
-    content: args.content,
-    to: args.recipients,
+  const mensagem = renderSmsVariables(args.content, args.variables);
+  const payload = {
+    bulk: args.recipients.slice(0, 5000).map((to) => ({
+      celular: toShortBrasilCell(to),
+      mensagem,
+      parceiroId: crypto.randomUUID(),
+    })),
   };
-  if (args.variables && Object.keys(args.variables).length > 0) {
-    payload.variables = args.variables;
-  }
   const maxAttempts = 3;
   let attempt = 0;
   let res: Response;
   while (true) {
     attempt++;
     try {
-      res = await fetch(BUSINESSCODE_DISPATCH_URL, {
+      res = await fetch(shortBrasilBulkUrl(), {
         method: "POST",
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
-          Authorization: `Bearer ${normalizedToken}`,
-          "Idempotency-Key": idempotencyKey,
+          usuario,
+          chave,
         },
         body: JSON.stringify(payload),
       });
@@ -241,36 +275,35 @@ export async function callBusinessCodeSmsDispatch(args: {
   } catch {
     body = { non_json: true, snippet: text.slice(0, 300) };
   }
-  // Extrai dispatchId pra status polling (mesma lógica do refresh).
+  const appError = isShortBrasilApplicationError(body);
   let dispatchId: string | null = null;
   if (body && typeof body === "object") {
     const o = body as Record<string, unknown>;
     const cand =
-      o.dispatch_id ??
-      o.dispatchId ??
       o.id ??
-      (o.data && typeof o.data === "object"
-        ? (o.data as Record<string, unknown>).dispatch_id ??
-          (o.data as Record<string, unknown>).id
-        : null);
+      o.loteId ??
+      o.lote_id ??
+      (o.data && typeof o.data === "object" ? (o.data as Record<string, unknown>).id : null);
     if (typeof cand === "string" || typeof cand === "number") {
       dispatchId = String(cand);
     }
-    const link = (o._links as { status?: string } | undefined)?.status;
-    if (!dispatchId && typeof link === "string") {
-      const m = link.match(/dispatches\/(\d+)/);
-      if (m) dispatchId = m[1];
-    }
   }
-  console.info("SMS BusinessCode bulk dispatch", {
+  console.info("SMS Short Brasil bulk dispatch", {
     status: res.status,
-    ok: res.ok,
+    ok: res.ok && !appError,
     recipients: args.recipients.length,
     dispatchId,
     attempts: attempt,
   });
-  const temporary = !res.ok && (res.status === 0 || res.status >= 500);
-  return { ok: res.ok, status: res.status, body, idempotencyKey, dispatchId, temporary };
+  const temporary = (!res.ok || appError) && (res.status === 0 || res.status >= 500);
+  return {
+    ok: res.ok && !appError,
+    status: res.status,
+    body,
+    idempotencyKey,
+    dispatchId,
+    temporary,
+  };
 }
 
 async function logSend(row: {
@@ -293,7 +326,7 @@ async function logSend(row: {
     to_phone: row.to,
     content: row.content,
     status: row.status,
-    provider: "businesscode",
+    provider: "short-brasil",
     provider_response: (row.provider_response ?? {}) as Json,
     error: row.error,
     idempotency_key: row.idempotency_key || null,
@@ -323,8 +356,10 @@ function extractProviderMessageId(body: unknown): string | null {
     o.messageId,
     o.sms_id,
     o.smsId,
+    o.parceiroId,
     data?.id,
     data?.message_id,
+    data?.parceiroId,
   ];
   for (const v of candidates) {
     if (typeof v === "string" && v.length > 0) return v;
@@ -343,17 +378,26 @@ function summarizeProviderError(status: number, body: unknown): string {
   if (body && typeof body === "object") {
     const b = body as Record<string, unknown>;
     if (b.non_json) {
-      return `Provedor BusinessCode retornou HTTP ${status} (resposta não-JSON — endpoint pode estar incorreto ou token inválido).`;
+      return `Provedor Short Brasil retornou HTTP ${status} (resposta nao-JSON - endpoint pode estar incorreto ou credenciais invalidas).`;
     }
+    const appStatus = getShortBrasilAppStatus(body);
+    if (appStatus === 101) return "Short Brasil: erro de autenticacao";
+    if (appStatus === 303) return "Short Brasil: erro de requisicao";
+    if (appStatus === 404) return "Short Brasil: transacao nao encontrada";
+    if (appStatus === 505) return "Short Brasil: saldo insuficiente";
     const msg =
+      (typeof b.statusDetalhe === "string" && b.statusDetalhe) ||
+      (typeof b.detalhe === "string" && b.detalhe) ||
       (typeof b.message === "string" && b.message) ||
       (typeof b.error === "string" && b.error) ||
-      (b.error && typeof b.error === "object" && "message" in (b.error as object) &&
+      (b.error &&
+        typeof b.error === "object" &&
+        "message" in (b.error as object) &&
         String((b.error as { message: unknown }).message)) ||
       null;
     if (msg) {
-      if (status === 401) {
-          return `BusinessCode recusou o token (HTTP 401: ${msg}). O segredo BUSINESSCODE_SMS_TOKEN está presente mas o provedor não aceitou: gere um novo token com permissão de SMS no painel da BusinessCode e atualize o segredo.`;
+      if (status === 401 || appStatus === 101) {
+        return `Short Brasil recusou as credenciais (HTTP ${status}: ${msg}). Confira SHORT_BRASIL_SMS_USUARIO e SHORT_BRASIL_SMS_CHAVE.`;
       }
       return `HTTP ${status}: ${msg}`;
     }
@@ -397,7 +441,7 @@ export async function sendSmsInternal(args: {
     return { ok: false, error: msg };
   }
 
-  const r = await callBusinessCode(normalized, args.content, args.variables);
+  const r = await callShortBrasil(normalized, args.content, args.variables);
   const providerMessageId = r.ok ? extractProviderMessageId(r.body) : null;
   const errorSummary = r.ok ? null : summarizeProviderError(r.status, r.body);
   const isTemporary = !r.ok && (r.status === 0 || r.status === 429 || r.status >= 500);
@@ -435,9 +479,12 @@ export const smsProviderStatus = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async () => {
     return {
-      configured: Boolean(process.env.BUSINESSCODE_SMS_TOKEN),
-      provider: "BusinessCode",
-      endpoint: BUSINESSCODE_URL,
+      configured: Boolean(
+        process.env.SHORT_BRASIL_SMS_USUARIO && process.env.SHORT_BRASIL_SMS_CHAVE,
+      ),
+      provider: "Short Brasil",
+      endpoint: DEFAULT_SHORT_BRASIL_SINGLE_URL,
+      callbackPath: "/api/public/sms-webhook",
     };
   });
 
@@ -739,7 +786,7 @@ export const sendBulkSms = createServerFn({ method: "POST" })
 // flow_leads e deposits. Retorna shape pronto para o componente.
 // ============================================================
 
-const SMS_COST_BRL = 0.08; // custo médio estimado por SMS (BusinessCode)
+const SMS_COST_BRL = 0.08; // custo medio estimado por SMS
 const CONVERSION_WINDOW_HOURS = 72;
 
 function dayKey(d: Date): string {
@@ -838,163 +885,19 @@ function pickDispatchStatus(body: any): string | null {
 }
 
 /**
- * Consulta o endpoint de status da BusinessCode para SMS pendentes
- * (status='sent', delivery_status='sent') das últimas 24h e atualiza
- * delivery_status conforme o status retornado pelo provedor.
+ * A Short Brasil envia os status por callback em /api/public/sms-webhook.
+ * Mantemos este hook como no-op para compatibilidade com o cron existente.
  */
 export async function refreshSmsDeliveryStatusInternal(): Promise<{ processed: number }> {
-  const rawToken = process.env.BUSINESSCODE_SMS_TOKEN;
-  const token = rawToken ? normalizeBusinessCodeToken(rawToken) : "";
-  if (!token) return { processed: 0 };
-
-  // Se o endpoint de status da BusinessCode estiver degradado (5xx em massa),
-  // entramos em backoff e pulamos o ciclo. Evita poluir logs e martelar a API
-  // do provedor enquanto ela não normaliza. Os envios em si não dependem
-  // desse ciclo — só a atualização de delivery_status fica suspensa.
-  {
-    const { data: state } = await supabaseAdmin
-      .from("dispatch_rate_state")
-      .select("backoff_until")
-      .eq("channel", "sms_status")
-      .maybeSingle();
-    const until = state?.backoff_until ? new Date(state.backoff_until).getTime() : 0;
-    if (until > Date.now()) {
-      return { processed: 0 };
-    }
-  }
-
-  const sinceIso = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
-
-  const { data: pending, error } = await supabaseAdmin
-    .from("sms_send_logs")
-    .select("id, provider_response, created_at")
-    .eq("status", "sent")
-    .eq("delivery_status", "sent")
-    .gte("created_at", sinceIso)
-    .order("created_at", { ascending: false })
-    .limit(100);
-  if (error || !pending || pending.length === 0) return { processed: 0 };
-
-  // Processa em paralelo (até 10 simultâneos) — refresh de status agora roda
-  // em background via cron, então pode trabalhar mais sem atrasar nada na UI.
-  const CONCURRENCY = 10;
-  const queue = [...pending];
-  let processed = 0;
-  const stats = { calls: 0, fiveXx: 0, lastStatus: 0 };
-  const workers = Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
-    while (queue.length > 0) {
-      const row = queue.shift();
-      if (!row) break;
-      await processOne(row, token, stats);
-      processed += 1;
-    }
-  });
-  await Promise.allSettled(workers);
-
-  // Decide backoff agregado depois do ciclo. Ativa quando a maioria das
-  // chamadas voltou 5xx — provedor instável. Limpa quando o ciclo foi saudável.
-  if (stats.calls >= 10 && stats.fiveXx / stats.calls >= 0.5) {
-    const backoffMs = 10 * 60 * 1000; // 10 minutos
-    const backoffUntil = new Date(Date.now() + backoffMs).toISOString();
-    const err = `BusinessCode status refresh degraded: ${stats.fiveXx}/${stats.calls} returned 5xx (last=${stats.lastStatus})`;
-    console.warn(err, { backoffUntil });
-    await supabaseAdmin.from("dispatch_rate_state").upsert(
-      {
-        channel: "sms_status",
-        backoff_until: backoffUntil,
-        last_provider_error: err,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "channel" },
-    );
-  } else if (stats.calls > 0 && stats.fiveXx === 0) {
-    // Ciclo saudável — limpa backoff anterior, se houver.
-    await supabaseAdmin
-      .from("dispatch_rate_state")
-      .update({ backoff_until: null, last_provider_error: null, updated_at: new Date().toISOString() })
-      .eq("channel", "sms_status");
-  }
-
-  return { processed };
+  return { processed: 0 };
 }
 
 async function processOne(
-  row: { id: string; provider_response: unknown; created_at: string },
-  token: string,
-  stats: { calls: number; fiveXx: number; lastStatus: number },
+  _row: { id: string; provider_response: unknown; created_at: string },
+  _token: string,
+  _stats: { calls: number; fiveXx: number; lastStatus: number },
 ): Promise<void> {
-    const pr = (row.provider_response ?? {}) as any;
-    const dispatchId =
-      pr?.dispatch_id ??
-      pr?.dispatchId ??
-      pr?.data?.dispatch_id ??
-      (() => {
-        const link: string | undefined = pr?._links?.status;
-        if (typeof link === "string") {
-          const m = link.match(/dispatches\/(\d+)/);
-          return m ? Number(m[1]) : null;
-        }
-        return null;
-      })();
-    if (!dispatchId) return;
-
-    const statusUrl = `${BUSINESSCODE_DISPATCH_URL}/${dispatchId}`;
-    try {
-      const res = await fetch(statusUrl, {
-        method: "GET",
-        headers: {
-          Accept: "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-      });
-      stats.calls += 1;
-      stats.lastStatus = res.status;
-      if (res.status >= 500) stats.fiveXx += 1;
-      const text = await res.text();
-      let body: any = null;
-      try {
-        body = text ? JSON.parse(text) : null;
-      } catch {
-        body = { non_json: true, snippet: text.slice(0, 300) };
-      }
-      if (!res.ok) {
-        // 404 (dispatch antigo) ou 401/5xx — pula sem marcar como falha.
-        // Log agregado é emitido no fim do ciclo (ver refreshSmsDeliveryStatusInternal).
-        return;
-      }
-      const rawStatus = pickDispatchStatus(body);
-      const { delivery_status, isFinal } = mapDispatchStatus(rawStatus);
-      if (!isFinal) return;
-
-      const patch: {
-        delivery_status: string;
-        last_callback: Json;
-        delivered_at?: string;
-      } = {
-        delivery_status,
-        last_callback: (body ?? {}) as Json,
-      };
-      if (delivery_status === "delivered") {
-        patch.delivered_at = new Date().toISOString();
-      }
-      const { error: updErr } = await supabaseAdmin
-        .from("sms_send_logs")
-        .update(patch)
-        .eq("id", row.id);
-      if (updErr) {
-        console.warn("Failed to update sms_send_logs delivery_status", {
-          id: row.id,
-          error: updErr.message,
-        });
-      }
-    } catch (err) {
-      stats.calls += 1;
-      stats.fiveXx += 1; // erro de rede = trata como provedor caído
-      console.warn("BusinessCode dispatch status fetch failed", {
-        dispatchId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+  return;
 }
 
 export const getSmsDashboard = createServerFn({ method: "POST" })
@@ -1010,8 +913,7 @@ export const getSmsDashboard = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     // Dashboard = leitura pura do banco (rápido). O refresh de delivery_status
-    // contra a BusinessCode roda em background via cron em
-    // /api/public/hooks/sms-refresh-status — não bloqueia mais a UI.
+    // por callback da Short Brasil em /api/public/sms-webhook.
 
     // Resolve tenant do usuário autenticado — todas as queries do dashboard
     // DEVEM ser filtradas por tenant para não misturar dados de outros tenants.

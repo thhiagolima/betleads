@@ -306,7 +306,7 @@ function SmsPage() {
   );
 }
 
-// ---------------- Provedor (integração BusinessCode) ----------------
+// ---------------- Provedor (integracao Short Brasil) ----------------
 
 function Provedor() {
   const qc = useQueryClient();
@@ -323,8 +323,8 @@ function Provedor() {
 
   const webhookUrl =
     typeof window !== "undefined"
-      ? `${window.location.origin}/api/public/sms-webhook`
-      : "/api/public/sms-webhook";
+      ? `${window.location.origin}/api/public/sms-webhook?token=SEU_SHORT_BRASIL_WEBHOOK_SECRET`
+      : "/api/public/sms-webhook?token=SEU_SHORT_BRASIL_WEBHOOK_SECRET";
 
   const send = useMutation({
     mutationFn: () =>
@@ -347,10 +347,10 @@ function Provedor() {
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle>Provedor SMS — BusinessCode</CardTitle>
+          <CardTitle>Provedor SMS — Short Brasil</CardTitle>
           <CardDescription>
             Integração via API REST. Endpoint:{" "}
-            <code className="text-xs">dash.businesscode.com.br/api/v1/messaging/sms</code>
+            <code className="text-xs">lp01-short.painelsms.com/bot/single-sms.php</code>
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-2">
@@ -367,8 +367,8 @@ function Provedor() {
             )}
           </div>
           <p className="text-xs text-muted-foreground">
-            Os números são normalizados para E.164 (+55 + DDD + número) antes do envio.
-            Cada requisição usa um <code>Idempotency-Key</code> único.
+            Os números são normalizados para E.164 (+55 + DDD + número) antes do envio. Cada
+            requisição usa um <code>parceiroId</code> único para casar o callback.
           </p>
         </CardContent>
       </Card>
@@ -377,7 +377,7 @@ function Provedor() {
         <CardHeader>
           <CardTitle>URL de Callback (Webhook)</CardTitle>
           <CardDescription>
-            Cole esta URL no painel da BusinessCode para receber o status de entrega dos SMS.
+            Cole esta URL no painel da Short Brasil para receber status, DLRs e respostas.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -395,14 +395,16 @@ function Provedor() {
             </Button>
           </div>
           <ul className="text-xs text-muted-foreground space-y-1 list-disc list-inside">
-            <li>Método: <code>POST</code> · Content-Type: <code>application/json</code></li>
             <li>
-              Casamos o callback pelo campo <code>id</code> / <code>message_id</code> retornado
-              no envio (com fallback no <code>idempotency_key</code>).
+              Método: <code>GET</code> para Single ou <code>POST</code> JSON para Bulk.
             </li>
             <li>
-              Statuses reconhecidos: <code>delivered</code>, <code>sent</code>, <code>failed</code>,
-              <code>undelivered</code>.
+              Casamos o callback pelo campo <code>id</code> retornado no envio, com fallback no{" "}
+              <code>parceiroId</code>.
+            </li>
+            <li>
+              Statuses reconhecidos: <code>CONFIRMADO</code>, <code>AGUARDANDO</code>,{" "}
+              <code>NAO_ENTREGUE</code>, <code>ENVIADA</code>, <code>REJEITADA</code>.
             </li>
           </ul>
         </CardContent>
@@ -440,8 +442,8 @@ function Provedor() {
             <LeadSelector value={testLead} onChange={setTestLead} />
             <p className="text-xs text-muted-foreground mt-1">
               Selecione um player para que tokens como{" "}
-              <code>{"{primeiro_nome}"}</code> sejam substituídos pelo provedor.
-              Sem player, os tokens chegam literais.
+              <code>{"{primeiro_nome}"}</code> sejam substituídos antes do envio. Sem player, os
+              tokens chegam literais.
             </p>
           </div>
           <div className="flex justify-end">
