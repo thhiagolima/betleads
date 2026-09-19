@@ -3,14 +3,15 @@
 // Headers: Authorization: Bearer <TOKEN>, Idempotency-Key: <uuid>
 // Body: { to: "+55DDDNNNN", audio_url: "https://..." }
 
-const BUSINESSCODE_VOICE_URL =
-  "https://dash.businesscode.com.br/api/v1/messaging/voice";
-const BUSINESSCODE_DISPATCH_URL =
-  "https://dash.businesscode.com.br/api/v1/messaging/dispatches";
+const BUSINESSCODE_VOICE_URL = "https://dash.businesscode.com.br/api/v1/messaging/voice";
+const BUSINESSCODE_DISPATCH_URL = "https://dash.businesscode.com.br/api/v1/messaging/dispatches";
 
 function normalizeBusinessCodeToken(raw: string): string {
   let t = (raw || "").replace(/[\u200B-\u200D\uFEFF]/g, "");
-  t = t.trim().replace(/^['"]+|['"]+$/g, "").trim();
+  t = t
+    .trim()
+    .replace(/^['"]+|['"]+$/g, "")
+    .trim();
   t = t.replace(/^Authorization\s*:\s*/i, "").trim();
   t = t.replace(/^Bearer\s+/i, "").trim();
   t = t.replace(/\s+/g, "");
@@ -38,14 +39,14 @@ export async function callBusinessCodeVoice(
   to: string,
   audioUrl: string,
 ): Promise<BusinessCodeVoiceResult> {
-  const rawToken = process.env.BUSINESSCODE_SMS_TOKEN;
+  const rawToken = process.env.BUSINESSCODE_VOICE_TOKEN;
   const token = rawToken ? normalizeBusinessCodeToken(rawToken) : "";
   if (!token) {
     console.error("Voice BusinessCode token missing");
     return {
       ok: false,
       status: 0,
-      body: { error: "BUSINESSCODE_SMS_TOKEN não configurado" },
+      body: { error: "BUSINESSCODE_VOICE_TOKEN não configurado" },
       idempotencyKey: "",
     };
   }
@@ -135,13 +136,13 @@ export type BusinessCodeDispatchStatus = {
 export async function fetchBusinessCodeDispatchStatus(
   dispatchId: number | string,
 ): Promise<BusinessCodeDispatchStatus> {
-  const rawToken = process.env.BUSINESSCODE_SMS_TOKEN;
+  const rawToken = process.env.BUSINESSCODE_VOICE_TOKEN;
   const token = rawToken ? normalizeBusinessCodeToken(rawToken) : "";
   if (!token) {
     return {
       ok: false,
       status: 0,
-      body: { error: "BUSINESSCODE_SMS_TOKEN não configurado" },
+      body: { error: "BUSINESSCODE_VOICE_TOKEN não configurado" },
     };
   }
   let res: Response;

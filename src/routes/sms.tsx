@@ -32,13 +32,7 @@ import {
   Search,
   RotateCw,
 } from "lucide-react";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -58,10 +52,7 @@ import {
   listScheduledSmsCampaigns,
   cancelScheduledSmsCampaign,
 } from "@/lib/sms.functions";
-import {
-  getFailedSmsBreakdown,
-  resendFailedSms,
-} from "@/lib/sms.functions";
+import { getFailedSmsBreakdown, resendFailedSms } from "@/lib/sms.functions";
 import { listPlayersForCalls } from "@/lib/calls.functions";
 import {
   Select,
@@ -139,9 +130,7 @@ type Gatilho = TriggerType;
 
 const GATILHOS: Gatilho[] = Object.keys(TRIGGER_NAMES) as Gatilho[];
 
-type Etapa =
-  | { tipo: "sms"; mensagem: string }
-  | { tipo: "delay"; dias: number };
+type Etapa = { tipo: "sms"; mensagem: string } | { tipo: "delay"; dias: number };
 
 type Fluxo = {
   id: string;
@@ -219,6 +208,22 @@ const VARIAVEIS = [
   "{expert}",
   "{link}",
 ];
+
+function sanitizeSmsProviderError(error: string | null | undefined): string | null {
+  if (!error) return null;
+  return error
+    .replace(/BUSINESSCODE_SMS_TOKEN/gi, "SHORT_BRASIL_SMS_USUARIO/SHORT_BRASIL_SMS_CHAVE")
+    .replace(/BusinessCode/gi, "Short Brasil")
+    .replace(/businesscode/gi, "short-brasil")
+    .replace(
+      /Sem resposta do provedor:\s*SHORT_BRASIL_SMS_USUARIO\/SHORT_BRASIL_SMS_CHAVE não configurado/gi,
+      "Credenciais Short Brasil nao configuradas. Reinicie o servidor apos alterar o .env.",
+    )
+    .replace(
+      /Sem resposta do provedor:\s*SHORT_BRASIL_SMS_USUARIO\/SHORT_BRASIL_SMS_CHAVE nao configurado/gi,
+      "Credenciais Short Brasil nao configuradas. Reinicie o servidor apos alterar o .env.",
+    );
+}
 
 function previewMensagem(msg: string) {
   return msg
@@ -413,9 +418,7 @@ function Provedor() {
       <Card>
         <CardHeader>
           <CardTitle>Enviar SMS de teste</CardTitle>
-          <CardDescription>
-            Envia direto pelo provedor, sem passar por fluxo.
-          </CardDescription>
+          <CardDescription>Envia direto pelo provedor, sem passar por fluxo.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -441,9 +444,8 @@ function Provedor() {
             <Label>Player (opcional — para substituir variáveis)</Label>
             <LeadSelector value={testLead} onChange={setTestLead} />
             <p className="text-xs text-muted-foreground mt-1">
-              Selecione um player para que tokens como{" "}
-              <code>{"{primeiro_nome}"}</code> sejam substituídos antes do envio. Sem player, os
-              tokens chegam literais.
+              Selecione um player para que tokens como <code>{"{primeiro_nome}"}</code> sejam
+              substituídos antes do envio. Sem player, os tokens chegam literais.
             </p>
           </div>
           <div className="flex justify-end">
@@ -471,10 +473,7 @@ function Provedor() {
           ) : (
             <div className="space-y-2">
               {(logs.data?.logs ?? []).map((l: any) => (
-                <div
-                  key={l.id}
-                  className="flex items-start gap-3 p-3 rounded-md border bg-card/50"
-                >
+                <div key={l.id} className="flex items-start gap-3 p-3 rounded-md border bg-card/50">
                   {l.status === "sent" ? (
                     <CheckCircle2 className="h-4 w-4 text-emerald-400 mt-0.5 shrink-0" />
                   ) : (
@@ -499,8 +498,8 @@ function Provedor() {
                           {l.delivery_status === "delivered"
                             ? "entregue"
                             : l.delivery_status === "failed"
-                            ? "falhou"
-                            : l.delivery_status}
+                              ? "falhou"
+                              : l.delivery_status}
                         </Badge>
                       )}
                       {l.trigger_name && (
@@ -513,9 +512,7 @@ function Provedor() {
                       </span>
                     </div>
                     <p className="text-sm text-muted-foreground truncate">{l.content}</p>
-                    {l.error && (
-                      <p className="text-xs text-red-400 mt-1 break-all">{l.error}</p>
-                    )}
+                    {l.error && <p className="text-xs text-red-400 mt-1 break-all">{l.error}</p>}
                   </div>
                 </div>
               ))}
@@ -723,8 +720,8 @@ function Dashboard() {
             isLoading
               ? "…"
               : totals && totals.sent > 0
-              ? `${Math.round((totals.conversions / totals.sent) * 100)}%`
-              : "0%"
+                ? `${Math.round((totals.conversions / totals.sent) * 100)}%`
+                : "0%"
           }
           hint={totals ? `${totals.conversions} / ${totals.sent} SMS` : "—"}
           tone="default"
@@ -771,7 +768,12 @@ function Dashboard() {
                   labelFormatter={(v) => fmtDay(String(v))}
                 />
                 <Legend />
-                <Area type="monotone" dataKey="enviados" stroke="hsl(var(--primary))" fill="url(#grad1)" />
+                <Area
+                  type="monotone"
+                  dataKey="enviados"
+                  stroke="hsl(var(--primary))"
+                  fill="url(#grad1)"
+                />
                 <Area type="monotone" dataKey="entregues" stroke="#10b981" fill="url(#grad2)" />
               </AreaChart>
             </ResponsiveContainer>
@@ -820,10 +822,9 @@ function Dashboard() {
           <AlertDialogHeader>
             <AlertDialogTitle>Reenviar SMS que falharam</AlertDialogTitle>
             <AlertDialogDescription>
-              Dia {new Date(rk.to + "T00:00:00").toLocaleDateString("pt-BR")}. Cada
-              destinatário recebe no máximo uma vez (deduplicado por telefone +
-              conteúdo). Quem já recebeu o mesmo SMS com sucesso nas últimas 24h
-              é ignorado automaticamente.
+              Dia {new Date(rk.to + "T00:00:00").toLocaleDateString("pt-BR")}. Cada destinatário
+              recebe no máximo uma vez (deduplicado por telefone + conteúdo). Quem já recebeu o
+              mesmo SMS com sucesso nas últimas 24h é ignorado automaticamente.
             </AlertDialogDescription>
           </AlertDialogHeader>
 
@@ -864,9 +865,7 @@ function Dashboard() {
           <AlertDialogFooter>
             <AlertDialogCancel disabled={resending}>Cancelar</AlertDialogCancel>
             <AlertDialogAction
-              disabled={
-                resending || (!includeRate && !includeCarrier) || !breakdownQ.data
-              }
+              disabled={resending || (!includeRate && !includeCarrier) || !breakdownQ.data}
               onClick={async (e) => {
                 e.preventDefault();
                 setResending(true);
@@ -886,10 +885,9 @@ function Dashboard() {
                   setResendOpen(false);
                   qc.invalidateQueries({ queryKey: ["sms-dashboard"] });
                 } catch (err) {
-                  toast.error(
-                    err instanceof Error ? err.message : "Falha ao reenviar",
-                    { id: tid },
-                  );
+                  toast.error(err instanceof Error ? err.message : "Falha ao reenviar", {
+                    id: tid,
+                  });
                 } finally {
                   setResending(false);
                 }
@@ -906,11 +904,7 @@ function Dashboard() {
 
 // ---------------- Envio em Massa ----------------
 
-type CampanhaStatus =
-  | "Rascunho"
-  | "Enviando"
-  | "Enviado"
-  | "Falhou";
+type CampanhaStatus = "Rascunho" | "Enviando" | "Enviado" | "Falhou";
 
 function statusTone(s: CampanhaStatus) {
   switch (s) {
@@ -932,9 +926,12 @@ function EnvioMassa() {
   const [destinatarios, setDestinatarios] = useState("");
   const [mensagem, setMensagem] = useState("");
   const [status, setStatus] = useState<CampanhaStatus>("Rascunho");
-  const [resultado, setResultado] = useState<
-    { sent: number; failed: number; pending: number; firstError?: string | null } | null
-  >(null);
+  const [resultado, setResultado] = useState<{
+    sent: number;
+    failed: number;
+    pending: number;
+    firstError?: string | null;
+  } | null>(null);
   const bulkFn = useServerFn(sendBulkSms);
   const scheduleFn = useServerFn(scheduleBulkSms);
   const listScheduledFn = useServerFn(listScheduledSmsCampaigns);
@@ -1040,17 +1037,13 @@ function EnvioMassa() {
             ratePerMinute: ritmo,
           },
         });
-        toast.success(
-          `Campanha agendada para ${scheduledAt.toLocaleString("pt-BR")}`,
-          { id: tid },
-        );
+        toast.success(`Campanha agendada para ${scheduledAt.toLocaleString("pt-BR")}`, { id: tid });
         qcMassa.invalidateQueries({ queryKey: ["sms-scheduled-campaigns"] });
         novoRascunho();
       } catch (err) {
-        toast.error(
-          `Erro ao agendar: ${err instanceof Error ? err.message : String(err)}`,
-          { id: tid },
-        );
+        toast.error(`Erro ao agendar: ${err instanceof Error ? err.message : String(err)}`, {
+          id: tid,
+        });
       }
       return;
     }
@@ -1072,15 +1065,17 @@ function EnvioMassa() {
       if ((r as { queued?: boolean }).queued) {
         setStatus("Enviando");
         setResultado({ sent: 0, failed: 0, pending: r.total, firstError: null });
-        toast.success(
-          `Campanha enfileirada — ${r.total} destinatários. Acompanhe em Campanhas.`,
-          { id: tid, duration: 8000 },
-        );
+        toast.success(`Campanha enfileirada — ${r.total} destinatários. Acompanhe em Campanhas.`, {
+          id: tid,
+          duration: 8000,
+        });
         qcMassa.invalidateQueries({ queryKey: ["sms-scheduled-campaigns"] });
         novoRascunho();
         return;
       }
-      const firstError = r.results.find((x: { ok: boolean; error?: string }) => !x.ok)?.error ?? null;
+      const firstError = sanitizeSmsProviderError(
+        r.results.find((x: { ok: boolean; error?: string }) => !x.ok)?.error,
+      );
       const pending = (r as { pending?: number }).pending ?? 0;
       setResultado({ sent: r.sent, failed: r.failed, pending, firstError });
       if (r.sent === r.total) {
@@ -1104,7 +1099,9 @@ function EnvioMassa() {
       }
     } catch (err) {
       setStatus("Falhou");
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg =
+        sanitizeSmsProviderError(err instanceof Error ? err.message : String(err)) ??
+        "erro desconhecido";
       toast.error(`Erro ao enviar: ${msg}`, { id: tid });
     }
   }
@@ -1184,14 +1181,12 @@ function EnvioMassa() {
                 <Zap className="h-4 w-4" /> Ritmo de entrega
               </Label>
               <div className="grid grid-cols-4 gap-2">
-                {(
-                  [
-                    { v: 5000, label: "Turbo", hint: "~5.000/min" },
-                    { v: 1000, label: "Rápido", hint: "~1.000/min" },
-                    { v: 300, label: "Normal", hint: "~300/min" },
-                    { v: 100, label: "Gradual", hint: "~100/min" },
-                  ]
-                ).map((o) => (
+                {[
+                  { v: 5000, label: "Turbo", hint: "~5.000/min" },
+                  { v: 1000, label: "Rápido", hint: "~1.000/min" },
+                  { v: 300, label: "Normal", hint: "~300/min" },
+                  { v: 100, label: "Gradual", hint: "~100/min" },
+                ].map((o) => (
                   <Button
                     key={o.v}
                     type="button"
@@ -1224,9 +1219,7 @@ function EnvioMassa() {
               />
               <div className="max-h-64 overflow-y-auto rounded-lg border border-border bg-card/50">
                 {isFetchingPlayers && (
-                  <p className="px-3 py-4 text-center text-xs text-muted-foreground">
-                    Buscando...
-                  </p>
+                  <p className="px-3 py-4 text-center text-xs text-muted-foreground">Buscando...</p>
                 )}
                 {!isFetchingPlayers && players.length === 0 && (
                   <p className="px-3 py-4 text-center text-xs text-muted-foreground">
@@ -1247,8 +1240,7 @@ function EnvioMassa() {
                       <div className="min-w-0 flex-1">
                         <p className="truncate font-medium">{p.nome}</p>
                         <p className="truncate text-xs text-muted-foreground">
-                          {p.telefone ?? "sem telefone"} ·{" "}
-                          {p.vip ? "VIP" : (p.status ?? "ativo")}
+                          {p.telefone ?? "sem telefone"} · {p.vip ? "VIP" : (p.status ?? "ativo")}
                         </p>
                       </div>
                       {added ? (
@@ -1316,7 +1308,9 @@ function EnvioMassa() {
                 </span>
               </div>
               <p className="text-sm">
-                {mensagem ? previewMensagem(mensagem) : (
+                {mensagem ? (
+                  previewMensagem(mensagem)
+                ) : (
                   <span className="text-muted-foreground italic">Sua mensagem aparecerá aqui</span>
                 )}
               </p>
@@ -1365,11 +1359,13 @@ function EnvioMassa() {
                   {resultado && (
                     <div className="space-y-1.5">
                       <div className="text-xs text-muted-foreground text-center">
-                        {resultado.sent} enviados · {resultado.pending} pendentes · {resultado.failed} falharam
+                        {resultado.sent} enviados · {resultado.pending} pendentes ·{" "}
+                        {resultado.failed} falharam
                       </div>
                       {resultado.firstError && (
                         <div className="rounded-md border border-rose-500/30 bg-rose-500/10 p-2 text-[11px] leading-snug text-rose-200">
-                          <span className="font-semibold">Motivo:</span> {resultado.firstError}
+                          <span className="font-semibold">Motivo:</span>{" "}
+                          {sanitizeSmsProviderError(resultado.firstError)}
                         </div>
                       )}
                     </div>
@@ -1463,15 +1459,9 @@ function Campanhas() {
   const all = (q.data?.campaigns ?? []) as Array<any>;
   const pendentes = all
     .filter((c) => c.status === "agendada" || c.status === "enviando")
-    .sort(
-      (a, b) =>
-        new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime(),
-    );
+    .sort((a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime());
   const historico = all
-    .filter(
-      (c) =>
-        c.status === "enviado" || c.status === "falhou" || c.status === "cancelada",
-    )
+    .filter((c) => c.status === "enviado" || c.status === "falhou" || c.status === "cancelada")
     .sort(
       (a, b) =>
         new Date(b.updated_at ?? b.scheduled_at).getTime() -
@@ -1486,8 +1476,7 @@ function Campanhas() {
     cancelada: "bg-muted text-muted-foreground border-border",
   };
 
-  const fmt = (iso?: string | null) =>
-    iso ? new Date(iso).toLocaleString("pt-BR") : "—";
+  const fmt = (iso?: string | null) => (iso ? new Date(iso).toLocaleString("pt-BR") : "—");
 
   return (
     <div className="space-y-6">
@@ -1495,26 +1484,16 @@ function Campanhas() {
         <div>
           <h2 className="text-lg font-semibold">Campanhas de SMS</h2>
           <p className="text-sm text-muted-foreground">
-            {pendentes.length} agendada{pendentes.length === 1 ? "" : "s"} ·{" "}
-            {historico.length} no histórico (últimos 30 dias)
+            {pendentes.length} agendada{pendentes.length === 1 ? "" : "s"} · {historico.length} no
+            histórico (últimos 30 dias)
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => q.refetch()}
-            disabled={q.isFetching}
-          >
-            <RotateCw
-              className={cn("h-4 w-4 mr-2", q.isFetching && "animate-spin")}
-            />
+          <Button variant="outline" size="sm" onClick={() => q.refetch()} disabled={q.isFetching}>
+            <RotateCw className={cn("h-4 w-4 mr-2", q.isFetching && "animate-spin")} />
             Atualizar
           </Button>
-          <Button
-            size="sm"
-            onClick={() => navigate({ to: "/sms", hash: "massa", replace: true })}
-          >
+          <Button size="sm" onClick={() => navigate({ to: "/sms", hash: "massa", replace: true })}>
             <Plus className="h-4 w-4 mr-2" /> Nova campanha
           </Button>
         </div>
@@ -1530,13 +1509,9 @@ function Campanhas() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-2">
-          {q.isLoading && (
-            <p className="text-sm text-muted-foreground">Carregando…</p>
-          )}
+          {q.isLoading && <p className="text-sm text-muted-foreground">Carregando…</p>}
           {!q.isLoading && pendentes.length === 0 && (
-            <p className="text-sm text-muted-foreground">
-              Nenhuma campanha agendada.
-            </p>
+            <p className="text-sm text-muted-foreground">Nenhuma campanha agendada.</p>
           )}
           {pendentes.map((c) => {
             const total = c.total_count ?? 0;
@@ -1555,12 +1530,7 @@ function Campanhas() {
                       {total === 1 ? "" : "s"}
                     </p>
                   </div>
-                  <Badge
-                    className={cn(
-                      "font-medium capitalize border",
-                      badgeTone[c.status] ?? "",
-                    )}
-                  >
+                  <Badge className={cn("font-medium capitalize border", badgeTone[c.status] ?? "")}>
                     {c.status}
                   </Badge>
                 </div>
@@ -1625,12 +1595,7 @@ function Campanhas() {
                       Agendada: {fmt(c.scheduled_at)} · Concluída: {fmt(c.updated_at)}
                     </p>
                   </div>
-                  <Badge
-                    className={cn(
-                      "font-medium capitalize border",
-                      badgeTone[c.status] ?? "",
-                    )}
-                  >
+                  <Badge className={cn("font-medium capitalize border", badgeTone[c.status] ?? "")}>
                     {c.status}
                   </Badge>
                 </div>
@@ -1639,7 +1604,7 @@ function Campanhas() {
                 </p>
                 {c.last_error && (
                   <p className="text-[11px] text-rose-300 truncate">
-                    Erro: {c.last_error}
+                    Erro: {sanitizeSmsProviderError(c.last_error)}
                   </p>
                 )}
               </div>
@@ -1844,13 +1809,7 @@ function Fluxos() {
         })}
       </div>
 
-      {editor && (
-        <EditorFluxo
-          fluxo={editor}
-          onClose={() => setEditor(null)}
-          onSave={salvar}
-        />
-      )}
+      {editor && <EditorFluxo fluxo={editor} onClose={() => setEditor(null)} onSave={salvar} />}
 
       <AlertDialog
         open={!!confirmarExclusao}
@@ -1861,10 +1820,8 @@ function Fluxos() {
             <AlertDialogTitle>Excluir fluxo?</AlertDialogTitle>
             <AlertDialogDescription>
               Tem certeza que deseja excluir{" "}
-              <span className="font-medium text-foreground">
-                {confirmarExclusao?.nome}
-              </span>
-              ? Essa ação não pode ser desfeita.
+              <span className="font-medium text-foreground">{confirmarExclusao?.nome}</span>? Essa
+              ação não pode ser desfeita.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1953,10 +1910,7 @@ function EditorFluxo({
             </div>
             <div className="space-y-1.5">
               <Label>Gatilho de entrada</Label>
-              <Select
-                value={draft.gatilho}
-                onValueChange={(v: Gatilho) => update("gatilho", v)}
-              >
+              <Select value={draft.gatilho} onValueChange={(v: Gatilho) => update("gatilho", v)}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -1991,10 +1945,20 @@ function EditorFluxo({
             <div className="flex items-center justify-between mb-2">
               <Label>Sequência</Label>
               <div className="flex gap-1">
-                <Button size="sm" variant="outline" onClick={() => addEtapa("sms")} className="gap-1">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => addEtapa("sms")}
+                  className="gap-1"
+                >
                   <MessageSquare className="h-3.5 w-3.5" /> SMS
                 </Button>
-                <Button size="sm" variant="outline" onClick={() => addEtapa("delay")} className="gap-1">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => addEtapa("delay")}
+                  className="gap-1"
+                >
                   <Timer className="h-3.5 w-3.5" /> Delay
                 </Button>
               </div>
@@ -2041,9 +2005,7 @@ function EditorFluxo({
                       />
                       <MessageVariablePicker
                         value={e.mensagem}
-                        onChange={(next: string) =>
-                          updateEtapa(i, { tipo: "sms", mensagem: next })
-                        }
+                        onChange={(next: string) => updateEtapa(i, { tipo: "sms", mensagem: next })}
                       />
                       <p className="text-[11px] text-muted-foreground italic">
                         Preview: {previewMensagem(e.mensagem) || "—"}

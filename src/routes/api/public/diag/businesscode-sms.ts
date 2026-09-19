@@ -1,12 +1,11 @@
-// Diagnóstico do endpoint de SMS da BusinessCode.
-// GET sem token — apenas mede status/latência/content-type pra mostrar
-// à BusinessCode quando o app reporta 526 (TLS/Cloudflare).
+// Diagnostico do endpoint de SMS da Short Brasil.
+// A rota manteve o nome antigo por compatibilidade com links internos.
 
 import { createFileRoute } from "@tanstack/react-router";
 import { createClient } from "@supabase/supabase-js";
 
-const BUSINESSCODE_SMS_URL =
-  "https://dash.businesscode.com.br/api/v1/messaging/sms";
+const SHORT_BRASIL_SMS_URL =
+  process.env.SHORT_BRASIL_SMS_SINGLE_URL ?? "http://lp01-short.painelsms.com/bot/single-sms.php";
 
 async function requireAuth(request: Request): Promise<Response | null> {
   const authHeader = request.headers.get("authorization");
@@ -45,10 +44,24 @@ export const Route = createFileRoute("/api/public/diag/businesscode-sms")({
         for (const method of ["GET", "POST"] as const) {
           const t0 = Date.now();
           try {
-            const res = await fetch(BUSINESSCODE_SMS_URL, {
+            const headers: Record<string, string> = { "Content-Type": "application/json" };
+            if (process.env.SHORT_BRASIL_SMS_USUARIO) {
+              headers.usuario = process.env.SHORT_BRASIL_SMS_USUARIO;
+            }
+            if (process.env.SHORT_BRASIL_SMS_CHAVE) {
+              headers.chave = process.env.SHORT_BRASIL_SMS_CHAVE;
+            }
+            const res = await fetch(SHORT_BRASIL_SMS_URL, {
               method,
-              headers: { "Content-Type": "application/json" },
-              body: method === "POST" ? "{}" : undefined,
+              headers,
+              body:
+                method === "POST"
+                  ? JSON.stringify({
+                      celular: "11999999999",
+                      mensagem: "Diagnostico Short Brasil",
+                      parceiroId: `diag-${Date.now()}`,
+                    })
+                  : undefined,
             });
             const text = await res.text();
             attempts.push({
@@ -72,9 +85,9 @@ export const Route = createFileRoute("/api/public/diag/businesscode-sms")({
 
         return Response.json({
           ok: true,
-          endpoint: BUSINESSCODE_SMS_URL,
-          note:
-            "Status 526 ou erro TLS indica falha de certificado/Cloudflare em dash.businesscode.com.br. Compartilhe com o suporte da BusinessCode.",
+          provider: "short-brasil",
+          endpoint: SHORT_BRASIL_SMS_URL,
+          note: "Se o status for 0/timeout, o backend nao conseguiu conectar em lp01-short.painelsms.com. Confira host, firewall, allowlist ou endpoint alternativo com a Short Brasil.",
           attempts,
           ts: new Date().toISOString(),
         });

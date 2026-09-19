@@ -7,15 +7,17 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { augmentEmailHtml, isSuppressed } from "./email-deliverability.server";
 
-export const BUSINESSCODE_EMAIL_URL =
-  "https://dash.businesscode.com.br/api/v1/messaging/email";
+export const BUSINESSCODE_EMAIL_URL = "https://dash.businesscode.com.br/api/v1/messaging/email";
 
 export const BUSINESSCODE_DISPATCH_URL =
   "https://dash.businesscode.com.br/api/v1/messaging/dispatches";
 
 function normalizeBusinessCodeToken(raw: string): string {
   let t = (raw || "").replace(/[\u200B-\u200D\uFEFF]/g, "");
-  t = t.trim().replace(/^['"]+|['"]+$/g, "").trim();
+  t = t
+    .trim()
+    .replace(/^['"]+|['"]+$/g, "")
+    .trim();
   t = t.replace(/^Authorization\s*:\s*/i, "").trim();
   t = t.replace(/^Bearer\s+/i, "").trim();
   t = t.replace(/\s+/g, "");
@@ -65,8 +67,7 @@ export function sanitizeEmailHtml(html: string): string {
 export function absolutizeEmailUrls(html: string, baseUrl: string): string {
   if (!html) return "";
   const base = baseUrl.replace(/\/+$/, "");
-  const isAbsolute = (u: string) =>
-    /^(https?:|data:|cid:|mailto:|tel:|#)/i.test(u);
+  const isAbsolute = (u: string) => /^(https?:|data:|cid:|mailto:|tel:|#)/i.test(u);
   const toEmailImg = (u: string): string => {
     // Reescreve qualquer URL que aponte para o storage de assets
     // (`/__l5e/assets-v1/<id>/<file>`) — em qualquer host — para o
@@ -92,8 +93,7 @@ export function absolutizeEmailUrls(html: string, baseUrl: string): string {
     // caminhos relativos ./algo, algo.png
     return toEmailImg(`${base}/${v.replace(/^\.?\/?/, "")}`);
   };
-  const rewriteAttr = (attr: string) =>
-    new RegExp(`(\\s${attr}\\s*=\\s*)(["'])([^"']*)\\2`, "gi");
+  const rewriteAttr = (attr: string) => new RegExp(`(\\s${attr}\\s*=\\s*)(["'])([^"']*)\\2`, "gi");
 
   let out = html;
 
@@ -123,10 +123,7 @@ export function absolutizeEmailUrls(html: string, baseUrl: string): string {
   });
 
   // url(...) em atributos style
-  out = out.replace(
-    /url\(\s*(['"]?)([^)'"]+)\1\s*\)/gi,
-    (_m, q, v) => `url(${q}${toAbs(v)}${q})`,
-  );
+  out = out.replace(/url\(\s*(['"]?)([^)'"]+)\1\s*\)/gi, (_m, q, v) => `url(${q}${toAbs(v)}${q})`);
 
   return out;
 }
@@ -158,18 +155,10 @@ export function shieldDarkEmailHtml(html: string): string {
   return html || "";
 }
 
-export async function callBusinessCodeEmail(
-  input: SendEmailInput,
-): Promise<SendEmailResult> {
-  const smsToken = process.env.BUSINESSCODE_SMS_TOKEN;
+export async function callBusinessCodeEmail(input: SendEmailInput): Promise<SendEmailResult> {
   const emailToken = process.env.BUSINESSCODE_EMAIL_TOKEN;
-  const token = emailToken || smsToken;
-  const normalizedToken = token ? normalizeBusinessCodeToken(token) : "";
-  const tokenSource = emailToken
-    ? "BUSINESSCODE_EMAIL_TOKEN"
-    : smsToken
-    ? "BUSINESSCODE_SMS_TOKEN"
-    : "none";
+  const normalizedToken = emailToken ? normalizeBusinessCodeToken(emailToken) : "";
+  const tokenSource = emailToken ? "BUSINESSCODE_EMAIL_TOKEN" : "none";
   if (!normalizedToken) {
     console.error("Email BusinessCode token missing");
     return {
@@ -222,9 +211,9 @@ export async function callBusinessCodeEmail(
   // algum wrapper adicionado por fora do template original.
   try {
     const finalHtml = String(payload.content ?? "");
-    const imgSrcs = Array.from(
-      finalHtml.matchAll(/<img[^>]+src=["']([^"']+)["']/gi),
-    ).map((m) => m[1]);
+    const imgSrcs = Array.from(finalHtml.matchAll(/<img[^>]+src=["']([^"']+)["']/gi)).map(
+      (m) => m[1],
+    );
     console.info("Email BusinessCode FINAL HTML preview", {
       to: input.to,
       subject: input.subject,
@@ -333,7 +322,12 @@ export async function callBusinessCodeEmail(
     attempts: attempt,
   });
   const temporary =
-    !res.ok && (res.status === 0 || res.status >= 500 || res.status === 401 || res.status === 403 || res.status === 429);
+    !res.ok &&
+    (res.status === 0 ||
+      res.status >= 500 ||
+      res.status === 401 ||
+      res.status === 403 ||
+      res.status === 429);
   return { ok: res.ok, status: res.status, body, idempotencyKey, temporary };
 }
 
@@ -357,10 +351,8 @@ export async function callBusinessCodeEmailDispatch(args: {
   dispatchId: string | null;
   temporary?: boolean;
 }> {
-  const smsToken = process.env.BUSINESSCODE_SMS_TOKEN;
   const emailToken = process.env.BUSINESSCODE_EMAIL_TOKEN;
-  const token = emailToken || smsToken;
-  const normalizedToken = token ? normalizeBusinessCodeToken(token) : "";
+  const normalizedToken = emailToken ? normalizeBusinessCodeToken(emailToken) : "";
   if (!normalizedToken) {
     return {
       ok: false,
@@ -380,7 +372,10 @@ export async function callBusinessCodeEmailDispatch(args: {
     recipients = checks.filter((c) => !c.sup).map((c) => c.r);
     const removed = args.recipients.length - recipients.length;
     if (removed > 0) {
-      console.info("Email bulk dispatch — suprimidos removidos", { removed, total: args.recipients.length });
+      console.info("Email bulk dispatch — suprimidos removidos", {
+        removed,
+        total: args.recipients.length,
+      });
     }
     if (recipients.length === 0) {
       return {
@@ -459,8 +454,8 @@ export async function callBusinessCodeEmailDispatch(args: {
       o.dispatchId ??
       o.id ??
       (o.data && typeof o.data === "object"
-        ? (o.data as Record<string, unknown>).dispatch_id ??
-          (o.data as Record<string, unknown>).id
+        ? ((o.data as Record<string, unknown>).dispatch_id ??
+          (o.data as Record<string, unknown>).id)
         : null);
     if (typeof cand === "string" || typeof cand === "number") dispatchId = String(cand);
   }
@@ -472,7 +467,12 @@ export async function callBusinessCodeEmailDispatch(args: {
     attempts: attempt,
   });
   const temporary =
-    !res.ok && (res.status === 0 || res.status >= 500 || res.status === 401 || res.status === 403 || res.status === 429);
+    !res.ok &&
+    (res.status === 0 ||
+      res.status >= 500 ||
+      res.status === 401 ||
+      res.status === 403 ||
+      res.status === 429);
   return { ok: res.ok, status: res.status, body, idempotencyKey, dispatchId, temporary };
 }
 

@@ -12,7 +12,8 @@ async function requireAuth(request: Request): Promise<Response | null> {
   const token = authHeader.slice(7);
   const SUPABASE_URL = process.env.SUPABASE_URL;
   const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY;
-  if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) return new Response("Server misconfigured", { status: 500 });
+  if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY)
+    return new Response("Server misconfigured", { status: 500 });
   const sb = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
@@ -46,7 +47,9 @@ export const Route = createFileRoute("/api/public/diag/call-status")({
         if (providerCallId) {
           const { data } = await supabaseAdmin
             .from("call_history")
-            .select("id, status, duration_seconds, provider_call_id, provider_response, to_phone, created_at")
+            .select(
+              "id, status, duration_seconds, provider_call_id, provider_response, to_phone, created_at",
+            )
             .eq("provider_call_id", providerCallId)
             .order("created_at", { ascending: false })
             .limit(1)
@@ -59,16 +62,22 @@ export const Route = createFileRoute("/api/public/diag/call-status")({
         }
 
         if (!dispatchId) {
-          return Response.json({
-            ok: false,
-            error: "Informe providerCallId ou dispatchId. Não consegui resolver dispatch_id.",
-            history,
-          }, { status: 400 });
+          return Response.json(
+            {
+              ok: false,
+              error: "Informe providerCallId ou dispatchId. Não consegui resolver dispatch_id.",
+              history,
+            },
+            { status: 400 },
+          );
         }
 
-        const token = normalizeToken(process.env.BUSINESSCODE_SMS_TOKEN || "");
+        const token = normalizeToken(process.env.BUSINESSCODE_VOICE_TOKEN || "");
         if (!token) {
-          return Response.json({ ok: false, error: "BUSINESSCODE_SMS_TOKEN não configurado" }, { status: 500 });
+          return Response.json(
+            { ok: false, error: "BUSINESSCODE_VOICE_TOKEN não configurado" },
+            { status: 500 },
+          );
         }
 
         const statusUrl = `https://dash.businesscode.com.br/api/v1/messaging/dispatches/${dispatchId}`;

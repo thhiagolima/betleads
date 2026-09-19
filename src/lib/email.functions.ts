@@ -5,11 +5,7 @@ import { dbUuid } from "@/lib/zod-helpers";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import {
-  BUSINESSCODE_EMAIL_URL,
-  callBusinessCodeEmail,
-  resolveSender,
-} from "./email-send.server";
+import { BUSINESSCODE_EMAIL_URL, callBusinessCodeEmail, resolveSender } from "./email-send.server";
 import { loadPlayersForSegment, countPlayersForSegment } from "./email-segments.server";
 import { buildPlayerVariables } from "./template-vars.server";
 import { renderTemplate } from "./template-vars.server";
@@ -57,9 +53,7 @@ export const getEmailProviderStatus = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async () => {
     return {
-      configured: Boolean(
-        process.env.BUSINESSCODE_SMS_TOKEN || process.env.BUSINESSCODE_EMAIL_TOKEN,
-      ),
+      configured: Boolean(process.env.BUSINESSCODE_EMAIL_TOKEN),
       endpoint: BUSINESSCODE_EMAIL_URL,
       provider: "businesscode" as const,
     };
@@ -81,7 +75,8 @@ export const sendTestEmail = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => SendTestEmailSchema.parse(d))
   .handler(async ({ data, context }) => {
     // Resolve remetente
-    let sender: { fromEmail: string; fromName: string | null; replyTo: string | null } | null = null;
+    let sender: { fromEmail: string; fromName: string | null; replyTo: string | null } | null =
+      null;
     if (data.fromEmail) {
       sender = {
         fromEmail: data.fromEmail,
@@ -148,7 +143,11 @@ export const sendTestEmail = createServerFn({ method: "POST" })
       error: result.ok ? null : JSON.stringify(result.body).slice(0, 1000),
       sent_at: result.ok ? new Date().toISOString() : null,
       player_id: playerId,
-      provider_response: { status: result.status, body: result.body, idempotency_key: result.idempotencyKey } as never,
+      provider_response: {
+        status: result.status,
+        body: result.body,
+        idempotency_key: result.idempotencyKey,
+      } as never,
     });
     if (logErr) console.error("email_send_logs insert error", logErr.message);
 
@@ -159,7 +158,11 @@ export const sendTestEmail = createServerFn({ method: "POST" })
         : `Resposta inesperada do provedor (${result.status}).`;
       throw new Error(`Falha no envio (${result.status}): ${msg}`);
     }
-    const body = result.body as { dispatch_id?: number; status?: string; data?: { id?: number; status?: string } } | null;
+    const body = result.body as {
+      dispatch_id?: number;
+      status?: string;
+      data?: { id?: number; status?: string };
+    } | null;
     return {
       ok: true,
       status: result.status,
@@ -272,10 +275,7 @@ export const deleteSmtpConfig = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ id: dbUuid() }).parse(d))
   .handler(async ({ data, context }) => {
-    const { error } = await context.supabase
-      .from("email_smtp_configs")
-      .delete()
-      .eq("id", data.id);
+    const { error } = await context.supabase.from("email_smtp_configs").delete().eq("id", data.id);
     if (error) throw new Error(error.message);
     return { ok: true };
   });
@@ -378,10 +378,7 @@ export const deleteEmailSender = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ id: dbUuid() }).parse(d))
   .handler(async ({ data, context }) => {
-    const { error } = await context.supabase
-      .from("email_senders")
-      .delete()
-      .eq("id", data.id);
+    const { error } = await context.supabase.from("email_senders").delete().eq("id", data.id);
     if (error) throw new Error(error.message);
     return { ok: true };
   });
@@ -483,10 +480,7 @@ export const deleteEmailTemplate = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ id: dbUuid() }).parse(d))
   .handler(async ({ data, context }) => {
-    const { error } = await context.supabase
-      .from("email_templates")
-      .delete()
-      .eq("id", data.id);
+    const { error } = await context.supabase.from("email_templates").delete().eq("id", data.id);
     if (error) throw new Error(error.message);
     return { ok: true };
   });
@@ -544,7 +538,9 @@ function campanhaRowToUI(r: any) {
   return {
     id: r.id,
     nome: r.name,
-    audienceMode: af.audience_mode ?? (targetIds.length > 0 ? "leads" : extraEmails.length > 0 ? "emails" : "segmento"),
+    audienceMode:
+      af.audience_mode ??
+      (targetIds.length > 0 ? "leads" : extraEmails.length > 0 ? "emails" : "segmento"),
     segmento: af.segmento ?? "Todos",
     template: af.template_label ?? "",
     smtp: af.smtp_label ?? "",
@@ -580,8 +576,7 @@ export const saveEmailCampaign = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     // BusinessCode é um provedor próprio (não SMTP). Normaliza para null
     // para evitar gravar valor não-UUID em smtp_id.
-    const smtpIdNorm =
-      data.smtpId && data.smtpId !== "businesscode" ? data.smtpId : null;
+    const smtpIdNorm = data.smtpId && data.smtpId !== "businesscode" ? data.smtpId : null;
     const payload: any = {
       name: data.nome,
       audience_filter: {
@@ -617,10 +612,12 @@ export const saveEmailCampaign = createServerFn({ method: "POST" })
 export const updateEmailCampaignStatus = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
-    z.object({
-      id: dbUuid(),
-      status: z.enum(["rascunho", "agendada", "enviando", "pausada", "concluida"]),
-    }).parse(d),
+    z
+      .object({
+        id: dbUuid(),
+        status: z.enum(["rascunho", "agendada", "enviando", "pausada", "concluida"]),
+      })
+      .parse(d),
   )
   .handler(async ({ data, context }) => {
     const { error } = await context.supabase
@@ -660,10 +657,7 @@ export const deleteEmailCampaign = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ id: dbUuid() }).parse(d))
   .handler(async ({ data, context }) => {
-    const { error } = await context.supabase
-      .from("email_campaigns")
-      .delete()
-      .eq("id", data.id);
+    const { error } = await context.supabase.from("email_campaigns").delete().eq("id", data.id);
     if (error) throw new Error(error.message);
     return { ok: true };
   });
@@ -732,9 +726,7 @@ export const listPlayersForEmail = createServerFn({ method: "POST" })
 // Retorna estatísticas finais.
 export const sendEmailCampaignNow = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) =>
-    z.object({ campaignId: dbUuid() }).parse(d),
-  )
+  .inputValidator((d: unknown) => z.object({ campaignId: dbUuid() }).parse(d))
   .handler(async ({ data }) => {
     try {
       return await runCampaignSend(data.campaignId);
@@ -783,12 +775,13 @@ export async function runCampaignSend(campaignId: string) {
     extra_emails?: string[];
   };
   let players: any[];
-  const audienceMode = af.audience_mode ??
+  const audienceMode =
+    af.audience_mode ??
     (Array.isArray(af.target_player_ids) && af.target_player_ids.length > 0
       ? "leads"
       : Array.isArray(af.extra_emails) && af.extra_emails.length > 0
-      ? "emails"
-      : "segmento");
+        ? "emails"
+        : "segmento");
   if (audienceMode === "emails") {
     players = [];
   } else if (audienceMode === "leads") {
@@ -808,11 +801,22 @@ export async function runCampaignSend(campaignId: string) {
 
   // Inclui emails avulsos (sem player vinculado), dedup contra a base.
   const baseEmails = new Set(
-    players.map((p: any) => String(p.email ?? "").trim().toLowerCase()).filter(Boolean),
+    players
+      .map((p: any) =>
+        String(p.email ?? "")
+          .trim()
+          .toLowerCase(),
+      )
+      .filter(Boolean),
   );
-  const extras = audienceMode === "leads" ? [] : Array.from(
-    new Set((af.extra_emails ?? []).map((e) => String(e).trim().toLowerCase()).filter(Boolean)),
-  ).filter((e) => audienceMode === "emails" || !baseEmails.has(e));
+  const extras =
+    audienceMode === "leads"
+      ? []
+      : Array.from(
+          new Set(
+            (af.extra_emails ?? []).map((e) => String(e).trim().toLowerCase()).filter(Boolean),
+          ),
+        ).filter((e) => audienceMode === "emails" || !baseEmails.has(e));
   for (const email of extras) {
     players.push({ id: null, email, nome: "" });
   }
@@ -827,7 +831,14 @@ export async function runCampaignSend(campaignId: string) {
       .from("email_campaigns")
       .update({
         status: "rascunho",
-        stats: { enviados: 0, entregues: 0, abertos: 0, cliques: 0, falhas: 0, total: players.length },
+        stats: {
+          enviados: 0,
+          entregues: 0,
+          abertos: 0,
+          cliques: 0,
+          falhas: 0,
+          total: players.length,
+        },
       })
       .eq("id", campaignId);
     throw new Error(
@@ -839,7 +850,14 @@ export async function runCampaignSend(campaignId: string) {
     .from("email_campaigns")
     .update({
       status: "enviando",
-      stats: { enviados: 0, entregues: 0, abertos: 0, cliques: 0, falhas: 0, total: players.length },
+      stats: {
+        enviados: 0,
+        entregues: 0,
+        abertos: 0,
+        cliques: 0,
+        falhas: 0,
+        total: players.length,
+      },
     })
     .eq("id", campaignId);
 
@@ -877,7 +895,11 @@ export async function runCampaignSend(campaignId: string) {
         player_id: p.id,
         campaign_id: campaignId,
         tenant_id: camp.tenant_id,
-        provider_response: { status: (r as any).status, body: r.body, idempotency_key: (r as any).idempotencyKey } as never,
+        provider_response: {
+          status: (r as any).status,
+          body: r.body,
+          idempotency_key: (r as any).idempotencyKey,
+        } as never,
       });
       if (r.ok) enviados++;
       else if (isTemporary) {
@@ -886,8 +908,7 @@ export async function runCampaignSend(campaignId: string) {
           to: p.email,
           status: (r as any).status,
         });
-      }
-      else {
+      } else {
         falhas++;
         console.error("campaign send failed", { to: p.email, snippet: errSnippet });
       }
@@ -1028,9 +1049,7 @@ export const saveEmailAutomation = createServerFn({ method: "POST" })
 
 export const toggleEmailAutomation = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) =>
-    z.object({ id: dbUuid(), is_active: z.boolean() }).parse(d),
-  )
+  .inputValidator((d: unknown) => z.object({ id: dbUuid(), is_active: z.boolean() }).parse(d))
   .handler(async ({ data, context }) => {
     const { error } = await context.supabase
       .from("email_automations")
@@ -1071,10 +1090,7 @@ export const deleteEmailAutomation = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ id: dbUuid() }).parse(d))
   .handler(async ({ data, context }) => {
-    const { error } = await context.supabase
-      .from("email_automations")
-      .delete()
-      .eq("id", data.id);
+    const { error } = await context.supabase.from("email_automations").delete().eq("id", data.id);
     if (error) throw new Error(error.message);
     return { ok: true };
   });
@@ -1086,8 +1102,14 @@ export const deleteEmailAutomation = createServerFn({ method: "POST" })
 const DashboardRangeSchema = z
   .object({
     range_days: z.union([z.literal(1), z.literal(7), z.literal(30)]).optional(),
-    from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-    to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    from: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
+    to: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
   })
   .default({});
 
@@ -1105,15 +1127,12 @@ export const getEmailDashboard = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     // Resolve tenant do usuário autenticado — todas as queries do dashboard
     // DEVEM ser filtradas por tenant para não misturar dados de outros tenants.
-    const { data: tenantRow, error: tenantErr } = await context.supabase.rpc(
-      "current_tenant_id",
-    );
+    const { data: tenantRow, error: tenantErr } = await context.supabase.rpc("current_tenant_id");
     if (tenantErr) throw new Error(tenantErr.message);
     const tenantId = tenantRow as string | null;
     if (!tenantId) throw new Error("tenant não encontrado para o usuário");
     // Dias YYYY-MM-DD = calendário em Brasília (BRT), não em UTC.
-    const { parseBrtDayStart, parseBrtDayEnd, brtDayStart, brtDayEnd } =
-      await import("./tz");
+    const { parseBrtDayStart, parseBrtDayEnd, brtDayStart, brtDayEnd } = await import("./tz");
     let sinceDate: Date;
     let endDate: Date;
     if (data.from && data.to) {
@@ -1129,7 +1148,9 @@ export const getEmailDashboard = createServerFn({ method: "POST" })
       Math.round((endDate.getTime() - sinceDate.getTime()) / 86400000) + 1,
     );
     let sinceIso = sinceDate.toISOString();
-    const endIso = (data.from && data.to ? parseBrtDayEnd(data.to) : brtDayEnd(endDate)).toISOString();
+    const endIso = (
+      data.from && data.to ? parseBrtDayEnd(data.to) : brtDayEnd(endDate)
+    ).toISOString();
 
     let todayStart = new Date(endDate);
 
@@ -1158,7 +1179,9 @@ export const getEmailDashboard = createServerFn({ method: "POST" })
       while (true) {
         const { data: chunk, error: logsErr } = await supabaseAdmin
           .from("email_send_logs")
-          .select("id, status, created_at, sent_at, player_id, campaign_id, automation_id, to_email, subject, error")
+          .select(
+            "id, status, created_at, sent_at, player_id, campaign_id, automation_id, to_email, subject, error",
+          )
           .eq("tenant_id", tenantId)
           .gte("created_at", sinceIso)
           .lte("created_at", endIso)
@@ -1316,7 +1339,8 @@ export const getEmailDashboard = createServerFn({ method: "POST" })
     }
 
     // Série diária completa preenchida
-    const by_day: Array<{ date: string; enviados: number; entregues: number; falharam: number }> = [];
+    const by_day: Array<{ date: string; enviados: number; entregues: number; falharam: number }> =
+      [];
     const conversions_by_day: Array<{ date: string; conversoes: number }> = [];
     for (let i = 0; i < rangeDays; i++) {
       const d = new Date(sinceDate);

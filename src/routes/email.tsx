@@ -38,13 +38,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import {
   Select,
   SelectContent,
@@ -149,7 +143,16 @@ import {
   type EmailFlowBlockDraft,
   type EmailTrigger,
 } from "@/lib/email-automations.shared";
-import { ArrowDown, ArrowUp, Clock, GitBranch, Tag as TagIcon, StopCircle, UserMinus, FlaskConical } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  Clock,
+  GitBranch,
+  Tag as TagIcon,
+  StopCircle,
+  UserMinus,
+  FlaskConical,
+} from "lucide-react";
 
 export const Route = createFileRoute("/email")({
   head: () => ({
@@ -226,12 +229,18 @@ type Campanha = {
 // Parser de emails colados (um por linha, vírgula, ponto-e-vírgula ou espaço).
 const EMAIL_RX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 function parseExtraEmails(raw: string): { valid: string[]; invalid: number } {
-  const parts = raw.split(/[\s,;]+/).map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const parts = raw
+    .split(/[\s,;]+/)
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
   const valid: string[] = [];
   const seen = new Set<string>();
   let invalid = 0;
   for (const p of parts) {
-    if (!EMAIL_RX.test(p)) { invalid++; continue; }
+    if (!EMAIL_RX.test(p)) {
+      invalid++;
+      continue;
+    }
     if (seen.has(p)) continue;
     seen.add(p);
     valid.push(p);
@@ -367,7 +376,13 @@ function DashboardTab() {
   const fn = useServerFn(getEmailDashboard);
   useRealtimeInvalidate(
     "email-dashboard-realtime",
-    ["email_send_logs", "email_campaigns", "email_flow_leads", "dispatcher_runs", "dispatch_rate_state"],
+    [
+      "email_send_logs",
+      "email_campaigns",
+      "email_flow_leads",
+      "dispatcher_runs",
+      "dispatch_rate_state",
+    ],
     [["email-dashboard"]],
   );
   const { data, isLoading } = useQuery({
@@ -481,7 +496,8 @@ function DashboardTab() {
         <Card className="card-premium border-0 lg:col-span-2">
           <CardHeader>
             <CardTitle className="text-base">
-              Envios x Entregas — {sameDay
+              Envios x Entregas —{" "}
+              {sameDay
                 ? new Date(rk.from + "T00:00:00").toLocaleDateString("pt-BR")
                 : `${new Date(rk.from + "T00:00:00").toLocaleDateString("pt-BR")} - ${new Date(rk.to + "T00:00:00").toLocaleDateString("pt-BR")}`}
             </CardTitle>
@@ -497,7 +513,12 @@ function DashboardTab() {
                   </linearGradient>
                 </defs>
                 <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" />
-                <XAxis dataKey="date" tickFormatter={fmtDay} stroke="hsl(var(--muted-foreground))" fontSize={11} />
+                <XAxis
+                  dataKey="date"
+                  tickFormatter={fmtDay}
+                  stroke="hsl(var(--muted-foreground))"
+                  fontSize={11}
+                />
                 <YAxis stroke="hsl(var(--muted-foreground))" fontSize={11} />
                 <Tooltip
                   contentStyle={{
@@ -508,8 +529,18 @@ function DashboardTab() {
                   labelFormatter={(v) => fmtDay(String(v))}
                 />
                 <Legend />
-                <Area type="monotone" dataKey="enviados" stroke="hsl(var(--primary))" fill="url(#g1)" />
-                <Area type="monotone" dataKey="entregues" stroke="hsl(var(--accent))" fillOpacity={0} />
+                <Area
+                  type="monotone"
+                  dataKey="enviados"
+                  stroke="hsl(var(--primary))"
+                  fill="url(#g1)"
+                />
+                <Area
+                  type="monotone"
+                  dataKey="entregues"
+                  stroke="hsl(var(--accent))"
+                  fillOpacity={0}
+                />
               </AreaChart>
             </ResponsiveContainer>
           </CardContent>
@@ -586,7 +617,12 @@ function DashboardTab() {
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={data?.by_day ?? []}>
                 <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" />
-                <XAxis dataKey="date" tickFormatter={fmtDay} stroke="hsl(var(--muted-foreground))" fontSize={11} />
+                <XAxis
+                  dataKey="date"
+                  tickFormatter={fmtDay}
+                  stroke="hsl(var(--muted-foreground))"
+                  fontSize={11}
+                />
                 <YAxis stroke="hsl(var(--muted-foreground))" fontSize={11} />
                 <Tooltip
                   contentStyle={{
@@ -611,7 +647,12 @@ function DashboardTab() {
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={data?.conversions_by_day ?? []}>
                 <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" />
-                <XAxis dataKey="date" tickFormatter={fmtDay} stroke="hsl(var(--muted-foreground))" fontSize={11} />
+                <XAxis
+                  dataKey="date"
+                  tickFormatter={fmtDay}
+                  stroke="hsl(var(--muted-foreground))"
+                  fontSize={11}
+                />
                 <YAxis stroke="hsl(var(--muted-foreground))" fontSize={11} />
                 <Tooltip
                   contentStyle={{
@@ -692,13 +733,13 @@ function SmtpTab() {
   function salvar(cfg: SmtpConfig) {
     setItems((prev) => {
       const ex = prev.find((p) => p.id === cfg.id);
-      const next = ex
-        ? prev.map((p) => (p.id === cfg.id ? cfg : p))
-        : [...prev, cfg];
+      const next = ex ? prev.map((p) => (p.id === cfg.id ? cfg : p)) : [...prev, cfg];
       return cfg.padrao ? next.map((p) => ({ ...p, padrao: p.id === cfg.id })) : next;
     });
     setOpen(false);
-    toast.success(editing && items.find((i) => i.id === editing.id) ? "SMTP atualizado" : "SMTP criado");
+    toast.success(
+      editing && items.find((i) => i.id === editing.id) ? "SMTP atualizado" : "SMTP criado",
+    );
   }
 
   function excluir(id: string) {
@@ -764,7 +805,10 @@ function SmtpTab() {
                       <div className="flex items-center gap-2">
                         {s.nome || "—"}
                         {s.padrao && (
-                          <Badge variant="outline" className="border-primary/40 text-primary text-[10px]">
+                          <Badge
+                            variant="outline"
+                            className="border-primary/40 text-primary text-[10px]"
+                          >
                             padrão
                           </Badge>
                         )}
@@ -799,7 +843,12 @@ function SmtpTab() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => { setEditing(s); setOpen(true); }}>
+                          <DropdownMenuItem
+                            onClick={() => {
+                              setEditing(s);
+                              setOpen(true);
+                            }}
+                          >
                             <Pencil className="h-4 w-4 mr-2" /> Editar
                           </DropdownMenuItem>
                           <DropdownMenuItem onClick={testar}>
@@ -869,13 +918,25 @@ function SmtpDialog({
         </DialogHeader>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Nome da configuração">
-            <Input value={s.nome} onChange={(e) => up("nome", e.target.value)} placeholder="Ex: Principal" />
+            <Input
+              value={s.nome}
+              onChange={(e) => up("nome", e.target.value)}
+              placeholder="Ex: Principal"
+            />
           </Field>
           <Field label="Provedor/empresa">
-            <Input value={s.provedor} onChange={(e) => up("provedor", e.target.value)} placeholder="Brevo, Mailgun..." />
+            <Input
+              value={s.provedor}
+              onChange={(e) => up("provedor", e.target.value)}
+              placeholder="Brevo, Mailgun..."
+            />
           </Field>
           <Field label="Host SMTP">
-            <Input value={s.host} onChange={(e) => up("host", e.target.value)} placeholder="smtp.provedor.com" />
+            <Input
+              value={s.host}
+              onChange={(e) => up("host", e.target.value)}
+              placeholder="smtp.provedor.com"
+            />
           </Field>
           <Field label="Porta">
             <Input
@@ -914,20 +975,40 @@ function SmtpDialog({
             <Input type="password" value={s.senha} onChange={(e) => up("senha", e.target.value)} />
           </Field>
           <Field label="Nome do remetente">
-            <Input value={s.fromName} onChange={(e) => up("fromName", e.target.value)} placeholder="BETLEADS" />
+            <Input
+              value={s.fromName}
+              onChange={(e) => up("fromName", e.target.value)}
+              placeholder="BETLEADS"
+            />
           </Field>
           <Field label="Email do remetente">
-            <Input value={s.fromEmail} onChange={(e) => up("fromEmail", e.target.value)} placeholder="no-reply@dominio.com" />
+            <Input
+              value={s.fromEmail}
+              onChange={(e) => up("fromEmail", e.target.value)}
+              placeholder="no-reply@dominio.com"
+            />
           </Field>
           <Field label="Email de resposta">
-            <Input value={s.replyTo} onChange={(e) => up("replyTo", e.target.value)} placeholder="suporte@dominio.com" />
+            <Input
+              value={s.replyTo}
+              onChange={(e) => up("replyTo", e.target.value)}
+              placeholder="suporte@dominio.com"
+            />
           </Field>
           <div className="grid grid-cols-2 gap-2">
             <Field label="Limite diário">
-              <Input type="number" value={s.limiteDiario} onChange={(e) => up("limiteDiario", Number(e.target.value))} />
+              <Input
+                type="number"
+                value={s.limiteDiario}
+                onChange={(e) => up("limiteDiario", Number(e.target.value))}
+              />
             </Field>
             <Field label="Limite por hora">
-              <Input type="number" value={s.limiteHora} onChange={(e) => up("limiteHora", Number(e.target.value))} />
+              <Input
+                type="number"
+                value={s.limiteHora}
+                onChange={(e) => up("limiteHora", Number(e.target.value))}
+              />
             </Field>
           </div>
           <div className="sm:col-span-2 flex items-center gap-3 pt-1">
@@ -1092,7 +1173,9 @@ function TemplatesTab() {
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <CardTitle className="text-base truncate">{t.nome || "Sem nome"}</CardTitle>
-                    <CardDescription className="truncate">{t.assunto || "(sem assunto)"}</CardDescription>
+                    <CardDescription className="truncate">
+                      {t.assunto || "(sem assunto)"}
+                    </CardDescription>
                   </div>
                   <Badge
                     className={
@@ -1110,9 +1193,15 @@ function TemplatesTab() {
                   {t.preheader || t.corpo || "Sem conteúdo ainda."}
                 </div>
                 <div className="flex flex-wrap gap-1.5">
-                  <Badge variant="outline" className="text-[10px]">{t.categoria}</Badge>
+                  <Badge variant="outline" className="text-[10px]">
+                    {t.categoria}
+                  </Badge>
                   {t.tags.map((tag) => (
-                    <Badge key={tag} variant="outline" className="text-[10px] border-accent/30 text-accent">
+                    <Badge
+                      key={tag}
+                      variant="outline"
+                      className="text-[10px] border-accent/30 text-accent"
+                    >
                       #{tag}
                     </Badge>
                   ))}
@@ -1121,19 +1210,51 @@ function TemplatesTab() {
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
                   <span>Atualizado {t.atualizadoEm}</span>
                   <div className="flex items-center gap-1">
-                    <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => toast.info("Preview em breve")}>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7"
+                      onClick={() => toast.info("Preview em breve")}
+                    >
                       <Eye className="h-3.5 w-3.5" />
                     </Button>
-                    <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => { setEditing(t); setOpen(true); }}>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7"
+                      onClick={() => {
+                        setEditing(t);
+                        setOpen(true);
+                      }}
+                    >
                       <Pencil className="h-3.5 w-3.5" />
                     </Button>
-                    <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => duplicar(t)}>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7"
+                      onClick={() => duplicar(t)}
+                    >
                       <Copy className="h-3.5 w-3.5" />
                     </Button>
-                    <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => togglePause(t)}>
-                      {t.ativo ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7"
+                      onClick={() => togglePause(t)}
+                    >
+                      {t.ativo ? (
+                        <Pause className="h-3.5 w-3.5" />
+                      ) : (
+                        <Play className="h-3.5 w-3.5" />
+                      )}
                     </Button>
-                    <Button size="icon" variant="ghost" className="h-7 w-7 text-rose-400" onClick={() => excluir(t.id)}>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7 text-rose-400"
+                      onClick={() => excluir(t.id)}
+                    >
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
                   </div>
@@ -1205,9 +1326,19 @@ const BLOCOS = [
   { id: "titulo", label: "Título", snippet: "<h1>Título</h1>" },
   { id: "texto", label: "Texto", snippet: "<p>Texto do email...</p>" },
   { id: "imagem", label: "Imagem", snippet: '<img src="" alt="" style="max-width:100%" />' },
-  { id: "botao", label: "Botão", snippet: '<a href="{link_login}" style="background:#3b82f6;color:#fff;padding:10px 16px;border-radius:8px;text-decoration:none;display:inline-block">Clique aqui</a>' },
+  {
+    id: "botao",
+    label: "Botão",
+    snippet:
+      '<a href="{link_login}" style="background:#3b82f6;color:#fff;padding:10px 16px;border-radius:8px;text-decoration:none;display:inline-block">Clique aqui</a>',
+  },
   { id: "divisor", label: "Divisor", snippet: "<hr />" },
-  { id: "rodape", label: "Rodapé", snippet: '<footer style="font-size:12px;color:#999">BETLEADS — você recebe pois é cadastrado.</footer>' },
+  {
+    id: "rodape",
+    label: "Rodapé",
+    snippet:
+      '<footer style="font-size:12px;color:#999">BETLEADS — você recebe pois é cadastrado.</footer>',
+  },
   { id: "html", label: "HTML", snippet: "<!-- HTML customizado -->" },
 ];
 
@@ -1283,7 +1414,12 @@ function TemplateDialog({
                     key={tag}
                     variant="outline"
                     className="text-[10px] cursor-pointer"
-                    onClick={() => up("tags", t.tags.filter((x) => x !== tag))}
+                    onClick={() =>
+                      up(
+                        "tags",
+                        t.tags.filter((x) => x !== tag),
+                      )
+                    }
                   >
                     #{tag} ×
                   </Badge>
@@ -1319,7 +1455,9 @@ function TemplateDialog({
               onChange={(e) => up("corpo", e.target.value)}
               rows={12}
               className="font-mono text-xs"
-              placeholder={mode === "html" ? "<!doctype html>..." : "Escreva o conteúdo ou insira blocos →"}
+              placeholder={
+                mode === "html" ? "<!doctype html>..." : "Escreva o conteúdo ou insira blocos →"
+              }
             />
           </div>
 
@@ -1401,7 +1539,10 @@ function CampanhasTab() {
   const failuresQ = useQuery({
     queryKey: ["campaign-failures", failuresFor?.id],
     enabled: !!failuresFor?.id,
-    queryFn: () => historyFn({ data: { status: "error", campaign_id: failuresFor!.id, limit: 200, offset: 0 } } as any),
+    queryFn: () =>
+      historyFn({
+        data: { status: "error", campaign_id: failuresFor!.id, limit: 200, offset: 0 },
+      } as any),
   });
 
   function novo() {
@@ -1442,8 +1583,8 @@ function CampanhasTab() {
           smtpId: c.smtpId ?? null,
           agendadoPara: c.agendadoPara ?? null,
           status: c.status,
-          targetPlayerIds: mode === "leads" ? c.targetPlayerIds ?? [] : [],
-          extraEmails: mode === "emails" ? c.extraEmails ?? [] : [],
+          targetPlayerIds: mode === "leads" ? (c.targetPlayerIds ?? []) : [],
+          extraEmails: mode === "emails" ? (c.extraEmails ?? []) : [],
         },
       } as any);
       setOpen(false);
@@ -1551,8 +1692,12 @@ function CampanhasTab() {
                   <TableRow key={c.id}>
                     <TableCell className="font-medium">{c.nome}</TableCell>
                     <TableCell className="text-muted-foreground text-xs">{c.segmento}</TableCell>
-                    <TableCell className="text-muted-foreground text-xs">{c.template || "—"}</TableCell>
-                    <TableCell><StatusBadgeCampanha s={c.status} /></TableCell>
+                    <TableCell className="text-muted-foreground text-xs">
+                      {c.template || "—"}
+                    </TableCell>
+                    <TableCell>
+                      <StatusBadgeCampanha s={c.status} />
+                    </TableCell>
                     <TableCell className="text-right tabular-nums">{c.enviados}</TableCell>
                     <TableCell className="text-right tabular-nums">{c.entregues}</TableCell>
                     <TableCell className="text-right tabular-nums">{c.abertos}</TableCell>
@@ -1580,10 +1725,17 @@ function CampanhasTab() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => { setEditing(c); setOpen(true); }}>
+                          <DropdownMenuItem
+                            onClick={() => {
+                              setEditing(c);
+                              setOpen(true);
+                            }}
+                          >
                             <Pencil className="h-4 w-4 mr-2" /> Editar
                           </DropdownMenuItem>
-                          {(c.status === "rascunho" || c.status === "agendada" || c.status === "pausada") && (
+                          {(c.status === "rascunho" ||
+                            c.status === "agendada" ||
+                            c.status === "pausada") && (
                             <DropdownMenuItem onClick={() => enviarAgora(c)}>
                               <Send className="h-4 w-4 mr-2" /> Enviar agora
                             </DropdownMenuItem>
@@ -1622,7 +1774,8 @@ function CampanhasTab() {
           <DialogHeader>
             <DialogTitle>Falhas — {failuresFor?.nome}</DialogTitle>
             <DialogDescription>
-              Detalhe dos envios que não foram aceitos pelo provedor. Use a mensagem para corrigir o remetente, domínio ou destinatário.
+              Detalhe dos envios que não foram aceitos pelo provedor. Use a mensagem para corrigir o
+              remetente, domínio ou destinatário.
             </DialogDescription>
           </DialogHeader>
           <div className="max-h-[60vh] overflow-y-auto rounded-md border border-border/40">
@@ -1656,7 +1809,9 @@ function CampanhasTab() {
             )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setFailuresFor(null)}>Fechar</Button>
+            <Button variant="outline" onClick={() => setFailuresFor(null)}>
+              Fechar
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1691,15 +1846,19 @@ function CampanhaDialog({
   const [audienceMode, setAudienceMode] = useState<"segmento" | "leads" | "emails">(
     editing?.audienceMode ?? ((editing?.targetPlayerIds?.length ?? 0) > 0 ? "leads" : "segmento"),
   );
-  const [extraRaw, setExtraRaw] = useState<string>(
-    (editing?.extraEmails ?? []).join("\n"),
-  );
+  const [extraRaw, setExtraRaw] = useState<string>((editing?.extraEmails ?? []).join("\n"));
   const extraParsed = useMemo(() => parseExtraEmails(extraRaw), [extraRaw]);
   useEffect(() => {
     setC((p) => (p ? { ...p, extraEmails: extraParsed.valid } : p));
   }, [extraParsed.valid.join(",")]);
   useEffect(() => {
-    const mode = editing?.audienceMode ?? ((editing?.targetPlayerIds?.length ?? 0) > 0 ? "leads" : (editing?.extraEmails?.length ?? 0) > 0 ? "emails" : "segmento");
+    const mode =
+      editing?.audienceMode ??
+      ((editing?.targetPlayerIds?.length ?? 0) > 0
+        ? "leads"
+        : (editing?.extraEmails?.length ?? 0) > 0
+          ? "emails"
+          : "segmento");
     setC(editing ? { ...editing, audienceMode: mode } : editing);
     setAgendar(Boolean(editing?.agendadoPara));
     setAudienceMode(mode);
@@ -1713,9 +1872,21 @@ function CampanhaDialog({
   const saveFn = useServerFn(saveEmailCampaign);
   const getStatus = useServerFn(getEmailProviderStatus);
 
-  const tplQ = useQuery({ queryKey: ["email-templates-sel"], queryFn: () => listTpl(), enabled: open });
-  const smtpQ = useQuery({ queryKey: ["email-smtp-sel"], queryFn: () => listSmtp(), enabled: open });
-  const provQ = useQuery({ queryKey: ["email-provider-status"], queryFn: () => getStatus(), enabled: open });
+  const tplQ = useQuery({
+    queryKey: ["email-templates-sel"],
+    queryFn: () => listTpl(),
+    enabled: open,
+  });
+  const smtpQ = useQuery({
+    queryKey: ["email-smtp-sel"],
+    queryFn: () => listSmtp(),
+    enabled: open,
+  });
+  const provQ = useQuery({
+    queryKey: ["email-provider-status"],
+    queryFn: () => getStatus(),
+    enabled: open,
+  });
   const templates: any[] = (tplQ.data?.items ?? []) as any;
   const smtps: any[] = (smtpQ.data?.items ?? []) as any;
   const bcAtivo: boolean = Boolean((provQ.data as any)?.configured);
@@ -1729,9 +1900,7 @@ function CampanhaDialog({
       return;
     }
     if (bcAtivo) {
-      setC((p) =>
-        p ? { ...p, smtpId: "businesscode", smtp: "BusinessCode" } : p,
-      );
+      setC((p) => (p ? { ...p, smtpId: "businesscode", smtp: "BusinessCode" } : p));
     }
   }, [smtps, bcAtivo, c]);
 
@@ -1799,7 +1968,7 @@ function CampanhaDialog({
           smtpId: c.smtpId ?? null,
           agendadoPara: null,
           status: "enviando",
-          targetPlayerIds: audienceMode === "leads" ? c.targetPlayerIds ?? [] : [],
+          targetPlayerIds: audienceMode === "leads" ? (c.targetPlayerIds ?? []) : [],
           extraEmails: audienceMode === "emails" ? extraParsed.valid : [],
         },
       } as any);
@@ -1834,14 +2003,30 @@ function CampanhaDialog({
                 const mode = v === "leads" ? "leads" : v === "emails" ? "emails" : "segmento";
                 setAudienceMode(mode);
                 if (mode === "segmento") {
-                  setC((p) => (p ? { ...p, audienceMode: mode, targetPlayerIds: [], extraEmails: [] } : p));
+                  setC((p) =>
+                    p ? { ...p, audienceMode: mode, targetPlayerIds: [], extraEmails: [] } : p,
+                  );
                 } else if (mode === "leads") {
                   setC((p) =>
-                    p ? { ...p, audienceMode: mode, targetPlayerIds: p.targetPlayerIds ?? [], extraEmails: [] } : p,
+                    p
+                      ? {
+                          ...p,
+                          audienceMode: mode,
+                          targetPlayerIds: p.targetPlayerIds ?? [],
+                          extraEmails: [],
+                        }
+                      : p,
                   );
                 } else {
                   setC((p) =>
-                    p ? { ...p, audienceMode: mode, targetPlayerIds: [], extraEmails: extraParsed.valid } : p,
+                    p
+                      ? {
+                          ...p,
+                          audienceMode: mode,
+                          targetPlayerIds: [],
+                          extraEmails: extraParsed.valid,
+                        }
+                      : p,
                   );
                 }
               }}
@@ -1859,10 +2044,14 @@ function CampanhaDialog({
               </TabsList>
               <TabsContent value="segmento" className="mt-2">
                 <Select value={c.segmento} onValueChange={(v) => up("segmento", v)}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
                   <SelectContent className="max-h-72">
                     {SEGMENTOS.map((s) => (
-                      <SelectItem key={s} value={s}>{s}</SelectItem>
+                      <SelectItem key={s} value={s}>
+                        {s}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -1870,9 +2059,7 @@ function CampanhaDialog({
               <TabsContent value="leads" className="mt-2">
                 <LeadEmailPicker
                   selectedIds={c.targetPlayerIds ?? []}
-                  onChange={(ids) =>
-                    setC((p) => (p ? { ...p, targetPlayerIds: ids } : p))
-                  }
+                  onChange={(ids) => setC((p) => (p ? { ...p, targetPlayerIds: ids } : p))}
                 />
               </TabsContent>
               <TabsContent value="emails" className="mt-2 space-y-1.5">
@@ -1883,9 +2070,15 @@ function CampanhaDialog({
                   className="min-h-[110px] font-mono text-xs"
                 />
                 <p className="text-[11px] text-muted-foreground">
-                  {extraParsed.valid.length} email{extraParsed.valid.length === 1 ? "" : "s"} avulso{extraParsed.valid.length === 1 ? "" : "s"} válido{extraParsed.valid.length === 1 ? "" : "s"}
+                  {extraParsed.valid.length} email{extraParsed.valid.length === 1 ? "" : "s"} avulso
+                  {extraParsed.valid.length === 1 ? "" : "s"} válido
+                  {extraParsed.valid.length === 1 ? "" : "s"}
                   {extraParsed.invalid > 0 && (
-                    <span className="text-amber-500/80"> · {extraParsed.invalid} ignorado{extraParsed.invalid > 1 ? "s" : ""} (formato inválido)</span>
+                    <span className="text-amber-500/80">
+                      {" "}
+                      · {extraParsed.invalid} ignorado{extraParsed.invalid > 1 ? "s" : ""} (formato
+                      inválido)
+                    </span>
                   )}
                   . Não serão somados aos contatos da base.
                 </p>
@@ -1906,11 +2099,17 @@ function CampanhaDialog({
               }}
             >
               <SelectTrigger>
-                <SelectValue placeholder={templates.length ? "Selecionar template" : "Crie um template primeiro"} />
+                <SelectValue
+                  placeholder={
+                    templates.length ? "Selecionar template" : "Crie um template primeiro"
+                  }
+                />
               </SelectTrigger>
               <SelectContent className="max-h-72">
                 {templates.map((t) => (
-                  <SelectItem key={t.id} value={t.id}>{t.nome}</SelectItem>
+                  <SelectItem key={t.id} value={t.id}>
+                    {t.nome}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -1920,9 +2119,7 @@ function CampanhaDialog({
               value={c.smtpId ?? ""}
               onValueChange={(v) => {
                 if (v === "businesscode") {
-                  setC((p) =>
-                    p ? { ...p, smtpId: "businesscode", smtp: "BusinessCode" } : p,
-                  );
+                  setC((p) => (p ? { ...p, smtpId: "businesscode", smtp: "BusinessCode" } : p));
                   return;
                 }
                 const s = smtps.find((x) => x.id === v);
@@ -1932,21 +2129,18 @@ function CampanhaDialog({
               <SelectTrigger>
                 <SelectValue
                   placeholder={
-                    bcAtivo || smtps.length
-                      ? "Selecionar servidor"
-                      : "Cadastre um SMTP primeiro"
+                    bcAtivo || smtps.length ? "Selecionar servidor" : "Cadastre um SMTP primeiro"
                   }
                 />
               </SelectTrigger>
               <SelectContent className="max-h-72">
                 {bcAtivo && (
-                  <SelectItem value="businesscode">
-                    Provedor de Email (BusinessCode)
-                  </SelectItem>
+                  <SelectItem value="businesscode">Provedor de Email (BusinessCode)</SelectItem>
                 )}
                 {smtps.map((s) => (
                   <SelectItem key={s.id} value={s.id}>
-                    {s.nome}{s.padrao ? " · padrão" : ""}
+                    {s.nome}
+                    {s.padrao ? " · padrão" : ""}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -2023,13 +2217,20 @@ function FluxosList() {
   const toggleFn = useServerFn(toggleEmailFlow);
   const delFn = useServerFn(deleteEmailFlow);
   const dupFn = useServerFn(duplicateEmailFlow);
-  const { data, refetch, isLoading } = useQuery({ queryKey: ["email-flows"], queryFn: () => listFn() });
+  const { data, refetch, isLoading } = useQuery({
+    queryKey: ["email-flows"],
+    queryFn: () => listFn(),
+  });
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  function novo() { setEditingId(null); setEditorOpen(true); }
+  function novo() {
+    setEditingId(null);
+    setEditorOpen(true);
+  }
   function abrirEditor(id: string | null) {
-    setEditingId(id); setEditorOpen(true);
+    setEditingId(id);
+    setEditorOpen(true);
   }
 
   const flows = data?.flows ?? [];
@@ -2041,7 +2242,9 @@ function FluxosList() {
           <h2 className="text-lg font-semibold">Automações</h2>
           <p className="text-xs text-muted-foreground">Construtor visual de fluxos por gatilho</p>
         </div>
-        <Button onClick={novo} className="gap-2"><Plus className="h-4 w-4" /> Nova automação</Button>
+        <Button onClick={novo} className="gap-2">
+          <Plus className="h-4 w-4" /> Nova automação
+        </Button>
       </div>
       {isLoading ? (
         <Card className="card-premium border-0 p-6 text-xs text-muted-foreground">Carregando…</Card>
@@ -2051,7 +2254,11 @@ function FluxosList() {
             icon={<Workflow className="h-6 w-6" />}
             title="Nenhuma automação criada"
             description="Monte um fluxo visual por blocos, selecionando um gatilho real do sistema."
-            action={<Button onClick={novo} className="gap-2"><Plus className="h-4 w-4" /> Nova automação</Button>}
+            action={
+              <Button onClick={novo} className="gap-2">
+                <Plus className="h-4 w-4" /> Nova automação
+              </Button>
+            }
           />
         </Card>
       ) : (
@@ -2063,35 +2270,84 @@ function FluxosList() {
                   <div className="min-w-0">
                     <CardTitle className="text-base truncate">{f.name}</CardTitle>
                     <CardDescription className="flex flex-wrap gap-1 mt-1">
-                      <Badge variant="outline" className="text-[10px] border-accent/30 text-accent">{triggerLabel(f.trigger_type)}</Badge>
-                      <Badge variant="outline" className="text-[10px]">{f.counts.blocks} etapa{f.counts.blocks !== 1 ? "s" : ""}</Badge>
-                      <Badge variant="outline" className="text-[10px]">{f.counts.active_leads} leads ativos</Badge>
+                      <Badge variant="outline" className="text-[10px] border-accent/30 text-accent">
+                        {triggerLabel(f.trigger_type)}
+                      </Badge>
+                      <Badge variant="outline" className="text-[10px]">
+                        {f.counts.blocks} etapa{f.counts.blocks !== 1 ? "s" : ""}
+                      </Badge>
+                      <Badge variant="outline" className="text-[10px]">
+                        {f.counts.active_leads} leads ativos
+                      </Badge>
                     </CardDescription>
                   </div>
                   <Switch
                     checked={f.active}
                     onCheckedChange={async (v) => {
-                      try { await toggleFn({ data: { id: f.id, active: v } }); refetch(); }
-                      catch (e) { toast.error(e instanceof Error ? e.message : "Falha"); }
+                      try {
+                        await toggleFn({ data: { id: f.id, active: v } });
+                        refetch();
+                      } catch (e) {
+                        toast.error(e instanceof Error ? e.message : "Falha");
+                      }
                     }}
                   />
                 </div>
               </CardHeader>
               <CardContent className="space-y-3 text-xs">
                 <div className="grid grid-cols-2 gap-2 text-muted-foreground">
-                  <div>Cooldown: <span className="text-foreground">{f.cooldown_hours}h</span></div>
-                  <div className="col-span-2">Última execução: <span className="text-foreground">{f.last_run_at ? new Date(f.last_run_at).toLocaleString("pt-BR") : "—"}</span></div>
+                  <div>
+                    Cooldown: <span className="text-foreground">{f.cooldown_hours}h</span>
+                  </div>
+                  <div className="col-span-2">
+                    Última execução:{" "}
+                    <span className="text-foreground">
+                      {f.last_run_at ? new Date(f.last_run_at).toLocaleString("pt-BR") : "—"}
+                    </span>
+                  </div>
                 </div>
                 <div className="flex items-center justify-end gap-1 pt-1">
-                  <Button size="sm" variant="ghost" className="h-7 gap-1" onClick={() => abrirEditor(f.id)}>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 gap-1"
+                    onClick={() => abrirEditor(f.id)}
+                  >
                     <Pencil className="h-3.5 w-3.5" /> Editar
                   </Button>
-                  <Button size="icon" variant="ghost" className="h-7 w-7" title="Duplicar"
-                    onClick={async () => { try { await dupFn({ data: { id: f.id } }); refetch(); toast.success("Duplicado"); } catch (e) { toast.error(e instanceof Error ? e.message : "Falha"); } }}>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-7 w-7"
+                    title="Duplicar"
+                    onClick={async () => {
+                      try {
+                        await dupFn({ data: { id: f.id } });
+                        refetch();
+                        toast.success("Duplicado");
+                      } catch (e) {
+                        toast.error(e instanceof Error ? e.message : "Falha");
+                      }
+                    }}
+                  >
                     <Copy className="h-3.5 w-3.5" />
                   </Button>
-                  <Button size="icon" variant="ghost" className="h-7 w-7 text-rose-400" title="Excluir"
-                    onClick={async () => { if (!confirm("Excluir esta automação?")) return; try { await delFn({ data: { id: f.id } }); refetch(); toast.success("Excluído"); } catch (e) { toast.error(e instanceof Error ? e.message : "Falha"); } }}>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-7 w-7 text-rose-400"
+                    title="Excluir"
+                    onClick={async () => {
+                      if (!confirm("Excluir esta automação?")) return;
+                      try {
+                        await delFn({ data: { id: f.id } });
+                        refetch();
+                        toast.success("Excluído");
+                      } catch (e) {
+                        toast.error(e instanceof Error ? e.message : "Falha");
+                      }
+                    }}
+                  >
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 </div>
@@ -2104,7 +2360,10 @@ function FluxosList() {
       {editorOpen && (
         <FlowBuilderDialog
           flowId={editingId}
-          onClose={() => { setEditorOpen(false); refetch(); }}
+          onClose={() => {
+            setEditorOpen(false);
+            refetch();
+          }}
         />
       )}
     </div>
@@ -2146,7 +2405,10 @@ function FlowBuilderDialog({ flowId, onClose }: { flowId: string | null; onClose
         setTrigger(r.flow.trigger_type as EmailTrigger);
         setActive(r.flow.active);
         setCooldownH(r.flow.cooldown_hours);
-        setExits({ ...defaultExitConditions(), ...(r.flow.exit_conditions as Record<string, boolean>) });
+        setExits({
+          ...defaultExitConditions(),
+          ...(r.flow.exit_conditions as Record<string, boolean>),
+        });
         setBlocks(
           r.blocks.map((b) => ({
             id: b.id,
@@ -2184,21 +2446,28 @@ function FlowBuilderDialog({ flowId, onClose }: { flowId: string | null; onClose
   function insertBlock(at: number, type: EmailFlowBlockDraft["block_type"]) {
     setBlocks((bs) => [...bs.slice(0, at), emptyBlock(type), ...bs.slice(at)]);
   }
-  function removeBlock(i: number) { setBlocks((bs) => bs.filter((_, k) => k !== i)); }
+  function removeBlock(i: number) {
+    setBlocks((bs) => bs.filter((_, k) => k !== i));
+  }
   function updateBlock(i: number, patch: Partial<EmailFlowBlockDraft>) {
     setBlocks((bs) => bs.map((b, k) => (k === i ? { ...b, ...patch } : b)));
   }
 
   async function salvar() {
-    if (!name.trim()) { toast.error("Informe um nome"); return; }
+    if (!name.trim()) {
+      toast.error("Informe um nome");
+      return;
+    }
     // Validações
     for (let i = 0; i < blocks.length; i++) {
       const b = blocks[i];
       if (b.block_type === "send_email" && b.template_ids.length === 0) {
-        toast.error(`Bloco ${i + 1}: selecione pelo menos um template`); return;
+        toast.error(`Bloco ${i + 1}: selecione pelo menos um template`);
+        return;
       }
       if (b.block_type === "delay" && b.delay_seconds <= 0) {
-        toast.error(`Bloco ${i + 1}: delay precisa ser maior que zero`); return;
+        toast.error(`Bloco ${i + 1}: delay precisa ser maior que zero`);
+        return;
       }
     }
     setSaving(true);
@@ -2238,7 +2507,10 @@ function FlowBuilderDialog({ flowId, onClose }: { flowId: string | null; onClose
   }
 
   async function dispararTeste() {
-    if (!flowId) { toast.error("Salve a automação antes de testar"); return; }
+    if (!flowId) {
+      toast.error("Salve a automação antes de testar");
+      return;
+    }
     const email = prompt("Email do destinatário para teste:");
     if (!email) return;
     try {
@@ -2250,11 +2522,18 @@ function FlowBuilderDialog({ flowId, onClose }: { flowId: string | null; onClose
   }
 
   return (
-    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
+    <Dialog
+      open
+      onOpenChange={(v) => {
+        if (!v) onClose();
+      }}
+    >
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{flowId ? "Editar automação" : "Nova automação"}</DialogTitle>
-          <DialogDescription>Fluxo visual por blocos. Use M1/M2 para randomizar modelos.</DialogDescription>
+          <DialogDescription>
+            Fluxo visual por blocos. Use M1/M2 para randomizar modelos.
+          </DialogDescription>
         </DialogHeader>
 
         {loading ? (
@@ -2264,20 +2543,32 @@ function FlowBuilderDialog({ flowId, onClose }: { flowId: string | null; onClose
             {/* Header */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Field label="Nome da automação">
-                <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex.: Conversão 7 dias" />
+                <Input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Ex.: Conversão 7 dias"
+                />
               </Field>
               <Field label="Gatilho">
                 <Select value={trigger} onValueChange={(v) => setTrigger(v as EmailTrigger)}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
                   <SelectContent>
                     {EMAIL_TRIGGERS.map((t) => (
-                      <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                      <SelectItem key={t.value} value={t.value}>
+                        {t.label}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </Field>
               <Field label="Cooldown (horas)">
-                <Input type="number" value={cooldownH} onChange={(e) => setCooldownH(Math.max(0, Number(e.target.value) || 0))} />
+                <Input
+                  type="number"
+                  value={cooldownH}
+                  onChange={(e) => setCooldownH(Math.max(0, Number(e.target.value) || 0))}
+                />
               </Field>
               <div className="sm:col-span-2">
                 <Label className="text-xs text-muted-foreground">Condições de saída</Label>
@@ -2291,7 +2582,9 @@ function FlowBuilderDialog({ flowId, onClose }: { flowId: string | null; onClose
                         onClick={() => setExits((p) => ({ ...p, [s.value]: !on }))}
                         className={cn(
                           "px-2.5 py-1 rounded-md text-xs border transition-colors",
-                          on ? "border-primary/40 bg-primary/15 text-primary" : "border-border text-muted-foreground hover:bg-muted/40",
+                          on
+                            ? "border-primary/40 bg-primary/15 text-primary"
+                            : "border-border text-muted-foreground hover:bg-muted/40",
                         )}
                       >
                         {s.label}
@@ -2312,14 +2605,18 @@ function FlowBuilderDialog({ flowId, onClose }: { flowId: string | null; onClose
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold">Fluxo</h3>
-                <div className="text-[10px] text-muted-foreground">{blocks.length} bloco{blocks.length !== 1 ? "s" : ""}</div>
+                <div className="text-[10px] text-muted-foreground">
+                  {blocks.length} bloco{blocks.length !== 1 ? "s" : ""}
+                </div>
               </div>
 
               {/* Início fixo */}
               <div className="rounded-lg border border-accent/30 bg-accent/5 p-3 flex items-center gap-2 text-xs">
                 <Play className="h-3.5 w-3.5 text-accent" />
                 <span className="font-medium">Início</span>
-                <Badge variant="outline" className="text-[10px] border-accent/30 text-accent">{triggerLabel(trigger)}</Badge>
+                <Badge variant="outline" className="text-[10px] border-accent/30 text-accent">
+                  {triggerLabel(trigger)}
+                </Badge>
               </div>
 
               {blocks.map((b, i) => (
@@ -2357,7 +2654,9 @@ function FlowBuilderDialog({ flowId, onClose }: { flowId: string | null; onClose
               <FlaskConical className="h-4 w-4" /> Disparar teste
             </Button>
           )}
-          <Button variant="outline" onClick={onClose}>Cancelar</Button>
+          <Button variant="outline" onClick={onClose}>
+            Cancelar
+          </Button>
           <Button onClick={salvar} disabled={saving} className="gap-2">
             <CheckCircle2 className="h-4 w-4" /> {saving ? "Salvando…" : "Salvar"}
           </Button>
@@ -2369,7 +2668,13 @@ function FlowBuilderDialog({ flowId, onClose }: { flowId: string | null; onClose
 
 // ---------- Block editor ----------
 function BlockEditor({
-  index, block, templates, smtps, onChange, onRemove, onMove,
+  index,
+  block,
+  templates,
+  smtps,
+  onChange,
+  onRemove,
+  onMove,
 }: {
   index: number;
   block: EmailFlowBlockDraft;
@@ -2384,15 +2689,45 @@ function BlockEditor({
     <div className="rounded-lg border border-border bg-card/40 p-3 space-y-3">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 text-xs">
-          <span className="inline-flex items-center justify-center h-6 w-6 rounded bg-primary/15 text-primary">{meta.icon}</span>
+          <span className="inline-flex items-center justify-center h-6 w-6 rounded bg-primary/15 text-primary">
+            {meta.icon}
+          </span>
           <span className="font-medium">{meta.title}</span>
-          {block.label && <Badge variant="outline" className="text-[10px]">{block.label}</Badge>}
+          {block.label && (
+            <Badge variant="outline" className="text-[10px]">
+              {block.label}
+            </Badge>
+          )}
           <span className="text-muted-foreground">#{index + 1}</span>
         </div>
         <div className="flex items-center gap-1">
-          <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => onMove(-1)} title="Subir"><ArrowUp className="h-3 w-3" /></Button>
-          <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => onMove(1)} title="Descer"><ArrowDown className="h-3 w-3" /></Button>
-          <Button size="icon" variant="ghost" className="h-6 w-6 text-rose-400" onClick={onRemove} title="Remover"><Trash2 className="h-3 w-3" /></Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-6 w-6"
+            onClick={() => onMove(-1)}
+            title="Subir"
+          >
+            <ArrowUp className="h-3 w-3" />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-6 w-6"
+            onClick={() => onMove(1)}
+            title="Descer"
+          >
+            <ArrowDown className="h-3 w-3" />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-6 w-6 text-rose-400"
+            onClick={onRemove}
+            title="Remover"
+          >
+            <Trash2 className="h-3 w-3" />
+          </Button>
         </div>
       </div>
 
@@ -2400,11 +2735,16 @@ function BlockEditor({
         <div className="space-y-2">
           <Field label="Templates (selecione 1 ou mais — múltiplos = randomização M1/M2)">
             <div className="border rounded-md p-2 max-h-40 overflow-y-auto space-y-1">
-              {templates.length === 0 && <div className="text-xs text-muted-foreground">Nenhum template disponível</div>}
+              {templates.length === 0 && (
+                <div className="text-xs text-muted-foreground">Nenhum template disponível</div>
+              )}
               {templates.map((t) => {
                 const checked = block.template_ids.includes(t.id);
                 return (
-                  <label key={t.id} className="flex items-center gap-2 text-xs cursor-pointer hover:bg-muted/40 px-1 py-0.5 rounded">
+                  <label
+                    key={t.id}
+                    className="flex items-center gap-2 text-xs cursor-pointer hover:bg-muted/40 px-1 py-0.5 rounded"
+                  >
                     <input
                       type="checkbox"
                       checked={checked}
@@ -2423,24 +2763,45 @@ function BlockEditor({
           </Field>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <Field label="SMTP (opcional)">
-              <Select value={block.smtp_config_id ?? "__none"} onValueChange={(v) => onChange({ smtp_config_id: v === "__none" ? null : v })}>
-                <SelectTrigger><SelectValue placeholder="Padrão" /></SelectTrigger>
+              <Select
+                value={block.smtp_config_id ?? "__none"}
+                onValueChange={(v) => onChange({ smtp_config_id: v === "__none" ? null : v })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Padrão" />
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__none">Usar padrão</SelectItem>
                   {smtps.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>{s.name ?? s.nome ?? s.id.slice(0, 8)}</SelectItem>
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.name ?? s.nome ?? s.id.slice(0, 8)}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </Field>
             <Field label="Delay antes (segundos)">
-              <Input type="number" value={block.pre_delay_seconds} onChange={(e) => onChange({ pre_delay_seconds: Math.max(0, Number(e.target.value) || 0) })} />
+              <Input
+                type="number"
+                value={block.pre_delay_seconds}
+                onChange={(e) =>
+                  onChange({ pre_delay_seconds: Math.max(0, Number(e.target.value) || 0) })
+                }
+              />
             </Field>
             <Field label="Assunto (override)">
-              <Input value={block.subject_override ?? ""} onChange={(e) => onChange({ subject_override: e.target.value || null })} placeholder="Usa o do template" />
+              <Input
+                value={block.subject_override ?? ""}
+                onChange={(e) => onChange({ subject_override: e.target.value || null })}
+                placeholder="Usa o do template"
+              />
             </Field>
             <Field label="Pré-header (override)">
-              <Input value={block.preheader_override ?? ""} onChange={(e) => onChange({ preheader_override: e.target.value || null })} placeholder="Usa o do template" />
+              <Input
+                value={block.preheader_override ?? ""}
+                onChange={(e) => onChange({ preheader_override: e.target.value || null })}
+                placeholder="Usa o do template"
+              />
             </Field>
           </div>
         </div>
@@ -2452,7 +2813,11 @@ function BlockEditor({
             <Input
               type="number"
               value={Math.max(1, Math.round(block.delay_seconds / delayUnitSec(block)))}
-              onChange={(e) => onChange({ delay_seconds: Math.max(1, Number(e.target.value) || 1) * delayUnitSec(block) })}
+              onChange={(e) =>
+                onChange({
+                  delay_seconds: Math.max(1, Number(e.target.value) || 1) * delayUnitSec(block),
+                })
+              }
             />
           </Field>
           <Field label="Unidade">
@@ -2460,11 +2825,14 @@ function BlockEditor({
               value={delayUnit(block)}
               onValueChange={(u) => {
                 const qty = Math.max(1, Math.round(block.delay_seconds / delayUnitSec(block)));
-                const newSec = qty * ({ seg: 1, min: 60, h: 3600, dia: 86400 } as Record<string, number>)[u];
+                const newSec =
+                  qty * ({ seg: 1, min: 60, h: 3600, dia: 86400 } as Record<string, number>)[u];
                 onChange({ delay_seconds: newSec });
               }}
             >
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="seg">Segundos</SelectItem>
                 <SelectItem value="min">Minutos</SelectItem>
@@ -2473,19 +2841,33 @@ function BlockEditor({
               </SelectContent>
             </Select>
           </Field>
-          <div className="col-span-2 text-[11px] text-muted-foreground">Total: {formatDelay(block.delay_seconds)}</div>
+          <div className="col-span-2 text-[11px] text-muted-foreground">
+            Total: {formatDelay(block.delay_seconds)}
+          </div>
         </div>
       )}
 
       {(block.block_type === "condition" || block.block_type === "tag") && (
         <div className="grid grid-cols-2 gap-2">
-          <Field label="Tipo"><Input value={block.condition_type ?? ""} onChange={(e) => onChange({ condition_type: e.target.value || null })} /></Field>
-          <Field label="Valor"><Input value={block.condition_value ?? ""} onChange={(e) => onChange({ condition_value: e.target.value || null })} /></Field>
+          <Field label="Tipo">
+            <Input
+              value={block.condition_type ?? ""}
+              onChange={(e) => onChange({ condition_type: e.target.value || null })}
+            />
+          </Field>
+          <Field label="Valor">
+            <Input
+              value={block.condition_value ?? ""}
+              onChange={(e) => onChange({ condition_value: e.target.value || null })}
+            />
+          </Field>
         </div>
       )}
 
       {(block.block_type === "remove" || block.block_type === "end") && (
-        <div className="text-xs text-muted-foreground">Encerra a participação do lead neste fluxo.</div>
+        <div className="text-xs text-muted-foreground">
+          Encerra a participação do lead neste fluxo.
+        </div>
       )}
     </div>
   );
@@ -2493,13 +2875,20 @@ function BlockEditor({
 
 function blockMeta(t: EmailFlowBlockDraft["block_type"]) {
   switch (t) {
-    case "send_email": return { title: "Enviar email", icon: <Mail className="h-3.5 w-3.5" /> };
-    case "delay": return { title: "Delay", icon: <Clock className="h-3.5 w-3.5" /> };
-    case "condition": return { title: "Condição", icon: <GitBranch className="h-3.5 w-3.5" /> };
-    case "tag": return { title: "Tag", icon: <TagIcon className="h-3.5 w-3.5" /> };
-    case "remove": return { title: "Remover do fluxo", icon: <UserMinus className="h-3.5 w-3.5" /> };
-    case "end": return { title: "Encerrar fluxo", icon: <StopCircle className="h-3.5 w-3.5" /> };
-    default: return { title: t, icon: <Workflow className="h-3.5 w-3.5" /> };
+    case "send_email":
+      return { title: "Enviar email", icon: <Mail className="h-3.5 w-3.5" /> };
+    case "delay":
+      return { title: "Delay", icon: <Clock className="h-3.5 w-3.5" /> };
+    case "condition":
+      return { title: "Condição", icon: <GitBranch className="h-3.5 w-3.5" /> };
+    case "tag":
+      return { title: "Tag", icon: <TagIcon className="h-3.5 w-3.5" /> };
+    case "remove":
+      return { title: "Remover do fluxo", icon: <UserMinus className="h-3.5 w-3.5" /> };
+    case "end":
+      return { title: "Encerrar fluxo", icon: <StopCircle className="h-3.5 w-3.5" /> };
+    default:
+      return { title: t, icon: <Workflow className="h-3.5 w-3.5" /> };
   }
 }
 
@@ -2514,20 +2903,38 @@ function delayUnitSec(b: EmailFlowBlockDraft): number {
   return ({ seg: 1, min: 60, h: 3600, dia: 86400 } as Record<string, number>)[delayUnit(b)];
 }
 
-function InsertBlockButton({ onInsert }: { onInsert: (t: EmailFlowBlockDraft["block_type"]) => void }) {
+function InsertBlockButton({
+  onInsert,
+}: {
+  onInsert: (t: EmailFlowBlockDraft["block_type"]) => void;
+}) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm" className="h-7 gap-1 text-xs"><Plus className="h-3 w-3" /> Inserir bloco</Button>
+        <Button variant="outline" size="sm" className="h-7 gap-1 text-xs">
+          <Plus className="h-3 w-3" /> Inserir bloco
+        </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="center">
-        <DropdownMenuItem onClick={() => onInsert("send_email")}><Mail className="h-3.5 w-3.5 mr-2" /> Enviar email</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => onInsert("delay")}><Clock className="h-3.5 w-3.5 mr-2" /> Delay</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => onInsert("condition")}><GitBranch className="h-3.5 w-3.5 mr-2" /> Condição</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => onInsert("tag")}><TagIcon className="h-3.5 w-3.5 mr-2" /> Tag</DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onInsert("send_email")}>
+          <Mail className="h-3.5 w-3.5 mr-2" /> Enviar email
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onInsert("delay")}>
+          <Clock className="h-3.5 w-3.5 mr-2" /> Delay
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onInsert("condition")}>
+          <GitBranch className="h-3.5 w-3.5 mr-2" /> Condição
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onInsert("tag")}>
+          <TagIcon className="h-3.5 w-3.5 mr-2" /> Tag
+        </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => onInsert("remove")}><UserMinus className="h-3.5 w-3.5 mr-2" /> Remover do fluxo</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => onInsert("end")}><StopCircle className="h-3.5 w-3.5 mr-2" /> Encerrar fluxo</DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onInsert("remove")}>
+          <UserMinus className="h-3.5 w-3.5 mr-2" /> Remover do fluxo
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onInsert("end")}>
+          <StopCircle className="h-3.5 w-3.5 mr-2" /> Encerrar fluxo
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -2541,9 +2948,12 @@ function FluxosHistorico() {
   const [flowId, setFlowId] = useState<string>("__all");
   const { data, refetch } = useQuery({
     queryKey: ["email-flow-leads", flowId],
-    queryFn: () => listLeadsFn({ data: { flow_id: flowId === "__all" ? undefined : flowId, limit: 100 } }),
+    queryFn: () =>
+      listLeadsFn({ data: { flow_id: flowId === "__all" ? undefined : flowId, limit: 100 } }),
   });
-  useEffect(() => { refetch(); }, [flowId, refetch]);
+  useEffect(() => {
+    refetch();
+  }, [flowId, refetch]);
   const leads = data?.leads ?? [];
   const flowsMap = new Map((flowsData?.flows ?? []).map((f) => [f.id, f.name]));
 
@@ -2551,10 +2961,16 @@ function FluxosHistorico() {
     <div className="space-y-3">
       <div className="flex items-center gap-2">
         <Select value={flowId} onValueChange={setFlowId}>
-          <SelectTrigger className="w-72"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-72">
+            <SelectValue />
+          </SelectTrigger>
           <SelectContent>
             <SelectItem value="__all">Todos os fluxos</SelectItem>
-            {(flowsData?.flows ?? []).map((f) => (<SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>))}
+            {(flowsData?.flows ?? []).map((f) => (
+              <SelectItem key={f.id} value={f.id}>
+                {f.name}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       </div>
@@ -2573,16 +2989,34 @@ function FluxosHistorico() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {leads.length === 0 && (<TableRow><TableCell colSpan={7} className="text-center text-xs text-muted-foreground py-6">Sem leads</TableCell></TableRow>)}
+              {leads.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={7} className="text-center text-xs text-muted-foreground py-6">
+                    Sem leads
+                  </TableCell>
+                </TableRow>
+              )}
               {leads.map((l) => (
                 <TableRow key={l.id}>
                   <TableCell className="text-xs">{l.email}</TableCell>
-                  <TableCell className="text-xs">{flowsMap.get(l.flow_id) ?? l.flow_id.slice(0, 8)}</TableCell>
+                  <TableCell className="text-xs">
+                    {flowsMap.get(l.flow_id) ?? l.flow_id.slice(0, 8)}
+                  </TableCell>
                   <TableCell className="text-xs">#{l.current_block_index}</TableCell>
-                  <TableCell className="text-xs">{l.next_run_at ? new Date(l.next_run_at).toLocaleString("pt-BR") : "—"}</TableCell>
-                  <TableCell className="text-xs"><Badge variant="outline" className="text-[10px]">{l.status}</Badge></TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{l.exit_reason ?? "—"}</TableCell>
-                  <TableCell className="text-xs">{new Date(l.entered_at).toLocaleString("pt-BR")}</TableCell>
+                  <TableCell className="text-xs">
+                    {l.next_run_at ? new Date(l.next_run_at).toLocaleString("pt-BR") : "—"}
+                  </TableCell>
+                  <TableCell className="text-xs">
+                    <Badge variant="outline" className="text-[10px]">
+                      {l.status}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {l.exit_reason ?? "—"}
+                  </TableCell>
+                  <TableCell className="text-xs">
+                    {new Date(l.entered_at).toLocaleString("pt-BR")}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -2601,18 +3035,27 @@ function FluxosLogs() {
   const [flowId, setFlowId] = useState<string>("__all");
   const { data, refetch } = useQuery({
     queryKey: ["email-flow-logs", flowId],
-    queryFn: () => listLogsFn({ data: { flow_id: flowId === "__all" ? undefined : flowId, limit: 200 } }),
+    queryFn: () =>
+      listLogsFn({ data: { flow_id: flowId === "__all" ? undefined : flowId, limit: 200 } }),
   });
-  useEffect(() => { refetch(); }, [flowId, refetch]);
+  useEffect(() => {
+    refetch();
+  }, [flowId, refetch]);
   const logs = data?.logs ?? [];
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
         <Select value={flowId} onValueChange={setFlowId}>
-          <SelectTrigger className="w-72"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-72">
+            <SelectValue />
+          </SelectTrigger>
           <SelectContent>
             <SelectItem value="__all">Todos os fluxos</SelectItem>
-            {(flowsData?.flows ?? []).map((f) => (<SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>))}
+            {(flowsData?.flows ?? []).map((f) => (
+              <SelectItem key={f.id} value={f.id}>
+                {f.name}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       </div>
@@ -2628,13 +3071,27 @@ function FluxosLogs() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {logs.length === 0 && (<TableRow><TableCell colSpan={4} className="text-center text-xs text-muted-foreground py-6">Sem logs</TableCell></TableRow>)}
+              {logs.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={4} className="text-center text-xs text-muted-foreground py-6">
+                    Sem logs
+                  </TableCell>
+                </TableRow>
+              )}
               {logs.map((l) => (
                 <TableRow key={l.id}>
-                  <TableCell className="text-xs">{new Date(l.created_at).toLocaleString("pt-BR")}</TableCell>
-                  <TableCell className="text-xs"><Badge variant="outline" className="text-[10px]">{l.event}</Badge></TableCell>
+                  <TableCell className="text-xs">
+                    {new Date(l.created_at).toLocaleString("pt-BR")}
+                  </TableCell>
+                  <TableCell className="text-xs">
+                    <Badge variant="outline" className="text-[10px]">
+                      {l.event}
+                    </Badge>
+                  </TableCell>
                   <TableCell className="text-xs">{l.flow_lead_id?.slice(0, 8) ?? "—"}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground font-mono break-all">{JSON.stringify(l.detail)}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground font-mono break-all">
+                    {JSON.stringify(l.detail)}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -2722,9 +3179,7 @@ function BusinessCodeEmailCard() {
           </CardTitle>
           <CardDescription className="text-xs">
             Endpoint:{" "}
-            <code className="text-[11px]">
-              dash.businesscode.com.br/api/v1/messaging/email
-            </code>
+            <code className="text-[11px]">dash.businesscode.com.br/api/v1/messaging/email</code>
           </CardDescription>
         </div>
         <div className="flex items-center gap-2">
@@ -2744,15 +3199,12 @@ function BusinessCodeEmailCard() {
       </CardHeader>
       <CardContent className="text-xs text-muted-foreground space-y-1">
         <p>
-          O envio usa a mesma autenticação do SMS/Voice (secret{" "}
-          <code>BUSINESSCODE_SMS_TOKEN</code>). O domínio do remetente precisa
-          estar verificado em <em>Configurações &gt; Domínios de Email</em> na
-          BusinessCode.
+          O envio usa o secret <code>BUSINESSCODE_EMAIL_TOKEN</code>. O domínio do remetente precisa
+          estar verificado em <em>Configurações &gt; Domínios de Email</em> na BusinessCode.
         </p>
         <p>
-          Variáveis no conteúdo (ex.: <code>{"{primeiro_nome}"}</code>,{" "}
-          <code>{"{saldo}"}</code>) são substituídas automaticamente quando o
-          destinatário existe no CRM.
+          Variáveis no conteúdo (ex.: <code>{"{primeiro_nome}"}</code>, <code>{"{saldo}"}</code>)
+          são substituídas automaticamente quando o destinatário existe no CRM.
         </p>
       </CardContent>
 
@@ -2804,10 +3256,7 @@ function BusinessCodeEmailCard() {
             </div>
             <div>
               <Label className="text-xs">Assunto</Label>
-              <Input
-                value={subject}
-                onChange={(e) => setSubject(e.target.value)}
-              />
+              <Input value={subject} onChange={(e) => setSubject(e.target.value)} />
             </div>
             <div>
               <Label className="text-xs">Conteúdo (HTML)</Label>
@@ -2887,9 +3336,7 @@ function LeadEmailPicker({
           {searchQ.isLoading ? (
             <div className="p-3 text-xs text-muted-foreground">Buscando…</div>
           ) : results.length === 0 ? (
-            <div className="p-3 text-xs text-muted-foreground">
-              Nenhum lead encontrado.
-            </div>
+            <div className="p-3 text-xs text-muted-foreground">Nenhum lead encontrado.</div>
           ) : (
             results.map((p) => {
               const already = selectedIds.includes(p.id);
@@ -3051,7 +3498,8 @@ function RemetentesTab() {
         <div>
           <h2 className="text-lg font-semibold">Remetentes</h2>
           <p className="text-xs text-muted-foreground">
-            Cadastre os remetentes (nome, email e domínio verificado na BusinessCode) usados em campanhas e automações. Independente de SMTP.
+            Cadastre os remetentes (nome, email e domínio verificado na BusinessCode) usados em
+            campanhas e automações. Independente de SMTP.
           </p>
         </div>
         <Button onClick={novo} className="gap-2">
@@ -3092,7 +3540,10 @@ function RemetentesTab() {
                       <div className="flex items-center gap-2">
                         {s.name}
                         {s.isDefault && (
-                          <Badge variant="outline" className="border-primary/40 text-primary text-[10px]">
+                          <Badge
+                            variant="outline"
+                            className="border-primary/40 text-primary text-[10px]"
+                          >
                             padrão
                           </Badge>
                         )}
@@ -3111,7 +3562,12 @@ function RemetentesTab() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => { setEditing(s); setOpen(true); }}>
+                          <DropdownMenuItem
+                            onClick={() => {
+                              setEditing(s);
+                              setOpen(true);
+                            }}
+                          >
                             <Pencil className="h-4 w-4 mr-2" /> Editar
                           </DropdownMenuItem>
                           {!s.isDefault && (
@@ -3137,12 +3593,7 @@ function RemetentesTab() {
         </Card>
       )}
 
-      <SenderDialog
-        open={open}
-        onOpenChange={setOpen}
-        editing={editing}
-        onSave={salvar}
-      />
+      <SenderDialog open={open} onOpenChange={setOpen} editing={editing} onSave={salvar} />
     </div>
   );
 }
@@ -3159,7 +3610,9 @@ function SenderDialog({
   onSave: (s: SenderUI) => void;
 }) {
   const [s, setS] = useState<SenderUI | null>(editing);
-  useEffect(() => { setS(editing); }, [editing]);
+  useEffect(() => {
+    setS(editing);
+  }, [editing]);
   if (!s) return null;
   const up = (k: keyof SenderUI, v: any) => setS((p) => (p ? { ...p, [k]: v } : p));
   return (
@@ -3171,19 +3624,39 @@ function SenderDialog({
         </DialogHeader>
         <div className="grid gap-3">
           <Field label="Nome interno">
-            <Input value={s.name} onChange={(e) => up("name", e.target.value)} placeholder="Ex.: BETLEADS" />
+            <Input
+              value={s.name}
+              onChange={(e) => up("name", e.target.value)}
+              placeholder="Ex.: BETLEADS"
+            />
           </Field>
           <Field label="Nome exibido (From Name)">
-            <Input value={s.fromName} onChange={(e) => up("fromName", e.target.value)} placeholder="Ex.: BETLEADS" />
+            <Input
+              value={s.fromName}
+              onChange={(e) => up("fromName", e.target.value)}
+              placeholder="Ex.: BETLEADS"
+            />
           </Field>
           <Field label="Email do remetente (From)">
-            <Input value={s.fromEmail} onChange={(e) => up("fromEmail", e.target.value)} placeholder="noreply@betleads.io" />
+            <Input
+              value={s.fromEmail}
+              onChange={(e) => up("fromEmail", e.target.value)}
+              placeholder="noreply@betleads.io"
+            />
           </Field>
           <Field label="Reply-To (opcional)">
-            <Input value={s.replyTo} onChange={(e) => up("replyTo", e.target.value)} placeholder="suporte@betleads.io" />
+            <Input
+              value={s.replyTo}
+              onChange={(e) => up("replyTo", e.target.value)}
+              placeholder="suporte@betleads.io"
+            />
           </Field>
           <Field label="Domínio (opcional)">
-            <Input value={s.domain} onChange={(e) => up("domain", e.target.value)} placeholder="betleads.io" />
+            <Input
+              value={s.domain}
+              onChange={(e) => up("domain", e.target.value)}
+              placeholder="betleads.io"
+            />
           </Field>
           <label className="flex items-center gap-2 text-sm">
             <input
@@ -3195,8 +3668,12 @@ function SenderDialog({
           </label>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
-          <Button onClick={() => onSave(s)} disabled={!s.name || !s.fromEmail}>Salvar</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancelar
+          </Button>
+          <Button onClick={() => onSave(s)} disabled={!s.name || !s.fromEmail}>
+            Salvar
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

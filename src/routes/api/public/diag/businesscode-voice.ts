@@ -6,12 +6,14 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { createClient } from "@supabase/supabase-js";
 
-const BUSINESSCODE_VOICE_URL =
-  "https://dash.businesscode.com.br/api/v1/messaging/voice";
+const BUSINESSCODE_VOICE_URL = "https://dash.businesscode.com.br/api/v1/messaging/voice";
 
 function normalizeToken(raw: string): string {
   let t = (raw || "").replace(/[\u200B-\u200D\uFEFF]/g, "");
-  t = t.trim().replace(/^['"]+|['"]+$/g, "").trim();
+  t = t
+    .trim()
+    .replace(/^['"]+|['"]+$/g, "")
+    .trim();
   t = t.replace(/^Authorization\s*:\s*/i, "").trim();
   t = t.replace(/^Bearer\s+/i, "").trim();
   t = t.replace(/\s+/g, "");
@@ -57,11 +59,11 @@ export const Route = createFileRoute("/api/public/diag/businesscode-voice")({
           payload.audio_url ||
           "https://file-examples.com/storage/fe0c4d4dca6c8e1d2c43cba/2017/11/file_example_MP3_700KB.mp3";
 
-        const rawToken = process.env.BUSINESSCODE_SMS_TOKEN;
+        const rawToken = process.env.BUSINESSCODE_VOICE_TOKEN;
         const token = rawToken ? normalizeToken(rawToken) : "";
         if (!token) {
           return Response.json(
-            { ok: false, error: "BUSINESSCODE_SMS_TOKEN não configurado" },
+            { ok: false, error: "BUSINESSCODE_VOICE_TOKEN não configurado" },
             { status: 500 },
           );
         }

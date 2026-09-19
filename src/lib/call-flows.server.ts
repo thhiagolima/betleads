@@ -16,10 +16,7 @@ import {
   type LeadLike,
   type VoiceSettings,
 } from "./calls.server";
-import {
-  callBusinessCodeVoice,
-  normalizeE164BR,
-} from "./businesscode-voice.server";
+import { callBusinessCodeVoice, normalizeE164BR } from "./businesscode-voice.server";
 import { sendSmsInternal } from "./sms.functions";
 import { buildPlayerVariables } from "./template-vars.server";
 import { deferIfOutsideWindow } from "./send-window.server";
@@ -106,14 +103,9 @@ export async function cancelProgress(progressId: string, reason: string) {
     .from("call_flow_progress")
     .update({ status: "cancelled", exit_reason: reason } as any)
     .eq("id", progressId);
-  await logEvent(
-    prog.id,
-    prog.flow_id,
-    prog.player_id,
-    prog.current_block_index,
-    "cancelled",
-    { reason },
-  );
+  await logEvent(prog.id, prog.flow_id, prog.player_id, prog.current_block_index, "cancelled", {
+    reason,
+  });
 }
 
 /** Verifica condições de saída em tempo real para um player. Chamado dos
@@ -165,11 +157,7 @@ async function loadBlocks(flowId: string) {
 }
 
 /** Dispara a ligação de um bloco call e atualiza o progresso. */
-async function executeCallBlock(
-  progress: any,
-  block: any,
-  player: any,
-): Promise<void> {
+async function executeCallBlock(progress: any, block: any, player: any): Promise<void> {
   // 1. resolve roteiro + voz
   let scriptContent = "";
   let scriptId: string | null = block.script_id ?? null;
@@ -187,14 +175,20 @@ async function executeCallBlock(
       scriptContent = (s.content as string) ?? "";
       provider = (s.provider as string) || provider;
       if (!block.voice_id && s.default_voice_id) voiceId = s.default_voice_id as string;
-      voiceSettings =
-        (s.voice_settings as unknown as VoiceSettings) ?? DEFAULT_VOICE_SETTINGS;
+      voiceSettings = (s.voice_settings as unknown as VoiceSettings) ?? DEFAULT_VOICE_SETTINGS;
     }
   }
   if (!scriptContent) {
-    await logEvent(progress.id, progress.flow_id, progress.player_id, progress.current_block_index, "call_skipped", {
-      reason: "no_script",
-    });
+    await logEvent(
+      progress.id,
+      progress.flow_id,
+      progress.player_id,
+      progress.current_block_index,
+      "call_skipped",
+      {
+        reason: "no_script",
+      },
+    );
     await scheduleNext(progress, block);
     return;
   }
@@ -243,7 +237,14 @@ async function executeCallBlock(
       audioPath = up.path;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      await logEvent(progress.id, progress.flow_id, progress.player_id, progress.current_block_index, "audio_error", { error: msg });
+      await logEvent(
+        progress.id,
+        progress.flow_id,
+        progress.player_id,
+        progress.current_block_index,
+        "audio_error",
+        { error: msg },
+      );
       // tenta de novo no próximo tick (1 min)
       await supabaseAdmin
         .from("call_flow_progress")
@@ -269,7 +270,14 @@ async function executeCallBlock(
   // 3. telefone
   const rawPhone = progress.phone_e164 || player?.telefone || "";
   if (!rawPhone || !audioUrl) {
-    await logEvent(progress.id, progress.flow_id, progress.player_id, progress.current_block_index, "call_skipped", { reason: "no_phone_or_audio" });
+    await logEvent(
+      progress.id,
+      progress.flow_id,
+      progress.player_id,
+      progress.current_block_index,
+      "call_skipped",
+      { reason: "no_phone_or_audio" },
+    );
     await scheduleNext(progress, block);
     return;
   }
@@ -277,10 +285,17 @@ async function executeCallBlock(
   try {
     to = normalizeE164BR(rawPhone);
   } catch (e) {
-    await logEvent(progress.id, progress.flow_id, progress.player_id, progress.current_block_index, "call_skipped", {
-      reason: "invalid_phone",
-      error: e instanceof Error ? e.message : String(e),
-    });
+    await logEvent(
+      progress.id,
+      progress.flow_id,
+      progress.player_id,
+      progress.current_block_index,
+      "call_skipped",
+      {
+        reason: "invalid_phone",
+        error: e instanceof Error ? e.message : String(e),
+      },
+    );
     await scheduleNext(progress, block);
     return;
   }
@@ -289,9 +304,7 @@ async function executeCallBlock(
   const result = await callBusinessCodeVoice(to, audioUrl);
   const isAuthError = result.status === 401 || result.status === 403;
   if (isAuthError) {
-    console.warn(
-      `[call-flow] auth_error ${result.status} — mantendo lead na fila, retry em 10min`,
-    );
+    console.warn(`[call-flow] auth_error ${result.status} — mantendo lead na fila, retry em 10min`);
   }
 
   // 5. registra histórico (linka com progress via provider_call_id)
@@ -317,7 +330,7 @@ async function executeCallBlock(
       status: isAuthError ? "active" : "waiting",
       last_call_at: new Date().toISOString(),
       attempts_on_block: isAuthError
-        ? progress.attempts_on_block ?? 0
+        ? (progress.attempts_on_block ?? 0)
         : (progress.attempts_on_block ?? 0) + 1,
       // se não chegar callback em 10min, o tick avança mesmo assim
       next_run_at: new Date(Date.now() + 10 * 60_000).toISOString(),
@@ -329,11 +342,18 @@ async function executeCallBlock(
     } as any)
     .eq("id", progress.id);
 
-  await logEvent(progress.id, progress.flow_id, progress.player_id, progress.current_block_index, "call_dispatched", {
-    ok: result.ok,
-    provider_call_id: result.idempotencyKey,
-    to,
-  });
+  await logEvent(
+    progress.id,
+    progress.flow_id,
+    progress.player_id,
+    progress.current_block_index,
+    "call_dispatched",
+    {
+      ok: result.ok,
+      provider_call_id: result.idempotencyKey,
+      to,
+    },
+  );
 }
 
 /** Agenda o próximo bloco (ou conclui o fluxo) após um bloco call/delay. */
@@ -342,15 +362,21 @@ async function scheduleNext(progress: any, currentBlock: any) {
   const nextIdx = (progress.current_block_index ?? 0) + 1;
   const delaySec =
     currentBlock?.block_type === "delay"
-      ? currentBlock.delay_seconds ?? 0
-      : currentBlock?.delay_after_seconds ?? 0;
+      ? (currentBlock.delay_seconds ?? 0)
+      : (currentBlock?.delay_after_seconds ?? 0);
 
   if (nextIdx >= blocks.length) {
     await supabaseAdmin
       .from("call_flow_progress")
       .update({ status: "completed", exit_reason: "finished" } as any)
       .eq("id", progress.id);
-    await logEvent(progress.id, progress.flow_id, progress.player_id, progress.current_block_index, "completed");
+    await logEvent(
+      progress.id,
+      progress.flow_id,
+      progress.player_id,
+      progress.current_block_index,
+      "completed",
+    );
     return;
   }
   await supabaseAdmin
@@ -413,9 +439,16 @@ export async function advanceProgress(progressId: string) {
         .from("call_flow_progress")
         .update({ next_run_at: defer, status: "active" } as any)
         .eq("id", progress.id);
-      await logEvent(progress.id, progress.flow_id, progress.player_id, progress.current_block_index, "deferred_quiet_hours", {
-        next_run_at: defer,
-      });
+      await logEvent(
+        progress.id,
+        progress.flow_id,
+        progress.player_id,
+        progress.current_block_index,
+        "deferred_quiet_hours",
+        {
+          next_run_at: defer,
+        },
+      );
       return;
     }
   }
@@ -440,10 +473,9 @@ export async function tickFlows(limit = 50): Promise<{ processed: number }> {
   // Claim atômico: reserva linhas ativas via FOR UPDATE SKIP LOCKED — permite
   // que múltiplos workers do cron rodem em paralelo sem disparar a mesma
   // ligação duas vezes.
-  const { data: ready, error: claimErr } = await supabaseAdmin.rpc(
-    "claim_call_flow_progress",
-    { p_limit: limit },
-  );
+  const { data: ready, error: claimErr } = await supabaseAdmin.rpc("claim_call_flow_progress", {
+    p_limit: limit,
+  });
   if (claimErr) {
     console.error("[call-flow tick] claim falhou", claimErr);
     return { processed: 0 };
@@ -533,7 +565,7 @@ export async function pollPendingCalls(limit = 50): Promise<number> {
   if (!pendings || pendings.length === 0) return 0;
   console.info("[call-flow polling] pendings", { count: pendings.length });
 
-  const rawToken = process.env.BUSINESSCODE_SMS_TOKEN || "";
+  const rawToken = process.env.BUSINESSCODE_VOICE_TOKEN || "";
   const token = rawToken
     .replace(/[\u200B-\u200D\uFEFF]/g, "")
     .trim()
@@ -542,7 +574,7 @@ export async function pollPendingCalls(limit = 50): Promise<number> {
     .replace(/^Bearer\s+/i, "")
     .replace(/\s+/g, "");
   if (!token) {
-    console.warn("[call-flow polling] BUSINESSCODE_SMS_TOKEN ausente");
+    console.warn("[call-flow polling] BUSINESSCODE_VOICE_TOKEN ausente");
     return 0;
   }
 
@@ -581,10 +613,8 @@ export async function pollPendingCalls(limit = 50): Promise<number> {
       // expõe o resultado real da ligação em `voice_status`. Sem ler isso,
       // ligações atendidas ficam para sempre como "queued" no nosso lado.
       const d = body?.data ?? body;
-      const voiceStatus: string | undefined =
-        d?.voice_status ?? body?.voice_status;
-      const baseStatus: string | undefined =
-        d?.status ?? body?.status ?? body?.dispatch?.status;
+      const voiceStatus: string | undefined = d?.voice_status ?? body?.voice_status;
+      const baseStatus: string | undefined = d?.status ?? body?.status ?? body?.dispatch?.status;
       const providerStatus: string | undefined = voiceStatus ?? baseStatus;
       const duration: number =
         Number(
@@ -741,10 +771,17 @@ export async function handleCallCompletion(args: {
     } as any)
     .eq("id", progress.id);
 
-  await logEvent(progress.id, progress.flow_id, progress.player_id, progress.current_block_index, "call_result", {
-    status: args.status,
-    duration,
-  });
+  await logEvent(
+    progress.id,
+    progress.flow_id,
+    progress.player_id,
+    progress.current_block_index,
+    "call_result",
+    {
+      status: args.status,
+      duration,
+    },
+  );
 
   // Dispara SMS condicionais
   const smsList = ((block as any).call_flow_block_sms ?? []) as any[];
@@ -765,10 +802,17 @@ export async function handleCallCompletion(args: {
         if (!sms.template) continue;
         if (!smsCondMatches(sms.condition, args.status, duration, sms.threshold_seconds)) continue;
         if (deferSms) {
-          await logEvent(progress.id, progress.flow_id, progress.player_id, progress.current_block_index, "sms_deferred_quiet_hours", {
-            condition: sms.condition,
-            next_allowed_at: deferSms,
-          });
+          await logEvent(
+            progress.id,
+            progress.flow_id,
+            progress.player_id,
+            progress.current_block_index,
+            "sms_deferred_quiet_hours",
+            {
+              condition: sms.condition,
+              next_allowed_at: deferSms,
+            },
+          );
           continue;
         }
         try {
@@ -780,9 +824,16 @@ export async function handleCallCompletion(args: {
             triggerName: `call_flow:${progress.flow_id}:block:${progress.current_block_index}`,
             variables: vars,
           });
-          await logEvent(progress.id, progress.flow_id, progress.player_id, progress.current_block_index, "sms_sent", {
-            condition: sms.condition,
-          });
+          await logEvent(
+            progress.id,
+            progress.flow_id,
+            progress.player_id,
+            progress.current_block_index,
+            "sms_sent",
+            {
+              condition: sms.condition,
+            },
+          );
         } catch (e) {
           console.error("[call-flow] sms fail", e);
         }
@@ -795,11 +846,7 @@ export async function handleCallCompletion(args: {
   const notAnswered = ["not_answered", "busy", "failed", "undelivered", "no_answer"].includes(
     args.status,
   );
-  if (
-    isCall &&
-    notAnswered &&
-    (progress.attempts_on_block ?? 0) < (block.max_attempts ?? 1)
-  ) {
+  if (isCall && notAnswered && (progress.attempts_on_block ?? 0) < (block.max_attempts ?? 1)) {
     await supabaseAdmin
       .from("call_flow_progress")
       .update({
@@ -807,9 +854,16 @@ export async function handleCallCompletion(args: {
         next_run_at: new Date(Date.now() + 5 * 60_000).toISOString(),
       } as any)
       .eq("id", progress.id);
-    await logEvent(progress.id, progress.flow_id, progress.player_id, progress.current_block_index, "retry_scheduled", {
-      attempt: progress.attempts_on_block,
-    });
+    await logEvent(
+      progress.id,
+      progress.flow_id,
+      progress.player_id,
+      progress.current_block_index,
+      "retry_scheduled",
+      {
+        attempt: progress.attempts_on_block,
+      },
+    );
     return { ok: true };
   }
 

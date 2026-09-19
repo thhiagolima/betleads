@@ -25,6 +25,23 @@ const LABEL: Record<DispatchChannel, string> = {
   call: "Ligações",
 };
 
+const SHORT_BRASIL_MESSAGE = `Assunto: API de SMS Short Brasil indisponivel - lp01-short.painelsms.com
+
+Ola, time Short Brasil.
+
+Estamos tentando enviar SMS pela API documentada abaixo, mas o endpoint nao respondeu a conexao do nosso backend:
+
+- POST http://lp01-short.painelsms.com/bot/single-sms.php
+- Headers: usuario, chave, content-type: application/json
+- Body: {"celular":"DDDNUMERO","mensagem":"...","parceiroId":"..."}
+
+Precisamos confirmar:
+1. Se o host lp01-short.painelsms.com esta operacional.
+2. Se existe IP, firewall ou allowlist necessario.
+3. Se ha endpoint alternativo ou HTTPS recomendado.
+
+Obrigado.`;
+
 const BUSINESSCODE_MESSAGE = `Assunto: API de SMS e Email retornando HTTP 503 (HTML do Apache) — dash.businesscode.com.br
 
 Olá, time BusinessCode.
@@ -56,6 +73,13 @@ O que precisamos saber:
 3. Se existe endpoint/host alternativo enquanto isso.
 
 Obrigado.`;
+
+function supportMessageFor(channel: DispatchChannel): { title: string; body: string } {
+  if (channel === "sms") {
+    return { title: "Mensagem para a Short Brasil", body: SHORT_BRASIL_MESSAGE };
+  }
+  return { title: "Mensagem para a BusinessCode", body: BUSINESSCODE_MESSAGE };
+}
 
 export function ProvidersPausedBanner({ channel }: { channel: DispatchChannel }) {
   const fetchState = useServerFn(getDispatchPauseState);
@@ -96,10 +120,11 @@ export function ProvidersPausedBanner({ channel }: { channel: DispatchChannel })
 
   const row = data?.[channel];
   if (!row?.paused) return null;
+  const supportMessage = supportMessageFor(channel);
 
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(BUSINESSCODE_MESSAGE);
+      await navigator.clipboard.writeText(supportMessage.body);
       setCopied(true);
       toast.success("Mensagem copiada.");
       setTimeout(() => setCopied(false), 2000);
@@ -113,13 +138,10 @@ export function ProvidersPausedBanner({ channel }: { channel: DispatchChannel })
       <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 px-4 py-3 text-sm text-amber-200 flex items-start gap-3">
         <Pause className="h-4 w-4 mt-0.5 shrink-0" />
         <div className="flex-1 space-y-1">
-          <div className="font-medium">
-            Disparos de {LABEL[channel]} pausados
-          </div>
+          <div className="font-medium">Disparos de {LABEL[channel]} pausados</div>
           <div className="text-xs opacity-80">
-            {row.reason ?? "Pausa manual"}. Nada foi perdido — leads, campanhas
-            e pendentes seguem na fila e voltam a ser processados assim que você
-            clicar em <b>Iniciar disparos</b>.
+            {row.reason ?? "Pausa manual"}. Nada foi perdido — leads, campanhas e pendentes seguem
+            na fila e voltam a ser processados assim que você clicar em <b>Iniciar disparos</b>.
           </div>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
@@ -129,7 +151,7 @@ export function ProvidersPausedBanner({ channel }: { channel: DispatchChannel })
             onClick={() => setShowMessage(true)}
             className="border-amber-500/40 text-amber-100 hover:bg-amber-500/10"
           >
-            <Mail className="h-3.5 w-3.5 mr-1.5" /> Mensagem para BusinessCode
+            <Mail className="h-3.5 w-3.5 mr-1.5" /> {supportMessage.title}
           </Button>
           <Button
             size="sm"
@@ -145,17 +167,12 @@ export function ProvidersPausedBanner({ channel }: { channel: DispatchChannel })
       <Dialog open={showMessage} onOpenChange={setShowMessage}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Mensagem para a BusinessCode</DialogTitle>
+            <DialogTitle>{supportMessage.title}</DialogTitle>
             <DialogDescription>
-              Copie e envie ao suporte. Inclui o erro literal retornado pelo
-              servidor deles.
+              Copie e envie ao suporte. Inclui o erro literal retornado pelo servidor deles.
             </DialogDescription>
           </DialogHeader>
-          <Textarea
-            readOnly
-            value={BUSINESSCODE_MESSAGE}
-            className="h-[420px] font-mono text-xs"
-          />
+          <Textarea readOnly value={supportMessage.body} className="h-[420px] font-mono text-xs" />
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowMessage(false)}>
               Fechar
