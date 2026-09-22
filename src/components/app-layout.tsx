@@ -1,25 +1,32 @@
-import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
-import { AppSidebar } from "@/components/app-sidebar";
 import { useRouterState } from "@tanstack/react-router";
-import { useGlobalRealtimeStatus } from "@/hooks/use-realtime-invalidate";
+
+import { AppSidebar } from "@/components/app-sidebar";
 import { ProviderAuthBanner } from "@/components/provider-auth-banner";
+import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { WhatsappNotifier } from "@/components/whatsapp-notifier";
+import { useGlobalRealtimeStatus } from "@/hooks/use-realtime-invalidate";
 
 const titles: Record<string, { title: string; subtitle: string }> = {
   "/": { title: "Dashboard", subtitle: "Visão geral em tempo real" },
   "/players": { title: "Players", subtitle: "Base completa de jogadores" },
-  "/inteligencia": { title: "Inteligência IA", subtitle: "Pergunte qualquer coisa sobre seus players" },
+  "/midia-ltv": { title: "Mídia e LTV", subtitle: "ROI por criativo, campanha e público" },
+  "/inteligencia": {
+    title: "Inteligência IA",
+    subtitle: "Pergunte qualquer coisa sobre seus players",
+  },
   "/treino-ia": { title: "Treino IA", subtitle: "Ensine a inteligência com exemplos reais" },
   "/alertas": { title: "Alertas", subtitle: "Central de recuperação de receita" },
-  "/gamificacao": { title: "Gamificacao", subtitle: "Niveis, VIPs parados e faixas por tenant" },
-  "/regras": { title: "Gamificacao", subtitle: "Niveis, VIPs parados e faixas por tenant" },
+  "/gamificacao": { title: "Gamificação", subtitle: "Níveis, VIPs parados e faixas por tenant" },
+  "/regras": { title: "Gamificação", subtitle: "Níveis, VIPs parados e faixas por tenant" },
   "/whatsapp": { title: "WhatsApp", subtitle: "Sessões, fluxos e inbox em tempo real" },
   "/sms": { title: "SMS", subtitle: "Disparos em massa e automações por SMS" },
-  "/email": { title: "Email", subtitle: "Campanhas e fluxos de email — em breve" },
-  "/ligacoes": { title: "Ligações", subtitle: "Discador e call center — em breve" },
+  "/creditos-sms": { title: "Créditos SMS", subtitle: "Saldo, pedidos e extrato de consumo" },
+  "/email": { title: "Email", subtitle: "Campanhas e fluxos de email" },
+  "/ligacoes": { title: "Ligações", subtitle: "Discador e call center" },
   "/eventos": { title: "Eventos", subtitle: "Timeline de atividades em tempo real" },
   "/webhooks": { title: "Webhooks", subtitle: "Integração com sua casa de aposta" },
   "/configuracoes": { title: "Configurações", subtitle: "Preferências da plataforma" },
+  "/admin": { title: "Super Admin", subtitle: "Usuários, métricas e billing da plataforma" },
 };
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
@@ -33,30 +40,32 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     rt === "active"
       ? { dot: "bg-emerald-400 pulse-realtime", label: "Realtime ativo" }
       : rt === "connecting"
-        ? { dot: "bg-amber-400 animate-pulse", label: "Conectando…" }
+        ? { dot: "bg-amber-400 animate-pulse", label: "Conectando..." }
         : rt === "offline"
           ? { dot: "bg-rose-500", label: "Offline" }
           : { dot: "bg-muted-foreground/60", label: "Em espera" };
 
   return (
     <SidebarProvider>
-      <div className="min-h-screen flex w-full bg-app-gradient">
+      <div className="flex min-h-screen w-full bg-app-gradient">
         <AppSidebar />
-        <div className="flex-1 flex flex-col min-w-0">
-          <header className="h-16 border-b border-border/60 flex items-center gap-3 px-4 sm:px-5 sticky top-0 z-30 bg-background/70 backdrop-blur-xl">
+        <div className="flex min-w-0 flex-1 flex-col">
+          <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-border/60 bg-background/70 px-4 backdrop-blur-xl sm:px-5">
             <SidebarTrigger />
-            <div className="flex flex-col leading-tight min-w-0">
-              <h1 className="text-base font-semibold tracking-tight truncate">{meta.title}</h1>
-              <p className="text-xs text-muted-foreground truncate hidden sm:block">{meta.subtitle}</p>
+            <div className="flex min-w-0 flex-col leading-tight">
+              <h1 className="truncate text-base font-semibold tracking-tight">{meta.title}</h1>
+              <p className="hidden truncate text-xs text-muted-foreground sm:block">
+                {meta.subtitle}
+              </p>
             </div>
-            <div className="ml-auto flex items-center gap-2 rounded-full border border-border/60 bg-card/50 px-3 py-1 text-xs text-muted-foreground backdrop-blur shrink-0">
+            <div className="ml-auto flex shrink-0 items-center gap-2 rounded-full border border-border/60 bg-card/50 px-3 py-1 text-xs text-muted-foreground backdrop-blur">
               <span className={`h-1.5 w-1.5 rounded-full ${rtMeta.dot}`} />
-              <span className="text-foreground/80 hidden sm:inline">{rtMeta.label}</span>
+              <span className="hidden text-foreground/80 sm:inline">{rtMeta.label}</span>
             </div>
           </header>
           <ProviderAuthBanner />
           <WhatsappNotifier />
-          <main className="flex-1 p-4 sm:p-6 overflow-x-hidden animate-fade-in">{children}</main>
+          <main className="flex-1 overflow-x-hidden p-4 animate-fade-in sm:p-6">{children}</main>
         </div>
       </div>
     </SidebarProvider>

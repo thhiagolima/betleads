@@ -952,6 +952,37 @@ function EnvioMassa() {
   const [scheduleDate, setScheduleDate] = useState<string>(defaultScheduleDate);
   const [scheduleTime, setScheduleTime] = useState<string>(defaultScheduleTime);
 
+  useEffect(() => {
+    const raw = window.localStorage.getItem("betleads:smsAudienceDraft");
+    if (!raw) return;
+    try {
+      const draft = JSON.parse(raw) as {
+        label?: string;
+        recipients?: Array<{ phone?: string }>;
+        missingPhone?: number;
+      };
+      const phones = Array.from(
+        new Set(
+          (draft.recipients ?? [])
+            .map((recipient) => String(recipient.phone ?? "").replace(/\D/g, ""))
+            .filter((phone) => phone.length >= 10),
+        ),
+      );
+      if (phones.length === 0) return;
+      setNome(`Público: ${draft.label ?? "Players"}`);
+      setDestinatarios(phones.join("\n"));
+      toast.success(
+        `${phones.length.toLocaleString("pt-BR")} destinatários carregados de Players${
+          draft.missingPhone ? `; ${draft.missingPhone} sem telefone foram ignorados` : ""
+        }.`,
+      );
+    } catch {
+      toast.error("Não foi possível carregar o público vindo de Players.");
+    } finally {
+      window.localStorage.removeItem("betleads:smsAudienceDraft");
+    }
+  }, []);
+
   const scheduledCampaigns = useQuery({
     queryKey: ["sms-scheduled-campaigns"],
     queryFn: () => listScheduledFn(),

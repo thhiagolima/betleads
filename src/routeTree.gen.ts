@@ -14,6 +14,7 @@ import { Route as AdminRouteImport } from './routes/admin'
 import { Route as AlertasRouteImport } from './routes/alertas'
 import { Route as AutomacoesRouteImport } from './routes/automacoes'
 import { Route as ConfiguracoesRouteImport } from './routes/configuracoes'
+import { Route as CreditosSmsRouteImport } from './routes/creditos-sms'
 import { Route as EmailRouteImport } from './routes/email'
 import { Route as EventosRouteImport } from './routes/eventos'
 import { Route as ExpertsRouteImport } from './routes/experts'
@@ -79,6 +80,11 @@ const AutomacoesRoute = AutomacoesRouteImport.update({
 const ConfiguracoesRoute = ConfiguracoesRouteImport.update({
   id: '/configuracoes',
   path: '/configuracoes',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CreditosSmsRoute = CreditosSmsRouteImport.update({
+  id: '/creditos-sms',
+  path: '/creditos-sms',
   getParentRoute: () => rootRouteImport,
 } as any)
 const EmailRoute = EmailRouteImport.update({
@@ -311,6 +317,7 @@ export interface FileRoutesByFullPath {
   '/alertas': typeof AlertasRoute
   '/automacoes': typeof AutomacoesRoute
   '/configuracoes': typeof ConfiguracoesRoute
+  '/creditos-sms': typeof CreditosSmsRoute
   '/email': typeof EmailRoute
   '/eventos': typeof EventosRoute
   '/experts': typeof ExpertsRoute
@@ -359,6 +366,7 @@ export interface FileRoutesByTo {
   '/alertas': typeof AlertasRoute
   '/automacoes': typeof AutomacoesRoute
   '/configuracoes': typeof ConfiguracoesRoute
+  '/creditos-sms': typeof CreditosSmsRoute
   '/email': typeof EmailRoute
   '/eventos': typeof EventosRoute
   '/experts': typeof ExpertsRoute
@@ -408,6 +416,7 @@ export interface FileRoutesById {
   '/alertas': typeof AlertasRoute
   '/automacoes': typeof AutomacoesRoute
   '/configuracoes': typeof ConfiguracoesRoute
+  '/creditos-sms': typeof CreditosSmsRoute
   '/email': typeof EmailRoute
   '/eventos': typeof EventosRoute
   '/experts': typeof ExpertsRoute
@@ -458,6 +467,7 @@ export interface FileRouteTypes {
     | '/alertas'
     | '/automacoes'
     | '/configuracoes'
+    | '/creditos-sms'
     | '/email'
     | '/eventos'
     | '/experts'
@@ -506,6 +516,7 @@ export interface FileRouteTypes {
     | '/alertas'
     | '/automacoes'
     | '/configuracoes'
+    | '/creditos-sms'
     | '/email'
     | '/eventos'
     | '/experts'
@@ -554,6 +565,7 @@ export interface FileRouteTypes {
     | '/alertas'
     | '/automacoes'
     | '/configuracoes'
+    | '/creditos-sms'
     | '/email'
     | '/eventos'
     | '/experts'
@@ -603,6 +615,7 @@ export interface RootRouteChildren {
   AlertasRoute: typeof AlertasRoute
   AutomacoesRoute: typeof AutomacoesRoute
   ConfiguracoesRoute: typeof ConfiguracoesRoute
+  CreditosSmsRoute: typeof CreditosSmsRoute
   EmailRoute: typeof EmailRoute
   EventosRoute: typeof EventosRoute
   ExpertsRoute: typeof ExpertsRoute
@@ -680,6 +693,13 @@ declare module '@tanstack/react-router' {
       path: '/configuracoes'
       fullPath: '/configuracoes'
       preLoaderRoute: typeof ConfiguracoesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/creditos-sms': {
+      id: '/creditos-sms'
+      path: '/creditos-sms'
+      fullPath: '/creditos-sms'
+      preLoaderRoute: typeof CreditosSmsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/email': {
@@ -989,6 +1009,7 @@ const rootRouteChildren: RootRouteChildren = {
   AlertasRoute: AlertasRoute,
   AutomacoesRoute: AutomacoesRoute,
   ConfiguracoesRoute: ConfiguracoesRoute,
+  CreditosSmsRoute: CreditosSmsRoute,
   EmailRoute: EmailRoute,
   EventosRoute: EventosRoute,
   ExpertsRoute: ExpertsRoute,

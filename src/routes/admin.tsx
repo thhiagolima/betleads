@@ -49,16 +49,30 @@ import {
   setPricing,
 } from "@/lib/admin.functions";
 import {
+  adminAdjustSmsCredits,
+  adminClearTenantSmsPricing,
+  adminMarkSmsCreditOrderPaid,
+  adminSetSmsCreditSettings,
+  adminSetTenantSmsPricing,
+  adminSmsCreditConsole,
+  adminUpsertSmsCreditPackage,
+} from "@/lib/sms-credits.functions";
+import {
   Activity,
   Ban,
   CheckCircle2,
   Copy,
+  CreditCard,
   DollarSign,
   LogIn,
+  Package as PackageIcon,
   Plus,
+  Receipt,
+  Settings2,
   ShieldCheck,
   Trash2,
   Users,
+  Wallet,
 } from "lucide-react";
 
 export const Route = createFileRoute("/admin")({
@@ -85,7 +99,11 @@ type UserRow = {
 
 function brl(n: number | string | null | undefined) {
   const v = typeof n === "string" ? Number(n) : (n ?? 0);
-  return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", minimumFractionDigits: 2 });
+  return v.toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+    minimumFractionDigits: 2,
+  });
 }
 
 function fmtDate(d: string | null) {
@@ -140,6 +158,9 @@ function AdminPage() {
           <TabsTrigger value="pricing" className="gap-2">
             <DollarSign className="h-4 w-4" /> Preços
           </TabsTrigger>
+          <TabsTrigger value="sms-credits" className="gap-2">
+            <CreditCard className="h-4 w-4" /> Créditos SMS
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="users">
@@ -150,6 +171,9 @@ function AdminPage() {
         </TabsContent>
         <TabsContent value="pricing">
           <PricingTab />
+        </TabsContent>
+        <TabsContent value="sms-credits">
+          <SmsCreditsAdminTab />
         </TabsContent>
       </Tabs>
     </div>
@@ -171,7 +195,9 @@ function UsersTab() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
-          {isLoading ? "Carregando…" : `${users.length} usuário(s) — uso e custo dos últimos 30 dias.`}
+          {isLoading
+            ? "Carregando…"
+            : `${users.length} usuário(s) — uso e custo dos últimos 30 dias.`}
         </p>
         <CreateUserDialog onCreated={() => qc.invalidateQueries({ queryKey: ["admin"] })} />
       </div>
@@ -284,7 +310,12 @@ function CreateUserDialog({ onCreated }: { onCreated: () => void }) {
         <div className="space-y-3">
           <div>
             <Label htmlFor="dn">Nome da conta</Label>
-            <Input id="dn" value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="Ex: Casa do João" />
+            <Input
+              id="dn"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              placeholder="Ex: Casa do João"
+            />
           </div>
           <div>
             <Label htmlFor="em">Email</Label>
@@ -292,12 +323,22 @@ function CreateUserDialog({ onCreated }: { onCreated: () => void }) {
           </div>
           <div>
             <Label htmlFor="pw">Senha (mín. 8 caracteres)</Label>
-            <Input id="pw" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+            <Input
+              id="pw"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
-          <Button disabled={mut.isPending || !email || password.length < 8 || !displayName} onClick={() => mut.mutate()}>
+          <Button variant="outline" onClick={() => setOpen(false)}>
+            Cancelar
+          </Button>
+          <Button
+            disabled={mut.isPending || !email || password.length < 8 || !displayName}
+            onClick={() => mut.mutate()}
+          >
             {mut.isPending ? "Criando…" : "Criar"}
           </Button>
         </DialogFooter>
@@ -320,7 +361,13 @@ function ImpersonateButton({ userId, email }: { userId: string; email: string })
   });
   return (
     <>
-      <Button size="sm" variant="ghost" title="Entrar como" onClick={() => mut.mutate()} disabled={mut.isPending}>
+      <Button
+        size="sm"
+        variant="ghost"
+        title="Entrar como"
+        onClick={() => mut.mutate()}
+        disabled={mut.isPending}
+      >
         <LogIn className="h-4 w-4" />
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
@@ -431,6 +478,596 @@ function DeleteUserButton({ userId, email }: { userId: string; email: string }) 
 }
 
 // ─── Aba Métricas ────────────────────────────────────────────────────────────
+type SmsCreditSettings = {
+  provider_cost_per_sms: number;
+  default_sale_price_per_sms: number;
+  min_checkout_credits: number;
+  low_balance_threshold: number;
+};
+
+type SmsCreditTenantRow = {
+  tenant_id: string;
+  tenant_name: string | null;
+  balance_credits: number;
+  lifetime_purchased_credits: number;
+  lifetime_used_credits: number;
+  sale_price_per_sms: number;
+  provider_cost_per_sms: number;
+  has_custom_pricing: boolean;
+  low_balance_threshold: number;
+};
+
+type SmsCreditPackageRow = {
+  id?: string;
+  name: string;
+  credits: number;
+  bonus_credits: number;
+  price_cents: number;
+  is_active: boolean;
+  sort_order: number;
+};
+
+type SmsCreditOrderRow = {
+  id: string;
+  tenant_id: string;
+  credits: number;
+  amount_cents: number;
+  currency: string;
+  status: string;
+  checkout_provider: string;
+  external_reference: string | null;
+  created_at: string;
+  paid_at: string | null;
+  tenants?: { nome?: string | null } | Array<{ nome?: string | null }> | null;
+};
+
+function centsAdmin(value: number | string | null | undefined) {
+  return brl(Number(value ?? 0) / 100);
+}
+
+function nullableNumber(value: string) {
+  if (value.trim() === "") return null;
+  return Number(value);
+}
+
+function orderTenantName(order: SmsCreditOrderRow) {
+  const tenants = order.tenants;
+  if (Array.isArray(tenants)) return tenants[0]?.nome ?? order.tenant_id.slice(0, 8);
+  return tenants?.nome ?? order.tenant_id.slice(0, 8);
+}
+
+function SmsCreditsAdminTab() {
+  const fn = useServerFn(adminSmsCreditConsole);
+  const { data, isLoading } = useQuery({
+    queryKey: ["admin", "sms-credits"],
+    queryFn: () => fn(),
+  });
+
+  const settings = data?.settings as SmsCreditSettings | null | undefined;
+  const overview = (data?.overview ?? []) as SmsCreditTenantRow[];
+  const packages = (data?.packages ?? []) as SmsCreditPackageRow[];
+  const orders = (data?.orders ?? []) as SmsCreditOrderRow[];
+
+  if (isLoading || !settings) {
+    return <Card className="h-48 animate-pulse" />;
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+        <SmsCreditSettingsCard settings={settings} />
+        <SmsCreditPackagesCard packages={packages} />
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Wallet className="h-5 w-5 text-primary" />
+            Saldos por tenant
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="overflow-x-auto p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Tenant</TableHead>
+                <TableHead className="text-right">Saldo</TableHead>
+                <TableHead className="text-right">Usado</TableHead>
+                <TableHead className="text-right">Comprado</TableHead>
+                <TableHead className="text-right">Venda/SMS</TableHead>
+                <TableHead className="text-right">Custo/SMS</TableHead>
+                <TableHead className="text-right">Ações</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {overview.map((row) => (
+                <TableRow key={row.tenant_id}>
+                  <TableCell>
+                    <div className="font-medium">{row.tenant_name ?? "Sem nome"}</div>
+                    <div className="text-xs text-muted-foreground font-mono">{row.tenant_id}</div>
+                    {row.has_custom_pricing && (
+                      <Badge className="mt-1 bg-primary/15 text-primary">preço individual</Badge>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right font-semibold">
+                    {Number(row.balance_credits).toLocaleString("pt-BR")}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {Number(row.lifetime_used_credits).toLocaleString("pt-BR")}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {Number(row.lifetime_purchased_credits).toLocaleString("pt-BR")}
+                  </TableCell>
+                  <TableCell className="text-right">{brl(row.sale_price_per_sms)}</TableCell>
+                  <TableCell className="text-right">{brl(row.provider_cost_per_sms)}</TableCell>
+                  <TableCell>
+                    <div className="flex justify-end gap-2">
+                      <AdjustCreditsDialog tenant={row} />
+                      <TenantPricingDialog tenant={row} />
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {overview.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={7} className="py-8 text-center text-sm text-muted-foreground">
+                    Nenhum tenant encontrado.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      <SmsCreditOrdersCard orders={orders} />
+    </div>
+  );
+}
+
+function SmsCreditSettingsCard({ settings }: { settings: SmsCreditSettings }) {
+  const qc = useQueryClient();
+  const fn = useServerFn(adminSetSmsCreditSettings);
+  const [form, setForm] = useState({
+    provider_cost_per_sms: String(settings.provider_cost_per_sms),
+    default_sale_price_per_sms: String(settings.default_sale_price_per_sms),
+    min_checkout_credits: String(settings.min_checkout_credits),
+    low_balance_threshold: String(settings.low_balance_threshold),
+  });
+  const mut = useMutation({
+    mutationFn: () =>
+      fn({
+        data: {
+          provider_cost_per_sms: Number(form.provider_cost_per_sms),
+          default_sale_price_per_sms: Number(form.default_sale_price_per_sms),
+          min_checkout_credits: Number(form.min_checkout_credits),
+          low_balance_threshold: Number(form.low_balance_threshold),
+        },
+      }),
+    onSuccess: () => {
+      toast.success("Configuração de créditos atualizada");
+      qc.invalidateQueries({ queryKey: ["admin", "sms-credits"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Settings2 className="h-5 w-5 text-primary" />
+          Configuração global
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="grid gap-3 sm:grid-cols-2">
+        <AdminNumberField
+          label="Custo fornecedor/SMS"
+          value={form.provider_cost_per_sms}
+          step="0.0001"
+          onChange={(v) => setForm((p) => ({ ...p, provider_cost_per_sms: v }))}
+        />
+        <AdminNumberField
+          label="Preço padrão/SMS"
+          value={form.default_sale_price_per_sms}
+          step="0.0001"
+          onChange={(v) => setForm((p) => ({ ...p, default_sale_price_per_sms: v }))}
+        />
+        <AdminNumberField
+          label="Compra mínima"
+          value={form.min_checkout_credits}
+          step="1"
+          onChange={(v) => setForm((p) => ({ ...p, min_checkout_credits: v }))}
+        />
+        <AdminNumberField
+          label="Alerta de saldo baixo"
+          value={form.low_balance_threshold}
+          step="1"
+          onChange={(v) => setForm((p) => ({ ...p, low_balance_threshold: v }))}
+        />
+        <div className="sm:col-span-2">
+          <Button onClick={() => mut.mutate()} disabled={mut.isPending}>
+            {mut.isPending ? "Salvando..." : "Salvar configuração"}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function AdminNumberField({
+  label,
+  value,
+  step,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  step: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <Label>{label}</Label>
+      <Input
+        type="number"
+        min="0"
+        step={step}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    </div>
+  );
+}
+
+function SmsCreditPackagesCard({ packages }: { packages: SmsCreditPackageRow[] }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <PackageIcon className="h-5 w-5 text-primary" />
+          Pacotes de checkout
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {packages.map((pkg) => (
+          <SmsCreditPackageForm key={pkg.id} pkg={pkg} />
+        ))}
+        <SmsCreditPackageForm
+          pkg={{
+            name: "",
+            credits: 1000,
+            bonus_credits: 0,
+            price_cents: 0,
+            is_active: true,
+            sort_order: packages.length + 1,
+          }}
+          isNew
+        />
+      </CardContent>
+    </Card>
+  );
+}
+
+function SmsCreditPackageForm({
+  pkg,
+  isNew = false,
+}: {
+  pkg: SmsCreditPackageRow;
+  isNew?: boolean;
+}) {
+  const qc = useQueryClient();
+  const fn = useServerFn(adminUpsertSmsCreditPackage);
+  const [form, setForm] = useState({
+    name: pkg.name,
+    credits: String(pkg.credits),
+    bonus_credits: String(pkg.bonus_credits),
+    price_cents: String(pkg.price_cents),
+    sort_order: String(pkg.sort_order),
+    is_active: pkg.is_active,
+  });
+  const mut = useMutation({
+    mutationFn: () =>
+      fn({
+        data: {
+          id: pkg.id ?? null,
+          name: form.name,
+          credits: Number(form.credits),
+          bonus_credits: Number(form.bonus_credits),
+          price_cents: Number(form.price_cents),
+          sort_order: Number(form.sort_order),
+          is_active: form.is_active,
+        },
+      }),
+    onSuccess: () => {
+      toast.success(isNew ? "Pacote criado" : "Pacote atualizado");
+      qc.invalidateQueries({ queryKey: ["admin", "sms-credits"] });
+      if (isNew) {
+        setForm({
+          name: "",
+          credits: "1000",
+          bonus_credits: "0",
+          price_cents: "0",
+          sort_order: "1",
+          is_active: true,
+        });
+      }
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  return (
+    <div className="grid gap-2 rounded-lg border border-border/60 p-3 md:grid-cols-[1.2fr_0.7fr_0.7fr_0.8fr_0.55fr_auto]">
+      <Input
+        placeholder="Nome"
+        value={form.name}
+        onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+      />
+      <Input
+        type="number"
+        min="1"
+        value={form.credits}
+        onChange={(e) => setForm((p) => ({ ...p, credits: e.target.value }))}
+      />
+      <Input
+        type="number"
+        min="0"
+        value={form.bonus_credits}
+        onChange={(e) => setForm((p) => ({ ...p, bonus_credits: e.target.value }))}
+      />
+      <Input
+        type="number"
+        min="0"
+        value={form.price_cents}
+        onChange={(e) => setForm((p) => ({ ...p, price_cents: e.target.value }))}
+      />
+      <Input
+        type="number"
+        min="0"
+        value={form.sort_order}
+        onChange={(e) => setForm((p) => ({ ...p, sort_order: e.target.value }))}
+      />
+      <Button size="sm" onClick={() => mut.mutate()} disabled={mut.isPending || !form.name}>
+        {isNew ? "Criar" : "Salvar"}
+      </Button>
+      <div className="text-xs text-muted-foreground md:col-span-6">
+        {Number(form.credits).toLocaleString("pt-BR")} +{" "}
+        {Number(form.bonus_credits).toLocaleString("pt-BR")} créditos por{" "}
+        {centsAdmin(form.price_cents)}.
+      </div>
+    </div>
+  );
+}
+
+function AdjustCreditsDialog({ tenant }: { tenant: SmsCreditTenantRow }) {
+  const qc = useQueryClient();
+  const fn = useServerFn(adminAdjustSmsCredits);
+  const [open, setOpen] = useState(false);
+  const [delta, setDelta] = useState("1000");
+  const [reason, setReason] = useState("Ajuste manual pelo superadmin");
+  const mut = useMutation({
+    mutationFn: () =>
+      fn({
+        data: {
+          tenantId: tenant.tenant_id,
+          delta: Number(delta),
+          reason,
+        },
+      }),
+    onSuccess: () => {
+      toast.success("Saldo ajustado");
+      setOpen(false);
+      qc.invalidateQueries({ queryKey: ["admin", "sms-credits"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button size="sm" variant="outline">
+          Saldo
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Ajustar saldo SMS</DialogTitle>
+          <DialogDescription>
+            Use valor positivo para adicionar créditos e negativo para remover. A movimentação fica
+            no extrato.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div>
+            <Label>Tenant</Label>
+            <p className="text-sm font-medium">{tenant.tenant_name ?? tenant.tenant_id}</p>
+          </div>
+          <div className="space-y-2">
+            <Label>Delta de créditos</Label>
+            <Input
+              type="number"
+              step="1"
+              value={delta}
+              onChange={(e) => setDelta(e.target.value)}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Motivo</Label>
+            <Input value={reason} onChange={(e) => setReason(e.target.value)} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setOpen(false)}>
+            Cancelar
+          </Button>
+          <Button
+            disabled={mut.isPending || !Number(delta) || reason.length < 3}
+            onClick={() => mut.mutate()}
+          >
+            Confirmar ajuste
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function TenantPricingDialog({ tenant }: { tenant: SmsCreditTenantRow }) {
+  const qc = useQueryClient();
+  const setFn = useServerFn(adminSetTenantSmsPricing);
+  const clearFn = useServerFn(adminClearTenantSmsPricing);
+  const [open, setOpen] = useState(false);
+  const [sale, setSale] = useState(String(tenant.sale_price_per_sms));
+  const [cost, setCost] = useState(String(tenant.provider_cost_per_sms));
+  const save = useMutation({
+    mutationFn: () =>
+      setFn({
+        data: {
+          tenantId: tenant.tenant_id,
+          sale_price_per_sms: nullableNumber(sale),
+          provider_cost_per_sms: nullableNumber(cost),
+        },
+      }),
+    onSuccess: () => {
+      toast.success("Preço individual salvo");
+      setOpen(false);
+      qc.invalidateQueries({ queryKey: ["admin", "sms-credits"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const clear = useMutation({
+    mutationFn: () => clearFn({ data: { tenantId: tenant.tenant_id } }),
+    onSuccess: () => {
+      toast.success("Preço individual removido");
+      setOpen(false);
+      qc.invalidateQueries({ queryKey: ["admin", "sms-credits"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button size="sm" variant="outline">
+          Preço
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Preço individual do tenant</DialogTitle>
+          <DialogDescription>
+            Campos vazios voltam a usar o preço global. Use ponto como separador decimal.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-2">
+            <Label>Preço de venda/SMS</Label>
+            <Input
+              type="number"
+              min="0"
+              step="0.0001"
+              value={sale}
+              onChange={(e) => setSale(e.target.value)}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Custo fornecedor/SMS</Label>
+            <Input
+              type="number"
+              min="0"
+              step="0.0001"
+              value={cost}
+              onChange={(e) => setCost(e.target.value)}
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          {tenant.has_custom_pricing && (
+            <Button variant="outline" disabled={clear.isPending} onClick={() => clear.mutate()}>
+              Remover individual
+            </Button>
+          )}
+          <Button disabled={save.isPending} onClick={() => save.mutate()}>
+            Salvar preço
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function SmsCreditOrdersCard({ orders }: { orders: SmsCreditOrderRow[] }) {
+  const qc = useQueryClient();
+  const fn = useServerFn(adminMarkSmsCreditOrderPaid);
+  const mut = useMutation({
+    mutationFn: (orderId: string) => fn({ data: { orderId, provider: "manual" } }),
+    onSuccess: () => {
+      toast.success("Pedido marcado como pago");
+      qc.invalidateQueries({ queryKey: ["admin", "sms-credits"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Receipt className="h-5 w-5 text-primary" />
+          Pedidos de créditos
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="overflow-x-auto p-0">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Pedido</TableHead>
+              <TableHead>Tenant</TableHead>
+              <TableHead className="text-right">Créditos</TableHead>
+              <TableHead className="text-right">Valor</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Criado em</TableHead>
+              <TableHead className="text-right">Ações</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {orders.map((order) => (
+              <TableRow key={order.id}>
+                <TableCell className="font-mono text-xs">{order.id.slice(0, 8)}</TableCell>
+                <TableCell>{orderTenantName(order)}</TableCell>
+                <TableCell className="text-right">
+                  {Number(order.credits).toLocaleString("pt-BR")}
+                </TableCell>
+                <TableCell className="text-right">{centsAdmin(order.amount_cents)}</TableCell>
+                <TableCell>
+                  {order.status === "paid" ? (
+                    <Badge className="bg-emerald-500/15 text-emerald-400">pago</Badge>
+                  ) : (
+                    <Badge variant="secondary">{order.status}</Badge>
+                  )}
+                </TableCell>
+                <TableCell>{fmtDate(order.created_at)}</TableCell>
+                <TableCell className="text-right">
+                  {order.status === "pending" && (
+                    <Button size="sm" disabled={mut.isPending} onClick={() => mut.mutate(order.id)}>
+                      Marcar pago
+                    </Button>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+            {orders.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={7} className="py-8 text-center text-sm text-muted-foreground">
+                  Nenhum pedido criado.
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
+  );
+}
+
 function MetricsTab() {
   const fn = useServerFn(adminPlatformMetrics);
   const { data, isLoading } = useQuery({
@@ -450,13 +1087,13 @@ function MetricsTab() {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
       {isLoading
-        ? Array.from({ length: 7 }).map((_, i) => (
-            <Card key={i} className="animate-pulse h-24" />
-          ))
+        ? Array.from({ length: 7 }).map((_, i) => <Card key={i} className="animate-pulse h-24" />)
         : items.map((it) => (
             <Card key={it.label}>
               <CardHeader className="pb-1">
-                <CardTitle className="text-xs text-muted-foreground font-medium">{it.label}</CardTitle>
+                <CardTitle className="text-xs text-muted-foreground font-medium">
+                  {it.label}
+                </CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold tracking-tight">{it.value}</div>
@@ -475,7 +1112,11 @@ function PricingTab() {
     queryKey: ["admin", "pricing"],
     queryFn: () => fn(),
   });
-  const items = (data?.pricing ?? []) as Array<{ channel: string; price_per_unit: number; unit_label: string }>;
+  const items = (data?.pricing ?? []) as Array<{
+    channel: string;
+    price_per_unit: number;
+    unit_label: string;
+  }>;
 
   return (
     <div className="space-y-3 max-w-2xl">

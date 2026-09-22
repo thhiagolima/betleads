@@ -12,6 +12,7 @@ import {
   LogOut,
   MessageSquare,
   MessageCircle,
+  CreditCard,
   Rocket,
   Mail,
   Phone,
@@ -89,6 +90,7 @@ const engajamentoItems: NavItem[] = [
       { title: "Fluxos", hash: "fluxos" },
     ],
   },
+  { title: "Créditos SMS", url: "/creditos-sms", icon: CreditCard },
   {
     title: "Email",
     url: "/email",

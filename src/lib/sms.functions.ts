@@ -405,6 +405,75 @@ function summarizeProviderError(status: number, body: unknown): string {
   return `HTTP ${status} do provedor`;
 }
 
+type SmsCreditRpcResult<T = unknown> = {
+  data: T | null;
+  error: { message: string } | null;
+};
+type SmsCreditRpcClient = {
+  rpc: <T = unknown>(fn: string, args: Record<string, unknown>) => Promise<SmsCreditRpcResult<T>>;
+};
+
+function smsCreditDb() {
+  return supabaseAdmin as unknown as SmsCreditRpcClient;
+}
+
+async function resolveBillingTenantId(args: {
+  tenantId?: string | null;
+  playerId?: string | null;
+}) {
+  if (args.tenantId) return args.tenantId;
+  if (!args.playerId) return null;
+  const { data, error } = await supabaseAdmin
+    .from("players")
+    .select("tenant_id")
+    .eq("id", args.playerId)
+    .maybeSingle();
+  if (error) {
+    console.warn("Failed to resolve SMS billing tenant", {
+      playerId: args.playerId,
+      error: error.message,
+    });
+    return null;
+  }
+  return data?.tenant_id ?? null;
+}
+
+async function reserveSmsCredit(tenantId: string, referenceId: string) {
+  const { data, error } = await smsCreditDb().rpc("reserve_sms_credits", {
+    _tenant: tenantId,
+    _credits: 1,
+    _reference_type: "sms_send",
+    _reference_id: referenceId,
+    _idempotency_key: `sms-reserve:${referenceId}`,
+  });
+  if (error) {
+    const message = String(error.message ?? "");
+    if (message.includes("insufficient_sms_credits")) {
+      return { ok: false as const, error: "Saldo de créditos SMS insuficiente" };
+    }
+    throw new Error(message);
+  }
+  return { ok: true as const, data };
+}
+
+async function refundSmsCredit(tenantId: string, referenceId: string, reason: string) {
+  const { error } = await smsCreditDb().rpc("refund_sms_credits", {
+    _tenant: tenantId,
+    _credits: 1,
+    _reference_type: "sms_send",
+    _reference_id: referenceId,
+    _idempotency_key: `sms-refund:${referenceId}`,
+    _reason: reason,
+  });
+  if (error) {
+    console.error("Failed to refund SMS credit", {
+      tenantId,
+      referenceId,
+      error: error.message,
+    });
+  }
+}
+
 /** Envia um SMS, registra log e retorna o resultado. Server-only. */
 export async function sendSmsInternal(args: {
   to: string;
@@ -441,15 +510,57 @@ export async function sendSmsInternal(args: {
     return { ok: false, error: msg };
   }
 
+  const billingTenantId = await resolveBillingTenantId({
+    tenantId: args.tenantId,
+    playerId: args.playerId,
+  });
+  const billingReferenceId = crypto.randomUUID();
+  let creditReserved = false;
+  if (billingTenantId) {
+    const reservation = await reserveSmsCredit(billingTenantId, billingReferenceId);
+    if (!reservation.ok) {
+      await logSend({
+        to: normalized,
+        content: args.content,
+        status: "error",
+        provider_response: { billing_reference_id: billingReferenceId },
+        error: reservation.error,
+        idempotency_key: "",
+        player_id: args.playerId,
+        flow_id: args.flowId,
+        trigger_name: args.triggerName,
+        step_index: args.stepIndex,
+        step_label: args.stepLabel,
+        flow_lead_id: args.flowLeadId,
+        tenant_id: billingTenantId,
+      });
+      return { ok: false as const, status: 402, error: reservation.error };
+    }
+    creditReserved = true;
+  }
+
   const r = await callShortBrasil(normalized, args.content, args.variables);
   const providerMessageId = r.ok ? extractProviderMessageId(r.body) : null;
   const errorSummary = r.ok ? null : summarizeProviderError(r.status, r.body);
   const isTemporary = !r.ok && (r.status === 0 || r.status === 429 || r.status >= 500);
+  if (!r.ok && creditReserved && billingTenantId) {
+    await refundSmsCredit(
+      billingTenantId,
+      billingReferenceId,
+      errorSummary ?? `SMS nao aceito pelo provedor: HTTP ${r.status}`,
+    );
+  }
   await logSend({
     to: normalized,
     content: args.content,
     status: r.ok ? "sent" : isTemporary ? "pending" : "error",
-    provider_response: r.body,
+    provider_response: {
+      ...(r.body && typeof r.body === "object" && !Array.isArray(r.body)
+        ? (r.body as Record<string, unknown>)
+        : { raw: r.body }),
+      billing_reference_id: billingReferenceId,
+      credit_reserved: creditReserved && r.ok,
+    },
     error: errorSummary,
     idempotency_key: r.idempotencyKey,
     provider_message_id: providerMessageId,
@@ -459,7 +570,7 @@ export async function sendSmsInternal(args: {
     step_index: args.stepIndex,
     step_label: args.stepLabel,
     flow_lead_id: args.flowLeadId,
-    tenant_id: args.tenantId ?? null,
+    tenant_id: billingTenantId ?? args.tenantId ?? null,
   });
 
   return r.ok
@@ -499,7 +610,10 @@ export const sendTestSms = createServerFn({ method: "POST" })
       })
       .parse(input),
   )
-  .handler(async ({ data }) => {
+  .handler(async ({ data, context }) => {
+    const { data: tenantRow, error: tenantErr } = await context.supabase.rpc("current_tenant_id");
+    if (tenantErr) throw new Error(tenantErr.message);
+    const tenantId = tenantRow as string | null;
     let variables: Record<string, string> | null = null;
     if (data.playerId) {
       const { data: p } = await supabaseAdmin
@@ -519,6 +633,7 @@ export const sendTestSms = createServerFn({ method: "POST" })
       playerId: data.playerId ?? null,
       triggerName: "teste-manual",
       variables,
+      tenantId,
     });
   });
 
@@ -607,17 +722,16 @@ export const sendBulkSms = createServerFn({ method: "POST" })
         content: z.string().min(1).max(480),
         campaignName: z.string().min(1).max(120),
         route: z.literal("iGaming").optional().default("iGaming"),
-        ratePerMinute: z
-          .number()
-          .int()
-          .min(1)
-          .max(5000)
-          .optional()
-          .default(1000),
+        ratePerMinute: z.number().int().min(1).max(5000).optional().default(1000),
       })
       .parse(input),
   )
   .handler(async ({ data, context }) => {
+    const { data: tenantRow, error: tenantErr } = await context.supabase.rpc("current_tenant_id");
+    if (tenantErr) throw new Error(tenantErr.message);
+    const tenantId = tenantRow as string | null;
+    if (!tenantId) throw new Error("tenant não encontrado para o usuário");
+
     const trigger = `campanha:${data.campaignName}:${data.route}`;
     const targets: Array<{ phone: string; playerId?: string }> = [
       ...data.recipients,
@@ -634,12 +748,6 @@ export const sendBulkSms = createServerFn({ method: "POST" })
     // acompanha o progresso na aba Campanhas.
     const QUEUE_THRESHOLD = 50;
     if (targets.length > QUEUE_THRESHOLD) {
-      const { data: tenantRow, error: tenantErr } = await context.supabase.rpc(
-        "current_tenant_id",
-      );
-      if (tenantErr) throw new Error(tenantErr.message);
-      const tenantId = tenantRow as string | null;
-      if (!tenantId) throw new Error("tenant não encontrado para o usuário");
       const resolved = await resolveRecipientsForTenant(
         tenantId,
         targets.filter((t) => !t.playerId).map((t) => t.phone),
@@ -700,6 +808,7 @@ export const sendBulkSms = createServerFn({ method: "POST" })
       const { data: matches } = await supabaseAdmin
         .from("players")
         .select("id, telefone")
+        .eq("tenant_id", tenantId)
         .in("telefone", Array.from(unmatchedDigits));
       (matches ?? []).forEach((m) => {
         const d = (m.telefone ?? "").replace(/\D/g, "");
@@ -719,11 +828,7 @@ export const sendBulkSms = createServerFn({ method: "POST" })
 
     // Carrega variáveis dos players envolvidos (uma query só)
     const playerIds = Array.from(
-      new Set(
-        targets
-          .map((t) => t.playerId)
-          .filter((id): id is string => typeof id === "string"),
-      ),
+      new Set(targets.map((t) => t.playerId).filter((id): id is string => typeof id === "string")),
     );
     const varsByPlayer = new Map<string, Record<string, string>>();
     if (playerIds.length > 0) {
@@ -749,13 +854,14 @@ export const sendBulkSms = createServerFn({ method: "POST" })
       const batch = targets.slice(i, i + concurrency);
       const batchResults = await Promise.all(
         batch.map(async (t) => {
-          const variables = t.playerId ? varsByPlayer.get(t.playerId) ?? null : null;
+          const variables = t.playerId ? (varsByPlayer.get(t.playerId) ?? null) : null;
           const r = await sendSmsInternal({
             to: t.phone,
             content: data.content,
             playerId: t.playerId ?? null,
             triggerName: trigger,
             variables,
+            tenantId,
           });
           return {
             phone: t.phone,
@@ -866,17 +972,30 @@ function mapDispatchStatus(raw: string | null | undefined): {
   return { delivery_status: "sent", isFinal: false };
 }
 
-function pickDispatchStatus(body: any): string | null {
+function pickDispatchStatus(body: unknown): string | null {
   if (!body || typeof body !== "object") return null;
+  const payload = body as Record<string, unknown>;
+  const data =
+    payload.data && typeof payload.data === "object"
+      ? (payload.data as Record<string, unknown>)
+      : {};
+  const dispatch =
+    payload.dispatch && typeof payload.dispatch === "object"
+      ? (payload.dispatch as Record<string, unknown>)
+      : {};
+  const result =
+    payload.result && typeof payload.result === "object"
+      ? (payload.result as Record<string, unknown>)
+      : {};
   const candidates = [
-    body.status,
-    body.state,
-    body.delivery_status,
-    body.deliveryStatus,
-    body?.data?.status,
-    body?.data?.state,
-    body?.dispatch?.status,
-    body?.result?.status,
+    payload.status,
+    payload.state,
+    payload.delivery_status,
+    payload.deliveryStatus,
+    data.status,
+    data.state,
+    dispatch.status,
+    result.status,
   ];
   for (const c of candidates) {
     if (typeof c === "string" && c.length > 0) return c;
@@ -906,8 +1025,14 @@ export const getSmsDashboard = createServerFn({ method: "POST" })
     z
       .object({
         range_days: z.union([z.literal(1), z.literal(7), z.literal(30)]).optional(),
-        from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-        to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        from: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/)
+          .optional(),
+        to: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/)
+          .optional(),
       })
       .parse(input ?? {}),
   )
@@ -917,17 +1042,14 @@ export const getSmsDashboard = createServerFn({ method: "POST" })
 
     // Resolve tenant do usuário autenticado — todas as queries do dashboard
     // DEVEM ser filtradas por tenant para não misturar dados de outros tenants.
-    const { data: tenantRow, error: tenantErr } = await context.supabase.rpc(
-      "current_tenant_id",
-    );
+    const { data: tenantRow, error: tenantErr } = await context.supabase.rpc("current_tenant_id");
     if (tenantErr) throw new Error(tenantErr.message);
     const tenantId = tenantRow as string | null;
     if (!tenantId) throw new Error("tenant não encontrado para o usuário");
 
     // Resolve período em America/Sao_Paulo (BRT). As datas YYYY-MM-DD vindas
     // do front representam dias do calendário em Brasília — não em UTC.
-    const { parseBrtDayStart, parseBrtDayEnd, brtDayStart, brtDayEnd } =
-      await import("./tz");
+    const { parseBrtDayStart, parseBrtDayEnd, brtDayStart, brtDayEnd } = await import("./tz");
     let sinceDate: Date;
     let endDate: Date;
     if (data.from && data.to) {
@@ -943,7 +1065,9 @@ export const getSmsDashboard = createServerFn({ method: "POST" })
       Math.round((endDate.getTime() - sinceDate.getTime()) / 86400000) + 1,
     );
     let sinceIso = sinceDate.toISOString();
-    const endIso = (data.from && data.to ? parseBrtDayEnd(data.to) : brtDayEnd(endDate)).toISOString();
+    const endIso = (
+      data.from && data.to ? parseBrtDayEnd(data.to) : brtDayEnd(endDate)
+    ).toISOString();
 
     // "Hoje" = último dia BRT do período (mostra o dia mais recente do range)
     let todayStart = new Date(endDate);
@@ -1040,13 +1164,9 @@ export const getSmsDashboard = createServerFn({ method: "POST" })
 
     // 5) Conversões: para cada SMS 'sent' com player_id, conferir se houve depósito
     // dentro da janela CONVERSION_WINDOW_HOURS após o envio.
-    const sentRowsWithPlayer = rows.filter(
-      (r) => r.status === "sent" && !!r.player_id,
-    );
-    const playerIds = Array.from(
-      new Set(sentRowsWithPlayer.map((r) => r.player_id as string)),
-    );
-    let depositsByPlayer = new Map<string, Array<{ created_at: string; valor: number }>>();
+    const sentRowsWithPlayer = rows.filter((r) => r.status === "sent" && !!r.player_id);
+    const playerIds = Array.from(new Set(sentRowsWithPlayer.map((r) => r.player_id as string)));
+    const depositsByPlayer = new Map<string, Array<{ created_at: string; valor: number }>>();
     if (playerIds.length > 0) {
       const PAGE = 1000;
       let offset = 0;
@@ -1074,10 +1194,7 @@ export const getSmsDashboard = createServerFn({ method: "POST" })
     }
 
     // Buckets por dia
-    const buckets = new Map<
-      string,
-      { enviados: number; entregues: number; conversoes: number }
-    >();
+    const buckets = new Map<string, { enviados: number; entregues: number; conversoes: number }>();
     const ensure = (k: string) => {
       let b = buckets.get(k);
       if (!b) {
@@ -1333,9 +1450,7 @@ export const resendFailedSms = createServerFn({ method: "POST" })
     // Pré-carrega variáveis dos players envolvidos
     const playerIds = Array.from(
       new Set(
-        toResend
-          .map((r) => r.player_id)
-          .filter((id): id is string => typeof id === "string"),
+        toResend.map((r) => r.player_id).filter((id): id is string => typeof id === "string"),
       ),
     );
     const varsByPlayer = new Map<string, Record<string, string>>();
@@ -1365,7 +1480,7 @@ export const resendFailedSms = createServerFn({ method: "POST" })
       const batch = toResend.slice(i, i + concurrency);
       const results = await Promise.all(
         batch.map(async (r) => {
-          const variables = r.player_id ? varsByPlayer.get(r.player_id) ?? null : null;
+          const variables = r.player_id ? (varsByPlayer.get(r.player_id) ?? null) : null;
           return sendSmsInternal({
             to: r.to_phone,
             content: r.content,
@@ -1420,13 +1535,7 @@ const ScheduleBulkSchema = z.object({
   campaignName: z.string().min(1).max(120),
   route: z.literal("iGaming").optional().default("iGaming"),
   scheduledAt: z.string().min(1),
-  ratePerMinute: z
-    .number()
-    .int()
-    .min(1)
-    .max(5000)
-    .optional()
-    .default(1000),
+  ratePerMinute: z.number().int().min(1).max(5000).optional().default(1000),
 });
 
 /** Match telefone → playerId dentro do tenant, mesmo shape usado em sendBulkSms. */
@@ -1488,18 +1597,12 @@ export const scheduleBulkSms = createServerFn({ method: "POST" })
       throw new Error("O horário agendado precisa estar pelo menos 1 minuto no futuro");
     }
 
-    const { data: tenantRow, error: tenantErr } = await context.supabase.rpc(
-      "current_tenant_id",
-    );
+    const { data: tenantRow, error: tenantErr } = await context.supabase.rpc("current_tenant_id");
     if (tenantErr) throw new Error(tenantErr.message);
     const tenantId = tenantRow as string | null;
     if (!tenantId) throw new Error("tenant não encontrado para o usuário");
 
-    const targets = await resolveRecipientsForTenant(
-      tenantId,
-      data.phones,
-      data.recipients,
-    );
+    const targets = await resolveRecipientsForTenant(tenantId, data.phones, data.recipients);
     if (targets.length === 0) throw new Error("Sem destinatários válidos");
 
     const { data: inserted, error } = await context.supabase

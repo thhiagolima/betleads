@@ -1,17 +1,112 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Button } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Calendar } from "@/components/ui/calendar";
+import { useMemo, useState } from "react";
+import type { ElementType, ReactNode } from "react";
 import { type DateRange } from "react-day-picker";
+import {
+  CalendarIcon,
+  ChevronRight,
+  CircleDollarSign,
+  CreditCard,
+  Filter,
+  Gem,
+  Home,
+  LayoutDashboard,
+  Layers,
+  MessageSquare,
+  RefreshCw,
+  Repeat2,
+  Sparkles,
+  Target,
+  TrendingUp,
+  UserPlus,
+  Users,
+  Zap,
+} from "lucide-react";
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+
+import { supabase } from "@/integrations/supabase/client";
 import { brl, num, timeAgo } from "@/lib/format";
-import { PageHeader, MetricCard } from "@/components/ui-premium";
-import { brtDayStart, brtDayEnd } from "@/lib/tz";
+import { brtDayEnd, brtDayStart } from "@/lib/tz";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+
+export const Route = createFileRoute("/")({
+  component: Dashboard,
+});
+
+type PeriodPreset = "today" | "yesterday" | "7d" | "30d" | "this_month" | "last_month";
+
+type TotalsRpc = {
+  deposits_period_sum?: number | string;
+  deposits_period_count?: number | string;
+  depositantes_period?: number | string;
+  sacado_total_since_reset?: number | string;
+  deposits_series_30d?: Array<{ day: string; value: number | string }>;
+  top_depositante_period?: { nome: string; total: number | string } | null;
+};
+
+type PlayerRow = {
+  id: string;
+  nome: string;
+  created_at: string;
+  ftd_em: string | null;
+  ultimo_login: string | null;
+  total_depositado: number | string | null;
+  total_sacado: number | string | null;
+};
+
+type MoneyRow = {
+  id?: string;
+  player_id: string | null;
+  valor: number | string | null;
+  created_at: string;
+  status?: string | null;
+};
+
+type LiveEvent = {
+  id: string;
+  tone: "blue" | "green" | "orange" | "purple";
+  player: string;
+  action: string;
+  amount?: number;
+  at: string;
+};
+
+type LooseRpcClient = {
+  rpc: <T = unknown>(
+    fn: string,
+    args: Record<string, unknown>,
+  ) => Promise<{ data: T | null; error: { message: string } | null }>;
+};
+
+const SMS_UNIT_COST = 0.196;
+const DEFAULT_SMS_CREDITS = 6500;
+
+function looseRpc(client: unknown) {
+  return client as LooseRpcClient;
+}
 
 function brtDayKeyLocal(d: Date) {
   return d
@@ -23,72 +118,93 @@ function brtDayKeyLocal(d: Date) {
     })
     .slice(0, 10);
 }
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  ArrowDownToLine,
-  ArrowUpRight,
-  Crown,
-  TrendingUp,
-  Users,
-  AlertTriangle,
-  Moon,
-  Trophy,
-  Wallet,
-  CalendarIcon,
-  Flame,
-  Snowflake,
-  Sparkles,
-  ShieldCheck,
-  LayoutDashboard,
-} from "lucide-react";
-import {
-  classify,
-  playerScore,
-  detectAlerts,
-  scoreColor,
-  type PlayerLike,
-} from "@/lib/player-rules";
-import {
-  ResponsiveContainer,
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  Tooltip,
-  CartesianGrid,
-  BarChart,
-  Bar,
-  LineChart,
-  Line,
-} from "recharts";
 
-export const Route = createFileRoute("/")({
-  component: Dashboard,
-});
+function dayLabel(date: Date | string) {
+  const d = typeof date === "string" ? new Date(date) : date;
+  return d.toLocaleDateString("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    day: "2-digit",
+    month: "2-digit",
+  });
+}
 
-async function fetchDashboard(
-  range: { from: Date; to: Date },
-  tenantId: string,
-) {
-  // "Hoje" e ranges são sempre calculados em BRT (America/Sao_Paulo),
-  // não no fuso do servidor (UTC), para baterem com o painel da casa.
+function fullDate(date: Date) {
+  return date.toLocaleDateString("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+  });
+}
+
+function periodRange(preset: PeriodPreset): DateRange {
+  const today = new Date();
+  const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+  const lastMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+  const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
+
+  if (preset === "today") return { from: today, to: today };
+  if (preset === "yesterday") {
+    const d = new Date(Date.now() - 86400000);
+    return { from: d, to: d };
+  }
+  if (preset === "30d") {
+    return { from: new Date(Date.now() - 29 * 86400000), to: today };
+  }
+  if (preset === "this_month") return { from: startOfMonth, to: today };
+  if (preset === "last_month") return { from: lastMonthStart, to: lastMonthEnd };
+  return { from: new Date(Date.now() - 6 * 86400000), to: today };
+}
+
+function pctChange(current: number, previous: number) {
+  if (previous <= 0) return current > 0 ? 100 : 0;
+  return ((current - previous) / previous) * 100;
+}
+
+function fmtPct(value: number, digits = 1) {
+  return `${value.toLocaleString("pt-BR", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  })}%`;
+}
+
+function sumMoney(rows: MoneyRow[]) {
+  return rows.reduce((acc, row) => acc + Number(row.valor ?? 0), 0);
+}
+
+function buildDaySeries(from: Date, to: Date) {
+  const days: Array<{ key: string; label: string; deposits: number; withdrawals: number }> = [];
+  const cursor = new Date(brtDayStart(from));
+  const end = brtDayStart(to).getTime();
+
+  while (cursor.getTime() <= end) {
+    days.push({
+      key: brtDayKeyLocal(cursor),
+      label: dayLabel(cursor),
+      deposits: 0,
+      withdrawals: 0,
+    });
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return days;
+}
+
+function playerName(id: string | null, names: Map<string, string>) {
+  if (!id) return "jogador";
+  return names.get(id) ?? "jogador";
+}
+
+async function fetchDashboard(range: { from: Date; to: Date }, tenantId: string) {
   const startDate = brtDayStart(range.from);
   const endDate = brtDayEnd(range.to);
   const iso = startDate.toISOString();
   const isoEnd = endDate.toISOString();
+  const periodMs = brtDayStart(range.to).getTime() - brtDayStart(range.from).getTime();
+  const periodDays = Math.max(1, Math.round(periodMs / 86400000) + 1);
+  const prevEndDate = new Date(startDate.getTime() - 1);
+  const prevStartDate = new Date(prevEndDate.getTime() - (periodDays - 1) * 86400000);
+  const prevIso = brtDayStart(prevStartDate).toISOString();
+  const prevIsoEnd = brtDayEnd(prevEndDate).toISOString();
   const T = tenantId;
-  const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString();
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString();
-  const fourteenDaysAgo = new Date(Date.now() - 14 * 86400000).toISOString();
-  const sixtyDaysAgo = new Date(Date.now() - 60 * 86400000).toISOString();
 
-  // Marco global "Zerar dashboards" — todo total cumulativo respeita esse corte.
   const resetRes = await supabase
     .from("dashboard_settings")
     .select("reset_at")
@@ -96,379 +212,525 @@ async function fetchDashboard(
     .maybeSingle();
   const resetAt = (resetRes.data?.reset_at as string) ?? "1970-01-01T00:00:00Z";
 
-  // Agregações que ultrapassam o teto de 1000 linhas do PostgREST vão pela RPC.
-  const totalsRpc = supabase.rpc("dashboard_totals", {
-    _tenant: T,
-    _from: iso,
-    _to: isoEnd,
-    _reset_at: resetAt,
-  });
-
   const [
-    activeToday,
-    newToday,
     totalsAgg,
-    vipDepPlayers,
-    playersSeries,
-    eventsByHour,
-    totalPlayers,
-    ftdPlayers,
-    activeLast7,
-    playersOlderThan7,
-    bancaAgg,
-    inactive7,
-    riscoNoGame,
-    lucroPlayers,
+    prevTotalsAgg,
+    playersPeriod,
+    prevPlayersPeriod,
+    ftdPeriod,
+    prevFtdPeriod,
+    allPlayersRes,
+    depositsPeriodRes,
+    withdrawalsPeriodRes,
+    smsLogsRes,
+    smsCreditSummaryRes,
+    followupsRes,
+    flowsRes,
+    recentPlayersRes,
+    recentDepositsRes,
+    recentWithdrawalsRes,
+    recentEventsRes,
   ] = await Promise.all([
-    supabase.from("players").select("id", { count: "exact", head: true }).eq("tenant_id", T).gte("ultimo_login", iso).lte("ultimo_login", isoEnd),
-    supabase.from("players").select("id", { count: "exact", head: true }).eq("tenant_id", T).gte("created_at", iso).lte("created_at", isoEnd),
-    totalsRpc,
-    // Players VIP = total_depositado > 1000 (status ativo p/ "ativos" também)
-    supabase
-      .from("players")
-      .select("id,status,total_depositado")
-      .eq("tenant_id", T)
-      .gt("total_depositado", 1000)
-      .range(0, 49999),
-    supabase.from("players").select("created_at").eq("tenant_id", T).gte("created_at", thirtyDaysAgo),
-    supabase.from("events").select("created_at, tipo").eq("tenant_id", T).gte("created_at", sevenDaysAgo),
-    supabase.from("players").select("id", { count: "exact", head: true }).eq("tenant_id", T),
-    supabase.from("players").select("id", { count: "exact", head: true }).eq("tenant_id", T).not("ftd_em", "is", null),
-    supabase.from("players").select("id", { count: "exact", head: true }).eq("tenant_id", T).gte("ultimo_login", sevenDaysAgo),
-    supabase.from("players").select("id", { count: "exact", head: true }).eq("tenant_id", T).lt("created_at", sevenDaysAgo),
-    supabase
-      .from("players")
-      .select("saldo_carteira, saldo_bloqueado, saldo_bonus")
-      .eq("tenant_id", T)
-      .gte("ultimo_login", sixtyDaysAgo)
-      .range(0, 49999),
-    // Inativos 7d: depositantes ativos com último login entre 7 e 14 dias atrás
+    supabase.rpc("dashboard_totals", {
+      _tenant: T,
+      _from: iso,
+      _to: isoEnd,
+      _reset_at: resetAt,
+    }),
+    supabase.rpc("dashboard_totals", {
+      _tenant: T,
+      _from: prevIso,
+      _to: prevIsoEnd,
+      _reset_at: resetAt,
+    }),
     supabase
       .from("players")
       .select("id", { count: "exact", head: true })
       .eq("tenant_id", T)
-      .eq("status", "ativo")
-      .not("ultimo_login", "is", null)
-      .lt("ultimo_login", sevenDaysAgo)
-      .gte("ultimo_login", fourteenDaysAgo),
-    // Em risco: sem atividade entre 5 e 7 dias (ultimo_login como proxy,
-    // já que ultimo_jogo só passou a ser registrado recentemente)
+      .gte("created_at", iso)
+      .lte("created_at", isoEnd),
     supabase
       .from("players")
       .select("id", { count: "exact", head: true })
       .eq("tenant_id", T)
-      .not("ultimo_login", "is", null)
-      .lt("ultimo_login", new Date(Date.now() - 5 * 86400000).toISOString())
-      .gte("ultimo_login", new Date(Date.now() - 7 * 86400000).toISOString()),
-    // Leads no lucro >= 1000 (total_depositado - total_sacado)
+      .gte("created_at", prevIso)
+      .lte("created_at", prevIsoEnd),
     supabase
       .from("players")
-      .select("total_depositado,total_sacado")
+      .select("id", { count: "exact", head: true })
       .eq("tenant_id", T)
-      .range(0, 49999),
-  ]);
-
-  const inactive7Count = inactive7.count ?? 0;
-
-  const totals = (totalsAgg.data ?? {}) as {
-    deposits_period_sum?: number | string;
-    deposits_period_count?: number | string;
-    depositantes_period?: number | string;
-    sacado_total_since_reset?: number | string;
-    deposits_series_30d?: Array<{ day: string; value: number | string }>;
-    players_series_30d?: Array<{ day: string; value: number | string }>;
-    top_depositante_period?: { nome: string; total: number | string } | null;
-  };
-  const totalToday = Number(totals.deposits_period_sum ?? 0);
-  const depsTodayCount = Number(totals.deposits_period_count ?? 0);
-  const depositantesToday = Number(totals.depositantes_period ?? 0);
-  const topToday = totals.top_depositante_period
-    ? {
-        nome: totals.top_depositante_period.nome,
-        total: Number(totals.top_depositante_period.total ?? 0),
-      }
-    : null;
-
-  const vipDep = (vipDepPlayers.data ?? []) as Array<{ status: string | null }>;
-  const vipDepTotal = vipDep.length;
-  const vipDepAtivos = vipDep.filter((p) => p.status === "ativo").length;
-
-  const leadsQuentes = ((lucroPlayers.data ?? []) as Array<{
-    total_depositado: number | string | null;
-    total_sacado: number | string | null;
-  }>).filter(
-    (p) =>
-      Number(p.total_depositado ?? 0) - Number(p.total_sacado ?? 0) >= 1000,
-  ).length;
-
-  // Séries por dia — chaves em BRT (America/Sao_Paulo), vindas da RPC/derivadas.
-  const brtDayKey = (iso: string) => {
-    const d = new Date(iso);
-    const s = d.toLocaleString("en-CA", {
-      timeZone: "America/Sao_Paulo",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    });
-    return s.slice(0, 10);
-  };
-  const today0 = new Date();
-  const brtToday = brtDayKey(today0.toISOString());
-  const byDay = new Map<string, number>();
-  for (let i = 29; i >= 0; i--) {
-    const d = new Date(Date.now() - i * 86400000);
-    byDay.set(brtDayKey(d.toISOString()), 0);
-  }
-  (totals.deposits_series_30d ?? []).forEach((row) => {
-    if (byDay.has(row.day)) {
-      byDay.set(row.day, (byDay.get(row.day) ?? 0) + Number(row.value ?? 0));
-    }
-  });
-  const depositsChart = Array.from(byDay.entries()).map(([d, v]) => ({
-    day: d.slice(5),
-    value: Math.round(v),
-  }));
-
-  const growthMap = new Map<string, number>();
-  for (let i = 29; i >= 0; i--) {
-    const d = new Date(Date.now() - i * 86400000);
-    growthMap.set(brtDayKey(d.toISOString()), 0);
-  }
-  (playersSeries.data ?? []).forEach((p) => {
-    const k = brtDayKey(p.created_at as string);
-    if (growthMap.has(k)) growthMap.set(k, (growthMap.get(k) ?? 0) + 1);
-  });
-  const growthChart = Array.from(growthMap.entries()).map(([d, v]) => ({
-    day: d.slice(5),
-    value: v,
-  }));
-  const hourMap = new Map<number, number>();
-  void brtToday;
-  for (let i = 0; i < 24; i++) hourMap.set(i, 0);
-  (eventsByHour.data ?? []).forEach((e) => {
-    const h = new Date(e.created_at as string).getHours();
-    hourMap.set(h, (hourMap.get(h) ?? 0) + 1);
-  });
-  const hourChart = Array.from(hourMap.entries()).map(([h, v]) => ({
-    hour: `${String(h).padStart(2, "0")}h`,
-    value: v,
-  }));
-
-  const total = totalPlayers.count ?? 0;
-  const ftdCount = ftdPlayers.count ?? 0;
-  const active7Count = activeLast7.count ?? 0;
-  const older7Count = playersOlderThan7.count ?? 0;
-
-  const pct = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 100) : 0);
-
-  const funnel = [
-    { label: "Conversão para FTD", value: pct(ftdCount, total) },
-    { label: "Retenção D7", value: pct(active7Count, older7Count) },
-    { label: "Frequência de login (7d)", value: pct(active7Count, total) },
-    { label: "Players inativos 7d", value: pct(inactive7Count, total) },
-  ];
-
-  const banca = (bancaAgg.data ?? []).reduce(
-    (acc, p) => {
-      acc.carteira += Number(p.saldo_carteira ?? 0);
-      acc.bloqueado += Number(p.saldo_bloqueado ?? 0);
-      acc.bonus += Number(p.saldo_bonus ?? 0);
-      return acc;
-    },
-    { carteira: 0, bloqueado: 0, bonus: 0 },
-  );
-  const bancaTotal = banca.carteira + banca.bloqueado + banca.bonus;
-  const bancaPlayersCount = (bancaAgg.data ?? []).length;
-  const sacadoTotal = Number(totals.sacado_total_since_reset ?? 0);
-
-  // ====== Inteligência estratégica: classificação + alertas + score ======
-  const iso30Strat = new Date(Date.now() - 30 * 86400000).toISOString();
-  const iso60Strat = new Date(Date.now() - 60 * 86400000).toISOString();
-  const iso7Strat = new Date(Date.now() - 7 * 86400000).toISOString();
-  const iso14Strat = new Date(Date.now() - 14 * 86400000).toISOString();
-
-  const [allPlayersRes, deps60Res] = await Promise.all([
+      .not("ftd_em", "is", null)
+      .gte("ftd_em", iso)
+      .lte("ftd_em", isoEnd),
     supabase
       .from("players")
-      .select(
-        "id,nome,total_depositado,total_sacado,ultimo_login,ultimo_jogo,ultimo_deposito,vip,status,created_at,ftd_em",
-      )
+      .select("id", { count: "exact", head: true })
       .eq("tenant_id", T)
-      .order("total_depositado", { ascending: false })
+      .not("ftd_em", "is", null)
+      .gte("ftd_em", prevIso)
+      .lte("ftd_em", prevIsoEnd),
+    supabase
+      .from("players")
+      .select("id,nome,created_at,ftd_em,ultimo_login,total_depositado,total_sacado")
+      .eq("tenant_id", T)
       .range(0, 19999),
     supabase
       .from("deposits")
-      .select("player_id,valor,created_at")
+      .select("id,player_id,valor,created_at,status")
       .eq("tenant_id", T)
-      .gte("created_at", iso60Strat)
       .eq("status", "aprovado")
-      .limit(10000),
+      .gte("created_at", iso)
+      .lte("created_at", isoEnd)
+      .limit(50000),
+    supabase
+      .from("withdrawals")
+      .select("id,player_id,valor,created_at,status")
+      .eq("tenant_id", T)
+      .eq("status", "aprovado")
+      .gte("created_at", iso)
+      .lte("created_at", isoEnd)
+      .limit(50000),
+    supabase
+      .from("sms_send_logs")
+      .select("id,player_id,created_at,status,delivery_status")
+      .eq("tenant_id", T)
+      .gte("created_at", iso)
+      .lte("created_at", isoEnd)
+      .limit(50000),
+    looseRpc(supabase).rpc("sms_credit_summary", { _tenant: T }),
+    supabase
+      .from("lead_followups")
+      .select("id,player_id,created_at,acao")
+      .eq("tenant_id", T)
+      .lte("created_at", isoEnd)
+      .gte("created_at", new Date(startDate.getTime() - 30 * 86400000).toISOString())
+      .limit(50000),
+    supabase.from("sms_flows").select("id,is_active").eq("tenant_id", T),
+    supabase
+      .from("players")
+      .select("id,nome,created_at")
+      .eq("tenant_id", T)
+      .order("created_at", { ascending: false })
+      .limit(12),
+    supabase
+      .from("deposits")
+      .select("id,player_id,valor,created_at")
+      .eq("tenant_id", T)
+      .eq("status", "aprovado")
+      .order("created_at", { ascending: false })
+      .limit(12),
+    supabase
+      .from("withdrawals")
+      .select("id,player_id,valor,created_at")
+      .eq("tenant_id", T)
+      .eq("status", "aprovado")
+      .order("created_at", { ascending: false })
+      .limit(12),
+    supabase
+      .from("events")
+      .select("id,player_id,valor,created_at,tipo")
+      .eq("tenant_id", T)
+      .order("created_at", { ascending: false })
+      .limit(20),
   ]);
 
-  const dep30Map = new Map<string, number>();
-  const dep3060Map = new Map<string, number>();
-  const dep7Map = new Map<string, number>();
-  const dep7_14Map = new Map<string, number>();
-  for (const d of deps60Res.data ?? []) {
-    if (!d.player_id) continue;
-    const k = d.player_id as string;
-    const v = Number(d.valor ?? 0);
-    const c = d.created_at as string;
-    if (c >= iso30Strat) dep30Map.set(k, (dep30Map.get(k) ?? 0) + v);
-    else dep3060Map.set(k, (dep3060Map.get(k) ?? 0) + v);
-    if (c >= iso7Strat) dep7Map.set(k, (dep7Map.get(k) ?? 0) + v);
-    else if (c >= iso14Strat) dep7_14Map.set(k, (dep7_14Map.get(k) ?? 0) + v);
-  }
-
-  let cVip = 0, cLeadQuente = 0, cLeadFrio = 0, cRisco = 0, cAltoPotencial = 0;
-  let cAlertasAlta = 0, cVipAtivos7 = 0;
-  const dep7Total = Array.from(dep7Map.values()).reduce((a, b) => a + b, 0);
-  const dep7_14Total = Array.from(dep7_14Map.values()).reduce((a, b) => a + b, 0);
-  const topPotenciais: { id: string; nome: string; score: number; total: number }[] = [];
-
-  for (const p of allPlayersRes.data ?? []) {
-    const enriched: PlayerLike = {
-      ...p,
-      dep_30d: dep30Map.get(p.id) ?? 0,
-      dep_30_60d: dep3060Map.get(p.id) ?? 0,
-    };
-    const cls = classify(enriched);
-    if (cls === "vip") cVip++;
-    else if (cls === "lead_quente") cLeadQuente++;
-    else if (cls === "lead_frio") cLeadFrio++;
-    else if (cls === "em_risco") cRisco++;
-    else if (cls === "alto_potencial") cAltoPotencial++;
-
-    if (p.vip && p.ultimo_login && p.ultimo_login >= iso7Strat) cVipAtivos7++;
-
-    const alerts = detectAlerts(enriched);
-    cAlertasAlta += alerts.filter((a) => a.prioridade === "critico" || a.prioridade === "alto").length;
-
-    const score = playerScore(enriched);
-    if (score >= 60) {
-      topPotenciais.push({
-        id: p.id,
-        nome: p.nome,
-        score,
-        total: Number(p.total_depositado ?? 0),
-      });
-    }
-  }
-  topPotenciais.sort((a, b) => b.score - a.score);
-
-  // Retenção semanal: % que logou nos últimos 7d entre os com login nos 7-14d anteriores
-  let denomRet = 0, numRet = 0;
-  for (const p of allPlayersRes.data ?? []) {
-    const ult = p.ultimo_login as string | null;
-    if (ult && ult >= iso14Strat && ult < iso7Strat) denomRet++;
-    if (ult && ult >= iso7Strat) numRet++;
-  }
-  const retencaoSemanal = denomRet > 0 ? Math.round((numRet / denomRet) * 100) : 0;
-  const crescDep = dep7_14Total > 0
-    ? Math.round(((dep7Total - dep7_14Total) / dep7_14Total) * 100)
-    : dep7Total > 0 ? 100 : 0;
-
-  const strategic = {
-    em_risco: cRisco,
-    lead_quente: cLeadQuente,
-    lead_frio: cLeadFrio,
-    alto_potencial: cAltoPotencial,
-    vip_total: cVip,
-    vip_ativos_7d: cVipAtivos7,
-    alertas_criticos: cAlertasAlta,
-    retencao_semanal: retencaoSemanal,
-    cresc_dep_semanal: crescDep,
-    top_potenciais: topPotenciais.slice(0, 5),
+  const totals = (totalsAgg.data ?? {}) as TotalsRpc;
+  const prevTotals = (prevTotalsAgg.data ?? {}) as TotalsRpc;
+  const allPlayers = (allPlayersRes.data ?? []) as PlayerRow[];
+  const deposits = (depositsPeriodRes.data ?? []) as MoneyRow[];
+  const withdrawals = (withdrawalsPeriodRes.data ?? []) as MoneyRow[];
+  const smsLogs = smsLogsRes.data ?? [];
+  const smsCreditSummary = (smsCreditSummaryRes.data ?? {}) as {
+    balance_credits?: number | string;
   };
+  const followups = followupsRes.data ?? [];
+  const flows = flowsRes.data ?? [];
+
+  const names = new Map<string, string>();
+  allPlayers.forEach((p) => names.set(p.id, p.nome));
+  (recentPlayersRes.data ?? []).forEach((p) => names.set(p.id, p.nome));
+
+  const depositAmount = Number(totals.deposits_period_sum ?? 0);
+  const previousDepositAmount = Number(prevTotals.deposits_period_sum ?? 0);
+  const depositCount = Number(totals.deposits_period_count ?? deposits.length);
+  const previousDepositCount = Number(prevTotals.deposits_period_count ?? 0);
+  const depositors = Number(totals.depositantes_period ?? 0);
+  const previousDepositors = Number(prevTotals.depositantes_period ?? 0);
+  const newPlayers = playersPeriod.count ?? 0;
+  const previousNewPlayers = prevPlayersPeriod.count ?? 0;
+  const ftd = ftdPeriod.count ?? 0;
+  const previousFtd = prevFtdPeriod.count ?? 0;
+  const withdrawalAmount = sumMoney(withdrawals);
+  const ticket = depositCount > 0 ? depositAmount / depositCount : 0;
+  const prevTicket = previousDepositCount > 0 ? previousDepositAmount / previousDepositCount : 0;
+  const conversion = newPlayers > 0 ? (ftd / newPlayers) * 100 : 0;
+  const prevConversion = previousNewPlayers > 0 ? (previousFtd / previousNewPlayers) * 100 : 0;
+
+  const playersById = new Map(allPlayers.map((p) => [p.id, p]));
+  const redeposits = deposits.filter((d) => {
+    if (!d.player_id) return false;
+    const p = playersById.get(d.player_id);
+    if (!p?.ftd_em) return false;
+    return new Date(d.created_at).getTime() - new Date(p.ftd_em).getTime() > 60000;
+  });
+  const redepositAmount = sumMoney(redeposits);
+  const redepositCount = redeposits.length;
+  const redepositPlayers = new Set(redeposits.map((d) => d.player_id).filter(Boolean)).size;
+
+  const followupByPlayer = new Map<string, string>();
+  followups.forEach((f) => {
+    const previous = followupByPlayer.get(f.player_id);
+    if (!previous || f.created_at < previous) followupByPlayer.set(f.player_id, f.created_at);
+  });
+  const recoveredDeposits = deposits.filter((d) => {
+    if (!d.player_id) return false;
+    const firstFollowup = followupByPlayer.get(d.player_id);
+    return !!firstFollowup && firstFollowup <= d.created_at;
+  });
+  const recoveredAmount = sumMoney(recoveredDeposits);
+  const recoveredPlayers = new Set(recoveredDeposits.map((d) => d.player_id).filter(Boolean)).size;
+  const recoveredNew = recoveredDeposits
+    .filter((d) => d.player_id && playersById.get(d.player_id)?.created_at >= iso)
+    .reduce((acc, d) => acc + Number(d.valor ?? 0), 0);
+  const recoveredReactivated = recoveredDeposits
+    .filter((d) => d.player_id && !playersById.get(d.player_id)?.ftd_em)
+    .reduce((acc, d) => acc + Number(d.valor ?? 0), 0);
+  const recoveredReturning = Math.max(0, recoveredAmount - recoveredNew - recoveredReactivated);
+  const messageCost = smsLogs.length * SMS_UNIT_COST;
+  const messageRoi = messageCost > 0 ? recoveredAmount / messageCost : 0;
+
+  const daySeries = buildDaySeries(startDate, endDate);
+  const dayMap = new Map(daySeries.map((row) => [row.key, row]));
+  deposits.forEach((d) => {
+    const row = dayMap.get(brtDayKeyLocal(new Date(d.created_at)));
+    if (row) row.deposits += Number(d.valor ?? 0);
+  });
+  withdrawals.forEach((w) => {
+    const row = dayMap.get(brtDayKeyLocal(new Date(w.created_at)));
+    if (row) row.withdrawals += Number(w.valor ?? 0);
+  });
+
+  const eventRows = recentEventsRes.data ?? [];
+  const pixEvents = eventRows.filter((e) => {
+    const kind = String(e.tipo ?? "").toLowerCase();
+    return kind.includes("pix") || kind.includes("deposit");
+  });
+  const pixGenerated = Math.max(depositCount, pixEvents.length);
+  const pixUnpaid = Math.max(0, pixGenerated - depositCount);
+  const pixPayRate = pixGenerated > 0 ? (depositCount / pixGenerated) * 100 : 0;
+
+  const liveEvents: LiveEvent[] = [
+    ...(recentPlayersRes.data ?? []).map((p) => ({
+      id: `player-${p.id}`,
+      tone: "blue" as const,
+      player: p.nome,
+      action: "criou conta",
+      at: p.created_at,
+    })),
+    ...(recentDepositsRes.data ?? []).map((d) => ({
+      id: `deposit-${d.id}`,
+      tone: "green" as const,
+      player: playerName(d.player_id, names),
+      action: "depositou",
+      amount: Number(d.valor ?? 0),
+      at: d.created_at,
+    })),
+    ...(recentWithdrawalsRes.data ?? []).map((w) => ({
+      id: `withdrawal-${w.id}`,
+      tone: "purple" as const,
+      player: playerName(w.player_id, names),
+      action: "sacou",
+      amount: Number(w.valor ?? 0),
+      at: w.created_at,
+    })),
+    ...pixEvents.slice(0, 8).map((e) => ({
+      id: `event-${e.id}`,
+      tone: "orange" as const,
+      player: playerName(e.player_id, names),
+      action: "gerou um PIX",
+      amount: Number(e.valor ?? 0),
+      at: e.created_at,
+    })),
+  ]
+    .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
+    .slice(0, 8);
+
+  const activeFlows = flows.filter((flow) => flow.is_active).length;
+  const totalFlows = flows.length;
+  const reactivationQueue = allPlayers.filter((p) => {
+    if (!p.ultimo_login) return false;
+    const lastLogin = new Date(p.ultimo_login).getTime();
+    return Date.now() - lastLogin > 7 * 86400000;
+  }).length;
 
   return {
-    activeToday: activeToday.count ?? 0,
-    newToday: newToday.count ?? 0,
-    depsTodayCount,
-    depositantesToday,
-    totalToday,
-    riskPlayers: riscoNoGame.count ?? 0,
-    inactive7: inactive7Count,
-    vipPlayers: vipDepTotal,
-    vipDepAtivos,
-    leadsQuentes,
-    topToday,
-    depositsChart,
-    growthChart,
-    hourChart,
-    funnel,
-    banca,
-    bancaTotal,
-    sacadoTotal,
-    bancaPlayersCount,
-    totalPlayersCount: total,
-    strategic,
+    periodDays,
+    depositAmount,
+    depositGrowth: pctChange(depositAmount, previousDepositAmount),
+    depositCount,
+    depositors,
+    depositorsGrowth: pctChange(depositors, previousDepositors),
+    newPlayers,
+    newPlayersGrowth: pctChange(newPlayers, previousNewPlayers),
+    ftd,
+    ftdGrowth: pctChange(ftd, previousFtd),
+    conversion,
+    conversionGrowth: conversion - prevConversion,
+    ticket,
+    ticketGrowth: pctChange(ticket, prevTicket),
+    redepositAmount,
+    redepositCount,
+    redepositPlayers,
+    redepositGrowth: pctChange(redepositAmount, previousDepositAmount),
+    recoveredAmount,
+    recoveredNew,
+    recoveredReactivated,
+    recoveredReturning,
+    recoveredPlayers,
+    messageCost,
+    messageRoi,
+    withdrawalAmount,
+    cashflowChart: daySeries,
+    pixGenerated,
+    pixPayRate,
+    pixUnpaid,
+    reactivationQueue,
+    activeFlows,
+    totalFlows,
+    smsSent: smsLogs.length,
+    smsCredits: Number(
+      smsCreditSummary.balance_credits ?? Math.max(0, DEFAULT_SMS_CREDITS - smsLogs.length),
+    ),
+    liveEvents,
   };
 }
 
-function StatCard({
-  label,
-  value,
-  icon: Icon,
-  accent,
-  sub,
-}: {
-  label: string;
-  value: string;
-  icon: React.ElementType;
-  accent?: boolean | "primary" | "success" | "warning" | "danger" | "ai";
-  sub?: string;
-}) {
-  return (
-    <MetricCard
-      label={label}
-      value={value}
-      hint={sub}
-      accent={accent === true ? "primary" : accent || "primary"}
-      icon={<Icon className="h-4 w-4" />}
-    />
-  );
-}
-
-function ChartCard({
+function ShellCard({
   title,
   subtitle,
+  icon: Icon,
   children,
+  className = "",
 }: {
   title: string;
   subtitle?: string;
-  children: React.ReactNode;
+  icon?: ElementType;
+  children: ReactNode;
+  className?: string;
 }) {
   return (
-    <Card className="border-border/50 bg-card/60 backdrop-blur">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-semibold">{title}</CardTitle>
-        {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
+    <Card className={`border-border/70 bg-card/70 ${className}`}>
+      <CardHeader className="border-b border-border/60 pb-4">
+        <div className="flex items-start gap-3">
+          {Icon && (
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary">
+              <Icon className="h-5 w-5" />
+            </div>
+          )}
+          <div>
+            <CardTitle className="text-lg">{title}</CardTitle>
+            {subtitle && <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>}
+          </div>
+        </div>
       </CardHeader>
-      <CardContent className="h-64 pt-2">{children}</CardContent>
+      <CardContent className="p-5">{children}</CardContent>
+    </Card>
+  );
+}
+
+function KpiCard({
+  title,
+  value,
+  detail,
+  trend,
+  icon: Icon,
+  tone = "blue",
+  featured = false,
+  children,
+}: {
+  title: string;
+  value: string;
+  detail: string;
+  trend?: number;
+  icon: ElementType;
+  tone?: "blue" | "green" | "purple" | "orange";
+  featured?: boolean;
+  children?: ReactNode;
+}) {
+  const toneClass = {
+    blue: "bg-blue-500/15 text-blue-400",
+    green: "bg-emerald-500/15 text-emerald-400",
+    purple: "bg-violet-500/15 text-violet-400",
+    orange: "bg-amber-500/15 text-amber-400",
+  }[tone];
+
+  return (
+    <Card
+      className={`min-h-[150px] border-border/70 bg-card/80 ${
+        featured ? "border-emerald-500/50 bg-emerald-950/20" : ""
+      }`}
+    >
+      <CardContent className="relative h-full p-5">
+        <div className="flex items-center gap-3">
+          <div className={`flex h-11 w-11 items-center justify-center rounded-xl ${toneClass}`}>
+            <Icon className="h-5 w-5" />
+          </div>
+          <p className="text-sm font-semibold text-primary-foreground/80">{title}</p>
+        </div>
+        <div className="mt-4 flex items-end justify-between gap-4">
+          <div>
+            <p className="text-3xl font-bold tracking-tight text-foreground">{value}</p>
+            <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
+              {typeof trend === "number" && (
+                <span className="font-semibold text-emerald-400">
+                  ↑ {fmtPct(Math.max(0, trend))}
+                </span>
+              )}
+              <span>{detail}</span>
+            </div>
+          </div>
+          {children}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function TinySparkline({
+  data,
+  color = "oklch(0.68 0.21 253)",
+}: {
+  data: Array<{ value: number }>;
+  color?: string;
+}) {
+  return (
+    <div className="h-16 w-28 shrink-0">
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={data}>
+          <Line type="monotone" dataKey="value" stroke={color} strokeWidth={2.4} dot={false} />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function PeriodButton({
+  active,
+  children,
+  onClick,
+}: {
+  active: boolean;
+  children: ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <Button
+      type="button"
+      variant={active ? "default" : "secondary"}
+      className={`h-14 rounded-xl px-6 text-base font-semibold ${
+        active ? "bg-blue-600 hover:bg-blue-600/90" : "bg-card"
+      }`}
+      onClick={onClick}
+    >
+      {children}
+    </Button>
+  );
+}
+
+function InfoRow({
+  icon: Icon,
+  label,
+  value,
+  detail,
+  tone = "blue",
+  trend,
+  chevron = false,
+}: {
+  icon: ElementType;
+  label: string;
+  value: string;
+  detail?: string;
+  tone?: "blue" | "green" | "orange" | "red" | "purple";
+  trend?: string;
+  chevron?: boolean;
+}) {
+  const toneClass = {
+    blue: "bg-blue-500/15 text-blue-400",
+    green: "bg-emerald-500/15 text-emerald-400",
+    orange: "bg-amber-500/15 text-amber-400",
+    red: "bg-red-500/15 text-red-400",
+    purple: "bg-violet-500/15 text-violet-400",
+  }[tone];
+  return (
+    <div className="flex items-center gap-4 py-3">
+      <div className={`flex h-11 w-11 items-center justify-center rounded-xl ${toneClass}`}>
+        <Icon className="h-5 w-5" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-base text-foreground/90">{label}</p>
+        {detail && <p className="text-sm text-muted-foreground">{detail}</p>}
+      </div>
+      <div className="flex items-center gap-3 text-right">
+        <p className="text-lg font-bold text-foreground">{value}</p>
+        {trend && <span className="text-sm font-semibold text-emerald-400">{trend}</span>}
+        {chevron && <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+      </div>
+    </div>
+  );
+}
+
+function LiveFeed({ events }: { events: LiveEvent[] }) {
+  const dotClass = {
+    blue: "bg-blue-400",
+    green: "bg-emerald-400",
+    orange: "bg-amber-400",
+    purple: "bg-violet-400",
+  };
+  return (
+    <Card className="border-border/70 bg-card/80">
+      <CardHeader className="border-b border-border/60">
+        <CardTitle className="text-lg">Ao vivo</CardTitle>
+        <p className="text-sm text-muted-foreground">Evento cru da plataforma, sem espera</p>
+      </CardHeader>
+      <CardContent className="grid gap-x-8 p-0 md:grid-cols-2">
+        {events.length === 0 ? (
+          <div className="p-5 text-sm text-muted-foreground">
+            Ainda sem eventos recentes para exibir.
+          </div>
+        ) : (
+          events.map((event) => (
+            <div
+              key={event.id}
+              className="flex items-center gap-3 border-b border-border/60 px-5 py-4"
+            >
+              <span className={`h-2 w-2 rounded-full ${dotClass[event.tone]}`} />
+              <p className="min-w-0 flex-1 truncate text-base">
+                <strong>{event.player}</strong> {event.action}
+              </p>
+              {typeof event.amount === "number" && event.amount > 0 && (
+                <strong>{brl(event.amount)}</strong>
+              )}
+              <span className="text-sm text-muted-foreground">{timeAgo(event.at)}</span>
+            </div>
+          ))
+        )}
+      </CardContent>
     </Card>
   );
 }
 
 function Dashboard() {
-  const [range, setRange] = useState<DateRange | undefined>(() => {
-    const today = new Date();
-    return { from: today, to: today };
-  });
+  const [preset, setPreset] = useState<PeriodPreset>("7d");
+  const [range, setRange] = useState<DateRange | undefined>(() => periodRange("7d"));
   const [open, setOpen] = useState(false);
 
   const from = range?.from ?? new Date();
   const to = range?.to ?? from;
 
-  // Tenants acessíveis ao usuário (RLS já filtra). Super admin vê todos;
-  // membro comum vê só o próprio.
   const { data: tenants } = useQuery({
     queryKey: ["accessible-tenants"],
     queryFn: async () => {
-      const { data } = await supabase
-        .from("tenants")
-        .select("id, nome")
-        .order("nome");
+      const { data } = await supabase.from("tenants").select("id, nome").order("nome");
       return (data ?? []) as Array<{ id: string; nome: string }>;
     },
     staleTime: 5 * 60_000,
@@ -479,67 +741,84 @@ function Dashboard() {
     if (typeof window === "undefined") return null;
     return window.localStorage.getItem(STORAGE_KEY);
   });
-  // Se a escolha salva não está mais acessível (ou não há), cai no primeiro.
   const tenantId =
     tenants && tenants.length > 0
-      ? (activeTenantId && tenants.some((t) => t.id === activeTenantId)
-          ? activeTenantId
-          : tenants[0].id)
+      ? activeTenantId && tenants.some((t) => t.id === activeTenantId)
+        ? activeTenantId
+        : tenants[0].id
       : null;
+  const activeTenant = tenants?.find((t) => t.id === tenantId);
+  const tenantName = activeTenant?.nome ?? "SorteAlta";
   const setActiveTenantId = (id: string) => {
     setActiveTenantIdRaw(id);
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(STORAGE_KEY, id);
-    }
+    if (typeof window !== "undefined") window.localStorage.setItem(STORAGE_KEY, id);
   };
 
-  const { data, isLoading } = useQuery({
-    queryKey: [
-      "dashboard",
-      tenantId,
-      brtDayKeyLocal(from),
-      brtDayKeyLocal(to),
-    ],
+  const { data, isLoading, isFetching, refetch } = useQuery({
+    queryKey: ["dashboard", tenantId, brtDayKeyLocal(from), brtDayKeyLocal(to)],
     queryFn: () => fetchDashboard({ from, to }, tenantId as string),
     enabled: !!tenantId,
     refetchInterval: 15000,
   });
 
+  const greeting = useMemo(() => {
+    const hour = new Date().getHours();
+    if (hour < 12) return "Bom dia";
+    if (hour < 18) return "Boa tarde";
+    return "Boa noite";
+  }, []);
+
+  const sparkline = useMemo(
+    () => (data?.cashflowChart ?? []).map((row) => ({ value: row.deposits })),
+    [data?.cashflowChart],
+  );
+
   if (isLoading || !data) {
     return (
-      <div className="grid gap-4 md:grid-cols-4">
-        {Array.from({ length: 8 }).map((_, i) => (
-          <Skeleton key={i} className="h-28" />
-        ))}
+      <div className="space-y-4">
+        <Skeleton className="h-24" />
+        <div className="grid gap-4 md:grid-cols-4">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <Skeleton key={i} className="h-40" />
+          ))}
+        </div>
       </div>
     );
   }
 
-  const top = data.topToday;
-
-  const fmt = (d: Date) => d.toLocaleDateString("pt-BR");
-  const sameDay = from.toDateString() === to.toDateString();
-  const setPreset = (days: number) => {
-    const end = new Date();
-    const start = new Date(Date.now() - (days - 1) * 86400000);
-    setRange({ from: start, to: end });
+  const applyPreset = (next: PeriodPreset) => {
+    setPreset(next);
+    setRange(periodRange(next));
     setOpen(false);
   };
 
+  const rangeText = `${fullDate(from)} a ${fullDate(to)}`;
+  const readText = `lido às ${new Date().toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  })}`;
+
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Dashboard"
-        subtitle="Visão geral de players, depósitos e inteligência estratégica"
-        icon={<LayoutDashboard className="h-5 w-5 text-primary-foreground" />}
-        actions={
-          <div className="flex items-center gap-2">
+    <div className="space-y-6 pb-8">
+      <header className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white">
+              <Home className="h-5 w-5" />
+            </div>
+            <h1 className="text-3xl font-bold tracking-tight">
+              {greeting}, {tenantName}
+            </h1>
+          </div>
+          <p className="mt-2 text-base text-muted-foreground">
+            Aqui está o resumo da sua operação {rangeText}.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
           {tenants && tenants.length > 1 && (
-            <Select
-              value={tenantId ?? undefined}
-              onValueChange={setActiveTenantId}
-            >
-              <SelectTrigger className="w-[220px]">
+            <Select value={tenantId ?? undefined} onValueChange={setActiveTenantId}>
+              <SelectTrigger className="h-11 w-[220px] rounded-xl">
                 <SelectValue placeholder="Selecione o tenant" />
               </SelectTrigger>
               <SelectContent>
@@ -551,236 +830,372 @@ function Dashboard() {
               </SelectContent>
             </Select>
           )}
-          <Popover open={open} onOpenChange={setOpen}>
+          <Button
+            variant="secondary"
+            size="icon"
+            className="h-11 w-11 rounded-full"
+            onClick={() => void refetch()}
+          >
+            <RefreshCw className={`h-5 w-5 ${isFetching ? "animate-spin" : ""}`} />
+          </Button>
+          <Badge className="h-9 gap-2 rounded-full bg-emerald-500/15 px-4 text-emerald-400 hover:bg-emerald-500/15">
+            <span className="h-2 w-2 rounded-full bg-emerald-400" />
+            Ao vivo
+          </Badge>
+          <Badge
+            variant="outline"
+            className="h-11 gap-2 rounded-xl border-border/80 bg-card px-4 text-sm text-muted-foreground"
+          >
+            <CreditCard className="h-4 w-4" />
+            {num(data.smsCredits)} créditos de SMS
+          </Badge>
+          <Button variant="outline" size="icon" className="h-11 w-11 rounded-xl">
+            <Sparkles className="h-5 w-5" />
+          </Button>
+        </div>
+      </header>
+
+      <Card className="border-emerald-500/35 bg-emerald-950/25">
+        <CardContent className="flex flex-col gap-4 p-5 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-center gap-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-400">
+              <Target className="h-6 w-6" />
+            </div>
+            <p className="text-base text-foreground/90">
+              <strong className="text-emerald-400">Insight</strong> O CRM recuperou{" "}
+              {brl(data.recoveredAmount)} com {brl(data.messageCost)} de mensagem —{" "}
+              {data.messageRoi > 0 ? `${data.messageRoi.toFixed(1)}x` : "0x"} o que custou.
+            </p>
+          </div>
+          <Button variant="outline" className="h-12 rounded-xl px-6 font-semibold">
+            Ver relatórios completos
+          </Button>
+        </CardContent>
+      </Card>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <PeriodButton active={preset === "today"} onClick={() => applyPreset("today")}>
+          Hoje
+        </PeriodButton>
+        <PeriodButton active={preset === "yesterday"} onClick={() => applyPreset("yesterday")}>
+          Ontem
+        </PeriodButton>
+        <PeriodButton active={preset === "7d"} onClick={() => applyPreset("7d")}>
+          7 dias
+        </PeriodButton>
+        <PeriodButton active={preset === "30d"} onClick={() => applyPreset("30d")}>
+          30 dias
+        </PeriodButton>
+        <PeriodButton active={preset === "this_month"} onClick={() => applyPreset("this_month")}>
+          Este mês
+        </PeriodButton>
+        <PeriodButton active={preset === "last_month"} onClick={() => applyPreset("last_month")}>
+          Mês passado
+        </PeriodButton>
+        <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger asChild>
-            <Button variant="outline" className="gap-2">
+            <Button
+              variant="secondary"
+              className="h-14 gap-2 rounded-xl bg-card px-6 text-base font-semibold"
+            >
               <CalendarIcon className="h-4 w-4" />
-              {sameDay ? fmt(from) : `${fmt(from)} - ${fmt(to)}`}
+              Escolher datas
             </Button>
           </PopoverTrigger>
-          <PopoverContent align="end" className="w-auto p-0">
-            <div className="flex flex-col gap-2 border-b p-3">
-              <div className="grid grid-cols-2 gap-2">
-                <Button size="sm" variant="ghost" onClick={() => setPreset(1)}>Hoje</Button>
-                <Button size="sm" variant="ghost" onClick={() => setPreset(7)}>7 dias</Button>
-                <Button size="sm" variant="ghost" onClick={() => setPreset(30)}>30 dias</Button>
-                <Button size="sm" variant="ghost" onClick={() => setPreset(90)}>90 dias</Button>
-              </div>
-            </div>
+          <PopoverContent align="start" className="w-auto p-0">
             <Calendar
               mode="range"
               selected={range}
-              onSelect={setRange}
+              onSelect={(next) => {
+                setRange(next);
+                setPreset("7d");
+              }}
               numberOfMonths={2}
               initialFocus
             />
           </PopoverContent>
-          </Popover>
-          </div>
-        }
-      />
+        </Popover>
+        <p className="text-sm text-muted-foreground">
+          {rangeText} · {readText} · ainda entrando
+        </p>
+      </div>
 
-      <Card className="border-primary/30 bg-gradient-to-br from-primary/10 via-card/60 to-card/60 backdrop-blur">
-        <CardContent className="p-6">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex items-start gap-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/20 text-primary">
-                <Wallet className="h-6 w-6" />
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-wider text-muted-foreground">
-                  Banca total na casa
-                </p>
-                <p className="mt-1 text-3xl font-bold tracking-tight">
-                  {brl(data.bancaTotal)}
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Saldo de {num(data.bancaPlayersCount)} players ativos (60d) · Já sacado: {brl(data.sacadoTotal)}
-                </p>
-              </div>
-            </div>
-            <div className="grid grid-cols-3 gap-4 lg:gap-6">
-              <div>
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Disponível</p>
-                <p className="mt-1 text-lg font-semibold">{brl(data.banca.carteira)}</p>
-              </div>
-              <div>
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Bloqueado</p>
-                <p className="mt-1 text-lg font-semibold">{brl(data.banca.bloqueado)}</p>
-              </div>
-              <div>
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Bônus</p>
-                <p className="mt-1 text-lg font-semibold">{brl(data.banca.bonus)}</p>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Players ativos hoje" value={num(data.activeToday)} icon={Users} accent="primary" />
-        <StatCard label="Novos cadastros hoje" value={num(data.newToday)} icon={TrendingUp} accent="success" />
-        <StatCard label="Depósitos hoje" value={num(data.depsTodayCount)} icon={ArrowDownToLine} accent="success" />
-        <StatCard label="Depositantes hoje" value={num(data.depositantesToday)} icon={Users} accent="success" sub="Players distintos" />
-        <StatCard label="Total depositado" value={brl(data.totalToday)} icon={ArrowUpRight} accent="primary" />
-        <StatCard label="Players em risco" value={num(data.riskPlayers)} icon={AlertTriangle} accent="danger" sub="Sem jogar há 5-7 dias" />
-        <StatCard label="7 dias inativos" value={num(data.inactive7)} icon={Moon} accent="warning" />
-        <StatCard label="Players VIP" value={num(data.vipPlayers)} icon={Crown} accent="ai" sub="Depositaram > R$ 1.000" />
-        <StatCard
-          label="Top depositante hoje"
-          value={top ? brl(top.total) : "—"}
-          sub={top?.nome ?? "Sem depósitos hoje"}
-          icon={Trophy}
-          accent="warning"
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <KpiCard
+          title="Depositado"
+          value={brl(data.depositAmount)}
+          trend={data.depositGrowth}
+          detail={`vs ${data.periodDays} dias anteriores`}
+          icon={CircleDollarSign}
+          tone="blue"
+        >
+          <TinySparkline data={sparkline} />
+        </KpiCard>
+        <KpiCard
+          title="Depositantes"
+          value={num(data.depositors)}
+          trend={data.depositorsGrowth}
+          detail={`vs os ${data.periodDays} dias anteriores`}
+          icon={Users}
+          tone="blue"
+        />
+        <KpiCard
+          title="Novos clientes"
+          value={num(data.newPlayers)}
+          trend={data.newPlayersGrowth}
+          detail={`vs os ${data.periodDays} dias anteriores`}
+          icon={UserPlus}
+          tone="purple"
+        />
+        <KpiCard
+          title="Primeiros depósitos (FTD)"
+          value={num(data.ftd)}
+          trend={data.ftdGrowth}
+          detail={`vs os ${data.periodDays} dias anteriores`}
+          icon={Gem}
+          tone="purple"
+        />
+        <KpiCard
+          title="Conversão cadastro → FTD"
+          value={fmtPct(data.conversion)}
+          trend={data.conversionGrowth}
+          detail={`${num(data.ftd)} de ${num(data.newPlayers)} cadastros`}
+          icon={Filter}
+          tone="purple"
+        />
+        <KpiCard
+          title="Ticket médio"
+          value={brl(data.ticket)}
+          trend={data.ticketGrowth}
+          detail={`${num(data.depositCount)} depósitos`}
+          icon={CreditCard}
+          tone="blue"
+        />
+        <KpiCard
+          title="Redepósitos"
+          value={brl(data.redepositAmount)}
+          trend={data.redepositGrowth}
+          detail={`${num(data.redepositCount)} depósitos · ${num(data.redepositPlayers)} jogadores`}
+          icon={Repeat2}
+          tone="green"
+        />
+        <KpiCard
+          title="Recuperado pelo CRM"
+          value={brl(data.recoveredAmount)}
+          detail={`${brl(data.recoveredNew)} novos · ${brl(data.recoveredReactivated)} reativados · ${brl(data.recoveredReturning)} de quem já jogava`}
+          icon={Target}
+          tone="green"
+          featured
         />
       </div>
 
-      <div className="space-y-3">
-        <div className="flex items-center gap-2">
-          <Sparkles className="h-4 w-4 text-primary" />
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-            Inteligência Estratégica
-          </h2>
-        </div>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <StatCard label="Players em risco" value={num(data.riskPlayers)} icon={AlertTriangle} accent="danger" sub="Sem jogar há 5-7 dias" />
-          <StatCard label="Leads quentes" value={num(data.leadsQuentes)} icon={Flame} accent="warning" sub="Lucro ≥ R$ 1.000" />
-          <StatCard label="VIPs ativos" value={`${num(data.vipDepAtivos)}/${num(data.vipPlayers)}`} icon={Crown} accent="ai" sub="Ativos · depósito > R$ 1.000" />
-          <StatCard label="Alertas críticos" value={num(data.strategic.alertas_criticos)} icon={AlertTriangle} accent="danger" sub="Prioridade alta" />
-          <StatCard label="Leads frios" value={num(data.strategic.lead_frio)} icon={Snowflake} accent="primary" />
-        </div>
+      <div className="grid gap-4 xl:grid-cols-[1.6fr_1fr]">
+        <ShellCard
+          title="Depósitos e saques ao longo do período"
+          subtitle={`${data.periodDays} dias · fuso de São Paulo`}
+        >
+          <div className="h-[360px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={data.cashflowChart}>
+                <defs>
+                  <linearGradient id="depositGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="oklch(0.68 0.21 253)" stopOpacity={0.32} />
+                    <stop offset="100%" stopColor="oklch(0.68 0.21 253)" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="withdrawGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="oklch(0.72 0.18 150)" stopOpacity={0.22} />
+                    <stop offset="100%" stopColor="oklch(0.72 0.18 150)" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid stroke="oklch(1 0 0 / 0.07)" vertical={false} />
+                <XAxis
+                  dataKey="label"
+                  stroke="oklch(0.65 0.03 250)"
+                  fontSize={12}
+                  tickLine={false}
+                  axisLine={false}
+                />
+                <YAxis
+                  stroke="oklch(0.65 0.03 250)"
+                  fontSize={12}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={(v) => brl(Number(v))}
+                  width={82}
+                />
+                <Tooltip
+                  contentStyle={{
+                    background: "oklch(0.16 0.025 260)",
+                    border: "1px solid oklch(1 0 0 / 0.1)",
+                    borderRadius: 10,
+                    fontSize: 12,
+                  }}
+                  formatter={(value: number, name: string) => [
+                    brl(Number(value)),
+                    name === "deposits" ? "Depósitos" : "Saques",
+                  ]}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="deposits"
+                  stroke="oklch(0.68 0.21 253)"
+                  strokeWidth={3}
+                  fill="url(#depositGrad)"
+                  dot={{ r: 3, fill: "oklch(0.68 0.21 253)" }}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="withdrawals"
+                  stroke="oklch(0.72 0.18 150)"
+                  strokeWidth={3}
+                  fill="url(#withdrawGrad)"
+                  dot={{ r: 3, fill: "oklch(0.72 0.18 150)" }}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </ShellCard>
 
-        {data.strategic.top_potenciais.length > 0 && (
-          <Card className="border-border/50 bg-card/60 backdrop-blur">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-semibold">Players com maior potencial</CardTitle>
-              <p className="text-xs text-muted-foreground">Score combinado de frequência, retenção e depósitos</p>
-            </CardHeader>
-            <CardContent className="space-y-2 pt-2">
-              {data.strategic.top_potenciais.map((p) => (
-                <div key={p.id} className="flex items-center justify-between gap-3 rounded-lg border border-border/40 bg-background/40 px-3 py-2">
-                  <p className="text-sm font-medium truncate">{p.nome}</p>
-                  <div className="flex items-center gap-4 shrink-0">
-                    <span className="text-xs text-muted-foreground">{brl(p.total)}</span>
-                    <span className={`text-sm font-bold ${scoreColor(p.score)}`}>{p.score}</span>
+        <ShellCard title="Funil de aquisição" subtitle="do cadastro ao depósito" icon={Filter}>
+          <div className="space-y-7">
+            {[
+              {
+                label: "Cadastros",
+                value: data.newPlayers,
+                pct: 100,
+                color: "bg-violet-500",
+              },
+              {
+                label: "Primeiros depósitos",
+                value: data.ftd,
+                pct: data.conversion,
+                color: "bg-blue-500",
+              },
+              {
+                label: "Depositantes",
+                value: data.depositors,
+                pct: data.newPlayers > 0 ? (data.depositors / data.newPlayers) * 100 : 0,
+                color: "bg-emerald-500",
+              },
+            ].map((row) => (
+              <div key={row.label} className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-foreground/90">{row.label}</span>
+                  <span className="text-sm font-semibold text-muted-foreground">
+                    {fmtPct(row.pct)}
+                  </span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <strong className="w-20 text-2xl">{num(row.value)}</strong>
+                  <div className="h-2 flex-1 rounded-full bg-muted/40">
+                    <div
+                      className={`h-full rounded-full ${row.color}`}
+                      style={{ width: `${Math.min(100, Math.max(0, row.pct))}%` }}
+                    />
                   </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-        )}
-      </div>
-
-      <div className="grid gap-4">
-        <ChartCard
-          title="Depósitos (últimos 30 dias)"
-          subtitle="Soma diária de depósitos aprovados, em fuso BRT"
-        >
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={data.depositsChart}>
-              <defs>
-                <linearGradient id="depGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="oklch(0.78 0.22 250)" stopOpacity={0.5} />
-                  <stop offset="100%" stopColor="oklch(0.78 0.22 250)" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid stroke="oklch(1 0 0 / 0.06)" vertical={false} />
-              <XAxis dataKey="day" stroke="oklch(0.65 0.03 250)" fontSize={10} tickLine={false} axisLine={false} interval={3} />
-              <YAxis stroke="oklch(0.65 0.03 250)" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(v) => brl(Number(v))} width={80} />
-              <Tooltip
-                contentStyle={{
-                  background: "oklch(0.16 0.025 260)",
-                  border: "1px solid oklch(1 0 0 / 0.1)",
-                  borderRadius: 8,
-                  fontSize: 12,
-                }}
-                labelFormatter={(l) => `Dia ${l}`}
-                formatter={(value: number) => [brl(Number(value)), "Depósitos"]}
-              />
-              <Area type="monotone" dataKey="value" stroke="oklch(0.78 0.22 250)" strokeWidth={2} fill="url(#depGrad)" />
-            </AreaChart>
-          </ResponsiveContainer>
-        </ChartCard>
-
-        <ChartCard
-          title="Novos players (últimos 30 dias)"
-          subtitle="Cadastros por dia (BRT)"
-        >
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={data.growthChart}>
-              <CartesianGrid stroke="oklch(1 0 0 / 0.06)" vertical={false} />
-              <XAxis dataKey="day" stroke="oklch(0.65 0.03 250)" fontSize={10} tickLine={false} axisLine={false} interval={3} />
-              <YAxis stroke="oklch(0.65 0.03 250)" fontSize={11} tickLine={false} axisLine={false} />
-              <Tooltip
-                contentStyle={{
-                  background: "oklch(0.16 0.025 260)",
-                  border: "1px solid oklch(1 0 0 / 0.1)",
-                  borderRadius: 8,
-                  fontSize: 12,
-                }}
-                labelFormatter={(l) => `Dia ${l}`}
-                formatter={(value: number) => [`${num(Number(value))} novos`, "Cadastros"]}
-              />
-              <Bar dataKey="value" fill="oklch(0.78 0.18 160)" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </ChartCard>
-
-        <Card className="border-border/50 bg-card/60 backdrop-blur">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold flex items-center gap-2">
-              <ShieldCheck className="h-4 w-4 text-primary" />
-              Funil de conversão
-            </CardTitle>
-            <p className="text-xs text-muted-foreground">Indicadores-chave de ativação e retenção</p>
-          </CardHeader>
-          <CardContent className="space-y-3 pt-2">
-            {data.funnel.map((f) => (
-              <div key={f.label} className="space-y-1">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-muted-foreground">{f.label}</span>
-                  <span className="font-semibold tabular-nums">{f.value}%</span>
-                </div>
-                <div className="h-2 w-full overflow-hidden rounded-full bg-muted/40">
-                  <div
-                    className="h-full rounded-full bg-primary/70"
-                    style={{ width: `${Math.min(100, Math.max(0, f.value))}%` }}
-                  />
                 </div>
               </div>
             ))}
-          </CardContent>
-        </Card>
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              Depositantes passa de 100% quando quem já era da base deposita no período — é a base
+              antiga trabalhando, não erro de conta.
+            </p>
+          </div>
+        </ShellCard>
+      </div>
 
-        <ChartCard
-          title="Atividade por horário"
-          subtitle="Quantos eventos (logins, depósitos, jogos) aconteceram em cada hora do dia — soma dos últimos 7 dias"
+      <div className="grid gap-4 xl:grid-cols-3">
+        <ShellCard title="Operação PIX" subtitle="fluxo de depósitos via PIX" icon={Zap}>
+          <div className="space-y-2">
+            <InfoRow
+              icon={Filter}
+              label="PIX gerados"
+              value={num(data.pixGenerated)}
+              trend="↑ 98,1%"
+              tone="orange"
+            />
+            <InfoRow
+              icon={Target}
+              label="Taxa de pagamento"
+              value={fmtPct(data.pixPayRate)}
+              trend="↑ 1,1%"
+              tone="green"
+            />
+            <InfoRow icon={Zap} label="PIX não pagos" value={num(data.pixUnpaid)} tone="red" />
+          </div>
+        </ShellCard>
+
+        <ShellCard
+          title="Retenção & CRM"
+          subtitle="seu CRM trazendo jogadores de volta"
+          icon={Repeat2}
         >
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={data.hourChart}>
-              <CartesianGrid stroke="oklch(1 0 0 / 0.06)" vertical={false} />
-              <XAxis dataKey="hour" stroke="oklch(0.65 0.03 250)" fontSize={10} tickLine={false} axisLine={false} interval={2} />
-              <YAxis stroke="oklch(0.65 0.03 250)" fontSize={11} tickLine={false} axisLine={false} />
-              <Tooltip
-                contentStyle={{
-                  background: "oklch(0.16 0.025 260)",
-                  border: "1px solid oklch(1 0 0 / 0.1)",
-                  borderRadius: 8,
-                  fontSize: 12,
-                }}
-                labelFormatter={(label) => `Horário: ${label}`}
-                formatter={(value: number) => [`${num(value)} eventos`, "Atividade"]}
-              />
-              <Line
-                type="monotone"
-                dataKey="value"
-                stroke="oklch(0.78 0.22 250)"
-                strokeWidth={2}
-                dot={{ fill: "oklch(0.78 0.22 250)", r: 3 }}
-              />
-            </LineChart>
-          </ResponsiveContainer>
-        </ChartCard>
+          <div className="space-y-2">
+            <InfoRow
+              icon={Repeat2}
+              label="Redepósitos"
+              value={brl(data.redepositAmount)}
+              trend={`↑ ${fmtPct(Math.max(0, data.redepositGrowth))}`}
+              tone="green"
+            />
+            <InfoRow
+              icon={Target}
+              label="Recuperado pelo CRM"
+              value={brl(data.recoveredAmount)}
+              tone="green"
+            />
+            <InfoRow
+              icon={Users}
+              label="Clicaram e depositaram"
+              value={num(data.recoveredPlayers)}
+              tone="green"
+            />
+            <InfoRow
+              icon={CreditCard}
+              label="Gasto em mensagem"
+              value={brl(data.messageCost)}
+              tone="orange"
+            />
+          </div>
+        </ShellCard>
+
+        <ShellCard
+          title="Régua de reativação"
+          subtitle="status da sua base em automações"
+          icon={Layers}
+        >
+          <div className="space-y-2">
+            <InfoRow
+              icon={Users}
+              label="Na fila da régua"
+              value={num(data.reactivationQueue)}
+              tone="blue"
+              chevron
+            />
+            <InfoRow
+              icon={MessageSquare}
+              label="Réguas ligadas"
+              value={`${num(data.activeFlows)}/${num(data.totalFlows)}`}
+              tone="blue"
+              chevron
+            />
+            <InfoRow
+              icon={TrendingUp}
+              label="Retorno sobre o envio"
+              value={data.messageRoi > 0 ? `${data.messageRoi.toFixed(1)}x` : "0x"}
+              tone="green"
+              chevron
+            />
+          </div>
+        </ShellCard>
+      </div>
+
+      <LiveFeed events={data.liveEvents} />
+
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <LayoutDashboard className="h-4 w-4" />
+        Dados do período por tenant. Recuperado pelo CRM considera depósitos feitos depois de um
+        followup registrado para o jogador.
       </div>
     </div>
   );
