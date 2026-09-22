@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -15,7 +15,21 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { brl, timeAgo } from "@/lib/format";
-import { Search, Crown, ChevronLeft, ChevronRight, Download, ArrowUp, ArrowDown, ArrowUpDown, Copy, Check, Calendar as CalendarIcon, X, Eye } from "lucide-react";
+import {
+  Search,
+  Crown,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
+  Copy,
+  Check,
+  Calendar as CalendarIcon,
+  X,
+  Eye,
+} from "lucide-react";
 import { MessageCircle } from "lucide-react";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -45,7 +59,11 @@ import { PlayerContactHistoryDialog } from "@/components/history/player-contact-
 import { getQuedaDepositosPlayerIds } from "@/lib/queda-depositos.functions";
 import { getLeadQuenteEsfriandoPlayerIds } from "@/lib/lead-quente-esfriando.functions";
 import { getAlertPlayerIdsByTipo } from "@/lib/alert-ids.functions";
-import { getPlayersPage, getPlayersFilteredExternalIds, type PlayerRow } from "@/lib/players-list.functions";
+import {
+  getPlayersPage,
+  getPlayersFilteredExternalIds,
+  type PlayerRow,
+} from "@/lib/players-list.functions";
 import {
   listPendingConversion,
   listRecentFollowupKeys,
@@ -58,6 +76,11 @@ import {
 import { useServerFn } from "@tanstack/react-start";
 
 export const Route = createFileRoute("/players")({
+  validateSearch: (search: Record<string, unknown>) => ({
+    id: typeof search.id === "string" && search.id.trim() ? search.id.trim() : undefined,
+    focus:
+      typeof search.focus === "string" && search.focus.trim() ? search.focus.trim() : undefined,
+  }),
   component: PlayersPage,
 });
 
@@ -143,11 +166,16 @@ function defaultSortKey(
 }
 
 function statusBadge(p: Player) {
-  if (p.vip) return <Badge className="bg-amber-500/15 text-amber-400 border-amber-500/30">VIP</Badge>;
+  if (p.vip)
+    return <Badge className="bg-amber-500/15 text-amber-400 border-amber-500/30">VIP</Badge>;
   const sevenDaysAgo = Date.now() - 7 * 86400000;
   const ativo = !!p.ultimo_login && new Date(p.ultimo_login).getTime() >= sevenDaysAgo;
   if (!ativo)
-    return <Badge variant="outline" className="border-muted text-muted-foreground">Inativo</Badge>;
+    return (
+      <Badge variant="outline" className="border-muted text-muted-foreground">
+        Inativo
+      </Badge>
+    );
   return <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30">Ativo</Badge>;
 }
 
@@ -156,8 +184,8 @@ function riskDot(r: string) {
     r === "alto"
       ? "bg-red-500 shadow-red-500/60"
       : r === "medio"
-      ? "bg-amber-400 shadow-amber-400/60"
-      : "bg-emerald-400 shadow-emerald-400/60";
+        ? "bg-amber-400 shadow-amber-400/60"
+        : "bg-emerald-400 shadow-emerald-400/60";
   return <span className={`inline-block h-2 w-2 rounded-full shadow-[0_0_8px] ${c}`} />;
 }
 
@@ -172,6 +200,12 @@ type SortKey =
   | "origem";
 
 function PlayersPage() {
+  const navigate = useNavigate();
+  const routeSearch = Route.useSearch();
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const linkedPlayerId = routeSearch.id ?? routeSearch.focus ?? null;
+  const isDetailRoute =
+    pathname.replace(/\/+$/, "") !== "/players" && pathname.startsWith("/players/");
   const [filter, setFilter] = useState("todos");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -186,6 +220,16 @@ function PlayersPage() {
   const [historyPlayer, setHistoryPlayer] = useState<{ id: string; nome: string } | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!linkedPlayerId || isDetailRoute) return;
+
+    void navigate({
+      to: "/players/$playerId",
+      params: { playerId: linkedPlayerId },
+      replace: true,
+    });
+  }, [isDetailRoute, linkedPlayerId, navigate]);
 
   // Nome do tenant atual para a copy de pré-ligação. RLS já garante que
   // o usuário só vê o próprio tenant.
@@ -204,14 +248,15 @@ function PlayersPage() {
         `${dateRange.from.getFullYear()}-${String(dateRange.from.getMonth() + 1).padStart(2, "0")}-${String(dateRange.from.getDate()).padStart(2, "0")}`,
       ).toISOString()
     : null;
-  const dateToIso = (dateRange?.to ?? dateRange?.from)
-    ? parseBrtDayEnd(
-        (() => {
-          const d = dateRange!.to ?? dateRange!.from!;
-          return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-        })(),
-      ).toISOString()
-    : null;
+  const dateToIso =
+    (dateRange?.to ?? dateRange?.from)
+      ? parseBrtDayEnd(
+          (() => {
+            const d = dateRange!.to ?? dateRange!.from!;
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+          })(),
+        ).toISOString()
+      : null;
   const hasDateRange = !!(dateFromIso && dateToIso);
 
   function fmtBr(d: Date) {
@@ -299,14 +344,17 @@ function PlayersPage() {
   // Abre o dialog do WhatsApp a partir de uma linha das tabelas de
   // Aguardando / Converteu / Não converteu, reaproveitando a copy de
   // pré-ligação padrão.
-  function openWaFromRow(row: { player_id: string; nome: string; telefone: string | null; email: string | null }) {
+  function openWaFromRow(row: {
+    player_id: string;
+    nome: string;
+    telefone: string | null;
+    email: string | null;
+  }) {
     if (!row.telefone) {
       toast.error("Lead sem telefone cadastrado");
       return;
     }
-    setWaMensagem(
-      nextPrecallCopy({ fullName: row.nome, brand: tenantBrand ?? "" }),
-    );
+    setWaMensagem(nextPrecallCopy({ fullName: row.nome, brand: tenantBrand ?? "" }));
     setWaDialog({
       player: {
         id: row.player_id,
@@ -327,10 +375,7 @@ function PlayersPage() {
     refetchInterval: isQuedaFilter ? 60_000 : false,
     staleTime: 30_000,
   });
-  const quedaIdSet = useMemo(
-    () => (quedaIds ? new Set(quedaIds.ids) : null),
-    [quedaIds],
-  );
+  const quedaIdSet = useMemo(() => (quedaIds ? new Set(quedaIds.ids) : null), [quedaIds]);
 
   // Query dedicada para "Lead quente esfriando" — mesma estratégia.
   const fetchLqeIds = useServerFn(getLeadQuenteEsfriandoPlayerIds);
@@ -341,10 +386,7 @@ function PlayersPage() {
     refetchInterval: isLqeFilter ? 60_000 : false,
     staleTime: 30_000,
   });
-  const lqeIdSet = useMemo(
-    () => (lqeIds ? new Set(lqeIds.ids) : null),
-    [lqeIds],
-  );
+  const lqeIdSet = useMemo(() => (lqeIds ? new Set(lqeIds.ids) : null), [lqeIds]);
 
   // Query dedicada para os demais gatilhos (alto potencial, reativado, em
   // sequência, logando sem depositar, frequência caindo) — agregação em SQL.
@@ -392,35 +434,33 @@ function PlayersPage() {
     };
   }, [qc]);
 
-
   // IDs pré-calculados para filtros de alerta (servidor já restringiu o set).
   // Quando o filtro de alerta ainda está carregando, mandamos [] explícito pra
   // não exibir a base inteira sem querer.
   const alertIdsForFilter: string[] | null = useMemo(() => {
-    const raw =
-      isQuedaFilter
-        ? quedaIdSet ? Array.from(quedaIdSet) : []
-        : isLqeFilter
-          ? lqeIdSet ? Array.from(lqeIdSet) : []
-          : isServerAlertFilter
-            ? serverAlertIdSet ? Array.from(serverAlertIdSet) : []
-            : null;
+    const raw = isQuedaFilter
+      ? quedaIdSet
+        ? Array.from(quedaIdSet)
+        : []
+      : isLqeFilter
+        ? lqeIdSet
+          ? Array.from(lqeIdSet)
+          : []
+        : isServerAlertFilter
+          ? serverAlertIdSet
+            ? Array.from(serverAlertIdSet)
+            : []
+          : null;
     if (raw === null) return null;
     return raw;
-  }, [
-    isQuedaFilter,
-    quedaIdSet,
-    isLqeFilter,
-    lqeIdSet,
-    isServerAlertFilter,
-    serverAlertIdSet,
-  ]);
+  }, [isQuedaFilter, quedaIdSet, isLqeFilter, lqeIdSet, isServerAlertFilter, serverAlertIdSet]);
 
   // Para os 4 alertas que ainda dependem do cálculo local (abandono_vip,
   // vip_sem_atividade, proximo_vip, saldo_parado), a tabela mostra TODOS os
   // players e o filtro final ocorre via alertsByPlayer (client). Esses 4 chips
   // são raros e quem clica neles já espera ver "porquê apareceu".
-  const isLocalAlertFilter = isAlertFilter && !isQuedaFilter && !isLqeFilter && !isServerAlertFilter;
+  const isLocalAlertFilter =
+    isAlertFilter && !isQuedaFilter && !isLqeFilter && !isServerAlertFilter;
 
   // Quando há ordenação por saldo/lucro precisamos do dataset completo (o
   // server faz no caminho computeClient). Ainda assim só baixa as cols slim.
@@ -436,7 +476,7 @@ function PlayersPage() {
       sort?.dir ?? "desc",
       // serializa os IDs de alerta — pequenos sets na prática
       alertIdsForFilter ? alertIdsForFilter.length : null,
-      alertIdsForFilter ? alertIdsForFilter.slice(0, 1)[0] ?? "" : "",
+      alertIdsForFilter ? (alertIdsForFilter.slice(0, 1)[0] ?? "") : "",
       dateField,
       dateFromIso,
       dateToIso,
@@ -459,7 +499,9 @@ function PlayersPage() {
     // Para os filtros locais (proximo_vip, abandono_vip, etc.) o servidor não
     // consegue restringir; ainda assim trazemos a página completa do filtro.
     enabled: !isLocalAlertFilter
-      ? (alertIdsForFilter === null ? true : alertIdsForFilter.length >= 0)
+      ? alertIdsForFilter === null
+        ? true
+        : alertIdsForFilter.length >= 0
       : true,
     placeholderData: (prev) => prev,
     staleTime: 10_000,
@@ -495,10 +537,26 @@ function PlayersPage() {
         if (batch.length < PAGE) break;
       }
       const [depsRes, wdRes, sessRes, fupRes] = await Promise.all([
-        supabase.from("deposits").select("player_id,valor,created_at,status").gte("created_at", iso60).eq("status", "aprovado").limit(20000),
-        supabase.from("withdrawals").select("player_id,valor,created_at").gte("created_at", iso30).limit(10000),
-        supabase.from("sessions").select("player_id,iniciado_em").gte("iniciado_em", iso60).limit(20000),
-        supabase.from("lead_followups").select("player_id,alerta_tipo,created_at").gte("created_at", iso30),
+        supabase
+          .from("deposits")
+          .select("player_id,valor,created_at,status")
+          .gte("created_at", iso60)
+          .eq("status", "aprovado")
+          .limit(20000),
+        supabase
+          .from("withdrawals")
+          .select("player_id,valor,created_at")
+          .gte("created_at", iso30)
+          .limit(10000),
+        supabase
+          .from("sessions")
+          .select("player_id,iniciado_em")
+          .gte("iniciado_em", iso60)
+          .limit(20000),
+        supabase
+          .from("lead_followups")
+          .select("player_id,alerta_tipo,created_at")
+          .gte("created_at", iso30),
       ]);
       const map = computeAlertsByPlayer({
         players: all as any,
@@ -532,17 +590,33 @@ function PlayersPage() {
   const visiblePlayerIds = useMemo(() => (data ?? []).map((p) => p.id), [data]);
   const { data: alertsByPlayerServerSide } = useQuery({
     queryKey: ["players-alerts-page", visiblePlayerIds.join(",")],
-    enabled:
-      isAlertFilter && !isLocalAlertFilter && visiblePlayerIds.length > 0,
+    enabled: isAlertFilter && !isLocalAlertFilter && visiblePlayerIds.length > 0,
     staleTime: 15_000,
     queryFn: async () => {
       const iso60 = new Date(Date.now() - 60 * 86400000).toISOString();
       const iso30 = new Date(Date.now() - 30 * 86400000).toISOString();
       const [depsRes, wdRes, sessRes, fupRes] = await Promise.all([
-        supabase.from("deposits").select("player_id,valor,created_at,status").in("player_id", visiblePlayerIds).gte("created_at", iso60).eq("status", "aprovado"),
-        supabase.from("withdrawals").select("player_id,valor,created_at").in("player_id", visiblePlayerIds).gte("created_at", iso30),
-        supabase.from("sessions").select("player_id,iniciado_em").in("player_id", visiblePlayerIds).gte("iniciado_em", iso60),
-        supabase.from("lead_followups").select("player_id,alerta_tipo,created_at").in("player_id", visiblePlayerIds).gte("created_at", iso30),
+        supabase
+          .from("deposits")
+          .select("player_id,valor,created_at,status")
+          .in("player_id", visiblePlayerIds)
+          .gte("created_at", iso60)
+          .eq("status", "aprovado"),
+        supabase
+          .from("withdrawals")
+          .select("player_id,valor,created_at")
+          .in("player_id", visiblePlayerIds)
+          .gte("created_at", iso30),
+        supabase
+          .from("sessions")
+          .select("player_id,iniciado_em")
+          .in("player_id", visiblePlayerIds)
+          .gte("iniciado_em", iso60),
+        supabase
+          .from("lead_followups")
+          .select("player_id,alerta_tipo,created_at")
+          .in("player_id", visiblePlayerIds)
+          .gte("created_at", iso30),
       ]);
       return computeAlertsByPlayer({
         players: (data ?? []) as any,
@@ -577,14 +651,22 @@ function PlayersPage() {
           const dir = sort.dir === "asc" ? 1 : -1;
           const val = (p: Player) => {
             switch (sort.key) {
-              case "ultimo_login": return p.ultimo_login ? new Date(p.ultimo_login).getTime() : 0;
-              case "ultimo_jogo": return p.ultimo_jogo ? new Date(p.ultimo_jogo).getTime() : 0;
-              case "total_depositado": return Number(p.total_depositado);
-              case "total_sacado": return Number(p.total_sacado);
-              case "lucro": return Number(p.total_depositado) - Number(p.total_sacado);
-              case "saldo": return Number(p.saldo_carteira ?? 0) + Number(p.saldo_bonus ?? 0);
-              case "status": return p.vip ? 1 : 0;
-              case "origem": return (p.origem ?? "") + "|" + (p.expert ?? "");
+              case "ultimo_login":
+                return p.ultimo_login ? new Date(p.ultimo_login).getTime() : 0;
+              case "ultimo_jogo":
+                return p.ultimo_jogo ? new Date(p.ultimo_jogo).getTime() : 0;
+              case "total_depositado":
+                return Number(p.total_depositado);
+              case "total_sacado":
+                return Number(p.total_sacado);
+              case "lucro":
+                return Number(p.total_depositado) - Number(p.total_sacado);
+              case "saldo":
+                return Number(p.saldo_carteira ?? 0) + Number(p.saldo_bonus ?? 0);
+              case "status":
+                return p.vip ? 1 : 0;
+              case "origem":
+                return (p.origem ?? "") + "|" + (p.expert ?? "");
             }
           };
           const va = val(a);
@@ -619,12 +701,8 @@ function PlayersPage() {
   }, [filter, search]);
 
   // Linhas / totais — vêm do path local (4 alertas) ou da página do servidor.
-  const paged: Player[] = isLocalAlertFilter
-    ? (localPagedSlice?.page ?? [])
-    : (data ?? []);
-  const filteredCount = isLocalAlertFilter
-    ? (localPagedSlice?.total ?? 0)
-    : totalCount;
+  const paged: Player[] = isLocalAlertFilter ? (localPagedSlice?.page ?? []) : (data ?? []);
+  const filteredCount = isLocalAlertFilter ? (localPagedSlice?.total ?? 0) : totalCount;
   const totalPages = Math.max(1, Math.ceil(filteredCount / pageSize));
   const currentPage = Math.min(page, totalPages);
 
@@ -745,7 +823,9 @@ function PlayersPage() {
       ta.style.opacity = "0";
       document.body.appendChild(ta);
       ta.select();
-      try { document.execCommand("copy"); } catch {}
+      try {
+        document.execCommand("copy");
+      } catch {}
       document.body.removeChild(ta);
       return true;
     }
@@ -767,9 +847,7 @@ function PlayersPage() {
 
   async function copySelectedIds() {
     // Usa os IDs externos dos selecionados — buscamos no dataset visível.
-    const allRows: Player[] = isLocalAlertFilter
-      ? (localAlertData?.rows ?? [])
-      : (data ?? []);
+    const allRows: Player[] = isLocalAlertFilter ? (localAlertData?.rows ?? []) : (data ?? []);
     const map = new Map(allRows.map((p) => [p.id, p.player_external_id]));
     const externals = Array.from(selectedIds).map((id) => map.get(id) ?? null);
     const ids = formatIds(externals);
@@ -837,6 +915,8 @@ function PlayersPage() {
     }
   }
 
+  if (isDetailRoute) return <Outlet />;
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -857,9 +937,7 @@ function PlayersPage() {
               />
             </div>
             <div className="flex items-center gap-3">
-              <div className="text-xs text-muted-foreground">
-                {filteredCount} players
-              </div>
+              <div className="text-xs text-muted-foreground">{filteredCount} players</div>
               <button
                 onClick={exportCsv}
                 disabled={filteredCount === 0}
@@ -889,7 +967,10 @@ function PlayersPage() {
             <span className="text-[10px] uppercase tracking-wider text-muted-foreground/80">
               Filtrar por data
             </span>
-            <Select value={dateField} onValueChange={(v) => setDateField(v as "created_at" | "ftd_em")}>
+            <Select
+              value={dateField}
+              onValueChange={(v) => setDateField(v as "created_at" | "ftd_em")}
+            >
               <SelectTrigger className="h-8 w-[140px] text-xs">
                 <SelectValue />
               </SelectTrigger>
@@ -911,29 +992,53 @@ function PlayersPage() {
               </PopoverTrigger>
               <PopoverContent align="start" className="w-auto p-0 pointer-events-auto">
                 <div className="grid grid-cols-2 gap-2 border-b p-3">
-                  <Button size="sm" variant="ghost" onClick={() => {
-                    const t = new Date();
-                    setDateRange({ from: t, to: t });
-                    setDateOpen(false);
-                  }}>Hoje</Button>
-                  <Button size="sm" variant="ghost" onClick={() => {
-                    const to = new Date();
-                    const from = new Date(Date.now() - 6 * 86400000);
-                    setDateRange({ from, to });
-                    setDateOpen(false);
-                  }}>7 dias</Button>
-                  <Button size="sm" variant="ghost" onClick={() => {
-                    const to = new Date();
-                    const from = new Date(Date.now() - 29 * 86400000);
-                    setDateRange({ from, to });
-                    setDateOpen(false);
-                  }}>30 dias</Button>
-                  <Button size="sm" variant="ghost" onClick={() => {
-                    const to = new Date();
-                    const from = new Date(Date.now() - 89 * 86400000);
-                    setDateRange({ from, to });
-                    setDateOpen(false);
-                  }}>90 dias</Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      const t = new Date();
+                      setDateRange({ from: t, to: t });
+                      setDateOpen(false);
+                    }}
+                  >
+                    Hoje
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      const to = new Date();
+                      const from = new Date(Date.now() - 6 * 86400000);
+                      setDateRange({ from, to });
+                      setDateOpen(false);
+                    }}
+                  >
+                    7 dias
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      const to = new Date();
+                      const from = new Date(Date.now() - 29 * 86400000);
+                      setDateRange({ from, to });
+                      setDateOpen(false);
+                    }}
+                  >
+                    30 dias
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      const to = new Date();
+                      const from = new Date(Date.now() - 89 * 86400000);
+                      setDateRange({ from, to });
+                      setDateOpen(false);
+                    }}
+                  >
+                    90 dias
+                  </Button>
                 </div>
                 <Calendar
                   mode="range"
@@ -1016,8 +1121,8 @@ function PlayersPage() {
           <div className="border-b border-border/40 p-4">
             <div className="text-sm font-medium">Aguardando conversão</div>
             <div className="text-xs text-muted-foreground">
-              Leads contatados nos últimos 5 dias sem desfecho. Marque "Converteu"
-              ou "Não converteu" para tirar da fila.
+              Leads contatados nos últimos 5 dias sem desfecho. Marque "Converteu" ou "Não
+              converteu" para tirar da fila.
             </div>
           </div>
           <div className="overflow-x-auto">
@@ -1034,20 +1139,29 @@ function PlayersPage() {
               <TableBody>
                 {pendingLoading && (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center py-8 text-muted-foreground text-sm">
+                    <TableCell
+                      colSpan={5}
+                      className="text-center py-8 text-muted-foreground text-sm"
+                    >
                       Carregando…
                     </TableCell>
                   </TableRow>
                 )}
                 {!pendingLoading && (pendingData?.rows ?? []).length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center py-10 text-muted-foreground text-sm">
+                    <TableCell
+                      colSpan={5}
+                      className="text-center py-10 text-muted-foreground text-sm"
+                    >
                       Nenhum lead aguardando conversão.
                     </TableCell>
                   </TableRow>
                 )}
                 {(pendingData?.rows ?? []).map((row) => (
-                  <TableRow key={`${row.player_id}:${row.alerta_tipo}`} className="border-border/40 hover:bg-muted/30">
+                  <TableRow
+                    key={`${row.player_id}:${row.alerta_tipo}`}
+                    className="border-border/40 hover:bg-muted/30"
+                  >
                     <TableCell>
                       <button
                         type="button"
@@ -1067,7 +1181,10 @@ function PlayersPage() {
                       <div className="text-muted-foreground">{row.email ?? "—"}</div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant="outline" className="border-amber-400/40 text-amber-300 text-[10px]">
+                      <Badge
+                        variant="outline"
+                        className="border-amber-400/40 text-amber-300 text-[10px]"
+                      >
                         {row.alerta_tipo}
                       </Badge>
                     </TableCell>
@@ -1131,25 +1248,37 @@ function PlayersPage() {
               <TableBody>
                 {(isConvertedFilter ? convertedLoading : notConvertedLoading) && (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center py-8 text-muted-foreground text-sm">
+                    <TableCell
+                      colSpan={5}
+                      className="text-center py-8 text-muted-foreground text-sm"
+                    >
                       Carregando…
                     </TableCell>
                   </TableRow>
                 )}
                 {(() => {
-                  const rows: OutcomeRow[] = (isConvertedFilter ? convertedData?.rows : notConvertedData?.rows) ?? [];
+                  const rows: OutcomeRow[] =
+                    (isConvertedFilter ? convertedData?.rows : notConvertedData?.rows) ?? [];
                   const loading = isConvertedFilter ? convertedLoading : notConvertedLoading;
                   if (!loading && rows.length === 0) {
                     return (
                       <TableRow>
-                        <TableCell colSpan={5} className="text-center py-10 text-muted-foreground text-sm">
-                          {isConvertedFilter ? "Nenhum lead convertido ainda." : "Nenhum lead marcado como não convertido."}
+                        <TableCell
+                          colSpan={5}
+                          className="text-center py-10 text-muted-foreground text-sm"
+                        >
+                          {isConvertedFilter
+                            ? "Nenhum lead convertido ainda."
+                            : "Nenhum lead marcado como não convertido."}
                         </TableCell>
                       </TableRow>
                     );
                   }
                   return rows.map((row) => (
-                    <TableRow key={`${row.player_id}:${row.alerta_tipo}`} className="border-border/40 hover:bg-muted/30">
+                    <TableRow
+                      key={`${row.player_id}:${row.alerta_tipo}`}
+                      className="border-border/40 hover:bg-muted/30"
+                    >
                       <TableCell>
                         <button
                           type="button"
@@ -1164,7 +1293,10 @@ function PlayersPage() {
                         <div className="text-muted-foreground">{row.email ?? "—"}</div>
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline" className={`text-[10px] ${isConvertedFilter ? "border-emerald-400/40 text-emerald-300" : "border-rose-400/40 text-rose-300"}`}>
+                        <Badge
+                          variant="outline"
+                          className={`text-[10px] ${isConvertedFilter ? "border-emerald-400/40 text-emerald-300" : "border-rose-400/40 text-rose-300"}`}
+                        >
                           {row.alerta_tipo}
                         </Badge>
                       </TableCell>
@@ -1192,241 +1324,268 @@ function PlayersPage() {
       )}
 
       {!isPendingFilter && !isOutcomeFilter && (
-      <Card className="border-border/50 bg-card/60 backdrop-blur">
-        <CardContent className="p-3 flex flex-wrap items-center gap-3 text-xs">
-          <div className="text-muted-foreground">
-            Filtro: <span className="text-foreground font-medium">{filters.find(f => f.id === filter)?.label ?? alertFilters.find(f => f.id === filter)?.label ?? filter}</span>
-          </div>
-          <div className="text-muted-foreground">
-            Total: <span className="text-foreground font-medium">{filteredCount}</span>
-          </div>
-          <div className="text-muted-foreground">
-            Selecionados: <span className="text-foreground font-medium">{selectedIds.size}</span>
-          </div>
-          <div className="ml-auto flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={copySelectedIds}
-              disabled={selectedIds.size === 0}
-              className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-background/60 px-3 py-1.5 text-xs hover:border-primary/60 hover:text-primary disabled:opacity-40 disabled:pointer-events-none"
-            >
-              <Copy className="h-3.5 w-3.5" />
-              Copiar IDs selecionados{selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}
-            </button>
-            <button
-              type="button"
-              onClick={copyFilterIds}
-              disabled={copyingFilter || filteredCount === 0}
-              className="inline-flex items-center gap-1.5 rounded-md border border-primary/50 bg-primary/10 px-3 py-1.5 text-xs text-primary hover:bg-primary/20 disabled:opacity-40 disabled:pointer-events-none"
-              title="Copia o player_external_id de todos os players desse filtro, prontos pra colar no campo Usuários Alvo da plataforma."
-            >
-              <Copy className="h-3.5 w-3.5" />
-              {copyingFilter ? "Copiando…" : "Copiar IDs do filtro atual"}
-            </button>
-          </div>
-        </CardContent>
-      </Card>
+        <Card className="border-border/50 bg-card/60 backdrop-blur">
+          <CardContent className="p-3 flex flex-wrap items-center gap-3 text-xs">
+            <div className="text-muted-foreground">
+              Filtro:{" "}
+              <span className="text-foreground font-medium">
+                {filters.find((f) => f.id === filter)?.label ??
+                  alertFilters.find((f) => f.id === filter)?.label ??
+                  filter}
+              </span>
+            </div>
+            <div className="text-muted-foreground">
+              Total: <span className="text-foreground font-medium">{filteredCount}</span>
+            </div>
+            <div className="text-muted-foreground">
+              Selecionados: <span className="text-foreground font-medium">{selectedIds.size}</span>
+            </div>
+            <div className="ml-auto flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={copySelectedIds}
+                disabled={selectedIds.size === 0}
+                className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-background/60 px-3 py-1.5 text-xs hover:border-primary/60 hover:text-primary disabled:opacity-40 disabled:pointer-events-none"
+              >
+                <Copy className="h-3.5 w-3.5" />
+                Copiar IDs selecionados{selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}
+              </button>
+              <button
+                type="button"
+                onClick={copyFilterIds}
+                disabled={copyingFilter || filteredCount === 0}
+                className="inline-flex items-center gap-1.5 rounded-md border border-primary/50 bg-primary/10 px-3 py-1.5 text-xs text-primary hover:bg-primary/20 disabled:opacity-40 disabled:pointer-events-none"
+                title="Copia o player_external_id de todos os players desse filtro, prontos pra colar no campo Usuários Alvo da plataforma."
+              >
+                <Copy className="h-3.5 w-3.5" />
+                {copyingFilter ? "Copiando…" : "Copiar IDs do filtro atual"}
+              </button>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {!isPendingFilter && !isOutcomeFilter && (
-      <Card className="border-border/50 bg-card/60 backdrop-blur overflow-hidden">
-        <div className="overflow-x-auto">
-          <Table className="min-w-[1200px]">
-            <TableHeader>
-              <TableRow className="hover:bg-transparent border-border/60">
-                <TableHead className="w-8">
-                  <Checkbox
-                    checked={paged.length > 0 && paged.every((p) => selectedIds.has(p.id))}
-                    onCheckedChange={(v) => {
-                      setSelectedIds((cur) => {
-                        const next = new Set(cur);
-                        if (v) for (const p of paged) next.add(p.id);
-                        else for (const p of paged) next.delete(p.id);
-                        return next;
-                      });
-                    }}
-                    aria-label="Selecionar página"
-                  />
-                </TableHead>
-                <TableHead>Player</TableHead>
-                <TableHead>ID Push</TableHead>
-                <TableHead>Contato</TableHead>
-                <TableHead><SortHeader k="origem" label="Origem / Expert" /></TableHead>
-                <TableHead><SortHeader k="status" label="Status" /></TableHead>
-                <TableHead><SortHeader k="ultimo_login" label="Último login" /></TableHead>
-                <TableHead className="text-right"><SortHeader k="total_depositado" label="Depositado" align="right" /></TableHead>
-                <TableHead className="text-right"><SortHeader k="total_sacado" label="Sacado" align="right" /></TableHead>
-                <TableHead className="text-right"><SortHeader k="saldo" label="Saldo" align="right" /></TableHead>
-                <TableHead className="text-right"><SortHeader k="lucro" label="Lucro" align="right" /></TableHead>
-                <TableHead>Tags</TableHead>
-                <TableHead className="text-right">Ficha</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {isLoading &&
-                Array.from({ length: 8 }).map((_, i) => (
-                  <TableRow key={i}>
-                    {Array.from({ length: 13 }).map((_, j) => (
-                      <TableCell key={j}>
-                        <Skeleton className="h-4 w-24" />
+        <Card className="border-border/50 bg-card/60 backdrop-blur overflow-hidden">
+          <div className="overflow-x-auto">
+            <Table className="min-w-[1200px]">
+              <TableHeader>
+                <TableRow className="hover:bg-transparent border-border/60">
+                  <TableHead className="w-8">
+                    <Checkbox
+                      checked={paged.length > 0 && paged.every((p) => selectedIds.has(p.id))}
+                      onCheckedChange={(v) => {
+                        setSelectedIds((cur) => {
+                          const next = new Set(cur);
+                          if (v) for (const p of paged) next.add(p.id);
+                          else for (const p of paged) next.delete(p.id);
+                          return next;
+                        });
+                      }}
+                      aria-label="Selecionar página"
+                    />
+                  </TableHead>
+                  <TableHead>Player</TableHead>
+                  <TableHead>ID Push</TableHead>
+                  <TableHead>Contato</TableHead>
+                  <TableHead>
+                    <SortHeader k="origem" label="Origem / Expert" />
+                  </TableHead>
+                  <TableHead>
+                    <SortHeader k="status" label="Status" />
+                  </TableHead>
+                  <TableHead>
+                    <SortHeader k="ultimo_login" label="Último login" />
+                  </TableHead>
+                  <TableHead className="text-right">
+                    <SortHeader k="total_depositado" label="Depositado" align="right" />
+                  </TableHead>
+                  <TableHead className="text-right">
+                    <SortHeader k="total_sacado" label="Sacado" align="right" />
+                  </TableHead>
+                  <TableHead className="text-right">
+                    <SortHeader k="saldo" label="Saldo" align="right" />
+                  </TableHead>
+                  <TableHead className="text-right">
+                    <SortHeader k="lucro" label="Lucro" align="right" />
+                  </TableHead>
+                  <TableHead>Tags</TableHead>
+                  <TableHead className="text-right">Ficha</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {isLoading &&
+                  Array.from({ length: 8 }).map((_, i) => (
+                    <TableRow key={i}>
+                      {Array.from({ length: 13 }).map((_, j) => (
+                        <TableCell key={j}>
+                          <Skeleton className="h-4 w-24" />
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  ))}
+                {paged.map((p) => {
+                  const lucro = Number(p.total_depositado) - Number(p.total_sacado);
+                  const saldo = Number(p.saldo_carteira ?? 0) + Number(p.saldo_bonus ?? 0);
+                  const extId = (p.player_external_id ?? "").trim();
+                  return (
+                    <TableRow key={p.id} className="border-border/40 hover:bg-muted/30">
+                      <TableCell className="w-8">
+                        <Checkbox
+                          checked={selectedIds.has(p.id)}
+                          onCheckedChange={(v) => {
+                            setSelectedIds((cur) => {
+                              const next = new Set(cur);
+                              if (v) next.add(p.id);
+                              else next.delete(p.id);
+                              return next;
+                            });
+                          }}
+                          aria-label={`Selecionar ${p.nome}`}
+                        />
                       </TableCell>
-                    ))}
-                  </TableRow>
-                ))}
-              {paged.map((p) => {
-                const lucro = Number(p.total_depositado) - Number(p.total_sacado);
-                const saldo = Number(p.saldo_carteira ?? 0) + Number(p.saldo_bonus ?? 0);
-                const extId = (p.player_external_id ?? "").trim();
-                return (
-                  <TableRow key={p.id} className="border-border/40 hover:bg-muted/30">
-                    <TableCell className="w-8">
-                      <Checkbox
-                        checked={selectedIds.has(p.id)}
-                        onCheckedChange={(v) => {
-                          setSelectedIds((cur) => {
-                            const next = new Set(cur);
-                            if (v) next.add(p.id); else next.delete(p.id);
-                            return next;
-                          });
-                        }}
-                        aria-label={`Selecionar ${p.nome}`}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        {riskDot(p.risco)}
-                         <div className="flex flex-col">
-                           <Link
-                             to="/players/$playerId"
-                             params={{ playerId: p.id }}
-                             className="font-medium flex items-center gap-1 text-left hover:text-primary"
-                             title="Abrir ficha do player"
-                           >
-                             {p.nome}
-                             {p.vip && <Crown className="h-3 w-3 text-amber-400" />}
-                             {pendingPlayerIdsAny.has(p.id) && (
-                               <span
-                                 title="Mensagem enviada — aguardando conversão"
-                                 className="ml-1 inline-flex items-center rounded-full border border-sky-400/50 bg-sky-400/10 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-sky-300"
-                               >
-                                 ⏳ aguardando
-                               </span>
-                             )}
-                           </Link>
-                          <span className="text-[11px] text-muted-foreground">
-                            {p.player_external_id}
-                          </span>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          {riskDot(p.risco)}
+                          <div className="flex flex-col">
+                            <Link
+                              to="/players/$playerId"
+                              params={{ playerId: p.id }}
+                              className="font-medium flex items-center gap-1 text-left hover:text-primary"
+                              title="Abrir ficha do player"
+                            >
+                              {p.nome}
+                              {p.vip && <Crown className="h-3 w-3 text-amber-400" />}
+                              {pendingPlayerIdsAny.has(p.id) && (
+                                <span
+                                  title="Mensagem enviada — aguardando conversão"
+                                  className="ml-1 inline-flex items-center rounded-full border border-sky-400/50 bg-sky-400/10 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-sky-300"
+                                >
+                                  ⏳ aguardando
+                                </span>
+                              )}
+                            </Link>
+                            <span className="text-[11px] text-muted-foreground">
+                              {p.player_external_id}
+                            </span>
+                          </div>
                         </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      {extId ? (
-                        <div className="inline-flex items-center gap-1.5">
-                          <span className="font-mono text-xs">{extId}</span>
-                          <button
-                            type="button"
-                            title="Copiar ID Push"
-                            onClick={() => copyOneId(extId, p.id)}
-                            className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10"
-                          >
-                            {copiedId === p.id ? (
-                              <Check className="h-3.5 w-3.5 text-emerald-400" />
-                            ) : (
-                              <Copy className="h-3.5 w-3.5" />
-                            )}
-                          </button>
-                        </div>
-                      ) : (
-                        <span className="text-[11px] uppercase tracking-wide text-muted-foreground/70">Sem ID</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-col text-xs">
-                        <span className="flex items-center gap-2">
-                          {p.telefone ?? "—"}
-                          {p.telefone && (
+                      </TableCell>
+                      <TableCell>
+                        {extId ? (
+                          <div className="inline-flex items-center gap-1.5">
+                            <span className="font-mono text-xs">{extId}</span>
                             <button
                               type="button"
-                              title="Enviar pré-ligação no WhatsApp"
-                              onClick={() => {
-                                setWaMensagem(
-                                  nextPrecallCopy({
-                                    fullName: p.nome,
-                                    brand: tenantBrand ?? "",
-                                  }),
-                                );
-                                setWaDialog({ player: p });
-                              }}
-                              className="inline-flex h-5 w-5 items-center justify-center rounded-md text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
+                              title="Copiar ID Push"
+                              onClick={() => copyOneId(extId, p.id)}
+                              className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10"
                             >
-                              <MessageCircle className="h-3.5 w-3.5" />
+                              {copiedId === p.id ? (
+                                <Check className="h-3.5 w-3.5 text-emerald-400" />
+                              ) : (
+                                <Copy className="h-3.5 w-3.5" />
+                              )}
                             </button>
-                          )}
-                        </span>
-                        <span className="text-muted-foreground">{p.email ?? "—"}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-col text-xs">
-                        <span>{p.origem ?? "—"}</span>
-                        <span className="text-muted-foreground">{p.expert ?? "—"}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell>{statusBadge(p)}</TableCell>
-                    <TableCell className="text-xs">{timeAgo(p.ultimo_login)}</TableCell>
-                    <TableCell className="text-right font-medium">{brl(p.total_depositado)}</TableCell>
-                    <TableCell className="text-right text-muted-foreground">
-                      {brl(p.total_sacado)}
-                    </TableCell>
+                          </div>
+                        ) : (
+                          <span className="text-[11px] uppercase tracking-wide text-muted-foreground/70">
+                            Sem ID
+                          </span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex flex-col text-xs">
+                          <span className="flex items-center gap-2">
+                            {p.telefone ?? "—"}
+                            {p.telefone && (
+                              <button
+                                type="button"
+                                title="Enviar pré-ligação no WhatsApp"
+                                onClick={() => {
+                                  setWaMensagem(
+                                    nextPrecallCopy({
+                                      fullName: p.nome,
+                                      brand: tenantBrand ?? "",
+                                    }),
+                                  );
+                                  setWaDialog({ player: p });
+                                }}
+                                className="inline-flex h-5 w-5 items-center justify-center rounded-md text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
+                              >
+                                <MessageCircle className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                          </span>
+                          <span className="text-muted-foreground">{p.email ?? "—"}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex flex-col text-xs">
+                          <span>{p.origem ?? "—"}</span>
+                          <span className="text-muted-foreground">{p.expert ?? "—"}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell>{statusBadge(p)}</TableCell>
+                      <TableCell className="text-xs">{timeAgo(p.ultimo_login)}</TableCell>
+                      <TableCell className="text-right font-medium">
+                        {brl(p.total_depositado)}
+                      </TableCell>
+                      <TableCell className="text-right text-muted-foreground">
+                        {brl(p.total_sacado)}
+                      </TableCell>
+                      <TableCell
+                        className={`text-right font-semibold ${
+                          saldo > 0 ? "text-emerald-400" : "text-muted-foreground"
+                        }`}
+                      >
+                        {brl(saldo)}
+                      </TableCell>
+                      <TableCell
+                        className={`text-right font-semibold ${
+                          lucro >= 0 ? "text-emerald-400" : "text-red-400"
+                        }`}
+                      >
+                        {brl(lucro)}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap gap-1">
+                          {p.tags.map((t) => (
+                            <Badge
+                              key={t}
+                              variant="outline"
+                              className="border-border/60 text-[10px] py-0"
+                            >
+                              {t}
+                            </Badge>
+                          ))}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button variant="outline" size="sm" asChild className="h-8 gap-1.5">
+                          <Link to="/players/$playerId" params={{ playerId: p.id }}>
+                            <Eye className="h-3.5 w-3.5" />
+                            Ficha
+                          </Link>
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+                {!isLoading && filteredCount === 0 && (
+                  <TableRow>
                     <TableCell
-                      className={`text-right font-semibold ${
-                        saldo > 0 ? "text-emerald-400" : "text-muted-foreground"
-                      }`}
+                      colSpan={13}
+                      className="text-center py-10 text-muted-foreground text-sm"
                     >
-                      {brl(saldo)}
-                    </TableCell>
-                    <TableCell
-                      className={`text-right font-semibold ${
-                        lucro >= 0 ? "text-emerald-400" : "text-red-400"
-                      }`}
-                    >
-                      {brl(lucro)}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-1">
-                        {p.tags.map((t) => (
-                          <Badge
-                            key={t}
-                            variant="outline"
-                            className="border-border/60 text-[10px] py-0"
-                          >
-                            {t}
-                          </Badge>
-                        ))}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button variant="outline" size="sm" asChild className="h-8 gap-1.5">
-                        <Link to="/players/$playerId" params={{ playerId: p.id }}>
-                          <Eye className="h-3.5 w-3.5" />
-                          Ficha
-                        </Link>
-                      </Button>
+                      Nenhum player encontrado com esses filtros.
                     </TableCell>
                   </TableRow>
-                );
-              })}
-              {!isLoading && filteredCount === 0 && (
-                <TableRow>
-                  <TableCell colSpan={13} className="text-center py-10 text-muted-foreground text-sm">
-                    Nenhum player encontrado com esses filtros.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </div>
-      </Card>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </Card>
       )}
 
       {!isPendingFilter && filteredCount > 0 && (
@@ -1451,7 +1610,9 @@ function PlayersPage() {
                 >
                   1
                 </button>
-                {pageNumbers[0] > 2 && <span className="px-1 text-muted-foreground text-xs">…</span>}
+                {pageNumbers[0] > 2 && (
+                  <span className="px-1 text-muted-foreground text-xs">…</span>
+                )}
               </>
             )}
             {pageNumbers.map((n) => (
@@ -1494,7 +1655,12 @@ function PlayersPage() {
       {waDialog && (
         <EnviarPeloWhatsAppDialog
           open
-          onOpenChange={(v) => { if (!v) { setWaDialog(null); setWaMensagem(""); } }}
+          onOpenChange={(v) => {
+            if (!v) {
+              setWaDialog(null);
+              setWaMensagem("");
+            }
+          }}
           phone={waDialog.player.telefone}
           leadName={waDialog.player.nome}
           mensagem={
@@ -1536,7 +1702,9 @@ function PlayersPage() {
       )}
       <PlayerContactHistoryDialog
         open={!!historyPlayer}
-        onOpenChange={(v) => { if (!v) setHistoryPlayer(null); }}
+        onOpenChange={(v) => {
+          if (!v) setHistoryPlayer(null);
+        }}
         playerId={historyPlayer?.id ?? null}
         playerName={historyPlayer?.nome}
       />
