@@ -2,12 +2,16 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import {
+  AlertTriangle,
   BadgeCheck,
   BarChart3,
+  Calendar,
   Clipboard,
+  CreditCard,
   Eye,
   ExternalLink,
   FileSpreadsheet,
+  Image as ImageIcon,
   Link2,
   Loader2,
   Radio,
@@ -18,6 +22,15 @@ import {
   Wallet,
 } from "lucide-react";
 import { useMemo, useState } from "react";
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -61,6 +74,8 @@ type MarketingIntegration = {
 type MarketingTotals = {
   spend: number;
   revenue: number;
+  ftdRevenue: number;
+  redepositRevenue: number;
   roas: number | null;
   players: number;
   markedPlayers: number;
@@ -79,6 +94,8 @@ type CampaignRow = {
   players: number;
   ftd: number;
   revenue: number;
+  ftdRevenue: number;
+  redepositRevenue: number;
 };
 
 type OrphanAttributionRow = {
@@ -95,8 +112,24 @@ type OrphanAttributionRow = {
 type CreativeRow = {
   creative: string;
   campaign: string | null;
+  adset: string | null;
   ad_id: string | null;
+  thumbnail_url: string | null;
   spend: number;
+  impressions: number;
+  clicks: number;
+  frequency: number | null;
+  players: number;
+  ftd: number;
+  revenue: number;
+  ftdRevenue: number;
+  redepositRevenue: number;
+};
+
+type AudienceRow = {
+  adset: string;
+  spend: number;
+  ads: number;
   impressions: number;
   clicks: number;
   players: number;
@@ -104,10 +137,29 @@ type CreativeRow = {
   revenue: number;
 };
 
+type DailyPoint = {
+  date: string;
+  label: string;
+  spend: number;
+  ftd: number;
+};
+
+type MoneyRow = {
+  creative: string;
+  campaign: string | null;
+  thumbnail_url: string | null;
+  revenue: number;
+  share: number;
+};
+
 type MarketingOverview = {
+  period: { from: string; to: string };
   totals: MarketingTotals;
   campaigns: CampaignRow[];
   creatives: CreativeRow[];
+  audiences: AudienceRow[];
+  daily: DailyPoint[];
+  moneyMap: MoneyRow[];
   orphanAttributions: OrphanAttributionRow[];
 };
 
@@ -141,11 +193,74 @@ const utmByPlatform: Record<Platform, string> = {
   kwai: "utm_source=kwai&utm_medium=paid&utm_campaign=__CAMPAIGN_NAME__&utm_content=__CREATIVE_NAME__&utm_id=__CREATIVE_ID__",
 };
 
+type PeriodPreset = "today" | "yesterday" | "7d" | "30d" | "this_month" | "last_month";
+
+const periodLabels: Record<PeriodPreset, string> = {
+  today: "Hoje",
+  yesterday: "Ontem",
+  "7d": "7 dias",
+  "30d": "30 dias",
+  this_month: "Este mês",
+  last_month: "Mês passado",
+};
+
+function isoDate(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function periodRange(preset: PeriodPreset) {
+  const now = new Date();
+  const from = new Date(now);
+  const to = new Date(now);
+
+  if (preset === "today") {
+    return { from: isoDate(from), to: isoDate(to), days: 1 };
+  }
+  if (preset === "yesterday") {
+    from.setDate(now.getDate() - 1);
+    to.setDate(now.getDate() - 1);
+    return { from: isoDate(from), to: isoDate(to), days: 1 };
+  }
+  if (preset === "30d") {
+    from.setDate(now.getDate() - 29);
+    return { from: isoDate(from), to: isoDate(to), days: 30 };
+  }
+  if (preset === "this_month") {
+    from.setDate(1);
+    return { from: isoDate(from), to: isoDate(to), days: Math.max(1, now.getDate()) };
+  }
+  if (preset === "last_month") {
+    from.setMonth(now.getMonth() - 1, 1);
+    to.setDate(0);
+    const days = Math.max(1, Math.round((to.getTime() - from.getTime()) / 86400000) + 1);
+    return { from: isoDate(from), to: isoDate(to), days };
+  }
+
+  from.setDate(now.getDate() - 6);
+  return { from: isoDate(from), to: isoDate(to), days: 7 };
+}
+
+function periodText(period?: { from: string; to: string }) {
+  if (!period) return "";
+  const from = new Date(`${period.from}T00:00:00`);
+  const to = new Date(`${period.to}T00:00:00`);
+  return `${from.toLocaleDateString("pt-BR")} a ${to.toLocaleDateString("pt-BR")}`;
+}
+
 function brl(value: number | null | undefined) {
   return new Intl.NumberFormat("pt-BR", {
     style: "currency",
     currency: "BRL",
     maximumFractionDigits: 0,
+  }).format(value ?? 0);
+}
+
+function brl2(value: number | null | undefined) {
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(value ?? 0);
 }
 
@@ -155,6 +270,10 @@ function num(value: number | null | undefined) {
 
 function ratio(value: number | null | undefined) {
   return value == null ? "-" : `${value.toFixed(2)}x`;
+}
+
+function pct(value: number | null | undefined) {
+  return value == null ? "-" : `${value.toFixed(2).replace(".", ",")}%`;
 }
 
 function appendParams(url: string, params: string) {
@@ -178,14 +297,15 @@ function MediaLtvPage() {
   const createMetaUrl = useServerFn(createMetaOAuthUrl);
   const fetchMetaSummary = useServerFn(getMetaConnectionSummary);
   const syncMeta = useServerFn(syncMetaInsights);
-  const [days, setDays] = useState(7);
+  const [period, setPeriod] = useState<PeriodPreset>("7d");
   const [section, setSection] = useState<"visualizacao" | "configuracao">("visualizacao");
   const [platform, setPlatform] = useState<Platform>("meta");
   const [houseUrl, setHouseUrl] = useState("https://sua-casa.com/cadastro");
+  const range = useMemo(() => periodRange(period), [period]);
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["marketing-overview", days],
-    queryFn: () => fetchOverview({ data: { days } }),
+    queryKey: ["marketing-overview", range.from, range.to],
+    queryFn: () => fetchOverview({ data: { days: range.days, from: range.from, to: range.to } }),
     refetchInterval: 30000,
   });
 
@@ -231,7 +351,7 @@ function MediaLtvPage() {
   });
 
   const syncMetaMutation = useMutation({
-    mutationFn: () => syncMeta({ data: { days } }),
+    mutationFn: () => syncMeta({ data: { days: range.days } }),
     onSuccess: (res) => {
       if (res.errors.length > 0) {
         toast.warning(
@@ -262,7 +382,7 @@ function MediaLtvPage() {
     <div className="space-y-6">
       <PageHeader
         title="Midia e LTV"
-        subtitle="Conexao de anuncios, marcacao UTM e leitura de retorno por criativo."
+        subtitle="Cada jogador carrega o criativo que o trouxe. Ai da para ver quem trouxe cadastro barato e quem trouxe dinheiro."
         icon={<BarChart3 className="h-5 w-5 text-primary-foreground" />}
         actions={
           <div className="flex items-center gap-2">
@@ -284,16 +404,6 @@ function MediaLtvPage() {
               <Settings className="h-3.5 w-3.5" />
               Configuracao
             </Button>
-            {[7, 30, 90].map((d) => (
-              <Button
-                key={d}
-                variant={days === d ? "default" : "outline"}
-                size="sm"
-                onClick={() => setDays(d)}
-              >
-                {d} dias
-              </Button>
-            ))}
           </div>
         }
       />
@@ -307,7 +417,9 @@ function MediaLtvPage() {
 
       {section === "visualizacao" ? (
         <VisualizacaoSection
-          days={days}
+          range={range}
+          period={period}
+          onPeriodChange={setPeriod}
           data={data}
           isLoading={isLoading}
           metaSummary={metaSummary}
@@ -404,14 +516,18 @@ function CopyBlock({ title, value, onCopy }: { title: string; value: string; onC
 }
 
 function VisualizacaoSection({
-  days,
+  range,
+  period,
+  onPeriodChange,
   data,
   isLoading,
   metaSummary,
   syncPending,
   onSync,
 }: {
-  days: number;
+  range: { from: string; to: string; days: number };
+  period: PeriodPreset;
+  onPeriodChange: (period: PeriodPreset) => void;
   data: MarketingOverview | undefined;
   isLoading: boolean;
   metaSummary: MetaSummary | undefined;
@@ -426,89 +542,179 @@ function VisualizacaoSection({
     .filter(Boolean)
     .sort()
     .at(-1);
+  const staleAccounts = selectedAccounts.filter((account) => !account.last_sync_at).length;
+  const orphanRows = data?.orphanAttributions ?? [];
+  const orphanRevenue = orphanRows.reduce((sum, row) => sum + row.revenue, 0);
+  const orphanFtd = orphanRows.reduce((sum, row) => sum + row.ftd, 0);
+  const totalReturn = (totals?.ftdRevenue ?? 0) + (totals?.redepositRevenue ?? 0);
 
   return (
-    <div className="space-y-5">
-      <DataCard
-        title="Leitura Meta"
-        description="Contas conectadas e sincronizacao de campanhas, conjuntos, anuncios e gasto."
-        icon={<Radio className="h-4 w-4" />}
-        actions={
-          <Button
-            className="gap-2"
-            onClick={onSync}
-            disabled={syncPending || accounts.length === 0}
-          >
-            {syncPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="h-4 w-4" />
-            )}
-            Sincronizar Meta
-          </Button>
-        }
-      >
-        <div className="grid gap-3 lg:grid-cols-[1.2fr_1fr]">
-          <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">
-              {accounts.length > 0
-                ? `${accounts.length} conta(s) conectada(s), ${selectedAccounts.length} selecionada(s) para leitura.`
-                : "Nenhuma conta Meta conectada ainda."}
-            </p>
-            {lastSync && (
-              <p className="text-xs text-muted-foreground">
-                Ultima sincronizacao: {new Date(lastSync).toLocaleString("pt-BR")}
-              </p>
-            )}
-            {accounts.length === 0 && (
-              <p className="text-xs text-amber-300">
-                Va em Configuracao para conectar o Facebook antes de importar campanhas.
-              </p>
-            )}
-          </div>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {accounts.slice(0, 4).map((account) => (
-              <div
-                key={account.id}
-                className="rounded-lg border border-border/60 bg-background/40 px-3 py-2"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <p className="truncate text-sm font-semibold">
-                    {account.name ?? account.account_id}
-                  </p>
-                  <StatusBadge status={account.selected === false ? "disabled" : "connected"} />
-                </div>
-                <p className="mt-1 truncate text-xs text-muted-foreground">
-                  {account.account_id ?? account.meta_ad_account_id} {account.currency ?? ""}
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </DataCard>
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="rounded-full border border-border/70 px-3 py-1.5 text-sm font-medium text-muted-foreground">
+          {periodText(data?.period ?? range)}
+        </span>
+        <Button
+          variant="outline"
+          className="gap-2"
+          disabled={syncPending || accounts.length === 0}
+          onClick={onSync}
+        >
+          {syncPending ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <RefreshCw className="h-4 w-4" />
+          )}
+          {syncPending ? "lendo a conta..." : "Atualizar agora"}
+        </Button>
+        <span className="inline-flex items-center gap-2 rounded-md border border-border/70 bg-muted/50 px-3 py-2 text-sm font-semibold text-muted-foreground">
+          <CreditCard className="h-4 w-4" />
+          6.499 créditos de SMS
+        </span>
+      </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <Kpi title="Investido" value={brl(totals?.spend)} detail={`${days} dias`} />
+      <div className="flex flex-wrap items-center gap-2">
+        {(Object.keys(periodLabels) as PeriodPreset[]).map((key) => (
+          <Button
+            key={key}
+            variant={period === key ? "default" : "outline"}
+            className="h-11 px-5"
+            onClick={() => onPeriodChange(key)}
+          >
+            {periodLabels[key]}
+          </Button>
+        ))}
+        <Button variant="outline" className="h-11 gap-2">
+          <Calendar className="h-4 w-4" />
+          Escolher datas
+        </Button>
+        <span className="ml-1 text-sm text-muted-foreground">
+          só anúncios com rastreio da iFluxHub
+        </span>
+      </div>
+
+      <p className="text-sm text-muted-foreground">
+        gasto e FTD lidos de {num(selectedAccounts.length)} conta(s)
+        {lastSync
+          ? ` · última leitura ${new Date(lastSync).toLocaleString("pt-BR")}`
+          : " · aguardando primeira leitura"}
+      </p>
+
+      {staleAccounts > 0 && (
+        <div className="rounded-xl border border-red-500/40 bg-card/70 p-4 text-sm">
+          <p className="flex items-center gap-2 font-semibold text-red-400">
+            <AlertTriangle className="h-4 w-4" />A conta conectada ainda não está entregando gasto
+          </p>
+          <p className="mt-2 text-muted-foreground">
+            O token pode estar válido, mas sem leitura recente para uma conta de anúncio. Enquanto
+            isso o gasto dessa conta não entra, e o ROI aparece melhor do que é.
+          </p>
+        </div>
+      )}
+
+      {orphanRows.length > 0 && (
+        <div className="rounded-lg border border-amber-500/20 bg-amber-500/15 px-4 py-3 text-sm text-amber-100">
+          <strong>{num(orphanRows.length)} criativos de conta de anúncio não conectada</strong> —{" "}
+          {brl(orphanRevenue)} de receita e {num(orphanFtd)} FTD, sem gasto importado. Conecte em
+          Integrações → Mídia paga.
+        </div>
+      )}
+
+      <div className="rounded-lg bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+        <strong>Saúde da medição</strong> — FTD:{" "}
+        <strong className="text-foreground">pelo seu webhook</strong> — cadastro:{" "}
+        <strong className="text-foreground">pela conta</strong> · LTV por criativo:{" "}
+        <strong className="text-emerald-400">disponível.</strong>
+      </div>
+
+      <p className="text-sm text-muted-foreground">
+        pela conta de anúncio <strong className="text-foreground">{num(totals?.ftd)} FTD</strong> ·{" "}
+        <strong className="text-foreground">{num(totals?.players)} cadastros</strong> — pelo seu
+        webhook <strong className="text-foreground">{num(totals?.ftd)} FTD</strong> ·{" "}
+        <strong className="text-foreground">{num(totals?.markedPlayers)} cadastros</strong>. Os
+        cartões usam <strong className="text-foreground">o seu webhook</strong> para o FTD e{" "}
+        <strong className="text-foreground">a conta</strong> para o cadastro.
+      </p>
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <Kpi
-          title="Receita atribuida"
-          value={brl(totals?.revenue)}
-          detail="depositos dos players"
+          title="Investido no periodo"
+          value={brl(totals?.spend)}
+          detail={`${brl((totals?.spend ?? 0) / Math.max(1, range.days))} por dia, em média`}
+        />
+        <Kpi
+          title="ROAS no periodo"
+          value={ratio(totals?.roas)}
+          detail={`investiu ${brl(totals?.spend)} · voltou ${brl(totalReturn)}`}
+          tone="info"
+        />
+        <Kpi
+          title="ROAS do FTD"
+          value={ratio(
+            (totals?.spend ?? 0) > 0 ? (totals?.ftdRevenue ?? 0) / (totals?.spend ?? 0) : null,
+          )}
+          detail={`${brl(totals?.ftdRevenue)} em primeiros depósitos`}
+          tone="info"
+        />
+        <Kpi
+          title="Custo por FTD"
+          value={totals?.cpaFtd == null ? "-" : brl2(totals.cpaFtd)}
+          detail={`${num(totals?.ftd)} primeiros depósitos no período`}
+        />
+        <Kpi
+          title="Redepósito no periodo"
+          value={brl(totals?.redepositRevenue)}
+          detail="recompra somada no período"
           tone="success"
         />
-        <Kpi title="ROAS" value={ratio(totals?.roas)} detail="receita / midia" tone="info" />
-        <Kpi
-          title="UTM sem midia"
-          value={num(totals?.orphanPlayers)}
-          detail={`${num(totals?.markedPlayers)} players marcados`}
-        />
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[1fr_1fr]">
-        <CampaignTable campaigns={data?.campaigns ?? []} isLoading={isLoading} />
+      <div className="rounded-lg bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+        <strong className="text-foreground">{brl(totals?.ftdRevenue)}</strong> de {num(totals?.ftd)}{" "}
+        primeiros depósitos
+        <span className="px-2">+</span>
+        <strong className="text-foreground">{brl(totals?.redepositRevenue)}</strong> de redepósito
+        <span className="px-2">=</span>
+        <strong className="text-emerald-400">{brl(totalReturn)}</strong> de volta
+        <span className="px-2">÷</span>
+        <strong className="text-foreground">{brl(totals?.spend)}</strong> investidos
+        <span className="px-2">=</span>
+        <strong className="text-emerald-400">{ratio(totals?.roas)}</strong>
+        <span className="float-right hidden text-muted-foreground lg:inline">
+          nos últimos {range.days} dias · só de quem chegou por anúncio marcado
+        </span>
+      </div>
+
+      <div className="grid gap-5 xl:grid-cols-[1.4fr_1fr]">
         <CreativeTable creatives={data?.creatives ?? []} isLoading={isLoading} />
+        <div className="space-y-4">
+          <DailyChart
+            title="Investimento por dia"
+            subtitle={`${range.days} dias · o que foi gasto em mídia`}
+            data={data?.daily ?? []}
+            dataKey="spend"
+            color="#f59e0b"
+            formatter={brl}
+          />
+          <DailyChart
+            title="Primeiros depósitos (FTD) por dia"
+            subtitle={`${range.days} dias`}
+            data={data?.daily ?? []}
+            dataKey="ftd"
+            color="#22c55e"
+            formatter={num}
+          />
+          <MoneyMapCard rows={data?.moneyMap ?? []} />
+        </div>
       </div>
 
-      <OrphanAttributionTable rows={data?.orphanAttributions ?? []} isLoading={isLoading} />
+      <AudienceTable rows={data?.audiences ?? []} isLoading={isLoading} />
+      <CampaignTable
+        campaigns={data?.campaigns ?? []}
+        isLoading={isLoading}
+        orphanRevenue={orphanRevenue}
+      />
+      <OrphanAttributionTable rows={orphanRows} isLoading={isLoading} />
     </div>
   );
 }
@@ -725,15 +931,267 @@ function AttributionBadge({ status }: { status: string }) {
   );
 }
 
-function CampaignTable({ campaigns, isLoading }: { campaigns: CampaignRow[]; isLoading: boolean }) {
+function CreativeThumb({ src, label }: { src?: string | null; label: string }) {
+  return (
+    <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border/60 bg-muted/50">
+      {src ? (
+        <img src={src} alt={label} className="h-full w-full object-cover" loading="lazy" />
+      ) : (
+        <ImageIcon className="h-4 w-4 text-muted-foreground" />
+      )}
+    </div>
+  );
+}
+
+function DailyChart({
+  title,
+  subtitle,
+  data,
+  dataKey,
+  color,
+  formatter,
+}: {
+  title: string;
+  subtitle: string;
+  data: DailyPoint[];
+  dataKey: "spend" | "ftd";
+  color: string;
+  formatter: (value: number) => string;
+}) {
+  return (
+    <DataCard title={title} description={subtitle} bodyClassName="h-[250px] pt-3">
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={data} margin={{ top: 8, right: 10, bottom: 0, left: 0 }}>
+          <defs>
+            <linearGradient id={`grad-${dataKey}`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor={color} stopOpacity={0.35} />
+              <stop offset="95%" stopColor={color} stopOpacity={0.02} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" opacity={0.45} />
+          <XAxis
+            dataKey="label"
+            tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }}
+            axisLine={false}
+            tickLine={false}
+          />
+          <YAxis
+            tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }}
+            axisLine={false}
+            tickLine={false}
+            tickFormatter={(value) => formatter(Number(value))}
+            width={58}
+          />
+          <Tooltip
+            cursor={{ stroke: color, strokeOpacity: 0.35 }}
+            contentStyle={{
+              background: "hsl(var(--popover))",
+              border: "1px solid hsl(var(--border))",
+              borderRadius: 8,
+              color: "hsl(var(--popover-foreground))",
+            }}
+            formatter={(value) => formatter(Number(value))}
+          />
+          <Area
+            type="monotone"
+            dataKey={dataKey}
+            stroke={color}
+            fill={`url(#grad-${dataKey})`}
+            strokeWidth={2.5}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
+    </DataCard>
+  );
+}
+
+function MoneyMapCard({ rows }: { rows: MoneyRow[] }) {
+  const [page, setPage] = useState(1);
+  const pageSize = 8;
+  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+  const current = Math.min(page, totalPages);
+  const paged = rows.slice((current - 1) * pageSize, current * pageSize);
+
+  return (
+    <DataCard
+      title="Onde o dinheiro está"
+      description="Participação na receita do período (FTD + recompra), por anúncio"
+    >
+      {rows.length === 0 ? (
+        <EmptyState
+          icon={<Wallet className="h-6 w-6" />}
+          title="Sem receita atribuída"
+          description="Quando os depósitos chegarem com UTM, a distribuição aparece aqui."
+        />
+      ) : (
+        <div className="space-y-3">
+          {paged.map((row) => (
+            <div key={`${row.creative}-${row.campaign ?? ""}`} className="space-y-1">
+              <div className="flex items-center gap-3">
+                <CreativeThumb src={row.thumbnail_url} label={row.creative} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="truncate text-sm font-semibold">{row.creative}</p>
+                    <span className="text-sm text-muted-foreground">{Math.round(row.share)}%</span>
+                  </div>
+                  <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted/50">
+                    <div
+                      className="h-full rounded-full bg-primary"
+                      style={{ width: `${Math.max(1, row.share)}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+          <div className="flex flex-wrap items-center gap-2 pt-2 text-sm text-muted-foreground">
+            <span>
+              {rows.length === 0 ? 0 : (current - 1) * pageSize + 1}–
+              {Math.min(current * pageSize, rows.length)} de {num(rows.length)} criativos
+            </span>
+            <div className="ml-auto flex flex-wrap gap-2">
+              {Array.from({ length: Math.min(totalPages, 10) }).map((_, index) => {
+                const n = index + 1;
+                return (
+                  <Button
+                    key={n}
+                    variant={n === current ? "default" : "outline"}
+                    size="sm"
+                    className="h-9 w-9 p-0"
+                    onClick={() => setPage(n)}
+                  >
+                    {n}
+                  </Button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+    </DataCard>
+  );
+}
+
+function AudienceTable({ rows, isLoading }: { rows: AudienceRow[]; isLoading: boolean }) {
+  const totals = rows.reduce(
+    (acc, row) => ({
+      spend: acc.spend + row.spend,
+      ads: acc.ads + row.ads,
+      impressions: acc.impressions + row.impressions,
+      clicks: acc.clicks + row.clicks,
+      ftd: acc.ftd + row.ftd,
+      players: acc.players + row.players,
+    }),
+    { spend: 0, ads: 0, impressions: 0, clicks: 0, ftd: 0, players: 0 },
+  );
+
+  return (
+    <DataCard
+      title="Público por público"
+      description="O que cada conjunto custou e quantos primeiros depósitos ele trouxe. É onde mora a segmentação — idade, posicionamento, interesse. Só conjuntos que investiram no período."
+      bodyClassName="overflow-x-auto"
+    >
+      {rows.length === 0 ? (
+        <EmptyState
+          icon={
+            isLoading ? (
+              <Loader2 className="h-6 w-6 animate-spin" />
+            ) : (
+              <Target className="h-6 w-6" />
+            )
+          }
+          title={isLoading ? "Carregando públicos" : "Sem públicos no período"}
+          description="Depois de sincronizar conjuntos de anúncio, eles aparecem aqui."
+        />
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Público</TableHead>
+              <TableHead className="text-right">Investido</TableHead>
+              <TableHead className="text-right">Anúncios</TableHead>
+              <TableHead className="text-right">Impressões</TableHead>
+              <TableHead className="text-right">Cliques</TableHead>
+              <TableHead className="text-right">FTD</TableHead>
+              <TableHead className="text-right">Custo por FTD</TableHead>
+              <TableHead className="text-right">Cadastros</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((row) => (
+              <TableRow key={row.adset}>
+                <TableCell>{row.adset}</TableCell>
+                <TableCell className="text-right font-medium">{brl(row.spend)}</TableCell>
+                <TableCell className="text-right text-muted-foreground">{num(row.ads)}</TableCell>
+                <TableCell className="text-right text-muted-foreground">
+                  {num(row.impressions)}
+                </TableCell>
+                <TableCell className="text-right text-muted-foreground">
+                  {num(row.clicks)}
+                </TableCell>
+                <TableCell className="text-right font-semibold">
+                  {row.ftd > 0 ? num(row.ftd) : "—"}
+                </TableCell>
+                <TableCell className="text-right">
+                  {row.ftd > 0 ? brl2(row.spend / row.ftd) : "—"}
+                </TableCell>
+                <TableCell className="text-right text-muted-foreground">
+                  {row.players > 0 ? num(row.players) : "—"}
+                </TableCell>
+              </TableRow>
+            ))}
+            <TableRow className="bg-muted/35 font-semibold">
+              <TableCell>{num(rows.length)} públicos</TableCell>
+              <TableCell className="text-right">{brl(totals.spend)}</TableCell>
+              <TableCell className="text-right">{num(totals.ads)}</TableCell>
+              <TableCell className="text-right">{num(totals.impressions)}</TableCell>
+              <TableCell className="text-right">{num(totals.clicks)}</TableCell>
+              <TableCell className="text-right">{num(totals.ftd)}</TableCell>
+              <TableCell className="text-right">
+                {totals.ftd > 0 ? brl2(totals.spend / totals.ftd) : "—"}
+              </TableCell>
+              <TableCell className="text-right">{num(totals.players)}</TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+      )}
+    </DataCard>
+  );
+}
+
+function CampaignTable({
+  campaigns,
+  isLoading,
+  orphanRevenue,
+}: {
+  campaigns: CampaignRow[];
+  isLoading: boolean;
+  orphanRevenue: number;
+}) {
+  const rows = campaigns.filter((row) => row.spend > 0 || row.players > 0);
+  const totals = rows.reduce(
+    (acc, row) => ({
+      spend: acc.spend + row.spend,
+      impressions: acc.impressions + row.impressions,
+      clicks: acc.clicks + row.clicks,
+      players: acc.players + row.players,
+      ftd: acc.ftd + row.ftd,
+      ftdRevenue: acc.ftdRevenue + row.ftdRevenue,
+    }),
+    { spend: 0, impressions: 0, clicks: 0, players: 0, ftd: 0, ftdRevenue: 0 },
+  );
+  const totalCtr = totals.impressions > 0 ? (totals.clicks / totals.impressions) * 100 : null;
+  const totalCpc = totals.clicks > 0 ? totals.spend / totals.clicks : null;
+  const totalCpm = totals.impressions > 0 ? (totals.spend / totals.impressions) * 1000 : null;
+
   return (
     <DataCard
       title="Campanha por campanha"
-      description="Gasto de midia cruzado com cadastros, FTD e receita atribuida."
+      description="O que cada campanha custou e o que ela devolveu — primeiro depósito e recompra do mesmo dia. Só campanhas que investiram no período."
       icon={<BarChart3 className="h-4 w-4" />}
       bodyClassName="overflow-x-auto"
     >
-      {campaigns.length === 0 ? (
+      {rows.length === 0 ? (
         <EmptyState
           icon={
             isLoading ? (
@@ -746,45 +1204,89 @@ function CampaignTable({ campaigns, isLoading }: { campaigns: CampaignRow[]; isL
           description="Depois de sincronizar o Meta ou receber players com UTM, as campanhas aparecem aqui."
         />
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Campanha</TableHead>
-              <TableHead className="text-right">Investido</TableHead>
-              <TableHead className="text-right">Impressoes</TableHead>
-              <TableHead className="text-right">Cliques</TableHead>
-              <TableHead className="text-right">Players</TableHead>
-              <TableHead className="text-right">FTD</TableHead>
-              <TableHead className="text-right">Receita</TableHead>
-              <TableHead className="text-right">ROAS</TableHead>
-              <TableHead className="text-right">Status</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {campaigns.map((row) => (
-              <TableRow key={`${row.campaign_id ?? row.campaign}`}>
-                <TableCell>
-                  <p className="font-semibold">{row.campaign}</p>
-                  {row.campaign_id && (
-                    <p className="text-xs text-muted-foreground">{row.campaign_id}</p>
-                  )}
-                </TableCell>
-                <TableCell className="text-right">{brl(row.spend)}</TableCell>
-                <TableCell className="text-right">{num(row.impressions)}</TableCell>
-                <TableCell className="text-right">{num(row.clicks)}</TableCell>
-                <TableCell className="text-right">{num(row.players)}</TableCell>
-                <TableCell className="text-right">{num(row.ftd)}</TableCell>
-                <TableCell className="text-right">{brl(row.revenue)}</TableCell>
-                <TableCell className="text-right">
-                  {ratio(row.spend > 0 ? row.revenue / row.spend : null)}
-                </TableCell>
-                <TableCell className="text-right">
-                  <AttributionBadge status={row.match_status} />
-                </TableCell>
+        <div className="space-y-3">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Campanha</TableHead>
+                <TableHead className="text-right">Investido</TableHead>
+                <TableHead className="text-right">Impressões</TableHead>
+                <TableHead className="text-right">Cliques</TableHead>
+                <TableHead className="text-right">CTR</TableHead>
+                <TableHead className="text-right">CPC</TableHead>
+                <TableHead className="text-right">CPM</TableHead>
+                <TableHead className="text-right">Cadastros</TableHead>
+                <TableHead className="text-right">CPA cadastro</TableHead>
+                <TableHead className="text-right">FTD</TableHead>
+                <TableHead className="text-right">Valor FTD</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {rows.map((row) => {
+                const ctr = row.impressions > 0 ? (row.clicks / row.impressions) * 100 : null;
+                const cpc = row.clicks > 0 ? row.spend / row.clicks : null;
+                const cpm = row.impressions > 0 ? (row.spend / row.impressions) * 1000 : null;
+                return (
+                  <TableRow key={`${row.campaign_id ?? row.campaign}`}>
+                    <TableCell>
+                      <p className="font-semibold">{row.campaign}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {num(row.players)} cadastros · {row.campaign_id ?? "sem id"}
+                      </p>
+                    </TableCell>
+                    <TableCell className="text-right font-medium">{brl(row.spend)}</TableCell>
+                    <TableCell className="text-right">{num(row.impressions)}</TableCell>
+                    <TableCell className="text-right">{num(row.clicks)}</TableCell>
+                    <TableCell className="text-right">{pct(ctr)}</TableCell>
+                    <TableCell className="text-right">{cpc == null ? "—" : brl2(cpc)}</TableCell>
+                    <TableCell className="text-right">{cpm == null ? "—" : brl2(cpm)}</TableCell>
+                    <TableCell className="text-right">{num(row.players)}</TableCell>
+                    <TableCell className="text-right">
+                      {row.players > 0 ? brl2(row.spend / row.players) : "—"}
+                    </TableCell>
+                    <TableCell className="text-right font-semibold">{num(row.ftd)}</TableCell>
+                    <TableCell className="text-right">
+                      <p className="font-semibold">{brl(row.ftdRevenue)}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {row.ftd > 0 ? `${brl(row.ftdRevenue / row.ftd)} por jogador` : "—"}
+                      </p>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+              <TableRow className="bg-muted/35 font-semibold">
+                <TableCell>
+                  Total
+                  <p className="text-xs font-normal text-muted-foreground">
+                    {num(rows.length)} campanha(s)
+                  </p>
+                </TableCell>
+                <TableCell className="text-right">{brl(totals.spend)}</TableCell>
+                <TableCell className="text-right">{num(totals.impressions)}</TableCell>
+                <TableCell className="text-right">{num(totals.clicks)}</TableCell>
+                <TableCell className="text-right">{pct(totalCtr)}</TableCell>
+                <TableCell className="text-right">
+                  {totalCpc == null ? "—" : brl2(totalCpc)}
+                </TableCell>
+                <TableCell className="text-right">
+                  {totalCpm == null ? "—" : brl2(totalCpm)}
+                </TableCell>
+                <TableCell className="text-right">{num(totals.players)}</TableCell>
+                <TableCell className="text-right">
+                  {totals.players > 0 ? brl2(totals.spend / totals.players) : "—"}
+                </TableCell>
+                <TableCell className="text-right">{num(totals.ftd)}</TableCell>
+                <TableCell className="text-right">{brl(totals.ftdRevenue)}</TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+          <p className="text-sm text-muted-foreground">
+            ROAS é o total depositado dividido pelo investido. Sem a conta de anúncios conectada,
+            {orphanRevenue > 0 ? ` ${brl(orphanRevenue)} continuam` : " a receita órfã continua"} no
+            início e em Relatórios.investimento fica em zero e a coluna aparece como “—”: é receita,
+            não retorno.
+          </p>
+        </div>
       )}
     </DataCard>
   );
@@ -858,14 +1360,31 @@ function OrphanAttributionTable({
 }
 
 function CreativeTable({ creatives, isLoading }: { creatives: CreativeRow[]; isLoading: boolean }) {
+  const rows = creatives.filter((row) => row.spend > 0 || row.players > 0).slice(0, 75);
+  const totals = rows.reduce(
+    (acc, row) => ({
+      spend: acc.spend + row.spend,
+      impressions: acc.impressions + row.impressions,
+      clicks: acc.clicks + row.clicks,
+      frequencySum: acc.frequencySum + (row.frequency ?? 0),
+      frequencyCount: acc.frequencyCount + (row.frequency ? 1 : 0),
+    }),
+    { spend: 0, impressions: 0, clicks: 0, frequencySum: 0, frequencyCount: 0 },
+  );
+  const totalCtr = totals.impressions > 0 ? (totals.clicks / totals.impressions) * 100 : null;
+  const totalCpc = totals.clicks > 0 ? totals.spend / totals.clicks : null;
+  const totalCpm = totals.impressions > 0 ? (totals.spend / totals.impressions) * 1000 : null;
+  const totalFrequency =
+    totals.frequencyCount > 0 ? totals.frequencySum / totals.frequencyCount : null;
+
   return (
     <DataCard
       title="Criativo por criativo"
-      description="Une gasto de midia com players criados pela marcacao UTM."
+      description="Ordenado pelo que devolve, não pelo que é barato"
       icon={<Target className="h-4 w-4" />}
       bodyClassName="overflow-x-auto"
     >
-      {creatives.length === 0 ? (
+      {rows.length === 0 ? (
         <EmptyState
           icon={
             isLoading ? (
@@ -878,43 +1397,88 @@ function CreativeTable({ creatives, isLoading }: { creatives: CreativeRow[]; isL
           description="Depois que players chegarem com UTM ou gasto for importado, a leitura por criativo aparece aqui."
         />
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Criativo</TableHead>
-              <TableHead className="text-right">Investido</TableHead>
-              <TableHead className="text-right">CTR</TableHead>
-              <TableHead className="text-right">CPC</TableHead>
-              <TableHead className="text-right">Players</TableHead>
-              <TableHead className="text-right">FTD</TableHead>
-              <TableHead className="text-right">Receita</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {creatives.map((row) => {
-              const ctr = row.impressions > 0 ? (row.clicks / row.impressions) * 100 : null;
-              const cpc = row.clicks > 0 ? row.spend / row.clicks : null;
-              return (
-                <TableRow key={`${row.ad_id ?? row.creative}`}>
-                  <TableCell>
-                    <p className="font-semibold">{row.creative}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {row.campaign ?? "Sem campanha"}
+        <div className="space-y-3">
+          <div className="max-h-[560px] overflow-auto pr-1">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Criativo</TableHead>
+                  <TableHead className="text-right">Investido</TableHead>
+                  <TableHead className="text-right">CTR</TableHead>
+                  <TableHead className="text-right">CPC</TableHead>
+                  <TableHead className="text-right">CPM</TableHead>
+                  <TableHead className="text-right">Freq.</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((row) => {
+                  const ctr = row.impressions > 0 ? (row.clicks / row.impressions) * 100 : null;
+                  const cpc = row.clicks > 0 ? row.spend / row.clicks : null;
+                  const cpm = row.impressions > 0 ? (row.spend / row.impressions) * 1000 : null;
+                  return (
+                    <TableRow key={`${row.ad_id ?? row.creative}`}>
+                      <TableCell>
+                        <div className="flex min-w-[260px] items-center gap-3">
+                          <CreativeThumb src={row.thumbnail_url} label={row.creative} />
+                          <div className="min-w-0">
+                            <p className="truncate font-semibold">{row.creative}</p>
+                            <p className="truncate text-xs text-muted-foreground">
+                              {row.campaign ?? "Sem campanha"}
+                            </p>
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <p className="font-medium">{brl(row.spend)}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {num(row.impressions)} impressões
+                        </p>
+                      </TableCell>
+                      <TableCell className="text-right font-medium">{pct(ctr)}</TableCell>
+                      <TableCell className="text-right">
+                        <p>{cpc == null ? "—" : brl2(cpc)}</p>
+                        <p className="text-xs text-muted-foreground">{num(row.clicks)} cliques</p>
+                      </TableCell>
+                      <TableCell className="text-right text-muted-foreground">
+                        {cpm == null ? "—" : brl2(cpm)}
+                      </TableCell>
+                      <TableCell className="text-right text-amber-400">
+                        {row.frequency == null ? "—" : row.frequency.toFixed(1)}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+                <TableRow className="sticky bottom-0 bg-muted font-semibold">
+                  <TableCell>Total · {num(rows.length)} criativos</TableCell>
+                  <TableCell className="text-right">
+                    <p>{brl(totals.spend)}</p>
+                    <p className="text-xs font-normal text-muted-foreground">
+                      {num(totals.impressions)} impressões
                     </p>
                   </TableCell>
-                  <TableCell className="text-right">{brl(row.spend)}</TableCell>
+                  <TableCell className="text-right">{pct(totalCtr)}</TableCell>
                   <TableCell className="text-right">
-                    {ctr == null ? "-" : `${ctr.toFixed(2)}%`}
+                    <p>{totalCpc == null ? "—" : brl2(totalCpc)}</p>
+                    <p className="text-xs font-normal text-muted-foreground">
+                      {num(totals.clicks)} cliques
+                    </p>
                   </TableCell>
-                  <TableCell className="text-right">{cpc == null ? "-" : brl(cpc)}</TableCell>
-                  <TableCell className="text-right">{num(row.players)}</TableCell>
-                  <TableCell className="text-right">{num(row.ftd)}</TableCell>
-                  <TableCell className="text-right">{brl(row.revenue)}</TableCell>
+                  <TableCell className="text-right text-muted-foreground">
+                    {totalCpm == null ? "—" : brl2(totalCpm)}
+                  </TableCell>
+                  <TableCell className="text-right text-muted-foreground">
+                    {totalFrequency == null ? "—" : totalFrequency.toFixed(1)}
+                  </TableCell>
                 </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
+              </TableBody>
+            </Table>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            {num(rows.length)} criativos no período, do que mais devolveu para o que menos devolveu
+            — {brl(totals.spend)} investido no total. O FTD vem da conta de anúncio, para bater com
+            o gerenciador.
+          </p>
+        </div>
       )}
     </DataCard>
   );
