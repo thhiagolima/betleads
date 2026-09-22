@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -15,7 +15,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { brl, timeAgo } from "@/lib/format";
-import { Search, Crown, ChevronLeft, ChevronRight, Download, ArrowUp, ArrowDown, ArrowUpDown, Copy, Check, Calendar as CalendarIcon, X } from "lucide-react";
+import { Search, Crown, ChevronLeft, ChevronRight, Download, ArrowUp, ArrowDown, ArrowUpDown, Copy, Check, Calendar as CalendarIcon, X, Eye } from "lucide-react";
 import { MessageCircle } from "lucide-react";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -1259,13 +1259,14 @@ function PlayersPage() {
                 <TableHead className="text-right"><SortHeader k="saldo" label="Saldo" align="right" /></TableHead>
                 <TableHead className="text-right"><SortHeader k="lucro" label="Lucro" align="right" /></TableHead>
                 <TableHead>Tags</TableHead>
+                <TableHead className="text-right">Ficha</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading &&
                 Array.from({ length: 8 }).map((_, i) => (
                   <TableRow key={i}>
-                    {Array.from({ length: 12 }).map((_, j) => (
+                    {Array.from({ length: 13 }).map((_, j) => (
                       <TableCell key={j}>
                         <Skeleton className="h-4 w-24" />
                       </TableCell>
@@ -1295,11 +1296,11 @@ function PlayersPage() {
                       <div className="flex items-center gap-2">
                         {riskDot(p.risco)}
                          <div className="flex flex-col">
-                           <button
-                             type="button"
-                             onClick={() => setHistoryPlayer({ id: p.id, nome: p.nome })}
+                           <Link
+                             to="/players/$playerId"
+                             params={{ playerId: p.id }}
                              className="font-medium flex items-center gap-1 text-left hover:text-primary"
-                             title="Ver histórico de contatos"
+                             title="Abrir ficha do player"
                            >
                              {p.nome}
                              {p.vip && <Crown className="h-3 w-3 text-amber-400" />}
@@ -1311,7 +1312,7 @@ function PlayersPage() {
                                  ⏳ aguardando
                                </span>
                              )}
-                           </button>
+                           </Link>
                           <span className="text-[11px] text-muted-foreground">
                             {p.player_external_id}
                           </span>
@@ -1404,12 +1405,20 @@ function PlayersPage() {
                         ))}
                       </div>
                     </TableCell>
+                    <TableCell className="text-right">
+                      <Button variant="outline" size="sm" asChild className="h-8 gap-1.5">
+                        <Link to="/players/$playerId" params={{ playerId: p.id }}>
+                          <Eye className="h-3.5 w-3.5" />
+                          Ficha
+                        </Link>
+                      </Button>
+                    </TableCell>
                   </TableRow>
                 );
               })}
               {!isLoading && filteredCount === 0 && (
                 <TableRow>
-                  <TableCell colSpan={12} className="text-center py-10 text-muted-foreground text-sm">
+                  <TableCell colSpan={13} className="text-center py-10 text-muted-foreground text-sm">
                     Nenhum player encontrado com esses filtros.
                   </TableCell>
                 </TableRow>

@@ -26,6 +26,7 @@ import { Route as SmsRouteImport } from './routes/sms'
 import { Route as TreinoIaRouteImport } from './routes/treino-ia'
 import { Route as WebhooksRouteImport } from './routes/webhooks'
 import { Route as WhatsappRouteImport } from './routes/whatsapp'
+import { Route as PlayersPlayerIdRouteImport } from './routes/players.$playerId'
 import { Route as UTokenRouteImport } from './routes/u.$token'
 import { Route as ApiPublicEvolutionWebhookRouteImport } from './routes/api/public/evolution-webhook'
 import { Route as ApiPublicSmsWebhookRouteImport } from './routes/api/public/sms-webhook'
@@ -138,6 +139,11 @@ const WhatsappRoute = WhatsappRouteImport.update({
   id: '/whatsapp',
   path: '/whatsapp',
   getParentRoute: () => rootRouteImport,
+} as any)
+const PlayersPlayerIdRoute = PlayersPlayerIdRouteImport.update({
+  id: '/$playerId',
+  path: '/$playerId',
+  getParentRoute: () => PlayersRoute,
 } as any)
 const UTokenRoute = UTokenRouteImport.update({
   id: '/u/$token',
@@ -305,12 +311,13 @@ export interface FileRoutesByFullPath {
   '/inteligencia': typeof InteligenciaRoute
   '/ligacoes': typeof LigacoesRoute
   '/midia-ltv': typeof MidiaLtvRoute
-  '/players': typeof PlayersRoute
+  '/players': typeof PlayersRouteWithChildren
   '/regras': typeof RegrasRoute
   '/sms': typeof SmsRoute
   '/treino-ia': typeof TreinoIaRoute
   '/webhooks': typeof WebhooksRoute
   '/whatsapp': typeof WhatsappRoute
+  '/players/$playerId': typeof PlayersPlayerIdRoute
   '/u/$token': typeof UTokenRoute
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
   '/api/public/sms-webhook': typeof ApiPublicSmsWebhookRoute
@@ -351,12 +358,13 @@ export interface FileRoutesByTo {
   '/inteligencia': typeof InteligenciaRoute
   '/ligacoes': typeof LigacoesRoute
   '/midia-ltv': typeof MidiaLtvRoute
-  '/players': typeof PlayersRoute
+  '/players': typeof PlayersRouteWithChildren
   '/regras': typeof RegrasRoute
   '/sms': typeof SmsRoute
   '/treino-ia': typeof TreinoIaRoute
   '/webhooks': typeof WebhooksRoute
   '/whatsapp': typeof WhatsappRoute
+  '/players/$playerId': typeof PlayersPlayerIdRoute
   '/u/$token': typeof UTokenRoute
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
   '/api/public/sms-webhook': typeof ApiPublicSmsWebhookRoute
@@ -398,12 +406,13 @@ export interface FileRoutesById {
   '/inteligencia': typeof InteligenciaRoute
   '/ligacoes': typeof LigacoesRoute
   '/midia-ltv': typeof MidiaLtvRoute
-  '/players': typeof PlayersRoute
+  '/players': typeof PlayersRouteWithChildren
   '/regras': typeof RegrasRoute
   '/sms': typeof SmsRoute
   '/treino-ia': typeof TreinoIaRoute
   '/webhooks': typeof WebhooksRoute
   '/whatsapp': typeof WhatsappRoute
+  '/players/$playerId': typeof PlayersPlayerIdRoute
   '/u/$token': typeof UTokenRoute
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
   '/api/public/sms-webhook': typeof ApiPublicSmsWebhookRoute
@@ -452,6 +461,7 @@ export interface FileRouteTypes {
     | '/treino-ia'
     | '/webhooks'
     | '/whatsapp'
+    | '/players/$playerId'
     | '/u/$token'
     | '/api/public/evolution-webhook'
     | '/api/public/sms-webhook'
@@ -498,6 +508,7 @@ export interface FileRouteTypes {
     | '/treino-ia'
     | '/webhooks'
     | '/whatsapp'
+    | '/players/$playerId'
     | '/u/$token'
     | '/api/public/evolution-webhook'
     | '/api/public/sms-webhook'
@@ -544,6 +555,7 @@ export interface FileRouteTypes {
     | '/treino-ia'
     | '/webhooks'
     | '/whatsapp'
+    | '/players/$playerId'
     | '/u/$token'
     | '/api/public/evolution-webhook'
     | '/api/public/sms-webhook'
@@ -585,7 +597,7 @@ export interface RootRouteChildren {
   InteligenciaRoute: typeof InteligenciaRoute
   LigacoesRoute: typeof LigacoesRoute
   MidiaLtvRoute: typeof MidiaLtvRoute
-  PlayersRoute: typeof PlayersRoute
+  PlayersRoute: typeof PlayersRouteWithChildren
   RegrasRoute: typeof RegrasRoute
   SmsRoute: typeof SmsRoute
   TreinoIaRoute: typeof TreinoIaRoute
@@ -740,6 +752,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/whatsapp'
       preLoaderRoute: typeof WhatsappRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/players/$playerId': {
+      id: '/players/$playerId'
+      path: '/$playerId'
+      fullPath: '/players/$playerId'
+      preLoaderRoute: typeof PlayersPlayerIdRouteImport
+      parentRoute: typeof PlayersRoute
     }
     '/u/$token': {
       id: '/u/$token'
@@ -933,6 +952,17 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface PlayersRouteChildren {
+  PlayersPlayerIdRoute: typeof PlayersPlayerIdRoute
+}
+
+const PlayersRouteChildren: PlayersRouteChildren = {
+  PlayersPlayerIdRoute: PlayersPlayerIdRoute,
+}
+
+const PlayersRouteWithChildren =
+  PlayersRoute._addFileChildren(PlayersRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
@@ -945,7 +975,7 @@ const rootRouteChildren: RootRouteChildren = {
   InteligenciaRoute: InteligenciaRoute,
   LigacoesRoute: LigacoesRoute,
   MidiaLtvRoute: MidiaLtvRoute,
-  PlayersRoute: PlayersRoute,
+  PlayersRoute: PlayersRouteWithChildren,
   RegrasRoute: RegrasRoute,
   SmsRoute: SmsRoute,
   TreinoIaRoute: TreinoIaRoute,
