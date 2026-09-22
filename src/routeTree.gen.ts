@@ -17,6 +17,7 @@ import { Route as ConfiguracoesRouteImport } from './routes/configuracoes'
 import { Route as EmailRouteImport } from './routes/email'
 import { Route as EventosRouteImport } from './routes/eventos'
 import { Route as ExpertsRouteImport } from './routes/experts'
+import { Route as GamificacaoRouteImport } from './routes/gamificacao'
 import { Route as InteligenciaRouteImport } from './routes/inteligencia'
 import { Route as LigacoesRouteImport } from './routes/ligacoes'
 import { Route as MidiaLtvRouteImport } from './routes/midia-ltv'
@@ -93,6 +94,11 @@ const EventosRoute = EventosRouteImport.update({
 const ExpertsRoute = ExpertsRouteImport.update({
   id: '/experts',
   path: '/experts',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GamificacaoRoute = GamificacaoRouteImport.update({
+  id: '/gamificacao',
+  path: '/gamificacao',
   getParentRoute: () => rootRouteImport,
 } as any)
 const InteligenciaRoute = InteligenciaRouteImport.update({
@@ -308,6 +314,7 @@ export interface FileRoutesByFullPath {
   '/email': typeof EmailRoute
   '/eventos': typeof EventosRoute
   '/experts': typeof ExpertsRoute
+  '/gamificacao': typeof GamificacaoRoute
   '/inteligencia': typeof InteligenciaRoute
   '/ligacoes': typeof LigacoesRoute
   '/midia-ltv': typeof MidiaLtvRoute
@@ -355,6 +362,7 @@ export interface FileRoutesByTo {
   '/email': typeof EmailRoute
   '/eventos': typeof EventosRoute
   '/experts': typeof ExpertsRoute
+  '/gamificacao': typeof GamificacaoRoute
   '/inteligencia': typeof InteligenciaRoute
   '/ligacoes': typeof LigacoesRoute
   '/midia-ltv': typeof MidiaLtvRoute
@@ -403,6 +411,7 @@ export interface FileRoutesById {
   '/email': typeof EmailRoute
   '/eventos': typeof EventosRoute
   '/experts': typeof ExpertsRoute
+  '/gamificacao': typeof GamificacaoRoute
   '/inteligencia': typeof InteligenciaRoute
   '/ligacoes': typeof LigacoesRoute
   '/midia-ltv': typeof MidiaLtvRoute
@@ -452,6 +461,7 @@ export interface FileRouteTypes {
     | '/email'
     | '/eventos'
     | '/experts'
+    | '/gamificacao'
     | '/inteligencia'
     | '/ligacoes'
     | '/midia-ltv'
@@ -499,6 +509,7 @@ export interface FileRouteTypes {
     | '/email'
     | '/eventos'
     | '/experts'
+    | '/gamificacao'
     | '/inteligencia'
     | '/ligacoes'
     | '/midia-ltv'
@@ -546,6 +557,7 @@ export interface FileRouteTypes {
     | '/email'
     | '/eventos'
     | '/experts'
+    | '/gamificacao'
     | '/inteligencia'
     | '/ligacoes'
     | '/midia-ltv'
@@ -594,6 +606,7 @@ export interface RootRouteChildren {
   EmailRoute: typeof EmailRoute
   EventosRoute: typeof EventosRoute
   ExpertsRoute: typeof ExpertsRoute
+  GamificacaoRoute: typeof GamificacaoRoute
   InteligenciaRoute: typeof InteligenciaRoute
   LigacoesRoute: typeof LigacoesRoute
   MidiaLtvRoute: typeof MidiaLtvRoute
@@ -688,6 +701,13 @@ declare module '@tanstack/react-router' {
       path: '/experts'
       fullPath: '/experts'
       preLoaderRoute: typeof ExpertsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/gamificacao': {
+      id: '/gamificacao'
+      path: '/gamificacao'
+      fullPath: '/gamificacao'
+      preLoaderRoute: typeof GamificacaoRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/inteligencia': {
@@ -972,6 +992,7 @@ const rootRouteChildren: RootRouteChildren = {
   EmailRoute: EmailRoute,
   EventosRoute: EventosRoute,
   ExpertsRoute: ExpertsRoute,
+  GamificacaoRoute: GamificacaoRoute,
   InteligenciaRoute: InteligenciaRoute,
   LigacoesRoute: LigacoesRoute,
   MidiaLtvRoute: MidiaLtvRoute,

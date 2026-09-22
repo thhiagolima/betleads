@@ -12,13 +12,13 @@ import {
   LogOut,
   MessageSquare,
   MessageCircle,
-  Zap,
   Rocket,
   Mail,
   Phone,
   ChevronRight,
   ShieldCheck,
   BarChart3,
+  Trophy,
   type LucideIcon,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -61,7 +61,7 @@ const menuItems: NavItem[] = [
   { title: "Inteligência IA", url: "/inteligencia", icon: Brain },
   { title: "Treino IA", url: "/treino-ia", icon: GraduationCap },
   { title: "Alertas", url: "/alertas", icon: AlertTriangle },
-  { title: "Regras", url: "/regras", icon: Zap },
+  { title: "Gamificacao", url: "/gamificacao", icon: Trophy },
   { title: "Automações", url: "/automacoes", icon: Rocket },
 ];
 
