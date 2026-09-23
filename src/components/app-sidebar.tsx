@@ -20,6 +20,7 @@ import {
   ShieldCheck,
   BarChart3,
   Trophy,
+  Building2,
   type LucideIcon,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -123,8 +124,11 @@ const engajamentoItems: NavItem[] = [
 
 const sistemaItems: NavItem[] = [{ title: "Configurações", url: "/configuracoes", icon: Settings }];
 
+const tenantSelfItem: NavItem = { title: "Meu tenant", url: "/tenants", icon: Building2 };
+
 const superAdminItems: NavItem[] = [
   { title: "Painel Super Admin", url: "/admin", icon: ShieldCheck },
+  { title: "Tenants", url: "/tenants", icon: Building2 },
 ];
 
 function isActivePath(pathname: string, url: string) {
@@ -297,6 +301,7 @@ export function AppSidebar() {
   const { isSuperAdmin } = useIsSuperAdmin();
   const { total: whatsappUnread } = useWhatsappUnreadTotal(!!session);
   const userEmail = session?.user.email ?? null;
+  const systemItems = isSuperAdmin ? sistemaItems : [...sistemaItems, tenantSelfItem];
 
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">
@@ -322,7 +327,7 @@ export function AppSidebar() {
           hash={hash}
           whatsappUnread={whatsappUnread}
         />
-        <NavGroup label="Sistema" items={sistemaItems} pathname={pathname} hash={hash} />
+        <NavGroup label="Sistema" items={systemItems} pathname={pathname} hash={hash} />
         {isSuperAdmin && (
           <NavGroup label="Administração" items={superAdminItems} pathname={pathname} hash={hash} />
         )}

@@ -7,6 +7,11 @@ import { dbUuid } from "@/lib/zod-helpers";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import {
+  assertTenantCanOperate,
+  resolveCurrentTenantId,
+  resolveOperationalTenantId,
+} from "@/lib/tenant-access.server";
 import { buildPlayerVariables } from "./template-vars.server";
 import type { Json } from "@/integrations/supabase/types";
 
@@ -514,6 +519,9 @@ export async function sendSmsInternal(args: {
     tenantId: args.tenantId,
     playerId: args.playerId,
   });
+  if (billingTenantId) {
+    await assertTenantCanOperate(billingTenantId);
+  }
   const billingReferenceId = crypto.randomUUID();
   let creditReserved = false;
   if (billingTenantId) {
@@ -611,9 +619,7 @@ export const sendTestSms = createServerFn({ method: "POST" })
       .parse(input),
   )
   .handler(async ({ data, context }) => {
-    const { data: tenantRow, error: tenantErr } = await context.supabase.rpc("current_tenant_id");
-    if (tenantErr) throw new Error(tenantErr.message);
-    const tenantId = tenantRow as string | null;
+    const tenantId = await resolveOperationalTenantId(context.supabase);
     let variables: Record<string, string> | null = null;
     if (data.playerId) {
       const { data: p } = await supabaseAdmin
@@ -622,6 +628,7 @@ export const sendTestSms = createServerFn({ method: "POST" })
           "nome, telefone, saldo_carteira, ultimo_login, ultimo_jogo, ultimo_deposito, total_depositado, total_sacado, vip, status, expert, risco",
         )
         .eq("id", data.playerId)
+        .eq("tenant_id", tenantId)
         .maybeSingle();
       if (p) {
         variables = buildPlayerVariables(p);
@@ -639,12 +646,18 @@ export const sendTestSms = createServerFn({ method: "POST" })
 
 export const listSmsLogs = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async () => {
+  .handler(async ({ context }) => {
+    const { data: tenantRow, error: tenantErr } = await context.supabase.rpc("current_tenant_id");
+    if (tenantErr) throw new Error(tenantErr.message);
+    const tenantId = tenantRow as string | null;
+    if (!tenantId) throw new Error("tenant não encontrado para o usuário");
+
     const { data, error } = await supabaseAdmin
       .from("sms_send_logs")
       .select(
         "id, to_phone, content, status, error, provider_response, trigger_name, created_at, delivery_status, delivered_at, provider_message_id",
       )
+      .eq("tenant_id", tenantId)
       .order("created_at", { ascending: false })
       .limit(50);
     if (error) throw new Error(error.message);
@@ -664,10 +677,12 @@ export const triggerSmsFlowNow = createServerFn({ method: "POST" })
       })
       .parse(input),
   )
-  .handler(async ({ data }) => {
+  .handler(async ({ data, context }) => {
+    const tenantId = await resolveOperationalTenantId(context.supabase);
     const { data: flow } = await supabaseAdmin
       .from("sms_flows")
-      .select("id, trigger_name, is_active")
+      .select("id, trigger_name, is_active, tenant_id")
+      .eq("tenant_id", tenantId)
       .eq("trigger_name", data.triggerName)
       .eq("is_active", true)
       .maybeSingle();
@@ -689,6 +704,7 @@ export const triggerSmsFlowNow = createServerFn({ method: "POST" })
         "id, nome, telefone, saldo_carteira, ultimo_login, ultimo_jogo, ultimo_deposito, total_depositado, total_sacado, vip, status, expert, risco",
       )
       .eq("id", data.playerId)
+      .eq("tenant_id", tenantId)
       .maybeSingle();
     if (!player?.telefone) return { ok: false, error: "Player sem telefone" };
 
@@ -700,6 +716,7 @@ export const triggerSmsFlowNow = createServerFn({ method: "POST" })
       flowId: flow.id,
       triggerName: data.triggerName,
       variables,
+      tenantId,
     });
   });
 
@@ -731,6 +748,8 @@ export const sendBulkSms = createServerFn({ method: "POST" })
     if (tenantErr) throw new Error(tenantErr.message);
     const tenantId = tenantRow as string | null;
     if (!tenantId) throw new Error("tenant não encontrado para o usuário");
+
+    await assertTenantCanOperate(tenantId);
 
     const trigger = `campanha:${data.campaignName}:${data.route}`;
     const targets: Array<{ phone: string; playerId?: string }> = [
@@ -1332,11 +1351,13 @@ export const getFailedSmsBreakdown = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     await requireAdmin(context.userId);
+    const tenantId = await resolveCurrentTenantId(context.supabase);
     const { start, end } = brtDayWindow(data.date);
 
     const { count: rateLimited } = await supabaseAdmin
       .from("sms_send_logs")
       .select("id", { count: "exact", head: true })
+      .eq("tenant_id", tenantId)
       .gte("created_at", start)
       .lte("created_at", end)
       .eq("status", "error")
@@ -1345,6 +1366,7 @@ export const getFailedSmsBreakdown = createServerFn({ method: "POST" })
     const { count: carrierFailed } = await supabaseAdmin
       .from("sms_send_logs")
       .select("id", { count: "exact", head: true })
+      .eq("tenant_id", tenantId)
       .gte("created_at", start)
       .lte("created_at", end)
       .eq("status", "sent")
@@ -1372,6 +1394,7 @@ export const resendFailedSms = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     await requireAdmin(context.userId);
+    const tenantId = await resolveOperationalTenantId(context.supabase);
     const { start, end } = brtDayWindow(data.date);
 
     type Row = {
@@ -1386,6 +1409,7 @@ export const resendFailedSms = createServerFn({ method: "POST" })
       const { data: r1 } = await supabaseAdmin
         .from("sms_send_logs")
         .select("to_phone, content, player_id, trigger_name")
+        .eq("tenant_id", tenantId)
         .gte("created_at", start)
         .lte("created_at", end)
         .eq("status", "error")
@@ -1396,6 +1420,7 @@ export const resendFailedSms = createServerFn({ method: "POST" })
       const { data: r2 } = await supabaseAdmin
         .from("sms_send_logs")
         .select("to_phone, content, player_id, trigger_name")
+        .eq("tenant_id", tenantId)
         .gte("created_at", start)
         .lte("created_at", end)
         .eq("status", "sent")
@@ -1426,6 +1451,7 @@ export const resendFailedSms = createServerFn({ method: "POST" })
       const { data: recent } = await supabaseAdmin
         .from("sms_send_logs")
         .select("to_phone, content, status, delivery_status, created_at")
+        .eq("tenant_id", tenantId)
         .in("to_phone", chunk)
         .gte("created_at", since)
         .eq("status", "sent")
@@ -1460,6 +1486,7 @@ export const resendFailedSms = createServerFn({ method: "POST" })
         .select(
           "id, nome, telefone, saldo_carteira, ultimo_login, ultimo_jogo, ultimo_deposito, total_depositado, total_sacado, vip, status, expert, risco",
         )
+        .eq("tenant_id", tenantId)
         .in("id", playerIds);
       (players ?? []).forEach((p) => {
         varsByPlayer.set(p.id, buildPlayerVariables(p));
@@ -1487,6 +1514,7 @@ export const resendFailedSms = createServerFn({ method: "POST" })
             playerId: r.player_id,
             triggerName: `resend_failed:${r.trigger_name ?? "manual"}`,
             variables,
+            tenantId,
           });
         }),
       );
@@ -1602,6 +1630,8 @@ export const scheduleBulkSms = createServerFn({ method: "POST" })
     const tenantId = tenantRow as string | null;
     if (!tenantId) throw new Error("tenant não encontrado para o usuário");
 
+    await assertTenantCanOperate(tenantId);
+
     const targets = await resolveRecipientsForTenant(tenantId, data.phones, data.recipients);
     if (targets.length === 0) throw new Error("Sem destinatários válidos");
 
@@ -1645,10 +1675,12 @@ export const cancelScheduledSmsCampaign = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) => z.object({ id: dbUuid() }).parse(input))
   .handler(async ({ data, context }) => {
+    const tenantId = await resolveCurrentTenantId(context.supabase);
     const { data: updated, error } = await context.supabase
       .from("sms_campaigns")
       .update({ status: "cancelada" })
       .eq("id", data.id)
+      .eq("tenant_id", tenantId)
       .eq("status", "agendada")
       .select("id")
       .maybeSingle();

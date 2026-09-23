@@ -31,6 +31,10 @@ import {
   Timer,
   Search,
   RotateCw,
+  CreditCard,
+  Link as LinkIcon,
+  Smartphone,
+  ExternalLink,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -39,8 +43,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { TRIGGER_NAMES, TRIGGER_MEANINGS, type TriggerType } from "@/lib/triggers";
-import { SendWindowCard } from "@/components/send-window-card";
 import { ProvidersPausedBanner } from "@/components/providers-paused-banner";
 import {
   smsProviderStatus,
@@ -114,6 +125,8 @@ import {
   duplicateSmsFlow,
   deleteSmsFlow,
 } from "@/lib/sms-flows.functions";
+import { getSmsCreditPortal } from "@/lib/sms-credits.functions";
+import { num } from "@/lib/format";
 
 export const Route = createFileRoute("/sms")({
   head: () => ({
@@ -250,6 +263,14 @@ function SmsPage() {
   const hash = useLocation({ select: (l) => l.hash });
   const VALID = ["dashboard", "massa", "campanhas", "fluxos", "historico", "provedor"] as const;
   const currentTab = (VALID as readonly string[]).includes(hash) ? hash : "dashboard";
+  const navItems = [
+    { value: "dashboard", label: "Painel" },
+    { value: "massa", label: "Envio em massa" },
+    { value: "campanhas", label: "Fila" },
+    { value: "fluxos", label: "Fluxos" },
+    { value: "historico", label: "Histórico" },
+    { value: "provedor", label: "Provedor" },
+  ];
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center gap-3 flex-wrap">
@@ -259,12 +280,22 @@ function SmsPage() {
         <div className="flex-1">
           <h1 className="text-2xl font-bold tracking-tight">SMS</h1>
           <p className="text-sm text-muted-foreground">
-            Central de envios, campanhas e fluxos automáticos
+            Envie SMS e acompanhe entregas, respostas, créditos e campanhas.
           </p>
         </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {navItems.map((item) => (
+            <Button
+              key={item.value}
+              variant={currentTab === item.value ? "default" : "outline"}
+              size="sm"
+              onClick={() => navigate({ to: "/sms", hash: item.value, replace: true })}
+            >
+              {item.label}
+            </Button>
+          ))}
+        </div>
       </div>
-
-      <SendWindowCard compact />
 
       <ProvidersPausedBanner channel="sms" />
 
@@ -283,7 +314,7 @@ function SmsPage() {
         </TabsList>
 
         <TabsContent value="dashboard" className="mt-6">
-          <Dashboard />
+          <SmsHomePanel />
         </TabsContent>
         <TabsContent value="massa" className="mt-6">
           <EnvioMassa />
@@ -562,6 +593,523 @@ function StatCard({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+type SmsLogRow = {
+  id: string;
+  to_phone: string | null;
+  content: string | null;
+  status: string | null;
+  error: string | null;
+  trigger_name: string | null;
+  created_at: string;
+  delivery_status: string | null;
+};
+
+type SmsCampaignRow = {
+  id: string;
+  name: string;
+  scheduled_at: string;
+  status: string;
+  total_count: number;
+  sent_count: number | null;
+  failed_count: number | null;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string | null;
+};
+
+function readNumber(value: unknown) {
+  const n = Number(value ?? 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function fmtSmsDate(value: string | null | undefined) {
+  if (!value) return "-";
+  return new Date(value).toLocaleString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function smsStatusBadge(status: string | null | undefined, delivery?: string | null) {
+  const value = delivery || status || "pendente";
+  if (value === "delivered") {
+    return (
+      <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30">entregue</Badge>
+    );
+  }
+  if (value === "failed" || value === "error") return <Badge variant="destructive">falhou</Badge>;
+  if (value === "sent")
+    return <Badge className="bg-primary/15 text-primary border-primary/30">enviado</Badge>;
+  if (value === "pending") return <Badge variant="secondary">pendente</Badge>;
+  return <Badge variant="outline">{value}</Badge>;
+}
+
+function SmsHomePanel() {
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const dashboardFn = useServerFn(getSmsDashboard);
+  const logsFn = useServerFn(listSmsLogs);
+  const campaignsFn = useServerFn(listScheduledSmsCampaigns);
+  const statusFn = useServerFn(smsProviderStatus);
+  const portalFn = useServerFn(getSmsCreditPortal);
+  const bulkFn = useServerFn(sendBulkSms);
+
+  const dashboard = useQuery({
+    queryKey: ["sms-home-dashboard"],
+    queryFn: () => dashboardFn({ data: { range_days: 30 } }),
+    refetchInterval: 15_000,
+  });
+  const logs = useQuery({
+    queryKey: ["sms-home-logs"],
+    queryFn: () => logsFn(),
+    refetchInterval: 15_000,
+  });
+  const campaigns = useQuery({
+    queryKey: ["sms-home-campaigns"],
+    queryFn: () => campaignsFn(),
+    refetchInterval: 30_000,
+  });
+  const provider = useQuery({
+    queryKey: ["sms-provider-status"],
+    queryFn: () => statusFn(),
+    refetchInterval: 30_000,
+  });
+  const credits = useQuery({
+    queryKey: ["sms-credits", "portal"],
+    queryFn: () => portalFn({ data: {} }),
+    refetchInterval: 30_000,
+  });
+
+  const [phone, setPhone] = useState("");
+  const [recipientName, setRecipientName] = useState("");
+  const [message, setMessage] = useState("Oi {nome}, seu bonus esta liberado. Acesse: suacasa.com");
+  const [trackLinks, setTrackLinks] = useState(true);
+
+  const parts = smsCount(message.length);
+  const phoneDigits = phone.replace(/\D/g, "");
+  const canSend = phoneDigits.length >= 10 && message.trim().length > 0;
+  const logsRows = ((logs.data?.logs ?? []) as SmsLogRow[]).slice(0, 10);
+  const campaignRows = ((campaigns.data?.campaigns ?? []) as SmsCampaignRow[]).slice(0, 8);
+  const totals = dashboard.data?.totals;
+  const today = dashboard.data?.today;
+  const sent30 = readNumber(totals?.sent);
+  const delivered = readNumber(totals?.delivered);
+  const failed = readNumber(totals?.failed);
+  const deliveryRate = sent30 > 0 ? Math.round((delivered / sent30) * 100) : 0;
+  const summary = (credits.data?.summary ?? {}) as Record<string, unknown>;
+  const balance = readNumber(summary.balance_credits);
+  const usedLifetime = readNumber(summary.lifetime_used_credits);
+  const usedToday = readNumber(today?.sent);
+  const pendingCampaigns = campaignRows.filter((c) =>
+    ["agendada", "running", "processando"].includes(c.status),
+  );
+
+  const sendManual = useMutation({
+    mutationFn: () =>
+      bulkFn({
+        data: {
+          phones: [phoneDigits],
+          content: message,
+          campaignName: `Manual: ${recipientName.trim() || phoneDigits}`,
+          route: "iGaming",
+          ratePerMinute: 1000,
+        },
+      }),
+    onSuccess: () => {
+      toast.success("SMS enviado para processamento");
+      setPhone("");
+      setRecipientName("");
+      qc.invalidateQueries({ queryKey: ["sms-home-dashboard"] });
+      qc.invalidateQueries({ queryKey: ["sms-home-logs"] });
+      qc.invalidateQueries({ queryKey: ["sms-credits"] });
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <Badge
+          className={
+            provider.data?.configured
+              ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+              : "bg-amber-500/15 text-amber-400 border-amber-500/30"
+          }
+        >
+          {provider.data?.configured ? "envio ativo" : "provedor pendente"}
+        </Badge>
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={() => {
+            qc.invalidateQueries({ queryKey: ["sms-home-dashboard"] });
+            qc.invalidateQueries({ queryKey: ["sms-home-logs"] });
+            qc.invalidateQueries({ queryKey: ["sms-home-campaigns"] });
+            qc.invalidateQueries({ queryKey: ["sms-credits"] });
+          }}
+        >
+          <RotateCw className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="outline"
+          className="gap-2"
+          onClick={() => navigate({ to: "/creditos-sms" })}
+        >
+          <CreditCard className="h-4 w-4" />
+          {num(balance)} créditos de SMS
+        </Button>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        {[
+          {
+            label: "Enviados hoje",
+            value: num(readNumber(today?.sent)),
+            hint: `${num(sent30)} em 30 dias`,
+            tone: "text-primary",
+          },
+          {
+            label: "Entregues",
+            value: num(delivered),
+            hint: `${deliveryRate}% de entrega`,
+            tone: "text-foreground",
+          },
+          {
+            label: "Falharam",
+            value: num(failed),
+            hint: "número inválido ou operadora recusou",
+            tone: "text-foreground",
+          },
+          { label: "Respostas", value: "0", hint: "quem respondeu o SMS", tone: "text-foreground" },
+          { label: "Não perturbe", value: "0", hint: "pediram para sair", tone: "text-foreground" },
+        ].map((item) => (
+          <Card key={item.label} className="border-border/70 bg-card/70">
+            <CardContent className="p-5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                {item.label}
+              </p>
+              <p className={cn("mt-3 text-4xl font-bold", item.tone)}>{item.value}</p>
+              <p className="mt-2 text-sm text-muted-foreground">{item.hint}</p>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      <Card className="border-border/70 bg-card/70">
+        <CardContent className="flex flex-col gap-4 p-5 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-center gap-4">
+            <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <CreditCard className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                Créditos de SMS · 1 crédito = 1 parte de SMS
+              </p>
+              <div className="mt-1 flex flex-wrap items-baseline gap-2">
+                <span className="text-4xl font-bold">{num(balance)}</span>
+                <span className="text-sm text-muted-foreground">
+                  disponíveis · {num(usedToday)} consumidos hoje · {num(usedLifetime)} no histórico
+                </span>
+              </div>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => navigate({ to: "/creditos-sms" })}>
+              Extrato
+            </Button>
+            <Button className="gap-2" onClick={() => navigate({ to: "/creditos-sms" })}>
+              <Plus className="h-4 w-4" />
+              Comprar créditos
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-4 xl:grid-cols-[450px_1fr]">
+        <div className="space-y-4">
+          <Card className="border-border/70 bg-card/70">
+            <CardHeader className="border-b border-border/60">
+              <CardTitle className="text-base">Enviar SMS</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4 p-5">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label>Telefone</Label>
+                  <Input
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="(11) 98765-4321"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Nome de quem recebe</Label>
+                  <Input
+                    value={recipientName}
+                    onChange={(e) => setRecipientName(e.target.value)}
+                    placeholder="Rafael"
+                  />
+                </div>
+              </div>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                Use {"{nome}"} ou {"{primeiro_nome}"}. Quando existir player no CRM, as variáveis
+                são preenchidas automaticamente.
+              </p>
+
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <Label>Mensagem</Label>
+                  <div className="flex gap-2">
+                    <MessageVariablePicker
+                      onInsert={(value) => setMessage((m) => `${m}${value}`)}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      onClick={() => setMessage((m) => `${m}{link}`)}
+                    >
+                      <LinkIcon className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+                <Textarea
+                  rows={6}
+                  value={message}
+                  onChange={(e) => setMessage(e.target.value)}
+                  placeholder="Oi {nome}, seu bonus esta liberado. Acesse: suacasa.com"
+                />
+              </div>
+
+              <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-primary/30 bg-primary/10 p-3">
+                <Checkbox checked={trackLinks} onCheckedChange={(v) => setTrackLinks(v === true)} />
+                <span className="text-sm">
+                  <span className="font-semibold text-primary">Encurtar e medir links</span>
+                  <span className="block text-xs leading-relaxed text-muted-foreground">
+                    Se houver link na mensagem, ele poderá sair curto e mensurável quando o
+                    shortener estiver configurado.
+                  </span>
+                </span>
+              </label>
+
+              <div className="rounded-lg bg-background/70 p-3">
+                <div className="flex items-center justify-between text-sm">
+                  <span>
+                    <strong>{message.length}</strong> caracteres · <strong>{parts}</strong> parte
+                  </span>
+                  <strong>
+                    {parts} crédito{parts === 1 ? "" : "s"}
+                  </strong>
+                </div>
+                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className="h-full rounded-full bg-primary"
+                    style={{ width: `${Math.min(100, (message.length / 160) * 100)}%` }}
+                  />
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  160 caracteres por parte. Acima disso, cada parte consome um crédito.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-sm font-medium">Como chega no celular</p>
+                <div className="mx-auto max-w-[360px] rounded-[28px] border border-border bg-background p-4">
+                  <div className="mb-3 flex items-center justify-between text-[10px] text-muted-foreground">
+                    <span>
+                      {new Date().toLocaleTimeString("pt-BR", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </span>
+                    <Smartphone className="h-4 w-4" />
+                  </div>
+                  <div className="rounded-2xl bg-muted px-4 py-3 text-sm text-muted-foreground">
+                    {previewMensagem(message).replaceAll("João", recipientName || "Rafael")}
+                  </div>
+                </div>
+              </div>
+
+              <Button
+                className="w-full"
+                disabled={!canSend || sendManual.isPending || !provider.data?.configured}
+                onClick={() => sendManual.mutate()}
+              >
+                {sendManual.isPending
+                  ? "Enviando..."
+                  : `Enviar · ${parts} crédito${parts === 1 ? "" : "s"}`}
+              </Button>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                Toda mensagem de divulgação precisa de opt-in e saída fácil. Quem responder SAIR
+                deve entrar na lista de não perturbe.
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="border-border/70 bg-card/70">
+            <CardHeader className="border-b border-border/60">
+              <CardTitle className="text-base">Não perturbe</CardTitle>
+              <CardDescription>0 números bloqueados</CardDescription>
+            </CardHeader>
+            <CardContent className="py-10 text-center text-muted-foreground">
+              Ninguém pediu para sair.
+            </CardContent>
+          </Card>
+        </div>
+
+        <Card className="border-border/70 bg-card/70">
+          <CardHeader className="border-b border-border/60">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <CardTitle className="text-base">Histórico de SMS</CardTitle>
+                <CardDescription>tudo que saiu, do mais recente para o mais antigo</CardDescription>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => navigate({ to: "/sms", hash: "historico", replace: true })}
+              >
+                Completo
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <Table className="min-w-[860px]">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Quando</TableHead>
+                    <TableHead>Número</TableHead>
+                    <TableHead>Mensagem</TableHead>
+                    <TableHead>Origem</TableHead>
+                    <TableHead>Partes</TableHead>
+                    <TableHead className="text-right">Situação</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {logs.isLoading &&
+                    Array.from({ length: 6 }).map((_, i) => (
+                      <TableRow key={i}>
+                        <TableCell colSpan={6} className="text-muted-foreground">
+                          Carregando...
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  {!logs.isLoading && logsRows.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
+                        Nenhum SMS enviado ainda.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {logsRows.map((row) => (
+                    <TableRow key={row.id}>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {fmtSmsDate(row.created_at)}
+                      </TableCell>
+                      <TableCell className="font-medium">{row.to_phone ?? "-"}</TableCell>
+                      <TableCell className="max-w-[460px] whitespace-normal text-sm">
+                        {row.content ?? "-"}
+                        {row.error && (
+                          <div className="mt-1 text-xs text-rose-400">
+                            {sanitizeSmsProviderError(row.error)}
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {row.trigger_name?.startsWith("campanha:")
+                          ? "campanha"
+                          : (row.trigger_name ?? "manual")}
+                      </TableCell>
+                      <TableCell>{smsCount((row.content ?? "").length)}</TableCell>
+                      <TableCell className="text-right">
+                        {smsStatusBadge(row.status, row.delivery_status)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card className="border-border/70 bg-card/70">
+        <CardHeader className="border-b border-border/60">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <CardTitle className="text-base">Fila de SMS</CardTitle>
+              <CardDescription>
+                {pendingCampaigns.length > 0
+                  ? `${pendingCampaigns.length} campanha(s) precisam de atenção`
+                  : `nada parado · saldo ${num(balance)}`}
+              </CardDescription>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {[
+                "Precisam de atenção",
+                `Todos ${campaignRows.length}`,
+                "Pausadas",
+                "Com erro",
+                `Aguardando ${pendingCampaigns.length}`,
+              ].map((label, idx) => (
+                <Badge
+                  key={label}
+                  variant={idx === 0 ? "default" : "outline"}
+                  className="px-3 py-1"
+                >
+                  {label}
+                </Badge>
+              ))}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => navigate({ to: "/sms", hash: "campanhas", replace: true })}
+              >
+                Abrir fila
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          {campaignRows.length === 0 ? (
+            <div className="py-20 text-center text-muted-foreground">
+              Nada parado. Toda campanha de SMS está andando ou já terminou.
+            </div>
+          ) : (
+            <div className="divide-y divide-border/60">
+              {campaignRows.map((campaign) => (
+                <div
+                  key={campaign.id}
+                  className="flex flex-col gap-2 p-4 md:flex-row md:items-center md:justify-between"
+                >
+                  <div>
+                    <p className="font-medium">{campaign.name}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {fmtSmsDate(campaign.scheduled_at)} · {num(campaign.sent_count ?? 0)} enviados
+                      de {num(campaign.total_count)}
+                    </p>
+                    {campaign.last_error && (
+                      <p className="mt-1 text-xs text-rose-400">
+                        {sanitizeSmsProviderError(campaign.last_error)}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {smsStatusBadge(campaign.status)}
+                    <ExternalLink className="h-4 w-4 text-muted-foreground" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 

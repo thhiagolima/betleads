@@ -25,6 +25,7 @@ import { Route as MidiaLtvRouteImport } from './routes/midia-ltv'
 import { Route as PlayersRouteImport } from './routes/players'
 import { Route as RegrasRouteImport } from './routes/regras'
 import { Route as SmsRouteImport } from './routes/sms'
+import { Route as TenantsRouteImport } from './routes/tenants'
 import { Route as TreinoIaRouteImport } from './routes/treino-ia'
 import { Route as WebhooksRouteImport } from './routes/webhooks'
 import { Route as WhatsappRouteImport } from './routes/whatsapp'
@@ -135,6 +136,11 @@ const RegrasRoute = RegrasRouteImport.update({
 const SmsRoute = SmsRouteImport.update({
   id: '/sms',
   path: '/sms',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TenantsRoute = TenantsRouteImport.update({
+  id: '/tenants',
+  path: '/tenants',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TreinoIaRoute = TreinoIaRouteImport.update({
@@ -328,6 +334,7 @@ export interface FileRoutesByFullPath {
   '/players': typeof PlayersRouteWithChildren
   '/regras': typeof RegrasRoute
   '/sms': typeof SmsRoute
+  '/tenants': typeof TenantsRoute
   '/treino-ia': typeof TreinoIaRoute
   '/webhooks': typeof WebhooksRoute
   '/whatsapp': typeof WhatsappRoute
@@ -377,6 +384,7 @@ export interface FileRoutesByTo {
   '/players': typeof PlayersRouteWithChildren
   '/regras': typeof RegrasRoute
   '/sms': typeof SmsRoute
+  '/tenants': typeof TenantsRoute
   '/treino-ia': typeof TreinoIaRoute
   '/webhooks': typeof WebhooksRoute
   '/whatsapp': typeof WhatsappRoute
@@ -427,6 +435,7 @@ export interface FileRoutesById {
   '/players': typeof PlayersRouteWithChildren
   '/regras': typeof RegrasRoute
   '/sms': typeof SmsRoute
+  '/tenants': typeof TenantsRoute
   '/treino-ia': typeof TreinoIaRoute
   '/webhooks': typeof WebhooksRoute
   '/whatsapp': typeof WhatsappRoute
@@ -478,6 +487,7 @@ export interface FileRouteTypes {
     | '/players'
     | '/regras'
     | '/sms'
+    | '/tenants'
     | '/treino-ia'
     | '/webhooks'
     | '/whatsapp'
@@ -527,6 +537,7 @@ export interface FileRouteTypes {
     | '/players'
     | '/regras'
     | '/sms'
+    | '/tenants'
     | '/treino-ia'
     | '/webhooks'
     | '/whatsapp'
@@ -576,6 +587,7 @@ export interface FileRouteTypes {
     | '/players'
     | '/regras'
     | '/sms'
+    | '/tenants'
     | '/treino-ia'
     | '/webhooks'
     | '/whatsapp'
@@ -626,6 +638,7 @@ export interface RootRouteChildren {
   PlayersRoute: typeof PlayersRouteWithChildren
   RegrasRoute: typeof RegrasRoute
   SmsRoute: typeof SmsRoute
+  TenantsRoute: typeof TenantsRoute
   TreinoIaRoute: typeof TreinoIaRoute
   WebhooksRoute: typeof WebhooksRoute
   WhatsappRoute: typeof WhatsappRoute
@@ -770,6 +783,13 @@ declare module '@tanstack/react-router' {
       path: '/sms'
       fullPath: '/sms'
       preLoaderRoute: typeof SmsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/tenants': {
+      id: '/tenants'
+      path: '/tenants'
+      fullPath: '/tenants'
+      preLoaderRoute: typeof TenantsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/treino-ia': {
@@ -1020,6 +1040,7 @@ const rootRouteChildren: RootRouteChildren = {
   PlayersRoute: PlayersRouteWithChildren,
   RegrasRoute: RegrasRoute,
   SmsRoute: SmsRoute,
+  TenantsRoute: TenantsRoute,
   TreinoIaRoute: TreinoIaRoute,
   WebhooksRoute: WebhooksRoute,
   WhatsappRoute: WhatsappRoute,

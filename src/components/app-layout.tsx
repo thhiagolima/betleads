@@ -2,6 +2,7 @@ import { useRouterState } from "@tanstack/react-router";
 
 import { AppSidebar } from "@/components/app-sidebar";
 import { ProviderAuthBanner } from "@/components/provider-auth-banner";
+import { TenantStatusGate } from "@/components/tenant-status-gate";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { WhatsappNotifier } from "@/components/whatsapp-notifier";
 import { useGlobalRealtimeStatus } from "@/hooks/use-realtime-invalidate";
@@ -27,6 +28,7 @@ const titles: Record<string, { title: string; subtitle: string }> = {
   "/webhooks": { title: "Webhooks", subtitle: "Integração com sua casa de aposta" },
   "/configuracoes": { title: "Configurações", subtitle: "Preferências da plataforma" },
   "/admin": { title: "Super Admin", subtitle: "Usuários, métricas e billing da plataforma" },
+  "/tenants": { title: "Tenants", subtitle: "Conta, usuarios, saldo e auditoria" },
 };
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
@@ -65,7 +67,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           </header>
           <ProviderAuthBanner />
           <WhatsappNotifier />
-          <main className="flex-1 overflow-x-hidden p-4 animate-fade-in sm:p-6">{children}</main>
+          <main className="flex-1 overflow-x-hidden p-4 animate-fade-in sm:p-6">
+            <TenantStatusGate>{children}</TenantStatusGate>
+          </main>
         </div>
       </div>
     </SidebarProvider>

@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { assertTenantCanOpenBilling } from "@/lib/tenant-access.server";
 import { dbUuid } from "@/lib/zod-helpers";
 
 type ServerContext = {
@@ -28,6 +29,68 @@ type LooseSupabase = {
 
 function looseDb(client: unknown) {
   return client as LooseSupabase;
+}
+
+async function getSmsCreditSummary(tenantId: string) {
+  const { data, error } = await looseDb(supabaseAdmin).rpc("sms_credit_summary", {
+    _tenant: tenantId,
+  });
+  if (error) {
+    console.warn("[sms-credits] failed loading credit summary for audit", error.message);
+    return null;
+  }
+  return data;
+}
+
+async function getSmsPricing(tenantId: string) {
+  const { data, error } = await looseDb(supabaseAdmin).rpc("sms_effective_pricing", {
+    _tenant: tenantId,
+  });
+  if (error) {
+    console.warn("[sms-credits] failed loading pricing for audit", error.message);
+    return null;
+  }
+  return data;
+}
+
+async function getSmsCreditOrder(orderId: string) {
+  const { data, error } = await looseDb(supabaseAdmin)
+    .from("sms_credit_orders")
+    .select(
+      "id,tenant_id,credits,amount_cents,currency,status,checkout_provider,external_reference,created_at,paid_at",
+    )
+    .eq("id", orderId)
+    .maybeSingle();
+  if (error) {
+    console.warn("[sms-credits] failed loading order for audit", error.message);
+    return null;
+  }
+  return data as { id: string; tenant_id: string } | null;
+}
+
+async function auditTenantChange(args: {
+  tenantId: string;
+  actorUserId: string;
+  action: string;
+  entityType: string;
+  entityId?: string | null;
+  before?: unknown;
+  after?: unknown;
+  metadata?: Record<string, unknown>;
+}) {
+  const { error } = await supabaseAdmin.from("tenant_audit_logs").insert({
+    tenant_id: args.tenantId,
+    actor_user_id: args.actorUserId,
+    action: args.action,
+    entity_type: args.entityType,
+    entity_id: args.entityId ?? null,
+    before_data: args.before ?? null,
+    after_data: args.after ?? null,
+    metadata: args.metadata ?? {},
+  });
+  if (error) {
+    console.warn("[sms-credits] failed writing tenant audit log", error.message);
+  }
 }
 
 async function assertSuperAdmin(userId: string) {
@@ -142,6 +205,7 @@ export const createSmsCreditCheckout = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const ctx = context as ServerContext;
     const tenantId = await resolveTenantId(ctx, data.tenantId);
+    await assertTenantCanOpenBilling(tenantId);
     const { data: result, error } = await looseDb(ctx.supabase).rpc("create_sms_credit_checkout", {
       _tenant: tenantId,
       _package_id: data.packageId ?? null,
@@ -219,12 +283,27 @@ export const adminSetTenantSmsPricing = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => tenantPricingInput.parse(data))
   .handler(async ({ data, context }) => {
     await assertSuperAdmin(context.userId);
+    const before = await getSmsPricing(data.tenantId);
     const { error } = await looseDb(context.supabase).rpc("admin_set_tenant_sms_pricing", {
       _tenant: data.tenantId,
       _sale_price_per_sms: data.sale_price_per_sms,
       _provider_cost_per_sms: data.provider_cost_per_sms,
     });
     if (error) throw new Error(error.message);
+    const after = await getSmsPricing(data.tenantId);
+    await auditTenantChange({
+      tenantId: data.tenantId,
+      actorUserId: context.userId,
+      action: "tenant_sms.pricing_set",
+      entityType: "tenant_sms_pricing",
+      entityId: data.tenantId,
+      before,
+      after,
+      metadata: {
+        sale_price_per_sms: data.sale_price_per_sms,
+        provider_cost_per_sms: data.provider_cost_per_sms,
+      },
+    });
     return { ok: true };
   });
 
@@ -233,10 +312,21 @@ export const adminClearTenantSmsPricing = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => z.object({ tenantId: dbUuid() }).parse(data))
   .handler(async ({ data, context }) => {
     await assertSuperAdmin(context.userId);
+    const before = await getSmsPricing(data.tenantId);
     const { error } = await looseDb(context.supabase).rpc("admin_clear_tenant_sms_pricing", {
       _tenant: data.tenantId,
     });
     if (error) throw new Error(error.message);
+    const after = await getSmsPricing(data.tenantId);
+    await auditTenantChange({
+      tenantId: data.tenantId,
+      actorUserId: context.userId,
+      action: "tenant_sms.pricing_cleared",
+      entityType: "tenant_sms_pricing",
+      entityId: data.tenantId,
+      before,
+      after,
+    });
     return { ok: true };
   });
 
@@ -256,6 +346,7 @@ export const adminAdjustSmsCredits = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => adjustInput.parse(data))
   .handler(async ({ data, context }) => {
     await assertSuperAdmin(context.userId);
+    const before = await getSmsCreditSummary(data.tenantId);
     const { error } = await looseDb(context.supabase).rpc("admin_adjust_sms_credits", {
       _tenant: data.tenantId,
       _delta: data.delta,
@@ -263,6 +354,20 @@ export const adminAdjustSmsCredits = createServerFn({ method: "POST" })
       _idempotency_key: crypto.randomUUID(),
     });
     if (error) throw new Error(error.message);
+    const after = await getSmsCreditSummary(data.tenantId);
+    await auditTenantChange({
+      tenantId: data.tenantId,
+      actorUserId: context.userId,
+      action: "tenant_sms.balance_adjusted",
+      entityType: "sms_credit_balance",
+      entityId: data.tenantId,
+      before,
+      after,
+      metadata: {
+        delta: data.delta,
+        reason: data.reason,
+      },
+    });
     return { ok: true };
   });
 
@@ -275,6 +380,7 @@ export const adminMarkSmsCreditOrderPaid = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     await assertSuperAdmin(context.userId);
+    const before = await getSmsCreditOrder(data.orderId);
     const { error } = await looseDb(context.supabase).rpc("admin_mark_sms_credit_order_paid", {
       _order_id: data.orderId,
       _checkout_provider: data.provider,
@@ -282,6 +388,22 @@ export const adminMarkSmsCreditOrderPaid = createServerFn({ method: "POST" })
       _metadata: {},
     });
     if (error) throw new Error(error.message);
+    const after = await getSmsCreditOrder(data.orderId);
+    const tenantId = after?.tenant_id ?? before?.tenant_id;
+    if (tenantId) {
+      await auditTenantChange({
+        tenantId,
+        actorUserId: context.userId,
+        action: "tenant_sms.order_marked_paid",
+        entityType: "sms_credit_order",
+        entityId: data.orderId,
+        before,
+        after,
+        metadata: {
+          provider: data.provider,
+        },
+      });
+    }
     return { ok: true };
   });
 
