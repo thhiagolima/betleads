@@ -317,6 +317,7 @@ function PlayersPage() {
   const [historyPlayer, setHistoryPlayer] = useState<{ id: string; nome: string } | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
 
   useEffect(() => {
     if (!linkedPlayerId || isDetailRoute) return;
@@ -1354,6 +1355,18 @@ function PlayersPage() {
           </div>
         </div>
 
+        <details
+          className="rounded-xl border border-border/60 bg-card/30"
+          open={advancedFiltersOpen}
+          onToggle={(event) => setAdvancedFiltersOpen(event.currentTarget.open)}
+        >
+          <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-primary">
+            Mais filtros e alertas
+            <span className="ml-2 text-xs font-normal text-muted-foreground">
+              atividade, depósitos, saldo e oportunidades
+            </span>
+          </summary>
+          <div className="space-y-3 border-t border-border/50 p-3">
         <div className="space-y-2">
           <button className="text-sm font-semibold text-primary">
             o que significa cada categoria? →
@@ -1376,7 +1389,6 @@ function PlayersPage() {
               ))}
           </div>
         </div>
-
         <Card className="border-border/50 bg-card/50">
           <CardContent className="space-y-2 p-3">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground/80">
@@ -1416,6 +1428,8 @@ function PlayersPage() {
             </div>
           </CardContent>
         </Card>
+      </div>
+        </details>
       </div>
       {isPendingFilter && (
         <Card className="border-border/50 bg-card/60 backdrop-blur overflow-hidden">

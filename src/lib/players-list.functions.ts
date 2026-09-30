@@ -97,6 +97,16 @@ type QueryLike = {
 type SettingsClient = {
   from: (table: string) => {
     select: (columns: string) => {
+      eq: (column: string, value: unknown) => {
+        maybeSingle: () => Promise<{
+          data: {
+            level_thresholds?: unknown;
+            cooling_after_days?: unknown;
+            sleeping_after_days?: unknown;
+          } | null;
+          error: { message: string } | null;
+        }>;
+      };
       maybeSingle: () => Promise<{
         data: {
           level_thresholds?: unknown;
@@ -145,10 +155,11 @@ const DEFAULT_GAMIFICATION: GamificationSettings = {
   sleepingAfterDays: 7,
 };
 
-async function readGamificationSettings(supabase: SettingsClient): Promise<GamificationSettings> {
+async function readGamificationSettings(supabase: SettingsClient, tenantId: string): Promise<GamificationSettings> {
   const { data, error } = await supabase
     .from("gamification_settings")
     .select("level_thresholds,cooling_after_days,sleeping_after_days")
+    .eq("tenant_id", tenantId)
     .maybeSingle();
 
   if (error || !data) return DEFAULT_GAMIFICATION;
@@ -256,8 +267,11 @@ export const getPlayersPage = createServerFn({ method: "POST" })
     const { page, pageSize, filter, search, sortKey, sortDir, idsIn, dateField, dateFrom, dateTo } =
       data;
     const supabase = context.supabase;
+    const { data: tenantId, error: tenantError } = await (supabase as any).rpc("current_tenant_id");
+    if (tenantError) throw new Error(tenantError.message);
+    if (!tenantId) throw new Error("Tenant atual não encontrado.");
     const gamificationSettings = isGamificationFilter(filter)
-      ? await readGamificationSettings(supabase)
+      ? await readGamificationSettings(supabase, tenantId as string)
       : DEFAULT_GAMIFICATION;
 
     // Helper para aplicar filtros de janela / regra no PostgREST builder.
@@ -281,7 +295,7 @@ export const getPlayersPage = createServerFn({ method: "POST" })
     // Para sort saldo/lucro precisamos calcular em JS (não há expressão arbitrária no .order()).
     const computeClient = sortKey === "saldo" || sortKey === "lucro";
 
-    let q = supabase.from("players").select(COLS, { count: "exact" });
+    let q = supabase.from("players").select(COLS, { count: "exact" }).eq("tenant_id", tenantId);
 
     // 1) Restrição por IDs (alerta) — vem primeiro pra cortar volume.
     if (idsIn) {
@@ -417,7 +431,8 @@ export const getPlayersPage = createServerFn({ method: "POST" })
     // (Refaz por simplicidade — PostgREST não permite trocar select depois.)
     let slim = supabase
       .from("players")
-      .select("id,total_depositado,total_sacado,saldo_carteira,saldo_bonus", { count: "exact" });
+      .select("id,total_depositado,total_sacado,saldo_carteira,saldo_bonus", { count: "exact" })
+      .eq("tenant_id", tenantId);
     if (idsIn) slim = slim.in("id", idsIn);
     if (s) {
       const term = `%${s}%`;
@@ -551,8 +566,11 @@ export const getPlayersFilteredExternalIds = createServerFn({ method: "POST" })
     async ({ data, context }): Promise<{ ids: string[]; missing: number; total: number }> => {
       const { filter, search, idsIn, dateField, dateFrom, dateTo } = data;
       const supabase = context.supabase;
+      const { data: tenantId, error: tenantError } = await (supabase as any).rpc("current_tenant_id");
+      if (tenantError) throw new Error(tenantError.message);
+      if (!tenantId) throw new Error("Tenant atual não encontrado.");
       const gamificationSettings = isGamificationFilter(filter)
-        ? await readGamificationSettings(supabase)
+        ? await readGamificationSettings(supabase, tenantId as string)
         : DEFAULT_GAMIFICATION;
       const now = Date.now();
       const daysAgo = (n: number) => new Date(now - n * 86400000).toISOString();
@@ -562,7 +580,7 @@ export const getPlayersFilteredExternalIds = createServerFn({ method: "POST" })
         return t.toISOString();
       })();
 
-      let q = supabase.from("players").select("player_external_id", { count: "exact" });
+      let q = supabase.from("players").select("player_external_id", { count: "exact" }).eq("tenant_id", tenantId);
       const todayStartBrt = (() => {
         const now = new Date();
         const brt = new Date(now.getTime() - 3 * 3600 * 1000);
@@ -696,8 +714,11 @@ export const getPlayersFilteredSmsAudience = createServerFn({ method: "POST" })
     }> => {
       const { filter, search, idsIn, dateField, dateFrom, dateTo } = data;
       const supabase = context.supabase;
+      const { data: tenantId, error: tenantError } = await (supabase as any).rpc("current_tenant_id");
+      if (tenantError) throw new Error(tenantError.message);
+      if (!tenantId) throw new Error("Tenant atual não encontrado.");
       const gamificationSettings = isGamificationFilter(filter)
-        ? await readGamificationSettings(supabase)
+        ? await readGamificationSettings(supabase, tenantId as string)
         : DEFAULT_GAMIFICATION;
       const now = Date.now();
       const daysAgo = (n: number) => new Date(now - n * 86400000).toISOString();
@@ -714,7 +735,7 @@ export const getPlayersFilteredSmsAudience = createServerFn({ method: "POST" })
         ).toISOString();
       })();
 
-      let q = supabase.from("players").select("id,telefone", { count: "exact" });
+      let q = supabase.from("players").select("id,telefone", { count: "exact" }).eq("tenant_id", tenantId);
 
       if (idsIn) {
         if (idsIn.length === 0) return { recipients: [], missingPhone: 0, total: 0 };

@@ -90,8 +90,11 @@ export const getGamificationData = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<GamificationData> => {
     const supabase = context.supabase as any;
-    const settings = await readSettings(supabase);
-    const players = await readPlayers(supabase);
+    const { data: tenantId, error: tenantError } = await supabase.rpc("current_tenant_id");
+    if (tenantError) throw new Error(tenantError.message);
+    if (!tenantId) throw new Error("Tenant atual nao encontrado.");
+    const settings = await readSettings(supabase, tenantId as string);
+    const players = await readPlayers(supabase, tenantId as string);
     return buildGamificationData(players, settings);
   });
 
@@ -123,14 +126,15 @@ export const saveGamificationSettings = createServerFn({ method: "POST" })
       throw new Error(error.message);
     }
 
-    const players = await readPlayers(supabase);
+    const players = await readPlayers(supabase, tenantId);
     return buildGamificationData(players, data);
   });
 
-async function readSettings(supabase: any): Promise<GamificationSettings> {
+async function readSettings(supabase: any, tenantId: string): Promise<GamificationSettings> {
   const { data, error } = await supabase
     .from("gamification_settings")
     .select("level_thresholds, cooling_after_days, sleeping_after_days, vip_min_level")
+    .eq("tenant_id", tenantId)
     .maybeSingle();
   if (error) {
     if (isMissingGamificationTable(error)) return DEFAULT_SETTINGS;
@@ -146,7 +150,7 @@ async function readSettings(supabase: any): Promise<GamificationSettings> {
   });
 }
 
-async function readPlayers(supabase: any): Promise<DbPlayer[]> {
+async function readPlayers(supabase: any, tenantId: string): Promise<DbPlayer[]> {
   const rows: DbPlayer[] = [];
   const pageSize = 1000;
 
@@ -154,6 +158,7 @@ async function readPlayers(supabase: any): Promise<DbPlayer[]> {
     const { data, error } = await supabase
       .from("players")
       .select("id,nome,player_external_id,total_depositado,total_sacado,ultimo_deposito,ftd_em,telefone,email")
+      .eq("tenant_id", tenantId)
       .range(from, from + pageSize - 1);
 
     if (error) throw new Error(error.message);
