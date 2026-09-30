@@ -828,10 +828,10 @@ export const sendBulkSms = createServerFn({ method: "POST" })
         .from("players")
         .select("id, telefone")
         .eq("tenant_id", tenantId)
-        .in("telefone", Array.from(unmatchedDigits));
+        .range(0, 49999);
       (matches ?? []).forEach((m) => {
         const d = (m.telefone ?? "").replace(/\D/g, "");
-        if (d) phoneLookup.set(d, m.id);
+        if (d && unmatchedDigits.has(d)) phoneLookup.set(d, m.id);
       });
     }
     for (const t of targets) {
@@ -1593,7 +1593,7 @@ async function resolveRecipientsForTenant(
       .from("players")
       .select("id, telefone")
       .eq("tenant_id", tenantId)
-      .in("telefone", Array.from(unmatched));
+      .range(0, 49999);
     const lookup = new Map<string, string>();
     (matches ?? []).forEach((m) => {
       const d = (m.telefone ?? "").replace(/\D/g, "");

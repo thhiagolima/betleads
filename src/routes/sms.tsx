@@ -214,16 +214,16 @@ const FLUXOS_INICIAIS: Fluxo[] = [
   },
 ];
 
-const VARIAVEIS = [
-  "{primeiro_nome}",
-  "{nome}",
-  "{dias_sem_login}",
-  "{dias_sem_deposito}",
-  "{total_depositado}",
-  "{saldo_atual}",
-  "{expert}",
-  "{link}",
+const SMS_VARIABLE_KEYS = [
+  "primeiro_nome", "nome", "telefone", "email", "saldo", "saldo_atual",
+  "ultimo_login", "dias_sem_login", "ultimo_jogo", "dias_sem_jogar",
+  "ultimo_deposito", "dias_sem_depositar", "total_depositado", "total_sacado",
+  "lucro", "categoria", "status_lead", "expert", "nome_expert", "link",
+  "link_deposito", "cashback_amount", "cashback_valor", "cashback_pago_em",
+  "id_push", "platform_user_id",
 ];
+
+const VARIAVEIS = SMS_VARIABLE_KEYS.map((key) => `{${key}}`);
 
 function sanitizeSmsProviderError(error: string | null | undefined): string | null {
   if (!error) return null;
@@ -380,7 +380,7 @@ function SmsCompactWorkspace({
       value: num(readNumber(today?.sent)),
       hint: `${num(sent)} em 30 dias`,
     },
-    { label: "Falharam", value: num(failed), hint: "inválido ou recusado" },
+    { label: "Entregues", value: num(delivered), hint: `${deliveryRate}% de entrega · ${num(failed)} falharam` },
   ];
 
   return (
@@ -407,15 +407,10 @@ function SmsCompactWorkspace({
         </Button>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
         {kpis.map((item) => (
-          <MetricCard key={item.label} label={item.label} value={item.value} hint={item.hint} />
+          <MetricCard key={item.label} label={item.label} value={item.value} hint={item.hint} className="py-3" />
         ))}
-      </div>
-      <div className="grid gap-3 sm:grid-cols-3">
-        <MetricCard label="Entregues" value={num(delivered)} hint={`${deliveryRate}% de entrega`} />
-        <MetricCard label="Respostas" value="0" hint="quem respondeu o SMS" />
-        <MetricCard label="Não perturbe" value="0" hint="pediram para sair" />
       </div>
 
       <div className="flex w-fit rounded-lg border border-border/70 bg-card/60 p-1">
@@ -482,6 +477,7 @@ function SmsCompactWorkspace({
                   <div className="flex items-center justify-between">
                     <Label>Mensagem</Label>
                     <MessageVariablePicker
+                      allowedKeys={SMS_VARIABLE_KEYS}
                       onInsert={(value) => setMessage((current) => `${current}${value}`)}
                     />
                   </div>
@@ -1078,6 +1074,7 @@ function SmsHomePanel() {
                   <Label>Mensagem</Label>
                   <div className="flex gap-2">
                     <MessageVariablePicker
+                      allowedKeys={SMS_VARIABLE_KEYS}
                       onInsert={(value) => setMessage((m) => `${m}${value}`)}
                     />
                     <Button
@@ -1680,6 +1677,60 @@ function statusTone(s: CampanhaStatus) {
   }
 }
 
+function AudiencePicker({
+  open,
+  onOpenChange,
+  onResolved,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onResolved: (phones: string[], label: string) => void;
+}) {
+  const resolveFn = useServerFn(resolveSmsCampaignAudience);
+  const [criteria, setCriteria] = useState<AudienceCriteria>(EMPTY_AUDIENCE);
+  const [count, setCount] = useState(0);
+  const [label, setLabel] = useState("Público personalizado");
+  const [loading, setLoading] = useState(false);
+  const toggle = (key: "never" | "yes") => setCriteria((c) => ({ ...c, activity: { ...c.activity, deposit: c.activity.deposit === key ? "any" : key }, level: key === "never" ? null : c.level }));
+  const run = async () => {
+    setLoading(true);
+    try {
+      const result = await resolveFn({ data: { criteria } });
+      setCount(result.total);
+      onResolved(result.phones, label);
+      toast.success(`${result.total.toLocaleString("pt-BR")} jogadores selecionados`);
+      onOpenChange(false);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível montar o público");
+    } finally { setLoading(false); }
+  };
+  const chip = (active: boolean) => active ? "rounded-full" : "rounded-full";
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[90vh] max-w-xl overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Escolher público</DialogTitle>
+          <DialogDescription>Use as mesmas regras da Gamificação para montar o público do disparo.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 rounded-xl bg-muted/25 p-3">
+          <div className="rounded-xl bg-primary/10 px-3 py-2 text-sm"><strong className="text-xl">{loading ? "…" : count}</strong> <span className="text-muted-foreground">jogadores neste público</span></div>
+          <div className="space-y-2"><Label>Nome do público</Label><Input value={label} onChange={(e) => setLabel(e.target.value)} /></div>
+          <div className="space-y-2"><Label>O que ela fez</Label><div className="flex flex-wrap gap-2">
+            <Button type="button" size="sm" className={chip(criteria.activity.deposit === "never")} variant={criteria.activity.deposit === "never" ? "default" : "outline"} onClick={() => toggle("never")}>Cadastrou e nunca depositou</Button>
+            <Button type="button" size="sm" className={chip(criteria.activity.pixUnpaid)} variant={criteria.activity.pixUnpaid ? "default" : "outline"} onClick={() => setCriteria((c) => ({ ...c, activity: { ...c.activity, pixUnpaid: !c.activity.pixUnpaid } }))}>Gerou PIX e não pagou</Button>
+            <Button type="button" size="sm" className={chip(criteria.activity.deposit === "yes")} variant={criteria.activity.deposit === "yes" ? "default" : "outline"} onClick={() => toggle("yes")}>Já depositou</Button>
+            <Button type="button" size="sm" className={chip(criteria.activity.withdrawal === "yes")} variant={criteria.activity.withdrawal === "yes" ? "default" : "outline"} onClick={() => setCriteria((c) => ({ ...c, activity: { ...c.activity, withdrawal: c.activity.withdrawal === "yes" ? "any" : "yes" } }))}>Já sacou</Button>
+            <Button type="button" size="sm" className={chip(criteria.activity.withdrawal === "never")} variant={criteria.activity.withdrawal === "never" ? "default" : "outline"} onClick={() => setCriteria((c) => ({ ...c, activity: { ...c.activity, withdrawal: c.activity.withdrawal === "never" ? "any" : "never" } }))}>Nunca sacou</Button>
+          </div></div>
+          {criteria.activity.deposit !== "never" && <div className="space-y-2"><Label>Nível (Gamificação)</Label><div className="flex flex-wrap gap-2">{([ ["bronze", "🥉 Bronze"], ["silver", "🥈 Prata"], ["gold", "🥇 Ouro"], ["diamond", "💎 Diamante"], ["black", "👑 Black VIP"] ] as const).map(([value, text]) => <Button key={value} type="button" size="sm" className="rounded-full" variant={criteria.level === value ? "default" : "outline"} onClick={() => setCriteria((c) => ({ ...c, level: c.level === value ? null : value }))}>{text}</Button>)}</div></div>}
+          <div className="space-y-2"><Label>Quando</Label><div className="flex flex-wrap gap-2">{([ ["cooling", "Esfriando"], ["sleeping", "Dormindo"], ["inactive30", "30+ dias parado"], ["inactive90", "90+ dias parado"], ["registered_week", "Cadastrou essa semana"] ] as const).map(([value, text]) => <Button key={value} type="button" size="sm" className="rounded-full" variant={criteria.timing === value ? "default" : "outline"} onClick={() => setCriteria((c) => ({ ...c, timing: c.timing === value ? "any" : value }))}>{text}</Button>)}</div></div>
+        </div>
+        <DialogFooter><Button variant="ghost" onClick={() => onOpenChange(false)}>Cancelar</Button><Button onClick={run} disabled={loading}>{loading ? "Calculando…" : "Usar este público"}</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function EnvioMassa() {
   const navigate = useNavigate();
   const [nome, setNome] = useState("");
@@ -1712,6 +1763,7 @@ function EnvioMassa() {
   };
   const [scheduleDate, setScheduleDate] = useState<string>(defaultScheduleDate);
   const [scheduleTime, setScheduleTime] = useState<string>(defaultScheduleTime);
+  const [audienceOpen, setAudienceOpen] = useState(false);
 
   useEffect(() => {
     const raw = window.localStorage.getItem("betleads:smsAudienceDraft");
@@ -1922,6 +1974,20 @@ function EnvioMassa() {
                 onChange={(e) => setNome(e.target.value)}
                 placeholder="Ex: Recuperação semanal"
               />
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label> Público</Label>
+                <Button type="button" size="sm" variant="outline" onClick={() => setAudienceOpen(true)}>
+                  Escolher público
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">Selecione um público usando as regras da Gamificação ou adicione números manualmente abaixo.</p>
+              <AudiencePicker open={audienceOpen} onOpenChange={setAudienceOpen} onResolved={(phones, label) => {
+                setDestinatarios(phones.join("\n"));
+                if (label) setNome((current) => current || `Público: ${label}`);
+              }} />
             </div>
 
             <div className="space-y-2">
@@ -2648,6 +2714,7 @@ function NewSmsCampaignDialog({
             <div className="flex items-center justify-between">
               <Label>Mensagem</Label>
               <MessageVariablePicker
+                allowedKeys={SMS_VARIABLE_KEYS}
                 onInsert={(value) => setMessage((current) => `${current}${value}`)}
               />
             </div>
@@ -3283,6 +3350,7 @@ function EditorFluxo({
                         placeholder="Mensagem com {primeiro_nome}, {link}..."
                       />
                       <MessageVariablePicker
+                        allowedKeys={SMS_VARIABLE_KEYS}
                         value={e.mensagem}
                         onChange={(next: string) => updateEtapa(i, { tipo: "sms", mensagem: next })}
                       />

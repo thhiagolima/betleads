@@ -13,6 +13,8 @@ interface Props {
   onInsert?: (token: string) => void;
   className?: string;
   label?: string;
+  /** Limita a lista às variáveis suportadas pelo contexto atual. */
+  allowedKeys?: string[];
 }
 
 export function MessageVariablePicker({
@@ -22,7 +24,11 @@ export function MessageVariablePicker({
   onInsert,
   className,
   label = "Variáveis disponíveis — clique para inserir",
+  allowedKeys,
 }: Props) {
+  const variables = allowedKeys
+    ? SCRIPT_VARIABLES.filter((variable) => allowedKeys.includes(variable.key))
+    : SCRIPT_VARIABLES;
   function insert(key: string) {
     const token = `{${key}}`;
     if (onInsert) {
@@ -51,7 +57,7 @@ export function MessageVariablePicker({
     <div className={`rounded-md border border-border/60 bg-muted/30 p-2 ${className ?? ""}`}>
       <p className="mb-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">{label}</p>
       <div className="flex flex-wrap gap-1">
-        {SCRIPT_VARIABLES.map((v) => (
+        {variables.map((v) => (
           <Badge
             key={v.key}
             variant="outline"
