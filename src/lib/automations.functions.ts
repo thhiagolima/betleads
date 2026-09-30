@@ -5,6 +5,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { runDispatcher, evaluateAllPlayers } from "@/lib/automation.server";
+import { resolveOperationalTenantId } from "@/lib/tenant-access.server";
 
 const PrioritySchema = z.enum(["critico", "alto", "medio", "baixo"]);
 const TriggerSchema = z.enum([
@@ -36,7 +37,9 @@ export const listRules = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const { data, error } = await context.supabase
       .from("rules")
-      .select("id, trigger_type, name, meaning, priority, flow_id, active, last_run_at, last_match_count")
+      .select(
+        "id, trigger_type, name, meaning, priority, flow_id, active, last_run_at, last_match_count",
+      )
       .order("priority", { ascending: true })
       .order("name", { ascending: true });
     if (error) throw new Error(error.message);
@@ -56,7 +59,11 @@ export const updateRule = createServerFn({ method: "POST" })
       .parse(input),
   )
   .handler(async ({ data, context }) => {
-    const patch: { active?: boolean; flow_id?: string | null; priority?: "critico" | "alto" | "medio" | "baixo" } = {};
+    const patch: {
+      active?: boolean;
+      flow_id?: string | null;
+      priority?: "critico" | "alto" | "medio" | "baixo";
+    } = {};
     if (data.active !== undefined) patch.active = data.active;
     if (data.flow_id !== undefined) patch.flow_id = data.flow_id;
     if (data.priority !== undefined) patch.priority = data.priority;
@@ -85,7 +92,11 @@ export const getFlow = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) => z.object({ id: dbUuid() }).parse(input))
   .handler(async ({ data, context }) => {
-    const [{ data: flow, error: fErr }, { data: templates, error: tErr }, { data: blocks, error: bErr }] = await Promise.all([
+    const [
+      { data: flow, error: fErr },
+      { data: templates, error: tErr },
+      { data: blocks, error: bErr },
+    ] = await Promise.all([
       context.supabase.from("flows").select("*").eq("id", data.id).maybeSingle(),
       context.supabase
         .from("flow_templates")
@@ -214,9 +225,7 @@ export const saveFlow = createServerFn({ method: "POST" })
       weight: tpl.weight,
     }));
 
-    const { error: tErr } = await context.supabase
-      .from("flow_templates")
-      .insert(templateRows);
+    const { error: tErr } = await context.supabase.from("flow_templates").insert(templateRows);
     if (tErr) throw new Error(tErr.message);
 
     const blockRows = templatesWithIds.flatMap((tpl) =>
@@ -235,9 +244,7 @@ export const saveFlow = createServerFn({ method: "POST" })
     );
 
     if (blockRows.length > 0) {
-      const { error: bErr } = await context.supabase
-        .from("flow_blocks")
-        .insert(blockRows);
+      const { error: bErr } = await context.supabase.from("flow_blocks").insert(blockRows);
       if (bErr) throw new Error(bErr.message);
     }
 
@@ -388,12 +395,14 @@ export const triggerFlowTest = createServerFn({ method: "POST" })
       })
       .parse(input),
   )
-  .handler(async ({ data }) => {
+  .handler(async ({ data, context }) => {
+    const tenantId = await resolveOperationalTenantId(context.supabase);
     // 1. Valida fluxo
     const { data: flow } = await supabaseAdmin
       .from("flows")
       .select("id, name, active")
       .eq("id", data.flow_id)
+      .eq("tenant_id", tenantId)
       .maybeSingle();
     if (!flow) throw new Error("Fluxo não encontrado");
     if (!flow.active) throw new Error("Fluxo está pausado — ative antes de testar");
@@ -417,6 +426,7 @@ export const triggerFlowTest = createServerFn({ method: "POST" })
       .from("players")
       .select("id, nome, telefone")
       .eq("id", data.player_id)
+      .eq("tenant_id", tenantId)
       .maybeSingle();
     if (!player) throw new Error("Player não encontrado");
     const digits = (player.telefone ?? "").replace(/\D/g, "");
@@ -428,6 +438,7 @@ export const triggerFlowTest = createServerFn({ method: "POST" })
       .select("id, status")
       .eq("flow_id", data.flow_id)
       .eq("player_id", data.player_id)
+      .eq("tenant_id", tenantId)
       .limit(1)
       .maybeSingle();
     if (existing) {
@@ -442,6 +453,7 @@ export const triggerFlowTest = createServerFn({ method: "POST" })
       .select("id")
       .eq("status", "connected")
       .eq("is_active", true)
+      .eq("tenant_id", tenantId)
       .limit(1);
     if (!connected || connected.length === 0) {
       throw new Error("Nenhuma sessão WhatsApp conectada — conecte uma sessão antes de testar");
@@ -452,6 +464,7 @@ export const triggerFlowTest = createServerFn({ method: "POST" })
     const { data: inserted, error: insErr } = await supabaseAdmin
       .from("flow_leads")
       .insert({
+        tenant_id: tenantId,
         flow_id: data.flow_id,
         player_id: data.player_id,
         phone_e164: digits,
@@ -464,6 +477,7 @@ export const triggerFlowTest = createServerFn({ method: "POST" })
     if (insErr || !inserted) throw new Error(insErr?.message ?? "Falha ao criar flow_lead");
 
     await supabaseAdmin.from("flow_logs").insert({
+      tenant_id: tenantId,
       flow_id: data.flow_id,
       flow_lead_id: inserted.id,
       player_id: data.player_id,
@@ -476,6 +490,7 @@ export const triggerFlowTest = createServerFn({ method: "POST" })
       limit: 1,
       bypassWindow: true,
       onlyLeadId: inserted.id,
+      tenantId,
     });
 
     return {
@@ -490,9 +505,10 @@ export const triggerFlowTest = createServerFn({ method: "POST" })
 // ============================================================
 export const runEvaluateAndDispatch = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(async () => {
-    const evalRes = await evaluateAllPlayers({ limit: 500 });
-    const dispRes = await runDispatcher({ limit: 30, bypassWindow: true });
+  .handler(async ({ context }) => {
+    const tenantId = await resolveOperationalTenantId(context.supabase);
+    const evalRes = await evaluateAllPlayers({ limit: 500, tenantId });
+    const dispRes = await runDispatcher({ limit: 30, bypassWindow: true, tenantId });
     return { evaluate: evalRes, dispatch: dispRes };
   });
 
@@ -502,7 +518,9 @@ export const runEvaluateAndDispatch = createServerFn({ method: "POST" })
 export const createMediaUploadUrl = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) =>
-    z.object({ filename: z.string().min(1).max(200), mimetype: z.string().min(1).max(120) }).parse(input),
+    z
+      .object({ filename: z.string().min(1).max(200), mimetype: z.string().min(1).max(120) })
+      .parse(input),
   )
   .handler(async ({ data, context }) => {
     const safe = data.filename.replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -517,9 +535,7 @@ export const createMediaUploadUrl = createServerFn({ method: "POST" })
 // ============================================================
 // ANTI-BAN (teto global do dispatcher)
 // ============================================================
-const TimeStr = z
-  .string()
-  .regex(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/, "Formato HH:MM");
+const TimeStr = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/, "Formato HH:MM");
 
 const AntibanInputSchema = z.object({
   delay_min_seconds: z.number().int().min(0).max(86400),

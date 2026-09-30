@@ -48,6 +48,7 @@ import {
 import { PageHeader } from "@/components/ui-premium/page-header";
 import { DataCard } from "@/components/ui-premium/data-card";
 import { EmptyState } from "@/components/ui-premium/empty-state";
+import { MetricCard } from "@/components/ui-premium/metric-card";
 import { getMarketingOverview, saveMarketingIntegration } from "@/lib/marketing.functions";
 import {
   createMetaOAuthUrl,
@@ -478,23 +479,22 @@ function Kpi({
   detail: string;
   tone?: "default" | "success" | "info";
 }) {
+  const icon =
+    tone === "success" ? (
+      <Wallet className="h-4 w-4" />
+    ) : tone === "info" ? (
+      <Target className="h-4 w-4" />
+    ) : (
+      <BarChart3 className="h-4 w-4" />
+    );
   return (
-    <div className="rounded-xl border border-border/60 bg-card/70 p-4">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-          {title}
-        </p>
-        {tone === "success" ? (
-          <Wallet className="h-4 w-4 text-emerald-400" />
-        ) : tone === "info" ? (
-          <Target className="h-4 w-4 text-sky-300" />
-        ) : (
-          <BarChart3 className="h-4 w-4 text-muted-foreground" />
-        )}
-      </div>
-      <p className="mt-3 text-2xl font-bold">{value}</p>
-      <p className="mt-1 text-xs text-muted-foreground">{detail}</p>
-    </div>
+    <MetricCard
+      label={title}
+      value={value}
+      hint={detail}
+      icon={icon}
+      accent={tone === "success" ? "success" : "primary"}
+    />
   );
 }
 

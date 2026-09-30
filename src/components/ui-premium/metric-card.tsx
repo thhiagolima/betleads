@@ -32,15 +32,24 @@ export function MetricCard({
   children,
 }: MetricCardProps) {
   return (
-    <div className={cn("card-premium rounded-xl p-4 sm:p-5 flex flex-col gap-2", className)}>
-      <div className="flex items-start justify-between gap-3">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-          {label}
-        </p>
+    <div
+      className={cn(
+        "card-premium group relative flex min-h-[132px] flex-col overflow-hidden rounded-xl p-4 sm:p-5",
+        className,
+      )}
+    >
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-xs font-medium text-muted-foreground">{label}</p>
+          <div className="mt-2.5 text-2xl font-semibold tracking-[-0.03em] text-foreground tabular-nums sm:text-[1.75rem]">
+            {value}
+          </div>
+        </div>
         {icon && (
           <div
             className={cn(
-              "flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br",
+              "flex size-9 shrink-0 items-center justify-center rounded-lg border border-border/50 bg-gradient-to-br transition-transform duration-200 group-hover:scale-105",
               accentClasses[accent],
             )}
           >
@@ -48,11 +57,8 @@ export function MetricCard({
           </div>
         )}
       </div>
-      <div className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground tabular-nums">
-        {value}
-      </div>
       {(delta || hint) && (
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <div className="mt-auto flex min-h-5 items-center gap-2 pt-3 text-xs text-muted-foreground">
           {delta && (
             <span
               className={cn(
@@ -60,14 +66,18 @@ export function MetricCard({
                 delta.positive ? "text-emerald-400" : "text-rose-400",
               )}
             >
-              {delta.positive ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+              {delta.positive ? (
+                <TrendingUp className="h-3 w-3" />
+              ) : (
+                <TrendingDown className="h-3 w-3" />
+              )}
               {delta.value}
             </span>
           )}
           {hint && <span>{hint}</span>}
         </div>
       )}
-      {children}
+      {children && <div className="mt-3">{children}</div>}
     </div>
   );
 }

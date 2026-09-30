@@ -61,9 +61,7 @@ export const createWhatsappProxy = createServerFn({ method: "POST" })
 
 export const updateWhatsappProxy = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input) =>
-    baseSchema.partial().extend({ id: dbUuid() }).parse(input),
-  )
+  .inputValidator((input) => baseSchema.partial().extend({ id: dbUuid() }).parse(input))
   .handler(async ({ data, context }) => {
     const patch: {
       name?: string;
@@ -99,9 +97,7 @@ export const updateWhatsappProxy = createServerFn({ method: "POST" })
 
 export const deleteWhatsappProxy = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input) =>
-    z.object({ id: dbUuid(), force: z.boolean().optional() }).parse(input),
-  )
+  .inputValidator((input) => z.object({ id: dbUuid(), force: z.boolean().optional() }).parse(input))
   .handler(async ({ data, context }) => {
     const { count } = await context.supabase
       .from("whatsapp_sessions")
@@ -118,10 +114,7 @@ export const deleteWhatsappProxy = createServerFn({ method: "POST" })
         .update({ proxy_id: null })
         .eq("proxy_id", data.id);
     }
-    const { error } = await context.supabase
-      .from("whatsapp_proxies")
-      .delete()
-      .eq("id", data.id);
+    const { error } = await context.supabase.from("whatsapp_proxies").delete().eq("id", data.id);
     if (error) throw new Error(error.message);
     return { ok: true };
   });
@@ -154,6 +147,12 @@ export const testWhatsappProxy = createServerFn({ method: "POST" })
       password?: string | null;
     };
     if (data.id) {
+      const { data: allowed } = await context.supabase
+        .from("whatsapp_proxies")
+        .select("id")
+        .eq("id", data.id)
+        .maybeSingle();
+      if (!allowed) throw new Error("Proxy não encontrado nesta tenant");
       const { data: row, error } = await supabaseAdmin
         .from("whatsapp_proxies")
         .select("protocol, host, port, username, password_encrypted")
@@ -181,7 +180,7 @@ export const testWhatsappProxy = createServerFn({ method: "POST" })
         .update({
           last_tested_at: new Date().toISOString(),
           last_test_ok: result.ok,
-          last_test_error: result.ok ? null : result.error ?? null,
+          last_test_error: result.ok ? null : (result.error ?? null),
         })
         .eq("id", data.id);
       await supabaseAdmin.from("whatsapp_proxy_logs").insert({
@@ -205,6 +204,21 @@ export const assignProxyToSession = createServerFn({ method: "POST" })
       .parse(input),
   )
   .handler(async ({ data, context }) => {
+    const [{ data: session }, { data: proxy }] = await Promise.all([
+      context.supabase
+        .from("whatsapp_sessions")
+        .select("id")
+        .eq("id", data.session_id)
+        .maybeSingle(),
+      data.proxy_id
+        ? context.supabase
+            .from("whatsapp_proxies")
+            .select("id")
+            .eq("id", data.proxy_id)
+            .maybeSingle()
+        : Promise.resolve({ data: { id: null } }),
+    ]);
+    if (!session || !proxy) throw new Error("Sessão ou proxy não encontrado nesta tenant");
     const { error } = await context.supabase
       .from("whatsapp_sessions")
       .update({ proxy_id: data.proxy_id })

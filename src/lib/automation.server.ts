@@ -139,7 +139,12 @@ async function getOrAssignSession(phone: string, playerId: string | null) {
     if (!prev.includes(existing.session_id)) prev.push(existing.session_id);
     await supabaseAdmin
       .from("lead_whatsapp_assignments")
-      .update({ session_id: best.id, previous_session_ids: prev, status: "active", player_id: playerId })
+      .update({
+        session_id: best.id,
+        previous_session_ids: prev,
+        status: "active",
+        player_id: playerId,
+      })
       .eq("id", existing.id);
   } else {
     await supabaseAdmin
@@ -152,7 +157,7 @@ async function getOrAssignSession(phone: string, playerId: string | null) {
 // ---------------------------------------------------------------
 // EVALUATE — identifica leads que entram em fluxos
 // ---------------------------------------------------------------
-export async function evaluateAllPlayers(opts: { limit?: number } = {}) {
+export async function evaluateAllPlayers(opts: { limit?: number; tenantId?: string } = {}) {
   const limit = opts.limit ?? 500;
 
   // Contas que terceirizaram o WhatsApp: o gatilho vai para o webhook externo
@@ -162,27 +167,30 @@ export async function evaluateAllPlayers(opts: { limit?: number } = {}) {
   // Fonte da verdade do motor: a tabela `flows` (o que o usuário enxerga/edita
   // na tela "Fluxos"). Cada flow tem seu próprio trigger_type — não dependemos
   // mais da tabela `rules` para vincular gatilho → fluxo.
-  const { data: activeFlows } = await supabaseAdmin
+  let activeFlowsQuery = supabaseAdmin
     .from("flows")
     .select(
       "id, name, active, delay_min_seconds, delay_max_seconds, cooldown_hours, trigger_type, activated_at",
     )
     .eq("active", true)
     .not("trigger_type", "is", null);
+  if (opts.tenantId) activeFlowsQuery = activeFlowsQuery.eq("tenant_id", opts.tenantId);
+  const { data: activeFlows } = await activeFlowsQuery;
 
   if ((!activeFlows || activeFlows.length === 0) && externalIntegrations.size === 0) {
     return { evaluated: 0, enqueued: 0, reason: "no-active-flows" };
   }
 
   // Players candidatos: ativos com telefone
-  const { data: players } = await supabaseAdmin
+  let playersQuery = supabaseAdmin
     .from("players")
     .select(
       "id, tenant_id, nome, telefone, email, vip, total_depositado, total_sacado, saldo_carteira, ultimo_login, ultimo_jogo, ultimo_deposito, ftd_em, created_at, last_cashback_paid_at, last_cashback_amount, player_external_id",
     )
     .eq("status", "ativo")
-    .not("telefone", "is", null)
-    .limit(limit);
+    .not("telefone", "is", null);
+  if (opts.tenantId) playersQuery = playersQuery.eq("tenant_id", opts.tenantId);
+  const { data: players } = await playersQuery.limit(limit);
 
   let enqueued = 0;
   let forwarded = 0;
@@ -234,16 +242,14 @@ export async function evaluateAllPlayers(opts: { limit?: number } = {}) {
     // prioridade que ele dispara. Antes, o loop enfileirava o mesmo player
     // em fluxos de gatilhos diferentes no mesmo tick — causa de duplas
     // mensagens de abertura no WhatsApp.
-    const triggersWithFlow = triggers.filter((t) =>
-      activeFlows.some((f) => f.trigger_type === t),
-    );
+    const triggersWithFlow = triggers.filter((t) => activeFlows.some((f) => f.trigger_type === t));
     const chosen = pickHighestPriority(triggersWithFlow);
     if (!chosen) continue;
     const chosenRank = priorityRank(chosen);
     const lowerPriorityTriggers = new Set(
-      (activeFlows
+      activeFlows
         .map((f) => f.trigger_type as TriggerType)
-        .filter((t) => priorityRank(t) <= chosenRank && t !== chosen)),
+        .filter((t) => priorityRank(t) <= chosenRank && t !== chosen),
     );
 
     // Guarda cross-trigger no próprio WhatsApp: se já existe flow_lead
@@ -433,7 +439,9 @@ async function shouldExit(
 // ---------------------------------------------------------------
 // DISPATCH — envia próximo bloco dos flow_leads prontos
 // ---------------------------------------------------------------
-export async function runDispatcher(opts: { limit?: number; bypassWindow?: boolean; onlyLeadId?: string } = {}) {
+export async function runDispatcher(
+  opts: { limit?: number; bypassWindow?: boolean; onlyLeadId?: string; tenantId?: string } = {},
+) {
   const limit = opts.limit ?? 30;
   const nowIso = new Date().toISOString();
   const antiban = await getAntibanSettings();
@@ -445,27 +453,35 @@ export async function runDispatcher(opts: { limit?: number; bypassWindow?: boole
   // só lia pending/running). Agora apenas empurramos o next_run_at.
   if (!opts.bypassWindow && !isWithinOperationalWindow(now, antiban)) {
     const nextStart = nextWindowStart(now, antiban).toISOString();
-    await supabaseAdmin
+    let postponeQuery = supabaseAdmin
       .from("flow_leads")
       .update({ next_run_at: nextStart })
       .in("status", ["pending", "running", "cooldown"])
       .lte("next_run_at", nowIso);
+    if (opts.tenantId) postponeQuery = postponeQuery.eq("tenant_id", opts.tenantId);
+    await postponeQuery;
     return { processed: 0, sent: 0, skipped: "out-of-window" };
   }
 
   let dueQuery = supabaseAdmin
     .from("flow_leads")
-    .select("id, flow_id, template_id, player_id, phone_e164, session_id, status, current_block_index, started_at, attempt_count")
+    .select(
+      "id, flow_id, template_id, player_id, phone_e164, session_id, status, current_block_index, started_at, attempt_count",
+    )
     .in("status", ["pending", "running", "cooldown"])
     .lte("next_run_at", nowIso)
     .order("next_run_at", { ascending: true })
     .limit(limit);
+  if (opts.tenantId) dueQuery = dueQuery.eq("tenant_id", opts.tenantId);
   if (opts.onlyLeadId) {
     dueQuery = supabaseAdmin
       .from("flow_leads")
-      .select("id, flow_id, template_id, player_id, phone_e164, session_id, status, current_block_index, started_at, attempt_count")
+      .select(
+        "id, flow_id, template_id, player_id, phone_e164, session_id, status, current_block_index, started_at, attempt_count",
+      )
       .eq("id", opts.onlyLeadId)
       .limit(1);
+    if (opts.tenantId) dueQuery = dueQuery.eq("tenant_id", opts.tenantId);
   }
   const { data: due } = await dueQuery;
 
@@ -492,7 +508,9 @@ export async function runDispatcher(opts: { limit?: number; bypassWindow?: boole
   const [{ data: flows }, { data: templates }, { data: allBlocks }] = await Promise.all([
     supabaseAdmin
       .from("flows")
-      .select("id, name, active, exit_conditions, daily_limit, hourly_limit, delay_min_seconds, delay_max_seconds, priority")
+      .select(
+        "id, name, active, exit_conditions, daily_limit, hourly_limit, delay_min_seconds, delay_max_seconds, priority",
+      )
       .in("id", flowIds),
     supabaseAdmin
       .from("flow_templates")
@@ -500,12 +518,17 @@ export async function runDispatcher(opts: { limit?: number; bypassWindow?: boole
       .in("flow_id", flowIds),
     supabaseAdmin
       .from("flow_blocks")
-      .select("id, flow_id, flow_template_id, order_index, block_type, content, caption, media_url, media_mimetype, media_filename, delay_seconds")
+      .select(
+        "id, flow_id, flow_template_id, order_index, block_type, content, caption, media_url, media_mimetype, media_filename, delay_seconds",
+      )
       .in("flow_id", flowIds)
       .order("order_index", { ascending: true }),
   ]);
   const flowMap = new Map((flows ?? []).map((f) => [f.id, f]));
-  const templatesByFlow = new Map<string, Array<{ id: string; name: string; is_active: boolean; weight: number }>>();
+  const templatesByFlow = new Map<
+    string,
+    Array<{ id: string; name: string; is_active: boolean; weight: number }>
+  >();
   for (const t of templates ?? []) {
     const arr = templatesByFlow.get(t.flow_id) ?? [];
     arr.push(t);
@@ -542,7 +565,10 @@ export async function runDispatcher(opts: { limit?: number; bypassWindow?: boole
   for (const lead of due) {
     const flow = flowMap.get(lead.flow_id);
     if (!flow || !flow.active) {
-      await supabaseAdmin.from("flow_leads").update({ status: "exited", exit_reason: "flow_inactive", completed_at: nowIso }).eq("id", lead.id);
+      await supabaseAdmin
+        .from("flow_leads")
+        .update({ status: "exited", exit_reason: "flow_inactive", completed_at: nowIso })
+        .eq("id", lead.id);
       continue;
     }
 
@@ -575,17 +601,26 @@ export async function runDispatcher(opts: { limit?: number; bypassWindow?: boole
       if (picked) {
         templateId = picked.id;
         templateName = picked.name;
-        await supabaseAdmin.from("flow_leads").update({ template_id: templateId }).eq("id", lead.id);
+        await supabaseAdmin
+          .from("flow_leads")
+          .update({ template_id: templateId })
+          .eq("id", lead.id);
       }
     }
     const blocks = templateId ? (blocksByTemplate.get(templateId) ?? []) : [];
     if (blocks.length === 0) {
-      await supabaseAdmin.from("flow_leads").update({ status: "completed", completed_at: nowIso }).eq("id", lead.id);
+      await supabaseAdmin
+        .from("flow_leads")
+        .update({ status: "completed", completed_at: nowIso })
+        .eq("id", lead.id);
       continue;
     }
     const idx = lead.current_block_index;
     if (idx >= blocks.length) {
-      await supabaseAdmin.from("flow_leads").update({ status: "completed", completed_at: nowIso }).eq("id", lead.id);
+      await supabaseAdmin
+        .from("flow_leads")
+        .update({ status: "completed", completed_at: nowIso })
+        .eq("id", lead.id);
       continue;
     }
     const block = blocks[idx];
@@ -707,7 +742,12 @@ export async function runDispatcher(opts: { limit?: number; bypassWindow?: boole
         block_id: block.id,
         session_id: session.id,
         event: result.skipDispatch ? "dispatched" : "sent",
-        detail: { block_type: block.block_type, message_id: result.messageId, template_id: templateId, template_name: templateName },
+        detail: {
+          block_type: block.block_type,
+          message_id: result.messageId,
+          template_id: templateId,
+          template_name: templateName,
+        },
       });
     } catch (err: any) {
       const msg = err?.message ?? String(err);

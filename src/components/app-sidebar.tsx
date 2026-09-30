@@ -1,73 +1,75 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
-  LayoutDashboard,
-  Users,
-  Brain,
-  Webhook,
-  Settings,
-  Sparkles,
   AlertTriangle,
-  GraduationCap,
-  LogOut,
-  MessageSquare,
-  MessageCircle,
-  CreditCard,
-  Rocket,
-  Mail,
-  Phone,
-  ChevronRight,
-  ShieldCheck,
   BarChart3,
-  Trophy,
+  Brain,
   Building2,
+  GraduationCap,
+  LayoutDashboard,
+  LogOut,
+  Mail,
+  Megaphone,
+  MessageCircle,
+  MessageSquare,
+  Phone,
+  Rocket,
+  Settings,
+  ShieldCheck,
+  Sparkles,
+  Trophy,
+  Users,
+  Webhook,
   type LucideIcon,
 } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
-import { useIsSuperAdmin } from "@/hooks/use-is-super-admin";
-import { useWhatsappUnreadTotal } from "@/hooks/use-whatsapp-unread";
+
 import { useAuthSession } from "@/components/auth-gate";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   Sidebar,
-  SidebarContent,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
-  SidebarHeader,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarMenuSub,
-  SidebarMenuSubButton,
-  SidebarMenuSubItem,
   SidebarFooter,
+  SidebarHeader,
+  SidebarItem,
+  SidebarNav,
+  SidebarNested,
+  SidebarSection,
+  SidebarToggle,
+  useSidebar,
 } from "@/components/ui/sidebar";
-import { cn } from "@/lib/utils";
+import { useIsSuperAdmin } from "@/hooks/use-is-super-admin";
+import { useWhatsappUnreadTotal } from "@/hooks/use-whatsapp-unread";
+import { supabase } from "@/integrations/supabase/client";
 
-type SubItem = { title: string; hash?: string; soon?: boolean };
+type SubItem = { title: string; hash?: string; url?: string; soon?: boolean };
 type NavItem = {
   title: string;
   url: string;
   icon: LucideIcon;
   subItems?: SubItem[];
-  soon?: boolean;
 };
 
 const menuItems: NavItem[] = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
-  { title: "Midia e LTV", url: "/midia-ltv", icon: BarChart3 },
+  { title: "Mídia e LTV", url: "/midia-ltv", icon: BarChart3 },
   { title: "Players", url: "/players", icon: Users },
   { title: "Inteligência IA", url: "/inteligencia", icon: Brain },
   { title: "Treino IA", url: "/treino-ia", icon: GraduationCap },
   { title: "Alertas", url: "/alertas", icon: AlertTriangle },
-  { title: "Gamificacao", url: "/gamificacao", icon: Trophy },
-  { title: "Automações", url: "/automacoes", icon: Rocket },
+  { title: "Gamificação", url: "/gamificacao", icon: Trophy },
+  {
+    title: "Automações",
+    url: "/automacoes",
+    icon: Rocket,
+    subItems: [
+      { title: "Visão geral", hash: "visao-geral" },
+      { title: "Fluxos SMS", url: "/automacoes/sms" },
+      { title: "Execuções", hash: "execucoes" },
+      { title: "Histórico", hash: "historico" },
+    ],
+  },
 ];
 
-const engajamentoItems: NavItem[] = [
+const engagementItems: NavItem[] = [
+  { title: "Campanhas", url: "/campanhas", icon: Megaphone },
   {
     title: "WhatsApp",
     url: "/whatsapp",
@@ -85,13 +87,10 @@ const engajamentoItems: NavItem[] = [
     url: "/sms",
     icon: MessageSquare,
     subItems: [
-      { title: "Dashboard", hash: "dashboard" },
-      { title: "Envio em Massa", hash: "massa" },
-      { title: "Campanhas", hash: "campanhas" },
-      { title: "Fluxos", hash: "fluxos" },
+      { title: "Enviar", hash: "enviar" },
+      { title: "Histórico", hash: "historico" },
     ],
   },
-  { title: "Créditos SMS", url: "/creditos-sms", icon: CreditCard },
   {
     title: "Email",
     url: "/email",
@@ -122,11 +121,9 @@ const engajamentoItems: NavItem[] = [
   { title: "Webhooks", url: "/webhooks", icon: Webhook },
 ];
 
-const sistemaItems: NavItem[] = [{ title: "Configurações", url: "/configuracoes", icon: Settings }];
-
-const tenantSelfItem: NavItem = { title: "Meu tenant", url: "/tenants", icon: Building2 };
-
-const superAdminItems: NavItem[] = [
+const systemItems: NavItem[] = [{ title: "Configurações", url: "/configuracoes", icon: Settings }];
+const tenantItem: NavItem = { title: "Meu tenant", url: "/tenants", icon: Building2 };
+const adminItems: NavItem[] = [
   { title: "Painel Super Admin", url: "/admin", icon: ShieldCheck },
   { title: "Tenants", url: "/tenants", icon: Building2 },
 ];
@@ -135,7 +132,75 @@ function isActivePath(pathname: string, url: string) {
   return url === "/" ? pathname === "/" : pathname.startsWith(url);
 }
 
-function NavGroup({
+function CountBadge({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="rounded-md bg-foreground/[0.07] px-1.5 py-0.5 text-[10.5px] font-medium leading-none tabular-nums text-muted-foreground">
+      {children}
+    </span>
+  );
+}
+
+function SimpleItem({ item, pathname }: { item: NavItem; pathname: string }) {
+  return (
+    <SidebarItem
+      asChild
+      active={isActivePath(pathname, item.url)}
+      icon={<item.icon className="size-[18px]" strokeWidth={1.75} />}
+    >
+      <Link to={item.url}>{item.title}</Link>
+    </SidebarItem>
+  );
+}
+
+function NestedItem({
+  item,
+  pathname,
+  hash,
+  unread,
+}: {
+  item: NavItem;
+  pathname: string;
+  hash: string;
+  unread: number;
+}) {
+  const active = isActivePath(pathname, item.url);
+  const [open, setOpen] = useState(active);
+  useEffect(() => {
+    if (active) setOpen(true);
+  }, [active]);
+
+  return (
+    <SidebarNested
+      label={item.title}
+      icon={<item.icon className="size-[18px]" strokeWidth={1.75} />}
+      active={active}
+      open={open}
+      onOpenChange={setOpen}
+      badge={unread > 0 ? <CountBadge>{unread > 99 ? "99+" : unread}</CountBadge> : undefined}
+    >
+      {item.subItems?.map((sub, index) => {
+        const normalizedHash = hash.replace(/^#/, "");
+        const subActive = sub.url
+          ? pathname === sub.url
+          : active && (normalizedHash === sub.hash || (!normalizedHash && index === 0));
+        return (
+          <SidebarItem
+            key={sub.title}
+            asChild
+            active={subActive}
+            className="py-[7px] text-[12.5px]"
+          >
+            <Link to={sub.url ?? item.url} hash={sub.url ? undefined : sub.hash}>
+              {sub.title}
+            </Link>
+          </SidebarItem>
+        );
+      })}
+    </SidebarNested>
+  );
+}
+
+function NavSection({
   label,
   items,
   pathname,
@@ -149,208 +214,116 @@ function NavGroup({
   whatsappUnread?: number;
 }) {
   return (
-    <SidebarGroup>
-      <SidebarGroupLabel className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground/70 font-semibold">
-        {label}
-      </SidebarGroupLabel>
-      <SidebarGroupContent>
-        <SidebarMenu>
-          {items.map((item) =>
-            item.subItems ? (
-              <CollapsibleNavItem
-                key={item.url}
-                item={item}
-                pathname={pathname}
-                hash={hash}
-                whatsappUnread={whatsappUnread}
-              />
-            ) : (
-              <SimpleNavItem key={item.url} item={item} pathname={pathname} />
-            ),
-          )}
-        </SidebarMenu>
-      </SidebarGroupContent>
-    </SidebarGroup>
+    <SidebarSection label={label}>
+      {items.map((item) =>
+        item.subItems ? (
+          <NestedItem
+            key={item.url}
+            item={item}
+            pathname={pathname}
+            hash={hash}
+            unread={item.url === "/whatsapp" ? whatsappUnread : 0}
+          />
+        ) : (
+          <SimpleItem key={item.url} item={item} pathname={pathname} />
+        ),
+      )}
+    </SidebarSection>
   );
 }
 
-function SimpleNavItem({ item, pathname }: { item: NavItem; pathname: string }) {
-  const active = isActivePath(pathname, item.url);
+function Brand() {
+  const { collapsed } = useSidebar();
   return (
-    <SidebarMenuItem>
-      <SidebarMenuButton
-        asChild
-        isActive={active}
-        className={cn(
-          "relative gap-3 transition-all duration-200",
-          active &&
-            "bg-gradient-to-r from-primary/15 to-accent/10 text-foreground before:absolute before:left-0 before:top-1/2 before:-translate-y-1/2 before:h-5 before:w-[3px] before:rounded-r-full before:bg-primary before:shadow-[0_0_8px] before:shadow-primary/60",
-        )}
-      >
-        <Link to={item.url} className="gap-3">
-          <item.icon className="h-4 w-4 shrink-0" />
-          <span className="truncate">{item.title}</span>
-        </Link>
-      </SidebarMenuButton>
-    </SidebarMenuItem>
+    <Link to="/" className="flex min-w-0 items-center gap-2.5">
+      <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-[0_0_18px] shadow-primary/25">
+        <Sparkles className="size-3.5" />
+      </span>
+      {!collapsed && (
+        <span className="min-w-0">
+          <span className="block truncate text-[13.5px] font-semibold leading-none">BETLEADS</span>
+          <span className="mt-1 block truncate text-[9px] uppercase leading-none tracking-[0.15em] text-muted-foreground">
+            Player Intelligence
+          </span>
+        </span>
+      )}
+    </Link>
   );
 }
 
-function CollapsibleNavItem({
-  item,
-  pathname,
-  hash,
-  whatsappUnread,
+function UserFooter({ email }: { email: string | null }) {
+  const { collapsed } = useSidebar();
+  const initials = email?.slice(0, 2).toUpperCase() ?? "BL";
+  return (
+    <>
+      <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-semibold text-primary">
+        {initials}
+      </span>
+      {!collapsed && (
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[12.5px] font-medium">{email ?? "Sistema online"}</div>
+          <div className="mt-0.5 flex items-center gap-1.5 text-[10.5px] text-muted-foreground">
+            <span className="size-1.5 rounded-full bg-emerald-400" /> Online
+          </div>
+        </div>
+      )}
+      {!collapsed && (
+        <button
+          type="button"
+          onClick={() => supabase.auth.signOut()}
+          className="flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
+          aria-label="Sair"
+        >
+          <LogOut className="size-4" />
+        </button>
+      )}
+    </>
+  );
+}
+
+export function AppSidebar({
+  collapsed,
+  onCollapsedChange,
 }: {
-  item: NavItem;
-  pathname: string;
-  hash: string;
-  whatsappUnread: number;
+  collapsed: boolean;
+  onCollapsedChange: (collapsed: boolean) => void;
 }) {
-  const active = isActivePath(pathname, item.url);
-  const [open, setOpen] = useState(active);
-  const unread = item.url === "/whatsapp" ? whatsappUnread : 0;
-
-  useEffect(() => {
-    if (active) setOpen(true);
-  }, [active]);
-
-  return (
-    <Collapsible open={open} onOpenChange={setOpen} asChild>
-      <SidebarMenuItem>
-        <CollapsibleTrigger asChild>
-          <SidebarMenuButton
-            isActive={active}
-            className={cn(
-              "relative gap-3 transition-all duration-200 group/collapse",
-              active &&
-                "bg-gradient-to-r from-primary/15 to-accent/10 text-foreground before:absolute before:left-0 before:top-1/2 before:-translate-y-1/2 before:h-5 before:w-[3px] before:rounded-r-full before:bg-primary before:shadow-[0_0_8px] before:shadow-primary/60",
-            )}
-          >
-            <item.icon className="h-4 w-4 shrink-0" />
-            <span className="flex-1 truncate text-left">{item.title}</span>
-            {unread > 0 && (
-              <>
-                <Badge className="h-4 min-w-4 px-1.5 text-[10px] rounded-full bg-primary text-primary-foreground shadow-[0_0_6px] shadow-primary/60 group-data-[collapsible=icon]:hidden">
-                  {unread > 99 ? "99+" : unread}
-                </Badge>
-                <span className="hidden group-data-[collapsible=icon]:block absolute top-1 right-1 h-2 w-2 rounded-full bg-primary shadow-[0_0_6px] shadow-primary/70" />
-              </>
-            )}
-            {item.soon && (
-              <Badge
-                variant="outline"
-                className="h-4 px-1.5 text-[9px] uppercase tracking-wider border-accent/40 text-accent group-data-[collapsible=icon]:hidden"
-              >
-                Breve
-              </Badge>
-            )}
-            <ChevronRight
-              className={cn(
-                "h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-200 group-data-[collapsible=icon]:hidden",
-                open && "rotate-90",
-              )}
-            />
-          </SidebarMenuButton>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="overflow-hidden data-[state=open]:animate-[accordion-down_180ms_ease-out] data-[state=closed]:animate-[accordion-up_180ms_ease-out]">
-          <SidebarMenuSub className="border-l border-sidebar-border/80 ml-[18px] pl-3 mt-1 gap-0.5">
-            {item.subItems!.map((sub) => {
-              const href = sub.hash ? `${item.url}#${sub.hash}` : item.url;
-              const normalizedHash = hash.replace(/^#/, "");
-              const subActive =
-                active && (sub.hash ? normalizedHash === sub.hash : normalizedHash === "");
-              const firstSubActive =
-                active && !normalizedHash && item.subItems![0]?.hash === sub.hash;
-              const isOn = subActive || firstSubActive;
-              return (
-                <SidebarMenuSubItem key={sub.title}>
-                  <SidebarMenuSubButton
-                    asChild
-                    isActive={isOn}
-                    className={cn(
-                      "relative text-[13px] transition-all duration-200",
-                      isOn
-                        ? "bg-gradient-to-r from-primary/20 to-accent/10 text-primary font-medium shadow-[inset_0_0_0_1px] shadow-primary/20 before:absolute before:-left-3 before:top-1/2 before:-translate-y-1/2 before:h-4 before:w-[2px] before:rounded-r-full before:bg-primary before:shadow-[0_0_6px] before:shadow-primary/70 [&_svg]:text-primary"
-                        : "text-muted-foreground/80 hover:text-foreground hover:bg-sidebar-accent/40",
-                    )}
-                  >
-                    <Link to={item.url} hash={sub.hash}>
-                      <span className="truncate">{sub.title}</span>
-                      {sub.soon && (
-                        <span className="ml-auto text-[9px] uppercase tracking-wider text-accent/80">
-                          breve
-                        </span>
-                      )}
-                    </Link>
-                  </SidebarMenuSubButton>
-                </SidebarMenuSubItem>
-              );
-            })}
-          </SidebarMenuSub>
-        </CollapsibleContent>
-      </SidebarMenuItem>
-    </Collapsible>
-  );
-}
-
-export function AppSidebar() {
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const hash = useRouterState({ select: (s) => s.location.hash });
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const hash = useRouterState({ select: (state) => state.location.hash });
   const session = useAuthSession();
   const { isSuperAdmin } = useIsSuperAdmin();
-  const { total: whatsappUnread } = useWhatsappUnreadTotal(!!session);
-  const userEmail = session?.user.email ?? null;
-  const systemItems = isSuperAdmin ? sistemaItems : [...sistemaItems, tenantSelfItem];
+  const { total: whatsappUnread } = useWhatsappUnreadTotal(Boolean(session));
+  const tenantSystemItems = isSuperAdmin ? systemItems : [...systemItems, tenantItem];
 
   return (
-    <Sidebar collapsible="icon" className="border-r border-sidebar-border">
-      <SidebarHeader className="px-4 py-5">
-        <Link to="/" className="flex items-center gap-2.5">
-          <div className="relative flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-accent glow-blue">
-            <Sparkles className="h-4 w-4 text-primary-foreground" />
-          </div>
-          <div className="flex flex-col leading-none group-data-[collapsible=icon]:hidden">
-            <span className="text-base font-bold tracking-tight">BETLEADS</span>
-            <span className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-              Player Intelligence
-            </span>
-          </div>
-        </Link>
+    <Sidebar
+      variant="collapsible"
+      className="fixed inset-y-0 left-0 z-40 h-dvh"
+      width={244}
+      collapsedWidth={60}
+      collapsed={collapsed}
+      onCollapsedChange={onCollapsedChange}
+    >
+      <SidebarHeader>
+        <Brand />
+        <SidebarToggle className="ml-auto" />
       </SidebarHeader>
-      <SidebarContent className="gap-1">
-        <NavGroup label="Menu" items={menuItems} pathname={pathname} hash={hash} />
-        <NavGroup
+      <SidebarNav>
+        <NavSection label="Menu" items={menuItems} pathname={pathname} hash={hash} />
+        <NavSection
           label="Engajamento"
-          items={engajamentoItems}
+          items={engagementItems}
           pathname={pathname}
           hash={hash}
           whatsappUnread={whatsappUnread}
         />
-        <NavGroup label="Sistema" items={systemItems} pathname={pathname} hash={hash} />
+        <NavSection label="Sistema" items={tenantSystemItems} pathname={pathname} hash={hash} />
         {isSuperAdmin && (
-          <NavGroup label="Administração" items={superAdminItems} pathname={pathname} hash={hash} />
+          <NavSection label="Administração" items={adminItems} pathname={pathname} hash={hash} />
         )}
-      </SidebarContent>
-      <SidebarFooter className="border-t border-sidebar-border p-3">
-        <div className="flex items-center gap-2 rounded-md bg-sidebar-accent/40 px-2.5 py-1.5 text-xs text-muted-foreground mb-2">
-          <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400 pulse-realtime" />
-          <span
-            className="truncate group-data-[collapsible=icon]:hidden"
-            title={userEmail ?? undefined}
-          >
-            {userEmail ?? "Sistema online"}
-          </span>
-        </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => supabase.auth.signOut()}
-          className="w-full justify-start gap-2 text-xs"
-        >
-          <LogOut className="h-4 w-4" />
-          <span className="group-data-[collapsible=icon]:hidden">Sair</span>
-        </Button>
+      </SidebarNav>
+      <SidebarFooter>
+        <UserFooter email={session?.user.email ?? null} />
       </SidebarFooter>
     </Sidebar>
   );

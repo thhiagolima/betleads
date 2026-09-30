@@ -11,6 +11,29 @@ async function assertSuperAdmin(userId: string) {
   if (!data) throw new Error("Apenas o super admin pode realizar esta ação");
 }
 
+export const adminGetSmsProviderConfig = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertSuperAdmin(context.userId);
+    const webhookSecret = process.env.SHORT_BRASIL_WEBHOOK_SECRET ?? "SEU_WEBHOOK_SECRET";
+    const appUrl = (process.env.PUBLIC_APP_URL ?? "https://betleads.io").replace(/\/$/, "");
+    return {
+      configured: Boolean(
+        process.env.SHORT_BRASIL_SMS_USUARIO && process.env.SHORT_BRASIL_SMS_CHAVE,
+      ),
+      provider: "Short Brasil",
+      endpoint:
+        process.env.SHORT_BRASIL_SMS_SINGLE_URL ??
+        "http://lp01-short.painelsms.com/bot/single-sms.php",
+      callbackUrl: `${appUrl}/api/public/sms-webhook?token=${encodeURIComponent(webhookSecret)}`,
+      credentials: {
+        usuario: Boolean(process.env.SHORT_BRASIL_SMS_USUARIO),
+        chave: Boolean(process.env.SHORT_BRASIL_SMS_CHAVE),
+        webhookSecret: Boolean(process.env.SHORT_BRASIL_WEBHOOK_SECRET),
+      },
+    };
+  });
+
 // ─── Listagem com uso ────────────────────────────────────────────────────────
 const listInput = z
   .object({
@@ -125,8 +148,12 @@ export const adminCreateUser = createServerFn({ method: "POST" })
       .from("user_roles")
       .insert({ user_id: newUser.id, tenant_id: tenant.id, role: "user" });
     if (roleErr) {
-      try { await supabaseAdmin.from("tenants").delete().eq("id", tenant.id); } catch {}
-      try { await supabaseAdmin.auth.admin.deleteUser(newUser.id); } catch {}
+      try {
+        await supabaseAdmin.from("tenants").delete().eq("id", tenant.id);
+      } catch {}
+      try {
+        await supabaseAdmin.auth.admin.deleteUser(newUser.id);
+      } catch {}
       throw new Error(roleErr.message);
     }
 
@@ -198,7 +225,9 @@ export const adminGenerateLoginLink = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
     // Pega o email do alvo
-    const { data: target, error: getErr } = await supabaseAdmin.auth.admin.getUserById(data.user_id);
+    const { data: target, error: getErr } = await supabaseAdmin.auth.admin.getUserById(
+      data.user_id,
+    );
     if (getErr) throw new Error(getErr.message);
     if (!target.user?.email) throw new Error("Usuário sem email");
 

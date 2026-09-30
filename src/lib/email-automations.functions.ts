@@ -5,16 +5,38 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { runEmailFlowDispatcher } from "./email-automations.server";
+import { resolveOperationalTenantId } from "./tenant-access.server";
 
 const TriggerSchema = z.enum([
-  "lead_cadastrado","recuperacao_vip","vip_esfriando","receita_em_queda","lead_quente_esfriando",
-  "quase_vip","alto_potencial","reativacao_em_curso","dinheiro_parado",
-  "engajado_sem_converter","frequencia_caindo","cadastrados_sem_deposito",
-  "sem_login_7_14","sem_login_15_24","sem_login_25_34","sem_login_35_44",
-  "sem_login_45_59","sem_login_60_mais",
+  "lead_cadastrado",
+  "recuperacao_vip",
+  "vip_esfriando",
+  "receita_em_queda",
+  "lead_quente_esfriando",
+  "quase_vip",
+  "alto_potencial",
+  "reativacao_em_curso",
+  "dinheiro_parado",
+  "engajado_sem_converter",
+  "frequencia_caindo",
+  "cadastrados_sem_deposito",
+  "sem_login_7_14",
+  "sem_login_15_24",
+  "sem_login_25_34",
+  "sem_login_35_44",
+  "sem_login_45_59",
+  "sem_login_60_mais",
 ]);
 
-const BlockTypeSchema = z.enum(["start","send_email","delay","condition","tag","remove","end"]);
+const BlockTypeSchema = z.enum([
+  "start",
+  "send_email",
+  "delay",
+  "condition",
+  "tag",
+  "remove",
+  "end",
+]);
 
 const BlockInputSchema = z.object({
   block_type: BlockTypeSchema,
@@ -23,8 +45,18 @@ const BlockInputSchema = z.object({
   smtp_config_id: dbUuid().nullable().optional(),
   subject_override: z.string().nullable().optional(),
   preheader_override: z.string().nullable().optional(),
-  pre_delay_seconds: z.number().int().min(0).max(86400 * 30).default(0),
-  delay_seconds: z.number().int().min(0).max(86400 * 30).default(0),
+  pre_delay_seconds: z
+    .number()
+    .int()
+    .min(0)
+    .max(86400 * 30)
+    .default(0),
+  delay_seconds: z
+    .number()
+    .int()
+    .min(0)
+    .max(86400 * 30)
+    .default(0),
   condition_type: z.string().nullable().optional(),
   condition_value: z.string().nullable().optional(),
   label: z.string().nullable().optional(),
@@ -51,7 +83,9 @@ export const listEmailFlows = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const { data, error } = await context.supabase
       .from("email_flows")
-      .select("id, name, trigger_type, active, daily_limit, cooldown_hours, exit_conditions, stats, activated_at, last_run_at, updated_at")
+      .select(
+        "id, name, trigger_type, active, daily_limit, cooldown_hours, exit_conditions, stats, activated_at, last_run_at, updated_at",
+      )
       .order("updated_at", { ascending: false });
     if (error) throw new Error(error.message);
     // Conta blocos e leads ativos por fluxo
@@ -69,12 +103,19 @@ export const listEmailFlows = createServerFn({ method: "GET" })
       counts = ids.reduce<typeof counts>((acc, id) => {
         acc[id] = {
           blocks: (blocks ?? []).filter((b) => b.flow_id === id).length,
-          active_leads: (leads ?? []).filter((l) => l.flow_id === id && (l.status === "pending" || l.status === "running")).length,
+          active_leads: (leads ?? []).filter(
+            (l) => l.flow_id === id && (l.status === "pending" || l.status === "running"),
+          ).length,
         };
         return acc;
       }, {});
     }
-    return { flows: (data ?? []).map((f) => ({ ...f, counts: counts[f.id] ?? { blocks: 0, active_leads: 0 } })) };
+    return {
+      flows: (data ?? []).map((f) => ({
+        ...f,
+        counts: counts[f.id] ?? { blocks: 0, active_leads: 0 },
+      })),
+    };
   });
 
 // ---------- GET ----------
@@ -84,7 +125,11 @@ export const getEmailFlow = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const [{ data: flow, error: fErr }, { data: blocks, error: bErr }] = await Promise.all([
       context.supabase.from("email_flows").select("*").eq("id", data.id).maybeSingle(),
-      context.supabase.from("email_flow_blocks").select("*").eq("flow_id", data.id).order("order_index", { ascending: true }),
+      context.supabase
+        .from("email_flow_blocks")
+        .select("*")
+        .eq("flow_id", data.id)
+        .order("order_index", { ascending: true }),
     ]);
     if (fErr) throw new Error(fErr.message);
     if (bErr) throw new Error(bErr.message);
@@ -95,22 +140,28 @@ export const getEmailFlow = createServerFn({ method: "POST" })
 export const saveEmailFlow = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
-    z.object({
-      id: dbUuid().optional(),
-      name: z.string().min(1).max(120),
-      trigger_type: TriggerSchema,
-      active: z.boolean(),
-      daily_limit: z.number().int().min(1).max(10_000_000).optional().default(999999),
-      cooldown_hours: z.number().int().min(0).max(8760),
-      exit_conditions: ExitConditionsSchema,
-      blocks: z.array(BlockInputSchema).min(1).max(60),
-    }).parse(d),
+    z
+      .object({
+        id: dbUuid().optional(),
+        name: z.string().min(1).max(120),
+        trigger_type: TriggerSchema,
+        active: z.boolean(),
+        daily_limit: z.number().int().min(1).max(10_000_000).optional().default(999999),
+        cooldown_hours: z.number().int().min(0).max(8760),
+        exit_conditions: ExitConditionsSchema,
+        blocks: z.array(BlockInputSchema).min(1).max(60),
+      })
+      .parse(d),
   )
   .handler(async ({ data, context }) => {
     // Valida: ativo so com >=1 send_email com template
-    const hasSend = data.blocks.some((b) => b.block_type === "send_email" && b.template_ids.length > 0);
+    const hasSend = data.blocks.some(
+      (b) => b.block_type === "send_email" && b.template_ids.length > 0,
+    );
     if (data.active && !hasSend) {
-      throw new Error("Para ativar o fluxo, é necessário pelo menos um bloco de envio com template selecionado.");
+      throw new Error(
+        "Para ativar o fluxo, é necessário pelo menos um bloco de envio com template selecionado.",
+      );
     }
 
     let flowId = data.id;
@@ -126,7 +177,11 @@ export const saveEmailFlow = createServerFn({ method: "POST" })
       const { error } = await context.supabase.from("email_flows").update(payload).eq("id", flowId);
       if (error) throw new Error(error.message);
     } else {
-      const { data: created, error } = await context.supabase.from("email_flows").insert(payload).select("id").single();
+      const { data: created, error } = await context.supabase
+        .from("email_flows")
+        .insert(payload)
+        .select("id")
+        .single();
       if (error) throw new Error(error.message);
       flowId = created.id;
     }
@@ -183,9 +238,17 @@ export const duplicateEmailFlow = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ id: dbUuid() }).parse(d))
   .handler(async ({ data, context }) => {
-    const { data: flow } = await context.supabase.from("email_flows").select("*").eq("id", data.id).maybeSingle();
+    const { data: flow } = await context.supabase
+      .from("email_flows")
+      .select("*")
+      .eq("id", data.id)
+      .maybeSingle();
     if (!flow) throw new Error("Fluxo não encontrado");
-    const { data: blocks } = await context.supabase.from("email_flow_blocks").select("*").eq("flow_id", data.id).order("order_index");
+    const { data: blocks } = await context.supabase
+      .from("email_flow_blocks")
+      .select("*")
+      .eq("flow_id", data.id)
+      .order("order_index");
     const { data: created, error } = await context.supabase
       .from("email_flows")
       .insert({
@@ -228,12 +291,19 @@ export const duplicateEmailFlow = createServerFn({ method: "POST" })
 export const listEmailFlowLeads = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
-    z.object({ flow_id: dbUuid().optional(), limit: z.number().int().min(1).max(200).default(100) }).parse(d),
+    z
+      .object({
+        flow_id: dbUuid().optional(),
+        limit: z.number().int().min(1).max(200).default(100),
+      })
+      .parse(d),
   )
   .handler(async ({ data, context }) => {
     let q = context.supabase
       .from("email_flow_leads")
-      .select("id, flow_id, player_id, email, status, current_block_index, next_run_at, entered_at, last_sent_at, last_template_id, exit_reason")
+      .select(
+        "id, flow_id, player_id, email, status, current_block_index, next_run_at, entered_at, last_sent_at, last_template_id, exit_reason",
+      )
       .order("entered_at", { ascending: false })
       .limit(data.limit);
     if (data.flow_id) q = q.eq("flow_id", data.flow_id);
@@ -245,7 +315,12 @@ export const listEmailFlowLeads = createServerFn({ method: "POST" })
 export const listEmailFlowLogs = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
-    z.object({ flow_id: dbUuid().optional(), limit: z.number().int().min(1).max(500).default(100) }).parse(d),
+    z
+      .object({
+        flow_id: dbUuid().optional(),
+        limit: z.number().int().min(1).max(500).default(100),
+      })
+      .parse(d),
   )
   .handler(async ({ data, context }) => {
     let q = context.supabase
@@ -263,20 +338,33 @@ export const listEmailFlowLogs = createServerFn({ method: "POST" })
 export const triggerEmailFlowTest = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
-    z.object({ flow_id: dbUuid(), player_id: dbUuid().optional(), email: z.string().email().optional() }).parse(d),
+    z
+      .object({
+        flow_id: dbUuid(),
+        player_id: dbUuid().optional(),
+        email: z.string().email().optional(),
+      })
+      .parse(d),
   )
-  .handler(async ({ data }) => {
+  .handler(async ({ data, context }) => {
+    const tenantId = await resolveOperationalTenantId(context.supabase);
     const { data: flow } = await supabaseAdmin
       .from("email_flows")
       .select("id, active")
       .eq("id", data.flow_id)
+      .eq("tenant_id", tenantId)
       .maybeSingle();
     if (!flow) throw new Error("Fluxo não encontrado");
 
     let email = data.email ?? null;
     let player_id = data.player_id ?? null;
     if (player_id && !email) {
-      const { data: p } = await supabaseAdmin.from("players").select("email").eq("id", player_id).maybeSingle();
+      const { data: p } = await supabaseAdmin
+        .from("players")
+        .select("email")
+        .eq("id", player_id)
+        .eq("tenant_id", tenantId)
+        .maybeSingle();
       email = p?.email ?? null;
     }
     if (!email) throw new Error("Informe um player com email ou um email direto");
@@ -284,6 +372,7 @@ export const triggerEmailFlowTest = createServerFn({ method: "POST" })
     const { data: inserted, error } = await supabaseAdmin
       .from("email_flow_leads")
       .insert({
+        tenant_id: tenantId,
         flow_id: data.flow_id,
         player_id,
         email,
@@ -296,6 +385,7 @@ export const triggerEmailFlowTest = createServerFn({ method: "POST" })
     if (error || !inserted) throw new Error(error?.message ?? "Falha ao injetar lead");
 
     await supabaseAdmin.from("email_flow_logs").insert({
+      tenant_id: tenantId,
       flow_id: data.flow_id,
       flow_lead_id: inserted.id,
       player_id,
@@ -310,4 +400,19 @@ export const triggerEmailFlowTest = createServerFn({ method: "POST" })
 // ---------- DISPATCH MANUAL ----------
 export const runEmailFlowsNow = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(async () => runEmailFlowDispatcher({ limit: 30 }));
+  .handler(async ({ context }) => {
+    const tenantId = await resolveOperationalTenantId(context.supabase);
+    const { data: leads, error } = await supabaseAdmin
+      .from("email_flow_leads")
+      .select("id")
+      .eq("tenant_id", tenantId)
+      .in("status", ["pending", "running", "cooldown"])
+      .lte("next_run_at", new Date().toISOString())
+      .limit(30);
+    if (error) throw new Error(error.message);
+    const results = [];
+    for (const lead of leads ?? []) {
+      results.push(await runEmailFlowDispatcher({ onlyLeadId: lead.id }));
+    }
+    return { processed: results.length, results };
+  });

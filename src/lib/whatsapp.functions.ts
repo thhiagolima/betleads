@@ -2,8 +2,14 @@ import { createServerFn } from "@tanstack/react-start";
 import { dbUuid } from "@/lib/zod-helpers";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { evolutionFetch, isEvolutionConnectionClosed, mapEvolutionState, setEvolutionProxy } from "./evolution.server";
+import {
+  evolutionFetch,
+  isEvolutionConnectionClosed,
+  mapEvolutionState,
+  setEvolutionProxy,
+} from "./evolution.server";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { resolveOperationalTenantId } from "./tenant-access.server";
 
 async function fingerprintKey(key: string): Promise<string> {
   try {
@@ -65,10 +71,9 @@ export const getEvolutionRealtimeConfig = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     // Restrito a super admin — o apikey global do Evolution dá controle
     // sobre TODAS as instâncias WhatsApp, então jamais expor a tenants.
-    const { data: isSuper, error: roleErr } = await supabaseAdmin.rpc(
-      "is_super_admin",
-      { _user_id: context.userId },
-    );
+    const { data: isSuper, error: roleErr } = await supabaseAdmin.rpc("is_super_admin", {
+      _user_id: context.userId,
+    });
     if (roleErr) throw new Error(roleErr.message);
     if (!isSuper) throw new Error("Apenas o super admin pode acessar esta configuração");
     const url = process.env.EVOLUTION_API_URL;
@@ -94,15 +99,17 @@ export const listWhatsappSessions = createServerFn({ method: "GET" })
 export const createWhatsappSession = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) =>
-    z.object({
-      name: z.string().min(1).max(100),
-      instance_name: z
-        .string()
-        .min(2)
-        .max(60)
-        .regex(/^[a-z0-9_-]+$/, "Use apenas letras minúsculas, números, _ ou -"),
-      phone_number: z.string().max(30).optional().nullable(),
-    }).parse(input),
+    z
+      .object({
+        name: z.string().min(1).max(100),
+        instance_name: z
+          .string()
+          .min(2)
+          .max(60)
+          .regex(/^[a-z0-9_-]+$/, "Use apenas letras minúsculas, números, _ ou -"),
+        phone_number: z.string().max(30).optional().nullable(),
+      })
+      .parse(input),
   )
   .handler(async ({ data, context }) => {
     // SOURCE OF TRUTH = Evolution. Any non-2xx is a hard failure — never
@@ -125,10 +132,7 @@ export const createWhatsappSession = createServerFn({ method: "POST" })
 
     // Evolution v2 returns the QR code directly in the create response.
     const createBase64 =
-      createResp?.qrcode?.base64 ??
-      createResp?.qrcode?.code ??
-      createResp?.base64 ??
-      null;
+      createResp?.qrcode?.base64 ?? createResp?.qrcode?.code ?? createResp?.base64 ?? null;
     const createdQr = createBase64
       ? createBase64.startsWith("data:")
         ? createBase64
@@ -218,9 +222,7 @@ export const connectWhatsappSession = createServerFn({ method: "POST" })
           event: "connect_failed",
           detail: { error: e?.message ?? String(e) },
         });
-        throw new Error(
-          `Falha ao aplicar proxy na sessão: ${e?.message ?? "erro desconhecido"}`,
-        );
+        throw new Error(`Falha ao aplicar proxy na sessão: ${e?.message ?? "erro desconhecido"}`);
       }
     } else {
       // Sem proxy vinculado — garante que a Evolution não use proxy antigo.
@@ -257,12 +259,7 @@ export const connectWhatsappSession = createServerFn({ method: "POST" })
         method: "POST",
         body: {
           enabled: true,
-          events: [
-            "QRCODE_UPDATED",
-            "CONNECTION_UPDATE",
-            "qrcode.updated",
-            "connection.update",
-          ],
+          events: ["QRCODE_UPDATED", "CONNECTION_UPDATE", "qrcode.updated", "connection.update"],
         },
       });
     } catch (e: any) {
@@ -291,9 +288,7 @@ export const connectWhatsappSession = createServerFn({ method: "POST" })
     // 3) /instance/fetchInstances?instanceName={name}
     if (!qrImage) {
       try {
-        const r: any = await evolutionFetch(
-          `/instance/fetchInstances?instanceName=${name}`,
-        );
+        const r: any = await evolutionFetch(`/instance/fetchInstances?instanceName=${name}`);
         const item = Array.isArray(r) ? r[0] : Array.isArray(r?.instances) ? r.instances[0] : r;
         qrImage = extractQr(item);
         if (!state) state = mapEvolutionState(item?.instance?.state ?? item?.connectionStatus);
@@ -313,14 +308,15 @@ export const connectWhatsappSession = createServerFn({ method: "POST" })
     }
 
     const newStatus =
-      state === "connected" ? "connected" : qrImage ? "qrcode" : state ?? "connecting";
+      state === "connected" ? "connected" : qrImage ? "qrcode" : (state ?? "connecting");
 
     await context.supabase
       .from("whatsapp_sessions")
       .update({
         qr_code: qrImage ?? session.qr_code,
         status: newStatus,
-        last_connected_at: newStatus === "connected" ? new Date().toISOString() : session.last_connected_at,
+        last_connected_at:
+          newStatus === "connected" ? new Date().toISOString() : session.last_connected_at,
       })
       .eq("id", data.id);
 
@@ -407,11 +403,7 @@ export const disconnectWhatsappSession = createServerFn({ method: "POST" })
 
 export const deleteWhatsappSession = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input) =>
-    z
-      .object({ id: dbUuid(), force: z.boolean().optional() })
-      .parse(input),
-  )
+  .inputValidator((input) => z.object({ id: dbUuid(), force: z.boolean().optional() }).parse(input))
   .handler(async ({ data, context }) => {
     const { data: session } = await context.supabase
       .from("whatsapp_sessions")
@@ -445,14 +437,8 @@ export const deleteWhatsappSession = createServerFn({ method: "POST" })
         .delete()
         .eq("session_id", data.id);
       if (assignErr) throw new Error(assignErr.message);
-      await supabaseAdmin
-        .from("whatsapp_messages")
-        .delete()
-        .eq("session_id", data.id);
-      await supabaseAdmin
-        .from("whatsapp_chats")
-        .delete()
-        .eq("session_id", data.id);
+      await supabaseAdmin.from("whatsapp_messages").delete().eq("session_id", data.id);
+      await supabaseAdmin.from("whatsapp_chats").delete().eq("session_id", data.id);
     }
 
     if (session) {
@@ -465,10 +451,7 @@ export const deleteWhatsappSession = createServerFn({ method: "POST" })
       }
     }
 
-    const { error } = await context.supabase
-      .from("whatsapp_sessions")
-      .delete()
-      .eq("id", data.id);
+    const { error } = await context.supabase.from("whatsapp_sessions").delete().eq("id", data.id);
     if (error) throw new Error(error.message);
 
     return { ok: true };
@@ -533,11 +516,7 @@ export const syncWhatsappSessions = createServerFn({ method: "POST" })
             ? raw.data
             : [];
       for (const it of list) {
-        const n =
-          it?.instance?.instanceName ??
-          it?.instanceName ??
-          it?.name ??
-          it?.instance?.name;
+        const n = it?.instance?.instanceName ?? it?.instanceName ?? it?.name ?? it?.instance?.name;
         if (typeof n === "string" && n.length > 0) evolutionNames.add(n);
       }
     } catch (e: any) {
@@ -572,7 +551,10 @@ export const syncWhatsappSessions = createServerFn({ method: "POST" })
       } catch (e: any) {
         // Instance may not exist on Evolution OR endpoint flaky — do not mark as orphan,
         // just leave the local row untouched.
-        console.warn(`[whatsapp] connectionState failed for ${s.instance_name} (ignored):`, e?.message);
+        console.warn(
+          `[whatsapp] connectionState failed for ${s.instance_name} (ignored):`,
+          e?.message,
+        );
       }
     }
 
@@ -630,11 +612,7 @@ function logWhatsappSend(details: Record<string, unknown>) {
   console.info("[whatsapp-send]", JSON.stringify(details));
 }
 
-async function markWhatsappSessionDisconnected(
-  supabase: any,
-  sessionId: string,
-  reason: string,
-) {
+async function markWhatsappSessionDisconnected(supabase: any, sessionId: string, reason: string) {
   await supabase
     .from("whatsapp_sessions")
     .update({
@@ -687,7 +665,11 @@ async function resolveWhatsappNumber(
       `/chat/whatsappNumbers/${encodeURIComponent(instance)}`,
       { method: "POST", body: { numbers: tried } },
     );
-    const arr: any[] = Array.isArray(resp) ? resp : Array.isArray(resp?.response?.message) ? resp.response.message : [];
+    const arr: any[] = Array.isArray(resp)
+      ? resp
+      : Array.isArray(resp?.response?.message)
+        ? resp.response.message
+        : [];
     const hit = arr.find((r) => r?.exists === true);
     console.info(
       "[whatsapp] number-resolve",
@@ -743,16 +725,16 @@ export const listInboxChats = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const { data, error } = await context.supabase
       .from("whatsapp_chats")
-      .select("id, session_id, remote_jid, phone, name, is_group, unread_count, last_message, last_message_at, profile_pic_url, whatsapp_sessions:session_id(name)")
+      .select(
+        "id, session_id, remote_jid, phone, name, is_group, unread_count, last_message, last_message_at, profile_pic_url, whatsapp_sessions:session_id(name)",
+      )
       .order("last_message_at", { ascending: false, nullsFirst: false })
       .limit(200);
     if (error) throw new Error(error.message);
     // Busca os assignments para sobrescrever a sessão "ativa" do lead
     const phones = Array.from(
       new Set(
-        (data ?? [])
-          .filter((c: any) => !c.is_group && c.phone)
-          .map((c: any) => c.phone as string),
+        (data ?? []).filter((c: any) => !c.is_group && c.phone).map((c: any) => c.phone as string),
       ),
     );
     type Assign = {
@@ -796,8 +778,7 @@ export const listInboxChats = createServerFn({ method: "GET" })
       if (assign) {
         // Procura entre os chats deste phone o que pertence à sessão ativa.
         const same = (data ?? []).find(
-          (x: any) =>
-            !x.is_group && x.phone === c.phone && x.session_id === assign.session_id,
+          (x: any) => !x.is_group && x.phone === c.phone && x.session_id === assign.session_id,
         );
         const chosen = same ?? c;
         seenPhones.add(c.phone);
@@ -891,9 +872,7 @@ export const getWhatsappPendingTotal = createServerFn({ method: "GET" })
 // do Inbox. Devolve null se não houver player vinculado.
 export const getLeadProfileByPhone = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input) =>
-    z.object({ phone: z.string().min(8).max(20) }).parse(input),
-  )
+  .inputValidator((input) => z.object({ phone: z.string().min(8).max(20) }).parse(input))
   .handler(async ({ data, context }) => {
     const phone = data.phone.replace(/\D/g, "");
     if (!phone) return { player: null, lastTrigger: null };
@@ -907,8 +886,7 @@ export const getLeadProfileByPhone = createServerFn({ method: "POST" })
       const ddd = phone.slice(2, 4);
       const rest = phone.slice(4);
       if (rest.length === 8) variants.add(`55${ddd}9${rest}`);
-      if (rest.length === 9 && rest.startsWith("9"))
-        variants.add(`55${ddd}${rest.slice(1)}`);
+      if (rest.length === 9 && rest.startsWith("9")) variants.add(`55${ddd}${rest.slice(1)}`);
     }
 
     // Player: tenta match por telefone normalizado. A coluna `telefone` em
@@ -921,11 +899,10 @@ export const getLeadProfileByPhone = createServerFn({ method: "POST" })
       .ilike("telefone", `%${phone.slice(-8)}%`)
       .limit(20);
     const player =
-      (candidates ?? []).find(
-        (p) => variants.has((p.telefone ?? "").replace(/\D/g, "")),
-      ) ?? null;
+      (candidates ?? []).find((p) => variants.has((p.telefone ?? "").replace(/\D/g, ""))) ?? null;
 
-    let lastTrigger: { trigger_type: string; rule_name: string | null; fired_at: string } | null = null;
+    let lastTrigger: { trigger_type: string; rule_name: string | null; fired_at: string } | null =
+      null;
     if (player) {
       const { data: alerts } = await context.supabase
         .from("lead_alerts")
@@ -983,7 +960,9 @@ export const listChatMessages = createServerFn({ method: "POST" })
     }
     const { data: messages, error } = await context.supabase
       .from("whatsapp_messages")
-      .select("id, from_me, message_type, text, media_url, media_mimetype, media_filename, media_size, media_duration, message_timestamp, status, sender_name, session_id")
+      .select(
+        "id, from_me, message_type, text, media_url, media_mimetype, media_filename, media_size, media_duration, message_timestamp, status, sender_name, session_id",
+      )
       .in("chat_id", chatIds)
       .order("message_timestamp", { ascending: true })
       .limit(500);
@@ -1016,10 +995,12 @@ export const listChatMessages = createServerFn({ method: "POST" })
 export const sendWhatsappMessage = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) =>
-    z.object({
-      chat_id: dbUuid(),
-      text: z.string().min(1).max(4000),
-    }).parse(input),
+    z
+      .object({
+        chat_id: dbUuid(),
+        text: z.string().min(1).max(4000),
+      })
+      .parse(input),
   )
   .handler(async ({ data, context }) => {
     const { data: chat, error } = await context.supabase
@@ -1083,7 +1064,8 @@ export const sendWhatsappMessage = createServerFn({ method: "POST" })
           })
           .select("id")
           .single();
-        if (ins.error || !ins.data) throw new Error(ins.error?.message ?? "Falha ao criar conversa");
+        if (ins.error || !ins.data)
+          throw new Error(ins.error?.message ?? "Falha ao criar conversa");
         chatId = ins.data.id;
       }
     }
@@ -1099,8 +1081,14 @@ export const sendWhatsappMessage = createServerFn({ method: "POST" })
       resp = await evolutionFetch(endpoint, { method: "POST", body: payload });
     } catch (e: any) {
       if (isEvolutionConnectionClosed(e)) {
-        await markWhatsappSessionDisconnected(context.supabase, session.id, "send_text_connection_closed");
-        throw new Error(`Sessão "${session.name}" caiu na Evolution. Reconecte em WhatsApp → Sessões antes de enviar.`);
+        await markWhatsappSessionDisconnected(
+          context.supabase,
+          session.id,
+          "send_text_connection_closed",
+        );
+        throw new Error(
+          `Sessão "${session.name}" caiu na Evolution. Reconecte em WhatsApp → Sessões antes de enviar.`,
+        );
       }
       const raw = (e?.rawBody ?? e?.message ?? "").toString().slice(0, 300);
       throw new Error(
@@ -1153,195 +1141,207 @@ async function sendWhatsappMediaInternal(
   context: any,
   forcedKind?: "image" | "video" | "audio" | "document",
 ) {
-    const kind = forcedKind ?? data.kind;
-    if (kind !== data.kind) throw new Error(`Tipo de mídia inválido: esperado ${forcedKind}.`);
-    const cleanBase64 = data.base64.replace(/^data:[^,]*base64,/i, "").replace(/\s+/g, "");
-    const cleanMimetype = data.mimetype.split(";")[0]?.trim().toLowerCase() || "application/octet-stream";
-    const filename = data.filename;
-    const { data: chat, error } = await context.supabase
+  const kind = forcedKind ?? data.kind;
+  if (kind !== data.kind) throw new Error(`Tipo de mídia inválido: esperado ${forcedKind}.`);
+  const cleanBase64 = data.base64.replace(/^data:[^,]*base64,/i, "").replace(/\s+/g, "");
+  const cleanMimetype =
+    data.mimetype.split(";")[0]?.trim().toLowerCase() || "application/octet-stream";
+  const filename = data.filename;
+  const { data: chat, error } = await context.supabase
+    .from("whatsapp_chats")
+    .select("id, session_id, remote_jid, phone, is_group")
+    .eq("id", data.chat_id)
+    .single();
+  if (error || !chat) throw new Error("Conversa não encontrada");
+
+  // Resolve sessão ativa via assignment (1:1)
+  let sessionId = chat.session_id as string;
+  if (!chat.is_group && chat.phone) {
+    const { data: assignment } = await context.supabase
+      .from("lead_whatsapp_assignments")
+      .select("session_id, status")
+      .eq("phone_e164", chat.phone)
+      .maybeSingle();
+    if (assignment) {
+      if (assignment.status === "orphaned") {
+        throw new Error(
+          "Esta conversa está sem sessão ativa — realoque o lead em WhatsApp → Sessões antes de enviar.",
+        );
+      }
+      sessionId = assignment.session_id;
+    }
+  }
+  const { data: session, error: sErr } = await context.supabase
+    .from("whatsapp_sessions")
+    .select("id, instance_name, status, name")
+    .eq("id", sessionId)
+    .single();
+  if (sErr || !session) throw new Error("Sessão não encontrada");
+  if (session.status !== "connected") {
+    throw new Error(`Sessão "${session.name}" não está conectada`);
+  }
+  const instance = session.instance_name;
+
+  // Se mudou de sessão, garante chat correspondente
+  let chatId = chat.id as string;
+  if (sessionId !== chat.session_id) {
+    const { data: existing } = await context.supabase
       .from("whatsapp_chats")
-      .select("id, session_id, remote_jid, phone, is_group")
-      .eq("id", data.chat_id)
-      .single();
-    if (error || !chat) throw new Error("Conversa não encontrada");
-
-    // Resolve sessão ativa via assignment (1:1)
-    let sessionId = chat.session_id as string;
-    if (!chat.is_group && chat.phone) {
-      const { data: assignment } = await context.supabase
-        .from("lead_whatsapp_assignments")
-        .select("session_id, status")
-        .eq("phone_e164", chat.phone)
-        .maybeSingle();
-      if (assignment) {
-        if (assignment.status === "orphaned") {
-          throw new Error(
-            "Esta conversa está sem sessão ativa — realoque o lead em WhatsApp → Sessões antes de enviar.",
-          );
-        }
-        sessionId = assignment.session_id;
-      }
-    }
-    const { data: session, error: sErr } = await context.supabase
-      .from("whatsapp_sessions")
-      .select("id, instance_name, status, name")
-      .eq("id", sessionId)
-      .single();
-    if (sErr || !session) throw new Error("Sessão não encontrada");
-    if (session.status !== "connected") {
-      throw new Error(`Sessão "${session.name}" não está conectada`);
-    }
-    const instance = session.instance_name;
-
-    // Se mudou de sessão, garante chat correspondente
-    let chatId = chat.id as string;
-    if (sessionId !== chat.session_id) {
-      const { data: existing } = await context.supabase
+      .select("id")
+      .eq("session_id", sessionId)
+      .eq("remote_jid", chat.remote_jid)
+      .maybeSingle();
+    if (existing) chatId = existing.id;
+    else {
+      const ins = await context.supabase
         .from("whatsapp_chats")
+        .insert({
+          session_id: sessionId,
+          remote_jid: chat.remote_jid,
+          phone: chat.phone,
+          is_group: chat.is_group,
+          last_message_at: new Date().toISOString(),
+        })
         .select("id")
-        .eq("session_id", sessionId)
-        .eq("remote_jid", chat.remote_jid)
-        .maybeSingle();
-      if (existing) chatId = existing.id;
-      else {
-        const ins = await context.supabase
-          .from("whatsapp_chats")
-          .insert({
-            session_id: sessionId,
-            remote_jid: chat.remote_jid,
-            phone: chat.phone,
-            is_group: chat.is_group,
-            last_message_at: new Date().toISOString(),
-          })
-          .select("id").single();
-        if (ins.error || !ins.data) throw new Error(ins.error?.message ?? "Falha ao criar conversa");
-        chatId = ins.data.id;
-      }
+        .single();
+      if (ins.error || !ins.data) throw new Error(ins.error?.message ?? "Falha ao criar conversa");
+      chatId = ins.data.id;
     }
+  }
 
-    const number = evolutionNumber(chat.remote_jid);
+  const number = evolutionNumber(chat.remote_jid);
 
-    const bin = Uint8Array.from(atob(cleanBase64), (c) => c.charCodeAt(0));
-    const ext = filename.includes(".") ? filename.split(".").pop() : "bin";
-    const path = `outgoing/${instance}/${crypto.randomUUID()}.${ext}`;
-    const { error: upErr } = await context.supabase.storage
-      .from("whatsapp-media")
-      .upload(path, bin, { contentType: cleanMimetype, upsert: false });
-    if (upErr) {
-      throw new Error(`Falha ao subir mídia: ${upErr.message}`);
+  const bin = Uint8Array.from(atob(cleanBase64), (c) => c.charCodeAt(0));
+  const ext = filename.includes(".") ? filename.split(".").pop() : "bin";
+  const path = `outgoing/${instance}/${crypto.randomUUID()}.${ext}`;
+  const { error: upErr } = await context.supabase.storage
+    .from("whatsapp-media")
+    .upload(path, bin, { contentType: cleanMimetype, upsert: false });
+  if (upErr) {
+    throw new Error(`Falha ao subir mídia: ${upErr.message}`);
+  }
+  // Bucket é privado: geramos uma URL assinada de curta duração só para a Evolution baixar.
+  const { data: signed, error: signErr } = await context.supabase.storage
+    .from("whatsapp-media")
+    .createSignedUrl(path, 60 * 60); // 1h
+  if (signErr || !signed?.signedUrl) {
+    throw new Error(`Falha ao gerar URL assinada: ${signErr?.message ?? "sem detalhes"}`);
+  }
+  const evolutionMediaUrl = signed.signedUrl;
+
+  // VÍDEO: WhatsApp só renderiza nativamente mp4 (H.264 + AAC). webm/quicktime/etc
+  // chegam na Evolution, retornam 200, mas o WhatsApp descarta silenciosamente.
+  // Também enviamos como base64 inline (não signed URL) porque o downloader da
+  // Evolution falha esporadicamente em URLs assinadas longas para vídeo.
+  if (kind === "video") {
+    if (cleanMimetype !== "video/mp4") {
+      throw new Error(
+        `Formato de vídeo não suportado pelo WhatsApp: ${cleanMimetype}. ` +
+          `Envie um arquivo .mp4 (H.264 + AAC).`,
+      );
     }
-    // Bucket é privado: geramos uma URL assinada de curta duração só para a Evolution baixar.
-    const { data: signed, error: signErr } = await context.supabase.storage
-      .from("whatsapp-media")
-      .createSignedUrl(path, 60 * 60); // 1h
-    if (signErr || !signed?.signedUrl) {
-      throw new Error(`Falha ao gerar URL assinada: ${signErr?.message ?? "sem detalhes"}`);
+    const MAX_VIDEO_BYTES = 16 * 1024 * 1024; // limite prático do WhatsApp
+    if (bin.byteLength > MAX_VIDEO_BYTES) {
+      throw new Error(
+        `Vídeo muito grande (${(bin.byteLength / 1024 / 1024).toFixed(1)}MB). ` +
+          `Limite do WhatsApp: 16MB.`,
+      );
     }
-    const evolutionMediaUrl = signed.signedUrl;
+  }
 
-    // VÍDEO: WhatsApp só renderiza nativamente mp4 (H.264 + AAC). webm/quicktime/etc
-    // chegam na Evolution, retornam 200, mas o WhatsApp descarta silenciosamente.
-    // Também enviamos como base64 inline (não signed URL) porque o downloader da
-    // Evolution falha esporadicamente em URLs assinadas longas para vídeo.
-    if (kind === "video") {
-      if (cleanMimetype !== "video/mp4") {
-        throw new Error(
-          `Formato de vídeo não suportado pelo WhatsApp: ${cleanMimetype}. ` +
-            `Envie um arquivo .mp4 (H.264 + AAC).`,
-        );
-      }
-      const MAX_VIDEO_BYTES = 16 * 1024 * 1024; // limite prático do WhatsApp
-      if (bin.byteLength > MAX_VIDEO_BYTES) {
-        throw new Error(
-          `Vídeo muito grande (${(bin.byteLength / 1024 / 1024).toFixed(1)}MB). ` +
-            `Limite do WhatsApp: 16MB.`,
-        );
-      }
-    }
-
-    const endpoint = kind === "audio"
+  const endpoint =
+    kind === "audio"
       ? `/message/sendWhatsAppAudio/${encodeURIComponent(instance)}`
       : `/message/sendMedia/${encodeURIComponent(instance)}`;
-    const trimmedCaption = (data.caption ?? "").trim();
-    let payload: Record<string, unknown>;
-    if (kind === "audio") {
-      payload = { number, audio: cleanBase64, encoding: true };
-    } else if (kind === "video") {
-      // base64 inline — comprovadamente entrega no WhatsApp; signed URL falha em parte dos casos.
-      payload = {
-        number,
-        mediatype: "video",
-        mimetype: "video/mp4",
-        media: cleanBase64,
-        fileName: filename.toLowerCase().endsWith(".mp4") ? filename : `${filename}.mp4`,
-      };
-      if (trimmedCaption) (payload as any).caption = trimmedCaption;
-    } else {
-      payload = {
-        number,
-        mediatype: kind,
-        mimetype: cleanMimetype,
-        media: evolutionMediaUrl,
-        fileName: filename,
-      };
-      if (trimmedCaption) (payload as any).caption = trimmedCaption;
-    }
-    logWhatsappSend({
-      endpoint,
-      instance,
+  const trimmedCaption = (data.caption ?? "").trim();
+  let payload: Record<string, unknown>;
+  if (kind === "audio") {
+    payload = { number, audio: cleanBase64, encoding: true };
+  } else if (kind === "video") {
+    // base64 inline — comprovadamente entrega no WhatsApp; signed URL falha em parte dos casos.
+    payload = {
       number,
-      kind,
+      mediatype: "video",
+      mimetype: "video/mp4",
+      media: cleanBase64,
+      fileName: filename.toLowerCase().endsWith(".mp4") ? filename : `${filename}.mp4`,
+    };
+    if (trimmedCaption) (payload as any).caption = trimmedCaption;
+  } else {
+    payload = {
+      number,
+      mediatype: kind,
       mimetype: cleanMimetype,
-      size: bin.byteLength,
-      filename,
-      payload:
-        kind === "audio"
-          ? { number, audio: `[base64 length=${cleanBase64.length}]`, encoding: true }
-          : kind === "video"
-            ? { ...payload, media: `[base64 length=${cleanBase64.length}]` }
-            : { ...payload, media: `[signed-url length=${evolutionMediaUrl.length}]` },
-    });
-    let resp: any;
-    try {
-      resp = await evolutionFetch(endpoint, { method: "POST", body: payload });
-    } catch (e: any) {
-      if (isEvolutionConnectionClosed(e)) {
-        await markWhatsappSessionDisconnected(context.supabase, session.id, "send_media_connection_closed");
-        throw new Error(`Sessão "${session.name}" caiu na Evolution. Reconecte em WhatsApp → Sessões antes de enviar.`);
-      }
-      throw e;
+      media: evolutionMediaUrl,
+      fileName: filename,
+    };
+    if (trimmedCaption) (payload as any).caption = trimmedCaption;
+  }
+  logWhatsappSend({
+    endpoint,
+    instance,
+    number,
+    kind,
+    mimetype: cleanMimetype,
+    size: bin.byteLength,
+    filename,
+    payload:
+      kind === "audio"
+        ? { number, audio: `[base64 length=${cleanBase64.length}]`, encoding: true }
+        : kind === "video"
+          ? { ...payload, media: `[base64 length=${cleanBase64.length}]` }
+          : { ...payload, media: `[signed-url length=${evolutionMediaUrl.length}]` },
+  });
+  let resp: any;
+  try {
+    resp = await evolutionFetch(endpoint, { method: "POST", body: payload });
+  } catch (e: any) {
+    if (isEvolutionConnectionClosed(e)) {
+      await markWhatsappSessionDisconnected(
+        context.supabase,
+        session.id,
+        "send_media_connection_closed",
+      );
+      throw new Error(
+        `Sessão "${session.name}" caiu na Evolution. Reconecte em WhatsApp → Sessões antes de enviar.`,
+      );
     }
+    throw e;
+  }
 
-    const msgId = resp?.key?.id ?? resp?.messageId ?? null;
-    const ts = new Date().toISOString();
-    await context.supabase.from("whatsapp_messages").insert({
-      chat_id: chatId,
-      session_id: sessionId,
-      evolution_message_id: msgId,
-      remote_jid: chat.remote_jid,
-      from_me: true,
-      message_type: kind,
-      text: data.caption ?? null,
-      // Armazena APENAS o storage path; URL assinada é gerada no read (listChatMessages).
-      media_url: path,
-      media_mimetype: cleanMimetype,
-      media_filename: filename,
-      media_size: bin.byteLength,
-      raw: resp,
-      message_timestamp: ts,
-    });
+  const msgId = resp?.key?.id ?? resp?.messageId ?? null;
+  const ts = new Date().toISOString();
+  await context.supabase.from("whatsapp_messages").insert({
+    chat_id: chatId,
+    session_id: sessionId,
+    evolution_message_id: msgId,
+    remote_jid: chat.remote_jid,
+    from_me: true,
+    message_type: kind,
+    text: data.caption ?? null,
+    // Armazena APENAS o storage path; URL assinada é gerada no read (listChatMessages).
+    media_url: path,
+    media_mimetype: cleanMimetype,
+    media_filename: filename,
+    media_size: bin.byteLength,
+    raw: resp,
+    message_timestamp: ts,
+  });
 
-    const preview =
-      kind === "image" ? `🖼️ ${data.caption ?? "Imagem"}` :
-      kind === "video" ? `🎬 ${data.caption ?? "Vídeo"}` :
-      kind === "audio" ? "🎤 Áudio" :
-      `📎 ${filename}`;
-    await context.supabase
-      .from("whatsapp_chats")
-      .update({ last_message: preview, last_message_at: ts })
-      .eq("id", chatId);
+  const preview =
+    kind === "image"
+      ? `🖼️ ${data.caption ?? "Imagem"}`
+      : kind === "video"
+        ? `🎬 ${data.caption ?? "Vídeo"}`
+        : kind === "audio"
+          ? "🎤 Áudio"
+          : `📎 ${filename}`;
+  await context.supabase
+    .from("whatsapp_chats")
+    .update({ last_message: preview, last_message_at: ts })
+    .eq("id", chatId);
 
-    return { ok: true };
+  return { ok: true };
 }
 
 export const sendWhatsappMedia = createServerFn({ method: "POST" })
@@ -1351,22 +1351,30 @@ export const sendWhatsappMedia = createServerFn({ method: "POST" })
 
 export const sendWhatsappImage = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input) => mediaInputSchema.parse({ ...(input as Record<string, unknown>), kind: "image" }))
+  .inputValidator((input) =>
+    mediaInputSchema.parse({ ...(input as Record<string, unknown>), kind: "image" }),
+  )
   .handler(async ({ data, context }) => sendWhatsappMediaInternal(data, context, "image"));
 
 export const sendWhatsappVideo = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input) => mediaInputSchema.parse({ ...(input as Record<string, unknown>), kind: "video" }))
+  .inputValidator((input) =>
+    mediaInputSchema.parse({ ...(input as Record<string, unknown>), kind: "video" }),
+  )
   .handler(async ({ data, context }) => sendWhatsappMediaInternal(data, context, "video"));
 
 export const sendWhatsappDocument = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input) => mediaInputSchema.parse({ ...(input as Record<string, unknown>), kind: "document" }))
+  .inputValidator((input) =>
+    mediaInputSchema.parse({ ...(input as Record<string, unknown>), kind: "document" }),
+  )
   .handler(async ({ data, context }) => sendWhatsappMediaInternal(data, context, "document"));
 
 export const sendWhatsappAudio = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input) => mediaInputSchema.parse({ ...(input as Record<string, unknown>), kind: "audio" }))
+  .inputValidator((input) =>
+    mediaInputSchema.parse({ ...(input as Record<string, unknown>), kind: "audio" }),
+  )
   .handler(async ({ data, context }) => sendWhatsappMediaInternal(data, context, "audio"));
 
 // ============================================================
@@ -1378,9 +1386,7 @@ export const sendWhatsappAudio = createServerFn({ method: "POST" })
 // lista de sessões disponíveis para escolha.
 export const resolveSessionForLead = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input) =>
-    z.object({ phone: z.string().min(4).max(30) }).parse(input),
-  )
+  .inputValidator((input) => z.object({ phone: z.string().min(4).max(30) }).parse(input))
   .handler(async ({ data, context }) => {
     const digits = data.phone.replace(/\D/g, "");
     if (!digits) throw new Error("Telefone inválido");
@@ -1398,7 +1404,11 @@ export const resolveSessionForLead = createServerFn({ method: "POST" })
           await resolveWhatsappNumber(sess.instance_name as string, digits);
         } catch (e: any) {
           if (isEvolutionConnectionClosed(e)) {
-            await markWhatsappSessionDisconnected(context.supabase, sess.id as string, "resolve_pinned_connection_closed");
+            await markWhatsappSessionDisconnected(
+              context.supabase,
+              sess.id as string,
+              "resolve_pinned_connection_closed",
+            );
             sessionStatus = "disconnected";
           }
         }
@@ -1432,7 +1442,11 @@ export const resolveSessionForLead = createServerFn({ method: "POST" })
           return s;
         } catch (e: any) {
           if (isEvolutionConnectionClosed(e)) {
-            await markWhatsappSessionDisconnected(context.supabase, s.id, "resolve_session_list_connection_closed");
+            await markWhatsappSessionDisconnected(
+              context.supabase,
+              s.id,
+              "resolve_session_list_connection_closed",
+            );
             return { ...s, status: "disconnected" };
           }
           return s;
@@ -1482,8 +1496,14 @@ export const sendToLeadFromSession = createServerFn({ method: "POST" })
       resolved = await resolveWhatsappNumber(session.instance_name, digits);
     } catch (e: any) {
       if (isEvolutionConnectionClosed(e)) {
-        await markWhatsappSessionDisconnected(context.supabase, session.id, "resolve_number_connection_closed");
-        throw new Error(`Sessão "${session.name}" caiu na Evolution. Reconecte em WhatsApp → Sessões antes de enviar.`);
+        await markWhatsappSessionDisconnected(
+          context.supabase,
+          session.id,
+          "resolve_number_connection_closed",
+        );
+        throw new Error(
+          `Sessão "${session.name}" caiu na Evolution. Reconecte em WhatsApp → Sessões antes de enviar.`,
+        );
       }
       throw e;
     }
@@ -1533,23 +1553,23 @@ export const sendToLeadFromSession = createServerFn({ method: "POST" })
       resp = await evolutionFetch(endpoint, { method: "POST", body: payload });
     } catch (e: any) {
       if (isEvolutionConnectionClosed(e)) {
-        await markWhatsappSessionDisconnected(context.supabase, session.id, "send_to_lead_connection_closed");
-        throw new Error(`Sessão "${session.name}" caiu na Evolution. Reconecte em WhatsApp → Sessões antes de enviar.`);
+        await markWhatsappSessionDisconnected(
+          context.supabase,
+          session.id,
+          "send_to_lead_connection_closed",
+        );
+        throw new Error(
+          `Sessão "${session.name}" caiu na Evolution. Reconecte em WhatsApp → Sessões antes de enviar.`,
+        );
       }
       const raw = (e?.rawBody ?? e?.message ?? "").toString().slice(0, 300);
       if (raw.includes('"exists":false')) {
         throw new Error("Este número não tem WhatsApp ativo.");
       }
-      throw new Error(
-        `Evolution recusou envio (status=${e?.status ?? 0}). raw=${raw}`,
-      );
+      throw new Error(`Evolution recusou envio (status=${e?.status ?? 0}). raw=${raw}`);
     }
     const msgId =
-      resp?.key?.id ??
-      resp?.message?.key?.id ??
-      resp?.data?.key?.id ??
-      resp?.messageId ??
-      null;
+      resp?.key?.id ?? resp?.message?.key?.id ?? resp?.data?.key?.id ?? resp?.messageId ?? null;
     const ts = new Date().toISOString();
     await context.supabase.from("whatsapp_messages").insert({
       chat_id: chatId,
@@ -1579,17 +1599,11 @@ export const sendToLeadFromSession = createServerFn({ method: "POST" })
         session_id: session.id,
         status: "active",
       });
-    } else if (
-      existingAssign.session_id !== session.id ||
-      existingAssign.status !== "active"
-    ) {
+    } else if (existingAssign.session_id !== session.id || existingAssign.status !== "active") {
       const prev: string[] = Array.isArray(existingAssign.previous_session_ids)
         ? (existingAssign.previous_session_ids as string[])
         : [];
-      if (
-        existingAssign.session_id !== session.id &&
-        !prev.includes(existingAssign.session_id)
-      ) {
+      if (existingAssign.session_id !== session.id && !prev.includes(existingAssign.session_id)) {
         prev.push(existingAssign.session_id);
       }
       await context.supabase
@@ -1618,9 +1632,7 @@ export const sendToLeadFromSession = createServerFn({ method: "POST" })
 // Usado pelo painel de Sessões para oferecer realocação após queda/banimento.
 export const listOrphanedAssignments = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input) =>
-    z.object({ session_id: dbUuid().optional() }).parse(input),
-  )
+  .inputValidator((input) => z.object({ session_id: dbUuid().optional() }).parse(input))
   .handler(async ({ data, context }) => {
     let q = context.supabase
       .from("lead_whatsapp_assignments")
@@ -1689,9 +1701,10 @@ export const reassignOrphanedLeads = createServerFn({ method: "POST" })
       .from("lead_whatsapp_assignments")
       .select("id, session_id, previous_session_ids")
       .eq("session_id", data.from_session_id);
-    const targetQ = data.assignment_ids && data.assignment_ids.length > 0
-      ? baseQ.in("id", data.assignment_ids)
-      : baseQ;
+    const targetQ =
+      data.assignment_ids && data.assignment_ids.length > 0
+        ? baseQ.in("id", data.assignment_ids)
+        : baseQ;
     const { data: rows, error } = await targetQ;
     if (error) throw new Error(error.message);
     let moved = 0;
@@ -1735,7 +1748,9 @@ export const getOrAssignSessionForLead = createServerFn({ method: "POST" })
 
     const { data: existing } = await context.supabase
       .from("lead_whatsapp_assignments")
-      .select("id, session_id, status, previous_session_ids, whatsapp_sessions:session_id(id, name, status)")
+      .select(
+        "id, session_id, status, previous_session_ids, whatsapp_sessions:session_id(id, name, status)",
+      )
       .eq("phone_e164", digits)
       .maybeSingle();
 
@@ -1905,8 +1920,7 @@ export const refreshContactNames = createServerFn({ method: "POST" })
         .eq("is_group", false);
       for (const c of chats ?? []) {
         const patch: { name?: string; profile_pic_url?: string } = {};
-        const nameLooksWrong =
-          !c.name || c.name === c.phone || c.name === c.remote_jid;
+        const nameLooksWrong = !c.name || c.name === c.phone || c.name === c.remote_jid;
         // Nome via findContacts
         if (nameLooksWrong) {
           try {
@@ -1947,7 +1961,7 @@ export const refreshContactNames = createServerFn({ method: "POST" })
               if (typeof pic === "string" && pic.startsWith("http")) {
                 patch.profile_pic_url = pic;
               }
-          }
+            }
           } catch {}
         }
         if (Object.keys(patch).length > 0) {
@@ -1967,24 +1981,43 @@ export const refreshContactNames = createServerFn({ method: "POST" })
 // últimos 20 leads problemáticos com motivo do último log.
 export const getWhatsappQueueStats = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async () => {
+  .handler(async ({ context }) => {
+    const tenantId = await resolveOperationalTenantId(context.supabase);
     const nowIso = new Date().toISOString();
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
 
     const [pending, running, cooldown, overdue, failedAll, sentToday] = await Promise.all([
-      supabaseAdmin.from("flow_leads").select("id", { count: "exact", head: true }).eq("status", "pending"),
-      supabaseAdmin.from("flow_leads").select("id", { count: "exact", head: true }).eq("status", "running"),
-      supabaseAdmin.from("flow_leads").select("id", { count: "exact", head: true }).eq("status", "cooldown"),
       supabaseAdmin
         .from("flow_leads")
         .select("id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .eq("status", "pending"),
+      supabaseAdmin
+        .from("flow_leads")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .eq("status", "running"),
+      supabaseAdmin
+        .from("flow_leads")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .eq("status", "cooldown"),
+      supabaseAdmin
+        .from("flow_leads")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
         .in("status", ["pending", "running", "cooldown"])
         .lte("next_run_at", nowIso),
-      supabaseAdmin.from("flow_leads").select("id", { count: "exact", head: true }).eq("status", "failed"),
+      supabaseAdmin
+        .from("flow_leads")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .eq("status", "failed"),
       supabaseAdmin
         .from("flow_logs")
         .select("id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
         .eq("event", "sent")
         .gte("created_at", startOfDay.toISOString()),
     ]);
@@ -1993,9 +2026,8 @@ export const getWhatsappQueueStats = createServerFn({ method: "GET" })
     const { data: problemRows } = await supabaseAdmin
       .from("flow_leads")
       .select("id, flow_id, player_id, phone_e164, status, next_run_at, attempt_count, last_error")
-      .or(
-        `and(status.in.(pending,running,cooldown),next_run_at.lte.${nowIso}),status.eq.failed`,
-      )
+      .eq("tenant_id", tenantId)
+      .or(`and(status.in.(pending,running,cooldown),next_run_at.lte.${nowIso}),status.eq.failed`)
       .order("next_run_at", { ascending: true })
       .limit(20);
 
@@ -2007,15 +2039,20 @@ export const getWhatsappQueueStats = createServerFn({ method: "GET" })
 
     const [{ data: flows }, { data: players }, { data: lastLogs }] = await Promise.all([
       flowIds.length
-        ? supabaseAdmin.from("flows").select("id, name").in("id", flowIds)
+        ? supabaseAdmin.from("flows").select("id, name").eq("tenant_id", tenantId).in("id", flowIds)
         : Promise.resolve({ data: [] as any[] }),
       playerIds.length
-        ? supabaseAdmin.from("players").select("id, nome").in("id", playerIds)
+        ? supabaseAdmin
+            .from("players")
+            .select("id, nome")
+            .eq("tenant_id", tenantId)
+            .in("id", playerIds)
         : Promise.resolve({ data: [] as any[] }),
       leadIds.length
         ? supabaseAdmin
             .from("flow_logs")
             .select("flow_lead_id, event, detail, created_at")
+            .eq("tenant_id", tenantId)
             .in("flow_lead_id", leadIds)
             .order("created_at", { ascending: false })
             .limit(200)
@@ -2041,7 +2078,7 @@ export const getWhatsappQueueStats = createServerFn({ method: "GET" })
       const reason =
         r.last_error ??
         (log?.detail && typeof log.detail === "object"
-          ? (log.detail as any).reason ?? (log.detail as any).error ?? null
+          ? ((log.detail as any).reason ?? (log.detail as any).error ?? null)
           : null);
       return {
         id: r.id,
@@ -2075,15 +2112,20 @@ export const resumeWhatsappQueue = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) =>
     z
-      .object({ bypassWindow: z.boolean().optional(), limit: z.number().int().min(1).max(500).optional() })
+      .object({
+        bypassWindow: z.boolean().optional(),
+        limit: z.number().int().min(1).max(500).optional(),
+      })
       .parse(input ?? {}),
   )
-  .handler(async ({ data }) => {
+  .handler(async ({ data, context }) => {
+    const tenantId = await resolveOperationalTenantId(context.supabase);
     const nowIso = new Date().toISOString();
     // 1) destrava cooldown atrasado → pending agora
     const { data: updated } = await supabaseAdmin
       .from("flow_leads")
       .update({ status: "pending", next_run_at: nowIso })
+      .eq("tenant_id", tenantId)
       .eq("status", "cooldown")
       .lte("next_run_at", nowIso)
       .select("id");
@@ -2092,6 +2134,7 @@ export const resumeWhatsappQueue = createServerFn({ method: "POST" })
     const { data: retried } = await supabaseAdmin
       .from("flow_leads")
       .update({ status: "pending", next_run_at: nowIso, last_error: null })
+      .eq("tenant_id", tenantId)
       .eq("status", "failed")
       .lt("next_run_at", fifteenMinAgo)
       .select("id");
@@ -2100,6 +2143,7 @@ export const resumeWhatsappQueue = createServerFn({ method: "POST" })
     const result = await runDispatcher({
       limit: data.limit ?? 100,
       bypassWindow: !!data.bypassWindow,
+      tenantId,
     });
     return {
       resumed: updated?.length ?? 0,
@@ -2113,11 +2157,13 @@ export const resumeWhatsappQueue = createServerFn({ method: "POST" })
 // respeitando duplicidade. Não toca SMS/Email/Call.
 export const backfillWhatsappFromAlerts = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(async () => {
+  .handler(async ({ context }) => {
+    const tenantId = await resolveOperationalTenantId(context.supabase);
     // Carrega fluxos WhatsApp ativos com trigger
     const { data: flows } = await supabaseAdmin
       .from("flows")
       .select("id, trigger_type")
+      .eq("tenant_id", tenantId)
       .eq("active", true)
       .not("trigger_type", "is", null);
     if (!flows || flows.length === 0) {
@@ -2135,6 +2181,7 @@ export const backfillWhatsappFromAlerts = createServerFn({ method: "POST" })
     const { data: alerts } = await supabaseAdmin
       .from("lead_alerts")
       .select("id, player_id, trigger_type, flow_lead_id, fired_at")
+      .eq("tenant_id", tenantId)
       .gte("fired_at", since)
       .order("fired_at", { ascending: false })
       .limit(2000);
@@ -2156,6 +2203,7 @@ export const backfillWhatsappFromAlerts = createServerFn({ method: "POST" })
       const { data: player } = await supabaseAdmin
         .from("players")
         .select("id, telefone, status")
+        .eq("tenant_id", tenantId)
         .eq("id", a.player_id)
         .maybeSingle();
       if (!player || player.status !== "ativo") {
@@ -2172,6 +2220,7 @@ export const backfillWhatsappFromAlerts = createServerFn({ method: "POST" })
         const { count } = await supabaseAdmin
           .from("flow_leads")
           .select("id", { count: "exact", head: true })
+          .eq("tenant_id", tenantId)
           .eq("flow_id", flowId)
           .eq("player_id", a.player_id);
         if ((count ?? 0) > 0) {
@@ -2181,6 +2230,7 @@ export const backfillWhatsappFromAlerts = createServerFn({ method: "POST" })
         const { data: inserted, error } = await supabaseAdmin
           .from("flow_leads")
           .insert({
+            tenant_id: tenantId,
             flow_id: flowId,
             player_id: a.player_id,
             phone_e164: phone,
@@ -2195,6 +2245,7 @@ export const backfillWhatsappFromAlerts = createServerFn({ method: "POST" })
           continue;
         }
         await supabaseAdmin.from("flow_logs").insert({
+          tenant_id: tenantId,
           flow_id: flowId,
           flow_lead_id: inserted?.id ?? null,
           player_id: a.player_id,

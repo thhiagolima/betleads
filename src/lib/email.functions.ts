@@ -9,6 +9,7 @@ import { BUSINESSCODE_EMAIL_URL, callBusinessCodeEmail, resolveSender } from "./
 import { loadPlayersForSegment, countPlayersForSegment } from "./email-segments.server";
 import { buildPlayerVariables } from "./template-vars.server";
 import { renderTemplate } from "./template-vars.server";
+import { resolveOperationalTenantId } from "./tenant-access.server";
 
 // ============ Helpers ============
 
@@ -74,6 +75,7 @@ export const sendTestEmail = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => SendTestEmailSchema.parse(d))
   .handler(async ({ data, context }) => {
+    const tenantId = await resolveOperationalTenantId(context.supabase);
     // Resolve remetente
     let sender: { fromEmail: string; fromName: string | null; replyTo: string | null } | null =
       null;
@@ -84,9 +86,6 @@ export const sendTestEmail = createServerFn({ method: "POST" })
         replyTo: data.replyTo ?? null,
       };
     } else {
-      const { data: tenantRow, error: tenantErr } = await context.supabase.rpc("current_tenant_id");
-      if (tenantErr) throw new Error(tenantErr.message);
-      const tenantId = tenantRow as string | null;
       sender = await resolveSender(data.smtpId ?? null, tenantId);
     }
     if (!sender) {
@@ -104,6 +103,7 @@ export const sendTestEmail = createServerFn({ method: "POST" })
         .from("players")
         .select("*")
         .eq("id", data.playerId)
+        .eq("tenant_id", tenantId)
         .maybeSingle();
       if (p) {
         playerId = p.id;
@@ -117,6 +117,7 @@ export const sendTestEmail = createServerFn({ method: "POST" })
         .from("players")
         .select("*")
         .eq("email", data.to)
+        .eq("tenant_id", tenantId)
         .maybeSingle();
       if (p) {
         playerId = p.id;
@@ -137,6 +138,7 @@ export const sendTestEmail = createServerFn({ method: "POST" })
 
     // Log
     const { error: logErr } = await supabaseAdmin.from("email_send_logs").insert({
+      tenant_id: tenantId,
       to_email: data.to,
       subject,
       status: result.ok ? "sent" : "error",
@@ -727,7 +729,15 @@ export const listPlayersForEmail = createServerFn({ method: "POST" })
 export const sendEmailCampaignNow = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ campaignId: dbUuid() }).parse(d))
-  .handler(async ({ data }) => {
+  .handler(async ({ data, context }) => {
+    const tenantId = await resolveOperationalTenantId(context.supabase);
+    const { data: campaign } = await context.supabase
+      .from("email_campaigns")
+      .select("id")
+      .eq("id", data.campaignId)
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+    if (!campaign) throw new Error("Campanha não encontrada nesta tenant");
     try {
       return await runCampaignSend(data.campaignId);
     } catch (err) {
@@ -1405,13 +1415,15 @@ const EmailHistorySchema = z.object({
 export const getEmailHistory = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => EmailHistorySchema.parse(d))
-  .handler(async ({ data }) => {
+  .handler(async ({ data, context }) => {
+    const tenantId = await resolveOperationalTenantId(context.supabase);
     let q = supabaseAdmin
       .from("email_send_logs")
       .select(
         "id, created_at, sent_at, to_email, subject, status, error, campaign_id, automation_id, player_id, provider_response",
         { count: "exact" },
       )
+      .eq("tenant_id", tenantId)
       .order("created_at", { ascending: false });
 
     if (data.from) q = q.gte("created_at", data.from);

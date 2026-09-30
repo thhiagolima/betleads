@@ -7,10 +7,12 @@ import { dbUuid } from "@/lib/zod-helpers";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
+  advanceProgress,
   cancelProgress,
   enrollPlayerInFlow,
   tickFlows,
 } from "./call-flows.server";
+import { resolveOperationalTenantId } from "./tenant-access.server";
 
 const SmsConditionSchema = z.enum([
   "always",
@@ -44,13 +46,15 @@ const CallBlockSchema = z.object({
 
 const DelayBlockSchema = z.object({
   block_type: z.literal("delay"),
-  delay_seconds: z.number().int().min(1).max(60 * 60 * 24 * 365).default(86400),
+  delay_seconds: z
+    .number()
+    .int()
+    .min(1)
+    .max(60 * 60 * 24 * 365)
+    .default(86400),
 });
 
-const BlockSchema = z.discriminatedUnion("block_type", [
-  CallBlockSchema,
-  DelayBlockSchema,
-]);
+const BlockSchema = z.discriminatedUnion("block_type", [CallBlockSchema, DelayBlockSchema]);
 
 const ExitConditionsSchema = z.object({
   login: z.boolean().default(true),
@@ -112,10 +116,7 @@ export const saveCallFlow = createServerFn({ method: "POST" })
 
     let flowId = data.id;
     if (flowId) {
-      const { error } = await supabase
-        .from("call_flows")
-        .update(flowPayload)
-        .eq("id", flowId);
+      const { error } = await supabase.from("call_flows").update(flowPayload).eq("id", flowId);
       if (error) throw new Error(error.message);
     } else {
       const { data: created, error } = await supabase
@@ -128,10 +129,7 @@ export const saveCallFlow = createServerFn({ method: "POST" })
     }
 
     // Substitui blocos (delete + reinsert). CASCADE em call_flow_block_sms.
-    const { error: dErr } = await supabase
-      .from("call_flow_blocks")
-      .delete()
-      .eq("flow_id", flowId);
+    const { error: dErr } = await supabase.from("call_flow_blocks").delete().eq("flow_id", flowId);
     if (dErr) throw new Error(dErr.message);
 
     for (let i = 0; i < data.blocks.length; i++) {
@@ -175,9 +173,7 @@ export const saveCallFlow = createServerFn({ method: "POST" })
           threshold_seconds: s.threshold_seconds ?? null,
           template: s.template ?? "",
         }));
-        const { error: sErr } = await supabase
-          .from("call_flow_block_sms")
-          .insert(smsRows);
+        const { error: sErr } = await supabase.from("call_flow_block_sms").insert(smsRows);
         if (sErr) throw new Error(sErr.message);
       }
     }
@@ -189,19 +185,14 @@ export const deleteCallFlow = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) => z.object({ id: dbUuid() }).parse(input))
   .handler(async ({ data, context }) => {
-    const { error } = await context.supabase
-      .from("call_flows")
-      .delete()
-      .eq("id", data.id);
+    const { error } = await context.supabase.from("call_flows").delete().eq("id", data.id);
     if (error) throw new Error(error.message);
     return { ok: true };
   });
 
 export const toggleCallFlow = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input) =>
-    z.object({ id: dbUuid(), is_active: z.boolean() }).parse(input),
-  )
+  .inputValidator((input) => z.object({ id: dbUuid(), is_active: z.boolean() }).parse(input))
   .handler(async ({ data, context }) => {
     const { error } = await context.supabase
       .from("call_flows")
@@ -229,7 +220,9 @@ export const getPlayerFlowProgress = createServerFn({ method: "POST" })
 export const getPlayerFlowHistory = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) =>
-    z.object({ player_id: dbUuid(), limit: z.number().int().min(1).max(500).default(100) }).parse(input),
+    z
+      .object({ player_id: dbUuid(), limit: z.number().int().min(1).max(500).default(100) })
+      .parse(input),
   )
   .handler(async ({ data, context }) => {
     const { data: rows, error } = await context.supabase
@@ -246,12 +239,24 @@ export const getPlayerFlowHistory = createServerFn({ method: "POST" })
 
 export const enrollPlayerInCallFlow = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input) =>
-    z
-      .object({ flow_id: dbUuid(), player_id: dbUuid() })
-      .parse(input),
-  )
-  .handler(async ({ data }) => {
+  .inputValidator((input) => z.object({ flow_id: dbUuid(), player_id: dbUuid() }).parse(input))
+  .handler(async ({ data, context }) => {
+    const tenantId = await resolveOperationalTenantId(context.supabase);
+    const [{ data: flow }, { data: player }] = await Promise.all([
+      context.supabase
+        .from("call_flows")
+        .select("id")
+        .eq("id", data.flow_id)
+        .eq("tenant_id", tenantId)
+        .maybeSingle(),
+      context.supabase
+        .from("players")
+        .select("id")
+        .eq("id", data.player_id)
+        .eq("tenant_id", tenantId)
+        .maybeSingle(),
+    ]);
+    if (!flow || !player) throw new Error("Fluxo ou player não encontrado nesta tenant");
     return enrollPlayerInFlow(data.flow_id, data.player_id);
   });
 
@@ -265,15 +270,37 @@ export const cancelPlayerCallFlow = createServerFn({ method: "POST" })
       })
       .parse(input),
   )
-  .handler(async ({ data }) => {
+  .handler(async ({ data, context }) => {
+    const tenantId = await resolveOperationalTenantId(context.supabase);
+    const { data: progress } = await context.supabase
+      .from("call_flow_progress")
+      .select("id")
+      .eq("id", data.progress_id)
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+    if (!progress) throw new Error("Progresso não encontrado nesta tenant");
     await cancelProgress(data.progress_id, data.reason);
     return { ok: true };
   });
 
 export const runCallFlowsTick = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(async () => {
-    return tickFlows(100);
+  .handler(async ({ context }) => {
+    const tenantId = await resolveOperationalTenantId(context.supabase);
+    const { data: ready, error } = await context.supabase
+      .from("call_flow_progress")
+      .select("id")
+      .eq("tenant_id", tenantId)
+      .in("status", ["active", "waiting"])
+      .lte("next_run_at", new Date().toISOString())
+      .limit(100);
+    if (error) throw new Error(error.message);
+    let processed = 0;
+    for (const row of ready ?? []) {
+      await advanceProgress(row.id);
+      processed += 1;
+    }
+    return { processed };
   });
 
 export const listActiveCallFlowProgress = createServerFn({ method: "GET" })

@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as AlertasRouteImport } from './routes/alertas'
 import { Route as AutomacoesRouteImport } from './routes/automacoes'
+import { Route as CampanhasRouteImport } from './routes/campanhas'
 import { Route as ConfiguracoesRouteImport } from './routes/configuracoes'
 import { Route as CreditosSmsRouteImport } from './routes/creditos-sms'
 import { Route as EmailRouteImport } from './routes/email'
@@ -29,6 +30,7 @@ import { Route as TenantsRouteImport } from './routes/tenants'
 import { Route as TreinoIaRouteImport } from './routes/treino-ia'
 import { Route as WebhooksRouteImport } from './routes/webhooks'
 import { Route as WhatsappRouteImport } from './routes/whatsapp'
+import { Route as AutomacoesSmsRouteImport } from './routes/automacoes.sms'
 import { Route as PlayersPlayerIdRouteImport } from './routes/players.$playerId'
 import { Route as UTokenRouteImport } from './routes/u.$token'
 import { Route as ApiPublicEvolutionWebhookRouteImport } from './routes/api/public/evolution-webhook'
@@ -76,6 +78,11 @@ const AlertasRoute = AlertasRouteImport.update({
 const AutomacoesRoute = AutomacoesRouteImport.update({
   id: '/automacoes',
   path: '/automacoes',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CampanhasRoute = CampanhasRouteImport.update({
+  id: '/campanhas',
+  path: '/campanhas',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ConfiguracoesRoute = ConfiguracoesRouteImport.update({
@@ -157,6 +164,11 @@ const WhatsappRoute = WhatsappRouteImport.update({
   id: '/whatsapp',
   path: '/whatsapp',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AutomacoesSmsRoute = AutomacoesSmsRouteImport.update({
+  id: '/sms',
+  path: '/sms',
+  getParentRoute: () => AutomacoesRoute,
 } as any)
 const PlayersPlayerIdRoute = PlayersPlayerIdRouteImport.update({
   id: '/$playerId',
@@ -321,7 +333,8 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/alertas': typeof AlertasRoute
-  '/automacoes': typeof AutomacoesRoute
+  '/automacoes': typeof AutomacoesRouteWithChildren
+  '/campanhas': typeof CampanhasRoute
   '/configuracoes': typeof ConfiguracoesRoute
   '/creditos-sms': typeof CreditosSmsRoute
   '/email': typeof EmailRoute
@@ -338,6 +351,7 @@ export interface FileRoutesByFullPath {
   '/treino-ia': typeof TreinoIaRoute
   '/webhooks': typeof WebhooksRoute
   '/whatsapp': typeof WhatsappRoute
+  '/automacoes/sms': typeof AutomacoesSmsRoute
   '/players/$playerId': typeof PlayersPlayerIdRoute
   '/u/$token': typeof UTokenRoute
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
@@ -371,7 +385,8 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/alertas': typeof AlertasRoute
-  '/automacoes': typeof AutomacoesRoute
+  '/automacoes': typeof AutomacoesRouteWithChildren
+  '/campanhas': typeof CampanhasRoute
   '/configuracoes': typeof ConfiguracoesRoute
   '/creditos-sms': typeof CreditosSmsRoute
   '/email': typeof EmailRoute
@@ -388,6 +403,7 @@ export interface FileRoutesByTo {
   '/treino-ia': typeof TreinoIaRoute
   '/webhooks': typeof WebhooksRoute
   '/whatsapp': typeof WhatsappRoute
+  '/automacoes/sms': typeof AutomacoesSmsRoute
   '/players/$playerId': typeof PlayersPlayerIdRoute
   '/u/$token': typeof UTokenRoute
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
@@ -422,7 +438,8 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/alertas': typeof AlertasRoute
-  '/automacoes': typeof AutomacoesRoute
+  '/automacoes': typeof AutomacoesRouteWithChildren
+  '/campanhas': typeof CampanhasRoute
   '/configuracoes': typeof ConfiguracoesRoute
   '/creditos-sms': typeof CreditosSmsRoute
   '/email': typeof EmailRoute
@@ -439,6 +456,7 @@ export interface FileRoutesById {
   '/treino-ia': typeof TreinoIaRoute
   '/webhooks': typeof WebhooksRoute
   '/whatsapp': typeof WhatsappRoute
+  '/automacoes/sms': typeof AutomacoesSmsRoute
   '/players/$playerId': typeof PlayersPlayerIdRoute
   '/u/$token': typeof UTokenRoute
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
@@ -475,6 +493,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/alertas'
     | '/automacoes'
+    | '/campanhas'
     | '/configuracoes'
     | '/creditos-sms'
     | '/email'
@@ -491,6 +510,7 @@ export interface FileRouteTypes {
     | '/treino-ia'
     | '/webhooks'
     | '/whatsapp'
+    | '/automacoes/sms'
     | '/players/$playerId'
     | '/u/$token'
     | '/api/public/evolution-webhook'
@@ -525,6 +545,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/alertas'
     | '/automacoes'
+    | '/campanhas'
     | '/configuracoes'
     | '/creditos-sms'
     | '/email'
@@ -541,6 +562,7 @@ export interface FileRouteTypes {
     | '/treino-ia'
     | '/webhooks'
     | '/whatsapp'
+    | '/automacoes/sms'
     | '/players/$playerId'
     | '/u/$token'
     | '/api/public/evolution-webhook'
@@ -575,6 +597,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/alertas'
     | '/automacoes'
+    | '/campanhas'
     | '/configuracoes'
     | '/creditos-sms'
     | '/email'
@@ -591,6 +614,7 @@ export interface FileRouteTypes {
     | '/treino-ia'
     | '/webhooks'
     | '/whatsapp'
+    | '/automacoes/sms'
     | '/players/$playerId'
     | '/u/$token'
     | '/api/public/evolution-webhook'
@@ -625,7 +649,8 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
   AlertasRoute: typeof AlertasRoute
-  AutomacoesRoute: typeof AutomacoesRoute
+  AutomacoesRoute: typeof AutomacoesRouteWithChildren
+  CampanhasRoute: typeof CampanhasRoute
   ConfiguracoesRoute: typeof ConfiguracoesRoute
   CreditosSmsRoute: typeof CreditosSmsRoute
   EmailRoute: typeof EmailRoute
@@ -699,6 +724,13 @@ declare module '@tanstack/react-router' {
       path: '/automacoes'
       fullPath: '/automacoes'
       preLoaderRoute: typeof AutomacoesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/campanhas': {
+      id: '/campanhas'
+      path: '/campanhas'
+      fullPath: '/campanhas'
+      preLoaderRoute: typeof CampanhasRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/configuracoes': {
@@ -812,6 +844,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/whatsapp'
       preLoaderRoute: typeof WhatsappRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/automacoes/sms': {
+      id: '/automacoes/sms'
+      path: '/sms'
+      fullPath: '/automacoes/sms'
+      preLoaderRoute: typeof AutomacoesSmsRouteImport
+      parentRoute: typeof AutomacoesRoute
     }
     '/players/$playerId': {
       id: '/players/$playerId'
@@ -1012,6 +1051,18 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface AutomacoesRouteChildren {
+  AutomacoesSmsRoute: typeof AutomacoesSmsRoute
+}
+
+const AutomacoesRouteChildren: AutomacoesRouteChildren = {
+  AutomacoesSmsRoute: AutomacoesSmsRoute,
+}
+
+const AutomacoesRouteWithChildren = AutomacoesRoute._addFileChildren(
+  AutomacoesRouteChildren,
+)
+
 interface PlayersRouteChildren {
   PlayersPlayerIdRoute: typeof PlayersPlayerIdRoute
 }
@@ -1027,7 +1078,8 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
   AlertasRoute: AlertasRoute,
-  AutomacoesRoute: AutomacoesRoute,
+  AutomacoesRoute: AutomacoesRouteWithChildren,
+  CampanhasRoute: CampanhasRoute,
   ConfiguracoesRoute: ConfiguracoesRoute,
   CreditosSmsRoute: CreditosSmsRoute,
   EmailRoute: EmailRoute,

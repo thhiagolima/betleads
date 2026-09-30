@@ -4,23 +4,30 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { orchestrate } from "./orchestrator.server";
 import { brtDayStart } from "./tz";
+import { resolveOperationalTenantId } from "./tenant-access.server";
 
 export const simulateActivation = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((i) => z.object({ tenantId: z.string().uuid() }).parse(i))
-  .handler(async ({ data }) => orchestrate({ mode: "simulate", tenantId: data.tenantId }));
+  .handler(async ({ context }) => {
+    const tenantId = await resolveOperationalTenantId(context.supabase);
+    return orchestrate({ mode: "simulate", tenantId });
+  });
 
 export const executeActivation = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((i) => z.object({ tenantId: z.string().uuid() }).parse(i))
-  .handler(async ({ data }) => orchestrate({ mode: "execute", tenantId: data.tenantId }));
+  .handler(async ({ context }) => {
+    const tenantId = await resolveOperationalTenantId(context.supabase);
+    return orchestrate({ mode: "execute", tenantId });
+  });
 
 export const getAutomationSettings = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async () => {
+  .handler(async ({ context }) => {
+    const tenantId = await resolveOperationalTenantId(context.supabase);
     const { data } = await supabaseAdmin
       .from("automation_settings")
       .select("*")
+      .eq("tenant_id", tenantId)
       .limit(1)
       .maybeSingle();
     return { settings: data };
@@ -29,14 +36,25 @@ export const getAutomationSettings = createServerFn({ method: "GET" })
 export const setPaused = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((i) => z.object({ paused: z.boolean() }).parse(i))
-  .handler(async ({ data }) => {
-    const { data: s } = await supabaseAdmin.from("automation_settings").select("id").limit(1).maybeSingle();
+  .handler(async ({ data, context }) => {
+    const tenantId = await resolveOperationalTenantId(context.supabase);
+    const { data: s } = await supabaseAdmin
+      .from("automation_settings")
+      .select("id")
+      .eq("tenant_id", tenantId)
+      .limit(1)
+      .maybeSingle();
     if (!s) return { ok: false };
     await supabaseAdmin.from("automation_settings").update({ paused: data.paused }).eq("id", s.id);
     return { ok: true };
   });
 
-const CHANNEL_PAUSE_FIELDS = ["sms_paused", "email_paused", "call_paused", "whatsapp_paused"] as const;
+const CHANNEL_PAUSE_FIELDS = [
+  "sms_paused",
+  "email_paused",
+  "call_paused",
+  "whatsapp_paused",
+] as const;
 
 export const setChannelPaused = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -48,8 +66,14 @@ export const setChannelPaused = createServerFn({ method: "POST" })
       })
       .parse(i),
   )
-  .handler(async ({ data }) => {
-    const { data: s } = await supabaseAdmin.from("automation_settings").select("id").limit(1).maybeSingle();
+  .handler(async ({ data, context }) => {
+    const tenantId = await resolveOperationalTenantId(context.supabase);
+    const { data: s } = await supabaseAdmin
+      .from("automation_settings")
+      .select("id")
+      .eq("tenant_id", tenantId)
+      .limit(1)
+      .maybeSingle();
     if (!s) return { ok: false };
     const patch =
       data.channel === "sms"
@@ -74,8 +98,14 @@ export const updateLimits = createServerFn({ method: "POST" })
       })
       .parse(i),
   )
-  .handler(async ({ data }) => {
-    const { data: s } = await supabaseAdmin.from("automation_settings").select("id").limit(1).maybeSingle();
+  .handler(async ({ data, context }) => {
+    const tenantId = await resolveOperationalTenantId(context.supabase);
+    const { data: s } = await supabaseAdmin
+      .from("automation_settings")
+      .select("id")
+      .eq("tenant_id", tenantId)
+      .limit(1)
+      .maybeSingle();
     if (!s) return { ok: false };
     await supabaseAdmin.from("automation_settings").update(data).eq("id", s.id);
     return { ok: true };
@@ -83,24 +113,70 @@ export const updateLimits = createServerFn({ method: "POST" })
 
 export const getActivationStatus = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async () => {
+  .handler(async ({ context }) => {
+    const tenantId = await resolveOperationalTenantId(context.supabase);
     // "Hoje" = dia do calendário em Brasília (mesmo fuso da janela de envio).
     const iso = brtDayStart().toISOString();
-    const [{ data: lastRun }, sms, email, call, wa, smsPending, emailPending, callPending, waPending] = await Promise.all([
+    const [
+      { data: lastRun },
+      sms,
+      email,
+      call,
+      wa,
+      smsPending,
+      emailPending,
+      callPending,
+      waPending,
+    ] = await Promise.all([
       supabaseAdmin
         .from("activation_runs")
         .select("id, mode, status, totals, started_at, finished_at, error")
+        .eq("tenant_id", tenantId)
         .order("started_at", { ascending: false })
         .limit(1)
         .maybeSingle(),
-      supabaseAdmin.from("sms_send_logs").select("id", { count: "exact", head: true }).gte("created_at", iso).eq("status", "sent"),
-      supabaseAdmin.from("email_send_logs").select("id", { count: "exact", head: true }).gte("created_at", iso),
-      supabaseAdmin.from("call_history").select("id", { count: "exact", head: true }).gte("created_at", iso),
-      supabaseAdmin.from("flow_logs").select("id", { count: "exact", head: true }).gte("created_at", iso).eq("event", "sent"),
-      supabaseAdmin.from("sms_flow_leads").select("id", { count: "exact", head: true }).in("status", ["pending", "running"]),
-      supabaseAdmin.from("email_flow_leads").select("id", { count: "exact", head: true }).in("status", ["pending", "running"]),
-      supabaseAdmin.from("call_flow_progress").select("id", { count: "exact", head: true }).in("status", ["active", "waiting"]),
-      supabaseAdmin.from("flow_leads").select("id", { count: "exact", head: true }).in("status", ["pending", "running"]),
+      supabaseAdmin
+        .from("sms_send_logs")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .gte("created_at", iso)
+        .eq("status", "sent"),
+      supabaseAdmin
+        .from("email_send_logs")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .gte("created_at", iso),
+      supabaseAdmin
+        .from("call_history")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .gte("created_at", iso),
+      supabaseAdmin
+        .from("flow_logs")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .gte("created_at", iso)
+        .eq("event", "sent"),
+      supabaseAdmin
+        .from("sms_flow_leads")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .in("status", ["pending", "running"]),
+      supabaseAdmin
+        .from("email_flow_leads")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .in("status", ["pending", "running"]),
+      supabaseAdmin
+        .from("call_flow_progress")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .in("status", ["active", "waiting"]),
+      supabaseAdmin
+        .from("flow_leads")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .in("status", ["pending", "running"]),
     ]);
     return {
       lastRun,
@@ -121,10 +197,12 @@ export const getActivationStatus = createServerFn({ method: "GET" })
 
 export const listRecentRuns = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async () => {
+  .handler(async ({ context }) => {
+    const tenantId = await resolveOperationalTenantId(context.supabase);
     const { data } = await supabaseAdmin
       .from("activation_runs")
       .select("id, mode, status, totals, started_at, finished_at, error")
+      .eq("tenant_id", tenantId)
       .order("started_at", { ascending: false })
       .limit(20);
     return { runs: data ?? [] };
@@ -133,7 +211,8 @@ export const listRecentRuns = createServerFn({ method: "GET" })
 /** Resumo de prontidão da fila para a janela 06:00–22:00 BRT. */
 export const getQueueReadiness = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async () => {
+  .handler(async ({ context }) => {
+    const tenantId = await resolveOperationalTenantId(context.supabase);
     const [
       smsPending,
       emailPending,
@@ -144,26 +223,50 @@ export const getQueueReadiness = createServerFn({ method: "GET" })
       settings,
       sendWindow,
     ] = await Promise.all([
-      supabaseAdmin.from("sms_flow_leads").select("id", { count: "exact", head: true }).in("status", ["pending", "running"]),
-      supabaseAdmin.from("email_flow_leads").select("id", { count: "exact", head: true }).in("status", ["pending", "running"]),
-      supabaseAdmin.from("call_flow_progress").select("id", { count: "exact", head: true }).in("status", ["active", "waiting"]),
-      supabaseAdmin.from("flow_leads").select("id", { count: "exact", head: true }).in("status", ["pending", "running", "cooldown"]),
+      supabaseAdmin
+        .from("sms_flow_leads")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .in("status", ["pending", "running"]),
+      supabaseAdmin
+        .from("email_flow_leads")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .in("status", ["pending", "running"]),
+      supabaseAdmin
+        .from("call_flow_progress")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .in("status", ["active", "waiting"]),
+      supabaseAdmin
+        .from("flow_leads")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .in("status", ["pending", "running", "cooldown"]),
       supabaseAdmin
         .from("activation_runs")
         .select("id, mode, status, started_at, finished_at, error")
+        .eq("tenant_id", tenantId)
         .order("started_at", { ascending: false })
         .limit(1)
         .maybeSingle(),
       supabaseAdmin
         .from("activation_runs")
         .select("id, mode, started_at, error")
+        .eq("tenant_id", tenantId)
         .not("error", "is", null)
         .order("started_at", { ascending: false })
         .limit(5),
-      supabaseAdmin.from("automation_settings").select("paused").limit(1).maybeSingle(),
+      supabaseAdmin
+        .from("automation_settings")
+        .select("paused")
+        .eq("tenant_id", tenantId)
+        .limit(1)
+        .maybeSingle(),
       supabaseAdmin
         .from("send_window_settings")
         .select("start_minute, end_minute, timezone, enabled, weekdays")
+        .eq("tenant_id", tenantId)
         .eq("singleton", true)
         .maybeSingle(),
     ]);
@@ -217,7 +320,12 @@ export const getQueueReadiness = createServerFn({ method: "GET" })
       paused: !!settings.data?.paused,
       pending,
       totalPending,
-      window: { start_minute: startMin, end_minute: endMin, timezone: tz, enabled: sw?.enabled ?? true },
+      window: {
+        start_minute: startMin,
+        end_minute: endMin,
+        timezone: tz,
+        enabled: sw?.enabled ?? true,
+      },
       insideWindow,
       nextRunAt,
       lastRun: lastRun.data ?? null,

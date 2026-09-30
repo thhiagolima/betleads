@@ -65,6 +65,7 @@ import {
   adminSetTenantSmsPricing,
 } from "@/lib/sms-credits.functions";
 import { brl, num } from "@/lib/format";
+import { MetricCard as DashboardMetricCard } from "@/components/ui-premium/metric-card";
 
 export const Route = createFileRoute("/tenants")({
   component: TenantsPage,
@@ -396,18 +397,13 @@ function MetricCard({
   hint: React.ReactNode;
 }) {
   return (
-    <Card>
-      <CardContent className="p-5">
-        <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-primary/15 text-primary">
-          <Icon className="h-5 w-5" />
-        </div>
-        <div className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-          {label}
-        </div>
-        <div className="mt-2 text-3xl font-bold">{value}</div>
-        <div className="mt-1 text-sm text-muted-foreground">{hint}</div>
-      </CardContent>
-    </Card>
+    <DashboardMetricCard
+      label={label}
+      value={value}
+      hint={hint}
+      icon={<Icon className="h-4 w-4" />}
+      accent="primary"
+    />
   );
 }
 

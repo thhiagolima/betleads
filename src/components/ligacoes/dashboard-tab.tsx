@@ -11,14 +11,9 @@ import {
   Clock,
   Timer,
   TrendingUp,
+  type LucideIcon,
 } from "lucide-react";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -41,6 +36,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { cn } from "@/lib/utils";
+import { MetricCard } from "@/components/ui-premium/metric-card";
 import { getCallsDashboard } from "@/lib/calls.functions";
 import { HISTORY_STATUS_LABEL } from "./shared";
 import {
@@ -50,7 +46,6 @@ import {
   type DashboardRange,
 } from "@/components/dashboard-date-range-picker";
 
-
 function StatCard({
   icon: Icon,
   label,
@@ -58,42 +53,28 @@ function StatCard({
   hint,
   tone = "default",
 }: {
-  icon: any;
+  icon: LucideIcon;
   label: string;
   value: string;
   hint?: string;
   tone?: "default" | "success" | "danger" | "warning" | "info" | "muted";
 }) {
-  const tones: Record<string, string> = {
-    default: "text-primary bg-primary/10",
-    success: "text-emerald-400 bg-emerald-400/10",
-    danger: "text-rose-400 bg-rose-400/10",
-    warning: "text-amber-400 bg-amber-400/10",
-    info: "text-sky-400 bg-sky-400/10",
-    muted: "text-muted-foreground bg-muted",
-  };
+  const accents = {
+    default: "primary",
+    success: "success",
+    danger: "danger",
+    warning: "warning",
+    info: "primary",
+    muted: "primary",
+  } as const;
   return (
-    <Card className="border-border/60">
-      <CardContent className="flex items-center gap-4 p-4">
-        <div
-          className={cn(
-            "flex h-10 w-10 items-center justify-center rounded-lg",
-            tones[tone],
-          )}
-        >
-          <Icon className="h-5 w-5" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-xs uppercase tracking-wider text-muted-foreground">
-            {label}
-          </p>
-          <p className="text-2xl font-bold leading-tight">{value}</p>
-          {hint && (
-            <p className="mt-0.5 text-[11px] text-muted-foreground">{hint}</p>
-          )}
-        </div>
-      </CardContent>
-    </Card>
+    <MetricCard
+      label={label}
+      value={value}
+      hint={hint}
+      icon={<Icon className="h-4 w-4" />}
+      accent={accents[tone]}
+    />
   );
 }
 
@@ -140,12 +121,8 @@ export function DashboardTab() {
   });
 
   const totals = data?.totals;
-  const answeredCount = totals
-    ? totals.answered + totals.completed + totals.converted
-    : 0;
-  const answerRate = totals?.total
-    ? Math.round((answeredCount / totals.total) * 100)
-    : 0;
+  const answeredCount = totals ? totals.answered + totals.completed + totals.converted : 0;
+  const answerRate = totals?.total ? Math.round((answeredCount / totals.total) * 100) : 0;
 
   return (
     <div className="space-y-6">
@@ -188,12 +165,7 @@ export function DashboardTab() {
           value={String(totals?.busy ?? 0)}
           tone="info"
         />
-        <StatCard
-          icon={XCircle}
-          label="Falhas"
-          value={String(totals?.failed ?? 0)}
-          tone="danger"
-        />
+        <StatCard icon={XCircle} label="Falhas" value={String(totals?.failed ?? 0)} tone="danger" />
         <StatCard
           icon={Clock}
           label="Na fila"
@@ -216,15 +188,11 @@ export function DashboardTab() {
             <TrendingUp className="h-4 w-4 text-primary" />
             Ligações por dia
           </CardTitle>
-          <CardDescription>
-            Total disparado × atendidas no período selecionado.
-          </CardDescription>
+          <CardDescription>Total disparado × atendidas no período selecionado.</CardDescription>
         </CardHeader>
         <CardContent className="h-72">
           {isLoading || !data ? (
-            <p className="py-12 text-center text-sm text-muted-foreground">
-              Carregando…
-            </p>
+            <p className="py-12 text-center text-sm text-muted-foreground">Carregando…</p>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={data.by_day}>
@@ -235,11 +203,7 @@ export function DashboardTab() {
                   stroke="hsl(var(--muted-foreground))"
                   fontSize={11}
                 />
-                <YAxis
-                  stroke="hsl(var(--muted-foreground))"
-                  fontSize={11}
-                  allowDecimals={false}
-                />
+                <YAxis stroke="hsl(var(--muted-foreground))" fontSize={11} allowDecimals={false} />
                 <Tooltip
                   contentStyle={{
                     background: "hsl(var(--card))",
@@ -285,15 +249,11 @@ export function DashboardTab() {
         <Card className="lg:col-span-1">
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Top scripts</CardTitle>
-            <CardDescription>
-              Mais disparados no período (com taxa de atendimento).
-            </CardDescription>
+            <CardDescription>Mais disparados no período (com taxa de atendimento).</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {(data?.top_scripts ?? []).length === 0 ? (
-              <p className="py-6 text-center text-xs text-muted-foreground">
-                Sem dados ainda.
-              </p>
+              <p className="py-6 text-center text-xs text-muted-foreground">Sem dados ainda.</p>
             ) : (
               data!.top_scripts.map((s) => {
                 const rate = s.total ? Math.round((s.answered / s.total) * 100) : 0;
@@ -338,9 +298,7 @@ export function DashboardTab() {
                 <TableBody>
                   {data!.recent.map((r) => (
                     <TableRow key={r.id}>
-                      <TableCell className="text-sm font-medium">
-                        {r.lead_nome}
-                      </TableCell>
+                      <TableCell className="text-sm font-medium">{r.lead_nome}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">
                         {r.script_name}
                       </TableCell>

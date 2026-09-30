@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -28,12 +28,29 @@ import {
 } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
-  Loader2, Pause, Play, Rocket, FlaskConical, RefreshCw, Clock,
-  AlertTriangle, CheckCircle2, Sunrise, Info, RotateCw,
+  Loader2,
+  Pause,
+  Play,
+  Rocket,
+  FlaskConical,
+  RefreshCw,
+  Clock,
+  AlertTriangle,
+  CheckCircle2,
+  Sunrise,
+  Info,
+  RotateCw,
+  MessageSquare,
+  Mail,
+  ArrowRight,
 } from "lucide-react";
 import {
-  modeLabel, statusLabel, classifyError, friendlyError,
-  formatDateShort, formatDuration,
+  modeLabel,
+  statusLabel,
+  classifyError,
+  friendlyError,
+  formatDateShort,
+  formatDuration,
 } from "@/lib/activation-labels";
 
 export const Route = createFileRoute("/automacoes")({ component: AutomacoesPage });
@@ -60,9 +77,21 @@ function AutomacoesPage() {
   const fnReadiness = useServerFn(getQueueReadiness);
 
   const settings = useQuery({ queryKey: ["automation-settings"], queryFn: () => fnSettings() });
-  const status = useQuery({ queryKey: ["activation-status"], queryFn: () => fnStatus(), refetchInterval: 10000 });
-  const runs = useQuery({ queryKey: ["activation-runs"], queryFn: () => fnRuns(), refetchInterval: 10000 });
-  const readiness = useQuery({ queryKey: ["queue-readiness"], queryFn: () => fnReadiness(), refetchInterval: 15000 });
+  const status = useQuery({
+    queryKey: ["activation-status"],
+    queryFn: () => fnStatus(),
+    refetchInterval: 10000,
+  });
+  const runs = useQuery({
+    queryKey: ["activation-runs"],
+    queryFn: () => fnRuns(),
+    refetchInterval: 10000,
+  });
+  const readiness = useQuery({
+    queryKey: ["queue-readiness"],
+    queryFn: () => fnReadiness(),
+    refetchInterval: 15000,
+  });
 
   const [simResult, setSimResult] = useState<Totals | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -137,39 +166,93 @@ function AutomacoesPage() {
             <Rocket className="h-6 w-6 text-primary" /> Automações — Ativação de fluxos
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Identifica o estado de cada lead e enfileira nos fluxos corretos de SMS, Email, Ligação e WhatsApp,
-            respeitando prioridade, cooldown e limite diário.
+            Identifica o estado de cada lead e enfileira nos fluxos corretos de SMS, Email, Ligação
+            e WhatsApp, respeitando prioridade, cooldown e limite diário.
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Badge variant={paused ? "destructive" : "default"}>
-            {paused ? "Pausado" : "Ativo"}
-          </Badge>
+          <Badge variant={paused ? "destructive" : "default"}>{paused ? "Pausado" : "Ativo"}</Badge>
           <Button variant="outline" size="sm" onClick={() => togglePause.mutate(!paused)}>
-            {paused ? <><Play className="h-4 w-4 mr-1" /> Retomar</> : <><Pause className="h-4 w-4 mr-1" /> Pausar tudo</>}
+            {paused ? (
+              <>
+                <Play className="h-4 w-4 mr-1" /> Retomar
+              </>
+            ) : (
+              <>
+                <Pause className="h-4 w-4 mr-1" /> Pausar tudo
+              </>
+            )}
           </Button>
         </div>
       </div>
 
+      <Card id="fluxos" className="border-border/70 bg-card/70">
+        <CardHeader>
+          <CardTitle>Fluxos multicanal</CardTitle>
+          <CardDescription>
+            Os construtores ficam centralizados aqui. A estrutura está pronta para jornadas que
+            combinem SMS, e-mail e outros canais em uma única sequência.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 md:grid-cols-2">
+          <Link
+            to="/automacoes/sms"
+            className="group flex items-center gap-3 rounded-lg border border-border/70 p-4 transition-colors hover:border-primary/50 hover:bg-primary/5"
+          >
+            <span className="rounded-lg bg-primary/10 p-2 text-primary">
+              <MessageSquare className="h-5 w-5" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block font-medium">Fluxos de SMS</span>
+              <span className="block text-xs text-muted-foreground">
+                Gatilhos, etapas, esperas e condições de saída
+              </span>
+            </span>
+            <ArrowRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-1" />
+          </Link>
+          <Link
+            to="/email"
+            hash="automacoes"
+            className="group flex items-center gap-3 rounded-lg border border-border/70 p-4 transition-colors hover:border-primary/50 hover:bg-primary/5"
+          >
+            <span className="rounded-lg bg-primary/10 p-2 text-primary">
+              <Mail className="h-5 w-5" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block font-medium">Fluxos de e-mail</span>
+              <span className="block text-xs text-muted-foreground">
+                Sequências, condições e mensagens automatizadas
+              </span>
+            </span>
+            <ArrowRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-1" />
+          </Link>
+        </CardContent>
+      </Card>
+
       {/* Pause por canal */}
-      <Card>
+      <Card id="visao-geral">
         <CardHeader className="pb-2">
           <CardTitle className="text-sm">Disparos por canal</CardTitle>
           <CardDescription className="text-xs">
-            Liga/desliga cada canal individualmente. O botão "Pausar tudo" acima sobrepõe estes ajustes.
+            Liga/desliga cada canal individualmente. O botão "Pausar tudo" acima sobrepõe estes
+            ajustes.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {(["sms", "email", "call", "whatsapp"] as const).map((ch) => {
               const isPaused = channelPaused[ch];
-              const label = ch === "sms" ? "SMS" : ch === "email" ? "E-mail" : ch === "call" ? "Ligação" : "WhatsApp";
+              const label =
+                ch === "sms"
+                  ? "SMS"
+                  : ch === "email"
+                    ? "E-mail"
+                    : ch === "call"
+                      ? "Ligação"
+                      : "WhatsApp";
               const disabled = paused || toggleChannel.isPending;
               return (
-                <div
-                  key={ch}
-                  className="flex items-center justify-between rounded-md border p-3"
-                >
+                <div key={ch} className="flex items-center justify-between rounded-md border p-3">
                   <div>
                     <div className="text-sm font-medium">{label}</div>
                     <div className="text-xs text-muted-foreground">
@@ -211,14 +294,16 @@ function AutomacoesPage() {
       </div>
 
       {/* Prontidão para a janela 06:00 BRT */}
-      <Card>
+      <Card id="readiness">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Sunrise className="h-5 w-5 text-primary" /> Prontidão da fila — janela 06:00–22:00 (America/Sao_Paulo)
+            <Sunrise className="h-5 w-5 text-primary" /> Prontidão da fila — janela 06:00–22:00
+            (America/Sao_Paulo)
           </CardTitle>
           <CardDescription>
-            Rotinas automáticas rodam no backend (cron) sem depender desta tela. Os dispatchers respeitam prioridade,
-            limite diário, cooldown, opt-out, condições de saída, canal disponível e intervalos anti-ban.
+            Rotinas automáticas rodam no backend (cron) sem depender desta tela. Os dispatchers
+            respeitam prioridade, limite diário, cooldown, opt-out, condições de saída, canal
+            disponível e intervalos anti-ban.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -229,20 +314,28 @@ function AutomacoesPage() {
               </div>
               <div className="font-semibold mt-1">
                 {readiness.data?.nextRunAt
-                  ? new Date(readiness.data.nextRunAt).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })
+                  ? new Date(readiness.data.nextRunAt).toLocaleString("pt-BR", {
+                      timeZone: "America/Sao_Paulo",
+                    })
                   : "—"}
               </div>
               <div className="text-xs text-muted-foreground mt-1">
-                {readiness.data?.insideWindow ? "Dentro da janela" : "Fora da janela — aguardando 06:00 BRT"}
+                {readiness.data?.insideWindow
+                  ? "Dentro da janela"
+                  : "Fora da janela — aguardando 06:00 BRT"}
               </div>
             </div>
             <div className="rounded-md border p-3">
               <div className="text-xs text-muted-foreground">Status da rotina</div>
               <div className="font-semibold mt-1 flex items-center gap-1">
                 {readiness.data?.paused ? (
-                  <><Pause className="h-4 w-4 text-destructive" /> Pausada</>
+                  <>
+                    <Pause className="h-4 w-4 text-destructive" /> Pausada
+                  </>
                 ) : (
-                  <><CheckCircle2 className="h-4 w-4 text-green-600" /> Ativa</>
+                  <>
+                    <CheckCircle2 className="h-4 w-4 text-green-600" /> Ativa
+                  </>
                 )}
               </div>
               <div className="text-xs text-muted-foreground mt-1">Cron a cada 1 min</div>
@@ -251,14 +344,18 @@ function AutomacoesPage() {
               <div className="text-xs text-muted-foreground">Pendentes p/ 06:00</div>
               <div className="font-semibold text-lg mt-1">{readiness.data?.totalPending ?? 0}</div>
               <div className="text-xs text-muted-foreground mt-1">
-                SMS {readiness.data?.pending.sms ?? 0} · Email {readiness.data?.pending.email ?? 0} · Lig {readiness.data?.pending.call ?? 0} · WA {readiness.data?.pending.whatsapp ?? 0}
+                SMS {readiness.data?.pending.sms ?? 0} · Email {readiness.data?.pending.email ?? 0}{" "}
+                · Lig {readiness.data?.pending.call ?? 0} · WA{" "}
+                {readiness.data?.pending.whatsapp ?? 0}
               </div>
             </div>
             <div className="rounded-md border p-3">
               <div className="text-xs text-muted-foreground">Última execução</div>
               <div className="font-semibold mt-1">
                 {readiness.data?.lastRun?.started_at
-                  ? new Date(readiness.data.lastRun.started_at).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })
+                  ? new Date(readiness.data.lastRun.started_at).toLocaleString("pt-BR", {
+                      timeZone: "America/Sao_Paulo",
+                    })
                   : "—"}
               </div>
               <div className="text-xs text-muted-foreground mt-1">
@@ -269,33 +366,39 @@ function AutomacoesPage() {
 
           <div className="flex flex-wrap gap-2 items-center">
             <Button onClick={() => simulate.mutate()} disabled={simulate.isPending}>
-              {simulate.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Sunrise className="h-4 w-4 mr-1" />}
+              {simulate.isPending ? (
+                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+              ) : (
+                <Sunrise className="h-4 w-4 mr-1" />
+              )}
               Testar rotina das 06:00
             </Button>
             <span className="text-xs text-muted-foreground">
-              Simula a execução sem enviar nada e mostra quantos leads seriam disparados, bloqueados, por canal e por fluxo.
+              Simula a execução sem enviar nada e mostra quantos leads seriam disparados,
+              bloqueados, por canal e por fluxo.
             </span>
           </div>
 
           <RecentEventsBlock errors={readiness.data?.recentErrors ?? []} />
 
           <div className="text-xs text-muted-foreground border-t pt-2">
-            Logs de envio, bloqueio e erro ficam em <code>sms_send_logs</code>, <code>email_send_logs</code>,
-            <code> call_history</code> e <code>flow_logs</code>. Anti-ban aplica intervalo entre envios
-            (delay min/max) e tetos por hora/dia.
+            Logs de envio, bloqueio e erro ficam em <code>sms_send_logs</code>,{" "}
+            <code>email_send_logs</code>,<code> call_history</code> e <code>flow_logs</code>.
+            Anti-ban aplica intervalo entre envios (delay min/max) e tetos por hora/dia.
           </div>
         </CardContent>
       </Card>
 
       {/* Ações */}
-      <Card>
+      <Card id="execucoes">
         <CardHeader>
           <CardTitle>Reprocessar leads existentes agora</CardTitle>
           <CardDescription>
-            A rotina automática já roda no backend a cada poucos minutos e enfileira sozinha todo lead novo
-            que entra em algum estado. Use os botões abaixo apenas quando:
+            A rotina automática já roda no backend a cada poucos minutos e enfileira sozinha todo
+            lead novo que entra em algum estado. Use os botões abaixo apenas quando:
             <span className="block mt-1">
-              • Você acabou de criar um gatilho ou fluxo novo e quer pegar leads que já estavam elegíveis.
+              • Você acabou de criar um gatilho ou fluxo novo e quer pegar leads que já estavam
+              elegíveis.
             </span>
             <span className="block">
               • Suspeita que algo ficou de fora e quer forçar uma varredura completa agora.
@@ -304,8 +407,16 @@ function AutomacoesPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap gap-3">
-            <Button onClick={() => simulate.mutate()} disabled={simulate.isPending} variant="outline">
-              {simulate.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <FlaskConical className="h-4 w-4 mr-1" />}
+            <Button
+              onClick={() => simulate.mutate()}
+              disabled={simulate.isPending}
+              variant="outline"
+            >
+              {simulate.isPending ? (
+                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+              ) : (
+                <FlaskConical className="h-4 w-4 mr-1" />
+              )}
               Simular sem enviar
             </Button>
             <Button onClick={() => setConfirmOpen(true)} disabled={paused}>
@@ -316,10 +427,18 @@ function AutomacoesPage() {
           {simResult && (
             <div className="rounded-md border bg-muted/30 p-4 space-y-3 text-sm">
               <div className="flex flex-wrap gap-4">
-                <span><strong>Analisados:</strong> {simResult.analyzed ?? 0}</span>
-                <span><strong>Elegíveis:</strong> {simResult.eligible ?? 0}</span>
-                <span><strong>Enfileiráveis:</strong> {simResult.enqueued ?? 0}</span>
-                <span><strong>Ignorados:</strong> {simResult.skipped ?? 0}</span>
+                <span>
+                  <strong>Analisados:</strong> {simResult.analyzed ?? 0}
+                </span>
+                <span>
+                  <strong>Elegíveis:</strong> {simResult.eligible ?? 0}
+                </span>
+                <span>
+                  <strong>Enfileiráveis:</strong> {simResult.enqueued ?? 0}
+                </span>
+                <span>
+                  <strong>Ignorados:</strong> {simResult.skipped ?? 0}
+                </span>
               </div>
               <BreakdownBlock title="Por canal" map={simResult.by_channel} />
               <BreakdownBlock title="Por gatilho" map={simResult.by_trigger} />
@@ -330,12 +449,13 @@ function AutomacoesPage() {
       </Card>
 
       {/* Histórico */}
-      <Card>
+      <Card id="historico">
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
             <CardTitle>Execuções recentes</CardTitle>
             <CardDescription>
-              Cada linha é um ciclo da rotina automática (cron) ou um reprocessamento que você disparou aqui.
+              Cada linha é um ciclo da rotina automática (cron) ou um reprocessamento que você
+              disparou aqui.
             </CardDescription>
           </div>
           <Button variant="ghost" size="sm" onClick={() => runs.refetch()}>
@@ -357,20 +477,26 @@ function AutomacoesPage() {
             <DialogTitle>Reprocessar leads agora?</DialogTitle>
             <DialogDescription className="space-y-2">
               <span className="block">
-                Vou varrer toda a base de players, identificar quem se encaixa em algum gatilho ativo
-                e enfileirar nos fluxos de SMS, e-mail, ligação e WhatsApp — respeitando prioridade,
-                cooldown, limite diário e a janela de envio.
+                Vou varrer toda a base de players, identificar quem se encaixa em algum gatilho
+                ativo e enfileirar nos fluxos de SMS, e-mail, ligação e WhatsApp — respeitando
+                prioridade, cooldown, limite diário e a janela de envio.
               </span>
               <span className="block">
-                <strong>Você não precisa esperar nesta tela.</strong> O trabalho roda em segundo plano
-                e o resultado aparece em "Execuções recentes" logo abaixo. Para confirmar, digite{" "}
-                <strong>REPROCESSAR</strong>.
+                <strong>Você não precisa esperar nesta tela.</strong> O trabalho roda em segundo
+                plano e o resultado aparece em "Execuções recentes" logo abaixo. Para confirmar,
+                digite <strong>REPROCESSAR</strong>.
               </span>
             </DialogDescription>
           </DialogHeader>
-          <Input value={confirmText} onChange={(e) => setConfirmText(e.target.value)} placeholder="REPROCESSAR" />
+          <Input
+            value={confirmText}
+            onChange={(e) => setConfirmText(e.target.value)}
+            placeholder="REPROCESSAR"
+          />
           <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmOpen(false)}>Cancelar</Button>
+            <Button variant="outline" onClick={() => setConfirmOpen(false)}>
+              Cancelar
+            </Button>
             <Button
               disabled={confirmText !== "REPROCESSAR" || executeStarting}
               onClick={startExecute}
@@ -405,7 +531,11 @@ function RunRow({ run: r }: { run: any }) {
     <div className="flex items-center justify-between gap-3 text-sm border-b py-2 last:border-0">
       <div className="flex items-center gap-2 min-w-0 flex-wrap">
         <Badge variant="outline" className="font-normal">
-          {isExec ? <RotateCw className="h-3 w-3 mr-1" /> : <FlaskConical className="h-3 w-3 mr-1" />}
+          {isExec ? (
+            <RotateCw className="h-3 w-3 mr-1" />
+          ) : (
+            <FlaskConical className="h-3 w-3 mr-1" />
+          )}
           {modeLabel(r.mode)}
         </Badge>
         <Badge variant="outline" className={`font-normal ${statusClass}`}>
@@ -435,17 +565,28 @@ function RunRow({ run: r }: { run: any }) {
         )}
       </div>
       <div className="text-xs text-muted-foreground text-right shrink-0">
-        {enqueued > 0
-          ? <>{analyzed.toLocaleString("pt-BR")} analisados · <strong className="text-foreground">{enqueued.toLocaleString("pt-BR")} enfileirados</strong></>
-          : status === "running"
-            ? "Em execução…"
-            : "Nenhum lead novo no ciclo"}
+        {enqueued > 0 ? (
+          <>
+            {analyzed.toLocaleString("pt-BR")} analisados ·{" "}
+            <strong className="text-foreground">
+              {enqueued.toLocaleString("pt-BR")} enfileirados
+            </strong>
+          </>
+        ) : status === "running" ? (
+          "Em execução…"
+        ) : (
+          "Nenhum lead novo no ciclo"
+        )}
       </div>
     </div>
   );
 }
 
-function RecentEventsBlock({ errors }: { errors: Array<{ id: string; started_at: string; error: string | null; mode?: string }> }) {
+function RecentEventsBlock({
+  errors,
+}: {
+  errors: Array<{ id: string; started_at: string; error: string | null; mode?: string }>;
+}) {
   if (!errors.length) {
     return (
       <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-3 text-xs flex items-center gap-2">
@@ -465,8 +606,8 @@ function RecentEventsBlock({ errors }: { errors: Array<{ id: string; started_at:
         <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-3 text-xs flex items-start gap-2">
           <CheckCircle2 className="h-4 w-4 text-emerald-600 mt-0.5 shrink-0" />
           <span>
-            <strong>Envios em dia.</strong> No período só há avisos de operação do varredor de leads — isso
-            não afeta SMS, e-mail nem ligações.
+            <strong>Envios em dia.</strong> No período só há avisos de operação do varredor de leads
+            — isso não afeta SMS, e-mail nem ligações.
           </span>
         </div>
       )}
@@ -479,7 +620,9 @@ function RecentEventsBlock({ errors }: { errors: Array<{ id: string; started_at:
           <ul className="text-xs space-y-1">
             {failures.map((e) => (
               <li key={e.id} className="flex items-start gap-2">
-                <span className="text-muted-foreground shrink-0">{formatDateShort(e.started_at)}</span>
+                <span className="text-muted-foreground shrink-0">
+                  {formatDateShort(e.started_at)}
+                </span>
                 <span className="text-foreground">{e.error}</span>
               </li>
             ))}
@@ -493,8 +636,9 @@ function RecentEventsBlock({ errors }: { errors: Array<{ id: string; started_at:
             <Clock className="h-3 w-3" /> Avisos de operação ({operational.length})
           </div>
           <p className="text-xs text-muted-foreground mb-2">
-            O varredor de leads excedeu o tempo limite e foi reiniciado automaticamente. Isso é esperado
-            enquanto a base cresce — <strong>os envios de SMS, e-mail e ligações continuam normalmente</strong>.
+            O varredor de leads excedeu o tempo limite e foi reiniciado automaticamente. Isso é
+            esperado enquanto a base cresce —{" "}
+            <strong>os envios de SMS, e-mail e ligações continuam normalmente</strong>.
           </p>
           <ul className="text-xs space-y-1">
             {operational.map((e) => (

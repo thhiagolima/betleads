@@ -566,21 +566,26 @@ function KpiCard({
 
   return (
     <Card
-      className={`min-h-[150px] border-border/70 bg-card/80 ${
-        featured ? "border-emerald-500/50 bg-emerald-950/20" : ""
+      className={`card-premium group relative min-h-[156px] overflow-hidden border-0 ${
+        featured ? "ring-1 ring-emerald-500/35" : ""
       }`}
     >
-      <CardContent className="relative h-full p-5">
-        <div className="flex items-center gap-3">
-          <div className={`flex h-11 w-11 items-center justify-center rounded-xl ${toneClass}`}>
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
+      <CardContent className="relative flex h-full flex-col p-5">
+        <div className="flex items-start justify-between gap-4">
+          <p className="text-xs font-medium text-muted-foreground">{title}</p>
+          <div
+            className={`flex size-9 shrink-0 items-center justify-center rounded-lg border border-border/50 transition-transform duration-200 group-hover:scale-105 ${toneClass}`}
+          >
             <Icon className="h-5 w-5" />
           </div>
-          <p className="text-sm font-semibold text-primary-foreground/80">{title}</p>
         </div>
-        <div className="mt-4 flex items-end justify-between gap-4">
-          <div>
-            <p className="text-3xl font-bold tracking-tight text-foreground">{value}</p>
-            <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
+        <div className="mt-1 flex flex-1 items-end justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-3xl font-semibold tracking-[-0.04em] text-foreground tabular-nums">
+              {value}
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
               {typeof trend === "number" && (
                 <span className="font-semibold text-emerald-400">
                   ↑ {fmtPct(Math.max(0, trend))}
