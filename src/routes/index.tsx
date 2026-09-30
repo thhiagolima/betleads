@@ -740,17 +740,27 @@ function Dashboard() {
     },
     staleTime: 5 * 60_000,
   });
+  const { data: sessionTenantId } = useQuery({
+    queryKey: ["current-tenant-id-dashboard"],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("current_tenant_id");
+      if (error) throw new Error(error.message);
+      return (data as string | null) ?? null;
+    },
+    staleTime: 5 * 60_000,
+  });
 
   const STORAGE_KEY = "dashboard:active_tenant";
-  const [activeTenantId, setActiveTenantIdRaw] = useState<string | null>(() => {
-    if (typeof window === "undefined") return null;
-    return window.localStorage.getItem(STORAGE_KEY);
-  });
+  // A seleção explícita da sessão começa no tenant retornado pelo JWT/RPC;
+  // não reutilizamos um tenant antigo do localStorage antes dessa validação.
+  const [activeTenantId, setActiveTenantIdRaw] = useState<string | null>(null);
   const tenantId =
     tenants && tenants.length > 0
       ? activeTenantId && tenants.some((t) => t.id === activeTenantId)
         ? activeTenantId
-        : tenants[0].id
+        : sessionTenantId && tenants.some((t) => t.id === sessionTenantId)
+          ? sessionTenantId
+          : tenants[0].id
       : null;
   const activeTenant = tenants?.find((t) => t.id === tenantId);
   const tenantName = activeTenant?.nome ?? "SorteAlta";

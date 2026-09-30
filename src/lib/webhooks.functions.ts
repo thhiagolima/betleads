@@ -7,11 +7,13 @@ export const getMyWebhookToken = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const { supabase } = context;
-    const { data, error } = await supabase
+    const { data: currentTenantId, error: tenantError } = await supabase.rpc("current_tenant_id");
+    if (tenantError) throw new Error(tenantError.message);
+    let tenantQuery = supabase
       .from("tenants")
-      .select("id, nome, legacy_webhook")
-      .limit(1)
-      .maybeSingle();
+      .select("id, nome, legacy_webhook");
+    if (currentTenantId) tenantQuery = tenantQuery.eq("id", currentTenantId);
+    const { data, error } = await tenantQuery.limit(1).maybeSingle();
     if (error) throw new Error(error.message);
     const tenantId = (data?.id as string | undefined) ?? null;
     let token: string | null = null;
@@ -27,6 +29,8 @@ export const getMyWebhookToken = createServerFn({ method: "GET" })
       token,
       tenantId,
       tenantNome: (data?.nome as string | undefined) ?? null,
-      legacy: Boolean((data as { legacy_webhook?: boolean } | null)?.legacy_webhook),
+      // Mesmo o tenant legado usa agora URL/token próprios. O campo histórico
+      // legacy_webhook não deve mais gerar endpoint global.
+      legacy: false,
     };
   });

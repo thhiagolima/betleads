@@ -70,11 +70,7 @@ function WebhooksPage() {
   const token = tokenInfo?.token ?? null;
   const legacy = Boolean(tokenInfo?.legacy);
   const origin = publicOrigin();
-  const baseUrl = legacy
-    ? `${origin}/api/public/webhook`
-    : token
-      ? `${origin}/api/public/webhook/${token}`
-      : null;
+  const baseUrl = token ? `${origin}/api/public/webhook/${token}` : null;
 
   const { data: logs = [], isLoading } = useQuery<WebhookLog[]>({
     queryKey: ["webhook_logs"],
@@ -119,7 +115,7 @@ function WebhooksPage() {
         icon={<WebhookIcon className="h-5 w-5 text-primary-foreground" />}
       />
 
-      {!legacy && (
+      {
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 flex items-start gap-3">
           <ShieldAlert className="h-4 w-4 text-amber-400 mt-0.5 shrink-0" />
           <div className="text-xs text-amber-100/90 leading-relaxed">
@@ -130,7 +126,7 @@ function WebhooksPage() {
             </p>
           </div>
         </div>
-      )}
+      }
 
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="lg:col-span-2 space-y-4">
