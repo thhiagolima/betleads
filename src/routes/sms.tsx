@@ -241,10 +241,12 @@ function sanitizeSmsProviderError(error: string | null | undefined): string | nu
     );
 }
 
-function previewMensagem(msg: string) {
+function previewMensagem(msg: string, recipient = "João Silva") {
+  const fullName = recipient.trim() || "João Silva";
+  const firstName = fullName.split(/\s+/)[0] || fullName;
   return msg
-    .replaceAll("{primeiro_nome}", "João")
-    .replaceAll("{nome}", "João Silva")
+    .replaceAll("{primeiro_nome}", firstName)
+    .replaceAll("{nome}", fullName)
     .replaceAll("{dias_sem_login}", "7")
     .replaceAll("{dias_sem_deposito}", "12")
     .replaceAll("{total_depositado}", "R$ 1.240")
@@ -348,7 +350,7 @@ function SmsCompactWorkspace({
     ["agendada", "running", "processando"].includes(campaign.status),
   ).length;
   const canSend = phoneDigits.length >= 10 && message.trim().length > 0 && balance >= parts;
-  const preview = previewMensagem(message).replaceAll("João", recipientName.trim() || "Rafael");
+  const preview = previewMensagem(message, recipientName.trim() || "Rafael");
 
   const send = useMutation({
     mutationFn: () =>
@@ -1140,7 +1142,7 @@ function SmsHomePanel() {
                     <Smartphone className="h-4 w-4" />
                   </div>
                   <div className="rounded-2xl bg-muted px-4 py-3 text-sm text-muted-foreground">
-                    {previewMensagem(message).replaceAll("João", recipientName || "Rafael")}
+                    {previewMensagem(message, recipientName || "Rafael")}
                   </div>
                 </div>
               </div>
