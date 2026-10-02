@@ -6,15 +6,19 @@ interface PageHeaderProps {
   subtitle?: string;
   icon?: ReactNode;
   actions?: ReactNode;
+  iconClassName?: string;
   className?: string;
 }
 
-export function PageHeader({ title, subtitle, icon, actions, className }: PageHeaderProps) {
+export function PageHeader({ title, subtitle, icon, actions, iconClassName, className }: PageHeaderProps) {
   return (
-    <header className={cn("flex flex-wrap items-center justify-between gap-4 mb-6", className)}>
+    <header className={cn("mb-6 flex flex-wrap items-center justify-between gap-4", className)}>
       <div className="flex items-center gap-3 min-w-0">
         {icon && (
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-accent glow-blue">
+          <div className={cn(
+            "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-accent glow-blue",
+            iconClassName,
+          )}>
             {icon}
           </div>
         )}
@@ -25,7 +29,11 @@ export function PageHeader({ title, subtitle, icon, actions, className }: PageHe
           )}
         </div>
       </div>
-      {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}
+      {actions && (
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+          {actions}
+        </div>
+      )}
     </header>
   );
 }

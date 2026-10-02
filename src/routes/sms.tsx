@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
@@ -53,7 +53,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { TRIGGER_NAMES, TRIGGER_MEANINGS, type TriggerType } from "@/lib/triggers";
-import { ProvidersPausedBanner } from "@/components/providers-paused-banner";
 import {
   smsProviderStatus,
   sendTestSms,
@@ -115,9 +114,12 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { MessageVariablePicker } from "@/components/message-variable-picker";
-import { HistoryShell } from "@/components/history/history-shell";
 import { MetricCard } from "@/components/ui-premium/metric-card";
+import { SmsPageShell } from "@/components/sms/sms-page-shell";
+import { SmsChannelHealth } from "@/components/sms/sms-channel-health";
+import { SmsHistoryPanel } from "@/components/sms/sms-history-panel";
 import { LeadSelector, type SelectedLead } from "@/components/ligacoes/lead-selector";
+import { NewSmsCampaignDialog } from "@/components/campaigns/new-sms-campaign-dialog";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import {
@@ -129,6 +131,8 @@ import {
 } from "@/lib/sms-flows.functions";
 import { getSmsCreditPortal } from "@/lib/sms-credits.functions";
 import { resolveSmsCampaignAudience } from "@/lib/sms-audiences.functions";
+import { listSmsAudiences } from "@/lib/sms-audience-crud.functions";
+import { EMPTY_SMS_AUDIENCE, SYSTEM_SMS_AUDIENCES, type SmsAudienceCriteria } from "@/lib/sms-audience-criteria";
 import { num } from "@/lib/format";
 
 export const Route = createFileRoute("/sms")({
@@ -261,6 +265,15 @@ function smsCount(len: number) {
   return Math.ceil(len / 153);
 }
 
+function renderIndividualSmsTemplate(message: string, recipientName: string, phone: string) {
+  const fullName = recipientName.trim();
+  const firstName = fullName.split(/\s+/)[0] ?? "";
+  return message
+    .replaceAll("{nome}", fullName)
+    .replaceAll("{primeiro_nome}", firstName)
+    .replaceAll("{telefone}", phone);
+}
+
 // ---------------- Page ----------------
 
 function SmsPage() {
@@ -275,26 +288,18 @@ function SmsPage() {
     fila: "campanhas",
   };
   const currentTab = aliases[hash] ?? "enviar";
+  useEffect(() => {
+    if (currentTab === "campanhas") {
+      void navigate({ to: "/campanhas", replace: true });
+    }
+  }, [currentTab, navigate]);
   return (
-    <div className="mx-auto w-full max-w-[1180px] space-y-5 p-4 sm:p-6">
-      <div className="flex items-center gap-3 flex-wrap">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-accent glow-blue">
-          <MessageSquare className="h-5 w-5 text-primary-foreground" />
-        </div>
-        <div className="flex-1">
-          <h1 className="text-2xl font-bold tracking-tight">SMS</h1>
-          <p className="text-sm text-muted-foreground">
-            Envie SMS e acompanhe entregas, respostas, créditos e campanhas.
-          </p>
-        </div>
-      </div>
-
-      <ProvidersPausedBanner channel="sms" />
+    <SmsPageShell>
       <SmsCompactWorkspace
         tab={currentTab}
         onTabChange={(tab) => navigate({ to: "/sms", hash: tab, replace: true })}
       />
-    </div>
+    </SmsPageShell>
   );
 }
 
@@ -357,7 +362,7 @@ function SmsCompactWorkspace({
       bulkFn({
         data: {
           phones: [phoneDigits],
-          content: message,
+          content: renderIndividualSmsTemplate(message, recipientName, phoneDigits),
           campaignName: `Manual: ${recipientName.trim() || phoneDigits}`,
           route: "iGaming",
           ratePerMinute: 1000,
@@ -382,6 +387,10 @@ function SmsCompactWorkspace({
     },
     { label: "Entregues", value: num(delivered), hint: `${deliveryRate}% de entrega · ${num(failed)} falharam` },
   ];
+
+  if (tab === "enviar") {
+    return <SmsChannelHealth configured={!!provider.data?.configured} balance={num(balance)} queue={queue} deliveryRate={deliveryRate} metrics={kpis} onRefresh={() => qc.invalidateQueries({ queryKey: ["sms-compact-dashboard"] })} onOpenHistory={() => onTabChange("historico")} />;
+  }
 
   return (
     <div className="space-y-5">
@@ -414,7 +423,7 @@ function SmsCompactWorkspace({
       </div>
 
       <div className="flex w-fit rounded-lg border border-border/70 bg-card/60 p-1">
-        {(["enviar", "historico", "campanhas"] as const).map((value) => (
+        {(["enviar", "historico"] as const).map((value) => (
           <Button
             key={value}
             size="sm"
@@ -423,20 +432,15 @@ function SmsCompactWorkspace({
           >
             {value === "enviar"
               ? "Enviar"
-              : value === "historico"
-                ? "Histórico"
-                : `Campanhas${queue ? ` · ${queue}` : ""}`}
+              : "Histórico"}
           </Button>
         ))}
+        <Button size="sm" variant="ghost" asChild>
+          <Link to="/campanhas">Campanhas{queue ? ` · ${queue}` : ""}</Link>
+        </Button>
       </div>
 
-      {tab === "historico" && (
-        <HistoryShell
-          channel="sms"
-          options={{ title: "Histórico de SMS", subtitle: "Todos os disparos e status." }}
-        />
-      )}
-      {tab === "campanhas" && <CampaignsHub />}
+      {tab === "historico" && <SmsHistoryPanel />}
       {tab === "enviar" &&
         (bulkMode ? (
           <div className="space-y-3">
@@ -2268,7 +2272,7 @@ function EnvioMassa() {
               variant="outline"
               size="sm"
               className="w-full"
-              onClick={() => navigate({ to: "/sms", hash: "campanhas", replace: true })}
+              onClick={() => navigate({ to: "/campanhas" })}
             >
               Ver campanhas
             </Button>
@@ -2290,25 +2294,25 @@ function Row({ label, value }: { label: string; value: string }) {
 
 // ---------------- Campanhas (agendadas + histórico) ----------------
 
-type AudienceCriteria = {
-  activity: { deposit: "any" | "never" | "yes"; pixUnpaid: boolean; withdrawal: "any" | "yes" | "never" };
-  level: "bronze" | "silver" | "gold" | "diamond" | "black" | null;
-  timing: "any" | "cooling" | "sleeping" | "inactive30" | "inactive90" | "custom" | "registered_week";
-  customDays: number;
-};
+/*
+ * Implementação anterior de Campanhas: preservada temporariamente apenas como
+ * referência de migração. A interface ativa está em components/campaigns.
+ */
+/* type AudienceCriteria = SmsAudienceCriteria;
+const EMPTY_AUDIENCE: AudienceCriteria = EMPTY_SMS_AUDIENCE;
 
-const EMPTY_AUDIENCE: AudienceCriteria = {
-  activity: { deposit: "any", pixUnpaid: false, withdrawal: "any" },
-  level: null,
-  timing: "any",
-  customDays: 2,
-};
-
-export function CampaignsHub() {
+function LegacyCampaignsHub() {
   const qc = useQueryClient();
   const listFn = useServerFn(listScheduledSmsCampaigns);
   const cancelFn = useServerFn(cancelScheduledSmsCampaign);
   const [open, setOpen] = useState(false);
+  const [requestedAudienceId, setRequestedAudienceId] = useState("");
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const audienceId = params.get("audience") ?? "";
+    setRequestedAudienceId(audienceId);
+    if (audienceId && params.get("newCampaign") === "1") setOpen(true);
+  }, []);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("todos");
   const q = useQuery({
@@ -2349,7 +2353,7 @@ export function CampaignsHub() {
         <div>
           <h2 className="text-xl font-semibold">Campanhas</h2>
           <p className="text-sm text-muted-foreground">
-            Disparos em massa para públicos segmentados.
+            Crie, acompanhe e agende disparos para os seus públicos salvos.
           </p>
         </div>
         <Button onClick={() => setOpen(true)}>
@@ -2390,8 +2394,13 @@ export function CampaignsHub() {
           />
         </div>
       </div>
-      <Card className="overflow-hidden border-border/70 bg-card/70">
-        <CardContent className="p-0">
+      <Card className="relative overflow-hidden border-border/70 bg-card/70" aria-busy={q.isFetching}>
+        {q.isFetching && !q.isLoading && (
+          <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-center border-b border-primary/20 bg-primary/10 px-3 py-1.5 text-xs text-primary" role="status">
+            <RotateCw className="mr-2 h-3.5 w-3.5 animate-spin" /> Atualizando campanhas...
+          </div>
+        )}
+        <CardContent className={cn("p-0", q.isFetching && !q.isLoading && "opacity-60 transition-opacity")}>
           {q.isLoading && (
             <p className="p-6 text-sm text-muted-foreground">Carregando campanhas…</p>
           )}
@@ -2455,56 +2464,65 @@ export function CampaignsHub() {
       <NewSmsCampaignDialog
         open={open}
         onOpenChange={setOpen}
+        initialAudienceId={requestedAudienceId}
         onCreated={() => qc.invalidateQueries({ queryKey: ["sms-scheduled-campaigns"] })}
       />
     </div>
   );
 }
 
-function NewSmsCampaignDialog({
+function LegacyNewSmsCampaignDialog({
   open,
   onOpenChange,
   onCreated,
+  initialAudienceId,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreated: () => void;
+  initialAudienceId?: string;
 }) {
   const resolveAudienceFn = useServerFn(resolveSmsCampaignAudience);
   const sendFn = useServerFn(sendBulkSms);
   const scheduleFn = useServerFn(scheduleBulkSms);
   const [name, setName] = useState("");
   const [message, setMessage] = useState("");
-  const [builder, setBuilder] = useState(false);
-  const [criteria, setCriteria] = useState<AudienceCriteria>(EMPTY_AUDIENCE);
   const [selectedSaved, setSelectedSaved] = useState("");
-  const [audienceName, setAudienceName] = useState("");
   const [phones, setPhones] = useState<string[]>([]);
-  const [audienceSettings, setAudienceSettings] = useState({ cooling: 2, sleeping: 7 });
+  const [audienceTotal, setAudienceTotal] = useState(0);
   const [when, setWhen] = useState<"now" | "schedule">("now");
   const [scheduledAt, setScheduledAt] = useState("");
-  const [savedAudiences, setSavedAudiences] = useState<Array<{ name: string; criteria: AudienceCriteria }>>([]);
+  const [savedAudiences, setSavedAudiences] = useState<Array<{ id: string; name: string; criteria: AudienceCriteria; system?: boolean }>>([]);
+  const listAudiencesFn = useServerFn(listSmsAudiences);
+  const savedAudiencesQuery = useQuery({ queryKey: ["sms-audiences"], queryFn: () => listAudiencesFn(), enabled: open });
   useEffect(() => {
     if (!open) return;
-    try {
-      setSavedAudiences(JSON.parse(localStorage.getItem("betleads:sms-audiences") ?? "[]"));
-    } catch {
-      setSavedAudiences([]);
-    }
-  }, [open]);
+    setSavedAudiences([
+      ...SYSTEM_SMS_AUDIENCES.map((item) => ({ ...item, system: true })),
+      ...(savedAudiencesQuery.data ?? []).map((item: any) => ({ id: item.id, name: item.name, criteria: item.criteria as AudienceCriteria })),
+    ]);
+  }, [open, savedAudiencesQuery.data]);
   const audience = useMutation({
     mutationFn: (next: AudienceCriteria) => resolveAudienceFn({ data: { criteria: next } }),
     onSuccess: (result) => {
       setPhones(result.phones);
-      setAudienceSettings({ cooling: result.settings.cooling, sleeping: result.settings.sleeping });
+      setAudienceTotal(result.total);
     },
     onError: (error: Error) => toast.error(error.message),
   });
   useEffect(() => {
-    if (!open || !builder) return;
-    const timer = window.setTimeout(() => audience.mutate(criteria), 220);
-    return () => window.clearTimeout(timer);
-  }, [open, builder, criteria]);
+    if (!open || !initialAudienceId || savedAudiences.length === 0) return;
+    const selected = savedAudiences.find((item) => item.id === initialAudienceId);
+    if (!selected) return;
+    setSelectedSaved(selected.id);
+    audience.mutate(selected.criteria);
+  }, [open, initialAudienceId, savedAudiences]);
+  useEffect(() => {
+    if (!open) return;
+    setSelectedSaved("");
+    setPhones([]);
+    setAudienceTotal(0);
+  }, [open]);
   const submit = useMutation({
     mutationFn: async () => {
       if (!name.trim() || !message.trim() || phones.length === 0)
@@ -2537,45 +2555,20 @@ function NewSmsCampaignDialog({
       onCreated();
       onOpenChange(false);
       setPhones([]);
+      setAudienceTotal(0);
       setName("");
       setMessage("");
     },
     onError: (error: Error) => toast.error(error.message),
   });
   const parts = smsCount(message.length);
-  function saveAudience() {
-    if (!audienceName.trim()) return toast.error("Dê um nome ao público");
-    const next = [
-      ...savedAudiences.filter((item) => item.name !== audienceName.trim()),
-      { name: audienceName.trim(), criteria },
-    ];
-    localStorage.setItem("betleads:sms-audiences", JSON.stringify(next));
-    setSavedAudiences(next);
-    toast.success("Público salvo");
-  }
-  function toggleDeposit(value: "never" | "yes") {
-    setCriteria((current) => ({
-      ...current,
-      activity: { ...current.activity, deposit: current.activity.deposit === value ? "any" : value },
-      level: value === "never" ? null : current.level,
-    }));
-  }
-  function toggleWithdrawal(value: "yes" | "never") {
-    setCriteria((current) => ({
-      ...current,
-      activity: { ...current.activity, withdrawal: current.activity.withdrawal === value ? "any" : value },
-    }));
-  }
-  function toggleTiming(value: AudienceCriteria["timing"]) {
-    setCriteria((current) => ({ ...current, timing: current.timing === value ? "any" : value }));
-  }
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[92vh] max-w-xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Nova campanha</DialogTitle>
           <DialogDescription>
-            Escolha um público pronto ou monte um público na hora.
+            Escolha um público salvo, escreva a mensagem e programe o disparo.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
@@ -2590,125 +2583,39 @@ function NewSmsCampaignDialog({
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label>Público</Label>
-              <Button
-                variant="link"
-                size="sm"
-                onClick={() => {
-                  setBuilder((value) => !value);
-                  setPhones([]);
-                }}
-              >
-                {builder ? "usar um público pronto" : "montar um público"}
+              <Button variant="link" size="sm" asChild>
+                <Link to="/publicos" onClick={() => onOpenChange(false)}>Criar novo público</Link>
               </Button>
             </div>
-            {!builder ? (
-              <>
-                <Select
-                  value={selectedSaved}
-                  onValueChange={(value) => {
-                    setSelectedSaved(value);
-                    const defaults: Record<string, AudienceCriteria> = {
-                      cooling: { ...EMPTY_AUDIENCE, timing: "cooling" },
-                      never: { ...EMPTY_AUDIENCE, activity: { ...EMPTY_AUDIENCE.activity, deposit: "never" } },
-                      all: EMPTY_AUDIENCE,
-                    };
-                    const saved = savedAudiences.find((item) => item.name === value);
-                    const next = saved?.criteria ?? defaults[value];
-                    if (next) audience.mutate(next);
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Escolha um público" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="cooling">Esfriando (faixa definida na Gamificação)</SelectItem>
-                    <SelectItem value="never">Cadastrou e nunca depositou</SelectItem>
-                    <SelectItem value="all">Todos com telefone</SelectItem>
-                    {savedAudiences.map((item) => (
-                      <SelectItem key={item.name} value={item.name}>
-                        {item.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </>
-            ) : (
-              <div className="space-y-3 rounded-xl bg-muted/25 p-3">
-                <div className="rounded-xl bg-primary/10 px-3 py-2.5 text-sm text-primary">
-                  <strong className="text-xl">{audience.isPending ? "…" : num(phones.length)}</strong>{" "}
-                  <span className="text-muted-foreground">jogadores neste público</span>
-                </div>
-                <div className="space-y-2">
-                  <Label>O que ela fez</Label>
-                  <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    variant={criteria.activity.deposit === "never" ? "default" : "outline"}
-                    size="sm"
-                    className="rounded-full"
-                    onClick={() => toggleDeposit("never")}
-                  >
-                    Cadastrou e nunca depositou
-                  </Button>
-                  <Button
-                    type="button"
-                    variant={criteria.activity.pixUnpaid ? "default" : "outline"}
-                    size="sm"
-                    className="rounded-full"
-                    onClick={() => setCriteria((current) => ({ ...current, activity: { ...current.activity, pixUnpaid: !current.activity.pixUnpaid } }))}
-                  >
-                    Gerou PIX e não pagou
-                  </Button>
-                    <Button type="button" variant={criteria.activity.deposit === "yes" ? "default" : "outline"} size="sm" className="rounded-full" onClick={() => toggleDeposit("yes")}>Já depositou</Button>
-                    <Button type="button" variant={criteria.activity.withdrawal === "yes" ? "default" : "outline"} size="sm" className="rounded-full" onClick={() => toggleWithdrawal("yes")}>Já sacou</Button>
-                    <Button type="button" variant={criteria.activity.withdrawal === "never" ? "default" : "outline"} size="sm" className="rounded-full" onClick={() => toggleWithdrawal("never")}>Nunca sacou</Button>
-                  </div>
-                </div>
-                {criteria.activity.deposit !== "never" && (
-                  <div className="space-y-2">
-                    <Label>Nível (faixa de valor da Gamificação)</Label>
-                    <div className="flex flex-wrap gap-2">
-                      {([
-                        ["bronze", "🥉 Bronze"], ["silver", "🥈 Prata"], ["gold", "🥇 Ouro"],
-                        ["diamond", "💎 Diamante"], ["black", "👑 Black VIP"],
-                      ] as const).map(([value, label]) => (
-                        <Button key={value} type="button" size="sm" className="rounded-full" variant={criteria.level === value ? "default" : "outline"} onClick={() => setCriteria((current) => ({ ...current, level: current.level === value ? null : value }))}>{label}</Button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                <div className="space-y-2">
-                  <Label>Quando</Label>
-                  <div className="flex flex-wrap gap-2">
-                    <Button type="button" size="sm" className="rounded-full" variant={criteria.timing === "cooling" ? "default" : "outline"} onClick={() => toggleTiming("cooling")}>esfriando ({audienceSettings.cooling} a {audienceSettings.sleeping} dias)</Button>
-                    <Button type="button" size="sm" className="rounded-full" variant={criteria.timing === "sleeping" ? "default" : "outline"} onClick={() => toggleTiming("sleeping")}>dormindo ({audienceSettings.sleeping}+ dias)</Button>
-                    <Button type="button" size="sm" className="rounded-full" variant={criteria.timing === "inactive30" ? "default" : "outline"} onClick={() => toggleTiming("inactive30")}>30+ dias parado</Button>
-                    <Button type="button" size="sm" className="rounded-full" variant={criteria.timing === "inactive90" ? "default" : "outline"} onClick={() => toggleTiming("inactive90")}>90+ dias parado</Button>
-                    <div className={`flex h-9 items-center gap-1 rounded-full border px-3 text-sm ${criteria.timing === "custom" ? "border-primary bg-primary/15" : "border-input"}`}>
-                      <button type="button" onClick={() => toggleTiming("custom")}>parado há</button>
-                      <Input className="h-7 w-12 border-0 bg-muted px-1 text-center" type="number" min={1} max={7} value={criteria.customDays} onFocus={() => setCriteria((current) => ({ ...current, timing: "custom" }))} onChange={(event) => setCriteria((current) => ({ ...current, timing: "custom", customDays: Math.min(7, Math.max(1, Number(event.target.value) || 1)) }))} />
-                      <span>+ dias (até 7)</span>
-                    </div>
-                    <Button type="button" size="sm" className="rounded-full" variant={criteria.timing === "registered_week" ? "default" : "outline"} onClick={() => toggleTiming("registered_week")}>cadastrou essa semana</Button>
-                  </div>
-                </div>
-                <div className="flex gap-2 border-t border-border/70 pt-3">
-                  <Input
-                    value={audienceName}
-                    onChange={(event) => setAudienceName(event.target.value)}
-                    placeholder="dar um nome e salvar"
-                  />
-                  <Button variant="outline" onClick={saveAudience} disabled={!audienceName.trim()}>
-                    Salvar público
-                  </Button>
-                  <Button variant="ghost" onClick={() => { setCriteria(EMPTY_AUDIENCE); setAudienceName(""); }}>limpar</Button>
-                </div>
-                <p className="text-xs text-muted-foreground">As condições entre grupos são combinadas. Opções incompatíveis do mesmo grupo se substituem automaticamente.</p>
+            <Select
+              value={selectedSaved}
+              onValueChange={(value) => {
+                setSelectedSaved(value);
+                const selected = savedAudiences.find((item) => item.id === value);
+                if (selected) audience.mutate(selected.criteria);
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Escolha um público" />
+              </SelectTrigger>
+              <SelectContent>
+                {savedAudiences.map((item) => (
+                  <SelectItem key={item.id} value={item.id}>
+                    {item.system ? `Nível · ${item.name}` : item.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <div className="rounded-lg bg-primary/10 px-3 py-2 text-sm text-primary">
+              <div>
+                <strong>{audience.isPending ? "…" : num(audienceTotal)}</strong> jogadores correspondem a este público
               </div>
-            )}
-            {!builder && <div className="rounded-lg bg-primary/10 px-3 py-2 text-sm text-primary">
-              <strong>{num(phones.length)}</strong> jogadores neste público
-            </div>}
+              {!audience.isPending && (
+                <div className="mt-0.5 text-xs text-muted-foreground">
+                  {num(phones.length)} têm telefone válido e receberão a campanha
+                </div>
+              )}
+            </div>
           </div>
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
@@ -2778,7 +2685,14 @@ function NewSmsCampaignDialog({
   );
 }
 
-function Campanhas() {
+*/
+
+/*
+ * Legado: a lista de campanhas foi consolidada em CampaignsHub, exibido pela
+ * rota /campanhas. Mantemos este bloco apenas temporariamente como referência
+ * de migração; ele não faz mais parte da interface nem do fluxo de navegação.
+ */
+/* function Campanhas() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const listFn = useServerFn(listScheduledSmsCampaigns);
@@ -2963,6 +2877,7 @@ function Campanhas() {
 }
 
 // ---------------- Fluxos ----------------
+*/
 
 export function SmsFlowsPanel() {
   const qc = useQueryClient();

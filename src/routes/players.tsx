@@ -29,10 +29,9 @@ import {
   Calendar as CalendarIcon,
   X,
   Eye,
-  FileSearch,
   MessageSquareText,
   RefreshCw,
-  Upload,
+  Loader2,
 } from "lucide-react";
 import { MessageCircle } from "lucide-react";
 import { Calendar } from "@/components/ui/calendar";
@@ -192,7 +191,6 @@ const gamificationLevelFilters: Array<{
   label: string;
   tone: string;
 }> = [
-  { id: "nivel_novice", level: "novice", label: "Novato", tone: "text-emerald-300" },
   { id: "nivel_bronze", level: "bronze", label: "Bronze", tone: "text-orange-400" },
   { id: "nivel_silver", level: "silver", label: "Prata", tone: "text-sky-200" },
   { id: "nivel_gold", level: "gold", label: "Ouro", tone: "text-amber-400" },
@@ -301,6 +299,8 @@ function PlayersPage() {
   const isDetailRoute =
     pathname.replace(/\/+$/, "") !== "/players" && pathname.startsWith("/players/");
   const [filter, setFilter] = useState("todos");
+  const [selectedSituation, setSelectedSituation] = useState<PlayerSituation | null>(null);
+  const [selectedLevel, setSelectedLevel] = useState<PaidLevelSlug | null>(null);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" } | null>(null);
@@ -574,12 +574,14 @@ function PlayersPage() {
   // Quando há ordenação por saldo/lucro precisamos do dataset completo (o
   // server faz no caminho computeClient). Ainda assim só baixa as cols slim.
   const fetchPlayersPage = useServerFn(getPlayersPage);
-  const { data: pageData, isLoading } = useQuery({
+  const { data: pageData, isLoading, isFetching: isFetchingPlayers } = useQuery({
     queryKey: [
       "players-page",
       page,
       pageSize,
       filter,
+      selectedSituation,
+      selectedLevel,
       search,
       sort?.key ?? null,
       sort?.dir ?? "desc",
@@ -596,6 +598,8 @@ function PlayersPage() {
           page,
           pageSize,
           filter,
+          gamificationStatus: selectedSituation,
+          gamificationLevel: selectedLevel,
           search,
           sortKey: sort?.key ?? defaultSortKey(filter),
           sortDir: sort?.dir ?? "desc",
@@ -802,12 +806,12 @@ function PlayersPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [filter, search, dateField, dateFromIso, dateToIso]);
+  }, [filter, selectedSituation, selectedLevel, search, dateField, dateFromIso, dateToIso]);
 
   // Limpa seleção quando muda filtro/busca — evita copiar IDs de outro conjunto.
   useEffect(() => {
     setSelectedIds(new Set());
-  }, [filter, search]);
+  }, [filter, selectedSituation, selectedLevel, search]);
 
   // Linhas / totais — vêm do path local (4 alertas) ou da página do servidor.
   const paged: Player[] = isLocalAlertFilter ? (localPagedSlice?.page ?? []) : (data ?? []);
@@ -1002,6 +1006,8 @@ function PlayersPage() {
       const res = await fetchFilteredExternalIds({
         data: {
           filter,
+          gamificationStatus: selectedSituation,
+          gamificationLevel: selectedLevel,
           search,
           idsIn: alertIdsForFilter,
           dateField: hasDateRange ? dateField : null,
@@ -1029,7 +1035,7 @@ function PlayersPage() {
   const fetchSmsAudience = useServerFn(getPlayersFilteredSmsAudience);
   const [buildingAudience, setBuildingAudience] = useState(false);
 
-  const selectedFilterLabel =
+  const baseFilterLabel =
     filters.find((f) => f.id === filter)?.label ??
     alertFilters.find((f) => f.id === filter)?.label ??
     gamificationStatusFilters.find((f) => f.id === filter)?.label ??
@@ -1042,11 +1048,75 @@ function PlayersPage() {
           ? "Não converteu"
           : filter);
 
+  const selectedFilterLabel = [
+    filter === "todos" ? null : baseFilterLabel,
+    selectedSituation ? situationBadgeMeta[selectedSituation].label : null,
+    selectedLevel ? levelBadgeMeta[selectedLevel].label : null,
+  ]
+    .filter(Boolean)
+    .join(" + ") || "Todos";
+
   const levelCounts = useMemo(() => {
     const map = new Map<LevelSlug, number>();
     for (const level of gamification?.levels ?? []) map.set(level.slug, level.count);
     return map;
   }, [gamification]);
+  const statusCounts: Record<string, number> = useMemo(() => {
+    const statuses: PlayerSituation[] = ["active", "cooling", "sleeping", "no_deposit"];
+    const countForStatus = (status: PlayerSituation) =>
+      selectedLevel
+        ? (gamification?.segmentCounts?.[status]?.[selectedLevel] ?? 0)
+        : (gamification?.totals?.[
+            status === "active"
+              ? "activeCount"
+              : status === "cooling"
+                ? "coolingCount"
+                : status === "sleeping"
+                  ? "sleepingCount"
+                  : "noDepositCount"
+          ] ?? 0);
+    return {
+      todos: gamification?.totals.players ?? totalCount,
+      ...Object.fromEntries(statuses.map((status) => [`situacao_${status}`, countForStatus(status)])),
+    };
+  }, [gamification, selectedLevel, totalCount]);
+
+  const contextualLevelCounts = useMemo(() => {
+    const map = new Map<LevelSlug, number>();
+    for (const item of gamificationLevelFilters) {
+      map.set(
+        item.level,
+        selectedSituation
+          ? (gamification?.segmentCounts?.[selectedSituation]?.[item.level] ?? 0)
+          : (levelCounts.get(item.level) ?? 0),
+      );
+    }
+    return map;
+  }, [gamification, levelCounts, selectedSituation]);
+
+  function resetGamificationFilters() {
+    setFilter("todos");
+    setSelectedSituation(null);
+    setSelectedLevel(null);
+  }
+
+  function selectSituation(situation: PlayerSituation) {
+    setFilter("todos");
+    setSelectedSituation((current) => (current === situation ? null : situation));
+    if (situation === "no_deposit") setSelectedLevel(null);
+  }
+
+  function selectLevel(level: PaidLevelSlug) {
+    setFilter("todos");
+    setSelectedLevel((current) => (current === level ? null : level));
+    if (selectedSituation === "no_deposit") setSelectedSituation(null);
+  }
+
+  function selectAdvancedFilter(nextFilter: string) {
+    setSelectedSituation(null);
+    setSelectedLevel(null);
+    setFilter(nextFilter);
+  }
 
   const playerGamificationSettings: PlayerGamificationSettings =
     gamification?.settings ?? DEFAULT_PLAYER_GAMIFICATION;
@@ -1108,6 +1178,8 @@ function PlayersPage() {
       const res = await fetchSmsAudience({
         data: {
           filter,
+          gamificationStatus: selectedSituation,
+          gamificationLevel: selectedLevel,
           search,
           idsIn: alertIdsForFilter,
           dateField: hasDateRange ? dateField : null,
@@ -1131,17 +1203,18 @@ function PlayersPage() {
 
   return (
     <div className="space-y-4">
-      <div className="space-y-1">
-        <h1 className="text-3xl font-bold tracking-normal">Jogadores</h1>
-        <p className="text-sm text-muted-foreground">
-          A base viva da casa. Cada jogador tem um nível, uma situação e pode virar público de SMS.
-        </p>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="space-y-1">
+          <h1 className="text-3xl font-bold tracking-normal">Jogadores</h1>
+          <p className="text-sm text-muted-foreground">
+            A base viva da casa. Cada jogador tem um nível, uma situação e pode virar público de SMS.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
         <Button
           variant="outline"
-          className="h-12 px-5"
+          size="sm"
+          className="h-9 px-3"
           onClick={exportCsv}
           disabled={filteredCount === 0}
         >
@@ -1149,25 +1222,18 @@ function PlayersPage() {
           Exportar CSV
         </Button>
         <Button
-          className="h-12 px-5"
+          size="sm"
+          className="h-9 px-3"
           disabled={filteredCount === 0 || buildingAudience}
           onClick={() => sendToSmsAudience("filter")}
         >
           <MessageSquareText className="h-4 w-4" />
           Usar como público
         </Button>
-        <Button variant="outline" className="h-12 px-5" disabled>
-          <Upload className="h-4 w-4" />
-          Importar base
-        </Button>
-        <Button variant="outline" className="h-12 px-5" disabled>
-          <FileSearch className="h-4 w-4" />
-          Procurar repetidos
-        </Button>
         <Button
           variant="outline"
           size="icon"
-          className="h-12 w-12"
+          className="h-9 w-9"
           onClick={() => {
             qc.invalidateQueries({ queryKey: ["players-page"] });
             void refetchGamification();
@@ -1178,29 +1244,30 @@ function PlayersPage() {
             className={`h-4 w-4 ${isLoading || isFetchingGamification ? "animate-spin" : ""}`}
           />
         </Button>
+        </div>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
         <Card className="border-border/70 bg-card/70">
-          <CardContent className="p-5">
+          <CardContent className="p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Base total
             </p>
-            <p className="mt-3 text-4xl font-bold text-primary">
+            <p className="mt-2 text-2xl font-bold text-primary">
               {(gamification?.totals.players ?? totalCount).toLocaleString("pt-BR")}
             </p>
-            <p className="mt-1 text-sm text-muted-foreground">jogadores acompanhados</p>
+            <p className="mt-1 text-xs text-muted-foreground">jogadores acompanhados</p>
           </CardContent>
         </Card>
         <Card className="border-border/70 bg-card/70">
-          <CardContent className="p-5">
+          <CardContent className="p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Já depositaram
             </p>
-            <p className="mt-3 text-4xl font-bold">
+            <p className="mt-2 text-2xl font-bold">
               {(gamification?.totals.depositors ?? 0).toLocaleString("pt-BR")}
             </p>
-            <p className="mt-1 text-sm text-muted-foreground">
+            <p className="mt-1 text-xs text-muted-foreground">
               {gamification?.totals.players
                 ? `${Math.round((gamification.totals.depositors / gamification.totals.players) * 100)}% da base`
                 : "aguardando dados"}
@@ -1208,21 +1275,21 @@ function PlayersPage() {
           </CardContent>
         </Card>
         <Card className="border-border/70 bg-card/70">
-          <CardContent className="p-5">
+          <CardContent className="p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Depositado no total
             </p>
-            <p className="mt-3 text-3xl font-bold">{brl(gamification?.totals.deposited ?? 0)}</p>
-            <p className="mt-1 text-sm text-muted-foreground">soma das fichas importadas</p>
+            <p className="mt-2 text-2xl font-bold">{brl(gamification?.totals.deposited ?? 0)}</p>
+            <p className="mt-1 text-xs text-muted-foreground">soma das fichas importadas</p>
           </CardContent>
         </Card>
         <Card className="border-border/70 bg-card/70">
-          <CardContent className="p-5">
+          <CardContent className="p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               VIPs esfriando
             </p>
-            <p className="mt-3 text-4xl font-bold">{gamification?.totals.stoppedVipCount ?? 0}</p>
-            <p className="mt-1 text-sm text-muted-foreground">Diamante para cima, parados</p>
+            <p className="mt-2 text-2xl font-bold">{gamification?.totals.stoppedVipCount ?? 0}</p>
+            <p className="mt-1 text-xs text-muted-foreground">Diamante para cima, parados</p>
           </CardContent>
         </Card>
       </div>
@@ -1237,122 +1304,46 @@ function PlayersPage() {
           {gamificationStatusFilters.map((item) => (
             <button
               key={item.id}
-              onClick={() => setFilter(item.id)}
-              className={`inline-flex h-12 items-center gap-3 rounded-lg border px-5 text-sm font-semibold transition-colors ${
-                filter === item.id
+              onClick={() =>
+                item.id === "todos"
+                  ? resetGamificationFilters()
+                  : selectSituation(item.id.replace("situacao_", "") as PlayerSituation)
+              }
+              className={`inline-flex h-10 items-center gap-2 rounded-lg border px-4 text-sm font-semibold transition-colors ${
+                (item.id === "todos"
+                  ? filter === "todos" && !selectedSituation && !selectedLevel
+                  : selectedSituation === item.id.replace("situacao_", ""))
                   ? "border-primary/70 bg-primary text-primary-foreground"
                   : "border-border/60 bg-card/70 hover:border-primary/50 hover:bg-primary/5"
               }`}
             >
-              <span className={filter === item.id ? "text-primary-foreground" : item.tone}>
+              <span className={(item.id === "todos" ? filter === "todos" && !selectedSituation && !selectedLevel : selectedSituation === item.id.replace("situacao_", "")) ? "text-primary-foreground" : item.tone}>
                 {item.label}
               </span>
-              {item.id === "todos" && (
-                <span className="text-muted-foreground">
-                  {(gamification?.totals.players ?? totalCount).toLocaleString("pt-BR")}
-                </span>
-              )}
+              <span className={(item.id === "todos" ? filter === "todos" && !selectedSituation && !selectedLevel : selectedSituation === item.id.replace("situacao_", "")) ? "text-primary-foreground/80" : "text-muted-foreground"}>
+                {(statusCounts[item.id] ?? 0).toLocaleString("pt-BR")}
+              </span>
             </button>
           ))}
           <span className="mx-1 hidden h-10 w-px bg-border/70 sm:block" />
           {gamificationLevelFilters.map((item) => (
             <button
               key={item.id}
-              onClick={() => setFilter(item.id)}
-              className={`inline-flex h-12 items-center gap-3 rounded-lg border px-5 text-sm font-semibold transition-colors ${
-                filter === item.id
+              onClick={() => selectLevel(item.level as PaidLevelSlug)}
+              className={`inline-flex h-10 items-center gap-2 rounded-lg border px-4 text-sm font-semibold transition-colors ${
+                selectedLevel === item.level
                   ? "border-primary/70 bg-primary text-primary-foreground"
                   : "border-border/60 bg-card/70 hover:border-primary/50 hover:bg-primary/5"
               }`}
             >
-              <span className={filter === item.id ? "text-primary-foreground" : item.tone}>
+              <span className={selectedLevel === item.level ? "text-primary-foreground" : item.tone}>
                 {item.label}
               </span>
               <span className="text-muted-foreground">
-                {(levelCounts.get(item.level) ?? 0).toLocaleString("pt-BR")}
+                {(contextualLevelCounts.get(item.level) ?? 0).toLocaleString("pt-BR")}
               </span>
             </button>
           ))}
-        </div>
-
-        <div className="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-center">
-          <div className="relative">
-            <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Nome, ID ou telefone"
-              className="h-14 rounded-xl bg-background/70 pl-11 text-base"
-            />
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Select
-              value={dateField}
-              onValueChange={(v) => setDateField(v as "created_at" | "ftd_em")}
-            >
-              <SelectTrigger className="h-11 w-[170px] bg-background/70">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ftd_em">FTD (1º depósito)</SelectItem>
-                <SelectItem value="created_at">Cadastro</SelectItem>
-              </SelectContent>
-            </Select>
-            <Popover open={dateOpen} onOpenChange={setDateOpen}>
-              <PopoverTrigger asChild>
-                <Button variant="outline" className="h-11 gap-2">
-                  <CalendarIcon className="h-4 w-4" />
-                  {hasDateRange && dateRange?.from
-                    ? dateRange.to && dateRange.to.toDateString() !== dateRange.from.toDateString()
-                      ? `${fmtBr(dateRange.from)} - ${fmtBr(dateRange.to)}`
-                      : fmtBr(dateRange.from)
-                    : "Selecionar período"}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent align="end" className="w-auto p-0 pointer-events-auto">
-                <div className="grid grid-cols-2 gap-2 border-b p-3">
-                  {[
-                    { label: "Hoje", days: 0 },
-                    { label: "7 dias", days: 6 },
-                    { label: "30 dias", days: 29 },
-                    { label: "90 dias", days: 89 },
-                  ].map((preset) => (
-                    <Button
-                      key={preset.label}
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => {
-                        const to = new Date();
-                        const from = new Date(Date.now() - preset.days * 86400000);
-                        setDateRange({ from, to });
-                        setDateOpen(false);
-                      }}
-                    >
-                      {preset.label}
-                    </Button>
-                  ))}
-                </div>
-                <Calendar
-                  mode="range"
-                  selected={dateRange}
-                  onSelect={setDateRange}
-                  numberOfMonths={2}
-                  initialFocus
-                />
-              </PopoverContent>
-            </Popover>
-            {hasDateRange && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setDateRange(undefined)}
-                className="h-11 gap-1"
-              >
-                <X className="h-3.5 w-3.5" />
-                Limpar
-              </Button>
-            )}
-          </div>
         </div>
 
         <details
@@ -1367,6 +1358,23 @@ function PlayersPage() {
             </span>
           </summary>
           <div className="space-y-3 border-t border-border/50 p-3">
+            <div className="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-center">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Nome, ID ou telefone" className="h-10 bg-background/70 pl-9" />
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Select value={dateField} onValueChange={(v) => setDateField(v as "created_at" | "ftd_em")}>
+                  <SelectTrigger className="h-10 w-[170px] bg-background/70"><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="ftd_em">FTD (1º depósito)</SelectItem><SelectItem value="created_at">Cadastro</SelectItem></SelectContent>
+                </Select>
+                <Popover open={dateOpen} onOpenChange={setDateOpen}>
+                  <PopoverTrigger asChild><Button variant="outline" className="h-10 gap-2"><CalendarIcon className="h-4 w-4" />{hasDateRange && dateRange?.from ? dateRange.to && dateRange.to.toDateString() !== dateRange.from.toDateString() ? `${fmtBr(dateRange.from)} - ${fmtBr(dateRange.to)}` : fmtBr(dateRange.from) : "Selecionar período"}</Button></PopoverTrigger>
+                  <PopoverContent align="end" className="w-auto p-0 pointer-events-auto"><div className="grid grid-cols-2 gap-2 border-b p-3">{[{ label: "Hoje", days: 0 }, { label: "7 dias", days: 6 }, { label: "30 dias", days: 29 }, { label: "90 dias", days: 89 }].map((preset) => <Button key={preset.label} size="sm" variant="ghost" onClick={() => { const to = new Date(); const from = new Date(Date.now() - preset.days * 86400000); setDateRange({ from, to }); setDateOpen(false); }}>{preset.label}</Button>)}</div><Calendar mode="range" selected={dateRange} onSelect={setDateRange} numberOfMonths={2} initialFocus /></PopoverContent>
+                </Popover>
+                {hasDateRange && <Button variant="ghost" size="sm" onClick={() => setDateRange(undefined)} className="h-10 gap-1"><X className="h-3.5 w-3.5" />Limpar</Button>}
+              </div>
+            </div>
         <div className="space-y-2">
           <button className="text-sm font-semibold text-primary">
             o que significa cada categoria? →
@@ -1377,7 +1385,7 @@ function PlayersPage() {
               .map((f) => (
                 <button
                   key={f.id}
-                  onClick={() => setFilter(f.id)}
+                  onClick={() => selectAdvancedFilter(f.id)}
                   className={`rounded-full border px-3 py-1 text-xs transition-colors ${
                     filter === f.id
                       ? "border-primary/60 bg-primary/15 text-primary"
@@ -1398,7 +1406,7 @@ function PlayersPage() {
               {alertFilters.map((f) => (
                 <button
                   key={f.id}
-                  onClick={() => setFilter(f.id)}
+                  onClick={() => selectAdvancedFilter(f.id)}
                   className={`rounded-full px-3 py-1 text-xs transition-colors border ${
                     filter === f.id
                       ? "border-amber-400/60 bg-amber-400/15 text-amber-300"
@@ -1415,7 +1423,7 @@ function PlayersPage() {
               ].map(([id, label]) => (
                 <button
                   key={id}
-                  onClick={() => setFilter(id)}
+                  onClick={() => selectAdvancedFilter(id)}
                   className={`rounded-full px-3 py-1 text-xs transition-colors border ${
                     filter === id
                       ? "border-sky-400/60 bg-sky-400/15 text-sky-300"
@@ -1643,11 +1651,7 @@ function PlayersPage() {
           <CardContent className="p-3 flex flex-wrap items-center gap-3 text-xs">
             <div className="text-muted-foreground">
               Filtro:{" "}
-              <span className="text-foreground font-medium">
-                {filters.find((f) => f.id === filter)?.label ??
-                  alertFilters.find((f) => f.id === filter)?.label ??
-                  filter}
-              </span>
+              <span className="text-foreground font-medium">{selectedFilterLabel}</span>
             </div>
             <div className="text-muted-foreground">
               Total: <span className="text-foreground font-medium">{filteredCount}</span>
@@ -1690,7 +1694,15 @@ function PlayersPage() {
       )}
 
       {!isPendingFilter && !isOutcomeFilter && (
-        <Card className="border-border/50 bg-card/60 backdrop-blur overflow-hidden">
+        <Card className="relative border-border/50 bg-card/60 backdrop-blur overflow-hidden">
+          {isFetchingPlayers && !isLoading && (
+            <div className="absolute inset-0 z-20 flex min-h-48 items-center justify-center bg-background/75 backdrop-blur-[2px]">
+              <div className="flex items-center gap-2 rounded-lg border border-border/70 bg-card px-4 py-2 text-sm font-medium shadow-xl">
+                <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                Atualizando jogadores…
+              </div>
+            </div>
+          )}
           <div className="overflow-x-auto">
             <Table className="min-w-[980px]">
               <TableHeader>

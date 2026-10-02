@@ -1,5 +1,5 @@
 import { useRouterState } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { AppSidebar } from "@/components/app-sidebar";
 import { ProviderAuthBanner } from "@/components/provider-auth-banner";
@@ -9,17 +9,17 @@ import { WhatsappNotifier } from "@/components/whatsapp-notifier";
 import { useGlobalRealtimeStatus } from "@/hooks/use-realtime-invalidate";
 
 const titles: Record<string, { title: string; subtitle: string }> = {
-  "/": { title: "Dashboard", subtitle: "Visão geral em tempo real" },
-  "/players": { title: "Players", subtitle: "Base completa de jogadores" },
-  "/midia-ltv": { title: "Mídia e LTV", subtitle: "ROI por criativo, campanha e público" },
+  "/": { title: "Início", subtitle: "Visão geral em tempo real" },
+  "/players": { title: "Jogadores", subtitle: "Base completa de jogadores" },
+  "/midia-ltv": { title: "Aquisição e LTV", subtitle: "ROI por criativo, campanha e público" },
   "/inteligencia": {
-    title: "Inteligência IA",
+    title: "Assistente IA",
     subtitle: "Pergunte qualquer coisa sobre seus players",
   },
-  "/treino-ia": { title: "Treino IA", subtitle: "Ensine a inteligência com exemplos reais" },
-  "/alertas": { title: "Alertas", subtitle: "Central de recuperação de receita" },
-  "/gamificacao": { title: "Gamificação", subtitle: "Níveis, VIPs parados e faixas por tenant" },
-  "/regras": { title: "Gamificação", subtitle: "Níveis, VIPs parados e faixas por tenant" },
+  "/treino-ia": { title: "Configurar IA", subtitle: "Ensine a inteligência com exemplos reais" },
+  "/alertas": { title: "Oportunidades", subtitle: "Jogadores que precisam de atenção" },
+  "/gamificacao": { title: "Níveis e fidelização", subtitle: "Classificação e comportamento dos jogadores" },
+  "/regras": { title: "Níveis e fidelização", subtitle: "Classificação e comportamento dos jogadores" },
   "/whatsapp": { title: "WhatsApp", subtitle: "Sessões, fluxos e inbox em tempo real" },
   "/sms": { title: "SMS", subtitle: "Disparos em massa e automações por SMS" },
   "/campanhas": { title: "Campanhas", subtitle: "Disparos segmentados e resultados" },
@@ -27,15 +27,39 @@ const titles: Record<string, { title: string; subtitle: string }> = {
   "/email": { title: "Email", subtitle: "Campanhas e fluxos de email" },
   "/ligacoes": { title: "Ligações", subtitle: "Discador e call center" },
   "/eventos": { title: "Eventos", subtitle: "Timeline de atividades em tempo real" },
-  "/webhooks": { title: "Webhooks", subtitle: "Integração com sua casa de aposta" },
+  "/webhooks": { title: "Integrações", subtitle: "Conexão com sua plataforma de apostas" },
   "/configuracoes": { title: "Configurações", subtitle: "Preferências da plataforma" },
   "/admin": { title: "Super Admin", subtitle: "Usuários, métricas e billing da plataforma" },
-  "/tenants": { title: "Tenants", subtitle: "Conta, usuarios, saldo e auditoria" },
+  "/tenants": { title: "Conta e equipe", subtitle: "Usuários, saldo e auditoria" },
 };
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  const [sidebarPreferenceLoaded, setSidebarPreferenceLoaded] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 767px)");
+    const syncViewport = () => setIsMobile(media.matches);
+    syncViewport();
+    media.addEventListener("change", syncViewport);
+    const savedPreference = window.localStorage.getItem("betleads:sidebar-collapsed");
+    if (savedPreference !== null) setSidebarCollapsed(savedPreference === "true");
+    setSidebarPreferenceLoaded(true);
+    return () => media.removeEventListener("change", syncViewport);
+  }, []);
+
+  useEffect(() => {
+    if (sidebarPreferenceLoaded && !isMobile) {
+      window.localStorage.setItem("betleads:sidebar-collapsed", String(sidebarCollapsed));
+    }
+  }, [isMobile, sidebarCollapsed, sidebarPreferenceLoaded]);
+
+  useEffect(() => {
+    setMobileSidebarOpen(false);
+  }, [pathname]);
   const key = Object.keys(titles).find((k) =>
     k === "/" ? pathname === "/" : pathname.startsWith(k),
   );
@@ -52,20 +76,38 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex min-h-screen w-full bg-app-gradient">
-      <AppSidebar collapsed={sidebarCollapsed} onCollapsedChange={setSidebarCollapsed} />
+      {isMobile && mobileSidebarOpen && (
+        <button
+          type="button"
+          aria-label="Fechar menu"
+          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-[2px] md:hidden"
+          onClick={() => setMobileSidebarOpen(false)}
+        />
+      )}
+      <AppSidebar
+        collapsed={isMobile ? false : sidebarCollapsed}
+        onCollapsedChange={setSidebarCollapsed}
+        mobile={isMobile}
+        mobileOpen={mobileSidebarOpen}
+        onMobileClose={() => setMobileSidebarOpen(false)}
+      />
       <div
         aria-hidden="true"
-        className="shrink-0 transition-[width] duration-200 ease-out"
+        className="hidden shrink-0 transition-[width] duration-200 ease-out md:block"
         style={{ width: sidebarCollapsed ? 60 : 244 }}
       />
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-border/60 bg-background/70 px-4 backdrop-blur-xl sm:px-5">
           <SidebarToggle
-            collapsed={sidebarCollapsed}
-            onToggle={() => setSidebarCollapsed((collapsed) => !collapsed)}
+            collapsed={isMobile ? !mobileSidebarOpen : sidebarCollapsed}
+            onToggle={() =>
+              isMobile
+                ? setMobileSidebarOpen((open) => !open)
+                : setSidebarCollapsed((collapsed) => !collapsed)
+            }
           />
           <div className="flex min-w-0 flex-col leading-tight">
-            <h1 className="truncate text-base font-semibold tracking-tight">{meta.title}</h1>
+            <p className="truncate text-base font-semibold tracking-tight">{meta.title}</p>
             <p className="hidden truncate text-xs text-muted-foreground sm:block">
               {meta.subtitle}
             </p>
@@ -77,7 +119,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         </header>
         <ProviderAuthBanner />
         <WhatsappNotifier />
-        <main className="flex-1 overflow-x-hidden p-4 animate-fade-in sm:p-6">
+        <main aria-label={meta.title} className="flex-1 overflow-x-hidden p-4 animate-fade-in sm:p-6">
           <TenantStatusGate>{children}</TenantStatusGate>
         </main>
       </div>

@@ -222,7 +222,9 @@ function TenantsPage() {
           <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-lg bg-primary/15 text-primary">
             <Building2 className="h-6 w-6" />
           </div>
-          <h1 className="text-3xl font-bold tracking-tight">Tenants</h1>
+          <h1 className="text-3xl font-bold tracking-tight">
+            {consoleData?.isSuperAdmin ? "Contas" : "Conta e equipe"}
+          </h1>
           <p className="text-muted-foreground">
             Gestão de contas, usuários, saldo, relatórios e auditoria da operação.
           </p>

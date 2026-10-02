@@ -1094,7 +1094,7 @@ export const getSmsDashboard = createServerFn({ method: "POST" })
 
     // Respeita o marco "zerar dashboards"
     const { readResetAtAdmin } = await import("@/lib/dashboard-settings.functions");
-    const resetAt = await readResetAtAdmin();
+    const resetAt = await readResetAtAdmin(tenantId);
     if (resetAt > sinceIso) sinceIso = resetAt;
     if (resetAt > todayIso) {
       todayIso = resetAt;
@@ -1658,12 +1658,14 @@ export const scheduleBulkSms = createServerFn({ method: "POST" })
 export const listScheduledSmsCampaigns = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
+    const tenantId = await resolveCurrentTenantId(context.supabase);
     const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
     const { data, error } = await context.supabase
       .from("sms_campaigns")
       .select(
         "id, name, scheduled_at, status, total_count, sent_count, failed_count, last_error, created_at, updated_at",
       )
+      .eq("tenant_id", tenantId)
       .gte("created_at", since)
       .order("scheduled_at", { ascending: true })
       .limit(200);

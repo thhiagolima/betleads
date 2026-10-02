@@ -13,6 +13,7 @@ import appCss from "../styles.css?url";
 import { AppLayout } from "@/components/app-layout";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthGate } from "@/components/auth-gate";
+import { SystemDialogHost } from "@/components/system-dialog-host";
 
 function NotFoundComponent() {
   return (
@@ -136,6 +137,7 @@ function RootComponent() {
           <Outlet />
         </AppLayout>
       </AuthGate>
+      <SystemDialogHost />
       <Toaster />
     </QueryClientProvider>
   );

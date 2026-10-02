@@ -21,6 +21,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/ui-premium/page-header";
 import {
   Select,
   SelectContent,
@@ -45,7 +46,7 @@ export const Route = createFileRoute("/gamificacao")({
   head: () => ({
     meta: [
       { title: "Gamificacao - BetLeads" },
-      { name: "description", content: "Niveis de jogadores, faixas e ranking por tenant." },
+      { name: "description", content: "Níveis de jogadores, faixas e ranking da sua operação." },
     ],
   }),
 });
@@ -77,6 +78,7 @@ function GamificacaoPage() {
   const [sort, setSort] = useState<"deposit" | "stopped" | "name">("deposit");
   const [onlyStopped, setOnlyStopped] = useState(false);
   const [page, setPage] = useState(1);
+  const [activeTab, setActiveTab] = useState<"overview" | "rules" | "campaigns" | "players" | "settings">("overview");
 
   useEffect(() => {
     if (data) setDraft(toDraft(data));
@@ -140,37 +142,63 @@ function GamificacaoPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-3xl font-bold tracking-normal">Gamificacao</h1>
-        <p className="mt-2 max-w-4xl text-sm text-muted-foreground">
-          Cada jogador ganha um nivel pelo total que ja depositou. Os melhores ficam visiveis e viram publico de campanha.
-        </p>
-      </div>
+      <PageHeader
+        title="Níveis e fidelização"
+        subtitle="Cada jogador ganha um nível pelo total depositado. Os melhores ficam visíveis e podem virar público de campanha."
+        icon={<Trophy className="h-5 w-5 text-primary-foreground" />}
+        actions={
+          <>
+            <Button variant="outline" size="sm" asChild>
+              <Link to="/campanhas">
+                <MessageSquareText className="h-4 w-4" />
+                Criar campanha
+              </Link>
+            </Button>
+            <Button variant="outline" size="icon" className="h-9 w-9" onClick={() => refetch()} disabled={isFetching} aria-label="Atualizar dados">
+              <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
+            </Button>
+          </>
+        }
+      />
 
-      <div className="flex flex-wrap items-center gap-3">
-        <Button variant="outline" asChild className="h-12 px-5">
-          <Link to="/sms" hash="campanhas">
-            <MessageSquareText className="h-4 w-4" />
-            Mensagens por evento
-          </Link>
-        </Button>
-        <Button variant="outline" size="icon" className="h-12 w-12" onClick={() => refetch()} disabled={isFetching}>
-          <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
-        </Button>
-        <div className="inline-flex h-10 items-center gap-2 rounded-md border border-border/60 bg-card/70 px-4 text-sm text-muted-foreground">
-          <WalletCards className="h-4 w-4" />
-          <span className="font-semibold text-foreground">SMS</span>
-          creditos conectados
-        </div>
-      </div>
-
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
-        {data.levels.map((level) => (
-          <LevelCard key={level.slug} level={level} />
+      <div className="inline-flex flex-wrap items-center gap-1 rounded-full bg-muted/70 p-1">
+        {([
+          ["overview", "Visão geral"], ["rules", "Regras"], ["campaigns", "Campanhas"],
+          ["players", "Jogadores"], ["settings", "Configurações"],
+        ] as const).map(([value, label]) => (
+          <Button
+            key={value}
+            variant={activeTab === value ? "secondary" : "ghost"}
+            className="h-9 rounded-full px-4 text-sm"
+            onClick={() => setActiveTab(value)}
+          >
+            {label}
+          </Button>
         ))}
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[1fr_0.7fr]">
+      {activeTab === "rules" && (
+        <Card className="border-border/50 bg-card/70"><CardContent className="space-y-4 p-5">
+          <h2 className="text-lg font-semibold">O que fazer com isso</h2>
+          <p className="text-sm text-muted-foreground">Nível é valor; situação é tempo sem depositar.</p>
+          <p className="text-sm"><strong>Black VIP e Diamante que pararam</strong> — atendimento humano, não disparo.</p>
+          <p className="text-sm"><strong>Novato há mais de 7 dias</strong> — público de oferta de primeiro depósito.</p>
+        </CardContent></Card>
+      )}
+      {(activeTab === "campaigns" || activeTab === "settings") && (
+        <Card className="border-border/50 bg-card/70"><CardContent className="p-5">
+          <h2 className="text-lg font-semibold">{activeTab === "campaigns" ? "Públicos de campanha" : "Configurações"}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Use as faixas e situações abaixo para criar campanhas segmentadas.</p>
+        </CardContent></Card>
+      )}
+
+      {activeTab !== "players" && <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+        {data.levels.map((level) => (
+          <LevelCard key={level.slug} level={level} />
+        ))}
+      </div>}
+
+      {activeTab === "overview" && <div className="grid gap-4 xl:grid-cols-[1fr_0.7fr]">
         <Card className="overflow-hidden border-border/50 bg-card/70">
           <div className="border-b border-border/50 p-5">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -287,9 +315,9 @@ function GamificacaoPage() {
             </CardContent>
           </Card>
         </div>
-      </div>
+      </div>}
 
-      <Card className="overflow-hidden border-border/50 bg-card/70">
+      {activeTab === "players" && <Card className="overflow-hidden border-border/50 bg-card/70">
         <div className="border-b border-border/50 p-5">
           <h2 className="text-lg font-semibold">Jogadores por nivel</h2>
           <p className="mt-1 text-sm text-muted-foreground">Sem filtro, e o ranking da casa por total depositado</p>
@@ -384,7 +412,7 @@ function GamificacaoPage() {
             </Button>
           </div>
         </CardContent>
-      </Card>
+      </Card>}
     </div>
   );
 }

@@ -27,7 +27,7 @@ export function TenantStatusGate({ children }: { children: ReactNode }) {
         <CardContent className="flex items-center gap-3 p-5 text-sm text-muted-foreground">
           <div className="h-9 w-9 animate-pulse rounded-lg bg-primary/10" />
           <div>
-            <p className="font-medium text-foreground">Validando tenant</p>
+            <p className="font-medium text-foreground">Validando sua conta</p>
             <p>Conferindo status da conta antes de abrir a operacao.</p>
           </div>
         </CardContent>
@@ -38,8 +38,8 @@ export function TenantStatusGate({ children }: { children: ReactNode }) {
   if (isError) {
     return (
       <BlockedTenantCard
-        title="Nao foi possivel validar este tenant"
-        description="Por seguranca, a area operacional fica bloqueada ate a validacao responder."
+        title="Não foi possível validar sua conta"
+        description="Por segurança, a área operacional fica bloqueada até a validação responder."
         icon={<AlertTriangle className="h-5 w-5 text-amber-300" />}
         action={
           <Button variant="outline" disabled={isFetching} onClick={() => void refetch()}>
@@ -54,12 +54,12 @@ export function TenantStatusGate({ children }: { children: ReactNode }) {
     const statusLabel = data.tenant?.status === "canceled" ? "cancelado" : "suspenso";
     return (
       <BlockedTenantCard
-        title={`Tenant ${statusLabel}`}
-        description="A conta esta em modo bloqueado. Areas operacionais ficam indisponiveis ate a regularizacao."
+        title={`Conta ${statusLabel}`}
+        description="Sua conta está bloqueada. As áreas operacionais voltam a ficar disponíveis após a regularização."
         icon={<LockKeyhole className="h-5 w-5 text-rose-300" />}
         action={
           <Button asChild>
-            <Link to="/tenants">Abrir meu tenant</Link>
+            <Link to="/tenants">Abrir minha conta</Link>
           </Button>
         }
       />
@@ -96,7 +96,7 @@ function BlockedTenantCard({
           <div className="flex items-center justify-between gap-3 border-t border-border/60 pt-4">
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Building2 className="h-4 w-4" />
-              Gerencia de tenant e auditoria seguem acessiveis.
+              Gestão da conta e auditoria continuam disponíveis.
             </div>
             {action}
           </div>

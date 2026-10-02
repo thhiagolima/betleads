@@ -2,15 +2,18 @@
 // timestamp a partir do qual as 4 dashboards contam.
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { resolveCurrentTenantId } from "@/lib/tenant-access.server";
 
 const EPOCH = "1970-01-01T00:00:00Z";
 
 export const getDashboardResetAt = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<{ reset_at: string }> => {
+    const tenantId = await resolveCurrentTenantId(context.supabase);
     const { data } = await context.supabase
       .from("dashboard_settings")
       .select("reset_at")
+      .eq("tenant_id", tenantId)
       .eq("id", "global")
       .maybeSingle();
     return { reset_at: (data?.reset_at as string) ?? EPOCH };
@@ -19,6 +22,7 @@ export const getDashboardResetAt = createServerFn({ method: "GET" })
 export const resetDashboards = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<{ reset_at: string }> => {
+    const tenantId = await resolveCurrentTenantId(context.supabase);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     // Verifica admin
     const { data: isAdmin } = await supabaseAdmin.rpc("has_role", {
@@ -29,17 +33,27 @@ export const resetDashboards = createServerFn({ method: "POST" })
     const now = new Date().toISOString();
     const { error } = await supabaseAdmin
       .from("dashboard_settings")
-      .upsert({ id: "global", reset_at: now, updated_at: now, updated_by: context.userId });
+      .upsert(
+        {
+          tenant_id: tenantId,
+          id: "global",
+          reset_at: now,
+          updated_at: now,
+          updated_by: context.userId,
+        },
+        { onConflict: "tenant_id,id" },
+      );
     if (error) throw new Error(error.message);
     return { reset_at: now };
   });
 
 /** Helper para uso dentro de outras server fns. Não exporta como server fn. */
-export async function readResetAtAdmin(): Promise<string> {
+export async function readResetAtAdmin(tenantId: string): Promise<string> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { data } = await supabaseAdmin
     .from("dashboard_settings")
     .select("reset_at")
+    .eq("tenant_id", tenantId)
     .eq("id", "global")
     .maybeSingle();
   return (data?.reset_at as string) ?? EPOCH;

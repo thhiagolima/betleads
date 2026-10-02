@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/table";
 import { listCallScripts, deleteCallScript } from "@/lib/calls.functions";
 import { ScriptFormDialog } from "./script-form-dialog";
+import { requestConfirmation } from "@/components/system-dialog-host";
 
 export function ScriptsTab() {
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -120,8 +121,14 @@ export function ScriptsTab() {
                     <Button
                       size="icon"
                       variant="ghost"
-                      onClick={() => {
-                        if (confirm(`Excluir "${s.name}"?`)) delMut.mutate(s.id);
+                      onClick={async () => {
+                        const confirmed = await requestConfirmation({
+                          title: `Excluir “${s.name}”?`,
+                          description: "O template de fala será removido e não poderá ser usado em novos fluxos.",
+                          confirmLabel: "Excluir template",
+                          destructive: true,
+                        });
+                        if (confirmed) delMut.mutate(s.id);
                       }}
                     >
                       <Trash2 className="h-4 w-4 text-destructive" />

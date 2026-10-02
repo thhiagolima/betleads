@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { PageHeader } from "@/components/ui-premium/page-header";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -160,17 +161,11 @@ function AutomacoesPage() {
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Rocket className="h-6 w-6 text-primary" /> Automações — Ativação de fluxos
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Identifica o estado de cada lead e enfileira nos fluxos corretos de SMS, Email, Ligação
-            e WhatsApp, respeitando prioridade, cooldown e limite diário.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
+      <PageHeader
+        title="Automações"
+        subtitle="Organize os fluxos de SMS, e-mail, ligação e WhatsApp com prioridade e limite diário."
+        icon={<Rocket className="h-5 w-5 text-primary-foreground" />}
+        actions={<div className="flex items-center gap-2">
           <Badge variant={paused ? "destructive" : "default"}>{paused ? "Pausado" : "Ativo"}</Badge>
           <Button variant="outline" size="sm" onClick={() => togglePause.mutate(!paused)}>
             {paused ? (
@@ -183,8 +178,8 @@ function AutomacoesPage() {
               </>
             )}
           </Button>
-        </div>
-      </div>
+        </div>}
+      />
 
       <Card id="fluxos" className="border-border/70 bg-card/70">
         <CardHeader>

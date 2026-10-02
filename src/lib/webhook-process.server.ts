@@ -18,11 +18,17 @@ export async function processWebhookEvent(
 ): Promise<Response> {
   let logId = options.existingLogId;
   if (!logId) {
-    const { data: logRow } = await sb
+    const { data: logRow, error: logError } = await sb
       .from("webhook_logs")
       .insert({ evento, payload, status: "recebido", tenant_id: tenantId })
       .select("id")
       .single();
+    if (logError) {
+      return Response.json(
+        { ok: false, evento, error: `Falha ao registrar webhook: ${logError.message}` },
+        { status: 503 },
+      );
+    }
     logId = logRow?.id as string | undefined;
   }
 
@@ -121,7 +127,7 @@ export async function processWebhookEvent(
         signupAttribution.fbclid ? "fb" : undefined,
       ) ?? null;
     const metodo =
-      (data.paymentMethod as string) ?? (data.metodo as string) ?? (data.method as string) ?? null;
+      firstString(data.paymentMethod, data.methodCode, data.metodo, data.method) ?? null;
     const transactionId =
       firstString(
         data.transactionId,
@@ -129,22 +135,32 @@ export async function processWebhookEvent(
         data.referenceId,
         data.operationId,
         subject.type === "payment_transaction" ? subject.id : undefined,
+        payload.eventId,
+        payload.event_id,
+        payload.deliveryId,
       ) ?? null;
+    const providerEventId =
+      firstString(payload.eventId, payload.event_id, data.eventId, data.event_id) ?? null;
+    const providerStatus = firstString(data.status, payload.status) ?? null;
 
     let playerId: string | null = null;
 
     if (externalId) {
-      const { data: existing } = await sb
+      const { data: existing, error: existingError } = await sb
         .from("players")
         .select("id")
         .eq("player_external_id", externalId)
         .eq("tenant_id", tenantId)
         .maybeSingle();
+      if (existingError) {
+        await markLog("erro", { step: "find_player", error: existingError.message });
+        return Response.json({ ok: false, evento, error: existingError.message }, { status: 200 });
+      }
 
       if (existing) {
         playerId = existing.id;
-      } else if (signupEvent) {
-        const { data: created } = await sb
+      } else {
+        const { data: created, error: createError } = await sb
           .from("players")
           .insert({
             nome,
@@ -163,29 +179,27 @@ export async function processWebhookEvent(
           .select("id")
           .single();
         playerId = created?.id ?? null;
+        // Cadastro, login e evento financeiro podem chegar simultaneamente.
+        // Se outro request criou o player entre o SELECT e o INSERT, recupera
+        // a linha vencedora em vez de classificar o evento como sem_player.
+        if (createError) {
+          const { data: concurrentPlayer, error: retryError } = await sb
+            .from("players")
+            .select("id")
+            .eq("player_external_id", externalId)
+            .eq("tenant_id", tenantId)
+            .maybeSingle();
+          playerId = concurrentPlayer?.id ?? null;
+          if (!playerId) {
+            await markLog("erro", {
+              step: "create_player",
+              error: createError.message,
+              retry_error: retryError?.message,
+            });
+            return Response.json({ ok: false, evento, error: createError.message }, { status: 200 });
+          }
+        }
       }
-    }
-
-    if (!playerId && externalId && !signupEvent) {
-      const { data: created } = await sb
-        .from("players")
-        .insert({
-          nome,
-          email,
-          telefone,
-          origem,
-          ...utm,
-          player_external_id: externalId,
-          status: "ativo",
-          affiliate_id: affiliateId,
-          expert: expertNome,
-          tenant_id: tenantId,
-          created_at: eventIso,
-          updated_at: eventIso,
-        })
-        .select("id")
-        .single();
-      playerId = created?.id ?? null;
     }
 
     if (playerId) {
@@ -225,82 +239,54 @@ export async function processWebhookEvent(
       const ACTIVITY_EVENTS = new Set([
         "login",
         "jogo-iniciado",
+        "deposito-pendente",
         "deposito-aprovado",
-        "saque-solicitado",
+        "deposito-falhou",
+        "saque-pendente",
         "saque-aprovado",
+        "saque-concluido",
+        "saque-falhou",
       ]);
       if (ACTIVITY_EVENTS.has(evento)) updates.ultimo_login = eventIso;
       if (evento === "jogo-iniciado") updates.ultimo_jogo = eventIso;
 
-      if (evento === "deposito-aprovado" && valor) {
-        const { data: inserted, error: depErr } = await sb
-          .from("deposits")
-          .insert({
-            player_id: playerId,
-            valor,
-            status: "aprovado",
-            metodo,
-            external_id: transactionId,
-            tenant_id: tenantId,
-            created_at: eventIso,
-          })
-          .select("id")
-          .maybeSingle();
-        if (depErr && depErr.code !== "23505") {
-          await markLog("erro", { step: "insert_deposit", error: depErr.message });
-          return Response.json({ ok: false, evento, error: depErr.message }, { status: 200 });
-        }
-        if (inserted?.id) {
-          const { data: p } = await sb.from("players").select("ftd_em").eq("id", playerId).single();
-          const { error: incErr } = await sb.rpc("increment_player_totals", {
-            p_player_id: playerId,
-            p_delta_deposito: valor,
-            p_delta_saque: 0,
-            p_set_ultimo_deposito: true,
-            p_set_ultimo_saque: false,
-            p_set_ftd: !p?.ftd_em,
+      const financialEvent = resolveFinancialEvent(evento);
+      if (financialEvent && valor) {
+        if (!transactionId) {
+          await markLog("erro", {
+            step: "financial_transaction",
+            error: "missing_transaction_id",
+            provider_event: payload.event,
           });
-          if (incErr) {
-            await markLog("erro", { step: "increment_totals", error: incErr.message });
-            return Response.json({ ok: false, evento, error: incErr.message }, { status: 200 });
-          }
-          updates.ultimo_deposito = eventIso;
-          if (!p?.ftd_em) updates.ftd_em = eventIso;
+          return Response.json(
+            { ok: false, evento, error: "ID da transação não encontrado" },
+            { status: 200 },
+          );
         }
-      }
-
-      if ((evento === "saque-aprovado" || evento === "saque-concluido") && valor) {
-        const { data: inserted, error: wErr } = await sb
-          .from("withdrawals")
-          .insert({
-            player_id: playerId,
-            valor,
-            status: "aprovado",
-            metodo,
-            external_id: transactionId,
-            tenant_id: tenantId,
-            created_at: eventIso,
-          })
-          .select("id")
-          .maybeSingle();
-        if (wErr && wErr.code !== "23505") {
-          await markLog("erro", { step: "insert_withdrawal", error: wErr.message });
-          return Response.json({ ok: false, evento, error: wErr.message }, { status: 200 });
-        }
-        if (inserted?.id) {
-          const { error: incErr } = await sb.rpc("increment_player_totals", {
-            p_player_id: playerId,
-            p_delta_deposito: 0,
-            p_delta_saque: valor,
-            p_set_ultimo_deposito: false,
-            p_set_ultimo_saque: true,
-            p_set_ftd: false,
+        const { error: financialError } = await sb.rpc("record_financial_webhook_event", {
+          p_tenant_id: tenantId,
+          p_player_id: playerId,
+          p_kind: financialEvent.kind,
+          p_external_id: transactionId,
+          p_event_id: providerEventId,
+          p_amount: valor,
+          p_status: financialEvent.status,
+          p_provider_status: providerStatus,
+          p_method: metodo,
+          p_event_at: eventIso,
+          p_payload: payload,
+        });
+        if (financialError) {
+          await markLog("erro", {
+            step: "record_financial_transaction",
+            kind: financialEvent.kind,
+            status: financialEvent.status,
+            error: financialError.message,
           });
-          if (incErr) {
-            await markLog("erro", { step: "increment_totals", error: incErr.message });
-            return Response.json({ ok: false, evento, error: incErr.message }, { status: 200 });
-          }
-          updates.ultimo_saque = eventIso;
+          return Response.json(
+            { ok: false, evento, error: financialError.message },
+            { status: 200 },
+          );
         }
       }
 
@@ -495,7 +481,18 @@ export async function processWebhookEvent(
         }
       }
 
-      await sb.from("players").update(updates).eq("id", playerId);
+      const { error: playerUpdateError } = await sb
+        .from("players")
+        .update(updates)
+        .eq("id", playerId)
+        .eq("tenant_id", tenantId);
+      if (playerUpdateError) {
+        await markLog("erro", { step: "update_player", error: playerUpdateError.message });
+        return Response.json(
+          { ok: false, evento, error: playerUpdateError.message },
+          { status: 200 },
+        );
+      }
       if (signupEvent) {
         await savePlayerAttribution(sb, {
           tenantId,
@@ -509,14 +506,96 @@ export async function processWebhookEvent(
         });
       }
 
-      await sb.from("events").insert({
-        player_id: playerId,
-        tipo: evento,
-        valor,
-        metadata: payload,
-        tenant_id: tenantId,
-        created_at: eventIso,
-      });
+      if (evento === "login") {
+        let sessionExists = false;
+        if (providerEventId) {
+          const { data: existingSession, error: existingSessionError } = await sb
+            .from("sessions")
+            .select("id")
+            .eq("tenant_id", tenantId)
+            .eq("provider_event_id", providerEventId)
+            .maybeSingle();
+          if (existingSessionError) {
+            await markLog("erro", { step: "find_session", error: existingSessionError.message });
+            return Response.json({ ok: false, evento, error: existingSessionError.message }, { status: 200 });
+          }
+          sessionExists = !!existingSession;
+        }
+        if (!sessionExists) {
+          const { error: sessionInsertError } = await sb.from("sessions").insert({
+            tenant_id: tenantId,
+            player_id: playerId,
+            iniciado_em: eventIso,
+            provider_event_id: providerEventId,
+          });
+          if (sessionInsertError && sessionInsertError.code !== "23505") {
+            await markLog("erro", { step: "insert_session", error: sessionInsertError.message });
+            return Response.json({ ok: false, evento, error: sessionInsertError.message }, { status: 200 });
+          }
+        }
+      } else if (evento === "logout") {
+        const { data: openSession, error: openSessionError } = await sb
+          .from("sessions")
+          .select("id,iniciado_em")
+          .eq("tenant_id", tenantId)
+          .eq("player_id", playerId)
+          .is("encerrado_em", null)
+          .order("iniciado_em", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (openSessionError) {
+          await markLog("erro", { step: "find_open_session", error: openSessionError.message });
+          return Response.json({ ok: false, evento, error: openSessionError.message }, { status: 200 });
+        }
+        if (openSession) {
+          const duration = Math.max(
+            0,
+            Math.floor((new Date(eventIso).getTime() - new Date(openSession.iniciado_em).getTime()) / 1000),
+          );
+          const { error: closeSessionError } = await sb
+            .from("sessions")
+            .update({ encerrado_em: eventIso, duracao_segundos: duration })
+            .eq("id", openSession.id)
+            .eq("tenant_id", tenantId);
+          if (closeSessionError) {
+            await markLog("erro", { step: "close_session", error: closeSessionError.message });
+            return Response.json({ ok: false, evento, error: closeSessionError.message }, { status: 200 });
+          }
+        }
+      }
+
+      let eventExists = false;
+      if (providerEventId) {
+        const { data: existingEvent, error: existingEventError } = await sb
+          .from("events")
+          .select("id")
+          .eq("tenant_id", tenantId)
+          .eq("provider_event_id", providerEventId)
+          .maybeSingle();
+        if (existingEventError) {
+          await markLog("erro", { step: "find_event", error: existingEventError.message });
+          return Response.json({ ok: false, evento, error: existingEventError.message }, { status: 200 });
+        }
+        eventExists = !!existingEvent;
+      }
+      if (!eventExists) {
+        const { error: eventInsertError } = await sb.from("events").insert({
+          player_id: playerId,
+          tipo: evento,
+          valor,
+          metadata: payload,
+          tenant_id: tenantId,
+          provider_event_id: providerEventId,
+          created_at: eventIso,
+        });
+        if (eventInsertError && eventInsertError.code !== "23505") {
+          await markLog("erro", { step: "insert_event", error: eventInsertError.message });
+          return Response.json(
+            { ok: false, evento, error: eventInsertError.message },
+            { status: 200 },
+          );
+        }
+      }
 
       // Entrada principal do CRM EXPERT: ao receber um cadastro de lead
       // pertencente ao expert (já validado pelo espelhamento via
@@ -789,6 +868,28 @@ function isSignupEvent(evento: string, payload: Record<string, unknown>): boolea
   return evento === "cadastro" || stringFrom(payload.event) === "auth.signup.success";
 }
 
+function resolveFinancialEvent(
+  evento: string,
+): { kind: "deposit" | "withdrawal"; status: "pendente" | "aprovado" | "falhou" } | null {
+  switch (evento) {
+    case "deposito-pendente":
+      return { kind: "deposit", status: "pendente" };
+    case "deposito-aprovado":
+      return { kind: "deposit", status: "aprovado" };
+    case "deposito-falhou":
+      return { kind: "deposit", status: "falhou" };
+    case "saque-pendente":
+      return { kind: "withdrawal", status: "pendente" };
+    case "saque-aprovado":
+    case "saque-concluido":
+      return { kind: "withdrawal", status: "aprovado" };
+    case "saque-falhou":
+      return { kind: "withdrawal", status: "falhou" };
+    default:
+      return null;
+  }
+}
+
 function resolveExternalId(
   evento: string,
   payload: Record<string, unknown>,
@@ -1021,9 +1122,19 @@ function isValidCpf(digits: string): boolean {
 
 function extractCpf(data: Record<string, unknown>): string | null {
   const pix = (data.pixData ?? data.pix_data ?? {}) as Record<string, unknown>;
-  const keyType = String(pix.keyType ?? pix.key_type ?? "").toLowerCase();
+  const metadata = asRecord(data.metadata);
+  const withdrawPix = asRecord(metadata.withdrawPix ?? metadata.withdraw_pix);
+  const keyType = String(
+    pix.keyType ?? pix.key_type ?? withdrawPix.keyType ?? withdrawPix.key_type ?? data.pixKeyType ?? "",
+  ).toLowerCase();
   const candidates: unknown[] = [];
-  if (keyType === "cpf") candidates.push(pix.keyValue ?? pix.key_value);
+  if (keyType === "cpf") {
+    candidates.push(
+      pix.keyValue ?? pix.key_value,
+      data.withdrawPixKey,
+      data.withdraw_pix_key,
+    );
+  }
   candidates.push(data.cpf, data.CPF);
   for (const c of candidates) {
     if (typeof c !== "string" && typeof c !== "number") continue;
@@ -1048,6 +1159,8 @@ function resolveEventTimestamp(
     data.createdAt,
     data.created_at,
     data.timestamp,
+    payload.occurredAt,
+    payload.occurred_at,
     payload.timestamp,
     payload.createdAt,
     payload.created_at,

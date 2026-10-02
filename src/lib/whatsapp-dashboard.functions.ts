@@ -69,12 +69,16 @@ export const getWhatsappDashboard = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => RangeSchema.parse(input ?? {}))
   .handler(async ({ context, data }): Promise<WhatsappDashboard> => {
     const { supabase } = context;
+    const { data: tenantRow, error: tenantErr } = await supabase.rpc("current_tenant_id");
+    if (tenantErr) throw new Error(tenantErr.message);
+    const tenantId = tenantRow as string | null;
+    if (!tenantId) throw new Error("tenant não encontrado para o usuário");
     const todayRef = new Date();
     const fromDate = data?.from ? parseLocalDate(data.from) : todayRef;
     const toDate = data?.to ? parseLocalDate(data.to) : todayRef;
     const periodStartISO0 = startOfDayLocalISO(fromDate);
     const periodEndISO = endOfDayLocalISO(toDate);
-    const resetAt = await readResetAtAdmin();
+    const resetAt = await readResetAtAdmin(tenantId);
     const max = (a: string, b: string) => (a > b ? a : b);
     const todayISO = max(periodStartISO0, resetAt);
     const lastHourISO = max(new Date(Date.now() - 60 * 60 * 1000).toISOString(), resetAt);

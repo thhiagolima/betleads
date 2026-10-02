@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -30,7 +29,7 @@ import { WEBHOOK_EVENTS } from "@/lib/webhook-events";
 import { PageHeader } from "@/components/ui-premium/page-header";
 import { DataCard } from "@/components/ui-premium/data-card";
 import { EmptyState } from "@/components/ui-premium/empty-state";
-import { getMyWebhookToken } from "@/lib/webhooks.functions";
+import { getMyWebhookLogs, getMyWebhookToken } from "@/lib/webhooks.functions";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/webhooks")({
@@ -63,6 +62,7 @@ type WebhookLog = {
 
 function WebhooksPage() {
   const fetchToken = useServerFn(getMyWebhookToken);
+  const fetchLogs = useServerFn(getMyWebhookLogs);
   const { data: tokenInfo, isLoading: tokenLoading } = useQuery({
     queryKey: ["my-webhook-token"],
     queryFn: () => fetchToken(),
@@ -74,14 +74,7 @@ function WebhooksPage() {
 
   const { data: logs = [], isLoading } = useQuery<WebhookLog[]>({
     queryKey: ["webhook_logs"],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("webhook_logs")
-        .select("id, tenant_id, evento, status, created_at, payload")
-        .order("created_at", { ascending: false })
-        .limit(50);
-      return (data ?? []) as WebhookLog[];
-    },
+    queryFn: async () => (await fetchLogs()) as WebhookLog[],
     refetchInterval: 10000,
   });
 
@@ -110,8 +103,8 @@ function WebhooksPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Webhooks"
-        subtitle="URLs de integração com sua casa de aposta. Copie e cole no backoffice."
+        title="Integrações da operação"
+        subtitle="Conecte sua plataforma de apostas e acompanhe a entrada dos dados."
         icon={<WebhookIcon className="h-5 w-5 text-primary-foreground" />}
       />
 

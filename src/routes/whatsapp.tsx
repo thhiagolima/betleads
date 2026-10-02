@@ -126,8 +126,9 @@ import {
   runEvaluateAndDispatch,
 } from "@/lib/automations.functions";
 import { LeadSelector, type SelectedLead } from "@/components/ligacoes/lead-selector";
-import { MetricCard, EmptyState } from "@/components/ui-premium";
+import { MetricCard, EmptyState, PageHeader } from "@/components/ui-premium";
 import { MessageVariablePicker } from "@/components/message-variable-picker";
+import { requestConfirmation } from "@/components/system-dialog-host";
 import { getWhatsappDashboard, type WhatsappDashboard } from "@/lib/whatsapp-dashboard.functions";
 import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
 import { HistoryShell } from "@/components/history/history-shell";
@@ -306,26 +307,19 @@ function WhatsAppPage() {
   return (
     <div className="min-h-screen bg-background p-6">
       <div className="mx-auto max-w-7xl space-y-6">
-        <header className="flex items-center justify-between flex-wrap gap-3">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600">
-              <MessageCircle className="h-5 w-5 text-white" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold">WhatsApp</h1>
-              <p className="text-sm text-muted-foreground">
-                Central nativa de automação, inbox e retenção
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
+        <PageHeader
+          title="WhatsApp"
+          subtitle="Central de automação, conversas e retenção."
+          icon={<MessageCircle className="h-5 w-5 text-white" />}
+          iconClassName="bg-gradient-to-br from-emerald-500 to-teal-600"
+          actions={<div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
             <span className="flex items-center gap-1.5">
               <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_8px] shadow-emerald-400/60" />
               {sessoesAtivas} sessões ativas · {filaTotal} na fila
             </span>
             <DashboardDateRangePicker range={range} onChange={setRange} />
-          </div>
-        </header>
+          </div>}
+        />
 
         <Tabs
           value={currentTab}
@@ -1142,14 +1136,14 @@ function RealSessoesTab() {
                 variant="outline"
                 className="mt-3"
                 disabled={!manageSession || clearHistoryMut.isPending}
-                onClick={() => {
+                onClick={async () => {
                   if (!manageSession) return;
-                  if (
-                    !confirm(
-                      `Apagar todo o histórico de "${manageSession.name}"? Esta ação não pode ser desfeita.`,
-                    )
-                  )
-                    return;
+                  if (!(await requestConfirmation({
+                    title: `Limpar histórico de “${manageSession.name}”?`,
+                    description: "Todas as conversas e mensagens desta sessão serão apagadas. Os jogadores vinculados serão mantidos.",
+                    confirmLabel: "Limpar histórico",
+                    destructive: true,
+                  }))) return;
                   clearHistoryMut.mutate(manageSession.id);
                 }}
               >
@@ -1171,14 +1165,14 @@ function RealSessoesTab() {
                 variant="destructive"
                 className="mt-3"
                 disabled={!manageSession || deleteMut.isPending}
-                onClick={() => {
+                onClick={async () => {
                   if (!manageSession) return;
-                  if (
-                    !confirm(
-                      `Excluir definitivamente "${manageSession.name}" e apagar todo o histórico?`,
-                    )
-                  )
-                    return;
+                  if (!(await requestConfirmation({
+                    title: `Excluir sessão “${manageSession.name}”?`,
+                    description: "A sessão, as conversas e as mensagens serão apagadas. Os jogadores serão desvinculados e poderão ser realocados depois.",
+                    confirmLabel: "Excluir sessão",
+                    destructive: true,
+                  }))) return;
                   deleteMut.mutate({ id: manageSession.id, force: true });
                 }}
               >
@@ -1575,9 +1569,11 @@ function FluxosTab() {
                 <div className="flex items-center gap-2">
                   <Switch checked={f.active} onCheckedChange={async (v) => {
                     if (v && !f.active) {
-                      const ok = confirm(
-                        `Ativar "${f.name}"?\n\nNas primeiras 48h, só NOVOS eventos vão disparar — isso protege o WhatsApp de uma enxurrada inicial. Depois desse prazo, leads que ainda estiverem em estado de gatilho entram naturalmente, respeitando os limites do Antispam.`,
-                      );
+                      const ok = await requestConfirmation({
+                        title: `Ativar fluxo “${f.name}”?`,
+                        description: "Nas primeiras 48 horas, somente novos eventos serão disparados. Depois desse período, jogadores que continuarem no gatilho entrarão no fluxo respeitando os limites de proteção.",
+                        confirmLabel: "Ativar fluxo",
+                      });
                       if (!ok) return;
                     }
                     await toggleFlowFn({ data: { id: f.id, active: v } });
@@ -1601,7 +1597,12 @@ function FluxosTab() {
                     <Copy className="h-3.5 w-3.5" />
                   </Button>
                   <Button size="sm" variant="outline" onClick={async () => {
-                    if (!confirm(`Excluir fluxo "${f.name}"?`)) return;
+                    if (!(await requestConfirmation({
+                      title: `Excluir fluxo “${f.name}”?`,
+                      description: "O fluxo e todas as suas etapas serão removidos permanentemente.",
+                      confirmLabel: "Excluir fluxo",
+                      destructive: true,
+                    }))) return;
                     await deleteFlowFn({ data: { id: f.id } });
                     invalidate();
                     toast.success("Fluxo removido");
@@ -2754,8 +2755,13 @@ function ProxiesTab() {
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => {
-                      if (!confirm(`Excluir proxy "${p.name}"?`)) return;
+                    onClick={async () => {
+                      if (!(await requestConfirmation({
+                        title: `Excluir proxy “${p.name}”?`,
+                        description: "O proxy será removido e deixará de estar disponível para novas sessões.",
+                        confirmLabel: "Excluir proxy",
+                        destructive: true,
+                      }))) return;
                       deleteMut.mutate(p.id);
                     }}
                   >

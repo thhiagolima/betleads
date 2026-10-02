@@ -51,6 +51,7 @@ import { EmptyState } from "@/components/ui-premium/empty-state";
 import { MetricCard } from "@/components/ui-premium/metric-card";
 import { getMarketingOverview, saveMarketingIntegration } from "@/lib/marketing.functions";
 import {
+  connectMetaSystemUserToken,
   createMetaOAuthUrl,
   getMetaConnectionSummary,
   syncMetaInsights,
@@ -296,6 +297,7 @@ function MediaLtvPage() {
   const fetchOverview = useServerFn(getMarketingOverview);
   const saveIntegration = useServerFn(saveMarketingIntegration);
   const createMetaUrl = useServerFn(createMetaOAuthUrl);
+  const connectMetaToken = useServerFn(connectMetaSystemUserToken);
   const fetchMetaSummary = useServerFn(getMetaConnectionSummary);
   const syncMeta = useServerFn(syncMetaInsights);
   const [period, setPeriod] = useState<PeriodPreset>("7d");
@@ -349,6 +351,15 @@ function MediaLtvPage() {
       window.location.assign(res.url);
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Erro ao iniciar OAuth Meta"),
+  });
+  const connectMetaTokenMutation = useMutation({
+    mutationFn: (accessToken: string) => connectMetaToken({ data: { accessToken } }),
+    onSuccess: (result) => {
+      toast.success(`${result.accounts.length} conta(s) Meta conectada(s)`);
+      qc.invalidateQueries({ queryKey: ["meta-connection-summary"] });
+      qc.invalidateQueries({ queryKey: ["marketing-overview"] });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Não foi possível validar o token Meta"),
   });
 
   const syncMetaMutation = useMutation({
@@ -440,6 +451,8 @@ function MediaLtvPage() {
           utmParams={utmParams}
           fullUrl={fullUrl}
           onConnectMeta={() => connectMetaMutation.mutate()}
+          onConnectMetaToken={(token) => connectMetaTokenMutation.mutateAsync(token)}
+          connectTokenPending={connectMetaTokenMutation.isPending}
           onSaveProvider={(provider) => saveMutation.mutate(provider)}
           onPlatformChange={setPlatform}
           onHouseUrlChange={setHouseUrl}
@@ -731,6 +744,8 @@ function ConfiguracaoSection({
   utmParams,
   fullUrl,
   onConnectMeta,
+  onConnectMetaToken,
+  connectTokenPending,
   onSaveProvider,
   onPlatformChange,
   onHouseUrlChange,
@@ -747,11 +762,15 @@ function ConfiguracaoSection({
   utmParams: string;
   fullUrl: string;
   onConnectMeta: () => void;
+  onConnectMetaToken: (token: string) => Promise<unknown>;
+  connectTokenPending: boolean;
   onSaveProvider: (provider: Provider) => void;
   onPlatformChange: (platform: Platform) => void;
   onHouseUrlChange: (value: string) => void;
   onCopy: (value: string, label?: string) => void;
 }) {
+  const [systemUserToken, setSystemUserToken] = useState("");
+  const [showMetaSteps, setShowMetaSteps] = useState(true);
   return (
     <div className="space-y-5">
       <div className="grid gap-4 xl:grid-cols-3">
@@ -763,18 +782,18 @@ function ConfiguracaoSection({
             <StatusBadge status={metaSummary?.accounts?.length ? "connected" : meta?.status} />
           }
         >
-          <p className="mb-4 text-sm text-muted-foreground">
-            Melhor caminho para produto proprio: cada tenant pode conectar varias contas de anuncio,
-            e a leitura fica sob seu controle.
-          </p>
-          <Button className="w-full gap-2" onClick={onConnectMeta} disabled={connectPending}>
-            {connectPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <ShieldCheck className="h-4 w-4" />
-            )}
-            Conectar Meta
+          <p className="mb-3 text-sm text-muted-foreground">Conecte o app e o usuário do sistema da sua própria conta Meta.</p>
+          <Button variant="outline" size="sm" onClick={() => setShowMetaSteps((value) => !value)}>{showMetaSteps ? "Esconder passo a passo" : "Ver passo a passo"}</Button>
+          {showMetaSteps && <div className="mt-3 space-y-2 text-xs text-muted-foreground">
+            {["Abra as Configurações do negócio no Business Manager.", "Crie um usuário do sistema e atribua as contas de anúncios.", "No app da sua empresa, gere um token com ads_read.", "Cole o token abaixo para conferir e listar as contas."].map((step, index) => <div key={step} className="flex gap-2 rounded-lg bg-muted/40 p-2"><span className="font-bold text-primary">{index + 1}</span><span>{step}</span></div>)}
+          </div>}
+          <Label className="mt-4 block" htmlFor="meta-system-token">Token do usuário do sistema</Label>
+          <Input id="meta-system-token" className="mt-2" type="password" autoComplete="off" placeholder="EAAG..." value={systemUserToken} onChange={(event) => setSystemUserToken(event.target.value)} />
+          <Button className="mt-3 w-full gap-2" disabled={connectTokenPending || systemUserToken.trim().length < 40} onClick={async () => { await onConnectMetaToken(systemUserToken.trim()); setSystemUserToken(""); }}>
+            {connectTokenPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+            Conferir token e listar contas
           </Button>
+          <Button className="mt-2 w-full" variant="ghost" size="sm" onClick={onConnectMeta} disabled={connectPending}>Usar conexão antiga por OAuth</Button>
           <ConnectedAccounts accounts={metaSummary?.accounts ?? []} />
         </DataCard>
 

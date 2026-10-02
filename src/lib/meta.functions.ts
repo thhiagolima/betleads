@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { decryptMetaToken, encryptMetaToken, metaTokenHint } from "@/lib/meta-token.server";
 
 const DEFAULT_SCOPES = ["ads_read", "business_management"];
 
@@ -11,6 +12,9 @@ const oauthSchema = z.object({
 
 const syncSchema = z.object({
   days: z.number().int().min(1).max(90).default(7),
+});
+const systemTokenSchema = z.object({
+  accessToken: z.string().trim().min(40).max(1000),
 });
 
 type MetaInsight = {
@@ -58,13 +62,17 @@ type MetaAccountForSync = {
   currency: string | null;
   meta_connections:
     | {
-        access_token: string;
+      access_token: string;
+      encrypted_access_token?: string | null;
       }
     | {
-        access_token: string;
+      access_token: string;
+      encrypted_access_token?: string | null;
       }[]
     | null;
 };
+
+type MetaPermission = { permission: string; status: string };
 
 function metaApiVersion() {
   return process.env.META_API_VERSION ?? "v23.0";
@@ -233,6 +241,81 @@ export const createMetaOAuthUrl = createServerFn({ method: "POST" })
     };
   });
 
+export const connectMetaSystemUserToken = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) => systemTokenSchema.parse(input))
+  .handler(async ({ data, context }) => {
+    const tenantId = await resolveTenantId(context.supabase);
+    const token = data.accessToken;
+    const [metaUser, permissions, adAccounts] = await Promise.all([
+      fetchMetaJson<MetaUser>("/me", { access_token: token, fields: "id,name" }),
+      fetchMetaJson<{ data?: MetaPermission[] }>("/me/permissions", { access_token: token }),
+      (async () => {
+        const first = await fetchMetaJson<{ data?: Array<any>; paging?: { next?: string } }>("/me/adaccounts", {
+          access_token: token,
+          limit: "200",
+          fields: "id,account_id,name,currency,timezone_name,account_status,business{id,name}",
+        });
+        const rows = [...(first.data ?? [])];
+        let next = first.paging?.next;
+        while (next) {
+          const response = await fetch(next);
+          const json = await response.json() as { data?: Array<any>; paging?: { next?: string }; error?: { message?: string } };
+          if (!response.ok || json.error) throw new Error(json.error?.message ?? `Meta API HTTP ${response.status}`);
+          rows.push(...(json.data ?? [])); next = json.paging?.next;
+        }
+        return rows;
+      })(),
+    ]);
+    const granted = (permissions.data ?? []).filter((item) => item.status === "granted").map((item) => item.permission);
+    if (!granted.includes("ads_read")) throw new Error("O token não possui a permissão ads_read.");
+    if (adAccounts.length === 0) throw new Error("O usuário do sistema não possui contas de anúncios atribuídas.");
+
+    const encrypted = await encryptMetaToken(token);
+    const primaryBusiness = adAccounts.find((account) => account.business?.id)?.business ?? null;
+    const { data: connection, error: connectionError } = await (supabaseAdmin as any)
+      .from("meta_connections")
+      .upsert({
+        tenant_id: tenantId,
+        connected_by_user_id: context.userId,
+        meta_user_id: metaUser.id,
+        meta_user_name: metaUser.name ?? "Usuário do sistema Meta",
+        access_token: null,
+        encrypted_access_token: encrypted,
+        token_hint: metaTokenHint(token),
+        auth_type: "system_user_token",
+        scopes: granted,
+        business_id: primaryBusiness?.id ?? null,
+        token_validated_at: new Date().toISOString(),
+        status: "connected",
+        last_error: null,
+        connected_at: new Date().toISOString(),
+      }, { onConflict: "tenant_id,meta_user_id" })
+      .select("id")
+      .single();
+    if (connectionError) throw new Error(connectionError.message);
+
+    const { error: accountsError } = await (supabaseAdmin as any).from("meta_ad_accounts").upsert(
+      adAccounts.map((account) => ({
+        tenant_id: tenantId,
+        connection_id: connection.id,
+        meta_ad_account_id: account.id,
+        account_id: account.account_id ?? null,
+        name: account.name ?? account.id,
+        business_id: account.business?.id ?? null,
+        business_name: account.business?.name ?? null,
+        currency: account.currency ?? null,
+        timezone_name: account.timezone_name ?? null,
+        account_status: account.account_status ?? null,
+        selected: true,
+        raw: account,
+      })),
+      { onConflict: "tenant_id,meta_ad_account_id" },
+    );
+    if (accountsError) throw new Error(accountsError.message);
+    return { connectionId: connection.id, userName: metaUser.name ?? null, permissions: granted, accounts: adAccounts.map((account) => ({ id: account.id, name: account.name ?? account.id, businessName: account.business?.name ?? null, currency: account.currency ?? null })) };
+  });
+
 export const getMetaConnectionSummary = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
@@ -242,7 +325,7 @@ export const getMetaConnectionSummary = createServerFn({ method: "GET" })
       supabaseAdmin
         .from("meta_connections")
         .select(
-          "id, meta_user_id, meta_user_name, scopes, token_expires_at, status, last_error, connected_at, last_sync_at",
+          "id, meta_user_id, meta_user_name, scopes, token_expires_at, status, last_error, connected_at, last_sync_at, auth_type, token_hint, token_validated_at, business_id",
         )
         .eq("tenant_id", tenantId)
         .order("connected_at", { ascending: false }),
@@ -273,7 +356,7 @@ export const syncMetaInsights = createServerFn({ method: "POST" })
     const { data: accounts, error: accountsErr } = await supabaseAdmin
       .from("meta_ad_accounts")
       .select(
-        "id, tenant_id, connection_id, meta_ad_account_id, account_id, name, currency, meta_connections!inner(access_token)",
+        "id, tenant_id, connection_id, meta_ad_account_id, account_id, name, currency, meta_connections!inner(access_token,encrypted_access_token)",
       )
       .eq("tenant_id", tenantId)
       .eq("selected", true);
@@ -294,7 +377,9 @@ export const syncMetaInsights = createServerFn({ method: "POST" })
       const connection = Array.isArray(account.meta_connections)
         ? account.meta_connections[0]
         : account.meta_connections;
-      const token = connection?.access_token;
+      const token = connection?.encrypted_access_token
+        ? await decryptMetaToken(connection.encrypted_access_token)
+        : connection?.access_token;
       if (!token) {
         errors.push({
           account: account.name ?? account.meta_ad_account_id,

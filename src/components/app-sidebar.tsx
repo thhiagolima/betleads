@@ -5,14 +5,10 @@ import {
   BarChart3,
   Brain,
   Building2,
-  GraduationCap,
   LayoutDashboard,
   LogOut,
-  Mail,
   Megaphone,
-  MessageCircle,
   MessageSquare,
-  Phone,
   Rocket,
   Settings,
   ShieldCheck,
@@ -20,6 +16,7 @@ import {
   Trophy,
   Users,
   Webhook,
+  X,
   type LucideIcon,
 } from "lucide-react";
 
@@ -47,85 +44,64 @@ type NavItem = {
   subItems?: SubItem[];
 };
 
-const menuItems: NavItem[] = [
-  { title: "Dashboard", url: "/", icon: LayoutDashboard },
-  { title: "Mídia e LTV", url: "/midia-ltv", icon: BarChart3 },
-  { title: "Players", url: "/players", icon: Users },
-  { title: "Inteligência IA", url: "/inteligencia", icon: Brain },
-  { title: "Treino IA", url: "/treino-ia", icon: GraduationCap },
-  { title: "Alertas", url: "/alertas", icon: AlertTriangle },
-  { title: "Gamificação", url: "/gamificacao", icon: Trophy },
+const overviewItems: NavItem[] = [
+  { title: "Início", url: "/", icon: LayoutDashboard },
+  { title: "Aquisição e LTV", url: "/midia-ltv", icon: BarChart3 },
+];
+
+const crmItems: NavItem[] = [
+  { title: "Jogadores", url: "/players", icon: Users },
+  { title: "Públicos", url: "/publicos", icon: Users },
+  { title: "Oportunidades", url: "/alertas", icon: AlertTriangle },
+  { title: "Níveis e fidelização", url: "/gamificacao", icon: Trophy },
+];
+
+const engagementItems: NavItem[] = [
+  { title: "Campanhas", url: "/campanhas", icon: Megaphone },
   {
     title: "Automações",
     url: "/automacoes",
     icon: Rocket,
     subItems: [
       { title: "Visão geral", hash: "visao-geral" },
-      { title: "Fluxos SMS", url: "/automacoes/sms" },
+      { title: "Fluxos", url: "/automacoes/sms" },
       { title: "Execuções", hash: "execucoes" },
       { title: "Histórico", hash: "historico" },
     ],
   },
-];
-
-const engagementItems: NavItem[] = [
-  { title: "Campanhas", url: "/campanhas", icon: Megaphone },
   {
-    title: "WhatsApp",
+    title: "Canais",
     url: "/whatsapp",
-    icon: MessageCircle,
-    subItems: [
-      { title: "Dashboard", hash: "dashboard" },
-      { title: "Sessões", hash: "sessoes" },
-      { title: "Fluxos", hash: "fluxos" },
-      { title: "Inbox", hash: "inbox" },
-      { title: "Integração externa", hash: "externo" },
-    ],
-  },
-  {
-    title: "SMS",
-    url: "/sms",
     icon: MessageSquare,
     subItems: [
-      { title: "Enviar", hash: "enviar" },
-      { title: "Histórico", hash: "historico" },
+      { title: "WhatsApp", url: "/whatsapp" },
+      { title: "SMS", url: "/sms" },
+      { title: "Email", url: "/email" },
+      { title: "Ligações", url: "/ligacoes" },
     ],
   },
-  {
-    title: "Email",
-    url: "/email",
-    icon: Mail,
-    subItems: [
-      { title: "Dashboard", hash: "dashboard" },
-      { title: "Remetentes", hash: "remetentes" },
-      { title: "Configurações SMTP", hash: "smtp" },
-      { title: "Templates", hash: "templates" },
-      { title: "Campanhas", hash: "campanhas" },
-      { title: "Automações", hash: "automacoes" },
-      { title: "Histórico", hash: "historico" },
-    ],
-  },
-  {
-    title: "Ligações",
-    url: "/ligacoes",
-    icon: Phone,
-    subItems: [
-      { title: "Dashboard", hash: "dashboard" },
-      { title: "Fluxos", hash: "fluxos" },
-      { title: "Scripts IA", hash: "scripts" },
-      { title: "Envio em Massa", hash: "massa" },
-      { title: "Histórico", hash: "historico" },
-      { title: "Configurações", hash: "configuracoes" },
-    ],
-  },
-  { title: "Webhooks", url: "/webhooks", icon: Webhook },
 ];
 
-const systemItems: NavItem[] = [{ title: "Configurações", url: "/configuracoes", icon: Settings }];
-const tenantItem: NavItem = { title: "Meu tenant", url: "/tenants", icon: Building2 };
+const intelligenceItems: NavItem[] = [
+  {
+    title: "Inteligência",
+    url: "/inteligencia",
+    icon: Brain,
+    subItems: [
+      { title: "Assistente IA", url: "/inteligencia" },
+      { title: "Configurar IA", url: "/treino-ia" },
+    ],
+  },
+];
+
+const systemItems: NavItem[] = [
+  { title: "Integrações", url: "/webhooks", icon: Webhook },
+  { title: "Configurações", url: "/configuracoes", icon: Settings },
+];
+const tenantItem: NavItem = { title: "Conta e equipe", url: "/tenants", icon: Building2 };
 const adminItems: NavItem[] = [
-  { title: "Painel Super Admin", url: "/admin", icon: ShieldCheck },
-  { title: "Tenants", url: "/tenants", icon: Building2 },
+  { title: "Visão da plataforma", url: "/admin", icon: ShieldCheck },
+  { title: "Contas", url: "/tenants", icon: Building2 },
 ];
 
 function isActivePath(pathname: string, url: string) {
@@ -163,7 +139,9 @@ function NestedItem({
   hash: string;
   unread: number;
 }) {
-  const active = isActivePath(pathname, item.url);
+  const active = isActivePath(pathname, item.url) || Boolean(
+    item.subItems?.some((sub) => sub.url && isActivePath(pathname, sub.url)),
+  );
   const [open, setOpen] = useState(active);
   useEffect(() => {
     if (active) setOpen(true);
@@ -181,7 +159,7 @@ function NestedItem({
       {item.subItems?.map((sub, index) => {
         const normalizedHash = hash.replace(/^#/, "");
         const subActive = sub.url
-          ? pathname === sub.url
+          ? isActivePath(pathname, sub.url)
           : active && (normalizedHash === sub.hash || (!normalizedHash && index === 0));
         return (
           <SidebarItem
@@ -284,9 +262,15 @@ function UserFooter({ email }: { email: string | null }) {
 export function AppSidebar({
   collapsed,
   onCollapsedChange,
+  mobile = false,
+  mobileOpen = false,
+  onMobileClose,
 }: {
   collapsed: boolean;
   onCollapsedChange: (collapsed: boolean) => void;
+  mobile?: boolean;
+  mobileOpen?: boolean;
+  onMobileClose?: () => void;
 }) {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const hash = useRouterState({ select: (state) => state.location.hash });
@@ -298,7 +282,9 @@ export function AppSidebar({
   return (
     <Sidebar
       variant="collapsible"
-      className="fixed inset-y-0 left-0 z-40 h-dvh"
+      className={`fixed inset-y-0 left-0 z-50 h-dvh transition-transform duration-200 md:translate-x-0 ${
+        mobile && !mobileOpen ? "-translate-x-full" : "translate-x-0"
+      }`}
       width={244}
       collapsedWidth={60}
       collapsed={collapsed}
@@ -306,10 +292,22 @@ export function AppSidebar({
     >
       <SidebarHeader>
         <Brand />
-        <SidebarToggle className="ml-auto" />
+        {mobile ? (
+          <button
+            type="button"
+            aria-label="Fechar menu"
+            onClick={onMobileClose}
+            className="ml-auto flex size-8 items-center justify-center rounded-[10px] text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
+          >
+            <X className="size-[17px]" />
+          </button>
+        ) : (
+          <SidebarToggle className="ml-auto" />
+        )}
       </SidebarHeader>
       <SidebarNav>
-        <NavSection label="Menu" items={menuItems} pathname={pathname} hash={hash} />
+        <NavSection label="Visão geral" items={overviewItems} pathname={pathname} hash={hash} />
+        <NavSection label="CRM" items={crmItems} pathname={pathname} hash={hash} />
         <NavSection
           label="Engajamento"
           items={engagementItems}
@@ -317,7 +315,8 @@ export function AppSidebar({
           hash={hash}
           whatsappUnread={whatsappUnread}
         />
-        <NavSection label="Sistema" items={tenantSystemItems} pathname={pathname} hash={hash} />
+        <NavSection label="Inteligência" items={intelligenceItems} pathname={pathname} hash={hash} />
+        <NavSection label="Configurações" items={tenantSystemItems} pathname={pathname} hash={hash} />
         {isSuperAdmin && (
           <NavSection label="Administração" items={adminItems} pathname={pathname} hash={hash} />
         )}

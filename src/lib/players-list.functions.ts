@@ -37,6 +37,8 @@ type Input = {
   page: number;
   pageSize: number;
   filter: string;
+  gamificationStatus?: string | null;
+  gamificationLevel?: string | null;
   search: string;
   sortKey:
     | "ultimo_login"
@@ -87,7 +89,7 @@ type QueryLike = {
     error: { message: string } | null;
   }>;
   lt: (column: string, value: unknown) => QueryLike;
-  lte?: (column: string, value: unknown) => QueryLike;
+  lte: (column: string, value: unknown) => QueryLike;
   gt?: (column: string, value: unknown) => QueryLike;
   gte: (column: string, value: unknown) => QueryLike;
   not: (column: string, operator: string, value: unknown) => QueryLike;
@@ -222,10 +224,22 @@ function applyGamificationFilter<T extends QueryLike>(
         .not("ftd_em", "is", null)
         .lt("ultimo_deposito", daysAgo(settings.sleepingAfterDays)) as T;
     case "situacao_no_deposit":
-      return q.is("ftd_em", null) as T;
+      return q.is("ftd_em", null).lte("total_depositado", 0) as T;
     default:
       return q;
   }
+}
+
+function applyGamificationDimensions<T extends QueryLike>(
+  q: T,
+  status: string | null | undefined,
+  level: string | null | undefined,
+  settings: GamificationSettings,
+): T {
+  let result = q;
+  if (status) result = applyGamificationFilter(result, `situacao_${status}`, settings);
+  if (level) result = applyGamificationFilter(result, `nivel_${level}`, settings);
+  return result;
 }
 
 async function attachDepositCounts(
@@ -264,13 +278,25 @@ export const getPlayersPage = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: Input) => data)
   .handler(async ({ data, context }): Promise<{ rows: PlayerRow[]; total: number }> => {
-    const { page, pageSize, filter, search, sortKey, sortDir, idsIn, dateField, dateFrom, dateTo } =
-      data;
+    const {
+      page,
+      pageSize,
+      filter,
+      gamificationStatus,
+      gamificationLevel,
+      search,
+      sortKey,
+      sortDir,
+      idsIn,
+      dateField,
+      dateFrom,
+      dateTo,
+    } = data;
     const supabase = context.supabase;
     const { data: tenantId, error: tenantError } = await (supabase as any).rpc("current_tenant_id");
     if (tenantError) throw new Error(tenantError.message);
     if (!tenantId) throw new Error("Tenant atual não encontrado.");
-    const gamificationSettings = isGamificationFilter(filter)
+    const gamificationSettings = isGamificationFilter(filter) || gamificationStatus || gamificationLevel
       ? await readGamificationSettings(supabase, tenantId as string)
       : DEFAULT_GAMIFICATION;
 
@@ -377,6 +403,7 @@ export const getPlayersPage = createServerFn({ method: "POST" })
         q = applyGamificationFilter(q, filter, gamificationSettings);
         break;
     }
+    q = applyGamificationDimensions(q, gamificationStatus, gamificationLevel, gamificationSettings);
 
     // 4) Range de datas (independente dos chips).
     if (dateField && dateFrom && dateTo) {
@@ -503,6 +530,12 @@ export const getPlayersPage = createServerFn({ method: "POST" })
         slim = applyGamificationFilter(slim, filter, gamificationSettings);
         break;
     }
+    slim = applyGamificationDimensions(
+      slim,
+      gamificationStatus,
+      gamificationLevel,
+      gamificationSettings,
+    );
     if (dateField && dateFrom && dateTo) {
       slim = slim.gte(dateField, dateFrom).lte(dateField, dateTo);
       if (dateField === "ftd_em") slim = slim.not("ftd_em", "is", null);
@@ -552,6 +585,8 @@ export const getPlayersPage = createServerFn({ method: "POST" })
 // Usado pra "Copiar IDs do filtro" — não pagina e não traz colunas extras.
 type IdsInput = {
   filter: string;
+  gamificationStatus?: string | null;
+  gamificationLevel?: string | null;
   search: string;
   idsIn?: string[] | null;
   dateField?: "created_at" | "ftd_em" | null;
@@ -564,12 +599,21 @@ export const getPlayersFilteredExternalIds = createServerFn({ method: "POST" })
   .inputValidator((data: IdsInput) => data)
   .handler(
     async ({ data, context }): Promise<{ ids: string[]; missing: number; total: number }> => {
-      const { filter, search, idsIn, dateField, dateFrom, dateTo } = data;
+      const {
+        filter,
+        gamificationStatus,
+        gamificationLevel,
+        search,
+        idsIn,
+        dateField,
+        dateFrom,
+        dateTo,
+      } = data;
       const supabase = context.supabase;
       const { data: tenantId, error: tenantError } = await (supabase as any).rpc("current_tenant_id");
       if (tenantError) throw new Error(tenantError.message);
       if (!tenantId) throw new Error("Tenant atual não encontrado.");
-      const gamificationSettings = isGamificationFilter(filter)
+      const gamificationSettings = isGamificationFilter(filter) || gamificationStatus || gamificationLevel
         ? await readGamificationSettings(supabase, tenantId as string)
         : DEFAULT_GAMIFICATION;
       const now = Date.now();
@@ -665,6 +709,7 @@ export const getPlayersFilteredExternalIds = createServerFn({ method: "POST" })
           q = applyGamificationFilter(q, filter, gamificationSettings);
           break;
       }
+      q = applyGamificationDimensions(q, gamificationStatus, gamificationLevel, gamificationSettings);
 
       if (dateField && dateFrom && dateTo) {
         q = q.gte(dateField, dateFrom).lte(dateField, dateTo);
@@ -712,12 +757,21 @@ export const getPlayersFilteredSmsAudience = createServerFn({ method: "POST" })
       missingPhone: number;
       total: number;
     }> => {
-      const { filter, search, idsIn, dateField, dateFrom, dateTo } = data;
+      const {
+        filter,
+        gamificationStatus,
+        gamificationLevel,
+        search,
+        idsIn,
+        dateField,
+        dateFrom,
+        dateTo,
+      } = data;
       const supabase = context.supabase;
       const { data: tenantId, error: tenantError } = await (supabase as any).rpc("current_tenant_id");
       if (tenantError) throw new Error(tenantError.message);
       if (!tenantId) throw new Error("Tenant atual não encontrado.");
-      const gamificationSettings = isGamificationFilter(filter)
+      const gamificationSettings = isGamificationFilter(filter) || gamificationStatus || gamificationLevel
         ? await readGamificationSettings(supabase, tenantId as string)
         : DEFAULT_GAMIFICATION;
       const now = Date.now();
@@ -812,6 +866,7 @@ export const getPlayersFilteredSmsAudience = createServerFn({ method: "POST" })
           q = applyGamificationFilter(q, filter, gamificationSettings);
           break;
       }
+      q = applyGamificationDimensions(q, gamificationStatus, gamificationLevel, gamificationSettings);
 
       if (dateField && dateFrom && dateTo) {
         q = q.gte(dateField, dateFrom).lte(dateField, dateTo);

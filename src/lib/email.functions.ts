@@ -1166,7 +1166,7 @@ export const getEmailDashboard = createServerFn({ method: "POST" })
 
     // Respeita o marco "zerar dashboards"
     const { readResetAtAdmin } = await import("@/lib/dashboard-settings.functions");
-    const resetAt = await readResetAtAdmin();
+    const resetAt = await readResetAtAdmin(tenantId);
     if (resetAt > sinceIso) sinceIso = resetAt;
     if (resetAt > todayStart.toISOString()) todayStart = new Date(resetAt);
 

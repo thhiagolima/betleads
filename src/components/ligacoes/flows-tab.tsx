@@ -20,6 +20,7 @@ import {
 } from "@/lib/call-flows.functions";
 import { TRIGGER_OPTIONS } from "./shared";
 import { FlowFormDialog } from "./flow-form-dialog";
+import { requestConfirmation } from "@/components/system-dialog-host";
 
 const triggerLabel = (v?: string | null) =>
   TRIGGER_OPTIONS.find((t) => t.value === v)?.label ?? v ?? "—";
@@ -156,8 +157,14 @@ export function FlowsTab() {
                   <Button
                     size="icon"
                     variant="ghost"
-                    onClick={() => {
-                      if (confirm(`Excluir fluxo "${f.name}"?`)) delMut.mutate(f.id);
+                    onClick={async () => {
+                      const confirmed = await requestConfirmation({
+                        title: `Excluir fluxo “${f.name}”?`,
+                        description: "O fluxo de ligação e todas as suas etapas serão removidos permanentemente.",
+                        confirmLabel: "Excluir fluxo",
+                        destructive: true,
+                      });
+                      if (confirmed) delMut.mutate(f.id);
                     }}
                   >
                     <Trash2 className="h-4 w-4 text-destructive" />

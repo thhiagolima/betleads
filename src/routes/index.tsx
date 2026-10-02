@@ -165,6 +165,11 @@ function fmtPct(value: number, digits = 1) {
   })}%`;
 }
 
+function comparisonLabel(value: number) {
+  const direction = value > 0 ? "↑" : value < 0 ? "↓" : "→";
+  return `${direction} ${fmtPct(Math.abs(value))} vs. período anterior`;
+}
+
 function sumMoney(rows: MoneyRow[]) {
   return rows.reduce((acc, row) => acc + Number(row.valor ?? 0), 0);
 }
@@ -192,6 +197,30 @@ function playerName(id: string | null, names: Map<string, string>) {
   return names.get(id) ?? "jogador";
 }
 
+const QUERY_PAGE_SIZE = 1000;
+
+/**
+ * PostgREST limits a response to 1,000 rows by default. Dashboard charts and
+ * derived metrics need the complete period, so read each page explicitly.
+ */
+async function fetchAllRows<Row>(
+  fetchPage: (from: number, to: number) => Promise<{
+    data: Row[] | null;
+    error: { message: string } | null;
+  }>,
+) {
+  const rows: Row[] = [];
+
+  for (let from = 0; ; from += QUERY_PAGE_SIZE) {
+    const { data, error } = await fetchPage(from, from + QUERY_PAGE_SIZE - 1);
+    if (error) throw new Error(error.message);
+
+    const page = data ?? [];
+    rows.push(...page);
+    if (page.length < QUERY_PAGE_SIZE) return rows;
+  }
+}
+
 async function fetchDashboard(range: { from: Date; to: Date }, tenantId: string) {
   const startDate = brtDayStart(range.from);
   const endDate = brtDayEnd(range.to);
@@ -208,6 +237,7 @@ async function fetchDashboard(range: { from: Date; to: Date }, tenantId: string)
   const resetRes = await supabase
     .from("dashboard_settings")
     .select("reset_at")
+    .eq("tenant_id", T)
     .eq("id", "global")
     .maybeSingle();
   const resetAt = (resetRes.data?.reset_at as string) ?? "1970-01-01T00:00:00Z";
@@ -219,17 +249,20 @@ async function fetchDashboard(range: { from: Date; to: Date }, tenantId: string)
     prevPlayersPeriod,
     ftdPeriod,
     prevFtdPeriod,
-    allPlayersRes,
-    depositsPeriodRes,
-    withdrawalsPeriodRes,
-    smsLogsRes,
+    allPlayersRows,
+    depositsPeriodRows,
+    previousDepositsPeriodRows,
+    withdrawalsPeriodRows,
+    smsLogsRows,
     smsCreditSummaryRes,
-    followupsRes,
+    followupsRows,
     flowsRes,
     recentPlayersRes,
     recentDepositsRes,
     recentWithdrawalsRes,
     recentEventsRes,
+    pixGeneratedPeriod,
+    previousPixGeneratedPeriod,
   ] = await Promise.all([
     supabase.rpc("dashboard_totals", {
       _tenant: T,
@@ -269,42 +302,62 @@ async function fetchDashboard(range: { from: Date; to: Date }, tenantId: string)
       .not("ftd_em", "is", null)
       .gte("ftd_em", prevIso)
       .lte("ftd_em", prevIsoEnd),
-    supabase
-      .from("players")
-      .select("id,nome,created_at,ftd_em,ultimo_login,total_depositado,total_sacado")
-      .eq("tenant_id", T)
-      .range(0, 19999),
-    supabase
-      .from("deposits")
-      .select("id,player_id,valor,created_at,status")
-      .eq("tenant_id", T)
-      .eq("status", "aprovado")
-      .gte("created_at", iso)
-      .lte("created_at", isoEnd)
-      .limit(50000),
-    supabase
-      .from("withdrawals")
-      .select("id,player_id,valor,created_at,status")
-      .eq("tenant_id", T)
-      .eq("status", "aprovado")
-      .gte("created_at", iso)
-      .lte("created_at", isoEnd)
-      .limit(50000),
-    supabase
-      .from("sms_send_logs")
-      .select("id,player_id,created_at,status,delivery_status")
-      .eq("tenant_id", T)
-      .gte("created_at", iso)
-      .lte("created_at", isoEnd)
-      .limit(50000),
+    fetchAllRows<PlayerRow>((from, to) =>
+      supabase
+        .from("players")
+        .select("id,nome,created_at,ftd_em,ultimo_login,total_depositado,total_sacado")
+        .eq("tenant_id", T)
+        .range(from, to),
+    ),
+    fetchAllRows<MoneyRow>((from, to) =>
+      supabase
+        .from("deposits")
+        .select("id,player_id,valor,created_at,status")
+        .eq("tenant_id", T)
+        .eq("status", "aprovado")
+        .gte("created_at", iso)
+        .lte("created_at", isoEnd)
+        .range(from, to),
+    ),
+    fetchAllRows<MoneyRow>((from, to) =>
+      supabase
+        .from("deposits")
+        .select("id,player_id,valor,created_at,status")
+        .eq("tenant_id", T)
+        .eq("status", "aprovado")
+        .gte("created_at", prevIso)
+        .lte("created_at", prevIsoEnd)
+        .range(from, to),
+    ),
+    fetchAllRows<MoneyRow>((from, to) =>
+      supabase
+        .from("withdrawals")
+        .select("id,player_id,valor,created_at,status")
+        .eq("tenant_id", T)
+        .eq("status", "aprovado")
+        .gte("created_at", iso)
+        .lte("created_at", isoEnd)
+        .range(from, to),
+    ),
+    fetchAllRows((from, to) =>
+      supabase
+        .from("sms_send_logs")
+        .select("id,player_id,created_at,status,delivery_status")
+        .eq("tenant_id", T)
+        .gte("created_at", iso)
+        .lte("created_at", isoEnd)
+        .range(from, to),
+    ),
     looseRpc(supabase).rpc("sms_credit_summary", { _tenant: T }),
-    supabase
-      .from("lead_followups")
-      .select("id,player_id,created_at,acao")
-      .eq("tenant_id", T)
-      .lte("created_at", isoEnd)
-      .gte("created_at", new Date(startDate.getTime() - 30 * 86400000).toISOString())
-      .limit(50000),
+    fetchAllRows((from, to) =>
+      supabase
+        .from("lead_followups")
+        .select("id,player_id,created_at,acao")
+        .eq("tenant_id", T)
+        .lte("created_at", isoEnd)
+        .gte("created_at", new Date(startDate.getTime() - 30 * 86400000).toISOString())
+        .range(from, to),
+    ),
     supabase.from("sms_flows").select("id,is_active").eq("tenant_id", T),
     supabase
       .from("players")
@@ -332,18 +385,31 @@ async function fetchDashboard(range: { from: Date; to: Date }, tenantId: string)
       .eq("tenant_id", T)
       .order("created_at", { ascending: false })
       .limit(20),
+    supabase
+      .from("deposits")
+      .select("id", { count: "exact", head: true })
+      .eq("tenant_id", T)
+      .gte("created_at", iso)
+      .lte("created_at", isoEnd),
+    supabase
+      .from("deposits")
+      .select("id", { count: "exact", head: true })
+      .eq("tenant_id", T)
+      .gte("created_at", prevIso)
+      .lte("created_at", prevIsoEnd),
   ]);
 
   const totals = (totalsAgg.data ?? {}) as TotalsRpc;
   const prevTotals = (prevTotalsAgg.data ?? {}) as TotalsRpc;
-  const allPlayers = (allPlayersRes.data ?? []) as PlayerRow[];
-  const deposits = (depositsPeriodRes.data ?? []) as MoneyRow[];
-  const withdrawals = (withdrawalsPeriodRes.data ?? []) as MoneyRow[];
-  const smsLogs = smsLogsRes.data ?? [];
+  const allPlayers = allPlayersRows;
+  const deposits = depositsPeriodRows;
+  const previousDeposits = previousDepositsPeriodRows;
+  const withdrawals = withdrawalsPeriodRows;
+  const smsLogs = smsLogsRows;
   const smsCreditSummary = (smsCreditSummaryRes.data ?? {}) as {
     balance_credits?: number | string;
   };
-  const followups = followupsRes.data ?? [];
+  const followups = followupsRows;
   const flows = flowsRes.data ?? [];
 
   const names = new Map<string, string>();
@@ -367,12 +433,14 @@ async function fetchDashboard(range: { from: Date; to: Date }, tenantId: string)
   const prevConversion = previousNewPlayers > 0 ? (previousFtd / previousNewPlayers) * 100 : 0;
 
   const playersById = new Map(allPlayers.map((p) => [p.id, p]));
-  const redeposits = deposits.filter((d) => {
+  const isRedeposit = (d: MoneyRow) => {
     if (!d.player_id) return false;
     const p = playersById.get(d.player_id);
     if (!p?.ftd_em) return false;
     return new Date(d.created_at).getTime() - new Date(p.ftd_em).getTime() > 60000;
-  });
+  };
+  const redeposits = deposits.filter(isRedeposit);
+  const previousRedepositAmount = sumMoney(previousDeposits.filter(isRedeposit));
   const redepositAmount = sumMoney(redeposits);
   const redepositCount = redeposits.length;
   const redepositPlayers = new Set(redeposits.map((d) => d.player_id).filter(Boolean)).size;
@@ -411,11 +479,11 @@ async function fetchDashboard(range: { from: Date; to: Date }, tenantId: string)
   });
 
   const eventRows = recentEventsRes.data ?? [];
-  const pixEvents = eventRows.filter((e) => {
+  const recentPixEvents = eventRows.filter((e) => {
     const kind = String(e.tipo ?? "").toLowerCase();
     return kind.includes("pix") || kind.includes("deposit");
   });
-  const pixGenerated = Math.max(depositCount, pixEvents.length);
+  const pixGenerated = pixGeneratedPeriod.count ?? depositCount;
   const pixUnpaid = Math.max(0, pixGenerated - depositCount);
   const pixPayRate = pixGenerated > 0 ? (depositCount / pixGenerated) * 100 : 0;
 
@@ -443,7 +511,7 @@ async function fetchDashboard(range: { from: Date; to: Date }, tenantId: string)
       amount: Number(w.valor ?? 0),
       at: w.created_at,
     })),
-    ...pixEvents.slice(0, 8).map((e) => ({
+    ...recentPixEvents.slice(0, 8).map((e) => ({
       id: `event-${e.id}`,
       tone: "orange" as const,
       player: playerName(e.player_id, names),
@@ -481,7 +549,7 @@ async function fetchDashboard(range: { from: Date; to: Date }, tenantId: string)
     redepositAmount,
     redepositCount,
     redepositPlayers,
-    redepositGrowth: pctChange(redepositAmount, previousDepositAmount),
+    redepositGrowth: pctChange(redepositAmount, previousRedepositAmount),
     recoveredAmount,
     recoveredNew,
     recoveredReactivated,
@@ -492,6 +560,7 @@ async function fetchDashboard(range: { from: Date; to: Date }, tenantId: string)
     withdrawalAmount,
     cashflowChart: daySeries,
     pixGenerated,
+    pixGeneratedGrowth: pctChange(pixGenerated, previousPixGeneratedPeriod.count ?? 0),
     pixPayRate,
     pixUnpaid,
     reactivationQueue,
@@ -814,7 +883,15 @@ function Dashboard() {
   })}`;
 
   return (
-    <div className="space-y-6 pb-8">
+    <div className="relative space-y-6 pb-8" aria-busy={isFetching}>
+      {isFetching && (
+        <div className="sticky top-2 z-30 flex justify-center" role="status" aria-live="polite">
+          <div className="flex items-center gap-2 rounded-full border border-primary/25 bg-card/95 px-3 py-1.5 text-xs font-medium text-primary shadow-lg backdrop-blur">
+            <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+            Atualizando painel…
+          </div>
+        </div>
+      )}
       <header className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <div className="flex items-center gap-3">
@@ -834,7 +911,7 @@ function Dashboard() {
           {tenants && tenants.length > 1 && (
             <Select value={tenantId ?? undefined} onValueChange={setActiveTenantId}>
               <SelectTrigger className="h-11 w-[220px] rounded-xl">
-                <SelectValue placeholder="Selecione o tenant" />
+                <SelectValue placeholder="Selecione uma conta" />
               </SelectTrigger>
               <SelectContent>
                 {tenants.map((t) => (
@@ -1126,14 +1203,14 @@ function Dashboard() {
               icon={Filter}
               label="PIX gerados"
               value={num(data.pixGenerated)}
-              trend="↑ 98,1%"
+              detail={comparisonLabel(data.pixGeneratedGrowth)}
               tone="orange"
             />
             <InfoRow
               icon={Target}
               label="Taxa de pagamento"
               value={fmtPct(data.pixPayRate)}
-              trend="↑ 1,1%"
+              detail={`${num(data.depositCount)} pagamentos aprovados no período`}
               tone="green"
             />
             <InfoRow icon={Zap} label="PIX não pagos" value={num(data.pixUnpaid)} tone="red" />
@@ -1150,7 +1227,7 @@ function Dashboard() {
               icon={Repeat2}
               label="Redepósitos"
               value={brl(data.redepositAmount)}
-              trend={`↑ ${fmtPct(Math.max(0, data.redepositGrowth))}`}
+              detail={comparisonLabel(data.redepositGrowth)}
               tone="green"
             />
             <InfoRow
@@ -1209,7 +1286,7 @@ function Dashboard() {
 
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <LayoutDashboard className="h-4 w-4" />
-        Dados do período por tenant. Recuperado pelo CRM considera depósitos feitos depois de um
+        Dados do período da sua operação. Recuperado pelo CRM considera depósitos feitos depois de um
         followup registrado para o jogador.
       </div>
     </div>

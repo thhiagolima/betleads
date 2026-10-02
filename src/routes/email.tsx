@@ -88,6 +88,7 @@ import { cn } from "@/lib/utils";
 import { MetricCard, EmptyState, PageHeader } from "@/components/ui-premium";
 import { SendWindowCard } from "@/components/send-window-card";
 import { ProvidersPausedBanner } from "@/components/providers-paused-banner";
+import { requestConfirmation, requestTextInput } from "@/components/system-dialog-host";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -1108,7 +1109,12 @@ function TemplatesTab() {
     }
   }
   async function excluir(id: string) {
-    if (!confirm("Excluir este template?")) return;
+    if (!(await requestConfirmation({
+      title: "Excluir template?",
+      description: "O template será removido e não poderá mais ser usado em novas campanhas.",
+      confirmLabel: "Excluir template",
+      destructive: true,
+    }))) return;
     try {
       await delFn({ data: { id } } as any);
       toast.success("Template excluído");
@@ -1614,7 +1620,12 @@ function CampanhasTab() {
   }
 
   async function excluir(c: Campanha) {
-    if (!confirm(`Excluir a campanha "${c.nome}"?`)) return;
+    if (!(await requestConfirmation({
+      title: `Excluir “${c.nome}”?`,
+      description: "A campanha será removida permanentemente. O histórico de mensagens já enviadas não será alterado.",
+      confirmLabel: "Excluir campanha",
+      destructive: true,
+    }))) return;
     try {
       await delFn({ data: { id: c.id } } as any);
       toast.success("Campanha removida");
@@ -1629,7 +1640,11 @@ function CampanhasTab() {
       toast.error("Selecione um template antes de enviar.");
       return;
     }
-    if (!confirm(`Disparar campanha "${c.nome}" agora para o segmento "${c.segmento}"?`)) return;
+    if (!(await requestConfirmation({
+      title: `Disparar “${c.nome}” agora?`,
+      description: `As mensagens serão enviadas imediatamente para o segmento “${c.segmento}”.`,
+      confirmLabel: "Disparar campanha",
+    }))) return;
     const tid = toast.loading("Enviando campanha…");
     try {
       const r: any = await sendNowFn({ data: { campaignId: c.id } } as any);
@@ -2338,7 +2353,12 @@ function FluxosList() {
                     className="h-7 w-7 text-rose-400"
                     title="Excluir"
                     onClick={async () => {
-                      if (!confirm("Excluir esta automação?")) return;
+                      if (!(await requestConfirmation({
+                        title: "Excluir automação?",
+                        description: "O fluxo e suas etapas serão removidos permanentemente.",
+                        confirmLabel: "Excluir automação",
+                        destructive: true,
+                      }))) return;
                       try {
                         await delFn({ data: { id: f.id } });
                         refetch();
@@ -2511,7 +2531,14 @@ function FlowBuilderDialog({ flowId, onClose }: { flowId: string | null; onClose
       toast.error("Salve a automação antes de testar");
       return;
     }
-    const email = prompt("Email do destinatário para teste:");
+    const email = await requestTextInput({
+      title: "Enviar teste da automação",
+      description: "Informe quem deve receber a mensagem de teste. Nenhum jogador será incluído.",
+      label: "Email do destinatário",
+      placeholder: "nome@empresa.com",
+      inputType: "email",
+      confirmLabel: "Enviar teste",
+    });
     if (!email) return;
     try {
       await testFn({ data: { flow_id: flowId, email } });

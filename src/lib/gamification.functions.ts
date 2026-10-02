@@ -45,7 +45,12 @@ export type GamificationData = {
     depositors: number;
     deposited: number;
     stoppedVipCount: number;
+    activeCount: number;
+    coolingCount: number;
+    sleepingCount: number;
+    noDepositCount: number;
   };
+  segmentCounts: Record<PlayerStatus, Record<LevelSlug, number>>;
   vipStopped: GamificationPlayer[];
   ranking: GamificationPlayer[];
 };
@@ -165,7 +170,6 @@ async function readPlayers(supabase: any, tenantId: string): Promise<DbPlayer[]>
     const batch = (data ?? []) as DbPlayer[];
     rows.push(...batch);
     if (batch.length < pageSize) break;
-    if (rows.length >= 50000) break;
   }
 
   return rows;
@@ -204,6 +208,18 @@ function buildGamificationData(players: DbPlayer[], settings: GamificationSettin
     )
     .slice(0, 50);
 
+  const segmentCounts = Object.fromEntries(
+    (["active", "cooling", "sleeping", "no_deposit"] as PlayerStatus[]).map((status) => [
+      status,
+      Object.fromEntries(
+        LEVELS.map(({ slug }) => [
+          slug,
+          ranked.filter((player) => player.status === status && player.level === slug).length,
+        ]),
+      ) as Record<LevelSlug, number>,
+    ]),
+  ) as Record<PlayerStatus, Record<LevelSlug, number>>;
+
   return {
     settings,
     levels,
@@ -212,7 +228,12 @@ function buildGamificationData(players: DbPlayer[], settings: GamificationSettin
       depositors: ranked.filter((p) => p.total_depositado > 0 || p.ftd_em).length,
       deposited: sum(ranked.map((p) => p.total_depositado)),
       stoppedVipCount: vipStopped.length,
+      activeCount: ranked.filter((p) => p.status === "active").length,
+      coolingCount: ranked.filter((p) => p.status === "cooling").length,
+      sleepingCount: ranked.filter((p) => p.status === "sleeping").length,
+      noDepositCount: ranked.filter((p) => p.status === "no_deposit").length,
     },
+    segmentCounts,
     vipStopped: vipStopped.slice(0, 8),
     ranking: ranked.slice(0, 200),
   };
