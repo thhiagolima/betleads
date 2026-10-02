@@ -1658,7 +1658,8 @@ function PlayersPage() {
                 <div>
                   <h3 className="text-sm font-semibold">Nível e situação</h3>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Combine um nível com uma situação. Sem depósito não combina com nível pago.
+                    Combine um nível com uma situação. Os números se recalculam entre essas duas
+                    escolhas; sem depósito não combina com nível pago.
                   </p>
                 </div>
                 <div className="space-y-2">
@@ -1823,7 +1824,9 @@ function PlayersPage() {
                       <div key={group.title} className="space-y-2">
                         <div>
                           <p className="text-xs font-medium text-foreground">{group.title}</p>
-                          <p className="text-[11px] text-muted-foreground">{group.description}</p>
+                          <p className="text-[11px] text-muted-foreground">
+                            {group.description} Os números mostram o tamanho atual de cada atalho.
+                          </p>
                         </div>
                         <div className="flex flex-wrap gap-2">
                           {group.ids.map((id) => {
