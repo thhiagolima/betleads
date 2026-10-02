@@ -108,6 +108,14 @@ const EMPTY_PLAYERS: Player[] = [];
 
 type PaidLevelSlug = Exclude<LevelSlug, "novice">;
 type PlayerSituation = "active" | "cooling" | "sleeping" | "no_deposit";
+type AdvancedFilterDraft = {
+  filter: string;
+  situation: PlayerSituation | null;
+  level: PaidLevelSlug | null;
+  search: string;
+  dateField: "created_at" | "ftd_em";
+  dateRange: DateRange | undefined;
+};
 type PlayerGamificationSettings = {
   thresholds: Record<PaidLevelSlug, number>;
   coolingAfterDays: number;
@@ -213,6 +221,20 @@ const alertFilters: { id: AlertaTipo; label: string }[] = [
   { id: "frequencia_caindo", label: "Frequência caindo" },
 ];
 const ALERT_FILTER_IDS = new Set<string>(alertFilters.map((a) => a.id));
+
+function filterDisplayLabel(filterId: string) {
+  return (
+    filters.find((item) => item.id === filterId)?.label ??
+    alertFilters.find((item) => item.id === filterId)?.label ??
+    (filterId === "aguardando_conversao"
+      ? "Aguardando conversão"
+      : filterId === "convertido"
+        ? "Converteu"
+        : filterId === "nao_convertido"
+          ? "Não converteu"
+          : filterId)
+  );
+}
 
 function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
@@ -359,6 +381,7 @@ function PlayersPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
+  const [advancedDraft, setAdvancedDraft] = useState<AdvancedFilterDraft | null>(null);
 
   useEffect(() => {
     if (!linkedPlayerId || isDetailRoute) return;
@@ -409,7 +432,26 @@ function PlayersPage() {
       : null;
   const hasDateRange = !!(dateFromIso && dateToIso);
   const advancedFilterCount =
-    Number(filter !== "todos") + Number(Boolean(search.trim())) + Number(hasDateRange);
+    Number(filter !== "todos") +
+    Number(Boolean(selectedSituation)) +
+    Number(Boolean(selectedLevel)) +
+    Number(Boolean(search.trim())) +
+    Number(hasDateRange);
+  const sheetDraft: AdvancedFilterDraft = advancedDraft ?? {
+    filter,
+    situation: selectedSituation,
+    level: selectedLevel,
+    search,
+    dateField,
+    dateRange,
+  };
+  const draftHasDateRange = Boolean(sheetDraft.dateRange?.from);
+  const draftFilterCount =
+    Number(sheetDraft.filter !== "todos") +
+    Number(Boolean(sheetDraft.situation)) +
+    Number(Boolean(sheetDraft.level)) +
+    Number(Boolean(sheetDraft.search.trim())) +
+    Number(draftHasDateRange);
 
   function fmtBr(d: Date) {
     return d.toLocaleDateString("pt-BR");
@@ -1151,28 +1193,86 @@ function PlayersPage() {
   }
 
   function selectSituation(situation: PlayerSituation) {
-    setFilter("todos");
     setSelectedSituation((current) => (current === situation ? null : situation));
     if (situation === "no_deposit") setSelectedLevel(null);
   }
 
   function selectLevel(level: PaidLevelSlug) {
-    setFilter("todos");
     setSelectedLevel((current) => (current === level ? null : level));
     if (selectedSituation === "no_deposit") setSelectedSituation(null);
   }
 
-  function selectAdvancedFilter(nextFilter: string) {
-    setSelectedSituation(null);
-    setSelectedLevel(null);
-    setFilter(nextFilter);
-    setAdvancedFiltersOpen(false);
+  function openAdvancedFilters() {
+    setAdvancedDraft({
+      filter,
+      situation: selectedSituation,
+      level: selectedLevel,
+      search,
+      dateField,
+      dateRange,
+    });
+    setAdvancedFiltersOpen(true);
   }
 
-  function clearAdvancedFilters() {
-    setFilter("todos");
-    setSearch("");
-    setDateRange(undefined);
+  function closeAdvancedFilters() {
+    setAdvancedFiltersOpen(false);
+    setAdvancedDraft(null);
+  }
+
+  function selectAdvancedFilter(nextFilter: string) {
+    setAdvancedDraft((current) => {
+      if (!current) return current;
+      return { ...current, filter: current.filter === nextFilter ? "todos" : nextFilter };
+    });
+  }
+
+  function selectDraftSituation(situation: PlayerSituation) {
+    setAdvancedDraft((current) => {
+      if (!current) return current;
+      const nextSituation = current.situation === situation ? null : situation;
+      return {
+        ...current,
+        situation: nextSituation,
+        level: nextSituation === "no_deposit" ? null : current.level,
+      };
+    });
+  }
+
+  function selectDraftLevel(level: PaidLevelSlug) {
+    setAdvancedDraft((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        level: current.level === level ? null : level,
+        situation: current.situation === "no_deposit" ? null : current.situation,
+      };
+    });
+  }
+
+  function clearAdvancedDraft() {
+    setAdvancedDraft((current) =>
+      current
+        ? {
+            ...current,
+            filter: "todos",
+            situation: null,
+            level: null,
+            search: "",
+            dateRange: undefined,
+          }
+        : current,
+    );
+  }
+
+  function applyAdvancedFilters() {
+    if (!advancedDraft) return closeAdvancedFilters();
+    setFilter(advancedDraft.filter);
+    setSelectedSituation(advancedDraft.situation);
+    setSelectedLevel(advancedDraft.level);
+    setSearch(advancedDraft.search);
+    setDateField(advancedDraft.dateField);
+    setDateRange(advancedDraft.dateRange);
+    closeAdvancedFilters();
   }
 
   const playerGamificationSettings: PlayerGamificationSettings =
@@ -1432,7 +1532,7 @@ function PlayersPage() {
           type="button"
           variant="outline"
           className="h-10 gap-2 self-start"
-          onClick={() => setAdvancedFiltersOpen(true)}
+          onClick={openAdvancedFilters}
         >
           <SlidersHorizontal className="h-4 w-4" />
           Mais filtros
@@ -1443,7 +1543,10 @@ function PlayersPage() {
           )}
         </Button>
 
-        <Sheet open={advancedFiltersOpen} onOpenChange={setAdvancedFiltersOpen}>
+        <Sheet
+          open={advancedFiltersOpen}
+          onOpenChange={(open) => (open ? openAdvancedFilters() : closeAdvancedFilters())}
+        >
           <SheetContent
             side="right"
             className="flex w-full flex-col overflow-y-auto p-0 sm:max-w-xl"
@@ -1451,10 +1554,72 @@ function PlayersPage() {
             <SheetHeader className="border-b border-border/60 px-5 py-4 pr-12">
               <SheetTitle>Filtros e alertas</SheetTitle>
               <SheetDescription>
-                Encontre jogadores por comportamento, período, oportunidade ou dados de contato.
+                Monte a combinação desejada e aplique quando estiver pronto.
               </SheetDescription>
             </SheetHeader>
             <div className="flex-1 space-y-5 px-5 py-4">
+              <Card className="border-primary/20 bg-primary/5">
+                <CardContent className="space-y-2 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs font-semibold">Filtros selecionados</p>
+                    <span className="text-xs text-muted-foreground">
+                      {draftFilterCount === 0
+                        ? "Nenhum filtro"
+                        : `${draftFilterCount} ativo${draftFilterCount === 1 ? "" : "s"}`}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {sheetDraft.filter !== "todos" && (
+                      <Badge variant="secondary" className="gap-1">
+                        {filterDisplayLabel(sheetDraft.filter)}
+                        <button
+                          type="button"
+                          aria-label="Remover filtro"
+                          onClick={() => selectAdvancedFilter(sheetDraft.filter)}
+                          className="rounded-sm hover:text-foreground"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </Badge>
+                    )}
+                    {sheetDraft.situation && (
+                      <Badge variant="secondary" className="gap-1">
+                        {situationBadgeMeta[sheetDraft.situation].label}
+                        <button
+                          type="button"
+                          aria-label="Remover situação"
+                          onClick={() => selectDraftSituation(sheetDraft.situation!)}
+                          className="rounded-sm hover:text-foreground"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </Badge>
+                    )}
+                    {sheetDraft.level && (
+                      <Badge variant="secondary" className="gap-1">
+                        {levelBadgeMeta[sheetDraft.level].label}
+                        <button
+                          type="button"
+                          aria-label="Remover nível"
+                          onClick={() => selectDraftLevel(sheetDraft.level!)}
+                          className="rounded-sm hover:text-foreground"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </Badge>
+                    )}
+                    {sheetDraft.search.trim() && (
+                      <Badge variant="secondary">Busca: {sheetDraft.search}</Badge>
+                    )}
+                    {draftHasDateRange && <Badge variant="secondary">Período selecionado</Badge>}
+                    {draftFilterCount === 0 && (
+                      <span className="text-xs text-muted-foreground">
+                        A lista inteira será exibida.
+                      </span>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
               <div className="space-y-1">
                 <h3 className="text-sm font-semibold">Busca e período</h3>
                 <p className="text-xs text-muted-foreground">
@@ -1462,20 +1627,79 @@ function PlayersPage() {
                 </p>
               </div>
               <div className="space-y-3">
+                <div>
+                  <h3 className="text-sm font-semibold">Nível e situação</h3>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Combine um nível com uma situação. Sem depósito não combina com nível pago.
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-foreground">Situação</p>
+                  <div className="flex flex-wrap gap-2">
+                    {gamificationStatusFilters.slice(1).map((item) => {
+                      const situation = item.id.replace("situacao_", "") as PlayerSituation;
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => selectDraftSituation(situation)}
+                          className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+                            sheetDraft.situation === situation
+                              ? "border-primary/60 bg-primary/15 text-primary"
+                              : "border-border/60 text-muted-foreground hover:border-border hover:text-foreground"
+                          }`}
+                        >
+                          {item.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-foreground">Nível</p>
+                  <div className="flex flex-wrap gap-2">
+                    {gamificationLevelFilters.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => selectDraftLevel(item.level as PaidLevelSlug)}
+                        className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+                          sheetDraft.level === item.level
+                            ? "border-primary/60 bg-primary/15 text-primary"
+                            : "border-border/60 text-muted-foreground hover:border-border hover:text-foreground"
+                        }`}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div className="space-y-3">
                 <div className="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-center">
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                     <Input
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
+                      value={sheetDraft.search}
+                      onChange={(e) =>
+                        setAdvancedDraft((current) =>
+                          current ? { ...current, search: e.target.value } : current,
+                        )
+                      }
                       placeholder="Nome, ID ou telefone"
                       className="h-10 bg-background/70 pl-9"
                     />
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <Select
-                      value={dateField}
-                      onValueChange={(v) => setDateField(v as "created_at" | "ftd_em")}
+                      value={sheetDraft.dateField}
+                      onValueChange={(v) =>
+                        setAdvancedDraft((current) =>
+                          current
+                            ? { ...current, dateField: v as "created_at" | "ftd_em" }
+                            : current,
+                        )
+                      }
                     >
                       <SelectTrigger className="h-10 w-[170px] bg-background/70">
                         <SelectValue />
@@ -1489,11 +1713,12 @@ function PlayersPage() {
                       <PopoverTrigger asChild>
                         <Button variant="outline" className="h-10 gap-2">
                           <CalendarIcon className="h-4 w-4" />
-                          {hasDateRange && dateRange?.from
-                            ? dateRange.to &&
-                              dateRange.to.toDateString() !== dateRange.from.toDateString()
-                              ? `${fmtBr(dateRange.from)} - ${fmtBr(dateRange.to)}`
-                              : fmtBr(dateRange.from)
+                          {draftHasDateRange && sheetDraft.dateRange?.from
+                            ? sheetDraft.dateRange.to &&
+                              sheetDraft.dateRange.to.toDateString() !==
+                                sheetDraft.dateRange.from.toDateString()
+                              ? `${fmtBr(sheetDraft.dateRange.from)} - ${fmtBr(sheetDraft.dateRange.to)}`
+                              : fmtBr(sheetDraft.dateRange.from)
                             : "Selecionar período"}
                         </Button>
                       </PopoverTrigger>
@@ -1512,7 +1737,9 @@ function PlayersPage() {
                               onClick={() => {
                                 const to = new Date();
                                 const from = new Date(Date.now() - preset.days * 86400000);
-                                setDateRange({ from, to });
+                                setAdvancedDraft((current) =>
+                                  current ? { ...current, dateRange: { from, to } } : current,
+                                );
                                 setDateOpen(false);
                               }}
                             >
@@ -1522,18 +1749,26 @@ function PlayersPage() {
                         </div>
                         <Calendar
                           mode="range"
-                          selected={dateRange}
-                          onSelect={setDateRange}
+                          selected={sheetDraft.dateRange}
+                          onSelect={(nextRange) =>
+                            setAdvancedDraft((current) =>
+                              current ? { ...current, dateRange: nextRange } : current,
+                            )
+                          }
                           numberOfMonths={2}
                           initialFocus
                         />
                       </PopoverContent>
                     </Popover>
-                    {hasDateRange && (
+                    {draftHasDateRange && (
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => setDateRange(undefined)}
+                        onClick={() =>
+                          setAdvancedDraft((current) =>
+                            current ? { ...current, dateRange: undefined } : current,
+                          )
+                        }
                         className="h-10 gap-1"
                       >
                         <X className="h-3.5 w-3.5" />
@@ -1565,7 +1800,7 @@ function PlayersPage() {
                                 key={item.id}
                                 onClick={() => selectAdvancedFilter(item.id)}
                                 className={`rounded-full border px-3 py-1 text-xs transition-colors ${
-                                  filter === item.id
+                                  sheetDraft.filter === item.id
                                     ? "border-primary/60 bg-primary/15 text-primary"
                                     : "border-border/60 text-muted-foreground hover:border-border hover:text-foreground"
                                 }`}
@@ -1596,7 +1831,7 @@ function PlayersPage() {
                           key={f.id}
                           onClick={() => selectAdvancedFilter(f.id)}
                           className={`rounded-full px-3 py-1 text-xs transition-colors border ${
-                            filter === f.id
+                            sheetDraft.filter === f.id
                               ? "border-amber-400/60 bg-amber-400/15 text-amber-300"
                               : "border-border/60 text-muted-foreground hover:text-foreground hover:border-border"
                           }`}
@@ -1613,7 +1848,7 @@ function PlayersPage() {
                           key={id}
                           onClick={() => selectAdvancedFilter(id)}
                           className={`rounded-full px-3 py-1 text-xs transition-colors border ${
-                            filter === id
+                            sheetDraft.filter === id
                               ? "border-sky-400/60 bg-sky-400/15 text-sky-300"
                               : "border-border/60 text-muted-foreground hover:text-foreground hover:border-border"
                           }`}
@@ -1629,12 +1864,12 @@ function PlayersPage() {
             <SheetFooter className="border-t border-border/60 px-5 py-3">
               <Button
                 variant="ghost"
-                onClick={clearAdvancedFilters}
-                disabled={advancedFilterCount === 0}
+                onClick={clearAdvancedDraft}
+                disabled={draftFilterCount === 0}
               >
                 Limpar filtros
               </Button>
-              <Button onClick={() => setAdvancedFiltersOpen(false)}>Ver jogadores</Button>
+              <Button onClick={applyAdvancedFilters}>Ver jogadores</Button>
             </SheetFooter>
           </SheetContent>
         </Sheet>
