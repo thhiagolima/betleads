@@ -81,6 +81,7 @@ import {
   getPlayersFilteredSmsAudience,
   type PlayerRow,
 } from "@/lib/players-list.functions";
+import { getPlayerFilterFacets } from "@/lib/player-filter-facets.functions";
 import { getGamificationData, type LevelSlug } from "@/lib/gamification.functions";
 import {
   listPendingConversion,
@@ -659,6 +660,13 @@ function PlayersPage() {
   // Quando há ordenação por saldo/lucro precisamos do dataset completo (o
   // server faz no caminho computeClient). Ainda assim só baixa as cols slim.
   const fetchPlayersPage = useServerFn(getPlayersPage);
+  const fetchPlayerFilterFacets = useServerFn(getPlayerFilterFacets);
+  const { data: playerFilterFacets, isFetching: isFetchingPlayerFilterFacets } = useQuery({
+    queryKey: ["players-filter-facets"],
+    queryFn: () => fetchPlayerFilterFacets(),
+    enabled: advancedFiltersOpen,
+    staleTime: 30_000,
+  });
   const {
     data: pageData,
     isLoading,
@@ -1186,6 +1194,26 @@ function PlayersPage() {
     return map;
   }, [gamification, levelCounts, selectedSituation]);
 
+  function draftStatusCount(status: PlayerSituation) {
+    return sheetDraft.level
+      ? (gamification?.segmentCounts?.[status]?.[sheetDraft.level] ?? 0)
+      : (gamification?.totals?.[
+          status === "active"
+            ? "activeCount"
+            : status === "cooling"
+              ? "coolingCount"
+              : status === "sleeping"
+                ? "sleepingCount"
+                : "noDepositCount"
+        ] ?? 0);
+  }
+
+  function draftLevelCount(level: PaidLevelSlug) {
+    return sheetDraft.situation
+      ? (gamification?.segmentCounts?.[sheetDraft.situation]?.[level] ?? 0)
+      : (levelCounts.get(level) ?? 0);
+  }
+
   function resetGamificationFilters() {
     setFilter("todos");
     setSelectedSituation(null);
@@ -1649,7 +1677,10 @@ function PlayersPage() {
                               : "border-border/60 text-muted-foreground hover:border-border hover:text-foreground"
                           }`}
                         >
-                          {item.label}
+                          {item.label}{" "}
+                          <span className="ml-1 opacity-70">
+                            {draftStatusCount(situation).toLocaleString("pt-BR")}
+                          </span>
                         </button>
                       );
                     })}
@@ -1669,7 +1700,10 @@ function PlayersPage() {
                             : "border-border/60 text-muted-foreground hover:border-border hover:text-foreground"
                         }`}
                       >
-                        {item.label}
+                        {item.label}{" "}
+                        <span className="ml-1 opacity-70">
+                          {draftLevelCount(item.level as PaidLevelSlug).toLocaleString("pt-BR")}
+                        </span>
                       </button>
                     ))}
                   </div>
@@ -1806,6 +1840,11 @@ function PlayersPage() {
                                 }`}
                               >
                                 {item.label}
+                                <span className="ml-1 opacity-70">
+                                  {isFetchingPlayerFilterFacets
+                                    ? "…"
+                                    : (playerFilterFacets?.[item.id] ?? 0).toLocaleString("pt-BR")}
+                                </span>
                               </button>
                             );
                           })}
@@ -1822,7 +1861,7 @@ function PlayersPage() {
                       </div>
                       <p className="mt-1 text-[11px] text-muted-foreground">
                         Sinais priorizados para ação; podem cruzar os filtros acima, mas não os
-                        substituem.
+                        substituem. O quantitativo é calculado ao aplicar o alerta.
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-1.5">
