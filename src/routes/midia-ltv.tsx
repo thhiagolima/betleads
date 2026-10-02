@@ -8,7 +8,6 @@ import {
   Calendar,
   CheckCircle2,
   Clipboard,
-  CreditCard,
   Eye,
   ExternalLink,
   FileSpreadsheet,
@@ -179,6 +178,14 @@ type MarketingOverview = {
   daily: DailyPoint[];
   moneyMap: MoneyRow[];
   orphanAttributions: OrphanAttributionRow[];
+  attributionHealth: {
+    total: number;
+    marked: number;
+    matched: number;
+    missingUtm: number;
+    orphan: number;
+    matchRate: number | null;
+  };
 };
 
 type MetaAccount = {
@@ -190,6 +197,11 @@ type MetaAccount = {
   currency: string | null;
   selected: boolean | null;
   last_sync_at: string | null;
+  sync_status: "never" | "queued" | "syncing" | "healthy" | "warning" | "error";
+  last_attempt_at: string | null;
+  last_success_at: string | null;
+  last_error: string | null;
+  last_row_count: number;
 };
 
 type MetaConnection = {
@@ -206,6 +218,7 @@ type MetaConnection = {
   app_name: string | null;
   business_id: string | null;
   connection_label: string | null;
+  auth_type: "legacy_oauth" | "system_user_token";
 };
 
 type MetaSummary = {
@@ -363,10 +376,22 @@ function MediaLtvPage() {
   const testMetaConnection = useServerFn(validateMetaConnection);
   const removeMetaConnection = useServerFn(disconnectMetaConnection);
   const [period, setPeriod] = useState<PeriodPreset>("7d");
+  const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
   const [section, setSection] = useState<"visualizacao" | "configuracao">("visualizacao");
   const [platform, setPlatform] = useState<Platform>("meta");
   const [houseUrl, setHouseUrl] = useState("https://sua-casa.com/cadastro");
-  const range = useMemo(() => periodRange(period), [period]);
+  const range = useMemo(() => {
+    if (!customRange) return periodRange(period);
+    const days = Math.max(
+      1,
+      Math.round(
+        (new Date(`${customRange.to}T00:00:00`).getTime() -
+          new Date(`${customRange.from}T00:00:00`).getTime()) /
+          86400000,
+      ) + 1,
+    );
+    return { ...customRange, days };
+  }, [period, customRange]);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["marketing-overview", range.from, range.to],
@@ -472,12 +497,14 @@ function MediaLtvPage() {
   });
 
   const latestMetaRun = metaSyncRuns[0] as MetaSyncRun | undefined;
+  const latestMetaRunId = latestMetaRun?.id;
+  const latestMetaRunStatus = latestMetaRun?.status;
   useEffect(() => {
-    if (!latestMetaRun || !["completed", "partial", "failed"].includes(latestMetaRun.status))
-      return;
+    if (!latestMetaRunId || !latestMetaRunStatus) return;
+    if (!["completed", "partial", "failed"].includes(latestMetaRunStatus)) return;
     qc.invalidateQueries({ queryKey: ["marketing-overview"] });
     qc.invalidateQueries({ queryKey: ["meta-connection-summary"] });
-  }, [latestMetaRun?.id, latestMetaRun?.status, qc]);
+  }, [latestMetaRunId, latestMetaRunStatus, qc]);
 
   const integrations = data?.integrations ?? [];
   const meta = integrations.find((i) => i.provider === "meta");
@@ -532,7 +559,12 @@ function MediaLtvPage() {
         <VisualizacaoSection
           range={range}
           period={period}
-          onPeriodChange={setPeriod}
+          customRange={customRange}
+          onPeriodChange={(value) => {
+            setPeriod(value);
+            setCustomRange(null);
+          }}
+          onCustomRangeChange={setCustomRange}
           data={data}
           isLoading={isLoading}
           metaSummary={metaSummary}
@@ -642,7 +674,9 @@ function CopyBlock({ title, value, onCopy }: { title: string; value: string; onC
 function VisualizacaoSection({
   range,
   period,
+  customRange,
   onPeriodChange,
+  onCustomRangeChange,
   data,
   isLoading,
   metaSummary,
@@ -652,7 +686,9 @@ function VisualizacaoSection({
 }: {
   range: { from: string; to: string; days: number };
   period: PeriodPreset;
+  customRange: { from: string; to: string } | null;
   onPeriodChange: (period: PeriodPreset) => void;
+  onCustomRangeChange: (range: { from: string; to: string } | null) => void;
   data: MarketingOverview | undefined;
   isLoading: boolean;
   metaSummary: MetaSummary | undefined;
@@ -660,6 +696,9 @@ function VisualizacaoSection({
   onSync: () => void;
   syncRuns: MetaSyncRun[];
 }) {
+  const [reportView, setReportView] = useState<
+    "creatives" | "audiences" | "campaigns" | "evolution" | "diagnostics"
+  >("creatives");
   const totals = data?.totals;
   const accounts = metaSummary?.accounts ?? [];
   const selectedAccounts = accounts.filter((account) => account.selected !== false);
@@ -697,10 +736,6 @@ function VisualizacaoSection({
           )}
           {syncPending ? "sincronização na fila" : "Atualizar agora"}
         </Button>
-        <span className="inline-flex items-center gap-2 rounded-md border border-border/70 bg-muted/50 px-3 py-2 text-sm font-semibold text-muted-foreground">
-          <CreditCard className="h-4 w-4" />
-          6.499 créditos de SMS
-        </span>
       </div>
 
       {latestRun && (
@@ -778,10 +813,31 @@ function VisualizacaoSection({
             {periodLabels[key]}
           </Button>
         ))}
-        <Button variant="outline" className="h-11 gap-2">
-          <Calendar className="h-4 w-4" />
-          Escolher datas
-        </Button>
+        <div className="flex items-center gap-2 rounded-md border border-border/70 px-3 py-1.5">
+          <Calendar className="h-4 w-4 text-muted-foreground" />
+          <Input
+            aria-label="Data inicial"
+            type="date"
+            className="h-8 w-36 border-0 bg-transparent p-0"
+            value={customRange?.from ?? range.from}
+            max={customRange?.to ?? range.to}
+            onChange={(event) =>
+              onCustomRangeChange({ from: event.target.value, to: customRange?.to ?? range.to })
+            }
+          />
+          <span className="text-xs text-muted-foreground">até</span>
+          <Input
+            aria-label="Data final"
+            type="date"
+            className="h-8 w-36 border-0 bg-transparent p-0"
+            value={customRange?.to ?? range.to}
+            min={customRange?.from ?? range.from}
+            max={isoDate(new Date())}
+            onChange={(event) =>
+              onCustomRangeChange({ from: customRange?.from ?? range.from, to: event.target.value })
+            }
+          />
+        </div>
         <span className="ml-1 text-sm text-muted-foreground">
           só anúncios com rastreio da iFluxHub
         </span>
@@ -879,9 +935,31 @@ function VisualizacaoSection({
         </span>
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[1.4fr_1fr]">
+      <Tabs value={reportView} onValueChange={(value) => setReportView(value as typeof reportView)}>
+        <TabsList className="app-scrollbar h-auto max-w-full justify-start overflow-x-auto">
+          <TabsTrigger value="creatives">Criativos</TabsTrigger>
+          <TabsTrigger value="audiences">Públicos</TabsTrigger>
+          <TabsTrigger value="campaigns">Campanhas</TabsTrigger>
+          <TabsTrigger value="evolution">Evolução</TabsTrigger>
+          <TabsTrigger value="diagnostics">Diagnóstico</TabsTrigger>
+        </TabsList>
+      </Tabs>
+
+      {reportView === "creatives" && (
         <CreativeTable creatives={data?.creatives ?? []} isLoading={isLoading} />
-        <div className="space-y-4">
+      )}
+      {reportView === "audiences" && (
+        <AudienceTable rows={data?.audiences ?? []} isLoading={isLoading} />
+      )}
+      {reportView === "campaigns" && (
+        <CampaignTable
+          campaigns={data?.campaigns ?? []}
+          isLoading={isLoading}
+          orphanRevenue={orphanRevenue}
+        />
+      )}
+      {reportView === "evolution" && (
+        <div className="grid gap-5 xl:grid-cols-2">
           <DailyChart
             title="Investimento por dia"
             subtitle={`${range.days} dias · o que foi gasto em mídia`}
@@ -900,15 +978,36 @@ function VisualizacaoSection({
           />
           <MoneyMapCard rows={data?.moneyMap ?? []} />
         </div>
-      </div>
-
-      <AudienceTable rows={data?.audiences ?? []} isLoading={isLoading} />
-      <CampaignTable
-        campaigns={data?.campaigns ?? []}
-        isLoading={isLoading}
-        orphanRevenue={orphanRevenue}
-      />
-      <OrphanAttributionTable rows={orphanRows} isLoading={isLoading} />
+      )}
+      {reportView === "diagnostics" && (
+        <div className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            <Kpi title="Cadastros" value={num(data?.attributionHealth.total)} detail="no período" />
+            <Kpi
+              title="Com marcação"
+              value={num(data?.attributionHealth.marked)}
+              detail="receberam UTM ou ID"
+            />
+            <Kpi
+              title="Identificados"
+              value={num(data?.attributionHealth.matched)}
+              detail={`${pct(data?.attributionHealth.matchRate)} dos marcados`}
+              tone="success"
+            />
+            <Kpi
+              title="Sem UTM"
+              value={num(data?.attributionHealth.missingUtm)}
+              detail="não permitem atribuição"
+            />
+            <Kpi
+              title="Sem correspondência"
+              value={num(data?.attributionHealth.orphan)}
+              detail="marcação não encontrada na Meta"
+            />
+          </div>
+          <OrphanAttributionTable rows={orphanRows} isLoading={isLoading} />
+        </div>
+      )}
     </div>
   );
 }
@@ -1126,6 +1225,9 @@ function MetaConnectionWizard({
   }, [connections.length]);
 
   const persistedSelectedCount = accounts.filter((account) => account.selected).length;
+  const legacyConnections = connections.filter(
+    (connection) => connection.auth_type === "legacy_oauth",
+  );
   const currentStep = connections.length === 0 ? 1 : persistedSelectedCount === 0 ? 2 : 3;
   const connectionStatus = connections.some((connection) => connection.status === "error")
     ? "error"
@@ -1174,6 +1276,15 @@ function MetaConnectionWizard({
       <Button variant="outline" size="sm" onClick={() => setShowGuide((value) => !value)}>
         {showGuide ? "Esconder preparação" : "Como preparar a conta"}
       </Button>
+      {legacyConnections.length > 0 && (
+        <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm">
+          <p className="font-semibold text-amber-300">Conexão antiga precisa ser substituída</p>
+          <p className="mt-1 text-muted-foreground">
+            A integração anterior usava o app compartilhado da plataforma. Gere um token no app da
+            sua operação e conecte abaixo; os dados já importados serão preservados.
+          </p>
+        </div>
+      )}
       {showGuide && (
         <div className="mt-3 grid gap-2 text-xs text-muted-foreground md:grid-cols-2">
           {[
@@ -1285,6 +1396,11 @@ function MetaConnectionWizard({
                     <p className="mt-1 text-xs text-muted-foreground">
                       Usuário: {connection.meta_user_name ?? "Usuário do Sistema"}
                     </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {connection.auth_type === "system_user_token"
+                        ? "App próprio da operação"
+                        : "Conexão antiga do app compartilhado"}
+                    </p>
                   </div>
                   <StatusBadge status={connection.status} />
                 </div>
@@ -1358,6 +1474,28 @@ function MetaConnectionWizard({
                     </span>
                   </span>
                   <span className="text-xs text-muted-foreground">{account.currency ?? ""}</span>
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      "text-[10px]",
+                      account.sync_status === "healthy" && "border-emerald-500/30 text-emerald-400",
+                      account.sync_status === "warning" && "border-amber-500/30 text-amber-300",
+                      account.sync_status === "error" && "border-rose-500/30 text-rose-300",
+                    )}
+                    title={account.last_error ?? undefined}
+                  >
+                    {account.sync_status === "healthy"
+                      ? "dados atualizados"
+                      : account.sync_status === "syncing"
+                        ? "sincronizando"
+                        : account.sync_status === "queued"
+                          ? "aguardando"
+                          : account.sync_status === "error"
+                            ? "erro"
+                            : account.sync_status === "warning"
+                              ? "atenção"
+                              : "sem leitura"}
+                  </Badge>
                 </label>
               ))}
               {accounts.length === 0 && (

@@ -4,12 +4,6 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { decryptMetaToken, encryptMetaToken, metaTokenHint } from "@/lib/meta-token.server";
 
-const DEFAULT_SCOPES = ["ads_read", "business_management"];
-
-const oauthSchema = z.object({
-  returnTo: z.string().trim().max(300).optional(),
-});
-
 const syncSchema = z.object({
   days: z.number().int().min(1).max(90).default(7),
 });
@@ -37,6 +31,8 @@ type MetaInsight = {
   ctr?: string;
   cpc?: string;
   cpm?: string;
+  reach?: string;
+  frequency?: string;
 };
 
 type MetaAd = {
@@ -55,6 +51,13 @@ type MetaAd = {
     name?: string;
     status?: string;
     effective_status?: string;
+  };
+  creative?: {
+    id?: string;
+    name?: string;
+    thumbnail_url?: string;
+    image_url?: string;
+    effective_object_story_id?: string;
   };
 };
 
@@ -78,25 +81,21 @@ type MetaAccountForSync = {
     | null;
 };
 
+type MetaAdAccount = {
+  id: string;
+  account_id?: string;
+  name?: string;
+  currency?: string;
+  timezone_name?: string;
+  account_status?: number;
+  business?: { id?: string; name?: string };
+};
+
 type MetaPermission = { permission: string; status: string };
 type MetaApp = { id: string; name?: string };
 
 function metaApiVersion() {
   return process.env.META_API_VERSION ?? "v23.0";
-}
-
-function metaRedirectUri() {
-  return process.env.META_REDIRECT_URI ?? "https://betleads.io/api/meta/oauth/callback";
-}
-
-function requireMetaAppId() {
-  const appId = process.env.META_APP_ID;
-  if (!appId) throw new Error("META_APP_ID nao configurado");
-  return appId;
-}
-
-function randomNonce() {
-  return crypto.randomUUID().replace(/-/g, "");
 }
 
 function dateOnly(date: Date) {
@@ -156,6 +155,8 @@ async function loadInsights(accessToken: string, adAccountId: string, days: numb
     "ctr",
     "cpc",
     "cpm",
+    "reach",
+    "frequency",
   ].join(",");
 
   const first = await fetchMetaJson<{ data?: MetaInsight[] }>(
@@ -196,7 +197,7 @@ async function loadActiveAds(accessToken: string, adAccountId: string) {
   const first = await fetchMetaJson<{ data?: MetaAd[] }>(`/${accountPath(adAccountId)}/ads`, {
     access_token: accessToken,
     fields:
-      "id,name,status,effective_status,campaign{id,name,status,effective_status},adset{id,name,status,effective_status}",
+      "id,name,status,effective_status,campaign{id,name,status,effective_status},adset{id,name,status,effective_status},creative{id,name,thumbnail_url,image_url,effective_object_story_id}",
     effective_status: JSON.stringify(["ACTIVE"]),
     limit: "500",
   });
@@ -221,7 +222,7 @@ async function loadActiveAds(accessToken: string, adAccountId: string) {
 }
 
 async function loadAllAdAccounts(accessToken: string) {
-  const first = await fetchMetaJson<{ data?: Array<any>; paging?: { next?: string } }>(
+  const first = await fetchMetaJson<{ data?: MetaAdAccount[]; paging?: { next?: string } }>(
     "/me/adaccounts",
     {
       access_token: accessToken,
@@ -237,7 +238,7 @@ async function loadAllAdAccounts(accessToken: string) {
     try {
       const response = await fetch(next, { signal: controller.signal });
       const json = (await response.json()) as {
-        data?: Array<any>;
+        data?: MetaAdAccount[];
         paging?: { next?: string };
         error?: { message?: string };
       };
@@ -262,37 +263,6 @@ async function resolveTenantId(supabase: {
   return data as string;
 }
 
-export const createMetaOAuthUrl = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((input) => oauthSchema.parse(input ?? {}))
-  .handler(async ({ data, context }) => {
-    const tenantId = await resolveTenantId(context.supabase);
-    const nonce = randomNonce();
-    const expiresAt = new Date(Date.now() + 10 * 60_000).toISOString();
-
-    const { error } = await supabaseAdmin.from("meta_oauth_states").insert({
-      tenant_id: tenantId,
-      user_id: context.userId,
-      nonce,
-      return_to: data.returnTo ?? "/midia-ltv",
-      expires_at: expiresAt,
-    });
-    if (error) throw new Error(error.message);
-
-    const params = new URLSearchParams({
-      client_id: requireMetaAppId(),
-      redirect_uri: metaRedirectUri(),
-      state: nonce,
-      response_type: "code",
-      scope: DEFAULT_SCOPES.join(","),
-    });
-
-    return {
-      url: `https://www.facebook.com/${metaApiVersion()}/dialog/oauth?${params.toString()}`,
-      expiresAt,
-    };
-  });
-
 export const connectMetaSystemUserToken = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) => systemTokenSchema.parse(input))
@@ -314,7 +284,7 @@ export const connectMetaSystemUserToken = createServerFn({ method: "POST" })
 
     const encrypted = await encryptMetaToken(token);
     const checkedAt = new Date().toISOString();
-    const groups = new Map<string, Array<any>>();
+    const groups = new Map<string, MetaAdAccount[]>();
     for (const account of adAccounts) {
       const businessKey = account.business?.id ?? "__no_business__";
       groups.set(businessKey, [...(groups.get(businessKey) ?? []), account]);
@@ -504,7 +474,7 @@ export const updateMetaAccountSelection = createServerFn({ method: "POST" })
     if (data.accountIds.length > 0) {
       const { error: selectError } = await (supabaseAdmin as any)
         .from("meta_ad_accounts")
-        .update({ selected: true })
+        .update({ selected: true, sync_status: "queued", last_error: null })
         .eq("tenant_id", tenantId)
         .in("id", data.accountIds);
       if (selectError) throw new Error(selectError.message);
@@ -675,7 +645,7 @@ export const getMetaConnectionSummary = createServerFn({ method: "GET" })
       supabaseAdmin
         .from("meta_ad_accounts")
         .select(
-          "id, connection_id, meta_ad_account_id, account_id, name, business_id, business_name, currency, timezone_name, account_status, selected, last_sync_at",
+          "id, connection_id, meta_ad_account_id, account_id, name, business_id, business_name, currency, timezone_name, account_status, selected, last_sync_at, sync_status, last_attempt_at, last_success_at, last_error, last_row_count",
         )
         .eq("tenant_id", tenantId)
         .order("name", { ascending: true }),
@@ -701,6 +671,11 @@ async function syncMetaAccount(tenantId: string, account: MetaAccountForSync, da
 
   let imported = 0;
   const now = new Date().toISOString();
+  await (supabaseAdmin as any)
+    .from("meta_ad_accounts")
+    .update({ sync_status: "syncing", last_attempt_at: now, last_error: null })
+    .eq("id", account.id)
+    .eq("tenant_id", tenantId);
   const activeAds = await loadActiveAds(token, account.meta_ad_account_id);
   if (activeAds.length > 0) {
     const today = dateOnly(new Date());
@@ -764,12 +739,24 @@ async function syncMetaAccount(tenantId: string, account: MetaAccountForSync, da
 
   await (supabaseAdmin as any)
     .from("meta_ad_accounts")
-    .update({ last_sync_at: now })
-    .eq("id", account.id);
+    .update({
+      last_sync_at: now,
+      last_success_at: now,
+      sync_status: imported > 0 ? "healthy" : "warning",
+      last_error: imported > 0 ? null : "A Meta não retornou dados para o período selecionado.",
+      last_row_count: imported,
+    })
+    .eq("id", account.id)
+    .eq("tenant_id", tenantId);
   await (supabaseAdmin as any)
     .from("meta_connections")
     .update({ last_sync_at: now, last_error: null, status: "connected" })
     .eq("id", account.connection_id);
+  const { error: attributionError } = await (supabaseAdmin as any).rpc(
+    "reconcile_meta_attributions",
+    { p_tenant_id: tenantId },
+  );
+  if (attributionError) throw new Error(attributionError.message);
   return imported;
 }
 
@@ -1015,6 +1002,15 @@ export async function processMetaSyncQueue(limit = 2) {
         })
         .eq("id", job.id)
         .eq("worker_id", workerId);
+      await (supabaseAdmin as any)
+        .from("meta_ad_accounts")
+        .update({
+          sync_status: canRetry ? "warning" : "error",
+          last_attempt_at: new Date().toISOString(),
+          last_error: message.slice(0, 1000),
+        })
+        .eq("id", job.account_id)
+        .eq("tenant_id", job.tenant_id);
       await (supabaseAdmin as any).from("meta_connection_audit").insert({
         tenant_id: job.tenant_id,
         connection_id: account.connection_id,

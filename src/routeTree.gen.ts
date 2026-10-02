@@ -36,7 +36,6 @@ import { Route as PlayersPlayerIdRouteImport } from './routes/players.$playerId'
 import { Route as UTokenRouteImport } from './routes/u.$token'
 import { Route as ApiPublicEvolutionWebhookRouteImport } from './routes/api/public/evolution-webhook'
 import { Route as ApiPublicSmsWebhookRouteImport } from './routes/api/public/sms-webhook'
-import { Route as ApiMetaOauthCallbackRouteImport } from './routes/api/meta/oauth/callback'
 import { Route as ApiPublicAutomationsDispatchRouteImport } from './routes/api/public/automations/dispatch'
 import { Route as ApiPublicAutomationsEvaluateRouteImport } from './routes/api/public/automations/evaluate'
 import { Route as ApiPublicCallFlowsTickRouteImport } from './routes/api/public/call-flows/tick'
@@ -196,11 +195,6 @@ const ApiPublicEvolutionWebhookRoute =
 const ApiPublicSmsWebhookRoute = ApiPublicSmsWebhookRouteImport.update({
   id: '/api/public/sms-webhook',
   path: '/api/public/sms-webhook',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiMetaOauthCallbackRoute = ApiMetaOauthCallbackRouteImport.update({
-  id: '/api/meta/oauth/callback',
-  path: '/api/meta/oauth/callback',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiPublicAutomationsDispatchRoute =
@@ -369,7 +363,6 @@ export interface FileRoutesByFullPath {
   '/u/$token': typeof UTokenRoute
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
   '/api/public/sms-webhook': typeof ApiPublicSmsWebhookRoute
-  '/api/meta/oauth/callback': typeof ApiMetaOauthCallbackRoute
   '/api/public/automations/dispatch': typeof ApiPublicAutomationsDispatchRoute
   '/api/public/automations/evaluate': typeof ApiPublicAutomationsEvaluateRoute
   '/api/public/call-flows/tick': typeof ApiPublicCallFlowsTickRoute
@@ -423,7 +416,6 @@ export interface FileRoutesByTo {
   '/u/$token': typeof UTokenRoute
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
   '/api/public/sms-webhook': typeof ApiPublicSmsWebhookRoute
-  '/api/meta/oauth/callback': typeof ApiMetaOauthCallbackRoute
   '/api/public/automations/dispatch': typeof ApiPublicAutomationsDispatchRoute
   '/api/public/automations/evaluate': typeof ApiPublicAutomationsEvaluateRoute
   '/api/public/call-flows/tick': typeof ApiPublicCallFlowsTickRoute
@@ -478,7 +470,6 @@ export interface FileRoutesById {
   '/u/$token': typeof UTokenRoute
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
   '/api/public/sms-webhook': typeof ApiPublicSmsWebhookRoute
-  '/api/meta/oauth/callback': typeof ApiMetaOauthCallbackRoute
   '/api/public/automations/dispatch': typeof ApiPublicAutomationsDispatchRoute
   '/api/public/automations/evaluate': typeof ApiPublicAutomationsEvaluateRoute
   '/api/public/call-flows/tick': typeof ApiPublicCallFlowsTickRoute
@@ -534,7 +525,6 @@ export interface FileRouteTypes {
     | '/u/$token'
     | '/api/public/evolution-webhook'
     | '/api/public/sms-webhook'
-    | '/api/meta/oauth/callback'
     | '/api/public/automations/dispatch'
     | '/api/public/automations/evaluate'
     | '/api/public/call-flows/tick'
@@ -588,7 +578,6 @@ export interface FileRouteTypes {
     | '/u/$token'
     | '/api/public/evolution-webhook'
     | '/api/public/sms-webhook'
-    | '/api/meta/oauth/callback'
     | '/api/public/automations/dispatch'
     | '/api/public/automations/evaluate'
     | '/api/public/call-flows/tick'
@@ -642,7 +631,6 @@ export interface FileRouteTypes {
     | '/u/$token'
     | '/api/public/evolution-webhook'
     | '/api/public/sms-webhook'
-    | '/api/meta/oauth/callback'
     | '/api/public/automations/dispatch'
     | '/api/public/automations/evaluate'
     | '/api/public/call-flows/tick'
@@ -695,7 +683,6 @@ export interface RootRouteChildren {
   UTokenRoute: typeof UTokenRoute
   ApiPublicEvolutionWebhookRoute: typeof ApiPublicEvolutionWebhookRoute
   ApiPublicSmsWebhookRoute: typeof ApiPublicSmsWebhookRoute
-  ApiMetaOauthCallbackRoute: typeof ApiMetaOauthCallbackRoute
   ApiPublicAutomationsDispatchRoute: typeof ApiPublicAutomationsDispatchRoute
   ApiPublicAutomationsEvaluateRoute: typeof ApiPublicAutomationsEvaluateRoute
   ApiPublicCallFlowsTickRoute: typeof ApiPublicCallFlowsTickRoute
@@ -911,13 +898,6 @@ declare module '@tanstack/react-router' {
       path: '/api/public/sms-webhook'
       fullPath: '/api/public/sms-webhook'
       preLoaderRoute: typeof ApiPublicSmsWebhookRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/meta/oauth/callback': {
-      id: '/api/meta/oauth/callback'
-      path: '/api/meta/oauth/callback'
-      fullPath: '/api/meta/oauth/callback'
-      preLoaderRoute: typeof ApiMetaOauthCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/public/automations/dispatch': {
@@ -1140,7 +1120,6 @@ const rootRouteChildren: RootRouteChildren = {
   UTokenRoute: UTokenRoute,
   ApiPublicEvolutionWebhookRoute: ApiPublicEvolutionWebhookRoute,
   ApiPublicSmsWebhookRoute: ApiPublicSmsWebhookRoute,
-  ApiMetaOauthCallbackRoute: ApiMetaOauthCallbackRoute,
   ApiPublicAutomationsDispatchRoute: ApiPublicAutomationsDispatchRoute,
   ApiPublicAutomationsEvaluateRoute: ApiPublicAutomationsEvaluateRoute,
   ApiPublicCallFlowsTickRoute: ApiPublicCallFlowsTickRoute,

@@ -17,6 +17,8 @@ export async function processWebhookEvent(
   options: { mirror?: boolean; existingLogId?: string } = { mirror: true },
 ): Promise<Response> {
   let logId = options.existingLogId;
+  let receiptClaimed = false;
+  let receiptEventId: string | null = null;
   if (!logId) {
     const { data: logRow, error: logError } = await sb
       .from("webhook_logs")
@@ -33,14 +35,34 @@ export async function processWebhookEvent(
   }
 
   const markLog = async (status: string, extra?: Record<string, unknown>) => {
-    if (!logId) return;
-    await sb
-      .from("webhook_logs")
-      .update({
-        status,
-        ...(extra ? { payload: { ...payload, _processing: extra } } : {}),
-      })
-      .eq("id", logId);
+    if (logId) {
+      await sb
+        .from("webhook_logs")
+        .update({
+          status,
+          ...(extra ? { payload: { ...payload, _processing: extra } } : {}),
+        })
+        .eq("id", logId);
+    }
+
+    if (!receiptClaimed || !receiptEventId) return;
+    if (status === "processado" || status === "sem_player") {
+      await sb
+        .from("webhook_event_receipts")
+        .update({ status: "completed", completed_at: new Date().toISOString(), last_error: null })
+        .eq("tenant_id", tenantId)
+        .eq("provider_event_id", receiptEventId);
+    }
+    if (status === "erro") {
+      await sb
+        .from("webhook_event_receipts")
+        .update({
+          status: "failed",
+          last_error: String(extra?.error ?? extra?.step ?? "processing_error").slice(0, 1000),
+        })
+        .eq("tenant_id", tenantId)
+        .eq("provider_event_id", receiptEventId);
+    }
   };
 
   try {
@@ -143,6 +165,24 @@ export async function processWebhookEvent(
       firstString(payload.eventId, payload.event_id, data.eventId, data.event_id) ?? null;
     const providerStatus = firstString(data.status, payload.status) ?? null;
 
+    if (providerEventId) {
+      const { data: claimed, error: claimError } = await sb.rpc("claim_webhook_event", {
+        p_tenant_id: tenantId,
+        p_provider_event_id: providerEventId,
+        p_event_name: evento,
+      });
+      if (claimError) {
+        await markLog("erro", { step: "claim_webhook_event", error: claimError.message });
+        return Response.json({ ok: false, evento, error: claimError.message }, { status: 503 });
+      }
+      if (!claimed) {
+        await markLog("duplicado", { provider_event_id: providerEventId });
+        return Response.json({ ok: true, evento, duplicate: true });
+      }
+      receiptClaimed = true;
+      receiptEventId = providerEventId;
+    }
+
     let playerId: string | null = null;
 
     if (externalId) {
@@ -196,7 +236,10 @@ export async function processWebhookEvent(
               error: createError.message,
               retry_error: retryError?.message,
             });
-            return Response.json({ ok: false, evento, error: createError.message }, { status: 200 });
+            return Response.json(
+              { ok: false, evento, error: createError.message },
+              { status: 200 },
+            );
           }
         }
       }
@@ -517,20 +560,29 @@ export async function processWebhookEvent(
             .maybeSingle();
           if (existingSessionError) {
             await markLog("erro", { step: "find_session", error: existingSessionError.message });
-            return Response.json({ ok: false, evento, error: existingSessionError.message }, { status: 200 });
+            return Response.json(
+              { ok: false, evento, error: existingSessionError.message },
+              { status: 200 },
+            );
           }
           sessionExists = !!existingSession;
         }
         if (!sessionExists) {
-          const { error: sessionInsertError } = await sb.from("sessions").insert({
-            tenant_id: tenantId,
-            player_id: playerId,
-            iniciado_em: eventIso,
-            provider_event_id: providerEventId,
-          });
-          if (sessionInsertError && sessionInsertError.code !== "23505") {
+          const { error: sessionInsertError } = await sb.from("sessions").upsert(
+            {
+              tenant_id: tenantId,
+              player_id: playerId,
+              iniciado_em: eventIso,
+              provider_event_id: providerEventId,
+            },
+            { onConflict: "tenant_id,provider_event_id", ignoreDuplicates: true },
+          );
+          if (sessionInsertError) {
             await markLog("erro", { step: "insert_session", error: sessionInsertError.message });
-            return Response.json({ ok: false, evento, error: sessionInsertError.message }, { status: 200 });
+            return Response.json(
+              { ok: false, evento, error: sessionInsertError.message },
+              { status: 200 },
+            );
           }
         }
       } else if (evento === "logout") {
@@ -545,12 +597,17 @@ export async function processWebhookEvent(
           .maybeSingle();
         if (openSessionError) {
           await markLog("erro", { step: "find_open_session", error: openSessionError.message });
-          return Response.json({ ok: false, evento, error: openSessionError.message }, { status: 200 });
+          return Response.json(
+            { ok: false, evento, error: openSessionError.message },
+            { status: 200 },
+          );
         }
         if (openSession) {
           const duration = Math.max(
             0,
-            Math.floor((new Date(eventIso).getTime() - new Date(openSession.iniciado_em).getTime()) / 1000),
+            Math.floor(
+              (new Date(eventIso).getTime() - new Date(openSession.iniciado_em).getTime()) / 1000,
+            ),
           );
           const { error: closeSessionError } = await sb
             .from("sessions")
@@ -559,7 +616,10 @@ export async function processWebhookEvent(
             .eq("tenant_id", tenantId);
           if (closeSessionError) {
             await markLog("erro", { step: "close_session", error: closeSessionError.message });
-            return Response.json({ ok: false, evento, error: closeSessionError.message }, { status: 200 });
+            return Response.json(
+              { ok: false, evento, error: closeSessionError.message },
+              { status: 200 },
+            );
           }
         }
       }
@@ -574,21 +634,27 @@ export async function processWebhookEvent(
           .maybeSingle();
         if (existingEventError) {
           await markLog("erro", { step: "find_event", error: existingEventError.message });
-          return Response.json({ ok: false, evento, error: existingEventError.message }, { status: 200 });
+          return Response.json(
+            { ok: false, evento, error: existingEventError.message },
+            { status: 200 },
+          );
         }
         eventExists = !!existingEvent;
       }
       if (!eventExists) {
-        const { error: eventInsertError } = await sb.from("events").insert({
-          player_id: playerId,
-          tipo: evento,
-          valor,
-          metadata: payload,
-          tenant_id: tenantId,
-          provider_event_id: providerEventId,
-          created_at: eventIso,
-        });
-        if (eventInsertError && eventInsertError.code !== "23505") {
+        const { error: eventInsertError } = await sb.from("events").upsert(
+          {
+            player_id: playerId,
+            tipo: evento,
+            valor,
+            metadata: payload,
+            tenant_id: tenantId,
+            provider_event_id: providerEventId,
+            created_at: eventIso,
+          },
+          { onConflict: "tenant_id,provider_event_id", ignoreDuplicates: true },
+        );
+        if (eventInsertError) {
           await markLog("erro", { step: "insert_event", error: eventInsertError.message });
           return Response.json(
             { ok: false, evento, error: eventInsertError.message },
@@ -1125,15 +1191,16 @@ function extractCpf(data: Record<string, unknown>): string | null {
   const metadata = asRecord(data.metadata);
   const withdrawPix = asRecord(metadata.withdrawPix ?? metadata.withdraw_pix);
   const keyType = String(
-    pix.keyType ?? pix.key_type ?? withdrawPix.keyType ?? withdrawPix.key_type ?? data.pixKeyType ?? "",
+    pix.keyType ??
+      pix.key_type ??
+      withdrawPix.keyType ??
+      withdrawPix.key_type ??
+      data.pixKeyType ??
+      "",
   ).toLowerCase();
   const candidates: unknown[] = [];
   if (keyType === "cpf") {
-    candidates.push(
-      pix.keyValue ?? pix.key_value,
-      data.withdrawPixKey,
-      data.withdraw_pix_key,
-    );
+    candidates.push(pix.keyValue ?? pix.key_value, data.withdrawPixKey, data.withdraw_pix_key);
   }
   candidates.push(data.cpf, data.CPF);
   for (const c of candidates) {

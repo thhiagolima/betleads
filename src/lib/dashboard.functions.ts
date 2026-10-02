@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { brtDayEnd, brtDayStart } from "@/lib/tz";
+import { brtDayEnd, brtDayKey, brtDayStart } from "@/lib/tz";
 import { withServerResultCache } from "@/lib/server-result-cache";
 
 const inputSchema = z.object({
@@ -53,6 +53,22 @@ type DashboardRpc = {
   }>;
 };
 
+type DbResult<T = unknown> = {
+  data: T | null;
+  error: { message: string } | null;
+};
+
+type DashboardQuery<T = unknown> = PromiseLike<DbResult<T>> & {
+  select: (columns: string) => DashboardQuery<T>;
+  eq: (column: string, value: unknown) => DashboardQuery<T>;
+  maybeSingle: () => PromiseLike<DbResult<T>>;
+};
+
+type DashboardDb = {
+  rpc: <T = unknown>(name: string, args: Record<string, unknown>) => PromiseLike<DbResult<T>>;
+  from: <T = unknown>(table: string) => DashboardQuery<T>;
+};
+
 const SMS_UNIT_COST = 0.196;
 
 function number(value: unknown) {
@@ -86,7 +102,15 @@ export const getDashboardSummary = createServerFn({ method: "POST" })
     ].join(":");
 
     return withServerResultCache(cacheKey, ttlMs, async () => {
-      const supabase = context.supabase as any;
+      const supabase = context.supabase as unknown as DashboardDb;
+      if (includesToday) {
+        const { error: refreshError } = await supabase.rpc("refresh_dashboard_daily_metric", {
+          _tenant: data.tenantId,
+          _date: brtDayKey(new Date()),
+        });
+        if (refreshError) throw new Error(refreshError.message);
+      }
+
       const { data: settings, error: settingsError } = await supabase
         .from("dashboard_settings")
         .select("reset_at")

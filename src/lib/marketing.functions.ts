@@ -405,6 +405,9 @@ export const getMarketingOverview = createServerFn({ method: "GET" })
     }
 
     let markedPlayers = 0;
+    let matchedPlayers = 0;
+    let missingUtmPlayers = 0;
+    let orphanPlayersCount = 0;
     for (const player of (playersRes.data ?? []) as DbRow[]) {
       playersById.set(String(player.id), player);
       const attribution = attributionByPlayer.get(String(player.id)) ?? {};
@@ -427,6 +430,9 @@ export const getMarketingOverview = createServerFn({ method: "GET" })
         creativeKeys: metricCreativeKeys,
         campaignKeys: metricCampaignKeys,
       });
+      if (matchStatus.startsWith("matched_")) matchedPlayers += 1;
+      else if (matchStatus === "missing_utm") missingUtmPlayers += 1;
+      else orphanPlayersCount += 1;
       const fallbackName = String(utmContent || utmId || utmCampaign || "(sem marcacao)");
       const item =
         (idKey ? byAdId.get(idKey) : undefined) ??
@@ -589,6 +595,14 @@ export const getMarketingOverview = createServerFn({ method: "GET" })
         orphanPlayers,
         ftd,
         cpaFtd: ftd > 0 && spend > 0 ? spend / ftd : null,
+      },
+      attributionHealth: {
+        total: players,
+        marked: markedPlayers,
+        matched: matchedPlayers,
+        missingUtm: missingUtmPlayers,
+        orphan: orphanPlayersCount,
+        matchRate: markedPlayers > 0 ? (matchedPlayers / markedPlayers) * 100 : null,
       },
       campaigns,
       creatives,

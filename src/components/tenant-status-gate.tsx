@@ -8,14 +8,34 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { getCurrentTenantAccessStatus } from "@/lib/tenants.functions";
 
+const TENANT_VALIDATION_TIMEOUT_MS = 12_000;
+
+async function validateTenantWithTimeout<T>(request: Promise<T>): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      request,
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(
+          () => reject(new Error("A validação da conta demorou mais que o esperado.")),
+          TENANT_VALIDATION_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
 export function TenantStatusGate({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const isTenantPage = pathname.startsWith("/tenants");
   const fetchStatus = useServerFn(getCurrentTenantAccessStatus);
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ["current-tenant-access-status"],
-    queryFn: () => fetchStatus(),
+    queryFn: () => validateTenantWithTimeout(fetchStatus()),
     staleTime: 60_000,
+    retry: false,
     enabled: !isTenantPage,
   });
 
@@ -39,7 +59,7 @@ export function TenantStatusGate({ children }: { children: ReactNode }) {
     return (
       <BlockedTenantCard
         title="Não foi possível validar sua conta"
-        description="Por segurança, a área operacional fica bloqueada até a validação responder."
+        description="A conexão com os dados da sua conta não respondeu. Aguarde alguns segundos e tente novamente."
         icon={<AlertTriangle className="h-5 w-5 text-amber-300" />}
         action={
           <Button variant="outline" disabled={isFetching} onClick={() => void refetch()}>
