@@ -32,11 +32,20 @@ import {
   MessageSquareText,
   RefreshCw,
   Loader2,
+  SlidersHorizontal,
 } from "lucide-react";
 import { MessageCircle } from "lucide-react";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import {
   Select,
   SelectContent,
@@ -367,6 +376,8 @@ function PlayersPage() {
         ).toISOString()
       : null;
   const hasDateRange = !!(dateFromIso && dateToIso);
+  const advancedFilterCount =
+    Number(filter !== "todos") + Number(Boolean(search.trim())) + Number(hasDateRange);
 
   function fmtBr(d: Date) {
     return d.toLocaleDateString("pt-BR");
@@ -574,7 +585,11 @@ function PlayersPage() {
   // Quando há ordenação por saldo/lucro precisamos do dataset completo (o
   // server faz no caminho computeClient). Ainda assim só baixa as cols slim.
   const fetchPlayersPage = useServerFn(getPlayersPage);
-  const { data: pageData, isLoading, isFetching: isFetchingPlayers } = useQuery({
+  const {
+    data: pageData,
+    isLoading,
+    isFetching: isFetchingPlayers,
+  } = useQuery({
     queryKey: [
       "players-page",
       page,
@@ -1048,13 +1063,14 @@ function PlayersPage() {
           ? "Não converteu"
           : filter);
 
-  const selectedFilterLabel = [
-    filter === "todos" ? null : baseFilterLabel,
-    selectedSituation ? situationBadgeMeta[selectedSituation].label : null,
-    selectedLevel ? levelBadgeMeta[selectedLevel].label : null,
-  ]
-    .filter(Boolean)
-    .join(" + ") || "Todos";
+  const selectedFilterLabel =
+    [
+      filter === "todos" ? null : baseFilterLabel,
+      selectedSituation ? situationBadgeMeta[selectedSituation].label : null,
+      selectedLevel ? levelBadgeMeta[selectedLevel].label : null,
+    ]
+      .filter(Boolean)
+      .join(" + ") || "Todos";
 
   const levelCounts = useMemo(() => {
     const map = new Map<LevelSlug, number>();
@@ -1077,7 +1093,9 @@ function PlayersPage() {
           ] ?? 0);
     return {
       todos: gamification?.totals.players ?? totalCount,
-      ...Object.fromEntries(statuses.map((status) => [`situacao_${status}`, countForStatus(status)])),
+      ...Object.fromEntries(
+        statuses.map((status) => [`situacao_${status}`, countForStatus(status)]),
+      ),
     };
   }, [gamification, selectedLevel, totalCount]);
 
@@ -1116,6 +1134,13 @@ function PlayersPage() {
     setSelectedSituation(null);
     setSelectedLevel(null);
     setFilter(nextFilter);
+    setAdvancedFiltersOpen(false);
+  }
+
+  function clearAdvancedFilters() {
+    setFilter("todos");
+    setSearch("");
+    setDateRange(undefined);
   }
 
   const playerGamificationSettings: PlayerGamificationSettings =
@@ -1207,43 +1232,44 @@ function PlayersPage() {
         <div className="space-y-1">
           <h1 className="text-3xl font-bold tracking-normal">Jogadores</h1>
           <p className="text-sm text-muted-foreground">
-            A base viva da casa. Cada jogador tem um nível, uma situação e pode virar público de SMS.
+            A base viva da casa. Cada jogador tem um nível, uma situação e pode virar público de
+            SMS.
           </p>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-9 px-3"
-          onClick={exportCsv}
-          disabled={filteredCount === 0}
-        >
-          <Download className="h-4 w-4" />
-          Exportar CSV
-        </Button>
-        <Button
-          size="sm"
-          className="h-9 px-3"
-          disabled={filteredCount === 0 || buildingAudience}
-          onClick={() => sendToSmsAudience("filter")}
-        >
-          <MessageSquareText className="h-4 w-4" />
-          Usar como público
-        </Button>
-        <Button
-          variant="outline"
-          size="icon"
-          className="h-9 w-9"
-          onClick={() => {
-            qc.invalidateQueries({ queryKey: ["players-page"] });
-            void refetchGamification();
-          }}
-          disabled={isLoading || isFetchingGamification}
-        >
-          <RefreshCw
-            className={`h-4 w-4 ${isLoading || isFetchingGamification ? "animate-spin" : ""}`}
-          />
-        </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 px-3"
+            onClick={exportCsv}
+            disabled={filteredCount === 0}
+          >
+            <Download className="h-4 w-4" />
+            Exportar CSV
+          </Button>
+          <Button
+            size="sm"
+            className="h-9 px-3"
+            disabled={filteredCount === 0 || buildingAudience}
+            onClick={() => sendToSmsAudience("filter")}
+          >
+            <MessageSquareText className="h-4 w-4" />
+            Usar como público
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-9 w-9"
+            onClick={() => {
+              qc.invalidateQueries({ queryKey: ["players-page"] });
+              void refetchGamification();
+            }}
+            disabled={isLoading || isFetchingGamification}
+          >
+            <RefreshCw
+              className={`h-4 w-4 ${isLoading || isFetchingGamification ? "animate-spin" : ""}`}
+            />
+          </Button>
         </div>
       </div>
 
@@ -1310,17 +1336,39 @@ function PlayersPage() {
                   : selectSituation(item.id.replace("situacao_", "") as PlayerSituation)
               }
               className={`inline-flex h-10 items-center gap-2 rounded-lg border px-4 text-sm font-semibold transition-colors ${
-                (item.id === "todos"
-                  ? filter === "todos" && !selectedSituation && !selectedLevel
-                  : selectedSituation === item.id.replace("situacao_", ""))
+                (
+                  item.id === "todos"
+                    ? filter === "todos" && !selectedSituation && !selectedLevel
+                    : selectedSituation === item.id.replace("situacao_", "")
+                )
                   ? "border-primary/70 bg-primary text-primary-foreground"
                   : "border-border/60 bg-card/70 hover:border-primary/50 hover:bg-primary/5"
               }`}
             >
-              <span className={(item.id === "todos" ? filter === "todos" && !selectedSituation && !selectedLevel : selectedSituation === item.id.replace("situacao_", "")) ? "text-primary-foreground" : item.tone}>
+              <span
+                className={
+                  (
+                    item.id === "todos"
+                      ? filter === "todos" && !selectedSituation && !selectedLevel
+                      : selectedSituation === item.id.replace("situacao_", "")
+                  )
+                    ? "text-primary-foreground"
+                    : item.tone
+                }
+              >
                 {item.label}
               </span>
-              <span className={(item.id === "todos" ? filter === "todos" && !selectedSituation && !selectedLevel : selectedSituation === item.id.replace("situacao_", "")) ? "text-primary-foreground/80" : "text-muted-foreground"}>
+              <span
+                className={
+                  (
+                    item.id === "todos"
+                      ? filter === "todos" && !selectedSituation && !selectedLevel
+                      : selectedSituation === item.id.replace("situacao_", "")
+                  )
+                    ? "text-primary-foreground/80"
+                    : "text-muted-foreground"
+                }
+              >
                 {(statusCounts[item.id] ?? 0).toLocaleString("pt-BR")}
               </span>
             </button>
@@ -1336,7 +1384,9 @@ function PlayersPage() {
                   : "border-border/60 bg-card/70 hover:border-primary/50 hover:bg-primary/5"
               }`}
             >
-              <span className={selectedLevel === item.level ? "text-primary-foreground" : item.tone}>
+              <span
+                className={selectedLevel === item.level ? "text-primary-foreground" : item.tone}
+              >
                 {item.label}
               </span>
               <span className="text-muted-foreground">
@@ -1346,98 +1396,198 @@ function PlayersPage() {
           ))}
         </div>
 
-        <details
-          className="rounded-xl border border-border/60 bg-card/30"
-          open={advancedFiltersOpen}
-          onToggle={(event) => setAdvancedFiltersOpen(event.currentTarget.open)}
+        <Button
+          type="button"
+          variant="outline"
+          className="h-10 gap-2 self-start"
+          onClick={() => setAdvancedFiltersOpen(true)}
         >
-          <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-primary">
-            Mais filtros e alertas
-            <span className="ml-2 text-xs font-normal text-muted-foreground">
-              atividade, depósitos, saldo e oportunidades
+          <SlidersHorizontal className="h-4 w-4" />
+          Mais filtros
+          {advancedFilterCount > 0 && (
+            <span className="rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-bold text-primary-foreground">
+              {advancedFilterCount}
             </span>
-          </summary>
-          <div className="space-y-3 border-t border-border/50 p-3">
-            <div className="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-center">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Nome, ID ou telefone" className="h-10 bg-background/70 pl-9" />
+          )}
+        </Button>
+
+        <Sheet open={advancedFiltersOpen} onOpenChange={setAdvancedFiltersOpen}>
+          <SheetContent
+            side="right"
+            className="flex w-full flex-col overflow-y-auto p-0 sm:max-w-xl"
+          >
+            <SheetHeader className="border-b border-border/60 px-5 py-4 pr-12">
+              <SheetTitle>Filtros e alertas</SheetTitle>
+              <SheetDescription>
+                Encontre jogadores por comportamento, período, oportunidade ou dados de contato.
+              </SheetDescription>
+            </SheetHeader>
+            <div className="flex-1 space-y-5 px-5 py-4">
+              <div className="space-y-1">
+                <h3 className="text-sm font-semibold">Busca e período</h3>
+                <p className="text-xs text-muted-foreground">
+                  Procure por nome, telefone ou ID e delimite a janela de cadastro ou FTD.
+                </p>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Select value={dateField} onValueChange={(v) => setDateField(v as "created_at" | "ftd_em")}>
-                  <SelectTrigger className="h-10 w-[170px] bg-background/70"><SelectValue /></SelectTrigger>
-                  <SelectContent><SelectItem value="ftd_em">FTD (1º depósito)</SelectItem><SelectItem value="created_at">Cadastro</SelectItem></SelectContent>
-                </Select>
-                <Popover open={dateOpen} onOpenChange={setDateOpen}>
-                  <PopoverTrigger asChild><Button variant="outline" className="h-10 gap-2"><CalendarIcon className="h-4 w-4" />{hasDateRange && dateRange?.from ? dateRange.to && dateRange.to.toDateString() !== dateRange.from.toDateString() ? `${fmtBr(dateRange.from)} - ${fmtBr(dateRange.to)}` : fmtBr(dateRange.from) : "Selecionar período"}</Button></PopoverTrigger>
-                  <PopoverContent align="end" className="w-auto p-0 pointer-events-auto"><div className="grid grid-cols-2 gap-2 border-b p-3">{[{ label: "Hoje", days: 0 }, { label: "7 dias", days: 6 }, { label: "30 dias", days: 29 }, { label: "90 dias", days: 89 }].map((preset) => <Button key={preset.label} size="sm" variant="ghost" onClick={() => { const to = new Date(); const from = new Date(Date.now() - preset.days * 86400000); setDateRange({ from, to }); setDateOpen(false); }}>{preset.label}</Button>)}</div><Calendar mode="range" selected={dateRange} onSelect={setDateRange} numberOfMonths={2} initialFocus /></PopoverContent>
-                </Popover>
-                {hasDateRange && <Button variant="ghost" size="sm" onClick={() => setDateRange(undefined)} className="h-10 gap-1"><X className="h-3.5 w-3.5" />Limpar</Button>}
+              <div className="space-y-3">
+                <div className="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-center">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      placeholder="Nome, ID ou telefone"
+                      className="h-10 bg-background/70 pl-9"
+                    />
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Select
+                      value={dateField}
+                      onValueChange={(v) => setDateField(v as "created_at" | "ftd_em")}
+                    >
+                      <SelectTrigger className="h-10 w-[170px] bg-background/70">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ftd_em">FTD (1º depósito)</SelectItem>
+                        <SelectItem value="created_at">Cadastro</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Popover open={dateOpen} onOpenChange={setDateOpen}>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" className="h-10 gap-2">
+                          <CalendarIcon className="h-4 w-4" />
+                          {hasDateRange && dateRange?.from
+                            ? dateRange.to &&
+                              dateRange.to.toDateString() !== dateRange.from.toDateString()
+                              ? `${fmtBr(dateRange.from)} - ${fmtBr(dateRange.to)}`
+                              : fmtBr(dateRange.from)
+                            : "Selecionar período"}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent align="end" className="w-auto p-0 pointer-events-auto">
+                        <div className="grid grid-cols-2 gap-2 border-b p-3">
+                          {[
+                            { label: "Hoje", days: 0 },
+                            { label: "7 dias", days: 6 },
+                            { label: "30 dias", days: 29 },
+                            { label: "90 dias", days: 89 },
+                          ].map((preset) => (
+                            <Button
+                              key={preset.label}
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => {
+                                const to = new Date();
+                                const from = new Date(Date.now() - preset.days * 86400000);
+                                setDateRange({ from, to });
+                                setDateOpen(false);
+                              }}
+                            >
+                              {preset.label}
+                            </Button>
+                          ))}
+                        </div>
+                        <Calendar
+                          mode="range"
+                          selected={dateRange}
+                          onSelect={setDateRange}
+                          numberOfMonths={2}
+                          initialFocus
+                        />
+                      </PopoverContent>
+                    </Popover>
+                    {hasDateRange && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setDateRange(undefined)}
+                        className="h-10 gap-1"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                        Limpar
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <div>
+                    <h3 className="text-sm font-semibold">Comportamento e oportunidade</h3>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Selecione uma condição para atualizar a lista de jogadores.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {filters
+                      .filter((item) => !["todos", "ativo"].includes(item.id))
+                      .map((f) => (
+                        <button
+                          key={f.id}
+                          onClick={() => selectAdvancedFilter(f.id)}
+                          className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+                            filter === f.id
+                              ? "border-primary/60 bg-primary/15 text-primary"
+                              : "border-border/60 text-muted-foreground hover:border-border hover:text-foreground"
+                          }`}
+                        >
+                          {f.label}
+                        </button>
+                      ))}
+                  </div>
+                </div>
+                <Card className="border-border/50 bg-card/50">
+                  <CardContent className="space-y-2 p-3">
+                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground/80">
+                      Alertas operacionais
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {alertFilters.map((f) => (
+                        <button
+                          key={f.id}
+                          onClick={() => selectAdvancedFilter(f.id)}
+                          className={`rounded-full px-3 py-1 text-xs transition-colors border ${
+                            filter === f.id
+                              ? "border-amber-400/60 bg-amber-400/15 text-amber-300"
+                              : "border-border/60 text-muted-foreground hover:text-foreground hover:border-border"
+                          }`}
+                        >
+                          {f.label}
+                        </button>
+                      ))}
+                      {[
+                        ["aguardando_conversao", "Aguardando conversão"],
+                        ["convertido", "Converteu"],
+                        ["nao_convertido", "Não converteu"],
+                      ].map(([id, label]) => (
+                        <button
+                          key={id}
+                          onClick={() => selectAdvancedFilter(id)}
+                          className={`rounded-full px-3 py-1 text-xs transition-colors border ${
+                            filter === id
+                              ? "border-sky-400/60 bg-sky-400/15 text-sky-300"
+                              : "border-border/60 text-muted-foreground hover:text-foreground hover:border-border"
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
               </div>
             </div>
-        <div className="space-y-2">
-          <button className="text-sm font-semibold text-primary">
-            o que significa cada categoria? →
-          </button>
-          <div className="flex flex-wrap gap-2">
-            {filters
-              .filter((item) => !["todos", "ativo"].includes(item.id))
-              .map((f) => (
-                <button
-                  key={f.id}
-                  onClick={() => selectAdvancedFilter(f.id)}
-                  className={`rounded-full border px-3 py-1 text-xs transition-colors ${
-                    filter === f.id
-                      ? "border-primary/60 bg-primary/15 text-primary"
-                      : "border-border/60 text-muted-foreground hover:border-border hover:text-foreground"
-                  }`}
-                >
-                  {f.label}
-                </button>
-              ))}
-          </div>
-        </div>
-        <Card className="border-border/50 bg-card/50">
-          <CardContent className="space-y-2 p-3">
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground/80">
-              Alertas operacionais
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {alertFilters.map((f) => (
-                <button
-                  key={f.id}
-                  onClick={() => selectAdvancedFilter(f.id)}
-                  className={`rounded-full px-3 py-1 text-xs transition-colors border ${
-                    filter === f.id
-                      ? "border-amber-400/60 bg-amber-400/15 text-amber-300"
-                      : "border-border/60 text-muted-foreground hover:text-foreground hover:border-border"
-                  }`}
-                >
-                  {f.label}
-                </button>
-              ))}
-              {[
-                ["aguardando_conversao", "Aguardando conversão"],
-                ["convertido", "Converteu"],
-                ["nao_convertido", "Não converteu"],
-              ].map(([id, label]) => (
-                <button
-                  key={id}
-                  onClick={() => selectAdvancedFilter(id)}
-                  className={`rounded-full px-3 py-1 text-xs transition-colors border ${
-                    filter === id
-                      ? "border-sky-400/60 bg-sky-400/15 text-sky-300"
-                      : "border-border/60 text-muted-foreground hover:text-foreground hover:border-border"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-        </details>
+            <SheetFooter className="border-t border-border/60 px-5 py-3">
+              <Button
+                variant="ghost"
+                onClick={clearAdvancedFilters}
+                disabled={advancedFilterCount === 0}
+              >
+                Limpar filtros
+              </Button>
+              <Button onClick={() => setAdvancedFiltersOpen(false)}>Ver jogadores</Button>
+            </SheetFooter>
+          </SheetContent>
+        </Sheet>
       </div>
       {isPendingFilter && (
         <Card className="border-border/50 bg-card/60 backdrop-blur overflow-hidden">
@@ -1650,8 +1800,7 @@ function PlayersPage() {
         <Card className="border-border/50 bg-card/60 backdrop-blur">
           <CardContent className="p-3 flex flex-wrap items-center gap-3 text-xs">
             <div className="text-muted-foreground">
-              Filtro:{" "}
-              <span className="text-foreground font-medium">{selectedFilterLabel}</span>
+              Filtro: <span className="text-foreground font-medium">{selectedFilterLabel}</span>
             </div>
             <div className="text-muted-foreground">
               Total: <span className="text-foreground font-medium">{filteredCount}</span>
