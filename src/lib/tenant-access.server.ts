@@ -21,6 +21,35 @@ export async function resolveCurrentTenantId(supabase: RpcClient) {
   return tenantId;
 }
 
+/**
+ * Selects the operational tenant for an authenticated server action.
+ *
+ * Regular users are always bound to their active tenant. A requested tenant
+ * is accepted only for a global super admin, which is the one role allowed to
+ * inspect every account from the administration/dashboard screens.
+ */
+export async function resolveOperationalTenantForRequest(
+  supabase: RpcClient,
+  userId: string,
+  requestedTenantId?: string | null,
+) {
+  const { data: isSuperAdmin, error: roleError } = await supabase.rpc<boolean>("is_super_admin", {
+    _user_id: userId,
+  });
+  if (roleError) throw new Error(roleError.message);
+
+  if (isSuperAdmin) {
+    if (!requestedTenantId) throw new Error("Selecione uma conta para consultar os dados.");
+    return requestedTenantId;
+  }
+
+  const activeTenantId = await resolveCurrentTenantId(supabase);
+  if (requestedTenantId && requestedTenantId !== activeTenantId) {
+    throw new Error("Sem acesso aos dados desta conta.");
+  }
+  return activeTenantId;
+}
+
 export async function getTenantStatus(tenantId: string) {
   const { data, error } = await supabaseAdmin
     .from("tenants")

@@ -1,6 +1,7 @@
 // CRUD server fns para o módulo Pré-ligação.
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { resolveOperationalTenantId } from "@/lib/tenant-access.server";
 
 type CreateCampaignInput = {
   nome: string;
@@ -29,16 +30,7 @@ export const createPrecallCampaign = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { resolveAudience } = await import("./precall.server");
 
-    // tenant do user (current_tenant_id() via RPC seria ideal; usa user_roles)
-    const { data: roleRow } = await context.supabase
-      .from("user_roles")
-      .select("tenant_id")
-      .eq("user_id", context.userId)
-      .not("tenant_id", "is", null)
-      .limit(1)
-      .maybeSingle();
-    const tenantId = roleRow?.tenant_id;
-    if (!tenantId) throw new Error("tenant não encontrado");
+    const tenantId = await resolveOperationalTenantId(context.supabase);
 
     // 1) cria campanha
     const { data: camp, error: cErr } = await supabaseAdmin
@@ -84,7 +76,9 @@ export const createPrecallCampaign = createServerFn({ method: "POST" })
         player_id: a.player_id,
         telefone_e164: a.telefone_e164,
         status: "pendente",
-        scheduled_at: new Date(now + i * Math.floor((data.delay_min_seconds + data.delay_max_seconds) / 2) * 1000).toISOString(),
+        scheduled_at: new Date(
+          now + i * Math.floor((data.delay_min_seconds + data.delay_max_seconds) / 2) * 1000,
+        ).toISOString(),
       }));
       const { error: lErr } = await supabaseAdmin
         .from("precall_leads")
@@ -132,7 +126,9 @@ export const getPrecallCampaign = createServerFn({ method: "GET" })
 
     const { data: leads } = await context.supabase
       .from("precall_leads")
-      .select("id, player_id, telefone_e164, status, scheduled_at, sent_at, responded_at, called_at, mensagem_enviada, resposta_texto, observacao, error")
+      .select(
+        "id, player_id, telefone_e164, status, scheduled_at, sent_at, responded_at, called_at, mensagem_enviada, resposta_texto, observacao, error",
+      )
       .eq("campaign_id", data.id)
       .order("created_at", { ascending: true })
       .limit(2000);
@@ -140,10 +136,12 @@ export const getPrecallCampaign = createServerFn({ method: "GET" })
     // join nome/categoria/ultimo_login dos players
     const ids = (leads ?? []).map((l) => l.player_id).filter((x): x is string => !!x);
     const players = ids.length
-      ? (await context.supabase
-          .from("players")
-          .select("id, nome, vip, total_depositado, ultimo_login")
-          .in("id", ids)).data ?? []
+      ? ((
+          await context.supabase
+            .from("players")
+            .select("id, nome, vip, total_depositado, ultimo_login")
+            .in("id", ids)
+        ).data ?? [])
       : [];
     const pmap = new Map(players.map((p) => [p.id, p]));
     const leadsFull = (leads ?? []).map((l) => {
@@ -154,7 +152,11 @@ export const getPrecallCampaign = createServerFn({ method: "GET" })
       return {
         ...l,
         nome: p?.nome ?? null,
-        categoria: p?.vip ? "VIP" : p && Number(p.total_depositado) >= 1000 ? "Alto valor" : "Padrão",
+        categoria: p?.vip
+          ? "VIP"
+          : p && Number(p.total_depositado) >= 1000
+            ? "Alto valor"
+            : "Padrão",
         dias_sem_login: dias,
       };
     });
@@ -183,15 +185,7 @@ export const previewPrecallAudience = createServerFn({ method: "POST" })
   .inputValidator((d: { filtro_id: string }) => d)
   .handler(async ({ data, context }) => {
     const { resolveAudience } = await import("./precall.server");
-    const { data: roleRow } = await context.supabase
-      .from("user_roles")
-      .select("tenant_id")
-      .eq("user_id", context.userId)
-      .not("tenant_id", "is", null)
-      .limit(1)
-      .maybeSingle();
-    const tenantId = roleRow?.tenant_id;
-    if (!tenantId) return { count: 0 };
+    const tenantId = await resolveOperationalTenantId(context.supabase);
     const aud = await resolveAudience(tenantId, data.filtro_id);
     return { count: aud.length };
   });

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { brtDayEnd, brtDayKey, brtDayStart } from "@/lib/tz";
 import { withServerResultCache } from "@/lib/server-result-cache";
+import { resolveOperationalTenantForRequest } from "@/lib/tenant-access.server";
 
 const inputSchema = z.object({
   tenantId: z.string().uuid(),
@@ -85,6 +86,11 @@ export const getDashboardSummary = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) => inputSchema.parse(input))
   .handler(async ({ data, context }) => {
+    const tenantId = await resolveOperationalTenantForRequest(
+      context.supabase,
+      context.userId,
+      data.tenantId,
+    );
     const startDate = brtDayStart(new Date(data.from));
     const endDate = brtDayEnd(new Date(data.to));
     const periodMs = brtDayStart(endDate).getTime() - brtDayStart(startDate).getTime();
@@ -94,18 +100,15 @@ export const getDashboardSummary = createServerFn({ method: "POST" })
     const currentDay = brtDayStart(new Date()).getTime();
     const includesToday = brtDayStart(endDate).getTime() >= currentDay;
     const ttlMs = includesToday ? 20_000 : 5 * 60_000;
-    const cacheKey = [
-      "dashboard",
-      data.tenantId,
-      startDate.toISOString(),
-      endDate.toISOString(),
-    ].join(":");
+    const cacheKey = ["dashboard", tenantId, startDate.toISOString(), endDate.toISOString()].join(
+      ":",
+    );
 
     return withServerResultCache(cacheKey, ttlMs, async () => {
       const supabase = context.supabase as unknown as DashboardDb;
       if (includesToday) {
         const { error: refreshError } = await supabase.rpc("refresh_dashboard_daily_metric", {
-          _tenant: data.tenantId,
+          _tenant: tenantId,
           _date: brtDayKey(new Date()),
         });
         if (refreshError) throw new Error(refreshError.message);
@@ -114,13 +117,13 @@ export const getDashboardSummary = createServerFn({ method: "POST" })
       const { data: settings, error: settingsError } = await supabase
         .from("dashboard_settings")
         .select("reset_at")
-        .eq("tenant_id", data.tenantId)
+        .eq("tenant_id", tenantId)
         .eq("id", "global")
         .maybeSingle();
       if (settingsError) throw new Error(settingsError.message);
 
       const { data: raw, error } = await supabase.rpc("dashboard_summary_v2", {
-        _tenant: data.tenantId,
+        _tenant: tenantId,
         _from: startDate.toISOString(),
         _to: endDate.toISOString(),
         _prev_from: brtDayStart(prevStartDate).toISOString(),
