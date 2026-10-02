@@ -1306,7 +1306,7 @@ function PlayersPage() {
   const playerGamificationSettings: PlayerGamificationSettings =
     gamification?.settings ?? DEFAULT_PLAYER_GAMIFICATION;
 
-  function saveSmsDraft(args: {
+  function openCampaignWithAudience(args: {
     label: string;
     recipients: Array<{ phone: string; playerId?: string }>;
     missingPhone: number;
@@ -1322,7 +1322,7 @@ function PlayersPage() {
       return;
     }
     window.localStorage.setItem(
-      "betleads:smsAudienceDraft",
+      "betleads:campaignAudienceDraft",
       JSON.stringify({
         source: "players",
         label: args.label,
@@ -1331,8 +1331,10 @@ function PlayersPage() {
         createdAt: new Date().toISOString(),
       }),
     );
-    toast.success(`${recipients.length.toLocaleString("pt-BR")} destinatários enviados para SMS.`);
-    navigate({ to: "/sms", hash: "massa" });
+    toast.success(
+      `${recipients.length.toLocaleString("pt-BR")} jogadores prontos para a campanha.`,
+    );
+    window.location.assign("/campanhas?newCampaign=1&draft=players");
   }
 
   async function sendToSmsAudience(mode: "selected" | "filter") {
@@ -1340,7 +1342,7 @@ function PlayersPage() {
       const rows = (isLocalAlertFilter ? (localAlertData?.rows ?? []) : paged).filter((p) =>
         selectedIds.has(p.id),
       );
-      saveSmsDraft({
+      openCampaignWithAudience({
         label: `${selectedIds.size} selecionados em ${selectedFilterLabel}`,
         recipients: rows.map((p) => ({ phone: p.telefone ?? "", playerId: p.id })),
         missingPhone: Math.max(0, selectedIds.size - rows.filter((p) => p.telefone).length),
@@ -1352,7 +1354,7 @@ function PlayersPage() {
     try {
       if (isLocalAlertFilter) {
         const rows = localAlertData?.rows ?? [];
-        saveSmsDraft({
+        openCampaignWithAudience({
           label: selectedFilterLabel,
           recipients: rows.map((p) => ({ phone: p.telefone ?? "", playerId: p.id })),
           missingPhone: rows.filter((p) => !p.telefone).length,
@@ -1372,7 +1374,7 @@ function PlayersPage() {
           dateTo: dateToIso,
         },
       });
-      saveSmsDraft({
+      openCampaignWithAudience({
         label: selectedFilterLabel,
         recipients: res.recipients.map((r) => ({ phone: r.phone, playerId: r.playerId })),
         missingPhone: res.missingPhone,
@@ -1414,7 +1416,7 @@ function PlayersPage() {
             onClick={() => sendToSmsAudience("filter")}
           >
             <MessageSquareText className="h-4 w-4" />
-            Usar como público
+            Usar na campanha
           </Button>
           <Button
             variant="outline"
@@ -2143,7 +2145,7 @@ function PlayersPage() {
                 className="inline-flex items-center gap-1.5 rounded-md border border-primary/50 bg-primary/10 px-3 py-1.5 text-xs text-primary hover:bg-primary/20 disabled:opacity-40 disabled:pointer-events-none"
               >
                 <MessageSquareText className="h-3.5 w-3.5" />
-                Usar selecionados no SMS
+                Usar selecionados na campanha
               </button>
               <button
                 type="button"
