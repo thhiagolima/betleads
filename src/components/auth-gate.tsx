@@ -7,8 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
-import { LogOut } from "lucide-react";
-import betleadsLogo from "@/assets/betleads-logo-v2.png.asset.json";
+import { LogOut, Sparkles } from "lucide-react";
 
 type AuthState =
   | { status: "loading" }
@@ -17,6 +16,12 @@ type AuthState =
   | { status: "authed"; session: Session };
 
 const AuthSessionContext = createContext<Session | null>(null);
+
+function isInvalidRefreshToken(error: unknown) {
+  const message =
+    error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return message.includes("refresh token") || message.includes("refresh_token");
+}
 
 export function useAuthSession() {
   return useContext(AuthSessionContext);
@@ -41,10 +46,19 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     // a corrida onde o INITIAL_SESSION chega antes da sessão ser restaurada.
     supabase.auth
       .getSession()
-      .then(({ data, error }) => {
+      .then(async ({ data, error }) => {
         if (!mounted) return;
         clearTimeout(timeoutId);
         if (error) {
+          // Um refresh token revogado permanece no localStorage e faz toda nova
+          // inicialização repetir o 400. Limpar apenas a sessão local permite
+          // autenticar novamente sem depender de uma chamada ao token inválido.
+          if (isInvalidRefreshToken(error)) {
+            await supabase.auth.signOut({ scope: "local" }).catch(() => {});
+          }
+          if (!mounted) return;
+          cachedSessionKey.current = null;
+          queryClient.clear();
           setState({ status: "signed-out" });
           return;
         }
@@ -63,11 +77,11 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!mounted) return;
-        const nextSessionKey = session ? `${session.user.id}:${session.access_token}` : null;
-        if (cachedSessionKey.current !== null && cachedSessionKey.current !== nextSessionKey) {
-          queryClient.clear();
-        }
-        cachedSessionKey.current = nextSessionKey;
+      const nextSessionKey = session ? `${session.user.id}:${session.access_token}` : null;
+      if (cachedSessionKey.current !== null && cachedSessionKey.current !== nextSessionKey) {
+        queryClient.clear();
+      }
+      cachedSessionKey.current = nextSessionKey;
       if (session) setState({ status: "authed", session });
       else setState({ status: "signed-out" });
     });
@@ -115,7 +129,15 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   }
 
   if (state.status === "signed-out") {
-    return <AuthScreen />;
+    return (
+      <AuthScreen
+        onAuthenticated={(session) => {
+          cachedSessionKey.current = `${session.user.id}:${session.access_token}`;
+          queryClient.clear();
+          setState({ status: "authed", session });
+        }}
+      />
+    );
   }
 
   return (
@@ -123,7 +145,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   );
 }
 
-function AuthScreen() {
+function AuthScreen({ onAuthenticated }: { onAuthenticated: (session: Session) => void }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -132,8 +154,10 @@ function AuthScreen() {
     e.preventDefault();
     setLoading(true);
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
+      if (!data.session) throw new Error("A autenticação não retornou uma sessão válida.");
+      onAuthenticated(data.session);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Erro ao autenticar";
       toast.error(msg);
@@ -151,12 +175,12 @@ function AuthScreen() {
 
       <Card className="relative z-10 w-full max-w-md border border-white/10 bg-[#0a0f1c]/80 backdrop-blur-xl shadow-[0_0_45px_-20px_rgba(29,111,255,0.35)] py-2">
         <CardHeader className="items-center text-center pt-6 pb-1">
-          <img
-            src={betleadsLogo.url}
-            alt="BETLEADS"
-            className="mx-auto h-auto w-[220px] md:w-[280px] select-none"
-            draggable={false}
-          />
+          <div className="flex items-center justify-center gap-3" aria-label="BETLEADS">
+            <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-[#00b3ff] to-[#1d6fff] text-white shadow-[0_0_28px_-8px_rgba(0,179,255,0.9)]">
+              <Sparkles className="h-6 w-6" />
+            </span>
+            <span className="text-2xl font-bold tracking-tight text-white">BETLEADS</span>
+          </div>
           <CardTitle className="mt-5 text-lg font-semibold tracking-tight">Entrar</CardTitle>
         </CardHeader>
         <CardContent className="pt-2 pb-6">
