@@ -144,26 +144,58 @@ const situationBadgeMeta: Record<PlayerSituation, { label: string; className: st
 
 const filters = [
   { id: "todos", label: "Todos" },
-  { id: "ativo", label: "Ativo (já depositou)" },
+  { id: "ativo", label: "Já depositaram" },
   { id: "cashback_pago_hoje", label: "Cashback pago hoje" },
-  { id: "recorrentes", label: "Logaram nos últimos 4 dias" },
-  { id: "risco_5_7", label: "Em risco (5-7 dias)" },
-  { id: "em_risco", label: "7+ dias sem login" },
+  { id: "recorrentes", label: "Ativos nos últimos 4 dias" },
+  { id: "risco_5_7", label: "5 a 7 dias sem atividade" },
+  { id: "em_risco", label: "7+ dias sem atividade" },
   { id: "vip", label: "VIP" },
-  { id: "vip_em_risco", label: "VIP sem login" },
+  { id: "vip_em_risco", label: "VIP sem atividade há 7+ dias" },
   { id: "quase_vip", label: "Faltando pouco pro VIP" },
-  { id: "leads_quentes", label: "Depositando frequentemente" },
-  { id: "com_saldo", label: "Players com saldo" },
+  { id: "leads_quentes", label: "Ativos e depositaram na semana" },
+  { id: "com_saldo", label: "Saldo disponível (ativos em 60 dias)" },
   { id: "deposito_hoje", label: "Depositaram hoje" },
   { id: "ftd_hoje", label: "FTD hoje" },
-  { id: "nao_converteram", label: "Cadastrados sem depósito" },
-  { id: "risco_inicial", label: "7 a 14 dias sem login" },
-  { id: "risco_moderado", label: "15 a 24 dias sem login" },
-  { id: "risco_alto", label: "25 a 34 dias sem login" },
-  { id: "quase_perdido", label: "35 a 44 dias sem login" },
-  { id: "recuperacao_dificil", label: "45 a 59 dias sem login" },
-  { id: "perdidos", label: "60+ dias sem login" },
+  { id: "nao_converteram", label: "Sem FTD registrado" },
+  { id: "risco_inicial", label: "7 a 14 dias sem atividade" },
+  { id: "risco_moderado", label: "15 a 24 dias sem atividade" },
+  { id: "risco_alto", label: "25 a 34 dias sem atividade" },
+  { id: "quase_perdido", label: "35 a 44 dias sem atividade" },
+  { id: "recuperacao_dificil", label: "45 a 59 dias sem atividade" },
+  { id: "perdidos", label: "60+ dias sem atividade" },
 ];
+
+const advancedFilterGroups = [
+  {
+    title: "Atividade e depósitos",
+    description: "Condições objetivas de atividade, depósito e saldo.",
+    ids: [
+      "recorrentes",
+      "deposito_hoje",
+      "ftd_hoje",
+      "cashback_pago_hoje",
+      "leads_quentes",
+      "com_saldo",
+    ],
+  },
+  {
+    title: "Valor e risco",
+    description: "Atalhos por valor acumulado e tempo sem atividade.",
+    ids: [
+      "vip",
+      "quase_vip",
+      "vip_em_risco",
+      "risco_5_7",
+      "em_risco",
+      "risco_inicial",
+      "risco_moderado",
+      "risco_alto",
+      "quase_perdido",
+      "recuperacao_dificil",
+      "perdidos",
+    ],
+  },
+] as const;
 
 // Chips que filtram por gatilho de alerta em tempo real
 // (mesma lógica da página /alertas — quando a gente manda mensagem o lead some daqui)
@@ -1512,33 +1544,51 @@ function PlayersPage() {
                 </div>
                 <div className="space-y-2">
                   <div>
-                    <h3 className="text-sm font-semibold">Comportamento e oportunidade</h3>
+                    <h3 className="text-sm font-semibold">Filtros de comportamento</h3>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      Selecione uma condição para atualizar a lista de jogadores.
+                      Cada atalho representa uma condição diferente e verificável da base.
                     </p>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    {filters
-                      .filter((item) => !["todos", "ativo"].includes(item.id))
-                      .map((f) => (
-                        <button
-                          key={f.id}
-                          onClick={() => selectAdvancedFilter(f.id)}
-                          className={`rounded-full border px-3 py-1 text-xs transition-colors ${
-                            filter === f.id
-                              ? "border-primary/60 bg-primary/15 text-primary"
-                              : "border-border/60 text-muted-foreground hover:border-border hover:text-foreground"
-                          }`}
-                        >
-                          {f.label}
-                        </button>
-                      ))}
+                  <div className="space-y-4">
+                    {advancedFilterGroups.map((group) => (
+                      <div key={group.title} className="space-y-2">
+                        <div>
+                          <p className="text-xs font-medium text-foreground">{group.title}</p>
+                          <p className="text-[11px] text-muted-foreground">{group.description}</p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {group.ids.map((id) => {
+                            const item = filters.find((candidate) => candidate.id === id);
+                            if (!item) return null;
+                            return (
+                              <button
+                                key={item.id}
+                                onClick={() => selectAdvancedFilter(item.id)}
+                                className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+                                  filter === item.id
+                                    ? "border-primary/60 bg-primary/15 text-primary"
+                                    : "border-border/60 text-muted-foreground hover:border-border hover:text-foreground"
+                                }`}
+                              >
+                                {item.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
                 <Card className="border-border/50 bg-card/50">
                   <CardContent className="space-y-2 p-3">
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground/80">
-                      Alertas operacionais
+                    <div>
+                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground/80">
+                        Alertas operacionais
+                      </div>
+                      <p className="mt-1 text-[11px] text-muted-foreground">
+                        Sinais priorizados para ação; podem cruzar os filtros acima, mas não os
+                        substituem.
+                      </p>
                     </div>
                     <div className="flex flex-wrap gap-1.5">
                       {alertFilters.map((f) => (

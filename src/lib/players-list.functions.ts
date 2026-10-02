@@ -75,6 +75,7 @@ type GamificationSettings = {
   thresholds: Record<PaidLevelSlug, number>;
   coolingAfterDays: number;
   sleepingAfterDays: number;
+  vipMinLevel: PaidLevelSlug;
 };
 
 type QueryLike = {
@@ -85,6 +86,7 @@ type QueryLike = {
       level_thresholds?: unknown;
       cooling_after_days?: unknown;
       sleeping_after_days?: unknown;
+      vip_min_level?: unknown;
     } | null;
     error: { message: string } | null;
   }>;
@@ -99,12 +101,16 @@ type QueryLike = {
 type SettingsClient = {
   from: (table: string) => {
     select: (columns: string) => {
-      eq: (column: string, value: unknown) => {
+      eq: (
+        column: string,
+        value: unknown,
+      ) => {
         maybeSingle: () => Promise<{
           data: {
             level_thresholds?: unknown;
             cooling_after_days?: unknown;
             sleeping_after_days?: unknown;
+            vip_min_level?: unknown;
           } | null;
           error: { message: string } | null;
         }>;
@@ -114,6 +120,7 @@ type SettingsClient = {
           level_thresholds?: unknown;
           cooling_after_days?: unknown;
           sleeping_after_days?: unknown;
+          vip_min_level?: unknown;
         } | null;
         error: { message: string } | null;
       }>;
@@ -155,12 +162,16 @@ const DEFAULT_GAMIFICATION: GamificationSettings = {
   },
   coolingAfterDays: 2,
   sleepingAfterDays: 7,
+  vipMinLevel: "diamond",
 };
 
-async function readGamificationSettings(supabase: SettingsClient, tenantId: string): Promise<GamificationSettings> {
+async function readGamificationSettings(
+  supabase: SettingsClient,
+  tenantId: string,
+): Promise<GamificationSettings> {
   const { data, error } = await supabase
     .from("gamification_settings")
-    .select("level_thresholds,cooling_after_days,sleeping_after_days")
+    .select("level_thresholds,cooling_after_days,sleeping_after_days,vip_min_level")
     .eq("tenant_id", tenantId)
     .maybeSingle();
 
@@ -170,6 +181,12 @@ async function readGamificationSettings(supabase: SettingsClient, tenantId: stri
     const n = Number(value);
     return Number.isFinite(n) ? n : fallback;
   };
+
+  const vipMinLevel = ["bronze", "silver", "gold", "diamond", "black"].includes(
+    String(data.vip_min_level),
+  )
+    ? (data.vip_min_level as PaidLevelSlug)
+    : DEFAULT_GAMIFICATION.vipMinLevel;
 
   return {
     thresholds: {
@@ -181,7 +198,21 @@ async function readGamificationSettings(supabase: SettingsClient, tenantId: stri
     },
     coolingAfterDays: numberOr(data.cooling_after_days, DEFAULT_GAMIFICATION.coolingAfterDays),
     sleepingAfterDays: numberOr(data.sleeping_after_days, DEFAULT_GAMIFICATION.sleepingAfterDays),
+    vipMinLevel,
   };
+}
+
+function vipThreshold(settings: GamificationSettings) {
+  return settings.thresholds[settings.vipMinLevel];
+}
+
+function needsGamificationSettings(filter: string, status?: string | null, level?: string | null) {
+  return (
+    isGamificationFilter(filter) ||
+    Boolean(status) ||
+    Boolean(level) ||
+    ["vip", "vip_em_risco", "quase_vip"].includes(filter)
+  );
 }
 
 function isGamificationFilter(filter: string) {
@@ -296,18 +327,17 @@ export const getPlayersPage = createServerFn({ method: "POST" })
     const { data: tenantId, error: tenantError } = await (supabase as any).rpc("current_tenant_id");
     if (tenantError) throw new Error(tenantError.message);
     if (!tenantId) throw new Error("Tenant atual não encontrado.");
-    const gamificationSettings = isGamificationFilter(filter) || gamificationStatus || gamificationLevel
+    const gamificationSettings = needsGamificationSettings(
+      filter,
+      gamificationStatus,
+      gamificationLevel,
+    )
       ? await readGamificationSettings(supabase, tenantId as string)
       : DEFAULT_GAMIFICATION;
 
     // Helper para aplicar filtros de janela / regra no PostgREST builder.
     const now = Date.now();
     const daysAgo = (n: number) => ISO(now - n * 86400000);
-    const todayStart = (() => {
-      const t = new Date();
-      t.setHours(0, 0, 0, 0);
-      return t.toISOString();
-    })();
     // Início do dia em BRT (America/Sao_Paulo) expresso em UTC.
     const todayStartBrt = (() => {
       const now = new Date();
@@ -353,13 +383,19 @@ export const getPlayersPage = createServerFn({ method: "POST" })
         q = applyInactivityWindow(q, daysAgo(5), daysAgo(7));
         break;
       case "vip":
-        q = q.or(`vip.eq.true,total_depositado.gte.1000`);
+        q = q.or(`vip.eq.true,total_depositado.gte.${vipThreshold(gamificationSettings)}`);
         break;
       case "vip_em_risco":
-        q = applyInactiveAtLeast(q.or(`vip.eq.true,total_depositado.gte.1000`), daysAgo(7));
+        q = applyInactiveAtLeast(
+          q.or(`vip.eq.true,total_depositado.gte.${vipThreshold(gamificationSettings)}`),
+          daysAgo(7),
+        );
         break;
       case "quase_vip":
-        q = q.eq("vip", false).gte("total_depositado", 700).lt("total_depositado", 1000);
+        q = q
+          .eq("vip", false)
+          .gte("total_depositado", vipThreshold(gamificationSettings) * 0.7)
+          .lt("total_depositado", vipThreshold(gamificationSettings));
         break;
       case "leads_quentes":
         q = applyActiveWithin(q, daysAgo(4)).gte("ultimo_deposito", daysAgo(7));
@@ -369,7 +405,7 @@ export const getPlayersPage = createServerFn({ method: "POST" })
         q = applyActiveWithin(q.or(`saldo_carteira.gt.0,saldo_bonus.gt.0`), daysAgo(60));
         break;
       case "deposito_hoje":
-        q = q.gte("ultimo_deposito", todayStart);
+        q = q.gte("ultimo_deposito", todayStartBrt);
         break;
       case "ftd_hoje":
         q = q.gte("ftd_em", todayStartBrt);
@@ -482,13 +518,19 @@ export const getPlayersPage = createServerFn({ method: "POST" })
         slim = applyInactivityWindow(slim, daysAgo(5), daysAgo(7));
         break;
       case "vip":
-        slim = slim.or(`vip.eq.true,total_depositado.gte.1000`);
+        slim = slim.or(`vip.eq.true,total_depositado.gte.${vipThreshold(gamificationSettings)}`);
         break;
       case "vip_em_risco":
-        slim = applyInactiveAtLeast(slim.or(`vip.eq.true,total_depositado.gte.1000`), daysAgo(7));
+        slim = applyInactiveAtLeast(
+          slim.or(`vip.eq.true,total_depositado.gte.${vipThreshold(gamificationSettings)}`),
+          daysAgo(7),
+        );
         break;
       case "quase_vip":
-        slim = slim.eq("vip", false).gte("total_depositado", 700).lt("total_depositado", 1000);
+        slim = slim
+          .eq("vip", false)
+          .gte("total_depositado", vipThreshold(gamificationSettings) * 0.7)
+          .lt("total_depositado", vipThreshold(gamificationSettings));
         break;
       case "leads_quentes":
         slim = applyActiveWithin(slim, daysAgo(4)).gte("ultimo_deposito", daysAgo(7));
@@ -497,7 +539,7 @@ export const getPlayersPage = createServerFn({ method: "POST" })
         slim = applyActiveWithin(slim.or(`saldo_carteira.gt.0,saldo_bonus.gt.0`), daysAgo(60));
         break;
       case "deposito_hoje":
-        slim = slim.gte("ultimo_deposito", todayStart);
+        slim = slim.gte("ultimo_deposito", todayStartBrt);
         break;
       case "ftd_hoje":
         slim = slim.gte("ftd_em", todayStartBrt);
@@ -610,21 +652,25 @@ export const getPlayersFilteredExternalIds = createServerFn({ method: "POST" })
         dateTo,
       } = data;
       const supabase = context.supabase;
-      const { data: tenantId, error: tenantError } = await (supabase as any).rpc("current_tenant_id");
+      const { data: tenantId, error: tenantError } = await (supabase as any).rpc(
+        "current_tenant_id",
+      );
       if (tenantError) throw new Error(tenantError.message);
       if (!tenantId) throw new Error("Tenant atual não encontrado.");
-      const gamificationSettings = isGamificationFilter(filter) || gamificationStatus || gamificationLevel
+      const gamificationSettings = needsGamificationSettings(
+        filter,
+        gamificationStatus,
+        gamificationLevel,
+      )
         ? await readGamificationSettings(supabase, tenantId as string)
         : DEFAULT_GAMIFICATION;
       const now = Date.now();
       const daysAgo = (n: number) => new Date(now - n * 86400000).toISOString();
-      const todayStart = (() => {
-        const t = new Date();
-        t.setHours(0, 0, 0, 0);
-        return t.toISOString();
-      })();
 
-      let q = supabase.from("players").select("player_external_id", { count: "exact" }).eq("tenant_id", tenantId);
+      let q = supabase
+        .from("players")
+        .select("player_external_id", { count: "exact" })
+        .eq("tenant_id", tenantId);
       const todayStartBrt = (() => {
         const now = new Date();
         const brt = new Date(now.getTime() - 3 * 3600 * 1000);
@@ -661,13 +707,19 @@ export const getPlayersFilteredExternalIds = createServerFn({ method: "POST" })
           q = applyInactivityWindow(q, daysAgo(5), daysAgo(7));
           break;
         case "vip":
-          q = q.or(`vip.eq.true,total_depositado.gte.1000`);
+          q = q.or(`vip.eq.true,total_depositado.gte.${vipThreshold(gamificationSettings)}`);
           break;
         case "vip_em_risco":
-          q = applyInactiveAtLeast(q.or(`vip.eq.true,total_depositado.gte.1000`), daysAgo(7));
+          q = applyInactiveAtLeast(
+            q.or(`vip.eq.true,total_depositado.gte.${vipThreshold(gamificationSettings)}`),
+            daysAgo(7),
+          );
           break;
         case "quase_vip":
-          q = q.eq("vip", false).gte("total_depositado", 700).lt("total_depositado", 1000);
+          q = q
+            .eq("vip", false)
+            .gte("total_depositado", vipThreshold(gamificationSettings) * 0.7)
+            .lt("total_depositado", vipThreshold(gamificationSettings));
           break;
         case "leads_quentes":
           q = applyActiveWithin(q, daysAgo(4)).gte("ultimo_deposito", daysAgo(7));
@@ -676,7 +728,7 @@ export const getPlayersFilteredExternalIds = createServerFn({ method: "POST" })
           q = applyActiveWithin(q.or(`saldo_carteira.gt.0,saldo_bonus.gt.0`), daysAgo(60));
           break;
         case "deposito_hoje":
-          q = q.gte("ultimo_deposito", todayStart);
+          q = q.gte("ultimo_deposito", todayStartBrt);
           break;
         case "ftd_hoje":
           q = q.gte("ftd_em", todayStartBrt);
@@ -709,7 +761,12 @@ export const getPlayersFilteredExternalIds = createServerFn({ method: "POST" })
           q = applyGamificationFilter(q, filter, gamificationSettings);
           break;
       }
-      q = applyGamificationDimensions(q, gamificationStatus, gamificationLevel, gamificationSettings);
+      q = applyGamificationDimensions(
+        q,
+        gamificationStatus,
+        gamificationLevel,
+        gamificationSettings,
+      );
 
       if (dateField && dateFrom && dateTo) {
         q = q.gte(dateField, dateFrom).lte(dateField, dateTo);
@@ -768,19 +825,20 @@ export const getPlayersFilteredSmsAudience = createServerFn({ method: "POST" })
         dateTo,
       } = data;
       const supabase = context.supabase;
-      const { data: tenantId, error: tenantError } = await (supabase as any).rpc("current_tenant_id");
+      const { data: tenantId, error: tenantError } = await (supabase as any).rpc(
+        "current_tenant_id",
+      );
       if (tenantError) throw new Error(tenantError.message);
       if (!tenantId) throw new Error("Tenant atual não encontrado.");
-      const gamificationSettings = isGamificationFilter(filter) || gamificationStatus || gamificationLevel
+      const gamificationSettings = needsGamificationSettings(
+        filter,
+        gamificationStatus,
+        gamificationLevel,
+      )
         ? await readGamificationSettings(supabase, tenantId as string)
         : DEFAULT_GAMIFICATION;
       const now = Date.now();
       const daysAgo = (n: number) => new Date(now - n * 86400000).toISOString();
-      const todayStart = (() => {
-        const t = new Date();
-        t.setHours(0, 0, 0, 0);
-        return t.toISOString();
-      })();
       const todayStartBrt = (() => {
         const current = new Date();
         const brt = new Date(current.getTime() - 3 * 3600 * 1000);
@@ -789,7 +847,10 @@ export const getPlayersFilteredSmsAudience = createServerFn({ method: "POST" })
         ).toISOString();
       })();
 
-      let q = supabase.from("players").select("id,telefone", { count: "exact" }).eq("tenant_id", tenantId);
+      let q = supabase
+        .from("players")
+        .select("id,telefone", { count: "exact" })
+        .eq("tenant_id", tenantId);
 
       if (idsIn) {
         if (idsIn.length === 0) return { recipients: [], missingPhone: 0, total: 0 };
@@ -818,13 +879,19 @@ export const getPlayersFilteredSmsAudience = createServerFn({ method: "POST" })
           q = applyInactivityWindow(q, daysAgo(5), daysAgo(7));
           break;
         case "vip":
-          q = q.or(`vip.eq.true,total_depositado.gte.1000`);
+          q = q.or(`vip.eq.true,total_depositado.gte.${vipThreshold(gamificationSettings)}`);
           break;
         case "vip_em_risco":
-          q = applyInactiveAtLeast(q.or(`vip.eq.true,total_depositado.gte.1000`), daysAgo(7));
+          q = applyInactiveAtLeast(
+            q.or(`vip.eq.true,total_depositado.gte.${vipThreshold(gamificationSettings)}`),
+            daysAgo(7),
+          );
           break;
         case "quase_vip":
-          q = q.eq("vip", false).gte("total_depositado", 700).lt("total_depositado", 1000);
+          q = q
+            .eq("vip", false)
+            .gte("total_depositado", vipThreshold(gamificationSettings) * 0.7)
+            .lt("total_depositado", vipThreshold(gamificationSettings));
           break;
         case "leads_quentes":
           q = applyActiveWithin(q, daysAgo(4)).gte("ultimo_deposito", daysAgo(7));
@@ -833,7 +900,7 @@ export const getPlayersFilteredSmsAudience = createServerFn({ method: "POST" })
           q = applyActiveWithin(q.or(`saldo_carteira.gt.0,saldo_bonus.gt.0`), daysAgo(60));
           break;
         case "deposito_hoje":
-          q = q.gte("ultimo_deposito", todayStart);
+          q = q.gte("ultimo_deposito", todayStartBrt);
           break;
         case "ftd_hoje":
           q = q.gte("ftd_em", todayStartBrt);
@@ -866,7 +933,12 @@ export const getPlayersFilteredSmsAudience = createServerFn({ method: "POST" })
           q = applyGamificationFilter(q, filter, gamificationSettings);
           break;
       }
-      q = applyGamificationDimensions(q, gamificationStatus, gamificationLevel, gamificationSettings);
+      q = applyGamificationDimensions(
+        q,
+        gamificationStatus,
+        gamificationLevel,
+        gamificationSettings,
+      );
 
       if (dateField && dateFrom && dateTo) {
         q = q.gte(dateField, dateFrom).lte(dateField, dateTo);
