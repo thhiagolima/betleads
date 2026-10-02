@@ -2,7 +2,10 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { assertTenantCanOperate, resolveCurrentTenantId } from "@/lib/tenant-access.server";
-import { smsAudienceCriteriaSchema } from "@/lib/sms-audience-criteria";
+import {
+  normalizeSmsAudienceCriteria,
+  smsAudienceCriteriaSchema,
+} from "@/lib/sms-audience-criteria";
 import { withServerResultCache } from "@/lib/server-result-cache";
 
 const audienceInput = z.object({ criteria: smsAudienceCriteriaSchema });
@@ -37,15 +40,16 @@ export const resolveSmsCampaignAudience = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) => audienceInput.parse(input))
   .handler(async ({ data, context }): Promise<ResolvedSmsAudience> => {
-    const supabase = context.supabase as any;
+    const supabase = context.supabase;
     const tenantId = await resolveCurrentTenantId(supabase);
     await assertTenantCanOperate(tenantId);
-    const criteriaKey = JSON.stringify(data.criteria);
+    const criteria = normalizeSmsAudienceCriteria(data.criteria);
+    const criteriaKey = JSON.stringify(criteria);
 
     return withServerResultCache(`audience:${tenantId}:${criteriaKey}`, 30_000, async () => {
       const { data: result, error } = await supabase.rpc("resolve_sms_audience_v2", {
         _tenant: tenantId,
-        _criteria: data.criteria,
+        _criteria: criteria,
       });
       if (error) throw new Error(error.message);
       if (!result) throw new Error("Sem acesso aos jogadores desta conta.");
