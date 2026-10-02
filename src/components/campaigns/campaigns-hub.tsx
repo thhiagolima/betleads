@@ -56,7 +56,11 @@ export function CampaignsHub() {
     const params = new URLSearchParams(window.location.search);
     const audienceId = params.get("audience") ?? "";
     setRequestedAudienceId(audienceId);
-    if (params.get("newCampaign") === "1") setOpen(true);
+    if (params.get("newChannel") === "email") {
+      setEmailOpen(true);
+    } else if (params.get("newCampaign") === "1") {
+      setOpen(true);
+    }
   }, []);
 
   const campaigns = useQuery({

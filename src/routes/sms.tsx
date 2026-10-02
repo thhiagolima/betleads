@@ -132,7 +132,11 @@ import {
 import { getSmsCreditPortal } from "@/lib/sms-credits.functions";
 import { resolveSmsCampaignAudience } from "@/lib/sms-audiences.functions";
 import { listSmsAudiences } from "@/lib/sms-audience-crud.functions";
-import { EMPTY_SMS_AUDIENCE, SYSTEM_SMS_AUDIENCES, type SmsAudienceCriteria } from "@/lib/sms-audience-criteria";
+import {
+  EMPTY_SMS_AUDIENCE,
+  SYSTEM_SMS_AUDIENCES,
+  type SmsAudienceCriteria,
+} from "@/lib/sms-audience-criteria";
 import { num } from "@/lib/format";
 
 export const Route = createFileRoute("/sms")({
@@ -219,12 +223,32 @@ const FLUXOS_INICIAIS: Fluxo[] = [
 ];
 
 const SMS_VARIABLE_KEYS = [
-  "primeiro_nome", "nome", "telefone", "email", "saldo", "saldo_atual",
-  "ultimo_login", "dias_sem_login", "ultimo_jogo", "dias_sem_jogar",
-  "ultimo_deposito", "dias_sem_depositar", "total_depositado", "total_sacado",
-  "lucro", "categoria", "status_lead", "expert", "nome_expert", "link",
-  "link_deposito", "cashback_amount", "cashback_valor", "cashback_pago_em",
-  "id_push", "platform_user_id",
+  "primeiro_nome",
+  "nome",
+  "telefone",
+  "email",
+  "saldo",
+  "saldo_atual",
+  "ultimo_login",
+  "dias_sem_login",
+  "ultimo_jogo",
+  "dias_sem_jogar",
+  "ultimo_deposito",
+  "dias_sem_depositar",
+  "total_depositado",
+  "total_sacado",
+  "lucro",
+  "categoria",
+  "status_lead",
+  "expert",
+  "nome_expert",
+  "link",
+  "link_deposito",
+  "cashback_amount",
+  "cashback_valor",
+  "cashback_pago_em",
+  "id_push",
+  "platform_user_id",
 ];
 
 const VARIAVEIS = SMS_VARIABLE_KEYS.map((key) => `{${key}}`);
@@ -279,15 +303,16 @@ function renderIndividualSmsTemplate(message: string, recipientName: string, pho
 function SmsPage() {
   const navigate = useNavigate();
   const hash = useLocation({ select: (l) => l.hash });
-  const aliases: Record<string, "enviar" | "historico" | "campanhas"> = {
-    dashboard: "enviar",
-    massa: "enviar",
+  const aliases: Record<string, "saude" | "historico" | "campanhas"> = {
+    dashboard: "saude",
+    massa: "saude",
     campanhas: "campanhas",
-    enviar: "enviar",
+    enviar: "saude",
+    saude: "saude",
     historico: "historico",
     fila: "campanhas",
   };
-  const currentTab = aliases[hash] ?? "enviar";
+  const currentTab = aliases[hash] ?? "saude";
   useEffect(() => {
     if (currentTab === "campanhas") {
       void navigate({ to: "/campanhas", replace: true });
@@ -307,7 +332,7 @@ function SmsCompactWorkspace({
   tab,
   onTabChange,
 }: {
-  tab: "enviar" | "historico" | "campanhas";
+  tab: "saude" | "historico" | "campanhas";
   onTabChange: (tab: string) => void;
 }) {
   const qc = useQueryClient();
@@ -385,11 +410,25 @@ function SmsCompactWorkspace({
       value: num(readNumber(today?.sent)),
       hint: `${num(sent)} em 30 dias`,
     },
-    { label: "Entregues", value: num(delivered), hint: `${deliveryRate}% de entrega · ${num(failed)} falharam` },
+    {
+      label: "Entregues",
+      value: num(delivered),
+      hint: `${deliveryRate}% de entrega · ${num(failed)} falharam`,
+    },
   ];
 
-  if (tab === "enviar") {
-    return <SmsChannelHealth configured={!!provider.data?.configured} balance={num(balance)} queue={queue} deliveryRate={deliveryRate} metrics={kpis} onRefresh={() => qc.invalidateQueries({ queryKey: ["sms-compact-dashboard"] })} onOpenHistory={() => onTabChange("historico")} />;
+  if (tab === "saude") {
+    return (
+      <SmsChannelHealth
+        configured={!!provider.data?.configured}
+        balance={num(balance)}
+        queue={queue}
+        deliveryRate={deliveryRate}
+        metrics={kpis}
+        onRefresh={() => qc.invalidateQueries({ queryKey: ["sms-compact-dashboard"] })}
+        onOpenHistory={() => onTabChange("historico")}
+      />
+    );
   }
 
   return (
@@ -418,21 +457,25 @@ function SmsCompactWorkspace({
 
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
         {kpis.map((item) => (
-          <MetricCard key={item.label} label={item.label} value={item.value} hint={item.hint} className="py-3" />
+          <MetricCard
+            key={item.label}
+            label={item.label}
+            value={item.value}
+            hint={item.hint}
+            className="py-3"
+          />
         ))}
       </div>
 
       <div className="flex w-fit rounded-lg border border-border/70 bg-card/60 p-1">
-        {(["enviar", "historico"] as const).map((value) => (
+        {(["saude", "historico"] as const).map((value) => (
           <Button
             key={value}
             size="sm"
             variant={tab === value ? "default" : "ghost"}
             onClick={() => onTabChange(value)}
           >
-            {value === "enviar"
-              ? "Enviar"
-              : "Histórico"}
+            {value === "saude" ? "Saúde" : "Histórico"}
           </Button>
         ))}
         <Button size="sm" variant="ghost" asChild>
@@ -1695,7 +1738,12 @@ function AudiencePicker({
   const [count, setCount] = useState(0);
   const [label, setLabel] = useState("Público personalizado");
   const [loading, setLoading] = useState(false);
-  const toggle = (key: "never" | "yes") => setCriteria((c) => ({ ...c, activity: { ...c.activity, deposit: c.activity.deposit === key ? "any" : key }, level: key === "never" ? null : c.level }));
+  const toggle = (key: "never" | "yes") =>
+    setCriteria((c) => ({
+      ...c,
+      activity: { ...c.activity, deposit: c.activity.deposit === key ? "any" : key },
+      level: key === "never" ? null : c.level,
+    }));
   const run = async () => {
     setLoading(true);
     try {
@@ -1706,30 +1754,165 @@ function AudiencePicker({
       onOpenChange(false);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Não foi possível montar o público");
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   };
-  const chip = (active: boolean) => active ? "rounded-full" : "rounded-full";
+  const chip = (active: boolean) => (active ? "rounded-full" : "rounded-full");
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] max-w-xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Escolher público</DialogTitle>
-          <DialogDescription>Use as mesmas regras da Gamificação para montar o público do disparo.</DialogDescription>
+          <DialogDescription>
+            Use as mesmas regras da Gamificação para montar o público do disparo.
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 rounded-xl bg-muted/25 p-3">
-          <div className="rounded-xl bg-primary/10 px-3 py-2 text-sm"><strong className="text-xl">{loading ? "…" : count}</strong> <span className="text-muted-foreground">jogadores neste público</span></div>
-          <div className="space-y-2"><Label>Nome do público</Label><Input value={label} onChange={(e) => setLabel(e.target.value)} /></div>
-          <div className="space-y-2"><Label>O que ela fez</Label><div className="flex flex-wrap gap-2">
-            <Button type="button" size="sm" className={chip(criteria.activity.deposit === "never")} variant={criteria.activity.deposit === "never" ? "default" : "outline"} onClick={() => toggle("never")}>Cadastrou e nunca depositou</Button>
-            <Button type="button" size="sm" className={chip(criteria.activity.pixUnpaid)} variant={criteria.activity.pixUnpaid ? "default" : "outline"} onClick={() => setCriteria((c) => ({ ...c, activity: { ...c.activity, pixUnpaid: !c.activity.pixUnpaid } }))}>Gerou PIX e não pagou</Button>
-            <Button type="button" size="sm" className={chip(criteria.activity.deposit === "yes")} variant={criteria.activity.deposit === "yes" ? "default" : "outline"} onClick={() => toggle("yes")}>Já depositou</Button>
-            <Button type="button" size="sm" className={chip(criteria.activity.withdrawal === "yes")} variant={criteria.activity.withdrawal === "yes" ? "default" : "outline"} onClick={() => setCriteria((c) => ({ ...c, activity: { ...c.activity, withdrawal: c.activity.withdrawal === "yes" ? "any" : "yes" } }))}>Já sacou</Button>
-            <Button type="button" size="sm" className={chip(criteria.activity.withdrawal === "never")} variant={criteria.activity.withdrawal === "never" ? "default" : "outline"} onClick={() => setCriteria((c) => ({ ...c, activity: { ...c.activity, withdrawal: c.activity.withdrawal === "never" ? "any" : "never" } }))}>Nunca sacou</Button>
-          </div></div>
-          {criteria.activity.deposit !== "never" && <div className="space-y-2"><Label>Nível (Gamificação)</Label><div className="flex flex-wrap gap-2">{([ ["bronze", "🥉 Bronze"], ["silver", "🥈 Prata"], ["gold", "🥇 Ouro"], ["diamond", "💎 Diamante"], ["black", "👑 Black VIP"] ] as const).map(([value, text]) => <Button key={value} type="button" size="sm" className="rounded-full" variant={criteria.level === value ? "default" : "outline"} onClick={() => setCriteria((c) => ({ ...c, level: c.level === value ? null : value }))}>{text}</Button>)}</div></div>}
-          <div className="space-y-2"><Label>Quando</Label><div className="flex flex-wrap gap-2">{([ ["cooling", "Esfriando"], ["sleeping", "Dormindo"], ["inactive30", "30+ dias parado"], ["inactive90", "90+ dias parado"], ["registered_week", "Cadastrou essa semana"] ] as const).map(([value, text]) => <Button key={value} type="button" size="sm" className="rounded-full" variant={criteria.timing === value ? "default" : "outline"} onClick={() => setCriteria((c) => ({ ...c, timing: c.timing === value ? "any" : value }))}>{text}</Button>)}</div></div>
+          <div className="rounded-xl bg-primary/10 px-3 py-2 text-sm">
+            <strong className="text-xl">{loading ? "…" : count}</strong>{" "}
+            <span className="text-muted-foreground">jogadores neste público</span>
+          </div>
+          <div className="space-y-2">
+            <Label>Nome do público</Label>
+            <Input value={label} onChange={(e) => setLabel(e.target.value)} />
+          </div>
+          <div className="space-y-2">
+            <Label>O que ela fez</Label>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                className={chip(criteria.activity.deposit === "never")}
+                variant={criteria.activity.deposit === "never" ? "default" : "outline"}
+                onClick={() => toggle("never")}
+              >
+                Cadastrou e nunca depositou
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className={chip(criteria.activity.pixUnpaid)}
+                variant={criteria.activity.pixUnpaid ? "default" : "outline"}
+                onClick={() =>
+                  setCriteria((c) => ({
+                    ...c,
+                    activity: { ...c.activity, pixUnpaid: !c.activity.pixUnpaid },
+                  }))
+                }
+              >
+                Gerou PIX e não pagou
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className={chip(criteria.activity.deposit === "yes")}
+                variant={criteria.activity.deposit === "yes" ? "default" : "outline"}
+                onClick={() => toggle("yes")}
+              >
+                Já depositou
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className={chip(criteria.activity.withdrawal === "yes")}
+                variant={criteria.activity.withdrawal === "yes" ? "default" : "outline"}
+                onClick={() =>
+                  setCriteria((c) => ({
+                    ...c,
+                    activity: {
+                      ...c.activity,
+                      withdrawal: c.activity.withdrawal === "yes" ? "any" : "yes",
+                    },
+                  }))
+                }
+              >
+                Já sacou
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className={chip(criteria.activity.withdrawal === "never")}
+                variant={criteria.activity.withdrawal === "never" ? "default" : "outline"}
+                onClick={() =>
+                  setCriteria((c) => ({
+                    ...c,
+                    activity: {
+                      ...c.activity,
+                      withdrawal: c.activity.withdrawal === "never" ? "any" : "never",
+                    },
+                  }))
+                }
+              >
+                Nunca sacou
+              </Button>
+            </div>
+          </div>
+          {criteria.activity.deposit !== "never" && (
+            <div className="space-y-2">
+              <Label>Nível (Gamificação)</Label>
+              <div className="flex flex-wrap gap-2">
+                {(
+                  [
+                    ["bronze", "🥉 Bronze"],
+                    ["silver", "🥈 Prata"],
+                    ["gold", "🥇 Ouro"],
+                    ["diamond", "💎 Diamante"],
+                    ["black", "👑 Black VIP"],
+                  ] as const
+                ).map(([value, text]) => (
+                  <Button
+                    key={value}
+                    type="button"
+                    size="sm"
+                    className="rounded-full"
+                    variant={criteria.level === value ? "default" : "outline"}
+                    onClick={() =>
+                      setCriteria((c) => ({ ...c, level: c.level === value ? null : value }))
+                    }
+                  >
+                    {text}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="space-y-2">
+            <Label>Quando</Label>
+            <div className="flex flex-wrap gap-2">
+              {(
+                [
+                  ["cooling", "Esfriando"],
+                  ["sleeping", "Dormindo"],
+                  ["inactive30", "30+ dias parado"],
+                  ["inactive90", "90+ dias parado"],
+                  ["registered_week", "Cadastrou essa semana"],
+                ] as const
+              ).map(([value, text]) => (
+                <Button
+                  key={value}
+                  type="button"
+                  size="sm"
+                  className="rounded-full"
+                  variant={criteria.timing === value ? "default" : "outline"}
+                  onClick={() =>
+                    setCriteria((c) => ({ ...c, timing: c.timing === value ? "any" : value }))
+                  }
+                >
+                  {text}
+                </Button>
+              ))}
+            </div>
+          </div>
         </div>
-        <DialogFooter><Button variant="ghost" onClick={() => onOpenChange(false)}>Cancelar</Button><Button onClick={run} disabled={loading}>{loading ? "Calculando…" : "Usar este público"}</Button></DialogFooter>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>
+            Cancelar
+          </Button>
+          <Button onClick={run} disabled={loading}>
+            {loading ? "Calculando…" : "Usar este público"}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -1983,15 +2166,27 @@ function EnvioMassa() {
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label> Público</Label>
-                <Button type="button" size="sm" variant="outline" onClick={() => setAudienceOpen(true)}>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setAudienceOpen(true)}
+                >
                   Escolher público
                 </Button>
               </div>
-              <p className="text-xs text-muted-foreground">Selecione um público usando as regras da Gamificação ou adicione números manualmente abaixo.</p>
-              <AudiencePicker open={audienceOpen} onOpenChange={setAudienceOpen} onResolved={(phones, label) => {
-                setDestinatarios(phones.join("\n"));
-                if (label) setNome((current) => current || `Público: ${label}`);
-              }} />
+              <p className="text-xs text-muted-foreground">
+                Selecione um público usando as regras da Gamificação ou adicione números manualmente
+                abaixo.
+              </p>
+              <AudiencePicker
+                open={audienceOpen}
+                onOpenChange={setAudienceOpen}
+                onResolved={(phones, label) => {
+                  setDestinatarios(phones.join("\n"));
+                  if (label) setNome((current) => current || `Público: ${label}`);
+                }}
+              />
             </div>
 
             <div className="space-y-2">

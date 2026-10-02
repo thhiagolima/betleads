@@ -292,25 +292,41 @@ const SAIDAS = ["Login", "Depósito", "Primeiro depósito", "Aposta", "Resposta"
 function EmailPage() {
   const navigate = useNavigate();
   const hash = useLocation({ select: (l) => l.hash });
-  const VALID = [
-    "dashboard",
-    "remetentes",
-    "smtp",
-    "templates",
-    "campanhas",
-    "automacoes",
-    "historico",
-  ] as const;
+  const VALID = ["dashboard", "remetentes", "smtp", "templates", "historico"] as const;
   const current = (VALID as readonly string[]).includes(hash) ? hash : "dashboard";
+
+  useEffect(() => {
+    if (hash === "campanhas") {
+      void navigate({ to: "/campanhas", search: { newChannel: "email" } as never, replace: true });
+    }
+    if (hash === "automacoes") {
+      void navigate({ to: "/automacoes", replace: true });
+    }
+  }, [hash, navigate]);
 
   return (
     <div className="p-4 sm:p-6 space-y-6">
       <PageHeader
         title="Email Marketing"
-        subtitle="Dashboard, SMTP, templates, campanhas, automações e histórico"
+        subtitle="Saúde do canal, entregas, remetentes, SMTP, templates e histórico"
         icon={<Mail className="h-5 w-5 text-primary-foreground" />}
         actions={
           <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              onClick={() =>
+                void navigate({ to: "/campanhas", search: { newChannel: "email" } as never })
+              }
+            >
+              <Plus className="mr-1.5 h-3.5 w-3.5" /> Criar campanha
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void navigate({ to: "/automacoes" })}
+            >
+              <Workflow className="mr-1.5 h-3.5 w-3.5" /> Automações
+            </Button>
             <Badge
               variant="outline"
               className="border-accent/40 text-accent text-[10px] uppercase tracking-wider"
@@ -335,8 +351,6 @@ function EmailPage() {
           <TabsTrigger value="remetentes">Remetentes</TabsTrigger>
           <TabsTrigger value="smtp">SMTP</TabsTrigger>
           <TabsTrigger value="templates">Templates</TabsTrigger>
-          <TabsTrigger value="campanhas">Campanhas</TabsTrigger>
-          <TabsTrigger value="automacoes">Automações</TabsTrigger>
           <TabsTrigger value="historico">Histórico</TabsTrigger>
         </TabsList>
 
@@ -351,12 +365,6 @@ function EmailPage() {
         </TabsContent>
         <TabsContent value="templates" className="mt-2">
           <TemplatesTab />
-        </TabsContent>
-        <TabsContent value="campanhas" className="mt-2">
-          <CampanhasTab />
-        </TabsContent>
-        <TabsContent value="automacoes" className="mt-2">
-          <AutomacoesTab />
         </TabsContent>
         <TabsContent value="historico" className="mt-2">
           <HistoricoTab />
@@ -1109,12 +1117,15 @@ function TemplatesTab() {
     }
   }
   async function excluir(id: string) {
-    if (!(await requestConfirmation({
-      title: "Excluir template?",
-      description: "O template será removido e não poderá mais ser usado em novas campanhas.",
-      confirmLabel: "Excluir template",
-      destructive: true,
-    }))) return;
+    if (
+      !(await requestConfirmation({
+        title: "Excluir template?",
+        description: "O template será removido e não poderá mais ser usado em novas campanhas.",
+        confirmLabel: "Excluir template",
+        destructive: true,
+      }))
+    )
+      return;
     try {
       await delFn({ data: { id } } as any);
       toast.success("Template excluído");
@@ -1620,12 +1631,16 @@ function CampanhasTab() {
   }
 
   async function excluir(c: Campanha) {
-    if (!(await requestConfirmation({
-      title: `Excluir “${c.nome}”?`,
-      description: "A campanha será removida permanentemente. O histórico de mensagens já enviadas não será alterado.",
-      confirmLabel: "Excluir campanha",
-      destructive: true,
-    }))) return;
+    if (
+      !(await requestConfirmation({
+        title: `Excluir “${c.nome}”?`,
+        description:
+          "A campanha será removida permanentemente. O histórico de mensagens já enviadas não será alterado.",
+        confirmLabel: "Excluir campanha",
+        destructive: true,
+      }))
+    )
+      return;
     try {
       await delFn({ data: { id: c.id } } as any);
       toast.success("Campanha removida");
@@ -1640,11 +1655,14 @@ function CampanhasTab() {
       toast.error("Selecione um template antes de enviar.");
       return;
     }
-    if (!(await requestConfirmation({
-      title: `Disparar “${c.nome}” agora?`,
-      description: `As mensagens serão enviadas imediatamente para o segmento “${c.segmento}”.`,
-      confirmLabel: "Disparar campanha",
-    }))) return;
+    if (
+      !(await requestConfirmation({
+        title: `Disparar “${c.nome}” agora?`,
+        description: `As mensagens serão enviadas imediatamente para o segmento “${c.segmento}”.`,
+        confirmLabel: "Disparar campanha",
+      }))
+    )
+      return;
     const tid = toast.loading("Enviando campanha…");
     try {
       const r: any = await sendNowFn({ data: { campaignId: c.id } } as any);
@@ -2353,12 +2371,15 @@ function FluxosList() {
                     className="h-7 w-7 text-rose-400"
                     title="Excluir"
                     onClick={async () => {
-                      if (!(await requestConfirmation({
-                        title: "Excluir automação?",
-                        description: "O fluxo e suas etapas serão removidos permanentemente.",
-                        confirmLabel: "Excluir automação",
-                        destructive: true,
-                      }))) return;
+                      if (
+                        !(await requestConfirmation({
+                          title: "Excluir automação?",
+                          description: "O fluxo e suas etapas serão removidos permanentemente.",
+                          confirmLabel: "Excluir automação",
+                          destructive: true,
+                        }))
+                      )
+                        return;
                       try {
                         await delFn({ data: { id: f.id } });
                         refetch();
