@@ -56,6 +56,7 @@ import { Route as ApiPublicHooksRecoveryRouteImport } from './routes/api/public/
 import { Route as ApiPublicHooksSmsRefreshStatusRouteImport } from './routes/api/public/hooks/sms-refresh-status'
 import { Route as ApiPublicHooksWebhookReplayRouteImport } from './routes/api/public/hooks/webhook-replay'
 import { Route as ApiPublicHooksWhatsappResumeRouteImport } from './routes/api/public/hooks/whatsapp-resume'
+import { Route as ApiPublicMetaSyncTickRouteImport } from './routes/api/public/meta-sync/tick'
 import { Route as ApiPublicPrecallDispatchRouteImport } from './routes/api/public/precall/dispatch'
 import { Route as ApiPublicWebhookEventoRouteImport } from './routes/api/public/webhook.$evento'
 import { Route as ApiPublicEmailImgAssetIdFilenameRouteImport } from './routes/api/public/email-img.$assetId.$filename'
@@ -311,6 +312,11 @@ const ApiPublicHooksWhatsappResumeRoute =
     path: '/api/public/hooks/whatsapp-resume',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicMetaSyncTickRoute = ApiPublicMetaSyncTickRouteImport.update({
+  id: '/api/public/meta-sync/tick',
+  path: '/api/public/meta-sync/tick',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicPrecallDispatchRoute =
   ApiPublicPrecallDispatchRouteImport.update({
     id: '/api/public/precall/dispatch',
@@ -383,6 +389,7 @@ export interface FileRoutesByFullPath {
   '/api/public/hooks/sms-refresh-status': typeof ApiPublicHooksSmsRefreshStatusRoute
   '/api/public/hooks/webhook-replay': typeof ApiPublicHooksWebhookReplayRoute
   '/api/public/hooks/whatsapp-resume': typeof ApiPublicHooksWhatsappResumeRoute
+  '/api/public/meta-sync/tick': typeof ApiPublicMetaSyncTickRoute
   '/api/public/precall/dispatch': typeof ApiPublicPrecallDispatchRoute
   '/api/public/webhook/$evento': typeof ApiPublicWebhookEventoRoute
   '/api/public/email-img/$assetId/$filename': typeof ApiPublicEmailImgAssetIdFilenameRoute
@@ -436,6 +443,7 @@ export interface FileRoutesByTo {
   '/api/public/hooks/sms-refresh-status': typeof ApiPublicHooksSmsRefreshStatusRoute
   '/api/public/hooks/webhook-replay': typeof ApiPublicHooksWebhookReplayRoute
   '/api/public/hooks/whatsapp-resume': typeof ApiPublicHooksWhatsappResumeRoute
+  '/api/public/meta-sync/tick': typeof ApiPublicMetaSyncTickRoute
   '/api/public/precall/dispatch': typeof ApiPublicPrecallDispatchRoute
   '/api/public/webhook/$evento': typeof ApiPublicWebhookEventoRoute
   '/api/public/email-img/$assetId/$filename': typeof ApiPublicEmailImgAssetIdFilenameRoute
@@ -490,6 +498,7 @@ export interface FileRoutesById {
   '/api/public/hooks/sms-refresh-status': typeof ApiPublicHooksSmsRefreshStatusRoute
   '/api/public/hooks/webhook-replay': typeof ApiPublicHooksWebhookReplayRoute
   '/api/public/hooks/whatsapp-resume': typeof ApiPublicHooksWhatsappResumeRoute
+  '/api/public/meta-sync/tick': typeof ApiPublicMetaSyncTickRoute
   '/api/public/precall/dispatch': typeof ApiPublicPrecallDispatchRoute
   '/api/public/webhook/$evento': typeof ApiPublicWebhookEventoRoute
   '/api/public/email-img/$assetId/$filename': typeof ApiPublicEmailImgAssetIdFilenameRoute
@@ -545,6 +554,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/sms-refresh-status'
     | '/api/public/hooks/webhook-replay'
     | '/api/public/hooks/whatsapp-resume'
+    | '/api/public/meta-sync/tick'
     | '/api/public/precall/dispatch'
     | '/api/public/webhook/$evento'
     | '/api/public/email-img/$assetId/$filename'
@@ -598,6 +608,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/sms-refresh-status'
     | '/api/public/hooks/webhook-replay'
     | '/api/public/hooks/whatsapp-resume'
+    | '/api/public/meta-sync/tick'
     | '/api/public/precall/dispatch'
     | '/api/public/webhook/$evento'
     | '/api/public/email-img/$assetId/$filename'
@@ -651,6 +662,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/sms-refresh-status'
     | '/api/public/hooks/webhook-replay'
     | '/api/public/hooks/whatsapp-resume'
+    | '/api/public/meta-sync/tick'
     | '/api/public/precall/dispatch'
     | '/api/public/webhook/$evento'
     | '/api/public/email-img/$assetId/$filename'
@@ -703,6 +715,7 @@ export interface RootRouteChildren {
   ApiPublicHooksSmsRefreshStatusRoute: typeof ApiPublicHooksSmsRefreshStatusRoute
   ApiPublicHooksWebhookReplayRoute: typeof ApiPublicHooksWebhookReplayRoute
   ApiPublicHooksWhatsappResumeRoute: typeof ApiPublicHooksWhatsappResumeRoute
+  ApiPublicMetaSyncTickRoute: typeof ApiPublicMetaSyncTickRoute
   ApiPublicPrecallDispatchRoute: typeof ApiPublicPrecallDispatchRoute
   ApiPublicWebhookEventoRoute: typeof ApiPublicWebhookEventoRoute
   ApiPublicEmailImgAssetIdFilenameRoute: typeof ApiPublicEmailImgAssetIdFilenameRoute
@@ -1040,6 +1053,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicHooksWhatsappResumeRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/meta-sync/tick': {
+      id: '/api/public/meta-sync/tick'
+      path: '/api/public/meta-sync/tick'
+      fullPath: '/api/public/meta-sync/tick'
+      preLoaderRoute: typeof ApiPublicMetaSyncTickRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/precall/dispatch': {
       id: '/api/public/precall/dispatch'
       path: '/api/public/precall/dispatch'
@@ -1142,6 +1162,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicHooksSmsRefreshStatusRoute: ApiPublicHooksSmsRefreshStatusRoute,
   ApiPublicHooksWebhookReplayRoute: ApiPublicHooksWebhookReplayRoute,
   ApiPublicHooksWhatsappResumeRoute: ApiPublicHooksWhatsappResumeRoute,
+  ApiPublicMetaSyncTickRoute: ApiPublicMetaSyncTickRoute,
   ApiPublicPrecallDispatchRoute: ApiPublicPrecallDispatchRoute,
   ApiPublicWebhookEventoRoute: ApiPublicWebhookEventoRoute,
   ApiPublicEmailImgAssetIdFilenameRoute: ApiPublicEmailImgAssetIdFilenameRoute,

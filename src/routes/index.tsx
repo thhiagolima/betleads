@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
 import { useMemo, useState } from "react";
 import type { ElementType, ReactNode } from "react";
 import { type DateRange } from "react-day-picker";
@@ -38,6 +39,7 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { brl, num, timeAgo } from "@/lib/format";
 import { brtDayEnd, brtDayStart } from "@/lib/tz";
+import { getDashboardSummary } from "@/lib/dashboard.functions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -204,7 +206,10 @@ const QUERY_PAGE_SIZE = 1000;
  * derived metrics need the complete period, so read each page explicitly.
  */
 async function fetchAllRows<Row>(
-  fetchPage: (from: number, to: number) => Promise<{
+  fetchPage: (
+    from: number,
+    to: number,
+  ) => Promise<{
     data: Row[] | null;
     error: { message: string } | null;
   }>,
@@ -221,7 +226,7 @@ async function fetchAllRows<Row>(
   }
 }
 
-async function fetchDashboard(range: { from: Date; to: Date }, tenantId: string) {
+async function fetchDashboardLegacy(range: { from: Date; to: Date }, tenantId: string) {
   const startDate = brtDayStart(range.from);
   const endDate = brtDayEnd(range.to);
   const iso = startDate.toISOString();
@@ -838,11 +843,22 @@ function Dashboard() {
     if (typeof window !== "undefined") window.localStorage.setItem(STORAGE_KEY, id);
   };
 
+  const fetchDashboard = useServerFn(getDashboardSummary);
+  const includesToday = brtDayStart(to).getTime() >= brtDayStart(new Date()).getTime();
   const { data, isLoading, isFetching, refetch } = useQuery({
     queryKey: ["dashboard", tenantId, brtDayKeyLocal(from), brtDayKeyLocal(to)],
-    queryFn: () => fetchDashboard({ from, to }, tenantId as string),
+    queryFn: () =>
+      fetchDashboard({
+        data: {
+          tenantId: tenantId as string,
+          from: from.toISOString(),
+          to: to.toISOString(),
+        },
+      }),
     enabled: !!tenantId,
-    refetchInterval: 15000,
+    staleTime: includesToday ? 20_000 : 5 * 60_000,
+    refetchInterval: includesToday ? 30_000 : false,
+    placeholderData: (previous) => previous,
   });
 
   const greeting = useMemo(() => {
@@ -1286,8 +1302,8 @@ function Dashboard() {
 
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <LayoutDashboard className="h-4 w-4" />
-        Dados do período da sua operação. Recuperado pelo CRM considera depósitos feitos depois de um
-        followup registrado para o jogador.
+        Dados do período da sua operação. Recuperado pelo CRM considera depósitos feitos depois de
+        um followup registrado para o jogador.
       </div>
     </div>
   );

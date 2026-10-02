@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { encryptMetaToken, metaTokenHint } from "@/lib/meta-token.server";
 
 type MetaUser = {
   id: string;
@@ -157,25 +158,48 @@ export const Route = createFileRoute("/api/meta/oauth/callback")({
               ? new Date(Date.now() + expiresIn * 1000).toISOString()
               : null;
 
-          const { data: connection, error: connErr } = await supabaseAdmin
+          const encryptedAccessToken = await encryptMetaToken(accessToken);
+          const { data: existingConnection, error: existingConnectionError } = await supabaseAdmin
             .from("meta_connections")
-            .upsert(
-              {
-                tenant_id: stateRow.tenant_id,
-                connected_by_user_id: stateRow.user_id,
-                meta_user_id: metaUser.id,
-                meta_user_name: metaUser.name ?? null,
-                access_token: accessToken,
-                scopes: ["ads_read", "business_management"],
-                token_expires_at: tokenExpiresAt,
-                status: "connected",
-                last_error: null,
-                connected_at: new Date().toISOString(),
-              },
-              { onConflict: "tenant_id,meta_user_id" },
-            )
             .select("id")
-            .single();
+            .eq("tenant_id", stateRow.tenant_id)
+            .eq("meta_user_id", metaUser.id)
+            .eq("auth_type", "legacy_oauth")
+            .neq("status", "disabled")
+            .maybeSingle();
+          if (existingConnectionError) throw new Error(existingConnectionError.message);
+
+          const connectionValues = {
+            tenant_id: stateRow.tenant_id,
+            connected_by_user_id: stateRow.user_id,
+            meta_user_id: metaUser.id,
+            meta_user_name: metaUser.name ?? null,
+            access_token: null,
+            encrypted_access_token: encryptedAccessToken,
+            token_hint: metaTokenHint(accessToken),
+            auth_type: "legacy_oauth",
+            app_id: requireMetaConfig().appId,
+            scopes: ["ads_read", "business_management"],
+            token_expires_at: tokenExpiresAt,
+            token_validated_at: new Date().toISOString(),
+            permissions_checked_at: new Date().toISOString(),
+            status: "connected",
+            last_error: null,
+            connected_at: new Date().toISOString(),
+          };
+          const connectionResult = existingConnection?.id
+            ? await supabaseAdmin
+                .from("meta_connections")
+                .update(connectionValues)
+                .eq("id", existingConnection.id)
+                .select("id")
+                .single()
+            : await supabaseAdmin
+                .from("meta_connections")
+                .insert(connectionValues)
+                .select("id")
+                .single();
+          const { data: connection, error: connErr } = connectionResult;
           if (connErr) throw new Error(connErr.message);
 
           if (adAccounts.length > 0) {

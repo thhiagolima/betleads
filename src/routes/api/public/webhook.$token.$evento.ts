@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { getServiceClient, processWebhookEvent } from "@/lib/webhook-process.server";
+import { invalidateServerResultCache } from "@/lib/server-result-cache";
 
 export const Route = createFileRoute("/api/public/webhook/$token/$evento")({
   server: {
@@ -34,7 +35,13 @@ export const Route = createFileRoute("/api/public/webhook/$token/$evento")({
           return Response.json({ ok: false, error: "token inválido" }, { status: 404 });
         }
 
-        return processWebhookEvent(sb, tenantId, evento, payload);
+        const response = await processWebhookEvent(sb, tenantId, evento, payload);
+        if (response.ok) {
+          invalidateServerResultCache(`dashboard:${tenantId}:`);
+          invalidateServerResultCache(`gamification:${tenantId}:`);
+          invalidateServerResultCache(`audience:${tenantId}:`);
+        }
+        return response;
       },
     },
   },

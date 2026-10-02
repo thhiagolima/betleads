@@ -1,4 +1,5 @@
-import { createContext, useContext, useEffect, useState, type FormEvent } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type FormEvent } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { Session } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
@@ -23,6 +24,8 @@ export function useAuthSession() {
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AuthState>({ status: "loading" });
+  const queryClient = useQueryClient();
+  const cachedSessionKey = useRef<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -45,8 +48,10 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
           setState({ status: "signed-out" });
           return;
         }
-        if (data.session) setState({ status: "authed", session: data.session });
-        else setState({ status: "signed-out" });
+        if (data.session) {
+          cachedSessionKey.current = `${data.session.user.id}:${data.session.access_token}`;
+          setState({ status: "authed", session: data.session });
+        } else setState({ status: "signed-out" });
       })
       .catch(() => {
         if (!mounted) return;
@@ -54,20 +59,25 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
         setState({ status: "signed-out" });
       });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        if (!mounted) return;
-        if (session) setState({ status: "authed", session });
-        else setState({ status: "signed-out" });
-      },
-    );
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!mounted) return;
+        const nextSessionKey = session ? `${session.user.id}:${session.access_token}` : null;
+        if (cachedSessionKey.current !== null && cachedSessionKey.current !== nextSessionKey) {
+          queryClient.clear();
+        }
+        cachedSessionKey.current = nextSessionKey;
+      if (session) setState({ status: "authed", session });
+      else setState({ status: "signed-out" });
+    });
 
     return () => {
       mounted = false;
       clearTimeout(timeoutId);
       subscription.unsubscribe();
     };
-  }, []);
+  }, [queryClient]);
 
   if (state.status === "loading") {
     return (
@@ -109,9 +119,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AuthSessionContext.Provider value={state.session}>
-      {children}
-    </AuthSessionContext.Provider>
+    <AuthSessionContext.Provider value={state.session}>{children}</AuthSessionContext.Provider>
   );
 }
 
@@ -191,4 +199,3 @@ function AuthScreen() {
     </div>
   );
 }
-

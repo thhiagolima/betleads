@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { invalidateServerResultCache, withServerResultCache } from "@/lib/server-result-cache";
 
 export type LevelSlug = "novice" | "bronze" | "silver" | "gold" | "diamond" | "black";
 export type PaidLevelSlug = Exclude<LevelSlug, "novice">;
@@ -98,9 +99,7 @@ export const getGamificationData = createServerFn({ method: "GET" })
     const { data: tenantId, error: tenantError } = await supabase.rpc("current_tenant_id");
     if (tenantError) throw new Error(tenantError.message);
     if (!tenantId) throw new Error("Tenant atual nao encontrado.");
-    const settings = await readSettings(supabase, tenantId as string);
-    const players = await readPlayers(supabase, tenantId as string);
-    return buildGamificationData(players, settings);
+    return readGamificationSnapshot(supabase, tenantId as string);
   });
 
 export const saveGamificationSettings = createServerFn({ method: "POST" })
@@ -113,7 +112,7 @@ export const saveGamificationSettings = createServerFn({ method: "POST" })
     const tenantId = tenantRow as string | null;
     if (!tenantId) throw new Error("Tenant atual nao encontrado.");
 
-  const { error } = await supabase.from("gamification_settings").upsert(
+    const { error } = await supabase.from("gamification_settings").upsert(
       {
         tenant_id: tenantId,
         level_thresholds: data.thresholds,
@@ -126,14 +125,32 @@ export const saveGamificationSettings = createServerFn({ method: "POST" })
     );
     if (error) {
       if (isMissingGamificationTable(error)) {
-        throw new Error("A tabela de gamificacao ainda nao foi criada. Aplique as migrations antes de salvar.");
+        throw new Error(
+          "A tabela de gamificacao ainda nao foi criada. Aplique as migrations antes de salvar.",
+        );
       }
       throw new Error(error.message);
     }
 
-    const players = await readPlayers(supabase, tenantId);
-    return buildGamificationData(players, data);
+    invalidateServerResultCache(`gamification:${tenantId}:`);
+    invalidateServerResultCache(`audience:${tenantId}:`);
+    return readGamificationSnapshot(supabase, tenantId);
   });
+
+async function readGamificationSnapshot(supabase: any, tenantId: string) {
+  return withServerResultCache<GamificationData>(
+    `gamification:${tenantId}:summary`,
+    30_000,
+    async () => {
+      const { data, error } = await supabase.rpc("gamification_snapshot_v2", {
+        _tenant: tenantId,
+      });
+      if (error) throw new Error(error.message);
+      if (!data) throw new Error("Sem acesso aos dados de gamificacao desta conta.");
+      return data as GamificationData;
+    },
+  );
+}
 
 async function readSettings(supabase: any, tenantId: string): Promise<GamificationSettings> {
   const { data, error } = await supabase
@@ -162,7 +179,9 @@ async function readPlayers(supabase: any, tenantId: string): Promise<DbPlayer[]>
   for (let from = 0; ; from += pageSize) {
     const { data, error } = await supabase
       .from("players")
-      .select("id,nome,player_external_id,total_depositado,total_sacado,ultimo_deposito,ftd_em,telefone,email")
+      .select(
+        "id,nome,player_external_id,total_depositado,total_sacado,ultimo_deposito,ftd_em,telefone,email",
+      )
       .eq("tenant_id", tenantId)
       .range(from, from + pageSize - 1);
 
@@ -175,7 +194,10 @@ async function readPlayers(supabase: any, tenantId: string): Promise<DbPlayer[]>
   return rows;
 }
 
-function buildGamificationData(players: DbPlayer[], settings: GamificationSettings): GamificationData {
+function buildGamificationData(
+  players: DbPlayer[],
+  settings: GamificationSettings,
+): GamificationData {
   const ranked = players
     .map((player) => enrichPlayer(player, settings))
     .sort((a, b) => b.total_depositado - a.total_depositado);
@@ -302,7 +324,9 @@ function normalizeSettingsInput(input: unknown): GamificationSettings {
     clean.thresholds.diamond <= clean.thresholds.gold ||
     clean.thresholds.black <= clean.thresholds.diamond
   ) {
-    throw new Error("As faixas precisam ser crescentes: Bronze < Prata < Ouro < Diamante < Black VIP.");
+    throw new Error(
+      "As faixas precisam ser crescentes: Bronze < Prata < Ouro < Diamante < Black VIP.",
+    );
   }
 
   if (clean.coolingAfterDays < 1) throw new Error("Esfriando precisa ser pelo menos 1 dia.");
@@ -356,6 +380,8 @@ function toInt(value: unknown, fallback: number) {
 function isMissingGamificationTable(error: { code?: string; message?: string }) {
   return (
     error.code === "42P01" ||
-    String(error.message ?? "").toLowerCase().includes("gamification_settings")
+    String(error.message ?? "")
+      .toLowerCase()
+      .includes("gamification_settings")
   );
 }

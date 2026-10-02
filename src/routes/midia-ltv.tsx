@@ -6,6 +6,7 @@ import {
   BadgeCheck,
   BarChart3,
   Calendar,
+  CheckCircle2,
   Clipboard,
   CreditCard,
   Eye,
@@ -19,9 +20,10 @@ import {
   Settings,
   ShieldCheck,
   Target,
+  Trash2,
   Wallet,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -34,8 +36,19 @@ import {
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
@@ -52,9 +65,12 @@ import { MetricCard } from "@/components/ui-premium/metric-card";
 import { getMarketingOverview, saveMarketingIntegration } from "@/lib/marketing.functions";
 import {
   connectMetaSystemUserToken,
-  createMetaOAuthUrl,
+  disconnectMetaConnection,
   getMetaConnectionSummary,
-  syncMetaInsights,
+  enqueueMetaSync,
+  getMetaSyncRuns,
+  updateMetaAccountSelection,
+  validateMetaConnection,
 } from "@/lib/meta.functions";
 import { cn } from "@/lib/utils";
 
@@ -167,6 +183,7 @@ type MarketingOverview = {
 
 type MetaAccount = {
   id: string;
+  connection_id: string;
   meta_ad_account_id: string;
   account_id: string | null;
   name: string | null;
@@ -175,8 +192,41 @@ type MetaAccount = {
   last_sync_at: string | null;
 };
 
+type MetaConnection = {
+  id: string;
+  meta_user_name: string | null;
+  scopes: string[] | null;
+  status: string;
+  last_error: string | null;
+  last_sync_at: string | null;
+  token_hint: string | null;
+  token_validated_at: string | null;
+  permissions_checked_at: string | null;
+  app_id: string | null;
+  app_name: string | null;
+  business_id: string | null;
+  connection_label: string | null;
+};
+
 type MetaSummary = {
   accounts: MetaAccount[];
+  connections: MetaConnection[];
+};
+
+type MetaSyncRun = {
+  id: string;
+  trigger_type: "manual" | "scheduled" | "backfill";
+  days: number;
+  status: "queued" | "running" | "completed" | "partial" | "failed" | "canceled";
+  total_accounts: number;
+  processed_accounts: number;
+  successful_accounts: number;
+  failed_accounts: number;
+  rows_imported: number;
+  started_at: string | null;
+  finished_at: string | null;
+  error_summary: string | null;
+  created_at: string;
 };
 
 const platformLabels: Record<Platform, string> = {
@@ -292,14 +342,26 @@ function statusLabel(status?: string) {
   return "planejada";
 }
 
+function syncStatusLabel(status: MetaSyncRun["status"]) {
+  if (status === "queued") return "na fila";
+  if (status === "running") return "sincronizando";
+  if (status === "completed") return "concluída";
+  if (status === "partial") return "concluída com atenção";
+  if (status === "failed") return "falhou";
+  return "cancelada";
+}
+
 function MediaLtvPage() {
   const qc = useQueryClient();
   const fetchOverview = useServerFn(getMarketingOverview);
   const saveIntegration = useServerFn(saveMarketingIntegration);
-  const createMetaUrl = useServerFn(createMetaOAuthUrl);
   const connectMetaToken = useServerFn(connectMetaSystemUserToken);
   const fetchMetaSummary = useServerFn(getMetaConnectionSummary);
-  const syncMeta = useServerFn(syncMetaInsights);
+  const requestMetaSync = useServerFn(enqueueMetaSync);
+  const fetchMetaSyncRuns = useServerFn(getMetaSyncRuns);
+  const saveMetaSelection = useServerFn(updateMetaAccountSelection);
+  const testMetaConnection = useServerFn(validateMetaConnection);
+  const removeMetaConnection = useServerFn(disconnectMetaConnection);
   const [period, setPeriod] = useState<PeriodPreset>("7d");
   const [section, setSection] = useState<"visualizacao" | "configuracao">("visualizacao");
   const [platform, setPlatform] = useState<Platform>("meta");
@@ -316,6 +378,15 @@ function MediaLtvPage() {
     queryKey: ["meta-connection-summary"],
     queryFn: () => fetchMetaSummary(),
     refetchInterval: 30000,
+  });
+
+  const { data: metaSyncRuns = [] } = useQuery({
+    queryKey: ["meta-sync-runs"],
+    queryFn: () => fetchMetaSyncRuns(),
+    refetchInterval: (query) => {
+      const runs = (query.state.data ?? []) as MetaSyncRun[];
+      return runs.some((run) => run.status === "queued" || run.status === "running") ? 3000 : 15000;
+    },
   });
 
   const saveMutation = useMutation({
@@ -345,13 +416,6 @@ function MediaLtvPage() {
     onError: (e) => toast.error(e instanceof Error ? e.message : "Erro ao salvar"),
   });
 
-  const connectMetaMutation = useMutation({
-    mutationFn: () => createMetaUrl({ data: { returnTo: "/midia-ltv" } }),
-    onSuccess: (res) => {
-      window.location.assign(res.url);
-    },
-    onError: (e) => toast.error(e instanceof Error ? e.message : "Erro ao iniciar OAuth Meta"),
-  });
   const connectMetaTokenMutation = useMutation({
     mutationFn: (accessToken: string) => connectMetaToken({ data: { accessToken } }),
     onSuccess: (result) => {
@@ -359,24 +423,61 @@ function MediaLtvPage() {
       qc.invalidateQueries({ queryKey: ["meta-connection-summary"] });
       qc.invalidateQueries({ queryKey: ["marketing-overview"] });
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : "Não foi possível validar o token Meta"),
+    onError: (e) =>
+      toast.error(e instanceof Error ? e.message : "Não foi possível validar o token Meta"),
+  });
+
+  const metaSelectionMutation = useMutation({
+    mutationFn: (accountIds: string[]) => saveMetaSelection({ data: { accountIds } }),
+    onSuccess: (result) => {
+      toast.success(`${result.selected} conta(s) selecionada(s)`);
+      qc.invalidateQueries({ queryKey: ["meta-connection-summary"] });
+      qc.invalidateQueries({ queryKey: ["marketing-overview"] });
+    },
+    onError: (e) =>
+      toast.error(e instanceof Error ? e.message : "Não foi possível salvar as contas"),
+  });
+
+  const validateMetaMutation = useMutation({
+    mutationFn: (connectionId: string) => testMetaConnection({ data: { connectionId } }),
+    onSuccess: (result) => {
+      toast.success(`Conexão validada · ${result.accounts} conta(s) acessíveis`);
+      qc.invalidateQueries({ queryKey: ["meta-connection-summary"] });
+    },
+    onError: (e) => {
+      toast.error(e instanceof Error ? e.message : "Não foi possível validar a conexão");
+      qc.invalidateQueries({ queryKey: ["meta-connection-summary"] });
+    },
+  });
+
+  const disconnectMetaMutation = useMutation({
+    mutationFn: (connectionId: string) => removeMetaConnection({ data: { connectionId } }),
+    onSuccess: () => {
+      toast.success("Conexão Meta removida");
+      qc.invalidateQueries({ queryKey: ["meta-connection-summary"] });
+      qc.invalidateQueries({ queryKey: ["marketing-overview"] });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Não foi possível desconectar"),
   });
 
   const syncMetaMutation = useMutation({
-    mutationFn: () => syncMeta({ data: { days: range.days } }),
-    onSuccess: (res) => {
-      if (res.errors.length > 0) {
-        toast.warning(
-          `${num(res.imported)} linhas importadas; ${res.errors.length} conta(s) com erro`,
-        );
-      } else {
-        toast.success(`${num(res.imported)} linhas de midia importadas`);
-      }
-      qc.invalidateQueries({ queryKey: ["marketing-overview"] });
-      qc.invalidateQueries({ queryKey: ["meta-connection-summary"] });
+    mutationFn: () => requestMetaSync({ data: { days: range.days } }),
+    onSuccess: (run) => {
+      toast.success(
+        run.reused ? "A sincronização já está na fila" : "Sincronização adicionada à fila",
+      );
+      qc.invalidateQueries({ queryKey: ["meta-sync-runs"] });
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : "Erro ao sincronizar Meta"),
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Erro ao agendar sincronização"),
   });
+
+  const latestMetaRun = metaSyncRuns[0] as MetaSyncRun | undefined;
+  useEffect(() => {
+    if (!latestMetaRun || !["completed", "partial", "failed"].includes(latestMetaRun.status))
+      return;
+    qc.invalidateQueries({ queryKey: ["marketing-overview"] });
+    qc.invalidateQueries({ queryKey: ["meta-connection-summary"] });
+  }, [latestMetaRun?.id, latestMetaRun?.status, qc]);
 
   const integrations = data?.integrations ?? [];
   const meta = integrations.find((i) => i.provider === "meta");
@@ -435,8 +536,14 @@ function MediaLtvPage() {
           data={data}
           isLoading={isLoading}
           metaSummary={metaSummary}
-          syncPending={syncMetaMutation.isPending}
+          syncPending={
+            syncMetaMutation.isPending ||
+            metaSyncRuns.some(
+              (run: MetaSyncRun) => run.status === "queued" || run.status === "running",
+            )
+          }
           onSync={() => syncMetaMutation.mutate()}
+          syncRuns={metaSyncRuns as MetaSyncRun[]}
         />
       ) : (
         <ConfiguracaoSection
@@ -444,15 +551,19 @@ function MediaLtvPage() {
           windsor={windsor}
           csv={csv}
           metaSummary={metaSummary}
-          connectPending={connectMetaMutation.isPending}
           savePending={saveMutation.isPending}
           platform={platform}
           houseUrl={houseUrl}
           utmParams={utmParams}
           fullUrl={fullUrl}
-          onConnectMeta={() => connectMetaMutation.mutate()}
           onConnectMetaToken={(token) => connectMetaTokenMutation.mutateAsync(token)}
           connectTokenPending={connectMetaTokenMutation.isPending}
+          onSaveMetaSelection={(accountIds) => metaSelectionMutation.mutateAsync(accountIds)}
+          selectionPending={metaSelectionMutation.isPending}
+          onValidateMeta={(connectionId) => validateMetaMutation.mutateAsync(connectionId)}
+          validatingConnectionId={validateMetaMutation.variables ?? null}
+          onDisconnectMeta={(connectionId) => disconnectMetaMutation.mutateAsync(connectionId)}
+          disconnectPending={disconnectMetaMutation.isPending}
           onSaveProvider={(provider) => saveMutation.mutate(provider)}
           onPlatformChange={setPlatform}
           onHouseUrlChange={setHouseUrl}
@@ -537,6 +648,7 @@ function VisualizacaoSection({
   metaSummary,
   syncPending,
   onSync,
+  syncRuns,
 }: {
   range: { from: string; to: string; days: number };
   period: PeriodPreset;
@@ -546,6 +658,7 @@ function VisualizacaoSection({
   metaSummary: MetaSummary | undefined;
   syncPending: boolean;
   onSync: () => void;
+  syncRuns: MetaSyncRun[];
 }) {
   const totals = data?.totals;
   const accounts = metaSummary?.accounts ?? [];
@@ -560,6 +673,10 @@ function VisualizacaoSection({
   const orphanRevenue = orphanRows.reduce((sum, row) => sum + row.revenue, 0);
   const orphanFtd = orphanRows.reduce((sum, row) => sum + row.ftd, 0);
   const totalReturn = (totals?.ftdRevenue ?? 0) + (totals?.redepositRevenue ?? 0);
+  const latestRun = syncRuns[0];
+  const progress = latestRun?.total_accounts
+    ? Math.round((latestRun.processed_accounts / latestRun.total_accounts) * 100)
+    : 0;
 
   return (
     <div className="space-y-4">
@@ -578,13 +695,77 @@ function VisualizacaoSection({
           ) : (
             <RefreshCw className="h-4 w-4" />
           )}
-          {syncPending ? "lendo a conta..." : "Atualizar agora"}
+          {syncPending ? "sincronização na fila" : "Atualizar agora"}
         </Button>
         <span className="inline-flex items-center gap-2 rounded-md border border-border/70 bg-muted/50 px-3 py-2 text-sm font-semibold text-muted-foreground">
           <CreditCard className="h-4 w-4" />
           6.499 créditos de SMS
         </span>
       </div>
+
+      {latestRun && (
+        <div
+          className={cn(
+            "rounded-xl border px-4 py-3",
+            latestRun.status === "failed" && "border-rose-500/30 bg-rose-500/5",
+            latestRun.status === "partial" && "border-amber-500/30 bg-amber-500/5",
+            latestRun.status === "completed" && "border-emerald-500/30 bg-emerald-500/5",
+            ["queued", "running"].includes(latestRun.status) && "border-primary/30 bg-primary/5",
+          )}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold">
+                Última sincronização: {syncStatusLabel(latestRun.status)}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {latestRun.processed_accounts} de {latestRun.total_accounts} conta(s) ·{" "}
+                {num(latestRun.rows_imported)} linhas processadas
+              </p>
+            </div>
+            <span className="text-sm font-semibold">
+              {["queued", "running"].includes(latestRun.status)
+                ? `${progress}%`
+                : new Date(latestRun.finished_at ?? latestRun.created_at).toLocaleString("pt-BR")}
+            </span>
+          </div>
+          {["queued", "running"].includes(latestRun.status) && (
+            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full rounded-full bg-primary transition-all duration-500"
+                style={{ width: `${Math.max(4, progress)}%` }}
+              />
+            </div>
+          )}
+          {latestRun.error_summary && (
+            <p className="mt-2 text-xs text-rose-300">{latestRun.error_summary}</p>
+          )}
+          {syncRuns.length > 1 && (
+            <details className="mt-3 text-xs text-muted-foreground">
+              <summary className="cursor-pointer font-medium text-foreground">
+                Ver histórico recente
+              </summary>
+              <div className="mt-2 space-y-1.5">
+                {syncRuns.slice(1, 6).map((run) => (
+                  <div
+                    key={run.id}
+                    className="flex flex-wrap justify-between gap-2 rounded-md bg-background/40 px-3 py-2"
+                  >
+                    <span>
+                      {syncStatusLabel(run.status)} ·{" "}
+                      {run.trigger_type === "manual" ? "manual" : "automática"}
+                    </span>
+                    <span>
+                      {run.processed_accounts}/{run.total_accounts} contas ·{" "}
+                      {new Date(run.created_at).toLocaleString("pt-BR")}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2">
         {(Object.keys(periodLabels) as PeriodPreset[]).map((key) => (
@@ -737,15 +918,19 @@ function ConfiguracaoSection({
   windsor,
   csv,
   metaSummary,
-  connectPending,
   savePending,
   platform,
   houseUrl,
   utmParams,
   fullUrl,
-  onConnectMeta,
   onConnectMetaToken,
   connectTokenPending,
+  onSaveMetaSelection,
+  selectionPending,
+  onValidateMeta,
+  validatingConnectionId,
+  onDisconnectMeta,
+  disconnectPending,
   onSaveProvider,
   onPlatformChange,
   onHouseUrlChange,
@@ -755,48 +940,40 @@ function ConfiguracaoSection({
   windsor: MarketingIntegration | undefined;
   csv: MarketingIntegration | undefined;
   metaSummary: MetaSummary | undefined;
-  connectPending: boolean;
   savePending: boolean;
   platform: Platform;
   houseUrl: string;
   utmParams: string;
   fullUrl: string;
-  onConnectMeta: () => void;
   onConnectMetaToken: (token: string) => Promise<unknown>;
   connectTokenPending: boolean;
+  onSaveMetaSelection: (accountIds: string[]) => Promise<unknown>;
+  selectionPending: boolean;
+  onValidateMeta: (connectionId: string) => Promise<unknown>;
+  validatingConnectionId: string | null;
+  onDisconnectMeta: (connectionId: string) => Promise<unknown>;
+  disconnectPending: boolean;
   onSaveProvider: (provider: Provider) => void;
   onPlatformChange: (platform: Platform) => void;
   onHouseUrlChange: (value: string) => void;
   onCopy: (value: string, label?: string) => void;
 }) {
-  const [systemUserToken, setSystemUserToken] = useState("");
-  const [showMetaSteps, setShowMetaSteps] = useState(true);
   return (
     <div className="space-y-5">
-      <div className="grid gap-4 xl:grid-cols-3">
-        <DataCard
-          title="Meta Ads"
-          description="App proprio com OAuth e Marketing API."
-          icon={<Target className="h-4 w-4" />}
-          actions={
-            <StatusBadge status={metaSummary?.accounts?.length ? "connected" : meta?.status} />
-          }
-        >
-          <p className="mb-3 text-sm text-muted-foreground">Conecte o app e o usuário do sistema da sua própria conta Meta.</p>
-          <Button variant="outline" size="sm" onClick={() => setShowMetaSteps((value) => !value)}>{showMetaSteps ? "Esconder passo a passo" : "Ver passo a passo"}</Button>
-          {showMetaSteps && <div className="mt-3 space-y-2 text-xs text-muted-foreground">
-            {["Abra as Configurações do negócio no Business Manager.", "Crie um usuário do sistema e atribua as contas de anúncios.", "No app da sua empresa, gere um token com ads_read.", "Cole o token abaixo para conferir e listar as contas."].map((step, index) => <div key={step} className="flex gap-2 rounded-lg bg-muted/40 p-2"><span className="font-bold text-primary">{index + 1}</span><span>{step}</span></div>)}
-          </div>}
-          <Label className="mt-4 block" htmlFor="meta-system-token">Token do usuário do sistema</Label>
-          <Input id="meta-system-token" className="mt-2" type="password" autoComplete="off" placeholder="EAAG..." value={systemUserToken} onChange={(event) => setSystemUserToken(event.target.value)} />
-          <Button className="mt-3 w-full gap-2" disabled={connectTokenPending || systemUserToken.trim().length < 40} onClick={async () => { await onConnectMetaToken(systemUserToken.trim()); setSystemUserToken(""); }}>
-            {connectTokenPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-            Conferir token e listar contas
-          </Button>
-          <Button className="mt-2 w-full" variant="ghost" size="sm" onClick={onConnectMeta} disabled={connectPending}>Usar conexão antiga por OAuth</Button>
-          <ConnectedAccounts accounts={metaSummary?.accounts ?? []} />
-        </DataCard>
+      <MetaConnectionWizard
+        meta={meta}
+        summary={metaSummary}
+        onConnect={onConnectMetaToken}
+        connectPending={connectTokenPending}
+        onSaveSelection={onSaveMetaSelection}
+        selectionPending={selectionPending}
+        onValidate={onValidateMeta}
+        validatingConnectionId={validatingConnectionId}
+        onDisconnect={onDisconnectMeta}
+        disconnectPending={disconnectPending}
+      />
 
+      <div className="grid gap-4 xl:grid-cols-2">
         <DataCard
           title="Windsor.ai"
           description="Atalho para validar dados antes da revisao Meta."
@@ -879,7 +1056,7 @@ function ConfiguracaoSection({
       >
         <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-5">
           {[
-            "Manter app Meta Business com OAuth server-side.",
+            "Usar o app e o Usuário do Sistema da própria operação.",
             "Solicitar ads_read e business_management para contas de clientes.",
             "Salvar tokens apenas no servidor, com expiracao monitorada.",
             "Sincronizar campanhas/adsets/ads/insights por acao e job diario.",
@@ -901,26 +1078,340 @@ function ConfiguracaoSection({
   );
 }
 
-function ConnectedAccounts({ accounts }: { accounts: MetaAccount[] }) {
-  if (!accounts.length) {
-    return <p className="mt-3 text-xs text-muted-foreground">Nenhuma conta conectada.</p>;
-  }
+function MetaConnectionWizard({
+  meta,
+  summary,
+  onConnect,
+  connectPending,
+  onSaveSelection,
+  selectionPending,
+  onValidate,
+  validatingConnectionId,
+  onDisconnect,
+  disconnectPending,
+}: {
+  meta: MarketingIntegration | undefined;
+  summary: MetaSummary | undefined;
+  onConnect: (token: string) => Promise<unknown>;
+  connectPending: boolean;
+  onSaveSelection: (accountIds: string[]) => Promise<unknown>;
+  selectionPending: boolean;
+  onValidate: (connectionId: string) => Promise<unknown>;
+  validatingConnectionId: string | null;
+  onDisconnect: (connectionId: string) => Promise<unknown>;
+  disconnectPending: boolean;
+}) {
+  const connections = useMemo(() => summary?.connections ?? [], [summary?.connections]);
+  const activeConnectionIds = useMemo(
+    () => new Set(connections.map((item) => item.id)),
+    [connections],
+  );
+  const accounts = useMemo(
+    () =>
+      (summary?.accounts ?? []).filter((account) => activeConnectionIds.has(account.connection_id)),
+    [summary?.accounts, activeConnectionIds],
+  );
+  const [token, setToken] = useState("");
+  const [showGuide, setShowGuide] = useState(connections.length === 0);
+  const [showTokenForm, setShowTokenForm] = useState(connections.length === 0);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [disconnectId, setDisconnectId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSelectedIds(accounts.filter((account) => account.selected).map((account) => account.id));
+  }, [accounts]);
+
+  useEffect(() => {
+    if (connections.length === 0) setShowTokenForm(true);
+  }, [connections.length]);
+
+  const persistedSelectedCount = accounts.filter((account) => account.selected).length;
+  const currentStep = connections.length === 0 ? 1 : persistedSelectedCount === 0 ? 2 : 3;
+  const connectionStatus = connections.some((connection) => connection.status === "error")
+    ? "error"
+    : connections.length > 0
+      ? "connected"
+      : meta?.status;
 
   return (
-    <div className="mt-4 space-y-2">
-      <p className="text-xs text-muted-foreground">{accounts.length} conta(s) conectada(s)</p>
-      {accounts.slice(0, 5).map((account) => (
-        <div
-          key={account.id}
-          className="flex items-center justify-between gap-3 rounded-md border border-border/50 bg-background/40 px-3 py-2"
-        >
-          <span className="truncate text-xs font-semibold">
-            {account.name ?? account.account_id}
-          </span>
-          <span className="text-[10px] text-muted-foreground">{account.currency ?? ""}</span>
+    <DataCard
+      title="Meta Ads"
+      description="Conecte sua conta, escolha o que deseja acompanhar e valide o acesso."
+      icon={<Target className="h-4 w-4" />}
+      actions={<StatusBadge status={connectionStatus} />}
+    >
+      <div className="mb-5 grid gap-2 sm:grid-cols-3">
+        {["Conectar", "Escolher contas", "Validar acesso"].map((label, index) => {
+          const step = index + 1;
+          const complete = step < currentStep;
+          const active = step === currentStep;
+          return (
+            <div
+              key={label}
+              className={cn(
+                "flex items-center gap-2 rounded-lg border px-3 py-2 text-sm",
+                active && "border-primary/60 bg-primary/10",
+                complete && "border-emerald-500/30 bg-emerald-500/10",
+              )}
+            >
+              <span
+                className={cn(
+                  "flex h-6 w-6 items-center justify-center rounded-full bg-muted text-xs font-bold",
+                  active && "bg-primary text-primary-foreground",
+                  complete && "bg-emerald-500/20 text-emerald-400",
+                )}
+              >
+                {complete ? <CheckCircle2 className="h-4 w-4" /> : step}
+              </span>
+              <span className={cn("font-medium", !active && !complete && "text-muted-foreground")}>
+                {label}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      <Button variant="outline" size="sm" onClick={() => setShowGuide((value) => !value)}>
+        {showGuide ? "Esconder preparação" : "Como preparar a conta"}
+      </Button>
+      {showGuide && (
+        <div className="mt-3 grid gap-2 text-xs text-muted-foreground md:grid-cols-2">
+          {[
+            "Abra as Configurações do negócio no Business Manager.",
+            "Crie um Usuário do Sistema para esta operação.",
+            "Atribua somente as contas de anúncio necessárias.",
+            "Gere um token no app da operação com ads_read.",
+          ].map((step, index) => (
+            <div key={step} className="flex gap-2 rounded-lg bg-muted/40 p-3">
+              <span className="font-bold text-primary">{index + 1}</span>
+              <span>{step}</span>
+            </div>
+          ))}
         </div>
-      ))}
-    </div>
+      )}
+
+      {(showTokenForm || connections.length === 0) && (
+        <div className="mt-5 rounded-xl border border-border/60 bg-background/40 p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="font-semibold">
+                {connections.length ? "Atualizar credencial" : "Conectar sua conta Meta"}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                O token é criptografado no servidor e não volta a aparecer.
+              </p>
+            </div>
+            {connections.length > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setShowTokenForm(false);
+                  setToken("");
+                }}
+              >
+                Cancelar
+              </Button>
+            )}
+          </div>
+          <Label className="mt-4 block" htmlFor="meta-system-token">
+            Token do Usuário do Sistema
+          </Label>
+          <Input
+            id="meta-system-token"
+            className="mt-2"
+            type="password"
+            autoComplete="off"
+            placeholder="EAAG..."
+            value={token}
+            onChange={(event) => setToken(event.target.value)}
+          />
+          <Button
+            className="mt-3 gap-2"
+            disabled={connectPending || token.trim().length < 40}
+            onClick={async () => {
+              try {
+                await onConnect(token.trim());
+                setToken("");
+                setShowTokenForm(false);
+              } catch {
+                // A mensagem de erro é exibida pela mutation; mantenha o token para nova tentativa.
+              }
+            }}
+          >
+            {connectPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <ShieldCheck className="h-4 w-4" />
+            )}
+            Validar token e buscar contas
+          </Button>
+        </div>
+      )}
+
+      {connections.length > 0 && !showTokenForm && (
+        <div className="mt-5 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="font-semibold">Conexões encontradas</p>
+              <p className="text-xs text-muted-foreground">
+                Revise a origem antes de escolher as contas de anúncio.
+              </p>
+            </div>
+            <Button variant="outline" size="sm" onClick={() => setShowTokenForm(true)}>
+              Atualizar token
+            </Button>
+          </div>
+          <div className="grid gap-3 lg:grid-cols-2">
+            {connections.map((connection) => (
+              <div
+                key={connection.id}
+                className={cn(
+                  "rounded-xl border p-4",
+                  connection.status === "error"
+                    ? "border-rose-500/30 bg-rose-500/5"
+                    : "border-border/60 bg-background/40",
+                )}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold">
+                      {connection.connection_label ?? connection.app_name ?? "Conta Meta"}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      App {connection.app_name ?? connection.app_id ?? "identificado"} · token{" "}
+                      {connection.token_hint ?? "protegido"}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Usuário: {connection.meta_user_name ?? "Usuário do Sistema"}
+                    </p>
+                  </div>
+                  <StatusBadge status={connection.status} />
+                </div>
+                {connection.last_error && (
+                  <p className="mt-3 rounded-md bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+                    {connection.last_error}
+                  </p>
+                )}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    disabled={validatingConnectionId === connection.id}
+                    onClick={() => onValidate(connection.id)}
+                  >
+                    {validatingConnectionId === connection.id ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-3.5 w-3.5" />
+                    )}{" "}
+                    Testar acesso
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="gap-2 text-rose-400 hover:text-rose-300"
+                    onClick={() => setDisconnectId(connection.id)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" /> Desconectar
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="rounded-xl border border-border/60 bg-background/40 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="font-semibold">Contas que entram nos relatórios</p>
+                <p className="text-xs text-muted-foreground">
+                  Somente as contas marcadas serão sincronizadas.
+                </p>
+              </div>
+              <span className="text-sm font-semibold text-primary">
+                {selectedIds.length} de {accounts.length} selecionadas
+              </span>
+            </div>
+            <div className="app-scrollbar mt-3 max-h-64 space-y-2 overflow-y-auto pr-1">
+              {accounts.map((account) => (
+                <label
+                  key={account.id}
+                  className="flex cursor-pointer items-center gap-3 rounded-lg border border-border/50 px-3 py-3 hover:bg-muted/30"
+                >
+                  <Checkbox
+                    checked={selectedIds.includes(account.id)}
+                    onCheckedChange={(checked) =>
+                      setSelectedIds((current) =>
+                        checked
+                          ? [...current, account.id]
+                          : current.filter((id) => id !== account.id),
+                      )
+                    }
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-semibold">
+                      {account.name ?? account.account_id}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {account.meta_ad_account_id}
+                    </span>
+                  </span>
+                  <span className="text-xs text-muted-foreground">{account.currency ?? ""}</span>
+                </label>
+              ))}
+              {accounts.length === 0 && (
+                <p className="py-6 text-center text-sm text-muted-foreground">
+                  Nenhuma conta de anúncio foi encontrada.
+                </p>
+              )}
+            </div>
+            <div className="mt-4 flex justify-end">
+              <Button
+                disabled={selectionPending || accounts.length === 0}
+                onClick={() => onSaveSelection(selectedIds)}
+              >
+                {selectionPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Salvar contas
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <AlertDialog
+        open={Boolean(disconnectId)}
+        onOpenChange={(open) => !open && !disconnectPending && setDisconnectId(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Desconectar esta conta Meta?</AlertDialogTitle>
+            <AlertDialogDescription>
+              O token armazenado será removido e as contas vinculadas deixarão de sincronizar. Os
+              relatórios já importados serão preservados.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={disconnectPending}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={disconnectPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={async (event) => {
+                event.preventDefault();
+                if (!disconnectId) return;
+                try {
+                  await onDisconnect(disconnectId);
+                  setDisconnectId(null);
+                } catch {
+                  // O diálogo permanece aberto e a mutation informa o erro.
+                }
+              }}
+            >
+              {disconnectPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Desconectar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </DataCard>
   );
 }
 
