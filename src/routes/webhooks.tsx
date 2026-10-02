@@ -29,7 +29,7 @@ import { WEBHOOK_EVENTS } from "@/lib/webhook-events";
 import { PageHeader } from "@/components/ui-premium/page-header";
 import { DataCard } from "@/components/ui-premium/data-card";
 import { EmptyState } from "@/components/ui-premium/empty-state";
-import { getMyWebhookLogs, getMyWebhookToken } from "@/lib/webhooks.functions";
+import { getMyWebhookHealth, getMyWebhookLogs, getMyWebhookToken } from "@/lib/webhooks.functions";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/webhooks")({
@@ -60,9 +60,20 @@ type WebhookLog = {
   payload: unknown;
 };
 
+type WebhookHealth = {
+  since: string;
+  received: number;
+  processed: number;
+  duplicates: number;
+  failed: number;
+  ignored: number;
+  latest: Pick<WebhookLog, "created_at" | "evento" | "status"> | null;
+};
+
 function WebhooksPage() {
   const fetchToken = useServerFn(getMyWebhookToken);
   const fetchLogs = useServerFn(getMyWebhookLogs);
+  const fetchHealth = useServerFn(getMyWebhookHealth);
   const { data: tokenInfo, isLoading: tokenLoading } = useQuery({
     queryKey: ["my-webhook-token"],
     queryFn: () => fetchToken(),
@@ -75,6 +86,11 @@ function WebhooksPage() {
   const { data: logs = [], isLoading } = useQuery<WebhookLog[]>({
     queryKey: ["webhook_logs"],
     queryFn: async () => (await fetchLogs()) as WebhookLog[],
+    refetchInterval: 10000,
+  });
+  const { data: health, isLoading: healthLoading } = useQuery<WebhookHealth>({
+    queryKey: ["webhook-health"],
+    queryFn: () => fetchHealth() as Promise<WebhookHealth>,
     refetchInterval: 10000,
   });
 
@@ -120,6 +136,60 @@ function WebhooksPage() {
           </div>
         </div>
       }
+
+      <section
+        className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5"
+        aria-label="Saúde dos webhooks nas últimas 24 horas"
+      >
+        <WebhookKpi
+          label="Recebidos"
+          value={health?.received}
+          loading={healthLoading}
+          detail="últimas 24 horas"
+        />
+        <WebhookKpi
+          label="Processados"
+          value={health?.processed}
+          loading={healthLoading}
+          tone="text-emerald-400"
+          detail="gravados com sucesso"
+        />
+        <WebhookKpi
+          label="Repetidos"
+          value={health?.duplicates}
+          loading={healthLoading}
+          tone="text-sky-300"
+          detail="ignorados com segurança"
+        />
+        <WebhookKpi
+          label="Precisam de atenção"
+          value={(health?.failed ?? 0) + (health?.ignored ?? 0)}
+          loading={healthLoading}
+          tone={
+            (health?.failed ?? 0) + (health?.ignored ?? 0) > 0
+              ? "text-amber-300"
+              : "text-emerald-400"
+          }
+          detail={
+            (health?.failed ?? 0) > 0
+              ? `${health?.failed} com erro`
+              : health?.ignored
+                ? `${health.ignored} sem jogador`
+                : "nenhum"
+          }
+        />
+        <WebhookKpi
+          label="Último evento"
+          value={health?.latest ? timeAgo(health.latest.created_at) : "—"}
+          loading={healthLoading}
+          detail={
+            health?.latest
+              ? `${health.latest.evento} · ${health.latest.status}`
+              : "aguardando integração"
+          }
+          compact
+        />
+      </section>
 
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="lg:col-span-2 space-y-4">
@@ -222,7 +292,8 @@ function WebhooksPage() {
                 <Skeleton key={i} className="h-12 rounded-md" />
               ))}
             {logs.map((l) => {
-              const ok = l.status === "processado" || l.status === "recebido";
+              const isDuplicate = l.status === "duplicado";
+              const ok = l.status === "processado" || l.status === "recebido" || isDuplicate;
               return (
                 <button
                   key={l.id}
@@ -239,7 +310,12 @@ function WebhooksPage() {
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-semibold truncate">{l.evento}</span>
                     {ok ? (
-                      <span className="text-[10px] text-emerald-400 uppercase tracking-wider shrink-0">
+                      <span
+                        className={cn(
+                          "text-[10px] uppercase tracking-wider shrink-0",
+                          isDuplicate ? "text-sky-300" : "text-emerald-400",
+                        )}
+                      >
                         {l.status}
                       </span>
                     ) : (
@@ -296,9 +372,11 @@ function WebhooksPage() {
                     <p
                       className={cn(
                         "mt-1 text-sm font-semibold",
-                        selectedLog.status === "processado" || selectedLog.status === "recebido"
-                          ? "text-emerald-400"
-                          : "text-rose-400",
+                        selectedLog.status === "duplicado"
+                          ? "text-sky-300"
+                          : selectedLog.status === "processado" || selectedLog.status === "recebido"
+                            ? "text-emerald-400"
+                            : "text-rose-400",
                       )}
                     >
                       {selectedLog.status}
@@ -336,6 +414,42 @@ function WebhooksPage() {
           )}
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+function WebhookKpi({
+  label,
+  value,
+  detail,
+  tone = "text-foreground",
+  loading,
+  compact = false,
+}: {
+  label: string;
+  value: number | string | undefined;
+  detail: string;
+  tone?: string;
+  loading: boolean;
+  compact?: boolean;
+}) {
+  return (
+    <div className="rounded-xl border border-border/60 bg-card/70 px-4 py-3">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+        {label}
+      </p>
+      {loading ? (
+        <Skeleton className="mt-2 h-7 w-16" />
+      ) : (
+        <p
+          className={cn("mt-1 text-2xl font-semibold tracking-tight", tone, compact && "text-base")}
+        >
+          {value ?? "—"}
+        </p>
+      )}
+      <p className="mt-1 truncate text-[11px] text-muted-foreground" title={detail}>
+        {detail}
+      </p>
     </div>
   );
 }

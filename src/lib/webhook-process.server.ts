@@ -279,18 +279,9 @@ export async function processWebhookEvent(
         if (!curCpf?.cpf) updates.cpf = cpfFromPayload;
       }
 
-      const ACTIVITY_EVENTS = new Set([
-        "login",
-        "jogo-iniciado",
-        "deposito-pendente",
-        "deposito-aprovado",
-        "deposito-falhou",
-        "saque-pendente",
-        "saque-aprovado",
-        "saque-concluido",
-        "saque-falhou",
-      ]);
-      if (ACTIVITY_EVENTS.has(evento)) updates.ultimo_login = eventIso;
+      // Atividade de login precisa representar somente uma entrada real na plataforma.
+      // Depósitos e saques não podem mascarar filtros como “X dias sem login”.
+      if (evento === "login") updates.ultimo_login = eventIso;
       if (evento === "jogo-iniciado") updates.ultimo_jogo = eventIso;
 
       const financialEvent = resolveFinancialEvent(evento);

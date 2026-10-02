@@ -44,3 +44,50 @@ export const getMyWebhookLogs = createServerFn({ method: "GET" })
     if (error) throw new Error(error.message);
     return data ?? [];
   });
+
+export const getMyWebhookHealth = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { data: tenantId, error: tenantError } = await context.supabase.rpc("current_tenant_id");
+    if (tenantError) throw new Error(tenantError.message);
+    if (!tenantId) throw new Error("Tenant atual não encontrado.");
+
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const countStatus = async (status?: string) => {
+      let query = supabaseAdmin
+        .from("webhook_logs")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .gte("created_at", since);
+      if (status) query = query.eq("status", status);
+      const { count, error } = await query;
+      if (error) throw new Error(error.message);
+      return count ?? 0;
+    };
+
+    const [received, processed, duplicates, failed, ignored, latest] = await Promise.all([
+      countStatus(),
+      countStatus("processado"),
+      countStatus("duplicado"),
+      countStatus("erro"),
+      countStatus("sem_player"),
+      supabaseAdmin
+        .from("webhook_logs")
+        .select("created_at,evento,status")
+        .eq("tenant_id", tenantId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ]);
+    if (latest.error) throw new Error(latest.error.message);
+
+    return {
+      since,
+      received,
+      processed,
+      duplicates,
+      failed,
+      ignored,
+      latest: latest.data ?? null,
+    };
+  });

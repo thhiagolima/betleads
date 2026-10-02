@@ -752,11 +752,6 @@ async function syncMetaAccount(tenantId: string, account: MetaAccountForSync, da
     .from("meta_connections")
     .update({ last_sync_at: now, last_error: null, status: "connected" })
     .eq("id", account.connection_id);
-  const { error: attributionError } = await (supabaseAdmin as any).rpc(
-    "reconcile_meta_attributions",
-    { p_tenant_id: tenantId },
-  );
-  if (attributionError) throw new Error(attributionError.message);
   return imported;
 }
 
@@ -966,6 +961,7 @@ export async function processMetaSyncQueue(limit = 2) {
   let completed = 0;
   let retried = 0;
   let failed = 0;
+  const tenantsToReconcile = new Set<string>();
   for (const job of claimed ?? []) {
     const { data: account, error: accountError } = await (supabaseAdmin as any)
       .from("meta_ad_accounts")
@@ -1002,15 +998,6 @@ export async function processMetaSyncQueue(limit = 2) {
         })
         .eq("id", job.id)
         .eq("worker_id", workerId);
-      await (supabaseAdmin as any)
-        .from("meta_ad_accounts")
-        .update({
-          sync_status: canRetry ? "warning" : "error",
-          last_attempt_at: new Date().toISOString(),
-          last_error: message.slice(0, 1000),
-        })
-        .eq("id", job.account_id)
-        .eq("tenant_id", job.tenant_id);
       await (supabaseAdmin as any).from("meta_connection_audit").insert({
         tenant_id: job.tenant_id,
         connection_id: account.connection_id,
@@ -1018,6 +1005,7 @@ export async function processMetaSyncQueue(limit = 2) {
         action: "sync_succeeded",
         metadata: { run_id: job.run_id, account_id: job.account_id, rows_imported: imported },
       });
+      tenantsToReconcile.add(job.tenant_id);
       completed += 1;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Erro desconhecido ao sincronizar.";
@@ -1060,5 +1048,29 @@ export async function processMetaSyncQueue(limit = 2) {
     }
     await refreshMetaSyncRun(job.run_id);
   }
-  return { workerId, scheduled, claimed: claimed?.length ?? 0, completed, retried, failed };
+
+  let reconciled = 0;
+  let reconciliationFailed = 0;
+  for (const tenantId of tenantsToReconcile) {
+    const { error } = await (supabaseAdmin as any).rpc("reconcile_meta_attributions", {
+      p_tenant_id: tenantId,
+    });
+    if (error) {
+      console.error("[meta-sync reconcile]", tenantId, error.message);
+      reconciliationFailed += 1;
+    } else {
+      reconciled += 1;
+    }
+  }
+
+  return {
+    workerId,
+    scheduled,
+    claimed: claimed?.length ?? 0,
+    completed,
+    retried,
+    failed,
+    reconciled,
+    reconciliationFailed,
+  };
 }
