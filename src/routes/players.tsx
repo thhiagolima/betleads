@@ -1,5 +1,5 @@
 import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
-import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
@@ -208,7 +208,6 @@ const advancedFilterGroups = [
   },
 ] as const;
 const BEHAVIOR_FILTER_IDS = new Set(filters.filter((item) => item.id !== "todos").map((item) => item.id));
-const BEHAVIOR_FILTER_ITEMS = filters.filter((item) => item.id !== "todos");
 
 // Chips que filtram por gatilho de alerta em tempo real
 // (mesma lógica da página /alertas — quando a gente manda mensagem o lead some daqui)
@@ -722,73 +721,35 @@ function PlayersPage() {
     enabled: advancedFiltersOpen && canEstimateDraft,
     staleTime: 5_000,
   });
-  const contextualFacetQueries = useQueries({
-    queries: BEHAVIOR_FILTER_ITEMS.map((item) => {
-      const alreadySelected = sheetDraft.behaviorFilters.includes(item.id);
-      const candidateFilters = alreadySelected
-        ? sheetDraft.behaviorFilters
-        : [...sheetDraft.behaviorFilters, item.id];
-      return {
-        queryKey: [
-          "players-contextual-behavior-facet",
-          advancedFiltersOpen,
-          item.id,
-          candidateFilters,
-          sheetDraft.behaviorOperator,
-          sheetDraft.situation,
-          sheetDraft.level,
-          sheetDraft.search,
-          sheetDraft.dateField,
-          draftDateFromIso,
-          draftDateToIso,
-        ],
-        queryFn: () =>
-          fetchPlayersPage({
-            data: {
-              page: 1,
-              pageSize: 1,
-              filter: "todos",
-              behaviorFilters: candidateFilters,
-              behaviorOperator: sheetDraft.behaviorOperator,
-              gamificationStatus: sheetDraft.situation,
-              gamificationLevel: sheetDraft.level,
-              search: sheetDraft.search,
-              sortKey: "ultimo_login",
-              sortDir: "desc",
-              idsIn: null,
-              dateField: draftDateFromIso && draftDateToIso ? sheetDraft.dateField : null,
-              dateFrom: draftDateFromIso,
-              dateTo: draftDateToIso,
-            },
-          }),
-        enabled: advancedFiltersOpen,
-        staleTime: 5_000,
-      };
-    }),
-  });
-  const contextualBehaviorFacetCounts = useMemo(
-    () =>
-      new Map(
-        BEHAVIOR_FILTER_ITEMS.map((item, index) => [
-          item.id,
-          contextualFacetQueries[index]?.data?.total,
-        ]),
-      ),
-    [contextualFacetQueries],
-  );
   const fetchPlayerFilterFacets = useServerFn(getPlayerFilterFacets);
   const { data: playerFilterFacets, isFetching: isFetchingPlayerFilterFacets } = useQuery({
-    queryKey: ["players-filter-facets", sheetDraft.situation, sheetDraft.level],
+    queryKey: [
+      "players-filter-facets",
+      sheetDraft.behaviorFilters,
+      sheetDraft.behaviorOperator,
+      sheetDraft.situation,
+      sheetDraft.level,
+      sheetDraft.search,
+      sheetDraft.dateField,
+      draftDateFromIso,
+      draftDateToIso,
+    ],
     queryFn: () =>
       fetchPlayerFilterFacets({
         data: {
+          behaviorFilters: sheetDraft.behaviorFilters,
+          behaviorOperator: sheetDraft.behaviorOperator,
           gamificationStatus: sheetDraft.situation,
           gamificationLevel: sheetDraft.level,
+          search: sheetDraft.search,
+          dateField: draftDateFromIso && draftDateToIso ? sheetDraft.dateField : null,
+          dateFrom: draftDateFromIso,
+          dateTo: draftDateToIso,
         },
       }),
     enabled: advancedFiltersOpen,
     placeholderData: (previous) => previous,
-    staleTime: 30_000,
+    staleTime: 5_000,
   });
   const {
     data: pageData,
@@ -2050,11 +2011,9 @@ function PlayersPage() {
                               >
                                 {item.label}
                                 <span className="ml-1 opacity-70">
-                                  {contextualFacetQueries[
-                                    BEHAVIOR_FILTER_ITEMS.findIndex((candidate) => candidate.id === item.id)
-                                  ]?.isFetching
+                                  {isFetchingPlayerFilterFacets
                                     ? "…"
-                                    : (contextualBehaviorFacetCounts.get(item.id) ?? 0).toLocaleString("pt-BR")}
+                                    : (playerFilterFacets?.[item.id] ?? 0).toLocaleString("pt-BR")}
                                 </span>
                               </button>
                             );

@@ -5,8 +5,14 @@ import { withServerResultCache } from "@/lib/server-result-cache";
 export type PlayerFilterFacets = Record<string, number>;
 
 export type PlayerFilterFacetInput = {
+  behaviorFilters?: string[] | null;
+  behaviorOperator?: "and" | "or" | null;
   gamificationStatus?: "active" | "cooling" | "sleeping" | "no_deposit" | null;
   gamificationLevel?: "bronze" | "silver" | "gold" | "diamond" | "black" | null;
+  search?: string | null;
+  dateField?: "created_at" | "ftd_em" | null;
+  dateFrom?: string | null;
+  dateTo?: string | null;
 };
 
 /**
@@ -24,14 +30,26 @@ export const getPlayerFilterFacets = createServerFn({ method: "POST" })
 
     const status = data.gamificationStatus ?? null;
     const level = data.gamificationLevel ?? null;
+    const behaviorFilters = Array.from(new Set(data.behaviorFilters ?? [])).filter(Boolean);
+    const behaviorOperator = data.behaviorOperator === "or" ? "or" : "and";
+    const search = data.search?.trim() ?? "";
+    const dateField = data.dateField ?? null;
+    const dateFrom = data.dateFrom ?? null;
+    const dateTo = data.dateTo ?? null;
     return withServerResultCache(
-      `players:filter-facets:${tenantId}:${status ?? "all"}:${level ?? "all"}`,
-      30_000,
+      `players:filter-facets:v2:${tenantId}:${behaviorFilters.join(",")}:${behaviorOperator}:${status ?? "all"}:${level ?? "all"}:${search}:${dateField ?? ""}:${dateFrom ?? ""}:${dateTo ?? ""}`,
+      5_000,
       async () => {
-        const { data, error } = await supabase.rpc("player_filter_facets_v1", {
+        const { data, error } = await supabase.rpc("player_filter_contextual_facets_v1", {
           _tenant: tenantId,
+          _filters: behaviorFilters,
+          _operator: behaviorOperator,
           _gamification_status: status,
           _gamification_level: level,
+          _search: search || null,
+          _date_field: dateField,
+          _date_from: dateFrom,
+          _date_to: dateTo,
         });
         if (error) throw new Error(error.message);
         return (data ?? {}) as PlayerFilterFacets;
