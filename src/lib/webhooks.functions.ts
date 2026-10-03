@@ -24,6 +24,34 @@ async function requireWebhookManager(context: { supabase: any }) {
   return access.tenantId;
 }
 
+function randomHex(bytes: number) {
+  return Array.from(crypto.getRandomValues(new Uint8Array(bytes)))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+export const rotateMyWebhookCredentials = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const tenantId = await requireWebhookManager(context);
+    const webhook_token = randomHex(24);
+    const webhook_secret = randomHex(32);
+    const { error } = await supabaseAdmin
+      .from("tenants")
+      .update({ webhook_token, webhook_secret })
+      .eq("id", tenantId);
+    if (error) throw new Error(error.message);
+    await supabaseAdmin.from("tenant_audit_logs").insert({
+      tenant_id: tenantId,
+      actor_user_id: context.userId,
+      action: "webhook.credentials_rotated",
+      entity_type: "tenant",
+      entity_id: tenantId,
+      metadata: { token_rotated: true, hmac_rotated: true },
+    });
+    return { token: webhook_token, secret: webhook_secret };
+  });
+
 // Retorna o webhook_token do tenant do usuário logado.
 // Usa a view "tenants" via RLS (has_tenant_access cobre o SELECT).
 export const getMyWebhookToken = createServerFn({ method: "GET" })
