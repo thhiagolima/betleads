@@ -195,6 +195,112 @@ export const getActivationStatus = createServerFn({ method: "GET" })
     };
   });
 
+/** Resumo operacional unificado das réguas de SMS e e-mail. */
+export const listAutomationJourneys = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const tenantId = await resolveOperationalTenantId(context.supabase);
+    const [smsFlows, emailFlows] = await Promise.all([
+      supabaseAdmin
+        .from("sms_flows")
+        .select("id, name, trigger_name, is_active, updated_at")
+        .eq("tenant_id", tenantId)
+        .order("updated_at", { ascending: false }),
+      supabaseAdmin
+        .from("email_flows")
+        .select("id, name, trigger_type, active, updated_at")
+        .eq("tenant_id", tenantId)
+        .order("updated_at", { ascending: false }),
+    ]);
+
+    const smsIds = (smsFlows.data ?? []).map((flow) => flow.id);
+    const emailIds = (emailFlows.data ?? []).map((flow) => flow.id);
+    const [smsLeads, smsLogs, emailLeads, emailLogs] = await Promise.all([
+      smsIds.length
+        ? supabaseAdmin
+            .from("sms_flow_leads")
+            .select("flow_id, status")
+            .eq("tenant_id", tenantId)
+            .in("flow_id", smsIds)
+        : Promise.resolve({ data: [] as Array<{ flow_id: string; status: string }> }),
+      smsIds.length
+        ? supabaseAdmin
+            .from("sms_send_logs")
+            .select("flow_id, status")
+            .eq("tenant_id", tenantId)
+            .in("flow_id", smsIds)
+        : Promise.resolve({ data: [] as Array<{ flow_id: string | null; status: string | null }> }),
+      emailIds.length
+        ? supabaseAdmin
+            .from("email_flow_leads")
+            .select("flow_id, status")
+            .eq("tenant_id", tenantId)
+            .in("flow_id", emailIds)
+        : Promise.resolve({ data: [] as Array<{ flow_id: string; status: string }> }),
+      emailIds.length
+        ? supabaseAdmin
+            .from("email_send_logs")
+            .select("flow_id, status")
+            .eq("tenant_id", tenantId)
+            .in("flow_id", emailIds)
+        : Promise.resolve({ data: [] as Array<{ flow_id: string | null; status: string | null }> }),
+    ]);
+
+    type Counters = { queued: number; sent: number; failed: number; exited: number };
+    const empty = (): Counters => ({ queued: 0, sent: 0, failed: 0, exited: 0 });
+    const leadCounters = (rows: Array<{ flow_id: string; status: string }> | null) => {
+      const counters = new Map<string, Counters>();
+      for (const row of rows ?? []) {
+        const counter = counters.get(row.flow_id) ?? empty();
+        if (["pending", "running", "cooldown"].includes(row.status)) counter.queued++;
+        if (row.status === "exited") counter.exited++;
+        if (row.status === "failed") counter.failed++;
+        counters.set(row.flow_id, counter);
+      }
+      return counters;
+    };
+    const addSendCounters = (
+      counters: Map<string, Counters>,
+      rows: Array<{ flow_id: string | null; status: string | null }> | null,
+    ) => {
+      for (const row of rows ?? []) {
+        if (!row.flow_id) continue;
+        const counter = counters.get(row.flow_id) ?? empty();
+        const status = (row.status ?? "").toLowerCase();
+        if (["sent", "delivered", "success"].includes(status)) counter.sent++;
+        if (["failed", "error"].includes(status)) counter.failed++;
+        counters.set(row.flow_id, counter);
+      }
+    };
+    const smsCounters = leadCounters(smsLeads.data);
+    const emailCounters = leadCounters(emailLeads.data);
+    addSendCounters(smsCounters, smsLogs.data);
+    addSendCounters(emailCounters, emailLogs.data);
+
+    return {
+      journeys: [
+        ...(smsFlows.data ?? []).map((flow) => ({
+          id: flow.id,
+          channel: "sms" as const,
+          name: flow.name,
+          trigger: flow.trigger_name ?? "manual",
+          active: flow.is_active,
+          updated_at: flow.updated_at,
+          counters: smsCounters.get(flow.id) ?? empty(),
+        })),
+        ...(emailFlows.data ?? []).map((flow) => ({
+          id: flow.id,
+          channel: "email" as const,
+          name: flow.name,
+          trigger: flow.trigger_type,
+          active: flow.active,
+          updated_at: flow.updated_at,
+          counters: emailCounters.get(flow.id) ?? empty(),
+        })),
+      ],
+    };
+  });
+
 export const listRecentRuns = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {

@@ -11,6 +11,7 @@ import {
   setPaused,
   setChannelPaused,
   getQueueReadiness,
+  listAutomationJourneys,
 } from "@/lib/activation.functions";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -45,6 +46,7 @@ import {
   Mail,
   Phone,
   ArrowRight,
+  ListChecks,
 } from "lucide-react";
 import {
   modeLabel,
@@ -54,6 +56,7 @@ import {
   formatDateShort,
   formatDuration,
 } from "@/lib/activation-labels";
+import { TRIGGER_NAMES } from "@/lib/triggers";
 
 export const Route = createFileRoute("/automacoes")({ component: AutomacoesPage });
 
@@ -77,6 +80,7 @@ function AutomacoesPage() {
   const fnPause = useServerFn(setPaused);
   const fnChannelPause = useServerFn(setChannelPaused);
   const fnReadiness = useServerFn(getQueueReadiness);
+  const fnJourneys = useServerFn(listAutomationJourneys);
 
   const settings = useQuery({ queryKey: ["automation-settings"], queryFn: () => fnSettings() });
   const status = useQuery({
@@ -92,6 +96,11 @@ function AutomacoesPage() {
   const readiness = useQuery({
     queryKey: ["queue-readiness"],
     queryFn: () => fnReadiness(),
+    refetchInterval: 15000,
+  });
+  const journeys = useQuery({
+    queryKey: ["automation-journeys"],
+    queryFn: () => fnJourneys(),
     refetchInterval: 15000,
   });
 
@@ -163,8 +172,8 @@ function AutomacoesPage() {
   return (
     <div className="p-6 space-y-6">
       <PageHeader
-        title="Automações"
-        subtitle="Organize os fluxos de SMS, e-mail, ligação e WhatsApp com prioridade e limite diário."
+        title="Réguas de automação"
+        subtitle="Cada gatilho inicia uma sequência de SMS ou e-mail no momento definido por você."
         icon={<Rocket className="h-5 w-5 text-primary-foreground" />}
         actions={
           <div className="flex items-center gap-2">
@@ -255,6 +264,69 @@ function AutomacoesPage() {
             </span>
             <ArrowRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-1" />
           </Link>
+        </CardContent>
+      </Card>
+
+      <Card id="reguas" className="border-border/70 bg-card/70">
+        <CardHeader className="flex flex-row items-center justify-between gap-4">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <ListChecks className="h-5 w-5 text-primary" /> Réguas em operação
+            </CardTitle>
+            <CardDescription>
+              Acompanhe fila, envios, saídas e falhas sem misturar campanhas com automações.
+            </CardDescription>
+          </div>
+          <Badge variant="outline">{journeys.data?.journeys.length ?? 0} réguas</Badge>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {journeys.isLoading ? (
+            <div className="py-8 text-center text-sm text-muted-foreground">Carregando réguas…</div>
+          ) : journeys.data?.journeys.length ? (
+            journeys.data.journeys.map((journey) => {
+              const isSms = journey.channel === "sms";
+              return (
+                <div
+                  key={`${journey.channel}-${journey.id}`}
+                  className="flex flex-col gap-3 rounded-lg border border-border/70 p-4 lg:flex-row lg:items-center"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className={`rounded-md px-2 py-1 text-xs font-medium ${
+                          isSms ? "bg-primary/10 text-primary" : "bg-violet-500/10 text-violet-300"
+                        }`}
+                      >
+                        {isSms ? "SMS" : "E-mail"}
+                      </span>
+                      <span className="font-medium">{journey.name}</span>
+                      <Badge variant={journey.active ? "default" : "outline"}>
+                        {journey.active ? "Ativa" : "Pausada"}
+                      </Badge>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Gatilho:{" "}
+                      {(TRIGGER_NAMES as Record<string, string>)[journey.trigger] ??
+                        journey.trigger}
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-4 gap-4 text-center text-sm lg:min-w-[360px]">
+                    <MetricCell label="Na fila" value={journey.counters.queued} />
+                    <MetricCell label="Enviados" value={journey.counters.sent} />
+                    <MetricCell label="Saídas" value={journey.counters.exited} />
+                    <MetricCell label="Falhas" value={journey.counters.failed} danger />
+                  </div>
+                  <Button asChild variant="outline" size="sm">
+                    <Link to={isSms ? "/automacoes/sms" : "/automacoes/email"}>Editar</Link>
+                  </Button>
+                </div>
+              );
+            })
+          ) : (
+            <div className="rounded-lg border border-dashed py-8 text-center text-sm text-muted-foreground">
+              Você ainda não criou nenhuma régua. Comece por SMS ou e-mail acima.
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -607,6 +679,25 @@ function RunRow({ run: r }: { run: any }) {
           "Nenhum lead novo no ciclo"
         )}
       </div>
+    </div>
+  );
+}
+
+function MetricCell({
+  label,
+  value,
+  danger = false,
+}: {
+  label: string;
+  value: number;
+  danger?: boolean;
+}) {
+  return (
+    <div>
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className={danger && value > 0 ? "font-semibold text-destructive" : "font-semibold"}>
+        {value}
+      </p>
     </div>
   );
 }
