@@ -1,12 +1,20 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 
 import { SmsFlowsPanel } from "@/routes/sms";
+import { consumeAutomationJourneyDraft, type AutomationJourneyDraft } from "@/lib/automation-draft";
 
 export const Route = createFileRoute("/automacoes/sms")({
   component: SmsAutomationFlowsPage,
 });
 
 function SmsAutomationFlowsPage() {
+  const [draft, setDraft] = useState<AutomationJourneyDraft | null>(null);
+
+  useEffect(() => {
+    setDraft(consumeAutomationJourneyDraft("sms"));
+  }, []);
+
   return (
     <div className="space-y-6 p-6">
       <div>
@@ -19,7 +27,7 @@ function SmsAutomationFlowsPage() {
           Automações e poderão ser combinados com outros canais.
         </p>
       </div>
-      <SmsFlowsPanel />
+      <SmsFlowsPanel initialDraft={draft} />
     </div>
   );
 }

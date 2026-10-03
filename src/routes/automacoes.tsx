@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -16,6 +16,13 @@ import {
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { PageHeader } from "@/components/ui-premium/page-header";
@@ -56,7 +63,8 @@ import {
   formatDateShort,
   formatDuration,
 } from "@/lib/activation-labels";
-import { TRIGGER_NAMES } from "@/lib/triggers";
+import { TRIGGER_NAMES, type TriggerType } from "@/lib/triggers";
+import { saveAutomationJourneyDraft } from "@/lib/automation-draft";
 
 export const Route = createFileRoute("/automacoes")({ component: AutomacoesPage });
 
@@ -71,6 +79,7 @@ type Totals = {
 };
 
 function AutomacoesPage() {
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const fnSettings = useServerFn(getAutomationSettings);
   const fnStatus = useServerFn(getActivationStatus);
@@ -107,6 +116,30 @@ function AutomacoesPage() {
   const [simResult, setSimResult] = useState<Totals | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmText, setConfirmText] = useState("");
+  const [newJourneyOpen, setNewJourneyOpen] = useState(false);
+  const [newJourneyName, setNewJourneyName] = useState("");
+  const [newJourneyChannel, setNewJourneyChannel] = useState<"sms" | "email">("sms");
+  const [newJourneyTrigger, setNewJourneyTrigger] = useState<TriggerType>(
+    "cadastrados_sem_deposito",
+  );
+
+  function createJourneyDraft() {
+    const name = newJourneyName.trim();
+    if (!name) {
+      toast.error("Informe o nome da régua para continuar.");
+      return;
+    }
+
+    saveAutomationJourneyDraft({
+      channel: newJourneyChannel,
+      name,
+      trigger: newJourneyTrigger,
+      createdAt: Date.now(),
+    });
+    setNewJourneyOpen(false);
+    setNewJourneyName("");
+    navigate({ to: newJourneyChannel === "sms" ? "/automacoes/sms" : "/automacoes/email" });
+  }
 
   const simulate = useMutation({
     mutationFn: async () => (await fnSimulate()) as { totals: Totals },
@@ -191,6 +224,9 @@ function AutomacoesPage() {
                 </>
               )}
             </Button>
+            <Button size="sm" onClick={() => setNewJourneyOpen(true)}>
+              Nova régua
+            </Button>
           </div>
         }
       />
@@ -266,6 +302,81 @@ function AutomacoesPage() {
           </Link>
         </CardContent>
       </Card>
+
+      <Dialog open={newJourneyOpen} onOpenChange={setNewJourneyOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Nova régua</DialogTitle>
+            <DialogDescription>
+              Defina o início da jornada. Você monta as mensagens e as esperas no próximo passo.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-5 py-2">
+            <div className="space-y-2">
+              <label className="text-sm font-medium" htmlFor="journey-name">
+                Nome da régua
+              </label>
+              <Input
+                id="journey-name"
+                value={newJourneyName}
+                onChange={(event) => setNewJourneyName(event.target.value)}
+                placeholder="Ex.: Sumiu depois do primeiro depósito"
+                autoFocus
+              />
+            </div>
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Canal da primeira mensagem</p>
+              <div className="grid grid-cols-2 gap-3">
+                <Button
+                  type="button"
+                  variant={newJourneyChannel === "sms" ? "default" : "outline"}
+                  className="h-auto justify-start gap-2 py-3"
+                  onClick={() => setNewJourneyChannel("sms")}
+                >
+                  <MessageSquare className="h-4 w-4" /> SMS
+                </Button>
+                <Button
+                  type="button"
+                  variant={newJourneyChannel === "email" ? "default" : "outline"}
+                  className="h-auto justify-start gap-2 py-3"
+                  onClick={() => setNewJourneyChannel("email")}
+                >
+                  <Mail className="h-4 w-4" /> E-mail
+                </Button>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium" htmlFor="journey-trigger">
+                Quando ela começa
+              </label>
+              <Select
+                value={newJourneyTrigger}
+                onValueChange={(value) => setNewJourneyTrigger(value as TriggerType)}
+              >
+                <SelectTrigger id="journey-trigger">
+                  <SelectValue placeholder="Escolha o gatilho" />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(TRIGGER_NAMES).map(([value, label]) => (
+                    <SelectItem key={value} value={value}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                A régua fica desligada até você revisar e salvar o fluxo.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setNewJourneyOpen(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={createJourneyDraft}>Criar e abrir</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Card id="reguas" className="border-border/70 bg-card/70">
         <CardHeader className="flex flex-row items-center justify-between gap-4">

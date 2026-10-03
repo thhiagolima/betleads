@@ -1,12 +1,20 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 
 import { EmailAutomationFlowsPanel } from "@/routes/email";
+import { consumeAutomationJourneyDraft, type AutomationJourneyDraft } from "@/lib/automation-draft";
 
 export const Route = createFileRoute("/automacoes/email")({
   component: EmailAutomationFlowsPage,
 });
 
 function EmailAutomationFlowsPage() {
+  const [draft, setDraft] = useState<AutomationJourneyDraft | null>(null);
+
+  useEffect(() => {
+    setDraft(consumeAutomationJourneyDraft("email"));
+  }, []);
+
   return (
     <div className="space-y-6 p-6">
       <div>
@@ -18,7 +26,7 @@ function EmailAutomationFlowsPage() {
           Organize condiÃ§Ãµes, etapas e mensagens automÃ¡ticas para acompanhar cada jogador.
         </p>
       </div>
-      <EmailAutomationFlowsPanel />
+      <EmailAutomationFlowsPanel initialDraft={draft} />
     </div>
   );
 }

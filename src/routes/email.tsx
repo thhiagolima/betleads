@@ -1,5 +1,5 @@
 import { createFileRoute, useLocation, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Mail,
   Send,
@@ -2220,7 +2220,11 @@ function CampanhaDialog({
 // Automações
 // ============================================================
 
-export function EmailAutomationFlowsPanel() {
+export function EmailAutomationFlowsPanel({
+  initialDraft,
+}: {
+  initialDraft?: { name: string; trigger: EmailTrigger; createdAt: number } | null;
+}) {
   const [sub, setSub] = useState<"fluxos" | "historico" | "logs">("fluxos");
   return (
     <div className="space-y-4">
@@ -2231,7 +2235,7 @@ export function EmailAutomationFlowsPanel() {
           <TabsTrigger value="logs">Logs</TabsTrigger>
         </TabsList>
         <TabsContent value="fluxos" className="mt-3">
-          <FluxosList />
+          <FluxosList initialDraft={initialDraft} />
         </TabsContent>
         <TabsContent value="historico" className="mt-3">
           <FluxosHistorico />
@@ -2245,7 +2249,11 @@ export function EmailAutomationFlowsPanel() {
 }
 
 // ---------- Lista de fluxos ----------
-function FluxosList() {
+function FluxosList({
+  initialDraft,
+}: {
+  initialDraft?: { name: string; trigger: EmailTrigger; createdAt: number } | null;
+}) {
   const listFn = useServerFn(listEmailFlows);
   const toggleFn = useServerFn(toggleEmailFlow);
   const delFn = useServerFn(deleteEmailFlow);
@@ -2256,13 +2264,25 @@ function FluxosList() {
   });
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<{ name: string; trigger: EmailTrigger } | null>(null);
+  const consumedDraft = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!initialDraft || consumedDraft.current === initialDraft.createdAt) return;
+    consumedDraft.current = initialDraft.createdAt;
+    setEditingId(null);
+    setDraft({ name: initialDraft.name, trigger: initialDraft.trigger });
+    setEditorOpen(true);
+  }, [initialDraft]);
 
   function novo() {
     setEditingId(null);
+    setDraft(null);
     setEditorOpen(true);
   }
   function abrirEditor(id: string | null) {
     setEditingId(id);
+    setDraft(null);
     setEditorOpen(true);
   }
 
@@ -2401,6 +2421,7 @@ function FluxosList() {
       {editorOpen && (
         <FlowBuilderDialog
           flowId={editingId}
+          initialDraft={draft ?? undefined}
           onClose={() => {
             setEditorOpen(false);
             refetch();
@@ -2412,7 +2433,15 @@ function FluxosList() {
 }
 
 // ---------- Flow builder ----------
-function FlowBuilderDialog({ flowId, onClose }: { flowId: string | null; onClose: () => void }) {
+function FlowBuilderDialog({
+  flowId,
+  initialDraft,
+  onClose,
+}: {
+  flowId: string | null;
+  initialDraft?: { name: string; trigger: EmailTrigger };
+  onClose: () => void;
+}) {
   const getFn = useServerFn(getEmailFlow);
   const saveFn = useServerFn(saveEmailFlow);
   const testFn = useServerFn(triggerEmailFlowTest);
@@ -2425,8 +2454,10 @@ function FlowBuilderDialog({ flowId, onClose }: { flowId: string | null; onClose
   const smtps = (smtpData?.items ?? []) as Array<{ id: string; name?: string; nome?: string }>;
 
   const [loading, setLoading] = useState(!!flowId);
-  const [name, setName] = useState("");
-  const [trigger, setTrigger] = useState<EmailTrigger>("cadastrados_sem_deposito");
+  const [name, setName] = useState(initialDraft?.name ?? "");
+  const [trigger, setTrigger] = useState<EmailTrigger>(
+    initialDraft?.trigger ?? "cadastrados_sem_deposito",
+  );
   const [active, setActive] = useState(false);
   const [cooldownH, setCooldownH] = useState(72);
   const [exits, setExits] = useState<Record<string, boolean>>(defaultExitConditions());

@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useLocation, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
 import {
   DashboardDateRangePicker,
@@ -3074,7 +3074,11 @@ function LegacyNewSmsCampaignDialog({
 // ---------------- Fluxos ----------------
 */
 
-export function SmsFlowsPanel() {
+export function SmsFlowsPanel({
+  initialDraft,
+}: {
+  initialDraft?: { name: string; trigger: TriggerType } | null;
+}) {
   const qc = useQueryClient();
   const listFn = useServerFn(listSmsFlows);
   const saveFn = useServerFn(saveSmsFlow);
@@ -3090,6 +3094,7 @@ export function SmsFlowsPanel() {
 
   const [editor, setEditor] = useState<Fluxo | null>(null);
   const [confirmarExclusao, setConfirmarExclusao] = useState<Fluxo | null>(null);
+  const consumedDraft = useRef<number | null>(null);
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["sms-flows"] });
 
@@ -3132,12 +3137,12 @@ export function SmsFlowsPanel() {
     },
   });
 
-  function novo() {
+  function novo(seed?: { name: string; trigger: TriggerType }) {
     setEditor({
       id: `new-${Date.now()}`,
-      nome: "Novo fluxo",
+      nome: seed?.name ?? "Novo fluxo",
       status: "inativo",
-      gatilho: "engajado_sem_converter",
+      gatilho: seed?.trigger ?? "engajado_sem_converter",
       etapas: [{ tipo: "sms", mensagem: "Olá {primeiro_nome}, ..." }],
       saida: ["se depositar", "se fizer primeiro depósito"],
       players: 0,
@@ -3146,6 +3151,12 @@ export function SmsFlowsPanel() {
       atualizadoEm: "agora",
     });
   }
+
+  useEffect(() => {
+    if (!initialDraft || consumedDraft.current === initialDraft.createdAt) return;
+    consumedDraft.current = initialDraft.createdAt;
+    novo(initialDraft);
+  }, [initialDraft]);
   const salvar = (f: Fluxo) => saveMut.mutate(f);
   const toggleStatus = (id: string) => {
     const f = fluxos.find((x) => x.id === id);
