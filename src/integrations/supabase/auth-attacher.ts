@@ -8,8 +8,12 @@ export const attachSupabaseAuth = createMiddleware({ type: 'function' }).client(
   async ({ next }) => {
     const { data } = await supabase.auth.getSession()
     const token = data.session?.access_token
+    const activeTenantId = window.localStorage.getItem('betleads:active-tenant')
     return next({
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(activeTenantId ? { 'X-Active-Tenant': activeTenantId } : {}),
+      },
     })
   },
 )

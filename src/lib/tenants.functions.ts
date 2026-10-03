@@ -58,14 +58,15 @@ type TenantMemberRow = {
   created_at: string;
 };
 
-type TenantAssignableRole = "user" | "admin" | "owner" | "member";
+type TenantAssignableRole = "admin" | "gestor" | "member";
 type ServerContext = {
   userId: string;
   supabase: LooseDb;
+  activeTenantId?: string | null;
 };
 
 const db = () => supabaseAdmin as unknown as LooseDb;
-const tenantRole = z.enum(["user", "admin", "owner", "member"]);
+const tenantRole = z.enum(["admin", "gestor", "member"]);
 const tenantStatus = z.enum(["active", "suspended", "trial", "canceled"]);
 const tenantPlan = z.enum(["starter", "pro", "enterprise", "interno"]);
 const crmModel = z.enum(["CRM_PLATAFORMA", "CRM_EXPERT"]);
@@ -94,12 +95,12 @@ async function checkSuperAdmin(userId: string) {
 
 async function canManageTenant(ctx: ServerContext, tenantId: string) {
   if (await checkSuperAdmin(ctx.userId)) return true;
-  const { data, error } = await ctx.supabase
+  const { data, error } = await db()
     .from<TenantMemberRow[]>("user_roles")
     .select("id,user_id,tenant_id,role,created_at")
     .eq("tenant_id", tenantId)
     .eq("user_id", ctx.userId)
-    .in("role", ["owner", "admin", "user"]);
+    .eq("role", "admin");
   if (error) throw new Error(error.message);
   return !!data?.length;
 }
@@ -109,12 +110,12 @@ async function requireTenantManager(ctx: ServerContext, tenantId: string) {
   if (!allowed) throw new Error("Sem permissão para gerenciar este tenant");
 }
 
-async function countTenantOwners(tenantId: string) {
+async function countTenantAdmins(tenantId: string) {
   const { data, error } = await db()
     .from<TenantMemberRow[]>("user_roles")
     .select("id,user_id,tenant_id,role,created_at")
     .eq("tenant_id", tenantId)
-    .eq("role", "owner");
+    .eq("role", "admin");
   if (error) throw new Error(error.message);
   return data?.length ?? 0;
 }
@@ -130,7 +131,7 @@ async function getAccessibleTenants(ctx: ServerContext) {
     return { superAdmin, tenants: data ?? [] };
   }
 
-  const { data: roles, error: rolesErr } = await ctx.supabase
+  const { data: roles, error: rolesErr } = await db()
     .from<TenantMemberRow[]>("user_roles")
     .select("tenant_id")
     .eq("user_id", ctx.userId)
@@ -365,10 +366,46 @@ export const getTenantManagementConsole = createServerFn({ method: "POST" })
 
     return {
       isSuperAdmin: superAdmin,
+      canManage: await canManageTenant(ctx, selectedTenantId),
       tenants,
       selectedTenantId,
       detail: await buildTenantDetail(selectedTenantId),
     };
+  });
+
+export const getTenantSwitcher = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const ctx = context as ServerContext;
+    const superAdmin = await checkSuperAdmin(ctx.userId);
+    const { data: memberships, error: membershipErr } = await db()
+      .from<TenantMemberRow[]>("user_roles")
+      .select("id,user_id,tenant_id,role,created_at")
+      .eq("user_id", ctx.userId)
+      .not("tenant_id", "is", null);
+    if (membershipErr) throw new Error(membershipErr.message);
+
+    const roles = memberships ?? [];
+    const tenantIds = roles.map((membership) => membership.tenant_id);
+    const { data: tenants, error: tenantsErr } = await db()
+      .from<TenantRow[]>("tenants")
+      .select("id,nome,slug,status,plano,crm_model,limits,metadata,created_at,updated_at")
+      .in("id", superAdmin ? (await getAccessibleTenants(ctx)).tenants.map((tenant) => tenant.id) : tenantIds)
+      .order("nome", { ascending: true });
+    if (tenantsErr) throw new Error(tenantsErr.message);
+
+    const roleByTenant = new Map(roles.map((membership) => [membership.tenant_id, membership.role]));
+    const options = (tenants ?? []).map((tenant) => ({
+      id: tenant.id,
+      nome: tenant.nome,
+      slug: tenant.slug,
+      role: superAdmin ? "super_admin" : roleByTenant.get(tenant.id) ?? "member",
+    }));
+    const activeTenantId = options.some((tenant) => tenant.id === ctx.activeTenantId)
+      ? ctx.activeTenantId
+      : options[0]?.id ?? null;
+
+    return { activeTenantId, tenants: options };
   });
 
 export const getCurrentTenantAccessStatus = createServerFn({ method: "GET" })
@@ -416,6 +453,7 @@ export const getCurrentTenantAccessStatus = createServerFn({ method: "GET" })
 const createTenantInput = z.object({
   nome: z.string().min(2).max(160),
   slug: z.string().min(2).max(80).optional().nullable(),
+  adminEmail: z.string().email().max(255),
   status: tenantStatus.default("trial"),
   plano: tenantPlan.default("starter"),
   crm_model: crmModel.default("CRM_PLATAFORMA"),
@@ -431,6 +469,9 @@ export const adminCreateTenant = createServerFn({ method: "POST" })
     const slug = normalizeSlug(data.slug || data.nome);
     if (!slug) throw new Error("Slug inválido");
 
+    const admin = await findAuthUserByEmail(data.adminEmail);
+    if (!admin) throw new Error("O admin inicial precisa ser um usuário já cadastrado");
+
     const { data: tenant, error } = await db()
       .from<TenantRow>("tenants")
       .insert({
@@ -445,13 +486,23 @@ export const adminCreateTenant = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     if (!tenant) throw new Error("Falha ao criar tenant");
 
+    const { error: membershipErr } = await db().from("user_roles").insert({
+      user_id: admin.id,
+      tenant_id: tenant.id,
+      role: "admin",
+    });
+    if (membershipErr) {
+      await db().from("tenants").delete().eq("id", tenant.id);
+      throw new Error(`Não foi possível definir o admin inicial: ${membershipErr.message}`);
+    }
+
     await auditTenant({
       tenantId: tenant.id,
       actorUserId: ctx.userId,
       action: "tenant.created",
       entityType: "tenant",
       entityId: tenant.id,
-      after: tenant,
+      after: { ...tenant, initial_admin_user_id: admin.id, initial_admin_email: admin.email },
     });
 
     return { tenant };
@@ -534,8 +585,8 @@ export const addUserToTenant = createServerFn({ method: "POST" })
     if (!actorIsSuperAdmin && data.password) {
       throw new Error("Convites de tenant devem ser enviados por email, sem senha manual");
     }
-    if (!actorIsSuperAdmin && data.role === "owner") {
-      throw new Error("Apenas o super admin pode adicionar owners");
+    if (!actorIsSuperAdmin && data.role === "admin") {
+      throw new Error("Apenas o super admin pode definir o admin do tenant");
     }
 
     const email = data.email.trim().toLowerCase();
@@ -628,8 +679,8 @@ export const updateTenantUserRole = createServerFn({ method: "POST" })
     await requireTenantManager(ctx, data.tenantId);
     const actorIsSuperAdmin = await checkSuperAdmin(ctx.userId);
 
-    if (!actorIsSuperAdmin && data.role === "owner") {
-      throw new Error("Apenas o super admin pode promover owners");
+    if (!actorIsSuperAdmin && data.role === "admin") {
+      throw new Error("Apenas o super admin pode definir o admin do tenant");
     }
 
     const { data: before, error: beforeErr } = await db()
@@ -641,15 +692,15 @@ export const updateTenantUserRole = createServerFn({ method: "POST" })
     if (beforeErr) throw new Error(beforeErr.message);
     if (!before) throw new Error("Vínculo não encontrado");
 
-    if (!actorIsSuperAdmin && before.role === "owner") {
-      throw new Error("Apenas o super admin pode alterar um owner");
+    if (!actorIsSuperAdmin && before.role === "admin") {
+      throw new Error("Apenas o super admin pode alterar o admin do tenant");
     }
     if (
-      before.role === "owner" &&
-      data.role !== "owner" &&
-      (await countTenantOwners(data.tenantId)) <= 1
+      before.role === "admin" &&
+      data.role !== "admin" &&
+      (await countTenantAdmins(data.tenantId)) <= 1
     ) {
-      throw new Error("Nao e permitido remover o ultimo owner do tenant");
+      throw new Error("Nao e permitido remover o unico admin do tenant");
     }
 
     const { data: after, error } = await db()
@@ -701,8 +752,12 @@ export const removeUserFromTenant = createServerFn({ method: "POST" })
       throw new Error("Você não pode remover seu próprio acesso por aqui");
     }
 
-    if (before.role === "owner" && (await countTenantOwners(data.tenantId)) <= 1) {
-      throw new Error("Nao e permitido remover o ultimo owner do tenant");
+    const actorIsSuperAdmin = await checkSuperAdmin(ctx.userId);
+    if (!actorIsSuperAdmin && before.role === "admin") {
+      throw new Error("Apenas o super admin pode remover o admin do tenant");
+    }
+    if (before.role === "admin" && (await countTenantAdmins(data.tenantId)) <= 1) {
+      throw new Error("Nao e permitido remover o unico admin do tenant");
     }
 
     const { error } = await db()

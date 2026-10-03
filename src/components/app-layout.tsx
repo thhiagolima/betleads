@@ -6,6 +6,7 @@ import { ProviderAuthBanner } from "@/components/provider-auth-banner";
 import { TenantStatusGate } from "@/components/tenant-status-gate";
 import { SidebarToggle } from "@/components/ui/sidebar";
 import { WhatsappNotifier } from "@/components/whatsapp-notifier";
+import { ActiveTenantSwitcher } from "@/components/active-tenant-switcher";
 import { useGlobalRealtimeStatus } from "@/hooks/use-realtime-invalidate";
 
 const titles: Record<string, { title: string; subtitle: string }> = {
@@ -112,6 +113,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               {meta.subtitle}
             </p>
           </div>
+          <ActiveTenantSwitcher />
           <div className="ml-auto flex shrink-0 items-center gap-2 rounded-full border border-border/60 bg-card/50 px-3 py-1 text-xs text-muted-foreground backdrop-blur">
             <span className={`h-1.5 w-1.5 rounded-full ${rtMeta.dot}`} />
             <span className="hidden text-foreground/80 sm:inline">{rtMeta.label}</span>

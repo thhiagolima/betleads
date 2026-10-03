@@ -11,6 +11,26 @@ async function assertSuperAdmin(userId: string) {
   if (!data) throw new Error("Apenas o super admin pode realizar esta ação");
 }
 
+async function auditAdminAction(args: {
+  actorUserId: string;
+  action: string;
+  targetUserId?: string | null;
+  tenantId?: string | null;
+  before?: unknown;
+  after?: unknown;
+}) {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { error } = await supabaseAdmin.from("admin_audit_logs").insert({
+    actor_user_id: args.actorUserId,
+    action: args.action,
+    target_user_id: args.targetUserId ?? null,
+    tenant_id: args.tenantId ?? null,
+    before_data: args.before ?? null,
+    after_data: args.after ?? null,
+  });
+  if (error) console.warn("[admin] audit failed", error.message);
+}
+
 export const adminGetSmsProviderConfig = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
@@ -107,7 +127,6 @@ export const setPricing = createServerFn({ method: "POST" })
 const createUserInput = z.object({
   email: z.string().email().max(255),
   password: z.string().min(8).max(200),
-  display_name: z.string().min(1).max(200),
 });
 
 export const adminCreateUser = createServerFn({ method: "POST" })
@@ -128,36 +147,15 @@ export const adminCreateUser = createServerFn({ method: "POST" })
     if (!newUser) throw new Error("Falha ao criar usuário");
 
     // 2. Cria um tenant para esse usuário
-    const slug = `${data.email
-      .split("@")[0]
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/(^-|-$)/g, "")}-${newUser.id.slice(0, 8)}`;
-    const { data: tenant, error: tenantErr } = await supabaseAdmin
-      .from("tenants")
-      .insert({ nome: data.display_name, slug })
-      .select("id")
-      .single();
-    if (tenantErr) {
-      await supabaseAdmin.auth.admin.deleteUser(newUser.id).catch(() => {});
-      throw new Error(tenantErr.message);
-    }
 
     // 3. Liga o usuário ao tenant com role 'user'
-    const { error: roleErr } = await supabaseAdmin
-      .from("user_roles")
-      .insert({ user_id: newUser.id, tenant_id: tenant.id, role: "user" });
-    if (roleErr) {
-      try {
-        await supabaseAdmin.from("tenants").delete().eq("id", tenant.id);
-      } catch {}
-      try {
-        await supabaseAdmin.auth.admin.deleteUser(newUser.id);
-      } catch {}
-      throw new Error(roleErr.message);
-    }
-
-    return { ok: true, user_id: newUser.id, tenant_id: tenant.id };
+    await auditAdminAction({
+      actorUserId: context.userId,
+      action: "user.created",
+      targetUserId: newUser.id,
+      after: { email: newUser.email },
+    });
+    return { ok: true, user_id: newUser.id };
   });
 
 // ─── Ativar / desativar usuário ─────────────────────────────────────────────
@@ -179,6 +177,12 @@ export const adminSetUserActive = createServerFn({ method: "POST" })
       ban_duration: data.active ? "none" : "876000h", // 100 anos
     });
     if (error) throw new Error(error.message);
+    await auditAdminAction({
+      actorUserId: context.userId,
+      action: data.active ? "user.activated" : "user.deactivated",
+      targetUserId: data.user_id,
+      after: { active: data.active },
+    });
     return { ok: true };
   });
 
@@ -202,6 +206,13 @@ export const adminDeleteUser = createServerFn({ method: "POST" })
       .eq("user_id", data.user_id);
     const tenantIds = (roles ?? []).map((r) => r.tenant_id).filter(Boolean) as string[];
 
+    await auditAdminAction({
+      actorUserId: context.userId,
+      action: "user.deleted",
+      targetUserId: data.user_id,
+      before: { tenant_ids: tenantIds },
+    });
+
     // Remove roles primeiro (FK protege)
     await supabaseAdmin.from("user_roles").delete().eq("user_id", data.user_id);
 
@@ -212,6 +223,109 @@ export const adminDeleteUser = createServerFn({ method: "POST" })
     // Opcional: marcar o tenant órfão como desativado. Como pode ter dados
     // que o super admin queira inspecionar, NÃO apagamos automaticamente.
     return { ok: true, removed_tenants: tenantIds };
+  });
+
+const membershipInput = z.object({
+  user_id: dbUuid(),
+  tenant_id: dbUuid(),
+  role: z.enum(["admin", "gestor", "member"]),
+});
+
+const userAccessInput = z.object({ user_id: dbUuid() });
+
+export const adminGetUserAccesses = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => userAccessInput.parse(data))
+  .handler(async ({ data, context }) => {
+    await assertSuperAdmin(context.userId);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const [{ data: memberships, error: membershipErr }, { data: tenants, error: tenantErr }] =
+      await Promise.all([
+        supabaseAdmin
+          .from("user_roles")
+          .select("id,tenant_id,role,created_at")
+          .eq("user_id", data.user_id)
+          .not("tenant_id", "is", null),
+        supabaseAdmin.from("tenants").select("id,nome,slug").order("nome"),
+      ]);
+    if (membershipErr) throw new Error(membershipErr.message);
+    if (tenantErr) throw new Error(tenantErr.message);
+    const tenantById = new Map((tenants ?? []).map((tenant) => [tenant.id, tenant]));
+    return {
+      tenants: tenants ?? [],
+      memberships: (memberships ?? []).map((membership) => ({
+        ...membership,
+        tenant: tenantById.get(membership.tenant_id),
+      })),
+    };
+  });
+
+export const adminAssignUserToTenant = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => membershipInput.parse(data))
+  .handler(async ({ data, context }) => {
+    await assertSuperAdmin(context.userId);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: before, error: beforeErr } = await supabaseAdmin
+      .from("user_roles")
+      .select("id,user_id,tenant_id,role")
+      .eq("user_id", data.user_id)
+      .eq("tenant_id", data.tenant_id)
+      .maybeSingle();
+    if (beforeErr) throw new Error(beforeErr.message);
+    if (before?.role === "admin" && data.role !== "admin") {
+      throw new Error("Transfira a administração para outro usuário antes de rebaixar o admin atual");
+    }
+    if (data.role === "admin" && before?.role !== "admin") {
+      const { data: currentAdmin, error: adminErr } = await supabaseAdmin
+        .from("user_roles")
+        .select("id,user_id")
+        .eq("tenant_id", data.tenant_id)
+        .eq("role", "admin")
+        .maybeSingle();
+      if (adminErr) throw new Error(adminErr.message);
+      if (currentAdmin) {
+        throw new Error("Este tenant já possui um admin. Use a transferência de administração.");
+      }
+    }
+
+    const request = before
+      ? supabaseAdmin.from("user_roles").update({ role: data.role }).eq("id", before.id)
+      : supabaseAdmin.from("user_roles").insert({ user_id: data.user_id, tenant_id: data.tenant_id, role: data.role });
+    const { error } = await request;
+    if (error) throw new Error(error.message);
+    await auditAdminAction({
+      actorUserId: context.userId,
+      action: before ? "user_membership.updated" : "user_membership.created",
+      targetUserId: data.user_id,
+      tenantId: data.tenant_id,
+      before,
+      after: data,
+    });
+    return { ok: true };
+  });
+
+const removeMembershipInput = z.object({ user_id: dbUuid(), tenant_id: dbUuid() });
+
+export const adminRemoveUserFromTenant = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => removeMembershipInput.parse(data))
+  .handler(async ({ data, context }) => {
+    await assertSuperAdmin(context.userId);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: before, error: beforeErr } = await supabaseAdmin
+      .from("user_roles")
+      .select("id,user_id,tenant_id,role")
+      .eq("user_id", data.user_id)
+      .eq("tenant_id", data.tenant_id)
+      .maybeSingle();
+    if (beforeErr) throw new Error(beforeErr.message);
+    if (!before) throw new Error("Vínculo não encontrado");
+    if (before.role === "admin") throw new Error("Defina outro admin antes de remover este vínculo");
+    const { error } = await supabaseAdmin.from("user_roles").delete().eq("id", before.id);
+    if (error) throw new Error(error.message);
+    await auditAdminAction({ actorUserId: context.userId, action: "user_membership.removed", targetUserId: data.user_id, tenantId: data.tenant_id, before });
+    return { ok: true };
   });
 
 // ─── Gerar link de "Entrar como" ────────────────────────────────────────────

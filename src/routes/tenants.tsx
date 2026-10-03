@@ -85,7 +85,7 @@ type TenantRow = {
 type TenantUser = {
   id: string;
   user_id: string;
-  role: "user" | "admin" | "owner" | "member";
+  role: "admin" | "gestor" | "member";
   created_at: string;
   email: string | null;
   last_sign_in_at: string | null;
@@ -152,15 +152,15 @@ type TenantDetail = {
 
 type ConsoleData = {
   isSuperAdmin: boolean;
+  canManage?: boolean;
   tenants: TenantRow[];
   selectedTenantId: string | null;
   detail: TenantDetail | null;
 };
 
 const ROLE_LABEL: Record<TenantUser["role"], string> = {
-  user: "admin principal",
-  owner: "owner",
   admin: "admin",
+  gestor: "gestor",
   member: "membro",
 };
 
@@ -368,7 +368,7 @@ function TenantWorkspace({
           <OverviewTab detail={detail} isSuperAdmin={isSuperAdmin} />
         </TabsContent>
         <TabsContent value="users">
-          <UsersTab detail={detail} />
+          <UsersTab detail={detail} isSuperAdmin={isSuperAdmin} canManage={!!consoleData?.canManage} />
         </TabsContent>
         <TabsContent value="credits">
           <CreditsTab detail={detail} isSuperAdmin={isSuperAdmin} />
@@ -502,7 +502,7 @@ function HealthLine({ label, ok }: { label: string; ok: boolean }) {
   );
 }
 
-function UsersTab({ detail }: { detail: TenantDetail }) {
+function UsersTab({ detail, isSuperAdmin, canManage }: { detail: TenantDetail; isSuperAdmin: boolean; canManage: boolean }) {
   return (
     <Card>
       <CardHeader className="flex-row items-center justify-between gap-4">
@@ -515,7 +515,7 @@ function UsersTab({ detail }: { detail: TenantDetail }) {
             Adicione operadores e mantenha papéis separados da role global de superadmin.
           </p>
         </div>
-        <AddUserDialog tenantId={detail.tenant.id} />
+        {canManage && <AddUserDialog tenantId={detail.tenant.id} isSuperAdmin={isSuperAdmin} />}
       </CardHeader>
       <CardContent className="overflow-x-auto p-0">
         <Table>
@@ -536,7 +536,7 @@ function UsersTab({ detail }: { detail: TenantDetail }) {
                   <div className="font-mono text-xs text-muted-foreground">{user.user_id}</div>
                 </TableCell>
                 <TableCell>
-                  <RoleSelect tenantId={detail.tenant.id} user={user} />
+                  <RoleSelect tenantId={detail.tenant.id} user={user} isSuperAdmin={isSuperAdmin} canManage={canManage} />
                 </TableCell>
                 <TableCell>{fmtDate(user.last_sign_in_at)}</TableCell>
                 <TableCell>
@@ -547,7 +547,7 @@ function UsersTab({ detail }: { detail: TenantDetail }) {
                   )}
                 </TableCell>
                 <TableCell className="text-right">
-                  <RemoveUserButton tenantId={detail.tenant.id} user={user} />
+                  {canManage && <RemoveUserButton tenantId={detail.tenant.id} user={user} />}
                 </TableCell>
               </TableRow>
             ))}
@@ -565,7 +565,7 @@ function UsersTab({ detail }: { detail: TenantDetail }) {
   );
 }
 
-function AddUserDialog({ tenantId }: { tenantId: string }) {
+function AddUserDialog({ tenantId, isSuperAdmin }: { tenantId: string; isSuperAdmin: boolean }) {
   const qc = useQueryClient();
   const fn = useServerFn(addUserToTenant);
   const [open, setOpen] = useState(false);
@@ -621,9 +621,8 @@ function AddUserDialog({ tenantId }: { tenantId: string }) {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="member">Membro</SelectItem>
-                <SelectItem value="admin">Admin</SelectItem>
-                <SelectItem value="owner">Owner</SelectItem>
-                <SelectItem value="user">Admin principal</SelectItem>
+                {isSuperAdmin && <SelectItem value="admin">Admin</SelectItem>}
+                <SelectItem value="gestor">Gestor</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -650,7 +649,17 @@ function AddUserDialog({ tenantId }: { tenantId: string }) {
   );
 }
 
-function RoleSelect({ tenantId, user }: { tenantId: string; user: TenantUser }) {
+function RoleSelect({
+  tenantId,
+  user,
+  isSuperAdmin,
+  canManage,
+}: {
+  tenantId: string;
+  user: TenantUser;
+  isSuperAdmin: boolean;
+  canManage: boolean;
+}) {
   const qc = useQueryClient();
   const fn = useServerFn(updateTenantUserRole);
   const mut = useMutation({
@@ -664,15 +673,18 @@ function RoleSelect({ tenantId, user }: { tenantId: string; user: TenantUser }) 
   });
 
   return (
-    <Select value={user.role} onValueChange={(value) => mut.mutate(value as TenantUser["role"])}>
+    <Select
+      value={user.role}
+      disabled={!canManage || (!isSuperAdmin && user.role === "admin")}
+      onValueChange={(value) => mut.mutate(value as TenantUser["role"])}
+    >
       <SelectTrigger className="w-44">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
         <SelectItem value="member">Membro</SelectItem>
-        <SelectItem value="admin">Admin</SelectItem>
-        <SelectItem value="owner">Owner</SelectItem>
-        <SelectItem value="user">Admin principal</SelectItem>
+        {isSuperAdmin && <SelectItem value="admin">Admin</SelectItem>}
+        <SelectItem value="gestor">Gestor</SelectItem>
       </SelectContent>
     </Select>
   );
@@ -1221,6 +1233,7 @@ function CreateTenantDialog() {
   const [form, setForm] = useState({
     nome: "",
     slug: "",
+    adminEmail: "",
     status: "trial" as TenantRow["status"],
     plano: "starter" as TenantRow["plano"],
     crm_model: "CRM_PLATAFORMA" as NonNullable<TenantRow["crm_model"]>,
@@ -1231,6 +1244,7 @@ function CreateTenantDialog() {
         data: {
           nome: form.nome,
           slug: form.slug || null,
+          adminEmail: form.adminEmail,
           status: form.status,
           plano: form.plano,
           crm_model: form.crm_model,
@@ -1242,6 +1256,7 @@ function CreateTenantDialog() {
       setForm({
         nome: "",
         slug: "",
+        adminEmail: "",
         status: "trial",
         plano: "starter",
         crm_model: "CRM_PLATAFORMA",
@@ -1280,6 +1295,16 @@ function CreateTenantDialog() {
               value={form.slug}
               onChange={(event) => setForm((prev) => ({ ...prev, slug: event.target.value }))}
             />
+          </div>
+          <div className="space-y-2">
+            <Label>Email do admin inicial</Label>
+            <Input
+              type="email"
+              value={form.adminEmail}
+              onChange={(event) => setForm((prev) => ({ ...prev, adminEmail: event.target.value }))}
+              placeholder="admin@empresa.com"
+            />
+            <p className="text-xs text-muted-foreground">O usuário precisa já existir no sistema.</p>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-2">
@@ -1327,7 +1352,7 @@ function CreateTenantDialog() {
             Cancelar
           </Button>
           <Button
-            disabled={mut.isPending || form.nome.trim().length < 2}
+            disabled={mut.isPending || form.nome.trim().length < 2 || !form.adminEmail.trim()}
             onClick={() => mut.mutate()}
           >
             Criar tenant

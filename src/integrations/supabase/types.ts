@@ -4543,7 +4543,7 @@ export type Database = {
       }
     }
     Enums: {
-      app_role: "admin" | "user" | "super_admin" | "owner" | "member"
+      app_role: "admin" | "user" | "super_admin" | "owner" | "member" | "gestor"
       call_audio_status: "pending" | "generating" | "ready" | "failed"
       call_flow_block_type: "call" | "delay"
       call_flow_progress_status:
@@ -4818,7 +4818,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      app_role: ["admin", "user", "super_admin", "owner", "member"],
+      app_role: ["admin", "user", "super_admin", "owner", "member", "gestor"],
       call_audio_status: ["pending", "generating", "ready", "failed"],
       call_flow_block_type: ["call", "delay"],
       call_flow_progress_status: [

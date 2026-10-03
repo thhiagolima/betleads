@@ -29,6 +29,7 @@ export const requireSupabaseAuth = createMiddleware({ type: 'function' }).server
     }
 
     const authHeader = request.headers.get('authorization');
+    const activeTenantId = request.headers.get('x-active-tenant');
 
     if (!authHeader) {
       throw new Error('Unauthorized: No authorization header provided');
@@ -50,6 +51,7 @@ export const requireSupabaseAuth = createMiddleware({ type: 'function' }).server
         global: {
           headers: {
             Authorization: `Bearer ${token}`,
+            ...(activeTenantId ? { 'X-Active-Tenant': activeTenantId } : {}),
           },
         },
         auth: {
@@ -74,6 +76,7 @@ export const requireSupabaseAuth = createMiddleware({ type: 'function' }).server
         supabase,
         userId: data.claims.sub,
         claims: data.claims,
+        activeTenantId,
       },
     });
   },

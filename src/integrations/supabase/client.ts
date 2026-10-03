@@ -20,6 +20,15 @@ function createSupabaseClient() {
   }
 
   return createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+    global: {
+      fetch: (input, init = {}) => {
+        const headers = new Headers(init.headers);
+        const activeTenantId =
+          typeof window === 'undefined' ? null : window.localStorage.getItem('betleads:active-tenant');
+        if (activeTenantId) headers.set('X-Active-Tenant', activeTenantId);
+        return fetch(input, { ...init, headers });
+      },
+    },
     auth: {
       storage: brokeredPreviewStorage(),
       persistSession: true,
@@ -38,4 +47,3 @@ export const supabase = new Proxy({} as ReturnType<typeof createSupabaseClient>,
     return Reflect.get(_supabase, prop, receiver);
   },
 });
-

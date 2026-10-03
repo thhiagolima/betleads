@@ -41,8 +41,11 @@ import { useIsSuperAdmin } from "@/hooks/use-is-super-admin";
 import {
   adminCreateUser,
   adminDeleteUser,
+  adminAssignUserToTenant,
   adminGenerateLoginLink,
+  adminGetUserAccesses,
   adminListUsers,
+  adminRemoveUserFromTenant,
   adminPlatformMetrics,
   adminSetUserActive,
   adminGetSmsProviderConfig,
@@ -325,6 +328,7 @@ function UsersTab() {
                     <TableCell>
                       <div className="flex justify-end gap-1">
                         <ImpersonateButton userId={u.user_id} email={u.email ?? ""} />
+                        <ManageAccessButton userId={u.user_id} email={u.email ?? ""} />
                         <ToggleActiveButton userId={u.user_id} banned={!!banned} />
                         <DeleteUserButton userId={u.user_id} email={u.email ?? ""} />
                       </div>
@@ -347,20 +351,128 @@ function UsersTab() {
   );
 }
 
+function ManageAccessButton({ userId, email }: { userId: string; email: string }) {
+  const [open, setOpen] = useState(false);
+  const [tenantId, setTenantId] = useState("");
+  const [role, setRole] = useState<"admin" | "gestor" | "member">("member");
+  const qc = useQueryClient();
+  const getAccesses = useServerFn(adminGetUserAccesses);
+  const assign = useServerFn(adminAssignUserToTenant);
+  const remove = useServerFn(adminRemoveUserFromTenant);
+  const { data, isLoading } = useQuery({
+    queryKey: ["admin-user-accesses", userId],
+    queryFn: () => getAccesses({ data: { user_id: userId } }),
+    enabled: open,
+  });
+  const assignMut = useMutation({
+    mutationFn: () => assign({ data: { user_id: userId, tenant_id: tenantId, role } }),
+    onSuccess: () => {
+      toast.success("Acesso atualizado");
+      setTenantId("");
+      qc.invalidateQueries({ queryKey: ["admin-user-accesses", userId] });
+      qc.invalidateQueries({ queryKey: ["admin"] });
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+  const removeMut = useMutation({
+    mutationFn: (id: string) => remove({ data: { user_id: userId, tenant_id: id } }),
+    onSuccess: () => {
+      toast.success("Acesso removido");
+      qc.invalidateQueries({ queryKey: ["admin-user-accesses", userId] });
+      qc.invalidateQueries({ queryKey: ["admin"] });
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+  const linked = new Set((data?.memberships ?? []).map((item) => item.tenant_id));
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button size="sm" variant="ghost" title="Gerenciar acessos">
+          <Settings2 className="h-4 w-4" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-xl">
+        <DialogHeader>
+          <DialogTitle>Acessos de {email}</DialogTitle>
+          <DialogDescription>Defina os tenants e privilégios desta conta.</DialogDescription>
+        </DialogHeader>
+        {isLoading ? (
+          <p className="text-sm text-muted-foreground">Carregando acessos...</p>
+        ) : (
+          <div className="space-y-4">
+            <div className="space-y-2 rounded-lg border border-border/60 p-3">
+              <p className="text-sm font-medium">Adicionar tenant</p>
+              <div className="grid gap-2 sm:grid-cols-[1fr_130px_auto]">
+                <Select value={tenantId} onValueChange={setTenantId}>
+                  <SelectTrigger><SelectValue placeholder="Selecione um tenant" /></SelectTrigger>
+                  <SelectContent>
+                    {(data?.tenants ?? []).filter((tenant) => !linked.has(tenant.id)).map((tenant) => (
+                      <SelectItem key={tenant.id} value={tenant.id}>{tenant.nome}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={role} onValueChange={(value) => setRole(value as typeof role)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="member">Membro</SelectItem>
+                    <SelectItem value="gestor">Gestor</SelectItem>
+                    <SelectItem value="admin">Admin</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button disabled={!tenantId || assignMut.isPending} onClick={() => assignMut.mutate()}>Adicionar</Button>
+              </div>
+            </div>
+            <div className="space-y-2">
+              {(data?.memberships ?? []).map((membership) => (
+                <div key={membership.id} className="flex items-center gap-3 rounded-lg border border-border/60 p-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium">{membership.tenant?.nome ?? membership.tenant_id}</p>
+                    <p className="text-xs text-muted-foreground">{membership.role}</p>
+                  </div>
+                  <Select
+                    value={membership.role}
+                    onValueChange={(value) => {
+                      setTenantId(membership.tenant_id);
+                      setRole(value as typeof role);
+                      assign({ data: { user_id: userId, tenant_id: membership.tenant_id, role: value as typeof role } })
+                        .then(() => qc.invalidateQueries({ queryKey: ["admin-user-accesses", userId] }))
+                        .catch((error: Error) => toast.error(error.message));
+                    }}
+                  >
+                    <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="member">Membro</SelectItem>
+                      <SelectItem value="gestor">Gestor</SelectItem>
+                      <SelectItem value="admin">Admin</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button size="sm" variant="ghost" disabled={membership.role === "admin" || removeMut.isPending} onClick={() => removeMut.mutate(membership.tenant_id)}>
+                    <Trash2 className="h-4 w-4 text-destructive" />
+                  </Button>
+                </div>
+              ))}
+              {!data?.memberships?.length && <p className="text-sm text-muted-foreground">Sem vínculos de tenant.</p>}
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function CreateUserDialog({ onCreated }: { onCreated: () => void }) {
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [displayName, setDisplayName] = useState("");
   const createFn = useServerFn(adminCreateUser);
   const mut = useMutation({
-    mutationFn: () => createFn({ data: { email, password, display_name: displayName } }),
+    mutationFn: () => createFn({ data: { email, password } }),
     onSuccess: () => {
       toast.success("Usuário criado");
       setOpen(false);
       setEmail("");
       setPassword("");
-      setDisplayName("");
       onCreated();
     },
     onError: (e: Error) => toast.error(e.message),
@@ -381,12 +493,12 @@ function CreateUserDialog({ onCreated }: { onCreated: () => void }) {
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
-          <div>
+          <div className="hidden">
             <Label htmlFor="dn">Nome da conta</Label>
             <Input
               id="dn"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
+              value=""
+              onChange={() => {}}
               placeholder="Ex: Casa do João"
             />
           </div>
@@ -409,7 +521,7 @@ function CreateUserDialog({ onCreated }: { onCreated: () => void }) {
             Cancelar
           </Button>
           <Button
-            disabled={mut.isPending || !email || password.length < 8 || !displayName}
+            disabled={mut.isPending || !email || password.length < 8}
             onClick={() => mut.mutate()}
           >
             {mut.isPending ? "Criando…" : "Criar"}
