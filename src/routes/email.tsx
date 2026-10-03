@@ -300,7 +300,7 @@ function EmailPage() {
       void navigate({ to: "/campanhas", search: { newChannel: "email" } as never, replace: true });
     }
     if (hash === "automacoes") {
-      void navigate({ to: "/automacoes", replace: true });
+      void navigate({ to: "/automacoes/email", replace: true });
     }
   }, [hash, navigate]);
 
@@ -323,7 +323,7 @@ function EmailPage() {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => void navigate({ to: "/automacoes" })}
+              onClick={() => void navigate({ to: "/automacoes/email" })}
             >
               <Workflow className="mr-1.5 h-3.5 w-3.5" /> Automações
             </Button>
@@ -2220,7 +2220,7 @@ function CampanhaDialog({
 // Automações
 // ============================================================
 
-function AutomacoesTab() {
+export function EmailAutomationFlowsPanel() {
   const [sub, setSub] = useState<"fluxos" | "historico" | "logs">("fluxos");
   return (
     <div className="space-y-4">

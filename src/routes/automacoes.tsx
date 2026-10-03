@@ -43,6 +43,7 @@ import {
   RotateCw,
   MessageSquare,
   Mail,
+  Phone,
   ArrowRight,
 } from "lucide-react";
 import {
@@ -165,20 +166,24 @@ function AutomacoesPage() {
         title="Automações"
         subtitle="Organize os fluxos de SMS, e-mail, ligação e WhatsApp com prioridade e limite diário."
         icon={<Rocket className="h-5 w-5 text-primary-foreground" />}
-        actions={<div className="flex items-center gap-2">
-          <Badge variant={paused ? "destructive" : "default"}>{paused ? "Pausado" : "Ativo"}</Badge>
-          <Button variant="outline" size="sm" onClick={() => togglePause.mutate(!paused)}>
-            {paused ? (
-              <>
-                <Play className="h-4 w-4 mr-1" /> Retomar
-              </>
-            ) : (
-              <>
-                <Pause className="h-4 w-4 mr-1" /> Pausar tudo
-              </>
-            )}
-          </Button>
-        </div>}
+        actions={
+          <div className="flex items-center gap-2">
+            <Badge variant={paused ? "destructive" : "default"}>
+              {paused ? "Pausado" : "Ativo"}
+            </Badge>
+            <Button variant="outline" size="sm" onClick={() => togglePause.mutate(!paused)}>
+              {paused ? (
+                <>
+                  <Play className="h-4 w-4 mr-1" /> Retomar
+                </>
+              ) : (
+                <>
+                  <Pause className="h-4 w-4 mr-1" /> Pausar tudo
+                </>
+              )}
+            </Button>
+          </div>
+        }
       />
 
       <Card id="fluxos" className="border-border/70 bg-card/70">
@@ -189,7 +194,7 @@ function AutomacoesPage() {
             combinem SMS, e-mail e outros canais em uma única sequência.
           </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-3 md:grid-cols-2">
+        <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <Link
             to="/automacoes/sms"
             className="group flex items-center gap-3 rounded-lg border border-border/70 p-4 transition-colors hover:border-primary/50 hover:bg-primary/5"
@@ -206,8 +211,7 @@ function AutomacoesPage() {
             <ArrowRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-1" />
           </Link>
           <Link
-            to="/email"
-            hash="automacoes"
+            to="/automacoes/email"
             className="group flex items-center gap-3 rounded-lg border border-border/70 p-4 transition-colors hover:border-primary/50 hover:bg-primary/5"
           >
             <span className="rounded-lg bg-primary/10 p-2 text-primary">
@@ -217,6 +221,36 @@ function AutomacoesPage() {
               <span className="block font-medium">Fluxos de e-mail</span>
               <span className="block text-xs text-muted-foreground">
                 Sequências, condições e mensagens automatizadas
+              </span>
+            </span>
+            <ArrowRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-1" />
+          </Link>
+          <Link
+            to="/automacoes/whatsapp"
+            className="group flex items-center gap-3 rounded-lg border border-border/70 p-4 transition-colors hover:border-primary/50 hover:bg-primary/5"
+          >
+            <span className="rounded-lg bg-primary/10 p-2 text-primary">
+              <MessageSquare className="h-5 w-5" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block font-medium">Fluxos de WhatsApp</span>
+              <span className="block text-xs text-muted-foreground">
+                Jornadas, respostas e regras de saÃ­da
+              </span>
+            </span>
+            <ArrowRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-1" />
+          </Link>
+          <Link
+            to="/automacoes/ligacoes"
+            className="group flex items-center gap-3 rounded-lg border border-border/70 p-4 transition-colors hover:border-primary/50 hover:bg-primary/5"
+          >
+            <span className="rounded-lg bg-primary/10 p-2 text-primary">
+              <Phone className="h-5 w-5" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block font-medium">Fluxos de ligaÃ§Ã£o</span>
+              <span className="block text-xs text-muted-foreground">
+                Etapas de contato, tentativas e mensagens de apoio
               </span>
             </span>
             <ArrowRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-1" />

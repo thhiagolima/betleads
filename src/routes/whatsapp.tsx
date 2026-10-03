@@ -343,7 +343,7 @@ function WhatsAppPage() {
 
           <TabsContent value="dashboard"><DashboardTab dashboard={dashboard} dataUpdatedAt={dataUpdatedAt} rtStatus={rtStatus} fluxos={fluxos} sessions={sessions} /></TabsContent>
           <TabsContent value="sessoes"><RealSessoesTab /></TabsContent>
-          <TabsContent value="fluxos"><FluxosTab /></TabsContent>
+          <TabsContent value="fluxos"><WhatsappAutomationFlowsPanel /></TabsContent>
           <TabsContent value="precall"><PrecallTab /></TabsContent>
           <TabsContent value="fila"><FilaTab /></TabsContent>
           <TabsContent value="historico"><HistoricoTab /></TabsContent>
@@ -1429,7 +1429,7 @@ const EMPTY_FLOW: FlowDraft = {
   templates: [emptyTemplate()],
 };
 
-function FluxosTab() {
+export function WhatsappAutomationFlowsPanel() {
   const qc = useQueryClient();
   const listFlowsFn = useServerFn(listFlows);
   const deleteFlowFn = useServerFn(deleteFlow);

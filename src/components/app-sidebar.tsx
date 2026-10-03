@@ -64,7 +64,7 @@ const engagementItems: NavItem[] = [
     icon: Rocket,
     subItems: [
       { title: "Visão geral", hash: "visao-geral" },
-      { title: "Fluxos", url: "/automacoes/sms" },
+      { title: "Fluxos de SMS", url: "/automacoes/sms" },
       { title: "Execuções", hash: "execucoes" },
       { title: "Histórico", hash: "historico" },
     ],
@@ -139,9 +139,9 @@ function NestedItem({
   hash: string;
   unread: number;
 }) {
-  const active = isActivePath(pathname, item.url) || Boolean(
-    item.subItems?.some((sub) => sub.url && isActivePath(pathname, sub.url)),
-  );
+  const active =
+    isActivePath(pathname, item.url) ||
+    Boolean(item.subItems?.some((sub) => sub.url && isActivePath(pathname, sub.url)));
   const [open, setOpen] = useState(active);
   useEffect(() => {
     if (active) setOpen(true);
@@ -315,8 +315,18 @@ export function AppSidebar({
           hash={hash}
           whatsappUnread={whatsappUnread}
         />
-        <NavSection label="Inteligência" items={intelligenceItems} pathname={pathname} hash={hash} />
-        <NavSection label="Configurações" items={tenantSystemItems} pathname={pathname} hash={hash} />
+        <NavSection
+          label="Inteligência"
+          items={intelligenceItems}
+          pathname={pathname}
+          hash={hash}
+        />
+        <NavSection
+          label="Configurações"
+          items={tenantSystemItems}
+          pathname={pathname}
+          hash={hash}
+        />
         {isSuperAdmin && (
           <NavSection label="Administração" items={adminItems} pathname={pathname} hash={hash} />
         )}
