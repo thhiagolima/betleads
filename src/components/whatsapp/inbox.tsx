@@ -1042,13 +1042,25 @@ function MessageBubble({ m, showSender }: { m: Msg; showSender?: boolean }) {
           <span>{fmtTime(m.message_timestamp)}</span>
           {mine &&
             (m.status === "sending" ? (
-              <Clock className="h-3 w-3 opacity-70" />
+              <>
+                <Clock className="h-3 w-3 opacity-70" aria-hidden="true" />
+                <span className="sr-only">Enviando</span>
+              </>
             ) : m.status === "READ" ? (
-              <CheckCheck className="h-3 w-3 text-sky-400" />
+              <>
+                <CheckCheck className="h-3 w-3 text-sky-400" aria-hidden="true" />
+                <span className="sr-only">Lida</span>
+              </>
             ) : m.status === "DELIVERY_ACK" ? (
-              <CheckCheck className="h-3 w-3" />
+              <>
+                <CheckCheck className="h-3 w-3" aria-hidden="true" />
+                <span className="sr-only">Entregue</span>
+              </>
             ) : (
-              <Check className="h-3 w-3" />
+              <>
+                <Check className="h-3 w-3" aria-hidden="true" />
+                <span className="sr-only">Enviada</span>
+              </>
             ))}
         </div>
       </div>
@@ -1060,10 +1072,15 @@ function MessageBody({ m }: { m: Msg }) {
   if (m.message_type === "image" && m.media_url) {
     return (
       <div className="space-y-1.5">
-        <a href={m.media_url} target="_blank" rel="noreferrer">
+        <a
+          href={m.media_url}
+          target="_blank"
+          rel="noreferrer"
+          aria-label={`Abrir imagem${m.media_filename ? `: ${m.media_filename}` : ""} em nova aba`}
+        >
           <img
             src={m.media_url}
-            alt={m.media_filename ?? ""}
+            alt={m.media_filename ? `Imagem: ${m.media_filename}` : "Imagem recebida"}
             loading="lazy"
             className="rounded-lg max-h-72 object-cover"
           />
@@ -1448,12 +1465,13 @@ function Composer({
               setPreview(null);
             }}
             className="h-7 w-7 rounded-full bg-muted/60 hover:bg-muted flex items-center justify-center"
+            aria-label="Remover anexo"
           >
-            <X className="h-3.5 w-3.5" />
+            <X className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
           <div className="h-12 w-12 rounded bg-muted/40 overflow-hidden flex items-center justify-center shrink-0">
             {preview.kind === "image" ? (
-              <img src={preview.url} className="h-full w-full object-cover" />
+              <img src={preview.url} alt="Prévia do anexo" className="h-full w-full object-cover" />
             ) : preview.kind === "video" ? (
               <video src={preview.url} className="h-full w-full object-cover" />
             ) : preview.kind === "audio" ? (
@@ -1475,7 +1493,8 @@ function Composer({
             )}
           </div>
           <Button onClick={sendPreview} size="sm">
-            <Send className="h-3.5 w-3.5" />
+            <Send className="h-3.5 w-3.5" aria-hidden="true" />
+            <span className="sr-only">Enviar anexo</span>
           </Button>
         </div>
       )}
@@ -1558,4 +1577,3 @@ function Composer({
     </>
   );
 }
-
