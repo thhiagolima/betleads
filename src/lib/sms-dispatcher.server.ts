@@ -434,19 +434,11 @@ export async function runSmsDispatcher({ limit = 30 }: { limit?: number } = {}) 
 
   // Consome budget só agora (depois de saber quantos SMS realmente vão sair).
   // Se o teto do minuto não couber tudo, refileira o excedente sem perder.
-  const dayStart = brtDayStart().toISOString();
   const allowed = [] as typeof toSend;
   for (const item of toSend) {
     const dailyLimit = Number(item.flow.daily_limit ?? 500);
     const cooldownHours = Number(item.flow.cooldown_hours ?? 24);
-    const [{ count: sentToday }, { data: latest }] = await Promise.all([
-      supabaseAdmin
-        .from("sms_send_logs")
-        .select("id", { count: "exact", head: true })
-        .eq("tenant_id", item.lead.tenant_id)
-        .eq("flow_id", item.lead.flow_id)
-        .eq("status", "sent")
-        .gte("created_at", dayStart),
+    const { data: latest } = await (
       item.lead.player_id && cooldownHours > 0
         ? supabaseAdmin
             .from("sms_send_logs")
@@ -458,19 +450,35 @@ export async function runSmsDispatcher({ limit = 30 }: { limit?: number } = {}) 
             .order("created_at", { ascending: false })
             .limit(1)
             .maybeSingle()
-        : Promise.resolve({ data: null }),
-    ]);
+        : Promise.resolve({ data: null })
+    );
     const cooldownUntil = latest?.created_at
       ? new Date(new Date(latest.created_at).getTime() + cooldownHours * 3_600_000)
       : null;
-    if ((sentToday ?? 0) >= dailyLimit || (cooldownUntil && cooldownUntil.getTime() > Date.now())) {
+    if (cooldownUntil && cooldownUntil.getTime() > Date.now()) {
       await supabaseAdmin
         .from("sms_flow_leads")
         .update({
-          next_run_at:
-            (sentToday ?? 0) >= dailyLimit
-              ? new Date(brtDayStart(new Date(Date.now() + 86_400_000)).getTime()).toISOString()
-              : cooldownUntil!.toISOString(),
+          next_run_at: cooldownUntil.toISOString(),
+          locked_at: null,
+          locked_by: null,
+        })
+        .eq("id", item.lead.id);
+      continue;
+    }
+    const { data: reserved, error: reserveError } = await supabaseAdmin.rpc(
+      "reserve_sms_flow_daily_slot",
+      {
+        _tenant: item.lead.tenant_id,
+        _flow: item.lead.flow_id,
+        _daily_limit: dailyLimit,
+      },
+    );
+    if (reserveError || !reserved) {
+      await supabaseAdmin
+        .from("sms_flow_leads")
+        .update({
+          next_run_at: new Date(brtDayStart(new Date(Date.now() + 86_400_000)).getTime()).toISOString(),
           locked_at: null,
           locked_by: null,
         })
