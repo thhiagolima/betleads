@@ -154,7 +154,9 @@ type Gatilho = TriggerType;
 
 const GATILHOS: Gatilho[] = Object.keys(TRIGGER_NAMES) as Gatilho[];
 
-type Etapa = { tipo: "sms"; mensagem: string } | { tipo: "delay"; dias: number };
+type Etapa =
+  | { tipo: "sms"; mensagem: string }
+  | { tipo: "delay"; quantidade: number; unidade: "horas" | "dias" };
 
 type Fluxo = {
   id: string;
@@ -163,6 +165,8 @@ type Fluxo = {
   gatilho: Gatilho;
   etapas: Etapa[];
   saida: string[];
+  dailyLimit: number;
+  cooldownHours: number;
   players: number;
   enviados: number;
   conversoes: number;
@@ -177,12 +181,14 @@ const FLUXOS_INICIAIS: Fluxo[] = [
     gatilho: "engajado_sem_converter",
     etapas: [
       { tipo: "sms", mensagem: "Fala {primeiro_nome}, sentimos sua falta! Bônus liberado: {link}" },
-      { tipo: "delay", dias: 1 },
+      { tipo: "delay", quantidade: 1, unidade: "dias" },
       { tipo: "sms", mensagem: "{primeiro_nome}, seu bônus expira em breve. Aproveite: {link}" },
-      { tipo: "delay", dias: 2 },
+      { tipo: "delay", quantidade: 2, unidade: "dias" },
       { tipo: "sms", mensagem: "Última chance, {primeiro_nome}! {link}" },
     ],
     saida: ["se fizer login", "se depositar", "se fizer primeiro depósito", "se voltar a jogar"],
+    dailyLimit: 500,
+    cooldownHours: 24,
     players: 0,
     enviados: 0,
     conversoes: 0,
@@ -195,10 +201,12 @@ const FLUXOS_INICIAIS: Fluxo[] = [
     gatilho: "vip_esfriando",
     etapas: [
       { tipo: "sms", mensagem: "{primeiro_nome}, seu gerente VIP quer falar contigo." },
-      { tipo: "delay", dias: 2 },
+      { tipo: "delay", quantidade: 2, unidade: "dias" },
       { tipo: "sms", mensagem: "Bônus exclusivo VIP liberado: {link}" },
     ],
     saida: ["se fizer login", "se depositar", "se fizer primeiro depósito"],
+    dailyLimit: 500,
+    cooldownHours: 24,
     players: 0,
     enviados: 0,
     conversoes: 0,
@@ -211,10 +219,12 @@ const FLUXOS_INICIAIS: Fluxo[] = [
     gatilho: "lead_quente_esfriando",
     etapas: [
       { tipo: "sms", mensagem: "Bem-vindo {primeiro_nome}! Seu bônus de boas-vindas: {link}" },
-      { tipo: "delay", dias: 1 },
+      { tipo: "delay", quantidade: 1, unidade: "dias" },
       { tipo: "sms", mensagem: "{primeiro_nome}, ative seu bônus antes que expire." },
     ],
     saida: ["se depositar", "se fizer primeiro depósito"],
+    dailyLimit: 500,
+    cooldownHours: 24,
     players: 0,
     enviados: 0,
     conversoes: 0,
@@ -3108,6 +3118,8 @@ export function SmsFlowsPanel({
           status: f.status,
           etapas: f.etapas,
           saida: f.saida,
+          dailyLimit: f.dailyLimit,
+          cooldownHours: f.cooldownHours,
         },
       }),
     onSuccess: () => {
@@ -3145,6 +3157,8 @@ export function SmsFlowsPanel({
       gatilho: seed?.trigger ?? "engajado_sem_converter",
       etapas: [{ tipo: "sms", mensagem: "Olá {primeiro_nome}, ..." }],
       saida: ["se depositar", "se fizer primeiro depósito"],
+      dailyLimit: 500,
+      cooldownHours: 24,
       players: 0,
       enviados: 0,
       conversoes: 0,
@@ -3319,6 +3333,10 @@ function EditorFluxo({
   onSave: (f: Fluxo) => void;
 }) {
   const [draft, setDraft] = useState<Fluxo>(fluxo);
+  const testSmsFn = useServerFn(sendTestSms);
+  const [testOpen, setTestOpen] = useState(false);
+  const [testPhone, setTestPhone] = useState("");
+  const [testing, setTesting] = useState(false);
 
   function update<K extends keyof Fluxo>(k: K, v: Fluxo[K]) {
     setDraft((d) => ({ ...d, [k]: v }));
@@ -3336,7 +3354,9 @@ function EditorFluxo({
       ...d,
       etapas: [
         ...d.etapas,
-        tipo === "sms" ? { tipo: "sms", mensagem: "" } : { tipo: "delay", dias: 1 },
+        tipo === "sms"
+          ? { tipo: "sms", mensagem: "" }
+          : { tipo: "delay", quantidade: 1, unidade: "horas" },
       ],
     }));
   }
@@ -3358,6 +3378,34 @@ function EditorFluxo({
     "se fizer primeiro depósito",
     "se voltar a jogar",
   ];
+  const firstSms = draft.etapas.find(
+    (step): step is Extract<Etapa, { tipo: "sms" }> =>
+      step.tipo === "sms" && !!step.mensagem.trim(),
+  );
+
+  async function sendControlledTest() {
+    if (!firstSms) return toast.error("Preencha ao menos uma mensagem SMS antes de testar.");
+    if (testPhone.replace(/\D/g, "").length < 10) {
+      return toast.error("Informe um telefone de teste válido.");
+    }
+    setTesting(true);
+    try {
+      const result = await testSmsFn({
+        data: { to: testPhone, content: firstSms.mensagem },
+      });
+      if (!result.ok) throw new Error(result.error ?? "O provedor recusou o SMS de teste.");
+      toast.success(
+        "SMS de teste enviado. Confira o histórico do canal para acompanhar a entrega.",
+      );
+      setTestOpen(false);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Não foi possível enviar o SMS de teste.",
+      );
+    } finally {
+      setTesting(false);
+    }
+  }
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -3407,6 +3455,42 @@ function EditorFluxo({
               onCheckedChange={(c) => update("status", c ? "ativo" : "inativo")}
             />
           </div>
+
+          <div className="grid grid-cols-1 gap-3 rounded-md border border-border/60 p-3 md:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label>Limite diário da régua</Label>
+              <Input
+                type="number"
+                min={1}
+                max={10000}
+                value={draft.dailyLimit}
+                onChange={(event) =>
+                  update("dailyLimit", Math.max(1, Number(event.target.value) || 1))
+                }
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Máximo de SMS desta régua por dia.
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Cooldown por jogador (horas)</Label>
+              <Input
+                type="number"
+                min={0}
+                max={720}
+                value={draft.cooldownHours}
+                onChange={(event) =>
+                  update("cooldownHours", Math.max(0, Number(event.target.value) || 0))
+                }
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Evita novo SMS desta mesma régua antes do prazo.
+              </p>
+            </div>
+          </div>
+          <p className="rounded-md border border-border/60 bg-muted/20 p-3 text-xs text-muted-foreground">
+            A janela de envio é global do canal SMS e é aplicada pelo dispatcher a todas as réguas.
+          </p>
 
           <div>
             <div className="flex items-center justify-between mb-2">
@@ -3485,16 +3569,28 @@ function EditorFluxo({
                       <Input
                         type="number"
                         min={1}
-                        value={e.dias}
+                        value={e.quantidade}
                         onChange={(ev) =>
                           updateEtapa(i, {
                             tipo: "delay",
-                            dias: Math.max(1, Number(ev.target.value) || 1),
+                            quantidade: Math.max(1, Number(ev.target.value) || 1),
+                            unidade: e.unidade,
                           })
                         }
                         className="w-20 h-8"
                       />
-                      <span className="text-xs text-muted-foreground">dia(s)</span>
+                      <Select
+                        value={e.unidade}
+                        onValueChange={(unidade: "horas" | "dias") =>
+                          updateEtapa(i, { tipo: "delay", quantidade: e.quantidade, unidade })
+                        }
+                      >
+                        <SelectTrigger className="h-8 w-28 text-xs"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="horas">hora(s)</SelectItem>
+                          <SelectItem value="dias">dia(s)</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
                   )}
                 </div>
@@ -3531,11 +3627,50 @@ function EditorFluxo({
         </div>
 
         <DialogFooter>
+          <Button variant="outline" onClick={() => setTestOpen(true)} disabled={!firstSms}>
+            Testar SMS
+          </Button>
           <Button variant="outline" onClick={onClose}>
             Cancelar
           </Button>
           <Button onClick={() => onSave(draft)}>Salvar fluxo</Button>
         </DialogFooter>
+
+        <Dialog open={testOpen} onOpenChange={(open) => !testing && setTestOpen(open)}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Teste controlado de SMS</DialogTitle>
+              <DialogDescription>
+                Envia apenas a primeira mensagem preenchida desta régua para o telefone informado. O
+                teste não ativa a régua nem inclui jogadores na fila.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label>Telefone autorizado para teste</Label>
+                <Input
+                  inputMode="tel"
+                  placeholder="5511999999999"
+                  value={testPhone}
+                  onChange={(event) => setTestPhone(event.target.value)}
+                  disabled={testing}
+                />
+              </div>
+              <div className="rounded-md border border-border/60 bg-muted/30 p-3 text-sm">
+                <p className="mb-1 text-xs font-medium text-muted-foreground">Prévia</p>
+                {firstSms ? previewMensagem(firstSms.mensagem) : "—"}
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setTestOpen(false)} disabled={testing}>
+                Cancelar
+              </Button>
+              <Button onClick={sendControlledTest} disabled={testing || !firstSms}>
+                {testing ? "Enviando…" : "Enviar teste"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </DialogContent>
     </Dialog>
   );

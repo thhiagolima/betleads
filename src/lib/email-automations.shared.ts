@@ -4,11 +4,8 @@
 import { TRIGGER_NAMES, type TriggerType } from "./triggers";
 
 export type EmailFlowBlockType =
-  | "start"
   | "send_email"
   | "delay"
-  | "condition"
-  | "tag"
   | "remove"
   | "end";
 

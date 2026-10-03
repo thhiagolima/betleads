@@ -1,5 +1,5 @@
 import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
@@ -111,6 +111,8 @@ type PaidLevelSlug = Exclude<LevelSlug, "novice">;
 type PlayerSituation = "active" | "cooling" | "sleeping" | "no_deposit";
 type AdvancedFilterDraft = {
   filter: string;
+  behaviorFilters: string[];
+  behaviorOperator: "and" | "or";
   situation: PlayerSituation | null;
   level: PaidLevelSlug | null;
   search: string;
@@ -205,6 +207,8 @@ const advancedFilterGroups = [
     ],
   },
 ] as const;
+const BEHAVIOR_FILTER_IDS = new Set(filters.filter((item) => item.id !== "todos").map((item) => item.id));
+const BEHAVIOR_FILTER_ITEMS = filters.filter((item) => item.id !== "todos");
 
 // Chips que filtram por gatilho de alerta em tempo real
 // (mesma lógica da página /alertas — quando a gente manda mensagem o lead some daqui)
@@ -363,6 +367,8 @@ function PlayersPage() {
   const isDetailRoute =
     pathname.replace(/\/+$/, "") !== "/players" && pathname.startsWith("/players/");
   const [filter, setFilter] = useState("todos");
+  const [behaviorFilters, setBehaviorFilters] = useState<string[]>([]);
+  const [behaviorOperator, setBehaviorOperator] = useState<"and" | "or">("and");
   const [selectedSituation, setSelectedSituation] = useState<PlayerSituation | null>(null);
   const [selectedLevel, setSelectedLevel] = useState<PaidLevelSlug | null>(null);
   const [search, setSearch] = useState("");
@@ -434,12 +440,15 @@ function PlayersPage() {
   const hasDateRange = !!(dateFromIso && dateToIso);
   const advancedFilterCount =
     Number(filter !== "todos") +
+    behaviorFilters.length +
     Number(Boolean(selectedSituation)) +
     Number(Boolean(selectedLevel)) +
     Number(Boolean(search.trim())) +
     Number(hasDateRange);
   const sheetDraft: AdvancedFilterDraft = advancedDraft ?? {
     filter,
+    behaviorFilters,
+    behaviorOperator,
     situation: selectedSituation,
     level: selectedLevel,
     search,
@@ -447,8 +456,23 @@ function PlayersPage() {
     dateRange,
   };
   const draftHasDateRange = Boolean(sheetDraft.dateRange?.from);
+  const draftDateFromIso = sheetDraft.dateRange?.from
+    ? parseBrtDayStart(
+        `${sheetDraft.dateRange.from.getFullYear()}-${String(sheetDraft.dateRange.from.getMonth() + 1).padStart(2, "0")}-${String(sheetDraft.dateRange.from.getDate()).padStart(2, "0")}`,
+      ).toISOString()
+    : null;
+  const draftDateToIso =
+    (sheetDraft.dateRange?.to ?? sheetDraft.dateRange?.from)
+      ? parseBrtDayEnd(
+          (() => {
+            const d = sheetDraft.dateRange!.to ?? sheetDraft.dateRange!.from!;
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+          })(),
+        ).toISOString()
+      : null;
   const draftFilterCount =
     Number(sheetDraft.filter !== "todos") +
+    sheetDraft.behaviorFilters.length +
     Number(Boolean(sheetDraft.situation)) +
     Number(Boolean(sheetDraft.level)) +
     Number(Boolean(sheetDraft.search.trim())) +
@@ -660,6 +684,98 @@ function PlayersPage() {
   // Quando há ordenação por saldo/lucro precisamos do dataset completo (o
   // server faz no caminho computeClient). Ainda assim só baixa as cols slim.
   const fetchPlayersPage = useServerFn(getPlayersPage);
+  const canEstimateDraft =
+    sheetDraft.filter === "todos" || BEHAVIOR_FILTER_IDS.has(sheetDraft.filter);
+  const { data: draftEstimate, isFetching: isFetchingDraftEstimate } = useQuery({
+    queryKey: [
+      "players-draft-estimate",
+      advancedFiltersOpen,
+      sheetDraft.filter,
+      sheetDraft.behaviorFilters,
+      sheetDraft.behaviorOperator,
+      sheetDraft.situation,
+      sheetDraft.level,
+      sheetDraft.search,
+      sheetDraft.dateField,
+      draftDateFromIso,
+      draftDateToIso,
+    ],
+    queryFn: () =>
+      fetchPlayersPage({
+        data: {
+          page: 1,
+          pageSize: 1,
+          filter: sheetDraft.filter,
+          behaviorFilters: sheetDraft.behaviorFilters,
+          behaviorOperator: sheetDraft.behaviorOperator,
+          gamificationStatus: sheetDraft.situation,
+          gamificationLevel: sheetDraft.level,
+          search: sheetDraft.search,
+          sortKey: "ultimo_login",
+          sortDir: "desc",
+          idsIn: null,
+          dateField: draftDateFromIso && draftDateToIso ? sheetDraft.dateField : null,
+          dateFrom: draftDateFromIso,
+          dateTo: draftDateToIso,
+        },
+      }),
+    enabled: advancedFiltersOpen && canEstimateDraft,
+    staleTime: 5_000,
+  });
+  const contextualFacetQueries = useQueries({
+    queries: BEHAVIOR_FILTER_ITEMS.map((item) => {
+      const alreadySelected = sheetDraft.behaviorFilters.includes(item.id);
+      const candidateFilters = alreadySelected
+        ? sheetDraft.behaviorFilters
+        : [...sheetDraft.behaviorFilters, item.id];
+      return {
+        queryKey: [
+          "players-contextual-behavior-facet",
+          advancedFiltersOpen,
+          item.id,
+          candidateFilters,
+          sheetDraft.behaviorOperator,
+          sheetDraft.situation,
+          sheetDraft.level,
+          sheetDraft.search,
+          sheetDraft.dateField,
+          draftDateFromIso,
+          draftDateToIso,
+        ],
+        queryFn: () =>
+          fetchPlayersPage({
+            data: {
+              page: 1,
+              pageSize: 1,
+              filter: "todos",
+              behaviorFilters: candidateFilters,
+              behaviorOperator: sheetDraft.behaviorOperator,
+              gamificationStatus: sheetDraft.situation,
+              gamificationLevel: sheetDraft.level,
+              search: sheetDraft.search,
+              sortKey: "ultimo_login",
+              sortDir: "desc",
+              idsIn: null,
+              dateField: draftDateFromIso && draftDateToIso ? sheetDraft.dateField : null,
+              dateFrom: draftDateFromIso,
+              dateTo: draftDateToIso,
+            },
+          }),
+        enabled: advancedFiltersOpen,
+        staleTime: 5_000,
+      };
+    }),
+  });
+  const contextualBehaviorFacetCounts = useMemo(
+    () =>
+      new Map(
+        BEHAVIOR_FILTER_ITEMS.map((item, index) => [
+          item.id,
+          contextualFacetQueries[index]?.data?.total,
+        ]),
+      ),
+    [contextualFacetQueries],
+  );
   const fetchPlayerFilterFacets = useServerFn(getPlayerFilterFacets);
   const { data: playerFilterFacets, isFetching: isFetchingPlayerFilterFacets } = useQuery({
     queryKey: ["players-filter-facets", sheetDraft.situation, sheetDraft.level],
@@ -684,6 +800,8 @@ function PlayersPage() {
       page,
       pageSize,
       filter,
+      behaviorFilters,
+      behaviorOperator,
       selectedSituation,
       selectedLevel,
       search,
@@ -702,6 +820,8 @@ function PlayersPage() {
           page,
           pageSize,
           filter,
+          behaviorFilters,
+          behaviorOperator,
           gamificationStatus: selectedSituation,
           gamificationLevel: selectedLevel,
           search,
@@ -1110,6 +1230,8 @@ function PlayersPage() {
       const res = await fetchFilteredExternalIds({
         data: {
           filter,
+          behaviorFilters,
+          behaviorOperator,
           gamificationStatus: selectedSituation,
           gamificationLevel: selectedLevel,
           search,
@@ -1223,6 +1345,8 @@ function PlayersPage() {
 
   function resetGamificationFilters() {
     setFilter("todos");
+    setBehaviorFilters([]);
+    setBehaviorOperator("and");
     setSelectedSituation(null);
     setSelectedLevel(null);
   }
@@ -1240,6 +1364,8 @@ function PlayersPage() {
   function openAdvancedFilters() {
     setAdvancedDraft({
       filter,
+      behaviorFilters,
+      behaviorOperator,
       situation: selectedSituation,
       level: selectedLevel,
       search,
@@ -1254,10 +1380,29 @@ function PlayersPage() {
     setAdvancedDraft(null);
   }
 
-  function selectAdvancedFilter(nextFilter: string) {
+  function selectAdvancedBehavior(nextFilter: string) {
     setAdvancedDraft((current) => {
       if (!current) return current;
-      return { ...current, filter: current.filter === nextFilter ? "todos" : nextFilter };
+      const selected = current.behaviorFilters.includes(nextFilter);
+      return {
+        ...current,
+        filter: "todos",
+        behaviorFilters: selected
+          ? current.behaviorFilters.filter((value) => value !== nextFilter)
+          : [...current.behaviorFilters, nextFilter],
+      };
+    });
+  }
+
+  function selectAdvancedFilter(nextFilter: string) {
+    if (BEHAVIOR_FILTER_IDS.has(nextFilter)) return selectAdvancedBehavior(nextFilter);
+    setAdvancedDraft((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        filter: current.filter === nextFilter ? "todos" : nextFilter,
+        behaviorFilters: [],
+      };
     });
   }
 
@@ -1290,6 +1435,8 @@ function PlayersPage() {
         ? {
             ...current,
             filter: "todos",
+            behaviorFilters: [],
+            behaviorOperator: "and",
             situation: null,
             level: null,
             search: "",
@@ -1302,6 +1449,8 @@ function PlayersPage() {
   function applyAdvancedFilters() {
     if (!advancedDraft) return closeAdvancedFilters();
     setFilter(advancedDraft.filter);
+    setBehaviorFilters(advancedDraft.behaviorFilters);
+    setBehaviorOperator(advancedDraft.behaviorOperator);
     setSelectedSituation(advancedDraft.situation);
     setSelectedLevel(advancedDraft.level);
     setSearch(advancedDraft.search);
@@ -1372,6 +1521,8 @@ function PlayersPage() {
       const res = await fetchSmsAudience({
         data: {
           filter,
+          behaviorFilters,
+          behaviorOperator,
           gamificationStatus: selectedSituation,
           gamificationLevel: selectedLevel,
           search,
@@ -1605,6 +1756,13 @@ function PlayersPage() {
                         : `${draftFilterCount} ativo${draftFilterCount === 1 ? "" : "s"}`}
                     </span>
                   </div>
+                  <p className="text-xs text-muted-foreground">
+                    {canEstimateDraft
+                      ? isFetchingDraftEstimate
+                        ? "Calculando estimativa…"
+                        : `${(draftEstimate?.total ?? 0).toLocaleString("pt-BR")} jogadores serão exibidos.`
+                      : "A estimativa para alertas é calculada após aplicar o alerta."}
+                  </p>
                   <div className="flex flex-wrap gap-1.5">
                     {sheetDraft.filter !== "todos" && (
                       <Badge variant="secondary" className="gap-1">
@@ -1619,6 +1777,19 @@ function PlayersPage() {
                         </button>
                       </Badge>
                     )}
+                    {sheetDraft.behaviorFilters.map((behaviorFilter) => (
+                      <Badge key={behaviorFilter} variant="secondary" className="gap-1">
+                        {filterDisplayLabel(behaviorFilter)}
+                        <button
+                          type="button"
+                          aria-label="Remover filtro de comportamento"
+                          onClick={() => selectAdvancedBehavior(behaviorFilter)}
+                          className="rounded-sm hover:text-foreground"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </Badge>
+                    ))}
                     {sheetDraft.situation && (
                       <Badge variant="secondary" className="gap-1">
                         {situationBadgeMeta[sheetDraft.situation].label}
@@ -1825,8 +1996,34 @@ function PlayersPage() {
                   <div>
                     <h3 className="text-sm font-semibold">Filtros de comportamento</h3>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      Cada atalho representa uma condição diferente e verificável da base.
+                      Selecione mais de um atalho e escolha como as condições serão combinadas.
                     </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-medium text-foreground">Combinar por</span>
+                    <div className="flex rounded-md border border-border/60 p-0.5">
+                      {([
+                        ["and", "E (AND)"],
+                        ["or", "OU (OR)"],
+                      ] as const).map(([operator, label]) => (
+                        <button
+                          key={operator}
+                          type="button"
+                          onClick={() =>
+                            setAdvancedDraft((current) =>
+                              current ? { ...current, behaviorOperator: operator } : current,
+                            )
+                          }
+                          className={`rounded px-2.5 py-1 text-xs transition-colors ${
+                            sheetDraft.behaviorOperator === operator
+                              ? "bg-primary text-primary-foreground"
+                              : "text-muted-foreground hover:text-foreground"
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                   <div className="space-y-4">
                     {advancedFilterGroups.map((group) => (
@@ -1846,16 +2043,18 @@ function PlayersPage() {
                                 key={item.id}
                                 onClick={() => selectAdvancedFilter(item.id)}
                                 className={`rounded-full border px-3 py-1 text-xs transition-colors ${
-                                  sheetDraft.filter === item.id
+                                  sheetDraft.behaviorFilters.includes(item.id)
                                     ? "border-primary/60 bg-primary/15 text-primary"
                                     : "border-border/60 text-muted-foreground hover:border-border hover:text-foreground"
                                 }`}
                               >
                                 {item.label}
                                 <span className="ml-1 opacity-70">
-                                  {isFetchingPlayerFilterFacets
+                                  {contextualFacetQueries[
+                                    BEHAVIOR_FILTER_ITEMS.findIndex((candidate) => candidate.id === item.id)
+                                  ]?.isFetching
                                     ? "…"
-                                    : (playerFilterFacets?.[item.id] ?? 0).toLocaleString("pt-BR")}
+                                    : (contextualBehaviorFacetCounts.get(item.id) ?? 0).toLocaleString("pt-BR")}
                                 </span>
                               </button>
                             );

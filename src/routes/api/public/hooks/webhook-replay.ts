@@ -19,7 +19,10 @@ export const Route = createFileRoute("/api/public/hooks/webhook-replay")({
 
         const body = await request.json().catch(() => ({}) as Record<string, unknown>);
         const tenantId = typeof body.tenant_id === "string" ? body.tenant_id : undefined;
-        const status = typeof body.status === "string" ? body.status : "recebido";
+        // Por padrão, retoma tanto eventos que ficaram apenas persistidos quanto
+        // os que falharam durante o processamento. Antes, a recuperação buscava
+        // somente `recebido` e deixava falhas financeiras fora da fila padrão.
+        const status = typeof body.status === "string" ? body.status : "pendente";
         const evento = typeof body.evento === "string" ? body.evento : undefined;
         const limitRaw = Number(body.limit ?? 100);
         const limit = Math.min(Math.max(Number.isFinite(limitRaw) ? limitRaw : 100, 1), 500);
@@ -27,9 +30,13 @@ export const Route = createFileRoute("/api/public/hooks/webhook-replay")({
         let query = sb
           .from("webhook_logs")
           .select("id, tenant_id, evento, payload")
-          .eq("status", status)
           .order("created_at", { ascending: true })
           .limit(limit);
+
+        query =
+          status === "pendente"
+            ? query.in("status", ["recebido", "erro"])
+            : query.eq("status", status);
 
         if (tenantId) query = query.eq("tenant_id", tenantId);
         if (evento) query = query.eq("evento", evento);

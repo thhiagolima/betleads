@@ -28,15 +28,8 @@ const TriggerSchema = z.enum([
   "sem_login_60_mais",
 ]);
 
-const BlockTypeSchema = z.enum([
-  "start",
-  "send_email",
-  "delay",
-  "condition",
-  "tag",
-  "remove",
-  "end",
-]);
+// O editor aceita apenas blocos que o dispatcher executa de fato.
+const BlockTypeSchema = z.enum(["send_email", "delay", "remove", "end"]);
 
 const BlockInputSchema = z.object({
   block_type: BlockTypeSchema,

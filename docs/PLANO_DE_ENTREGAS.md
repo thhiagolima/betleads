@@ -14,7 +14,8 @@ Legenda: `[x]` concluído · `[ ]` pendente · `[~]` em andamento ou parcialment
   - Norte: toda gravação deve usar a chave única do provedor/evento; erros devem entrar em uma fila reprocessável, sem derrubar o endpoint.
   - Validar: consultar logs de webhook, simular timeout/duplicidade e reprocessar uma falha sem criar dados duplicados.
 
-- [ ] **Reconciliação de dados da casa**
+- [~] **Reconciliação de dados da casa**
+  - Adiada por decisão do produto em 03/10/2026; nenhuma escrita de sincronização foi aplicada.
   - Norte: importar e sincronizar a exportação da pasta `base` com Players, depósitos e saques; gerar relatório de registros ausentes, divergentes e duplicados antes de qualquer escrita definitiva.
   - Validar: comparar totais, usuários únicos, depósitos e saques por período contra a origem.
 
@@ -28,15 +29,18 @@ Legenda: `[x]` concluído · `[ ]` pendente · `[~]` em andamento ou parcialment
   - Norte: a central lista réguas de SMS e e-mail; o modal cria um rascunho com nome, canal e gatilho e abre o editor correspondente desligado.
   - Validar: em `/automacoes`, criar rascunho SMS/e-mail, confirmar o preenchimento do editor e verificar que cancelar não cria uma régua.
 
-- [ ] **Editor de régua SMS**
+- [~] **Editor de régua SMS**
+  - 03/10/2026: validação, teste controlado, limite diário e cooldown por régua implementados; aguarda migration aplicada e cenário com destinatário autorizado.
   - Norte: simplificar o editor para gatilho, público, mensagens, esperas, saída, janela de envio, limite diário, cooldown, prévia e teste controlado.
   - Validar: criar uma régua inativa, salvar, testar em um destinatário autorizado e conferir a fila e o log.
 
-- [ ] **Editor de régua de e-mail**
+- [~] **Editor de régua de e-mail**
+  - 03/10/2026: construtor limitado a blocos executáveis (enviar, espera e encerramento); preserva template, remetente, prévia e teste. Aguarda validação com SMTP autorizado.
   - Norte: deixar visíveis apenas blocos que o motor realmente executa; suportar template, remetente, espera, saída, teste e prévia.
   - Validar: criar e-mail de teste, conferir SMTP/remetente, envio, abertura/clique quando disponível e log da régua.
 
-- [ ] **Elegibilidade única para SMS e e-mail**
+- [~] **Elegibilidade única para SMS e e-mail**
+  - 03/10/2026: entrada do orquestrador passou a centralizar contato inválido e opt-out de e-mail; lista de opt-out de SMS e motivo `sms_opt_out` foram preparados em migration.
   - Norte: centralizar opt-out, contato inválido, consentimento, cooldown, limite diário, saída por conversão e motivo de bloqueio.
   - Validar: testar cada bloqueio e garantir que SMS e e-mail exibam o mesmo motivo de não elegibilidade.
 

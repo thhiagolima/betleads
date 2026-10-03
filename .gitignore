@@ -13,6 +13,7 @@ lerna-debug.log*
 
 .lovable/
 mem/
+base/
 docs/*
 !docs/docker-deployment.md
 supabase/.temp/

@@ -320,6 +320,15 @@ function WhatsAppPage() {
             <DashboardDateRangePicker range={range} onChange={setRange} />
           </div>}
         />
+        <div className="flex items-start gap-3 rounded-lg border border-amber-500/40 bg-amber-500/5 px-4 py-3 text-sm text-amber-200">
+          <Pause className="mt-0.5 h-4 w-4 shrink-0" />
+          <div>
+            <p className="font-medium">Automações de WhatsApp em validação</p>
+            <p className="mt-1 text-xs opacity-80">
+              Não há cron de automação ativo para este canal. Sessões, inbox e ações manuais continuam disponíveis; fluxos só devem ser ativados após validação do provedor e da fila.
+            </p>
+          </div>
+        </div>
 
         <Tabs
           value={currentTab}

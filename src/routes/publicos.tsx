@@ -293,9 +293,16 @@ function PublicosPage() {
               </div>
               <p className="relative mt-2 text-xs text-muted-foreground">{describeSmsAudience(criteria)}</p>
               {!calculating && preview.data && (
-                <p className="relative mt-1 text-xs text-muted-foreground">
-                  {preview.data.recipientTotal.toLocaleString("pt-BR")} com telefone válido para receber SMS
-                </p>
+                <div className="relative mt-1 space-y-1 text-xs text-muted-foreground">
+                  <p>
+                    {preview.data.recipientTotal.toLocaleString("pt-BR")} com telefone válido para receber SMS
+                  </p>
+                  {preview.data.total > preview.data.recipientTotal && (
+                    <p>
+                      {(preview.data.total - preview.data.recipientTotal).toLocaleString("pt-BR")} ficam de fora do envio por não terem telefone válido.
+                    </p>
+                  )}
+                </div>
               )}
               {preview.isError && !calculating && (
                 <p className="relative mt-2 text-xs text-destructive">

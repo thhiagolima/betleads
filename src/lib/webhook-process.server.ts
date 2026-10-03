@@ -19,6 +19,7 @@ export async function processWebhookEvent(
   let logId = options.existingLogId;
   let receiptClaimed = false;
   let receiptEventId: string | null = null;
+  let financialAttemptId: string | null = null;
   if (!logId) {
     const { data: logRow, error: logError } = await sb
       .from("webhook_logs")
@@ -45,6 +46,21 @@ export async function processWebhookEvent(
         .eq("id", logId);
     }
 
+    if (financialAttemptId) {
+      const completed = status === "processado" || status === "sem_player";
+      await (sb as any)
+        .from("financial_webhook_attempts")
+        .update({
+          status: completed ? "completed" : "failed",
+          completed_at: completed ? new Date().toISOString() : null,
+          error_message: completed
+            ? null
+            : String(extra?.error ?? extra?.step ?? status).slice(0, 1000),
+        })
+        .eq("id", financialAttemptId)
+        .eq("tenant_id", tenantId);
+    }
+
     if (!receiptClaimed || !receiptEventId) return;
     if (status === "processado" || status === "sem_player") {
       await sb
@@ -63,6 +79,7 @@ export async function processWebhookEvent(
         .eq("tenant_id", tenantId)
         .eq("provider_event_id", receiptEventId);
     }
+
   };
 
   try {
@@ -297,6 +314,41 @@ export async function processWebhookEvent(
             { status: 200 },
           );
         }
+
+        const normalizedEvent = {
+          kind: financialEvent.kind,
+          status: financialEvent.status,
+          tenant_id: tenantId,
+          player_id: playerId,
+          external_id: transactionId,
+          provider_event_id: providerEventId,
+          provider_status: providerStatus,
+          amount: valor,
+          method: metodo,
+          event_at: eventIso,
+        };
+        const { data: attempt, error: attemptError } = await (sb as any)
+          .from("financial_webhook_attempts")
+          .insert({
+            tenant_id: tenantId,
+            webhook_log_id: logId ?? null,
+            provider_event_id: providerEventId,
+            event_name: evento,
+            parser_version: "2026-10-03",
+            raw_payload: payload,
+            normalized_event: normalizedEvent,
+          })
+          .select("id")
+          .single();
+        if (attemptError) {
+          await markLog("erro", {
+            step: "record_financial_webhook_attempt",
+            error: attemptError.message,
+          });
+          return Response.json({ ok: false, evento, error: attemptError.message }, { status: 503 });
+        }
+        financialAttemptId = attempt?.id ?? null;
+
         const { error: financialError } = await sb.rpc("record_financial_webhook_event", {
           p_tenant_id: tenantId,
           p_player_id: playerId,

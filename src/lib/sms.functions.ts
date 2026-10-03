@@ -17,6 +17,9 @@ import type { Json } from "@/integrations/supabase/types";
 
 const DEFAULT_SHORT_BRASIL_SINGLE_URL = "http://lp01-short.painelsms.com/bot/single-sms.php";
 const DEFAULT_SHORT_BRASIL_BULK_URL = "http://lp01-short.painelsms.com/bot/bulk-sms.php";
+// Mantém a tentativa abaixo do timeout de uma server function. Sem isso, uma
+// conexão TCP bloqueada pelo provedor pode deixar o envio preso indefinidamente.
+const SHORT_BRASIL_REQUEST_TIMEOUT_MS = 8_000;
 
 function shortBrasilSingleUrl(): string {
   return process.env.SHORT_BRASIL_SMS_SINGLE_URL ?? DEFAULT_SHORT_BRASIL_SINGLE_URL;
@@ -87,6 +90,21 @@ function shortBrasilCredentials(): { usuario: string; chave: string } {
   };
 }
 
+async function shortBrasilFetch(url: string, init: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), SHORT_BRASIL_REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`Short Brasil não respondeu em ${SHORT_BRASIL_REQUEST_TIMEOUT_MS / 1000}s`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function getShortBrasilAppStatus(body: unknown): number | null {
   if (!body || typeof body !== "object") return null;
   const raw = (body as Record<string, unknown>).status;
@@ -123,7 +141,7 @@ async function callShortBrasil(
     mensagem: renderSmsVariables(content, variables),
     parceiroId: idempotencyKey,
   };
-  const maxAttempts = 6;
+  const maxAttempts = 3;
   let attempt = 0;
   while (true) {
     attempt++;
@@ -134,7 +152,7 @@ async function callShortBrasil(
         usuarioFp,
         attempt,
       });
-      res = await fetch(shortBrasilSingleUrl(), {
+      res = await shortBrasilFetch(shortBrasilSingleUrl(), {
         method: "POST",
         headers: {
           Accept: "application/json",
@@ -243,7 +261,7 @@ export async function callShortBrasilSmsBulk(args: {
   while (true) {
     attempt++;
     try {
-      res = await fetch(shortBrasilBulkUrl(), {
+      res = await shortBrasilFetch(shortBrasilBulkUrl(), {
         method: "POST",
         headers: {
           Accept: "application/json",
@@ -336,7 +354,7 @@ async function logSend(row: {
     error: row.error,
     idempotency_key: row.idempotency_key || null,
     provider_message_id: row.provider_message_id ?? null,
-    delivery_status: row.status === "error" ? "failed" : "sent",
+    delivery_status: row.status === "sent" ? "sent" : row.status === "pending" ? "pending" : "failed",
     player_id: row.player_id ?? null,
     flow_id: row.flow_id ?? null,
     trigger_name: row.trigger_name ?? null,

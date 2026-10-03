@@ -3,6 +3,7 @@
 // segurança (prioridade cross-channel, cooldown, limite diário, contato válido,
 // duplicidade, exit conditions). Modo "simulate" não escreve nada.
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { channelEligibility } from "./channel-eligibility.server";
 import { detectTriggersForPlayer, type TriggerType } from "./triggers.server";
 import type { PlayerLike } from "./player-rules";
 import { PRIORITY_ORDER, priorityRank, pickHighestPriority } from "./priorities";
@@ -41,16 +42,6 @@ function emptyTotals(): Totals {
 
 function inc(map: Record<string, number>, key: string, n = 1) {
   map[key] = (map[key] ?? 0) + n;
-}
-
-function normalizePhone(raw: string | null | undefined): string | null {
-  if (!raw) return null;
-  const d = raw.replace(/\D/g, "");
-  return d.length >= 10 ? d : null;
-}
-
-function isEmail(v: string | null | undefined): v is string {
-  return !!v && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
 }
 
 // Agregados em lote: faz 2 queries (deposits + sessions) cobrindo TODOS os
@@ -705,19 +696,14 @@ async function processPlayers(
         }
       }
 
-      const phone = normalizePhone(p.telefone);
-      const email = isEmail(p.email) ? p.email : null;
       const flowsForChosen = flows.filter((f) => f.trigger === chosen);
       let anyEnqueued = false;
 
       for (const f of flowsForChosen) {
         // Contato válido
-        if ((f.channel === "sms" || f.channel === "call" || f.channel === "whatsapp") && !phone) {
-          inc(totals.blocked_reasons, "missing_phone");
-          continue;
-        }
-        if (f.channel === "email" && !email) {
-          inc(totals.blocked_reasons, "missing_email");
+        const eligibility = await channelEligibility(f.channel, p, tenantId);
+        if (!eligibility.eligible) {
+          inc(totals.blocked_reasons, eligibility.reason ?? "ineligible");
           continue;
         }
         // Já inscrito nesse fluxo? (consulta em memória)
@@ -737,8 +723,8 @@ async function processPlayers(
           f.channel,
           f.flow_id,
           { id: p.id, nome: p.nome, telefone: p.telefone, email: p.email },
-          phone,
-          email,
+          eligibility.phone,
+          eligibility.email,
           chosen,
           tenantId,
         );

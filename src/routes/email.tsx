@@ -148,8 +148,6 @@ import {
   ArrowDown,
   ArrowUp,
   Clock,
-  GitBranch,
-  Tag as TagIcon,
   StopCircle,
   UserMinus,
   FlaskConical,
@@ -2482,7 +2480,9 @@ function FlowBuilderDialog({
           ...(r.flow.exit_conditions as Record<string, boolean>),
         });
         setBlocks(
-          r.blocks.map((b) => ({
+          r.blocks
+            .filter((b) => ["send_email", "delay", "remove", "end"].includes(b.block_type))
+            .map((b) => ({
             id: b.id,
             block_type: b.block_type as EmailFlowBlockDraft["block_type"],
             template_ids: (b.template_ids as string[]) ?? [],
@@ -2495,7 +2495,7 @@ function FlowBuilderDialog({
             condition_type: b.condition_type,
             condition_value: b.condition_value,
             label: b.label,
-          })),
+            })),
         );
       } catch (e) {
         toast.error(e instanceof Error ? e.message : "Falha ao carregar");
@@ -2926,23 +2926,6 @@ function BlockEditor({
         </div>
       )}
 
-      {(block.block_type === "condition" || block.block_type === "tag") && (
-        <div className="grid grid-cols-2 gap-2">
-          <Field label="Tipo">
-            <Input
-              value={block.condition_type ?? ""}
-              onChange={(e) => onChange({ condition_type: e.target.value || null })}
-            />
-          </Field>
-          <Field label="Valor">
-            <Input
-              value={block.condition_value ?? ""}
-              onChange={(e) => onChange({ condition_value: e.target.value || null })}
-            />
-          </Field>
-        </div>
-      )}
-
       {(block.block_type === "remove" || block.block_type === "end") && (
         <div className="text-xs text-muted-foreground">
           Encerra a participação do lead neste fluxo.
@@ -2958,10 +2941,6 @@ function blockMeta(t: EmailFlowBlockDraft["block_type"]) {
       return { title: "Enviar email", icon: <Mail className="h-3.5 w-3.5" /> };
     case "delay":
       return { title: "Delay", icon: <Clock className="h-3.5 w-3.5" /> };
-    case "condition":
-      return { title: "Condição", icon: <GitBranch className="h-3.5 w-3.5" /> };
-    case "tag":
-      return { title: "Tag", icon: <TagIcon className="h-3.5 w-3.5" /> };
     case "remove":
       return { title: "Remover do fluxo", icon: <UserMinus className="h-3.5 w-3.5" /> };
     case "end":
@@ -3000,12 +2979,6 @@ function InsertBlockButton({
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => onInsert("delay")}>
           <Clock className="h-3.5 w-3.5 mr-2" /> Delay
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => onInsert("condition")}>
-          <GitBranch className="h-3.5 w-3.5 mr-2" /> Condição
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => onInsert("tag")}>
-          <TagIcon className="h-3.5 w-3.5 mr-2" /> Tag
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={() => onInsert("remove")}>

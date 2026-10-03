@@ -1,4 +1,4 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -79,6 +79,7 @@ type Totals = {
 };
 
 function AutomacoesPage() {
+  const location = useLocation();
   const navigate = useNavigate();
   const qc = useQueryClient();
   const fnSettings = useServerFn(getAutomationSettings);
@@ -201,6 +202,10 @@ function AutomacoesPage() {
     call: !!(s as { call_paused?: boolean } | null)?.call_paused,
     whatsapp: !!(s as { whatsapp_paused?: boolean } | null)?.whatsapp_paused,
   };
+
+  if (location.pathname !== "/automacoes") {
+    return <Outlet />;
+  }
 
   return (
     <div className="p-6 space-y-6">

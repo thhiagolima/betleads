@@ -37,6 +37,9 @@ type Input = {
   page: number;
   pageSize: number;
   filter: string;
+  // Dois ou mais comportamentos são avaliados pela RPC SQL, com AND/OR.
+  behaviorFilters?: string[] | null;
+  behaviorOperator?: "and" | "or" | null;
   gamificationStatus?: string | null;
   gamificationLevel?: string | null;
   search: string;
@@ -313,6 +316,8 @@ export const getPlayersPage = createServerFn({ method: "POST" })
       page,
       pageSize,
       filter,
+      behaviorFilters: rawBehaviorFilters,
+      behaviorOperator,
       gamificationStatus,
       gamificationLevel,
       search,
@@ -327,11 +332,16 @@ export const getPlayersPage = createServerFn({ method: "POST" })
     const { data: tenantId, error: tenantError } = await (supabase as any).rpc("current_tenant_id");
     if (tenantError) throw new Error(tenantError.message);
     if (!tenantId) throw new Error("Tenant atual não encontrado.");
+    const behaviorFilters = Array.from(
+      new Set((rawBehaviorFilters ?? []).filter((value) => typeof value === "string" && value)),
+    );
+    const primaryBehaviorFilter = behaviorFilters[0] ?? filter;
+    const usesCombinedBehaviorFilters = behaviorFilters.length > 1;
     const gamificationSettings = needsGamificationSettings(
-      filter,
+      primaryBehaviorFilter,
       gamificationStatus,
       gamificationLevel,
-    )
+    ) || behaviorFilters.some((value) => ["vip", "vip_em_risco", "quase_vip"].includes(value))
       ? await readGamificationSettings(supabase, tenantId as string)
       : DEFAULT_GAMIFICATION;
 
@@ -351,7 +361,15 @@ export const getPlayersPage = createServerFn({ method: "POST" })
     // Para sort saldo/lucro precisamos calcular em JS (não há expressão arbitrária no .order()).
     const computeClient = sortKey === "saldo" || sortKey === "lucro";
 
-    let q = supabase.from("players").select(COLS, { count: "exact" }).eq("tenant_id", tenantId);
+    let q: any = usesCombinedBehaviorFilters
+      ? (supabase as any)
+          .rpc("players_by_behavior_filters", {
+            _filters: behaviorFilters,
+            _operator: behaviorOperator === "or" ? "or" : "and",
+            _vip_threshold: vipThreshold(gamificationSettings),
+          })
+          .select(COLS, { count: "exact" })
+      : supabase.from("players").select(COLS, { count: "exact" }).eq("tenant_id", tenantId);
 
     // 1) Restrição por IDs (alerta) — vem primeiro pra cortar volume.
     if (idsIn) {
@@ -369,7 +387,7 @@ export const getPlayersPage = createServerFn({ method: "POST" })
     }
 
     // 3) Filtros de janela / regra.
-    switch (filter) {
+    if (!usesCombinedBehaviorFilters) switch (primaryBehaviorFilter) {
       case "recorrentes":
         q = applyActiveWithin(q, daysAgo(4));
         break;
@@ -492,10 +510,18 @@ export const getPlayersPage = createServerFn({ method: "POST" })
     };
     // Reaproveita a mesma query, mas projeta só as colunas de cálculo.
     // (Refaz por simplicidade — PostgREST não permite trocar select depois.)
-    let slim = supabase
-      .from("players")
-      .select("id,total_depositado,total_sacado,saldo_carteira,saldo_bonus", { count: "exact" })
-      .eq("tenant_id", tenantId);
+    let slim: any = usesCombinedBehaviorFilters
+      ? (supabase as any)
+          .rpc("players_by_behavior_filters", {
+            _filters: behaviorFilters,
+            _operator: behaviorOperator === "or" ? "or" : "and",
+            _vip_threshold: vipThreshold(gamificationSettings),
+          })
+          .select("id,total_depositado,total_sacado,saldo_carteira,saldo_bonus", { count: "exact" })
+      : supabase
+          .from("players")
+          .select("id,total_depositado,total_sacado,saldo_carteira,saldo_bonus", { count: "exact" })
+          .eq("tenant_id", tenantId);
     if (idsIn) slim = slim.in("id", idsIn);
     if (s) {
       const term = `%${s}%`;
@@ -504,7 +530,7 @@ export const getPlayersPage = createServerFn({ method: "POST" })
       );
     }
     // duplica o switch acima — pequeno custo de manutenção em troca de simplicidade
-    switch (filter) {
+    if (!usesCombinedBehaviorFilters) switch (primaryBehaviorFilter) {
       case "recorrentes":
         slim = applyActiveWithin(slim, daysAgo(4));
         break;
@@ -627,6 +653,8 @@ export const getPlayersPage = createServerFn({ method: "POST" })
 // Usado pra "Copiar IDs do filtro" — não pagina e não traz colunas extras.
 type IdsInput = {
   filter: string;
+  behaviorFilters?: string[] | null;
+  behaviorOperator?: "and" | "or" | null;
   gamificationStatus?: string | null;
   gamificationLevel?: string | null;
   search: string;
@@ -643,6 +671,8 @@ export const getPlayersFilteredExternalIds = createServerFn({ method: "POST" })
     async ({ data, context }): Promise<{ ids: string[]; missing: number; total: number }> => {
       const {
         filter,
+        behaviorFilters: rawBehaviorFilters,
+        behaviorOperator,
         gamificationStatus,
         gamificationLevel,
         search,
@@ -657,20 +687,33 @@ export const getPlayersFilteredExternalIds = createServerFn({ method: "POST" })
       );
       if (tenantError) throw new Error(tenantError.message);
       if (!tenantId) throw new Error("Tenant atual não encontrado.");
+      const behaviorFilters = Array.from(
+        new Set((rawBehaviorFilters ?? []).filter((value) => typeof value === "string" && value)),
+      );
+      const primaryBehaviorFilter = behaviorFilters[0] ?? filter;
+      const usesCombinedBehaviorFilters = behaviorFilters.length > 1;
       const gamificationSettings = needsGamificationSettings(
-        filter,
+        primaryBehaviorFilter,
         gamificationStatus,
         gamificationLevel,
-      )
+      ) || behaviorFilters.some((value) => ["vip", "vip_em_risco", "quase_vip"].includes(value))
         ? await readGamificationSettings(supabase, tenantId as string)
         : DEFAULT_GAMIFICATION;
       const now = Date.now();
       const daysAgo = (n: number) => new Date(now - n * 86400000).toISOString();
 
-      let q = supabase
-        .from("players")
-        .select("player_external_id", { count: "exact" })
-        .eq("tenant_id", tenantId);
+      let q: any = usesCombinedBehaviorFilters
+        ? (supabase as any)
+            .rpc("players_by_behavior_filters", {
+              _filters: behaviorFilters,
+              _operator: behaviorOperator === "or" ? "or" : "and",
+              _vip_threshold: vipThreshold(gamificationSettings),
+            })
+            .select("player_external_id", { count: "exact" })
+        : supabase
+            .from("players")
+            .select("player_external_id", { count: "exact" })
+            .eq("tenant_id", tenantId);
       const todayStartBrt = (() => {
         const now = new Date();
         const brt = new Date(now.getTime() - 3 * 3600 * 1000);
@@ -693,7 +736,7 @@ export const getPlayersFilteredExternalIds = createServerFn({ method: "POST" })
         );
       }
 
-      switch (filter) {
+      if (!usesCombinedBehaviorFilters) switch (primaryBehaviorFilter) {
         case "recorrentes":
           q = applyActiveWithin(q, daysAgo(4));
           break;
@@ -816,6 +859,8 @@ export const getPlayersFilteredSmsAudience = createServerFn({ method: "POST" })
     }> => {
       const {
         filter,
+        behaviorFilters: rawBehaviorFilters,
+        behaviorOperator,
         gamificationStatus,
         gamificationLevel,
         search,
@@ -830,11 +875,16 @@ export const getPlayersFilteredSmsAudience = createServerFn({ method: "POST" })
       );
       if (tenantError) throw new Error(tenantError.message);
       if (!tenantId) throw new Error("Tenant atual não encontrado.");
+      const behaviorFilters = Array.from(
+        new Set((rawBehaviorFilters ?? []).filter((value) => typeof value === "string" && value)),
+      );
+      const primaryBehaviorFilter = behaviorFilters[0] ?? filter;
+      const usesCombinedBehaviorFilters = behaviorFilters.length > 1;
       const gamificationSettings = needsGamificationSettings(
-        filter,
+        primaryBehaviorFilter,
         gamificationStatus,
         gamificationLevel,
-      )
+      ) || behaviorFilters.some((value) => ["vip", "vip_em_risco", "quase_vip"].includes(value))
         ? await readGamificationSettings(supabase, tenantId as string)
         : DEFAULT_GAMIFICATION;
       const now = Date.now();
@@ -847,10 +897,18 @@ export const getPlayersFilteredSmsAudience = createServerFn({ method: "POST" })
         ).toISOString();
       })();
 
-      let q = supabase
-        .from("players")
-        .select("id,telefone", { count: "exact" })
-        .eq("tenant_id", tenantId);
+      let q: any = usesCombinedBehaviorFilters
+        ? (supabase as any)
+            .rpc("players_by_behavior_filters", {
+              _filters: behaviorFilters,
+              _operator: behaviorOperator === "or" ? "or" : "and",
+              _vip_threshold: vipThreshold(gamificationSettings),
+            })
+            .select("id,telefone", { count: "exact" })
+        : supabase
+            .from("players")
+            .select("id,telefone", { count: "exact" })
+            .eq("tenant_id", tenantId);
 
       if (idsIn) {
         if (idsIn.length === 0) return { recipients: [], missingPhone: 0, total: 0 };
@@ -865,7 +923,7 @@ export const getPlayersFilteredSmsAudience = createServerFn({ method: "POST" })
         );
       }
 
-      switch (filter) {
+      if (!usesCombinedBehaviorFilters) switch (primaryBehaviorFilter) {
         case "recorrentes":
           q = applyActiveWithin(q, daysAgo(4));
           break;

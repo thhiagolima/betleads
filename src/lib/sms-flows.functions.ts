@@ -4,20 +4,49 @@ import { createServerFn } from "@tanstack/react-start";
 import { dbUuid } from "@/lib/zod-helpers";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { TRIGGER_NAMES } from "@/lib/triggers";
 
 const EtapaSchema = z.discriminatedUnion("tipo", [
-  z.object({ tipo: z.literal("sms"), mensagem: z.string().default("") }),
-  z.object({ tipo: z.literal("delay"), dias: z.number().int().min(0).max(365) }),
+  z.object({ tipo: z.literal("sms"), mensagem: z.string().max(480).default("") }),
+  z.object({
+    tipo: z.literal("delay"),
+    quantidade: z.number().int().min(1).max(8760),
+    unidade: z.enum(["horas", "dias"]),
+  }),
 ]);
 
-const FluxoInputSchema = z.object({
-  id: dbUuid().optional(),
-  nome: z.string().min(1).max(160),
-  gatilho: z.string().max(120).nullable().optional(),
-  status: z.enum(["ativo", "inativo"]).default("inativo"),
-  etapas: z.array(EtapaSchema).default([]),
-  saida: z.array(z.string()).default([]),
-});
+const FluxoInputSchema = z
+  .object({
+    id: dbUuid().optional(),
+    nome: z.string().min(1).max(160),
+    gatilho: z
+      .enum(Object.keys(TRIGGER_NAMES) as [string, ...string[]])
+      .nullable()
+      .optional(),
+    status: z.enum(["ativo", "inativo"]).default("inativo"),
+    etapas: z.array(EtapaSchema).max(50).default([]),
+    saida: z.array(z.string()).default([]),
+    dailyLimit: z.number().int().min(1).max(10000).default(500),
+    cooldownHours: z.number().int().min(0).max(720).default(24),
+  })
+  .superRefine((flow, ctx) => {
+    if (flow.status !== "ativo") return;
+
+    if (!flow.gatilho) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["gatilho"],
+        message: "Escolha o gatilho da régua ativa.",
+      });
+    }
+    if (!flow.etapas.some((step) => step.tipo === "sms" && step.mensagem.trim())) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["etapas"],
+        message: "Uma régua ativa precisa ter ao menos um SMS preenchido.",
+      });
+    }
+  });
 
 // === Mapeamento UI <-> banco para condições de saída ===
 // UI usa rótulos em português; o motor (sms-dispatcher) lê chaves booleanas.
@@ -74,10 +103,11 @@ type FluxoOut = {
   status: "ativo" | "inativo";
   gatilho: string;
   etapas: Array<
-    | { tipo: "sms"; mensagem: string }
-    | { tipo: "delay"; dias: number }
+    { tipo: "sms"; mensagem: string } | { tipo: "delay"; quantidade: number; unidade: "horas" | "dias" }
   >;
   saida: string[];
+  dailyLimit: number;
+  cooldownHours: number;
   players: number;
   enviados: number;
   conversoes: number;
@@ -94,10 +124,16 @@ function rowToFluxo(flow: any, steps: any[]): FluxoOut {
       .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0))
       .map((s) =>
         s.step_type === "delay"
-          ? { tipo: "delay" as const, dias: s.delay_days ?? 0 }
+          ? {
+              tipo: "delay" as const,
+              quantidade: s.delay_hours != null ? Number(s.delay_hours) : Math.max(1, Number(s.delay_days ?? 1)),
+              unidade: s.delay_hours != null ? "horas" as const : "dias" as const,
+            }
           : { tipo: "sms" as const, mensagem: s.content ?? "" },
       ),
     saida: exitConditionsToSaida(flow.exit_conditions),
+    dailyLimit: Number(flow.daily_limit ?? 500),
+    cooldownHours: Number(flow.cooldown_hours ?? 24),
     players: 0,
     enviados: 0,
     conversoes: 0,
@@ -137,17 +173,28 @@ export const saveSmsFlow = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => FluxoInputSchema.parse(data))
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
-    console.log("[saveSmsFlow] start", { userId, hasId: !!data.id, nome: data.nome, etapas: data.etapas.length });
+    console.log("[saveSmsFlow] start", {
+      userId,
+      hasId: !!data.id,
+      nome: data.nome,
+      etapas: data.etapas.length,
+    });
     const payload = {
       name: data.nome,
       trigger_name: data.gatilho || null,
       is_active: data.status === "ativo",
       exit_conditions: saidaArrayToObject(data.saida),
+      daily_limit: data.dailyLimit,
+      cooldown_hours: data.cooldownHours,
     };
 
     let flowId = data.id;
     if (flowId) {
-      const { data: upd, error, count } = await supabase
+      const {
+        data: upd,
+        error,
+        count,
+      } = await supabase
         .from("sms_flows")
         .update(payload, { count: "exact" })
         .eq("id", flowId)
@@ -155,12 +202,11 @@ export const saveSmsFlow = createServerFn({ method: "POST" })
       console.log("[saveSmsFlow] update flow", { flowId, count, rows: upd?.length, error });
       if (error) throw new Error(`UPDATE sms_flows: ${error.message} (code=${error.code})`);
       if (!upd || upd.length === 0) {
-        throw new Error(`UPDATE sms_flows afetou 0 linhas (RLS bloqueou ou id inexistente: ${flowId})`);
+        throw new Error(
+          `UPDATE sms_flows afetou 0 linhas (RLS bloqueou ou id inexistente: ${flowId})`,
+        );
       }
-      const { error: dErr } = await supabase
-        .from("sms_flow_steps")
-        .delete()
-        .eq("flow_id", flowId);
+      const { error: dErr } = await supabase.from("sms_flow_steps").delete().eq("flow_id", flowId);
       if (dErr) throw new Error(`DELETE sms_flow_steps: ${dErr.message} (code=${dErr.code})`);
     } else {
       const { data: created, error } = await supabase
@@ -185,7 +231,8 @@ export const saveSmsFlow = createServerFn({ method: "POST" })
               flow_id: flowId!,
               order_index: idx,
               step_type: "delay",
-              delay_days: e.dias,
+              delay_days: e.unidade === "dias" ? e.quantidade : 0,
+              delay_hours: e.unidade === "horas" ? e.quantidade : null,
               content: null,
             }
           : {
@@ -194,13 +241,19 @@ export const saveSmsFlow = createServerFn({ method: "POST" })
               step_type: "sms",
               content: e.mensagem,
               delay_days: 0,
+              delay_hours: null,
             },
       );
       const { data: insSteps, error } = await supabase
         .from("sms_flow_steps")
-        .insert(rows)
+        .insert(rows as never)
         .select("id");
-      console.log("[saveSmsFlow] insert steps", { flowId, requested: rows.length, inserted: insSteps?.length, error });
+      console.log("[saveSmsFlow] insert steps", {
+        flowId,
+        requested: rows.length,
+        inserted: insSteps?.length,
+        error,
+      });
       if (error) throw new Error(`INSERT sms_flow_steps: ${error.message} (code=${error.code})`);
       if (!insSteps || insSteps.length !== rows.length) {
         throw new Error(
@@ -215,9 +268,7 @@ export const saveSmsFlow = createServerFn({ method: "POST" })
 
 export const toggleSmsFlow = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) =>
-    z.object({ id: dbUuid(), is_active: z.boolean() }).parse(data),
-  )
+  .inputValidator((data: unknown) => z.object({ id: dbUuid(), is_active: z.boolean() }).parse(data))
   .handler(async ({ data, context }) => {
     const { error } = await context.supabase
       .from("sms_flows")
@@ -252,6 +303,8 @@ export const duplicateSmsFlow = createServerFn({ method: "POST" })
         is_active: false,
         randomize_templates: orig.randomize_templates,
         exit_conditions: orig.exit_conditions ?? [],
+        daily_limit: orig.daily_limit ?? 500,
+        cooldown_hours: orig.cooldown_hours ?? 24,
       })
       .select("id")
       .single();
@@ -276,10 +329,7 @@ export const deleteSmsFlow = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => z.object({ id: dbUuid() }).parse(data))
   .handler(async ({ data, context }) => {
-    const { error } = await context.supabase
-      .from("sms_flows")
-      .delete()
-      .eq("id", data.id);
+    const { error } = await context.supabase.from("sms_flows").delete().eq("id", data.id);
     if (error) throw new Error(error.message);
     return { ok: true };
   });

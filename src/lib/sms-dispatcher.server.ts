@@ -4,6 +4,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { sendSmsInternal } from "./sms.functions";
 import { buildPlayerVariables, renderTemplate } from "./template-vars.server";
 import { deferIfOutsideWindow } from "./send-window.server";
+import { brtDayStart } from "./tz";
 import {
   consumeBudget,
   countQueuePending,
@@ -22,11 +23,7 @@ import {
  * tratando o HH:MM como horário fixo America/Sao_Paulo (UTC-3).
  * Usado pelo modelo CRM_EXPERT para agendar SMS em horário exato.
  */
-function brtScheduledAt(
-  enteredAtIso: string,
-  dayOffset: number,
-  hhmm: string,
-): string | null {
+function brtScheduledAt(enteredAtIso: string, dayOffset: number, hhmm: string): string | null {
   const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
   if (!m) return null;
   const hh = Number(m[1]);
@@ -73,10 +70,16 @@ type Step = {
   step_type: string;
   content: string | null;
   delay_days: number;
+  delay_hours?: number | null;
   is_active: boolean;
   scheduled_time?: string | null;
   scheduled_day_offset?: number | null;
 };
+
+function delayMs(step: Step): number {
+  if (step.delay_hours != null) return Math.max(0, Number(step.delay_hours)) * 3600000;
+  return Math.max(0, Number(step.delay_days)) * 86400000;
+}
 
 type Lead = {
   id: string;
@@ -117,9 +120,12 @@ async function shouldExit(
     p.ultimo_deposito ? new Date(p.ultimo_deposito).getTime() : 0,
   );
   if (exit.login && lastAct > since) return "login";
-  if (exit.deposit && p.ultimo_deposito && new Date(p.ultimo_deposito).getTime() > since) return "deposit";
-  if (exit.first_deposit && p.ftd_em && new Date(p.ftd_em).getTime() > since) return "first_deposit";
-  if (exit.voltou_jogar && p.ultimo_jogo && new Date(p.ultimo_jogo).getTime() > since) return "voltou_jogar";
+  if (exit.deposit && p.ultimo_deposito && new Date(p.ultimo_deposito).getTime() > since)
+    return "deposit";
+  if (exit.first_deposit && p.ftd_em && new Date(p.ftd_em).getTime() > since)
+    return "first_deposit";
+  if (exit.voltou_jogar && p.ultimo_jogo && new Date(p.ultimo_jogo).getTime() > since)
+    return "voltou_jogar";
   return null;
 }
 
@@ -161,8 +167,7 @@ export async function runSmsDispatcher({ limit = 30 }: { limit?: number } = {}) 
   // O budget é consumido depois do planning, em cima do número real de SMS
   // que vão ser disparados (evita queimar minuto inteiro com leads em delay).
   const rate = await getRateState(channel);
-  const inBackoff =
-    !!(rate?.backoff_until && new Date(rate.backoff_until).getTime() > Date.now());
+  const inBackoff = !!(rate?.backoff_until && new Date(rate.backoff_until).getTime() > Date.now());
   if (inBackoff) {
     await recordRun(startedAt, {
       channel,
@@ -178,10 +183,9 @@ export async function runSmsDispatcher({ limit = 30 }: { limit?: number } = {}) 
 
   // Claim atômico: reserva leads via FOR UPDATE SKIP LOCKED — seguro pra rodar
   // em paralelo (vários workers do cron) sem enviar SMS duplicado.
-  const { data: leads, error: claimErr } = await supabaseAdmin.rpc(
-    "claim_sms_flow_leads",
-    { p_limit: effectiveLimit },
-  );
+  const { data: leads, error: claimErr } = await supabaseAdmin.rpc("claim_sms_flow_leads", {
+    p_limit: effectiveLimit,
+  });
   if (claimErr) {
     console.error("[sms-dispatcher] claim falhou", claimErr);
     await recordRun(startedAt, {
@@ -216,7 +220,9 @@ export async function runSmsDispatcher({ limit = 30 }: { limit?: number } = {}) 
   const [{ data: flowsData }, { data: stepsData }, { data: playersData }] = await Promise.all([
     supabaseAdmin
       .from("sms_flows")
-      .select("id, is_active, exit_conditions, trigger_name, randomize_templates")
+      .select(
+        "id, is_active, exit_conditions, trigger_name, randomize_templates, daily_limit, cooldown_hours",
+      )
       .in("id", flowIds),
     supabaseAdmin
       .from("sms_flow_steps")
@@ -230,7 +236,9 @@ export async function runSmsDispatcher({ limit = 30 }: { limit?: number } = {}) 
             "id, nome, telefone, email, player_external_id, saldo_carteira, ultimo_login, ultimo_jogo, ultimo_deposito, total_depositado, total_sacado, vip, status, expert, risco, ftd_em, last_cashback_paid_at, last_cashback_amount, last_cashback_sms_template_sent",
           )
           .in("id", playerIds)
-      : Promise.resolve({ data: [] as Array<{ id: string }> } as { data: Array<Record<string, unknown>> }),
+      : Promise.resolve({ data: [] as Array<{ id: string }> } as {
+          data: Array<Record<string, unknown>>;
+        }),
   ]);
 
   const flows = new Map(
@@ -283,9 +291,12 @@ export async function runSmsDispatcher({ limit = 30 }: { limit?: number } = {}) 
         pr.ultimo_deposito ? new Date(pr.ultimo_deposito).getTime() : 0,
       );
       if (exit.login && lastActIn > since) reason = "login";
-      else if (exit.deposit && pr.ultimo_deposito && new Date(pr.ultimo_deposito).getTime() > since) reason = "deposit";
-      else if (exit.first_deposit && pr.ftd_em && new Date(pr.ftd_em).getTime() > since) reason = "first_deposit";
-      else if (exit.voltou_jogar && pr.ultimo_jogo && new Date(pr.ultimo_jogo).getTime() > since) reason = "voltou_jogar";
+      else if (exit.deposit && pr.ultimo_deposito && new Date(pr.ultimo_deposito).getTime() > since)
+        reason = "deposit";
+      else if (exit.first_deposit && pr.ftd_em && new Date(pr.ftd_em).getTime() > since)
+        reason = "first_deposit";
+      else if (exit.voltou_jogar && pr.ultimo_jogo && new Date(pr.ultimo_jogo).getTime() > since)
+        reason = "voltou_jogar";
       if (reason) {
         exitedIds.push({ id: l.id, reason });
         continue;
@@ -301,9 +312,7 @@ export async function runSmsDispatcher({ limit = 30 }: { limit?: number } = {}) 
       // Modo rotação: ignora current_step_index e escolhe a próxima
       // mensagem do conjunto baseado no contador do player. Sempre
       // marca como finished (1 SMS por enrollment).
-      const smsSteps = stepList.filter(
-        (s) => s.step_type === "sms" && s.is_active && s.content,
-      );
+      const smsSteps = stepList.filter((s) => s.step_type === "sms" && s.is_active && s.content);
       if (smsSteps.length === 0) {
         completedIds.push(l.id);
         continue;
@@ -327,7 +336,7 @@ export async function runSmsDispatcher({ limit = 30 }: { limit?: number } = {}) 
       delayUpdates.push({
         id: l.id,
         nextIdx: l.current_step_index + 1,
-        nextRun: new Date(Date.now() + (step.delay_days || 0) * 86400000).toISOString(),
+        nextRun: new Date(Date.now() + delayMs(step)).toISOString(),
       });
       continue;
     }
@@ -338,21 +347,17 @@ export async function runSmsDispatcher({ limit = 30 }: { limit?: number } = {}) 
         content = renderTemplate(content, vars);
       }
       const next = stepList[l.current_step_index + 1];
-      const nextDelayDays = next && next.step_type === "delay" ? next.delay_days || 0 : 0;
+      const nextDelayMs = next && next.step_type === "delay" ? delayMs(next) : 0;
       // Agendamento fixo (CRM_EXPERT): se o próximo SMS tem horário definido,
       // ele manda. Senão cai no comportamento clássico de delay_days.
-      let nextRunAt = new Date(Date.now() + nextDelayDays * 86400000).toISOString();
+      let nextRunAt = new Date(Date.now() + nextDelayMs).toISOString();
       if (
         next &&
         next.step_type === "sms" &&
         next.scheduled_time &&
         typeof next.scheduled_day_offset === "number"
       ) {
-        const sched = brtScheduledAt(
-          l.entered_at,
-          next.scheduled_day_offset,
-          next.scheduled_time,
-        );
+        const sched = brtScheduledAt(l.entered_at, next.scheduled_day_offset, next.scheduled_time);
         if (sched) nextRunAt = sched;
       }
       // "Dia N" = 1 + soma dos delay_days dos steps anteriores
@@ -374,9 +379,7 @@ export async function runSmsDispatcher({ limit = 30 }: { limit?: number } = {}) 
         finished: forceFinished || l.current_step_index + 1 >= stepList.length,
         triggerName: (flow.trigger_name as string | null) ?? null,
         stepIndex: l.current_step_index,
-        stepLabel: isRotate
-          ? `Template #${(rotateStepOrder ?? 0) + 1}`
-          : `Dia ${dayN}`,
+        stepLabel: isRotate ? `Template #${(rotateStepOrder ?? 0) + 1}` : `Dia ${dayN}`,
         rotateStepOrder,
       });
     }
@@ -396,14 +399,14 @@ export async function runSmsDispatcher({ limit = 30 }: { limit?: number } = {}) 
         })
         .eq("id", e.id),
     ),
-    ...completedIds.length > 0
+    ...(completedIds.length > 0
       ? [
           supabaseAdmin
             .from("sms_flow_leads")
             .update({ status: "completed", locked_at: null, locked_by: null })
             .in("id", completedIds),
         ]
-      : [],
+      : []),
     ...delayUpdates.map((d) =>
       supabaseAdmin
         .from("sms_flow_leads")
@@ -431,6 +434,54 @@ export async function runSmsDispatcher({ limit = 30 }: { limit?: number } = {}) 
 
   // Consome budget só agora (depois de saber quantos SMS realmente vão sair).
   // Se o teto do minuto não couber tudo, refileira o excedente sem perder.
+  const dayStart = brtDayStart().toISOString();
+  const allowed = [] as typeof toSend;
+  for (const item of toSend) {
+    const dailyLimit = Number(item.flow.daily_limit ?? 500);
+    const cooldownHours = Number(item.flow.cooldown_hours ?? 24);
+    const [{ count: sentToday }, { data: latest }] = await Promise.all([
+      supabaseAdmin
+        .from("sms_send_logs")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", item.lead.tenant_id)
+        .eq("flow_id", item.lead.flow_id)
+        .eq("status", "sent")
+        .gte("created_at", dayStart),
+      item.lead.player_id && cooldownHours > 0
+        ? supabaseAdmin
+            .from("sms_send_logs")
+            .select("created_at")
+            .eq("tenant_id", item.lead.tenant_id)
+            .eq("flow_id", item.lead.flow_id)
+            .eq("player_id", item.lead.player_id)
+            .eq("status", "sent")
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle()
+        : Promise.resolve({ data: null }),
+    ]);
+    const cooldownUntil = latest?.created_at
+      ? new Date(new Date(latest.created_at).getTime() + cooldownHours * 3_600_000)
+      : null;
+    if ((sentToday ?? 0) >= dailyLimit || (cooldownUntil && cooldownUntil.getTime() > Date.now())) {
+      await supabaseAdmin
+        .from("sms_flow_leads")
+        .update({
+          next_run_at:
+            (sentToday ?? 0) >= dailyLimit
+              ? new Date(brtDayStart(new Date(Date.now() + 86_400_000)).getTime()).toISOString()
+              : cooldownUntil!.toISOString(),
+          locked_at: null,
+          locked_by: null,
+        })
+        .eq("id", item.lead.id);
+      continue;
+    }
+    allowed.push(item);
+  }
+  toSend.splice(0, toSend.length, ...allowed);
+  if (toSend.length === 0) return { processed: 0, deferred: true };
+
   const budget = await consumeBudget(channel, toSend.length);
   if (budget === 0) {
     // Sem budget: devolve todos pra fila com um pequeno backoff.
@@ -594,18 +645,11 @@ export async function runSmsDispatcher({ limit = 30 }: { limit?: number } = {}) 
             .update({ locked_at: null, locked_by: null })
             .eq("id", item.lead.id);
         } else {
-          const backoffMs = isAuthError
-            ? 600_000
-            : status === 429
-              ? 60_000
-              : 30_000;
+          const backoffMs = isAuthError ? 600_000 : status === 429 ? 60_000 : 30_000;
           await supabaseAdmin
             .from("sms_flow_leads")
             .update({
-              attempts:
-                status === 429 || isAuthError
-                  ? item.lead.attempts
-                  : item.lead.attempts + 1,
+              attempts: status === 429 || isAuthError ? item.lead.attempts : item.lead.attempts + 1,
               next_run_at: new Date(Date.now() + backoffMs).toISOString(),
               locked_at: null,
               locked_by: null,
@@ -688,17 +732,14 @@ function parseCampaignTargets(raw: unknown): CampaignTarget[] {
   return out;
 }
 
-export async function runScheduledSmsCampaigns({
-  limit = 20,
-}: { limit?: number } = {}) {
+export async function runScheduledSmsCampaigns({ limit = 20 }: { limit?: number } = {}) {
   // Fora da janela → deixa pra próximo tick (idem outros canais).
   const deferTo = await deferIfOutsideWindow();
   if (deferTo) return { processed: 0, deferred_until: deferTo };
 
-  const { data: claimed, error: claimErr } = await supabaseAdmin.rpc(
-    "claim_due_sms_campaigns",
-    { p_limit: limit },
-  );
+  const { data: claimed, error: claimErr } = await supabaseAdmin.rpc("claim_due_sms_campaigns", {
+    p_limit: limit,
+  });
   if (claimErr) {
     console.error("[sms-campaigns] claim falhou", claimErr);
     return { processed: 0, error: claimErr.message };
@@ -843,7 +884,7 @@ export async function runScheduledSmsCampaigns({
       const batch = targets.slice(i, i + concurrency);
       const results = await Promise.all(
         batch.map(async (t) => {
-          const variables = t.playerId ? varsByPlayer.get(t.playerId) ?? null : null;
+          const variables = t.playerId ? (varsByPlayer.get(t.playerId) ?? null) : null;
           try {
             // Dedup por (tenant, telefone, conteúdo) nas últimas 6h.
             if (dedupedPhones.has(t.phone)) {
@@ -882,9 +923,7 @@ export async function runScheduledSmsCampaigns({
     const newSent = (c.sent_count ?? 0) + sent;
     const newFailed = (c.failed_count ?? 0) + failed;
     const isDone = reservedCursor >= allTargets.length;
-    const finalStatus = isDone
-      ? (newSent === 0 ? "falhou" : "enviado")
-      : "enviando";
+    const finalStatus = isDone ? (newSent === 0 ? "falhou" : "enviado") : "enviando";
     await supabaseAdmin
       .from("sms_campaigns")
       .update({
