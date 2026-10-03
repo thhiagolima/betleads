@@ -300,7 +300,11 @@ function TenantsPage() {
         </Card>
 
         {detail ? (
-          <TenantWorkspace detail={detail} isSuperAdmin={!!consoleData?.isSuperAdmin} />
+          <TenantWorkspace
+            detail={detail}
+            isSuperAdmin={!!consoleData?.isSuperAdmin}
+            canManage={!!consoleData?.canManage}
+          />
         ) : (
           <Card className="min-h-96">
             <CardContent className="flex h-96 items-center justify-center text-muted-foreground">
@@ -316,9 +320,11 @@ function TenantsPage() {
 function TenantWorkspace({
   detail,
   isSuperAdmin,
+  canManage,
 }: {
   detail: TenantDetail;
   isSuperAdmin: boolean;
+  canManage: boolean;
 }) {
   const tenant = detail.tenant;
   const balance = Number(detail.sms.summary.balance_credits ?? 0);
@@ -368,7 +374,7 @@ function TenantWorkspace({
           <OverviewTab detail={detail} isSuperAdmin={isSuperAdmin} />
         </TabsContent>
         <TabsContent value="users">
-          <UsersTab detail={detail} isSuperAdmin={isSuperAdmin} canManage={!!consoleData?.canManage} />
+          <UsersTab detail={detail} isSuperAdmin={isSuperAdmin} canManage={canManage} />
         </TabsContent>
         <TabsContent value="credits">
           <CreditsTab detail={detail} isSuperAdmin={isSuperAdmin} />
