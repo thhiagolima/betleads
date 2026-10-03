@@ -16,6 +16,7 @@ mem/
 base/
 docs/*
 !docs/docker-deployment.md
+!docs/OPERACAO_SEGURA.md
 supabase/.temp/
 
 node_modules
