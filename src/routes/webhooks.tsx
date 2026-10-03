@@ -29,7 +29,7 @@ import { WEBHOOK_EVENTS } from "@/lib/webhook-events";
 import { PageHeader } from "@/components/ui-premium/page-header";
 import { DataCard } from "@/components/ui-premium/data-card";
 import { EmptyState } from "@/components/ui-premium/empty-state";
-import { getMyWebhookHealth, getMyWebhookLogs, getMyWebhookToken } from "@/lib/webhooks.functions";
+import { getMyWebhookAccess, getMyWebhookHealth, getMyWebhookLogs, getMyWebhookToken } from "@/lib/webhooks.functions";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/webhooks")({
@@ -71,12 +71,18 @@ type WebhookHealth = {
 };
 
 function WebhooksPage() {
+  const fetchAccess = useServerFn(getMyWebhookAccess);
   const fetchToken = useServerFn(getMyWebhookToken);
   const fetchLogs = useServerFn(getMyWebhookLogs);
   const fetchHealth = useServerFn(getMyWebhookHealth);
+  const { data: access, isLoading: accessLoading } = useQuery({
+    queryKey: ["my-webhook-access"],
+    queryFn: () => fetchAccess(),
+  });
   const { data: tokenInfo, isLoading: tokenLoading } = useQuery({
     queryKey: ["my-webhook-token"],
     queryFn: () => fetchToken(),
+    enabled: Boolean(access?.canManage),
   });
   const token = tokenInfo?.token ?? null;
   const legacy = Boolean(tokenInfo?.legacy);
@@ -87,11 +93,13 @@ function WebhooksPage() {
     queryKey: ["webhook_logs"],
     queryFn: async () => (await fetchLogs()) as WebhookLog[],
     refetchInterval: 10000,
+    enabled: Boolean(access?.canManage),
   });
   const { data: health, isLoading: healthLoading } = useQuery<WebhookHealth>({
     queryKey: ["webhook-health"],
     queryFn: () => fetchHealth() as Promise<WebhookHealth>,
     refetchInterval: 10000,
+    enabled: Boolean(access?.canManage),
   });
 
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
@@ -107,6 +115,23 @@ function WebhooksPage() {
   function copyPayload(payload: unknown) {
     navigator.clipboard.writeText(prettyJson(payload));
     toast.success("Payload copiado");
+  }
+
+  if (!accessLoading && access && !access.canManage) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          title="Integrações da operação"
+          subtitle="Conecte sua plataforma de apostas e acompanhe a entrada dos dados."
+          icon={<WebhookIcon className="h-5 w-5 text-primary-foreground" />}
+        />
+        <EmptyState
+          icon={<ShieldAlert className="h-5 w-5" />}
+          title="Acesso administrativo necessário"
+          description="URLs, assinaturas e payloads de webhook são restritos aos administradores da conta."
+        />
+      </div>
+    );
   }
 
   const lastByEvent = new Map<string, string>();

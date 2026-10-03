@@ -2,15 +2,34 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 
+async function getWebhookAccess(context: { supabase: any }) {
+  const { data: tenantId, error: tenantError } = await context.supabase.rpc("current_tenant_id");
+  if (tenantError) throw new Error(tenantError.message);
+  if (!tenantId) throw new Error("Tenant atual não encontrado.");
+
+  const { data: canManage, error: accessError } = await context.supabase.rpc("is_tenant_admin", {
+    _tenant: tenantId,
+  });
+  if (accessError) throw new Error(accessError.message);
+  return { tenantId: tenantId as string, canManage: Boolean(canManage) };
+}
+
+export const getMyWebhookAccess = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => getWebhookAccess(context));
+
+async function requireWebhookManager(context: { supabase: any }) {
+  const access = await getWebhookAccess(context);
+  if (!access.canManage) throw new Error("Apenas administradores da conta podem acessar integrações de webhook.");
+  return access.tenantId;
+}
+
 // Retorna o webhook_token do tenant do usuário logado.
 // Usa a view "tenants" via RLS (has_tenant_access cobre o SELECT).
 export const getMyWebhookToken = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { supabase } = context;
-    const { data: currentTenantId, error: tenantError } = await supabase.rpc("current_tenant_id");
-    if (tenantError) throw new Error(tenantError.message);
-    if (!currentTenantId) throw new Error("Tenant atual não encontrado.");
+    const currentTenantId = await requireWebhookManager(context);
     const { data, error } = await supabaseAdmin
       .from("tenants")
       .select("id, nome, legacy_webhook, webhook_token")
@@ -32,9 +51,7 @@ export const getMyWebhookToken = createServerFn({ method: "GET" })
 export const getMyWebhookLogs = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data: tenantId, error: tenantError } = await context.supabase.rpc("current_tenant_id");
-    if (tenantError) throw new Error(tenantError.message);
-    if (!tenantId) throw new Error("Tenant atual não encontrado.");
+    const tenantId = await requireWebhookManager(context);
     const { data, error } = await supabaseAdmin
       .from("webhook_logs")
       .select("id, tenant_id, evento, status, created_at, payload")
@@ -48,9 +65,7 @@ export const getMyWebhookLogs = createServerFn({ method: "GET" })
 export const getMyWebhookHealth = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data: tenantId, error: tenantError } = await context.supabase.rpc("current_tenant_id");
-    if (tenantError) throw new Error(tenantError.message);
-    if (!tenantId) throw new Error("Tenant atual não encontrado.");
+    const tenantId = await requireWebhookManager(context);
 
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const countStatus = async (status?: string) => {
