@@ -1,5 +1,5 @@
 -- Canonical tenant roles: one admin, operational managers and members.
-ALTER TYPE public.app_role ADD VALUE IF NOT EXISTS 'gestor';
+-- The enum value is committed by the preceding 20261003091500 migration.
 
 -- Convert legacy administrative roles while preserving one principal per tenant.
 WITH ranked AS (

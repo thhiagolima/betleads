@@ -662,9 +662,16 @@ function PlayersPage() {
   const fetchPlayersPage = useServerFn(getPlayersPage);
   const fetchPlayerFilterFacets = useServerFn(getPlayerFilterFacets);
   const { data: playerFilterFacets, isFetching: isFetchingPlayerFilterFacets } = useQuery({
-    queryKey: ["players-filter-facets"],
-    queryFn: () => fetchPlayerFilterFacets(),
+    queryKey: ["players-filter-facets", sheetDraft.situation, sheetDraft.level],
+    queryFn: () =>
+      fetchPlayerFilterFacets({
+        data: {
+          gamificationStatus: sheetDraft.situation,
+          gamificationLevel: sheetDraft.level,
+        },
+      }),
     enabled: advancedFiltersOpen,
+    placeholderData: (previous) => previous,
     staleTime: 30_000,
   });
   const {
