@@ -3,6 +3,7 @@
 
 import { createFileRoute } from "@tanstack/react-router";
 import { createClient } from "@supabase/supabase-js";
+import { requireDiagnosticSuperAdmin } from "@/lib/diagnostic-auth.server";
 
 const SHORT_BRASIL_SMS_URL =
   process.env.SHORT_BRASIL_SMS_SINGLE_URL ?? "http://lp01-short.painelsms.com/bot/single-sms.php";
@@ -30,7 +31,7 @@ export const Route = createFileRoute("/api/public/diag/businesscode-sms")({
   server: {
     handlers: {
       GET: async ({ request }) => {
-        const unauth = await requireAuth(request);
+        const unauth = await requireDiagnosticSuperAdmin(request);
         if (unauth) return unauth;
         const attempts: Array<{
           method: string;

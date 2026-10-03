@@ -625,12 +625,15 @@ function PlayersPage() {
   // Faz debounce (3s) pra não disparar uma rajada de refetches em horário de pico.
   useEffect(() => {
     let pending: ReturnType<typeof setTimeout> | null = null;
+    let lastRefreshAt = 0;
     const schedule = () => {
-      if (pending) return;
+      if (pending) clearTimeout(pending);
+      const wait = Math.max(0, 30_000 - (Date.now() - lastRefreshAt));
       pending = setTimeout(() => {
         pending = null;
+        lastRefreshAt = Date.now();
         qc.invalidateQueries({ queryKey: ["players-page"] });
-      }, 3000);
+      }, wait);
     };
     const channel = supabase
       .channel("players-realtime")
@@ -802,7 +805,10 @@ function PlayersPage() {
         : alertIdsForFilter.length >= 0
       : true,
     placeholderData: (prev) => prev,
-    staleTime: 10_000,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchOnMount: false,
   });
   const data = pageData?.rows ?? EMPTY_PLAYERS;
   const totalCount = pageData?.total ?? 0;

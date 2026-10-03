@@ -5,6 +5,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { BUSINESSCODE_EMAIL_URL } from "@/lib/email-send.server";
 import { createClient } from "@supabase/supabase-js";
+import { requireDiagnosticSuperAdmin } from "@/lib/diagnostic-auth.server";
 
 async function requireAuth(request: Request): Promise<Response | null> {
   const authHeader = request.headers.get("authorization");
@@ -29,7 +30,7 @@ export const Route = createFileRoute("/api/public/diag/businesscode-email")({
   server: {
     handlers: {
       GET: async ({ request }) => {
-        const unauth = await requireAuth(request);
+        const unauth = await requireDiagnosticSuperAdmin(request);
         if (unauth) return unauth;
         const attempts: Array<{
           method: string;

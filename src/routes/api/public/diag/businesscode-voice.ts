@@ -5,6 +5,7 @@
 
 import { createFileRoute } from "@tanstack/react-router";
 import { createClient } from "@supabase/supabase-js";
+import { requireDiagnosticSuperAdmin } from "@/lib/diagnostic-auth.server";
 
 const BUSINESSCODE_VOICE_URL = "https://dash.businesscode.com.br/api/v1/messaging/voice";
 
@@ -43,7 +44,7 @@ export const Route = createFileRoute("/api/public/diag/businesscode-voice")({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        const unauth = await requireAuth(request);
+        const unauth = await requireDiagnosticSuperAdmin(request);
         if (unauth) return unauth;
 
         let payload: { to?: string; audio_url?: string } = {};
