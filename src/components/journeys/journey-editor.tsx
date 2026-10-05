@@ -2,11 +2,16 @@ import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { ArrowLeft, Clock3, Mail, MessageSquare, Phone, Save, Trash2 } from "lucide-react";
+import { ArrowLeft, Clock3, Mail, MessageSquare, Phone, Save, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { saveJourney } from "@/lib/journeys.functions";
 import { listEmailTemplates } from "@/lib/email.functions";
-import { listJourneyVoiceAssets } from "@/lib/journey-voice-assets.functions";
+import {
+  createJourneyVoiceUpload,
+  finalizeJourneyVoiceUpload,
+  listJourneyVoiceAssets,
+} from "@/lib/journey-voice-assets.functions";
+import { supabase } from "@/integrations/supabase/client";
 import type { JourneyStepInput } from "@/lib/journeys.shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,6 +37,8 @@ export function JourneyEditor({
   const save = useServerFn(saveJourney);
   const templatesFn = useServerFn(listEmailTemplates);
   const voiceAssetsFn = useServerFn(listJourneyVoiceAssets);
+  const createVoiceUpload = useServerFn(createJourneyVoiceUpload);
+  const finalizeVoiceUpload = useServerFn(finalizeJourneyVoiceUpload);
   const templates = useQuery({
     queryKey: ["journey-email-templates"],
     queryFn: () => templatesFn(),
@@ -39,6 +46,27 @@ export function JourneyEditor({
   const voiceAssets = useQuery({
     queryKey: ["journey-voice-assets"],
     queryFn: () => voiceAssetsFn(),
+  });
+  const uploadAudio = useMutation({
+    mutationFn: async (file: File) => {
+      const contentType = file.type as "audio/mpeg";
+      const name = file.name.replace(/\.[^.]+$/, "");
+      const signed = await createVoiceUpload({
+        data: { name, filename: file.name, contentType, sizeBytes: file.size },
+      });
+      const { error } = await supabase.storage
+        .from("call-audios")
+        .uploadToSignedUrl(signed.path, signed.token, file, { contentType: file.type });
+      if (error) throw new Error(error.message);
+      return finalizeVoiceUpload({
+        data: { path: signed.path, name, contentType, sizeBytes: file.size },
+      });
+    },
+    onSuccess: () => {
+      voiceAssets.refetch();
+      toast.success("Áudio enviado");
+    },
+    onError: (error: Error) => toast.error(error.message),
   });
   const [name, setName] = useState(initial?.name ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
@@ -211,6 +239,21 @@ export function JourneyEditor({
                 </select>
               ) : (
                 <div className="space-y-2">
+                  <label className="inline-flex cursor-pointer items-center rounded-md border px-3 py-2 text-sm hover:bg-muted">
+                    <Upload className="mr-2 h-4 w-4" />{" "}
+                    {uploadAudio.isPending ? "Enviando..." : "Enviar áudio"}
+                    <input
+                      className="sr-only"
+                      type="file"
+                      accept="audio/mpeg,audio/wav,audio/x-wav,audio/mp4,audio/ogg"
+                      disabled={uploadAudio.isPending}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) uploadAudio.mutate(file);
+                        e.currentTarget.value = "";
+                      }}
+                    />
+                  </label>
                   <select
                     className="flex h-10 w-full rounded-md border bg-background px-3 text-sm"
                     value={s.assetId}
