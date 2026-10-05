@@ -64,6 +64,7 @@ const engagementItems: NavItem[] = [
     icon: Rocket,
     subItems: [
       { title: "Visão geral", hash: "visao-geral" },
+      { title: "Jornadas", url: "/jornadas" },
       { title: "Fluxos de SMS", url: "/automacoes/sms" },
       { title: "Execuções", hash: "execucoes" },
       { title: "Histórico", hash: "historico" },
