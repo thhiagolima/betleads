@@ -49,7 +49,35 @@ export const getJourney = createServerFn({ method: "GET" })
       .eq("journey_id", data.id)
       .order("position");
     if (stepsError) throw new Error(stepsError.message);
-    return { journey, steps: steps ?? [] };
+    const { data: enrollments, error: enrollmentsError } = await db
+      .from("journey_enrollments")
+      .select("status,exit_reason,current_position")
+      .eq("journey_id", data.id)
+      .eq("tenant_id", tenantId);
+    if (enrollmentsError) throw new Error(enrollmentsError.message);
+    const rows = enrollments ?? [];
+    const byStatus = rows.reduce((acc: Record<string, number>, row: { status: string }) => {
+      acc[row.status] = (acc[row.status] ?? 0) + 1;
+      return acc;
+    }, {});
+    const exits = rows
+      .filter((row: { exit_reason?: string | null }) => row.exit_reason)
+      .reduce((acc: Record<string, number>, row: { exit_reason: string }) => {
+        acc[row.exit_reason] = (acc[row.exit_reason] ?? 0) + 1;
+        return acc;
+      }, {});
+    const positions = rows.reduce(
+      (acc: Record<string, number>, row: { current_position: number }) => {
+        acc[String(row.current_position)] = (acc[String(row.current_position)] ?? 0) + 1;
+        return acc;
+      },
+      {},
+    );
+    return {
+      journey,
+      steps: steps ?? [],
+      metrics: { total: rows.length, byStatus, exits, positions },
+    };
   });
 
 export const saveJourney = createServerFn({ method: "POST" })

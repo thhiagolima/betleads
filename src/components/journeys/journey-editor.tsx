@@ -28,10 +28,12 @@ export function JourneyEditor({
   id,
   initial,
   initialSteps = [],
+  metrics,
 }: {
   id?: string;
   initial?: { name: string; description: string | null; trigger_type: string };
   initialSteps?: SavedStep[];
+  metrics?: { total: number; byStatus: Record<string, number>; exits: Record<string, number> };
 }) {
   const navigate = useNavigate();
   const save = useServerFn(saveJourney);
@@ -161,6 +163,27 @@ export function JourneyEditor({
         <p className="mt-1 text-sm text-muted-foreground">A jornada só envia após ser publicada.</p>
       </div>
       <div className="space-y-5 rounded-xl border p-5">
+        {metrics && (
+          <section className="rounded-lg border bg-muted/30 p-4 text-sm">
+            <div className="font-medium">Execução da jornada</div>
+            <div className="mt-2 flex flex-wrap gap-4 text-muted-foreground">
+              <span>{metrics.total} entradas</span>
+              <span>{metrics.byStatus.active ?? 0} em andamento</span>
+              <span>{metrics.byStatus.completed ?? 0} concluídas</span>
+              <span>{metrics.byStatus.failed ?? 0} falhas</span>
+            </div>
+            {Object.keys(metrics.exits).length > 0 && (
+              <div className="mt-3 border-t pt-3">
+                <p className="font-medium">Saídas por gatilho</p>
+                {Object.entries(metrics.exits).map(([reason, count]) => (
+                  <p key={reason} className="mt-1 text-muted-foreground">
+                    {reason}: {count}
+                  </p>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
         <label className="block text-sm font-medium">
           Nome
           <Input value={name} onChange={(e) => setName(e.target.value)} />
