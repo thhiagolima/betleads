@@ -5,6 +5,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { ArrowLeft, Clock3, Mail, MessageSquare, Phone, Save, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { saveJourney } from "@/lib/journeys.functions";
+import { TRIGGER_NAMES } from "@/lib/triggers";
 import { listEmailTemplates } from "@/lib/email.functions";
 import {
   createJourneyVoiceUpload,
@@ -73,6 +74,12 @@ export function JourneyEditor({
   const [name, setName] = useState(initial?.name ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
   const [trigger, setTrigger] = useState(initial?.trigger_type ?? "manual");
+  const [exitRules, setExitRules] = useState<Record<string, boolean>>({
+    deposit: true,
+    first_deposit: true,
+    login: false,
+    voltou_jogar: false,
+  });
   const [steps, setSteps] = useState<Step[]>(() =>
     initialSteps.flatMap((s) =>
       s.step_type === "wait"
@@ -126,6 +133,7 @@ export function JourneyEditor({
             name,
             description: description || null,
             trigger_type: trigger,
+            exit_rules: exitRules,
             steps: [...body, { step_type: "end", config: {} }],
           },
         },
@@ -193,9 +201,45 @@ export function JourneyEditor({
           <Textarea value={description} onChange={(e) => setDescription(e.target.value)} />
         </label>
         <label className="block text-sm font-medium">
-          Gatilho
-          <Input value={trigger} onChange={(e) => setTrigger(e.target.value)} />
+          Gatilho de entrada
+          <select
+            className="mt-1 flex h-10 w-full rounded-md border bg-background px-3 text-sm"
+            value={trigger}
+            onChange={(e) => setTrigger(e.target.value)}
+          >
+            <option value="manual">Entrada manual</option>
+            {Object.entries(TRIGGER_NAMES).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
         </label>
+        <section className="rounded-lg border p-4 text-sm">
+          <p className="font-medium">Gatilhos de saída</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            A jornada encerra para o jogador quando um destes eventos ocorre.
+          </p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            {[
+              { key: "deposit", label: "Realizou depósito" },
+              { key: "first_deposit", label: "Fez primeiro depósito" },
+              { key: "login", label: "Fez login" },
+              { key: "voltou_jogar", label: "Voltou a jogar" },
+            ].map((rule) => (
+              <label key={rule.key} className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={!!exitRules[rule.key]}
+                  onChange={(e) =>
+                    setExitRules((current) => ({ ...current, [rule.key]: e.target.checked }))
+                  }
+                />
+                {rule.label}
+              </label>
+            ))}
+          </div>
+        </section>
         <section className="space-y-3">
           <div className="flex items-center justify-between">
             <b className="text-sm">Sequência</b>
