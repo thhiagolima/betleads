@@ -15,5 +15,7 @@ function JourneyDetailPage() {
     return <div className="p-6 text-sm text-muted-foreground">Carregando jornada…</div>;
   if (!query.data)
     return <div className="p-6 text-sm text-destructive">Jornada não encontrada.</div>;
-  return <JourneyEditor id={journeyId} initial={query.data.journey} />;
+  return (
+    <JourneyEditor id={journeyId} initial={query.data.journey} initialSteps={query.data.steps} />
+  );
 }

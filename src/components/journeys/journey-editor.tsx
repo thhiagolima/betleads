@@ -2,25 +2,49 @@ import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useMutation } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { ArrowLeft, Plus, Save } from "lucide-react";
+import { ArrowDown, ArrowLeft, Clock3, MessageSquare, Plus, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { saveJourney } from "@/lib/journeys.functions";
+import type { JourneyStepInput } from "@/lib/journeys.shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
+type EditableStep = { kind: "wait"; seconds: number } | { kind: "sms"; content: string };
+
 export function JourneyEditor({
   id,
   initial,
+  initialSteps = [],
 }: {
   id?: string;
   initial?: { name: string; description: string | null; trigger_type: string };
+  initialSteps?: Array<{ step_type: string; config: Record<string, unknown> }>;
 }) {
   const navigate = useNavigate();
   const save = useServerFn(saveJourney);
   const [name, setName] = useState(initial?.name ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
   const [trigger, setTrigger] = useState(initial?.trigger_type ?? "manual");
+  const [steps, setSteps] = useState<EditableStep[]>(() =>
+    initialSteps.flatMap((step) =>
+      step.step_type === "wait"
+        ? [{ kind: "wait" as const, seconds: Number(step.config.delay_seconds ?? 3600) }]
+        : step.step_type === "sms"
+          ? [{ kind: "sms" as const, content: String(step.config.content ?? "") }]
+          : [],
+    ),
+  );
+  const serializedSteps = (): JourneyStepInput[] => [
+    ...steps
+      .map((step) =>
+        step.kind === "wait"
+          ? { step_type: "wait" as const, config: { delay_seconds: Math.max(60, step.seconds) } }
+          : { step_type: "sms" as const, config: { content: step.content } },
+      )
+      .filter((step) => step.step_type !== "sms" || step.config.content.trim()),
+    { step_type: "end", label: "Encerrar", config: {} },
+  ];
   const mutation = useMutation({
     mutationFn: () =>
       save({
@@ -30,7 +54,7 @@ export function JourneyEditor({
             name,
             description: description || null,
             trigger_type: trigger,
-            steps: [{ step_type: "end", label: "Encerrar", config: {} }],
+            steps: serializedSteps(),
           },
         },
       }),
@@ -40,6 +64,13 @@ export function JourneyEditor({
     },
     onError: (error: Error) => toast.error(error.message),
   });
+  const add = (kind: EditableStep["kind"]) =>
+    setSteps((current) => [
+      ...current,
+      kind === "wait" ? { kind, seconds: 3600 } : { kind, content: "" },
+    ]);
+  const update = (index: number, step: EditableStep) =>
+    setSteps((current) => current.map((item, position) => (position === index ? step : item)));
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6 p-4 sm:p-6">
       <Button variant="ghost" size="sm" onClick={() => navigate({ to: "/jornadas" })}>
@@ -51,7 +82,7 @@ export function JourneyEditor({
         </p>
         <h1 className="mt-1 text-2xl font-semibold">{id ? "Editar jornada" : "Nova jornada"}</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Defina o propósito agora. O construtor visual de etapas vem na próxima entrega.
+          Monte a sequência de contato. A jornada só dispara após ser publicada.
         </p>
       </div>
       <div className="space-y-5 rounded-xl border p-5">
@@ -78,18 +109,62 @@ export function JourneyEditor({
             onChange={(event) => setTrigger(event.target.value)}
             placeholder="manual"
           />
-          <span className="block text-xs font-normal text-muted-foreground">
-            Use “manual” até configurarmos os gatilhos comportamentais.
-          </span>
         </label>
-        <div className="rounded-lg bg-muted/50 p-4 text-sm">
-          <div className="flex items-center gap-2 font-medium">
-            <Plus className="h-4 w-4 text-primary" /> Etapa de encerramento incluída
+        <section className="space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-medium">Sequência</p>
+            <div className="flex gap-2">
+              <Button type="button" size="sm" variant="outline" onClick={() => add("wait")}>
+                <Clock3 className="mr-1 h-4 w-4" /> Espera
+              </Button>
+              <Button type="button" size="sm" variant="outline" onClick={() => add("sms")}>
+                <MessageSquare className="mr-1 h-4 w-4" /> SMS
+              </Button>
+            </div>
           </div>
-          <p className="mt-1 text-muted-foreground">
-            Ao salvar, a jornada fica em rascunho e não dispara nenhuma mensagem.
-          </p>
-        </div>
+          {steps.map((step, index) => (
+            <div key={index} className="rounded-lg border p-4">
+              {index > 0 && (
+                <ArrowDown className="-mt-7 mb-2 ml-4 h-4 w-4 bg-background text-muted-foreground" />
+              )}
+              <div className="mb-3 flex items-center justify-between font-medium">
+                {step.kind === "wait" ? "Aguardar" : "Enviar SMS"}
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  onClick={() =>
+                    setSteps((current) => current.filter((_, position) => position !== index))
+                  }
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+              {step.kind === "wait" ? (
+                <label className="text-sm">
+                  Segundos de espera
+                  <Input
+                    type="number"
+                    min={60}
+                    value={step.seconds}
+                    onChange={(event) =>
+                      update(index, { kind: "wait", seconds: Number(event.target.value) })
+                    }
+                  />
+                </label>
+              ) : (
+                <Textarea
+                  value={step.content}
+                  onChange={(event) => update(index, { kind: "sms", content: event.target.value })}
+                  placeholder="Mensagem SMS. Use variáveis como {{nome}}."
+                />
+              )}
+            </div>
+          ))}
+          <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+            Encerrar jornada
+          </div>
+        </section>
         <Button disabled={!name.trim() || mutation.isPending} onClick={() => mutation.mutate()}>
           <Save className="mr-2 h-4 w-4" /> Salvar rascunho
         </Button>
