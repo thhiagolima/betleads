@@ -1,8 +1,11 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
 import { WhatsappAutomationFlowsPanel } from "@/routes/whatsapp";
 
 export const Route = createFileRoute("/automacoes/whatsapp")({
+  beforeLoad: () => {
+    throw redirect({ to: "/jornadas" });
+  },
   component: WhatsappAutomationFlowsPage,
 });
 

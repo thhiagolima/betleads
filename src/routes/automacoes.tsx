@@ -1,4 +1,11 @@
-import { createFileRoute, Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
+import {
+  createFileRoute,
+  Link,
+  Outlet,
+  redirect,
+  useLocation,
+  useNavigate,
+} from "@tanstack/react-router";
 import { useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -66,7 +73,12 @@ import {
 import { TRIGGER_NAMES, type TriggerType } from "@/lib/triggers";
 import { saveAutomationJourneyDraft } from "@/lib/automation-draft";
 
-export const Route = createFileRoute("/automacoes")({ component: AutomacoesPage });
+export const Route = createFileRoute("/automacoes")({
+  beforeLoad: () => {
+    throw redirect({ to: "/jornadas" });
+  },
+  component: AutomacoesPage,
+});
 
 type Totals = {
   analyzed?: number;

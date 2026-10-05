@@ -1,10 +1,13 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import { EmailAutomationFlowsPanel } from "@/routes/email";
 import { consumeAutomationJourneyDraft, type AutomationJourneyDraft } from "@/lib/automation-draft";
 
 export const Route = createFileRoute("/automacoes/email")({
+  beforeLoad: () => {
+    throw redirect({ to: "/jornadas" });
+  },
   component: EmailAutomationFlowsPage,
 });
 

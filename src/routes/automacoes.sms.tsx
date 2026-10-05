@@ -1,10 +1,13 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import { SmsFlowsPanel } from "@/routes/sms";
 import { consumeAutomationJourneyDraft, type AutomationJourneyDraft } from "@/lib/automation-draft";
 
 export const Route = createFileRoute("/automacoes/sms")({
+  beforeLoad: () => {
+    throw redirect({ to: "/jornadas" });
+  },
   component: SmsAutomationFlowsPage,
 });
 

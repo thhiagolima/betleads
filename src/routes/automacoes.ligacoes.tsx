@@ -1,8 +1,11 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
 import { FlowsTab } from "@/components/ligacoes/flows-tab";
 
 export const Route = createFileRoute("/automacoes/ligacoes")({
+  beforeLoad: () => {
+    throw redirect({ to: "/jornadas" });
+  },
   component: CallAutomationFlowsPage,
 });
 
