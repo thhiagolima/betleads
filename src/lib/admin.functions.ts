@@ -141,6 +141,7 @@ export const adminCreateUser = createServerFn({ method: "POST" })
       email: data.email,
       password: data.password,
       email_confirm: true,
+      app_metadata: { force_password_change: true },
     });
     if (createErr) throw new Error(createErr.message);
     const newUser = created.user;

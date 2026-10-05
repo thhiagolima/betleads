@@ -600,6 +600,7 @@ export const addUserToTenant = createServerFn({ method: "POST" })
             password: data.password,
             email_confirm: true,
             user_metadata: { invited_by: ctx.userId, tenant_id: data.tenantId },
+            app_metadata: { force_password_change: true },
           })
         : await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
             data: { invited_by: ctx.userId, tenant_id: data.tenantId },

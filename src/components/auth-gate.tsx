@@ -1,6 +1,8 @@
 import { createContext, useContext, useEffect, useRef, useState, type FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
+import { changeInitialPassword } from "@/lib/auth.functions";
 import type { Session } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -140,8 +142,108 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     );
   }
 
+  if (state.session.user.app_metadata.force_password_change === true) {
+    return (
+      <InitialPasswordScreen
+        session={state.session}
+        onPasswordChanged={(session) => {
+          cachedSessionKey.current = `${session.user.id}:${session.access_token}`;
+          queryClient.clear();
+          setState({ status: "authed", session });
+        }}
+      />
+    );
+  }
+
   return (
     <AuthSessionContext.Provider value={state.session}>{children}</AuthSessionContext.Provider>
+  );
+}
+
+function InitialPasswordScreen({
+  session,
+  onPasswordChanged,
+}: {
+  session: Session;
+  onPasswordChanged: (session: Session) => void;
+}) {
+  const [password, setPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [loading, setLoading] = useState(false);
+  const changePassword = useServerFn(changeInitialPassword);
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (password !== confirmation) {
+      toast.error("As senhas não coincidem.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await changePassword({ data: { password } });
+      const { data, error } = await supabase.auth.refreshSession();
+      if (error) throw error;
+      if (!data.session) throw new Error("Não foi possível atualizar sua sessão.");
+      onPasswordChanged(data.session);
+      toast.success("Senha criada com sucesso.");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Não foi possível atualizar a senha.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-background p-4">
+      <Card className="w-full max-w-md">
+        <CardHeader>
+          <CardTitle>Crie sua nova senha</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Por segurança, defina uma senha pessoal antes de acessar o sistema.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="new-password">Nova senha</Label>
+              <Input
+                id="new-password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                minLength={8}
+                autoComplete="new-password"
+                required
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="confirm-new-password">Confirme a nova senha</Label>
+              <Input
+                id="confirm-new-password"
+                type="password"
+                value={confirmation}
+                onChange={(e) => setConfirmation(e.target.value)}
+                minLength={8}
+                autoComplete="new-password"
+                required
+              />
+            </div>
+            <Button type="submit" className="w-full" disabled={loading || password.length < 8}>
+              {loading ? "Salvando…" : "Salvar nova senha"}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              className="w-full"
+              onClick={() => supabase.auth.signOut()}
+            >
+              <LogOut className="mr-2 h-4 w-4" /> Sair
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
