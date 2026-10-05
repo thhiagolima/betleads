@@ -2,10 +2,11 @@ import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { ArrowLeft, Clock3, Mail, MessageSquare, Plus, Save, Trash2 } from "lucide-react";
+import { ArrowLeft, Clock3, Mail, MessageSquare, Phone, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { saveJourney } from "@/lib/journeys.functions";
 import { listEmailTemplates } from "@/lib/email.functions";
+import { listJourneyVoiceAssets } from "@/lib/journey-voice-assets.functions";
 import type { JourneyStepInput } from "@/lib/journeys.shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,7 +15,8 @@ import { Textarea } from "@/components/ui/textarea";
 type Step =
   | { kind: "wait"; seconds: number }
   | { kind: "sms"; content: string }
-  | { kind: "email"; templateId: string };
+  | { kind: "email"; templateId: string }
+  | { kind: "voice"; assetId: string; callerId: string };
 type SavedStep = { step_type: string; config: Record<string, unknown> };
 
 export function JourneyEditor({
@@ -29,9 +31,14 @@ export function JourneyEditor({
   const navigate = useNavigate();
   const save = useServerFn(saveJourney);
   const templatesFn = useServerFn(listEmailTemplates);
+  const voiceAssetsFn = useServerFn(listJourneyVoiceAssets);
   const templates = useQuery({
     queryKey: ["journey-email-templates"],
     queryFn: () => templatesFn(),
+  });
+  const voiceAssets = useQuery({
+    queryKey: ["journey-voice-assets"],
+    queryFn: () => voiceAssetsFn(),
   });
   const [name, setName] = useState(initial?.name ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
@@ -44,7 +51,15 @@ export function JourneyEditor({
           ? [{ kind: "sms" as const, content: String(s.config.content ?? "") }]
           : s.step_type === "email"
             ? [{ kind: "email" as const, templateId: String(s.config.template_id ?? "") }]
-            : [],
+            : s.step_type === "voice"
+              ? [
+                  {
+                    kind: "voice" as const,
+                    assetId: String(s.config.asset_id ?? ""),
+                    callerId: String(s.config.caller_id ?? "5511980465329"),
+                  },
+                ]
+              : [],
     ),
   );
   const mutation = useMutation({
@@ -56,9 +71,23 @@ export function JourneyEditor({
             ? s.content.trim()
               ? [{ step_type: "sms", config: { content: s.content } }]
               : []
-            : s.templateId
-              ? [{ step_type: "email", config: { template_id: s.templateId } }]
-              : [],
+            : s.kind === "email"
+              ? s.templateId
+                ? [{ step_type: "email", config: { template_id: s.templateId } }]
+                : []
+              : s.assetId
+                ? [
+                    {
+                      step_type: "voice",
+                      config: {
+                        asset_id: s.assetId,
+                        caller_id: s.callerId,
+                        max_attempts: 1,
+                        retry_delay_seconds: 86400,
+                      },
+                    },
+                  ]
+                : [],
       );
       return save({
         data: {
@@ -85,7 +114,9 @@ export function JourneyEditor({
         ? { kind, seconds: 3600 }
         : kind === "sms"
           ? { kind, content: "" }
-          : { kind, templateId: "" },
+          : kind === "email"
+            ? { kind, templateId: "" }
+            : { kind, assetId: "", callerId: "5511980465329" },
     ]);
   const change = (i: number, value: Step) =>
     setSteps((all) => all.map((s, n) => (n === i ? value : s)));
@@ -127,12 +158,21 @@ export function JourneyEditor({
               <Button type="button" size="sm" variant="outline" onClick={() => add("email")}>
                 <Mail className="mr-1 h-4 w-4" /> E-mail
               </Button>
+              <Button type="button" size="sm" variant="outline" onClick={() => add("voice")}>
+                <Phone className="mr-1 h-4 w-4" /> Voz
+              </Button>
             </div>
           </div>
           {steps.map((s, i) => (
             <div key={i} className="rounded-lg border p-4">
               <div className="mb-2 flex justify-between font-medium">
-                {s.kind === "wait" ? "Aguardar" : s.kind === "sms" ? "Enviar SMS" : "Enviar e-mail"}
+                {s.kind === "wait"
+                  ? "Aguardar"
+                  : s.kind === "sms"
+                    ? "Enviar SMS"
+                    : s.kind === "email"
+                      ? "Enviar e-mail"
+                      : "Fazer ligação"}
                 <Button
                   size="icon"
                   variant="ghost"
@@ -154,7 +194,7 @@ export function JourneyEditor({
                   onChange={(e) => change(i, { kind: "sms", content: e.target.value })}
                   placeholder="Mensagem SMS"
                 />
-              ) : (
+              ) : s.kind === "email" ? (
                 <select
                   className="flex h-10 w-full rounded-md border bg-background px-3 text-sm"
                   value={s.templateId}
@@ -169,6 +209,28 @@ export function JourneyEditor({
                       </option>
                     ))}
                 </select>
+              ) : (
+                <div className="space-y-2">
+                  <select
+                    className="flex h-10 w-full rounded-md border bg-background px-3 text-sm"
+                    value={s.assetId}
+                    onChange={(e) => change(i, { ...s, assetId: e.target.value })}
+                  >
+                    <option value="">Selecione o áudio enviado</option>
+                    {(voiceAssets.data?.assets ?? []).map((asset) => (
+                      <option key={asset.id} value={asset.id}>
+                        {asset.name}
+                      </option>
+                    ))}
+                  </select>
+                  <Input
+                    value={s.callerId}
+                    onChange={(e) =>
+                      change(i, { ...s, callerId: e.target.value.replace(/\D/g, "") })
+                    }
+                    placeholder="Número de origem"
+                  />
+                </div>
               )}
             </div>
           ))}
