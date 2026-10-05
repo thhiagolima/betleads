@@ -1,5 +1,7 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { callBusinessCodeEmail, resolveSender } from "./email-send.server";
+import { callBusinessCodeVoice } from "./businesscode-voice.server";
+import { callInfobipVoice } from "./infobip-voice.server";
 import { sendSmsInternal } from "./sms.functions";
 import { buildPlayerVariables, renderTemplate } from "./template-vars.server";
 
@@ -252,6 +254,32 @@ async function executeEnrollment(id: string): Promise<void> {
       status: "sent",
       provider: process.env.EMAIL_PROVIDER ?? "businesscode",
       provider_response: result.body,
+    });
+  } else if (step.step_type === "voice") {
+    if (!player.telefone) throw new Error("Jogador sem telefone");
+    const assetId = String(step.config.asset_id ?? "");
+    const { data: asset } = await db
+      .from("journey_voice_assets")
+      .select("storage_path")
+      .eq("id", assetId)
+      .eq("tenant_id", enrollment.tenant_id)
+      .maybeSingle();
+    if (!asset) throw new Error("Arquivo de áudio da jornada não encontrado");
+    const { data: signed, error: signedError } = await supabaseAdmin.storage
+      .from("call-audios")
+      .createSignedUrl(asset.storage_path, 60 * 60);
+    if (signedError || !signed?.signedUrl)
+      throw new Error("Não foi possível disponibilizar o áudio para a ligação");
+    const result =
+      process.env.VOICE_PROVIDER?.toLowerCase() === "infobip"
+        ? await callInfobipVoice(player.telefone, signed.signedUrl)
+        : await callBusinessCodeVoice(player.telefone, signed.signedUrl);
+    if (!result.ok) throw new Error("Ligação não aceita pelo provedor");
+    await finishExecution(run.id, {
+      status: "sent",
+      provider:
+        process.env.VOICE_PROVIDER?.toLowerCase() === "infobip" ? "infobip" : "businesscode",
+      provider_response: result,
     });
   } else {
     throw new Error(`Passo ${step.step_type} ainda não está habilitado no dispatcher`);
