@@ -21,6 +21,7 @@ import { Route as EventosRouteImport } from './routes/eventos'
 import { Route as ExpertsRouteImport } from './routes/experts'
 import { Route as GamificacaoRouteImport } from './routes/gamificacao'
 import { Route as InteligenciaRouteImport } from './routes/inteligencia'
+import { Route as JornadasRouteImport } from './routes/jornadas'
 import { Route as LigacoesRouteImport } from './routes/ligacoes'
 import { Route as MidiaLtvRouteImport } from './routes/midia-ltv'
 import { Route as PlayersRouteImport } from './routes/players'
@@ -35,6 +36,8 @@ import { Route as AutomacoesEmailRouteImport } from './routes/automacoes.email'
 import { Route as AutomacoesLigacoesRouteImport } from './routes/automacoes.ligacoes'
 import { Route as AutomacoesSmsRouteImport } from './routes/automacoes.sms'
 import { Route as AutomacoesWhatsappRouteImport } from './routes/automacoes.whatsapp'
+import { Route as JornadasJourneyIdRouteImport } from './routes/jornadas.$journeyId'
+import { Route as JornadasNovaRouteImport } from './routes/jornadas.nova'
 import { Route as PlayersPlayerIdRouteImport } from './routes/players.$playerId'
 import { Route as UTokenRouteImport } from './routes/u.$token'
 import { Route as ApiPublicEvolutionWebhookRouteImport } from './routes/api/public/evolution-webhook'
@@ -126,6 +129,11 @@ const InteligenciaRoute = InteligenciaRouteImport.update({
   path: '/inteligencia',
   getParentRoute: () => rootRouteImport,
 } as any)
+const JornadasRoute = JornadasRouteImport.update({
+  id: '/jornadas',
+  path: '/jornadas',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LigacoesRoute = LigacoesRouteImport.update({
   id: '/ligacoes',
   path: '/ligacoes',
@@ -195,6 +203,16 @@ const AutomacoesWhatsappRoute = AutomacoesWhatsappRouteImport.update({
   id: '/whatsapp',
   path: '/whatsapp',
   getParentRoute: () => AutomacoesRoute,
+} as any)
+const JornadasJourneyIdRoute = JornadasJourneyIdRouteImport.update({
+  id: '/$journeyId',
+  path: '/$journeyId',
+  getParentRoute: () => JornadasRoute,
+} as any)
+const JornadasNovaRoute = JornadasNovaRouteImport.update({
+  id: '/nova',
+  path: '/nova',
+  getParentRoute: () => JornadasRoute,
 } as any)
 const PlayersPlayerIdRoute = PlayersPlayerIdRouteImport.update({
   id: '/$playerId',
@@ -380,6 +398,7 @@ export interface FileRoutesByFullPath {
   '/experts': typeof ExpertsRoute
   '/gamificacao': typeof GamificacaoRoute
   '/inteligencia': typeof InteligenciaRoute
+  '/jornadas': typeof JornadasRouteWithChildren
   '/ligacoes': typeof LigacoesRoute
   '/midia-ltv': typeof MidiaLtvRoute
   '/players': typeof PlayersRouteWithChildren
@@ -394,6 +413,8 @@ export interface FileRoutesByFullPath {
   '/automacoes/ligacoes': typeof AutomacoesLigacoesRoute
   '/automacoes/sms': typeof AutomacoesSmsRoute
   '/automacoes/whatsapp': typeof AutomacoesWhatsappRoute
+  '/jornadas/$journeyId': typeof JornadasJourneyIdRoute
+  '/jornadas/nova': typeof JornadasNovaRoute
   '/players/$playerId': typeof PlayersPlayerIdRoute
   '/u/$token': typeof UTokenRoute
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
@@ -438,6 +459,7 @@ export interface FileRoutesByTo {
   '/experts': typeof ExpertsRoute
   '/gamificacao': typeof GamificacaoRoute
   '/inteligencia': typeof InteligenciaRoute
+  '/jornadas': typeof JornadasRouteWithChildren
   '/ligacoes': typeof LigacoesRoute
   '/midia-ltv': typeof MidiaLtvRoute
   '/players': typeof PlayersRouteWithChildren
@@ -452,6 +474,8 @@ export interface FileRoutesByTo {
   '/automacoes/ligacoes': typeof AutomacoesLigacoesRoute
   '/automacoes/sms': typeof AutomacoesSmsRoute
   '/automacoes/whatsapp': typeof AutomacoesWhatsappRoute
+  '/jornadas/$journeyId': typeof JornadasJourneyIdRoute
+  '/jornadas/nova': typeof JornadasNovaRoute
   '/players/$playerId': typeof PlayersPlayerIdRoute
   '/u/$token': typeof UTokenRoute
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
@@ -497,6 +521,7 @@ export interface FileRoutesById {
   '/experts': typeof ExpertsRoute
   '/gamificacao': typeof GamificacaoRoute
   '/inteligencia': typeof InteligenciaRoute
+  '/jornadas': typeof JornadasRouteWithChildren
   '/ligacoes': typeof LigacoesRoute
   '/midia-ltv': typeof MidiaLtvRoute
   '/players': typeof PlayersRouteWithChildren
@@ -511,6 +536,8 @@ export interface FileRoutesById {
   '/automacoes/ligacoes': typeof AutomacoesLigacoesRoute
   '/automacoes/sms': typeof AutomacoesSmsRoute
   '/automacoes/whatsapp': typeof AutomacoesWhatsappRoute
+  '/jornadas/$journeyId': typeof JornadasJourneyIdRoute
+  '/jornadas/nova': typeof JornadasNovaRoute
   '/players/$playerId': typeof PlayersPlayerIdRoute
   '/u/$token': typeof UTokenRoute
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
@@ -557,6 +584,7 @@ export interface FileRouteTypes {
     | '/experts'
     | '/gamificacao'
     | '/inteligencia'
+    | '/jornadas'
     | '/ligacoes'
     | '/midia-ltv'
     | '/players'
@@ -571,6 +599,8 @@ export interface FileRouteTypes {
     | '/automacoes/ligacoes'
     | '/automacoes/sms'
     | '/automacoes/whatsapp'
+    | '/jornadas/$journeyId'
+    | '/jornadas/nova'
     | '/players/$playerId'
     | '/u/$token'
     | '/api/public/evolution-webhook'
@@ -615,6 +645,7 @@ export interface FileRouteTypes {
     | '/experts'
     | '/gamificacao'
     | '/inteligencia'
+    | '/jornadas'
     | '/ligacoes'
     | '/midia-ltv'
     | '/players'
@@ -629,6 +660,8 @@ export interface FileRouteTypes {
     | '/automacoes/ligacoes'
     | '/automacoes/sms'
     | '/automacoes/whatsapp'
+    | '/jornadas/$journeyId'
+    | '/jornadas/nova'
     | '/players/$playerId'
     | '/u/$token'
     | '/api/public/evolution-webhook'
@@ -673,6 +706,7 @@ export interface FileRouteTypes {
     | '/experts'
     | '/gamificacao'
     | '/inteligencia'
+    | '/jornadas'
     | '/ligacoes'
     | '/midia-ltv'
     | '/players'
@@ -687,6 +721,8 @@ export interface FileRouteTypes {
     | '/automacoes/ligacoes'
     | '/automacoes/sms'
     | '/automacoes/whatsapp'
+    | '/jornadas/$journeyId'
+    | '/jornadas/nova'
     | '/players/$playerId'
     | '/u/$token'
     | '/api/public/evolution-webhook'
@@ -732,6 +768,7 @@ export interface RootRouteChildren {
   ExpertsRoute: typeof ExpertsRoute
   GamificacaoRoute: typeof GamificacaoRoute
   InteligenciaRoute: typeof InteligenciaRoute
+  JornadasRoute: typeof JornadasRouteWithChildren
   LigacoesRoute: typeof LigacoesRoute
   MidiaLtvRoute: typeof MidiaLtvRoute
   PlayersRoute: typeof PlayersRouteWithChildren
@@ -859,6 +896,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof InteligenciaRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/jornadas': {
+      id: '/jornadas'
+      path: '/jornadas'
+      fullPath: '/jornadas'
+      preLoaderRoute: typeof JornadasRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/ligacoes': {
       id: '/ligacoes'
       path: '/ligacoes'
@@ -956,6 +1000,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/automacoes/whatsapp'
       preLoaderRoute: typeof AutomacoesWhatsappRouteImport
       parentRoute: typeof AutomacoesRoute
+    }
+    '/jornadas/$journeyId': {
+      id: '/jornadas/$journeyId'
+      path: '/$journeyId'
+      fullPath: '/jornadas/$journeyId'
+      preLoaderRoute: typeof JornadasJourneyIdRouteImport
+      parentRoute: typeof JornadasRoute
+    }
+    '/jornadas/nova': {
+      id: '/jornadas/nova'
+      path: '/nova'
+      fullPath: '/jornadas/nova'
+      preLoaderRoute: typeof JornadasNovaRouteImport
+      parentRoute: typeof JornadasRoute
     }
     '/players/$playerId': {
       id: '/players/$playerId'
@@ -1188,6 +1246,20 @@ const AutomacoesRouteWithChildren = AutomacoesRoute._addFileChildren(
   AutomacoesRouteChildren,
 )
 
+interface JornadasRouteChildren {
+  JornadasJourneyIdRoute: typeof JornadasJourneyIdRoute
+  JornadasNovaRoute: typeof JornadasNovaRoute
+}
+
+const JornadasRouteChildren: JornadasRouteChildren = {
+  JornadasJourneyIdRoute: JornadasJourneyIdRoute,
+  JornadasNovaRoute: JornadasNovaRoute,
+}
+
+const JornadasRouteWithChildren = JornadasRoute._addFileChildren(
+  JornadasRouteChildren,
+)
+
 interface PlayersRouteChildren {
   PlayersPlayerIdRoute: typeof PlayersPlayerIdRoute
 }
@@ -1212,6 +1284,7 @@ const rootRouteChildren: RootRouteChildren = {
   ExpertsRoute: ExpertsRoute,
   GamificacaoRoute: GamificacaoRoute,
   InteligenciaRoute: InteligenciaRoute,
+  JornadasRoute: JornadasRouteWithChildren,
   LigacoesRoute: LigacoesRoute,
   MidiaLtvRoute: MidiaLtvRoute,
   PlayersRoute: PlayersRouteWithChildren,
