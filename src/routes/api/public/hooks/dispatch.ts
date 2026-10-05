@@ -1,18 +1,20 @@
 import { createFileRoute } from "@tanstack/react-router";
-import {
-  runSmsDispatcher,
-  runScheduledSmsCampaigns,
-} from "@/lib/sms-dispatcher.server";
+import { runSmsDispatcher, runScheduledSmsCampaigns } from "@/lib/sms-dispatcher.server";
 import { runEmailFlowDispatcher } from "@/lib/email-automations.server";
 import { tickFlows } from "@/lib/call-flows.server";
 import { runDispatcher as runWhatsappDispatcher } from "@/lib/automation.server";
+import { runJourneyDispatcher } from "@/lib/journeys.server";
 import { requireSharedSecret } from "@/lib/cron-auth.server";
 
 export const Route = createFileRoute("/api/public/hooks/dispatch")({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        try { requireSharedSecret(request, "CRON_SECRET"); } catch (r) { return r as Response; }
+        try {
+          requireSharedSecret(request, "CRON_SECRET");
+        } catch (r) {
+          return r as Response;
+        }
         const url = new URL(request.url);
         const channel = url.searchParams.get("channel");
         try {
@@ -28,9 +30,9 @@ export const Route = createFileRoute("/api/public/hooks/dispatch")({
             const campaigns = await runScheduledSmsCampaigns({ limit: 20 });
             const flows = await runSmsDispatcher({ limit: 2000 });
             result = { campaigns, flows };
-          }
-          else if (channel === "email") result = await runEmailFlowDispatcher({ limit: 2000 });
+          } else if (channel === "email") result = await runEmailFlowDispatcher({ limit: 2000 });
           else if (channel === "call") result = await tickFlows(200);
+          else if (channel === "journey") result = await runJourneyDispatcher(200);
           else if (channel === "whatsapp") result = await runWhatsappDispatcher({ limit: 50 });
           else return Response.json({ ok: false, error: "channel inválido" }, { status: 400 });
           return Response.json({ ok: true, channel, result });
