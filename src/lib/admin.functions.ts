@@ -413,9 +413,13 @@ export const adminGenerateLoginLink = createServerFn({ method: "POST" })
     if (getErr) throw new Error(getErr.message);
     if (!target.user?.email) throw new Error("Usuário sem email");
 
+    // Do not rely on Supabase's project Site URL here: it may still point to
+    // localhost and would send an impersonation link to the wrong host.
+    const redirectTo = (process.env.PUBLIC_APP_URL ?? "https://betleads.io").replace(/\/$/, "");
     const { data: link, error } = await supabaseAdmin.auth.admin.generateLink({
       type: "magiclink",
       email: target.user.email,
+      options: { redirectTo },
     });
     if (error) throw new Error(error.message);
 
