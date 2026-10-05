@@ -1,16 +1,21 @@
 import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { ArrowDown, ArrowLeft, Clock3, MessageSquare, Plus, Save, Trash2 } from "lucide-react";
+import { ArrowLeft, Clock3, Mail, MessageSquare, Plus, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { saveJourney } from "@/lib/journeys.functions";
+import { listEmailTemplates } from "@/lib/email.functions";
 import type { JourneyStepInput } from "@/lib/journeys.shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
-type EditableStep = { kind: "wait"; seconds: number } | { kind: "sms"; content: string };
+type Step =
+  | { kind: "wait"; seconds: number }
+  | { kind: "sms"; content: string }
+  | { kind: "email"; templateId: string };
+type SavedStep = { step_type: string; config: Record<string, unknown> };
 
 export function JourneyEditor({
   id,
@@ -19,100 +24,99 @@ export function JourneyEditor({
 }: {
   id?: string;
   initial?: { name: string; description: string | null; trigger_type: string };
-  initialSteps?: Array<{ step_type: string; config: Record<string, unknown> }>;
+  initialSteps?: SavedStep[];
 }) {
   const navigate = useNavigate();
   const save = useServerFn(saveJourney);
+  const templatesFn = useServerFn(listEmailTemplates);
+  const templates = useQuery({
+    queryKey: ["journey-email-templates"],
+    queryFn: () => templatesFn(),
+  });
   const [name, setName] = useState(initial?.name ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
   const [trigger, setTrigger] = useState(initial?.trigger_type ?? "manual");
-  const [steps, setSteps] = useState<EditableStep[]>(() =>
-    initialSteps.flatMap((step) =>
-      step.step_type === "wait"
-        ? [{ kind: "wait" as const, seconds: Number(step.config.delay_seconds ?? 3600) }]
-        : step.step_type === "sms"
-          ? [{ kind: "sms" as const, content: String(step.config.content ?? "") }]
-          : [],
+  const [steps, setSteps] = useState<Step[]>(() =>
+    initialSteps.flatMap((s) =>
+      s.step_type === "wait"
+        ? [{ kind: "wait" as const, seconds: Number(s.config.delay_seconds ?? 3600) }]
+        : s.step_type === "sms"
+          ? [{ kind: "sms" as const, content: String(s.config.content ?? "") }]
+          : s.step_type === "email"
+            ? [{ kind: "email" as const, templateId: String(s.config.template_id ?? "") }]
+            : [],
     ),
   );
-  const serializedSteps = (): JourneyStepInput[] => [
-    ...steps
-      .map((step) =>
-        step.kind === "wait"
-          ? { step_type: "wait" as const, config: { delay_seconds: Math.max(60, step.seconds) } }
-          : { step_type: "sms" as const, config: { content: step.content } },
-      )
-      .filter((step) => step.step_type !== "sms" || step.config.content.trim()),
-    { step_type: "end", label: "Encerrar", config: {} },
-  ];
   const mutation = useMutation({
-    mutationFn: () =>
-      save({
+    mutationFn: () => {
+      const body = steps.flatMap((s): JourneyStepInput[] =>
+        s.kind === "wait"
+          ? [{ step_type: "wait", config: { delay_seconds: Math.max(60, s.seconds) } }]
+          : s.kind === "sms"
+            ? s.content.trim()
+              ? [{ step_type: "sms", config: { content: s.content } }]
+              : []
+            : s.templateId
+              ? [{ step_type: "email", config: { template_id: s.templateId } }]
+              : [],
+      );
+      return save({
         data: {
           id,
           journey: {
             name,
             description: description || null,
             trigger_type: trigger,
-            steps: serializedSteps(),
+            steps: [...body, { step_type: "end", config: {} }],
           },
         },
-      }),
-    onSuccess: (result) => {
-      toast.success("Jornada salva como rascunho");
-      navigate({ to: "/jornadas/$journeyId", params: { journeyId: result.id } });
+      });
     },
-    onError: (error: Error) => toast.error(error.message),
+    onSuccess: (r) => {
+      toast.success("Jornada salva como rascunho");
+      navigate({ to: "/jornadas/$journeyId", params: { journeyId: r.id } });
+    },
+    onError: (e: Error) => toast.error(e.message),
   });
-  const add = (kind: EditableStep["kind"]) =>
-    setSteps((current) => [
-      ...current,
-      kind === "wait" ? { kind, seconds: 3600 } : { kind, content: "" },
+  const add = (kind: Step["kind"]) =>
+    setSteps((all) => [
+      ...all,
+      kind === "wait"
+        ? { kind, seconds: 3600 }
+        : kind === "sms"
+          ? { kind, content: "" }
+          : { kind, templateId: "" },
     ]);
-  const update = (index: number, step: EditableStep) =>
-    setSteps((current) => current.map((item, position) => (position === index ? step : item)));
+  const change = (i: number, value: Step) =>
+    setSteps((all) => all.map((s, n) => (n === i ? value : s)));
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6 p-4 sm:p-6">
       <Button variant="ghost" size="sm" onClick={() => navigate({ to: "/jornadas" })}>
         <ArrowLeft className="mr-1 h-4 w-4" /> Jornadas
       </Button>
       <div>
-        <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary">
+        <p className="text-xs font-medium uppercase tracking-[.18em] text-primary">
           Jornadas multicanal
         </p>
         <h1 className="mt-1 text-2xl font-semibold">{id ? "Editar jornada" : "Nova jornada"}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Monte a sequência de contato. A jornada só dispara após ser publicada.
-        </p>
+        <p className="mt-1 text-sm text-muted-foreground">A jornada só envia após ser publicada.</p>
       </div>
       <div className="space-y-5 rounded-xl border p-5">
-        <label className="block space-y-2 text-sm font-medium">
+        <label className="block text-sm font-medium">
           Nome
-          <Input
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder="Ex.: Recuperar jogadores inativos"
-          />
+          <Input value={name} onChange={(e) => setName(e.target.value)} />
         </label>
-        <label className="block space-y-2 text-sm font-medium">
+        <label className="block text-sm font-medium">
           Descrição
-          <Textarea
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-            placeholder="Objetivo e público da jornada"
-          />
+          <Textarea value={description} onChange={(e) => setDescription(e.target.value)} />
         </label>
-        <label className="block space-y-2 text-sm font-medium">
+        <label className="block text-sm font-medium">
           Gatilho
-          <Input
-            value={trigger}
-            onChange={(event) => setTrigger(event.target.value)}
-            placeholder="manual"
-          />
+          <Input value={trigger} onChange={(e) => setTrigger(e.target.value)} />
         </label>
         <section className="space-y-3">
           <div className="flex items-center justify-between">
-            <p className="text-sm font-medium">Sequência</p>
+            <b className="text-sm">Sequência</b>
             <div className="flex gap-2">
               <Button type="button" size="sm" variant="outline" onClick={() => add("wait")}>
                 <Clock3 className="mr-1 h-4 w-4" /> Espera
@@ -120,48 +124,55 @@ export function JourneyEditor({
               <Button type="button" size="sm" variant="outline" onClick={() => add("sms")}>
                 <MessageSquare className="mr-1 h-4 w-4" /> SMS
               </Button>
+              <Button type="button" size="sm" variant="outline" onClick={() => add("email")}>
+                <Mail className="mr-1 h-4 w-4" /> E-mail
+              </Button>
             </div>
           </div>
-          {steps.map((step, index) => (
-            <div key={index} className="rounded-lg border p-4">
-              {index > 0 && (
-                <ArrowDown className="-mt-7 mb-2 ml-4 h-4 w-4 bg-background text-muted-foreground" />
-              )}
-              <div className="mb-3 flex items-center justify-between font-medium">
-                {step.kind === "wait" ? "Aguardar" : "Enviar SMS"}
+          {steps.map((s, i) => (
+            <div key={i} className="rounded-lg border p-4">
+              <div className="mb-2 flex justify-between font-medium">
+                {s.kind === "wait" ? "Aguardar" : s.kind === "sms" ? "Enviar SMS" : "Enviar e-mail"}
                 <Button
-                  type="button"
                   size="icon"
                   variant="ghost"
-                  onClick={() =>
-                    setSteps((current) => current.filter((_, position) => position !== index))
-                  }
+                  onClick={() => setSteps((all) => all.filter((_, n) => n !== i))}
                 >
                   <Trash2 className="h-4 w-4" />
                 </Button>
               </div>
-              {step.kind === "wait" ? (
-                <label className="text-sm">
-                  Segundos de espera
-                  <Input
-                    type="number"
-                    min={60}
-                    value={step.seconds}
-                    onChange={(event) =>
-                      update(index, { kind: "wait", seconds: Number(event.target.value) })
-                    }
-                  />
-                </label>
-              ) : (
-                <Textarea
-                  value={step.content}
-                  onChange={(event) => update(index, { kind: "sms", content: event.target.value })}
-                  placeholder="Mensagem SMS. Use variáveis como {{nome}}."
+              {s.kind === "wait" ? (
+                <Input
+                  type="number"
+                  min={60}
+                  value={s.seconds}
+                  onChange={(e) => change(i, { kind: "wait", seconds: Number(e.target.value) })}
                 />
+              ) : s.kind === "sms" ? (
+                <Textarea
+                  value={s.content}
+                  onChange={(e) => change(i, { kind: "sms", content: e.target.value })}
+                  placeholder="Mensagem SMS"
+                />
+              ) : (
+                <select
+                  className="flex h-10 w-full rounded-md border bg-background px-3 text-sm"
+                  value={s.templateId}
+                  onChange={(e) => change(i, { kind: "email", templateId: e.target.value })}
+                >
+                  <option value="">Selecione um template</option>
+                  {(templates.data?.items ?? [])
+                    .filter((t) => t.ativo)
+                    .map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.nome}
+                      </option>
+                    ))}
+                </select>
               )}
             </div>
           ))}
-          <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+          <div className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
             Encerrar jornada
           </div>
         </section>
