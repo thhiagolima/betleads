@@ -1,8 +1,18 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link } from "@tanstack/react-router";
-import { Mail, MessageSquare, Pause, Play, Plus, Route, Timer, Volume2 } from "lucide-react";
+import {
+  Mail,
+  MessageSquare,
+  Pause,
+  Play,
+  Plus,
+  Route,
+  Search,
+  Timer,
+  Volume2,
+} from "lucide-react";
 import { toast } from "sonner";
 import { listJourneys, setJourneyStatus } from "@/lib/journeys.functions";
 import { Button } from "@/components/ui/button";
@@ -24,14 +34,21 @@ export function JourneysHub() {
   const list = useServerFn(listJourneys);
   const changeStatus = useServerFn(setJourneyStatus);
   const [filter, setFilter] = useState<"all" | Journey["status"]>("all");
+  const [search, setSearch] = useState("");
   const journeys = useQuery({ queryKey: ["journeys"], queryFn: () => list() });
   const status = useMutation({
     mutationFn: (input: { id: string; status: Journey["status"] }) => changeStatus({ data: input }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["journeys"] }),
     onError: (error: Error) => toast.error(error.message),
   });
-  const rows = ((journeys.data?.journeys ?? []) as Journey[]).filter(
-    (journey) => filter === "all" || journey.status === filter,
+  const rows = useMemo(
+    () =>
+      ((journeys.data?.journeys ?? []) as Journey[]).filter(
+        (journey) =>
+          (filter === "all" || journey.status === filter) &&
+          `${journey.name} ${journey.trigger_type}`.toLowerCase().includes(search.toLowerCase()),
+      ),
+    [journeys.data?.journeys, filter, search],
   );
   return (
     <div className="mx-auto w-full max-w-[1180px] space-y-6 p-4 sm:p-6">
@@ -69,6 +86,22 @@ export function JourneysHub() {
             {item === "all" ? "Todas" : labels[item]}
           </Button>
         ))}
+      </div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="inline-flex rounded-lg bg-muted p-1 text-sm">
+          <span className="rounded-md bg-background px-3 py-2 font-medium shadow-sm">Réguas</span>
+          <span className="px-3 py-2 text-muted-foreground">Fila de envio</span>
+          <span className="px-3 py-2 text-muted-foreground">Falhas</span>
+        </div>
+        <label className="relative block">
+          <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+          <input
+            className="h-10 w-full rounded-md border bg-background pl-9 pr-3 text-sm sm:w-72"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Buscar régua..."
+          />
+        </label>
       </div>
       <Card>
         <CardHeader>
