@@ -6,6 +6,7 @@
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { augmentEmailHtml, isSuppressed } from "./email-deliverability.server";
+import { callInfobipEmail } from "./infobip-email.server";
 
 export const BUSINESSCODE_EMAIL_URL = "https://dash.businesscode.com.br/api/v1/messaging/email";
 
@@ -205,6 +206,16 @@ export async function callBusinessCodeEmail(input: SendEmailInput): Promise<Send
   };
   if (input.fromName) payload.from_name = input.fromName;
   if (input.replyTo) payload.reply_to = input.replyTo;
+
+  // Opt-in migration path. The campaign and flow engines keep their existing
+  // contract while Infobip is enabled only after domain and webhook validation.
+  if (process.env.EMAIL_PROVIDER?.trim().toLowerCase() === "infobip") {
+    return callInfobipEmail({
+      ...input,
+      html: String(payload.content ?? ""),
+      idempotencyKey,
+    });
+  }
 
   // DEBUG: log do HTML final enviado para investigar fundo branco no Gmail mobile.
   // Mostra tamanho, primeiros 1500 chars e ultimos 800 chars para confirmar se ha

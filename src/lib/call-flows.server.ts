@@ -17,6 +17,7 @@ import {
   type VoiceSettings,
 } from "./calls.server";
 import { callBusinessCodeVoice, normalizeE164BR } from "./businesscode-voice.server";
+import { callInfobipVoice } from "./infobip-voice.server";
 import { sendSmsInternal } from "./sms.functions";
 import { buildPlayerVariables } from "./template-vars.server";
 import { deferIfOutsideWindow } from "./send-window.server";
@@ -301,7 +302,10 @@ async function executeCallBlock(progress: any, block: any, player: any): Promise
   }
 
   // 4. dispara provedor
-  const result = await callBusinessCodeVoice(to, audioUrl);
+  const usingInfobip = process.env.VOICE_PROVIDER?.trim().toLowerCase() === "infobip";
+  const result = usingInfobip
+    ? await callInfobipVoice(to, audioUrl)
+    : await callBusinessCodeVoice(to, audioUrl);
   const isAuthError = result.status === 401 || result.status === 403;
   if (isAuthError) {
     console.warn(`[call-flow] auth_error ${result.status} — mantendo lead na fila, retry em 10min`);
@@ -313,8 +317,8 @@ async function executeCallBlock(progress: any, block: any, player: any): Promise
     script_id: scriptId,
     audio_url: audioUrl,
     status: result.ok ? ("pending" as any) : isAuthError ? ("pending" as any) : ("failed" as any),
-    provider: "businesscode",
-    provider_call_id: result.idempotencyKey || null,
+    provider: usingInfobip ? "infobip" : "businesscode",
+    provider_call_id: result.providerCallId ?? (result.idempotencyKey || null),
     provider_response: (result.body ?? {}) as any,
     provider_status_code: result.status,
     to_phone: to,
@@ -350,7 +354,7 @@ async function executeCallBlock(progress: any, block: any, player: any): Promise
     "call_dispatched",
     {
       ok: result.ok,
-      provider_call_id: result.idempotencyKey,
+      provider_call_id: result.providerCallId ?? result.idempotencyKey,
       to,
     },
   );

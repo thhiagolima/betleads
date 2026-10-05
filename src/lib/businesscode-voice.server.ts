@@ -33,6 +33,7 @@ export type BusinessCodeVoiceResult = {
   status: number;
   body: unknown;
   idempotencyKey: string;
+  providerCallId?: string | null;
 };
 
 export async function callBusinessCodeVoice(
@@ -120,7 +121,7 @@ export async function callBusinessCodeVoice(
     attempts: attempt,
     body,
   });
-  return { ok: res.ok, status: res.status, body, idempotencyKey };
+  return { ok: res.ok, status: res.status, body, idempotencyKey, providerCallId: idempotencyKey };
 }
 
 // ============================================================

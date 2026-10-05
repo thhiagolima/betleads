@@ -71,9 +71,75 @@ export const adminListUsers = createServerFn({ method: "POST" })
     const args: Record<string, string> = {};
     if (data.from) args._from = data.from;
     if (data.to) args._to = data.to;
-    const { data: rows, error } = await supabaseAdmin.rpc("admin_list_users_with_usage", args);
-    if (error) throw new Error(error.message);
-    return { users: rows ?? [] };
+
+    // The account directory is the source of truth for this screen.  Do not make
+    // the presence of users depend on the usage aggregation RPC: an error (or a
+    // stale version) of that RPC used to make the UI show "0 usuários".
+    const [authResult, membershipsResult, tenantsResult, usageResult] = await Promise.all([
+      supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
+      supabaseAdmin.from("user_roles").select("user_id,tenant_id,role"),
+      supabaseAdmin.from("tenants").select("id,nome"),
+      // This RPC checks auth.uid(); it must run with the requesting super
+      // admin's JWT, not with the elevated client (which has no auth.uid()).
+      context.supabase.rpc("admin_list_users_with_usage", args),
+    ]);
+    if (authResult.error) throw new Error(authResult.error.message);
+    if (membershipsResult.error) throw new Error(membershipsResult.error.message);
+    if (tenantsResult.error) throw new Error(tenantsResult.error.message);
+
+    const memberships = membershipsResult.data ?? [];
+    const tenantNameById = new Map(
+      (tenantsResult.data ?? []).map((tenant) => [tenant.id, tenant.nome]),
+    );
+    const superAdminIds = new Set(
+      memberships
+        .filter((membership) => membership.role === "super_admin")
+        .map((membership) => membership.user_id),
+    );
+    const membershipsByUser = new Map<string, typeof memberships>();
+    for (const membership of memberships) {
+      const userMemberships = membershipsByUser.get(membership.user_id) ?? [];
+      userMemberships.push(membership);
+      membershipsByUser.set(membership.user_id, userMemberships);
+    }
+    const usageByUser = new Map((usageResult.data ?? []).map((row) => [row.user_id, row]));
+
+    const users = authResult.data.users
+      .filter((user) => !superAdminIds.has(user.id))
+      .map((user) => {
+        const userMemberships = membershipsByUser.get(user.id) ?? [];
+        const usage = usageByUser.get(user.id);
+        const tenantIds = userMemberships
+          .map((membership) => membership.tenant_id)
+          .filter((tenantId): tenantId is string => Boolean(tenantId));
+        const tenantNames = [
+          ...new Set(tenantIds.map((tenantId) => tenantNameById.get(tenantId)).filter(Boolean)),
+        ];
+        const roles = [
+          ...new Set(userMemberships.map((membership) => membership.role).filter(Boolean)),
+        ];
+
+        return {
+          user_id: user.id,
+          email: user.email ?? null,
+          created_at: user.created_at ?? null,
+          last_sign_in_at: user.last_sign_in_at ?? null,
+          banned_until: user.banned_until ?? null,
+          tenant_id: usage?.tenant_id ?? tenantIds[0] ?? null,
+          tenant_nome: usage?.tenant_nome ?? (tenantNames.join(", ") || null),
+          role: usage?.role ?? (roles.join(", ") || null),
+          sms_count: usage?.sms_count ?? 0,
+          sms_cost: usage?.sms_cost ?? 0,
+          call_minutes: usage?.call_minutes ?? 0,
+          call_cost: usage?.call_cost ?? 0,
+          email_count: usage?.email_count ?? 0,
+          email_cost: usage?.email_cost ?? 0,
+          total_cost: usage?.total_cost ?? 0,
+        };
+      })
+      .sort((a, b) => (a.email ?? "").localeCompare(b.email ?? "", "pt-BR"));
+
+    return { users, usageUnavailable: Boolean(usageResult.error) };
   });
 
 export const adminPlatformMetrics = createServerFn({ method: "POST" })
@@ -85,7 +151,7 @@ export const adminPlatformMetrics = createServerFn({ method: "POST" })
     const args: Record<string, string> = {};
     if (data.from) args._from = data.from;
     if (data.to) args._to = data.to;
-    const { data: metrics, error } = await supabaseAdmin.rpc("admin_platform_metrics", args);
+    const { data: metrics, error } = await context.supabase.rpc("admin_platform_metrics", args);
     if (error) throw new Error(error.message);
     return { metrics: metrics ?? {} };
   });
@@ -322,7 +388,8 @@ export const adminRemoveUserFromTenant = createServerFn({ method: "POST" })
       .maybeSingle();
     if (beforeErr) throw new Error(beforeErr.message);
     if (!before) throw new Error("Vínculo não encontrado");
-    if (before.role === "admin") throw new Error("Defina outro admin antes de remover este vínculo");
+    if (before.role === "admin")
+      throw new Error("Defina outro admin antes de remover este vínculo");
     const { error } = await supabaseAdmin.from("user_roles").delete().eq("id", before.id);
     if (error) throw new Error(error.message);
     await auditAdminAction({ actorUserId: context.userId, action: "user_membership.removed", targetUserId: data.user_id, tenantId: data.tenant_id, before });

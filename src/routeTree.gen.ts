@@ -62,6 +62,8 @@ import { Route as ApiPublicMetaSyncTickRouteImport } from './routes/api/public/m
 import { Route as ApiPublicPrecallDispatchRouteImport } from './routes/api/public/precall/dispatch'
 import { Route as ApiPublicWebhookEventoRouteImport } from './routes/api/public/webhook.$evento'
 import { Route as ApiPublicEmailImgAssetIdFilenameRouteImport } from './routes/api/public/email-img.$assetId.$filename'
+import { Route as ApiPublicInfobipVoiceCmlRouteImport } from './routes/api/public/infobip/voice/cml'
+import { Route as ApiPublicInfobipVoiceEventsRouteImport } from './routes/api/public/infobip/voice/events'
 import { Route as ApiPublicWebhookTokenEventoRouteImport } from './routes/api/public/webhook.$token.$evento'
 
 const IndexRoute = IndexRouteImport.update({
@@ -346,6 +348,18 @@ const ApiPublicEmailImgAssetIdFilenameRoute =
     path: '/api/public/email-img/$assetId/$filename',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicInfobipVoiceCmlRoute =
+  ApiPublicInfobipVoiceCmlRouteImport.update({
+    id: '/api/public/infobip/voice/cml',
+    path: '/api/public/infobip/voice/cml',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiPublicInfobipVoiceEventsRoute =
+  ApiPublicInfobipVoiceEventsRouteImport.update({
+    id: '/api/public/infobip/voice/events',
+    path: '/api/public/infobip/voice/events',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicWebhookTokenEventoRoute =
   ApiPublicWebhookTokenEventoRouteImport.update({
     id: '/api/public/webhook/$token/$evento',
@@ -407,6 +421,8 @@ export interface FileRoutesByFullPath {
   '/api/public/precall/dispatch': typeof ApiPublicPrecallDispatchRoute
   '/api/public/webhook/$evento': typeof ApiPublicWebhookEventoRoute
   '/api/public/email-img/$assetId/$filename': typeof ApiPublicEmailImgAssetIdFilenameRoute
+  '/api/public/infobip/voice/cml': typeof ApiPublicInfobipVoiceCmlRoute
+  '/api/public/infobip/voice/events': typeof ApiPublicInfobipVoiceEventsRoute
   '/api/public/webhook/$token/$evento': typeof ApiPublicWebhookTokenEventoRoute
 }
 export interface FileRoutesByTo {
@@ -463,6 +479,8 @@ export interface FileRoutesByTo {
   '/api/public/precall/dispatch': typeof ApiPublicPrecallDispatchRoute
   '/api/public/webhook/$evento': typeof ApiPublicWebhookEventoRoute
   '/api/public/email-img/$assetId/$filename': typeof ApiPublicEmailImgAssetIdFilenameRoute
+  '/api/public/infobip/voice/cml': typeof ApiPublicInfobipVoiceCmlRoute
+  '/api/public/infobip/voice/events': typeof ApiPublicInfobipVoiceEventsRoute
   '/api/public/webhook/$token/$evento': typeof ApiPublicWebhookTokenEventoRoute
 }
 export interface FileRoutesById {
@@ -520,6 +538,8 @@ export interface FileRoutesById {
   '/api/public/precall/dispatch': typeof ApiPublicPrecallDispatchRoute
   '/api/public/webhook/$evento': typeof ApiPublicWebhookEventoRoute
   '/api/public/email-img/$assetId/$filename': typeof ApiPublicEmailImgAssetIdFilenameRoute
+  '/api/public/infobip/voice/cml': typeof ApiPublicInfobipVoiceCmlRoute
+  '/api/public/infobip/voice/events': typeof ApiPublicInfobipVoiceEventsRoute
   '/api/public/webhook/$token/$evento': typeof ApiPublicWebhookTokenEventoRoute
 }
 export interface FileRouteTypes {
@@ -578,6 +598,8 @@ export interface FileRouteTypes {
     | '/api/public/precall/dispatch'
     | '/api/public/webhook/$evento'
     | '/api/public/email-img/$assetId/$filename'
+    | '/api/public/infobip/voice/cml'
+    | '/api/public/infobip/voice/events'
     | '/api/public/webhook/$token/$evento'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -634,6 +656,8 @@ export interface FileRouteTypes {
     | '/api/public/precall/dispatch'
     | '/api/public/webhook/$evento'
     | '/api/public/email-img/$assetId/$filename'
+    | '/api/public/infobip/voice/cml'
+    | '/api/public/infobip/voice/events'
     | '/api/public/webhook/$token/$evento'
   id:
     | '__root__'
@@ -690,6 +714,8 @@ export interface FileRouteTypes {
     | '/api/public/precall/dispatch'
     | '/api/public/webhook/$evento'
     | '/api/public/email-img/$assetId/$filename'
+    | '/api/public/infobip/voice/cml'
+    | '/api/public/infobip/voice/events'
     | '/api/public/webhook/$token/$evento'
   fileRoutesById: FileRoutesById
 }
@@ -742,6 +768,8 @@ export interface RootRouteChildren {
   ApiPublicPrecallDispatchRoute: typeof ApiPublicPrecallDispatchRoute
   ApiPublicWebhookEventoRoute: typeof ApiPublicWebhookEventoRoute
   ApiPublicEmailImgAssetIdFilenameRoute: typeof ApiPublicEmailImgAssetIdFilenameRoute
+  ApiPublicInfobipVoiceCmlRoute: typeof ApiPublicInfobipVoiceCmlRoute
+  ApiPublicInfobipVoiceEventsRoute: typeof ApiPublicInfobipVoiceEventsRoute
   ApiPublicWebhookTokenEventoRoute: typeof ApiPublicWebhookTokenEventoRoute
 }
 
@@ -1118,6 +1146,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicEmailImgAssetIdFilenameRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/infobip/voice/cml': {
+      id: '/api/public/infobip/voice/cml'
+      path: '/api/public/infobip/voice/cml'
+      fullPath: '/api/public/infobip/voice/cml'
+      preLoaderRoute: typeof ApiPublicInfobipVoiceCmlRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/infobip/voice/events': {
+      id: '/api/public/infobip/voice/events'
+      path: '/api/public/infobip/voice/events'
+      fullPath: '/api/public/infobip/voice/events'
+      preLoaderRoute: typeof ApiPublicInfobipVoiceEventsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/webhook/$token/$evento': {
       id: '/api/public/webhook/$token/$evento'
       path: '/api/public/webhook/$token/$evento'
@@ -1208,6 +1250,8 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicPrecallDispatchRoute: ApiPublicPrecallDispatchRoute,
   ApiPublicWebhookEventoRoute: ApiPublicWebhookEventoRoute,
   ApiPublicEmailImgAssetIdFilenameRoute: ApiPublicEmailImgAssetIdFilenameRoute,
+  ApiPublicInfobipVoiceCmlRoute: ApiPublicInfobipVoiceCmlRoute,
+  ApiPublicInfobipVoiceEventsRoute: ApiPublicInfobipVoiceEventsRoute,
   ApiPublicWebhookTokenEventoRoute: ApiPublicWebhookTokenEventoRoute,
 }
 export const routeTree = rootRouteImport
