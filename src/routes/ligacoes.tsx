@@ -6,7 +6,6 @@ import { SendWindowCard } from "@/components/send-window-card";
 import { LigacoesPausedBanner } from "@/components/ligacoes/paused-banner";
 import { ProvidersPausedBanner } from "@/components/providers-paused-banner";
 import { ScriptsTab } from "@/components/ligacoes/scripts-tab";
-import { GenerateAudioTab } from "@/components/ligacoes/generate-audio-tab";
 import { QueueTab } from "@/components/ligacoes/queue-tab";
 import { HistoryShell } from "@/components/history/history-shell";
 import { ProvidersTab } from "@/components/ligacoes/providers-tab";
@@ -77,7 +76,6 @@ function LigacoesPage() {
         </TabsContent>
         <TabsContent value="scripts" className="space-y-6">
           <ScriptsTab />
-          <GenerateAudioTab />
         </TabsContent>
         <TabsContent value="massa">
           <BulkCallTab />
