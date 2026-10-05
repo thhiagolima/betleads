@@ -62,23 +62,17 @@ const engagementItems: NavItem[] = [
     title: "Automações",
     url: "/automacoes",
     icon: Rocket,
-    subItems: [
-      { title: "Visão geral", hash: "visao-geral" },
-      { title: "Jornadas", url: "/jornadas" },
-      { title: "Fluxos de SMS", url: "/automacoes/sms" },
-      { title: "Execuções", hash: "execucoes" },
-      { title: "Histórico", hash: "historico" },
-    ],
+    subItems: [{ title: "Jornadas", url: "/jornadas" }],
   },
   {
     title: "Canais",
-    url: "/whatsapp",
+    url: "/sms",
     icon: MessageSquare,
     subItems: [
       { title: "WhatsApp", url: "/whatsapp" },
       { title: "SMS", url: "/sms" },
       { title: "Email", url: "/email" },
-      { title: "Ligações", url: "/ligacoes" },
+      { title: "Voz", url: "/ligacoes" },
     ],
   },
 ];

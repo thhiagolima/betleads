@@ -19,14 +19,20 @@ const titles: Record<string, { title: string; subtitle: string }> = {
   },
   "/treino-ia": { title: "Configurar IA", subtitle: "Ensine a inteligência com exemplos reais" },
   "/alertas": { title: "Oportunidades", subtitle: "Jogadores que precisam de atenção" },
-  "/gamificacao": { title: "Níveis e fidelização", subtitle: "Classificação e comportamento dos jogadores" },
-  "/regras": { title: "Níveis e fidelização", subtitle: "Classificação e comportamento dos jogadores" },
+  "/gamificacao": {
+    title: "Níveis e fidelização",
+    subtitle: "Classificação e comportamento dos jogadores",
+  },
+  "/regras": {
+    title: "Níveis e fidelização",
+    subtitle: "Classificação e comportamento dos jogadores",
+  },
   "/whatsapp": { title: "WhatsApp", subtitle: "Sessões, fluxos e inbox em tempo real" },
   "/sms": { title: "SMS", subtitle: "Disparos em massa e automações por SMS" },
   "/campanhas": { title: "Campanhas", subtitle: "Disparos segmentados e resultados" },
   "/creditos-sms": { title: "Créditos SMS", subtitle: "Saldo, pedidos e extrato de consumo" },
   "/email": { title: "Email", subtitle: "Campanhas e fluxos de email" },
-  "/ligacoes": { title: "Ligações", subtitle: "Discador e call center" },
+  "/ligacoes": { title: "Voz", subtitle: "Áudios, chamadas e provedores" },
   "/eventos": { title: "Eventos", subtitle: "Timeline de atividades em tempo real" },
   "/webhooks": { title: "Integrações", subtitle: "Conexão com sua plataforma de apostas" },
   "/configuracoes": { title: "Configurações", subtitle: "Preferências da plataforma" },
@@ -121,7 +127,10 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         </header>
         <ProviderAuthBanner />
         <WhatsappNotifier />
-        <main aria-label={meta.title} className="flex-1 overflow-x-hidden p-4 animate-fade-in sm:p-6">
+        <main
+          aria-label={meta.title}
+          className="flex-1 overflow-x-hidden p-4 animate-fade-in sm:p-6"
+        >
           <TenantStatusGate>{children}</TenantStatusGate>
         </main>
       </div>

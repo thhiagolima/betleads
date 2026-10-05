@@ -17,11 +17,11 @@ import { DashboardTab } from "@/components/ligacoes/dashboard-tab";
 export const Route = createFileRoute("/ligacoes")({
   head: () => ({
     meta: [
-      { title: "Ligações IA — BETLEADS" },
+      { title: "Voz — BETLEADS" },
       {
         name: "description",
         content:
-          "Central de ligações com voz IA — templates de fala, geração de áudio ElevenLabs, fila e provedores.",
+          "Central de voz com áudios enviados, fila de chamadas e configuração de provedores.",
       },
     ],
   }),
@@ -40,16 +40,14 @@ const VALID_TABS = [
 function LigacoesPage() {
   const navigate = useNavigate();
   const hash = useLocation({ select: (l) => l.hash });
-  const currentTab = (VALID_TABS as readonly string[]).includes(hash)
-    ? hash
-    : "dashboard";
+  const currentTab = (VALID_TABS as readonly string[]).includes(hash) ? hash : "dashboard";
 
   return (
     <div className="space-y-6 p-6">
       <PageHeader
         icon={<Phone />}
-        title="Ligações com Voz IA"
-        subtitle="Scripts personalizados, áudio gerado em tempo real e fila pronta para qualquer provedor de telefonia."
+        title="Voz"
+        subtitle="Envie áudios, configure o provedor e acompanhe a fila de chamadas."
       />
 
       <LigacoesPausedBanner />
@@ -60,9 +58,7 @@ function LigacoesPage() {
 
       <Tabs
         value={currentTab}
-        onValueChange={(v) =>
-          navigate({ to: "/ligacoes", hash: v, replace: true })
-        }
+        onValueChange={(v) => navigate({ to: "/ligacoes", hash: v, replace: true })}
         className="space-y-6"
       >
         <TabsList className="hidden">
@@ -111,4 +107,3 @@ function LigacoesPage() {
     </div>
   );
 }
-
