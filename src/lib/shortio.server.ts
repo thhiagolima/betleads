@@ -88,7 +88,7 @@ async function settingsForTenant(tenantId: string): Promise<TenantShortioSetting
   };
 }
 
-function stripTrailingPunctuation(raw: string) {
+export function stripTrackingUrlTrailingPunctuation(raw: string) {
   let value = raw.replace(TRAILING_PUNCTUATION, "");
   // Parentheses are common in prose. Keep a closing parenthesis only when it
   // has a matching opening parenthesis inside the URL.
@@ -150,7 +150,7 @@ async function canonicalHash(url: string) {
     .join("");
 }
 
-function withTrackingToken(raw: string, token: string, context: LinkTrackingContext) {
+export function withTrackingToken(raw: string, token: string, context: LinkTrackingContext) {
   const url = new URL(raw);
   if (!url.searchParams.has("utm_source")) url.searchParams.set("utm_source", "betleads");
   if (!url.searchParams.has("utm_medium")) url.searchParams.set("utm_medium", context.channel);
@@ -314,7 +314,7 @@ export async function prepareTrackedText(
   const links: PreparedTrackedLink[] = [];
   for (let position = 0; position < matches.length; position++) {
     const match = matches[position];
-    const raw = stripTrailingPunctuation(match[0]);
+    const raw = stripTrackingUrlTrailingPunctuation(match[0]);
     if (
       !raw ||
       !isShortioEligibleUrl(raw, {
