@@ -5,6 +5,8 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 
 import { MessageVariablePicker } from "@/components/message-variable-picker";
+import { LinkTrackingToggle } from "@/components/link-tracking-toggle";
+import { previewTrackedText, smsPartsForLength } from "@/lib/link-tracking-preview";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -103,6 +105,7 @@ export function NewSmsCampaignDialog({
   const [draftAudience, setDraftAudience] = useState<CampaignAudienceDraft | null>(null);
   const [when, setWhen] = useState<"now" | "schedule">("now");
   const [scheduledAt, setScheduledAt] = useState("");
+  const [trackLinks, setTrackLinks] = useState(true);
 
   const saved = useQuery({
     queryKey: ["sms-audiences"],
@@ -185,6 +188,7 @@ export function NewSmsCampaignDialog({
             route: "iGaming",
             scheduledAt: new Date(scheduledAt).toISOString(),
             ratePerMinute: 1000,
+            trackLinks,
           },
         });
       }
@@ -195,6 +199,7 @@ export function NewSmsCampaignDialog({
           campaignName: name,
           route: "iGaming",
           ratePerMinute: 1000,
+          trackLinks,
         },
       });
     },
@@ -206,10 +211,12 @@ export function NewSmsCampaignDialog({
       setAudienceTotal(0);
       setName("");
       setMessage("");
+      setTrackLinks(true);
     },
     onError: (error: Error) => toast.error(error.message),
   });
-  const parts = smsParts(message.length);
+  const previewMessage = previewTrackedText(message, trackLinks);
+  const parts = smsPartsForLength(previewMessage.length);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -302,11 +309,17 @@ export function NewSmsCampaignDialog({
             />
             <div className="flex justify-between text-xs text-muted-foreground">
               <span>
-                {message.length} caracteres · {parts} parte{parts === 1 ? "" : "s"}
+                {previewMessage.length} caracteres · {parts} parte{parts === 1 ? "" : "s"}
               </span>
               <strong>{num(phones.length * parts)} créditos</strong>
             </div>
           </div>
+          <LinkTrackingToggle
+            value={trackLinks}
+            onChange={setTrackLinks}
+            content={message}
+            channel="sms"
+          />
           <div className="space-y-2">
             <Label>Quando disparar</Label>
             <div className="flex gap-2">

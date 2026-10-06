@@ -9,6 +9,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { LinkTrackingToggle } from "@/components/link-tracking-toggle";
+import { previewTrackedText, smsPartsForLength } from "@/lib/link-tracking-preview";
 import { sendBulkSms } from "@/lib/sms.functions";
 
 function smsParts(length: number) {
@@ -31,11 +33,13 @@ export function IndividualSmsDialog({ open, onOpenChange }: { open: boolean; onO
   const [phone, setPhone] = useState("");
   const [name, setName] = useState("");
   const [message, setMessage] = useState("Olá {primeiro_nome}, temos uma novidade para você.");
+  const [trackLinks, setTrackLinks] = useState(true);
   const digits = phone.replace(/\D/g, "");
-  const parts = smsParts(message.length);
+  const previewContent = previewTrackedText(message, trackLinks);
+  const parts = smsPartsForLength(previewContent.length);
   const preview = useMemo(() => renderMessage(message, name || "Cliente", digits), [message, name, digits]);
   const mutation = useMutation({
-    mutationFn: () => send({ data: { phones: [digits], content: renderMessage(message, name, digits), campaignName: `Individual: ${name.trim() || digits}`, route: "iGaming", ratePerMinute: 1000 } }),
+    mutationFn: () => send({ data: { phones: [digits], content: renderMessage(message, name, digits), campaignName: `Individual: ${name.trim() || digits}`, route: "iGaming", ratePerMinute: 1000, trackLinks } }),
     onSuccess: () => {
       toast.success("SMS enviado para processamento");
       queryClient.invalidateQueries({ queryKey: ["sms-scheduled-campaigns"] });
@@ -55,7 +59,8 @@ export function IndividualSmsDialog({ open, onOpenChange }: { open: boolean; onO
           <div className="space-y-1.5"><Label>Telefone</Label><Input value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="(11) 98765-4321" inputMode="tel" /></div>
           <div className="space-y-1.5"><Label>Nome (opcional)</Label><Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Rafael" /></div>
         </div>
-        <div className="space-y-1.5"><div className="flex items-center justify-between"><Label>Mensagem</Label><span className="text-xs text-muted-foreground">{message.length} caracteres · {parts} parte{parts === 1 ? "" : "s"}</span></div><Textarea rows={5} value={message} onChange={(event) => setMessage(event.target.value)} /><div className="flex flex-wrap gap-1.5"><Button type="button" variant="outline" size="sm" onClick={() => setMessage((value) => `${value}{primeiro_nome}`)}>+ primeiro nome</Button><Button type="button" variant="outline" size="sm" onClick={() => setMessage((value) => `${value}{nome}`)}>+ nome</Button><Button type="button" variant="outline" size="sm" onClick={() => setMessage((value) => `${value}{telefone}`)}>+ telefone</Button></div></div>
+        <div className="space-y-1.5"><div className="flex items-center justify-between"><Label>Mensagem</Label><span className="text-xs text-muted-foreground">{previewContent.length} caracteres · {parts} parte{parts === 1 ? "" : "s"}</span></div><Textarea rows={5} value={message} onChange={(event) => setMessage(event.target.value)} /><div className="flex flex-wrap gap-1.5"><Button type="button" variant="outline" size="sm" onClick={() => setMessage((value) => `${value}{primeiro_nome}`)}>+ primeiro nome</Button><Button type="button" variant="outline" size="sm" onClick={() => setMessage((value) => `${value}{nome}`)}>+ nome</Button><Button type="button" variant="outline" size="sm" onClick={() => setMessage((value) => `${value}{telefone}`)}>+ telefone</Button></div></div>
+        <LinkTrackingToggle value={trackLinks} onChange={setTrackLinks} content={message} channel="sms" />
         <div className="rounded-xl border border-primary/25 bg-primary/5 p-4"><div className="mb-2 flex items-center gap-2 text-sm font-medium"><UserRound className="h-4 w-4 text-primary" />Prévia para o celular</div><p className="text-sm leading-relaxed">{preview}</p></div>
       </div>
       <DialogFooter><Button variant="ghost" onClick={() => onOpenChange(false)}>Cancelar</Button><Button disabled={!canSend || mutation.isPending} onClick={() => mutation.mutate()}><Send className="mr-2 h-4 w-4" />{mutation.isPending ? "Enviando…" : `Enviar · ${parts} crédito${parts === 1 ? "" : "s"}`}</Button></DialogFooter>

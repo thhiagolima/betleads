@@ -16,6 +16,8 @@ export type LinkTrackingContext = {
   recipientHash?: string | null;
   messageLogType?: string | null;
   messageLogId?: string | null;
+  /** Explicit choice made in the composer. Undefined preserves legacy behaviour. */
+  enabled?: boolean;
 };
 
 type TenantShortioSettings = {
@@ -315,7 +317,7 @@ export async function prepareTrackedText(
   context: LinkTrackingContext,
 ): Promise<PreparedText> {
   const settings = await settingsForTenant(context.tenantId);
-  if (!settings.enabled || !settings.enabled_channels.includes(context.channel))
+  if (context.enabled === false || !settings.enabled || !settings.enabled_channels.includes(context.channel))
     return { content, links: [], trackingEnabled: false };
 
   const matches = Array.from(content.matchAll(URL_PATTERN));
@@ -378,7 +380,7 @@ export async function prepareTrackedEmailHtml(
   context: Omit<LinkTrackingContext, "channel">,
 ): Promise<PreparedText> {
   const settings = await settingsForTenant(context.tenantId);
-  if (!settings.enabled || !settings.enabled_channels.includes("email"))
+  if (context.enabled === false || !settings.enabled || !settings.enabled_channels.includes("email"))
     return { content: html, links: [], trackingEnabled: false };
   const hrefPattern = /(\bhref\s*=\s*)(["'])([^"']*)\2/gi;
   const matches = Array.from(html.matchAll(hrefPattern));

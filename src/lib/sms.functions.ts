@@ -515,6 +515,7 @@ export async function sendSmsInternal(args: {
   stepLabel?: string | null;
   flowLeadId?: string | null;
   tenantId?: string | null;
+  linkTrackingEnabled?: boolean;
 }) {
   let normalized: string;
   try {
@@ -563,6 +564,7 @@ export async function sendSmsInternal(args: {
       sourceId: args.flowId ?? args.triggerName ?? null,
       recipientPlayerId: args.playerId ?? null,
       messageLogType: "sms_send_logs",
+      enabled: args.linkTrackingEnabled,
     });
     preparedContent = prepared.content;
     trackedDispatchIds = prepared.links.map((link) => link.dispatchId);
@@ -790,6 +792,7 @@ export const sendBulkSms = createServerFn({ method: "POST" })
         campaignName: z.string().min(1).max(120),
         route: z.literal("iGaming").optional().default("iGaming"),
         ratePerMinute: z.number().int().min(1).max(5000).optional().default(1000),
+        trackLinks: z.boolean().optional().default(true),
       })
       .parse(input),
   )
@@ -834,6 +837,7 @@ export const sendBulkSms = createServerFn({ method: "POST" })
           scheduled_at: new Date().toISOString(),
           status: "agendada",
           rate_per_minute: data.ratePerMinute,
+          track_links: data.trackLinks,
           created_by: context.userId,
         })
         .select("id")
@@ -931,6 +935,7 @@ export const sendBulkSms = createServerFn({ method: "POST" })
             triggerName: trigger,
             variables,
             tenantId,
+            linkTrackingEnabled: data.trackLinks,
           });
           return {
             phone: t.phone,
@@ -1614,6 +1619,7 @@ const ScheduleBulkSchema = z.object({
   route: z.literal("iGaming").optional().default("iGaming"),
   scheduledAt: z.string().min(1),
   ratePerMinute: z.number().int().min(1).max(5000).optional().default(1000),
+  trackLinks: z.boolean().optional().default(true),
 });
 
 /** Match telefone → playerId dentro do tenant, mesmo shape usado em sendBulkSms. */
@@ -1697,6 +1703,7 @@ export const scheduleBulkSms = createServerFn({ method: "POST" })
         scheduled_at: scheduled.toISOString(),
         status: "agendada",
         rate_per_minute: data.ratePerMinute,
+        track_links: data.trackLinks,
         created_by: context.userId,
       })
       .select("id, name, scheduled_at, total_count, status")

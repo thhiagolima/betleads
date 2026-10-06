@@ -37,6 +37,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { LinkTrackingToggle } from "@/components/link-tracking-toggle";
 import { Separator } from "@/components/ui/separator";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import {
@@ -3192,6 +3193,7 @@ function BusinessCodeEmailCard() {
     "<h1>Olá {primeiro_nome}!</h1><p>Este é um teste de envio via BusinessCode.</p>",
   );
   const [sending, setSending] = useState(false);
+  const [trackLinks, setTrackLinks] = useState(true);
 
   const sendTest = useServerFn(sendTestEmail);
 
@@ -3210,6 +3212,7 @@ function BusinessCodeEmailCard() {
           fromEmail,
           fromName: fromName || null,
           replyTo: replyTo || null,
+          trackLinks,
         },
       });
       toast.success("Email aceito pela BusinessCode. Aguarde a entrega na caixa de entrada.");
@@ -3319,6 +3322,12 @@ function BusinessCodeEmailCard() {
                 className="font-mono text-xs"
               />
             </div>
+            <LinkTrackingToggle
+              value={trackLinks}
+              onChange={setTrackLinks}
+              content={html}
+              channel="email"
+            />
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setOpen(false)}>

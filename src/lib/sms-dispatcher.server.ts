@@ -720,6 +720,7 @@ type CampaignRow = {
   sent_cursor: number;
   last_error: string | null;
   rate_per_minute: number | null;
+  track_links?: boolean | null;
 };
 
 type CampaignTarget = { phone: string; playerId?: string | null };
@@ -905,6 +906,7 @@ export async function runScheduledSmsCampaigns({ limit = 20 }: { limit?: number 
               triggerName: trigger,
               variables,
               tenantId: c.tenant_id,
+              linkTrackingEnabled: c.track_links !== false,
             });
             return r;
           } catch (e) {

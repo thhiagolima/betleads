@@ -69,6 +69,7 @@ const SendTestEmailSchema = z.object({
   fromEmail: z.string().email().max(255).optional().nullable(),
   fromName: z.string().max(160).optional().nullable(),
   replyTo: z.string().email().max(255).optional().nullable(),
+  trackLinks: z.boolean().optional().default(true),
 });
 
 export const sendTestEmail = createServerFn({ method: "POST" })
@@ -139,6 +140,7 @@ export const sendTestEmail = createServerFn({ method: "POST" })
         sourceType: "test",
         recipientPlayerId: playerId,
         messageLogType: "email_send_logs",
+        enabled: data.trackLinks,
       },
     });
 
