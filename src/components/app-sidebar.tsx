@@ -62,7 +62,10 @@ const engagementItems: NavItem[] = [
     title: "Automações",
     url: "/automacoes",
     icon: Rocket,
-    subItems: [{ title: "Jornadas", url: "/jornadas" }],
+    subItems: [
+      { title: "Visão operacional", url: "/automacoes" },
+      { title: "Jornadas", url: "/jornadas" },
+    ],
   },
   {
     title: "Canais",

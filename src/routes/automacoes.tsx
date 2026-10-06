@@ -2,7 +2,6 @@ import {
   createFileRoute,
   Link,
   Outlet,
-  redirect,
   useLocation,
   useNavigate,
 } from "@tanstack/react-router";
@@ -74,9 +73,6 @@ import { TRIGGER_NAMES, type TriggerType } from "@/lib/triggers";
 import { saveAutomationJourneyDraft } from "@/lib/automation-draft";
 
 export const Route = createFileRoute("/automacoes")({
-  beforeLoad: () => {
-    throw redirect({ to: "/jornadas" });
-  },
   component: AutomacoesPage,
 });
 
