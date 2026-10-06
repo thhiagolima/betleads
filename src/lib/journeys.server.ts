@@ -4,6 +4,7 @@ import { callBusinessCodeVoice } from "./businesscode-voice.server";
 import { callInfobipVoice } from "./infobip-voice.server";
 import { sendSmsInternal } from "./sms.functions";
 import { buildPlayerVariables, renderTemplate } from "./template-vars.server";
+import { detectTriggersForPlayer } from "./triggers.server";
 
 type JourneyRow = {
   id: string;
@@ -36,6 +37,53 @@ type PlayerActivity = {
 // narrow escape hatch keeps the dispatcher deployable during that transition.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const db = supabaseAdmin as any;
+
+async function enrollEligibleJourneyPlayers(limit = 500) {
+  const { data: journeys } = await db
+    .from("journeys")
+    .select("*")
+    .eq("status", "active")
+    .limit(100);
+  if (!journeys?.length) return 0;
+  const { data: players } = await supabaseAdmin
+    .from("players")
+    .select("*")
+    .eq("status", "ativo")
+    .limit(limit);
+  let enrolled = 0;
+  for (const journey of journeys as Array<
+    JourneyRow & {
+      tenant_id: string;
+      trigger_type: string;
+      version: number;
+      entry_rules: Record<string, unknown>;
+    }
+  >) {
+    for (const player of players ?? []) {
+      if (player.tenant_id !== journey.tenant_id) continue;
+      const audience = String(journey.entry_rules?.audience ?? "all_active");
+      if (audience === "vip" && !player.vip) continue;
+      if (audience === "manual") continue;
+      if (
+        journey.trigger_type !== "manual" &&
+        !detectTriggersForPlayer(player as never).includes(journey.trigger_type as never)
+      )
+        continue;
+      const { error } = await db
+        .from("journey_enrollments")
+        .insert({
+          tenant_id: journey.tenant_id,
+          journey_id: journey.id,
+          journey_version: journey.version,
+          player_id: player.id,
+          entry_key: "default",
+          metadata: { trigger: journey.trigger_type },
+        });
+      if (!error) enrolled++;
+    }
+  }
+  return enrolled;
+}
 
 async function event(
   enrollment: EnrollmentRow,
@@ -325,6 +373,7 @@ async function executeEnrollment(id: string): Promise<void> {
 }
 
 export async function runJourneyDispatcher(limit = 100) {
+  const enrolled = await enrollEligibleJourneyPlayers(limit);
   const { data: claimed, error } = await db.rpc("claim_due_journey_enrollments", {
     p_limit: limit,
   });
@@ -366,5 +415,5 @@ export async function runJourneyDispatcher(limit = 100) {
       });
     }
   }
-  return { claimed: (claimed ?? []).length, processed, failed };
+  return { enrolled, claimed: (claimed ?? []).length, processed, failed };
 }
