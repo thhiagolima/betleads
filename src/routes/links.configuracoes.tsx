@@ -13,7 +13,8 @@ export const Route = createFileRoute("/links/configuracoes")({ component: LinkSe
 function LinkSettings() {
   const q = useQuery({ queryKey: ["shortio-settings"], queryFn: () => getShortioSettings() });
   const [saving, setSaving] = useState(false);
-  const s = q.data;
+  const data = q.data;
+  const s = data?.settings;
   if (!s) return <div className="p-6">Carregando…</div>;
   async function save(form: FormData) {
     setSaving(true);
@@ -28,6 +29,7 @@ function LinkSettings() {
           .split(/[,\n]/)
           .map((x) => x.trim())
           .filter(Boolean),
+        enabled_channels: ["sms", "email"],
       });
       q.refetch();
     } finally {

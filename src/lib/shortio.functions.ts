@@ -107,24 +107,30 @@ export const getShortioSettings = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const tenantId = await requireTenantAdmin(context);
-    const { data, error } = await (context.supabase as any)
+    const db = context.supabase as any;
+    const [{ data, error }, { data: lastSync }] = await Promise.all([
+      db
       .from("shortio_settings")
       .select(
-        "enabled,domain,attribution_mode,fallback_mode,default_ttl_days,allowed_destination_hosts,updated_at",
+        "enabled,domain,attribution_mode,fallback_mode,default_ttl_days,allowed_destination_hosts,enabled_channels,updated_at",
       )
       .eq("tenant_id", tenantId)
-      .maybeSingle();
+      .maybeSingle(),
+      db.from("link_tracking_sync_runs").select("finished_at,status,links_processed,error").eq("tenant_id", tenantId).order("started_at", { ascending: false }).limit(1).maybeSingle(),
+    ]);
     if (error) throw new Error(error.message);
-    return (
-      data ?? {
+    return {
+      settings: data ?? {
         enabled: false,
         domain: null,
         attribution_mode: "individual",
         fallback_mode: "block",
         default_ttl_days: null,
         allowed_destination_hosts: [],
-      }
-    );
+        enabled_channels: ["sms", "email"],
+      },
+      health: { configured: Boolean(process.env.SHORTIO_API_KEY), lastSync: lastSync ?? null },
+    };
   });
 
 const settingsInput = z.object({
@@ -136,6 +142,7 @@ const settingsInput = z.object({
   fallback_mode: z.enum(["block", "passthrough"]),
   default_ttl_days: z.number().int().min(1).max(3650).nullable(),
   allowed_destination_hosts: z.array(z.string().trim().min(1).max(253)).max(50),
+  enabled_channels: z.array(z.enum(["sms", "email"])).min(1).max(2),
 });
 
 export const saveShortioSettings = createServerFn({ method: "POST" })
@@ -165,6 +172,7 @@ export const saveShortioSettings = createServerFn({ method: "POST" })
         tenant_id: tenantId,
         domain,
         allowed_destination_hosts: hosts,
+        enabled_channels: data.enabled_channels,
         updated_by: context.userId,
         updated_at: new Date().toISOString(),
       },
