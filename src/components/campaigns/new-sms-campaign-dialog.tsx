@@ -29,6 +29,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { listSmsAudiences } from "@/lib/sms-audience-crud.functions";
 import { SYSTEM_SMS_AUDIENCES, type SmsAudienceCriteria } from "@/lib/sms-audience-criteria";
 import { resolveSmsCampaignAudience } from "@/lib/sms-audiences.functions";
+import { listSmsTemplates } from "@/lib/sms-templates.functions";
 import { scheduleBulkSms, sendBulkSms } from "@/lib/sms.functions";
 import { num } from "@/lib/format";
 
@@ -97,6 +98,7 @@ export function NewSmsCampaignDialog({
   const send = useServerFn(sendBulkSms);
   const schedule = useServerFn(scheduleBulkSms);
   const listAudiences = useServerFn(listSmsAudiences);
+  const listTemplates = useServerFn(listSmsTemplates);
   const [name, setName] = useState("");
   const [message, setMessage] = useState("");
   const [selectedId, setSelectedId] = useState("");
@@ -106,12 +108,23 @@ export function NewSmsCampaignDialog({
   const [when, setWhen] = useState<"now" | "schedule">("now");
   const [scheduledAt, setScheduledAt] = useState("");
   const [trackLinks, setTrackLinks] = useState(true);
+  const [templateId, setTemplateId] = useState("");
 
   const saved = useQuery({
     queryKey: ["sms-audiences"],
     queryFn: () => listAudiences(),
     enabled: open,
   });
+  const templateQuery = useQuery({
+    queryKey: ["sms-templates"],
+    queryFn: () => listTemplates(),
+    enabled: open,
+  });
+  const templates = (templateQuery.data?.items ?? []).filter((item: any) => item.isActive !== false) as Array<{
+    id: string;
+    name: string;
+    content: string;
+  }>;
   const options: AudienceOption[] = open
     ? [
         ...SYSTEM_SMS_AUDIENCES.map((item) => ({ ...item, system: true })),
@@ -137,6 +150,7 @@ export function NewSmsCampaignDialog({
     setPhones([]);
     setAudienceTotal(0);
     setDraftAudience(null);
+    setTemplateId("");
 
     const serialized = window.localStorage.getItem("betleads:campaignAudienceDraft");
     if (!serialized) return;
@@ -189,6 +203,7 @@ export function NewSmsCampaignDialog({
             scheduledAt: new Date(scheduledAt).toISOString(),
             ratePerMinute: 1000,
             trackLinks,
+            templateId: templateId || undefined,
           },
         });
       }
@@ -200,6 +215,7 @@ export function NewSmsCampaignDialog({
           route: "iGaming",
           ratePerMinute: 1000,
           trackLinks,
+          templateId: templateId || undefined,
         },
       });
     },
@@ -228,6 +244,21 @@ export function NewSmsCampaignDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
+          <div className="space-y-1.5">
+            <Label>Template (opcional)</Label>
+            <Select
+              value={templateId}
+              onValueChange={(value) => {
+                setTemplateId(value);
+                const template = templates.find((item) => item.id === value);
+                if (template) setMessage(template.content);
+              }}
+            >
+              <SelectTrigger><SelectValue placeholder="Escrever mensagem manualmente" /></SelectTrigger>
+              <SelectContent>{templates.map((template) => <SelectItem key={template.id} value={template.id}>{template.name}</SelectItem>)}</SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">Ao selecionar, o conteúdo é copiado para esta campanha e pode ser ajustado.</p>
+          </div>
           <div className="space-y-1.5">
             <Label>Nome da campanha</Label>
             <Input

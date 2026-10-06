@@ -114,6 +114,7 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { MessageVariablePicker } from "@/components/message-variable-picker";
+import { LinkTrackingToggle } from "@/components/link-tracking-toggle";
 import { MetricCard } from "@/components/ui-premium/metric-card";
 import { SmsPageShell } from "@/components/sms/sms-page-shell";
 import { SmsChannelHealth } from "@/components/sms/sms-channel-health";
@@ -3553,14 +3554,32 @@ function EditorFluxo({
                         rows={2}
                         value={e.mensagem}
                         onChange={(ev) =>
-                          updateEtapa(i, { tipo: "sms", mensagem: ev.target.value })
+                          updateEtapa(i, {
+                            tipo: "sms",
+                            mensagem: ev.target.value,
+                            trackLinks: e.trackLinks !== false,
+                          })
                         }
                         placeholder="Mensagem com {primeiro_nome}, {link}..."
                       />
                       <MessageVariablePicker
                         allowedKeys={SMS_VARIABLE_KEYS}
                         value={e.mensagem}
-                        onChange={(next: string) => updateEtapa(i, { tipo: "sms", mensagem: next })}
+                        onChange={(next: string) =>
+                          updateEtapa(i, {
+                            tipo: "sms",
+                            mensagem: next,
+                            trackLinks: e.trackLinks !== false,
+                          })
+                        }
+                      />
+                      <LinkTrackingToggle
+                        value={e.trackLinks !== false}
+                        onChange={(trackLinks) =>
+                          updateEtapa(i, { tipo: "sms", mensagem: e.mensagem, trackLinks })
+                        }
+                        content={e.mensagem}
+                        channel="sms"
                       />
                       <p className="text-[11px] text-muted-foreground italic">
                         Preview: {previewMensagem(e.mensagem) || "—"}

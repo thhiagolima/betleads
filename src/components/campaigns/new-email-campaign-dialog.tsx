@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
+import { LinkTrackingToggle } from "@/components/link-tracking-toggle";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { listEmailTemplates, saveEmailCampaign, sendEmailCampaignNow } from "@/lib/email.functions";
 import { num } from "@/lib/format";
@@ -131,7 +131,7 @@ export function NewEmailCampaignDialog({
             </div>
           </div>
           <div className="space-y-1.5"><Label>Template de email</Label><Select value={templateId} onValueChange={setTemplateId}><SelectTrigger><SelectValue placeholder="Escolha um template" /></SelectTrigger><SelectContent>{templates.map((template) => <SelectItem key={template.id} value={template.id}>{template.nome}</SelectItem>)}</SelectContent></Select>{templates.length === 0 && <p className="text-xs text-muted-foreground">Crie um template antes de disparar uma campanha de email.</p>}</div>
-          <label className="flex items-center gap-2 rounded-lg border border-primary/25 bg-primary/5 p-3 text-sm"><Checkbox checked={trackLinks} onCheckedChange={(value) => setTrackLinks(value === true)} /><span><b className="text-primary">Encurtar e medir links</b><span className="ml-1 text-xs text-muted-foreground">somente CTAs elegíveis serão rastreados</span></span></label>
+          <LinkTrackingToggle value={trackLinks} onChange={setTrackLinks} content="" channel="email" />
           <div className="space-y-2"><Label>Quando disparar</Label><div className="flex gap-2"><Button size="sm" variant={when === "now" ? "default" : "outline"} onClick={() => setWhen("now")}>Disparar agora</Button><Button size="sm" variant={when === "schedule" ? "default" : "outline"} onClick={() => setWhen("schedule")}>Agendar</Button></div>{when === "schedule" && <Input type="datetime-local" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} />}</div>
         </div>
         <DialogFooter><Button variant="ghost" onClick={() => onOpenChange(false)}>Cancelar</Button><Button disabled={submit.isPending || !name.trim() || !templateId || !emailPlayerIds.length} onClick={() => submit.mutate()}>{submit.isPending ? "Salvando…" : when === "schedule" ? "Agendar disparo" : "Disparar agora"}</Button></DialogFooter>

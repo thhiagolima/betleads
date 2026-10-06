@@ -807,6 +807,7 @@ export const sendBulkSms = createServerFn({ method: "POST" })
         route: z.literal("iGaming").optional().default("iGaming"),
         ratePerMinute: z.number().int().min(1).max(5000).optional().default(1000),
         trackLinks: z.boolean().optional().default(true),
+        templateId: dbUuid().optional(),
       })
       .parse(input),
   )
@@ -817,6 +818,18 @@ export const sendBulkSms = createServerFn({ method: "POST" })
     if (!tenantId) throw new Error("tenant não encontrado para o usuário");
 
     await assertTenantCanOperate(tenantId);
+    let templateSnapshot: Json | null = null;
+    if (data.templateId) {
+      const { data: template, error } = await (context.supabase as any)
+        .from("sms_templates")
+        .select("id,name,content,version")
+        .eq("id", data.templateId)
+        .eq("tenant_id", tenantId)
+        .eq("is_active", true)
+        .single();
+      if (error || !template) throw new Error("Template SMS indisponível para esta campanha");
+      templateSnapshot = { id: template.id, name: template.name, content: template.content, version: template.version };
+    }
 
     const trigger = `campanha:${data.campaignName}:${data.route}`;
     const targets: Array<{ phone: string; playerId?: string }> = [
@@ -852,6 +865,8 @@ export const sendBulkSms = createServerFn({ method: "POST" })
           status: "agendada",
           rate_per_minute: data.ratePerMinute,
           track_links: data.trackLinks,
+          template_id: data.templateId ?? null,
+          template_snapshot: templateSnapshot,
           created_by: context.userId,
         })
         .select("id")
@@ -1634,6 +1649,7 @@ const ScheduleBulkSchema = z.object({
   scheduledAt: z.string().min(1),
   ratePerMinute: z.number().int().min(1).max(5000).optional().default(1000),
   trackLinks: z.boolean().optional().default(true),
+  templateId: dbUuid().optional(),
 });
 
 /** Match telefone → playerId dentro do tenant, mesmo shape usado em sendBulkSms. */
@@ -1701,6 +1717,18 @@ export const scheduleBulkSms = createServerFn({ method: "POST" })
     if (!tenantId) throw new Error("tenant não encontrado para o usuário");
 
     await assertTenantCanOperate(tenantId);
+    let templateSnapshot: Json | null = null;
+    if (data.templateId) {
+      const { data: template, error } = await (context.supabase as any)
+        .from("sms_templates")
+        .select("id,name,content,version")
+        .eq("id", data.templateId)
+        .eq("tenant_id", tenantId)
+        .eq("is_active", true)
+        .single();
+      if (error || !template) throw new Error("Template SMS indisponível para esta campanha");
+      templateSnapshot = { id: template.id, name: template.name, content: template.content, version: template.version };
+    }
 
     const targets = await resolveRecipientsForTenant(tenantId, data.phones, data.recipients);
     if (targets.length === 0) throw new Error("Sem destinatários válidos");
@@ -1718,6 +1746,8 @@ export const scheduleBulkSms = createServerFn({ method: "POST" })
         status: "agendada",
         rate_per_minute: data.ratePerMinute,
         track_links: data.trackLinks,
+        template_id: data.templateId ?? null,
+        template_snapshot: templateSnapshot,
         created_by: context.userId,
       })
       .select("id, name, scheduled_at, total_count, status")

@@ -41,6 +41,7 @@ import { Route as JornadasJourneyIdRouteImport } from './routes/jornadas.$journe
 import { Route as JornadasNovaRouteImport } from './routes/jornadas.nova'
 import { Route as LinksConfiguracoesRouteImport } from './routes/links.configuracoes'
 import { Route as PlayersPlayerIdRouteImport } from './routes/players.$playerId'
+import { Route as SmsTemplatesRouteImport } from './routes/sms.templates'
 import { Route as UTokenRouteImport } from './routes/u.$token'
 import { Route as ApiPublicEvolutionWebhookRouteImport } from './routes/api/public/evolution-webhook'
 import { Route as ApiPublicSmsWebhookRouteImport } from './routes/api/public/sms-webhook'
@@ -231,6 +232,11 @@ const PlayersPlayerIdRoute = PlayersPlayerIdRouteImport.update({
   id: '/$playerId',
   path: '/$playerId',
   getParentRoute: () => PlayersRoute,
+} as any)
+const SmsTemplatesRoute = SmsTemplatesRouteImport.update({
+  id: '/templates',
+  path: '/templates',
+  getParentRoute: () => SmsRoute,
 } as any)
 const UTokenRoute = UTokenRouteImport.update({
   id: '/u/$token',
@@ -423,7 +429,7 @@ export interface FileRoutesByFullPath {
   '/players': typeof PlayersRouteWithChildren
   '/publicos': typeof PublicosRoute
   '/regras': typeof RegrasRoute
-  '/sms': typeof SmsRoute
+  '/sms': typeof SmsRouteWithChildren
   '/tenants': typeof TenantsRoute
   '/treino-ia': typeof TreinoIaRoute
   '/webhooks': typeof WebhooksRoute
@@ -436,6 +442,7 @@ export interface FileRoutesByFullPath {
   '/jornadas/nova': typeof JornadasNovaRoute
   '/links/configuracoes': typeof LinksConfiguracoesRoute
   '/players/$playerId': typeof PlayersPlayerIdRoute
+  '/sms/templates': typeof SmsTemplatesRoute
   '/u/$token': typeof UTokenRoute
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
   '/api/public/sms-webhook': typeof ApiPublicSmsWebhookRoute
@@ -487,7 +494,7 @@ export interface FileRoutesByTo {
   '/players': typeof PlayersRouteWithChildren
   '/publicos': typeof PublicosRoute
   '/regras': typeof RegrasRoute
-  '/sms': typeof SmsRoute
+  '/sms': typeof SmsRouteWithChildren
   '/tenants': typeof TenantsRoute
   '/treino-ia': typeof TreinoIaRoute
   '/webhooks': typeof WebhooksRoute
@@ -500,6 +507,7 @@ export interface FileRoutesByTo {
   '/jornadas/nova': typeof JornadasNovaRoute
   '/links/configuracoes': typeof LinksConfiguracoesRoute
   '/players/$playerId': typeof PlayersPlayerIdRoute
+  '/sms/templates': typeof SmsTemplatesRoute
   '/u/$token': typeof UTokenRoute
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
   '/api/public/sms-webhook': typeof ApiPublicSmsWebhookRoute
@@ -552,7 +560,7 @@ export interface FileRoutesById {
   '/players': typeof PlayersRouteWithChildren
   '/publicos': typeof PublicosRoute
   '/regras': typeof RegrasRoute
-  '/sms': typeof SmsRoute
+  '/sms': typeof SmsRouteWithChildren
   '/tenants': typeof TenantsRoute
   '/treino-ia': typeof TreinoIaRoute
   '/webhooks': typeof WebhooksRoute
@@ -565,6 +573,7 @@ export interface FileRoutesById {
   '/jornadas/nova': typeof JornadasNovaRoute
   '/links/configuracoes': typeof LinksConfiguracoesRoute
   '/players/$playerId': typeof PlayersPlayerIdRoute
+  '/sms/templates': typeof SmsTemplatesRoute
   '/u/$token': typeof UTokenRoute
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
   '/api/public/sms-webhook': typeof ApiPublicSmsWebhookRoute
@@ -631,6 +640,7 @@ export interface FileRouteTypes {
     | '/jornadas/nova'
     | '/links/configuracoes'
     | '/players/$playerId'
+    | '/sms/templates'
     | '/u/$token'
     | '/api/public/evolution-webhook'
     | '/api/public/sms-webhook'
@@ -695,6 +705,7 @@ export interface FileRouteTypes {
     | '/jornadas/nova'
     | '/links/configuracoes'
     | '/players/$playerId'
+    | '/sms/templates'
     | '/u/$token'
     | '/api/public/evolution-webhook'
     | '/api/public/sms-webhook'
@@ -759,6 +770,7 @@ export interface FileRouteTypes {
     | '/jornadas/nova'
     | '/links/configuracoes'
     | '/players/$playerId'
+    | '/sms/templates'
     | '/u/$token'
     | '/api/public/evolution-webhook'
     | '/api/public/sms-webhook'
@@ -811,7 +823,7 @@ export interface RootRouteChildren {
   PlayersRoute: typeof PlayersRouteWithChildren
   PublicosRoute: typeof PublicosRoute
   RegrasRoute: typeof RegrasRoute
-  SmsRoute: typeof SmsRoute
+  SmsRoute: typeof SmsRouteWithChildren
   TenantsRoute: typeof TenantsRoute
   TreinoIaRoute: typeof TreinoIaRoute
   WebhooksRoute: typeof WebhooksRoute
@@ -1073,6 +1085,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/players/$playerId'
       preLoaderRoute: typeof PlayersPlayerIdRouteImport
       parentRoute: typeof PlayersRoute
+    }
+    '/sms/templates': {
+      id: '/sms/templates'
+      path: '/templates'
+      fullPath: '/sms/templates'
+      preLoaderRoute: typeof SmsTemplatesRouteImport
+      parentRoute: typeof SmsRoute
     }
     '/u/$token': {
       id: '/u/$token'
@@ -1340,6 +1359,16 @@ const PlayersRouteChildren: PlayersRouteChildren = {
 const PlayersRouteWithChildren =
   PlayersRoute._addFileChildren(PlayersRouteChildren)
 
+interface SmsRouteChildren {
+  SmsTemplatesRoute: typeof SmsTemplatesRoute
+}
+
+const SmsRouteChildren: SmsRouteChildren = {
+  SmsTemplatesRoute: SmsTemplatesRoute,
+}
+
+const SmsRouteWithChildren = SmsRoute._addFileChildren(SmsRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
@@ -1360,7 +1389,7 @@ const rootRouteChildren: RootRouteChildren = {
   PlayersRoute: PlayersRouteWithChildren,
   PublicosRoute: PublicosRoute,
   RegrasRoute: RegrasRoute,
-  SmsRoute: SmsRoute,
+  SmsRoute: SmsRouteWithChildren,
   TenantsRoute: TenantsRoute,
   TreinoIaRoute: TreinoIaRoute,
   WebhooksRoute: WebhooksRoute,

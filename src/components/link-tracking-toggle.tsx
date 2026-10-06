@@ -24,7 +24,6 @@ export function LinkTrackingToggle({
   className,
 }: LinkTrackingToggleProps) {
   const urls = messageUrls(content);
-  if (!urls.length) return null;
   const preview = previewTrackedText(content, value);
   const originalLength = content.length;
   const previewLength = preview.length;
@@ -48,7 +47,9 @@ export function LinkTrackingToggle({
             <Link2 className="h-4 w-4" /> Encurtar e medir os links
           </Label>
           <p className="text-xs leading-5 text-muted-foreground">
-            {value
+            {!urls.length
+              ? "Adicione uma URL à mensagem para que o encurtamento e a medição sejam aplicados no envio."
+              : value
               ? `Cada URL será substituída por um link como ${LINK_TRACKING_PREVIEW_URL} no envio.`
               : "As URLs originais serão preservadas e nenhum rastreamento será criado."}
           </p>
