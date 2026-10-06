@@ -1,5 +1,9 @@
 # Plano de entregas do Betleads
 
+> O fechamento da integração Short.io possui checklist próprio e canônico em
+> `docs/PLANO_FECHAMENTO_SHORTIO.md`. Atualize o status somente nesse arquivo para
+> evitar divergência entre planos.
+
 Este é o checklist operacional do projeto. Use `[x]` ao finalizar uma entrega e mantenha uma nota curta com a evidência: rota testada, migration aplicada, PR/commit ou cenário validado.
 
 Legenda: `[x]` concluído · `[ ]` pendente · `[~]` em andamento ou parcialmente entregue.
