@@ -466,7 +466,7 @@ export async function runDispatcher(
   let dueQuery = supabaseAdmin
     .from("flow_leads")
     .select(
-      "id, flow_id, template_id, player_id, phone_e164, session_id, status, current_block_index, started_at, attempt_count",
+      "id, tenant_id, flow_id, template_id, player_id, phone_e164, session_id, status, current_block_index, started_at, attempt_count",
     )
     .in("status", ["pending", "running", "cooldown"])
     .lte("next_run_at", nowIso)
@@ -477,7 +477,7 @@ export async function runDispatcher(
     dueQuery = supabaseAdmin
       .from("flow_leads")
       .select(
-        "id, flow_id, template_id, player_id, phone_e164, session_id, status, current_block_index, started_at, attempt_count",
+        "id, tenant_id, flow_id, template_id, player_id, phone_e164, session_id, status, current_block_index, started_at, attempt_count",
       )
       .eq("id", opts.onlyLeadId)
       .limit(1);
@@ -509,7 +509,7 @@ export async function runDispatcher(
     supabaseAdmin
       .from("flows")
       .select(
-        "id, name, active, exit_conditions, daily_limit, hourly_limit, delay_min_seconds, delay_max_seconds, priority",
+        "id, tenant_id, name, active, exit_conditions, daily_limit, hourly_limit, delay_min_seconds, delay_max_seconds, priority",
       )
       .in("id", flowIds),
     supabaseAdmin
@@ -707,6 +707,13 @@ export async function runDispatcher(
         blockToSend,
         { phone_e164: lead.phone_e164, player_id: lead.player_id },
         session,
+        {
+          tenantId: lead.tenant_id ?? flow.tenant_id,
+          sourceType: "whatsapp_flow",
+          sourceId: flow.id,
+          recipientPlayerId: lead.player_id,
+          messageLogType: "flow_logs",
+        },
       );
       const isLast = idx + 1 >= blocks.length;
       const blockDelay = block.delay_seconds ?? 0;

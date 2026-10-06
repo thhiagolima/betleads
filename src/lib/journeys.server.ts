@@ -75,7 +75,10 @@ async function enrollEligibleJourneyPlayers(limit = 500) {
         journey_version: journey.version,
         player_id: player.id,
         entry_key: "default",
-          metadata: { trigger: journey.trigger_type, deposited_before_entry: Number(player.total_depositado ?? 0) },
+        metadata: {
+          trigger: journey.trigger_type,
+          deposited_before_entry: Number(player.total_depositado ?? 0),
+        },
       });
       if (!error) enrolled++;
     }
@@ -307,6 +310,13 @@ async function executeEnrollment(id: string): Promise<void> {
       subject: renderTemplate(template.subject, vars),
       html: renderTemplate(template.body_html, vars),
       idempotencyKey: run.idempotency_key,
+      linkTracking: {
+        tenantId: enrollment.tenant_id,
+        sourceType: "journey",
+        sourceId: enrollment.journey_id,
+        recipientPlayerId: enrollment.player_id,
+        messageLogType: "email_send_logs",
+      },
     });
     if (!result.ok) throw new Error(JSON.stringify(result.body));
     await supabaseAdmin.from("email_send_logs").insert({

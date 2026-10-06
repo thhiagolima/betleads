@@ -212,7 +212,10 @@ async function planLead(lead: Lead): Promise<SendPlan | null> {
     .eq("id", lead.flow_id)
     .maybeSingle();
   if (!flow || !flow.active) {
-    await supabaseAdmin.from("email_flow_leads").update({ status: "exited", exit_reason: "flow_inactive" }).eq("id", lead.id);
+    await supabaseAdmin
+      .from("email_flow_leads")
+      .update({ status: "exited", exit_reason: "flow_inactive" })
+      .eq("id", lead.id);
     return null;
   }
 
@@ -227,7 +230,13 @@ async function planLead(lead: Lead): Promise<SendPlan | null> {
     if (idx >= blocks.length) {
       await supabaseAdmin
         .from("email_flow_leads")
-        .update({ status: "completed", current_block_index: idx, exit_reason: "completed", locked_at: null, locked_by: null })
+        .update({
+          status: "completed",
+          current_block_index: idx,
+          exit_reason: "completed",
+          locked_at: null,
+          locked_by: null,
+        })
         .eq("id", lead.id);
       await logEvent(lead.flow_id, lead.id, lead.player_id, "completed", {});
       return null;
@@ -240,7 +249,11 @@ async function planLead(lead: Lead): Promise<SendPlan | null> {
       .select("entered_at")
       .eq("id", lead.id)
       .maybeSingle();
-    const reason = await shouldExit(exitConditions, lead.player_id, leadRow?.entered_at ?? new Date().toISOString());
+    const reason = await shouldExit(
+      exitConditions,
+      lead.player_id,
+      leadRow?.entered_at ?? new Date().toISOString(),
+    );
     if (reason) {
       await supabaseAdmin
         .from("email_flow_leads")
@@ -257,22 +270,38 @@ async function planLead(lead: Lead): Promise<SendPlan | null> {
     if (block.block_type === "end" || block.block_type === "remove") {
       await supabaseAdmin
         .from("email_flow_leads")
-        .update({ status: "completed", current_block_index: idx, exit_reason: block.block_type, locked_at: null, locked_by: null })
+        .update({
+          status: "completed",
+          current_block_index: idx,
+          exit_reason: block.block_type,
+          locked_at: null,
+          locked_by: null,
+        })
         .eq("id", lead.id);
-      await logEvent(lead.flow_id, lead.id, lead.player_id, "completed", { block: block.block_type });
+      await logEvent(lead.flow_id, lead.id, lead.player_id, "completed", {
+        block: block.block_type,
+      });
       return null;
     }
     if (block.block_type === "delay") {
       const next = new Date(Date.now() + Math.max(0, block.delay_seconds) * 1000).toISOString();
       await supabaseAdmin
         .from("email_flow_leads")
-        .update({ status: "running", current_block_index: idx + 1, next_run_at: next, locked_at: null, locked_by: null })
+        .update({
+          status: "running",
+          current_block_index: idx + 1,
+          next_run_at: next,
+          locked_at: null,
+          locked_by: null,
+        })
         .eq("id", lead.id);
       return null;
     }
     if (block.block_type === "tag" || block.block_type === "condition") {
       // sem ramificacao no MVP; loga e segue
-      await logEvent(lead.flow_id, lead.id, lead.player_id, block.block_type, { label: block.label });
+      await logEvent(lead.flow_id, lead.id, lead.player_id, block.block_type, {
+        label: block.label,
+      });
       idx++;
       continue;
     }
@@ -291,14 +320,25 @@ async function planLead(lead: Lead): Promise<SendPlan | null> {
           // avança para o próximo bloco SEM disparar
           await supabaseAdmin
             .from("email_flow_leads")
-            .update({ status: "running", current_block_index: idx + 1, next_run_at: new Date().toISOString(), locked_at: null, locked_by: null })
+            .update({
+              status: "running",
+              current_block_index: idx + 1,
+              next_run_at: new Date().toISOString(),
+              locked_at: null,
+              locked_by: null,
+            })
             .eq("id", lead.id);
           return null;
         }
         if (sched.runAt.getTime() > Date.now() + 30_000) {
           await supabaseAdmin
             .from("email_flow_leads")
-            .update({ status: "running", next_run_at: sched.runAt.toISOString(), locked_at: null, locked_by: null })
+            .update({
+              status: "running",
+              next_run_at: sched.runAt.toISOString(),
+              locked_at: null,
+              locked_by: null,
+            })
             .eq("id", lead.id);
           return null;
         }
@@ -323,7 +363,12 @@ async function planLead(lead: Lead): Promise<SendPlan | null> {
         });
         await supabaseAdmin
           .from("email_flow_leads")
-          .update({ status: "failed", exit_reason: "no_template_in_block", locked_at: null, locked_by: null })
+          .update({
+            status: "failed",
+            exit_reason: "no_template_in_block",
+            locked_at: null,
+            locked_by: null,
+          })
           .eq("id", lead.id);
         return null;
       }
@@ -333,10 +378,18 @@ async function planLead(lead: Lead): Promise<SendPlan | null> {
         .eq("id", tplId)
         .maybeSingle();
       if (!tpl) {
-        await logEvent(lead.flow_id, lead.id, lead.player_id, "failed", { reason: "template_missing", tplId });
+        await logEvent(lead.flow_id, lead.id, lead.player_id, "failed", {
+          reason: "template_missing",
+          tplId,
+        });
         await supabaseAdmin
           .from("email_flow_leads")
-          .update({ status: "failed", exit_reason: "template_missing", locked_at: null, locked_by: null })
+          .update({
+            status: "failed",
+            exit_reason: "template_missing",
+            locked_at: null,
+            locked_by: null,
+          })
           .eq("id", lead.id);
         return null;
       }
@@ -353,7 +406,11 @@ async function planLead(lead: Lead): Promise<SendPlan | null> {
       // variaveis do player
       let vars: Record<string, string> = { email: lead.email };
       if (lead.player_id) {
-        const { data: p } = await supabaseAdmin.from("players").select("*").eq("id", lead.player_id).maybeSingle();
+        const { data: p } = await supabaseAdmin
+          .from("players")
+          .select("*")
+          .eq("id", lead.player_id)
+          .maybeSingle();
         if (p) vars = buildPlayerVariables(p) as Record<string, string>;
       }
       const subject = renderTemplate(block.subject_override || tpl.subject || "", vars);
@@ -379,13 +436,16 @@ async function planLead(lead: Lead): Promise<SendPlan | null> {
 async function applySendSuccess(plan: SendPlan, dispatchId: string | null) {
   const { lead, blocks, blockIdx, tplId } = plan;
   const isLast =
-    blockIdx === blocks.length - 1 || blocks.slice(blockIdx + 1).every((b) => b.block_type === "end");
+    blockIdx === blocks.length - 1 ||
+    blocks.slice(blockIdx + 1).every((b) => b.block_type === "end");
   const nextIdx = blockIdx + 1;
   const nextBlock = blocks[nextIdx];
   let next_run_at = new Date().toISOString();
   if (nextBlock) {
     if (nextBlock.block_type === "delay") {
-      next_run_at = new Date(Date.now() + Math.max(0, nextBlock.delay_seconds) * 1000).toISOString();
+      next_run_at = new Date(
+        Date.now() + Math.max(0, nextBlock.delay_seconds) * 1000,
+      ).toISOString();
     } else if (nextBlock.block_type === "send_email" && nextBlock.send_at_hour != null) {
       const sched = computeBlockSchedule(nextBlock);
       // se skip, runner do próximo tick pula o bloco; agenda ASAP
@@ -457,7 +517,10 @@ async function applySendFailure(
     .eq("id", lead.id);
 }
 
-export async function runEmailFlowDispatcher({ limit = 30, onlyLeadId }: { limit?: number; onlyLeadId?: string } = {}) {
+export async function runEmailFlowDispatcher({
+  limit = 30,
+  onlyLeadId,
+}: { limit?: number; onlyLeadId?: string } = {}) {
   const startedAt = Date.now();
   const channel = "email" as const;
   const queueBefore = onlyLeadId ? 0 : await countQueuePending("email_flow_leads");
@@ -500,8 +563,9 @@ export async function runEmailFlowDispatcher({ limit = 30, onlyLeadId }: { limit
   let rateState = null as Awaited<ReturnType<typeof getRateState>>;
   if (!onlyLeadId) {
     rateState = await getRateState(channel);
-    const inBackoff =
-      !!(rateState?.backoff_until && new Date(rateState.backoff_until).getTime() > Date.now());
+    const inBackoff = !!(
+      rateState?.backoff_until && new Date(rateState.backoff_until).getTime() > Date.now()
+    );
     if (inBackoff) {
       await recordRun(startedAt, {
         channel,
@@ -676,6 +740,13 @@ export async function runEmailFlowDispatcher({ limit = 30, onlyLeadId }: { limit
       replyTo: plan.sender.replyTo,
       subject: plan.subject,
       html: plan.html,
+      linkTracking: {
+        tenantId: plan.lead.tenant_id,
+        sourceType: "email_flow",
+        sourceId: plan.lead.flow_id,
+        recipientPlayerId: plan.lead.player_id,
+        messageLogType: "email_send_logs",
+      },
     });
     const isTemporary = !result.ok && result.temporary === true;
 
@@ -717,9 +788,8 @@ export async function runEmailFlowDispatcher({ limit = 30, onlyLeadId }: { limit
       // 429 ou rate-limit: registra throttle global pra desacelerar próximos ticks.
       const bodyStr = JSON.stringify(result.body ?? {}).slice(0, 400);
       lastProviderError = `status=${result.status} ${bodyStr}`.slice(0, 800);
-      const { isInsufficientFunds, pauseChannelForInsufficientFunds } = await import(
-        "./dispatch-pause-insufficient.server"
-      );
+      const { isInsufficientFunds, pauseChannelForInsufficientFunds } =
+        await import("./dispatch-pause-insufficient.server");
       const insufficient = isInsufficientFunds(result.status, result.body);
       if (result.status === 429 || /rate.?limit|throttle|too many/i.test(bodyStr)) {
         rateLimited++;

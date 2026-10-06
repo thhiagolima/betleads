@@ -13,6 +13,11 @@ import {
   resolveOperationalTenantId,
 } from "@/lib/tenant-access.server";
 import { buildPlayerVariables } from "./template-vars.server";
+import {
+  markTrackedDispatchesFailed,
+  markTrackedDispatchesSent,
+  prepareTrackedText,
+} from "./shortio.server";
 import type { Json } from "@/integrations/supabase/types";
 
 const DEFAULT_SHORT_BRASIL_SINGLE_URL = "http://lp01-short.painelsms.com/bot/single-sms.php";
@@ -354,7 +359,8 @@ async function logSend(row: {
     error: row.error,
     idempotency_key: row.idempotency_key || null,
     provider_message_id: row.provider_message_id ?? null,
-    delivery_status: row.status === "sent" ? "sent" : row.status === "pending" ? "pending" : "failed",
+    delivery_status:
+      row.status === "sent" ? "sent" : row.status === "pending" ? "pending" : "failed",
     player_id: row.player_id ?? null,
     flow_id: row.flow_id ?? null,
     trigger_name: row.trigger_name ?? null,
@@ -540,6 +546,27 @@ export async function sendSmsInternal(args: {
   if (billingTenantId) {
     await assertTenantCanOperate(billingTenantId);
   }
+  const renderedContent = renderSmsVariables(args.content, args.variables);
+  let preparedContent = renderedContent;
+  let trackedDispatchIds: string[] = [];
+  if (billingTenantId ?? args.tenantId) {
+    const prepared = await prepareTrackedText(renderedContent, {
+      tenantId: billingTenantId ?? args.tenantId!,
+      channel: "sms",
+      sourceType: args.triggerName?.startsWith("journey:")
+        ? "journey"
+        : args.flowId
+          ? "sms_flow"
+          : args.triggerName === "teste-manual"
+            ? "test"
+            : "manual",
+      sourceId: args.flowId ?? args.triggerName ?? null,
+      recipientPlayerId: args.playerId ?? null,
+      messageLogType: "sms_send_logs",
+    });
+    preparedContent = prepared.content;
+    trackedDispatchIds = prepared.links.map((link) => link.dispatchId);
+  }
   const billingReferenceId = crypto.randomUUID();
   let creditReserved = false;
   if (billingTenantId) {
@@ -547,7 +574,7 @@ export async function sendSmsInternal(args: {
     if (!reservation.ok) {
       await logSend({
         to: normalized,
-        content: args.content,
+        content: preparedContent,
         status: "error",
         provider_response: { billing_reference_id: billingReferenceId },
         error: reservation.error,
@@ -565,7 +592,7 @@ export async function sendSmsInternal(args: {
     creditReserved = true;
   }
 
-  const r = await callShortBrasil(normalized, args.content, args.variables);
+  const r = await callShortBrasil(normalized, preparedContent);
   const providerMessageId = r.ok ? extractProviderMessageId(r.body) : null;
   const errorSummary = r.ok ? null : summarizeProviderError(r.status, r.body);
   const isTemporary = !r.ok && (r.status === 0 || r.status === 429 || r.status >= 500);
@@ -578,7 +605,7 @@ export async function sendSmsInternal(args: {
   }
   await logSend({
     to: normalized,
-    content: args.content,
+    content: preparedContent,
     status: r.ok ? "sent" : isTemporary ? "pending" : "error",
     provider_response: {
       ...(r.body && typeof r.body === "object" && !Array.isArray(r.body)
@@ -598,6 +625,11 @@ export async function sendSmsInternal(args: {
     flow_lead_id: args.flowLeadId,
     tenant_id: billingTenantId ?? args.tenantId ?? null,
   });
+  if (r.ok) {
+    await markTrackedDispatchesSent(trackedDispatchIds);
+  } else {
+    await markTrackedDispatchesFailed(trackedDispatchIds);
+  }
 
   return r.ok
     ? { ok: true as const, status: r.status, response: JSON.stringify(r.body ?? null) }

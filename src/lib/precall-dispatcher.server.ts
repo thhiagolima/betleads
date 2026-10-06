@@ -62,7 +62,9 @@ export async function runPrecallDispatcher(): Promise<{
     // Player info para variáveis
     const { data: player } = await supabaseAdmin
       .from("players")
-      .select("id, nome, telefone, saldo_carteira, ultimo_login, ultimo_jogo, ultimo_deposito, total_depositado, total_sacado, vip, status, expert, risco")
+      .select(
+        "id, nome, telefone, saldo_carteira, ultimo_login, ultimo_jogo, ultimo_deposito, total_depositado, total_sacado, vip, status, expert, risco",
+      )
       .eq("id", lead.player_id ?? "00000000-0000-0000-0000-000000000000")
       .maybeSingle();
 
@@ -106,6 +108,14 @@ export async function runPrecallDispatcher(): Promise<{
           name: session.name,
           status: session.status,
         },
+        {
+          tenantId: camp.tenant_id,
+          sourceType: "precall",
+          sourceId: camp.id,
+          recipientPlayerId: lead.player_id,
+          messageLogType: "precall_leads",
+          messageLogId: lead.id,
+        },
       );
 
       await supabaseAdmin
@@ -126,7 +136,13 @@ export async function runPrecallDispatcher(): Promise<{
         .eq("campaign_id", camp.id);
       const totals = (cnt ?? []).reduce(
         (a, r) => {
-          if (r.status === "enviado" || r.status === "respondido" || r.status === "ligar_agora" || r.status === "ligado" || r.status === "sem_resposta")
+          if (
+            r.status === "enviado" ||
+            r.status === "respondido" ||
+            r.status === "ligar_agora" ||
+            r.status === "ligado" ||
+            r.status === "sem_resposta"
+          )
             a.enviados++;
           if (r.status === "respondido" || r.status === "ligar_agora" || r.status === "ligado")
             a.respondidos++;
@@ -184,10 +200,7 @@ export async function runPrecallDispatcher(): Promise<{
  * Chamado pelo webhook Evolution quando uma mensagem inbound chega.
  * Marca o lead como 'ligar_agora' se houver pré-call enviado nas últimas 48h.
  */
-export async function detectPrecallResponse(
-  phone: string,
-  text: string | null,
-): Promise<void> {
+export async function detectPrecallResponse(phone: string, text: string | null): Promise<void> {
   if (!phone) return;
   const cutoff = new Date(Date.now() - 48 * 3600 * 1000).toISOString();
   const { data: leads } = await supabaseAdmin

@@ -7,6 +7,12 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { augmentEmailHtml, isSuppressed } from "./email-deliverability.server";
 import { callInfobipEmail } from "./infobip-email.server";
+import {
+  markTrackedDispatchesFailed,
+  markTrackedDispatchesSent,
+  prepareTrackedEmailHtml,
+  type LinkTrackingContext,
+} from "./shortio.server";
 
 export const BUSINESSCODE_EMAIL_URL = "https://dash.businesscode.com.br/api/v1/messaging/email";
 
@@ -33,6 +39,7 @@ export type SendEmailInput = {
   subject: string;
   html: string;
   idempotencyKey?: string;
+  linkTracking?: Omit<LinkTrackingContext, "channel">;
 };
 
 export type SendEmailResult = {
@@ -195,13 +202,17 @@ export async function callBusinessCodeEmail(input: SendEmailInput): Promise<Send
   const { html: augmentedHtml } = await augmentEmailHtml(input.html, {
     email: input.to,
   });
+  const prepared = input.linkTracking
+    ? await prepareTrackedEmailHtml(augmentedHtml, input.linkTracking)
+    : null;
+  const trackedDispatchIds = prepared?.links.map((link) => link.dispatchId) ?? [];
 
   const payload: Record<string, unknown> = {
     to: input.to,
     from: input.from,
     subject: input.subject,
     content: shieldDarkEmailHtml(
-      absolutizeEmailUrls(sanitizeEmailHtml(augmentedHtml), getEmailBaseUrl()),
+      absolutizeEmailUrls(sanitizeEmailHtml(prepared?.content ?? augmentedHtml), getEmailBaseUrl()),
     ),
   };
   if (input.fromName) payload.from_name = input.fromName;
@@ -210,11 +221,15 @@ export async function callBusinessCodeEmail(input: SendEmailInput): Promise<Send
   // Opt-in migration path. The campaign and flow engines keep their existing
   // contract while Infobip is enabled only after domain and webhook validation.
   if (process.env.EMAIL_PROVIDER?.trim().toLowerCase() === "infobip") {
-    return callInfobipEmail({
+    const result = await callInfobipEmail({
       ...input,
       html: String(payload.content ?? ""),
       idempotencyKey,
     });
+    await (result.ok
+      ? markTrackedDispatchesSent(trackedDispatchIds)
+      : markTrackedDispatchesFailed(trackedDispatchIds));
+    return result;
   }
 
   // DEBUG: log do HTML final enviado para investigar fundo branco no Gmail mobile.
@@ -275,6 +290,7 @@ export async function callBusinessCodeEmail(input: SendEmailInput): Promise<Send
         await new Promise((r) => setTimeout(r, 800 * attempt));
         continue;
       }
+      await markTrackedDispatchesFailed(trackedDispatchIds);
       return {
         ok: false,
         status: 0,
@@ -339,6 +355,9 @@ export async function callBusinessCodeEmail(input: SendEmailInput): Promise<Send
       res.status === 401 ||
       res.status === 403 ||
       res.status === 429);
+  await (res.ok
+    ? markTrackedDispatchesSent(trackedDispatchIds)
+    : markTrackedDispatchesFailed(trackedDispatchIds));
   return { ok: res.ok, status: res.status, body, idempotencyKey, temporary };
 }
 

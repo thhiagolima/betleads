@@ -2,6 +2,12 @@
 // Detecta o tipo de bloco e chama a Evolution API adequada.
 import { evolutionFetch } from "./evolution.server";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import {
+  markTrackedDispatchesFailed,
+  markTrackedDispatchesSent,
+  prepareTrackedText,
+  type LinkTrackingContext,
+} from "./shortio.server";
 
 export type FlowBlock = {
   id: string;
@@ -46,6 +52,7 @@ export async function sendFlowBlock(
   block: FlowBlock,
   lead: { phone_e164: string; player_id?: string | null },
   session: SessionRow,
+  tracking?: Omit<LinkTrackingContext, "channel">,
 ): Promise<{ messageId: string | null; skipDispatch?: boolean }> {
   const number = normalizePhone(lead.phone_e164);
   const instance = session.instance_name;
@@ -55,12 +62,23 @@ export async function sendFlowBlock(
   }
 
   if (block.block_type === "text") {
-    const text = (block.content ?? "").trim();
+    const rawText = (block.content ?? "").trim();
+    const prepared = tracking
+      ? await prepareTrackedText(rawText, { ...tracking, channel: "whatsapp" })
+      : null;
+    const text = prepared?.content ?? rawText;
     if (!text) throw new Error("Bloco de texto vazio");
-    const resp: any = await evolutionFetch(
-      `/message/sendText/${encodeURIComponent(instance)}`,
-      { method: "POST", body: { number, text } },
-    );
+    let resp: any;
+    try {
+      resp = await evolutionFetch(`/message/sendText/${encodeURIComponent(instance)}`, {
+        method: "POST",
+        body: { number, text },
+      });
+    } catch (error) {
+      await markTrackedDispatchesFailed(prepared?.links.map((link) => link.dispatchId) ?? []);
+      throw error;
+    }
+    await markTrackedDispatchesSent(prepared?.links.map((link) => link.dispatchId) ?? []);
     return { messageId: resp?.key?.id ?? resp?.messageId ?? null };
   }
 
@@ -93,9 +111,9 @@ export async function sendFlowBlock(
   };
   if (caption) payload.caption = caption;
 
-  const resp: any = await evolutionFetch(
-    `/message/sendMedia/${encodeURIComponent(instance)}`,
-    { method: "POST", body: payload },
-  );
+  const resp: any = await evolutionFetch(`/message/sendMedia/${encodeURIComponent(instance)}`, {
+    method: "POST",
+    body: payload,
+  });
   return { messageId: resp?.key?.id ?? null };
 }

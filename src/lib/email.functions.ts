@@ -134,6 +134,12 @@ export const sendTestEmail = createServerFn({ method: "POST" })
       replyTo: sender.replyTo,
       subject,
       html,
+      linkTracking: {
+        tenantId,
+        sourceType: "test",
+        recipientPlayerId: playerId,
+        messageLogType: "email_send_logs",
+      },
     });
 
     // Log
@@ -889,6 +895,13 @@ export async function runCampaignSend(campaignId: string) {
         subject,
         html,
         idempotencyKey: crypto.randomUUID(),
+        linkTracking: {
+          tenantId: camp.tenant_id,
+          sourceType: "campaign",
+          sourceId: campaignId,
+          recipientPlayerId: p.id,
+          messageLogType: "email_send_logs",
+        },
       });
       const errSnippet = r.ok
         ? null

@@ -2,6 +2,12 @@ import { createServerFn } from "@tanstack/react-start";
 import { dbUuid } from "@/lib/zod-helpers";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { resolveOperationalTenantId } from "./tenant-access.server";
+import {
+  markTrackedDispatchesFailed,
+  markTrackedDispatchesSent,
+  prepareTrackedText,
+} from "./shortio.server";
 import {
   evolutionFetch,
   isEvolutionConnectionClosed,
@@ -9,7 +15,6 @@ import {
   setEvolutionProxy,
 } from "./evolution.server";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { resolveOperationalTenantId } from "./tenant-access.server";
 
 async function fingerprintKey(key: string): Promise<string> {
   try {
@@ -1003,6 +1008,7 @@ export const sendWhatsappMessage = createServerFn({ method: "POST" })
       .parse(input),
   )
   .handler(async ({ data, context }) => {
+    const tenantId = await resolveOperationalTenantId(context.supabase);
     const { data: chat, error } = await context.supabase
       .from("whatsapp_chats")
       .select("id, session_id, remote_jid, phone, is_group")
@@ -1070,16 +1076,24 @@ export const sendWhatsappMessage = createServerFn({ method: "POST" })
       }
     }
 
+    const prepared = await prepareTrackedText(data.text, {
+      tenantId,
+      channel: "whatsapp",
+      sourceType: "manual",
+      messageLogType: "whatsapp_messages",
+    });
+    const text = prepared.content;
     const number = evolutionNumber(chat.remote_jid);
     const endpoint = `/message/sendText/${encodeURIComponent(instance)}`;
     // Payload oficial Evolution v2: { number, text } — único formato aceito.
     // NÃO enviar message/body/content/caption/mensagem/textMessage.
-    const payload = { number, text: data.text };
+    const payload = { number, text };
     logWhatsappSend({ endpoint, instance, number, kind: "text", payload });
     let resp: any;
     try {
       resp = await evolutionFetch(endpoint, { method: "POST", body: payload });
     } catch (e: any) {
+      await markTrackedDispatchesFailed(prepared.links.map((link) => link.dispatchId));
       if (isEvolutionConnectionClosed(e)) {
         await markWhatsappSessionDisconnected(
           context.supabase,
@@ -1112,14 +1126,15 @@ export const sendWhatsappMessage = createServerFn({ method: "POST" })
       remote_jid: chat.remote_jid,
       from_me: true,
       message_type: "text",
-      text: data.text,
+      text,
       raw: resp,
       message_timestamp: ts,
     });
     await context.supabase
       .from("whatsapp_chats")
-      .update({ last_message: data.text, last_message_at: ts })
+      .update({ last_message: text, last_message_at: ts })
       .eq("id", chatId);
+    await markTrackedDispatchesSent(prepared.links.map((link) => link.dispatchId));
 
     return { ok: true };
   });
