@@ -25,6 +25,7 @@ type TenantShortioSettings = {
   fallback_mode: "block" | "passthrough";
   default_ttl_days: number | null;
   allowed_destination_hosts: string[];
+  enabled_channels: LinkTrackingChannel[];
 };
 
 type CreatedLink = { id: string; shortURL: string; path?: string | null };
@@ -59,6 +60,7 @@ function defaultSettings(): TenantShortioSettings {
     fallback_mode: "block",
     default_ttl_days: null,
     allowed_destination_hosts: [],
+    enabled_channels: ["sms", "whatsapp", "email"],
   };
 }
 
@@ -68,7 +70,7 @@ async function settingsForTenant(tenantId: string): Promise<TenantShortioSetting
   const { data, error } = await db
     .from("shortio_settings")
     .select(
-      "enabled,domain,attribution_mode,fallback_mode,default_ttl_days,allowed_destination_hosts",
+      "enabled,domain,attribution_mode,fallback_mode,default_ttl_days,allowed_destination_hosts,enabled_channels",
     )
     .eq("tenant_id", tenantId)
     .maybeSingle();
@@ -85,6 +87,12 @@ async function settingsForTenant(tenantId: string): Promise<TenantShortioSetting
     allowed_destination_hosts: Array.isArray(data.allowed_destination_hosts)
       ? data.allowed_destination_hosts.map(normalizeHost).filter(Boolean)
       : [],
+    enabled_channels: Array.isArray(data.enabled_channels)
+      ? data.enabled_channels.filter(
+          (channel: unknown): channel is LinkTrackingChannel =>
+            channel === "sms" || channel === "whatsapp" || channel === "email",
+        )
+      : ["sms", "whatsapp", "email"],
   };
 }
 
@@ -307,7 +315,8 @@ export async function prepareTrackedText(
   context: LinkTrackingContext,
 ): Promise<PreparedText> {
   const settings = await settingsForTenant(context.tenantId);
-  if (!settings.enabled) return { content, links: [], trackingEnabled: false };
+  if (!settings.enabled || !settings.enabled_channels.includes(context.channel))
+    return { content, links: [], trackingEnabled: false };
 
   const matches = Array.from(content.matchAll(URL_PATTERN));
   const replacements: Array<{ start: number; end: number; value: string }> = [];
@@ -369,7 +378,8 @@ export async function prepareTrackedEmailHtml(
   context: Omit<LinkTrackingContext, "channel">,
 ): Promise<PreparedText> {
   const settings = await settingsForTenant(context.tenantId);
-  if (!settings.enabled) return { content: html, links: [], trackingEnabled: false };
+  if (!settings.enabled || !settings.enabled_channels.includes("email"))
+    return { content: html, links: [], trackingEnabled: false };
   const hrefPattern = /(\bhref\s*=\s*)(["'])([^"']*)\2/gi;
   const matches = Array.from(html.matchAll(hrefPattern));
   const replacements: Array<{ start: number; end: number; value: string }> = [];
