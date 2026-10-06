@@ -178,6 +178,8 @@ nos cenários ligado/desligado e existe evidência de produção e rollback.
 
 ## Melhorias futuras — não bloqueiam o fechamento
 
+- [ ] Criar no dashboard de e-mail uma área completa de templates: criar, editar,
+  duplicar e excluir; incluir upload, biblioteca e gestão de imagens para o HTML.
 - [ ] Eventos brutos de clique e atributos individuais aprovados pela LGPD.
 - [ ] Garantia/atribuição de conversão financeira após clique.
 - [ ] Exportações analíticas avançadas.
