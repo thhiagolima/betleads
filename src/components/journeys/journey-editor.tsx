@@ -91,6 +91,7 @@ export function JourneyEditor({
   const [cooldownHours, setCooldownHours] = useState(72);
   const [windowStart, setWindowStart] = useState("08:00");
   const [windowEnd, setWindowEnd] = useState("22:00");
+  const [audience, setAudience] = useState("all_active");
   const [exitRules, setExitRules] = useState<Record<string, boolean>>({
     deposit: true,
     first_deposit: true,
@@ -152,7 +153,7 @@ export function JourneyEditor({
             trigger_type: trigger,
             exit_rules: exitRules,
             entry_rules: {
-              audience: "all_active",
+              audience,
               window_start: windowStart,
               window_end: windowEnd,
             },
@@ -273,7 +274,8 @@ export function JourneyEditor({
             </p>
             <select
               className="mt-3 flex h-10 w-full rounded-md border bg-background px-3 text-sm"
-              defaultValue="all_active"
+              value={audience}
+              onChange={(event) => setAudience(event.target.value)}
             >
               <option value="all_active">Todos os jogadores ativos</option>
               <option value="vip">Somente VIP</option>
