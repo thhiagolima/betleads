@@ -39,6 +39,7 @@ import { Route as AutomacoesSmsRouteImport } from './routes/automacoes.sms'
 import { Route as AutomacoesWhatsappRouteImport } from './routes/automacoes.whatsapp'
 import { Route as JornadasJourneyIdRouteImport } from './routes/jornadas.$journeyId'
 import { Route as JornadasNovaRouteImport } from './routes/jornadas.nova'
+import { Route as LinksConfiguracoesRouteImport } from './routes/links.configuracoes'
 import { Route as PlayersPlayerIdRouteImport } from './routes/players.$playerId'
 import { Route as UTokenRouteImport } from './routes/u.$token'
 import { Route as ApiPublicEvolutionWebhookRouteImport } from './routes/api/public/evolution-webhook'
@@ -220,6 +221,11 @@ const JornadasNovaRoute = JornadasNovaRouteImport.update({
   id: '/nova',
   path: '/nova',
   getParentRoute: () => JornadasRoute,
+} as any)
+const LinksConfiguracoesRoute = LinksConfiguracoesRouteImport.update({
+  id: '/configuracoes',
+  path: '/configuracoes',
+  getParentRoute: () => LinksRoute,
 } as any)
 const PlayersPlayerIdRoute = PlayersPlayerIdRouteImport.update({
   id: '/$playerId',
@@ -412,7 +418,7 @@ export interface FileRoutesByFullPath {
   '/inteligencia': typeof InteligenciaRoute
   '/jornadas': typeof JornadasRouteWithChildren
   '/ligacoes': typeof LigacoesRoute
-  '/links': typeof LinksRoute
+  '/links': typeof LinksRouteWithChildren
   '/midia-ltv': typeof MidiaLtvRoute
   '/players': typeof PlayersRouteWithChildren
   '/publicos': typeof PublicosRoute
@@ -428,6 +434,7 @@ export interface FileRoutesByFullPath {
   '/automacoes/whatsapp': typeof AutomacoesWhatsappRoute
   '/jornadas/$journeyId': typeof JornadasJourneyIdRoute
   '/jornadas/nova': typeof JornadasNovaRoute
+  '/links/configuracoes': typeof LinksConfiguracoesRoute
   '/players/$playerId': typeof PlayersPlayerIdRoute
   '/u/$token': typeof UTokenRoute
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
@@ -475,7 +482,7 @@ export interface FileRoutesByTo {
   '/inteligencia': typeof InteligenciaRoute
   '/jornadas': typeof JornadasRouteWithChildren
   '/ligacoes': typeof LigacoesRoute
-  '/links': typeof LinksRoute
+  '/links': typeof LinksRouteWithChildren
   '/midia-ltv': typeof MidiaLtvRoute
   '/players': typeof PlayersRouteWithChildren
   '/publicos': typeof PublicosRoute
@@ -491,6 +498,7 @@ export interface FileRoutesByTo {
   '/automacoes/whatsapp': typeof AutomacoesWhatsappRoute
   '/jornadas/$journeyId': typeof JornadasJourneyIdRoute
   '/jornadas/nova': typeof JornadasNovaRoute
+  '/links/configuracoes': typeof LinksConfiguracoesRoute
   '/players/$playerId': typeof PlayersPlayerIdRoute
   '/u/$token': typeof UTokenRoute
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
@@ -539,7 +547,7 @@ export interface FileRoutesById {
   '/inteligencia': typeof InteligenciaRoute
   '/jornadas': typeof JornadasRouteWithChildren
   '/ligacoes': typeof LigacoesRoute
-  '/links': typeof LinksRoute
+  '/links': typeof LinksRouteWithChildren
   '/midia-ltv': typeof MidiaLtvRoute
   '/players': typeof PlayersRouteWithChildren
   '/publicos': typeof PublicosRoute
@@ -555,6 +563,7 @@ export interface FileRoutesById {
   '/automacoes/whatsapp': typeof AutomacoesWhatsappRoute
   '/jornadas/$journeyId': typeof JornadasJourneyIdRoute
   '/jornadas/nova': typeof JornadasNovaRoute
+  '/links/configuracoes': typeof LinksConfiguracoesRoute
   '/players/$playerId': typeof PlayersPlayerIdRoute
   '/u/$token': typeof UTokenRoute
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
@@ -620,6 +629,7 @@ export interface FileRouteTypes {
     | '/automacoes/whatsapp'
     | '/jornadas/$journeyId'
     | '/jornadas/nova'
+    | '/links/configuracoes'
     | '/players/$playerId'
     | '/u/$token'
     | '/api/public/evolution-webhook'
@@ -683,6 +693,7 @@ export interface FileRouteTypes {
     | '/automacoes/whatsapp'
     | '/jornadas/$journeyId'
     | '/jornadas/nova'
+    | '/links/configuracoes'
     | '/players/$playerId'
     | '/u/$token'
     | '/api/public/evolution-webhook'
@@ -746,6 +757,7 @@ export interface FileRouteTypes {
     | '/automacoes/whatsapp'
     | '/jornadas/$journeyId'
     | '/jornadas/nova'
+    | '/links/configuracoes'
     | '/players/$playerId'
     | '/u/$token'
     | '/api/public/evolution-webhook'
@@ -794,7 +806,7 @@ export interface RootRouteChildren {
   InteligenciaRoute: typeof InteligenciaRoute
   JornadasRoute: typeof JornadasRouteWithChildren
   LigacoesRoute: typeof LigacoesRoute
-  LinksRoute: typeof LinksRoute
+  LinksRoute: typeof LinksRouteWithChildren
   MidiaLtvRoute: typeof MidiaLtvRoute
   PlayersRoute: typeof PlayersRouteWithChildren
   PublicosRoute: typeof PublicosRoute
@@ -1048,6 +1060,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof JornadasNovaRouteImport
       parentRoute: typeof JornadasRoute
     }
+    '/links/configuracoes': {
+      id: '/links/configuracoes'
+      path: '/configuracoes'
+      fullPath: '/links/configuracoes'
+      preLoaderRoute: typeof LinksConfiguracoesRouteImport
+      parentRoute: typeof LinksRoute
+    }
     '/players/$playerId': {
       id: '/players/$playerId'
       path: '/$playerId'
@@ -1300,6 +1319,16 @@ const JornadasRouteWithChildren = JornadasRoute._addFileChildren(
   JornadasRouteChildren,
 )
 
+interface LinksRouteChildren {
+  LinksConfiguracoesRoute: typeof LinksConfiguracoesRoute
+}
+
+const LinksRouteChildren: LinksRouteChildren = {
+  LinksConfiguracoesRoute: LinksConfiguracoesRoute,
+}
+
+const LinksRouteWithChildren = LinksRoute._addFileChildren(LinksRouteChildren)
+
 interface PlayersRouteChildren {
   PlayersPlayerIdRoute: typeof PlayersPlayerIdRoute
 }
@@ -1326,7 +1355,7 @@ const rootRouteChildren: RootRouteChildren = {
   InteligenciaRoute: InteligenciaRoute,
   JornadasRoute: JornadasRouteWithChildren,
   LigacoesRoute: LigacoesRoute,
-  LinksRoute: LinksRoute,
+  LinksRoute: LinksRouteWithChildren,
   MidiaLtvRoute: MidiaLtvRoute,
   PlayersRoute: PlayersRouteWithChildren,
   PublicosRoute: PublicosRoute,
