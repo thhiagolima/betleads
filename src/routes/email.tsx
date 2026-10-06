@@ -223,6 +223,7 @@ type Campanha = {
   entregues: number;
   abertos: number;
   cliques: number;
+  descadastros?: number;
   falhas: number;
   data: string;
   targetPlayerIds?: string[];
@@ -1055,6 +1056,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function TemplatesTab() {
   const listFn = useServerFn(listEmailTemplates);
+  const listCampaignsFn = useServerFn(listEmailCampaigns);
   const saveFn = useServerFn(saveEmailTemplate);
   const delFn = useServerFn(deleteEmailTemplate);
   const dupFn = useServerFn(duplicateEmailTemplate);
@@ -1064,6 +1066,21 @@ function TemplatesTab() {
     queryFn: () => listFn(),
   });
   const items: Template[] = (q.data?.items ?? []) as any;
+  const campaignQ = useQuery({ queryKey: ["email-template-report"], queryFn: () => listCampaignsFn() });
+  const reportByTemplate = useMemo(() => {
+    const report = new Map<string, { enviados: number; entregues: number; cliques: number; descadastros: number; falhas: number }>();
+    for (const campaign of ((campaignQ.data?.items ?? []) as Campanha[])) {
+      if (!campaign.templateId) continue;
+      const current = report.get(campaign.templateId) ?? { enviados: 0, entregues: 0, cliques: 0, descadastros: 0, falhas: 0 };
+      current.enviados += campaign.enviados ?? 0;
+      current.entregues += campaign.entregues ?? 0;
+      current.cliques += campaign.cliques ?? 0;
+      current.descadastros += campaign.descadastros ?? 0;
+      current.falhas += campaign.falhas ?? 0;
+      report.set(campaign.templateId, current);
+    }
+    return report;
+  }, [campaignQ.data]);
 
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Template | null>(null);
@@ -1234,6 +1251,18 @@ function TemplatesTab() {
                     </Badge>
                   ))}
                 </div>
+                {(() => {
+                  const report = reportByTemplate.get(t.id) ?? { enviados: 0, entregues: 0, cliques: 0, descadastros: 0, falhas: 0 };
+                  return (
+                    <div className="grid grid-cols-3 gap-2 rounded-md bg-muted/40 p-2 text-[10px] text-muted-foreground">
+                      <span><b className="text-foreground">{num(report.enviados)}</b> envios</span>
+                      <span><b className="text-foreground">{num(report.entregues)}</b> entregas</span>
+                      <span><b className="text-foreground">{num(report.cliques)}</b> cliques</span>
+                      <span><b className="text-foreground">{num(report.descadastros)}</b> descad.</span>
+                      <span><b className="text-foreground">{num(report.falhas)}</b> falhas</span>
+                    </div>
+                  );
+                })()}
                 <Separator />
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
                   <span>v{t.version ?? 1} · Atualizado {t.atualizadoEm}</span>

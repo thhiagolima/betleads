@@ -592,6 +592,7 @@ function campanhaRowToUI(r: any) {
     entregues: stats.entregues ?? 0,
     abertos: stats.abertos ?? 0,
     cliques: stats.cliques ?? 0,
+    descadastros: stats.descadastros ?? 0,
     falhas: stats.falhas ?? 0,
     data: new Date(r.created_at).toLocaleDateString("pt-BR"),
     trackLinks: r.track_links !== false,
