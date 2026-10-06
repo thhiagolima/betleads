@@ -19,3 +19,10 @@
 3. `npx supabase db push` e `npx supabase db lint --linked` aprovados.
 4. Backup e plano de rollback registrados.
 5. Health check em `/`, login, Players, SMS e webhook autorizado.
+
+## Rollback Short.io
+
+1. Como administrador do tenant, desative o canal SMS e/ou e-mail em **Links > Configurações** (ou defina `enabled=false`).
+2. Novos envios preservam as URLs originais; links `bmkt.click` já enviados continuam válidos e redirecionando.
+3. Não apague `tracked_links`, `link_dispatches` ou snapshots durante o rollback: eles são a trilha de auditoria.
+4. Após a estabilização, valide o último sync e os logs do canal antes de reativar o tenant.
