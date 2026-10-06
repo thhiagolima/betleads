@@ -436,6 +436,7 @@ const TemplateInputSchema = z.object({
   tags: z.array(z.string().max(60)).default([]),
   corpo: z.string().default(""),
   ativo: z.boolean().default(true),
+  trackLinks: z.boolean().default(true),
 });
 
 function templateRowToUI(r: any) {
@@ -449,6 +450,7 @@ function templateRowToUI(r: any) {
     tags: r.tags ?? [],
     corpo: r.body_html ?? "",
     ativo: !!r.is_active,
+    trackLinks: r.track_links !== false,
     atualizadoEm: new Date(r.updated_at ?? r.created_at).toLocaleString("pt-BR"),
   };
 }
@@ -477,6 +479,7 @@ export const saveEmailTemplate = createServerFn({ method: "POST" })
       body_text: "",
       tags: data.tags,
       is_active: data.ativo,
+      track_links: data.trackLinks,
     };
     if (data.id) {
       const { error } = await context.supabase
@@ -525,6 +528,7 @@ export const duplicateEmailTemplate = createServerFn({ method: "POST" })
         body_text: orig.body_text,
         tags: orig.tags,
         is_active: orig.is_active,
+        track_links: orig.track_links,
       })
       .select("id")
       .single();
@@ -547,6 +551,7 @@ const CampanhaInputSchema = z.object({
   status: z.enum(["rascunho", "agendada", "enviando", "pausada", "concluida"]).default("rascunho"),
   targetPlayerIds: z.array(dbUuid()).max(5000).optional(),
   extraEmails: z.array(z.string().email().max(255)).max(5000).optional(),
+  trackLinks: z.boolean().default(true),
 });
 
 function campanhaRowToUI(r: any) {
@@ -575,6 +580,7 @@ function campanhaRowToUI(r: any) {
     cliques: stats.cliques ?? 0,
     falhas: stats.falhas ?? 0,
     data: new Date(r.created_at).toLocaleDateString("pt-BR"),
+    trackLinks: r.track_links !== false,
   };
 }
 
@@ -610,6 +616,7 @@ export const saveEmailCampaign = createServerFn({ method: "POST" })
       smtp_id: smtpIdNorm,
       scheduled_at: data.agendadoPara ? new Date(data.agendadoPara).toISOString() : null,
       status: data.status,
+      track_links: data.trackLinks,
     };
     if (data.id) {
       const { error } = await context.supabase
@@ -665,6 +672,7 @@ export const duplicateEmailCampaign = createServerFn({ method: "POST" })
         template_id: orig.template_id,
         smtp_id: orig.smtp_id,
         status: "rascunho",
+        track_links: orig.track_links,
       })
       .select("id")
       .single();
@@ -911,7 +919,8 @@ export async function runCampaignSend(campaignId: string) {
           sourceType: "campaign",
           sourceId: campaignId,
           recipientPlayerId: p.id,
-          messageLogType: "email_send_logs",
+        messageLogType: "email_send_logs",
+        enabled: camp.track_links !== false,
         },
       });
       const errSnippet = r.ok

@@ -318,6 +318,7 @@ async function executeEnrollment(id: string): Promise<void> {
         sourceId: enrollment.journey_id,
         recipientPlayerId: enrollment.player_id,
         messageLogType: "email_send_logs",
+        enabled: step.config.track_links !== false,
       },
     });
     if (!result.ok) throw new Error(JSON.stringify(result.body));

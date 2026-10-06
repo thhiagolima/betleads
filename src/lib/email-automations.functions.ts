@@ -56,6 +56,7 @@ const BlockInputSchema = z.object({
   send_at_hour: z.number().int().min(0).max(23).nullable().optional(),
   send_at_minute: z.number().int().min(0).max(59).default(0),
   skip_if_past: z.boolean().default(false),
+  track_links: z.boolean().default(true),
 });
 
 const ExitConditionsSchema = z.object({
@@ -198,6 +199,7 @@ export const saveEmailFlow = createServerFn({ method: "POST" })
       send_at_hour: b.send_at_hour ?? null,
       send_at_minute: b.send_at_minute ?? 0,
       skip_if_past: b.skip_if_past ?? false,
+      track_links: b.track_links,
     }));
     if (rows.length > 0) {
       const { error } = await context.supabase.from("email_flow_blocks").insert(rows);
@@ -274,6 +276,7 @@ export const duplicateEmailFlow = createServerFn({ method: "POST" })
           send_at_hour: b.send_at_hour,
           send_at_minute: b.send_at_minute,
           skip_if_past: b.skip_if_past,
+          track_links: b.track_links,
         })),
       );
     }

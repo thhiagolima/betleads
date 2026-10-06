@@ -746,6 +746,7 @@ export async function runEmailFlowDispatcher({
         sourceId: plan.lead.flow_id,
         recipientPlayerId: plan.lead.player_id,
         messageLogType: "email_send_logs",
+        enabled: plan.blocks[plan.blockIdx]?.track_links !== false,
       },
     });
     const isTemporary = !result.ok && result.temporary === true;
