@@ -253,8 +253,8 @@ export function CampaignsHub() {
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <p className="truncate font-medium">{campaign.name}</p>
-                    <Badge variant="outline" className="capitalize">
-                      {campaign.status}
+                    <Badge variant="outline" className={operationState(campaign.status).tone}>
+                      {operationState(campaign.status).label}
                     </Badge>
                   </div>
                   <p className="mt-1 text-xs text-muted-foreground">
@@ -312,4 +312,24 @@ function CampaignMetric({ label, value }: { label: string; value: string }) {
       <strong className="block text-sm text-foreground">{value}</strong>
     </div>
   );
+}
+
+function operationState(status: string) {
+  const normalized = status.toLowerCase();
+  if (["agendada", "pending", "queued", "audio_ready"].includes(normalized)) {
+    return { label: "Aguardando envio", tone: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300" };
+  }
+  if (["enviando", "running", "processing", "dispatched"].includes(normalized)) {
+    return { label: "Em processamento", tone: "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300" };
+  }
+  if (["enviado", "sent", "delivered", "concluida", "completed", "answered"].includes(normalized)) {
+    return { label: "Concluída", tone: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" };
+  }
+  if (["falhou", "failed", "error", "cancelled", "cancelada"].includes(normalized)) {
+    return { label: "Ação necessária", tone: "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300" };
+  }
+  if (["pausada", "paused"].includes(normalized)) {
+    return { label: "Pausada", tone: "border-muted-foreground/30 bg-muted text-muted-foreground" };
+  }
+  return { label: status || "Sem status", tone: "border-border text-muted-foreground" };
 }
