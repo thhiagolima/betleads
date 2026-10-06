@@ -12,6 +12,7 @@ import { ProvidersTab } from "@/components/ligacoes/providers-tab";
 import { FlowsTab } from "@/components/ligacoes/flows-tab";
 import { BulkCallTab } from "@/components/ligacoes/bulk-call-tab";
 import { DashboardTab } from "@/components/ligacoes/dashboard-tab";
+import { VoiceAssetsTab } from "@/components/ligacoes/voice-assets-tab";
 
 export const Route = createFileRoute("/ligacoes")({
   head: () => ({
@@ -32,6 +33,7 @@ const VALID_TABS = [
   "fluxos",
   "scripts",
   "massa",
+  "audios",
   "historico",
   "configuracoes",
 ] as const;
@@ -80,6 +82,7 @@ function LigacoesPage() {
         <TabsContent value="massa">
           <BulkCallTab />
         </TabsContent>
+        <TabsContent value="audios"><VoiceAssetsTab /></TabsContent>
         <TabsContent value="historico" className="space-y-6">
           <QueueTab />
           <HistoryShell
