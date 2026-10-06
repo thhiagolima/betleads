@@ -436,6 +436,7 @@ const TemplateInputSchema = z.object({
   tags: z.array(z.string().max(60)).default([]),
   corpo: z.string().default(""),
   ativo: z.boolean().default(true),
+  lifecycleStatus: z.enum(["draft", "published", "archived"]).optional(),
   trackLinks: z.boolean().default(true),
 });
 
@@ -451,6 +452,8 @@ function templateRowToUI(r: any) {
     corpo: r.body_html ?? "",
     ativo: !!r.is_active,
     trackLinks: r.track_links !== false,
+    lifecycleStatus: r.lifecycle_status ?? (r.is_active ? "published" : "archived"),
+    version: r.version ?? 1,
     atualizadoEm: new Date(r.updated_at ?? r.created_at).toLocaleString("pt-BR"),
   };
 }
@@ -480,8 +483,18 @@ export const saveEmailTemplate = createServerFn({ method: "POST" })
       tags: data.tags,
       is_active: data.ativo,
       track_links: data.trackLinks,
+      lifecycle_status: data.lifecycleStatus ?? (data.ativo ? "published" : "draft"),
     };
     if (data.id) {
+      const { count, error: campaignError } = await (context.supabase as any)
+        .from("email_campaigns")
+        .select("id", { count: "exact", head: true })
+        .eq("template_id", data.id)
+        .in("status", ["agendada", "enviando", "enviado"]);
+      if (campaignError) throw new Error(campaignError.message);
+      if ((count ?? 0) > 0) {
+        throw new Error("Este template já está em uma campanha ativa. Duplique-o para criar uma nova versão.");
+      }
       const { error } = await context.supabase
         .from("email_templates")
         .update(payload)
