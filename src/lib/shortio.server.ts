@@ -606,14 +606,38 @@ export async function syncShortioMetrics(limit = 100, tenantId?: string) {
   // tenant-scoped e por isso só registra execuções com tenant explícito.
   const runId = run.data ? String(run.data.id) : null;
 
+  const { data: previousRun } = await db
+    .from("link_tracking_sync_runs")
+    .select("cursor")
+    .eq("tenant_id", tenantId)
+    .eq("status", "completed")
+    .not("cursor", "is", null)
+    .order("finished_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const cursor = typeof previousRun?.cursor === "string" ? previousRun.cursor : null;
+
   let query = db
     .from("tracked_links")
     .select("id,tenant_id,shortio_link_id")
     .eq("status", "active")
-    .order("last_synced_at", { ascending: true, nullsFirst: true })
+    .order("id", { ascending: true })
     .limit(limit);
   if (tenantId) query = query.eq("tenant_id", tenantId);
-  const { data: links, error } = await query;
+  if (cursor) query = query.gt("id", cursor);
+  let { data: links, error } = await query;
+  // Reached the end of the cursor window: begin the next reconciliation pass.
+  if (!error && cursor && (!links || links.length === 0)) {
+    const retry = await db
+      .from("tracked_links")
+      .select("id,tenant_id,shortio_link_id")
+      .eq("status", "active")
+      .eq("tenant_id", tenantId)
+      .order("id", { ascending: true })
+      .limit(limit);
+    links = retry.data;
+    error = retry.error;
+  }
   if (error) throw new Error(`Falha ao listar links para sincronização: ${error.message}`);
 
   let processed = 0;
@@ -680,6 +704,7 @@ export async function syncShortioMetrics(limit = 100, tenantId?: string) {
         finished_at: new Date().toISOString(),
         status: failures ? "failed" : "completed",
         links_processed: processed,
+        cursor: links?.length ? String(links[links.length - 1].id) : null,
         error: failures ? `${failures} links falharam` : null,
       })
       .eq("id", runId);
