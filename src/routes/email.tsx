@@ -201,6 +201,9 @@ type Template = {
   tags: string[];
   corpo: string;
   ativo: boolean;
+  trackLinks?: boolean;
+  lifecycleStatus?: "draft" | "published" | "archived";
+  version?: number;
   atualizadoEm: string;
 };
 
@@ -1078,6 +1081,9 @@ function TemplatesTab() {
       tags: [],
       corpo: "",
       ativo: true,
+      trackLinks: true,
+      lifecycleStatus: "draft",
+      version: 1,
       atualizadoEm: "agora",
     });
     setChooserOpen(true);
@@ -1096,6 +1102,8 @@ function TemplatesTab() {
           tags: t.tags,
           corpo: t.corpo,
           ativo: t.ativo,
+          trackLinks: t.trackLinks ?? true,
+          lifecycleStatus: t.lifecycleStatus,
         },
       } as any);
       setOpen(false);
@@ -1146,6 +1154,8 @@ function TemplatesTab() {
           tags: t.tags,
           corpo: t.corpo,
           ativo: !t.ativo,
+          trackLinks: t.trackLinks ?? true,
+          lifecycleStatus: t.ativo ? "archived" : "published",
         },
       } as any);
       q.refetch();
@@ -1195,12 +1205,14 @@ function TemplatesTab() {
                   </div>
                   <Badge
                     className={
-                      t.ativo
+                      t.lifecycleStatus === "published"
                         ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
-                        : "bg-muted text-muted-foreground"
+                        : t.lifecycleStatus === "draft"
+                          ? "bg-amber-500/15 text-amber-400 border-amber-500/30"
+                          : "bg-muted text-muted-foreground"
                     }
                   >
-                    {t.ativo ? "ativo" : "pausado"}
+                    {t.lifecycleStatus === "published" ? "publicado" : t.lifecycleStatus === "draft" ? "rascunho" : "arquivado"}
                   </Badge>
                 </div>
               </CardHeader>
@@ -1224,7 +1236,7 @@ function TemplatesTab() {
                 </div>
                 <Separator />
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span>Atualizado {t.atualizadoEm}</span>
+                  <span>v{t.version ?? 1} · Atualizado {t.atualizadoEm}</span>
                   <div className="flex items-center gap-1">
                     <Button
                       size="icon"
@@ -1406,6 +1418,22 @@ function TemplateDialog({
               <Field label="Nome do remetente">
                 <Input value={t.fromName} onChange={(e) => up("fromName", e.target.value)} />
               </Field>
+              <Field label="Status">
+                <Select
+                  value={t.lifecycleStatus ?? (t.ativo ? "published" : "archived")}
+                  onValueChange={(value: "draft" | "published" | "archived") => {
+                    up("lifecycleStatus", value);
+                    up("ativo", value === "published");
+                  }}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="draft">Rascunho</SelectItem>
+                    <SelectItem value="published">Publicado</SelectItem>
+                    <SelectItem value="archived">Arquivado</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
               <Field label="Tags">
                 <div className="flex gap-1.5">
                   <Input
@@ -1474,6 +1502,12 @@ function TemplateDialog({
               placeholder={
                 mode === "html" ? "<!doctype html>..." : "Escreva o conteúdo ou insira blocos →"
               }
+            />
+            <LinkTrackingToggle
+              value={t.trackLinks ?? true}
+              onChange={(value) => up("trackLinks", value)}
+              content={t.corpo}
+              channel="email"
             />
           </div>
 

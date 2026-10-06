@@ -540,8 +540,9 @@ export const duplicateEmailTemplate = createServerFn({ method: "POST" })
         body_html: orig.body_html,
         body_text: orig.body_text,
         tags: orig.tags,
-        is_active: orig.is_active,
+        is_active: false,
         track_links: orig.track_links,
+        lifecycle_status: "draft",
       })
       .select("id")
       .single();
@@ -615,6 +616,19 @@ export const saveEmailCampaign = createServerFn({ method: "POST" })
     // BusinessCode é um provedor próprio (não SMTP). Normaliza para null
     // para evitar gravar valor não-UUID em smtp_id.
     const smtpIdNorm = data.smtpId && data.smtpId !== "businesscode" ? data.smtpId : null;
+    let templateSnapshot: Record<string, unknown> | null = null;
+    if (data.templateId) {
+      const { data: template, error: templateError } = await context.supabase
+        .from("email_templates")
+        .select("id, name, subject, preheader, from_name, body_html, body_text, tags, track_links, lifecycle_status, version")
+        .eq("id", data.templateId)
+        .single();
+      if (templateError || !template) throw new Error("Template selecionado não foi encontrado.");
+      if (data.status === "agendada" && template.lifecycle_status !== "published") {
+        throw new Error("Apenas templates publicados podem ser agendados.");
+      }
+      templateSnapshot = template as Record<string, unknown>;
+    }
     const payload: any = {
       name: data.nome,
       audience_filter: {
@@ -630,6 +644,7 @@ export const saveEmailCampaign = createServerFn({ method: "POST" })
       scheduled_at: data.agendadoPara ? new Date(data.agendadoPara).toISOString() : null,
       status: data.status,
       track_links: data.trackLinks,
+      template_snapshot: templateSnapshot,
     };
     if (data.id) {
       const { error } = await context.supabase
@@ -799,12 +814,18 @@ export async function runCampaignSend(campaignId: string) {
 
   if (!camp.template_id) throw new Error("Selecione um template antes de enviar.");
 
-  const { data: tpl, error: tErr } = await supabaseAdmin
+  const { data: liveTpl, error: tErr } = await supabaseAdmin
     .from("email_templates")
     .select("*")
     .eq("id", camp.template_id)
     .maybeSingle();
-  if (tErr || !tpl) throw new Error("Template da campanha não encontrado.");
+  if (tErr || !liveTpl) throw new Error("Template da campanha não encontrado.");
+  if (liveTpl.lifecycle_status !== "published") {
+    throw new Error("O template desta campanha não está publicado.");
+  }
+  // O snapshot preserva a versão aprovada no momento em que a campanha foi criada.
+  // Campanhas legadas, sem snapshot, seguem usando o template publicado atual.
+  const tpl = (camp.template_snapshot as Record<string, any> | null) ?? liveTpl;
 
   // smtp_id pode ser null quando o usuário escolheu "BusinessCode" como
   // provedor. resolveSender tenta primeiro a tabela `email_senders`
