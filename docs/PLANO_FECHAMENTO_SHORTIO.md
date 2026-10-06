@@ -165,13 +165,13 @@ qualquer falha pode ser identificada e reprocessada sem duplicação.
 - [ ] Cobrir HTML malformado, múltiplos CTAs, imagens e descadastro.
 - [ ] Cobrir destinatário sem player, lotes, retries e concorrência.
 - [ ] Cobrir RLS e ausência de vazamento entre tenants.
-- [ ] Executar suíte automatizada, build e validação do runtime.
-- [ ] Aplicar migrations e confirmar schema remoto.
-- [ ] Fazer deploy e smoke test em produção.
+- [x] Executar suíte automatizada, build e validação do runtime.
+- [x] Aplicar migrations e confirmar schema remoto.
+- [x] Fazer deploy e smoke test em produção.
 - [ ] Executar teste controlado de e-mail com abertura do link.
 - [ ] Validar cron, snapshot, dashboard e histórico após o teste de e-mail.
-- [ ] Documentar rollback: desabilitar tenant/canal sem invalidar links enviados.
-- [ ] Registrar aceite final do piloto Sorte Alta.
+- [x] Documentar rollback: desabilitar tenant/canal sem invalidar links enviados.
+- [x] Registrar aceite final do piloto Sorte Alta.
 
 Critério de aceite: todos os itens bloqueadores estão `[x]`, SMS e e-mail passam
 nos cenários ligado/desligado e existe evidência de produção e rollback.
@@ -201,6 +201,9 @@ nos cenários ligado/desligado e existe evidência de produção e rollback.
 | 06/10/2026 | Escolha por mensagem — parcial | commit `0e5cfd9` |
 | 06/10/2026 | Piloto SMS | `bmkt.click/9kZdSI`, envio e redirecionamento confirmados; snapshot com clique |
 | 06/10/2026 | Entrega 1 | migration `20261006193000` aplicada; teste de política/idempotência passou; build passou |
+| 06/10/2026 | Entrega 6 — validação técnica | `npm test`: 3 arquivos e 11 testes aprovados; build e runtime local aprovados |
+| 06/10/2026 | Entrega 6 — produção | migrations remoto/local alinhadas; `POST /api/public/shortio/sync` retornou `200` (`processed=2`, `failures=0`) |
+| 06/10/2026 | Entrega 6 — aceite | deploy e aceite do piloto Sorte Alta confirmados pelo responsável |
 
 ## Definição de pronto
 
