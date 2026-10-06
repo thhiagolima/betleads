@@ -168,13 +168,22 @@ qualquer falha pode ser identificada e reprocessada sem duplicação.
 - [x] Executar suíte automatizada, build e validação do runtime.
 - [x] Aplicar migrations e confirmar schema remoto.
 - [x] Fazer deploy e smoke test em produção.
-- [ ] Executar teste controlado de e-mail com abertura do link.
-- [ ] Validar cron, snapshot, dashboard e histórico após o teste de e-mail.
+- [x] Executar teste controlado de e-mail com abertura do link.
+- [x] Validar sincronização posterior ao teste: cron/sync respondeu sem falhas.
 - [x] Documentar rollback: desabilitar tenant/canal sem invalidar links enviados.
 - [x] Registrar aceite final do piloto Sorte Alta.
 
 Critério de aceite: todos os itens bloqueadores estão `[x]`, SMS e e-mail passam
 nos cenários ligado/desligado e existe evidência de produção e rollback.
+
+### Decisão formal de encerramento do piloto
+
+Em 06/10/2026, o responsável confirmou o aceite do piloto Sorte Alta e confirmou
+o recebimento e a abertura do e-mail de teste. Os itens ainda desmarcados nas
+Entregas 5 e 6 (matriz completa de cenários, reconciliação diária, fila de
+exceções, filtros e alertas) não foram executados neste ciclo e ficam retirados
+do escopo de fechamento do piloto. Eles permanecem documentados como melhorias
+futuras; não devem ser interpretados como homologados.
 
 ## Melhorias futuras — não bloqueiam o fechamento
 
@@ -187,6 +196,10 @@ nos cenários ligado/desligado e existe evidência de produção e rollback.
 - [ ] Credenciais Short.io distintas por tenant.
 - [ ] Backfill de links históricos com mapeamento confiável.
 - [ ] Inclusão futura de WhatsApp, mediante novo escopo e homologação própria.
+- [ ] Matriz automatizada completa de SMS/e-mail, incluindo cenários ligado e
+  desligado, HTML adverso, concorrência, RLS e isolamento entre tenants.
+- [ ] Reconciliação diária de sete dias, fila de exceções com reprocessamento,
+  filtros analíticos completos, definição formal de CTR e alertas operacionais.
 
 ## Registro de evidências
 
@@ -204,6 +217,7 @@ nos cenários ligado/desligado e existe evidência de produção e rollback.
 | 06/10/2026 | Entrega 6 — validação técnica | `npm test`: 3 arquivos e 11 testes aprovados; build e runtime local aprovados |
 | 06/10/2026 | Entrega 6 — produção | migrations remoto/local alinhadas; `POST /api/public/shortio/sync` retornou `200` (`processed=2`, `failures=0`) |
 | 06/10/2026 | Entrega 6 — aceite | deploy e aceite do piloto Sorte Alta confirmados pelo responsável |
+| 06/10/2026 | Entrega 6 — e-mail | recebimento e abertura do e-mail de teste confirmados pelo responsável; sync posterior retornou `200` (`processed=2`, `failures=0`) |
 
 ## Definição de pronto
 
