@@ -61,6 +61,40 @@ export const getLinkTrackingOverview = createServerFn({ method: "GET" })
     };
   });
 
+export const getPlayerLinkHistory = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((v: unknown) => z.object({ playerId: z.string().uuid() }).parse(v))
+  .handler(async ({ data, context }) => {
+    const tenantId = await resolveOperationalTenantId(context.supabase);
+    const db = context.supabase as any;
+    const { data: rows, error } = await db
+      .from("link_dispatches")
+      .select("id,channel,source_type,sent_url,original_url,sent_at,tracked_link_id")
+      .eq("tenant_id", tenantId)
+      .eq("recipient_player_id", data.playerId)
+      .eq("send_status", "sent")
+      .order("sent_at", { ascending: false })
+      .limit(30);
+    if (error) throw new Error(error.message);
+    const ids = Array.from(new Set((rows ?? []).map((r: any) => r.tracked_link_id)));
+    const { data: snaps } = ids.length
+      ? await db
+          .from("link_click_snapshots")
+          .select("tracked_link_id,clicks")
+          .in("tracked_link_id", ids)
+      : { data: [] };
+    const clicks = new Map<string, number>();
+    for (const s of snaps ?? [])
+      clicks.set(
+        s.tracked_link_id,
+        Math.max(clicks.get(s.tracked_link_id) ?? 0, Number(s.clicks ?? 0)),
+      );
+    return (rows ?? []).map((row: any) => ({
+      ...row,
+      clicks: clicks.get(row.tracked_link_id) ?? 0,
+    }));
+  });
+
 async function requireTenantAdmin(context: any) {
   const tenantId = await resolveOperationalTenantId(context.supabase);
   const { data, error } = await context.supabase.rpc("is_tenant_admin", { _tenant: tenantId });
@@ -123,19 +157,17 @@ export const saveShortioSettings = createServerFn({ method: "POST" })
         ),
       ),
     );
-    const { error } = await (context.supabase as any)
-      .from("shortio_settings")
-      .upsert(
-        {
-          ...data,
-          tenant_id: tenantId,
-          domain,
-          allowed_destination_hosts: hosts,
-          updated_by: context.userId,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "tenant_id" },
-      );
+    const { error } = await (context.supabase as any).from("shortio_settings").upsert(
+      {
+        ...data,
+        tenant_id: tenantId,
+        domain,
+        allowed_destination_hosts: hosts,
+        updated_by: context.userId,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "tenant_id" },
+    );
     if (error) throw new Error(error.message);
     return { ok: true };
   });
