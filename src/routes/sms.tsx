@@ -155,7 +155,7 @@ type Gatilho = TriggerType;
 const GATILHOS: Gatilho[] = Object.keys(TRIGGER_NAMES) as Gatilho[];
 
 type Etapa =
-  | { tipo: "sms"; mensagem: string }
+  | { tipo: "sms"; mensagem: string; trackLinks?: boolean }
   | { tipo: "delay"; quantidade: number; unidade: "horas" | "dias" };
 
 type Fluxo = {
@@ -401,6 +401,7 @@ function SmsCompactWorkspace({
           campaignName: `Manual: ${recipientName.trim() || phoneDigits}`,
           route: "iGaming",
           ratePerMinute: 1000,
+          trackLinks,
         },
       }),
     onSuccess: () => {
@@ -647,6 +648,7 @@ function Provedor() {
 
   const [to, setTo] = useState("");
   const [content, setContent] = useState("Teste BetLeads ✅");
+  const [trackLinks, setTrackLinks] = useState(true);
   const [testLead, setTestLead] = useState<SelectedLead | null>(null);
 
   const webhookUrl =
@@ -661,6 +663,7 @@ function Provedor() {
           to,
           content,
           playerId: testLead?.id ?? undefined,
+          trackLinks,
         },
       }),
     onSuccess: (r: any) => {

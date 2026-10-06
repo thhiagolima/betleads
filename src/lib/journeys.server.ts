@@ -281,6 +281,8 @@ async function executeEnrollment(id: string): Promise<void> {
       tenantId: enrollment.tenant_id,
       triggerName: `journey:${enrollment.journey_id}`,
       variables: vars,
+      linkTrackingEnabled: step.config.track_links !== false,
+      deliveryKey: run.idempotency_key,
     });
     if (!result.ok) throw new Error(result.error ?? "SMS não aceito pelo provedor");
     await finishExecution(run.id, {

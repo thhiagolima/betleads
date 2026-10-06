@@ -7,7 +7,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { TRIGGER_NAMES } from "@/lib/triggers";
 
 const EtapaSchema = z.discriminatedUnion("tipo", [
-  z.object({ tipo: z.literal("sms"), mensagem: z.string().max(480).default("") }),
+  z.object({ tipo: z.literal("sms"), mensagem: z.string().max(480).default(""), trackLinks: z.boolean().default(true) }),
   z.object({
     tipo: z.literal("delay"),
     quantidade: z.number().int().min(1).max(8760),
@@ -103,7 +103,7 @@ type FluxoOut = {
   status: "ativo" | "inativo";
   gatilho: string;
   etapas: Array<
-    { tipo: "sms"; mensagem: string } | { tipo: "delay"; quantidade: number; unidade: "horas" | "dias" }
+    { tipo: "sms"; mensagem: string; trackLinks: boolean } | { tipo: "delay"; quantidade: number; unidade: "horas" | "dias" }
   >;
   saida: string[];
   dailyLimit: number;
@@ -129,7 +129,7 @@ function rowToFluxo(flow: any, steps: any[]): FluxoOut {
               quantidade: s.delay_hours != null ? Number(s.delay_hours) : Math.max(1, Number(s.delay_days ?? 1)),
               unidade: s.delay_hours != null ? "horas" as const : "dias" as const,
             }
-          : { tipo: "sms" as const, mensagem: s.content ?? "" },
+          : { tipo: "sms" as const, mensagem: s.content ?? "", trackLinks: s.track_links !== false },
       ),
     saida: exitConditionsToSaida(flow.exit_conditions),
     dailyLimit: Number(flow.daily_limit ?? 500),
@@ -240,6 +240,7 @@ export const saveSmsFlow = createServerFn({ method: "POST" })
               order_index: idx,
               step_type: "sms",
               content: e.mensagem,
+              track_links: e.trackLinks,
               delay_days: 0,
               delay_hours: null,
             },
@@ -316,6 +317,7 @@ export const duplicateSmsFlow = createServerFn({ method: "POST" })
         order_index: s.order_index,
         step_type: s.step_type,
         content: s.content,
+        track_links: s.track_links,
         delay_days: s.delay_days,
         is_active: s.is_active,
       }));

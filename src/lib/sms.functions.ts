@@ -679,6 +679,7 @@ export const sendTestSms = createServerFn({ method: "POST" })
         to: z.string().min(8).max(20),
         content: z.string().min(1).max(480),
         playerId: dbUuid().optional(),
+        trackLinks: z.boolean().optional().default(true),
       })
       .parse(input),
   )
@@ -705,6 +706,7 @@ export const sendTestSms = createServerFn({ method: "POST" })
       triggerName: "teste-manual",
       variables,
       tenantId,
+      linkTrackingEnabled: data.trackLinks,
     });
   });
 

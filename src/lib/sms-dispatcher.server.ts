@@ -74,6 +74,7 @@ type Step = {
   is_active: boolean;
   scheduled_time?: string | null;
   scheduled_day_offset?: number | null;
+  track_links?: boolean | null;
 };
 
 function delayMs(step: Step): number {
@@ -373,6 +374,7 @@ export async function runSmsDispatcher({ limit = 30 }: { limit?: number } = {}) 
       toSend.push({
         lead: l,
         flow,
+        step,
         stepList,
         content,
         nextRunAt,
@@ -587,6 +589,7 @@ export async function runSmsDispatcher({ limit = 30 }: { limit?: number } = {}) 
       stepLabel: item.stepLabel,
       flowLeadId: item.lead.id,
       tenantId: item.lead.tenant_id,
+      linkTrackingEnabled: item.step.track_links !== false,
     });
     if (r.ok) {
       const nextIdx = item.lead.current_step_index + 1;
