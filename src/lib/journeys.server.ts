@@ -9,6 +9,7 @@ type JourneyRow = {
   id: string;
   status: string;
   exit_rules: Record<string, boolean>;
+  entry_rules: Record<string, unknown>;
 };
 type EnrollmentRow = {
   id: string;
@@ -117,6 +118,25 @@ async function playerFor(enrollment: EnrollmentRow) {
   return data;
 }
 
+function nextWindowOpen(rules: Record<string, unknown>): string | null {
+  const start = typeof rules.window_start === "string" ? rules.window_start : null;
+  const end = typeof rules.window_end === "string" ? rules.window_end : null;
+  if (!start || !end || !/^\d\d:\d\d$/.test(start) || !/^\d\d:\d\d$/.test(end)) return null;
+  const now = new Date();
+  const [startHour, startMinute] = start.split(":").map(Number);
+  const [endHour, endMinute] = end.split(":").map(Number);
+  const minute = now.getHours() * 60 + now.getMinutes();
+  const startAt = startHour * 60 + startMinute;
+  const endAt = endHour * 60 + endMinute;
+  const allowed =
+    startAt <= endAt ? minute >= startAt && minute < endAt : minute >= startAt || minute < endAt;
+  if (allowed) return null;
+  const next = new Date(now);
+  next.setHours(startHour, startMinute, 0, 0);
+  if (minute >= endAt && startAt <= endAt) next.setDate(next.getDate() + 1);
+  return next.toISOString();
+}
+
 async function executeEnrollment(id: string): Promise<void> {
   const { data: enrollmentRaw, error: enrollmentError } = await db
     .from("journey_enrollments")
@@ -135,6 +155,12 @@ async function executeEnrollment(id: string): Promise<void> {
   const journey = journeyRaw as JourneyRow | null;
   if (!journey || journey.status !== "active") {
     await release(enrollment, { status: "paused" });
+    return;
+  }
+  const nextOpen = nextWindowOpen(journey.entry_rules ?? {});
+  if (nextOpen) {
+    await release(enrollment, { status: "waiting", next_run_at: nextOpen });
+    await event(enrollment, "deferred_outside_window", { next_run_at: nextOpen });
     return;
   }
   const exitReason = await shouldExit(enrollment, journey.exit_rules ?? {});
