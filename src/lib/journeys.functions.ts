@@ -141,6 +141,31 @@ export const setJourneyStatus = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const tenantId = await tenant(context);
+    if (data.status === "active") {
+      const { data: steps, error: stepsError } = await db
+        .from("journey_steps")
+        .select("step_type,config,is_enabled")
+        .eq("journey_id", data.id)
+        .eq("tenant_id", tenantId)
+        .eq("is_enabled", true);
+      if (stepsError) throw new Error(stepsError.message);
+      const actionable = (steps ?? []).filter(
+        (step: { step_type: string }) => step.step_type !== "end",
+      );
+      if (!actionable.length)
+        throw new Error("Adicione ao menos uma etapa de envio antes de publicar a régua.");
+      for (const step of actionable as Array<{
+        step_type: string;
+        config: Record<string, unknown>;
+      }>) {
+        if (step.step_type === "sms" && !String(step.config.content ?? "").trim())
+          throw new Error("Há uma etapa de SMS sem mensagem.");
+        if (step.step_type === "email" && !step.config.template_id)
+          throw new Error("Há uma etapa de e-mail sem template.");
+        if (step.step_type === "voice" && (!step.config.asset_id || !step.config.caller_id))
+          throw new Error("Há uma etapa de voz sem áudio ou número de origem.");
+      }
+    }
     const { error } = await db
       .from("journeys")
       .update({ status: data.status })
