@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import {
   Mail,
   MessageSquare,
@@ -18,6 +18,16 @@ import { listJourneys, setJourneyStatus } from "@/lib/journeys.functions";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { TRIGGER_NAMES } from "@/lib/triggers";
 
 type Journey = {
   id: string;
@@ -30,11 +40,28 @@ type Journey = {
 };
 
 export function JourneysHub() {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const list = useServerFn(listJourneys);
   const changeStatus = useServerFn(setJourneyStatus);
   const [filter, setFilter] = useState<"all" | Journey["status"]>("all");
   const [search, setSearch] = useState("");
+  const [newOpen, setNewOpen] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [entryMode, setEntryMode] = useState<"event" | "inactivity" | "manual">("event");
+  const [newTrigger, setNewTrigger] = useState("lead_cadastrado");
+  const create = () => {
+    window.sessionStorage.setItem(
+      "journey-draft",
+      JSON.stringify({
+        name: newName,
+        trigger: entryMode === "manual" ? "manual" : newTrigger,
+        entryMode,
+      }),
+    );
+    setNewOpen(false);
+    navigate({ to: "/jornadas/nova" });
+  };
   const journeys = useQuery({ queryKey: ["journeys"], queryFn: () => list() });
   const status = useMutation({
     mutationFn: (input: { id: string; status: Journey["status"] }) => changeStatus({ data: input }),
@@ -60,10 +87,8 @@ export function JourneysHub() {
             Sequências individuais que combinam SMS, e-mail e voz com esperas e regras de saída.
           </p>
         </div>
-        <Button asChild>
-          <Link to="/jornadas/nova">
-            <Plus className="mr-2 h-4 w-4" /> Nova jornada
-          </Link>
+        <Button onClick={() => setNewOpen(true)}>
+          <Plus className="mr-2 h-4 w-4" /> Nova régua
         </Button>
       </div>
       <Card className="border-primary/20 bg-primary/[0.03]">
@@ -171,6 +196,76 @@ export function JourneysHub() {
         <ChannelCard icon={<Mail className="h-4 w-4" />} text="E-mail" />
         <ChannelCard icon={<Volume2 className="h-4 w-4" />} text="Voz por áudio" pending />
       </div>
+      <Dialog open={newOpen} onOpenChange={setNewOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Nova régua</DialogTitle>
+            <DialogDescription>
+              Escolha o gatilho. Os degraus são montados na tela seguinte.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <label className="block text-sm font-medium">
+              Nome da régua
+              <Input
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder="Ex.: Sumiu depois do primeiro depósito"
+              />
+            </label>
+            <div className="grid gap-2">
+              <Button
+                type="button"
+                variant={entryMode === "event" ? "default" : "outline"}
+                className="justify-start"
+                onClick={() => setEntryMode("event")}
+              >
+                Quando algo acontece
+              </Button>
+              <Button
+                type="button"
+                variant={entryMode === "inactivity" ? "default" : "outline"}
+                className="justify-start"
+                onClick={() => setEntryMode("inactivity")}
+              >
+                Quando nada acontece
+              </Button>
+              <Button
+                type="button"
+                variant={entryMode === "manual" ? "default" : "outline"}
+                className="justify-start"
+                onClick={() => setEntryMode("manual")}
+              >
+                Entrada manual ou API
+              </Button>
+            </div>
+            {entryMode !== "manual" && (
+              <label className="block text-sm font-medium">
+                Qual evento
+                <select
+                  className="mt-1 flex h-10 w-full rounded-md border bg-background px-3 text-sm"
+                  value={newTrigger}
+                  onChange={(e) => setNewTrigger(e.target.value)}
+                >
+                  {Object.entries(TRIGGER_NAMES).map(([key, label]) => (
+                    <option key={key} value={key}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setNewOpen(false)}>
+              Cancelar
+            </Button>
+            <Button disabled={!newName.trim()} onClick={create}>
+              Criar e abrir
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -36,6 +36,19 @@ export function JourneyEditor({
   initialSteps?: SavedStep[];
   metrics?: { total: number; byStatus: Record<string, number>; exits: Record<string, number> };
 }) {
+  const draft =
+    !id && typeof window !== "undefined"
+      ? (() => {
+          try {
+            return JSON.parse(window.sessionStorage.getItem("journey-draft") ?? "null") as {
+              name?: string;
+              trigger?: string;
+            } | null;
+          } catch {
+            return null;
+          }
+        })()
+      : null;
   const navigate = useNavigate();
   const save = useServerFn(saveJourney);
   const templatesFn = useServerFn(listEmailTemplates);
@@ -71,9 +84,9 @@ export function JourneyEditor({
     },
     onError: (error: Error) => toast.error(error.message),
   });
-  const [name, setName] = useState(initial?.name ?? "");
+  const [name, setName] = useState(initial?.name ?? draft?.name ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
-  const [trigger, setTrigger] = useState(initial?.trigger_type ?? "manual");
+  const [trigger, setTrigger] = useState(initial?.trigger_type ?? draft?.trigger ?? "manual");
   const [exitRules, setExitRules] = useState<Record<string, boolean>>({
     deposit: true,
     first_deposit: true,
