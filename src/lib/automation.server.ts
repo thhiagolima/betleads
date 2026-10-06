@@ -709,7 +709,7 @@ export async function runDispatcher(
         session,
         {
           tenantId: lead.tenant_id ?? flow.tenant_id,
-          sourceType: "whatsapp_flow",
+          sourceType: "sms_flow",
           sourceId: flow.id,
           recipientPlayerId: lead.player_id,
           messageLogType: "flow_logs",

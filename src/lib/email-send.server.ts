@@ -203,7 +203,7 @@ export async function callBusinessCodeEmail(input: SendEmailInput): Promise<Send
     email: input.to,
   });
   const prepared = input.linkTracking
-    ? await prepareTrackedEmailHtml(augmentedHtml, input.linkTracking)
+    ? await prepareTrackedEmailHtml(augmentedHtml, { ...input.linkTracking, deliveryKey: idempotencyKey })
     : null;
   const trackedDispatchIds = prepared?.links.map((link) => link.dispatchId) ?? [];
 

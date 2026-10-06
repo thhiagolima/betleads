@@ -10,6 +10,7 @@ import { loadPlayersForSegment, countPlayersForSegment } from "./email-segments.
 import { buildPlayerVariables } from "./template-vars.server";
 import { renderTemplate } from "./template-vars.server";
 import { resolveOperationalTenantId } from "./tenant-access.server";
+import { bindTrackedDispatchesToMessageLog } from "./shortio.server";
 
 // ============ Helpers ============
 
@@ -145,7 +146,7 @@ export const sendTestEmail = createServerFn({ method: "POST" })
     });
 
     // Log
-    const { error: logErr } = await supabaseAdmin.from("email_send_logs").insert({
+    const { data: log, error: logErr } = await supabaseAdmin.from("email_send_logs").insert({
       tenant_id: tenantId,
       to_email: data.to,
       subject,
@@ -158,8 +159,16 @@ export const sendTestEmail = createServerFn({ method: "POST" })
         body: result.body,
         idempotency_key: result.idempotencyKey,
       } as never,
-    });
+    }).select("id").single();
     if (logErr) console.error("email_send_logs insert error", logErr.message);
+    if (log?.id) {
+      await bindTrackedDispatchesToMessageLog({
+        tenantId,
+        messageLogType: "email_send_logs",
+        messageLogId: log.id,
+        deliveryKey: result.idempotencyKey,
+      });
+    }
 
     if (!result.ok) {
       const b = result.body as { provider_error?: string } | null;

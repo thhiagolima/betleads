@@ -127,6 +127,7 @@ async function callShortBrasil(
   to: string,
   content: string,
   variables?: Record<string, string | number> | null,
+  idempotencyKey: string = crypto.randomUUID(),
 ) {
   const { usuario, chave } = shortBrasilCredentials();
   if (!usuario || !chave) {
@@ -139,7 +140,6 @@ async function callShortBrasil(
     };
   }
   const usuarioFp = await credentialFingerprint(usuario);
-  const idempotencyKey = crypto.randomUUID();
   let res: Response;
   const payload = {
     celular: toShortBrasilCell(to),
@@ -350,7 +350,7 @@ async function logSend(row: {
   flow_lead_id?: string | null;
   tenant_id?: string | null;
 }) {
-  const { error } = await supabaseAdmin.from("sms_send_logs").insert({
+  const { data, error } = await supabaseAdmin.from("sms_send_logs").insert({
     to_phone: row.to,
     content: row.content,
     status: row.status,
@@ -368,11 +368,12 @@ async function logSend(row: {
     step_label: row.step_label ?? null,
     flow_lead_id: row.flow_lead_id ?? null,
     ...(row.tenant_id ? { tenant_id: row.tenant_id } : {}),
-  });
+  }).select("id").single();
   if (error) {
     console.error("Failed to persist SMS send log", { to: row.to, error: error.message });
     throw new Error(`Falha ao registrar envio SMS: ${error.message}`);
   }
+  return data?.id ? String(data.id) : null;
 }
 
 function extractProviderMessageId(body: unknown): string | null {
@@ -516,6 +517,8 @@ export async function sendSmsInternal(args: {
   flowLeadId?: string | null;
   tenantId?: string | null;
   linkTrackingEnabled?: boolean;
+  /** Stable identity supplied by a queue/worker when retrying one delivery. */
+  deliveryKey?: string | null;
 }) {
   let normalized: string;
   try {
@@ -548,6 +551,7 @@ export async function sendSmsInternal(args: {
     await assertTenantCanOperate(billingTenantId);
   }
   const renderedContent = renderSmsVariables(args.content, args.variables);
+  const deliveryKey = args.deliveryKey ?? crypto.randomUUID();
   let preparedContent = renderedContent;
   let trackedDispatchIds: string[] = [];
   if (billingTenantId ?? args.tenantId) {
@@ -564,6 +568,7 @@ export async function sendSmsInternal(args: {
       sourceId: args.flowId ?? args.triggerName ?? null,
       recipientPlayerId: args.playerId ?? null,
       messageLogType: "sms_send_logs",
+      deliveryKey,
       enabled: args.linkTrackingEnabled,
     });
     preparedContent = prepared.content;
@@ -594,7 +599,7 @@ export async function sendSmsInternal(args: {
     creditReserved = true;
   }
 
-  const r = await callShortBrasil(normalized, preparedContent);
+  const r = await callShortBrasil(normalized, preparedContent, undefined, deliveryKey);
   const providerMessageId = r.ok ? extractProviderMessageId(r.body) : null;
   const errorSummary = r.ok ? null : summarizeProviderError(r.status, r.body);
   const isTemporary = !r.ok && (r.status === 0 || r.status === 429 || r.status >= 500);
@@ -605,7 +610,7 @@ export async function sendSmsInternal(args: {
       errorSummary ?? `SMS nao aceito pelo provedor: HTTP ${r.status}`,
     );
   }
-  await logSend({
+  const messageLogId = await logSend({
     to: normalized,
     content: preparedContent,
     status: r.ok ? "sent" : isTemporary ? "pending" : "error",
@@ -627,6 +632,13 @@ export async function sendSmsInternal(args: {
     flow_lead_id: args.flowLeadId,
     tenant_id: billingTenantId ?? args.tenantId ?? null,
   });
+  if (messageLogId && trackedDispatchIds.length > 0) {
+    const { error: dispatchLogError } = await (supabaseAdmin as any)
+      .from("link_dispatches")
+      .update({ message_log_id: messageLogId })
+      .in("id", trackedDispatchIds);
+    if (dispatchLogError) console.error("Failed to link Short.io dispatches to SMS log", dispatchLogError.message);
+  }
   if (r.ok) {
     await markTrackedDispatchesSent(trackedDispatchIds);
   } else {

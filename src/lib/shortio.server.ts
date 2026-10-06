@@ -5,17 +5,29 @@ const SHORTIO_API_URL = "https://api.short.io/links";
 const URL_PATTERN = /https?:\/\/[^\s<>"']+/gi;
 const TRAILING_PUNCTUATION = /[.,;:!?]+$/;
 
-export type LinkTrackingChannel = "sms" | "whatsapp" | "email";
+// WhatsApp is retained only so legacy callers type-check; it is never enabled
+// by defaults or tenant configuration in this rollout.
+export type LinkTrackingChannel = "sms" | "email" | "whatsapp";
+export type LinkTrackingSource =
+  | "manual"
+  | "test"
+  | "campaign"
+  | "sms_flow"
+  | "email_flow"
+  | "journey"
+  | "call_flow_sms";
 
 export type LinkTrackingContext = {
   tenantId: string;
   channel: LinkTrackingChannel;
-  sourceType: string;
+  sourceType: LinkTrackingSource;
   sourceId?: string | null;
   recipientPlayerId?: string | null;
   recipientHash?: string | null;
   messageLogType?: string | null;
   messageLogId?: string | null;
+  /** Stable identity of one intended delivery. Reusing it makes retries safe. */
+  deliveryKey?: string | null;
   /** Explicit choice made in the composer. Undefined preserves legacy behaviour. */
   enabled?: boolean;
 };
@@ -23,7 +35,6 @@ export type LinkTrackingContext = {
 type TenantShortioSettings = {
   enabled: boolean;
   domain: string | null;
-  attribution_mode: "individual" | "aggregate";
   fallback_mode: "block" | "passthrough";
   default_ttl_days: number | null;
   allowed_destination_hosts: string[];
@@ -58,11 +69,10 @@ function defaultSettings(): TenantShortioSettings {
   return {
     enabled: envEnabled(),
     domain: process.env.SHORTIO_DOMAIN?.trim().toLowerCase() || null,
-    attribution_mode: "individual",
     fallback_mode: "block",
     default_ttl_days: null,
     allowed_destination_hosts: [],
-    enabled_channels: ["sms", "whatsapp", "email"],
+    enabled_channels: ["sms", "email"],
   };
 }
 
@@ -72,7 +82,7 @@ async function settingsForTenant(tenantId: string): Promise<TenantShortioSetting
   const { data, error } = await db
     .from("shortio_settings")
     .select(
-      "enabled,domain,attribution_mode,fallback_mode,default_ttl_days,allowed_destination_hosts,enabled_channels",
+      "enabled,domain,fallback_mode,default_ttl_days,allowed_destination_hosts,enabled_channels",
     )
     .eq("tenant_id", tenantId)
     .maybeSingle();
@@ -82,7 +92,6 @@ async function settingsForTenant(tenantId: string): Promise<TenantShortioSetting
     enabled: Boolean(data.enabled),
     domain:
       typeof data.domain === "string" && data.domain ? data.domain.toLowerCase() : fallback.domain,
-    attribution_mode: data.attribution_mode === "aggregate" ? "aggregate" : "individual",
     fallback_mode: data.fallback_mode === "passthrough" ? "passthrough" : "block",
     default_ttl_days:
       typeof data.default_ttl_days === "number" ? data.default_ttl_days : fallback.default_ttl_days,
@@ -92,9 +101,9 @@ async function settingsForTenant(tenantId: string): Promise<TenantShortioSetting
     enabled_channels: Array.isArray(data.enabled_channels)
       ? data.enabled_channels.filter(
           (channel: unknown): channel is LinkTrackingChannel =>
-            channel === "sms" || channel === "whatsapp" || channel === "email",
+            channel === "sms" || channel === "email",
         )
-      : ["sms", "whatsapp", "email"],
+      : ["sms", "email"],
   };
 }
 
@@ -129,6 +138,33 @@ function isPrivateIpv4(hostname: string) {
   );
 }
 
+function isPrivateIpv6(hostname: string) {
+  const value = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  return value === "::1" || value === "::" || value.startsWith("fc") || value.startsWith("fd") || value.startsWith("fe80:");
+}
+
+export function isProtectedDestination(raw: string) {
+  try {
+    const url = new URL(raw);
+    if (/\/(?:u|login|auth|reset|magic)(?:\/|$)/i.test(url.pathname)) return true;
+    return ["token", "sig", "signature", "expires", "expiry", "exp", "auth", "login"]
+      .some((key) => url.searchParams.has(key));
+  } catch {
+    return true;
+  }
+}
+
+async function assertResolvedPublicDestination(raw: string) {
+  const host = new URL(raw).hostname;
+  // This module is also referenced by server functions discovered during the
+  // client build; keep Node DNS out of the browser bundle.
+  const { lookup } = await import(/* @vite-ignore */ "node:dns/promises");
+  const resolved = await lookup(host, { all: true, verbatim: true });
+  if (resolved.length === 0 || resolved.some(({ address }) => isPrivateIpv4(address) || isPrivateIpv6(address))) {
+    throw new Error("URL de destino resolve para um endereço interno ou reservado");
+  }
+}
+
 export function isShortioEligibleUrl(
   raw: string,
   options?: { domain?: string | null; allowedHosts?: string[] },
@@ -137,7 +173,13 @@ export function isShortioEligibleUrl(
     const url = new URL(raw);
     if (url.protocol !== "https:" && url.protocol !== "http:") return false;
     const host = normalizeHost(url.hostname);
-    if (!host || host === "localhost" || host.endsWith(".localhost") || isPrivateIpv4(host))
+    if (
+      !host ||
+      host === "localhost" ||
+      host.endsWith(".localhost") ||
+      isPrivateIpv4(host) ||
+      isPrivateIpv6(host)
+    )
       return false;
     if (options?.domain && host === normalizeHost(options.domain)) return false;
     const allowedHosts = options?.allowedHosts?.map(normalizeHost).filter(Boolean) ?? [];
@@ -158,6 +200,16 @@ async function canonicalHash(url: string) {
   return Array.from(new Uint8Array(digest))
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
+}
+
+export async function deterministicToken(context: LinkTrackingContext, position: number) {
+  const recipient = context.recipientPlayerId ?? context.recipientHash ?? "anonymous";
+  const delivery = context.deliveryKey ?? context.messageLogId ?? context.sourceId ?? "one-off";
+  const hash = await canonicalHash(
+    [context.tenantId, context.channel, context.sourceType, delivery, recipient, position].join("|"),
+  );
+  // UUID shape keeps compatibility with the existing uuid column and UTM format.
+  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-${hash.slice(12, 16)}-${hash.slice(16, 20)}-${hash.slice(20, 32)}`;
 }
 
 export function withTrackingToken(raw: string, token: string, context: LinkTrackingContext) {
@@ -286,8 +338,9 @@ async function persistDispatch(args: {
   const db = supabaseAdmin as any;
   const { data, error } = await db
     .from("link_dispatches")
-    .insert({
+    .upsert({
       tenant_id: args.context.tenantId,
+      idempotency_key: `${args.context.deliveryKey ?? args.context.messageLogId ?? args.context.sourceId ?? "one-off"}:${args.position}`,
       tracked_link_id: args.trackedLinkId,
       tracking_token: args.trackingToken,
       channel: args.context.channel,
@@ -300,9 +353,17 @@ async function persistDispatch(args: {
       url_position: args.position,
       original_url: args.originalUrl,
       sent_url: args.sentUrl,
-    })
+    }, { onConflict: "tenant_id,idempotency_key", ignoreDuplicates: true })
     .select("id")
     .single();
+  if (!error && data) return String(data.id);
+  const existing = await db
+    .from("link_dispatches")
+    .select("id")
+    .eq("tenant_id", args.context.tenantId)
+    .eq("idempotency_key", `${args.context.deliveryKey ?? args.context.messageLogId ?? args.context.sourceId ?? "one-off"}:${args.position}`)
+    .maybeSingle();
+  if (existing.data) return String(existing.data.id);
   if (error || !data)
     throw new Error(`Falha ao registrar dispatch de link: ${error?.message ?? "sem detalhes"}`);
   return String(data.id);
@@ -328,6 +389,7 @@ export async function prepareTrackedText(
     const raw = stripTrackingUrlTrailingPunctuation(match[0]);
     if (
       !raw ||
+      isProtectedDestination(raw) ||
       !isShortioEligibleUrl(raw, {
         domain: settings.domain,
         allowedHosts: settings.allowed_destination_hosts,
@@ -336,7 +398,8 @@ export async function prepareTrackedText(
       continue;
     }
     try {
-      const trackingToken = crypto.randomUUID();
+      await assertResolvedPublicDestination(raw);
+      const trackingToken = await deterministicToken(context, position);
       const trackedOriginal = withTrackingToken(raw, trackingToken, context);
       const tracked = await getOrCreateTrackedLink({
         tenantId: context.tenantId,
@@ -392,7 +455,7 @@ export async function prepareTrackedEmailHtml(
     let protectedLink = false;
     try {
       const parsed = new URL(raw);
-      protectedLink = parsed.pathname === "/u/" || parsed.pathname.startsWith("/u/");
+      protectedLink = isProtectedDestination(parsed.toString());
     } catch {
       protectedLink = true;
     }
@@ -407,7 +470,8 @@ export async function prepareTrackedEmailHtml(
       continue;
     }
     try {
-      const trackingToken = crypto.randomUUID();
+      await assertResolvedPublicDestination(raw);
+      const trackingToken = await deterministicToken({ ...context, channel: "email" }, position);
       const trackedOriginal = withTrackingToken(raw, trackingToken, {
         ...context,
         channel: "email",
@@ -477,6 +541,22 @@ export async function markTrackedDispatchesFailed(dispatchIds: string[]) {
       error: error.message,
       count: dispatchIds.length,
     });
+}
+
+/** Binds dispatches prepared before provider delivery to the durable send log. */
+export async function bindTrackedDispatchesToMessageLog(args: {
+  tenantId: string;
+  messageLogType: string;
+  messageLogId: string;
+  deliveryKey: string;
+}) {
+  const db = supabaseAdmin as any;
+  const { error } = await db
+    .from("link_dispatches")
+    .update({ message_log_type: args.messageLogType, message_log_id: args.messageLogId })
+    .eq("tenant_id", args.tenantId)
+    .like("idempotency_key", `${args.deliveryKey}:%`);
+  if (error) console.error("Falha ao vincular dispatch Short.io ao log", { error: error.message });
 }
 
 /** Pulls aggregate click counts from Short.io. Raw click data is intentionally

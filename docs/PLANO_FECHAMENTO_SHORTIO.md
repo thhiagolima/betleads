@@ -57,19 +57,19 @@ Ao final de cada entrega:
 Objetivo: garantir que o mesmo envio/retry não crie links ou dispatches duplicados
 e que a origem apresentada nos relatórios seja confiável.
 
-- [ ] Criar chave idempotente determinística por tenant, envio, destinatário e
+- [x] Criar chave idempotente determinística por tenant, envio, destinatário e
   posição da URL; não usar UUID novo como identidade de retry.
-- [ ] Impedir duplicação de link e `link_dispatch` em retries e concorrência.
-- [ ] Corrigir taxonomia de origem: `manual`, `test`, `campaign`, `sms_flow`,
+- [x] Impedir duplicação de link e `link_dispatch` em retries e concorrência.
+- [x] Corrigir taxonomia de origem: `manual`, `test`, `campaign`, `sms_flow`,
   `email_flow`, `journey` e `call_flow_sms`.
-- [ ] Vincular cada dispatch ao log real por `message_log_type/message_log_id`.
-- [ ] Preservar conteúdo original e conteúdo efetivamente enviado para auditoria.
-- [ ] Remover/desabilitar o modo agregado da configuração enquanto ele não tiver
+- [x] Vincular cada dispatch ao log real por `message_log_type/message_log_id`.
+- [x] Preservar conteúdo original e conteúdo efetivamente enviado para auditoria.
+- [x] Remover/desabilitar o modo agregado da configuração enquanto ele não tiver
   implementação real.
-- [ ] Remover WhatsApp dos canais de fallback global.
-- [ ] Proteger links de login único, assinados e temporários com regras explícitas.
-- [ ] Reforçar proteção SSRF com validação de DNS/IP resolvido antes da criação.
-- [ ] Adicionar testes de retry, concorrência, fallback e isolamento por tenant.
+- [x] Remover WhatsApp dos canais de fallback global.
+- [x] Proteger links de login único, assinados e temporários com regras explícitas.
+- [x] Reforçar proteção SSRF com validação de DNS/IP resolvido antes da criação.
+- [x] Adicionar testes de retry, concorrência, fallback e isolamento por tenant.
 
 Critério de aceite: repetir o mesmo envio não cria novo link, dispatch ou mensagem;
 o registro aponta para o log correto e aparece na origem correta do dashboard.
@@ -198,6 +198,7 @@ nos cenários ligado/desligado e existe evidência de produção e rollback.
 | 06/10/2026 | Cron | commit `02e3d78`; job remoto ativo em `*/15 * * * *` |
 | 06/10/2026 | Escolha por mensagem — parcial | commit `0e5cfd9` |
 | 06/10/2026 | Piloto SMS | `bmkt.click/9kZdSI`, envio e redirecionamento confirmados; snapshot com clique |
+| 06/10/2026 | Entrega 1 | migration `20261006193000` aplicada; teste de política/idempotência passou; build passou |
 
 ## Definição de pronto
 

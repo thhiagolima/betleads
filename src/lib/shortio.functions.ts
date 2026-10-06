@@ -130,7 +130,9 @@ export const getShortioSettings = createServerFn({ method: "GET" })
 const settingsInput = z.object({
   enabled: z.boolean(),
   domain: z.string().trim().max(253).nullable(),
-  attribution_mode: z.enum(["individual", "aggregate"]),
+  // Aggregate attribution is intentionally unavailable until its data model
+  // and reporting semantics are implemented.
+  attribution_mode: z.literal("individual"),
   fallback_mode: z.enum(["block", "passthrough"]),
   default_ttl_days: z.number().int().min(1).max(3650).nullable(),
   allowed_destination_hosts: z.array(z.string().trim().min(1).max(253)).max(50),

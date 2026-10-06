@@ -110,7 +110,7 @@ export async function runPrecallDispatcher(): Promise<{
         },
         {
           tenantId: camp.tenant_id,
-          sourceType: "precall",
+          sourceType: "call_flow_sms",
           sourceId: camp.id,
           recipientPlayerId: lead.player_id,
           messageLogType: "precall_leads",
