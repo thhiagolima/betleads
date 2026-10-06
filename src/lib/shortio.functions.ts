@@ -10,12 +10,15 @@ export const getLinkTrackingOverview = createServerFn({ method: "GET" })
     const tenantId = await resolveOperationalTenantId(context.supabase);
     const db = context.supabase as any;
     const since = new Date(Date.now() - 30 * 86400000).toISOString();
-    const { data: dispatches, error } = await db
+    const [{ data: dispatches, error }, { data: lastSync }] = await Promise.all([
+      db
       .from("link_dispatches")
       .select("id,channel,source_type,tracked_link_id,sent_at")
       .eq("tenant_id", tenantId)
       .eq("send_status", "sent")
-      .gte("sent_at", since);
+      .gte("sent_at", since),
+      db.from("link_tracking_sync_runs").select("started_at,finished_at,status,links_processed,error").eq("tenant_id", tenantId).order("started_at", { ascending: false }).limit(1).maybeSingle(),
+    ]);
     if (error) throw new Error(error.message);
     const linkIds = Array.from(new Set((dispatches ?? []).map((row: any) => row.tracked_link_id)));
     const { data: snapshots } = linkIds.length
@@ -58,6 +61,7 @@ export const getLinkTrackingOverview = createServerFn({ method: "GET" })
       sent: (dispatches ?? []).length,
       clicks: rows.reduce((sum, row) => sum + row.clicks, 0),
       rows,
+      lastSync: lastSync ?? null,
     };
   });
 

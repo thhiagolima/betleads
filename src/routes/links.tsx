@@ -24,6 +24,7 @@ function LinksPage() {
         <Metric title="Links enviados" value={data?.sent ?? 0} />
         <Metric title="Cliques" value={data?.clicks ?? 0} />
       </div>
+      <p className="text-xs text-muted-foreground">Último sync: {data?.lastSync?.finished_at ?? "ainda não executado"} · {data?.lastSync?.links_processed ?? 0} links · {data?.lastSync?.status ?? "sem estado"}{data?.lastSync?.error ? ` · ${data.lastSync.error}` : ""}</p>
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
