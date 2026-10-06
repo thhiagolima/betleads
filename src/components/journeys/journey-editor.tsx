@@ -87,6 +87,10 @@ export function JourneyEditor({
   const [name, setName] = useState(initial?.name ?? draft?.name ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
   const [trigger, setTrigger] = useState(initial?.trigger_type ?? draft?.trigger ?? "manual");
+  const [dailyLimit, setDailyLimit] = useState(1000);
+  const [cooldownHours, setCooldownHours] = useState(72);
+  const [windowStart, setWindowStart] = useState("08:00");
+  const [windowEnd, setWindowEnd] = useState("22:00");
   const [exitRules, setExitRules] = useState<Record<string, boolean>>({
     deposit: true,
     first_deposit: true,
@@ -147,6 +151,13 @@ export function JourneyEditor({
             description: description || null,
             trigger_type: trigger,
             exit_rules: exitRules,
+            entry_rules: {
+              audience: "all_active",
+              window_start: windowStart,
+              window_end: windowEnd,
+            },
+            daily_limit: dailyLimit,
+            cooldown_hours: cooldownHours,
             steps: [...body, { step_type: "end", config: {} }],
           },
         },
@@ -251,6 +262,59 @@ export function JourneyEditor({
                 {rule.label}
               </label>
             ))}
+          </div>
+        </section>
+        <section className="grid gap-4 rounded-lg border p-4 sm:grid-cols-2">
+          <div>
+            <p className="font-medium">Quem entra nesta régua</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Todos os jogadores ativos que atingirem o gatilho, respeitando opt-out e
+              elegibilidade.
+            </p>
+            <select
+              className="mt-3 flex h-10 w-full rounded-md border bg-background px-3 text-sm"
+              defaultValue="all_active"
+            >
+              <option value="all_active">Todos os jogadores ativos</option>
+              <option value="vip">Somente VIP</option>
+              <option value="manual">Público manual</option>
+            </select>
+          </div>
+          <div>
+            <p className="font-medium">Proteção contra excesso</p>
+            <label className="mt-3 block text-xs text-muted-foreground">
+              Limite diário
+              <Input
+                type="number"
+                min={1}
+                value={dailyLimit}
+                onChange={(e) => setDailyLimit(Number(e.target.value))}
+              />
+            </label>
+            <label className="mt-3 block text-xs text-muted-foreground">
+              Cooldown (horas)
+              <Input
+                type="number"
+                min={0}
+                value={cooldownHours}
+                onChange={(e) => setCooldownHours(Number(e.target.value))}
+              />
+            </label>
+          </div>
+        </section>
+        <section className="rounded-lg border p-4">
+          <p className="font-medium">Quando pode disparar</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Mensagens fora da janela aguardam a próxima abertura, no horário de Brasília.
+          </p>
+          <div className="mt-3 flex max-w-sm items-center gap-2">
+            <Input
+              type="time"
+              value={windowStart}
+              onChange={(e) => setWindowStart(e.target.value)}
+            />
+            <span>até</span>
+            <Input type="time" value={windowEnd} onChange={(e) => setWindowEnd(e.target.value)} />
           </div>
         </section>
         <section className="space-y-3">
