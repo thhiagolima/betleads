@@ -17,6 +17,8 @@ base/
 docs/*
 !docs/docker-deployment.md
 !docs/OPERACAO_SEGURA.md
+!docs/ESCOPO_REAUDITORIA_CANAIS_2026-10-06.md
+!docs/MATRIZ_ACEITE_CANAIS.md
 supabase/.temp/
 
 node_modules

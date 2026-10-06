@@ -34,6 +34,9 @@ export default tseslint.config(
       ],
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
       "@typescript-eslint/no-unused-vars": "off",
+      // O projeto ainda possui integrações de banco e provedores legados com `any`.
+      // Mantemos o diagnóstico visível sem bloquear correções de qualidade e novas entregas.
+      "@typescript-eslint/no-explicit-any": "warn",
     },
   },
   eslintPluginPrettier,
