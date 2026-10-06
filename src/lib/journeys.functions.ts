@@ -51,7 +51,7 @@ export const getJourney = createServerFn({ method: "GET" })
     if (stepsError) throw new Error(stepsError.message);
     const { data: enrollments, error: enrollmentsError } = await db
       .from("journey_enrollments")
-      .select("status,exit_reason,current_position")
+      .select("status,exit_reason,current_position,metadata,players(total_depositado)")
       .eq("journey_id", data.id)
       .eq("tenant_id", tenantId);
     if (enrollmentsError) throw new Error(enrollmentsError.message);
@@ -73,10 +73,51 @@ export const getJourney = createServerFn({ method: "GET" })
       },
       {},
     );
+    const recovered = rows.reduce(
+      (
+        sum: number,
+        row: {
+          metadata?: { deposited_before_entry?: number };
+          players?: { total_depositado?: number | null } | null;
+        },
+      ) =>
+        sum +
+        Math.max(
+          0,
+          Number(row.players?.total_depositado ?? 0) -
+            Number(row.metadata?.deposited_before_entry ?? row.players?.total_depositado ?? 0),
+        ),
+      0,
+    );
+    const { data: executions } = await db
+      .from("journey_step_executions")
+      .select("channel,status")
+      .eq("journey_id", data.id)
+      .eq("tenant_id", tenantId);
+    const sentByChannel = (executions ?? [])
+      .filter((row: { status: string }) => row.status === "sent" || row.status === "delivered")
+      .reduce((acc: Record<string, number>, row: { channel: string | null }) => {
+        const key = row.channel ?? "other";
+        acc[key] = (acc[key] ?? 0) + 1;
+        return acc;
+      }, {});
+    const cost =
+      (sentByChannel.sms ?? 0) * 0.12 +
+      (sentByChannel.email ?? 0) * 0.01 +
+      (sentByChannel.voice ?? 0) * 0.35;
     return {
       journey,
       steps: steps ?? [],
-      metrics: { total: rows.length, byStatus, exits, positions },
+      metrics: {
+        total: rows.length,
+        byStatus,
+        exits,
+        positions,
+        recovered,
+        sentByChannel,
+        cost,
+        roi: cost > 0 ? recovered / cost : null,
+      },
     };
   });
 

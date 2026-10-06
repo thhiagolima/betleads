@@ -75,7 +75,7 @@ async function enrollEligibleJourneyPlayers(limit = 500) {
         journey_version: journey.version,
         player_id: player.id,
         entry_key: "default",
-        metadata: { trigger: journey.trigger_type },
+          metadata: { trigger: journey.trigger_type, deposited_before_entry: Number(player.total_depositado ?? 0) },
       });
       if (!error) enrolled++;
     }

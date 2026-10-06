@@ -34,7 +34,15 @@ export function JourneyEditor({
   id?: string;
   initial?: { name: string; description: string | null; trigger_type: string };
   initialSteps?: SavedStep[];
-  metrics?: { total: number; byStatus: Record<string, number>; exits: Record<string, number> };
+  metrics?: {
+    total: number;
+    byStatus: Record<string, number>;
+    exits: Record<string, number>;
+    recovered: number;
+    sentByChannel: Record<string, number>;
+    cost: number;
+    roi: number | null;
+  };
 }) {
   const draft =
     !id && typeof window !== "undefined"
@@ -204,6 +212,21 @@ export function JourneyEditor({
               <span>{metrics.byStatus.active ?? 0} em andamento</span>
               <span>{metrics.byStatus.completed ?? 0} concluídas</span>
               <span>{metrics.byStatus.failed ?? 0} falhas</span>
+            </div>
+            <div className="mt-3 grid gap-2 border-t pt-3 sm:grid-cols-3">
+              <span>
+                Enviados:{" "}
+                {Object.values(metrics.sentByChannel).reduce((sum, value) => sum + value, 0)}
+              </span>
+              <span>
+                Recuperado:{" "}
+                {metrics.recovered.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+              </span>
+              <span>
+                Custo estimado:{" "}
+                {metrics.cost.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                {metrics.roi != null ? ` · ROI ${metrics.roi.toFixed(1)}x` : ""}
+              </span>
             </div>
             {Object.keys(metrics.exits).length > 0 && (
               <div className="mt-3 border-t pt-3">
