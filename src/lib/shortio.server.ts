@@ -566,6 +566,35 @@ export async function syncShortioMetrics(limit = 100, tenantId?: string) {
   if (!apiKey) throw new Error("SHORTIO_API_KEY não configurada no servidor");
   const db = supabaseAdmin as any;
   const startedAt = new Date().toISOString();
+  // A execução global é registrada por tenant, preservando RLS e permitindo
+  // identificar exatamente qual carteira de links falhou.
+  if (!tenantId) {
+    const { data: tenants, error: tenantsError } = await db
+      .from("tracked_links")
+      .select("tenant_id")
+      .eq("status", "active")
+      .limit(10_000);
+    if (tenantsError) throw new Error(`Falha ao listar tenants Short.io: ${tenantsError.message}`);
+    const ids = Array.from(new Set((tenants ?? []).map((row: any) => String(row.tenant_id))));
+    const results = await Promise.all(ids.map((id) => syncShortioMetrics(limit, id)));
+    return {
+      startedAt,
+      processed: results.reduce((sum, result) => sum + result.processed, 0),
+      failures: results.reduce((sum, result) => sum + result.failures, 0),
+      total: results.reduce((sum, result) => sum + result.total, 0),
+      tenants: ids.length,
+    };
+  }
+  const staleBefore = new Date(Date.now() - 20 * 60_000).toISOString();
+  const { data: activeRun } = await db
+    .from("link_tracking_sync_runs")
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .eq("status", "running")
+    .gte("started_at", staleBefore)
+    .limit(1)
+    .maybeSingle();
+  if (activeRun) return { startedAt, processed: 0, failures: 0, total: 0, skipped: true };
   const run = tenantId
     ? await db
         .from("link_tracking_sync_runs")
