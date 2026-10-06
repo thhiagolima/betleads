@@ -529,8 +529,12 @@ export async function syncShortioMetrics(limit = 100, tenantId?: string) {
         },
       );
       if (!response.ok) throw new Error(`Short.io retornou HTTP ${response.status}`);
-      const payload = (await response.json()) as { clickStatistics?: Array<{ y?: number }> };
-      const clicks = (payload.clickStatistics ?? []).reduce(
+      const payload = (await response.json()) as {
+        clicksStatistics?: Array<{ y?: number }>;
+        // Kept for compatibility with older API responses.
+        clickStatistics?: Array<{ y?: number }>;
+      };
+      const clicks = (payload.clicksStatistics ?? payload.clickStatistics ?? []).reduce(
         (total, item) => total + Number(item.y ?? 0),
         0,
       );
