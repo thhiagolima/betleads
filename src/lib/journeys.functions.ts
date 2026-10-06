@@ -149,3 +149,20 @@ export const setJourneyStatus = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     return { ok: true };
   });
+
+export const listJourneyOperations = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const tenantId = await tenant(context);
+    const { data, error } = await db
+      .from("journey_enrollments")
+      .select(
+        "id,journey_id,player_id,status,current_position,next_run_at,exit_reason,journeys(name),players(nome,telefone)",
+      )
+      .eq("tenant_id", tenantId)
+      .in("status", ["active", "waiting", "failed"])
+      .order("next_run_at", { ascending: true })
+      .limit(200);
+    if (error) throw new Error(error.message);
+    return { items: data ?? [] };
+  });

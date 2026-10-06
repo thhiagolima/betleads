@@ -14,7 +14,7 @@ import {
   Volume2,
 } from "lucide-react";
 import { toast } from "sonner";
-import { listJourneys, setJourneyStatus } from "@/lib/journeys.functions";
+import { listJourneyOperations, listJourneys, setJourneyStatus } from "@/lib/journeys.functions";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -44,8 +44,10 @@ export function JourneysHub() {
   const queryClient = useQueryClient();
   const list = useServerFn(listJourneys);
   const changeStatus = useServerFn(setJourneyStatus);
+  const operationsFn = useServerFn(listJourneyOperations);
   const [filter, setFilter] = useState<"all" | Journey["status"]>("all");
   const [search, setSearch] = useState("");
+  const [view, setView] = useState<"rules" | "queue" | "failures">("rules");
   const [newOpen, setNewOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [entryMode, setEntryMode] = useState<"event" | "inactivity" | "manual">("event");
@@ -63,6 +65,7 @@ export function JourneysHub() {
     navigate({ to: "/jornadas/nova" });
   };
   const journeys = useQuery({ queryKey: ["journeys"], queryFn: () => list() });
+  const operations = useQuery({ queryKey: ["journey-operations"], queryFn: () => operationsFn() });
   const status = useMutation({
     mutationFn: (input: { id: string; status: Journey["status"] }) => changeStatus({ data: input }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["journeys"] }),
@@ -114,9 +117,36 @@ export function JourneysHub() {
       </div>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="inline-flex rounded-lg bg-muted p-1 text-sm">
-          <span className="rounded-md bg-background px-3 py-2 font-medium shadow-sm">Réguas</span>
-          <span className="px-3 py-2 text-muted-foreground">Fila de envio</span>
-          <span className="px-3 py-2 text-muted-foreground">Falhas</span>
+          <button
+            className={
+              view === "rules"
+                ? "rounded-md bg-background px-3 py-2 font-medium shadow-sm"
+                : "px-3 py-2 text-muted-foreground"
+            }
+            onClick={() => setView("rules")}
+          >
+            Réguas
+          </button>
+          <button
+            className={
+              view === "queue"
+                ? "rounded-md bg-background px-3 py-2 font-medium shadow-sm"
+                : "px-3 py-2 text-muted-foreground"
+            }
+            onClick={() => setView("queue")}
+          >
+            Fila de envio
+          </button>
+          <button
+            className={
+              view === "failures"
+                ? "rounded-md bg-background px-3 py-2 font-medium shadow-sm"
+                : "px-3 py-2 text-muted-foreground"
+            }
+            onClick={() => setView("failures")}
+          >
+            Falhas
+          </button>
         </div>
         <label className="relative block">
           <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
@@ -128,69 +158,116 @@ export function JourneysHub() {
           />
         </label>
       </div>
-      <Card>
-        <CardHeader>
-          <CardTitle>Jornadas</CardTitle>
-          <CardDescription>{rows.length} encontrada(s)</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {journeys.isLoading ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">Carregando jornadas…</p>
-          ) : rows.length === 0 ? (
-            <div className="rounded-lg border border-dashed py-10 text-center text-sm text-muted-foreground">
-              Nenhuma jornada nesta visão.
-            </div>
-          ) : (
-            rows.map((journey) => (
-              <div
-                key={journey.id}
-                className="flex flex-col gap-3 rounded-lg border p-4 lg:flex-row lg:items-center"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="font-medium">{journey.name}</p>
-                    <Badge variant={journey.status === "active" ? "default" : "outline"}>
-                      {labels[journey.status]}
-                    </Badge>
+      {view !== "rules" && (
+        <Card>
+          <CardHeader>
+            <CardTitle>{view === "queue" ? "Fila de envio" : "Falhas"}</CardTitle>
+            <CardDescription>
+              {
+                (operations.data?.items ?? []).filter((item: { status: string }) =>
+                  view === "failures" ? item.status === "failed" : item.status !== "failed",
+                ).length
+              }{" "}
+              registro(s)
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {(operations.data?.items ?? [])
+              .filter((item: { status: string }) =>
+                view === "failures" ? item.status === "failed" : item.status !== "failed",
+              )
+              .map(
+                (item: {
+                  id: string;
+                  status: string;
+                  current_position: number;
+                  next_run_at: string | null;
+                  exit_reason: string | null;
+                  journeys: { name: string } | null;
+                  players: { nome: string | null } | null;
+                }) => (
+                  <div key={item.id} className="rounded-lg border p-3 text-sm">
+                    <b>
+                      {item.players?.nome ?? "Jogador"} · {item.journeys?.name ?? "Jornada"}
+                    </b>
+                    <p className="mt-1 text-muted-foreground">
+                      Etapa {item.current_position + 1}
+                      {item.next_run_at
+                        ? ` · ${new Date(item.next_run_at).toLocaleString("pt-BR")}`
+                        : ""}
+                      {item.exit_reason ? ` · ${item.exit_reason}` : ""}
+                    </p>
                   </div>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {journey.description || `Gatilho: ${journey.trigger_type}`}
-                  </p>
-                  <div className="mt-3 flex gap-3 text-xs text-muted-foreground">
-                    <span>{journey.journey_steps.length} etapas</span>
-                    <span>Limite diário: {journey.daily_limit}</span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button asChild variant="outline" size="sm">
-                    <Link to="/jornadas/$journeyId" params={{ journeyId: journey.id }}>
-                      Editar
-                    </Link>
-                  </Button>
-                  {journey.status === "active" ? (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={status.isPending}
-                      onClick={() => status.mutate({ id: journey.id, status: "paused" })}
-                    >
-                      <Pause className="mr-1 h-4 w-4" /> Pausar
-                    </Button>
-                  ) : (
-                    <Button
-                      size="sm"
-                      disabled={status.isPending || journey.status === "archived"}
-                      onClick={() => status.mutate({ id: journey.id, status: "active" })}
-                    >
-                      <Play className="mr-1 h-4 w-4" /> Publicar
-                    </Button>
-                  )}
-                </div>
+                ),
+              )}
+          </CardContent>
+        </Card>
+      )}
+      {view === "rules" && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Jornadas</CardTitle>
+            <CardDescription>{rows.length} encontrada(s)</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {journeys.isLoading ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">Carregando jornadas…</p>
+            ) : rows.length === 0 ? (
+              <div className="rounded-lg border border-dashed py-10 text-center text-sm text-muted-foreground">
+                Nenhuma jornada nesta visão.
               </div>
-            ))
-          )}
-        </CardContent>
-      </Card>
+            ) : (
+              rows.map((journey) => (
+                <div
+                  key={journey.id}
+                  className="flex flex-col gap-3 rounded-lg border p-4 lg:flex-row lg:items-center"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-medium">{journey.name}</p>
+                      <Badge variant={journey.status === "active" ? "default" : "outline"}>
+                        {labels[journey.status]}
+                      </Badge>
+                    </div>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {journey.description || `Gatilho: ${journey.trigger_type}`}
+                    </p>
+                    <div className="mt-3 flex gap-3 text-xs text-muted-foreground">
+                      <span>{journey.journey_steps.length} etapas</span>
+                      <span>Limite diário: {journey.daily_limit}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button asChild variant="outline" size="sm">
+                      <Link to="/jornadas/$journeyId" params={{ journeyId: journey.id }}>
+                        Editar
+                      </Link>
+                    </Button>
+                    {journey.status === "active" ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={status.isPending}
+                        onClick={() => status.mutate({ id: journey.id, status: "paused" })}
+                      >
+                        <Pause className="mr-1 h-4 w-4" /> Pausar
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        disabled={status.isPending || journey.status === "archived"}
+                        onClick={() => status.mutate({ id: journey.id, status: "active" })}
+                      >
+                        <Play className="mr-1 h-4 w-4" /> Publicar
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+      )}
       <div className="grid gap-3 sm:grid-cols-3">
         <ChannelCard icon={<MessageSquare className="h-4 w-4" />} text="SMS" />
         <ChannelCard icon={<Mail className="h-4 w-4" />} text="E-mail" />
