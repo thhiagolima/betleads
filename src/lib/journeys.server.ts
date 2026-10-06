@@ -69,16 +69,14 @@ async function enrollEligibleJourneyPlayers(limit = 500) {
         !detectTriggersForPlayer(player as never).includes(journey.trigger_type as never)
       )
         continue;
-      const { error } = await db
-        .from("journey_enrollments")
-        .insert({
-          tenant_id: journey.tenant_id,
-          journey_id: journey.id,
-          journey_version: journey.version,
-          player_id: player.id,
-          entry_key: "default",
-          metadata: { trigger: journey.trigger_type },
-        });
+      const { error } = await db.from("journey_enrollments").insert({
+        tenant_id: journey.tenant_id,
+        journey_id: journey.id,
+        journey_version: journey.version,
+        player_id: player.id,
+        entry_key: "default",
+        metadata: { trigger: journey.trigger_type },
+      });
       if (!error) enrolled++;
     }
   }
