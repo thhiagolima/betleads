@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { Mail, Plus, RotateCw, Search, Send, Workflow } from "lucide-react";
+import { Mail, Plus, RotateCw, Search, Send, Volume2, Workflow } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
 
@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import { num } from "@/lib/format";
 import { cancelScheduledSmsCampaign, listScheduledSmsCampaigns } from "@/lib/sms.functions";
 import { listEmailCampaigns } from "@/lib/email.functions";
+import { listCallQueue } from "@/lib/calls.functions";
 
 type CampaignStatus = "todos" | "agendadas" | "enviando" | "finalizadas";
 type Campaign = {
@@ -27,7 +28,7 @@ type Campaign = {
   total_count: number | null;
   sent_count: number | null;
   failed_count: number | null;
-  channel: "sms" | "email";
+  channel: "sms" | "email" | "voice";
   cancellable?: boolean;
 };
 
@@ -44,6 +45,7 @@ export function CampaignsHub() {
   const queryClient = useQueryClient();
   const listCampaigns = useServerFn(listScheduledSmsCampaigns);
   const listEmailCampaignsFn = useServerFn(listEmailCampaigns);
+  const listCallQueueFn = useServerFn(listCallQueue);
   const cancelCampaign = useServerFn(cancelScheduledSmsCampaign);
   const [open, setOpen] = useState(false);
   const [emailOpen, setEmailOpen] = useState(false);
@@ -73,6 +75,11 @@ export function CampaignsHub() {
     queryFn: () => listEmailCampaignsFn(),
     refetchInterval: 30_000,
   });
+  const voiceQueue = useQuery({
+    queryKey: ["call-queue", "campaigns-hub"],
+    queryFn: () => listCallQueueFn({ data: { limit: 100 } }),
+    refetchInterval: 30_000,
+  });
   const cancel = useMutation({
     mutationFn: (id: string) => cancelCampaign({ data: { id } }),
     onSuccess: () => {
@@ -100,7 +107,18 @@ export function CampaignsHub() {
     channel: "email" as const,
     cancellable: false,
   }));
-  const all: Campaign[] = [...smsCampaigns, ...emailRows].sort(
+  const voiceRows: Campaign[] = ((voiceQueue.data?.items ?? []) as any[]).map((item) => ({
+    id: item.id,
+    name: item.script_name ?? item.audio_name ?? "Ligação por voz",
+    scheduled_at: item.scheduled_at ?? item.created_at ?? new Date().toISOString(),
+    status: item.status ?? "pendente",
+    total_count: 1,
+    sent_count: ["dispatched", "sent", "completed", "answered"].includes(item.status) ? 1 : 0,
+    failed_count: ["failed", "error", "cancelled"].includes(item.status) ? 1 : 0,
+    channel: "voice",
+    cancellable: false,
+  }));
+  const all: Campaign[] = [...smsCampaigns, ...emailRows, ...voiceRows].sort(
     (a, b) => new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime(),
   );
   const normalizedSearch = search.trim().toLowerCase();
@@ -142,6 +160,12 @@ export function CampaignsHub() {
           <Button variant="outline" onClick={() => setEmailOpen(true)}>
             <Mail className="mr-2 h-4 w-4" />
             Campanha de email
+          </Button>
+          <Button variant="outline" asChild>
+            <Link to="/ligacoes" hash="fila">
+              <Volume2 className="mr-2 h-4 w-4" />
+              Campanha de voz
+            </Link>
           </Button>
           <Button variant="outline" asChild>
             <Link to="/automacoes" hash="fluxos">
