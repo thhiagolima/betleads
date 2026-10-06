@@ -23,6 +23,7 @@ import { Route as GamificacaoRouteImport } from './routes/gamificacao'
 import { Route as InteligenciaRouteImport } from './routes/inteligencia'
 import { Route as JornadasRouteImport } from './routes/jornadas'
 import { Route as LigacoesRouteImport } from './routes/ligacoes'
+import { Route as LinksRouteImport } from './routes/links'
 import { Route as MidiaLtvRouteImport } from './routes/midia-ltv'
 import { Route as PlayersRouteImport } from './routes/players'
 import { Route as PublicosRouteImport } from './routes/publicos'
@@ -63,6 +64,7 @@ import { Route as ApiPublicHooksWebhookReplayRouteImport } from './routes/api/pu
 import { Route as ApiPublicHooksWhatsappResumeRouteImport } from './routes/api/public/hooks/whatsapp-resume'
 import { Route as ApiPublicMetaSyncTickRouteImport } from './routes/api/public/meta-sync/tick'
 import { Route as ApiPublicPrecallDispatchRouteImport } from './routes/api/public/precall/dispatch'
+import { Route as ApiPublicShortioSyncRouteImport } from './routes/api/public/shortio/sync'
 import { Route as ApiPublicWebhookEventoRouteImport } from './routes/api/public/webhook.$evento'
 import { Route as ApiPublicEmailImgAssetIdFilenameRouteImport } from './routes/api/public/email-img.$assetId.$filename'
 import { Route as ApiPublicInfobipVoiceCmlRouteImport } from './routes/api/public/infobip/voice/cml'
@@ -137,6 +139,11 @@ const JornadasRoute = JornadasRouteImport.update({
 const LigacoesRoute = LigacoesRouteImport.update({
   id: '/ligacoes',
   path: '/ligacoes',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LinksRoute = LinksRouteImport.update({
+  id: '/links',
+  path: '/links',
   getParentRoute: () => rootRouteImport,
 } as any)
 const MidiaLtvRoute = MidiaLtvRouteImport.update({
@@ -355,6 +362,11 @@ const ApiPublicPrecallDispatchRoute =
     path: '/api/public/precall/dispatch',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicShortioSyncRoute = ApiPublicShortioSyncRouteImport.update({
+  id: '/api/public/shortio/sync',
+  path: '/api/public/shortio/sync',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicWebhookEventoRoute = ApiPublicWebhookEventoRouteImport.update({
   id: '/api/public/webhook/$evento',
   path: '/api/public/webhook/$evento',
@@ -400,6 +412,7 @@ export interface FileRoutesByFullPath {
   '/inteligencia': typeof InteligenciaRoute
   '/jornadas': typeof JornadasRouteWithChildren
   '/ligacoes': typeof LigacoesRoute
+  '/links': typeof LinksRoute
   '/midia-ltv': typeof MidiaLtvRoute
   '/players': typeof PlayersRouteWithChildren
   '/publicos': typeof PublicosRoute
@@ -440,6 +453,7 @@ export interface FileRoutesByFullPath {
   '/api/public/hooks/whatsapp-resume': typeof ApiPublicHooksWhatsappResumeRoute
   '/api/public/meta-sync/tick': typeof ApiPublicMetaSyncTickRoute
   '/api/public/precall/dispatch': typeof ApiPublicPrecallDispatchRoute
+  '/api/public/shortio/sync': typeof ApiPublicShortioSyncRoute
   '/api/public/webhook/$evento': typeof ApiPublicWebhookEventoRoute
   '/api/public/email-img/$assetId/$filename': typeof ApiPublicEmailImgAssetIdFilenameRoute
   '/api/public/infobip/voice/cml': typeof ApiPublicInfobipVoiceCmlRoute
@@ -461,6 +475,7 @@ export interface FileRoutesByTo {
   '/inteligencia': typeof InteligenciaRoute
   '/jornadas': typeof JornadasRouteWithChildren
   '/ligacoes': typeof LigacoesRoute
+  '/links': typeof LinksRoute
   '/midia-ltv': typeof MidiaLtvRoute
   '/players': typeof PlayersRouteWithChildren
   '/publicos': typeof PublicosRoute
@@ -501,6 +516,7 @@ export interface FileRoutesByTo {
   '/api/public/hooks/whatsapp-resume': typeof ApiPublicHooksWhatsappResumeRoute
   '/api/public/meta-sync/tick': typeof ApiPublicMetaSyncTickRoute
   '/api/public/precall/dispatch': typeof ApiPublicPrecallDispatchRoute
+  '/api/public/shortio/sync': typeof ApiPublicShortioSyncRoute
   '/api/public/webhook/$evento': typeof ApiPublicWebhookEventoRoute
   '/api/public/email-img/$assetId/$filename': typeof ApiPublicEmailImgAssetIdFilenameRoute
   '/api/public/infobip/voice/cml': typeof ApiPublicInfobipVoiceCmlRoute
@@ -523,6 +539,7 @@ export interface FileRoutesById {
   '/inteligencia': typeof InteligenciaRoute
   '/jornadas': typeof JornadasRouteWithChildren
   '/ligacoes': typeof LigacoesRoute
+  '/links': typeof LinksRoute
   '/midia-ltv': typeof MidiaLtvRoute
   '/players': typeof PlayersRouteWithChildren
   '/publicos': typeof PublicosRoute
@@ -563,6 +580,7 @@ export interface FileRoutesById {
   '/api/public/hooks/whatsapp-resume': typeof ApiPublicHooksWhatsappResumeRoute
   '/api/public/meta-sync/tick': typeof ApiPublicMetaSyncTickRoute
   '/api/public/precall/dispatch': typeof ApiPublicPrecallDispatchRoute
+  '/api/public/shortio/sync': typeof ApiPublicShortioSyncRoute
   '/api/public/webhook/$evento': typeof ApiPublicWebhookEventoRoute
   '/api/public/email-img/$assetId/$filename': typeof ApiPublicEmailImgAssetIdFilenameRoute
   '/api/public/infobip/voice/cml': typeof ApiPublicInfobipVoiceCmlRoute
@@ -586,6 +604,7 @@ export interface FileRouteTypes {
     | '/inteligencia'
     | '/jornadas'
     | '/ligacoes'
+    | '/links'
     | '/midia-ltv'
     | '/players'
     | '/publicos'
@@ -626,6 +645,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/whatsapp-resume'
     | '/api/public/meta-sync/tick'
     | '/api/public/precall/dispatch'
+    | '/api/public/shortio/sync'
     | '/api/public/webhook/$evento'
     | '/api/public/email-img/$assetId/$filename'
     | '/api/public/infobip/voice/cml'
@@ -647,6 +667,7 @@ export interface FileRouteTypes {
     | '/inteligencia'
     | '/jornadas'
     | '/ligacoes'
+    | '/links'
     | '/midia-ltv'
     | '/players'
     | '/publicos'
@@ -687,6 +708,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/whatsapp-resume'
     | '/api/public/meta-sync/tick'
     | '/api/public/precall/dispatch'
+    | '/api/public/shortio/sync'
     | '/api/public/webhook/$evento'
     | '/api/public/email-img/$assetId/$filename'
     | '/api/public/infobip/voice/cml'
@@ -708,6 +730,7 @@ export interface FileRouteTypes {
     | '/inteligencia'
     | '/jornadas'
     | '/ligacoes'
+    | '/links'
     | '/midia-ltv'
     | '/players'
     | '/publicos'
@@ -748,6 +771,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/whatsapp-resume'
     | '/api/public/meta-sync/tick'
     | '/api/public/precall/dispatch'
+    | '/api/public/shortio/sync'
     | '/api/public/webhook/$evento'
     | '/api/public/email-img/$assetId/$filename'
     | '/api/public/infobip/voice/cml'
@@ -770,6 +794,7 @@ export interface RootRouteChildren {
   InteligenciaRoute: typeof InteligenciaRoute
   JornadasRoute: typeof JornadasRouteWithChildren
   LigacoesRoute: typeof LigacoesRoute
+  LinksRoute: typeof LinksRoute
   MidiaLtvRoute: typeof MidiaLtvRoute
   PlayersRoute: typeof PlayersRouteWithChildren
   PublicosRoute: typeof PublicosRoute
@@ -803,6 +828,7 @@ export interface RootRouteChildren {
   ApiPublicHooksWhatsappResumeRoute: typeof ApiPublicHooksWhatsappResumeRoute
   ApiPublicMetaSyncTickRoute: typeof ApiPublicMetaSyncTickRoute
   ApiPublicPrecallDispatchRoute: typeof ApiPublicPrecallDispatchRoute
+  ApiPublicShortioSyncRoute: typeof ApiPublicShortioSyncRoute
   ApiPublicWebhookEventoRoute: typeof ApiPublicWebhookEventoRoute
   ApiPublicEmailImgAssetIdFilenameRoute: typeof ApiPublicEmailImgAssetIdFilenameRoute
   ApiPublicInfobipVoiceCmlRoute: typeof ApiPublicInfobipVoiceCmlRoute
@@ -908,6 +934,13 @@ declare module '@tanstack/react-router' {
       path: '/ligacoes'
       fullPath: '/ligacoes'
       preLoaderRoute: typeof LigacoesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/links': {
+      id: '/links'
+      path: '/links'
+      fullPath: '/links'
+      preLoaderRoute: typeof LinksRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/midia-ltv': {
@@ -1190,6 +1223,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicPrecallDispatchRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/shortio/sync': {
+      id: '/api/public/shortio/sync'
+      path: '/api/public/shortio/sync'
+      fullPath: '/api/public/shortio/sync'
+      preLoaderRoute: typeof ApiPublicShortioSyncRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/webhook/$evento': {
       id: '/api/public/webhook/$evento'
       path: '/api/public/webhook/$evento'
@@ -1286,6 +1326,7 @@ const rootRouteChildren: RootRouteChildren = {
   InteligenciaRoute: InteligenciaRoute,
   JornadasRoute: JornadasRouteWithChildren,
   LigacoesRoute: LigacoesRoute,
+  LinksRoute: LinksRoute,
   MidiaLtvRoute: MidiaLtvRoute,
   PlayersRoute: PlayersRouteWithChildren,
   PublicosRoute: PublicosRoute,
@@ -1321,6 +1362,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicHooksWhatsappResumeRoute: ApiPublicHooksWhatsappResumeRoute,
   ApiPublicMetaSyncTickRoute: ApiPublicMetaSyncTickRoute,
   ApiPublicPrecallDispatchRoute: ApiPublicPrecallDispatchRoute,
+  ApiPublicShortioSyncRoute: ApiPublicShortioSyncRoute,
   ApiPublicWebhookEventoRoute: ApiPublicWebhookEventoRoute,
   ApiPublicEmailImgAssetIdFilenameRoute: ApiPublicEmailImgAssetIdFilenameRoute,
   ApiPublicInfobipVoiceCmlRoute: ApiPublicInfobipVoiceCmlRoute,
