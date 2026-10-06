@@ -33,6 +33,7 @@ import {
   Image as ImageIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { LinkTrackingToggle } from "@/components/link-tracking-toggle";
 import { toast } from "sonner";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
@@ -58,6 +59,9 @@ export type EditorTemplate = {
   tags: string[];
   corpo: string;
   ativo: boolean;
+  trackLinks?: boolean;
+  lifecycleStatus?: "draft" | "published" | "archived";
+  version?: number;
   atualizadoEm: string;
 };
 
@@ -148,6 +152,8 @@ export function TemplateEditorDialog({
     mostrar_icone_beneficio: true,
   });
   const [customHtml, setCustomHtml] = useState<string>("");
+  const [lifecycleStatus, setLifecycleStatus] = useState<"draft" | "published" | "archived">("draft");
+  const [trackLinks, setTrackLinks] = useState(true);
 
   // Active focused field — para variáveis clicáveis
   const refs = useRef<Partial<Record<FieldKey, HTMLInputElement | HTMLTextAreaElement | null>>>({});
@@ -163,6 +169,8 @@ export function TemplateEditorDialog({
       fromName: editing.fromName || "BETLEADS",
     });
     setCustomHtml(editing.corpo || "");
+    setLifecycleStatus(editing.lifecycleStatus ?? (editing.ativo ? "published" : "archived"));
+    setTrackLinks(editing.trackLinks ?? true);
     // Se já tem corpo, ativa avançado para preservar; senão começa visual
     setAdvanced(Boolean(editing.corpo?.trim()));
     // Reset campos visuais
@@ -241,6 +249,12 @@ export function TemplateEditorDialog({
       return;
     }
     const corpoFinal = advanced ? customHtml : renderModeloHtml(modelo, fields);
+    const assetUrls = Array.from(corpoFinal.matchAll(/(?:href|src)=["']([^"']+)["']/gi)).map((match) => match[1]);
+    const invalidUrl = assetUrls.find((url) => !/^(https?:\/\/|\{|cid:|data:image\/)/i.test(url));
+    if (invalidUrl) {
+      toast.error(`Link ou imagem inválido: ${invalidUrl}`);
+      return;
+    }
     onSave({
       ...editing,
       nome: meta.nome,
@@ -251,7 +265,9 @@ export function TemplateEditorDialog({
       atualizadoEm: "agora",
       tags: editing.tags ?? [],
       categoria: editing.categoria || "Geral",
-      ativo: editing.ativo ?? true,
+      ativo: lifecycleStatus === "published",
+      lifecycleStatus,
+      trackLinks,
     });
   }
 
@@ -279,6 +295,14 @@ export function TemplateEditorDialog({
               <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setAiOpen(true)}>
                 <Sparkles className="h-3.5 w-3.5" /> Gerar com IA
               </Button>
+              <Select value={lifecycleStatus} onValueChange={(value: "draft" | "published" | "archived") => setLifecycleStatus(value)}>
+                <SelectTrigger className="w-[140px] h-8 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="draft">Rascunho</SelectItem>
+                  <SelectItem value="published">Publicado</SelectItem>
+                  <SelectItem value="archived">Arquivado</SelectItem>
+                </SelectContent>
+              </Select>
               <div className="flex-1" />
               <div className="flex items-center gap-2">
                 <Label className="text-xs text-muted-foreground">HTML avançado</Label>
@@ -299,6 +323,8 @@ export function TemplateEditorDialog({
                 </button>
               </div>
             </div>
+
+            <LinkTrackingToggle value={trackLinks} onChange={setTrackLinks} content={htmlPreview} channel="email" />
 
             {!advanced && (
               <>
