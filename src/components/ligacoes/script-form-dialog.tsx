@@ -25,19 +25,23 @@ import {
 } from "@/components/ui/select";
 import { saveCallScript } from "@/lib/calls.functions";
 import { VariablePicker } from "./variable-picker";
-import {
-  FAKE_LEAD_CLIENT,
-  renderScriptClient,
-  VOICE_OPTIONS,
-} from "./shared";
+import { FAKE_LEAD_CLIENT, renderScriptClient, VOICE_OPTIONS } from "./shared";
 
 interface Props {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   initial?: any | null;
+  defaultStatus?: "draft" | "active" | "inactive";
+  onSaved?: (script: { id: string; name: string; content: string; status: string }) => void;
 }
 
-export function ScriptFormDialog({ open, onOpenChange, initial }: Props) {
+export function ScriptFormDialog({
+  open,
+  onOpenChange,
+  initial,
+  defaultStatus = "draft",
+  onSaved,
+}: Props) {
   const qc = useQueryClient();
   const saveFn = useServerFn(saveCallScript);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -72,8 +76,9 @@ export function ScriptFormDialog({ open, onOpenChange, initial }: Props) {
     } else {
       setForm({
         name: "",
-        content: "Olá {primeiro_nome}, aqui é da {nome_expert}. Notamos que faz {dias_sem_login} dias que você não entra. Que tal voltar e usar seu saldo de {saldo}?",
-        status: "draft",
+        content:
+          "Olá {primeiro_nome}, aqui é da {nome_expert}. Notamos que faz {dias_sem_login} dias que você não entra. Que tal voltar e usar seu saldo de {saldo}?",
+        status: defaultStatus,
         default_voice_id: VOICE_OPTIONS[0].id,
         stability: 0.5,
         similarity_boost: 0.75,
@@ -82,13 +87,14 @@ export function ScriptFormDialog({ open, onOpenChange, initial }: Props) {
         use_speaker_boost: true,
       });
     }
-  }, [open, initial]);
+  }, [open, initial, defaultStatus]);
 
   const mut = useMutation({
     mutationFn: (input: any) => saveFn({ data: input }),
-    onSuccess: () => {
+    onSuccess: (result) => {
       toast.success(initial ? "Roteiro atualizado" : "Roteiro criado");
       qc.invalidateQueries({ queryKey: ["call-scripts"] });
+      onSaved?.({ id: result.id, name: form.name, content: form.content, status: form.status });
       onOpenChange(false);
     },
     onError: (e: any) => toast.error(e?.message ?? "Erro ao salvar script"),

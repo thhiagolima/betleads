@@ -16,6 +16,8 @@ import { toast } from "sonner";
 import { LinkTrackingToggle } from "@/components/link-tracking-toggle";
 import { MessageVariablePicker } from "@/components/message-variable-picker";
 import { SmsTemplateDialog } from "@/components/sms/sms-template-dialog";
+import { ScriptFormDialog } from "@/components/ligacoes/script-form-dialog";
+import { VoiceAssetUploadDialog } from "@/components/ligacoes/voice-asset-upload-dialog";
 import {
   TemplateEditorDialog,
   type EditorTemplate,
@@ -42,7 +44,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { bulkDispatchCalls, listCallScripts, saveCallScript } from "@/lib/calls.functions";
+import { bulkDispatchCalls, listCallScripts } from "@/lib/calls.functions";
 import { tenantSafeChannelError } from "@/lib/channel-error";
 import {
   getCampaignDraft,
@@ -137,7 +139,6 @@ export function ChannelCampaignComposer({
   const sendEmail = useServerFn(sendEmailCampaignNow);
   const dispatchVoice = useServerFn(bulkDispatchCalls);
   const createEmailTemplate = useServerFn(saveEmailTemplate);
-  const createVoiceScript = useServerFn(saveCallScript);
 
   const [channel, setChannel] = useState<Channel>(initialChannel);
   const [name, setName] = useState("");
@@ -155,11 +156,10 @@ export function ChannelCampaignComposer({
   const [trackLinks, setTrackLinks] = useState(true);
   const [riskConfirmed, setRiskConfirmed] = useState(false);
   const [submitAttempted, setSubmitAttempted] = useState(false);
-  const [quickAssetOpen, setQuickAssetOpen] = useState(false);
   const [smsTemplateDialogOpen, setSmsTemplateDialogOpen] = useState(false);
   const [emailTemplateDialogOpen, setEmailTemplateDialogOpen] = useState(false);
-  const [quickAssetName, setQuickAssetName] = useState("");
-  const [quickAssetContent, setQuickAssetContent] = useState("");
+  const [voiceScriptDialogOpen, setVoiceScriptDialogOpen] = useState(false);
+  const [voiceUploadDialogOpen, setVoiceUploadDialogOpen] = useState(false);
   const [draftId, setDraftId] = useState<string | null>(initialDraftId);
   const [draftVersion, setDraftVersion] = useState<number | null>(null);
   const [draftState, setDraftState] = useState<"idle" | "dirty" | "saving" | "saved" | "error">(
@@ -422,32 +422,6 @@ export function ChannelCampaignComposer({
       queryClient.invalidateQueries({ queryKey: ["campaign-drafts"] });
     },
     onError: () => setDraftState("error"),
-  });
-
-  const quickAsset = useMutation({
-    mutationFn: async () => {
-      if (!quickAssetName.trim() || !quickAssetContent.trim()) {
-        throw new Error("Informe nome e conteúdo do novo ativo.");
-      }
-      const result = await createVoiceScript({
-        data: {
-          name: quickAssetName,
-          content: quickAssetContent,
-          status: "active",
-        },
-      } as never);
-      return { id: result.id };
-    },
-    onSuccess: ({ id }) => {
-      queryClient.invalidateQueries({ queryKey: ["call-scripts"] });
-      setVoiceMode("script");
-      setVoiceSourceId(id);
-      setQuickAssetOpen(false);
-      setQuickAssetName("");
-      setQuickAssetContent("");
-      toast.success("Script criado e selecionado");
-    },
-    onError: (error: Error) => toast.error(tenantSafeChannelError(error)),
   });
 
   const saveVisualEmailTemplate = useMutation({
@@ -875,11 +849,12 @@ export function ChannelCampaignComposer({
                     size="sm"
                     variant="outline"
                     onClick={() => {
-                      setVoiceMode("script");
-                      setQuickAssetOpen(true);
+                      if (voiceMode === "asset") setVoiceUploadDialogOpen(true);
+                      else setVoiceScriptDialogOpen(true);
                     }}
                   >
-                    <Plus className="mr-1.5 size-3.5" /> Criar novo script
+                    <Plus className="mr-1.5 size-3.5" />
+                    {voiceMode === "asset" ? "Enviar novo áudio" : "Criar novo script"}
                   </Button>
                 </div>
                 <p className="text-xs text-muted-foreground">
@@ -902,50 +877,6 @@ export function ChannelCampaignComposer({
                 <AlertTriangle className="size-4 shrink-0" />
                 Variáveis não reconhecidas: {invalidVariables.join(", ")}
               </p>
-            )}
-            {quickAssetOpen && channel === "voice" && (
-              <Card className="border-primary/30 bg-primary/[0.03]">
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base">
-                    {channel === "voice" ? "Novo script" : "Novo template"}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="space-y-1.5">
-                    <Label>Nome</Label>
-                    <Input
-                      value={quickAssetName}
-                      onChange={(event) => setQuickAssetName(event.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>{channel === "voice" ? "Texto do script" : "Conteúdo"}</Label>
-                    <Textarea
-                      rows={channel === "email" ? 7 : 4}
-                      value={quickAssetContent}
-                      onChange={(event) => setQuickAssetContent(event.target.value)}
-                    />
-                    <MessageVariablePicker
-                      channel={channel}
-                      value={quickAssetContent}
-                      onChange={setQuickAssetContent}
-                      label={`Variáveis disponíveis para ${channel === "voice" ? "o script" : "o template"}`}
-                    />
-                  </div>
-                  <div className="flex justify-end gap-2">
-                    <Button type="button" variant="ghost" onClick={() => setQuickAssetOpen(false)}>
-                      Cancelar
-                    </Button>
-                    <Button
-                      type="button"
-                      disabled={quickAsset.isPending}
-                      onClick={() => quickAsset.mutate()}
-                    >
-                      {quickAsset.isPending ? "Criando…" : "Criar e selecionar"}
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
             )}
             <div className="space-y-2">
               <Label>Quando disparar</Label>
@@ -1110,6 +1041,23 @@ export function ChannelCampaignComposer({
         onOpenChange={setEmailTemplateDialogOpen}
         editing={emptyEmailTemplate}
         onSave={(template) => saveVisualEmailTemplate.mutate(template)}
+      />
+      <VoiceAssetUploadDialog
+        open={voiceUploadDialogOpen}
+        onOpenChange={setVoiceUploadDialogOpen}
+        onCreated={(asset) => {
+          setVoiceMode("asset");
+          setVoiceSourceId(asset.id);
+        }}
+      />
+      <ScriptFormDialog
+        open={voiceScriptDialogOpen}
+        onOpenChange={setVoiceScriptDialogOpen}
+        defaultStatus="active"
+        onSaved={(script) => {
+          setVoiceMode("script");
+          setVoiceSourceId(script.id);
+        }}
       />
     </Dialog>
   );

@@ -7,6 +7,8 @@ import { toast } from "sonner";
 import { LinkTrackingToggle } from "@/components/link-tracking-toggle";
 import { MessageVariablePicker } from "@/components/message-variable-picker";
 import { SmsTemplateDialog } from "@/components/sms/sms-template-dialog";
+import { ScriptFormDialog } from "@/components/ligacoes/script-form-dialog";
+import { VoiceAssetUploadDialog } from "@/components/ligacoes/voice-asset-upload-dialog";
 import {
   TemplateEditorDialog,
   type EditorTemplate,
@@ -36,6 +38,7 @@ import { listEmailTemplates, saveEmailTemplate, sendTestEmail } from "@/lib/emai
 import { previewTrackedText, smsPartsForLength } from "@/lib/link-tracking-preview";
 import { sendBulkSms } from "@/lib/sms.functions";
 import { listSmsTemplates } from "@/lib/sms-templates.functions";
+import { listJourneyVoiceAssets } from "@/lib/journey-voice-assets.functions";
 
 type Channel = "sms" | "email" | "voice";
 
@@ -62,6 +65,7 @@ export function IndividualSmsDialog({
   const listTemplates = useServerFn(listSmsTemplates);
   const listEmailTemplateFn = useServerFn(listEmailTemplates);
   const saveEmailTemplateFn = useServerFn(saveEmailTemplate);
+  const listVoiceAssets = useServerFn(listJourneyVoiceAssets);
   const queryClient = useQueryClient();
   const [channel, setChannel] = useState<Channel>("sms");
   const [phone, setPhone] = useState("");
@@ -74,6 +78,10 @@ export function IndividualSmsDialog({
   const [emailTemplateId, setEmailTemplateId] = useState("");
   const [emailTemplateDialogOpen, setEmailTemplateDialogOpen] = useState(false);
   const [scriptId, setScriptId] = useState("");
+  const [voiceMode, setVoiceMode] = useState<"script" | "asset">("script");
+  const [voiceAssetId, setVoiceAssetId] = useState("");
+  const [voiceScriptDialogOpen, setVoiceScriptDialogOpen] = useState(false);
+  const [voiceUploadDialogOpen, setVoiceUploadDialogOpen] = useState(false);
   const [trackLinks, setTrackLinks] = useState(true);
   const messageRef = useRef<HTMLTextAreaElement>(null);
   const digits = phone.replace(/\D/g, "");
@@ -98,6 +106,11 @@ export function IndividualSmsDialog({
     queryKey: ["email-templates"],
     queryFn: () => listEmailTemplateFn(),
     enabled: open && channel === "email",
+  });
+  const voiceAssets = useQuery({
+    queryKey: ["journey-voice-assets"],
+    queryFn: () => listVoiceAssets(),
+    enabled: open && channel === "voice",
   });
   const saveVisualEmailTemplate = useMutation({
     mutationFn: (template: EditorTemplate) =>
@@ -149,7 +162,8 @@ export function IndividualSmsDialog({
         return sendVoice({
           data: {
             campaign_name: `Teste individual: ${name.trim() || digits}`,
-            script_id: scriptId,
+            script_id: voiceMode === "script" ? scriptId : undefined,
+            asset_id: voiceMode === "asset" ? voiceAssetId : undefined,
             targets: [{ phone_number: digits }],
           },
         });
@@ -182,7 +196,10 @@ export function IndividualSmsDialog({
   const canSend =
     channel === "email"
       ? /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && Boolean(subject.trim() && message.trim())
-      : digits.length >= 10 && (channel === "voice" ? Boolean(scriptId) : Boolean(message.trim()));
+      : digits.length >= 10 &&
+        (channel === "voice"
+          ? Boolean(voiceMode === "script" ? scriptId : voiceAssetId)
+          : Boolean(message.trim()));
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -300,28 +317,73 @@ export function IndividualSmsDialog({
             </div>
           )}
           {channel === "voice" ? (
-            <div className="space-y-1.5">
-              <Label>Script aprovado</Label>
-              <Select value={scriptId} onValueChange={setScriptId}>
+            <div className="space-y-3">
+              <div className="flex gap-2" role="group" aria-label="Origem do áudio">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={voiceMode === "script" ? "default" : "outline"}
+                  onClick={() => setVoiceMode("script")}
+                >
+                  Script TTS
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={voiceMode === "asset" ? "default" : "outline"}
+                  onClick={() => setVoiceMode("asset")}
+                >
+                  Áudio fixo
+                </Button>
+              </div>
+              <Label>{voiceMode === "script" ? "Script aprovado" : "Áudio da biblioteca"}</Label>
+              <Select
+                value={voiceMode === "script" ? scriptId : voiceAssetId}
+                onValueChange={voiceMode === "script" ? setScriptId : setVoiceAssetId}
+              >
                 <SelectTrigger>
-                  <SelectValue placeholder="Selecione um script" />
+                  <SelectValue
+                    placeholder={
+                      voiceMode === "script" ? "Selecione um script" : "Selecione um áudio"
+                    }
+                  />
                 </SelectTrigger>
                 <SelectContent>
-                  {(
-                    (scripts.data?.scripts ?? []) as Array<{
-                      id: string;
-                      name: string;
-                      status: string;
-                    }>
-                  )
-                    .filter((item) => item.status === "active")
-                    .map((item) => (
-                      <SelectItem key={item.id} value={item.id}>
-                        {item.name}
-                      </SelectItem>
-                    ))}
+                  {(voiceMode === "script"
+                    ? (
+                        (scripts.data?.scripts ?? []) as Array<{
+                          id: string;
+                          name: string;
+                          status: string;
+                        }>
+                      ).filter((item) => item.status === "active")
+                    : (
+                        (voiceAssets.data?.assets ?? []) as Array<{
+                          id: string;
+                          name: string;
+                          is_archived?: boolean;
+                        }>
+                      ).filter((item) => !item.is_archived)
+                  ).map((item) => (
+                    <SelectItem key={item.id} value={item.id}>
+                      {item.name}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  voiceMode === "script"
+                    ? setVoiceScriptDialogOpen(true)
+                    : setVoiceUploadDialogOpen(true)
+                }
+              >
+                <Plus className="mr-1.5 size-3.5" />
+                {voiceMode === "script" ? "Criar novo script" : "Enviar novo áudio"}
+              </Button>
             </div>
           ) : (
             <div className="space-y-1.5">
@@ -442,6 +504,23 @@ export function IndividualSmsDialog({
         onOpenChange={setEmailTemplateDialogOpen}
         editing={emptyEmailTemplate}
         onSave={(template) => saveVisualEmailTemplate.mutate(template)}
+      />
+      <VoiceAssetUploadDialog
+        open={voiceUploadDialogOpen}
+        onOpenChange={setVoiceUploadDialogOpen}
+        onCreated={(asset) => {
+          setVoiceMode("asset");
+          setVoiceAssetId(asset.id);
+        }}
+      />
+      <ScriptFormDialog
+        open={voiceScriptDialogOpen}
+        onOpenChange={setVoiceScriptDialogOpen}
+        defaultStatus="active"
+        onSaved={(script) => {
+          setVoiceMode("script");
+          setScriptId(script.id);
+        }}
       />
     </Dialog>
   );
