@@ -42,35 +42,11 @@ Precisamos confirmar:
 
 Obrigado.`;
 
-const BUSINESSCODE_MESSAGE = `Assunto: API de SMS e Email retornando HTTP 503 (HTML do Apache) — dash.businesscode.com.br
+const INFOBIP_MESSAGE = `Assunto: API Infobip indisponível
 
-Olá, time BusinessCode.
+Olá, time Infobip.
 
-Desde hoje todos os nossos disparos de SMS e Email estão falhando. Os endpoints abaixo estão respondendo HTTP 503 Service Unavailable com uma página HTML do Apache, em vez do JSON esperado. Já tentamos com retry/backoff (6 tentativas) e o comportamento se mantém.
-
-Endpoints afetados:
-- POST https://dash.businesscode.com.br/api/v1/messaging/email
-- POST https://dash.businesscode.com.br/api/v1/messaging/sms
-
-Resposta retornada (literal):
-- Status: 503 Service Unavailable
-- Content-Type: text/html; charset=iso-8859-1
-- Corpo:
-<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
-<html><head><title>503 Service Unavailable</title></head>
-<body><h1>Service Unavailable</h1>
-<p>The server is temporarily unable to service your request due to maintenance downtime or capacity problems. Please try again later.</p>
-<hr><address>Apache/2.4.58 (Win64) OpenSSL/3.1.3 PHP/8.2.12 Server at dash.businesscode.com.br Port 443</address>
-</body></html>
-
-Volume impactado nas últimas 6 horas: 7.928 e-mails travados em "pending" e dezenas de SMS marcados como erro — todos com a mesma resposta.
-
-Token de autenticação, payload e Content-Type estão corretos (o mesmo request funciona quando o servidor responde). O 503 vem do Apache antes mesmo da aplicação processar.
-
-O que precisamos saber:
-1. Confirmar se há manutenção ou sobrecarga em curso em dash.businesscode.com.br.
-2. Previsão de normalização.
-3. Se existe endpoint/host alternativo enquanto isso.
+O CRM está recebendo erros temporários ao enviar mensagens. Poderiam confirmar a saúde da conta, credenciais, domínio/remetente e eventuais restrições de rede?
 
 Obrigado.`;
 
@@ -78,7 +54,7 @@ function supportMessageFor(channel: DispatchChannel): { title: string; body: str
   if (channel === "sms") {
     return { title: "Mensagem para a Short Brasil", body: SHORT_BRASIL_MESSAGE };
   }
-  return { title: "Mensagem para a BusinessCode", body: BUSINESSCODE_MESSAGE };
+  return { title: "Mensagem para a Infobip", body: INFOBIP_MESSAGE };
 }
 
 export function ProvidersPausedBanner({ channel }: { channel: DispatchChannel }) {

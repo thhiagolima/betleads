@@ -230,7 +230,7 @@ export function HistoryTab() {
                             </div>
                             <div className="grid gap-2 md:grid-cols-2">
                               <div>
-                                <p className="text-muted-foreground">HTTP status BusinessCode</p>
+                                <p className="text-muted-foreground">HTTP status Infobip</p>
                                 <p className="font-mono">{h.provider_status_code ?? "—"}</p>
                               </div>
                               <div>
@@ -255,7 +255,7 @@ export function HistoryTab() {
                               </div>
                             )}
                             <div>
-                              <p className="mb-1 text-muted-foreground">Resposta crua da BusinessCode</p>
+                              <p className="mb-1 text-muted-foreground">Resposta crua da Infobip</p>
                               <pre className="max-h-60 overflow-auto rounded bg-background p-2 font-mono text-[11px]">
 {JSON.stringify(h.provider_response ?? {}, null, 2)}
                               </pre>
@@ -267,7 +267,7 @@ export function HistoryTab() {
                               </div>
                             )}
                             <p className="text-muted-foreground">
-                              Se a URL do áudio não abrir no navegador, a BusinessCode também não consegue —
+                              Se a URL do áudio não abrir no navegador, a Infobip também não consegue —
                               é preciso autorizar o host <code>yrhczavmbpqerfsfucgr.supabase.co</code> na
                               allowlist deles ou usar bucket público.
                             </p>

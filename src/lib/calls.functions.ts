@@ -16,11 +16,7 @@ import {
   type LeadLike,
   type VoiceSettings,
 } from "./calls.server";
-import {
-  callBusinessCodeVoice,
-  fetchBusinessCodeDispatchStatus,
-  normalizeE164BR,
-} from "./businesscode-voice.server";
+import { callInfobipVoice, normalizeE164BR } from "./infobip-voice.server";
 
 // ============================================================
 // Schemas
@@ -604,7 +600,7 @@ export const updateCallQueueStatus = createServerFn({ method: "POST" })
   });
 
 // ============================================================
-// DISPATCH — BusinessCode Voice
+// DISPATCH — Infobip Voice
 // ============================================================
 export const dispatchCallQueueItem = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -642,7 +638,7 @@ export const dispatchCallQueueItem = createServerFn({ method: "POST" })
       throw new Error(e instanceof Error ? e.message : String(e));
     }
 
-    const result = await callBusinessCodeVoice(to, q.audio_url);
+    const result = await callInfobipVoice(to, q.audio_url);
 
     // 5xx ou body não-JSON (HTML) = falha transitória do provedor.
     // Preservamos o item em audio_ready com provider_status='provider_unavailable'
@@ -656,7 +652,7 @@ export const dispatchCallQueueItem = createServerFn({ method: "POST" })
         bodyAny?.non_json === true);
 
     if (isTransient) {
-      const errMsg = `BusinessCode voice ${result.status}: ${JSON.stringify(result.body).slice(0, 400)}`;
+      const errMsg = `Infobip voice ${result.status}: ${JSON.stringify(result.body).slice(0, 400)}`;
       try {
         await supabase.rpc("register_provider_throttle", {
           p_channel: "voice",
@@ -691,8 +687,8 @@ export const dispatchCallQueueItem = createServerFn({ method: "POST" })
       script_id: q.script_id,
       audio_url: q.audio_url,
       status: historyStatus as any,
-      provider: "businesscode",
-      provider_call_id: result.idempotencyKey || null,
+      provider: "infobip",
+      provider_call_id: result.providerCallId ?? result.idempotencyKey ?? null,
       error_message: result.ok ? null : JSON.stringify(result.body).slice(0, 1000),
       provider_response: (result.body ?? {}) as any,
       provider_status_code: result.status,
@@ -711,7 +707,7 @@ export const dispatchCallQueueItem = createServerFn({ method: "POST" })
 
     if (!result.ok) {
       throw new Error(
-        `BusinessCode retornou ${result.status}: ${JSON.stringify(result.body).slice(0, 300)}`,
+        `Infobip retornou ${result.status}: ${JSON.stringify(result.body).slice(0, 300)}`,
       );
     }
     return { ok: true, idempotency_key: result.idempotencyKey, to };
@@ -1045,7 +1041,7 @@ export const getCallsDashboard = createServerFn({ method: "POST" })
   });
 
 // ============================================================
-// REFRESH STATUS — consulta GET no BusinessCode/Infobip e sincroniza
+// REFRESH STATUS — os eventos da Infobip são a fonte de verdade.
 // ============================================================
 function mapBcStatusToHistory(s: string | null | undefined): string | null {
   if (!s) return null;
@@ -1081,84 +1077,5 @@ export const refreshCallDispatchStatus = createServerFn({ method: "POST" })
     if (hErr) throw new Error(hErr.message);
     if (!h) throw new Error("Registro de histórico não encontrado");
 
-    const pr = (h.provider_response ?? {}) as any;
-    const dispatchId =
-      pr?.dispatch_id ??
-      pr?.data?.id ??
-      (typeof pr?._links?.status === "string"
-        ? Number(pr._links.status.split("/").pop())
-        : null);
-    if (!dispatchId) {
-      throw new Error(
-        "Sem dispatch_id na resposta original — não dá pra consultar status.",
-      );
-    }
-
-    const res = await fetchBusinessCodeDispatchStatus(dispatchId);
-    if (!res.ok) {
-      throw new Error(
-        `BusinessCode retornou ${res.status} ao consultar status: ${JSON.stringify(
-          res.body,
-        ).slice(0, 300)}`,
-      );
-    }
-    const body = (res.body ?? {}) as any;
-    const d = body?.data ?? body;
-    const bcStatus: string | null = d?.status ?? null;
-    const voiceStatus: string | null = d?.voice_status ?? null;
-    const durationSec: number | null =
-      typeof d?.call_duration_seconds === "number"
-        ? d.call_duration_seconds
-        : null;
-    const errorMessage: string | null = d?.error_message ?? null;
-
-    const newHistStatus =
-      mapBcStatusToHistory(voiceStatus) ?? mapBcStatusToHistory(bcStatus);
-
-    await supabase
-      .from("call_history")
-      .update({
-        status: (newHistStatus ?? "pending") as any,
-        provider_response: d as any,
-        duration_seconds: durationSec,
-        error_message: errorMessage,
-      })
-      .eq("id", h.id);
-
-    if (h.call_queue_id) {
-      const finalStatuses = new Set([
-        "answered",
-        "completed",
-        "failed",
-        "no_answer",
-        "busy",
-        "cancelled",
-      ]);
-      const queueUpdate: Record<string, unknown> = {
-        provider_status: voiceStatus ?? bcStatus ?? null,
-        provider_response: d as any,
-      };
-      if (newHistStatus && finalStatuses.has(newHistStatus)) {
-        queueUpdate.status =
-          newHistStatus === "answered" || newHistStatus === "completed"
-            ? "completed"
-            : newHistStatus === "cancelled"
-              ? "cancelled"
-              : "failed";
-      }
-      await supabase
-        .from("call_queue")
-        .update(queueUpdate as any)
-        .eq("id", h.call_queue_id);
-    }
-
-    return {
-      ok: true,
-      bc_status: bcStatus,
-      voice_status: voiceStatus,
-      mapped: newHistStatus,
-      duration_seconds: durationSec,
-      error_message: errorMessage,
-      raw: d,
-    };
+    return { ok: true, status: h.provider_call_id ? "awaiting_infobip_event" : "missing_provider_call_id" };
   });

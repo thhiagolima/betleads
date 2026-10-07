@@ -46,7 +46,7 @@ function extractToken(request: Request): string | null {
 
 function authorizeCallback(request: Request): Response | null {
   const expected =
-    process.env.SHORT_BRASIL_WEBHOOK_SECRET ?? process.env.BUSINESSCODE_WEBHOOK_SECRET;
+    process.env.SHORT_BRASIL_WEBHOOK_SECRET;
   if (!expected) {
     return Response.json(
       { ok: false, error: "SHORT_BRASIL_WEBHOOK_SECRET not configured" },

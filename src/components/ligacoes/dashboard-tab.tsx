@@ -131,7 +131,7 @@ export function DashboardTab() {
         <div>
           <h2 className="text-lg font-semibold">Visão geral</h2>
           <p className="text-xs text-muted-foreground">
-            Métricas atualizadas a cada 30s · provedor BusinessCode
+            Métricas atualizadas a cada 30s · provedor Infobip
           </p>
         </div>
         <DashboardDateRangePicker range={range} onChange={setRange} />

@@ -13,7 +13,7 @@ export type SendWindowSettings = {
 };
 
 const DEFAULTS: SendWindowSettings = {
-  // O provedor (BusinessCode) recusa envios antes das 08:00 BRT com
+  // A janela operacional de envio começa às 08:00 BRT.
   // HTTP 422 QUIET_HOURS. Mantemos a janela padrão dentro do permitido.
   start_minute: 8 * 60,
   end_minute: 21 * 60,

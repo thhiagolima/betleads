@@ -21,7 +21,7 @@ export async function pauseChannelForInsufficientFunds(
   if (lastPauseAt[channel] && now - lastPauseAt[channel] < 5_000) return;
   lastPauseAt[channel] = now;
   try {
-    const provider = channel === "sms" ? "Short Brasil" : "BusinessCode";
+    const provider = channel === "sms" ? "Short Brasil" : "Infobip";
     await supabaseAdmin
       .from("dispatch_pause_state")
       .update({

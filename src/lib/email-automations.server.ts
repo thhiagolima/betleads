@@ -2,7 +2,7 @@
 // Pega leads com next_run_at <= now() e executa o bloco atual.
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { callBusinessCodeEmail, resolveSender } from "./email-send.server";
+import { sendInfobipEmail, resolveSender } from "./email-send.server";
 import { buildPlayerVariables, renderTemplate } from "./template-vars.server";
 import { deferIfOutsideWindow } from "./send-window.server";
 import {
@@ -537,7 +537,7 @@ export async function runEmailFlowDispatcher({
         channel,
         queue_before: queueBefore,
         stop_reason: "paused",
-        provider: "businesscode-email",
+        provider: "infobip",
       });
       return { processed: 0, ids: [] as string[], paused: true };
     }
@@ -551,7 +551,7 @@ export async function runEmailFlowDispatcher({
         channel,
         queue_before: queueBefore,
         stop_reason: "outside_window",
-        provider: "businesscode-email",
+        provider: "infobip",
       });
       return { processed: 0, ids: [] as string[], deferred_until: defer };
     }
@@ -572,7 +572,7 @@ export async function runEmailFlowDispatcher({
         queue_before: queueBefore,
         stop_reason: "rate_limited",
         target_rate: rateState?.target_per_minute ?? null,
-        provider: "businesscode-email",
+        provider: "infobip",
         last_provider_error: rateState?.last_provider_error ?? null,
       });
       return { processed: 0, ids: [] as string[], throttled: true };
@@ -601,7 +601,7 @@ export async function runEmailFlowDispatcher({
         channel,
         queue_before: queueBefore,
         stop_reason: `claim_error: ${error.message.slice(0, 200)}`,
-        provider: "businesscode-email",
+        provider: "infobip",
       });
       return { processed: 0, ids: [] as string[], error: error.message };
     }
@@ -616,7 +616,7 @@ export async function runEmailFlowDispatcher({
         claimed: 0,
         stop_reason: "queue_empty",
         target_rate: rateState?.target_per_minute ?? null,
-        provider: "businesscode-email",
+        provider: "infobip",
       });
     }
     return { processed: 0, ids: [] as string[] };
@@ -649,7 +649,7 @@ export async function runEmailFlowDispatcher({
         claimed: all.length,
         stop_reason: "nothing_to_send",
         target_rate: rateState?.target_per_minute ?? null,
-        provider: "businesscode-email",
+        provider: "infobip",
       });
     }
     return { processed: 0, ids: [] as string[] };
@@ -678,7 +678,7 @@ export async function runEmailFlowDispatcher({
         claimed: all.length,
         stop_reason: "throttled_by_minute_cap",
         target_rate: rateState?.target_per_minute ?? null,
-        provider: "businesscode-email",
+        provider: "infobip",
       });
       return { processed: 0, ids: [] as string[], throttled: true };
     }
@@ -733,7 +733,7 @@ export async function runEmailFlowDispatcher({
       processed.push(plan.lead.id);
       return;
     }
-    const result = await callBusinessCodeEmail({
+    const result = await sendInfobipEmail({
       to: plan.lead.email,
       from: plan.sender.fromEmail,
       fromName: plan.sender.fromName,
@@ -823,7 +823,7 @@ export async function runEmailFlowDispatcher({
       target_rate: rateState?.target_per_minute ?? null,
       actual_rate: processed.length,
       stop_reason: rateLimited > 0 ? "provider_rate_limited" : "ok",
-      provider: "businesscode-email",
+      provider: "infobip",
       last_provider_error: lastProviderError,
     });
   }

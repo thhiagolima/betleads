@@ -16,8 +16,7 @@ import {
   type LeadLike,
   type VoiceSettings,
 } from "./calls.server";
-import { callBusinessCodeVoice, normalizeE164BR } from "./businesscode-voice.server";
-import { callInfobipVoice } from "./infobip-voice.server";
+import { callInfobipVoice, normalizeE164BR } from "./infobip-voice.server";
 import { sendSmsInternal } from "./sms.functions";
 import { buildPlayerVariables } from "./template-vars.server";
 import { deferIfOutsideWindow } from "./send-window.server";
@@ -302,10 +301,7 @@ async function executeCallBlock(progress: any, block: any, player: any): Promise
   }
 
   // 4. dispara provedor
-  const usingInfobip = process.env.VOICE_PROVIDER?.trim().toLowerCase() === "infobip";
-  const result = usingInfobip
-    ? await callInfobipVoice(to, audioUrl)
-    : await callBusinessCodeVoice(to, audioUrl);
+  const result = await callInfobipVoice(to, audioUrl);
   const isAuthError = result.status === 401 || result.status === 403;
   if (isAuthError) {
     console.warn(`[call-flow] auth_error ${result.status} — mantendo lead na fila, retry em 10min`);
@@ -317,7 +313,7 @@ async function executeCallBlock(progress: any, block: any, player: any): Promise
     script_id: scriptId,
     audio_url: audioUrl,
     status: result.ok ? ("pending" as any) : isAuthError ? ("pending" as any) : ("failed" as any),
-    provider: usingInfobip ? "infobip" : "businesscode",
+    provider: "infobip",
     provider_call_id: result.providerCallId ?? (result.idempotencyKey || null),
     provider_response: (result.body ?? {}) as any,
     provider_status_code: result.status,
@@ -485,7 +481,7 @@ export async function tickFlows(limit = 50): Promise<{ processed: number }> {
     return { processed: 0 };
   }
   // Sem antiban para ligação — paraleliza em batches para usar capacidade
-  // máxima da BusinessCode Voice. Falha de um item não derruba batch.
+  // máxima do provedor de voz. Falha de um item não derruba batch.
   const BATCH_SIZE = 100;
   let processed = 0;
   const readyList = ready ?? [];
@@ -537,25 +533,14 @@ export async function tickFlows(limit = 50): Promise<{ processed: number }> {
     }
   }
 
-  // Fallback de polling: se o webhook da BusinessCode não chegar, consulta o
-  // status do dispatch e dispara handleCallCompletion manualmente.
-  try {
-    const polled = await pollPendingCalls(limit);
-    processed += polled;
-  } catch (e) {
-    console.error("[call-flow tick] erro polling", e);
-  }
-
   return { processed };
 }
 
-/**
- * Consulta na BusinessCode o status de ligações que estão como `pending` em
- * `call_history` há mais de 90s. Quando o dispatch já tem status final,
- * atualiza o histórico e chama handleCallCompletion (que dispara SMS
- * condicional do bloco e avança o progresso do fluxo).
- */
+/** Eventos de voz são recebidos pelo callback da Infobip; polling foi desativado. */
 export async function pollPendingCalls(limit = 50): Promise<number> {
+  void limit;
+  return 0;
+  if (false) {
   const cutoffIso = new Date(Date.now() - 90_000).toISOString();
   const { data: pendings } = await supabaseAdmin
     .from("call_history")
@@ -569,7 +554,7 @@ export async function pollPendingCalls(limit = 50): Promise<number> {
   if (!pendings || pendings.length === 0) return 0;
   console.info("[call-flow polling] pendings", { count: pendings.length });
 
-  const rawToken = process.env.BUSINESSCODE_VOICE_TOKEN || "";
+  const rawToken = "";
   const token = rawToken
     .replace(/[\u200B-\u200D\uFEFF]/g, "")
     .trim()
@@ -578,7 +563,7 @@ export async function pollPendingCalls(limit = 50): Promise<number> {
     .replace(/^Bearer\s+/i, "")
     .replace(/\s+/g, "");
   if (!token) {
-    console.warn("[call-flow polling] BUSINESSCODE_VOICE_TOKEN ausente");
+    console.warn("[call-flow polling] polling desativado");
     return 0;
   }
 
@@ -593,7 +578,7 @@ export async function pollPendingCalls(limit = 50): Promise<number> {
     const url = statusUrlRaw
       ? statusUrlRaw.replace(/^http:\/\//i, "https://")
       : dispatchId
-        ? `https://dash.businesscode.com.br/api/v1/messaging/dispatches/${dispatchId}`
+        ? null
         : null;
     if (!url) continue;
 
@@ -613,7 +598,7 @@ export async function pollPendingCalls(limit = 50): Promise<number> {
         continue;
       }
 
-      // A BusinessCode mantém `status` genérico (queued/sent/delivered) e
+      // O provedor mantém um status genérico (queued/sent/delivered) e
       // expõe o resultado real da ligação em `voice_status`. Sem ler isso,
       // ligações atendidas ficam para sempre como "queued" no nosso lado.
       const d = body?.data ?? body;
@@ -629,7 +614,7 @@ export async function pollPendingCalls(limit = 50): Promise<number> {
             0,
         ) || 0;
 
-      // Mapeia status da BusinessCode para nosso vocabulário
+      // Mapeia status do provedor para nosso vocabulário
       const finalMap: Record<string, string> = {
         answered: "answered",
         completed: "completed",
@@ -683,6 +668,7 @@ export async function pollPendingCalls(limit = 50): Promise<number> {
     }
   }
   return advanced;
+  }
 }
 
 /** Mapeia status do provedor para a condição lógica de SMS. */

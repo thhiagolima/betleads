@@ -48,12 +48,6 @@ import { Route as ApiPublicSmsWebhookRouteImport } from './routes/api/public/sms
 import { Route as ApiPublicAutomationsDispatchRouteImport } from './routes/api/public/automations/dispatch'
 import { Route as ApiPublicAutomationsEvaluateRouteImport } from './routes/api/public/automations/evaluate'
 import { Route as ApiPublicCallFlowsTickRouteImport } from './routes/api/public/call-flows/tick'
-import { Route as ApiPublicCallsBusinesscodeWebhookRouteImport } from './routes/api/public/calls/businesscode-webhook'
-import { Route as ApiPublicDiagBusinesscodeEmailRouteImport } from './routes/api/public/diag/businesscode-email'
-import { Route as ApiPublicDiagBusinesscodeSmsRouteImport } from './routes/api/public/diag/businesscode-sms'
-import { Route as ApiPublicDiagBusinesscodeTokenCheckRouteImport } from './routes/api/public/diag/businesscode-token-check'
-import { Route as ApiPublicDiagBusinesscodeVoiceRouteImport } from './routes/api/public/diag/businesscode-voice'
-import { Route as ApiPublicDiagCallStatusRouteImport } from './routes/api/public/diag/call-status'
 import { Route as ApiPublicEmailCampaignsTickRouteImport } from './routes/api/public/email-campaigns/tick'
 import { Route as ApiPublicEmailFlowsTickRouteImport } from './routes/api/public/email-flows/tick'
 import { Route as ApiPublicHooksCashbackCatchupRouteImport } from './routes/api/public/hooks/cashback-catchup'
@@ -271,41 +265,6 @@ const ApiPublicCallFlowsTickRoute = ApiPublicCallFlowsTickRouteImport.update({
   path: '/api/public/call-flows/tick',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiPublicCallsBusinesscodeWebhookRoute =
-  ApiPublicCallsBusinesscodeWebhookRouteImport.update({
-    id: '/api/public/calls/businesscode-webhook',
-    path: '/api/public/calls/businesscode-webhook',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const ApiPublicDiagBusinesscodeEmailRoute =
-  ApiPublicDiagBusinesscodeEmailRouteImport.update({
-    id: '/api/public/diag/businesscode-email',
-    path: '/api/public/diag/businesscode-email',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const ApiPublicDiagBusinesscodeSmsRoute =
-  ApiPublicDiagBusinesscodeSmsRouteImport.update({
-    id: '/api/public/diag/businesscode-sms',
-    path: '/api/public/diag/businesscode-sms',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const ApiPublicDiagBusinesscodeTokenCheckRoute =
-  ApiPublicDiagBusinesscodeTokenCheckRouteImport.update({
-    id: '/api/public/diag/businesscode-token-check',
-    path: '/api/public/diag/businesscode-token-check',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const ApiPublicDiagBusinesscodeVoiceRoute =
-  ApiPublicDiagBusinesscodeVoiceRouteImport.update({
-    id: '/api/public/diag/businesscode-voice',
-    path: '/api/public/diag/businesscode-voice',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const ApiPublicDiagCallStatusRoute = ApiPublicDiagCallStatusRouteImport.update({
-  id: '/api/public/diag/call-status',
-  path: '/api/public/diag/call-status',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ApiPublicEmailCampaignsTickRoute =
   ApiPublicEmailCampaignsTickRouteImport.update({
     id: '/api/public/email-campaigns/tick',
@@ -449,12 +408,6 @@ export interface FileRoutesByFullPath {
   '/api/public/automations/dispatch': typeof ApiPublicAutomationsDispatchRoute
   '/api/public/automations/evaluate': typeof ApiPublicAutomationsEvaluateRoute
   '/api/public/call-flows/tick': typeof ApiPublicCallFlowsTickRoute
-  '/api/public/calls/businesscode-webhook': typeof ApiPublicCallsBusinesscodeWebhookRoute
-  '/api/public/diag/businesscode-email': typeof ApiPublicDiagBusinesscodeEmailRoute
-  '/api/public/diag/businesscode-sms': typeof ApiPublicDiagBusinesscodeSmsRoute
-  '/api/public/diag/businesscode-token-check': typeof ApiPublicDiagBusinesscodeTokenCheckRoute
-  '/api/public/diag/businesscode-voice': typeof ApiPublicDiagBusinesscodeVoiceRoute
-  '/api/public/diag/call-status': typeof ApiPublicDiagCallStatusRoute
   '/api/public/email-campaigns/tick': typeof ApiPublicEmailCampaignsTickRoute
   '/api/public/email-flows/tick': typeof ApiPublicEmailFlowsTickRoute
   '/api/public/hooks/cashback-catchup': typeof ApiPublicHooksCashbackCatchupRoute
@@ -514,12 +467,6 @@ export interface FileRoutesByTo {
   '/api/public/automations/dispatch': typeof ApiPublicAutomationsDispatchRoute
   '/api/public/automations/evaluate': typeof ApiPublicAutomationsEvaluateRoute
   '/api/public/call-flows/tick': typeof ApiPublicCallFlowsTickRoute
-  '/api/public/calls/businesscode-webhook': typeof ApiPublicCallsBusinesscodeWebhookRoute
-  '/api/public/diag/businesscode-email': typeof ApiPublicDiagBusinesscodeEmailRoute
-  '/api/public/diag/businesscode-sms': typeof ApiPublicDiagBusinesscodeSmsRoute
-  '/api/public/diag/businesscode-token-check': typeof ApiPublicDiagBusinesscodeTokenCheckRoute
-  '/api/public/diag/businesscode-voice': typeof ApiPublicDiagBusinesscodeVoiceRoute
-  '/api/public/diag/call-status': typeof ApiPublicDiagCallStatusRoute
   '/api/public/email-campaigns/tick': typeof ApiPublicEmailCampaignsTickRoute
   '/api/public/email-flows/tick': typeof ApiPublicEmailFlowsTickRoute
   '/api/public/hooks/cashback-catchup': typeof ApiPublicHooksCashbackCatchupRoute
@@ -580,12 +527,6 @@ export interface FileRoutesById {
   '/api/public/automations/dispatch': typeof ApiPublicAutomationsDispatchRoute
   '/api/public/automations/evaluate': typeof ApiPublicAutomationsEvaluateRoute
   '/api/public/call-flows/tick': typeof ApiPublicCallFlowsTickRoute
-  '/api/public/calls/businesscode-webhook': typeof ApiPublicCallsBusinesscodeWebhookRoute
-  '/api/public/diag/businesscode-email': typeof ApiPublicDiagBusinesscodeEmailRoute
-  '/api/public/diag/businesscode-sms': typeof ApiPublicDiagBusinesscodeSmsRoute
-  '/api/public/diag/businesscode-token-check': typeof ApiPublicDiagBusinesscodeTokenCheckRoute
-  '/api/public/diag/businesscode-voice': typeof ApiPublicDiagBusinesscodeVoiceRoute
-  '/api/public/diag/call-status': typeof ApiPublicDiagCallStatusRoute
   '/api/public/email-campaigns/tick': typeof ApiPublicEmailCampaignsTickRoute
   '/api/public/email-flows/tick': typeof ApiPublicEmailFlowsTickRoute
   '/api/public/hooks/cashback-catchup': typeof ApiPublicHooksCashbackCatchupRoute
@@ -647,12 +588,6 @@ export interface FileRouteTypes {
     | '/api/public/automations/dispatch'
     | '/api/public/automations/evaluate'
     | '/api/public/call-flows/tick'
-    | '/api/public/calls/businesscode-webhook'
-    | '/api/public/diag/businesscode-email'
-    | '/api/public/diag/businesscode-sms'
-    | '/api/public/diag/businesscode-token-check'
-    | '/api/public/diag/businesscode-voice'
-    | '/api/public/diag/call-status'
     | '/api/public/email-campaigns/tick'
     | '/api/public/email-flows/tick'
     | '/api/public/hooks/cashback-catchup'
@@ -712,12 +647,6 @@ export interface FileRouteTypes {
     | '/api/public/automations/dispatch'
     | '/api/public/automations/evaluate'
     | '/api/public/call-flows/tick'
-    | '/api/public/calls/businesscode-webhook'
-    | '/api/public/diag/businesscode-email'
-    | '/api/public/diag/businesscode-sms'
-    | '/api/public/diag/businesscode-token-check'
-    | '/api/public/diag/businesscode-voice'
-    | '/api/public/diag/call-status'
     | '/api/public/email-campaigns/tick'
     | '/api/public/email-flows/tick'
     | '/api/public/hooks/cashback-catchup'
@@ -777,12 +706,6 @@ export interface FileRouteTypes {
     | '/api/public/automations/dispatch'
     | '/api/public/automations/evaluate'
     | '/api/public/call-flows/tick'
-    | '/api/public/calls/businesscode-webhook'
-    | '/api/public/diag/businesscode-email'
-    | '/api/public/diag/businesscode-sms'
-    | '/api/public/diag/businesscode-token-check'
-    | '/api/public/diag/businesscode-voice'
-    | '/api/public/diag/call-status'
     | '/api/public/email-campaigns/tick'
     | '/api/public/email-flows/tick'
     | '/api/public/hooks/cashback-catchup'
@@ -834,12 +757,6 @@ export interface RootRouteChildren {
   ApiPublicAutomationsDispatchRoute: typeof ApiPublicAutomationsDispatchRoute
   ApiPublicAutomationsEvaluateRoute: typeof ApiPublicAutomationsEvaluateRoute
   ApiPublicCallFlowsTickRoute: typeof ApiPublicCallFlowsTickRoute
-  ApiPublicCallsBusinesscodeWebhookRoute: typeof ApiPublicCallsBusinesscodeWebhookRoute
-  ApiPublicDiagBusinesscodeEmailRoute: typeof ApiPublicDiagBusinesscodeEmailRoute
-  ApiPublicDiagBusinesscodeSmsRoute: typeof ApiPublicDiagBusinesscodeSmsRoute
-  ApiPublicDiagBusinesscodeTokenCheckRoute: typeof ApiPublicDiagBusinesscodeTokenCheckRoute
-  ApiPublicDiagBusinesscodeVoiceRoute: typeof ApiPublicDiagBusinesscodeVoiceRoute
-  ApiPublicDiagCallStatusRoute: typeof ApiPublicDiagCallStatusRoute
   ApiPublicEmailCampaignsTickRoute: typeof ApiPublicEmailCampaignsTickRoute
   ApiPublicEmailFlowsTickRoute: typeof ApiPublicEmailFlowsTickRoute
   ApiPublicHooksCashbackCatchupRoute: typeof ApiPublicHooksCashbackCatchupRoute
@@ -1135,48 +1052,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicCallFlowsTickRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/public/calls/businesscode-webhook': {
-      id: '/api/public/calls/businesscode-webhook'
-      path: '/api/public/calls/businesscode-webhook'
-      fullPath: '/api/public/calls/businesscode-webhook'
-      preLoaderRoute: typeof ApiPublicCallsBusinesscodeWebhookRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/public/diag/businesscode-email': {
-      id: '/api/public/diag/businesscode-email'
-      path: '/api/public/diag/businesscode-email'
-      fullPath: '/api/public/diag/businesscode-email'
-      preLoaderRoute: typeof ApiPublicDiagBusinesscodeEmailRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/public/diag/businesscode-sms': {
-      id: '/api/public/diag/businesscode-sms'
-      path: '/api/public/diag/businesscode-sms'
-      fullPath: '/api/public/diag/businesscode-sms'
-      preLoaderRoute: typeof ApiPublicDiagBusinesscodeSmsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/public/diag/businesscode-token-check': {
-      id: '/api/public/diag/businesscode-token-check'
-      path: '/api/public/diag/businesscode-token-check'
-      fullPath: '/api/public/diag/businesscode-token-check'
-      preLoaderRoute: typeof ApiPublicDiagBusinesscodeTokenCheckRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/public/diag/businesscode-voice': {
-      id: '/api/public/diag/businesscode-voice'
-      path: '/api/public/diag/businesscode-voice'
-      fullPath: '/api/public/diag/businesscode-voice'
-      preLoaderRoute: typeof ApiPublicDiagBusinesscodeVoiceRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/public/diag/call-status': {
-      id: '/api/public/diag/call-status'
-      path: '/api/public/diag/call-status'
-      fullPath: '/api/public/diag/call-status'
-      preLoaderRoute: typeof ApiPublicDiagCallStatusRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/api/public/email-campaigns/tick': {
       id: '/api/public/email-campaigns/tick'
       path: '/api/public/email-campaigns/tick'
@@ -1400,14 +1275,6 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicAutomationsDispatchRoute: ApiPublicAutomationsDispatchRoute,
   ApiPublicAutomationsEvaluateRoute: ApiPublicAutomationsEvaluateRoute,
   ApiPublicCallFlowsTickRoute: ApiPublicCallFlowsTickRoute,
-  ApiPublicCallsBusinesscodeWebhookRoute:
-    ApiPublicCallsBusinesscodeWebhookRoute,
-  ApiPublicDiagBusinesscodeEmailRoute: ApiPublicDiagBusinesscodeEmailRoute,
-  ApiPublicDiagBusinesscodeSmsRoute: ApiPublicDiagBusinesscodeSmsRoute,
-  ApiPublicDiagBusinesscodeTokenCheckRoute:
-    ApiPublicDiagBusinesscodeTokenCheckRoute,
-  ApiPublicDiagBusinesscodeVoiceRoute: ApiPublicDiagBusinesscodeVoiceRoute,
-  ApiPublicDiagCallStatusRoute: ApiPublicDiagCallStatusRoute,
   ApiPublicEmailCampaignsTickRoute: ApiPublicEmailCampaignsTickRoute,
   ApiPublicEmailFlowsTickRoute: ApiPublicEmailFlowsTickRoute,
   ApiPublicHooksCashbackCatchupRoute: ApiPublicHooksCashbackCatchupRoute,

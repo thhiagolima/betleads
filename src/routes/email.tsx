@@ -440,7 +440,7 @@ function DashboardTab() {
         <div>
           <h2 className="text-lg font-semibold">Visão geral</h2>
           <p className="text-xs text-muted-foreground">
-            Métricas em tempo real · provedor BusinessCode
+            Métricas em tempo real · provedor Infobip
           </p>
         </div>
         <DashboardDateRangePicker range={range} onChange={setRange} />
@@ -769,7 +769,7 @@ function SmtpTab() {
 
   return (
     <div className="space-y-4">
-      <BusinessCodeEmailCard />
+      <InfobipEmailCard />
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold">Configurações SMTP</h2>
@@ -1986,7 +1986,7 @@ function CampanhaDialog({
   const smtps: any[] = (smtpQ.data?.items ?? []) as any;
   const bcAtivo: boolean = Boolean((provQ.data as any)?.configured);
 
-  // Pré-seleciona servidor em campanha nova: SMTP padrão > BusinessCode
+  // Pré-seleciona o remetente padrão para envio via Infobip.
   useEffect(() => {
     if (!c || c.smtpId) return;
     const padrao = smtps.find((s) => s.padrao);
@@ -1995,7 +1995,7 @@ function CampanhaDialog({
       return;
     }
     if (bcAtivo) {
-      setC((p) => (p ? { ...p, smtpId: "businesscode", smtp: "BusinessCode" } : p));
+      setC((p) => (p ? { ...p, smtpId: "", smtp: "Infobip" } : p));
     }
   }, [smtps, bcAtivo, c]);
 
@@ -2070,7 +2070,7 @@ function CampanhaDialog({
       const id = saved?.id || c.id;
       const r: any = await sendNowFn({ data: { campaignId: id } } as any);
       toast.success(
-        `Aceito pela BusinessCode: ${r.enviados} encaminhados, ${r.pendentes ?? 0} pendentes, ${r.falhas} falhas (${r.total} destinatários).`,
+        `Aceito pela Infobip: ${r.enviados} encaminhados, ${r.pendentes ?? 0} pendentes, ${r.falhas} falhas (${r.total} destinatários).`,
         { id: tid },
       );
       onOpenChange(false);
@@ -2213,8 +2213,8 @@ function CampanhaDialog({
             <Select
               value={c.smtpId ?? ""}
               onValueChange={(v) => {
-                if (v === "businesscode") {
-                  setC((p) => (p ? { ...p, smtpId: "businesscode", smtp: "BusinessCode" } : p));
+                if (v === "infobip") {
+                  setC((p) => (p ? { ...p, smtpId: "", smtp: "Infobip" } : p));
                   return;
                 }
                 const s = smtps.find((x) => x.id === v);
@@ -2230,7 +2230,7 @@ function CampanhaDialog({
               </SelectTrigger>
               <SelectContent className="max-h-72">
                 {bcAtivo && (
-                  <SelectItem value="businesscode">Provedor de Email (BusinessCode)</SelectItem>
+                  <SelectItem value="infobip">Provedor de Email (Infobip)</SelectItem>
                 )}
                 {smtps.map((s) => (
                   <SelectItem key={s.id} value={s.id}>
@@ -3236,10 +3236,10 @@ function HistoricoTab() {
 }
 
 // ============================================================
-// Provedor BusinessCode (envio real via API)
+// Provedor Infobip (envio real via API)
 // ============================================================
 
-function BusinessCodeEmailCard() {
+function InfobipEmailCard() {
   const getStatus = useServerFn(getEmailProviderStatus);
   const { data: status } = useQuery({
     queryKey: ["email-provider-status"],
@@ -3253,7 +3253,7 @@ function BusinessCodeEmailCard() {
   const [replyTo, setReplyTo] = useState("");
   const [subject, setSubject] = useState("Teste de envio — BetLeads");
   const [html, setHtml] = useState(
-    "<h1>Olá {primeiro_nome}!</h1><p>Este é um teste de envio via BusinessCode.</p>",
+    "<h1>Olá {primeiro_nome}!</h1><p>Este é um teste de envio via Infobip.</p>",
   );
   const [sending, setSending] = useState(false);
   const [trackLinks, setTrackLinks] = useState(true);
@@ -3278,7 +3278,7 @@ function BusinessCodeEmailCard() {
           trackLinks,
         },
       });
-      toast.success("Email aceito pela BusinessCode. Aguarde a entrega na caixa de entrada.");
+      toast.success("Email aceito pela Infobip. Aguarde a entrega na caixa de entrada.");
       setOpen(false);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Falha no envio");
@@ -3293,11 +3293,11 @@ function BusinessCodeEmailCard() {
         <div>
           <CardTitle className="flex items-center gap-2 text-base">
             <Server className="h-4 w-4 text-primary" />
-            Provedor de Email (BusinessCode)
+            Provedor de Email (Infobip)
           </CardTitle>
           <CardDescription className="text-xs">
             Endpoint:{" "}
-            <code className="text-[11px]">dash.businesscode.com.br/api/v1/messaging/email</code>
+            <code className="text-[11px]">INFOBIP_BASE_URL/email/3/send</code>
           </CardDescription>
         </div>
         <div className="flex items-center gap-2">
@@ -3317,8 +3317,8 @@ function BusinessCodeEmailCard() {
       </CardHeader>
       <CardContent className="text-xs text-muted-foreground space-y-1">
         <p>
-          O envio usa o secret <code>BUSINESSCODE_EMAIL_TOKEN</code>. O domínio do remetente precisa
-          estar verificado em <em>Configurações &gt; Domínios de Email</em> na BusinessCode.
+          O envio usa o secret <code>INFOBIP_API_KEY</code>. O domínio do remetente precisa
+          estar verificado no painel da Infobip.
         </p>
         <p>
           Variáveis no conteúdo (ex.: <code>{"{primeiro_nome}"}</code>, <code>{"{saldo}"}</code>)
@@ -3331,7 +3331,7 @@ function BusinessCodeEmailCard() {
           <DialogHeader>
             <DialogTitle>Enviar email de teste</DialogTitle>
             <DialogDescription>
-              Envio único via API BusinessCode. O log fica em Histórico.
+              Envio único via API Infobip. O log fica em Histórico.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -3622,7 +3622,7 @@ function RemetentesTab() {
         <div>
           <h2 className="text-lg font-semibold">Remetentes</h2>
           <p className="text-xs text-muted-foreground">
-            Cadastre os remetentes (nome, email e domínio verificado na BusinessCode) usados em
+            Cadastre os remetentes (nome, email e domínio verificado na Infobip) usados em
             campanhas e automações. Independente de SMTP.
           </p>
         </div>
@@ -3636,7 +3636,7 @@ function RemetentesTab() {
           <EmptyState
             icon={<Mail className="h-6 w-6" />}
             title="Nenhum remetente cadastrado"
-            description="Cadastre um remetente padrão (com o email do domínio verificado na BusinessCode) para poder enviar campanhas."
+            description="Cadastre um remetente padrão com domínio verificado na Infobip para poder enviar campanhas."
             action={
               <Button onClick={novo} className="gap-2">
                 <Plus className="h-4 w-4" /> Cadastrar remetente

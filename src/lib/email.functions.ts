@@ -5,7 +5,7 @@ import { dbUuid } from "@/lib/zod-helpers";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { BUSINESSCODE_EMAIL_URL, callBusinessCodeEmail, resolveSender } from "./email-send.server";
+import { sendInfobipEmail, resolveSender } from "./email-send.server";
 import { loadPlayersForSegment, countPlayersForSegment } from "./email-segments.server";
 import { buildPlayerVariables } from "./template-vars.server";
 import { renderTemplate } from "./template-vars.server";
@@ -21,10 +21,10 @@ export function summarizeProviderError(
   const r = (provider_response ?? {}) as Record<string, unknown>;
   const status = r.status ? String(r.status) : null;
   const body = (r.body ?? {}) as Record<string, unknown>;
-  // SPA HTML from BusinessCode means the endpoint doesn't exist
+  // HTML inesperado indica uma resposta inválida do provedor.
   const snippet = typeof body.snippet === "string" ? body.snippet : null;
   if (status === "405" || (snippet && snippet.includes("<!DOCTYPE html>"))) {
-    return `HTTP ${status ?? "405"} — endpoint indisponível na BusinessCode`;
+    return `HTTP ${status ?? "405"} — endpoint indisponível na Infobip`;
   }
   // JSON-shaped provider error
   const msg =
@@ -49,15 +49,15 @@ export function summarizeProviderError(
   return "Falha desconhecida";
 }
 
-// ============ ENVIO via BusinessCode ============
+// ============ ENVIO via Infobip ============
 
 export const getEmailProviderStatus = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async () => {
     return {
-      configured: Boolean(process.env.BUSINESSCODE_EMAIL_TOKEN),
-      endpoint: BUSINESSCODE_EMAIL_URL,
-      provider: "businesscode" as const,
+      configured: Boolean(process.env.INFOBIP_BASE_URL && process.env.INFOBIP_API_KEY),
+      endpoint: `${process.env.INFOBIP_BASE_URL?.replace(/\/$/, "") ?? ""}/email/3/send`,
+      provider: "infobip" as const,
     };
   });
 
@@ -129,7 +129,7 @@ export const sendTestEmail = createServerFn({ method: "POST" })
       }
     }
 
-    const result = await callBusinessCodeEmail({
+    const result = await sendInfobipEmail({
       to: data.to,
       from: sender.fromEmail,
       fromName: sender.fromName,
@@ -315,7 +315,7 @@ export const setDefaultSmtpConfig = createServerFn({ method: "POST" })
 
 // ============ REMETENTES (email_senders) ============
 // Entidade dedicada para o "from" do email — independente de SMTP.
-// Permite usar a API BusinessCode sem precisar cadastrar SMTP só para
+// Permite usar a API Infobip sem precisar cadastrar SMTP só para
 // armazenar from_email / from_name / reply_to.
 
 const SenderInputSchema = z.object({
@@ -614,9 +614,7 @@ export const saveEmailCampaign = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => CampanhaInputSchema.parse(d))
   .handler(async ({ data, context }) => {
-    // BusinessCode é um provedor próprio (não SMTP). Normaliza para null
-    // para evitar gravar valor não-UUID em smtp_id.
-    const smtpIdNorm = data.smtpId && data.smtpId !== "businesscode" ? data.smtpId : null;
+    const smtpIdNorm = data.smtpId ?? null;
     let templateSnapshot: Record<string, unknown> | null = null;
     if (data.templateId) {
       const { data: template, error: templateError } = await context.supabase
@@ -828,13 +826,11 @@ export async function runCampaignSend(campaignId: string) {
   // Campanhas legadas, sem snapshot, seguem usando o template publicado atual.
   const tpl = (camp.template_snapshot as Record<string, any> | null) ?? liveTpl;
 
-  // smtp_id pode ser null quando o usuário escolheu "BusinessCode" como
-  // provedor. resolveSender tenta primeiro a tabela `email_senders`
-  // (entidade dedicada, independente de SMTP), depois SMTP padrão.
+  // resolveSender tenta primeiro a tabela `email_senders`, depois SMTP padrão.
   const sender = await resolveSender(camp.smtp_id ?? null, camp.tenant_id);
   if (!sender) {
     throw new Error(
-      "Nenhum remetente configurado. Vá em Email > Remetentes e cadastre um remetente padrão (nome, email e domínio verificado na BusinessCode).",
+      "Nenhum remetente configurado. Vá em Email > Remetentes e cadastre um remetente padrão com domínio verificado na Infobip.",
     );
   }
 
@@ -941,7 +937,7 @@ export async function runCampaignSend(campaignId: string) {
       const vars = buildPlayerVariables(p);
       const subject = renderTemplate(tpl.subject ?? "", vars);
       const html = renderTemplate(tpl.body_html ?? "", vars);
-      const r = await callBusinessCodeEmail({
+      const r = await sendInfobipEmail({
         to: p.email,
         from: sender.fromEmail,
         fromName: sender.fromName,

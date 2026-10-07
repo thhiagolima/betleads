@@ -37,7 +37,7 @@ export const Route = createFileRoute("/api/public/email-campaigns/tick")({
               kind: "campaign",
               queue_before: ids.length,
               stop_reason: "outside_window",
-              provider: "businesscode-email",
+              provider: "infobip",
             });
             return new Response(
               JSON.stringify({ ok: true, deferred: ids.length, next_run_at: defer }),
@@ -92,7 +92,7 @@ export const Route = createFileRoute("/api/public/email-campaigns/tick")({
             sent: results.filter((r) => r.ok).length,
             errors,
             stop_reason: due.length === 0 ? "queue_empty" : errors > 0 ? "errors" : "ok",
-            provider: "businesscode-email",
+            provider: "infobip",
             last_provider_error: lastErr,
           });
 

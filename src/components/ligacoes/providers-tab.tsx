@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
 const WEBHOOK_URL =
-  "https://betleads.io/api/public/calls/businesscode-webhook";
+  "https://betleads.io/api/public/infobip/voice/events";
 
 export function ProvidersTab() {
   const [copied, setCopied] = useState(false);
@@ -35,15 +35,15 @@ export function ProvidersTab() {
           Provedor de Telefonia
         </CardTitle>
         <CardDescription>
-          Ligações disparadas pela BusinessCode usando o mesmo token configurado no SMS.
+          Ligações disparadas exclusivamente pela Infobip.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex items-center justify-between rounded-md border p-4">
           <div>
-            <p className="text-sm font-medium">BusinessCode Voice</p>
+            <p className="text-sm font-medium">Infobip Voice</p>
             <p className="text-xs text-muted-foreground">
-              Endpoint: <code>dash.businesscode.com.br/api/v1/messaging/voice</code>
+              Endpoint: <code>INFOBIP_BASE_URL/markuplanguage/1/create</code>
             </p>
           </div>
           <Badge variant="default">Ativo</Badge>
@@ -52,7 +52,7 @@ export function ProvidersTab() {
         <div className="space-y-2">
           <p className="text-sm font-medium">Webhook de callback</p>
           <p className="text-xs text-muted-foreground">
-            Cadastre essa URL no painel BusinessCode para receber atualizações de status (atendida, não atendida, duração).
+            Cadastre essa URL no painel Infobip para receber atualizações de status (atendida, não atendida, duração).
           </p>
           <div className="flex items-center gap-2">
             <code className="flex-1 truncate rounded bg-muted px-3 py-2 text-xs">

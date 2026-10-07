@@ -60,7 +60,7 @@ interface ParsedError {
 
 function parseProviderError(raw?: string): ParsedError {
   if (!raw) return { message: "Erro desconhecido" };
-  // tenta achar JSON dentro da string (pode vir prefixado por "BusinessCode retornou 422: {...}")
+  // tenta achar JSON dentro da string de erro do provedor
   const jsonStart = raw.indexOf("{");
   const jsonStr = jsonStart >= 0 ? raw.slice(jsonStart) : raw;
   try {
@@ -214,7 +214,7 @@ export function BulkCallTab() {
             </CardTitle>
             <CardDescription>
               Escolha um script e selecione vários leads — geramos o áudio (com
-              cache) e disparamos via BusinessCode para cada um.
+              cache) e disparamos via Infobip para cada um.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
@@ -368,7 +368,7 @@ export function BulkCallTab() {
           <CardContent className="space-y-3 text-sm">
             <Row label="Script" value={scripts.find((s: any) => s.id === scriptId)?.name ?? "—"} />
             <Row label="Destinatários" value={String(allTargets.length)} />
-            <Row label="Provedor" value="BusinessCode" />
+            <Row label="Provedor" value="Infobip" />
             <Separator />
             <Button
               className="w-full gap-2"
@@ -442,10 +442,10 @@ function FailureDetails({
       {allAllowlist && (
         <Alert variant="destructive">
           <AlertTriangle className="h-4 w-4" />
-          <AlertTitle className="text-xs">Host de áudio não autorizado na BusinessCode</AlertTitle>
+          <AlertTitle className="text-xs">Host de áudio não autorizado na Infobip</AlertTitle>
           <AlertDescription className="text-xs leading-relaxed">
             O host do áudio gerado não está liberado no provedor. No painel da
-            BusinessCode, adicione esse host à <code className="text-[10px]">MESSAGING_AUDIO_URL_ALLOWLIST</code>{" "}
+            Infobip, adicione esse host à lista de URLs permitidas no painel do provedor.{" "}
             (lista separada por vírgula no <code className="text-[10px]">.env</code>) ou ative{" "}
             <code className="text-[10px]">MESSAGING_AUDIO_URL_ALLOW_ANY=true</code>. Depois disso o disparo passa
             sem nenhuma mudança aqui.

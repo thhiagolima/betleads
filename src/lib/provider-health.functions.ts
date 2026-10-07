@@ -27,7 +27,7 @@ export const getProviderAuthHealth = createServerFn({ method: "GET" })
       if (!err) continue;
       const isActive = !until || new Date(until).getTime() > Date.now();
       if (!isActive) continue;
-      if (channel === "sms" && /BUSINESSCODE_SMS_TOKEN/i.test(err)) {
+      if (channel === "sms" && /SMS_TOKEN/i.test(err)) {
         err =
           "SHORT_BRASIL_SMS_USUARIO/SHORT_BRASIL_SMS_CHAVE nao configurados. Reinicie o servidor apos alterar o .env.";
       }

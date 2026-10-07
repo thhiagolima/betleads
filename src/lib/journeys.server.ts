@@ -1,6 +1,5 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { callBusinessCodeEmail, resolveSender } from "./email-send.server";
-import { callBusinessCodeVoice } from "./businesscode-voice.server";
+import { sendInfobipEmail, resolveSender } from "./email-send.server";
 import { callInfobipVoice } from "./infobip-voice.server";
 import { sendSmsInternal } from "./sms.functions";
 import { buildPlayerVariables, renderTemplate } from "./template-vars.server";
@@ -304,7 +303,7 @@ async function executeEnrollment(id: string): Promise<void> {
       enrollment.tenant_id,
     );
     if (!sender) throw new Error("Remetente de e-mail não configurado");
-    const result = await callBusinessCodeEmail({
+    const result = await sendInfobipEmail({
       to: player.email,
       from: sender.fromEmail,
       fromName: sender.fromName,
@@ -337,7 +336,7 @@ async function executeEnrollment(id: string): Promise<void> {
     });
     await finishExecution(run.id, {
       status: "sent",
-      provider: process.env.EMAIL_PROVIDER ?? "businesscode",
+      provider: "infobip",
       provider_response: result.body,
     });
   } else if (step.step_type === "voice") {
@@ -355,15 +354,11 @@ async function executeEnrollment(id: string): Promise<void> {
       .createSignedUrl(asset.storage_path, 60 * 60);
     if (signedError || !signed?.signedUrl)
       throw new Error("Não foi possível disponibilizar o áudio para a ligação");
-    const result =
-      process.env.VOICE_PROVIDER?.toLowerCase() === "infobip"
-        ? await callInfobipVoice(player.telefone, signed.signedUrl)
-        : await callBusinessCodeVoice(player.telefone, signed.signedUrl);
+    const result = await callInfobipVoice(player.telefone, signed.signedUrl);
     if (!result.ok) throw new Error("Ligação não aceita pelo provedor");
     await finishExecution(run.id, {
       status: "sent",
-      provider:
-        process.env.VOICE_PROVIDER?.toLowerCase() === "infobip" ? "infobip" : "businesscode",
+      provider: "infobip",
       provider_response: result,
     });
   } else {

@@ -267,9 +267,8 @@ const VARIAVEIS = SMS_VARIABLE_KEYS.map((key) => `{${key}}`);
 function sanitizeSmsProviderError(error: string | null | undefined): string | null {
   if (!error) return null;
   return error
-    .replace(/BUSINESSCODE_SMS_TOKEN/gi, "SHORT_BRASIL_SMS_USUARIO/SHORT_BRASIL_SMS_CHAVE")
-    .replace(/BusinessCode/gi, "Short Brasil")
-    .replace(/businesscode/gi, "short-brasil")
+    .replace(/SMS_TOKEN/gi, "SHORT_BRASIL_SMS_USUARIO/SHORT_BRASIL_SMS_CHAVE")
+    .replace(/legacy-provider/gi, "short-brasil")
     .replace(
       /Sem resposta do provedor:\s*SHORT_BRASIL_SMS_USUARIO\/SHORT_BRASIL_SMS_CHAVE não configurado/gi,
       "Credenciais Short Brasil nao configuradas. Reinicie o servidor apos alterar o .env.",

@@ -1,6 +1,5 @@
 // Infobip Email HTTP API v3 adapter.
-// The provider is opt-in through EMAIL_PROVIDER=infobip; keeping this adapter
-// isolated lets the campaign engine remain independent from the vendor.
+// Adaptador único de e-mail do CRM.
 
 export type InfobipEmailInput = {
   to: string;

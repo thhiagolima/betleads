@@ -27,7 +27,7 @@ function extractToken(request: Request): string | null {
  */
 export function requireSharedSecret(
   request: Request,
-  envName: "CRON_SECRET" | "BUSINESSCODE_WEBHOOK_SECRET",
+  envName: "CRON_SECRET" | "INFOBIP_WEBHOOK_SECRET",
 ): void {
   const expected = process.env[envName];
   if (!expected) {
