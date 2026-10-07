@@ -721,7 +721,8 @@ export const bulkDispatchCalls = createServerFn({ method: "POST" })
   .inputValidator((input) =>
     z
       .object({
-        script_id: dbUuid(),
+        script_id: dbUuid().optional(),
+        asset_id: dbUuid().optional(),
         campaign_name: z.string().max(120).optional(),
         targets: z
           .array(
@@ -733,10 +734,29 @@ export const bulkDispatchCalls = createServerFn({ method: "POST" })
           .min(1)
           .max(200),
       })
+      .refine((value) => Boolean(value.script_id) !== Boolean(value.asset_id), {
+        message: "Selecione um script TTS ou um áudio fixo da biblioteca.",
+      })
       .parse(input),
   )
   .handler(async ({ data, context }) => {
     const { supabase } = context;
+    const tenantId = await resolveOperationalTenantId(supabase);
+    let fixedAudioUrl: string | null = null;
+    if (data.asset_id) {
+      const { data: asset, error: assetError } = await (supabaseAdmin as any)
+        .from("journey_voice_assets")
+        .select("storage_path, is_archived")
+        .eq("id", data.asset_id)
+        .eq("tenant_id", tenantId)
+        .single();
+      if (assetError || !asset || asset.is_archived) throw new Error("Áudio fixo não está disponível na biblioteca.");
+      const { data: signed, error: signedError } = await supabaseAdmin.storage
+        .from("call-audios")
+        .createSignedUrl(asset.storage_path, 3600);
+      if (signedError || !signed?.signedUrl) throw new Error(signedError?.message ?? "Não foi possível preparar o áudio fixo.");
+      fixedAudioUrl = signed.signedUrl;
+    }
     const results: Array<{
       ok: boolean;
       lead_id: string | null;
@@ -754,7 +774,7 @@ export const bulkDispatchCalls = createServerFn({ method: "POST" })
           .from("call_queue")
           .insert({
             lead_id: target.lead_id ?? null,
-            script_id: data.script_id,
+            script_id: data.script_id ?? null,
             trigger_name: data.campaign_name ?? null,
             phone_number: target.phone_number ?? null,
             status: "pending_audio",
@@ -764,12 +784,11 @@ export const bulkDispatchCalls = createServerFn({ method: "POST" })
         if (qErr) throw new Error(qErr.message);
 
         // 2. gera áudio (cache hits aceleram muito)
-        const audioRes = await generateLeadVoiceAudio({
-          data: {
-            script_id: data.script_id,
-            lead_id: target.lead_id ?? null,
-          },
-        });
+        const audioRes = fixedAudioUrl
+          ? { audio: { id: null, audio_url: fixedAudioUrl } }
+          : await generateLeadVoiceAudio({
+              data: { script_id: data.script_id!, lead_id: target.lead_id ?? null },
+            });
 
         // 3. marca audio_ready
         await supabase

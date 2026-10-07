@@ -38,6 +38,7 @@ import {
   listPlayersForCalls,
   bulkDispatchCalls,
 } from "@/lib/calls.functions";
+import { listJourneyVoiceAssets } from "@/lib/journey-voice-assets.functions";
 
 interface Target {
   key: string;
@@ -87,9 +88,12 @@ function parseProviderError(raw?: string): ParsedError {
 export function BulkCallTab() {
   const listScripts = useServerFn(listCallScripts);
   const listPlayers = useServerFn(listPlayersForCalls);
+  const listAssets = useServerFn(listJourneyVoiceAssets);
   const bulkFn = useServerFn(bulkDispatchCalls);
 
   const [scriptId, setScriptId] = useState<string>("");
+  const [assetId, setAssetId] = useState<string>("");
+  const [audioMode, setAudioMode] = useState<"tts" | "fixed">("tts");
   const [campaignName, setCampaignName] = useState("");
   const [search, setSearch] = useState("");
   const [targets, setTargets] = useState<Target[]>([]);
@@ -107,6 +111,8 @@ export function BulkCallTab() {
     queryFn: () => listScripts(),
   });
   const scripts = scriptsData?.scripts ?? [];
+  const assetsQuery = useQuery({ queryKey: ["journey-voice-assets", "bulk-call"], queryFn: () => listAssets() });
+  const assets = (assetsQuery.data?.assets ?? []).filter((asset: any) => !asset.is_archived);
 
   const { data: playersData, isFetching } = useQuery({
     queryKey: ["players-for-calls", search],
@@ -166,7 +172,8 @@ export function BulkCallTab() {
     mutationFn: async () => {
       return bulkFn({
         data: {
-          script_id: scriptId,
+          script_id: audioMode === "tts" ? scriptId : undefined,
+          asset_id: audioMode === "fixed" ? assetId : undefined,
           campaign_name: campaignName || undefined,
           targets: allTargets.map((t) => ({
             lead_id: t.lead_id,
@@ -201,7 +208,7 @@ export function BulkCallTab() {
   });
 
   const canSend =
-    Boolean(scriptId) && allTargets.length > 0 && !bulkMut.isPending;
+    Boolean(audioMode === "tts" ? scriptId : assetId) && allTargets.length > 0 && !bulkMut.isPending;
 
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -220,8 +227,18 @@ export function BulkCallTab() {
           <CardContent className="space-y-5">
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-1.5">
-                <Label>Script</Label>
-                <Select value={scriptId} onValueChange={setScriptId}>
+                <Label>Fonte do áudio</Label>
+                <Select value={audioMode} onValueChange={(value: "tts" | "fixed") => setAudioMode(value)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="tts">Script dinâmico (TTS)</SelectItem>
+                    <SelectItem value="fixed">Áudio fixo da biblioteca</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>{audioMode === "tts" ? "Script" : "Áudio reutilizável"}</Label>
+                {audioMode === "tts" ? <Select value={scriptId} onValueChange={setScriptId}>
                   <SelectTrigger>
                     <SelectValue placeholder="Selecione um script..." />
                   </SelectTrigger>
@@ -237,7 +254,12 @@ export function BulkCallTab() {
                       </SelectItem>
                     ))}
                   </SelectContent>
-                </Select>
+                </Select> : <Select value={assetId} onValueChange={setAssetId}>
+                  <SelectTrigger><SelectValue placeholder="Selecione um áudio..." /></SelectTrigger>
+                  <SelectContent>
+                    {assets.length === 0 ? <div className="px-3 py-2 text-xs text-muted-foreground">Nenhum áudio ativo na biblioteca.</div> : assets.map((asset: any) => <SelectItem key={asset.id} value={asset.id}>{asset.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>}
               </div>
               <div className="space-y-1.5">
                 <Label>Nome da campanha (opcional)</Label>
