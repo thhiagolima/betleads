@@ -1,10 +1,11 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Mail, MessageSquare, Phone, Send, UserRound } from "lucide-react";
 import { toast } from "sonner";
 
 import { LinkTrackingToggle } from "@/components/link-tracking-toggle";
+import { MessageVariablePicker } from "@/components/message-variable-picker";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -61,6 +62,7 @@ export function IndividualSmsDialog({
   const [message, setMessage] = useState("Olá {primeiro_nome}, temos uma novidade para você.");
   const [scriptId, setScriptId] = useState("");
   const [trackLinks, setTrackLinks] = useState(true);
+  const messageRef = useRef<HTMLTextAreaElement>(null);
   const digits = phone.replace(/\D/g, "");
   const previewContent = previewTrackedText(message, trackLinks);
   const parts = smsPartsForLength(previewContent.length);
@@ -214,28 +216,16 @@ export function IndividualSmsDialog({
                 )}
               </div>
               <Textarea
+                ref={messageRef}
                 rows={5}
                 value={message}
                 onChange={(event) => setMessage(event.target.value)}
               />
-              <div className="flex flex-wrap gap-1.5">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setMessage((value) => `${value}{primeiro_nome}`)}
-                >
-                  + primeiro nome
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setMessage((value) => `${value}{nome}`)}
-                >
-                  + nome
-                </Button>
-              </div>
+              <MessageVariablePicker
+                textareaRef={messageRef}
+                value={message}
+                onChange={setMessage}
+              />
             </div>
           )}
           {channel !== "voice" && (

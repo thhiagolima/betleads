@@ -14,6 +14,7 @@ import {
 import { toast } from "sonner";
 
 import { LinkTrackingToggle } from "@/components/link-tracking-toggle";
+import { MessageVariablePicker } from "@/components/message-variable-picker";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -165,6 +166,7 @@ export function ChannelCampaignComposer({
   const [audience, setAudience] = useState<ResolvedAudience | null>(null);
   const [smsTemplateId, setSmsTemplateId] = useState("");
   const [smsContent, setSmsContent] = useState("");
+  const smsContentRef = useRef<HTMLTextAreaElement>(null);
   const [emailTemplateId, setEmailTemplateId] = useState("");
   const [voiceMode, setVoiceMode] = useState<"script" | "asset">("asset");
   const [voiceSourceId, setVoiceSourceId] = useState("");
@@ -761,6 +763,7 @@ export function ChannelCampaignComposer({
                 <div className="space-y-2">
                   <Label htmlFor={fieldIds.smsContent}>Mensagem</Label>
                   <Textarea
+                    ref={smsContentRef}
                     id={fieldIds.smsContent}
                     name="sms-content"
                     rows={5}
@@ -771,6 +774,11 @@ export function ChannelCampaignComposer({
                       submitAttempted && (Boolean(invalidVariables.length) || !smsContent.trim())
                     }
                     aria-describedby={fieldIds.validation}
+                  />
+                  <MessageVariablePicker
+                    textareaRef={smsContentRef}
+                    value={smsContent}
+                    onChange={setSmsContent}
                   />
                   <p className="text-xs text-muted-foreground">
                     {smsContent.length} caracteres · {parts} parte(s) · estimativa: {num(cost)}{" "}
@@ -824,6 +832,7 @@ export function ChannelCampaignComposer({
                 <p className="text-xs text-muted-foreground">
                   Estimativa: {num(cost)} destinatário(s).
                 </p>
+                <MessageVariablePicker readOnly label="Variáveis aceitas nos templates de e-mail" />
               </div>
             )}
             {channel === "voice" && (
@@ -888,6 +897,9 @@ export function ChannelCampaignComposer({
                 <p className="text-xs text-muted-foreground">
                   Estimativa: {num(cost)} chamada(s). O limite por campanha é 200 destinatários.
                 </p>
+                {voiceMode === "script" && (
+                  <MessageVariablePicker readOnly label="Variáveis aceitas nos scripts de voz" />
+                )}
               </div>
             )}
             {invalidVariables.length > 0 && (
@@ -929,6 +941,11 @@ export function ChannelCampaignComposer({
                       rows={channel === "email" ? 7 : 4}
                       value={quickAssetContent}
                       onChange={(event) => setQuickAssetContent(event.target.value)}
+                    />
+                    <MessageVariablePicker
+                      value={quickAssetContent}
+                      onChange={setQuickAssetContent}
+                      label={`Variáveis disponíveis para ${channel === "voice" ? "o script" : "o template"}`}
                     />
                   </div>
                   <div className="flex justify-end gap-2">

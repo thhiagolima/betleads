@@ -15,6 +15,8 @@ interface Props {
   label?: string;
   /** Limita a lista às variáveis suportadas pelo contexto atual. */
   allowedKeys?: string[];
+  /** Exibe a referência sem permitir inserção (útil em seletores de templates). */
+  readOnly?: boolean;
 }
 
 export function MessageVariablePicker({
@@ -25,11 +27,13 @@ export function MessageVariablePicker({
   className,
   label = "Variáveis disponíveis — clique para inserir",
   allowedKeys,
+  readOnly = false,
 }: Props) {
   const variables = allowedKeys
     ? SCRIPT_VARIABLES.filter((variable) => allowedKeys.includes(variable.key))
     : SCRIPT_VARIABLES;
   function insert(key: string) {
+    if (readOnly) return;
     const token = `{${key}}`;
     if (onInsert) {
       onInsert(token);
@@ -61,9 +65,13 @@ export function MessageVariablePicker({
           <Badge
             key={v.key}
             variant="outline"
-            className="cursor-pointer font-mono text-[10px] hover:bg-primary hover:text-primary-foreground"
+            className={
+              readOnly
+                ? "font-mono text-[10px]"
+                : "cursor-pointer font-mono text-[10px] hover:bg-primary hover:text-primary-foreground"
+            }
             onClick={() => insert(v.key)}
-            title={v.label}
+            title={readOnly ? v.label : `${v.label} — clique para inserir`}
           >
             {`{${v.key}}`}
           </Badge>
