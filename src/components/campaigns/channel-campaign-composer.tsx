@@ -16,6 +16,10 @@ import { toast } from "sonner";
 import { LinkTrackingToggle } from "@/components/link-tracking-toggle";
 import { MessageVariablePicker } from "@/components/message-variable-picker";
 import { SmsTemplateDialog } from "@/components/sms/sms-template-dialog";
+import {
+  TemplateEditorDialog,
+  type EditorTemplate,
+} from "@/components/email/template-editor-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -153,8 +157,8 @@ export function ChannelCampaignComposer({
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [quickAssetOpen, setQuickAssetOpen] = useState(false);
   const [smsTemplateDialogOpen, setSmsTemplateDialogOpen] = useState(false);
+  const [emailTemplateDialogOpen, setEmailTemplateDialogOpen] = useState(false);
   const [quickAssetName, setQuickAssetName] = useState("");
-  const [quickAssetSubject, setQuickAssetSubject] = useState("");
   const [quickAssetContent, setQuickAssetContent] = useState("");
   const [draftId, setDraftId] = useState<string | null>(initialDraftId);
   const [draftVersion, setDraftVersion] = useState<number | null>(null);
@@ -425,23 +429,6 @@ export function ChannelCampaignComposer({
       if (!quickAssetName.trim() || !quickAssetContent.trim()) {
         throw new Error("Informe nome e conteúdo do novo ativo.");
       }
-      if (channel === "email") {
-        const result = await createEmailTemplate({
-          data: {
-            nome: quickAssetName,
-            assunto: quickAssetSubject,
-            preheader: "",
-            fromName: "",
-            categoria: "Geral",
-            tags: [],
-            corpo: quickAssetContent,
-            ativo: true,
-            lifecycleStatus: "published",
-            trackLinks,
-          },
-        });
-        return { id: result.id, kind: "email" as const };
-      }
       const result = await createVoiceScript({
         data: {
           name: quickAssetName,
@@ -449,25 +436,60 @@ export function ChannelCampaignComposer({
           status: "active",
         },
       } as never);
-      return { id: result.id, kind: "voice" as const };
+      return { id: result.id };
     },
-    onSuccess: ({ id, kind }) => {
-      if (kind === "email") {
-        queryClient.invalidateQueries({ queryKey: ["email-templates"] });
-        setEmailTemplateId(id);
-      } else {
-        queryClient.invalidateQueries({ queryKey: ["call-scripts"] });
-        setVoiceMode("script");
-        setVoiceSourceId(id);
-      }
+    onSuccess: ({ id }) => {
+      queryClient.invalidateQueries({ queryKey: ["call-scripts"] });
+      setVoiceMode("script");
+      setVoiceSourceId(id);
       setQuickAssetOpen(false);
       setQuickAssetName("");
-      setQuickAssetSubject("");
       setQuickAssetContent("");
-      toast.success("Ativo criado e selecionado");
+      toast.success("Script criado e selecionado");
     },
     onError: (error: Error) => toast.error(tenantSafeChannelError(error)),
   });
+
+  const saveVisualEmailTemplate = useMutation({
+    mutationFn: (template: EditorTemplate) =>
+      createEmailTemplate({
+        data: {
+          nome: template.nome,
+          assunto: template.assunto,
+          preheader: template.preheader,
+          fromName: template.fromName,
+          categoria: template.categoria,
+          tags: template.tags,
+          corpo: template.corpo,
+          ativo: template.ativo,
+          lifecycleStatus: template.lifecycleStatus ?? "published",
+          trackLinks: template.trackLinks ?? true,
+        },
+      }),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["email-templates"] });
+      setEmailTemplateId(result.id);
+      setEmailTemplateDialogOpen(false);
+      toast.success("Template de e-mail criado e selecionado");
+    },
+    onError: (error: Error) => toast.error(tenantSafeChannelError(error)),
+  });
+
+  const emptyEmailTemplate: EditorTemplate = {
+    id: "",
+    nome: "",
+    assunto: "",
+    preheader: "",
+    fromName: "BETLEADS",
+    categoria: "Geral",
+    tags: [],
+    corpo: "",
+    ativo: true,
+    trackLinks,
+    lifecycleStatus: "published",
+    version: 1,
+    atualizadoEm: "agora",
+  };
 
   useEffect(() => {
     if (!open || submitted.current || (initialDraftId && !draftQuery.data)) return;
@@ -780,7 +802,7 @@ export function ChannelCampaignComposer({
                     type="button"
                     size="sm"
                     variant="outline"
-                    onClick={() => setQuickAssetOpen(true)}
+                    onClick={() => setEmailTemplateDialogOpen(true)}
                   >
                     <Plus className="mr-1.5 size-3.5" /> Criar novo template
                   </Button>
@@ -881,7 +903,7 @@ export function ChannelCampaignComposer({
                 Variáveis não reconhecidas: {invalidVariables.join(", ")}
               </p>
             )}
-            {quickAssetOpen && channel !== "sms" && (
+            {quickAssetOpen && channel === "voice" && (
               <Card className="border-primary/30 bg-primary/[0.03]">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">
@@ -896,15 +918,6 @@ export function ChannelCampaignComposer({
                       onChange={(event) => setQuickAssetName(event.target.value)}
                     />
                   </div>
-                  {channel === "email" && (
-                    <div className="space-y-1.5">
-                      <Label>Assunto</Label>
-                      <Input
-                        value={quickAssetSubject}
-                        onChange={(event) => setQuickAssetSubject(event.target.value)}
-                      />
-                    </div>
-                  )}
                   <div className="space-y-1.5">
                     <Label>{channel === "voice" ? "Texto do script" : "Conteúdo"}</Label>
                     <Textarea
@@ -1091,6 +1104,12 @@ export function ChannelCampaignComposer({
           setSmsTemplateId(template.id);
           setSmsContent(template.content);
         }}
+      />
+      <TemplateEditorDialog
+        open={emailTemplateDialogOpen}
+        onOpenChange={setEmailTemplateDialogOpen}
+        editing={emptyEmailTemplate}
+        onSave={(template) => saveVisualEmailTemplate.mutate(template)}
       />
     </Dialog>
   );

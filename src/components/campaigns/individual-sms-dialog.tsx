@@ -7,6 +7,10 @@ import { toast } from "sonner";
 import { LinkTrackingToggle } from "@/components/link-tracking-toggle";
 import { MessageVariablePicker } from "@/components/message-variable-picker";
 import { SmsTemplateDialog } from "@/components/sms/sms-template-dialog";
+import {
+  TemplateEditorDialog,
+  type EditorTemplate,
+} from "@/components/email/template-editor-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -28,7 +32,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { bulkDispatchCalls, listCallScripts } from "@/lib/calls.functions";
 import { tenantSafeChannelError } from "@/lib/channel-error";
-import { sendTestEmail } from "@/lib/email.functions";
+import { listEmailTemplates, saveEmailTemplate, sendTestEmail } from "@/lib/email.functions";
 import { previewTrackedText, smsPartsForLength } from "@/lib/link-tracking-preview";
 import { sendBulkSms } from "@/lib/sms.functions";
 import { listSmsTemplates } from "@/lib/sms-templates.functions";
@@ -56,6 +60,8 @@ export function IndividualSmsDialog({
   const sendVoice = useServerFn(bulkDispatchCalls);
   const listScripts = useServerFn(listCallScripts);
   const listTemplates = useServerFn(listSmsTemplates);
+  const listEmailTemplateFn = useServerFn(listEmailTemplates);
+  const saveEmailTemplateFn = useServerFn(saveEmailTemplate);
   const queryClient = useQueryClient();
   const [channel, setChannel] = useState<Channel>("sms");
   const [phone, setPhone] = useState("");
@@ -65,6 +71,8 @@ export function IndividualSmsDialog({
   const [message, setMessage] = useState("Olá {primeiro_nome}, temos uma novidade para você.");
   const [templateId, setTemplateId] = useState("");
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
+  const [emailTemplateId, setEmailTemplateId] = useState("");
+  const [emailTemplateDialogOpen, setEmailTemplateDialogOpen] = useState(false);
   const [scriptId, setScriptId] = useState("");
   const [trackLinks, setTrackLinks] = useState(true);
   const messageRef = useRef<HTMLTextAreaElement>(null);
@@ -86,6 +94,52 @@ export function IndividualSmsDialog({
     queryFn: () => listTemplates(),
     enabled: open && channel === "sms",
   });
+  const emailTemplates = useQuery({
+    queryKey: ["email-templates"],
+    queryFn: () => listEmailTemplateFn(),
+    enabled: open && channel === "email",
+  });
+  const saveVisualEmailTemplate = useMutation({
+    mutationFn: (template: EditorTemplate) =>
+      saveEmailTemplateFn({
+        data: {
+          nome: template.nome,
+          assunto: template.assunto,
+          preheader: template.preheader,
+          fromName: template.fromName,
+          categoria: template.categoria,
+          tags: template.tags,
+          corpo: template.corpo,
+          ativo: template.ativo,
+          lifecycleStatus: template.lifecycleStatus ?? "published",
+          trackLinks: template.trackLinks ?? true,
+        },
+      }),
+    onSuccess: (result, template) => {
+      queryClient.invalidateQueries({ queryKey: ["email-templates"] });
+      setEmailTemplateId(result.id);
+      setSubject(template.assunto);
+      setMessage(template.corpo);
+      setEmailTemplateDialogOpen(false);
+      toast.success("Template de e-mail criado e selecionado");
+    },
+    onError: (error: Error) => toast.error(tenantSafeChannelError(error)),
+  });
+  const emptyEmailTemplate: EditorTemplate = {
+    id: "",
+    nome: "",
+    assunto: "",
+    preheader: "",
+    fromName: "BETLEADS",
+    categoria: "Geral",
+    tags: [],
+    corpo: "",
+    ativo: true,
+    trackLinks,
+    lifecycleStatus: "published",
+    version: 1,
+    atualizadoEm: "agora",
+  };
   const mutation = useMutation({
     mutationFn: () => {
       if (channel === "email") {
@@ -187,9 +241,62 @@ export function IndividualSmsDialog({
             </div>
           </div>
           {channel === "email" && (
-            <div className="space-y-1.5">
-              <Label>Assunto</Label>
-              <Input value={subject} onChange={(event) => setSubject(event.target.value)} />
+            <div className="space-y-3 rounded-xl border bg-muted/20 p-3">
+              <div className="space-y-1.5">
+                <Label>Template de e-mail</Label>
+                <Select
+                  value={emailTemplateId}
+                  onValueChange={(value) => {
+                    setEmailTemplateId(value);
+                    const selected = (emailTemplates.data?.items ?? []).find(
+                      (item: { id: string }) => item.id === value,
+                    ) as
+                      | { assunto?: string; subject?: string; corpo?: string; body_html?: string }
+                      | undefined;
+                    if (selected) {
+                      setSubject(selected.assunto ?? selected.subject ?? subject);
+                      setMessage(selected.corpo ?? selected.body_html ?? message);
+                    }
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Conteúdo manual" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(emailTemplates.data?.items ?? [])
+                      .filter((item: { ativo?: boolean }) => item.ativo !== false)
+                      .map((item: { id: string; nome?: string; name?: string }) => (
+                        <SelectItem key={item.id} value={item.id}>
+                          {item.nome ?? item.name}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setEmailTemplateDialogOpen(true)}
+                >
+                  <Plus className="mr-1.5 size-3.5" /> Criar template visual
+                </Button>
+                {emailTemplateId && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setEmailTemplateId("")}
+                  >
+                    <X className="mr-1.5 size-3.5" /> Usar como conteúdo manual
+                  </Button>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                <Label>Assunto</Label>
+                <Input value={subject} onChange={(event) => setSubject(event.target.value)} />
+              </div>
             </div>
           )}
           {channel === "voice" ? (
@@ -329,6 +436,12 @@ export function IndividualSmsDialog({
           setTemplateId(template.id);
           setMessage(template.content);
         }}
+      />
+      <TemplateEditorDialog
+        open={emailTemplateDialogOpen}
+        onOpenChange={setEmailTemplateDialogOpen}
+        editing={emptyEmailTemplate}
+        onSave={(template) => saveVisualEmailTemplate.mutate(template)}
       />
     </Dialog>
   );
