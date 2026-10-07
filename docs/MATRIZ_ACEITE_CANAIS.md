@@ -58,3 +58,9 @@ Use esta matriz a cada tenant/provedor antes de classificar um canal como plenam
 | Gerente de projeto | | | |
 | UX (quando houver mudança de fluxo) | | | |
 
+## Evidências de execução
+
+| Data/hora BRT | Tenant | Canal | Cenário | Resultado | Evidência segura / próxima ação |
+| --- | --- | --- | --- | --- | --- |
+| 06/10/2026 | Sorte Alta | SMS / Short Brasil | envio unitário autorizado | Pendente de retentativa | Log interno `3ea50444-df91-41bc-8f21-36b982be2631`; três tentativas idempotentes expiraram sem resposta do provedor (8 s). Nenhuma confirmação de envio ou ID externo foi recebido. Investigar conectividade/saúde do Short Brasil antes de novo teste. |
+| 06/10/2026 | Sorte Alta | E-mail | envio de teste autorizado | Bloqueado por configuração | Não há remetente ativo/default cadastrado para a tenant. Configurar remetente/domínio e repetir o teste para o destinatário autorizado. |
