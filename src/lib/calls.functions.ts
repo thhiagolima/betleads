@@ -743,6 +743,7 @@ export const bulkDispatchCalls = createServerFn({ method: "POST" })
         script_id: dbUuid().optional(),
         asset_id: dbUuid().optional(),
         campaign_name: z.string().max(120).optional(),
+        scheduled_at: z.string().datetime().optional(),
         targets: z
           .array(
             z.object({
@@ -761,6 +762,11 @@ export const bulkDispatchCalls = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { supabase } = context;
     const tenantId = await resolveOperationalTenantId(supabase);
+    const scheduledAt = data.scheduled_at ? new Date(data.scheduled_at) : null;
+    if (scheduledAt && !Number.isFinite(scheduledAt.getTime())) {
+      throw new Error("Data de agendamento de voz inválida.");
+    }
+    const isScheduled = Boolean(scheduledAt && scheduledAt.getTime() > Date.now());
     let fixedAudioUrl: string | null = null;
     if (data.asset_id) {
       const { data: asset, error: assetError } = await (supabaseAdmin as any)
@@ -799,6 +805,7 @@ export const bulkDispatchCalls = createServerFn({ method: "POST" })
             voice_asset_id: data.asset_id ?? null,
             trigger_name: data.campaign_name ?? null,
             phone_number: target.phone_number ?? null,
+            scheduled_at: scheduledAt?.toISOString() ?? new Date().toISOString(),
             status: "pending_audio",
           })
           .select("id")
@@ -821,6 +828,16 @@ export const bulkDispatchCalls = createServerFn({ method: "POST" })
             status: "audio_ready",
           })
           .eq("id", q.id);
+
+        if (isScheduled) {
+          pending += 1;
+          results.push({
+            ok: true,
+            lead_id: target.lead_id ?? null,
+            phone: target.phone_number ?? null,
+          });
+          continue;
+        }
 
         // 4. dispara
         const dispatchResult = (await dispatchCallQueueItem({
@@ -855,7 +872,7 @@ export const bulkDispatchCalls = createServerFn({ method: "POST" })
     }
 
     console.log(`[calls] bulk dispatch: total=${data.targets.length} ok=${queued} fail=${failed}`);
-    return { total: data.targets.length, queued, pending, failed, results };
+    return { total: data.targets.length, queued, pending, failed, scheduled: isScheduled, results };
   });
 
 // ============================================================

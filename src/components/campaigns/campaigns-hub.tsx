@@ -1,12 +1,11 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { Mail, Plus, RotateCw, Search, Send, Volume2, Workflow } from "lucide-react";
+import { Plus, RotateCw, Search, Send, Workflow } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
 
-import { NewSmsCampaignDialog } from "@/components/campaigns/new-sms-campaign-dialog";
-import { NewEmailCampaignDialog } from "@/components/campaigns/new-email-campaign-dialog";
+import { ChannelCampaignComposer } from "@/components/campaigns/channel-campaign-composer";
 import { IndividualSmsDialog } from "@/components/campaigns/individual-sms-dialog";
 import { MetricCard } from "@/components/ui-premium/metric-card";
 import { Badge } from "@/components/ui/badge";
@@ -47,21 +46,21 @@ export function CampaignsHub() {
   const listEmailCampaignsFn = useServerFn(listEmailCampaigns);
   const listCallQueueFn = useServerFn(listCallQueue);
   const cancelCampaign = useServerFn(cancelScheduledSmsCampaign);
-  const [open, setOpen] = useState(false);
-  const [emailOpen, setEmailOpen] = useState(false);
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [initialChannel, setInitialChannel] = useState<"sms" | "email" | "voice">("sms");
   const [individualOpen, setIndividualOpen] = useState(false);
-  const [requestedAudienceId, setRequestedAudienceId] = useState("");
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<CampaignStatus>("todos");
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const audienceId = params.get("audience") ?? "";
-    setRequestedAudienceId(audienceId);
-    if (params.get("newChannel") === "email") {
-      setEmailOpen(true);
+    const requested = params.get("newChannel");
+    if (requested === "email" || requested === "voice" || requested === "sms") {
+      setInitialChannel(requested);
+      setComposerOpen(true);
     } else if (params.get("newCampaign") === "1") {
-      setOpen(true);
+      setInitialChannel("sms");
+      setComposerOpen(true);
     }
   }, []);
 
@@ -157,25 +156,20 @@ export function CampaignsHub() {
             <Send className="mr-2 h-4 w-4" />
             SMS individual
           </Button>
-          <Button variant="outline" onClick={() => setEmailOpen(true)}>
-            <Mail className="mr-2 h-4 w-4" />
-            Campanha de email
-          </Button>
-          <Button variant="outline" asChild>
-            <Link to="/ligacoes" hash="fila">
-              <Volume2 className="mr-2 h-4 w-4" />
-              Campanha de voz
-            </Link>
-          </Button>
           <Button variant="outline" asChild>
             <Link to="/automacoes" hash="fluxos">
               <Workflow className="mr-2 h-4 w-4" />
               Automações
             </Link>
           </Button>
-          <Button onClick={() => setOpen(true)}>
+          <Button
+            onClick={() => {
+              setInitialChannel("sms");
+              setComposerOpen(true);
+            }}
+          >
             <Plus className="mr-2 h-4 w-4" />
-            Campanha de SMS
+            Criar campanha
           </Button>
         </div>
       </div>
@@ -258,7 +252,12 @@ export function CampaignsHub() {
                     </Badge>
                   </div>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    {campaign.channel === "sms" ? "SMS" : "Email"} · {num(total)} destinatários ·{" "}
+                    {campaign.channel === "sms"
+                      ? "SMS"
+                      : campaign.channel === "email"
+                        ? "E-mail"
+                        : "Voz"}{" "}
+                    · {num(total)} destinatários ·{" "}
                     {new Date(campaign.scheduled_at).toLocaleString("pt-BR")}
                   </p>
                 </div>
@@ -289,16 +288,15 @@ export function CampaignsHub() {
           })}
         </CardContent>
       </Card>
-      <NewSmsCampaignDialog
-        open={open}
-        onOpenChange={setOpen}
-        initialAudienceId={requestedAudienceId}
-        onCreated={() => queryClient.invalidateQueries({ queryKey: ["sms-scheduled-campaigns"] })}
-      />
-      <NewEmailCampaignDialog
-        open={emailOpen}
-        onOpenChange={setEmailOpen}
-        onCreated={() => queryClient.invalidateQueries({ queryKey: ["email-campaigns"] })}
+      <ChannelCampaignComposer
+        open={composerOpen}
+        onOpenChange={setComposerOpen}
+        initialChannel={initialChannel}
+        onCreated={() => {
+          queryClient.invalidateQueries({ queryKey: ["sms-scheduled-campaigns"] });
+          queryClient.invalidateQueries({ queryKey: ["email-campaigns"] });
+          queryClient.invalidateQueries({ queryKey: ["call-queue"] });
+        }}
       />
       <IndividualSmsDialog open={individualOpen} onOpenChange={setIndividualOpen} />
     </div>
@@ -317,16 +315,28 @@ function CampaignMetric({ label, value }: { label: string; value: string }) {
 function operationState(status: string) {
   const normalized = status.toLowerCase();
   if (["agendada", "pending", "queued", "audio_ready"].includes(normalized)) {
-    return { label: "Aguardando envio", tone: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300" };
+    return {
+      label: "Aguardando envio",
+      tone: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+    };
   }
   if (["enviando", "running", "processing", "dispatched"].includes(normalized)) {
-    return { label: "Em processamento", tone: "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300" };
+    return {
+      label: "Em processamento",
+      tone: "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300",
+    };
   }
   if (["enviado", "sent", "delivered", "concluida", "completed", "answered"].includes(normalized)) {
-    return { label: "Concluída", tone: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" };
+    return {
+      label: "Concluída",
+      tone: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+    };
   }
   if (["falhou", "failed", "error", "cancelled", "cancelada"].includes(normalized)) {
-    return { label: "Ação necessária", tone: "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300" };
+    return {
+      label: "Ação necessária",
+      tone: "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300",
+    };
   }
   if (["pausada", "paused"].includes(normalized)) {
     return { label: "Pausada", tone: "border-muted-foreground/30 bg-muted text-muted-foreground" };

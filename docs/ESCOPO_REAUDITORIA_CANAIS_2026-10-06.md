@@ -9,11 +9,11 @@ O código contém uma base madura para SMS e e-mail, com fila, limites, históri
 
 O canal de voz possui telas, scripts, geração de áudio, fila, callback e fluxos, mas **não está apto à automação contínua**. A migration `20261003141000_disable_unvalidated_channel_crons.sql` remove explicitamente os crons de voz e WhatsApp até que provedor, fila e relatórios sejam validados de ponta a ponta. Portanto, voz deve permanecer como piloto/manual até passar pelos gates P0 abaixo.
 
-| Canal | Situação encontrada | Decisão de escopo |
-| --- | --- | --- |
-| SMS | Implementado e agendado por cron; Short Brasil, fila, créditos, histórico, supressão e rastreio de link presentes | Validar em produção e evoluir biblioteca de templates |
+| Canal  | Situação encontrada                                                                                                   | Decisão de escopo                                                       |
+| ------ | --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| SMS    | Implementado e agendado por cron; Short Brasil, fila, créditos, histórico, supressão e rastreio de link presentes     | Validar em produção e evoluir biblioteca de templates                   |
 | E-mail | Implementado e agendado por cron; templates, remetentes, entregabilidade, supressão, campanhas e automações presentes | Validar domínio/callback em produção e melhorar a experiência editorial |
-| Voz | Implementado parcialmente; geração/armazenamento/fila/callback existem, mas cron de despacho permanece desabilitado | Fechar validação operacional antes de ativar automação |
+| Voz    | Implementado parcialmente; geração/armazenamento/fila/callback existem, mas cron de despacho permanece desabilitado   | Fechar validação operacional antes de ativar automação                  |
 
 ## Evidências revisadas
 
@@ -80,7 +80,7 @@ O canal de voz possui telas, scripts, geração de áudio, fila, callback e flux
 ### P2 — melhorias de produto e UX
 
 1. **Navegação unificada de canais — concluída em 07/10/2026.** SMS, e-mail e voz usam o mesmo modelo: **Visão geral → Criar → Biblioteca → Campanhas/Fluxos → Histórico → Configurações**. O componente compartilhado inclui troca direta de canal, estado ativo acessível, rolagem horizontal em telas pequenas e destinos reais para cada etapa. Configurações de SMS foram consolidadas; remetentes/SMTP formam a configuração de e-mail; áudios/scripts formam a biblioteca de voz.
-2. Criar um composer único para SMS/e-mail/voz, com seleção de audiência, estimativa de alcance/custo, prévia, validação de variáveis, agendamento e confirmação de risco antes do envio.
+2. **Composer multicanal — concluído em 07/10/2026.** Foi criado um único fluxo para SMS, e-mail e voz, com seleção de audiência salva ou sistêmica, prévia, validação de variáveis, estimativa de alcance (e créditos de SMS), agendamento e confirmação obrigatória de risco antes do envio. O e-mail e a voz exibem o volume previsto, pois a precificação depende do contrato do provedor. Campanhas de voz agendadas deixam o áudio preparado na fila; o despacho automático permanece condicionado ao gate operacional de voz definido na prioridade P0.
 3. Apresentar estados operacionais em linguagem de produto: “pronto para enviar”, “aguardando provedor”, “pausado por limite”, “em retentativa” e “ação necessária”, sempre com próxima ação.
 4. Usar empty states orientados à tarefa e reduzir duplicação entre telas legadas e hubs de campanha.
 5. Fazer teste de usabilidade com operadores: criar campanha, reutilizar asset, entender falha e reenviar. Medir tempo para primeira campanha e taxa de erro de configuração.
@@ -88,12 +88,12 @@ O canal de voz possui telas, scripts, geração de áudio, fila, callback e flux
 
 ## Papéis e cadência
 
-| Papel | Responsabilidade contínua | Entregável/ritual |
-| --- | --- | --- |
-| Dev sênior | Arquitetura de filas, idempotência, segurança, testes de integração, observabilidade e revisão de migrations | PR com plano de rollback, métricas e evidência de teste por mudança de canal |
-| Designer UX | Jornada operacional, protótipos, sistema de estados, acessibilidade e testes com usuários | Fluxo validado e especificação de comportamento/erro antes da implementação |
-| Gerente de projeto | Repriorizar backlog com dados, eliminar bloqueios de fornecedores, controlar dependências e propor melhorias | Revisão semanal de métricas, riscos, hipóteses e decisão de go/no-go |
-| Operação/CRM | Aceite em produção, conteúdo, consentimento, qualidade de audiência e acompanhamento de conversão | Checklist de campanha e evidências de entrega/callback |
+| Papel              | Responsabilidade contínua                                                                                    | Entregável/ritual                                                            |
+| ------------------ | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| Dev sênior         | Arquitetura de filas, idempotência, segurança, testes de integração, observabilidade e revisão de migrations | PR com plano de rollback, métricas e evidência de teste por mudança de canal |
+| Designer UX        | Jornada operacional, protótipos, sistema de estados, acessibilidade e testes com usuários                    | Fluxo validado e especificação de comportamento/erro antes da implementação  |
+| Gerente de projeto | Repriorizar backlog com dados, eliminar bloqueios de fornecedores, controlar dependências e propor melhorias | Revisão semanal de métricas, riscos, hipóteses e decisão de go/no-go         |
+| Operação/CRM       | Aceite em produção, conteúdo, consentimento, qualidade de audiência e acompanhamento de conversão            | Checklist de campanha e evidências de entrega/callback                       |
 
 ### Ritual proposto para o gerente de projeto
 
