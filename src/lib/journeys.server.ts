@@ -59,15 +59,16 @@ async function enrollEligibleJourneyPlayers(limit = 500) {
       entry_rules: Record<string, unknown>;
     }
   >) {
+    // Jornadas manuais só podem receber matrículas por uma API auditada. Até
+    // essa API existir, o worker nunca pode transformar uma entrada manual em
+    // uma varredura automática da base.
+    if (journey.trigger_type === "manual") continue;
     for (const player of players ?? []) {
       if (player.tenant_id !== journey.tenant_id) continue;
       const audience = String(journey.entry_rules?.audience ?? "all_active");
       if (audience === "vip" && !player.vip) continue;
       if (audience === "manual") continue;
-      if (
-        journey.trigger_type !== "manual" &&
-        !detectTriggersForPlayer(player as never).includes(journey.trigger_type as never)
-      )
+      if (!detectTriggersForPlayer(player as never).includes(journey.trigger_type as never))
         continue;
       const { error } = await db.from("journey_enrollments").insert({
         tenant_id: journey.tenant_id,

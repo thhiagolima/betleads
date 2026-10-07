@@ -5,6 +5,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { orchestrate } from "./orchestrator.server";
 import { brtDayStart } from "./tz";
 import { resolveOperationalTenantId } from "./tenant-access.server";
+import { assertSuperAdmin } from "./provider-governance.server";
 
 export const simulateActivation = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -37,6 +38,7 @@ export const setPaused = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((i) => z.object({ paused: z.boolean() }).parse(i))
   .handler(async ({ data, context }) => {
+    await assertSuperAdmin(context.userId);
     const tenantId = await resolveOperationalTenantId(context.supabase);
     const { data: s } = await supabaseAdmin
       .from("automation_settings")
@@ -67,6 +69,7 @@ export const setChannelPaused = createServerFn({ method: "POST" })
       .parse(i),
   )
   .handler(async ({ data, context }) => {
+    await assertSuperAdmin(context.userId);
     const tenantId = await resolveOperationalTenantId(context.supabase);
     const { data: s } = await supabaseAdmin
       .from("automation_settings")

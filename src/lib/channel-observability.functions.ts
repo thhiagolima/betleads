@@ -5,6 +5,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import type { Json } from "@/integrations/supabase/types";
 import { resolveOperationalTenantId } from "@/lib/tenant-access.server";
+import { assertSuperAdmin } from "@/lib/provider-governance.server";
 
 const channelSchema = z.enum(["sms", "email", "voice"]);
 export type ObservabilityChannel = z.infer<typeof channelSchema>;
@@ -274,6 +275,7 @@ export const setChannelOperationalPause = createServerFn({ method: "POST" })
       .parse(value),
   )
   .handler(async ({ data, context }) => {
+    await assertSuperAdmin(context.userId);
     const tenantId = await resolveOperationalTenantId(context.supabase);
     const dbChannel = data.channel === "voice" ? "call" : data.channel;
     const { data: before } = await supabaseAdmin
@@ -308,6 +310,7 @@ export const reprocessStuckChannel = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((value: unknown) => z.object({ channel: channelSchema }).parse(value))
   .handler(async ({ data, context }) => {
+    await assertSuperAdmin(context.userId);
     const tenantId = await resolveOperationalTenantId(context.supabase);
     const campaignStuckBefore = new Date(Date.now() - 15 * 60 * 1000).toISOString();
     const voiceStuckBefore = new Date(Date.now() - 10 * 60 * 1000).toISOString();

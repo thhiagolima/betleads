@@ -5,7 +5,6 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { ProviderAuthBanner } from "@/components/provider-auth-banner";
 import { TenantStatusGate } from "@/components/tenant-status-gate";
 import { SidebarToggle } from "@/components/ui/sidebar";
-import { WhatsappNotifier } from "@/components/whatsapp-notifier";
 import { ActiveTenantSwitcher } from "@/components/active-tenant-switcher";
 import { useGlobalRealtimeStatus } from "@/hooks/use-realtime-invalidate";
 
@@ -27,7 +26,6 @@ const titles: Record<string, { title: string; subtitle: string }> = {
     title: "Níveis e fidelização",
     subtitle: "Classificação e comportamento dos jogadores",
   },
-  "/whatsapp": { title: "WhatsApp", subtitle: "Sessões, fluxos e inbox em tempo real" },
   "/sms": { title: "SMS", subtitle: "Disparos em massa e automações por SMS" },
   "/campanhas": { title: "Campanhas", subtitle: "Disparos segmentados e resultados" },
   "/creditos-sms": { title: "Créditos SMS", subtitle: "Saldo, pedidos e extrato de consumo" },
@@ -126,7 +124,6 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
         </header>
         <ProviderAuthBanner />
-        <WhatsappNotifier />
         <main
           aria-label={meta.title}
           className="flex-1 overflow-x-hidden p-4 animate-fade-in sm:p-6"

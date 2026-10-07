@@ -465,7 +465,7 @@ function AutomacoesPage() {
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {(["sms", "email", "call", "whatsapp"] as const).map((ch) => {
+            {(["sms", "email", "call"] as const).map((ch) => {
               const isPaused = channelPaused[ch];
               const label =
                 ch === "sms"
@@ -500,7 +500,7 @@ function AutomacoesPage() {
 
       {/* KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {(["sms", "email", "call", "whatsapp"] as const).map((ch) => (
+        {(["sms", "email", "call"] as const).map((ch) => (
           <Card key={ch}>
             <CardHeader className="pb-2">
               <CardDescription className="uppercase text-xs">{ch}</CardDescription>

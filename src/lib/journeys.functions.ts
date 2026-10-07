@@ -9,10 +9,43 @@ import { journeyInputSchema, journeyStatusSchema } from "./journeys.shared";
 const journeyIdSchema = z.object({ id: z.string().uuid() });
 const db = supabaseAdmin as unknown as {
   from: (table: string) => any;
+  rpc: (name: string, params: Record<string, unknown>) => Promise<{ data: unknown; error: { message: string } | null }>;
 };
 
 async function tenant(context: { supabase: Parameters<typeof resolveOperationalTenantId>[0] }) {
   return resolveOperationalTenantId(context.supabase);
+}
+
+type JourneyRole = "admin" | "gestor" | "member" | "super_admin";
+
+async function journeyRole(userId: string, tenantId: string): Promise<JourneyRole | null> {
+  const { data: superAdmin, error: superAdminError } = await supabaseAdmin.rpc("is_super_admin", {
+    _user_id: userId,
+  });
+  if (superAdminError) throw new Error("Não foi possível validar a permissão.");
+  if (superAdmin) return "super_admin";
+  const { data, error } = await supabaseAdmin
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", userId)
+    .eq("tenant_id", tenantId)
+    .maybeSingle();
+  if (error) throw new Error("Não foi possível validar a permissão.");
+  return (data?.role as JourneyRole | undefined) ?? null;
+}
+
+async function requireJourneyDraftEditor(userId: string, tenantId: string) {
+  const role = await journeyRole(userId, tenantId);
+  if (role !== "admin" && role !== "gestor" && role !== "super_admin") {
+    throw new Error("Você não tem permissão para editar jornadas.");
+  }
+}
+
+async function requireJourneyPublisher(userId: string, tenantId: string) {
+  const role = await journeyRole(userId, tenantId);
+  if (role !== "admin" && role !== "super_admin") {
+    throw new Error("Somente administradores podem publicar, pausar ou arquivar jornadas.");
+  }
 }
 
 export const listJourneys = createServerFn({ method: "GET" })
@@ -128,9 +161,12 @@ export const saveJourney = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const tenantId = await tenant(context);
+    await requireJourneyDraftEditor(context.userId, tenantId);
     const input = data.journey;
+    if (input.trigger_type === "manual" && input.entry_rules.audience === "manual") {
+      throw new Error("Público manual ainda não está disponível. Use uma audiência elegível.");
+    }
     const payload = {
-      tenant_id: tenantId,
       name: input.name,
       description: input.description ?? null,
       trigger_type: input.trigger_type,
@@ -140,39 +176,26 @@ export const saveJourney = createServerFn({ method: "POST" })
       daily_limit: input.daily_limit,
       cooldown_hours: input.cooldown_hours,
     };
-    let journeyId = data.id;
-    if (journeyId) {
-      const { error } = await db
-        .from("journeys")
-        .update(payload)
-        .eq("id", journeyId)
-        .eq("tenant_id", tenantId);
-      if (error) throw new Error(error.message);
-      const { error: removeError } = await db
-        .from("journey_steps")
-        .delete()
-        .eq("journey_id", journeyId);
-      if (removeError) throw new Error(removeError.message);
-    } else {
-      const { data: created, error } = await db
-        .from("journeys")
-        .insert(payload)
-        .select("id")
-        .single();
-      if (error) throw new Error(error.message);
-      journeyId = created.id;
-    }
     const steps = input.steps.map((step, position) => ({
       tenant_id: tenantId,
-      journey_id: journeyId,
       position,
       step_type: step.step_type,
       label: step.label ?? null,
       config: step.config,
     }));
-    const { error: stepsError } = await db.from("journey_steps").insert(steps);
-    if (stepsError) throw new Error(stepsError.message);
-    return { id: journeyId };
+    const { data: journeyId, error } = await db.rpc("save_journey_draft", {
+      p_tenant_id: tenantId,
+      p_journey_id: data.id ?? null,
+      p_actor_user_id: context.userId,
+      p_journey: payload,
+      p_steps: steps.map(({ tenant_id: _tenantId, ...step }) => step),
+    });
+    if (error || !journeyId) {
+      // The database keeps detailed diagnostics in its logs; never expose its
+      // schema/provider details to a tenant user.
+      throw new Error("Não foi possível salvar a jornada. Revise os dados e tente novamente.");
+    }
+    return { id: String(journeyId) };
   });
 
 export const setJourneyStatus = createServerFn({ method: "POST" })
@@ -182,7 +205,11 @@ export const setJourneyStatus = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const tenantId = await tenant(context);
+    await requireJourneyPublisher(context.userId, tenantId);
     if (data.status === "active") {
+      if (process.env.JOURNEYS_PUBLISHING_ENABLED !== "true") {
+        throw new Error("A publicação de jornadas está temporariamente indisponível enquanto a validação operacional é concluída.");
+      }
       const { data: steps, error: stepsError } = await db
         .from("journey_steps")
         .select("step_type,config,is_enabled")
@@ -203,8 +230,8 @@ export const setJourneyStatus = createServerFn({ method: "POST" })
           throw new Error("Há uma etapa de SMS sem mensagem.");
         if (step.step_type === "email" && !step.config.template_id)
           throw new Error("Há uma etapa de e-mail sem template.");
-        if (step.step_type === "voice" && (!step.config.asset_id || !step.config.caller_id))
-          throw new Error("Há uma etapa de voz sem áudio ou número de origem.");
+        if (step.step_type === "voice")
+          throw new Error("Etapas de voz não podem ser publicadas até a certificação operacional do canal.");
       }
     }
     const { error } = await db

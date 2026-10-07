@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import {
@@ -140,6 +140,9 @@ import {
 } from "@/components/dashboard-date-range-picker";
 
 export const Route = createFileRoute("/whatsapp")({
+  beforeLoad: () => {
+    throw redirect({ to: "/jornadas" });
+  },
   head: () => ({
     meta: [{ title: "WhatsApp — BETLEADS" }],
   }),

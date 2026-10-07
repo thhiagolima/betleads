@@ -101,6 +101,10 @@ export const journeyInputSchema = z.object({
   daily_limit: z.number().int().min(1).max(100000).default(1000),
   cooldown_hours: z.number().int().min(0).max(720).default(72),
   steps: z.array(journeyStepInputSchema).min(1).max(100),
+}).superRefine((value, ctx) => {
+  if (value.trigger_type === "manual" && value.entry_rules.audience === "manual") {
+    ctx.addIssue({ code: "custom", path: ["entry_rules", "audience"], message: "Público manual ainda não está disponível." });
+  }
 });
 
 export type JourneyInput = z.infer<typeof journeyInputSchema>;

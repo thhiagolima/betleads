@@ -341,7 +341,6 @@ export function JourneyEditor({
             >
               <option value="all_active">Todos os jogadores ativos</option>
               <option value="vip">Somente VIP</option>
-              <option value="manual">Público manual</option>
             </select>
           </div>
           <div>
@@ -393,9 +392,6 @@ export function JourneyEditor({
               </Button>
               <Button type="button" size="sm" variant="outline" onClick={() => add("email")}>
                 <Mail className="mr-1 h-4 w-4" /> E-mail
-              </Button>
-              <Button type="button" size="sm" variant="outline" onClick={() => add("voice")}>
-                <Phone className="mr-1 h-4 w-4" /> Voz
               </Button>
             </div>
           </div>

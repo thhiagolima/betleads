@@ -33,7 +33,6 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { useIsSuperAdmin } from "@/hooks/use-is-super-admin";
-import { useWhatsappUnreadTotal } from "@/hooks/use-whatsapp-unread";
 import { supabase } from "@/integrations/supabase/client";
 
 type SubItem = { title: string; hash?: string; url?: string; soon?: boolean };
@@ -72,7 +71,6 @@ const engagementItems: NavItem[] = [
     url: "/sms",
     icon: MessageSquare,
     subItems: [
-      { title: "WhatsApp", url: "/whatsapp" },
       { title: "SMS", url: "/sms" },
       { title: "Email", url: "/email" },
       { title: "Voz", url: "/ligacoes" },
@@ -185,13 +183,11 @@ function NavSection({
   items,
   pathname,
   hash,
-  whatsappUnread = 0,
 }: {
   label: string;
   items: NavItem[];
   pathname: string;
   hash: string;
-  whatsappUnread?: number;
 }) {
   return (
     <SidebarSection label={label}>
@@ -202,7 +198,7 @@ function NavSection({
             item={item}
             pathname={pathname}
             hash={hash}
-            unread={item.url === "/whatsapp" ? whatsappUnread : 0}
+            unread={0}
           />
         ) : (
           <SimpleItem key={item.url} item={item} pathname={pathname} />
@@ -278,7 +274,6 @@ export function AppSidebar({
   const hash = useRouterState({ select: (state) => state.location.hash });
   const session = useAuthSession();
   const { isSuperAdmin } = useIsSuperAdmin();
-  const { total: whatsappUnread } = useWhatsappUnreadTotal(Boolean(session));
   const tenantSystemItems = isSuperAdmin ? systemItems : [...systemItems, tenantItem];
 
   return (
@@ -315,7 +310,6 @@ export function AppSidebar({
           items={engagementItems}
           pathname={pathname}
           hash={hash}
-          whatsappUnread={whatsappUnread}
         />
         <NavSection
           label="Inteligência"
