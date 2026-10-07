@@ -56,3 +56,27 @@
 ## Plano de entrega e validação
 
 Cada prioridade deve ter build e testes aprovados, reinício do servidor local, commit e push próprios. O aceite manual ocorre em **Canais → Campanhas**, nos botões **Nova campanha** e **Envio individual / teste**. O arquivo local já modificado `scripts/sync-sortealta-export.mjs` não faz parte deste escopo e deve permanecer intacto.
+
+## Registro da entrega
+
+| Prioridade | Entrega | Evidência |
+| --- | --- | --- |
+| P1 | Catálogo de variáveis visível e fonte única compartilhada entre SMS, e-mail e voz | Commit `bf974d8`, consolidado em `d2f3c40` após revisão de produto |
+| P2 | Criação de template SMS em diálogo dedicado; seleção/criação também no envio individual | Commit `d2f3c40` |
+| P3 | Editor visual real de e-mail na campanha e no envio individual, com retorno do template selecionado | Commit `baf1f97` |
+| P4 | Upload de áudio fixo e editor dedicado de script TTS na campanha e no envio individual | Commit `5280559` |
+
+### Validação técnica
+
+- `npm run build`: aprovado após cada prioridade funcional.
+- `npm test -- --run`: aprovado durante os ciclos de validação.
+- Servidor local reiniciado após cada prioridade em `http://127.0.0.1:3000/`.
+- Alteração pré-existente em `scripts/sync-sortealta-export.mjs`: preservada e excluída dos commits.
+
+### Roteiro de aceite manual
+
+1. Em **Canais → Campanhas → Nova campanha → SMS**, selecionar, personalizar e criar um template; confirmar inserção de variável no cursor.
+2. Em **E-mail**, abrir **Criar novo template**, montar no editor visual, salvar e confirmar seleção automática e preview.
+3. Em **Voz → Áudio fixo**, enviar arquivo aceito e confirmar seleção automática; repetir com formato inválido ou acima de 50 MB.
+4. Em **Voz → Script TTS**, criar script, inserir variáveis, ajustar voz, salvar e confirmar seleção automática.
+5. Repetir os três cenários em **Envio individual / teste** e confirmar que destinatário e conteúdo já preenchidos não são perdidos ao abrir os editores.

@@ -80,6 +80,7 @@ export function buildPlayerVariables(p: PlayerVarsInput): Record<string, string>
     expert: safe(p.expert, "Equipe BETLEADS"),
     nome_expert: safe(p.expert, "Equipe BETLEADS"),
     link: "https://betleads.app/depositar",
+    link_login: "https://betleads.app",
     link_deposito: "https://betleads.app/depositar",
     cashback_amount: cashback != null ? cashback.toFixed(2).replace(".", ",") : "0,00",
     cashback_valor: brl(cashback ?? 0),
