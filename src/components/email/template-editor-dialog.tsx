@@ -48,6 +48,7 @@ import {
   type PresetTemplate,
 } from "./template-presets";
 import { generateEmailContent } from "@/lib/email-ai.functions";
+import { variablesForChannel } from "@/lib/message-variables";
 
 export type EditorTemplate = {
   id: string;
@@ -65,17 +66,10 @@ export type EditorTemplate = {
   atualizadoEm: string;
 };
 
-const VARIAVEIS = [
-  "{primeiro_nome}",
-  "{nome}",
-  "{email}",
-  "{saldo}",
-  "{ultimo_login}",
-  "{ultimo_deposito}",
-  "{total_depositado}",
-  "{link_login}",
-  "{link_deposito}",
-];
+const VARIAVEIS = variablesForChannel("email").map((variable) => ({
+  token: `{${variable.key}}`,
+  label: variable.label,
+}));
 
 type FieldKey =
   | "nome"
@@ -92,7 +86,11 @@ type FieldKey =
 const QUICK_FIELDS: { key: FieldKey; label: string; placeholder?: string }[] = [
   { key: "nome", label: "Nome do template", placeholder: "Ex: Recuperação 7 dias" },
   { key: "assunto", label: "Assunto", placeholder: "Ex: {primeiro_nome}, sentimos sua falta" },
-  { key: "preheader", label: "Pré-header", placeholder: "Linha de prévia exibida na caixa de entrada" },
+  {
+    key: "preheader",
+    label: "Pré-header",
+    placeholder: "Linha de prévia exibida na caixa de entrada",
+  },
   { key: "fromName", label: "Nome do remetente", placeholder: "Ex: BETLEADS" },
   { key: "titulo", label: "Título principal", placeholder: "Headline grande do email" },
   { key: "texto", label: "Texto principal" },
@@ -152,7 +150,9 @@ export function TemplateEditorDialog({
     mostrar_icone_beneficio: true,
   });
   const [customHtml, setCustomHtml] = useState<string>("");
-  const [lifecycleStatus, setLifecycleStatus] = useState<"draft" | "published" | "archived">("draft");
+  const [lifecycleStatus, setLifecycleStatus] = useState<"draft" | "published" | "archived">(
+    "draft",
+  );
   const [trackLinks, setTrackLinks] = useState(true);
 
   // Active focused field — para variáveis clicáveis
@@ -249,7 +249,9 @@ export function TemplateEditorDialog({
       return;
     }
     const corpoFinal = advanced ? customHtml : renderModeloHtml(modelo, fields);
-    const assetUrls = Array.from(corpoFinal.matchAll(/(?:href|src)=["']([^"']+)["']/gi)).map((match) => match[1]);
+    const assetUrls = Array.from(corpoFinal.matchAll(/(?:href|src)=["']([^"']+)["']/gi)).map(
+      (match) => match[1],
+    );
     const invalidUrl = assetUrls.find((url) => !/^(https?:\/\/|\{|cid:|data:image\/)/i.test(url));
     if (invalidUrl) {
       toast.error(`Link ou imagem inválido: ${invalidUrl}`);
@@ -289,14 +291,31 @@ export function TemplateEditorDialog({
           <div className="col-span-12 lg:col-span-7 overflow-y-auto p-6 space-y-5">
             {/* Toolbar topo */}
             <div className="flex flex-wrap items-center gap-2">
-              <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setPresetsOpen(true)}>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5"
+                onClick={() => setPresetsOpen(true)}
+              >
                 <LayoutTemplate className="h-3.5 w-3.5" /> Templates prontos
               </Button>
-              <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setAiOpen(true)}>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5"
+                onClick={() => setAiOpen(true)}
+              >
                 <Sparkles className="h-3.5 w-3.5" /> Gerar com IA
               </Button>
-              <Select value={lifecycleStatus} onValueChange={(value: "draft" | "published" | "archived") => setLifecycleStatus(value)}>
-                <SelectTrigger className="w-[140px] h-8 text-xs"><SelectValue /></SelectTrigger>
+              <Select
+                value={lifecycleStatus}
+                onValueChange={(value: "draft" | "published" | "archived") =>
+                  setLifecycleStatus(value)
+                }
+              >
+                <SelectTrigger className="w-[140px] h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="draft">Rascunho</SelectItem>
                   <SelectItem value="published">Publicado</SelectItem>
@@ -324,16 +343,17 @@ export function TemplateEditorDialog({
               </div>
             </div>
 
-            <LinkTrackingToggle value={trackLinks} onChange={setTrackLinks} content={htmlPreview} channel="email" />
+            <LinkTrackingToggle
+              value={trackLinks}
+              onChange={setTrackLinks}
+              content={htmlPreview}
+              channel="email"
+            />
 
             {!advanced && (
               <>
                 {/* 1. Objetivo */}
-                <Section
-                  step={1}
-                  title="Objetivo do email"
-                  desc="O que esse email precisa fazer?"
-                >
+                <Section step={1} title="Objetivo do email" desc="O que esse email precisa fazer?">
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
                     {OBJETIVOS.map((o) => (
                       <button
@@ -372,10 +392,7 @@ export function TemplateEditorDialog({
                         )}
                       >
                         <div className="flex items-center gap-2">
-                          <span
-                            className="h-3 w-3 rounded-full"
-                            style={{ background: m.cor }}
-                          />
+                          <span className="h-3 w-3 rounded-full" style={{ background: m.cor }} />
                           <span className="text-xs font-semibold">{m.label}</span>
                         </div>
                         <div className="text-[10px] text-muted-foreground line-clamp-1 mt-0.5">
@@ -437,12 +454,19 @@ export function TemplateEditorDialog({
                 </Section>
 
                 {/* 4. Campos rápidos */}
-                <Section step={4} title="Campos rápidos" desc="Edite o conteúdo. Clique nas variáveis abaixo para inserir.">
+                <Section
+                  step={4}
+                  title="Campos rápidos"
+                  desc="Edite o conteúdo. Clique nas variáveis abaixo para inserir."
+                >
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {QUICK_FIELDS.map((qf) => {
                       const isLong = qf.key === "texto";
                       const val =
-                        qf.key === "nome" || qf.key === "assunto" || qf.key === "preheader" || qf.key === "fromName"
+                        qf.key === "nome" ||
+                        qf.key === "assunto" ||
+                        qf.key === "preheader" ||
+                        qf.key === "fromName"
                           ? (meta as any)[qf.key]
                           : (fields as any)[qf.key];
                       const set = (v: string) => {
@@ -458,14 +482,14 @@ export function TemplateEditorDialog({
                         }
                       };
                       return (
-                        <div
-                          key={qf.key}
-                          className={cn("space-y-1", isLong && "sm:col-span-2")}
-                        >
+                        <div key={qf.key} className={cn("space-y-1", isLong && "sm:col-span-2")}>
                           <Label className="text-[11px] text-muted-foreground flex items-center gap-1">
                             {qf.label}
                             {activeField === qf.key && (
-                              <Badge variant="outline" className="text-[9px] py-0 h-3.5 border-primary/40 text-primary">
+                              <Badge
+                                variant="outline"
+                                className="text-[9px] py-0 h-3.5 border-primary/40 text-primary"
+                              >
                                 ativo
                               </Badge>
                             )}
@@ -503,15 +527,16 @@ export function TemplateEditorDialog({
                 {/* Variáveis clicáveis */}
                 <Section step={5} title="Variáveis" desc="Clique para inserir no campo ativo.">
                   <div className="flex flex-wrap gap-1.5">
-                    {VARIAVEIS.map((v) => (
+                    {VARIAVEIS.map((variable) => (
                       <Badge
-                        key={v}
+                        key={variable.token}
                         variant="outline"
                         className="text-[11px] cursor-pointer hover:bg-primary hover:text-primary-foreground font-mono"
-                        onClick={() => insertVariable(v)}
+                        onClick={() => insertVariable(variable.token)}
+                        title={variable.label}
                       >
                         <Variable className="h-3 w-3 mr-1" />
-                        {v}
+                        {variable.token}
                       </Badge>
                     ))}
                   </div>
@@ -528,19 +553,31 @@ export function TemplateEditorDialog({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
                   <div className="space-y-1">
                     <Label className="text-[11px] text-muted-foreground">Nome</Label>
-                    <Input value={meta.nome} onChange={(e) => setMeta((m) => ({ ...m, nome: e.target.value }))} />
+                    <Input
+                      value={meta.nome}
+                      onChange={(e) => setMeta((m) => ({ ...m, nome: e.target.value }))}
+                    />
                   </div>
                   <div className="space-y-1">
                     <Label className="text-[11px] text-muted-foreground">Assunto</Label>
-                    <Input value={meta.assunto} onChange={(e) => setMeta((m) => ({ ...m, assunto: e.target.value }))} />
+                    <Input
+                      value={meta.assunto}
+                      onChange={(e) => setMeta((m) => ({ ...m, assunto: e.target.value }))}
+                    />
                   </div>
                   <div className="space-y-1">
                     <Label className="text-[11px] text-muted-foreground">Pré-header</Label>
-                    <Input value={meta.preheader} onChange={(e) => setMeta((m) => ({ ...m, preheader: e.target.value }))} />
+                    <Input
+                      value={meta.preheader}
+                      onChange={(e) => setMeta((m) => ({ ...m, preheader: e.target.value }))}
+                    />
                   </div>
                   <div className="space-y-1">
                     <Label className="text-[11px] text-muted-foreground">Remetente</Label>
-                    <Input value={meta.fromName} onChange={(e) => setMeta((m) => ({ ...m, fromName: e.target.value }))} />
+                    <Input
+                      value={meta.fromName}
+                      onChange={(e) => setMeta((m) => ({ ...m, fromName: e.target.value }))}
+                    />
                   </div>
                 </div>
                 <Textarea
@@ -630,11 +667,7 @@ export function TemplateEditorDialog({
         </div>
 
         {/* ====== Dialog: Templates prontos ====== */}
-        <PresetsDialog
-          open={presetsOpen}
-          onOpenChange={setPresetsOpen}
-          onPick={applyPreset}
-        />
+        <PresetsDialog open={presetsOpen} onOpenChange={setPresetsOpen} onPick={applyPreset} />
 
         {/* ====== Dialog: Gerar com IA ====== */}
         <AiDialog
@@ -882,7 +915,11 @@ function PresetsDialog({
                     {m?.label}
                   </Badge>
                   {p.tags.map((t) => (
-                    <Badge key={t} variant="outline" className="text-[9px] text-accent border-accent/30">
+                    <Badge
+                      key={t}
+                      variant="outline"
+                      className="text-[9px] text-accent border-accent/30"
+                    >
                       #{t}
                     </Badge>
                   ))}
@@ -912,7 +949,13 @@ function AiDialog({
   modelo: ModeloId;
   defaultLink: string;
   defaultCupom: string;
-  onResult: (r: { assunto: string; preheader: string; titulo: string; texto: string; cta: string }) => void;
+  onResult: (r: {
+    assunto: string;
+    preheader: string;
+    titulo: string;
+    texto: string;
+    cta: string;
+  }) => void;
 }) {
   const [gatilho, setGatilho] = useState("");
   const [beneficio, setBeneficio] = useState("");
@@ -955,7 +998,9 @@ function AiDialog({
           <DialogTitle className="flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-primary" /> Gerar com IA
           </DialogTitle>
-          <DialogDescription>A IA escreve assunto, pré-header, título, texto e CTA.</DialogDescription>
+          <DialogDescription>
+            A IA escreve assunto, pré-header, título, texto e CTA.
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <div className="space-y-1">
@@ -993,7 +1038,11 @@ function AiDialog({
             </div>
             <div className="space-y-1">
               <Label className="text-[11px] text-muted-foreground">Cupom (opcional)</Label>
-              <Input value={cupom} onChange={(e) => setCupom(e.target.value)} placeholder="Ex: VOLTA50" />
+              <Input
+                value={cupom}
+                onChange={(e) => setCupom(e.target.value)}
+                placeholder="Ex: VOLTA50"
+              />
             </div>
           </div>
           <div className="space-y-1">

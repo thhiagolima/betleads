@@ -1,5 +1,5 @@
 import { Badge } from "@/components/ui/badge";
-import { SCRIPT_VARIABLES } from "@/components/ligacoes/shared";
+import { variablesForChannel, type MessageChannel } from "@/lib/message-variables";
 import type { RefObject } from "react";
 
 interface Props {
@@ -15,6 +15,7 @@ interface Props {
   label?: string;
   /** Limita a lista às variáveis suportadas pelo contexto atual. */
   allowedKeys?: string[];
+  channel?: MessageChannel;
   /** Exibe a referência sem permitir inserção (útil em seletores de templates). */
   readOnly?: boolean;
 }
@@ -27,11 +28,13 @@ export function MessageVariablePicker({
   className,
   label = "Variáveis disponíveis — clique para inserir",
   allowedKeys,
+  channel,
   readOnly = false,
 }: Props) {
+  const channelVariables = variablesForChannel(channel);
   const variables = allowedKeys
-    ? SCRIPT_VARIABLES.filter((variable) => allowedKeys.includes(variable.key))
-    : SCRIPT_VARIABLES;
+    ? channelVariables.filter((variable) => allowedKeys.includes(variable.key))
+    : channelVariables;
   function insert(key: string) {
     if (readOnly) return;
     const token = `{${key}}`;

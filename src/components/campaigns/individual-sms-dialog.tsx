@@ -1,11 +1,12 @@
 import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { Mail, MessageSquare, Phone, Send, UserRound } from "lucide-react";
+import { Mail, MessageSquare, Phone, Plus, Send, UserRound, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { LinkTrackingToggle } from "@/components/link-tracking-toggle";
 import { MessageVariablePicker } from "@/components/message-variable-picker";
+import { SmsTemplateDialog } from "@/components/sms/sms-template-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -30,6 +31,7 @@ import { tenantSafeChannelError } from "@/lib/channel-error";
 import { sendTestEmail } from "@/lib/email.functions";
 import { previewTrackedText, smsPartsForLength } from "@/lib/link-tracking-preview";
 import { sendBulkSms } from "@/lib/sms.functions";
+import { listSmsTemplates } from "@/lib/sms-templates.functions";
 
 type Channel = "sms" | "email" | "voice";
 
@@ -53,6 +55,7 @@ export function IndividualSmsDialog({
   const sendEmail = useServerFn(sendTestEmail);
   const sendVoice = useServerFn(bulkDispatchCalls);
   const listScripts = useServerFn(listCallScripts);
+  const listTemplates = useServerFn(listSmsTemplates);
   const queryClient = useQueryClient();
   const [channel, setChannel] = useState<Channel>("sms");
   const [phone, setPhone] = useState("");
@@ -60,6 +63,8 @@ export function IndividualSmsDialog({
   const [name, setName] = useState("");
   const [subject, setSubject] = useState("Mensagem da sua equipe");
   const [message, setMessage] = useState("Olá {primeiro_nome}, temos uma novidade para você.");
+  const [templateId, setTemplateId] = useState("");
+  const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
   const [scriptId, setScriptId] = useState("");
   const [trackLinks, setTrackLinks] = useState(true);
   const messageRef = useRef<HTMLTextAreaElement>(null);
@@ -75,6 +80,11 @@ export function IndividualSmsDialog({
     queryKey: ["call-scripts", "individual"],
     queryFn: () => listScripts(),
     enabled: open && channel === "voice",
+  });
+  const templates = useQuery({
+    queryKey: ["sms-templates"],
+    queryFn: () => listTemplates(),
+    enabled: open && channel === "sms",
   });
   const mutation = useMutation({
     mutationFn: () => {
@@ -98,6 +108,7 @@ export function IndividualSmsDialog({
           route: "iGaming",
           ratePerMinute: 1000,
           trackLinks,
+          templateId: templateId || undefined,
         },
       });
     },
@@ -207,6 +218,56 @@ export function IndividualSmsDialog({
             </div>
           ) : (
             <div className="space-y-1.5">
+              {channel === "sms" && (
+                <div className="mb-4 space-y-2 rounded-xl border bg-muted/20 p-3">
+                  <Label>Origem da mensagem</Label>
+                  <Select
+                    value={templateId}
+                    onValueChange={(value) => {
+                      setTemplateId(value);
+                      const selected = templates.data?.items.find((item) => item.id === value);
+                      if (selected) setMessage(selected.content);
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Mensagem manual" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(templates.data?.items ?? [])
+                        .filter((item) => item.isActive)
+                        .map((item) => (
+                          <SelectItem key={item.id} value={item.id}>
+                            {item.name}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setTemplateDialogOpen(true)}
+                    >
+                      <Plus className="mr-1.5 size-3.5" /> Criar template
+                    </Button>
+                    {templateId && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setTemplateId("")}
+                      >
+                        <X className="mr-1.5 size-3.5" /> Usar como mensagem manual
+                      </Button>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Alterar o texto abaixo personaliza apenas este envio; o template salvo não é
+                    modificado.
+                  </p>
+                </div>
+              )}
               <div className="flex items-center justify-between">
                 <Label>Mensagem</Label>
                 {channel === "sms" && (
@@ -222,6 +283,7 @@ export function IndividualSmsDialog({
                 onChange={(event) => setMessage(event.target.value)}
               />
               <MessageVariablePicker
+                channel={channel}
                 textareaRef={messageRef}
                 value={message}
                 onChange={setMessage}
@@ -259,6 +321,15 @@ export function IndividualSmsDialog({
           </Button>
         </DialogFooter>
       </DialogContent>
+      <SmsTemplateDialog
+        open={templateDialogOpen}
+        onOpenChange={setTemplateDialogOpen}
+        initialContent={message}
+        onCreated={(template) => {
+          setTemplateId(template.id);
+          setMessage(template.content);
+        }}
+      />
     </Dialog>
   );
 }

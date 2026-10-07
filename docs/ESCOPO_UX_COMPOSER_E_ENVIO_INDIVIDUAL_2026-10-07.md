@@ -18,8 +18,9 @@
 
 ### P1 — Variáveis visíveis e consistentes
 
-- Catálogo visível no SMS da campanha e no envio individual, com inserção na posição do cursor.
-- Referência das variáveis aceitas ao selecionar templates de e-mail e scripts TTS.
+- Catálogo único e transversal aos canais, sem vínculo exclusivo com SMS.
+- Inserção na posição do cursor em mensagens SMS, templates de e-mail e scripts TTS.
+- Referência das variáveis aceitas quando um ativo selecionado estiver em modo somente leitura.
 - Catálogo presente também nos fluxos de criação rápida enquanto existirem.
 - Variáveis desconhecidas continuam bloqueando o disparo.
 

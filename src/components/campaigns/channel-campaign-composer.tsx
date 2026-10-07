@@ -15,6 +15,7 @@ import { toast } from "sonner";
 
 import { LinkTrackingToggle } from "@/components/link-tracking-toggle";
 import { MessageVariablePicker } from "@/components/message-variable-picker";
+import { SmsTemplateDialog } from "@/components/sms/sms-template-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -52,6 +53,7 @@ import {
   sendEmailCampaignNow,
 } from "@/lib/email.functions";
 import { num } from "@/lib/format";
+import { MESSAGE_VARIABLES } from "@/lib/message-variables";
 import { listJourneyVoiceAssets } from "@/lib/journey-voice-assets.functions";
 import {
   resolveCampaignAudience,
@@ -59,7 +61,7 @@ import {
 } from "@/lib/sms-audiences.functions";
 import { SYSTEM_SMS_AUDIENCES, type SmsAudienceCriteria } from "@/lib/sms-audience-criteria";
 import { listSmsAudiences } from "@/lib/sms-audience-crud.functions";
-import { listSmsTemplates, saveSmsTemplate } from "@/lib/sms-templates.functions";
+import { listSmsTemplates } from "@/lib/sms-templates.functions";
 import { scheduleBulkSms, sendBulkSms } from "@/lib/sms.functions";
 
 type Channel = "sms" | "email" | "voice";
@@ -67,32 +69,7 @@ type AudienceOption = { id: string; name: string; criteria: SmsAudienceCriteria;
 type ResolvedAudience = ResolvedCampaignAudience;
 
 const variablePattern = /\{([a-zA-Z0-9_]+)\}/g;
-const allowedVariables = new Set([
-  "primeiro_nome",
-  "nome",
-  "telefone",
-  "email",
-  "saldo",
-  "saldo_atual",
-  "ultimo_login",
-  "dias_sem_login",
-  "ultimo_jogo",
-  "dias_sem_jogar",
-  "ultimo_deposito",
-  "dias_sem_depositar",
-  "total_depositado",
-  "total_sacado",
-  "lucro",
-  "categoria",
-  "status_lead",
-  "expert",
-  "nome_expert",
-  "link",
-  "link_deposito",
-  "cashback_amount",
-  "cashback_valor",
-  "cashback_pago_em",
-]);
+const allowedVariables = new Set(MESSAGE_VARIABLES.map((variable) => variable.key));
 
 function unknownVariables(content: string) {
   return [...content.matchAll(variablePattern)]
@@ -155,7 +132,6 @@ export function ChannelCampaignComposer({
   const saveEmail = useServerFn(saveEmailCampaign);
   const sendEmail = useServerFn(sendEmailCampaignNow);
   const dispatchVoice = useServerFn(bulkDispatchCalls);
-  const createSmsTemplate = useServerFn(saveSmsTemplate);
   const createEmailTemplate = useServerFn(saveEmailTemplate);
   const createVoiceScript = useServerFn(saveCallScript);
 
@@ -176,6 +152,7 @@ export function ChannelCampaignComposer({
   const [riskConfirmed, setRiskConfirmed] = useState(false);
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [quickAssetOpen, setQuickAssetOpen] = useState(false);
+  const [smsTemplateDialogOpen, setSmsTemplateDialogOpen] = useState(false);
   const [quickAssetName, setQuickAssetName] = useState("");
   const [quickAssetSubject, setQuickAssetSubject] = useState("");
   const [quickAssetContent, setQuickAssetContent] = useState("");
@@ -448,18 +425,6 @@ export function ChannelCampaignComposer({
       if (!quickAssetName.trim() || !quickAssetContent.trim()) {
         throw new Error("Informe nome e conteúdo do novo ativo.");
       }
-      if (channel === "sms") {
-        const result = await createSmsTemplate({
-          data: {
-            name: quickAssetName,
-            content: quickAssetContent,
-            category: "Geral",
-            tags: [],
-            isActive: true,
-          },
-        });
-        return { id: result.item.id, kind: "sms" as const };
-      }
       if (channel === "email") {
         const result = await createEmailTemplate({
           data: {
@@ -487,11 +452,7 @@ export function ChannelCampaignComposer({
       return { id: result.id, kind: "voice" as const };
     },
     onSuccess: ({ id, kind }) => {
-      if (kind === "sms") {
-        queryClient.invalidateQueries({ queryKey: ["sms-templates"] });
-        setSmsTemplateId(id);
-        setSmsContent(quickAssetContent);
-      } else if (kind === "email") {
+      if (kind === "email") {
         queryClient.invalidateQueries({ queryKey: ["email-templates"] });
         setEmailTemplateId(id);
       } else {
@@ -755,7 +716,7 @@ export function ChannelCampaignComposer({
                     type="button"
                     size="sm"
                     variant="outline"
-                    onClick={() => setQuickAssetOpen(true)}
+                    onClick={() => setSmsTemplateDialogOpen(true)}
                   >
                     <Plus className="mr-1.5 size-3.5" /> Criar novo template
                   </Button>
@@ -776,6 +737,7 @@ export function ChannelCampaignComposer({
                     aria-describedby={fieldIds.validation}
                   />
                   <MessageVariablePicker
+                    channel="sms"
                     textareaRef={smsContentRef}
                     value={smsContent}
                     onChange={setSmsContent}
@@ -832,7 +794,11 @@ export function ChannelCampaignComposer({
                 <p className="text-xs text-muted-foreground">
                   Estimativa: {num(cost)} destinatário(s).
                 </p>
-                <MessageVariablePicker readOnly label="Variáveis aceitas nos templates de e-mail" />
+                <MessageVariablePicker
+                  channel="email"
+                  readOnly
+                  label="Variáveis aceitas nos templates de e-mail"
+                />
               </div>
             )}
             {channel === "voice" && (
@@ -898,7 +864,11 @@ export function ChannelCampaignComposer({
                   Estimativa: {num(cost)} chamada(s). O limite por campanha é 200 destinatários.
                 </p>
                 {voiceMode === "script" && (
-                  <MessageVariablePicker readOnly label="Variáveis aceitas nos scripts de voz" />
+                  <MessageVariablePicker
+                    channel="voice"
+                    readOnly
+                    label="Variáveis aceitas nos scripts de voz"
+                  />
                 )}
               </div>
             )}
@@ -911,7 +881,7 @@ export function ChannelCampaignComposer({
                 Variáveis não reconhecidas: {invalidVariables.join(", ")}
               </p>
             )}
-            {quickAssetOpen && (
+            {quickAssetOpen && channel !== "sms" && (
               <Card className="border-primary/30 bg-primary/[0.03]">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">
@@ -943,6 +913,7 @@ export function ChannelCampaignComposer({
                       onChange={(event) => setQuickAssetContent(event.target.value)}
                     />
                     <MessageVariablePicker
+                      channel={channel}
                       value={quickAssetContent}
                       onChange={setQuickAssetContent}
                       label={`Variáveis disponíveis para ${channel === "voice" ? "o script" : "o template"}`}
@@ -1112,6 +1083,15 @@ export function ChannelCampaignComposer({
           </Button>
         </DialogFooter>
       </DialogContent>
+      <SmsTemplateDialog
+        open={smsTemplateDialogOpen}
+        onOpenChange={setSmsTemplateDialogOpen}
+        initialContent={smsContent}
+        onCreated={(template) => {
+          setSmsTemplateId(template.id);
+          setSmsContent(template.content);
+        }}
+      />
     </Dialog>
   );
 }

@@ -1,5 +1,7 @@
 import { Badge } from "@/components/ui/badge";
-import { SCRIPT_VARIABLES } from "./shared";
+import { variablesForChannel } from "@/lib/message-variables";
+
+const SCRIPT_VARIABLES = variablesForChannel("voice");
 
 interface Props {
   onInsert: (token: string) => void;
