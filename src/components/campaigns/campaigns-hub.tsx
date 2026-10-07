@@ -14,6 +14,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { num } from "@/lib/format";
+import { getChannelOperationState } from "@/lib/channel-operation-state";
 import { cancelScheduledSmsCampaign, listScheduledSmsCampaigns } from "@/lib/sms.functions";
 import { listEmailCampaigns } from "@/lib/email.functions";
 import { listCallQueue } from "@/lib/calls.functions";
@@ -239,16 +240,17 @@ export function CampaignsHub() {
           {rows.map((campaign) => {
             const total = Number(campaign.total_count ?? 0);
             const delivered = Number(campaign.sent_count ?? 0);
+            const operation = getChannelOperationState(campaign.status, campaign.channel);
             return (
               <div
                 key={campaign.id}
-                className="grid gap-3 border-b border-border/50 px-4 py-3 last:border-0 md:grid-cols-[1fr_90px_90px_90px_110px] md:items-center"
+                className="grid gap-3 border-b border-border/50 px-4 py-3 last:border-0 md:grid-cols-[minmax(220px,1fr)_110px_90px_90px_150px] md:items-center"
               >
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <p className="truncate font-medium">{campaign.name}</p>
-                    <Badge variant="outline" className={operationState(campaign.status).tone}>
-                      {operationState(campaign.status).label}
+                    <Badge variant="outline" className={operation.tone}>
+                      {operation.label}
                     </Badge>
                   </div>
                   <p className="mt-1 text-xs text-muted-foreground">
@@ -260,6 +262,7 @@ export function CampaignsHub() {
                     · {num(total)} destinatários ·{" "}
                     {new Date(campaign.scheduled_at).toLocaleString("pt-BR")}
                   </p>
+                  <p className="mt-1 text-xs text-muted-foreground">{operation.nextAction}</p>
                 </div>
                 <CampaignMetric label="Enviados" value={num(delivered)} />
                 <CampaignMetric label="Falhas" value={num(campaign.failed_count ?? 0)} />
@@ -278,8 +281,8 @@ export function CampaignsHub() {
                       Cancelar
                     </Button>
                   ) : (
-                    <Button size="sm" variant="ghost" disabled>
-                      Relatório
+                    <Button size="sm" variant="ghost" asChild>
+                      <a href={operation.actionTo}>{operation.actionLabel}</a>
                     </Button>
                   )}
                 </div>
@@ -310,36 +313,4 @@ function CampaignMetric({ label, value }: { label: string; value: string }) {
       <strong className="block text-sm text-foreground">{value}</strong>
     </div>
   );
-}
-
-function operationState(status: string) {
-  const normalized = status.toLowerCase();
-  if (["agendada", "pending", "queued", "audio_ready"].includes(normalized)) {
-    return {
-      label: "Aguardando envio",
-      tone: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
-    };
-  }
-  if (["enviando", "running", "processing", "dispatched"].includes(normalized)) {
-    return {
-      label: "Em processamento",
-      tone: "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300",
-    };
-  }
-  if (["enviado", "sent", "delivered", "concluida", "completed", "answered"].includes(normalized)) {
-    return {
-      label: "Concluída",
-      tone: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
-    };
-  }
-  if (["falhou", "failed", "error", "cancelled", "cancelada"].includes(normalized)) {
-    return {
-      label: "Ação necessária",
-      tone: "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300",
-    };
-  }
-  if (["pausada", "paused"].includes(normalized)) {
-    return { label: "Pausada", tone: "border-muted-foreground/30 bg-muted text-muted-foreground" };
-  }
-  return { label: status || "Sem status", tone: "border-border text-muted-foreground" };
 }
