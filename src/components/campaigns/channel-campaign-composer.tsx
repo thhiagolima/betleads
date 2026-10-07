@@ -99,6 +99,22 @@ const channelMeta: Record<Channel, { label: string; icon: typeof MessageSquare; 
   voice: { label: "Voz", icon: Phone, tone: "text-amber-500" },
 };
 
+const fieldIds = {
+  name: "campaign-name",
+  audienceLabel: "campaign-audience-label",
+  audience: "campaign-audience",
+  smsTemplateLabel: "campaign-sms-template-label",
+  smsTemplate: "campaign-sms-template",
+  smsContent: "campaign-sms-content",
+  emailTemplateLabel: "campaign-email-template-label",
+  emailTemplate: "campaign-email-template",
+  voiceSourceLabel: "campaign-voice-source-label",
+  voiceSource: "campaign-voice-source",
+  schedule: "campaign-schedule",
+  validation: "campaign-validation",
+  risk: "campaign-risk-confirmation",
+};
+
 export function ChannelCampaignComposer({
   open,
   onOpenChange,
@@ -135,6 +151,7 @@ export function ChannelCampaignComposer({
   const [scheduledAt, setScheduledAt] = useState("");
   const [trackLinks, setTrackLinks] = useState(true);
   const [riskConfirmed, setRiskConfirmed] = useState(false);
+  const [submitAttempted, setSubmitAttempted] = useState(false);
 
   const savedAudiences = useQuery({
     queryKey: ["sms-audiences"],
@@ -225,6 +242,7 @@ export function ChannelCampaignComposer({
     setScheduledAt("");
     setTrackLinks(true);
     setRiskConfirmed(false);
+    setSubmitAttempted(false);
   }, [open, initialChannel]);
 
   const audienceMutation = useMutation({
@@ -250,6 +268,22 @@ export function ChannelCampaignComposer({
     channel === "voice" && recipients > 200
       ? "Voz aceita até 200 destinatários por campanha."
       : null;
+  const validationIssues = [
+    !name.trim() ? "Informe o nome da campanha." : null,
+    !audience || recipients === 0 ? "Escolha um público com destinatários elegíveis." : null,
+    channel === "sms" && !smsContent.trim() ? "Escreva ou selecione a mensagem de SMS." : null,
+    channel === "email" && !emailTemplateId ? "Selecione um template de e-mail." : null,
+    channel === "voice" && !voiceSourceId ? "Selecione um script ou áudio da biblioteca." : null,
+    when === "schedule" && !scheduledAt ? "Escolha a data e hora do agendamento." : null,
+    when === "schedule" && scheduledAt && new Date(scheduledAt).getTime() < Date.now() + 60_000
+      ? "O agendamento deve ter pelo menos um minuto de antecedência."
+      : null,
+    ...(invalidVariables.length
+      ? [`Variáveis não reconhecidas: ${invalidVariables.join(", ")}`]
+      : []),
+    channelLimitError,
+    !riskConfirmed ? "Confirme a revisão de risco antes de enviar." : null,
+  ].filter((issue): issue is string => Boolean(issue));
 
   const submit = useMutation({
     mutationFn: async () => {
@@ -330,7 +364,7 @@ export function ChannelCampaignComposer({
   const MetaIcon = channelMeta[channel].icon;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[94vh] max-w-3xl overflow-y-auto">
+      <DialogContent className="max-h-[94vh] w-[calc(100vw-1rem)] max-w-3xl overflow-y-auto sm:w-full">
         <DialogHeader>
           <DialogTitle>Composer de campanha</DialogTitle>
           <DialogDescription>
@@ -339,7 +373,7 @@ export function ChannelCampaignComposer({
         </DialogHeader>
         <div className="grid gap-5 md:grid-cols-[1fr_280px]">
           <div className="space-y-5">
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-3 gap-2" role="group" aria-label="Canal da campanha">
               {(Object.keys(channelMeta) as Channel[]).map((item) => {
                 const Icon = channelMeta[item].icon;
                 return (
@@ -348,6 +382,7 @@ export function ChannelCampaignComposer({
                     type="button"
                     variant={channel === item ? "default" : "outline"}
                     className="h-auto py-3"
+                    aria-pressed={channel === item}
                     onClick={() => {
                       setChannel(item);
                       setRiskConfirmed(false);
@@ -360,15 +395,19 @@ export function ChannelCampaignComposer({
               })}
             </div>
             <div className="space-y-2">
-              <Label>Nome da campanha</Label>
+              <Label htmlFor={fieldIds.name}>Nome da campanha</Label>
               <Input
+                id={fieldIds.name}
+                name="campaign-name"
                 value={name}
                 onChange={(event) => setName(event.target.value)}
                 placeholder="Ex.: Bônus de fim de semana"
+                aria-invalid={submitAttempted && !name.trim()}
+                aria-describedby={fieldIds.validation}
               />
             </div>
             <div className="space-y-2">
-              <Label>Público</Label>
+              <Label id={fieldIds.audienceLabel}>Público</Label>
               <Select
                 value={audienceId}
                 onValueChange={(value) => {
@@ -378,7 +417,14 @@ export function ChannelCampaignComposer({
                   if (selected) audienceMutation.mutate(selected.criteria);
                 }}
               >
-                <SelectTrigger>
+                <SelectTrigger
+                  id={fieldIds.audience}
+                  aria-labelledby={fieldIds.audienceLabel}
+                  aria-describedby={fieldIds.validation}
+                  aria-invalid={
+                    submitAttempted && Boolean(!audience && !audienceMutation.isPending)
+                  }
+                >
                   <SelectValue placeholder="Selecione um público salvo" />
                 </SelectTrigger>
                 <SelectContent>
@@ -389,7 +435,7 @@ export function ChannelCampaignComposer({
                   ))}
                 </SelectContent>
               </Select>
-              <p className="rounded-lg bg-muted/60 px-3 py-2 text-sm">
+              <p className="rounded-lg bg-muted/60 px-3 py-2 text-sm" aria-live="polite">
                 <strong>{audienceMutation.isPending ? "Calculando..." : num(recipients)}</strong>{" "}
                 destinatário(s) elegível(is)
                 {audience && (
@@ -403,7 +449,7 @@ export function ChannelCampaignComposer({
             {channel === "sms" && (
               <div className="space-y-3">
                 <div className="space-y-2">
-                  <Label>Template SMS</Label>
+                  <Label id={fieldIds.smsTemplateLabel}>Template SMS</Label>
                   <Select
                     value={smsTemplateId}
                     onValueChange={(value) => {
@@ -412,7 +458,10 @@ export function ChannelCampaignComposer({
                       if (template) setSmsContent(template.content);
                     }}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger
+                      id={fieldIds.smsTemplate}
+                      aria-labelledby={fieldIds.smsTemplateLabel}
+                    >
                       <SelectValue placeholder="Mensagem manual" />
                     </SelectTrigger>
                     <SelectContent>
@@ -425,12 +474,18 @@ export function ChannelCampaignComposer({
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label>Mensagem</Label>
+                  <Label htmlFor={fieldIds.smsContent}>Mensagem</Label>
                   <Textarea
+                    id={fieldIds.smsContent}
+                    name="sms-content"
                     rows={5}
                     value={smsContent}
                     onChange={(event) => setSmsContent(event.target.value)}
                     placeholder="Olá {primeiro_nome}, seu bônus está liberado."
+                    aria-invalid={
+                      submitAttempted && (Boolean(invalidVariables.length) || !smsContent.trim())
+                    }
+                    aria-describedby={fieldIds.validation}
                   />
                   <p className="text-xs text-muted-foreground">
                     {smsContent.length} caracteres · {parts} parte(s) · estimativa: {num(cost)}{" "}
@@ -448,9 +503,14 @@ export function ChannelCampaignComposer({
             {channel === "email" && (
               <div className="space-y-3">
                 <div className="space-y-2">
-                  <Label>Template de e-mail</Label>
+                  <Label id={fieldIds.emailTemplateLabel}>Template de e-mail</Label>
                   <Select value={emailTemplateId} onValueChange={setEmailTemplateId}>
-                    <SelectTrigger>
+                    <SelectTrigger
+                      id={fieldIds.emailTemplate}
+                      aria-labelledby={fieldIds.emailTemplateLabel}
+                      aria-invalid={submitAttempted && !emailTemplateId}
+                      aria-describedby={fieldIds.validation}
+                    >
                       <SelectValue placeholder="Selecione um template" />
                     </SelectTrigger>
                     <SelectContent>
@@ -500,9 +560,16 @@ export function ChannelCampaignComposer({
                   </Button>
                 </div>
                 <div className="space-y-2">
-                  <Label>{voiceMode === "asset" ? "Áudio da biblioteca" : "Script ativo"}</Label>
+                  <Label id={fieldIds.voiceSourceLabel}>
+                    {voiceMode === "asset" ? "Áudio da biblioteca" : "Script ativo"}
+                  </Label>
                   <Select value={voiceSourceId} onValueChange={setVoiceSourceId}>
-                    <SelectTrigger>
+                    <SelectTrigger
+                      id={fieldIds.voiceSource}
+                      aria-labelledby={fieldIds.voiceSourceLabel}
+                      aria-invalid={submitAttempted && !voiceSourceId}
+                      aria-describedby={fieldIds.validation}
+                    >
                       <SelectValue placeholder="Selecione uma opção" />
                     </SelectTrigger>
                     <SelectContent>
@@ -520,18 +587,22 @@ export function ChannelCampaignComposer({
               </div>
             )}
             {invalidVariables.length > 0 && (
-              <p className="flex gap-2 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+              <p
+                className="flex gap-2 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
+                role="alert"
+              >
                 <AlertTriangle className="size-4 shrink-0" />
                 Variáveis não reconhecidas: {invalidVariables.join(", ")}
               </p>
             )}
             <div className="space-y-2">
               <Label>Quando disparar</Label>
-              <div className="flex gap-2">
+              <div className="flex gap-2" role="group" aria-label="Momento do disparo">
                 <Button
                   type="button"
                   size="sm"
                   variant={when === "now" ? "default" : "outline"}
+                  aria-pressed={when === "now"}
                   onClick={() => setWhen("now")}
                 >
                   <Send className="mr-1.5 size-3.5" />
@@ -541,6 +612,7 @@ export function ChannelCampaignComposer({
                   type="button"
                   size="sm"
                   variant={when === "schedule" ? "default" : "outline"}
+                  aria-pressed={when === "schedule"}
                   onClick={() => setWhen("schedule")}
                 >
                   <CalendarClock className="mr-1.5 size-3.5" />
@@ -550,9 +622,17 @@ export function ChannelCampaignComposer({
               {when === "schedule" && (
                 <>
                   <Input
+                    id={fieldIds.schedule}
+                    name="campaign-schedule"
                     type="datetime-local"
                     value={scheduledAt}
                     onChange={(event) => setScheduledAt(event.target.value)}
+                    aria-invalid={
+                      submitAttempted &&
+                      when === "schedule" &&
+                      (!scheduledAt || new Date(scheduledAt).getTime() < Date.now() + 60_000)
+                    }
+                    aria-describedby={fieldIds.validation}
                   />
                   {channel === "voice" && (
                     <p className="text-xs text-muted-foreground">
@@ -563,10 +643,15 @@ export function ChannelCampaignComposer({
                 </>
               )}
             </div>
-            <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-amber-500/35 bg-amber-500/5 p-3 text-sm">
+            <label
+              className="flex cursor-pointer items-start gap-3 rounded-lg border border-amber-500/35 bg-amber-500/5 p-3 text-sm"
+              htmlFor={fieldIds.risk}
+            >
               <Checkbox
+                id={fieldIds.risk}
                 checked={riskConfirmed}
                 onCheckedChange={(value) => setRiskConfirmed(value === true)}
+                aria-describedby={fieldIds.validation}
               />
               <span>
                 <strong>Confirmo a revisão de risco.</strong>
@@ -576,6 +661,23 @@ export function ChannelCampaignComposer({
                 </span>
               </span>
             </label>
+            {validationIssues.length > 0 && (
+              <div
+                id={fieldIds.validation}
+                className="rounded-lg border border-amber-500/35 bg-amber-500/5 p-3 text-sm"
+                role="status"
+                aria-live="polite"
+              >
+                <p className="font-medium">
+                  {submitAttempted ? "Para continuar, corrija:" : "Itens pendentes para envio:"}
+                </p>
+                <ul className="mt-1 list-disc space-y-1 pl-5 text-muted-foreground">
+                  {validationIssues.map((issue) => (
+                    <li key={issue}>{issue}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
           <Card className="h-fit border-primary/25">
             <CardHeader className="pb-3">
@@ -615,21 +717,18 @@ export function ChannelCampaignComposer({
             </CardContent>
           </Card>
         </div>
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>
+        <DialogFooter className="flex-col-reverse gap-2 sm:flex-row">
+          <Button className="w-full sm:w-auto" variant="ghost" onClick={() => onOpenChange(false)}>
             Cancelar
           </Button>
           <Button
-            disabled={
-              submit.isPending ||
-              !riskConfirmed ||
-              !name.trim() ||
-              !audience ||
-              recipients === 0 ||
-              Boolean(invalidVariables.length) ||
-              Boolean(channelLimitError)
-            }
-            onClick={() => submit.mutate()}
+            className="w-full sm:w-auto"
+            disabled={submit.isPending}
+            onClick={() => {
+              setSubmitAttempted(true);
+              submit.mutate();
+            }}
+            aria-describedby={validationIssues.length ? fieldIds.validation : undefined}
           >
             {submit.isPending
               ? "Processando..."
