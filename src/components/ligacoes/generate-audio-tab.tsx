@@ -139,11 +139,16 @@ export function GenerateAudioTab() {
         </div>
 
         {selectedScript && (
-          <div className="rounded-lg border border-primary/30 bg-primary/5 p-4">
+          <div className="space-y-2 rounded-lg border border-primary/30 bg-primary/5 p-4">
             <p className="mb-1 flex items-center gap-2 text-xs font-medium text-primary">
               <Sparkles className="h-3 w-3" /> Texto renderizado
             </p>
             <p className="text-sm leading-relaxed text-foreground">{previewText}</p>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <Badge variant="outline">script v{selectedScript.version ?? 1}</Badge>
+              <Badge variant="outline">{previewText.length} caracteres de TTS</Badge>
+              <span>Cache hit não consome nova síntese.</span>
+            </div>
           </div>
         )}
 

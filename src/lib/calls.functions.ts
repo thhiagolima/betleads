@@ -775,6 +775,7 @@ export const bulkDispatchCalls = createServerFn({ method: "POST" })
           .insert({
             lead_id: target.lead_id ?? null,
             script_id: data.script_id ?? null,
+            voice_asset_id: data.asset_id ?? null,
             trigger_name: data.campaign_name ?? null,
             phone_number: target.phone_number ?? null,
             status: "pending_audio",

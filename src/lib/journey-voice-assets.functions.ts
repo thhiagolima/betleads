@@ -113,7 +113,9 @@ export const deleteJourneyVoiceAsset = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     const { count, error: refError } = await db.from("journey_steps").select("id", { count: "exact", head: true }).contains("config", { asset_id: data.id });
     if (refError) throw new Error(refError.message);
-    if ((count ?? 0) > 0) throw new Error("Este áudio está em uso por uma jornada; arquive-o em vez de excluir.");
+    const { count: queueRefs, error: queueRefError } = await db.from("call_queue").select("id", { count: "exact", head: true }).eq("voice_asset_id", data.id);
+    if (queueRefError) throw new Error(queueRefError.message);
+    if ((count ?? 0) > 0 || (queueRefs ?? 0) > 0) throw new Error("Este áudio possui referências em jornadas ou disparos; arquive-o em vez de excluir.");
     const { error: storageError } = await supabaseAdmin.storage.from("call-audios").remove([asset.storage_path]);
     if (storageError) throw new Error(storageError.message);
     const { error: deleteError } = await db.from("journey_voice_assets").delete().eq("id", data.id).eq("tenant_id", tenantId);
