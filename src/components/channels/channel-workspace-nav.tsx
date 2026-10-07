@@ -63,7 +63,7 @@ export const CHANNEL_WORKSPACE_DESTINATIONS: Record<
   },
   voice: {
     overview: { to: "/ligacoes", hash: "dashboard" },
-    create: { to: "/ligacoes", hash: "massa" },
+    create: { to: "/campanhas", search: { newChannel: "voice" } },
     library: { to: "/ligacoes", hash: "audios" },
     campaigns: { to: "/ligacoes", hash: "fluxos" },
     history: { to: "/ligacoes", hash: "historico" },

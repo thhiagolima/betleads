@@ -233,9 +233,41 @@ export function CampaignsHub() {
             <p className="p-6 text-sm text-muted-foreground">Carregando campanhas…</p>
           )}
           {!campaigns.isLoading && rows.length === 0 && (
-            <p className="p-10 text-center text-sm text-muted-foreground">
-              Nenhuma campanha encontrada.
-            </p>
+            <div className="flex flex-col items-center justify-center gap-3 p-10 text-center">
+              <div>
+                <p className="font-medium">
+                  {all.length === 0
+                    ? "Nenhuma campanha criada ainda"
+                    : "Nenhuma campanha corresponde aos filtros"}
+                </p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {all.length === 0
+                    ? "Comece escolhendo o canal, a audiência e o conteúdo do primeiro disparo."
+                    : "Ajuste a busca ou o status para visualizar outras campanhas."}
+                </p>
+              </div>
+              {all.length === 0 ? (
+                <Button
+                  onClick={() => {
+                    setInitialChannel("sms");
+                    setComposerOpen(true);
+                  }}
+                >
+                  <Plus className="mr-2 h-4 w-4" />
+                  Criar primeira campanha
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setSearch("");
+                    setStatus("todos");
+                  }}
+                >
+                  Limpar filtros
+                </Button>
+              )}
+            </div>
           )}
           {rows.map((campaign) => {
             const total = Number(campaign.total_count ?? 0);

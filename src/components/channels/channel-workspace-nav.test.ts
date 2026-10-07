@@ -21,4 +21,12 @@ describe("channel workspace navigation", () => {
     expect(resolveChannelWorkspaceSection("email", "/email", "smtp")).toBe("settings");
     expect(resolveChannelWorkspaceSection("voice", "/ligacoes", "scripts")).toBe("library");
   });
+
+  it("direciona a criacao dos tres canais para o composer unificado", () => {
+    for (const channel of ["sms", "email", "voice"] as const) {
+      const destination = CHANNEL_WORKSPACE_DESTINATIONS[channel].create;
+      expect(destination.to).toBe("/campanhas");
+      expect(destination.search).toEqual({ newChannel: channel });
+    }
+  });
 });

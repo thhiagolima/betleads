@@ -120,7 +120,6 @@ import { SmsPageShell } from "@/components/sms/sms-page-shell";
 import { SmsChannelHealth } from "@/components/sms/sms-channel-health";
 import { SmsHistoryPanel } from "@/components/sms/sms-history-panel";
 import { LeadSelector, type SelectedLead } from "@/components/ligacoes/lead-selector";
-import { NewSmsCampaignDialog } from "@/components/campaigns/new-sms-campaign-dialog";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import {
