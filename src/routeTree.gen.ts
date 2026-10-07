@@ -15,6 +15,7 @@ import { Route as AlertasRouteImport } from './routes/alertas'
 import { Route as AutomacoesRouteImport } from './routes/automacoes'
 import { Route as CampanhasRouteImport } from './routes/campanhas'
 import { Route as ConfiguracoesRouteImport } from './routes/configuracoes'
+import { Route as ConsentimentosRouteImport } from './routes/consentimentos'
 import { Route as CreditosSmsRouteImport } from './routes/creditos-sms'
 import { Route as EmailRouteImport } from './routes/email'
 import { Route as EventosRouteImport } from './routes/eventos'
@@ -95,6 +96,11 @@ const CampanhasRoute = CampanhasRouteImport.update({
 const ConfiguracoesRoute = ConfiguracoesRouteImport.update({
   id: '/configuracoes',
   path: '/configuracoes',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ConsentimentosRoute = ConsentimentosRouteImport.update({
+  id: '/consentimentos',
+  path: '/consentimentos',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CreditosSmsRoute = CreditosSmsRouteImport.update({
@@ -375,6 +381,7 @@ export interface FileRoutesByFullPath {
   '/automacoes': typeof AutomacoesRouteWithChildren
   '/campanhas': typeof CampanhasRoute
   '/configuracoes': typeof ConfiguracoesRoute
+  '/consentimentos': typeof ConsentimentosRoute
   '/creditos-sms': typeof CreditosSmsRoute
   '/email': typeof EmailRoute
   '/eventos': typeof EventosRoute
@@ -434,6 +441,7 @@ export interface FileRoutesByTo {
   '/automacoes': typeof AutomacoesRouteWithChildren
   '/campanhas': typeof CampanhasRoute
   '/configuracoes': typeof ConfiguracoesRoute
+  '/consentimentos': typeof ConsentimentosRoute
   '/creditos-sms': typeof CreditosSmsRoute
   '/email': typeof EmailRoute
   '/eventos': typeof EventosRoute
@@ -494,6 +502,7 @@ export interface FileRoutesById {
   '/automacoes': typeof AutomacoesRouteWithChildren
   '/campanhas': typeof CampanhasRoute
   '/configuracoes': typeof ConfiguracoesRoute
+  '/consentimentos': typeof ConsentimentosRoute
   '/creditos-sms': typeof CreditosSmsRoute
   '/email': typeof EmailRoute
   '/eventos': typeof EventosRoute
@@ -555,6 +564,7 @@ export interface FileRouteTypes {
     | '/automacoes'
     | '/campanhas'
     | '/configuracoes'
+    | '/consentimentos'
     | '/creditos-sms'
     | '/email'
     | '/eventos'
@@ -614,6 +624,7 @@ export interface FileRouteTypes {
     | '/automacoes'
     | '/campanhas'
     | '/configuracoes'
+    | '/consentimentos'
     | '/creditos-sms'
     | '/email'
     | '/eventos'
@@ -673,6 +684,7 @@ export interface FileRouteTypes {
     | '/automacoes'
     | '/campanhas'
     | '/configuracoes'
+    | '/consentimentos'
     | '/creditos-sms'
     | '/email'
     | '/eventos'
@@ -733,6 +745,7 @@ export interface RootRouteChildren {
   AutomacoesRoute: typeof AutomacoesRouteWithChildren
   CampanhasRoute: typeof CampanhasRoute
   ConfiguracoesRoute: typeof ConfiguracoesRoute
+  ConsentimentosRoute: typeof ConsentimentosRoute
   CreditosSmsRoute: typeof CreditosSmsRoute
   EmailRoute: typeof EmailRoute
   EventosRoute: typeof EventosRoute
@@ -819,6 +832,13 @@ declare module '@tanstack/react-router' {
       path: '/configuracoes'
       fullPath: '/configuracoes'
       preLoaderRoute: typeof ConfiguracoesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/consentimentos': {
+      id: '/consentimentos'
+      path: '/consentimentos'
+      fullPath: '/consentimentos'
+      preLoaderRoute: typeof ConsentimentosRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/creditos-sms': {
@@ -1251,6 +1271,7 @@ const rootRouteChildren: RootRouteChildren = {
   AutomacoesRoute: AutomacoesRouteWithChildren,
   CampanhasRoute: CampanhasRoute,
   ConfiguracoesRoute: ConfiguracoesRoute,
+  ConsentimentosRoute: ConsentimentosRoute,
   CreditosSmsRoute: CreditosSmsRoute,
   EmailRoute: EmailRoute,
   EventosRoute: EventosRoute,

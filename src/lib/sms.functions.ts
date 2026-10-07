@@ -19,6 +19,7 @@ import {
   prepareTrackedText,
 } from "./shortio.server";
 import type { Json } from "@/integrations/supabase/types";
+import { isChannelRevoked } from "./consent.server";
 
 const DEFAULT_SHORT_BRASIL_SINGLE_URL = "http://lp01-short.painelsms.com/bot/single-sms.php";
 const DEFAULT_SHORT_BRASIL_BULK_URL = "http://lp01-short.painelsms.com/bot/bulk-sms.php";
@@ -350,25 +351,29 @@ async function logSend(row: {
   flow_lead_id?: string | null;
   tenant_id?: string | null;
 }) {
-  const { data, error } = await supabaseAdmin.from("sms_send_logs").insert({
-    to_phone: row.to,
-    content: row.content,
-    status: row.status,
-    provider: "short-brasil",
-    provider_response: (row.provider_response ?? {}) as Json,
-    error: row.error,
-    idempotency_key: row.idempotency_key || null,
-    provider_message_id: row.provider_message_id ?? null,
-    delivery_status:
-      row.status === "sent" ? "sent" : row.status === "pending" ? "pending" : "failed",
-    player_id: row.player_id ?? null,
-    flow_id: row.flow_id ?? null,
-    trigger_name: row.trigger_name ?? null,
-    step_index: row.step_index ?? null,
-    step_label: row.step_label ?? null,
-    flow_lead_id: row.flow_lead_id ?? null,
-    ...(row.tenant_id ? { tenant_id: row.tenant_id } : {}),
-  }).select("id").single();
+  const { data, error } = await supabaseAdmin
+    .from("sms_send_logs")
+    .insert({
+      to_phone: row.to,
+      content: row.content,
+      status: row.status,
+      provider: "short-brasil",
+      provider_response: (row.provider_response ?? {}) as Json,
+      error: row.error,
+      idempotency_key: row.idempotency_key || null,
+      provider_message_id: row.provider_message_id ?? null,
+      delivery_status:
+        row.status === "sent" ? "sent" : row.status === "pending" ? "pending" : "failed",
+      player_id: row.player_id ?? null,
+      flow_id: row.flow_id ?? null,
+      trigger_name: row.trigger_name ?? null,
+      step_index: row.step_index ?? null,
+      step_label: row.step_label ?? null,
+      flow_lead_id: row.flow_lead_id ?? null,
+      ...(row.tenant_id ? { tenant_id: row.tenant_id } : {}),
+    })
+    .select("id")
+    .single();
   if (error) {
     console.error("Failed to persist SMS send log", { to: row.to, error: error.message });
     throw new Error(`Falha ao registrar envio SMS: ${error.message}`);
@@ -549,6 +554,29 @@ export async function sendSmsInternal(args: {
   });
   if (billingTenantId) {
     await assertTenantCanOperate(billingTenantId);
+    if (await isChannelRevoked(billingTenantId, "sms", normalized)) {
+      await logSend({
+        to: normalized,
+        content: args.content,
+        status: "error",
+        provider_response: { suppressed: true, reason: "consent_revoked" },
+        error: "Destinatario revogou o consentimento para SMS",
+        idempotency_key: args.deliveryKey ?? "",
+        player_id: args.playerId,
+        flow_id: args.flowId,
+        trigger_name: args.triggerName,
+        step_index: args.stepIndex,
+        step_label: args.stepLabel,
+        flow_lead_id: args.flowLeadId,
+        tenant_id: billingTenantId,
+      });
+      return {
+        ok: false as const,
+        status: 200,
+        suppressed: true,
+        error: "Destinatario bloqueado por consentimento",
+      };
+    }
   }
   const renderedContent = renderSmsVariables(args.content, args.variables);
   const deliveryKey = args.deliveryKey ?? crypto.randomUUID();
@@ -637,7 +665,8 @@ export async function sendSmsInternal(args: {
       .from("link_dispatches")
       .update({ message_log_id: messageLogId })
       .in("id", trackedDispatchIds);
-    if (dispatchLogError) console.error("Failed to link Short.io dispatches to SMS log", dispatchLogError.message);
+    if (dispatchLogError)
+      console.error("Failed to link Short.io dispatches to SMS log", dispatchLogError.message);
   }
   if (r.ok) {
     await markTrackedDispatchesSent(trackedDispatchIds);
@@ -828,7 +857,12 @@ export const sendBulkSms = createServerFn({ method: "POST" })
         .eq("is_active", true)
         .single();
       if (error || !template) throw new Error("Template SMS indisponível para esta campanha");
-      templateSnapshot = { id: template.id, name: template.name, content: template.content, version: template.version };
+      templateSnapshot = {
+        id: template.id,
+        name: template.name,
+        content: template.content,
+        version: template.version,
+      };
     }
 
     const trigger = `campanha:${data.campaignName}:${data.route}`;
@@ -1727,7 +1761,12 @@ export const scheduleBulkSms = createServerFn({ method: "POST" })
         .eq("is_active", true)
         .single();
       if (error || !template) throw new Error("Template SMS indisponível para esta campanha");
-      templateSnapshot = { id: template.id, name: template.name, content: template.content, version: template.version };
+      templateSnapshot = {
+        id: template.id,
+        name: template.name,
+        content: template.content,
+        version: template.version,
+      };
     }
 
     const targets = await resolveRecipientsForTenant(tenantId, data.phones, data.recipients);

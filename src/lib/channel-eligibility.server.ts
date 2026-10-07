@@ -1,8 +1,10 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { isSuppressed } from "./email-deliverability.server";
+import { getChannelConsentStatus, isChannelRevoked } from "./consent.server";
 
 type Channel = "sms" | "email" | "call" | "whatsapp";
-type BlockReason = "missing_phone" | "missing_email" | "email_opt_out" | "sms_opt_out";
+type BlockReason =
+  "missing_phone" | "missing_email" | "email_opt_out" | "sms_opt_out" | "voice_opt_out";
 
 export type ChannelEligibility = {
   eligible: boolean;
@@ -50,13 +52,23 @@ export async function channelEligibility(
 
   if (channel === "email") {
     if (!email) return { eligible: false, reason: "missing_email", phone, email };
-    if (await isSuppressed(email)) return { eligible: false, reason: "email_opt_out", phone, email };
+    const centralStatus = await getChannelConsentStatus(tenantId, "email", email);
+    if (
+      centralStatus === "revoked" ||
+      (centralStatus !== "granted" && (await isSuppressed(email, tenantId)))
+    )
+      return { eligible: false, reason: "email_opt_out", phone, email };
     return { eligible: true, phone, email };
   }
 
   if (!phone) return { eligible: false, reason: "missing_phone", phone, email };
-  if (channel === "sms" && (await isSmsSuppressed(tenantId, phone))) {
+  if (
+    channel === "sms" &&
+    ((await isChannelRevoked(tenantId, "sms", phone)) || (await isSmsSuppressed(tenantId, phone)))
+  ) {
     return { eligible: false, reason: "sms_opt_out", phone, email };
   }
+  if (channel === "call" && (await isChannelRevoked(tenantId, "voice", phone)))
+    return { eligible: false, reason: "voice_opt_out", phone, email };
   return { eligible: true, phone, email };
 }

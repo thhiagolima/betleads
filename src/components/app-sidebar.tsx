@@ -77,6 +77,7 @@ const engagementItems: NavItem[] = [
       { title: "Templates SMS", url: "/sms/templates" },
       { title: "Email", url: "/email" },
       { title: "Voz", url: "/ligacoes" },
+      { title: "Consentimentos", url: "/consentimentos" },
     ],
   },
 ];

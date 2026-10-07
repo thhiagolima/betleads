@@ -1,9 +1,10 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { sendInfobipEmail, resolveSender } from "./email-send.server";
-import { callInfobipVoice } from "./infobip-voice.server";
+import { callInfobipVoice, normalizeE164BR } from "./infobip-voice.server";
 import { sendSmsInternal } from "./sms.functions";
 import { buildPlayerVariables, renderTemplate } from "./template-vars.server";
 import { detectTriggersForPlayer } from "./triggers.server";
+import { evaluateVoiceContactPolicy } from "./consent.server";
 
 type JourneyRow = {
   id: string;
@@ -310,6 +311,7 @@ async function executeEnrollment(id: string): Promise<void> {
       replyTo: sender.replyTo,
       subject: renderTemplate(template.subject, vars),
       html: renderTemplate(template.body_html, vars),
+      tenantId: enrollment.tenant_id,
       idempotencyKey: run.idempotency_key,
       linkTracking: {
         tenantId: enrollment.tenant_id,
@@ -341,6 +343,32 @@ async function executeEnrollment(id: string): Promise<void> {
     });
   } else if (step.step_type === "voice") {
     if (!player.telefone) throw new Error("Jogador sem telefone");
+    const contactPolicy = await evaluateVoiceContactPolicy(enrollment.tenant_id, player.telefone);
+    if (!contactPolicy.allowed) {
+      const consentRevoked = contactPolicy.reason === "consent_revoked";
+      await finishExecution(run.id, {
+        status: consentRevoked ? "skipped" : "retrying",
+        provider: "contact_policy",
+        provider_response: {
+          suppressed: consentRevoked,
+          reason: contactPolicy.reason,
+          retry_at: contactPolicy.retryAt,
+        },
+      });
+      await release(enrollment, {
+        status: "active",
+        current_position: consentRevoked ? step.position + 1 : step.position,
+        next_run_at: contactPolicy.retryAt ?? new Date(Date.now() + 3600_000).toISOString(),
+        attempts: consentRevoked ? 0 : enrollment.attempts + 1,
+      });
+      await event(enrollment, consentRevoked ? "step_skipped" : "step_deferred", {
+        channel,
+        step_position: step.position,
+        reason: contactPolicy.reason,
+        retry_at: contactPolicy.retryAt,
+      });
+      return;
+    }
     const assetId = String(step.config.asset_id ?? "");
     const { data: asset } = await db
       .from("journey_voice_assets")
@@ -354,8 +382,20 @@ async function executeEnrollment(id: string): Promise<void> {
       .createSignedUrl(asset.storage_path, 60 * 60);
     if (signedError || !signed?.signedUrl)
       throw new Error("Não foi possível disponibilizar o áudio para a ligação");
-    const result = await callInfobipVoice(player.telefone, signed.signedUrl);
+    const to = normalizeE164BR(player.telefone);
+    const result = await callInfobipVoice(to, signed.signedUrl);
     if (!result.ok) throw new Error("Ligação não aceita pelo provedor");
+    await supabaseAdmin.from("call_history").insert({
+      tenant_id: enrollment.tenant_id,
+      lead_id: enrollment.player_id,
+      audio_url: signed.signedUrl,
+      status: "pending",
+      provider: "infobip",
+      provider_call_id: result.providerCallId ?? result.idempotencyKey ?? null,
+      provider_response: (result.body ?? {}) as never,
+      provider_status_code: result.status,
+      to_phone: to,
+    });
     await finishExecution(run.id, {
       status: "sent",
       provider: "infobip",

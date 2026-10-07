@@ -45,7 +45,7 @@ O canal de voz possui telas, scripts, geração de áudio, fila, callback e flux
 
 - CRUD de scripts e fluxos, seleção de lead, personalização por variáveis e geração de áudio por ElevenLabs com cache.
 - Fila, disparo manual/em massa, histórico e atualização de status por webhook de voz.
-- Suporte de provedor BusinessCode e caminho alternativo Infobip.
+- Infobip como provedor exclusivo de voz; a integração BusinessCode foi removida do sistema.
 - Bucket privado `call-audios`, políticas de isolamento por tenant e uploads assinados.
 - Jornadas multicanal permitem enviar e reutilizar um arquivo de voz já cadastrado como etapa de voz.
 
@@ -65,8 +65,17 @@ O canal de voz possui telas, scripts, geração de áudio, fila, callback e flux
 2. **Biblioteca de áudios de voz — parcial.** O bucket e o upload existem, mas faltam catálogo independente, preview por URL assinada, metadados (duração, idioma, origem, tags), renomear, arquivar/excluir com remoção do objeto, busca, verificação de referências e política de retenção. Hoje o uso está acoplado ao editor de jornadas e a API expõe apenas criar/finalizar/listar.
 3. **Template de voz reutilizável.** Separar “áudio fixo” de “script dinâmico com TTS”. Para áudio fixo, permitir escolher um ativo da biblioteca; para TTS, versionar script/voz/configuração e exibir custo, preview e cache antes do disparo.
 4. **E-mail: maturidade de template.** O CRUD existe, mas precisa de versões/publicação, rascunho, bloqueio de edição de template em campanha já publicada, teste de renderização em desktop/mobile, validação de links/imagens e relatório por template (envio, entrega, clique, descadastro).
-5. **Consolidação de provedores.** Tornar a seleção BusinessCode/Infobip/SMTP explícita por tenant e por canal, com teste de conexão real, fallback documentado, credenciais em cofre e estado de saúde persistido.
-6. **Conformidade e consentimento.** Centralizar consentimento, opt-out e base legal entre SMS/e-mail/voz; oferecer importação/exportação e auditoria de supressões. A voz precisa de janela, frequência e regras de contato próprias.
+5. **Consolidação de provedores — concluída.** BusinessCode foi removida; Infobip é o provedor exclusivo de voz e e-mail.
+6. **Conformidade e consentimento — concluída em 07/10/2026.** Consentimento, opt-out e base legal foram centralizados entre SMS/e-mail/voz, com importação/exportação, auditoria, sincronização das listas legadas e bloqueio antes de qualquer chamada ao provedor. Voz passou a respeitar janela por tenant, cooldown e limite móvel de 24 horas por destinatário; itens fora da política são adiados sem perda da fila.
+
+#### Evidência da entrega de conformidade
+
+- Tabelas tenant-aware `channel_consents`, `channel_consent_audit` e `voice_contact_policies`, protegidas por RLS.
+- Backfill e normalização das supressões legadas de SMS/e-mail, incluindo telefone BR canônico.
+- Bloqueio central nos envios individuais, campanhas, filas, fluxos e jornadas dos três canais.
+- Descadastro público de e-mail sincronizado com a base central e registrado na auditoria.
+- Tela **Canais → Consentimentos** para decisão individual, pesquisa, CSV, histórico e política de voz.
+- Validação local: migrations aplicadas, build aprovado e 4 arquivos/13 testes aprovados.
 
 ### P2 — melhorias de produto e UX
 

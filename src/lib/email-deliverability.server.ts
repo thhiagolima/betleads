@@ -9,6 +9,7 @@
 // 4. `suppressEmail(email, reason, tenantId?)` — adiciona à suppression list.
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { normalizeConsentSubject } from "./consent.server";
 
 const APP_BASE_URL = (
   process.env.PUBLIC_APP_URL ||
@@ -25,19 +26,17 @@ function norm(email: string): string {
   return (email || "").trim().toLowerCase();
 }
 
-export async function isSuppressed(email: string): Promise<boolean> {
-  const key = norm(email);
-  if (!key) return false;
+export async function isSuppressed(email: string, tenantId?: string | null): Promise<boolean> {
+  const normalized = norm(email);
+  const key = `${tenantId ?? "global"}:${normalized}`;
+  if (!normalized) return false;
   const cached = suppressionCache.get(key);
   const now = Date.now();
   if (cached && now - cached.t < SUPPRESSION_TTL_MS) return cached.v;
   try {
-    const { data } = await supabaseAdmin
-      .from("suppressed_emails")
-      .select("id")
-      .ilike("email", key)
-      .limit(1)
-      .maybeSingle();
+    let query = supabaseAdmin.from("suppressed_emails").select("id").ilike("email", normalized);
+    if (tenantId) query = query.or(`tenant_id.eq.${tenantId},tenant_id.is.null`);
+    const { data } = await query.limit(1).maybeSingle();
     const v = !!data;
     suppressionCache.set(key, { v, t: now });
     return v;
@@ -57,11 +56,41 @@ export async function suppressEmail(
   const key = norm(email);
   if (!key) return;
   try {
-    await supabaseAdmin.from("suppressed_emails").upsert(
-      { email: key, reason, tenant_id: tenantId ?? null, notes: notes ?? null },
-      { onConflict: "email" },
-    );
-    suppressionCache.set(key, { v: true, t: Date.now() });
+    await supabaseAdmin
+      .from("suppressed_emails")
+      .upsert(
+        { email: key, reason, tenant_id: tenantId ?? null, notes: notes ?? null },
+        { onConflict: "email" },
+      );
+    if (tenantId) {
+      const subject = normalizeConsentSubject("email", key);
+      const { data: consent } = await (supabaseAdmin as any)
+        .from("channel_consents")
+        .upsert(
+          {
+            tenant_id: tenantId,
+            channel: "email",
+            subject,
+            status: "revoked",
+            reason,
+            source: "unsubscribe",
+            occurred_at: new Date().toISOString(),
+          },
+          { onConflict: "tenant_id,channel,subject" },
+        )
+        .select("id")
+        .single();
+      await (supabaseAdmin as any).from("channel_consent_audit").insert({
+        tenant_id: tenantId,
+        consent_id: consent?.id ?? null,
+        channel: "email",
+        subject,
+        new_status: "revoked",
+        reason,
+        source: "unsubscribe",
+      });
+    }
+    suppressionCache.set(`${tenantId ?? "global"}:${key}`, { v: true, t: Date.now() });
   } catch (e) {
     console.error("suppressEmail falhou", e);
   }

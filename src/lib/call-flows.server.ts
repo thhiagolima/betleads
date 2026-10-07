@@ -20,6 +20,7 @@ import { callInfobipVoice, normalizeE164BR } from "./infobip-voice.server";
 import { sendSmsInternal } from "./sms.functions";
 import { buildPlayerVariables } from "./template-vars.server";
 import { deferIfOutsideWindow } from "./send-window.server";
+import { evaluateVoiceContactPolicy } from "./consent.server";
 
 type Json = Record<string, unknown>;
 
@@ -300,6 +301,28 @@ async function executeCallBlock(progress: any, block: any, player: any): Promise
     return;
   }
 
+  const contactPolicy = await evaluateVoiceContactPolicy(progress.tenant_id, to);
+  if (!contactPolicy.allowed) {
+    await logEvent(
+      progress.id,
+      progress.flow_id,
+      progress.player_id,
+      progress.current_block_index,
+      contactPolicy.reason === "consent_revoked" ? "call_skipped" : "call_deferred",
+      { reason: contactPolicy.reason, retry_at: contactPolicy.retryAt },
+    );
+    if (contactPolicy.reason === "consent_revoked") await scheduleNext(progress, block);
+    else
+      await supabaseAdmin
+        .from("call_flow_progress")
+        .update({
+          next_run_at: contactPolicy.retryAt ?? new Date(Date.now() + 3600_000).toISOString(),
+          status: "active",
+        } as any)
+        .eq("id", progress.id);
+    return;
+  }
+
   // 4. dispara provedor
   const result = await callInfobipVoice(to, audioUrl);
   const isAuthError = result.status === 401 || result.status === 403;
@@ -318,6 +341,7 @@ async function executeCallBlock(progress: any, block: any, player: any): Promise
     provider_response: (result.body ?? {}) as any,
     provider_status_code: result.status,
     to_phone: to,
+    tenant_id: progress.tenant_id,
     error_message: result.ok ? null : JSON.stringify(result.body).slice(0, 1000),
     rendered_text: renderedText,
   } as any);
@@ -433,7 +457,7 @@ export async function advanceProgress(progressId: string) {
 
   // Janela de envio: bloquear ligação fora do horário permitido.
   if (block.block_type === "call") {
-    const defer = await deferIfOutsideWindow();
+    const defer = await deferIfOutsideWindow(new Date(), progress.tenant_id);
     if (defer) {
       await supabaseAdmin
         .from("call_flow_progress")
@@ -541,133 +565,133 @@ export async function pollPendingCalls(limit = 50): Promise<number> {
   void limit;
   return 0;
   if (false) {
-  const cutoffIso = new Date(Date.now() - 90_000).toISOString();
-  const { data: pendings } = await supabaseAdmin
-    .from("call_history")
-    .select("id, provider_call_id, provider_response, created_at")
-    .eq("status", "pending")
-    .lte("created_at", cutoffIso)
-    .gte("created_at", new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString())
-    .order("created_at", { ascending: true })
-    .limit(limit);
+    const cutoffIso = new Date(Date.now() - 90_000).toISOString();
+    const { data: pendings } = await supabaseAdmin
+      .from("call_history")
+      .select("id, provider_call_id, provider_response, created_at")
+      .eq("status", "pending")
+      .lte("created_at", cutoffIso)
+      .gte("created_at", new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString())
+      .order("created_at", { ascending: true })
+      .limit(limit);
 
-  if (!pendings || pendings.length === 0) return 0;
-  console.info("[call-flow polling] pendings", { count: pendings.length });
+    if (!pendings || pendings.length === 0) return 0;
+    console.info("[call-flow polling] pendings", { count: pendings.length });
 
-  const rawToken = "";
-  const token = rawToken
-    .replace(/[\u200B-\u200D\uFEFF]/g, "")
-    .trim()
-    .replace(/^['"]+|['"]+$/g, "")
-    .replace(/^Authorization\s*:\s*/i, "")
-    .replace(/^Bearer\s+/i, "")
-    .replace(/\s+/g, "");
-  if (!token) {
-    console.warn("[call-flow polling] polling desativado");
-    return 0;
-  }
+    const rawToken = "";
+    const token = rawToken
+      .replace(/[\u200B-\u200D\uFEFF]/g, "")
+      .trim()
+      .replace(/^['"]+|['"]+$/g, "")
+      .replace(/^Authorization\s*:\s*/i, "")
+      .replace(/^Bearer\s+/i, "")
+      .replace(/\s+/g, "");
+    if (!token) {
+      console.warn("[call-flow polling] polling desativado");
+      return 0;
+    }
 
-  let advanced = 0;
-  for (const row of pendings) {
-    const pr = (row.provider_response ?? {}) as {
-      dispatch_id?: number | string;
-      _links?: { status?: string };
-    };
-    const dispatchId = pr.dispatch_id;
-    const statusUrlRaw = pr._links?.status;
-    const url = statusUrlRaw
-      ? statusUrlRaw.replace(/^http:\/\//i, "https://")
-      : dispatchId
-        ? null
-        : null;
-    if (!url) continue;
-
-    try {
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
-      });
-      const text = await res.text();
-      let body: any = null;
-      try {
-        body = text ? JSON.parse(text) : null;
-      } catch {
-        body = { snippet: text.slice(0, 200) };
-      }
-      if (!res.ok) {
-        console.warn("[call-flow polling] status HTTP", res.status, "para", row.id);
-        continue;
-      }
-
-      // O provedor mantém um status genérico (queued/sent/delivered) e
-      // expõe o resultado real da ligação em `voice_status`. Sem ler isso,
-      // ligações atendidas ficam para sempre como "queued" no nosso lado.
-      const d = body?.data ?? body;
-      const voiceStatus: string | undefined = d?.voice_status ?? body?.voice_status;
-      const baseStatus: string | undefined = d?.status ?? body?.status ?? body?.dispatch?.status;
-      const providerStatus: string | undefined = voiceStatus ?? baseStatus;
-      const duration: number =
-        Number(
-          d?.call_duration_seconds ??
-            d?.duration_seconds ??
-            body?.duration_seconds ??
-            body?.duration ??
-            0,
-        ) || 0;
-
-      // Mapeia status do provedor para nosso vocabulário
-      const finalMap: Record<string, string> = {
-        answered: "answered",
-        completed: "completed",
-        delivered: "delivered",
-        not_answered: "not_answered",
-        no_answer: "not_answered",
-        busy: "busy",
-        failed: "failed",
-        undelivered: "undelivered",
+    let advanced = 0;
+    for (const row of pendings) {
+      const pr = (row.provider_response ?? {}) as {
+        dispatch_id?: number | string;
+        _links?: { status?: string };
       };
-      const mapped = providerStatus ? finalMap[providerStatus] : null;
-      if (!mapped) {
-        console.info("[call-flow polling] status não-final", {
+      const dispatchId = pr.dispatch_id;
+      const statusUrlRaw = pr._links?.status;
+      const url = statusUrlRaw
+        ? statusUrlRaw.replace(/^http:\/\//i, "https://")
+        : dispatchId
+          ? null
+          : null;
+      if (!url) continue;
+
+      try {
+        const res = await fetch(url, {
+          headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+        });
+        const text = await res.text();
+        let body: any = null;
+        try {
+          body = text ? JSON.parse(text) : null;
+        } catch {
+          body = { snippet: text.slice(0, 200) };
+        }
+        if (!res.ok) {
+          console.warn("[call-flow polling] status HTTP", res.status, "para", row.id);
+          continue;
+        }
+
+        // O provedor mantém um status genérico (queued/sent/delivered) e
+        // expõe o resultado real da ligação em `voice_status`. Sem ler isso,
+        // ligações atendidas ficam para sempre como "queued" no nosso lado.
+        const d = body?.data ?? body;
+        const voiceStatus: string | undefined = d?.voice_status ?? body?.voice_status;
+        const baseStatus: string | undefined = d?.status ?? body?.status ?? body?.dispatch?.status;
+        const providerStatus: string | undefined = voiceStatus ?? baseStatus;
+        const duration: number =
+          Number(
+            d?.call_duration_seconds ??
+              d?.duration_seconds ??
+              body?.duration_seconds ??
+              body?.duration ??
+              0,
+          ) || 0;
+
+        // Mapeia status do provedor para nosso vocabulário
+        const finalMap: Record<string, string> = {
+          answered: "answered",
+          completed: "completed",
+          delivered: "delivered",
+          not_answered: "not_answered",
+          no_answer: "not_answered",
+          busy: "busy",
+          failed: "failed",
+          undelivered: "undelivered",
+        };
+        const mapped = providerStatus ? finalMap[providerStatus] : null;
+        if (!mapped) {
+          console.info("[call-flow polling] status não-final", {
+            id: row.id,
+            voice_status: voiceStatus ?? null,
+            status: baseStatus ?? null,
+          });
+          continue;
+        }
+        console.info("[call-flow polling] status final detectado", {
           id: row.id,
           voice_status: voiceStatus ?? null,
           status: baseStatus ?? null,
+          duration,
         });
-        continue;
-      }
-      console.info("[call-flow polling] status final detectado", {
-        id: row.id,
-        voice_status: voiceStatus ?? null,
-        status: baseStatus ?? null,
-        duration,
-      });
 
-      // Atualiza call_history como o webhook faria
-      const newHistoryStatus = ["answered", "completed", "delivered"].includes(mapped)
-        ? "completed"
-        : "failed";
-      await supabaseAdmin
-        .from("call_history")
-        .update({
-          status: newHistoryStatus as any,
-          duration_seconds: duration || null,
-          provider_status_code: res.status,
-          provider_response: { ...pr, polled: body } as any,
-        } as any)
-        .eq("id", row.id);
+        // Atualiza call_history como o webhook faria
+        const newHistoryStatus = ["answered", "completed", "delivered"].includes(mapped)
+          ? "completed"
+          : "failed";
+        await supabaseAdmin
+          .from("call_history")
+          .update({
+            status: newHistoryStatus as any,
+            duration_seconds: duration || null,
+            provider_status_code: res.status,
+            provider_response: { ...pr, polled: body } as any,
+          } as any)
+          .eq("id", row.id);
 
-      if (row.provider_call_id) {
-        await handleCallCompletion({
-          providerCallId: row.provider_call_id,
-          status: mapped,
-          durationSeconds: duration,
-        });
-        advanced += 1;
+        if (row.provider_call_id) {
+          await handleCallCompletion({
+            providerCallId: row.provider_call_id,
+            status: mapped,
+            durationSeconds: duration,
+          });
+          advanced += 1;
+        }
+      } catch (e) {
+        console.error("[call-flow polling] erro consulta", row.id, e);
       }
-    } catch (e) {
-      console.error("[call-flow polling] erro consulta", row.id, e);
     }
-  }
-  return advanced;
+    return advanced;
   }
 }
 
