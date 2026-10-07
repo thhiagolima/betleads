@@ -12,11 +12,17 @@ async function validSignature(secret: string, payload: string, provided: string 
     ["sign"],
   );
   const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload));
-  const expected = Array.from(new Uint8Array(signature)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
-  const received = provided.replace(/^sha256=/i, "").trim().toLowerCase();
+  const expected = Array.from(new Uint8Array(signature))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+  const received = provided
+    .replace(/^sha256=/i, "")
+    .trim()
+    .toLowerCase();
   if (received.length !== expected.length) return false;
   let difference = 0;
-  for (let index = 0; index < expected.length; index++) difference |= expected.charCodeAt(index) ^ received.charCodeAt(index);
+  for (let index = 0; index < expected.length; index++)
+    difference |= expected.charCodeAt(index) ^ received.charCodeAt(index);
   return difference === 0;
 }
 
@@ -50,7 +56,7 @@ export const Route = createFileRoute("/api/public/webhook/$token/$evento")({
           .eq("webhook_token", token)
           .maybeSingle();
         const tenantId = tenantRow?.id as string | undefined;
-        if (!tenantId) {
+        if (!tenantRow || !tenantId) {
           return Response.json({ ok: false, error: "token inválido" }, { status: 404 });
         }
         if (

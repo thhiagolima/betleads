@@ -170,6 +170,7 @@ type MoneyRow = {
 };
 
 type MarketingOverview = {
+  integrations: MarketingIntegration[];
   period: { from: string; to: string };
   totals: MarketingTotals;
   campaigns: CampaignRow[];
@@ -395,13 +396,16 @@ function MediaLtvPage() {
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["marketing-overview", range.from, range.to],
-    queryFn: () => fetchOverview({ data: { days: range.days, from: range.from, to: range.to } }),
+    queryFn: async () =>
+      (await fetchOverview({
+        data: { days: range.days, from: range.from, to: range.to },
+      })) as MarketingOverview,
     refetchInterval: 30000,
   });
 
   const { data: metaSummary } = useQuery({
     queryKey: ["meta-connection-summary"],
-    queryFn: () => fetchMetaSummary(),
+    queryFn: async () => (await fetchMetaSummary()) as unknown as MetaSummary,
     refetchInterval: 30000,
   });
 

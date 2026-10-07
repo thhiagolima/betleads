@@ -10,6 +10,11 @@ import { getCurrentTenantAccessStatus } from "@/lib/tenants.functions";
 
 const TENANT_VALIDATION_TIMEOUT_MS = 12_000;
 
+type TenantAccessStatus = {
+  blocked: boolean;
+  tenant: { status: string } | null;
+};
+
 async function validateTenantWithTimeout<T>(request: Promise<T>): Promise<T> {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -33,7 +38,7 @@ export function TenantStatusGate({ children }: { children: ReactNode }) {
   const fetchStatus = useServerFn(getCurrentTenantAccessStatus);
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ["current-tenant-access-status"],
-    queryFn: () => validateTenantWithTimeout(fetchStatus()),
+    queryFn: () => validateTenantWithTimeout(fetchStatus() as Promise<TenantAccessStatus>),
     staleTime: 60_000,
     retry: false,
     enabled: !isTenantPage,

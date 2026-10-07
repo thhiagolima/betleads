@@ -20,7 +20,8 @@ export const getMyWebhookAccess = createServerFn({ method: "GET" })
 
 async function requireWebhookManager(context: { supabase: any }) {
   const access = await getWebhookAccess(context);
-  if (!access.canManage) throw new Error("Apenas administradores da conta podem acessar integrações de webhook.");
+  if (!access.canManage)
+    throw new Error("Apenas administradores da conta podem acessar integrações de webhook.");
   return access.tenantId;
 }
 
@@ -36,7 +37,7 @@ export const rotateMyWebhookCredentials = createServerFn({ method: "POST" })
     const tenantId = await requireWebhookManager(context);
     const webhook_token = randomHex(24);
     const webhook_secret = randomHex(32);
-    const { error } = await supabaseAdmin
+    const { error } = await (supabaseAdmin as any)
       .from("tenants")
       .update({ webhook_token, webhook_secret })
       .eq("id", tenantId);

@@ -178,7 +178,15 @@ function PlayerDetailPage() {
             {links.isLoading ? (
               <Skeleton className="h-12 w-full" />
             ) : links.data?.length ? (
-              links.data.map((link) => (
+              (
+                links.data as Array<{
+                  id: string;
+                  channel: string;
+                  source_type: string;
+                  sent_url: string;
+                  clicks: number;
+                }>
+              ).map((link) => (
                 <div
                   key={link.id}
                   className="flex items-center justify-between gap-3 rounded-md border border-border/50 p-3 text-sm"
@@ -391,7 +399,7 @@ function PlayerDetailPage() {
 function BackButton() {
   return (
     <Button variant="ghost" size="sm" asChild className="gap-2 text-muted-foreground">
-      <Link to="/players">
+      <Link to="/players" search={{ id: undefined, focus: undefined }}>
         <ArrowLeft className="h-4 w-4" />
         Voltar para players
       </Link>

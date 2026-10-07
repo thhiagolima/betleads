@@ -207,7 +207,9 @@ const advancedFilterGroups = [
     ],
   },
 ] as const;
-const BEHAVIOR_FILTER_IDS = new Set(filters.filter((item) => item.id !== "todos").map((item) => item.id));
+const BEHAVIOR_FILTER_IDS = new Set(
+  filters.filter((item) => item.id !== "todos").map((item) => item.id),
+);
 
 // Chips que filtram por gatilho de alerta em tempo real
 // (mesma lógica da página /alertas — quando a gente manda mensagem o lead some daqui)
@@ -351,6 +353,7 @@ function getPlayerSituation(
 type SortKey =
   | "ultimo_login"
   | "ultimo_jogo"
+  | "ultimo_deposito"
   | "total_depositado"
   | "total_sacado"
   | "lucro"
@@ -395,6 +398,7 @@ function PlayersPage() {
     void navigate({
       to: "/players/$playerId",
       params: { playerId: linkedPlayerId },
+      search: { id: undefined, focus: undefined },
       replace: true,
     });
   }, [isDetailRoute, linkedPlayerId, navigate]);
@@ -1969,10 +1973,12 @@ function PlayersPage() {
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-medium text-foreground">Combinar por</span>
                     <div className="flex rounded-md border border-border/60 p-0.5">
-                      {([
-                        ["and", "E (AND)"],
-                        ["or", "OU (OR)"],
-                      ] as const).map(([operator, label]) => (
+                      {(
+                        [
+                          ["and", "E (AND)"],
+                          ["or", "OU (OR)"],
+                        ] as const
+                      ).map(([operator, label]) => (
                         <button
                           key={operator}
                           type="button"
@@ -2426,6 +2432,7 @@ function PlayersPage() {
                             <Link
                               to="/players/$playerId"
                               params={{ playerId: p.id }}
+                              search={{ id: undefined, focus: undefined }}
                               className="font-medium flex items-center gap-1 text-left hover:text-primary"
                               title="Abrir ficha do player"
                             >
@@ -2489,7 +2496,11 @@ function PlayersPage() {
                       </TableCell>
                       <TableCell className="text-right">
                         <Button variant="outline" size="sm" asChild className="h-8 gap-1.5">
-                          <Link to="/players/$playerId" params={{ playerId: p.id }}>
+                          <Link
+                            to="/players/$playerId"
+                            params={{ playerId: p.id }}
+                            search={{ id: undefined, focus: undefined }}
+                          >
                             <Eye className="h-3.5 w-3.5" />
                             Ficha
                           </Link>

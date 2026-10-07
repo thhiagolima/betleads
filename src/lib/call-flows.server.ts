@@ -564,6 +564,7 @@ export async function tickFlows(limit = 50): Promise<{ processed: number }> {
 export async function pollPendingCalls(limit = 50): Promise<number> {
   void limit;
   return 0;
+  /*
   // Historical fallback retained for reference while callbacks are canonical.
   // eslint-disable-next-line no-constant-condition
   if (false) {
@@ -585,7 +586,7 @@ export async function pollPendingCalls(limit = 50): Promise<number> {
       .replace(/[\u200B-\u200D\uFEFF]/g, "")
       .trim()
       .replace(/^['"]+|['"]+$/g, "")
-      .replace(/^Authorization\s*:\s*/i, "")
+      .replace(/^Authorization\s*:\s+/i, "")
       .replace(/^Bearer\s+/i, "")
       .replace(/\s+/g, "");
     if (!token) {
@@ -695,6 +696,7 @@ export async function pollPendingCalls(limit = 50): Promise<number> {
     }
     return advanced;
   }
+  */
 }
 
 /** Mapeia status do provedor para a condição lógica de SMS. */

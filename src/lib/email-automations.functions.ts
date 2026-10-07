@@ -202,7 +202,7 @@ export const saveEmailFlow = createServerFn({ method: "POST" })
       track_links: b.track_links,
     }));
     if (rows.length > 0) {
-      const { error } = await context.supabase.from("email_flow_blocks").insert(rows);
+      const { error } = await (context.supabase as any).from("email_flow_blocks").insert(rows);
       if (error) throw new Error(error.message);
     }
     return { id: flowId };
@@ -258,7 +258,7 @@ export const duplicateEmailFlow = createServerFn({ method: "POST" })
       .single();
     if (error) throw new Error(error.message);
     if ((blocks ?? []).length > 0) {
-      await context.supabase.from("email_flow_blocks").insert(
+      await (context.supabase as any).from("email_flow_blocks").insert(
         (blocks ?? []).map((b, i) => ({
           flow_id: created.id,
           order_index: i,
@@ -276,7 +276,7 @@ export const duplicateEmailFlow = createServerFn({ method: "POST" })
           send_at_hour: b.send_at_hour,
           send_at_minute: b.send_at_minute,
           skip_if_past: b.skip_if_past,
-          track_links: b.track_links,
+          track_links: (b as any).track_links !== false,
         })),
       );
     }
@@ -402,7 +402,7 @@ export const runEmailFlowsNow = createServerFn({ method: "POST" })
       .from("email_flow_leads")
       .select("id")
       .eq("tenant_id", tenantId)
-      .in("status", ["pending", "running", "cooldown"])
+      .in("status", ["pending", "running"])
       .lte("next_run_at", new Date().toISOString())
       .limit(30);
     if (error) throw new Error(error.message);

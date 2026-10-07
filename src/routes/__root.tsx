@@ -37,7 +37,7 @@ function NotFoundComponent() {
   );
 }
 
-function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
+function ErrorComponent({ error, reset }: { error: unknown; reset: () => void }) {
   console.error(error);
   const router = useRouter();
 
@@ -78,15 +78,24 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "BETLEADS — Inteligência de Players" },
-      { name: "description", content: "Painel premium de inteligência de players para casas de apostas." },
+      {
+        name: "description",
+        content: "Painel premium de inteligência de players para casas de apostas.",
+      },
       { name: "author", content: "BETLEADS" },
       { property: "og:title", content: "BETLEADS — Inteligência de Players" },
-      { property: "og:description", content: "Painel premium de inteligência de players para casas de apostas." },
+      {
+        property: "og:description",
+        content: "Painel premium de inteligência de players para casas de apostas.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
       { name: "twitter:site", content: "@Lovable" },
       { name: "twitter:title", content: "BETLEADS — Inteligência de Players" },
-      { name: "twitter:description", content: "Painel premium de inteligência de players para casas de apostas." },
+      {
+        name: "twitter:description",
+        content: "Painel premium de inteligência de players para casas de apostas.",
+      },
     ],
     links: [
       {

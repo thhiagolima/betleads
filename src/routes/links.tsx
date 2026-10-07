@@ -17,14 +17,18 @@ function LinksPage() {
     <div className="space-y-6 p-4 md:p-6">
       <PageHeader
         title="Links rastreados"
-        description="Cliques Short.io dos últimos 30 dias."
+        subtitle="Cliques Short.io dos últimos 30 dias."
         icon={<Link2 className="h-5 w-5" />}
       />
       <div className="grid gap-4 md:grid-cols-2">
         <Metric title="Links enviados" value={data?.sent ?? 0} />
         <Metric title="Cliques" value={data?.clicks ?? 0} />
       </div>
-      <p className="text-xs text-muted-foreground">Último sync: {data?.lastSync?.finished_at ?? "ainda não executado"} · {data?.lastSync?.links_processed ?? 0} links · {data?.lastSync?.status ?? "sem estado"}{data?.lastSync?.error ? ` · ${data.lastSync.error}` : ""}</p>
+      <p className="text-xs text-muted-foreground">
+        Último sync: {data?.lastSync?.finished_at ?? "ainda não executado"} ·{" "}
+        {data?.lastSync?.links_processed ?? 0} links · {data?.lastSync?.status ?? "sem estado"}
+        {data?.lastSync?.error ? ` · ${data.lastSync.error}` : ""}
+      </p>
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">

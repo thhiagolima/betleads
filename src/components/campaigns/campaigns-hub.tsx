@@ -6,6 +6,7 @@ import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
 
 import { ChannelCampaignComposer } from "@/components/campaigns/channel-campaign-composer";
+import { ChannelObservabilityPanel } from "@/components/campaigns/channel-observability-panel";
 import { IndividualSmsDialog } from "@/components/campaigns/individual-sms-dialog";
 import { MetricCard } from "@/components/ui-premium/metric-card";
 import { Badge } from "@/components/ui/badge";
@@ -46,6 +47,13 @@ type EmailCampaignRow = {
   status: string;
   enviados: number;
   falhas: number;
+};
+
+type DraftSummary = {
+  id: string;
+  name: string;
+  channel: "sms" | "email" | "voice";
+  updatedAt: string;
 };
 
 export function CampaignsHub() {
@@ -219,7 +227,7 @@ export function CampaignsHub() {
                 Campanhas salvas automaticamente e disponíveis para continuar.
               </p>
             </div>
-            {drafts.data!.items.map((draft) => (
+            {(drafts.data!.items as DraftSummary[]).map((draft) => (
               <div
                 key={draft.id}
                 className="flex flex-wrap items-center justify-between gap-3 border-b border-border/50 px-4 py-3 last:border-0"
@@ -271,6 +279,7 @@ export function CampaignsHub() {
         <MetricCard label="Falhas" value={num(failed)} hint="rejeitados ou inválidos" />
         <MetricCard label="Em envio" value={num(queued)} hint="agendadas ou processando" />
       </div>
+      <ChannelObservabilityPanel />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex rounded-lg border border-border/70 bg-card/60 p-1">
           {(["todos", "agendadas", "enviando", "finalizadas"] as CampaignStatus[]).map((value) => (

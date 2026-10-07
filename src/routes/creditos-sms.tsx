@@ -87,7 +87,8 @@ function SmsCreditsPage() {
     mutationFn: (payload: { packageId?: string; credits?: number }) =>
       checkoutFn({ data: payload }),
     onSuccess: (result) => {
-      const orderId = String((result.checkout as Record<string, unknown>)?.order_id ?? "");
+      const checkoutResult = result as { checkout?: Record<string, unknown> };
+      const orderId = String(checkoutResult.checkout?.order_id ?? "");
       toast.success(
         orderId ? `Pedido criado: ${orderId.slice(0, 8)}` : "Pedido de créditos criado",
       );

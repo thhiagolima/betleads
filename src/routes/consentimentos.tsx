@@ -96,7 +96,7 @@ function ConsentPage() {
   const [voicePolicyEnabled, setVoicePolicyEnabled] = useState(true);
   const [cooldownHours, setCooldownHours] = useState(24);
   const [rolling24hLimit, setRolling24hLimit] = useState(1);
-  const query = useQuery({ queryKey: ["channel-consents"], queryFn: () => listFn({ data: {} }) });
+  const query = useQuery({ queryKey: ["channel-consents"], queryFn: () => listFn() });
   const refresh = () => qc.invalidateQueries({ queryKey: ["channel-consents"] });
   const save = useMutation({
     mutationFn: () =>

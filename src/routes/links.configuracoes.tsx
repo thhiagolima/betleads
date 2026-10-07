@@ -20,16 +20,18 @@ function LinkSettings() {
     setSaving(true);
     try {
       await saveShortioSettings({
-        enabled: form.get("enabled") === "on",
-        domain: String(form.get("domain") || "") || null,
-        attribution_mode: "individual",
-        fallback_mode: String(form.get("fallback")) as "block" | "passthrough",
-        default_ttl_days: form.get("ttl") ? Number(form.get("ttl")) : null,
-        allowed_destination_hosts: String(form.get("hosts") || "")
-          .split(/[,\n]/)
-          .map((x) => x.trim())
-          .filter(Boolean),
-        enabled_channels: ["sms", "email"],
+        data: {
+          enabled: form.get("enabled") === "on",
+          domain: String(form.get("domain") || "") || null,
+          attribution_mode: "individual",
+          fallback_mode: String(form.get("fallback")) as "block" | "passthrough",
+          default_ttl_days: form.get("ttl") ? Number(form.get("ttl")) : null,
+          allowed_destination_hosts: String(form.get("hosts") || "")
+            .split(/[,\n]/)
+            .map((x) => x.trim())
+            .filter(Boolean),
+          enabled_channels: ["sms", "email"],
+        },
       });
       q.refetch();
     } finally {
@@ -38,7 +40,7 @@ function LinkSettings() {
   }
   return (
     <div className="space-y-6 p-4 md:p-6">
-      <PageHeader title="Short.io" description="Domínio e regras de rastreamento de links." />
+      <PageHeader title="Short.io" subtitle="Domínio e regras de rastreamento de links." />
       <Card>
         <CardHeader>
           <CardTitle>Configuração do tenant</CardTitle>

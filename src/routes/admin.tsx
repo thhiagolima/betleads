@@ -410,54 +410,89 @@ function ManageAccessButton({ userId, email }: { userId: string; email: string }
               <p className="text-sm font-medium">Adicionar tenant</p>
               <div className="grid gap-2 sm:grid-cols-[1fr_130px_auto]">
                 <Select value={tenantId} onValueChange={setTenantId}>
-                  <SelectTrigger><SelectValue placeholder="Selecione um tenant" /></SelectTrigger>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione um tenant" />
+                  </SelectTrigger>
                   <SelectContent>
-                    {(data?.tenants ?? []).filter((tenant) => !linked.has(tenant.id)).map((tenant) => (
-                      <SelectItem key={tenant.id} value={tenant.id}>{tenant.nome}</SelectItem>
-                    ))}
+                    {(data?.tenants ?? [])
+                      .filter((tenant) => !linked.has(tenant.id))
+                      .map((tenant) => (
+                        <SelectItem key={tenant.id} value={tenant.id}>
+                          {tenant.nome}
+                        </SelectItem>
+                      ))}
                   </SelectContent>
                 </Select>
                 <Select value={role} onValueChange={(value) => setRole(value as typeof role)}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="member">Membro</SelectItem>
                     <SelectItem value="gestor">Gestor</SelectItem>
                     <SelectItem value="admin">Admin</SelectItem>
                   </SelectContent>
                 </Select>
-                <Button disabled={!tenantId || assignMut.isPending} onClick={() => assignMut.mutate()}>Adicionar</Button>
+                <Button
+                  disabled={!tenantId || assignMut.isPending}
+                  onClick={() => assignMut.mutate()}
+                >
+                  Adicionar
+                </Button>
               </div>
             </div>
             <div className="space-y-2">
               {(data?.memberships ?? []).map((membership) => (
-                <div key={membership.id} className="flex items-center gap-3 rounded-lg border border-border/60 p-3">
+                <div
+                  key={membership.id}
+                  className="flex items-center gap-3 rounded-lg border border-border/60 p-3"
+                >
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{membership.tenant?.nome ?? membership.tenant_id}</p>
+                    <p className="truncate text-sm font-medium">
+                      {membership.tenant?.nome ?? membership.tenant_id}
+                    </p>
                     <p className="text-xs text-muted-foreground">{membership.role}</p>
                   </div>
                   <Select
                     value={membership.role}
                     onValueChange={(value) => {
-                      setTenantId(membership.tenant_id);
+                      setTenantId(membership.tenant_id!);
                       setRole(value as typeof role);
-                      assign({ data: { user_id: userId, tenant_id: membership.tenant_id, role: value as typeof role } })
-                        .then(() => qc.invalidateQueries({ queryKey: ["admin-user-accesses", userId] }))
+                      assign({
+                        data: {
+                          user_id: userId,
+                          tenant_id: membership.tenant_id!,
+                          role: value as typeof role,
+                        },
+                      })
+                        .then(() =>
+                          qc.invalidateQueries({ queryKey: ["admin-user-accesses", userId] }),
+                        )
                         .catch((error: Error) => toast.error(error.message));
                     }}
                   >
-                    <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
+                    <SelectTrigger className="w-28">
+                      <SelectValue />
+                    </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="member">Membro</SelectItem>
                       <SelectItem value="gestor">Gestor</SelectItem>
                       <SelectItem value="admin">Admin</SelectItem>
                     </SelectContent>
                   </Select>
-                  <Button size="sm" variant="ghost" disabled={membership.role === "admin" || removeMut.isPending} onClick={() => removeMut.mutate(membership.tenant_id)}>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={membership.role === "admin" || removeMut.isPending}
+                    onClick={() => removeMut.mutate(membership.tenant_id!)}
+                  >
                     <Trash2 className="h-4 w-4 text-destructive" />
                   </Button>
                 </div>
               ))}
-              {!data?.memberships?.length && <p className="text-sm text-muted-foreground">Sem vínculos de tenant.</p>}
+              {!data?.memberships?.length && (
+                <p className="text-sm text-muted-foreground">Sem vínculos de tenant.</p>
+              )}
             </div>
           </div>
         )}
@@ -500,12 +535,7 @@ function CreateUserDialog({ onCreated }: { onCreated: () => void }) {
         <div className="space-y-3">
           <div className="hidden">
             <Label htmlFor="dn">Nome da conta</Label>
-            <Input
-              id="dn"
-              value=""
-              onChange={() => {}}
-              placeholder="Ex: Casa do João"
-            />
+            <Input id="dn" value="" onChange={() => {}} placeholder="Ex: Casa do João" />
           </div>
           <div>
             <Label htmlFor="em">Email</Label>

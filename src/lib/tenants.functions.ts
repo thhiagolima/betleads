@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import type { Json } from "@/integrations/supabase/types";
 import { dbUuid } from "@/lib/zod-helpers";
 
 type DbError = { message: string };
@@ -44,8 +45,8 @@ type TenantRow = {
   status: string;
   plano: string;
   crm_model?: string | null;
-  limits?: Record<string, unknown> | null;
-  metadata?: Record<string, unknown> | null;
+  limits?: Json | null;
+  metadata?: Json | null;
   created_at: string;
   updated_at: string | null;
 };
@@ -347,7 +348,7 @@ export const getTenantManagementConsole = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => consoleInput.parse(data ?? {}))
   .handler(async ({ data, context }) => {
-    const ctx = context as ServerContext;
+    const ctx = context as unknown as ServerContext;
     const { superAdmin, tenants } = await getAccessibleTenants(ctx);
     const selectedTenantId = data.tenantId ?? tenants[0]?.id ?? null;
 
@@ -376,7 +377,7 @@ export const getTenantManagementConsole = createServerFn({ method: "POST" })
 export const getTenantSwitcher = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const ctx = context as ServerContext;
+    const ctx = context as unknown as ServerContext;
     const superAdmin = await checkSuperAdmin(ctx.userId);
     const { data: memberships, error: membershipErr } = await db()
       .from<TenantMemberRow[]>("user_roles")
@@ -390,20 +391,27 @@ export const getTenantSwitcher = createServerFn({ method: "GET" })
     const { data: tenants, error: tenantsErr } = await db()
       .from<TenantRow[]>("tenants")
       .select("id,nome,slug,status,plano,crm_model,limits,metadata,created_at,updated_at")
-      .in("id", superAdmin ? (await getAccessibleTenants(ctx)).tenants.map((tenant) => tenant.id) : tenantIds)
+      .in(
+        "id",
+        superAdmin
+          ? (await getAccessibleTenants(ctx)).tenants.map((tenant) => tenant.id)
+          : tenantIds,
+      )
       .order("nome", { ascending: true });
     if (tenantsErr) throw new Error(tenantsErr.message);
 
-    const roleByTenant = new Map(roles.map((membership) => [membership.tenant_id, membership.role]));
+    const roleByTenant = new Map(
+      roles.map((membership) => [membership.tenant_id, membership.role]),
+    );
     const options = (tenants ?? []).map((tenant) => ({
       id: tenant.id,
       nome: tenant.nome,
       slug: tenant.slug,
-      role: superAdmin ? "super_admin" : roleByTenant.get(tenant.id) ?? "member",
+      role: superAdmin ? "super_admin" : (roleByTenant.get(tenant.id) ?? "member"),
     }));
     const activeTenantId = options.some((tenant) => tenant.id === ctx.activeTenantId)
       ? ctx.activeTenantId
-      : options[0]?.id ?? null;
+      : (options[0]?.id ?? null);
 
     return { activeTenantId, tenants: options };
   });
@@ -411,7 +419,7 @@ export const getTenantSwitcher = createServerFn({ method: "GET" })
 export const getCurrentTenantAccessStatus = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const ctx = context as ServerContext;
+    const ctx = context as unknown as ServerContext;
     const superAdmin = await checkSuperAdmin(ctx.userId);
 
     if (superAdmin) {
@@ -463,7 +471,7 @@ export const adminCreateTenant = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => createTenantInput.parse(data))
   .handler(async ({ data, context }) => {
-    const ctx = context as ServerContext;
+    const ctx = context as unknown as ServerContext;
     await assertSuperAdmin(ctx.userId);
 
     const slug = normalizeSlug(data.slug || data.nome);
@@ -520,7 +528,7 @@ export const updateTenantSettings = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => updateTenantInput.parse(data))
   .handler(async ({ data, context }) => {
-    const ctx = context as ServerContext;
+    const ctx = context as unknown as ServerContext;
     const superAdmin = await checkSuperAdmin(ctx.userId);
     await requireTenantManager(ctx, data.tenantId);
 
@@ -578,7 +586,7 @@ export const addUserToTenant = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => addUserInput.parse(data))
   .handler(async ({ data, context }) => {
-    const ctx = context as ServerContext;
+    const ctx = context as unknown as ServerContext;
     await requireTenantManager(ctx, data.tenantId);
     const actorIsSuperAdmin = await checkSuperAdmin(ctx.userId);
 
@@ -676,7 +684,7 @@ export const updateTenantUserRole = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => updateUserRoleInput.parse(data))
   .handler(async ({ data, context }) => {
-    const ctx = context as ServerContext;
+    const ctx = context as unknown as ServerContext;
     await requireTenantManager(ctx, data.tenantId);
     const actorIsSuperAdmin = await checkSuperAdmin(ctx.userId);
 
@@ -735,7 +743,7 @@ export const removeUserFromTenant = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => removeUserInput.parse(data))
   .handler(async ({ data, context }) => {
-    const ctx = context as ServerContext;
+    const ctx = context as unknown as ServerContext;
     await requireTenantManager(ctx, data.tenantId);
 
     const { data: memberships, error: listErr } = await db()

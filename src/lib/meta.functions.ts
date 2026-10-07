@@ -93,6 +93,7 @@ type MetaAdAccount = {
 
 type MetaPermission = { permission: string; status: string };
 type MetaApp = { id: string; name?: string };
+type MetaUser = { id: string; name?: string };
 
 function metaApiVersion() {
   return process.env.META_API_VERSION ?? "v23.0";
@@ -254,9 +255,10 @@ async function loadAllAdAccounts(accessToken: string) {
   return rows;
 }
 
-async function resolveTenantId(supabase: {
-  rpc: (name: string) => Promise<{ data: unknown; error: { message: string } | null }>;
-}) {
+async function resolveTenantId(client: unknown) {
+  const supabase = client as {
+    rpc: (name: string) => PromiseLike<{ data: unknown; error: { message: string } | null }>;
+  };
   const { data, error } = await supabase.rpc("current_tenant_id");
   if (error) throw new Error(error.message);
   if (!data) throw new Error("Tenant nao identificado");
@@ -912,9 +914,9 @@ async function enqueueScheduledMetaSyncs() {
     .select("tenant_id,meta_connections!inner(status)")
     .eq("selected", true)
     .eq("meta_connections.status", "connected");
-  const tenantIds = [
-    ...new Set((accounts ?? []).map((account: { tenant_id: string }) => account.tenant_id)),
-  ];
+  const tenantIds: string[] = Array.from(
+    new Set<string>((accounts ?? []).map((account: { tenant_id: string }) => account.tenant_id)),
+  );
   const since = new Date(Date.now() - 23 * 60 * 60 * 1000).toISOString();
   let enqueued = 0;
   for (const tenantId of tenantIds) {

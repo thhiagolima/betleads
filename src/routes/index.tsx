@@ -37,6 +37,7 @@ import {
 } from "recharts";
 
 import { supabase } from "@/integrations/supabase/client";
+import type { Tables } from "@/integrations/supabase/types";
 import { brl, num, timeAgo } from "@/lib/format";
 import { brtDayEnd, brtDayStart } from "@/lib/tz";
 import { getDashboardSummary } from "@/lib/dashboard.functions";
@@ -209,7 +210,7 @@ async function fetchAllRows<Row>(
   fetchPage: (
     from: number,
     to: number,
-  ) => Promise<{
+  ) => PromiseLike<{
     data: Row[] | null;
     error: { message: string } | null;
   }>,
@@ -344,7 +345,12 @@ async function fetchDashboardLegacy(range: { from: Date; to: Date }, tenantId: s
         .lte("created_at", isoEnd)
         .range(from, to),
     ),
-    fetchAllRows((from, to) =>
+    fetchAllRows<
+      Pick<
+        Tables<"sms_send_logs">,
+        "id" | "player_id" | "created_at" | "status" | "delivery_status"
+      >
+    >((from, to) =>
       supabase
         .from("sms_send_logs")
         .select("id,player_id,created_at,status,delivery_status")
@@ -463,7 +469,7 @@ async function fetchDashboardLegacy(range: { from: Date; to: Date }, tenantId: s
   const recoveredAmount = sumMoney(recoveredDeposits);
   const recoveredPlayers = new Set(recoveredDeposits.map((d) => d.player_id).filter(Boolean)).size;
   const recoveredNew = recoveredDeposits
-    .filter((d) => d.player_id && playersById.get(d.player_id)?.created_at >= iso)
+    .filter((d) => d.player_id && (playersById.get(d.player_id)?.created_at ?? "") >= iso)
     .reduce((acc, d) => acc + Number(d.valor ?? 0), 0);
   const recoveredReactivated = recoveredDeposits
     .filter((d) => d.player_id && !playersById.get(d.player_id)?.ftd_em)

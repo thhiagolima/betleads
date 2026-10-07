@@ -169,9 +169,10 @@ const DEFAULT_GAMIFICATION: GamificationSettings = {
 };
 
 async function readGamificationSettings(
-  supabase: SettingsClient,
+  client: unknown,
   tenantId: string,
 ): Promise<GamificationSettings> {
+  const supabase = client as SettingsClient;
   const { data, error } = await supabase
     .from("gamification_settings")
     .select("level_thresholds,cooling_after_days,sleeping_after_days,vip_min_level")
@@ -276,10 +277,8 @@ function applyGamificationDimensions<T extends QueryLike>(
   return result;
 }
 
-async function attachDepositCounts(
-  supabase: DepositCountClient,
-  rows: PlayerRow[],
-): Promise<PlayerRow[]> {
+async function attachDepositCounts(client: unknown, rows: PlayerRow[]): Promise<PlayerRow[]> {
+  const supabase = client as DepositCountClient;
   if (rows.length === 0) return rows;
   const ids = rows.map((row) => row.id);
   const counts = new Map<string, number>();
@@ -337,13 +336,11 @@ export const getPlayersPage = createServerFn({ method: "POST" })
     );
     const primaryBehaviorFilter = behaviorFilters[0] ?? filter;
     const usesCombinedBehaviorFilters = behaviorFilters.length > 1;
-    const gamificationSettings = needsGamificationSettings(
-      primaryBehaviorFilter,
-      gamificationStatus,
-      gamificationLevel,
-    ) || behaviorFilters.some((value) => ["vip", "vip_em_risco", "quase_vip"].includes(value))
-      ? await readGamificationSettings(supabase, tenantId as string)
-      : DEFAULT_GAMIFICATION;
+    const gamificationSettings =
+      needsGamificationSettings(primaryBehaviorFilter, gamificationStatus, gamificationLevel) ||
+      behaviorFilters.some((value) => ["vip", "vip_em_risco", "quase_vip"].includes(value))
+        ? await readGamificationSettings(supabase, tenantId as string)
+        : DEFAULT_GAMIFICATION;
 
     // Helper para aplicar filtros de janela / regra no PostgREST builder.
     const now = Date.now();
@@ -387,76 +384,77 @@ export const getPlayersPage = createServerFn({ method: "POST" })
     }
 
     // 3) Filtros de janela / regra.
-    if (!usesCombinedBehaviorFilters) switch (primaryBehaviorFilter) {
-      case "recorrentes":
-        q = applyActiveWithin(q, daysAgo(4));
-        break;
-      case "ativo":
-        q = q.not("ftd_em", "is", null);
-        break;
-      case "em_risco":
-        q = applyInactiveAtLeast(q, daysAgo(7));
-        break;
-      case "risco_5_7":
-        q = applyInactivityWindow(q, daysAgo(5), daysAgo(7));
-        break;
-      case "vip":
-        q = q.or(`vip.eq.true,total_depositado.gte.${vipThreshold(gamificationSettings)}`);
-        break;
-      case "vip_em_risco":
-        q = applyInactiveAtLeast(
-          q.or(`vip.eq.true,total_depositado.gte.${vipThreshold(gamificationSettings)}`),
-          daysAgo(7),
-        );
-        break;
-      case "quase_vip":
-        q = q
-          .eq("vip", false)
-          .gte("total_depositado", vipThreshold(gamificationSettings) * 0.7)
-          .lt("total_depositado", vipThreshold(gamificationSettings));
-        break;
-      case "leads_quentes":
-        q = applyActiveWithin(q, daysAgo(4)).gte("ultimo_deposito", daysAgo(7));
-        break;
-      case "com_saldo":
-        // saldo_carteira + saldo_bonus > 0 → usa OR sobre cada coluna positiva (próximo o suficiente, pega o relevante)
-        q = applyActiveWithin(q.or(`saldo_carteira.gt.0,saldo_bonus.gt.0`), daysAgo(60));
-        break;
-      case "deposito_hoje":
-        q = q.gte("ultimo_deposito", todayStartBrt);
-        break;
-      case "ftd_hoje":
-        q = q.gte("ftd_em", todayStartBrt);
-        break;
-      case "nao_converteram":
-        q = q.is("ftd_em", null);
-        break;
-      case "risco_inicial":
-        q = applyInactivityWindow(q, daysAgo(7), daysAgo(14)).not("ftd_em", "is", null);
-        break;
-      case "risco_moderado":
-        q = applyInactivityWindow(q, daysAgo(15), daysAgo(24)).not("ftd_em", "is", null);
-        break;
-      case "risco_alto":
-        q = applyInactivityWindow(q, daysAgo(25), daysAgo(34)).not("ftd_em", "is", null);
-        break;
-      case "quase_perdido":
-        q = applyInactivityWindow(q, daysAgo(35), daysAgo(44)).not("ftd_em", "is", null);
-        break;
-      case "recuperacao_dificil":
-        q = applyInactivityWindow(q, daysAgo(45), daysAgo(59)).not("ftd_em", "is", null);
-        break;
-      case "perdidos":
-        q = applyInactiveAtLeast(q, daysAgo(60)).not("ftd_em", "is", null);
-        break;
-      case "cashback_pago_hoje":
-        q = q.gte("last_cashback_paid_at", todayStartBrt);
-        break;
-      // "todos" e quaisquer filtros desconhecidos não restringem nada.
-      default:
-        q = applyGamificationFilter(q, filter, gamificationSettings);
-        break;
-    }
+    if (!usesCombinedBehaviorFilters)
+      switch (primaryBehaviorFilter) {
+        case "recorrentes":
+          q = applyActiveWithin(q, daysAgo(4));
+          break;
+        case "ativo":
+          q = q.not("ftd_em", "is", null);
+          break;
+        case "em_risco":
+          q = applyInactiveAtLeast(q, daysAgo(7));
+          break;
+        case "risco_5_7":
+          q = applyInactivityWindow(q, daysAgo(5), daysAgo(7));
+          break;
+        case "vip":
+          q = q.or(`vip.eq.true,total_depositado.gte.${vipThreshold(gamificationSettings)}`);
+          break;
+        case "vip_em_risco":
+          q = applyInactiveAtLeast(
+            q.or(`vip.eq.true,total_depositado.gte.${vipThreshold(gamificationSettings)}`),
+            daysAgo(7),
+          );
+          break;
+        case "quase_vip":
+          q = q
+            .eq("vip", false)
+            .gte("total_depositado", vipThreshold(gamificationSettings) * 0.7)
+            .lt("total_depositado", vipThreshold(gamificationSettings));
+          break;
+        case "leads_quentes":
+          q = applyActiveWithin(q, daysAgo(4)).gte("ultimo_deposito", daysAgo(7));
+          break;
+        case "com_saldo":
+          // saldo_carteira + saldo_bonus > 0 → usa OR sobre cada coluna positiva (próximo o suficiente, pega o relevante)
+          q = applyActiveWithin(q.or(`saldo_carteira.gt.0,saldo_bonus.gt.0`), daysAgo(60));
+          break;
+        case "deposito_hoje":
+          q = q.gte("ultimo_deposito", todayStartBrt);
+          break;
+        case "ftd_hoje":
+          q = q.gte("ftd_em", todayStartBrt);
+          break;
+        case "nao_converteram":
+          q = q.is("ftd_em", null);
+          break;
+        case "risco_inicial":
+          q = applyInactivityWindow(q, daysAgo(7), daysAgo(14)).not("ftd_em", "is", null);
+          break;
+        case "risco_moderado":
+          q = applyInactivityWindow(q, daysAgo(15), daysAgo(24)).not("ftd_em", "is", null);
+          break;
+        case "risco_alto":
+          q = applyInactivityWindow(q, daysAgo(25), daysAgo(34)).not("ftd_em", "is", null);
+          break;
+        case "quase_perdido":
+          q = applyInactivityWindow(q, daysAgo(35), daysAgo(44)).not("ftd_em", "is", null);
+          break;
+        case "recuperacao_dificil":
+          q = applyInactivityWindow(q, daysAgo(45), daysAgo(59)).not("ftd_em", "is", null);
+          break;
+        case "perdidos":
+          q = applyInactiveAtLeast(q, daysAgo(60)).not("ftd_em", "is", null);
+          break;
+        case "cashback_pago_hoje":
+          q = q.gte("last_cashback_paid_at", todayStartBrt);
+          break;
+        // "todos" e quaisquer filtros desconhecidos não restringem nada.
+        default:
+          q = applyGamificationFilter(q, filter, gamificationSettings);
+          break;
+      }
     q = applyGamificationDimensions(q, gamificationStatus, gamificationLevel, gamificationSettings);
 
     // 4) Range de datas (independente dos chips).
@@ -530,74 +528,75 @@ export const getPlayersPage = createServerFn({ method: "POST" })
       );
     }
     // duplica o switch acima — pequeno custo de manutenção em troca de simplicidade
-    if (!usesCombinedBehaviorFilters) switch (primaryBehaviorFilter) {
-      case "recorrentes":
-        slim = applyActiveWithin(slim, daysAgo(4));
-        break;
-      case "ativo":
-        slim = slim.not("ftd_em", "is", null);
-        break;
-      case "em_risco":
-        slim = applyInactiveAtLeast(slim, daysAgo(7));
-        break;
-      case "risco_5_7":
-        slim = applyInactivityWindow(slim, daysAgo(5), daysAgo(7));
-        break;
-      case "vip":
-        slim = slim.or(`vip.eq.true,total_depositado.gte.${vipThreshold(gamificationSettings)}`);
-        break;
-      case "vip_em_risco":
-        slim = applyInactiveAtLeast(
-          slim.or(`vip.eq.true,total_depositado.gte.${vipThreshold(gamificationSettings)}`),
-          daysAgo(7),
-        );
-        break;
-      case "quase_vip":
-        slim = slim
-          .eq("vip", false)
-          .gte("total_depositado", vipThreshold(gamificationSettings) * 0.7)
-          .lt("total_depositado", vipThreshold(gamificationSettings));
-        break;
-      case "leads_quentes":
-        slim = applyActiveWithin(slim, daysAgo(4)).gte("ultimo_deposito", daysAgo(7));
-        break;
-      case "com_saldo":
-        slim = applyActiveWithin(slim.or(`saldo_carteira.gt.0,saldo_bonus.gt.0`), daysAgo(60));
-        break;
-      case "deposito_hoje":
-        slim = slim.gte("ultimo_deposito", todayStartBrt);
-        break;
-      case "ftd_hoje":
-        slim = slim.gte("ftd_em", todayStartBrt);
-        break;
-      case "nao_converteram":
-        slim = slim.is("ftd_em", null);
-        break;
-      case "risco_inicial":
-        slim = applyInactivityWindow(slim, daysAgo(7), daysAgo(14)).not("ftd_em", "is", null);
-        break;
-      case "risco_moderado":
-        slim = applyInactivityWindow(slim, daysAgo(15), daysAgo(24)).not("ftd_em", "is", null);
-        break;
-      case "risco_alto":
-        slim = applyInactivityWindow(slim, daysAgo(25), daysAgo(34)).not("ftd_em", "is", null);
-        break;
-      case "quase_perdido":
-        slim = applyInactivityWindow(slim, daysAgo(35), daysAgo(44)).not("ftd_em", "is", null);
-        break;
-      case "recuperacao_dificil":
-        slim = applyInactivityWindow(slim, daysAgo(45), daysAgo(59)).not("ftd_em", "is", null);
-        break;
-      case "perdidos":
-        slim = applyInactiveAtLeast(slim, daysAgo(60)).not("ftd_em", "is", null);
-        break;
-      case "cashback_pago_hoje":
-        slim = slim.gte("last_cashback_paid_at", todayStartBrt);
-        break;
-      default:
-        slim = applyGamificationFilter(slim, filter, gamificationSettings);
-        break;
-    }
+    if (!usesCombinedBehaviorFilters)
+      switch (primaryBehaviorFilter) {
+        case "recorrentes":
+          slim = applyActiveWithin(slim, daysAgo(4));
+          break;
+        case "ativo":
+          slim = slim.not("ftd_em", "is", null);
+          break;
+        case "em_risco":
+          slim = applyInactiveAtLeast(slim, daysAgo(7));
+          break;
+        case "risco_5_7":
+          slim = applyInactivityWindow(slim, daysAgo(5), daysAgo(7));
+          break;
+        case "vip":
+          slim = slim.or(`vip.eq.true,total_depositado.gte.${vipThreshold(gamificationSettings)}`);
+          break;
+        case "vip_em_risco":
+          slim = applyInactiveAtLeast(
+            slim.or(`vip.eq.true,total_depositado.gte.${vipThreshold(gamificationSettings)}`),
+            daysAgo(7),
+          );
+          break;
+        case "quase_vip":
+          slim = slim
+            .eq("vip", false)
+            .gte("total_depositado", vipThreshold(gamificationSettings) * 0.7)
+            .lt("total_depositado", vipThreshold(gamificationSettings));
+          break;
+        case "leads_quentes":
+          slim = applyActiveWithin(slim, daysAgo(4)).gte("ultimo_deposito", daysAgo(7));
+          break;
+        case "com_saldo":
+          slim = applyActiveWithin(slim.or(`saldo_carteira.gt.0,saldo_bonus.gt.0`), daysAgo(60));
+          break;
+        case "deposito_hoje":
+          slim = slim.gte("ultimo_deposito", todayStartBrt);
+          break;
+        case "ftd_hoje":
+          slim = slim.gte("ftd_em", todayStartBrt);
+          break;
+        case "nao_converteram":
+          slim = slim.is("ftd_em", null);
+          break;
+        case "risco_inicial":
+          slim = applyInactivityWindow(slim, daysAgo(7), daysAgo(14)).not("ftd_em", "is", null);
+          break;
+        case "risco_moderado":
+          slim = applyInactivityWindow(slim, daysAgo(15), daysAgo(24)).not("ftd_em", "is", null);
+          break;
+        case "risco_alto":
+          slim = applyInactivityWindow(slim, daysAgo(25), daysAgo(34)).not("ftd_em", "is", null);
+          break;
+        case "quase_perdido":
+          slim = applyInactivityWindow(slim, daysAgo(35), daysAgo(44)).not("ftd_em", "is", null);
+          break;
+        case "recuperacao_dificil":
+          slim = applyInactivityWindow(slim, daysAgo(45), daysAgo(59)).not("ftd_em", "is", null);
+          break;
+        case "perdidos":
+          slim = applyInactiveAtLeast(slim, daysAgo(60)).not("ftd_em", "is", null);
+          break;
+        case "cashback_pago_hoje":
+          slim = slim.gte("last_cashback_paid_at", todayStartBrt);
+          break;
+        default:
+          slim = applyGamificationFilter(slim, filter, gamificationSettings);
+          break;
+      }
     slim = applyGamificationDimensions(
       slim,
       gamificationStatus,
@@ -692,13 +691,11 @@ export const getPlayersFilteredExternalIds = createServerFn({ method: "POST" })
       );
       const primaryBehaviorFilter = behaviorFilters[0] ?? filter;
       const usesCombinedBehaviorFilters = behaviorFilters.length > 1;
-      const gamificationSettings = needsGamificationSettings(
-        primaryBehaviorFilter,
-        gamificationStatus,
-        gamificationLevel,
-      ) || behaviorFilters.some((value) => ["vip", "vip_em_risco", "quase_vip"].includes(value))
-        ? await readGamificationSettings(supabase, tenantId as string)
-        : DEFAULT_GAMIFICATION;
+      const gamificationSettings =
+        needsGamificationSettings(primaryBehaviorFilter, gamificationStatus, gamificationLevel) ||
+        behaviorFilters.some((value) => ["vip", "vip_em_risco", "quase_vip"].includes(value))
+          ? await readGamificationSettings(supabase, tenantId as string)
+          : DEFAULT_GAMIFICATION;
       const now = Date.now();
       const daysAgo = (n: number) => new Date(now - n * 86400000).toISOString();
 
@@ -736,74 +733,75 @@ export const getPlayersFilteredExternalIds = createServerFn({ method: "POST" })
         );
       }
 
-      if (!usesCombinedBehaviorFilters) switch (primaryBehaviorFilter) {
-        case "recorrentes":
-          q = applyActiveWithin(q, daysAgo(4));
-          break;
-        case "ativo":
-          q = q.not("ftd_em", "is", null);
-          break;
-        case "em_risco":
-          q = applyInactiveAtLeast(q, daysAgo(7));
-          break;
-        case "risco_5_7":
-          q = applyInactivityWindow(q, daysAgo(5), daysAgo(7));
-          break;
-        case "vip":
-          q = q.or(`vip.eq.true,total_depositado.gte.${vipThreshold(gamificationSettings)}`);
-          break;
-        case "vip_em_risco":
-          q = applyInactiveAtLeast(
-            q.or(`vip.eq.true,total_depositado.gte.${vipThreshold(gamificationSettings)}`),
-            daysAgo(7),
-          );
-          break;
-        case "quase_vip":
-          q = q
-            .eq("vip", false)
-            .gte("total_depositado", vipThreshold(gamificationSettings) * 0.7)
-            .lt("total_depositado", vipThreshold(gamificationSettings));
-          break;
-        case "leads_quentes":
-          q = applyActiveWithin(q, daysAgo(4)).gte("ultimo_deposito", daysAgo(7));
-          break;
-        case "com_saldo":
-          q = applyActiveWithin(q.or(`saldo_carteira.gt.0,saldo_bonus.gt.0`), daysAgo(60));
-          break;
-        case "deposito_hoje":
-          q = q.gte("ultimo_deposito", todayStartBrt);
-          break;
-        case "ftd_hoje":
-          q = q.gte("ftd_em", todayStartBrt);
-          break;
-        case "nao_converteram":
-          q = q.is("ftd_em", null);
-          break;
-        case "risco_inicial":
-          q = applyInactivityWindow(q, daysAgo(7), daysAgo(14)).not("ftd_em", "is", null);
-          break;
-        case "risco_moderado":
-          q = applyInactivityWindow(q, daysAgo(15), daysAgo(24)).not("ftd_em", "is", null);
-          break;
-        case "risco_alto":
-          q = applyInactivityWindow(q, daysAgo(25), daysAgo(34)).not("ftd_em", "is", null);
-          break;
-        case "quase_perdido":
-          q = applyInactivityWindow(q, daysAgo(35), daysAgo(44)).not("ftd_em", "is", null);
-          break;
-        case "recuperacao_dificil":
-          q = applyInactivityWindow(q, daysAgo(45), daysAgo(59)).not("ftd_em", "is", null);
-          break;
-        case "perdidos":
-          q = applyInactiveAtLeast(q, daysAgo(60)).not("ftd_em", "is", null);
-          break;
-        case "cashback_pago_hoje":
-          q = q.gte("last_cashback_paid_at", todayStartBrt);
-          break;
-        default:
-          q = applyGamificationFilter(q, filter, gamificationSettings);
-          break;
-      }
+      if (!usesCombinedBehaviorFilters)
+        switch (primaryBehaviorFilter) {
+          case "recorrentes":
+            q = applyActiveWithin(q, daysAgo(4));
+            break;
+          case "ativo":
+            q = q.not("ftd_em", "is", null);
+            break;
+          case "em_risco":
+            q = applyInactiveAtLeast(q, daysAgo(7));
+            break;
+          case "risco_5_7":
+            q = applyInactivityWindow(q, daysAgo(5), daysAgo(7));
+            break;
+          case "vip":
+            q = q.or(`vip.eq.true,total_depositado.gte.${vipThreshold(gamificationSettings)}`);
+            break;
+          case "vip_em_risco":
+            q = applyInactiveAtLeast(
+              q.or(`vip.eq.true,total_depositado.gte.${vipThreshold(gamificationSettings)}`),
+              daysAgo(7),
+            );
+            break;
+          case "quase_vip":
+            q = q
+              .eq("vip", false)
+              .gte("total_depositado", vipThreshold(gamificationSettings) * 0.7)
+              .lt("total_depositado", vipThreshold(gamificationSettings));
+            break;
+          case "leads_quentes":
+            q = applyActiveWithin(q, daysAgo(4)).gte("ultimo_deposito", daysAgo(7));
+            break;
+          case "com_saldo":
+            q = applyActiveWithin(q.or(`saldo_carteira.gt.0,saldo_bonus.gt.0`), daysAgo(60));
+            break;
+          case "deposito_hoje":
+            q = q.gte("ultimo_deposito", todayStartBrt);
+            break;
+          case "ftd_hoje":
+            q = q.gte("ftd_em", todayStartBrt);
+            break;
+          case "nao_converteram":
+            q = q.is("ftd_em", null);
+            break;
+          case "risco_inicial":
+            q = applyInactivityWindow(q, daysAgo(7), daysAgo(14)).not("ftd_em", "is", null);
+            break;
+          case "risco_moderado":
+            q = applyInactivityWindow(q, daysAgo(15), daysAgo(24)).not("ftd_em", "is", null);
+            break;
+          case "risco_alto":
+            q = applyInactivityWindow(q, daysAgo(25), daysAgo(34)).not("ftd_em", "is", null);
+            break;
+          case "quase_perdido":
+            q = applyInactivityWindow(q, daysAgo(35), daysAgo(44)).not("ftd_em", "is", null);
+            break;
+          case "recuperacao_dificil":
+            q = applyInactivityWindow(q, daysAgo(45), daysAgo(59)).not("ftd_em", "is", null);
+            break;
+          case "perdidos":
+            q = applyInactiveAtLeast(q, daysAgo(60)).not("ftd_em", "is", null);
+            break;
+          case "cashback_pago_hoje":
+            q = q.gte("last_cashback_paid_at", todayStartBrt);
+            break;
+          default:
+            q = applyGamificationFilter(q, filter, gamificationSettings);
+            break;
+        }
       q = applyGamificationDimensions(
         q,
         gamificationStatus,
@@ -880,13 +878,11 @@ export const getPlayersFilteredSmsAudience = createServerFn({ method: "POST" })
       );
       const primaryBehaviorFilter = behaviorFilters[0] ?? filter;
       const usesCombinedBehaviorFilters = behaviorFilters.length > 1;
-      const gamificationSettings = needsGamificationSettings(
-        primaryBehaviorFilter,
-        gamificationStatus,
-        gamificationLevel,
-      ) || behaviorFilters.some((value) => ["vip", "vip_em_risco", "quase_vip"].includes(value))
-        ? await readGamificationSettings(supabase, tenantId as string)
-        : DEFAULT_GAMIFICATION;
+      const gamificationSettings =
+        needsGamificationSettings(primaryBehaviorFilter, gamificationStatus, gamificationLevel) ||
+        behaviorFilters.some((value) => ["vip", "vip_em_risco", "quase_vip"].includes(value))
+          ? await readGamificationSettings(supabase, tenantId as string)
+          : DEFAULT_GAMIFICATION;
       const now = Date.now();
       const daysAgo = (n: number) => new Date(now - n * 86400000).toISOString();
       const todayStartBrt = (() => {
@@ -923,74 +919,75 @@ export const getPlayersFilteredSmsAudience = createServerFn({ method: "POST" })
         );
       }
 
-      if (!usesCombinedBehaviorFilters) switch (primaryBehaviorFilter) {
-        case "recorrentes":
-          q = applyActiveWithin(q, daysAgo(4));
-          break;
-        case "ativo":
-          q = q.not("ftd_em", "is", null);
-          break;
-        case "em_risco":
-          q = applyInactiveAtLeast(q, daysAgo(7));
-          break;
-        case "risco_5_7":
-          q = applyInactivityWindow(q, daysAgo(5), daysAgo(7));
-          break;
-        case "vip":
-          q = q.or(`vip.eq.true,total_depositado.gte.${vipThreshold(gamificationSettings)}`);
-          break;
-        case "vip_em_risco":
-          q = applyInactiveAtLeast(
-            q.or(`vip.eq.true,total_depositado.gte.${vipThreshold(gamificationSettings)}`),
-            daysAgo(7),
-          );
-          break;
-        case "quase_vip":
-          q = q
-            .eq("vip", false)
-            .gte("total_depositado", vipThreshold(gamificationSettings) * 0.7)
-            .lt("total_depositado", vipThreshold(gamificationSettings));
-          break;
-        case "leads_quentes":
-          q = applyActiveWithin(q, daysAgo(4)).gte("ultimo_deposito", daysAgo(7));
-          break;
-        case "com_saldo":
-          q = applyActiveWithin(q.or(`saldo_carteira.gt.0,saldo_bonus.gt.0`), daysAgo(60));
-          break;
-        case "deposito_hoje":
-          q = q.gte("ultimo_deposito", todayStartBrt);
-          break;
-        case "ftd_hoje":
-          q = q.gte("ftd_em", todayStartBrt);
-          break;
-        case "nao_converteram":
-          q = q.is("ftd_em", null);
-          break;
-        case "risco_inicial":
-          q = applyInactivityWindow(q, daysAgo(7), daysAgo(14)).not("ftd_em", "is", null);
-          break;
-        case "risco_moderado":
-          q = applyInactivityWindow(q, daysAgo(15), daysAgo(24)).not("ftd_em", "is", null);
-          break;
-        case "risco_alto":
-          q = applyInactivityWindow(q, daysAgo(25), daysAgo(34)).not("ftd_em", "is", null);
-          break;
-        case "quase_perdido":
-          q = applyInactivityWindow(q, daysAgo(35), daysAgo(44)).not("ftd_em", "is", null);
-          break;
-        case "recuperacao_dificil":
-          q = applyInactivityWindow(q, daysAgo(45), daysAgo(59)).not("ftd_em", "is", null);
-          break;
-        case "perdidos":
-          q = applyInactiveAtLeast(q, daysAgo(60)).not("ftd_em", "is", null);
-          break;
-        case "cashback_pago_hoje":
-          q = q.gte("last_cashback_paid_at", todayStartBrt);
-          break;
-        default:
-          q = applyGamificationFilter(q, filter, gamificationSettings);
-          break;
-      }
+      if (!usesCombinedBehaviorFilters)
+        switch (primaryBehaviorFilter) {
+          case "recorrentes":
+            q = applyActiveWithin(q, daysAgo(4));
+            break;
+          case "ativo":
+            q = q.not("ftd_em", "is", null);
+            break;
+          case "em_risco":
+            q = applyInactiveAtLeast(q, daysAgo(7));
+            break;
+          case "risco_5_7":
+            q = applyInactivityWindow(q, daysAgo(5), daysAgo(7));
+            break;
+          case "vip":
+            q = q.or(`vip.eq.true,total_depositado.gte.${vipThreshold(gamificationSettings)}`);
+            break;
+          case "vip_em_risco":
+            q = applyInactiveAtLeast(
+              q.or(`vip.eq.true,total_depositado.gte.${vipThreshold(gamificationSettings)}`),
+              daysAgo(7),
+            );
+            break;
+          case "quase_vip":
+            q = q
+              .eq("vip", false)
+              .gte("total_depositado", vipThreshold(gamificationSettings) * 0.7)
+              .lt("total_depositado", vipThreshold(gamificationSettings));
+            break;
+          case "leads_quentes":
+            q = applyActiveWithin(q, daysAgo(4)).gte("ultimo_deposito", daysAgo(7));
+            break;
+          case "com_saldo":
+            q = applyActiveWithin(q.or(`saldo_carteira.gt.0,saldo_bonus.gt.0`), daysAgo(60));
+            break;
+          case "deposito_hoje":
+            q = q.gte("ultimo_deposito", todayStartBrt);
+            break;
+          case "ftd_hoje":
+            q = q.gte("ftd_em", todayStartBrt);
+            break;
+          case "nao_converteram":
+            q = q.is("ftd_em", null);
+            break;
+          case "risco_inicial":
+            q = applyInactivityWindow(q, daysAgo(7), daysAgo(14)).not("ftd_em", "is", null);
+            break;
+          case "risco_moderado":
+            q = applyInactivityWindow(q, daysAgo(15), daysAgo(24)).not("ftd_em", "is", null);
+            break;
+          case "risco_alto":
+            q = applyInactivityWindow(q, daysAgo(25), daysAgo(34)).not("ftd_em", "is", null);
+            break;
+          case "quase_perdido":
+            q = applyInactivityWindow(q, daysAgo(35), daysAgo(44)).not("ftd_em", "is", null);
+            break;
+          case "recuperacao_dificil":
+            q = applyInactivityWindow(q, daysAgo(45), daysAgo(59)).not("ftd_em", "is", null);
+            break;
+          case "perdidos":
+            q = applyInactiveAtLeast(q, daysAgo(60)).not("ftd_em", "is", null);
+            break;
+          case "cashback_pago_hoje":
+            q = q.gte("last_cashback_paid_at", todayStartBrt);
+            break;
+          default:
+            q = applyGamificationFilter(q, filter, gamificationSettings);
+            break;
+        }
       q = applyGamificationDimensions(
         q,
         gamificationStatus,

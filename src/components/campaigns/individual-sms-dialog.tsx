@@ -153,7 +153,7 @@ export function IndividualSmsDialog({
     version: 1,
     atualizadoEm: "agora",
   };
-  const mutation = useMutation({
+  const mutation = useMutation<unknown, Error, void>({
     mutationFn: () => {
       if (channel === "email") {
         return sendEmail({ data: { to: email, subject, html: message, trackLinks } });

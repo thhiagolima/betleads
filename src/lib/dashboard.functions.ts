@@ -127,7 +127,7 @@ export const getDashboardSummary = createServerFn({ method: "POST" })
         _to: endDate.toISOString(),
         _prev_from: brtDayStart(prevStartDate).toISOString(),
         _prev_to: brtDayEnd(prevEndDate).toISOString(),
-        _reset_at: settings?.reset_at ?? "1970-01-01T00:00:00Z",
+        _reset_at: (settings as { reset_at?: string } | null)?.reset_at ?? "1970-01-01T00:00:00Z",
       });
       if (error) throw new Error(error.message);
       if (!raw) throw new Error("Sem acesso aos dados desta conta.");

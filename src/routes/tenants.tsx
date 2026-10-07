@@ -356,7 +356,7 @@ function TenantWorkspace({
           icon={CreditCard}
           label="Comprado"
           value={num(purchased)}
-          hint={statusBadge(tenant.status)}
+          hint={`Status: ${tenant.status}`}
         />
       </div>
 
@@ -402,7 +402,7 @@ function MetricCard({
   icon: typeof Users;
   label: string;
   value: string;
-  hint: React.ReactNode;
+  hint: string;
 }) {
   return (
     <DashboardMetricCard
@@ -508,7 +508,15 @@ function HealthLine({ label, ok }: { label: string; ok: boolean }) {
   );
 }
 
-function UsersTab({ detail, isSuperAdmin, canManage }: { detail: TenantDetail; isSuperAdmin: boolean; canManage: boolean }) {
+function UsersTab({
+  detail,
+  isSuperAdmin,
+  canManage,
+}: {
+  detail: TenantDetail;
+  isSuperAdmin: boolean;
+  canManage: boolean;
+}) {
   return (
     <Card>
       <CardHeader className="flex-row items-center justify-between gap-4">
@@ -542,7 +550,12 @@ function UsersTab({ detail, isSuperAdmin, canManage }: { detail: TenantDetail; i
                   <div className="font-mono text-xs text-muted-foreground">{user.user_id}</div>
                 </TableCell>
                 <TableCell>
-                  <RoleSelect tenantId={detail.tenant.id} user={user} isSuperAdmin={isSuperAdmin} canManage={canManage} />
+                  <RoleSelect
+                    tenantId={detail.tenant.id}
+                    user={user}
+                    isSuperAdmin={isSuperAdmin}
+                    canManage={canManage}
+                  />
                 </TableCell>
                 <TableCell>{fmtDate(user.last_sign_in_at)}</TableCell>
                 <TableCell>
@@ -1206,7 +1219,10 @@ function SettingsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAd
               value={form.crm_model}
               disabled={!isSuperAdmin}
               onValueChange={(value) =>
-                setForm((prev) => ({ ...prev, crm_model: value as TenantRow["crm_model"] }))
+                setForm((prev) => ({
+                  ...prev,
+                  crm_model: value as NonNullable<TenantRow["crm_model"]>,
+                }))
               }
             >
               <SelectTrigger>
@@ -1310,7 +1326,9 @@ function CreateTenantDialog() {
               onChange={(event) => setForm((prev) => ({ ...prev, adminEmail: event.target.value }))}
               placeholder="admin@empresa.com"
             />
-            <p className="text-xs text-muted-foreground">O usuário precisa já existir no sistema.</p>
+            <p className="text-xs text-muted-foreground">
+              O usuário precisa já existir no sistema.
+            </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-2">

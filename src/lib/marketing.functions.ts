@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import type { Json } from "@/integrations/supabase/types";
 
 const overviewSchema = z.object({
   days: z.number().int().min(1).max(90).default(7),
@@ -27,7 +28,7 @@ type Integration = {
   last_sync_at: string | null;
   token_expires_at: string | null;
   connected_at: string | null;
-  settings: Record<string, unknown>;
+  settings: Record<string, Json>;
 };
 
 type CreativeRow = {
@@ -127,7 +128,8 @@ type AttributionTarget = {
 
 type AudienceAcc = AudienceRow & { adIds: Set<string> };
 
-async function resolveTenantId(supabase: DbClient): Promise<string> {
+async function resolveTenantId(client: unknown): Promise<string> {
+  const supabase = client as DbClient;
   const { data, error } = await supabase.rpc("current_tenant_id");
   if (error) throw new Error(error.message);
   if (!data) throw new Error("Tenant nao identificado");
@@ -352,10 +354,10 @@ export const getMarketingOverview = createServerFn({ method: "GET" })
       const name = String(row.creative_name || row.ad_name || row.ad_id || "Sem criativo");
       const raw = row.raw as Record<string, unknown> | null;
       const item = byCreative.get(keyOf(name)) ?? emptyCreative(name);
-      item.campaign = item.campaign ?? row.campaign_name ?? null;
+      item.campaign = item.campaign ?? (row.campaign_name as string | null) ?? null;
       item.campaign_id = item.campaign_id ?? (row.campaign_id as string | null) ?? null;
       item.adset = item.adset ?? (row.adset_name as string | null) ?? null;
-      item.ad_id = item.ad_id ?? row.ad_id ?? null;
+      item.ad_id = item.ad_id ?? (row.ad_id as string | null) ?? null;
       item.thumbnail_url =
         item.thumbnail_url ??
         pickNestedString(raw, ["thumbnail_url", "image_url", "picture", "url"]);
@@ -440,8 +442,8 @@ export const getMarketingOverview = createServerFn({ method: "GET" })
         byCreative.get(keyOf(fallbackName)) ??
         emptyCreative(fallbackName);
 
-      item.campaign = item.campaign ?? utmCampaign ?? null;
-      item.ad_id = item.ad_id ?? utmId ?? null;
+      item.campaign = item.campaign ?? (utmCampaign as string | null) ?? null;
+      item.ad_id = item.ad_id ?? (utmId as string | null) ?? null;
       item.players += 1;
       if (player.ftd_em) item.ftd += 1;
       byCreative.set(keyOf(item.creative), item);

@@ -13,6 +13,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import type { Json } from "@/integrations/supabase/types";
+
 import { LinkTrackingToggle } from "@/components/link-tracking-toggle";
 import { MessageVariablePicker } from "@/components/message-variable-picker";
 import { SmsTemplateDialog } from "@/components/sms/sms-template-dialog";
@@ -232,6 +234,7 @@ export function ChannelCampaignComposer({
       name: string;
       content: string;
       status: string;
+      version?: number;
     }>
   ).filter((item) => item.status === "active");
   const assets = (
@@ -343,7 +346,7 @@ export function ChannelCampaignComposer({
       channel,
       name,
       audienceId: audienceId || null,
-      audienceCriteria: (audienceCriteria as unknown as Record<string, unknown>) ?? null,
+      audienceCriteria: (audienceCriteria as unknown as Record<string, Json>) ?? null,
       assetId:
         channel === "sms"
           ? smsTemplateId || null
@@ -352,20 +355,22 @@ export function ChannelCampaignComposer({
             : voiceSourceId || null,
       assetKind:
         channel === "sms" ? "sms_template" : channel === "email" ? "email_template" : voiceMode,
-      assetSnapshot:
-        channel === "sms"
-          ? { content: smsContent }
-          : channel === "email"
-            ? activeEmailTemplate
-              ? {
-                  name: activeEmailTemplate.nome ?? activeEmailTemplate.name,
-                  subject: activeEmailTemplate.subject ?? activeEmailTemplate.assunto,
-                  bodyHtml: activeEmailTemplate.body_html ?? activeEmailTemplate.corpo,
-                }
-              : null
-            : activeScript
-              ? { name: activeScript.name, content: activeScript.content }
-              : { name: assets.find((item) => item.id === voiceSourceId)?.name ?? "" },
+      assetSnapshot: (channel === "sms"
+        ? { content: smsContent }
+        : channel === "email"
+          ? activeEmailTemplate
+            ? {
+                name: activeEmailTemplate.nome ?? activeEmailTemplate.name,
+                subject: activeEmailTemplate.subject ?? activeEmailTemplate.assunto ?? "",
+                bodyHtml: activeEmailTemplate.body_html ?? activeEmailTemplate.corpo ?? "",
+              }
+            : null
+          : activeScript
+            ? { name: activeScript.name, content: activeScript.content }
+            : { name: assets.find((item) => item.id === voiceSourceId)?.name ?? "" }) as Record<
+        string,
+        Json
+      > | null,
       content: channel === "sms" ? smsContent : previewContent,
       scheduledAt: when === "schedule" && scheduledAt ? new Date(scheduledAt).toISOString() : null,
       trackLinks,
@@ -729,8 +734,8 @@ export function ChannelCampaignComposer({
                     onChange={setSmsContent}
                   />
                   <p className="text-xs text-muted-foreground">
-                    {smsEstimate.characters} caracteres · {smsEstimate.encoding} · {parts} parte(s) ·
-                    estimativa: {num(cost)} créditos
+                    {smsEstimate.characters} caracteres · {smsEstimate.encoding} · {parts} parte(s)
+                    · estimativa: {num(cost)} créditos
                   </p>
                 </div>
                 <LinkTrackingToggle
@@ -830,6 +835,9 @@ export function ChannelCampaignComposer({
                       {(voiceMode === "asset" ? assets : scripts).map((item) => (
                         <SelectItem key={item.id} value={item.id}>
                           {item.name}
+                          {voiceMode === "script" && "version" in item
+                            ? ` · v${item.version ?? 1}`
+                            : ""}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -850,6 +858,13 @@ export function ChannelCampaignComposer({
                 <p className="text-xs text-muted-foreground">
                   Estimativa: {num(cost)} chamada(s). O limite por campanha é 200 destinatários.
                 </p>
+                {voiceMode === "script" && activeScript && (
+                  <p className="rounded-lg border border-border/70 bg-muted/50 p-2 text-xs text-muted-foreground">
+                    Script v{activeScript.version ?? 1} · {previewContent.length} caracteres de TTS.
+                    Áudios idênticos podem ser reutilizados do cache; o custo financeiro depende do
+                    contrato do provedor.
+                  </p>
+                )}
                 {voiceMode === "script" && (
                   <MessageVariablePicker
                     channel="voice"

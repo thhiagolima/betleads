@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import type { Json } from "@/integrations/supabase/types";
 import { resolveCurrentTenantId } from "@/lib/tenant-access.server";
 import { dbUuid } from "@/lib/zod-helpers";
 
@@ -26,7 +27,15 @@ const saveSchema = draftPayloadSchema.extend({
   idempotencyKey: z.string().uuid(),
 });
 
-export type CampaignDraftPayload = z.infer<typeof draftPayloadSchema>;
+type ParsedCampaignDraftPayload = z.infer<typeof draftPayloadSchema>;
+export type CampaignDraftPayload = Omit<
+  ParsedCampaignDraftPayload,
+  "audienceCriteria" | "assetSnapshot" | "payload"
+> & {
+  audienceCriteria?: Record<string, Json> | null;
+  assetSnapshot?: Record<string, Json> | null;
+  payload: Record<string, Json>;
+};
 
 export type CampaignDraft = CampaignDraftPayload & {
   id: string;
@@ -41,14 +50,14 @@ function toDraft(row: Record<string, unknown>): CampaignDraft {
     channel: row.channel as z.infer<typeof channelSchema>,
     name: String(row.name ?? ""),
     audienceId: (row.audience_id as string | null) ?? null,
-    audienceCriteria: (row.audience_criteria as Record<string, unknown> | null) ?? null,
+    audienceCriteria: (row.audience_criteria as Record<string, Json> | null) ?? null,
     assetId: (row.asset_id as string | null) ?? null,
     assetKind: (row.asset_kind as string | null) ?? null,
-    assetSnapshot: (row.asset_snapshot as Record<string, unknown> | null) ?? null,
+    assetSnapshot: (row.asset_snapshot as Record<string, Json> | null) ?? null,
     content: String(row.content ?? ""),
     scheduledAt: (row.scheduled_at as string | null) ?? null,
     trackLinks: row.track_links !== false,
-    payload: (row.payload as Record<string, unknown>) ?? {},
+    payload: (row.payload as Record<string, Json>) ?? {},
     status: row.status as "draft" | "submitted",
     version: Number(row.version ?? 1),
     updatedAt: String(row.updated_at),

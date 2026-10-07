@@ -58,9 +58,10 @@ export function ActiveTenantSwitcher() {
   if (isLoading || !active || tenants.length < 2) {
     return active ? <ActiveTenantBadge tenant={active} /> : null;
   }
+  const activeTenantId = active.id;
 
   function requestChange(nextTenantId: string) {
-    if (nextTenantId !== active.id) setPendingTenantId(nextTenantId);
+    if (nextTenantId !== activeTenantId) setPendingTenantId(nextTenantId);
   }
 
   function confirmChange() {
@@ -93,12 +94,15 @@ export function ActiveTenantSwitcher() {
           <DialogHeader>
             <DialogTitle>Trocar tenant ativo?</DialogTitle>
             <DialogDescription>
-              Você está saindo de <strong>{active.nome}</strong> e entrando em <strong>{pending?.nome}</strong>.
-              Todos os dados e as próximas ações passarão a usar o novo tenant.
+              Você está saindo de <strong>{active.nome}</strong> e entrando em{" "}
+              <strong>{pending?.nome}</strong>. Todos os dados e as próximas ações passarão a usar o
+              novo tenant.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setPendingTenantId(null)}>Cancelar</Button>
+            <Button variant="outline" onClick={() => setPendingTenantId(null)}>
+              Cancelar
+            </Button>
             <Button onClick={confirmChange}>Confirmar troca</Button>
           </DialogFooter>
         </DialogContent>

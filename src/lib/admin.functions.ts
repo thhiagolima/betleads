@@ -2,6 +2,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { dbUuid } from "@/lib/zod-helpers";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import type { Json } from "@/integrations/supabase/types";
 import { z } from "zod";
 
 async function assertSuperAdmin(userId: string) {
@@ -25,8 +26,8 @@ async function auditAdminAction(args: {
     action: args.action,
     target_user_id: args.targetUserId ?? null,
     tenant_id: args.tenantId ?? null,
-    before_data: args.before ?? null,
-    after_data: args.after ?? null,
+    before_data: (args.before ?? null) as Json,
+    after_data: (args.after ?? null) as Json,
   });
   if (error) console.warn("[admin] audit failed", error.message);
 }
@@ -351,7 +352,7 @@ export const adminGetUserAccesses = createServerFn({ method: "POST" })
       tenants: tenants ?? [],
       memberships: (memberships ?? []).map((membership) => ({
         ...membership,
-        tenant: tenantById.get(membership.tenant_id),
+        tenant: membership.tenant_id ? tenantById.get(membership.tenant_id) : undefined,
       })),
     };
   });
@@ -370,7 +371,9 @@ export const adminAssignUserToTenant = createServerFn({ method: "POST" })
       .maybeSingle();
     if (beforeErr) throw new Error(beforeErr.message);
     if (before?.role === "admin" && data.role !== "admin") {
-      throw new Error("Transfira a administração para outro usuário antes de rebaixar o admin atual");
+      throw new Error(
+        "Transfira a administração para outro usuário antes de rebaixar o admin atual",
+      );
     }
     if (data.role === "admin" && before?.role !== "admin") {
       const { data: currentAdmin, error: adminErr } = await supabaseAdmin
@@ -387,7 +390,9 @@ export const adminAssignUserToTenant = createServerFn({ method: "POST" })
 
     const request = before
       ? supabaseAdmin.from("user_roles").update({ role: data.role }).eq("id", before.id)
-      : supabaseAdmin.from("user_roles").insert({ user_id: data.user_id, tenant_id: data.tenant_id, role: data.role });
+      : supabaseAdmin
+          .from("user_roles")
+          .insert({ user_id: data.user_id, tenant_id: data.tenant_id, role: data.role });
     const { error } = await request;
     if (error) throw new Error(error.message);
     await auditAdminAction({
@@ -421,7 +426,13 @@ export const adminRemoveUserFromTenant = createServerFn({ method: "POST" })
       throw new Error("Defina outro admin antes de remover este vínculo");
     const { error } = await supabaseAdmin.from("user_roles").delete().eq("id", before.id);
     if (error) throw new Error(error.message);
-    await auditAdminAction({ actorUserId: context.userId, action: "user_membership.removed", targetUserId: data.user_id, tenantId: data.tenant_id, before });
+    await auditAdminAction({
+      actorUserId: context.userId,
+      action: "user_membership.removed",
+      targetUserId: data.user_id,
+      tenantId: data.tenant_id,
+      before,
+    });
     return { ok: true };
   });
 

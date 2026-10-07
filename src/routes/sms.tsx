@@ -507,7 +507,7 @@ function SmsCompactWorkspace({
           </div>
         </div>
       )}
-      {tab === "enviar" &&
+      {String(tab) === "enviar" &&
         (bulkMode ? (
           <div className="space-y-3">
             <Button variant="outline" size="sm" onClick={() => setBulkMode(false)}>
@@ -1759,7 +1759,7 @@ function AudiencePicker({
   onResolved: (phones: string[], label: string) => void;
 }) {
   const resolveFn = useServerFn(resolveSmsCampaignAudience);
-  const [criteria, setCriteria] = useState<AudienceCriteria>(EMPTY_AUDIENCE);
+  const [criteria, setCriteria] = useState<SmsAudienceCriteria>(EMPTY_SMS_AUDIENCE);
   const [count, setCount] = useState(0);
   const [label, setLabel] = useState("Público personalizado");
   const [loading, setLoading] = useState(false);
@@ -3102,7 +3102,7 @@ function LegacyNewSmsCampaignDialog({
 export function SmsFlowsPanel({
   initialDraft,
 }: {
-  initialDraft?: { name: string; trigger: TriggerType } | null;
+  initialDraft?: { name: string; trigger: TriggerType; createdAt: number } | null;
 }) {
   const qc = useQueryClient();
   const listFn = useServerFn(listSmsFlows);
@@ -3203,7 +3203,7 @@ export function SmsFlowsPanel({
             Sequências de SMS disparadas por comportamento do player
           </p>
         </div>
-        <Button onClick={novo} className="gap-2">
+        <Button onClick={() => novo()} className="gap-2">
           <Plus className="h-4 w-4" /> Novo fluxo
         </Button>
       </div>

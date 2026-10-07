@@ -257,6 +257,7 @@ export async function runSmsDispatcher({ limit = 30 }: { limit?: number } = {}) 
   type Prepared = {
     lead: Lead;
     flow: Record<string, unknown>;
+    step: Step;
     stepList: Step[];
     content: string;
     nextRunAt: string;
@@ -440,20 +441,18 @@ export async function runSmsDispatcher({ limit = 30 }: { limit?: number } = {}) 
   for (const item of toSend) {
     const dailyLimit = Number(item.flow.daily_limit ?? 500);
     const cooldownHours = Number(item.flow.cooldown_hours ?? 24);
-    const { data: latest } = await (
-      item.lead.player_id && cooldownHours > 0
-        ? supabaseAdmin
-            .from("sms_send_logs")
-            .select("created_at")
-            .eq("tenant_id", item.lead.tenant_id)
-            .eq("flow_id", item.lead.flow_id)
-            .eq("player_id", item.lead.player_id)
-            .eq("status", "sent")
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .maybeSingle()
-        : Promise.resolve({ data: null })
-    );
+    const { data: latest } = await (item.lead.player_id && cooldownHours > 0
+      ? supabaseAdmin
+          .from("sms_send_logs")
+          .select("created_at")
+          .eq("tenant_id", item.lead.tenant_id)
+          .eq("flow_id", item.lead.flow_id)
+          .eq("player_id", item.lead.player_id)
+          .eq("status", "sent")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle()
+      : Promise.resolve({ data: null }));
     const cooldownUntil = latest?.created_at
       ? new Date(new Date(latest.created_at).getTime() + cooldownHours * 3_600_000)
       : null;
@@ -480,7 +479,9 @@ export async function runSmsDispatcher({ limit = 30 }: { limit?: number } = {}) 
       await supabaseAdmin
         .from("sms_flow_leads")
         .update({
-          next_run_at: new Date(brtDayStart(new Date(Date.now() + 86_400_000)).getTime()).toISOString(),
+          next_run_at: new Date(
+            brtDayStart(new Date(Date.now() + 86_400_000)).getTime(),
+          ).toISOString(),
           locked_at: null,
           locked_by: null,
         })

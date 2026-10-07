@@ -3,13 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Plus, Pencil, Trash2, FileText } from "lucide-react";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -82,6 +76,7 @@ export function ScriptsTab() {
             <TableHeader>
               <TableRow>
                 <TableHead>Nome</TableHead>
+                <TableHead>Versão</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Atualizado</TableHead>
                 <TableHead className="text-right">Ações</TableHead>
@@ -91,6 +86,7 @@ export function ScriptsTab() {
               {scripts.map((s: any) => (
                 <TableRow key={s.id}>
                   <TableCell className="font-medium">{s.name}</TableCell>
+                  <TableCell>v{s.version ?? 1}</TableCell>
                   <TableCell>
                     <Badge
                       variant={
@@ -124,7 +120,8 @@ export function ScriptsTab() {
                       onClick={async () => {
                         const confirmed = await requestConfirmation({
                           title: `Excluir “${s.name}”?`,
-                          description: "O template de fala será removido e não poderá ser usado em novos fluxos.",
+                          description:
+                            "O template de fala será removido e não poderá ser usado em novos fluxos.",
                           confirmLabel: "Excluir template",
                           destructive: true,
                         });
@@ -141,11 +138,7 @@ export function ScriptsTab() {
         )}
       </CardContent>
 
-      <ScriptFormDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        initial={editing}
-      />
+      <ScriptFormDialog open={dialogOpen} onOpenChange={setDialogOpen} initial={editing} />
     </Card>
   );
 }

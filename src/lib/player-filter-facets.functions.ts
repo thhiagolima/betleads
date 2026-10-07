@@ -44,12 +44,12 @@ export const getPlayerFilterFacets = createServerFn({ method: "POST" })
           _tenant: tenantId,
           _filters: behaviorFilters,
           _operator: behaviorOperator,
-          _gamification_status: status,
-          _gamification_level: level,
-          _search: search || null,
-          _date_field: dateField,
-          _date_from: dateFrom,
-          _date_to: dateTo,
+          _gamification_status: status ?? undefined,
+          _gamification_level: level ?? undefined,
+          _search: search || undefined,
+          _date_field: dateField ?? undefined,
+          _date_from: dateFrom ?? undefined,
+          _date_to: dateTo ?? undefined,
         });
         if (error) throw new Error(error.message);
         return (data ?? {}) as PlayerFilterFacets;

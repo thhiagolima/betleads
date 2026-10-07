@@ -55,6 +55,7 @@ type Block = {
   send_at_hour: number | null;
   send_at_minute: number | null;
   skip_if_past: boolean | null;
+  track_links?: boolean | null;
 };
 
 type Lead = {

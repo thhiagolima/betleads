@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import type { Json } from "@/integrations/supabase/types";
 import { assertTenantCanOpenBilling } from "@/lib/tenant-access.server";
 import { dbUuid } from "@/lib/zod-helpers";
 
@@ -84,9 +85,9 @@ async function auditTenantChange(args: {
     action: args.action,
     entity_type: args.entityType,
     entity_id: args.entityId ?? null,
-    before_data: args.before ?? null,
-    after_data: args.after ?? null,
-    metadata: args.metadata ?? {},
+    before_data: (args.before ?? null) as Json,
+    after_data: (args.after ?? null) as Json,
+    metadata: (args.metadata ?? {}) as Json,
   });
   if (error) {
     console.warn("[sms-credits] failed writing tenant audit log", error.message);
@@ -212,7 +213,7 @@ export const createSmsCreditCheckout = createServerFn({ method: "POST" })
       _credits: data.credits ?? null,
     });
     if (error) throw new Error(error.message);
-    return { checkout: result };
+    return { checkout: result as Json };
   });
 
 export const adminSmsCreditConsole = createServerFn({ method: "GET" })

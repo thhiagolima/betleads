@@ -24,6 +24,30 @@ import {
 const acceptedTypes = ["audio/mpeg", "audio/wav", "audio/x-wav", "audio/mp4", "audio/ogg"] as const;
 type AcceptedAudioType = (typeof acceptedTypes)[number];
 
+async function readAudioDuration(file: File): Promise<number | undefined> {
+  const url = URL.createObjectURL(file);
+  try {
+    return await new Promise<number | undefined>((resolve) => {
+      const audio = document.createElement("audio");
+      const timeout = window.setTimeout(() => resolve(undefined), 5_000);
+      audio.preload = "metadata";
+      audio.onloadedmetadata = () => {
+        window.clearTimeout(timeout);
+        resolve(
+          Number.isFinite(audio.duration) ? Math.max(1, Math.round(audio.duration)) : undefined,
+        );
+      };
+      audio.onerror = () => {
+        window.clearTimeout(timeout);
+        resolve(undefined);
+      };
+      audio.src = url;
+    });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 export function VoiceAssetUploadDialog({
   open,
   onOpenChange,
@@ -57,6 +81,7 @@ export function VoiceAssetUploadDialog({
       }
       if (file.size > 52_428_800) throw new Error("O áudio deve ter no máximo 50 MB.");
       const contentType = file.type as AcceptedAudioType;
+      const durationSeconds = await readAudioDuration(file);
       const signed = await createUpload({
         data: { name: name.trim(), filename: file.name, contentType, sizeBytes: file.size },
       });
@@ -70,6 +95,7 @@ export function VoiceAssetUploadDialog({
           name: name.trim(),
           contentType,
           sizeBytes: file.size,
+          durationSeconds,
           language,
           tags: tags
             .split(",")
