@@ -3,6 +3,7 @@
 // Headers: usuario: <usuario>, chave: <chave>, Content-Type: application/json
 // Body: { celular: "11988887777", mensagem: "...", parceiroId?: "<id>" }
 import { createServerFn } from "@tanstack/react-start";
+import { tenantChannelHealth } from "@/lib/provider-governance.server";
 import { dbUuid } from "@/lib/zod-helpers";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
@@ -690,14 +691,10 @@ export async function sendSmsInternal(args: {
 export const smsProviderStatus = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async () => {
-    return {
-      configured: Boolean(
-        process.env.SHORT_BRASIL_SMS_USUARIO && process.env.SHORT_BRASIL_SMS_CHAVE,
-      ),
-      provider: "Short Brasil",
-      endpoint: DEFAULT_SHORT_BRASIL_SINGLE_URL,
-      callbackPath: "/api/public/sms-webhook",
-    };
+    const health = tenantChannelHealth(
+      Boolean(process.env.SHORT_BRASIL_SMS_USUARIO && process.env.SHORT_BRASIL_SMS_CHAVE),
+    );
+    return { ...health, configured: health.available };
   });
 
 export const sendTestSms = createServerFn({ method: "POST" })

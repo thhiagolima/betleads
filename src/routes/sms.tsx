@@ -266,17 +266,7 @@ const VARIAVEIS = SMS_VARIABLE_KEYS.map((key) => `{${key}}`);
 
 function sanitizeSmsProviderError(error: string | null | undefined): string | null {
   if (!error) return null;
-  return error
-    .replace(/SMS_TOKEN/gi, "SHORT_BRASIL_SMS_USUARIO/SHORT_BRASIL_SMS_CHAVE")
-    .replace(/legacy-provider/gi, "short-brasil")
-    .replace(
-      /Sem resposta do provedor:\s*SHORT_BRASIL_SMS_USUARIO\/SHORT_BRASIL_SMS_CHAVE não configurado/gi,
-      "Credenciais Short Brasil nao configuradas. Reinicie o servidor apos alterar o .env.",
-    )
-    .replace(
-      /Sem resposta do provedor:\s*SHORT_BRASIL_SMS_USUARIO\/SHORT_BRASIL_SMS_CHAVE nao configurado/gi,
-      "Credenciais Short Brasil nao configuradas. Reinicie o servidor apos alterar o .env.",
-    );
+  return "Não foi possível concluir este envio. Tente novamente ou contate o suporte.";
 }
 
 function previewMensagem(msg: string, recipient = "João Silva") {
@@ -321,7 +311,7 @@ function SmsPage() {
     saude: "saude",
     historico: "historico",
     fila: "campanhas",
-    configuracoes: "configuracoes",
+    configuracoes: "saude",
   };
   const currentTab = aliases[hash] ?? "saude";
   useEffect(() => {
@@ -453,7 +443,7 @@ function SmsCompactWorkspace({
               : "bg-amber-500/15 text-amber-400"
           }
         >
-          {provider.data?.configured ? "envio ativo" : "provedor pendente"}
+          {provider.data?.configured ? "canal disponível" : "canal indisponível"}
         </Badge>
         <Button
           variant="outline"
@@ -515,7 +505,6 @@ function SmsCompactWorkspace({
               </CardContent>
             </Card>
           </div>
-          <Provedor />
         </div>
       )}
       {tab === "enviar" &&
@@ -1054,7 +1043,7 @@ function SmsHomePanel() {
               : "bg-amber-500/15 text-amber-400 border-amber-500/30"
           }
         >
-          {provider.data?.configured ? "envio ativo" : "provedor pendente"}
+          {provider.data?.configured ? "envio ativo" : "canal pendente"}
         </Badge>
         <Button
           variant="outline"
@@ -3419,7 +3408,7 @@ function EditorFluxo({
       const result = await testSmsFn({
         data: { to: testPhone, content: firstSms.mensagem },
       });
-      if (!result.ok) throw new Error(result.error ?? "O provedor recusou o SMS de teste.");
+      if (!result.ok) throw new Error(result.error ?? "Não foi possível enviar o SMS de teste.");
       toast.success(
         "SMS de teste enviado. Confira o histórico do canal para acompanhar a entrega.",
       );

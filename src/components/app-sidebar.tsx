@@ -77,6 +77,9 @@ const engagementItems: NavItem[] = [
       { title: "Email", url: "/email" },
       { title: "Voz", url: "/ligacoes" },
       { title: "Consentimentos", url: "/consentimentos" },
+      { title: "Templates SMS", url: "/sms/templates" },
+      { title: "Templates de e-mail", url: "/email", hash: "templates" },
+      { title: "Áudios e scripts", url: "/ligacoes", hash: "audios" },
     ],
   },
 ];
@@ -158,7 +161,7 @@ function NestedItem({
       {item.subItems?.map((sub, index) => {
         const normalizedHash = hash.replace(/^#/, "");
         const subActive = sub.url
-          ? isActivePath(pathname, sub.url)
+          ? isActivePath(pathname, sub.url) && (!sub.hash || normalizedHash === sub.hash)
           : active && (normalizedHash === sub.hash || (!normalizedHash && index === 0));
         return (
           <SidebarItem
@@ -167,7 +170,7 @@ function NestedItem({
             active={subActive}
             className="py-[7px] text-[12.5px]"
           >
-            <Link to={sub.url ?? item.url} hash={sub.url ? undefined : sub.hash}>
+            <Link to={sub.url ?? item.url} hash={sub.hash}>
               {sub.title}
             </Link>
           </SidebarItem>

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import {
   AlertTriangle,
@@ -8,6 +8,7 @@ import {
   Mail,
   MessageSquare,
   Phone,
+  Plus,
   Send,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -35,24 +36,34 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { bulkDispatchCalls, listCallScripts } from "@/lib/calls.functions";
-import { listEmailTemplates, saveEmailCampaign, sendEmailCampaignNow } from "@/lib/email.functions";
+import { bulkDispatchCalls, listCallScripts, saveCallScript } from "@/lib/calls.functions";
+import { tenantSafeChannelError } from "@/lib/channel-error";
+import {
+  getCampaignDraft,
+  saveCampaignDraft,
+  submitCampaignDraft,
+  type CampaignDraftPayload,
+} from "@/lib/campaign-drafts.functions";
+import {
+  listEmailTemplates,
+  saveEmailCampaign,
+  saveEmailTemplate,
+  sendEmailCampaignNow,
+} from "@/lib/email.functions";
 import { num } from "@/lib/format";
 import { listJourneyVoiceAssets } from "@/lib/journey-voice-assets.functions";
-import { resolveSmsCampaignAudience } from "@/lib/sms-audiences.functions";
+import {
+  resolveCampaignAudience,
+  type ResolvedCampaignAudience,
+} from "@/lib/sms-audiences.functions";
 import { SYSTEM_SMS_AUDIENCES, type SmsAudienceCriteria } from "@/lib/sms-audience-criteria";
 import { listSmsAudiences } from "@/lib/sms-audience-crud.functions";
-import { listSmsTemplates } from "@/lib/sms-templates.functions";
+import { listSmsTemplates, saveSmsTemplate } from "@/lib/sms-templates.functions";
 import { scheduleBulkSms, sendBulkSms } from "@/lib/sms.functions";
 
 type Channel = "sms" | "email" | "voice";
 type AudienceOption = { id: string; name: string; criteria: SmsAudienceCriteria; system?: boolean };
-type ResolvedAudience = {
-  phones: string[];
-  total: number;
-  emailPlayerIds: string[];
-  emailRecipientTotal?: number;
-};
+type ResolvedAudience = ResolvedCampaignAudience;
 
 const variablePattern = /\{([a-zA-Z0-9_]+)\}/g;
 const allowedVariables = new Set([
@@ -120,13 +131,19 @@ export function ChannelCampaignComposer({
   onOpenChange,
   onCreated,
   initialChannel = "sms",
+  initialDraftId = null,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreated: () => void;
   initialChannel?: Channel;
+  initialDraftId?: string | null;
 }) {
-  const resolveAudience = useServerFn(resolveSmsCampaignAudience);
+  const queryClient = useQueryClient();
+  const resolveAudience = useServerFn(resolveCampaignAudience);
+  const getDraft = useServerFn(getCampaignDraft);
+  const saveDraft = useServerFn(saveCampaignDraft);
+  const submitDraft = useServerFn(submitCampaignDraft);
   const listAudiences = useServerFn(listSmsAudiences);
   const listSmsTemplateFn = useServerFn(listSmsTemplates);
   const listEmailTemplateFn = useServerFn(listEmailTemplates);
@@ -137,10 +154,14 @@ export function ChannelCampaignComposer({
   const saveEmail = useServerFn(saveEmailCampaign);
   const sendEmail = useServerFn(sendEmailCampaignNow);
   const dispatchVoice = useServerFn(bulkDispatchCalls);
+  const createSmsTemplate = useServerFn(saveSmsTemplate);
+  const createEmailTemplate = useServerFn(saveEmailTemplate);
+  const createVoiceScript = useServerFn(saveCallScript);
 
   const [channel, setChannel] = useState<Channel>(initialChannel);
   const [name, setName] = useState("");
   const [audienceId, setAudienceId] = useState("");
+  const [audienceCriteria, setAudienceCriteria] = useState<SmsAudienceCriteria | null>(null);
   const [audience, setAudience] = useState<ResolvedAudience | null>(null);
   const [smsTemplateId, setSmsTemplateId] = useState("");
   const [smsContent, setSmsContent] = useState("");
@@ -152,6 +173,28 @@ export function ChannelCampaignComposer({
   const [trackLinks, setTrackLinks] = useState(true);
   const [riskConfirmed, setRiskConfirmed] = useState(false);
   const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [quickAssetOpen, setQuickAssetOpen] = useState(false);
+  const [quickAssetName, setQuickAssetName] = useState("");
+  const [quickAssetSubject, setQuickAssetSubject] = useState("");
+  const [quickAssetContent, setQuickAssetContent] = useState("");
+  const [draftId, setDraftId] = useState<string | null>(initialDraftId);
+  const [draftVersion, setDraftVersion] = useState<number | null>(null);
+  const [draftState, setDraftState] = useState<"idle" | "dirty" | "saving" | "saved" | "error">(
+    "idle",
+  );
+  const idempotencyKey = useRef(
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : "00000000-0000-4000-8000-000000000000",
+  );
+  const hydratedDraftId = useRef<string | null>(null);
+  const submitted = useRef(false);
+
+  const draftQuery = useQuery({
+    queryKey: ["campaign-draft", initialDraftId],
+    queryFn: () => getDraft({ data: { id: initialDraftId! } }),
+    enabled: open && Boolean(initialDraftId),
+  });
 
   const savedAudiences = useQuery({
     queryKey: ["sms-audiences"],
@@ -207,7 +250,9 @@ export function ChannelCampaignComposer({
       name?: string;
       body_html?: string;
       subject?: string;
+      assunto?: string;
       ativo?: boolean;
+      corpo?: string;
     }>
   ).filter((item) => item.ativo !== false);
   const scripts = (
@@ -228,10 +273,11 @@ export function ChannelCampaignComposer({
   ).filter((item) => !item.is_archived);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || initialDraftId) return;
     setChannel(initialChannel);
     setName("");
     setAudienceId("");
+    setAudienceCriteria(null);
     setAudience(null);
     setSmsTemplateId("");
     setSmsContent("");
@@ -243,12 +289,48 @@ export function ChannelCampaignComposer({
     setTrackLinks(true);
     setRiskConfirmed(false);
     setSubmitAttempted(false);
-  }, [open, initialChannel]);
+    setDraftId(null);
+    setDraftVersion(null);
+    setDraftState("idle");
+    submitted.current = false;
+    hydratedDraftId.current = null;
+    idempotencyKey.current = crypto.randomUUID();
+  }, [open, initialChannel, initialDraftId]);
+
+  useEffect(() => {
+    const draft = draftQuery.data;
+    if (!open || !draft || hydratedDraftId.current === draft.id) return;
+    const payload = draft.payload as Record<string, unknown>;
+    setDraftId(draft.id);
+    setDraftVersion(draft.version);
+    setChannel(draft.channel);
+    setName(draft.name);
+    setAudienceId(draft.audienceId ?? "");
+    setAudienceCriteria((draft.audienceCriteria as SmsAudienceCriteria | null) ?? null);
+    setSmsTemplateId(String(payload.smsTemplateId ?? ""));
+    setSmsContent(draft.content);
+    setEmailTemplateId(String(payload.emailTemplateId ?? ""));
+    setVoiceMode(payload.voiceMode === "script" ? "script" : "asset");
+    setVoiceSourceId(draft.assetId ?? "");
+    setWhen(draft.scheduledAt ? "schedule" : "now");
+    setScheduledAt(draft.scheduledAt ? draft.scheduledAt.slice(0, 16) : "");
+    setTrackLinks(draft.trackLinks);
+    setRiskConfirmed(false);
+    setDraftState("saved");
+    hydratedDraftId.current = draft.id;
+    if (draft.audienceCriteria) {
+      audienceMutation.mutate({
+        channel: draft.channel,
+        criteria: draft.audienceCriteria as SmsAudienceCriteria,
+      });
+    }
+  }, [draftQuery.data, open]);
 
   const audienceMutation = useMutation({
-    mutationFn: (criteria: SmsAudienceCriteria) => resolveAudience({ data: { criteria } }),
+    mutationFn: ({ criteria, channel }: { criteria: SmsAudienceCriteria; channel: Channel }) =>
+      resolveAudience({ data: { criteria, channel } }),
     onSuccess: (result) => setAudience(result),
-    onError: (error: Error) => toast.error(error.message),
+    onError: (error: Error) => toast.error(tenantSafeChannelError(error)),
   });
 
   const activeEmailTemplate = emailTemplates.find((item) => item.id === emailTemplateId);
@@ -257,11 +339,10 @@ export function ChannelCampaignComposer({
     channel === "sms"
       ? smsContent
       : channel === "email"
-        ? (activeEmailTemplate?.body_html ?? "")
+        ? (activeEmailTemplate?.body_html ?? activeEmailTemplate?.corpo ?? "")
         : (activeScript?.content ?? "");
   const invalidVariables = unknownVariables(previewContent);
-  const recipients =
-    channel === "email" ? (audience?.emailPlayerIds.length ?? 0) : (audience?.phones.length ?? 0);
+  const recipients = audience?.eligibleTotal ?? 0;
   const parts = smsParts(smsContent);
   const cost = channel === "sms" ? recipients * parts : recipients;
   const channelLimitError =
@@ -285,6 +366,153 @@ export function ChannelCampaignComposer({
     !riskConfirmed ? "Confirme a revisão de risco antes de enviar." : null,
   ].filter((issue): issue is string => Boolean(issue));
 
+  const draftPayload = useMemo<CampaignDraftPayload>(
+    () => ({
+      channel,
+      name,
+      audienceId: audienceId || null,
+      audienceCriteria: (audienceCriteria as unknown as Record<string, unknown>) ?? null,
+      assetId:
+        channel === "sms"
+          ? smsTemplateId || null
+          : channel === "email"
+            ? emailTemplateId || null
+            : voiceSourceId || null,
+      assetKind:
+        channel === "sms" ? "sms_template" : channel === "email" ? "email_template" : voiceMode,
+      assetSnapshot:
+        channel === "sms"
+          ? { content: smsContent }
+          : channel === "email"
+            ? activeEmailTemplate
+              ? {
+                  name: activeEmailTemplate.nome ?? activeEmailTemplate.name,
+                  subject: activeEmailTemplate.subject ?? activeEmailTemplate.assunto,
+                  bodyHtml: activeEmailTemplate.body_html ?? activeEmailTemplate.corpo,
+                }
+              : null
+            : activeScript
+              ? { name: activeScript.name, content: activeScript.content }
+              : { name: assets.find((item) => item.id === voiceSourceId)?.name ?? "" },
+      content: channel === "sms" ? smsContent : previewContent,
+      scheduledAt: when === "schedule" && scheduledAt ? new Date(scheduledAt).toISOString() : null,
+      trackLinks,
+      payload: { smsTemplateId, emailTemplateId, voiceMode },
+    }),
+    [
+      channel,
+      name,
+      audienceId,
+      audienceCriteria,
+      smsTemplateId,
+      smsContent,
+      emailTemplateId,
+      voiceSourceId,
+      voiceMode,
+      activeEmailTemplate,
+      activeScript,
+      assets,
+      previewContent,
+      when,
+      scheduledAt,
+      trackLinks,
+    ],
+  );
+  const serializedDraft = JSON.stringify(draftPayload);
+
+  const autosave = useMutation({
+    scope: { id: "campaign-draft-autosave" },
+    mutationFn: () =>
+      saveDraft({
+        data: {
+          ...draftPayload,
+          id: draftId,
+          version: draftVersion,
+          idempotencyKey: idempotencyKey.current,
+        },
+      }),
+    onMutate: () => setDraftState("saving"),
+    onSuccess: (saved) => {
+      setDraftId(saved.id);
+      setDraftVersion(saved.version);
+      setDraftState("saved");
+      queryClient.invalidateQueries({ queryKey: ["campaign-drafts"] });
+    },
+    onError: () => setDraftState("error"),
+  });
+
+  const quickAsset = useMutation({
+    mutationFn: async () => {
+      if (!quickAssetName.trim() || !quickAssetContent.trim()) {
+        throw new Error("Informe nome e conteúdo do novo ativo.");
+      }
+      if (channel === "sms") {
+        const result = await createSmsTemplate({
+          data: {
+            name: quickAssetName,
+            content: quickAssetContent,
+            category: "Geral",
+            tags: [],
+            isActive: true,
+          },
+        });
+        return { id: result.item.id, kind: "sms" as const };
+      }
+      if (channel === "email") {
+        const result = await createEmailTemplate({
+          data: {
+            nome: quickAssetName,
+            assunto: quickAssetSubject,
+            preheader: "",
+            fromName: "",
+            categoria: "Geral",
+            tags: [],
+            corpo: quickAssetContent,
+            ativo: true,
+            lifecycleStatus: "published",
+            trackLinks,
+          },
+        });
+        return { id: result.id, kind: "email" as const };
+      }
+      const result = await createVoiceScript({
+        data: {
+          name: quickAssetName,
+          content: quickAssetContent,
+          status: "active",
+        },
+      } as never);
+      return { id: result.id, kind: "voice" as const };
+    },
+    onSuccess: ({ id, kind }) => {
+      if (kind === "sms") {
+        queryClient.invalidateQueries({ queryKey: ["sms-templates"] });
+        setSmsTemplateId(id);
+        setSmsContent(quickAssetContent);
+      } else if (kind === "email") {
+        queryClient.invalidateQueries({ queryKey: ["email-templates"] });
+        setEmailTemplateId(id);
+      } else {
+        queryClient.invalidateQueries({ queryKey: ["call-scripts"] });
+        setVoiceMode("script");
+        setVoiceSourceId(id);
+      }
+      setQuickAssetOpen(false);
+      setQuickAssetName("");
+      setQuickAssetSubject("");
+      setQuickAssetContent("");
+      toast.success("Ativo criado e selecionado");
+    },
+    onError: (error: Error) => toast.error(tenantSafeChannelError(error)),
+  });
+
+  useEffect(() => {
+    if (!open || submitted.current || (initialDraftId && !draftQuery.data)) return;
+    setDraftState("dirty");
+    const timer = window.setTimeout(() => autosave.mutate(), 700);
+    return () => window.clearTimeout(timer);
+  }, [serializedDraft, open, initialDraftId, draftQuery.data]);
+
   const submit = useMutation({
     mutationFn: async () => {
       if (!name.trim()) throw new Error("Informe o nome da campanha.");
@@ -303,7 +531,7 @@ export function ChannelCampaignComposer({
       if (channel === "sms") {
         if (!smsContent.trim()) throw new Error("Escreva ou selecione a mensagem de SMS.");
         const payload = {
-          phones: audience.phones,
+          phones: audience.eligibleIdentifiers,
           content: smsContent,
           campaignName: name,
           route: "iGaming" as const,
@@ -311,9 +539,14 @@ export function ChannelCampaignComposer({
           trackLinks,
           templateId: smsTemplateId || undefined,
         };
-        return when === "schedule"
-          ? scheduleSms({ data: { ...payload, scheduledAt: scheduleAt! } })
-          : sendSms({ data: payload });
+        const result =
+          when === "schedule"
+            ? scheduleSms({ data: { ...payload, scheduledAt: scheduleAt! } })
+            : sendSms({ data: payload });
+        const completed = await result;
+        if (draftId) await submitDraft({ data: { id: draftId } });
+        submitted.current = true;
+        return completed;
       }
       if (channel === "email") {
         if (!emailTemplateId) throw new Error("Selecione um template de e-mail.");
@@ -329,25 +562,33 @@ export function ChannelCampaignComposer({
             smtpId: null,
             agendadoPara: scheduleAt ?? null,
             status: when === "schedule" ? "agendada" : "enviando",
-            targetPlayerIds: audience.emailPlayerIds,
+            targetPlayerIds: audience.eligiblePlayerIds,
             extraEmails: [],
             trackLinks,
           },
         } as never);
-        return when === "schedule"
-          ? created
-          : sendEmail({ data: { campaignId: (created as { id: string }).id } } as never);
+        const completed =
+          when === "schedule"
+            ? created
+            : sendEmail({ data: { campaignId: (created as { id: string }).id } } as never);
+        const result = await completed;
+        if (draftId) await submitDraft({ data: { id: draftId } });
+        submitted.current = true;
+        return result;
       }
       if (!voiceSourceId) throw new Error("Selecione um script ou áudio da biblioteca.");
-      return dispatchVoice({
+      const completed = await dispatchVoice({
         data: {
           campaign_name: name,
           scheduled_at: scheduleAt,
           script_id: voiceMode === "script" ? voiceSourceId : undefined,
           asset_id: voiceMode === "asset" ? voiceSourceId : undefined,
-          targets: audience.phones.map((phone) => ({ phone_number: phone })),
+          targets: audience.eligibleIdentifiers.map((phone) => ({ phone_number: phone })),
         },
       });
+      if (draftId) await submitDraft({ data: { id: draftId } });
+      submitted.current = true;
+      return completed;
     },
     onSuccess: () => {
       toast.success(
@@ -358,15 +599,37 @@ export function ChannelCampaignComposer({
       onCreated();
       onOpenChange(false);
     },
-    onError: (error: Error) => toast.error(error.message),
+    onError: (error: Error) => toast.error(tenantSafeChannelError(error)),
   });
 
   const MetaIcon = channelMeta[channel].icon;
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next && (draftState === "dirty" || draftState === "saving")) {
+          const leave = window.confirm(
+            "Ainda há alterações sendo salvas. Deseja fechar e continuar depois pelo rascunho?",
+          );
+          if (!leave) return;
+        }
+        onOpenChange(next);
+      }}
+    >
       <DialogContent className="max-h-[94vh] w-[calc(100vw-1rem)] max-w-3xl overflow-y-auto sm:w-full">
         <DialogHeader>
-          <DialogTitle>Composer de campanha</DialogTitle>
+          <div className="flex items-center justify-between gap-3 pr-8">
+            <DialogTitle>Composer de campanha</DialogTitle>
+            <Badge variant={draftState === "error" ? "destructive" : "secondary"}>
+              {draftState === "saving" || draftState === "dirty"
+                ? "Salvando…"
+                : draftState === "error"
+                  ? "Falha ao salvar"
+                  : draftState === "saved"
+                    ? "Salvo agora"
+                    : "Preparando rascunho"}
+            </Badge>
+          </div>
           <DialogDescription>
             Planeje, revise e dispare SMS, e-mail ou voz em um único fluxo.
           </DialogDescription>
@@ -385,6 +648,11 @@ export function ChannelCampaignComposer({
                     aria-pressed={channel === item}
                     onClick={() => {
                       setChannel(item);
+                      const selected = audienceOptions.find((option) => option.id === audienceId);
+                      if (selected) {
+                        setAudienceCriteria(selected.criteria);
+                        audienceMutation.mutate({ criteria: selected.criteria, channel: item });
+                      }
                       setRiskConfirmed(false);
                     }}
                   >
@@ -414,7 +682,10 @@ export function ChannelCampaignComposer({
                   setAudienceId(value);
                   setAudience(null);
                   const selected = audienceOptions.find((item) => item.id === value);
-                  if (selected) audienceMutation.mutate(selected.criteria);
+                  if (selected) {
+                    setAudienceCriteria(selected.criteria);
+                    audienceMutation.mutate({ criteria: selected.criteria, channel });
+                  }
                 }}
               >
                 <SelectTrigger
@@ -437,7 +708,7 @@ export function ChannelCampaignComposer({
               </Select>
               <p className="rounded-lg bg-muted/60 px-3 py-2 text-sm" aria-live="polite">
                 <strong>{audienceMutation.isPending ? "Calculando..." : num(recipients)}</strong>{" "}
-                destinatário(s) elegível(is)
+                {channel === "email" ? "e-mail(s) válido(s)" : "telefone(s) válido(s)"}
                 {audience && (
                   <span className="text-muted-foreground">
                     {" "}
@@ -445,6 +716,12 @@ export function ChannelCampaignComposer({
                   </span>
                 )}
               </p>
+              {audience && audience.excludedTotal > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  {num(audience.excludedTotal)} excluído(s) por cadastro inválido, ausência de
+                  contato ou consentimento.
+                </p>
+              )}
             </div>
             {channel === "sms" && (
               <div className="space-y-3">
@@ -472,6 +749,14 @@ export function ChannelCampaignComposer({
                       ))}
                     </SelectContent>
                   </Select>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setQuickAssetOpen(true)}
+                  >
+                    <Plus className="mr-1.5 size-3.5" /> Criar novo template
+                  </Button>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor={fieldIds.smsContent}>Mensagem</Label>
@@ -521,6 +806,14 @@ export function ChannelCampaignComposer({
                       ))}
                     </SelectContent>
                   </Select>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setQuickAssetOpen(true)}
+                  >
+                    <Plus className="mr-1.5 size-3.5" /> Criar novo template
+                  </Button>
                 </div>
                 <LinkTrackingToggle
                   value={trackLinks}
@@ -580,6 +873,17 @@ export function ChannelCampaignComposer({
                       ))}
                     </SelectContent>
                   </Select>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setVoiceMode("script");
+                      setQuickAssetOpen(true);
+                    }}
+                  >
+                    <Plus className="mr-1.5 size-3.5" /> Criar novo script
+                  </Button>
                 </div>
                 <p className="text-xs text-muted-foreground">
                   Estimativa: {num(cost)} chamada(s). O limite por campanha é 200 destinatários.
@@ -594,6 +898,53 @@ export function ChannelCampaignComposer({
                 <AlertTriangle className="size-4 shrink-0" />
                 Variáveis não reconhecidas: {invalidVariables.join(", ")}
               </p>
+            )}
+            {quickAssetOpen && (
+              <Card className="border-primary/30 bg-primary/[0.03]">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base">
+                    {channel === "voice" ? "Novo script" : "Novo template"}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="space-y-1.5">
+                    <Label>Nome</Label>
+                    <Input
+                      value={quickAssetName}
+                      onChange={(event) => setQuickAssetName(event.target.value)}
+                    />
+                  </div>
+                  {channel === "email" && (
+                    <div className="space-y-1.5">
+                      <Label>Assunto</Label>
+                      <Input
+                        value={quickAssetSubject}
+                        onChange={(event) => setQuickAssetSubject(event.target.value)}
+                      />
+                    </div>
+                  )}
+                  <div className="space-y-1.5">
+                    <Label>{channel === "voice" ? "Texto do script" : "Conteúdo"}</Label>
+                    <Textarea
+                      rows={channel === "email" ? 7 : 4}
+                      value={quickAssetContent}
+                      onChange={(event) => setQuickAssetContent(event.target.value)}
+                    />
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button type="button" variant="ghost" onClick={() => setQuickAssetOpen(false)}>
+                      Cancelar
+                    </Button>
+                    <Button
+                      type="button"
+                      disabled={quickAsset.isPending}
+                      onClick={() => quickAsset.mutate()}
+                    >
+                      {quickAsset.isPending ? "Criando…" : "Criar e selecionar"}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
             )}
             <div className="space-y-2">
               <Label>Quando disparar</Label>
@@ -723,7 +1074,13 @@ export function ChannelCampaignComposer({
           </Button>
           <Button
             className="w-full sm:w-auto"
-            disabled={submit.isPending}
+            disabled={
+              submit.isPending ||
+              !draftId ||
+              draftState === "dirty" ||
+              draftState === "saving" ||
+              draftState === "error"
+            }
             onClick={() => {
               setSubmitAttempted(true);
               submit.mutate();

@@ -88,7 +88,6 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { MetricCard, EmptyState, PageHeader } from "@/components/ui-premium";
 import { SendWindowCard } from "@/components/send-window-card";
-import { ChannelWorkspaceNav } from "@/components/channels/channel-workspace-nav";
 import { ProvidersPausedBanner } from "@/components/providers-paused-banner";
 import { requestConfirmation, requestTextInput } from "@/components/system-dialog-host";
 import { useServerFn } from "@tanstack/react-start";
@@ -154,8 +153,7 @@ export const Route = createFileRoute("/email")({
       { title: "Email Marketing — BETLEADS" },
       {
         name: "description",
-        content:
-          "Módulo de Email Marketing premium: SMTP, templates, campanhas, automações e histórico.",
+        content: "Canal de e-mail: saúde, templates, campanhas e histórico.",
       },
     ],
   }),
@@ -291,13 +289,15 @@ function EmailPage() {
   const hash = useLocation({ select: (l) => l.hash });
   const VALID = [
     "dashboard",
-    "remetentes",
-    "smtp",
     "templates",
     "historico",
-    "configuracoes",
   ] as const;
-  const current = (VALID as readonly string[]).includes(hash) ? hash : "dashboard";
+  const legacySettings = ["remetentes", "smtp", "configuracoes"].includes(hash);
+  const current = legacySettings
+    ? "dashboard"
+    : (VALID as readonly string[]).includes(hash)
+      ? hash
+      : "dashboard";
 
   useEffect(() => {
     if (hash === "campanhas") {
@@ -306,13 +306,16 @@ function EmailPage() {
     if (hash === "automacoes") {
       void navigate({ to: "/automacoes/email", replace: true });
     }
-  }, [hash, navigate]);
+    if (legacySettings) {
+      void navigate({ to: "/email", hash: "dashboard", replace: true });
+    }
+  }, [hash, legacySettings, navigate]);
 
   return (
     <div className="p-4 sm:p-6 space-y-6">
       <PageHeader
         title="Email Marketing"
-        subtitle="Saúde do canal, entregas, remetentes, SMTP, templates e histórico"
+        subtitle="Saúde do canal, entregas, templates e histórico"
         icon={<Mail className="h-5 w-5 text-primary-foreground" />}
         actions={
           <div className="flex items-center gap-2">
@@ -331,17 +334,9 @@ function EmailPage() {
             >
               <Workflow className="mr-1.5 h-3.5 w-3.5" /> Automações
             </Button>
-            <Badge
-              variant="outline"
-              className="border-accent/40 text-accent text-[10px] uppercase tracking-wider"
-            >
-              <Sparkles className="h-3 w-3 mr-1" /> Pronto p/ integrar
-            </Badge>
           </div>
         }
       />
-
-      <ChannelWorkspaceNav channel="email" />
 
       <SendWindowCard compact />
 
@@ -354,31 +349,18 @@ function EmailPage() {
       >
         <TabsList className="hidden">
           <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
-          <TabsTrigger value="remetentes">Remetentes</TabsTrigger>
-          <TabsTrigger value="smtp">SMTP</TabsTrigger>
           <TabsTrigger value="templates">Templates</TabsTrigger>
           <TabsTrigger value="historico">Histórico</TabsTrigger>
-          <TabsTrigger value="configuracoes">Configurações</TabsTrigger>
         </TabsList>
 
         <TabsContent value="dashboard" className="mt-2">
           <DashboardTab />
-        </TabsContent>
-        <TabsContent value="remetentes" className="mt-2">
-          <RemetentesTab />
-        </TabsContent>
-        <TabsContent value="smtp" className="mt-2">
-          <SmtpTab />
         </TabsContent>
         <TabsContent value="templates" className="mt-2">
           <TemplatesTab />
         </TabsContent>
         <TabsContent value="historico" className="mt-2">
           <HistoricoTab />
-        </TabsContent>
-        <TabsContent value="configuracoes" className="mt-2 space-y-8">
-          <RemetentesTab />
-          <SmtpTab />
         </TabsContent>
       </Tabs>
     </div>
@@ -447,7 +429,7 @@ function DashboardTab() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold">Visão geral</h2>
-          <p className="text-xs text-muted-foreground">Métricas em tempo real · provedor Infobip</p>
+          <p className="text-xs text-muted-foreground">Métricas operacionais atualizadas em tempo real</p>
         </div>
         <DashboardDateRangePicker range={range} onChange={setRange} />
       </div>
@@ -573,8 +555,8 @@ function DashboardTab() {
             <HealthRow
               icon={<ShieldCheck className="h-4 w-4" />}
               label="Saúde do domínio"
-              value={health?.sender_domain ?? "Não configurado"}
-              tone={health?.sender_domain ? "ok" : "warn"}
+              value={health?.sender_configured ? "Configurada" : "Não configurada"}
+              tone={health?.sender_configured ? "ok" : "warn"}
             />
             <HealthRow
               icon={<Star className="h-4 w-4" />}
@@ -584,9 +566,9 @@ function DashboardTab() {
             />
             <HealthRow
               icon={<Server className="h-4 w-4" />}
-              label="SMTP"
-              value={health?.smtp_active ? (health.smtp_name ?? "Ativo") : "Inativo"}
-              tone={health?.smtp_active ? "ok" : "danger"}
+              label="Capacidade de envio"
+              value={health?.channel_active ? "Disponível" : "Indisponível"}
+              tone={health?.channel_active ? "ok" : "danger"}
             />
             <Separator />
             <div className="text-xs text-muted-foreground">

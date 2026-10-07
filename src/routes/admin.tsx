@@ -210,7 +210,7 @@ function AdminIntegrationsTab() {
       <CardHeader className="flex flex-row items-start justify-between gap-4">
         <div>
           <CardTitle className="flex items-center gap-2">
-            <RadioTower className="h-5 w-5 text-primary" /> Provedor SMS · Short Brasil
+            <RadioTower className="h-5 w-5 text-primary" /> Provedores de canais
           </CardTitle>
           <p className="mt-1 text-sm text-muted-foreground">
             Diagnóstico técnico visível exclusivamente para o super admin.
@@ -221,42 +221,40 @@ function AdminIntegrationsTab() {
         </Button>
       </CardHeader>
       <CardContent className="space-y-5">
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-muted-foreground">Status:</span>
-          <Badge variant={data?.configured ? "default" : "destructive"}>
-            {isLoading ? "verificando" : data?.configured ? "configurado" : "incompleto"}
-          </Badge>
-        </div>
-        <div className="grid gap-3 md:grid-cols-3">
-          {[
-            ["Usuário da API", data?.credentials.usuario],
-            ["Chave da API", data?.credentials.chave],
-            ["Secret do webhook", data?.credentials.webhookSecret],
-          ].map(([label, ok]) => (
-            <div key={String(label)} className="rounded-lg border border-border/70 p-4">
-              <p className="text-sm font-medium">{String(label)}</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {ok ? "Configurado no ambiente" : "Não configurado"}
-              </p>
+        <div className="grid gap-4 xl:grid-cols-3">
+          {(data?.channels ?? []).map((item) => (
+            <div key={item.channel} className="space-y-3 rounded-lg border border-border/70 p-4">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <p className="font-medium">{item.channel}</p>
+                  <p className="text-xs text-muted-foreground">{item.provider}</p>
+                </div>
+                <Badge variant={item.configured ? "default" : "destructive"}>
+                  {item.configured ? "configurado" : "incompleto"}
+                </Badge>
+              </div>
+              <div className="space-y-1">
+                <Label>Endpoint</Label>
+                <Input readOnly value={item.endpoint} className="font-mono text-xs" />
+              </div>
+              <div className="space-y-1">
+                <Label>Callback</Label>
+                <div className="flex gap-2">
+                  <Input readOnly value={item.callbackUrl} className="font-mono text-xs" />
+                  <Button
+                    size="icon"
+                    variant="outline"
+                    onClick={() => {
+                      navigator.clipboard.writeText(item.callbackUrl);
+                      toast.success("Callback copiado");
+                    }}
+                  >
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
             </div>
           ))}
-        </div>
-        <div className="space-y-2">
-          <Label>Endpoint</Label>
-          <Input readOnly value={data?.endpoint ?? ""} className="font-mono text-xs" />
-          <Label>Callback</Label>
-          <div className="flex gap-2">
-            <Input readOnly value={data?.callbackUrl ?? ""} className="font-mono text-xs" />
-            <Button
-              variant="outline"
-              onClick={() => {
-                if (data?.callbackUrl) navigator.clipboard.writeText(data.callbackUrl);
-                toast.success("Callback copiado");
-              }}
-            >
-              <Copy className="h-4 w-4" />
-            </Button>
-          </div>
         </div>
       </CardContent>
     </Card>

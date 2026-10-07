@@ -3,6 +3,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { dbUuid } from "@/lib/zod-helpers";
 import { z } from "zod";
+import { assertSuperAdmin, tenantChannelHealth } from "@/lib/provider-governance.server";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { sendInfobipEmail, resolveSender } from "./email-send.server";
@@ -54,11 +55,10 @@ export function summarizeProviderError(
 export const getEmailProviderStatus = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async () => {
-    return {
-      configured: Boolean(process.env.INFOBIP_BASE_URL && process.env.INFOBIP_API_KEY),
-      endpoint: `${process.env.INFOBIP_BASE_URL?.replace(/\/$/, "") ?? ""}/email/3/send`,
-      provider: "infobip" as const,
-    };
+    const health = tenantChannelHealth(
+      Boolean(process.env.INFOBIP_BASE_URL && process.env.INFOBIP_API_KEY),
+    );
+    return { ...health, configured: health.available };
   });
 
 const SendTestEmailSchema = z.object({
@@ -78,22 +78,11 @@ export const sendTestEmail = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => SendTestEmailSchema.parse(d))
   .handler(async ({ data, context }) => {
     const tenantId = await resolveOperationalTenantId(context.supabase);
-    // Resolve remetente
-    let sender: { fromEmail: string; fromName: string | null; replyTo: string | null } | null =
-      null;
-    if (data.fromEmail) {
-      sender = {
-        fromEmail: data.fromEmail,
-        fromName: data.fromName ?? null,
-        replyTo: data.replyTo ?? null,
-      };
-    } else {
-      sender = await resolveSender(data.smtpId ?? null, tenantId);
-    }
+    // Tenant requests always use the centrally approved editorial identity.
+    // Sender/provider overrides are deliberately ignored at this boundary.
+    const sender = await resolveSender(null, tenantId);
     if (!sender) {
-      throw new Error(
-        "Nenhum remetente configurado. Vá em Email > Remetentes e cadastre um remetente padrão.",
-      );
+      throw new Error("O canal de e-mail ainda não está disponível. Contate o suporte.");
     }
 
     // Variáveis do player (se informado)
@@ -234,6 +223,7 @@ function smtpRowToUI(r: any) {
 export const listSmtpConfigs = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
+    await assertSuperAdmin(context.userId);
     const { data, error } = await context.supabase
       .from("email_smtp_configs")
       .select("*")
@@ -247,6 +237,7 @@ export const saveSmtpConfig = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => SmtpInputSchema.parse(d))
   .handler(async ({ data, context }) => {
+    await assertSuperAdmin(context.userId);
     const { supabase } = context;
     const payload: any = {
       name: data.nome,
@@ -294,6 +285,7 @@ export const deleteSmtpConfig = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ id: dbUuid() }).parse(d))
   .handler(async ({ data, context }) => {
+    await assertSuperAdmin(context.userId);
     const { error } = await context.supabase.from("email_smtp_configs").delete().eq("id", data.id);
     if (error) throw new Error(error.message);
     return { ok: true };
@@ -303,6 +295,7 @@ export const setDefaultSmtpConfig = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ id: dbUuid() }).parse(d))
   .handler(async ({ data, context }) => {
+    await assertSuperAdmin(context.userId);
     const { supabase } = context;
     await supabase.from("email_smtp_configs").update({ is_default: false }).neq("id", data.id);
     const { error } = await supabase
@@ -343,6 +336,7 @@ function senderRowToUI(r: any) {
 export const listEmailSenders = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
+    await assertSuperAdmin(context.userId);
     const { data, error } = await context.supabase
       .from("email_senders")
       .select("*")
@@ -355,6 +349,7 @@ export const saveEmailSender = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => SenderInputSchema.parse(d))
   .handler(async ({ data, context }) => {
+    await assertSuperAdmin(context.userId);
     const { supabase } = context;
     const { data: tenantRow, error: tenantErr } = await supabase.rpc("current_tenant_id");
     if (tenantErr) throw new Error(tenantErr.message);
@@ -397,6 +392,7 @@ export const deleteEmailSender = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ id: dbUuid() }).parse(d))
   .handler(async ({ data, context }) => {
+    await assertSuperAdmin(context.userId);
     const { error } = await context.supabase.from("email_senders").delete().eq("id", data.id);
     if (error) throw new Error(error.message);
     return { ok: true };
@@ -406,6 +402,7 @@ export const setDefaultEmailSender = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ id: dbUuid() }).parse(d))
   .handler(async ({ data, context }) => {
+    await assertSuperAdmin(context.userId);
     const { supabase } = context;
     const { data: tenantRow, error: tenantErr } = await supabase.rpc("current_tenant_id");
     if (tenantErr) throw new Error(tenantErr.message);
@@ -1300,7 +1297,7 @@ export const getEmailDashboard = createServerFn({ method: "POST" })
     // 4) Saúde SMTP
     const { data: smtp } = await supabaseAdmin
       .from("email_smtp_configs")
-      .select("id, status, last_test_ok, is_default, name")
+      .select("id, status, last_test_ok, is_default")
       .eq("tenant_id", tenantId)
       .order("is_default", { ascending: false })
       .limit(1);
@@ -1309,7 +1306,7 @@ export const getEmailDashboard = createServerFn({ method: "POST" })
 
     const { data: senderRow } = await supabaseAdmin
       .from("email_senders")
-      .select("domain, from_email")
+      .select("id")
       .eq("tenant_id", tenantId)
       .order("is_default", { ascending: false })
       .limit(1)
@@ -1456,11 +1453,13 @@ export const getEmailDashboard = createServerFn({ method: "POST" })
       by_day,
       conversions_by_day,
       health: {
-        smtp_active: smtpActive,
-        smtp_name: smtpRow?.name ?? null,
-        sender_domain: senderRow?.domain ?? senderRow?.from_email?.split("@")[1] ?? null,
+        channel_active: smtpActive,
+        sender_configured: Boolean(senderRow?.id),
       },
-      recent_events,
+      recent_events: recent_events.map((event) => ({
+        ...event,
+        error: event.error ? "Não foi possível concluir o envio." : null,
+      })),
     };
   });
 

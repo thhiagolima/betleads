@@ -44,7 +44,9 @@ export const listCallScripts = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const { data, error } = await context.supabase
       .from("call_scripts")
-      .select("*")
+      .select(
+        "id, name, trigger_name, content, status, default_voice_id, voice_settings, version, created_at, updated_at",
+      )
       .order("updated_at", { ascending: false });
     if (error) throw new Error(error.message);
     return { scripts: data ?? [] };
@@ -61,7 +63,6 @@ export const saveCallScript = createServerFn({ method: "POST" })
         content: z.string().min(1).max(8000),
         status: ScriptStatusSchema.default("draft"),
         default_voice_id: z.string().max(120).nullable().optional(),
-        provider: z.string().max(60).default("elevenlabs"),
         voice_settings: VoiceSettingsSchema.optional(),
       })
       .parse(input),
@@ -73,7 +74,8 @@ export const saveCallScript = createServerFn({ method: "POST" })
       content: data.content,
       status: data.status,
       default_voice_id: data.default_voice_id ?? null,
-      provider: data.provider,
+      // Provider selection is centrally governed and never accepted from tenants.
+      provider: "elevenlabs",
       voice_settings: (data.voice_settings ?? DEFAULT_VOICE_SETTINGS) as any,
     };
     if (data.id) {
@@ -116,6 +118,18 @@ async function loadLead(supabase: any, leadId: string | null | undefined): Promi
     .maybeSingle();
   if (error) throw new Error(error.message);
   return (data as LeadLike | null) ?? FAKE_LEAD;
+}
+
+function publicAudioGeneration(row: any) {
+  return {
+    id: row.id,
+    lead_id: row.lead_id ?? null,
+    script_id: row.script_id ?? null,
+    rendered_text: row.rendered_text ?? "",
+    audio_url: row.audio_url ?? null,
+    generation_status: row.generation_status,
+    created_at: row.created_at,
+  };
 }
 
 export const generateLeadVoiceAudio = createServerFn({ method: "POST" })
@@ -169,7 +183,7 @@ export const generateLeadVoiceAudio = createServerFn({ method: "POST" })
     if (cached?.audio_url) {
       console.log(`[calls] cache HIT hash=${hash.slice(0, 10)}`);
       // Não inserir linha duplicada: reusar o registro existente.
-      return { audio: cached, cache: true };
+      return { audio: publicAudioGeneration(cached), cache: true };
     }
 
     // Anti-duplicação: se outra execução já está gerando esse mesmo hash
@@ -196,7 +210,7 @@ export const generateLeadVoiceAudio = createServerFn({ method: "POST" })
           .eq("id", inFlight.id)
           .maybeSingle();
         if (maybeReady?.generation_status === "ready" && maybeReady.audio_url) {
-          return { audio: maybeReady, cache: true };
+          return { audio: publicAudioGeneration(maybeReady), cache: true };
         }
         if (maybeReady?.generation_status === "failed") break;
       }
@@ -243,7 +257,7 @@ export const generateLeadVoiceAudio = createServerFn({ method: "POST" })
         .single();
       if (uErr) throw new Error(uErr.message);
       console.log(`[calls] áudio gerado id=${updated.id}`);
-      return { audio: updated, cache: false };
+      return { audio: publicAudioGeneration(updated), cache: false };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`[calls] falha gerando áudio: ${msg}`);
@@ -452,7 +466,16 @@ export const prepareCallForLead = createServerFn({ method: "POST" })
       .single();
     if (uErr) throw new Error(uErr.message);
 
-    return { queue: updated, audio: audioRes.audio };
+    return {
+      queue: {
+        id: updated.id,
+        status: updated.status,
+        phone_number: updated.phone_number,
+        audio_url: updated.audio_url,
+        scheduled_at: updated.scheduled_at,
+      },
+      audio: audioRes.audio,
+    };
   });
 
 export const listCallQueue = createServerFn({ method: "POST" })
@@ -468,14 +491,25 @@ export const listCallQueue = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     let q = context.supabase
       .from("call_queue")
-      .select("*")
+      .select("id, status, phone_number, audio_url, scheduled_at, provider_status")
       .order("priority", { ascending: true })
       .order("scheduled_at", { ascending: true })
       .limit(data.limit);
     if (data.status) q = q.eq("status", data.status as any);
     const { data: rows, error } = await q;
     if (error) throw new Error(error.message);
-    return { items: rows ?? [] };
+    return {
+      items: (rows ?? []).map((row) => ({
+        id: row.id,
+        status: row.status,
+        phone_number: row.phone_number,
+        audio_url: row.audio_url,
+        scheduled_at: row.scheduled_at,
+        retryable:
+          row.status === "audio_ready" &&
+          (row.provider_status === "provider_unavailable" || !row.provider_status),
+      })),
+    };
   });
 
 // ============================================================
@@ -494,13 +528,20 @@ export const listCallHistory = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     let q = context.supabase
       .from("call_history")
-      .select("*")
+      .select(
+        "id, lead_id, script_id, call_queue_id, to_phone, status, duration_seconds, recording_url, created_at, error_message",
+      )
       .order("created_at", { ascending: false })
       .limit(data.limit);
     if (data.lead_id) q = q.eq("lead_id", data.lead_id);
     const { data: rows, error } = await q;
     if (error) throw new Error(error.message);
-    return { history: rows ?? [] };
+    return {
+      history: (rows ?? []).map((row) => ({
+        ...row,
+        error_message: row.error_message ? "Não foi possível concluir a ligação." : null,
+      })),
+    };
   });
 
 export const listAudioGenerations = createServerFn({ method: "POST" })
@@ -517,7 +558,7 @@ export const listAudioGenerations = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     let q = context.supabase
       .from("call_audio_generations")
-      .select("*")
+      .select("id, lead_id, script_id, rendered_text, audio_url, generation_status, created_at")
       .order("created_at", { ascending: false })
       .limit(data.limit);
     if (data.lead_id) q = q.eq("lead_id", data.lead_id);
@@ -693,8 +734,8 @@ export const dispatchCallQueueItem = createServerFn({ method: "POST" })
         ok: false,
         pending: true,
         temporary: true,
-        status: result.status,
-        message: `Provedor de voz indisponível (HTTP ${result.status}). A ligação ficou pendente e será retentada — fila preservada.`,
+        message:
+          "O canal de voz está temporariamente indisponível. A ligação ficou pendente e será retentada.",
       };
     }
 
@@ -725,11 +766,9 @@ export const dispatchCallQueueItem = createServerFn({ method: "POST" })
       .eq("id", q.id);
 
     if (!result.ok) {
-      throw new Error(
-        `Infobip retornou ${result.status}: ${JSON.stringify(result.body).slice(0, 300)}`,
-      );
+      throw new Error("Não foi possível concluir o envio de voz. Tente novamente mais tarde.");
     }
-    return { ok: true, idempotency_key: result.idempotencyKey, to };
+    return { ok: true, to };
   });
 
 // ============================================================
@@ -1028,7 +1067,7 @@ export const getCallsDashboard = createServerFn({ method: "POST" })
     const topIds = Array.from(scriptAgg.entries())
       .sort((a, b) => b[1].total - a[1].total)
       .slice(0, 5);
-    let topScriptsNames: Record<string, string> = {};
+    const topScriptsNames: Record<string, string> = {};
     if (topIds.length > 0) {
       const { data: scripts } = await supabase
         .from("call_scripts")
@@ -1072,7 +1111,6 @@ export const getCallsDashboard = createServerFn({ method: "POST" })
       status: r.status,
       duration_seconds: r.duration_seconds,
       created_at: r.created_at,
-      provider: r.provider,
       lead_nome: r.lead_id ? (leadMap[r.lead_id] ?? "—") : "Avulso",
       script_name: r.script_id ? (scriptMap[r.script_id] ?? "—") : "—",
     }));
@@ -1116,7 +1154,7 @@ export const refreshCallDispatchStatus = createServerFn({ method: "POST" })
     const { supabase } = context;
     const { data: h, error: hErr } = await supabase
       .from("call_history")
-      .select("id, call_queue_id, provider_response, provider_call_id")
+      .select("id, call_queue_id, provider_call_id")
       .eq("id", data.call_history_id)
       .maybeSingle();
     if (hErr) throw new Error(hErr.message);
@@ -1124,6 +1162,6 @@ export const refreshCallDispatchStatus = createServerFn({ method: "POST" })
 
     return {
       ok: true,
-      status: h.provider_call_id ? "awaiting_infobip_event" : "missing_provider_call_id",
+      status: h.provider_call_id ? "processing" : "pending",
     };
   });

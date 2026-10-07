@@ -122,7 +122,6 @@ export function ScriptFormDialog({ open, onOpenChange, initial }: Props) {
       content: form.content,
       status: form.status,
       default_voice_id: form.default_voice_id,
-      provider: "elevenlabs",
       voice_settings: {
         stability: form.stability,
         similarity_boost: form.similarity_boost,
@@ -173,7 +172,7 @@ export function ScriptFormDialog({ open, onOpenChange, initial }: Props) {
               </Select>
             </div>
             <div>
-              <Label>Voz (ElevenLabs)</Label>
+              <Label>Voz</Label>
               <Select
                 value={form.default_voice_id}
                 onValueChange={(v) => setForm({ ...form, default_voice_id: v })}

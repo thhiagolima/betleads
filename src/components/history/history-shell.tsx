@@ -1,12 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -46,13 +41,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
-import {
-  Bar,
-  BarChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-} from "recharts";
+import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis } from "recharts";
 import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
 import {
   getChannelHistory,
@@ -89,7 +78,11 @@ const RANGE_OPTIONS = [
   { value: "all", label: "Tudo" },
 ];
 
-function rangeIso(value: string): { from: string | null; to: string | null; bucket: "hour" | "day" } {
+function rangeIso(value: string): {
+  from: string | null;
+  to: string | null;
+  bucket: "hour" | "day";
+} {
   if (value === "all")
     return {
       from: new Date(Date.now() - 30 * 86400000).toISOString(),
@@ -314,12 +307,11 @@ export function HistoryShell({
       {/* Header */}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          {options.title && (
-            <h2 className="text-lg font-semibold">{options.title}</h2>
-          )}
+          {options.title && <h2 className="text-lg font-semibold">{options.title}</h2>}
           <p className="mt-0.5 text-xs text-muted-foreground">
             {options.subtitle ? `${options.subtitle} · ` : ""}
-            Último disparo: <span className="text-foreground">{formatRelative(stats.data?.lastDispatchAt)}</span>
+            Último disparo:{" "}
+            <span className="text-foreground">{formatRelative(stats.data?.lastDispatchAt)}</span>
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -382,11 +374,17 @@ export function HistoryShell({
                 Disparos por {iso.bucket === "hour" ? "hora" : "dia"}
               </p>
               <p className="text-[11px] text-muted-foreground">
-                {(timeline.data?.points ?? []).reduce((a, b) => a + b.count, 0).toLocaleString("pt-BR")} total
+                {(timeline.data?.points ?? [])
+                  .reduce((a, b) => a + b.count, 0)
+                  .toLocaleString("pt-BR")}{" "}
+                total
               </p>
             </div>
             <ResponsiveContainer width="100%" height={64}>
-              <BarChart data={timeline.data?.points ?? []} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}>
+              <BarChart
+                data={timeline.data?.points ?? []}
+                margin={{ top: 4, right: 4, bottom: 0, left: 4 }}
+              >
                 <XAxis dataKey="t" hide />
                 <Tooltip
                   cursor={{ fill: "rgba(255,255,255,0.04)" }}
@@ -554,11 +552,7 @@ export function HistoryShell({
               </TableHeader>
               <TableBody>
                 {rows.map((r) => (
-                  <TableRow
-                    key={r.id}
-                    className="cursor-pointer"
-                    onClick={() => setOpenRow(r)}
-                  >
+                  <TableRow key={r.id} className="cursor-pointer" onClick={() => setOpenRow(r)}>
                     <TableCell className="whitespace-nowrap text-[11px] text-muted-foreground">
                       {new Date(r.created_at).toLocaleString("pt-BR", {
                         day: "2-digit",
@@ -657,17 +651,12 @@ export function HistoryShell({
                   </pre>
                 </DetailField>
                 {openRow.error && (
-                  <DetailField label="Erro do provedor">
+                  <DetailField label="Falha no envio">
                     <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-rose-500/10 p-2 text-xs text-rose-300">
                       {openRow.error}
                     </pre>
                   </DetailField>
                 )}
-                <DetailField label="ID do provedor">
-                  <span className="font-mono text-[11px] text-muted-foreground break-all">
-                    {openRow.provider_id ?? "—"}
-                  </span>
-                </DetailField>
                 {openRow.converted && (
                   <div className="rounded-md border border-emerald-500/20 bg-emerald-500/5 p-3 text-xs text-emerald-300">
                     Lead converteu (depósito em até 72h após o contato).
@@ -680,9 +669,7 @@ export function HistoryShell({
                     variant="outline"
                     size="sm"
                     className="gap-1"
-                    onClick={() =>
-                      window.open(`/players?focus=${openRow.player_id}`, "_blank")
-                    }
+                    onClick={() => window.open(`/players?focus=${openRow.player_id}`, "_blank")}
                   >
                     <ExternalLink className="h-3.5 w-3.5" /> Ver player
                   </Button>
@@ -739,9 +726,7 @@ function StatCard({
     <Card className="border-0 card-premium">
       <CardContent className="flex items-center justify-between gap-3 p-4">
         <div className="min-w-0">
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-            {label}
-          </p>
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
           <p className="text-xl font-semibold tabular-nums">
             {value == null ? "—" : value.toLocaleString("pt-BR")}
           </p>
@@ -817,10 +802,7 @@ function FlowRanking({
               <TableCell className="max-w-[260px]">
                 <div className="text-xs font-medium">{s.flow_name}</div>
                 <div className="mt-1 h-1 w-full rounded bg-muted/40">
-                  <div
-                    className="h-1 rounded bg-primary/70"
-                    style={{ width: `${width}%` }}
-                  />
+                  <div className="h-1 rounded bg-primary/70" style={{ width: `${width}%` }} />
                 </div>
               </TableCell>
               <TableCell className="text-right text-xs tabular-nums">
@@ -852,9 +834,7 @@ function FlowRanking({
 function DetailField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <p className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">
-        {label}
-      </p>
+      <p className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
       <div>{children}</div>
     </div>
   );

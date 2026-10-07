@@ -37,7 +37,36 @@ export const adminGetSmsProviderConfig = createServerFn({ method: "GET" })
     await assertSuperAdmin(context.userId);
     const webhookSecret = process.env.SHORT_BRASIL_WEBHOOK_SECRET ?? "SEU_WEBHOOK_SECRET";
     const appUrl = (process.env.PUBLIC_APP_URL ?? "https://betleads.io").replace(/\/$/, "");
+    const emailBase = (process.env.INFOBIP_BASE_URL ?? "").replace(/\/$/, "");
+    const channels = [
+      {
+        channel: "SMS",
+        provider: "Short Brasil",
+        configured: Boolean(
+          process.env.SHORT_BRASIL_SMS_USUARIO && process.env.SHORT_BRASIL_SMS_CHAVE,
+        ),
+        endpoint:
+          process.env.SHORT_BRASIL_SMS_SINGLE_URL ??
+          "http://lp01-short.painelsms.com/bot/single-sms.php",
+        callbackUrl: `${appUrl}/api/public/sms-webhook?token=${encodeURIComponent(webhookSecret)}`,
+      },
+      {
+        channel: "E-mail",
+        provider: "Infobip",
+        configured: Boolean(emailBase && process.env.INFOBIP_API_KEY),
+        endpoint: `${emailBase}/email/3/send`,
+        callbackUrl: `${appUrl}/api/public/infobip/email/events`,
+      },
+      {
+        channel: "Voz",
+        provider: "Infobip",
+        configured: Boolean(emailBase && process.env.INFOBIP_API_KEY),
+        endpoint: `${emailBase}/calls/1/calls`,
+        callbackUrl: `${appUrl}/api/public/infobip/voice/events`,
+      },
+    ];
     return {
+      channels,
       configured: Boolean(
         process.env.SHORT_BRASIL_SMS_USUARIO && process.env.SHORT_BRASIL_SMS_CHAVE,
       ),

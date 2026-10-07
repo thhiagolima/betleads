@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { Plus, RotateCw, Search, Send, Workflow } from "lucide-react";
+import { Plus, RotateCw, Search, Send, Trash2, Workflow } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
 
@@ -12,12 +12,19 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { num } from "@/lib/format";
 import { getChannelOperationState } from "@/lib/channel-operation-state";
 import { cancelScheduledSmsCampaign, listScheduledSmsCampaigns } from "@/lib/sms.functions";
 import { listEmailCampaigns } from "@/lib/email.functions";
 import { listCallQueue } from "@/lib/calls.functions";
+import { deleteCampaignDraft, listCampaignDrafts } from "@/lib/campaign-drafts.functions";
 
 type CampaignStatus = "todos" | "agendadas" | "enviando" | "finalizadas";
 type Campaign = {
@@ -47,9 +54,12 @@ export function CampaignsHub() {
   const listEmailCampaignsFn = useServerFn(listEmailCampaigns);
   const listCallQueueFn = useServerFn(listCallQueue);
   const cancelCampaign = useServerFn(cancelScheduledSmsCampaign);
+  const listDrafts = useServerFn(listCampaignDrafts);
+  const deleteDraftFn = useServerFn(deleteCampaignDraft);
   const [composerOpen, setComposerOpen] = useState(false);
   const [initialChannel, setInitialChannel] = useState<"sms" | "email" | "voice">("sms");
   const [individualOpen, setIndividualOpen] = useState(false);
+  const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<CampaignStatus>("todos");
 
@@ -80,11 +90,24 @@ export function CampaignsHub() {
     queryFn: () => listCallQueueFn({ data: { limit: 100 } }),
     refetchInterval: 30_000,
   });
+  const drafts = useQuery({
+    queryKey: ["campaign-drafts"],
+    queryFn: () => listDrafts(),
+    refetchInterval: 30_000,
+  });
   const cancel = useMutation({
     mutationFn: (id: string) => cancelCampaign({ data: { id } }),
     onSuccess: () => {
       toast.success("Campanha cancelada");
       queryClient.invalidateQueries({ queryKey: ["sms-scheduled-campaigns"] });
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+  const removeDraft = useMutation({
+    mutationFn: (id: string) => deleteDraftFn({ data: { id } }),
+    onSuccess: () => {
+      toast.success("Rascunho excluído");
+      queryClient.invalidateQueries({ queryKey: ["campaign-drafts"] });
     },
     onError: (error: Error) => toast.error(error.message),
   });
@@ -153,27 +176,91 @@ export function CampaignsHub() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => setIndividualOpen(true)}>
-            <Send className="mr-2 h-4 w-4" />
-            SMS individual
-          </Button>
           <Button variant="outline" asChild>
             <Link to="/automacoes" hash="fluxos">
               <Workflow className="mr-2 h-4 w-4" />
               Automações
             </Link>
           </Button>
-          <Button
-            onClick={() => {
-              setInitialChannel("sms");
-              setComposerOpen(true);
-            }}
-          >
-            <Plus className="mr-2 h-4 w-4" />
-            Criar campanha
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button>
+                <Plus className="mr-2 h-4 w-4" /> Criar
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                onClick={() => {
+                  setActiveDraftId(null);
+                  setInitialChannel("sms");
+                  setComposerOpen(true);
+                }}
+              >
+                <Plus className="mr-2 h-4 w-4" /> Campanha
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setIndividualOpen(true)}>
+                <Send className="mr-2 h-4 w-4" /> Envio individual / teste
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link to="/automacoes">
+                  <Workflow className="mr-2 h-4 w-4" /> Automação
+                </Link>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
+      {(drafts.data?.items?.length ?? 0) > 0 && (
+        <Card className="border-primary/25 bg-primary/[0.03]">
+          <CardContent className="p-0">
+            <div className="border-b border-border/60 px-4 py-3">
+              <h2 className="font-semibold">Rascunhos</h2>
+              <p className="text-xs text-muted-foreground">
+                Campanhas salvas automaticamente e disponíveis para continuar.
+              </p>
+            </div>
+            {drafts.data!.items.map((draft) => (
+              <div
+                key={draft.id}
+                className="flex flex-wrap items-center justify-between gap-3 border-b border-border/50 px-4 py-3 last:border-0"
+              >
+                <div>
+                  <p className="font-medium">{draft.name || "Campanha sem nome"}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {draft.channel === "email"
+                      ? "E-mail"
+                      : draft.channel === "voice"
+                        ? "Voz"
+                        : "SMS"}
+                    {" · "}editado em {new Date(draft.updatedAt).toLocaleString("pt-BR")}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      setActiveDraftId(draft.id);
+                      setInitialChannel(draft.channel);
+                      setComposerOpen(true);
+                    }}
+                  >
+                    Continuar edição
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    aria-label="Excluir rascunho"
+                    disabled={removeDraft.isPending}
+                    onClick={() => removeDraft.mutate(draft.id)}
+                  >
+                    <Trash2 className="size-4" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard label="Enviados" value={num(sent)} hint="nas campanhas listadas" />
         <MetricCard
@@ -250,6 +337,7 @@ export function CampaignsHub() {
                 <Button
                   onClick={() => {
                     setInitialChannel("sms");
+                    setActiveDraftId(null);
                     setComposerOpen(true);
                   }}
                 >
@@ -327,10 +415,12 @@ export function CampaignsHub() {
         open={composerOpen}
         onOpenChange={setComposerOpen}
         initialChannel={initialChannel}
+        initialDraftId={activeDraftId}
         onCreated={() => {
           queryClient.invalidateQueries({ queryKey: ["sms-scheduled-campaigns"] });
           queryClient.invalidateQueries({ queryKey: ["email-campaigns"] });
           queryClient.invalidateQueries({ queryKey: ["call-queue"] });
+          queryClient.invalidateQueries({ queryKey: ["campaign-drafts"] });
         }}
       />
       <IndividualSmsDialog open={individualOpen} onOpenChange={setIndividualOpen} />

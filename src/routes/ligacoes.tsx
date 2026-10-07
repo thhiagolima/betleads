@@ -8,12 +8,10 @@ import { ProvidersPausedBanner } from "@/components/providers-paused-banner";
 import { ScriptsTab } from "@/components/ligacoes/scripts-tab";
 import { QueueTab } from "@/components/ligacoes/queue-tab";
 import { HistoryShell } from "@/components/history/history-shell";
-import { ProvidersTab } from "@/components/ligacoes/providers-tab";
 import { FlowsTab } from "@/components/ligacoes/flows-tab";
 import { BulkCallTab } from "@/components/ligacoes/bulk-call-tab";
 import { DashboardTab } from "@/components/ligacoes/dashboard-tab";
 import { VoiceAssetsTab } from "@/components/ligacoes/voice-assets-tab";
-import { ChannelWorkspaceNav } from "@/components/channels/channel-workspace-nav";
 
 export const Route = createFileRoute("/ligacoes")({
   head: () => ({
@@ -22,7 +20,7 @@ export const Route = createFileRoute("/ligacoes")({
       {
         name: "description",
         content:
-          "Central de voz com áudios enviados, fila de chamadas e configuração de provedores.",
+          "Central de voz com áudios enviados, disponibilidade e fila de chamadas.",
       },
     ],
   }),
@@ -36,7 +34,6 @@ const VALID_TABS = [
   "massa",
   "audios",
   "historico",
-  "configuracoes",
 ] as const;
 
 function LigacoesPage() {
@@ -49,10 +46,8 @@ function LigacoesPage() {
       <PageHeader
         icon={<Phone />}
         title="Voz"
-        subtitle="Envie áudios, configure o provedor e acompanhe a fila de chamadas."
+        subtitle="Envie áudios e acompanhe a disponibilidade e a fila de chamadas."
       />
-
-      <ChannelWorkspaceNav channel="voice" />
 
       <LigacoesPausedBanner />
 
@@ -108,9 +103,6 @@ function LigacoesPage() {
               },
             }}
           />
-        </TabsContent>
-        <TabsContent value="configuracoes">
-          <ProvidersTab />
         </TabsContent>
       </Tabs>
     </div>

@@ -120,7 +120,7 @@ export const QUEUE_STATUS_LABEL: Record<string, string> = {
   pending_audio: "Aguardando áudio",
   audio_ready: "Áudio pronto",
   queued: "Na fila",
-  waiting_provider: "Aguardando provedor",
+  waiting_provider: "Processando envio",
   calling: "Ligando",
   completed: "Concluída",
   failed: "Falhou",

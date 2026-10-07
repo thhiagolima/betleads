@@ -2,9 +2,15 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { isSuppressed } from "./email-deliverability.server";
 import { getChannelConsentStatus, isChannelRevoked } from "./consent.server";
 
-type Channel = "sms" | "email" | "call" | "whatsapp";
-type BlockReason =
-  "missing_phone" | "missing_email" | "email_opt_out" | "sms_opt_out" | "voice_opt_out";
+export type Channel = "sms" | "email" | "call" | "whatsapp";
+export type BlockReason =
+  | "missing_phone"
+  | "invalid_phone"
+  | "missing_email"
+  | "invalid_email"
+  | "email_opt_out"
+  | "sms_opt_out"
+  | "voice_opt_out";
 
 export type ChannelEligibility = {
   eligible: boolean;
@@ -13,13 +19,15 @@ export type ChannelEligibility = {
   email: string | null;
 };
 
-function normalizePhone(raw: string | null | undefined): string | null {
+export function normalizePhone(raw: string | null | undefined): string | null {
   if (!raw) return null;
   const digits = raw.replace(/\D/g, "");
-  return digits.length >= 10 ? digits : null;
+  if (/^[1-9]{2}9?\d{8}$/.test(digits)) return `+55${digits}`;
+  if (/^55[1-9]{2}9?\d{8}$/.test(digits)) return `+${digits}`;
+  return null;
 }
 
-function normalizeEmail(raw: string | null | undefined): string | null {
+export function normalizeEmail(raw: string | null | undefined): string | null {
   const email = raw?.trim().toLowerCase() ?? "";
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null;
 }
@@ -51,7 +59,8 @@ export async function channelEligibility(
   const email = normalizeEmail(contact.email);
 
   if (channel === "email") {
-    if (!email) return { eligible: false, reason: "missing_email", phone, email };
+    if (!contact.email?.trim()) return { eligible: false, reason: "missing_email", phone, email };
+    if (!email) return { eligible: false, reason: "invalid_email", phone, email };
     const centralStatus = await getChannelConsentStatus(tenantId, "email", email);
     if (
       centralStatus === "revoked" ||
@@ -61,7 +70,8 @@ export async function channelEligibility(
     return { eligible: true, phone, email };
   }
 
-  if (!phone) return { eligible: false, reason: "missing_phone", phone, email };
+  if (!contact.telefone?.trim()) return { eligible: false, reason: "missing_phone", phone, email };
+  if (!phone) return { eligible: false, reason: "invalid_phone", phone, email };
   if (
     channel === "sms" &&
     ((await isChannelRevoked(tenantId, "sms", phone)) || (await isSmsSuppressed(tenantId, phone)))

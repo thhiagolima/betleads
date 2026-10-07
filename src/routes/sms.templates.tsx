@@ -15,7 +15,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { ChannelWorkspaceNav } from "@/components/channels/channel-workspace-nav";
 
 export const Route = createFileRoute("/sms/templates")({ component: SmsTemplatesPage });
 
@@ -100,7 +99,6 @@ function SmsTemplatesPage() {
           Novo template
         </Button>
       </div>
-      <ChannelWorkspaceNav channel="sms" />
       {editing && (
         <Card>
           <CardHeader>

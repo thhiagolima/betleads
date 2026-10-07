@@ -33,6 +33,10 @@ export interface HistoryRow {
   provider_response: any;
 }
 
+function safeOperationalError(error: unknown): string | null {
+  return error ? "Não foi possível concluir este envio. Tente novamente ou contate o suporte." : null;
+}
+
 export interface HistoryStats {
   total: number;
   success: number;
@@ -215,11 +219,11 @@ export const getChannelHistory = createServerFn({ method: "POST" })
           status_raw: r.delivery_status ?? r.status ?? "",
           status_label: s.label,
           status_color: s.color,
-          error: r.error ?? null,
+          error: safeOperationalError(r.error),
           converted: false,
           attempts: 1,
-          provider_id: r.provider_message_id ?? null,
-          provider_response: r.provider_response ?? null,
+          provider_id: null,
+          provider_response: null,
         };
       });
     } else if (channel === "email") {
@@ -257,11 +261,11 @@ export const getChannelHistory = createServerFn({ method: "POST" })
           status_raw: r.status ?? "",
           status_label: s.label,
           status_color: s.color,
-          error: r.error ?? null,
+          error: safeOperationalError(r.error),
           converted: false,
           attempts: 1,
           provider_id: null,
-          provider_response: r.provider_response ?? null,
+          provider_response: null,
         };
       });
     } else if (channel === "calls") {
@@ -306,18 +310,18 @@ export const getChannelHistory = createServerFn({ method: "POST" })
           lead_name: r.players?.nome ?? null,
           contact: r.to_phone ?? "—",
           message: r.duration_seconds ? `${r.duration_seconds}s` : null,
-          template: r.provider ?? null,
+          template: null,
           flow_id: flowInfo?.flow_id ?? null,
           flow_name: flowInfo?.flow_name ?? null,
           step: null,
           status_raw: r.status ?? "",
           status_label: s.label,
           status_color: s.color,
-          error: r.error_message ?? null,
+          error: safeOperationalError(r.error_message),
           converted: false,
           attempts: 1,
-          provider_id: r.provider_call_id ?? null,
-          provider_response: r.provider_response ?? null,
+          provider_id: null,
+          provider_response: null,
         };
       });
       // post-filter by flow if requested

@@ -12,13 +12,7 @@ import {
   Users,
   AlertTriangle,
 } from "lucide-react";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -33,11 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  listCallScripts,
-  listPlayersForCalls,
-  bulkDispatchCalls,
-} from "@/lib/calls.functions";
+import { listCallScripts, listPlayersForCalls, bulkDispatchCalls } from "@/lib/calls.functions";
 import { listJourneyVoiceAssets } from "@/lib/journey-voice-assets.functions";
 
 interface Target {
@@ -61,28 +51,10 @@ interface ParsedError {
 
 function parseProviderError(raw?: string): ParsedError {
   if (!raw) return { message: "Erro desconhecido" };
-  // tenta achar JSON dentro da string de erro do provedor
-  const jsonStart = raw.indexOf("{");
-  const jsonStr = jsonStart >= 0 ? raw.slice(jsonStart) : raw;
-  try {
-    const parsed = JSON.parse(jsonStr);
-    if (parsed && typeof parsed === "object" && parsed.errors) {
-      const fieldMsgs: string[] = [];
-      let hint: ParsedError["hint"];
-      for (const [field, msgs] of Object.entries(parsed.errors as Record<string, string[]>)) {
-        for (const m of msgs) {
-          fieldMsgs.push(`${field}: ${m}`);
-          if (/allowlist/i.test(m)) hint = "allowlist";
-        }
-      }
-      const head = parsed.message ? `${parsed.message} — ` : "";
-      return { message: head + fieldMsgs.join(" | "), hint };
-    }
-    if (parsed?.message) return { message: String(parsed.message) };
-  } catch {
-    /* não é JSON */
-  }
-  return { message: raw.length > 240 ? raw.slice(0, 240) + "…" : raw };
+  return {
+    message: "Não foi possível concluir esta chamada. Tente novamente ou contate o suporte.",
+    hint: /allowlist/i.test(raw) ? "allowlist" : undefined,
+  };
 }
 
 export function BulkCallTab() {
@@ -111,7 +83,10 @@ export function BulkCallTab() {
     queryFn: () => listScripts(),
   });
   const scripts = scriptsData?.scripts ?? [];
-  const assetsQuery = useQuery({ queryKey: ["journey-voice-assets", "bulk-call"], queryFn: () => listAssets() });
+  const assetsQuery = useQuery({
+    queryKey: ["journey-voice-assets", "bulk-call"],
+    queryFn: () => listAssets(),
+  });
   const assets = (assetsQuery.data?.assets ?? []).filter((asset: any) => !asset.is_archived);
 
   const { data: playersData, isFetching } = useQuery({
@@ -208,7 +183,9 @@ export function BulkCallTab() {
   });
 
   const canSend =
-    Boolean(audioMode === "tts" ? scriptId : assetId) && allTargets.length > 0 && !bulkMut.isPending;
+    Boolean(audioMode === "tts" ? scriptId : assetId) &&
+    allTargets.length > 0 &&
+    !bulkMut.isPending;
 
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -220,16 +197,21 @@ export function BulkCallTab() {
               Envio em massa de ligações
             </CardTitle>
             <CardDescription>
-              Escolha um script e selecione vários leads — geramos o áudio (com
-              cache) e disparamos via Infobip para cada um.
+              Escolha um script e selecione vários leads — geramos o áudio (com cache) e preparamos
+              o disparo para cada um.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-1.5">
                 <Label>Fonte do áudio</Label>
-                <Select value={audioMode} onValueChange={(value: "tts" | "fixed") => setAudioMode(value)}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                <Select
+                  value={audioMode}
+                  onValueChange={(value: "tts" | "fixed") => setAudioMode(value)}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="tts">Script dinâmico (TTS)</SelectItem>
                     <SelectItem value="fixed">Áudio fixo da biblioteca</SelectItem>
@@ -238,28 +220,44 @@ export function BulkCallTab() {
               </div>
               <div className="space-y-1.5">
                 <Label>{audioMode === "tts" ? "Script" : "Áudio reutilizável"}</Label>
-                {audioMode === "tts" ? <Select value={scriptId} onValueChange={setScriptId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecione um script..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {scripts.length === 0 && (
-                      <div className="px-3 py-2 text-xs text-muted-foreground">
-                        Nenhum script — crie um na aba Scripts.
-                      </div>
-                    )}
-                    {scripts.map((s: any) => (
-                      <SelectItem key={s.id} value={s.id}>
-                        {s.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select> : <Select value={assetId} onValueChange={setAssetId}>
-                  <SelectTrigger><SelectValue placeholder="Selecione um áudio..." /></SelectTrigger>
-                  <SelectContent>
-                    {assets.length === 0 ? <div className="px-3 py-2 text-xs text-muted-foreground">Nenhum áudio ativo na biblioteca.</div> : assets.map((asset: any) => <SelectItem key={asset.id} value={asset.id}>{asset.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>}
+                {audioMode === "tts" ? (
+                  <Select value={scriptId} onValueChange={setScriptId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione um script..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {scripts.length === 0 && (
+                        <div className="px-3 py-2 text-xs text-muted-foreground">
+                          Nenhum script — crie um na aba Scripts.
+                        </div>
+                      )}
+                      {scripts.map((s: any) => (
+                        <SelectItem key={s.id} value={s.id}>
+                          {s.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Select value={assetId} onValueChange={setAssetId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione um áudio..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {assets.length === 0 ? (
+                        <div className="px-3 py-2 text-xs text-muted-foreground">
+                          Nenhum áudio ativo na biblioteca.
+                        </div>
+                      ) : (
+                        assets.map((asset: any) => (
+                          <SelectItem key={asset.id} value={asset.id}>
+                            {asset.name}
+                          </SelectItem>
+                        ))
+                      )}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
               <div className="space-y-1.5">
                 <Label>Nome da campanha (opcional)</Label>
@@ -284,9 +282,7 @@ export function BulkCallTab() {
               />
               <div className="max-h-64 overflow-y-auto rounded-lg border border-border bg-card/50">
                 {isFetching && (
-                  <p className="px-3 py-4 text-center text-xs text-muted-foreground">
-                    Buscando...
-                  </p>
+                  <p className="px-3 py-4 text-center text-xs text-muted-foreground">Buscando...</p>
                 )}
                 {!isFetching && players.length === 0 && (
                   <p className="px-3 py-4 text-center text-xs text-muted-foreground">
@@ -306,8 +302,7 @@ export function BulkCallTab() {
                       <div className="min-w-0 flex-1">
                         <p className="truncate font-medium">{p.nome}</p>
                         <p className="truncate text-xs text-muted-foreground">
-                          {p.telefone ?? "sem telefone"} ·{" "}
-                          {p.vip ? "VIP" : (p.status ?? "ativo")}
+                          {p.telefone ?? "sem telefone"} · {p.vip ? "VIP" : (p.status ?? "ativo")}
                         </p>
                       </div>
                       {added ? (
@@ -332,8 +327,8 @@ export function BulkCallTab() {
                 onChange={(e) => setRawPhones(e.target.value)}
               />
               <p className="text-xs text-muted-foreground">
-                {phoneTargets.length} número(s) avulso(s) detectado(s). Sem
-                lead_id — variáveis do script viram placeholder.
+                {phoneTargets.length} número(s) avulso(s) detectado(s). Sem lead_id — variáveis do
+                script viram placeholder.
               </p>
             </div>
           </CardContent>
@@ -353,15 +348,11 @@ export function BulkCallTab() {
             ) : (
               <ul className="divide-y divide-border">
                 {allTargets.map((t) => (
-                  <li
-                    key={t.key}
-                    className="flex items-center justify-between gap-2 py-2 text-sm"
-                  >
+                  <li key={t.key} className="flex items-center justify-between gap-2 py-2 text-sm">
                     <div className="min-w-0 flex-1">
                       <p className="truncate font-medium">{t.nome}</p>
                       <p className="truncate text-xs text-muted-foreground">
-                        {t.phone ?? "sem telefone"}{" "}
-                        {t.lead_id ? "· lead" : "· avulso"}
+                        {t.phone ?? "sem telefone"} {t.lead_id ? "· lead" : "· avulso"}
                       </p>
                     </div>
                     {t.lead_id && (
@@ -390,13 +381,9 @@ export function BulkCallTab() {
           <CardContent className="space-y-3 text-sm">
             <Row label="Script" value={scripts.find((s: any) => s.id === scriptId)?.name ?? "—"} />
             <Row label="Destinatários" value={String(allTargets.length)} />
-            <Row label="Provedor" value="Infobip" />
+            <Row label="Canal" value="Voz" />
             <Separator />
-            <Button
-              className="w-full gap-2"
-              onClick={() => bulkMut.mutate()}
-              disabled={!canSend}
-            >
+            <Button className="w-full gap-2" onClick={() => bulkMut.mutate()} disabled={!canSend}>
               {bulkMut.isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
@@ -414,14 +401,11 @@ export function BulkCallTab() {
               </div>
             )}
             {lastResult && lastResult.failed > 0 && (
-              <FailureDetails
-                results={lastResult.results}
-                targets={allTargets}
-              />
+              <FailureDetails results={lastResult.results} targets={allTargets} />
             )}
             <p className="text-xs text-muted-foreground">
-              Cada destinatário gera (ou reutiliza do cache) o áudio e é disparado
-              individualmente. Acompanhe o resultado em Histórico.
+              Cada destinatário gera (ou reutiliza do cache) o áudio e é disparado individualmente.
+              Acompanhe o resultado em Histórico.
             </p>
           </CardContent>
         </Card>
@@ -439,13 +423,7 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-function FailureDetails({
-  results,
-  targets,
-}: {
-  results: DispatchResult[];
-  targets: Target[];
-}) {
+function FailureDetails({ results, targets }: { results: DispatchResult[]; targets: Target[] }) {
   const failures = results.filter((r) => !r.ok);
   if (failures.length === 0) return null;
   const parsed = failures.map((f) => ({ ...f, parsed: parseProviderError(f.error) }));
@@ -464,13 +442,10 @@ function FailureDetails({
       {allAllowlist && (
         <Alert variant="destructive">
           <AlertTriangle className="h-4 w-4" />
-          <AlertTitle className="text-xs">Host de áudio não autorizado na Infobip</AlertTitle>
+          <AlertTitle className="text-xs">Áudio temporariamente indisponível</AlertTitle>
           <AlertDescription className="text-xs leading-relaxed">
-            O host do áudio gerado não está liberado no provedor. No painel da
-            Infobip, adicione esse host à lista de URLs permitidas no painel do provedor.{" "}
-            (lista separada por vírgula no <code className="text-[10px]">.env</code>) ou ative{" "}
-            <code className="text-[10px]">MESSAGING_AUDIO_URL_ALLOW_ANY=true</code>. Depois disso o disparo passa
-            sem nenhuma mudança aqui.
+            O serviço de voz não conseguiu acessar o áudio. Tente novamente mais tarde ou contate o
+            suporte; os dados preparados foram preservados.
           </AlertDescription>
         </Alert>
       )}

@@ -71,11 +71,7 @@ export function QueueTab() {
 
   const retryAllMut = useMutation({
     mutationFn: async () => {
-      const pending = items.filter(
-        (it: any) =>
-          it.status === "audio_ready" &&
-          (it.provider_status === "provider_unavailable" || !it.provider_status),
-      );
+      const pending = items.filter((it: any) => it.retryable);
       let ok = 0;
       let fail = 0;
       for (const it of pending) {
@@ -108,7 +104,7 @@ export function QueueTab() {
               Fila de ligações
             </CardTitle>
             <CardDescription>
-              Itens preparados aguardando provedor de telefonia.
+              Itens preparados aguardando disponibilidade do canal.
             </CardDescription>
           </div>
           <Button

@@ -32,7 +32,7 @@ const titles: Record<string, { title: string; subtitle: string }> = {
   "/campanhas": { title: "Campanhas", subtitle: "Disparos segmentados e resultados" },
   "/creditos-sms": { title: "Créditos SMS", subtitle: "Saldo, pedidos e extrato de consumo" },
   "/email": { title: "Email", subtitle: "Campanhas e fluxos de email" },
-  "/ligacoes": { title: "Voz", subtitle: "Áudios, chamadas e provedores" },
+  "/ligacoes": { title: "Voz", subtitle: "Áudios, chamadas e disponibilidade" },
   "/eventos": { title: "Eventos", subtitle: "Timeline de atividades em tempo real" },
   "/webhooks": { title: "Integrações", subtitle: "Conexão com sua plataforma de apostas" },
   "/configuracoes": { title: "Configurações", subtitle: "Preferências da plataforma" },

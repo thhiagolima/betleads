@@ -1,22 +1,36 @@
 import { useMemo, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { Send, UserRound } from "lucide-react";
+import { Mail, MessageSquare, Phone, Send, UserRound } from "lucide-react";
 import { toast } from "sonner";
 
+import { LinkTrackingToggle } from "@/components/link-tracking-toggle";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { LinkTrackingToggle } from "@/components/link-tracking-toggle";
+import { bulkDispatchCalls, listCallScripts } from "@/lib/calls.functions";
+import { tenantSafeChannelError } from "@/lib/channel-error";
+import { sendTestEmail } from "@/lib/email.functions";
 import { previewTrackedText, smsPartsForLength } from "@/lib/link-tracking-preview";
 import { sendBulkSms } from "@/lib/sms.functions";
 
-function smsParts(length: number) {
-  if (!length) return 0;
-  return length <= 160 ? 1 : Math.ceil(length / 153);
-}
+type Channel = "sms" | "email" | "voice";
 
 function renderMessage(message: string, name: string, phone: string) {
   const fullName = name.trim();
@@ -27,43 +41,234 @@ function renderMessage(message: string, name: string, phone: string) {
     .replaceAll("{telefone}", phone);
 }
 
-export function IndividualSmsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
-  const send = useServerFn(sendBulkSms);
+export function IndividualSmsDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const sendSms = useServerFn(sendBulkSms);
+  const sendEmail = useServerFn(sendTestEmail);
+  const sendVoice = useServerFn(bulkDispatchCalls);
+  const listScripts = useServerFn(listCallScripts);
   const queryClient = useQueryClient();
+  const [channel, setChannel] = useState<Channel>("sms");
   const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
   const [name, setName] = useState("");
+  const [subject, setSubject] = useState("Mensagem da sua equipe");
   const [message, setMessage] = useState("Olá {primeiro_nome}, temos uma novidade para você.");
+  const [scriptId, setScriptId] = useState("");
   const [trackLinks, setTrackLinks] = useState(true);
   const digits = phone.replace(/\D/g, "");
   const previewContent = previewTrackedText(message, trackLinks);
   const parts = smsPartsForLength(previewContent.length);
-  const preview = useMemo(() => renderMessage(message, name || "Cliente", digits), [message, name, digits]);
+  const preview = useMemo(
+    () => renderMessage(message, name || "Cliente", digits),
+    [message, name, digits],
+  );
+
+  const scripts = useQuery({
+    queryKey: ["call-scripts", "individual"],
+    queryFn: () => listScripts(),
+    enabled: open && channel === "voice",
+  });
   const mutation = useMutation({
-    mutationFn: () => send({ data: { phones: [digits], content: renderMessage(message, name, digits), campaignName: `Individual: ${name.trim() || digits}`, route: "iGaming", ratePerMinute: 1000, trackLinks } }),
+    mutationFn: () => {
+      if (channel === "email") {
+        return sendEmail({ data: { to: email, subject, html: message, trackLinks } });
+      }
+      if (channel === "voice") {
+        return sendVoice({
+          data: {
+            campaign_name: `Teste individual: ${name.trim() || digits}`,
+            script_id: scriptId,
+            targets: [{ phone_number: digits }],
+          },
+        });
+      }
+      return sendSms({
+        data: {
+          phones: [digits],
+          content: renderMessage(message, name, digits),
+          campaignName: `Individual: ${name.trim() || digits}`,
+          route: "iGaming",
+          ratePerMinute: 1000,
+          trackLinks,
+        },
+      });
+    },
     onSuccess: () => {
-      toast.success("SMS enviado para processamento");
+      toast.success("Envio individual registrado para processamento");
       queryClient.invalidateQueries({ queryKey: ["sms-scheduled-campaigns"] });
       queryClient.invalidateQueries({ queryKey: ["sms-compact-dashboard"] });
       queryClient.invalidateQueries({ queryKey: ["sms-credits"] });
-      setPhone(""); setName(""); onOpenChange(false);
+      queryClient.invalidateQueries({ queryKey: ["call-queue"] });
+      setPhone("");
+      setEmail("");
+      setName("");
+      onOpenChange(false);
     },
-    onError: (error: Error) => toast.error(error.message),
+    onError: (error: Error) => toast.error(tenantSafeChannelError(error)),
   });
-  const canSend = digits.length >= 10 && message.trim().length > 0;
+  const canSend =
+    channel === "email"
+      ? /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && Boolean(subject.trim() && message.trim())
+      : digits.length >= 10 && (channel === "voice" ? Boolean(scriptId) : Boolean(message.trim()));
 
-  return <Dialog open={open} onOpenChange={onOpenChange}>
-    <DialogContent className="max-w-xl">
-      <DialogHeader><DialogTitle>Envio individual por SMS</DialogTitle><DialogDescription>Informe o número, escreva a mensagem e envie agora.</DialogDescription></DialogHeader>
-      <div className="space-y-4">
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-1.5"><Label>Telefone</Label><Input value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="(11) 98765-4321" inputMode="tel" /></div>
-          <div className="space-y-1.5"><Label>Nome (opcional)</Label><Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Rafael" /></div>
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-xl">
+        <DialogHeader>
+          <DialogTitle>Envio individual / teste</DialogTitle>
+          <DialogDescription>
+            Não é uma campanha. O envio respeita consentimento, janela de contato e fica registrado
+            no histórico.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="grid grid-cols-3 gap-2">
+            {(
+              [
+                ["sms", "SMS", MessageSquare],
+                ["email", "E-mail", Mail],
+                ["voice", "Voz", Phone],
+              ] as const
+            ).map(([value, label, Icon]) => (
+              <Button
+                key={value}
+                type="button"
+                variant={channel === value ? "default" : "outline"}
+                onClick={() => setChannel(value)}
+              >
+                <Icon className="mr-1.5 size-4" /> {label}
+              </Button>
+            ))}
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {channel === "email" ? (
+              <div className="space-y-1.5">
+                <Label>E-mail</Label>
+                <Input
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="cliente@exemplo.com"
+                  inputMode="email"
+                />
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <Label>Telefone</Label>
+                <Input
+                  value={phone}
+                  onChange={(event) => setPhone(event.target.value)}
+                  placeholder="(11) 98765-4321"
+                  inputMode="tel"
+                />
+              </div>
+            )}
+            <div className="space-y-1.5">
+              <Label>Nome (opcional)</Label>
+              <Input value={name} onChange={(event) => setName(event.target.value)} />
+            </div>
+          </div>
+          {channel === "email" && (
+            <div className="space-y-1.5">
+              <Label>Assunto</Label>
+              <Input value={subject} onChange={(event) => setSubject(event.target.value)} />
+            </div>
+          )}
+          {channel === "voice" ? (
+            <div className="space-y-1.5">
+              <Label>Script aprovado</Label>
+              <Select value={scriptId} onValueChange={setScriptId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione um script" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(
+                    (scripts.data?.scripts ?? []) as Array<{
+                      id: string;
+                      name: string;
+                      status: string;
+                    }>
+                  )
+                    .filter((item) => item.status === "active")
+                    .map((item) => (
+                      <SelectItem key={item.id} value={item.id}>
+                        {item.name}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <Label>Mensagem</Label>
+                {channel === "sms" && (
+                  <span className="text-xs text-muted-foreground">
+                    {previewContent.length} caracteres · {parts} parte{parts === 1 ? "" : "s"}
+                  </span>
+                )}
+              </div>
+              <Textarea
+                rows={5}
+                value={message}
+                onChange={(event) => setMessage(event.target.value)}
+              />
+              <div className="flex flex-wrap gap-1.5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setMessage((value) => `${value}{primeiro_nome}`)}
+                >
+                  + primeiro nome
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setMessage((value) => `${value}{nome}`)}
+                >
+                  + nome
+                </Button>
+              </div>
+            </div>
+          )}
+          {channel !== "voice" && (
+            <LinkTrackingToggle
+              value={trackLinks}
+              onChange={setTrackLinks}
+              content={message}
+              channel={channel}
+            />
+          )}
+          {channel === "sms" && (
+            <div className="rounded-xl border border-primary/25 bg-primary/5 p-4">
+              <div className="mb-2 flex items-center gap-2 text-sm font-medium">
+                <UserRound className="h-4 w-4 text-primary" /> Prévia para o celular
+              </div>
+              <p className="text-sm leading-relaxed">{preview}</p>
+            </div>
+          )}
         </div>
-        <div className="space-y-1.5"><div className="flex items-center justify-between"><Label>Mensagem</Label><span className="text-xs text-muted-foreground">{previewContent.length} caracteres · {parts} parte{parts === 1 ? "" : "s"}</span></div><Textarea rows={5} value={message} onChange={(event) => setMessage(event.target.value)} /><div className="flex flex-wrap gap-1.5"><Button type="button" variant="outline" size="sm" onClick={() => setMessage((value) => `${value}{primeiro_nome}`)}>+ primeiro nome</Button><Button type="button" variant="outline" size="sm" onClick={() => setMessage((value) => `${value}{nome}`)}>+ nome</Button><Button type="button" variant="outline" size="sm" onClick={() => setMessage((value) => `${value}{telefone}`)}>+ telefone</Button></div></div>
-        <LinkTrackingToggle value={trackLinks} onChange={setTrackLinks} content={message} channel="sms" />
-        <div className="rounded-xl border border-primary/25 bg-primary/5 p-4"><div className="mb-2 flex items-center gap-2 text-sm font-medium"><UserRound className="h-4 w-4 text-primary" />Prévia para o celular</div><p className="text-sm leading-relaxed">{preview}</p></div>
-      </div>
-      <DialogFooter><Button variant="ghost" onClick={() => onOpenChange(false)}>Cancelar</Button><Button disabled={!canSend || mutation.isPending} onClick={() => mutation.mutate()}><Send className="mr-2 h-4 w-4" />{mutation.isPending ? "Enviando…" : `Enviar · ${parts} crédito${parts === 1 ? "" : "s"}`}</Button></DialogFooter>
-    </DialogContent>
-  </Dialog>;
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>
+            Cancelar
+          </Button>
+          <Button disabled={!canSend || mutation.isPending} onClick={() => mutation.mutate()}>
+            <Send className="mr-2 h-4 w-4" />
+            {mutation.isPending
+              ? "Enviando…"
+              : channel === "sms"
+                ? `Enviar · ${parts} crédito${parts === 1 ? "" : "s"}`
+                : "Enviar teste"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
