@@ -74,7 +74,6 @@ const engagementItems: NavItem[] = [
     subItems: [
       { title: "WhatsApp", url: "/whatsapp" },
       { title: "SMS", url: "/sms" },
-      { title: "Templates SMS", url: "/sms/templates" },
       { title: "Email", url: "/email" },
       { title: "Voz", url: "/ligacoes" },
       { title: "Consentimentos", url: "/consentimentos" },

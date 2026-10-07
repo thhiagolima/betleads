@@ -79,7 +79,7 @@ O canal de voz possui telas, scripts, geração de áudio, fila, callback e flux
 
 ### P2 — melhorias de produto e UX
 
-1. Simplificar a navegação de canais em um modelo consistente: **Visão geral → Criar → Biblioteca → Campanhas/Fluxos → Histórico → Configurações**.
+1. **Navegação unificada de canais — concluída em 07/10/2026.** SMS, e-mail e voz usam o mesmo modelo: **Visão geral → Criar → Biblioteca → Campanhas/Fluxos → Histórico → Configurações**. O componente compartilhado inclui troca direta de canal, estado ativo acessível, rolagem horizontal em telas pequenas e destinos reais para cada etapa. Configurações de SMS foram consolidadas; remetentes/SMTP formam a configuração de e-mail; áudios/scripts formam a biblioteca de voz.
 2. Criar um composer único para SMS/e-mail/voz, com seleção de audiência, estimativa de alcance/custo, prévia, validação de variáveis, agendamento e confirmação de risco antes do envio.
 3. Apresentar estados operacionais em linguagem de produto: “pronto para enviar”, “aguardando provedor”, “pausado por limite”, “em retentativa” e “ação necessária”, sempre com próxima ação.
 4. Usar empty states orientados à tarefa e reduzir duplicação entre telas legadas e hubs de campanha.

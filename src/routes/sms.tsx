@@ -139,6 +139,7 @@ import {
   type SmsAudienceCriteria,
 } from "@/lib/sms-audience-criteria";
 import { num } from "@/lib/format";
+import { SendWindowCard } from "@/components/send-window-card";
 
 export const Route = createFileRoute("/sms")({
   head: () => ({
@@ -313,7 +314,7 @@ function renderIndividualSmsTemplate(message: string, recipientName: string, pho
 function SmsPage() {
   const navigate = useNavigate();
   const hash = useLocation({ select: (l) => l.hash });
-  const aliases: Record<string, "saude" | "historico" | "campanhas"> = {
+  const aliases: Record<string, "saude" | "historico" | "campanhas" | "configuracoes"> = {
     dashboard: "saude",
     massa: "saude",
     campanhas: "campanhas",
@@ -321,6 +322,7 @@ function SmsPage() {
     saude: "saude",
     historico: "historico",
     fila: "campanhas",
+    configuracoes: "configuracoes",
   };
   const currentTab = aliases[hash] ?? "saude";
   useEffect(() => {
@@ -342,7 +344,7 @@ function SmsCompactWorkspace({
   tab,
   onTabChange,
 }: {
-  tab: "saude" | "historico" | "campanhas";
+  tab: "saude" | "historico" | "campanhas" | "configuracoes";
   onTabChange: (tab: string) => void;
 }) {
   const qc = useQueryClient();
@@ -478,23 +480,45 @@ function SmsCompactWorkspace({
         ))}
       </div>
 
-      <div className="flex w-fit rounded-lg border border-border/70 bg-card/60 p-1">
-        {(["saude", "historico"] as const).map((value) => (
-          <Button
-            key={value}
-            size="sm"
-            variant={tab === value ? "default" : "ghost"}
-            onClick={() => onTabChange(value)}
-          >
-            {value === "saude" ? "Saúde" : "Histórico"}
-          </Button>
-        ))}
-        <Button size="sm" variant="ghost" asChild>
-          <Link to="/campanhas">Campanhas{queue ? ` · ${queue}` : ""}</Link>
-        </Button>
-      </div>
-
       {tab === "historico" && <SmsHistoryPanel />}
+      {tab === "configuracoes" && (
+        <div className="space-y-6">
+          <SendWindowCard />
+          <div className="grid gap-4 md:grid-cols-3">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Links e rastreamento</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Button variant="outline" asChild>
+                  <Link to="/links/configuracoes">Configurar encurtador</Link>
+                </Button>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Consentimentos</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Button variant="outline" asChild>
+                  <Link to="/consentimentos">Gerenciar bloqueios</Link>
+                </Button>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Créditos</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Button variant="outline" asChild>
+                  <Link to="/creditos-sms">Saldo e recargas</Link>
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+          <Provedor />
+        </div>
+      )}
       {tab === "enviar" &&
         (bulkMode ? (
           <div className="space-y-3">
@@ -3606,7 +3630,9 @@ function EditorFluxo({
                           updateEtapa(i, { tipo: "delay", quantidade: e.quantidade, unidade })
                         }
                       >
-                        <SelectTrigger className="h-8 w-28 text-xs"><SelectValue /></SelectTrigger>
+                        <SelectTrigger className="h-8 w-28 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="horas">hora(s)</SelectItem>
                           <SelectItem value="dias">dia(s)</SelectItem>

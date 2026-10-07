@@ -13,6 +13,7 @@ import { FlowsTab } from "@/components/ligacoes/flows-tab";
 import { BulkCallTab } from "@/components/ligacoes/bulk-call-tab";
 import { DashboardTab } from "@/components/ligacoes/dashboard-tab";
 import { VoiceAssetsTab } from "@/components/ligacoes/voice-assets-tab";
+import { ChannelWorkspaceNav } from "@/components/channels/channel-workspace-nav";
 
 export const Route = createFileRoute("/ligacoes")({
   head: () => ({
@@ -51,6 +52,8 @@ function LigacoesPage() {
         subtitle="Envie áudios, configure o provedor e acompanhe a fila de chamadas."
       />
 
+      <ChannelWorkspaceNav channel="voice" />
+
       <LigacoesPausedBanner />
 
       <ProvidersPausedBanner channel="call" />
@@ -82,7 +85,12 @@ function LigacoesPage() {
         <TabsContent value="massa">
           <BulkCallTab />
         </TabsContent>
-        <TabsContent value="audios"><VoiceAssetsTab /></TabsContent>
+        <TabsContent value="audios" className="space-y-10">
+          <VoiceAssetsTab />
+          <div className="border-t border-border/70 pt-8">
+            <ScriptsTab />
+          </div>
+        </TabsContent>
         <TabsContent value="historico" className="space-y-6">
           <QueueTab />
           <HistoryShell

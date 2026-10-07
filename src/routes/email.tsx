@@ -88,6 +88,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { MetricCard, EmptyState, PageHeader } from "@/components/ui-premium";
 import { SendWindowCard } from "@/components/send-window-card";
+import { ChannelWorkspaceNav } from "@/components/channels/channel-workspace-nav";
 import { ProvidersPausedBanner } from "@/components/providers-paused-banner";
 import { requestConfirmation, requestTextInput } from "@/components/system-dialog-host";
 import { useServerFn } from "@tanstack/react-start";
@@ -145,14 +146,7 @@ import {
   type EmailFlowBlockDraft,
   type EmailTrigger,
 } from "@/lib/email-automations.shared";
-import {
-  ArrowDown,
-  ArrowUp,
-  Clock,
-  StopCircle,
-  UserMinus,
-  FlaskConical,
-} from "lucide-react";
+import { ArrowDown, ArrowUp, Clock, StopCircle, UserMinus, FlaskConical } from "lucide-react";
 
 export const Route = createFileRoute("/email")({
   head: () => ({
@@ -295,7 +289,14 @@ const SAIDAS = ["Login", "Depósito", "Primeiro depósito", "Aposta", "Resposta"
 function EmailPage() {
   const navigate = useNavigate();
   const hash = useLocation({ select: (l) => l.hash });
-  const VALID = ["dashboard", "remetentes", "smtp", "templates", "historico"] as const;
+  const VALID = [
+    "dashboard",
+    "remetentes",
+    "smtp",
+    "templates",
+    "historico",
+    "configuracoes",
+  ] as const;
   const current = (VALID as readonly string[]).includes(hash) ? hash : "dashboard";
 
   useEffect(() => {
@@ -340,6 +341,8 @@ function EmailPage() {
         }
       />
 
+      <ChannelWorkspaceNav channel="email" />
+
       <SendWindowCard compact />
 
       <ProvidersPausedBanner channel="email" />
@@ -355,6 +358,7 @@ function EmailPage() {
           <TabsTrigger value="smtp">SMTP</TabsTrigger>
           <TabsTrigger value="templates">Templates</TabsTrigger>
           <TabsTrigger value="historico">Histórico</TabsTrigger>
+          <TabsTrigger value="configuracoes">Configurações</TabsTrigger>
         </TabsList>
 
         <TabsContent value="dashboard" className="mt-2">
@@ -371,6 +375,10 @@ function EmailPage() {
         </TabsContent>
         <TabsContent value="historico" className="mt-2">
           <HistoricoTab />
+        </TabsContent>
+        <TabsContent value="configuracoes" className="mt-2 space-y-8">
+          <RemetentesTab />
+          <SmtpTab />
         </TabsContent>
       </Tabs>
     </div>
@@ -439,9 +447,7 @@ function DashboardTab() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold">Visão geral</h2>
-          <p className="text-xs text-muted-foreground">
-            Métricas em tempo real · provedor Infobip
-          </p>
+          <p className="text-xs text-muted-foreground">Métricas em tempo real · provedor Infobip</p>
         </div>
         <DashboardDateRangePicker range={range} onChange={setRange} />
       </div>
@@ -1066,12 +1072,24 @@ function TemplatesTab() {
     queryFn: () => listFn(),
   });
   const items: Template[] = (q.data?.items ?? []) as any;
-  const campaignQ = useQuery({ queryKey: ["email-template-report"], queryFn: () => listCampaignsFn() });
+  const campaignQ = useQuery({
+    queryKey: ["email-template-report"],
+    queryFn: () => listCampaignsFn(),
+  });
   const reportByTemplate = useMemo(() => {
-    const report = new Map<string, { enviados: number; entregues: number; cliques: number; descadastros: number; falhas: number }>();
-    for (const campaign of ((campaignQ.data?.items ?? []) as Campanha[])) {
+    const report = new Map<
+      string,
+      { enviados: number; entregues: number; cliques: number; descadastros: number; falhas: number }
+    >();
+    for (const campaign of (campaignQ.data?.items ?? []) as Campanha[]) {
       if (!campaign.templateId) continue;
-      const current = report.get(campaign.templateId) ?? { enviados: 0, entregues: 0, cliques: 0, descadastros: 0, falhas: 0 };
+      const current = report.get(campaign.templateId) ?? {
+        enviados: 0,
+        entregues: 0,
+        cliques: 0,
+        descadastros: 0,
+        falhas: 0,
+      };
       current.enviados += campaign.enviados ?? 0;
       current.entregues += campaign.entregues ?? 0;
       current.cliques += campaign.cliques ?? 0;
@@ -1229,7 +1247,11 @@ function TemplatesTab() {
                           : "bg-muted text-muted-foreground"
                     }
                   >
-                    {t.lifecycleStatus === "published" ? "publicado" : t.lifecycleStatus === "draft" ? "rascunho" : "arquivado"}
+                    {t.lifecycleStatus === "published"
+                      ? "publicado"
+                      : t.lifecycleStatus === "draft"
+                        ? "rascunho"
+                        : "arquivado"}
                   </Badge>
                 </div>
               </CardHeader>
@@ -1252,20 +1274,38 @@ function TemplatesTab() {
                   ))}
                 </div>
                 {(() => {
-                  const report = reportByTemplate.get(t.id) ?? { enviados: 0, entregues: 0, cliques: 0, descadastros: 0, falhas: 0 };
+                  const report = reportByTemplate.get(t.id) ?? {
+                    enviados: 0,
+                    entregues: 0,
+                    cliques: 0,
+                    descadastros: 0,
+                    falhas: 0,
+                  };
                   return (
                     <div className="grid grid-cols-3 gap-2 rounded-md bg-muted/40 p-2 text-[10px] text-muted-foreground">
-                      <span><b className="text-foreground">{num(report.enviados)}</b> envios</span>
-                      <span><b className="text-foreground">{num(report.entregues)}</b> entregas</span>
-                      <span><b className="text-foreground">{num(report.cliques)}</b> cliques</span>
-                      <span><b className="text-foreground">{num(report.descadastros)}</b> descad.</span>
-                      <span><b className="text-foreground">{num(report.falhas)}</b> falhas</span>
+                      <span>
+                        <b className="text-foreground">{num(report.enviados)}</b> envios
+                      </span>
+                      <span>
+                        <b className="text-foreground">{num(report.entregues)}</b> entregas
+                      </span>
+                      <span>
+                        <b className="text-foreground">{num(report.cliques)}</b> cliques
+                      </span>
+                      <span>
+                        <b className="text-foreground">{num(report.descadastros)}</b> descad.
+                      </span>
+                      <span>
+                        <b className="text-foreground">{num(report.falhas)}</b> falhas
+                      </span>
                     </div>
                   );
                 })()}
                 <Separator />
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span>v{t.version ?? 1} · Atualizado {t.atualizadoEm}</span>
+                  <span>
+                    v{t.version ?? 1} · Atualizado {t.atualizadoEm}
+                  </span>
                   <div className="flex items-center gap-1">
                     <Button
                       size="icon"
@@ -1455,7 +1495,9 @@ function TemplateDialog({
                     up("ativo", value === "published");
                   }}
                 >
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="draft">Rascunho</SelectItem>
                     <SelectItem value="published">Publicado</SelectItem>
@@ -2229,9 +2271,7 @@ function CampanhaDialog({
                 />
               </SelectTrigger>
               <SelectContent className="max-h-72">
-                {bcAtivo && (
-                  <SelectItem value="infobip">Provedor de Email (Infobip)</SelectItem>
-                )}
+                {bcAtivo && <SelectItem value="infobip">Provedor de Email (Infobip)</SelectItem>}
                 {smtps.map((s) => (
                   <SelectItem key={s.id} value={s.id}>
                     {s.nome}
@@ -2547,18 +2587,18 @@ function FlowBuilderDialog({
           r.blocks
             .filter((b) => ["send_email", "delay", "remove", "end"].includes(b.block_type))
             .map((b) => ({
-            id: b.id,
-            block_type: b.block_type as EmailFlowBlockDraft["block_type"],
-            template_ids: (b.template_ids as string[]) ?? [],
-            sender_id: b.sender_id,
-            smtp_config_id: b.smtp_config_id,
-            subject_override: b.subject_override,
-            preheader_override: b.preheader_override,
-            pre_delay_seconds: b.pre_delay_seconds ?? 0,
-            delay_seconds: b.delay_seconds ?? 0,
-            condition_type: b.condition_type,
-            condition_value: b.condition_value,
-            label: b.label,
+              id: b.id,
+              block_type: b.block_type as EmailFlowBlockDraft["block_type"],
+              template_ids: (b.template_ids as string[]) ?? [],
+              sender_id: b.sender_id,
+              smtp_config_id: b.smtp_config_id,
+              subject_override: b.subject_override,
+              preheader_override: b.preheader_override,
+              pre_delay_seconds: b.pre_delay_seconds ?? 0,
+              delay_seconds: b.delay_seconds ?? 0,
+              condition_type: b.condition_type,
+              condition_value: b.condition_value,
+              label: b.label,
             })),
         );
       } catch (e) {
@@ -3296,8 +3336,7 @@ function InfobipEmailCard() {
             Provedor de Email (Infobip)
           </CardTitle>
           <CardDescription className="text-xs">
-            Endpoint:{" "}
-            <code className="text-[11px]">INFOBIP_BASE_URL/email/3/send</code>
+            Endpoint: <code className="text-[11px]">INFOBIP_BASE_URL/email/3/send</code>
           </CardDescription>
         </div>
         <div className="flex items-center gap-2">
@@ -3317,8 +3356,8 @@ function InfobipEmailCard() {
       </CardHeader>
       <CardContent className="text-xs text-muted-foreground space-y-1">
         <p>
-          O envio usa o secret <code>INFOBIP_API_KEY</code>. O domínio do remetente precisa
-          estar verificado no painel da Infobip.
+          O envio usa o secret <code>INFOBIP_API_KEY</code>. O domínio do remetente precisa estar
+          verificado no painel da Infobip.
         </p>
         <p>
           Variáveis no conteúdo (ex.: <code>{"{primeiro_nome}"}</code>, <code>{"{saldo}"}</code>)
@@ -3622,8 +3661,8 @@ function RemetentesTab() {
         <div>
           <h2 className="text-lg font-semibold">Remetentes</h2>
           <p className="text-xs text-muted-foreground">
-            Cadastre os remetentes (nome, email e domínio verificado na Infobip) usados em
-            campanhas e automações. Independente de SMTP.
+            Cadastre os remetentes (nome, email e domínio verificado na Infobip) usados em campanhas
+            e automações. Independente de SMTP.
           </p>
         </div>
         <Button onClick={novo} className="gap-2">
