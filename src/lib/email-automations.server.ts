@@ -223,7 +223,7 @@ async function planLead(lead: Lead): Promise<SendPlan | null> {
   const blocks = await getBlocks(lead.flow_id);
 
   let idx = lead.current_block_index;
-  let lastTemplateId = lead.last_template_id;
+  const lastTemplateId = lead.last_template_id;
 
   // proteção: limite de iteracoes por tick
   for (let safety = 0; safety < 20; safety++) {

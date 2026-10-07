@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { saveJourney } from "@/lib/journeys.functions";
 import { TRIGGER_NAMES } from "@/lib/triggers";
 import { listEmailTemplates } from "@/lib/email.functions";
+import { listSmsTemplates } from "@/lib/sms-templates.functions";
 import {
   createJourneyVoiceUpload,
   finalizeJourneyVoiceUpload,
@@ -20,7 +21,7 @@ import { Textarea } from "@/components/ui/textarea";
 
 type Step =
   | { kind: "wait"; seconds: number }
-  | { kind: "sms"; content: string }
+  | { kind: "sms"; templateId: string; content: string }
   | { kind: "email"; templateId: string }
   | { kind: "voice"; assetId: string; callerId: string };
 type SavedStep = { step_type: string; config: Record<string, unknown> };
@@ -60,6 +61,7 @@ export function JourneyEditor({
   const navigate = useNavigate();
   const save = useServerFn(saveJourney);
   const templatesFn = useServerFn(listEmailTemplates);
+  const smsTemplatesFn = useServerFn(listSmsTemplates);
   const voiceAssetsFn = useServerFn(listJourneyVoiceAssets);
   const createVoiceUpload = useServerFn(createJourneyVoiceUpload);
   const finalizeVoiceUpload = useServerFn(finalizeJourneyVoiceUpload);
@@ -67,10 +69,15 @@ export function JourneyEditor({
     queryKey: ["journey-email-templates"],
     queryFn: () => templatesFn(),
   });
+  const smsTemplates = useQuery({
+    queryKey: ["journey-sms-templates"],
+    queryFn: () => smsTemplatesFn(),
+  });
   const voiceAssets = useQuery({
     queryKey: ["journey-voice-assets"],
     queryFn: () => voiceAssetsFn(),
   });
+  const voiceAssetRows = (voiceAssets.data?.assets ?? []) as Array<{ id: string; name: string }>;
   const uploadAudio = useMutation({
     mutationFn: async (file: File) => {
       const contentType = file.type as "audio/mpeg";
@@ -107,11 +114,21 @@ export function JourneyEditor({
     voltou_jogar: false,
   });
   const [steps, setSteps] = useState<Step[]>(() =>
-    initialSteps.flatMap((s) =>
+    initialSteps.flatMap((s): Step[] =>
       s.step_type === "wait"
         ? [{ kind: "wait" as const, seconds: Number(s.config.delay_seconds ?? 3600) }]
         : s.step_type === "sms"
-          ? [{ kind: "sms" as const, content: String(s.config.content ?? "") }]
+          ? [
+              {
+                kind: "sms" as const,
+                templateId: String(s.config.template_id ?? ""),
+                content: String(
+                  (s.config.template_snapshot as { content?: string } | undefined)?.content ??
+                    s.config.content ??
+                    "",
+                ),
+              },
+            ]
           : s.step_type === "email"
             ? [{ kind: "email" as const, templateId: String(s.config.template_id ?? "") }]
             : s.step_type === "voice"
@@ -131,8 +148,29 @@ export function JourneyEditor({
         s.kind === "wait"
           ? [{ step_type: "wait", config: { delay_seconds: Math.max(60, s.seconds) } }]
           : s.kind === "sms"
-            ? s.content.trim()
-              ? [{ step_type: "sms", config: { content: s.content } }]
+            ? s.templateId && s.content.trim()
+              ? [
+                  {
+                    step_type: "sms",
+                    config: {
+                      template_id: s.templateId,
+                      content: s.content,
+                      template_snapshot: (() => {
+                        const template = (smsTemplates.data?.items ?? []).find(
+                          (item) => item.id === s.templateId,
+                        );
+                        return template
+                          ? {
+                              id: template.id,
+                              name: template.name,
+                              content: template.content,
+                              version: template.version,
+                            }
+                          : { id: s.templateId, content: s.content };
+                      })(),
+                    },
+                  },
+                ]
               : []
             : s.kind === "email"
               ? s.templateId
@@ -174,6 +212,7 @@ export function JourneyEditor({
     },
     onSuccess: (r) => {
       toast.success("Jornada salva como rascunho");
+      if (!r.id) throw new Error("Jornada salva sem identificador");
       navigate({ to: "/jornadas/$journeyId", params: { journeyId: r.id } });
     },
     onError: (e: Error) => toast.error(e.message),
@@ -184,7 +223,7 @@ export function JourneyEditor({
       kind === "wait"
         ? { kind, seconds: 3600 }
         : kind === "sms"
-          ? { kind, content: "" }
+          ? { kind, templateId: "", content: "" }
           : kind === "email"
             ? { kind, templateId: "" }
             : { kind, assetId: "", callerId: "5511980465329" },
@@ -386,11 +425,35 @@ export function JourneyEditor({
                   onChange={(e) => change(i, { kind: "wait", seconds: Number(e.target.value) })}
                 />
               ) : s.kind === "sms" ? (
-                <Textarea
-                  value={s.content}
-                  onChange={(e) => change(i, { kind: "sms", content: e.target.value })}
-                  placeholder="Mensagem SMS"
-                />
+                <div className="space-y-2">
+                  <select
+                    className="flex h-10 w-full rounded-md border bg-background px-3 text-sm"
+                    value={s.templateId}
+                    onChange={(event) => {
+                      const template = (smsTemplates.data?.items ?? []).find(
+                        (item) => item.id === event.target.value,
+                      );
+                      change(i, {
+                        kind: "sms",
+                        templateId: event.target.value,
+                        content: template?.content ?? "",
+                      });
+                    }}
+                  >
+                    <option value="">Selecione um template SMS</option>
+                    {(smsTemplates.data?.items ?? [])
+                      .filter((template) => template.isActive)
+                      .map((template) => (
+                        <option key={template.id} value={template.id}>
+                          {template.name} · v{template.version}
+                        </option>
+                      ))}
+                  </select>
+                  <Textarea value={s.content} readOnly placeholder="Conteúdo do template" />
+                  <p className="text-xs text-muted-foreground">
+                    A jornada guarda uma cópia desta versão para não mudar após a publicação.
+                  </p>
+                </div>
               ) : s.kind === "email" ? (
                 <select
                   className="flex h-10 w-full rounded-md border bg-background px-3 text-sm"
@@ -429,7 +492,7 @@ export function JourneyEditor({
                     onChange={(e) => change(i, { ...s, assetId: e.target.value })}
                   >
                     <option value="">Selecione o áudio enviado</option>
-                    {(voiceAssets.data?.assets ?? []).map((asset) => (
+                    {voiceAssetRows.map((asset) => (
                       <option key={asset.id} value={asset.id}>
                         {asset.name}
                       </option>

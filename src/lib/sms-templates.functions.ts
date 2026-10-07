@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { dbUuid } from "@/lib/zod-helpers";
 import { resolveOperationalTenantId } from "@/lib/tenant-access.server";
+import { unknownMessageVariables } from "@/lib/message-variables";
 
 const TemplateSchema = z.object({
   id: dbUuid().optional(),
@@ -58,6 +59,10 @@ export const saveSmsTemplate = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => TemplateSchema.parse(input))
   .handler(async ({ data, context }) => {
     const tenantId = await resolveOperationalTenantId(context.supabase);
+    const invalidVariables = unknownMessageVariables(data.content, "sms");
+    if (invalidVariables.length) {
+      throw new Error(`Variáveis não permitidas: ${invalidVariables.join(", ")}`);
+    }
     const db = context.supabase as any;
     const payload = {
       name: data.name,

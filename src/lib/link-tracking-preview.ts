@@ -20,6 +20,8 @@ export function smsPartsForLength(length: number) {
   return length <= 160 ? 1 : Math.ceil(length / 153);
 }
 
+// ESC is part of the GSM-7 alphabet extension marker.
+// eslint-disable-next-line no-control-regex
 const GSM7_BASIC = /^[\r\n @£$¥èéùìòÇØøÅåΔ_ΦΓΛΩΠΨΣΘΞ\u001bÆæßÉ!"#¤%&'()*+,\-./0-9:;<=>?¡A-ZÄÖÑÜ§¿a-zäöñüà^{}\\[~\]|€]*$/;
 const GSM7_EXTENSION = new Set(["^", "{", "}", "\\", "[", "~", "]", "|", "€"]);
 

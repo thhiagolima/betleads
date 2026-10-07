@@ -15,7 +15,7 @@
 ## Deploy
 
 1. Worktree limpo e revisão do diff.
-2. `npm test` e `npm run build` aprovados; `npm run lint` deve ser revisado e não pode introduzir novos erros. Enquanto a dívida legada de tipos estiver sendo migrada, seu job permanece informativo no CI.
+2. `npm run lint`, `npm test` e `npm run build` aprovados. Os três jobs são bloqueantes no CI; avisos de tipagem legada permanecem visíveis, mas erros de lint interrompem a entrega.
 3. `npx supabase db push` e `npx supabase db lint --linked` aprovados quando houver migration.
 4. Backup, plano de rollback e responsável operacional registrados.
 5. Health check em `/`, login, Players, SMS, e-mail, voz (quando ativo) e webhook autorizado.

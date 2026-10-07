@@ -353,7 +353,7 @@ export const triggerEmailFlowTest = createServerFn({ method: "POST" })
     if (!flow) throw new Error("Fluxo não encontrado");
 
     let email = data.email ?? null;
-    let player_id = data.player_id ?? null;
+    const player_id = data.player_id ?? null;
     if (player_id && !email) {
       const { data: p } = await supabaseAdmin
         .from("players")

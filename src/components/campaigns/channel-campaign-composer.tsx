@@ -50,6 +50,7 @@ import {
   getCampaignDraft,
   saveCampaignDraft,
   submitCampaignDraft,
+  type CampaignDraft,
   type CampaignDraftPayload,
 } from "@/lib/campaign-drafts.functions";
 import {
@@ -59,7 +60,7 @@ import {
   sendEmailCampaignNow,
 } from "@/lib/email.functions";
 import { num } from "@/lib/format";
-import { MESSAGE_VARIABLES } from "@/lib/message-variables";
+import { unknownMessageVariables } from "@/lib/message-variables";
 import { listJourneyVoiceAssets } from "@/lib/journey-voice-assets.functions";
 import {
   resolveCampaignAudience,
@@ -69,24 +70,11 @@ import { SYSTEM_SMS_AUDIENCES, type SmsAudienceCriteria } from "@/lib/sms-audien
 import { listSmsAudiences } from "@/lib/sms-audience-crud.functions";
 import { listSmsTemplates } from "@/lib/sms-templates.functions";
 import { scheduleBulkSms, sendBulkSms } from "@/lib/sms.functions";
+import { estimateSms } from "@/lib/link-tracking-preview";
 
 type Channel = "sms" | "email" | "voice";
 type AudienceOption = { id: string; name: string; criteria: SmsAudienceCriteria; system?: boolean };
 type ResolvedAudience = ResolvedCampaignAudience;
-
-const variablePattern = /\{([a-zA-Z0-9_]+)\}/g;
-const allowedVariables = new Set(MESSAGE_VARIABLES.map((variable) => variable.key));
-
-function unknownVariables(content: string) {
-  return [...content.matchAll(variablePattern)]
-    .map((match) => match[1])
-    .filter((key) => !allowedVariables.has(key));
-}
-
-function smsParts(content: string) {
-  if (!content) return 0;
-  return content.length <= 160 ? 1 : Math.ceil(content.length / 153);
-}
 
 const channelMeta: Record<Channel, { label: string; icon: typeof MessageSquare; tone: string }> = {
   sms: { label: "SMS", icon: MessageSquare, tone: "text-sky-500" },
@@ -281,7 +269,7 @@ export function ChannelCampaignComposer({
   }, [open, initialChannel, initialDraftId]);
 
   useEffect(() => {
-    const draft = draftQuery.data;
+    const draft = draftQuery.data as CampaignDraft | undefined;
     if (!open || !draft || hydratedDraftId.current === draft.id) return;
     const payload = draft.payload as Record<string, unknown>;
     setDraftId(draft.id);
@@ -324,9 +312,10 @@ export function ChannelCampaignComposer({
       : channel === "email"
         ? (activeEmailTemplate?.body_html ?? activeEmailTemplate?.corpo ?? "")
         : (activeScript?.content ?? "");
-  const invalidVariables = unknownVariables(previewContent);
+  const invalidVariables = unknownMessageVariables(previewContent, channel);
   const recipients = audience?.eligibleTotal ?? 0;
-  const parts = smsParts(smsContent);
+  const smsEstimate = estimateSms(smsContent);
+  const parts = smsEstimate.parts;
   const cost = channel === "sms" ? recipients * parts : recipients;
   const channelLimitError =
     channel === "voice" && recipients > 200
@@ -415,7 +404,8 @@ export function ChannelCampaignComposer({
         },
       }),
     onMutate: () => setDraftState("saving"),
-    onSuccess: (saved) => {
+    onSuccess: (savedResult) => {
+      const saved = savedResult as CampaignDraft;
       setDraftId(saved.id);
       setDraftVersion(saved.version);
       setDraftState("saved");
@@ -739,8 +729,8 @@ export function ChannelCampaignComposer({
                     onChange={setSmsContent}
                   />
                   <p className="text-xs text-muted-foreground">
-                    {smsContent.length} caracteres · {parts} parte(s) · estimativa: {num(cost)}{" "}
-                    créditos
+                    {smsEstimate.characters} caracteres · {smsEstimate.encoding} · {parts} parte(s) ·
+                    estimativa: {num(cost)} créditos
                   </p>
                 </div>
                 <LinkTrackingToggle

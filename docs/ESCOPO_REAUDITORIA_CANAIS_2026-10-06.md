@@ -1,5 +1,7 @@
 # Escopo de reauditoria — canais de comunicação
 
+> **Atualização de implementação — 07/10/2026:** o lint passou a ser bloqueante no CI; foram adicionados testes mockados dos adaptadores Infobip de e-mail e voz; a configuração SMTP simulada deixou de ser exibida; templates SMS passaram a calcular GSM-7/UCS-2 e a manter histórico imutável de versões; jornadas agora selecionam e armazenam snapshot do template SMS. Os aceites reais de provedor e a execução do teste de usabilidade continuam pendentes.
+
 **Data:** 06/10/2026  
 **Escopo:** SMS, e-mail e ligações por voz. WhatsApp permanece fora desta auditoria: há código e telas, porém ele não compõe os três canais em operação solicitados e seu cron está desativado.
 
@@ -20,7 +22,7 @@ O canal de voz possui telas, scripts, geração de áudio, fila, callback e flux
 - Documentos existentes: `docs/OPERACAO_SEGURA.md` e `docs/docker-deployment.md`.
 - Código de envio, dispatchers, rotas públicas, telas e migrations de SMS, e-mail e ligações.
 - Configuração local: as variáveis exigidas pelos canais estão declaradas/preenchidas no ambiente local. Valores e segredos não foram expostos ou validados contra fornecedores.
-- Qualidade local: `npm test` passou (**3 arquivos / 11 testes**) e `npm run build` passou. O `npm run lint` agrupado excedeu 124 s sem resultado conclusivo; ele deve ser executado isoladamente no CI com timeout e artefato de saída.
+- Qualidade local atualizada em 07/10/2026: `npm test` passou (**10 arquivos / 28 testes**), `npm run lint` passou sem erros e `npm run build` passou. O workflow executa os três como gates bloqueantes, com timeout e saída preservada.
 - Não houve envio real, alteração de cron, alteração de dados ou mudança de configuração externa nesta reauditoria.
 
 ## O que já está feito
@@ -56,12 +58,12 @@ O canal de voz possui telas, scripts, geração de áudio, fila, callback e flux
 1. **Aceite ponta a ponta de SMS e e-mail.** Criar uma matriz de testes por tenant/provedor: envio unitário, campanha, automação, janela de envio, limite, descadastro, falha transitória, callback de entrega e reenvio. Registrar evidência (ID de provedor, log, status final e horário).
 2. **Certificar voz antes de reativar cron.** Validar chamada real com áudio armazenado, callback assinado, correlação idempotente, status final, duração, gravação quando aplicável, retentativa e relatório. Só então criar/agendar o worker de voz e incluir o canal no health check diário.
 3. **Observabilidade uniforme.** Um painel único por canal com disponibilidade do provedor, fila pendente, itens presos, taxa de erro/entrega, atraso do último worker e ação de pausa/reprocessamento com auditoria.
-4. **CI de qualidade.** Tornar `lint`, testes e build gates obrigatórios, com timeout explícito, saída preservada e testes de integração mockados para cada adaptador de provedor.
+4. **CI de qualidade — concluído em 07/10/2026.** `lint`, testes e build são gates obrigatórios, com timeout explícito e saída preservada. Foram adicionados testes mockados dos adaptadores Short.io e Infobip de e-mail/voz. A dívida de avisos de tipagem continua registrada, sem mascarar erros de lint.
 5. **Runbook de incidente.** Estender `OPERACAO_SEGURA.md` com responsáveis, severidade, diagnóstico, pausa segura, reprocessamento, rollback, comunicação e critérios de retorno por canal.
 
 ### P1 — alto valor funcional
 
-1. **Biblioteca CRUD de templates SMS — ausente.** Criar entidade isolada por tenant, categorias/tags, texto, variáveis permitidas, contador GSM/UCS-2 e de partes, preview, status ativo/arquivado, duplicação, versionamento e auditoria. Campanhas, fluxos e jornadas devem selecionar um snapshot do template; não apenas copiar texto livre.
+1. **Biblioteca CRUD de templates SMS — implementada, pendente de aceite operacional.** A entidade é isolada por tenant e possui categorias/tags, estado ativo/arquivado, duplicação, cálculo GSM-7/UCS-2, partes, versionamento imutável e auditoria. Campanhas e jornadas armazenam snapshot do template. Ainda faltam evidência em banco produtivo e teste de regressão do ciclo completo após aplicação da migration.
 2. **Biblioteca de áudios de voz — parcial.** O bucket e o upload existem, mas faltam catálogo independente, preview por URL assinada, metadados (duração, idioma, origem, tags), renomear, arquivar/excluir com remoção do objeto, busca, verificação de referências e política de retenção. Hoje o uso está acoplado ao editor de jornadas e a API expõe apenas criar/finalizar/listar.
 3. **Template de voz reutilizável.** Separar “áudio fixo” de “script dinâmico com TTS”. Para áudio fixo, permitir escolher um ativo da biblioteca; para TTS, versionar script/voz/configuração e exibir custo, preview e cache antes do disparo.
 4. **E-mail: maturidade de template.** O CRUD existe, mas precisa de versões/publicação, rascunho, bloqueio de edição de template em campanha já publicada, teste de renderização em desktop/mobile, validação de links/imagens e relatório por template (envio, entrega, clique, descadastro).

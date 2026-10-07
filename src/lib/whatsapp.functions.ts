@@ -1658,7 +1658,7 @@ export const listOrphanedAssignments = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     // Tenta enriquecer com nome do chat
     const phones = (rows ?? []).map((r) => r.phone_e164);
-    let chatNames: Record<string, string> = {};
+    const chatNames: Record<string, string> = {};
     if (phones.length > 0) {
       const { data: chats } = await context.supabase
         .from("whatsapp_chats")

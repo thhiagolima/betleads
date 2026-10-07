@@ -23,6 +23,8 @@ Validar se um operador consegue concluir as tarefas rotineiras sem assistência 
 3. Garanta que o operador tenha acesso ao tenant de teste e abra `/campanhas` em uma janela anônima.
 4. Para a tarefa de falha, use uma campanha previamente marcada como `failed` ou `paused_limit`; não induza falha em um provedor real.
 5. Cronometre cada tarefa. O facilitador não deve ensinar o caminho; só pode ler o enunciado novamente.
+6. Em SMS, peça que o operador confira codificação GSM-7/UCS-2, partes e créditos antes de confirmar.
+7. Em voz, mantenha o cron desativado; a tarefa termina com o preparo da fila piloto.
 
 ## Roteiro por operador
 
@@ -68,9 +70,10 @@ Ao terminar, o gerente deve registrar no escopo: participantes (apenas apelidos)
 
 Foi executada uma passagem técnica local, sem autenticação de operador, sem gravação de campanhas e sem chamada a provedores:
 
-- rotas do composer para SMS, e-mail e voz responderam HTTP 200;
-- páginas dos três canais (`/sms`, `/email` e `/ligacoes`) responderam HTTP 200;
-- suíte automatizada: 18 testes aprovados;
+- rotas do composer para SMS, e-mail e voz responderam HTTP 200 em validação anterior;
+- páginas dos três canais (`/sms`, `/email` e `/ligacoes`) responderam HTTP 200 em validação anterior;
+- suíte automatizada atual: 28 testes aprovados em 10 arquivos;
+- lint: aprovado sem erros e configurado como gate bloqueante;
 - build de produção: aprovado.
 
 Essa passagem confirma a disponibilidade dos caminhos do roteiro, mas **não substitui** o teste com os três operadores nem produz as métricas humanas de tempo e erro exigidas para o aceite.

@@ -48,3 +48,12 @@ export function variablesForChannel(channel?: MessageChannel) {
     ? MESSAGE_VARIABLES.filter((variable) => variable.channels.includes(channel))
     : MESSAGE_VARIABLES;
 }
+
+const variablePattern = /\{([a-zA-Z0-9_]+)\}/g;
+
+export function unknownMessageVariables(content: string, channel?: MessageChannel) {
+  const allowed = new Set(variablesForChannel(channel).map((variable) => variable.key));
+  return [...new Set([...content.matchAll(variablePattern)].map((match) => match[1]))].filter(
+    (key) => !allowed.has(key),
+  );
+}

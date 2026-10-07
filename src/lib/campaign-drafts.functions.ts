@@ -28,7 +28,14 @@ const saveSchema = draftPayloadSchema.extend({
 
 export type CampaignDraftPayload = z.infer<typeof draftPayloadSchema>;
 
-function toDraft(row: Record<string, unknown>) {
+export type CampaignDraft = CampaignDraftPayload & {
+  id: string;
+  status: "draft" | "submitted";
+  version: number;
+  updatedAt: string;
+};
+
+function toDraft(row: Record<string, unknown>): CampaignDraft {
   return {
     id: row.id as string,
     channel: row.channel as z.infer<typeof channelSchema>,

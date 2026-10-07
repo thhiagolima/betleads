@@ -86,6 +86,7 @@ import {
 } from "recharts";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { num } from "@/lib/format";
 import { MetricCard, EmptyState, PageHeader } from "@/components/ui-premium";
 import { SendWindowCard } from "@/components/send-window-card";
 import { ProvidersPausedBanner } from "@/components/providers-paused-banner";
@@ -705,6 +706,29 @@ function HealthRow({
 // ============================================================
 
 function SmtpTab() {
+  return (
+    <div className="space-y-4">
+      <InfobipEmailCard />
+      <Card className="card-premium border-0">
+        <CardContent className="space-y-2 p-5">
+          <h2 className="text-sm font-semibold">Infraestrutura gerenciada pela plataforma</h2>
+          <p className="text-sm text-muted-foreground">
+            O envio usa exclusivamente a API da Infobip. Credenciais e limites do provedor são
+            administrados pela equipe da plataforma e não ficam expostos ao tenant.
+          </p>
+          <p className="text-sm text-muted-foreground">
+            Cadastre um remetente com domínio verificado na seção Remetentes e execute um envio de
+            teste autorizado antes de liberar campanhas.
+          </p>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// Mantido temporariamente apenas para facilitar a remoção segura do protótipo local antigo.
+// Não é renderizado: o backend não possui transporte SMTP de terceiros.
+function LegacySmtpPrototype() {
   const [items, setItems] = useState<SmtpConfig[]>([]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<SmtpConfig | null>(null);

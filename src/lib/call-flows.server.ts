@@ -161,7 +161,7 @@ async function loadBlocks(flowId: string) {
 async function executeCallBlock(progress: any, block: any, player: any): Promise<void> {
   // 1. resolve roteiro + voz
   let scriptContent = "";
-  let scriptId: string | null = block.script_id ?? null;
+  const scriptId: string | null = block.script_id ?? null;
   let provider = "elevenlabs";
   let voiceId = block.voice_id || defaultVoiceId();
   let voiceSettings: VoiceSettings = DEFAULT_VOICE_SETTINGS;
@@ -564,6 +564,8 @@ export async function tickFlows(limit = 50): Promise<{ processed: number }> {
 export async function pollPendingCalls(limit = 50): Promise<number> {
   void limit;
   return 0;
+  // Historical fallback retained for reference while callbacks are canonical.
+  // eslint-disable-next-line no-constant-condition
   if (false) {
     const cutoffIso = new Date(Date.now() - 90_000).toISOString();
     const { data: pendings } = await supabaseAdmin

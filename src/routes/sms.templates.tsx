@@ -15,6 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { estimateSms } from "@/lib/link-tracking-preview";
 
 export const Route = createFileRoute("/sms/templates")({ component: SmsTemplatesPage });
 
@@ -36,6 +37,7 @@ function SmsTemplatesPage() {
   const archive = useServerFn(archiveSmsTemplate);
   const templates = useQuery({ queryKey: ["sms-templates"], queryFn: () => list() });
   const [editing, setEditing] = useState<Template | null>(null);
+  const estimate = estimateSms(editing?.content ?? "");
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["sms-templates"] });
   const saveMutation = useMutation({
     mutationFn: (form: HTMLFormElement) => {
@@ -135,10 +137,18 @@ function SmsTemplatesPage() {
                 <Textarea
                   name="content"
                   rows={5}
-                  defaultValue={editing.content}
+                  value={editing.content}
                   maxLength={480}
                   required
+                  onChange={(event) =>
+                    setEditing((current) =>
+                      current ? { ...current, content: event.target.value } : current,
+                    )
+                  }
                 />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {estimate.characters} caracteres · {estimate.encoding} · {estimate.parts} parte(s)
+                </p>
               </div>
               <div className="flex gap-2">
                 <Button type="submit" disabled={saveMutation.isPending}>

@@ -22,6 +22,15 @@ const waitConfigSchema = z.object({
 const smsConfigSchema = z.object({
   content: z.string().trim().min(1).max(1600),
   sender: z.string().trim().max(30).optional(),
+  template_id: z.string().uuid().optional(),
+  template_snapshot: z
+    .object({
+      id: z.string().uuid(),
+      name: z.string().trim().max(160).optional(),
+      content: z.string().trim().min(1).max(1600),
+      version: z.number().int().positive().optional(),
+    })
+    .optional(),
 });
 const emailConfigSchema = z.object({
   template_id: z.string().uuid(),

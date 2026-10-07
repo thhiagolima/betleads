@@ -3,7 +3,10 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 type DbError = { message: string };
 type DbResult<T = unknown> = { data: T | null; error: DbError | null };
 type RpcClient = {
-  rpc: <T = unknown>(fn: string, args?: Record<string, unknown>) => Promise<DbResult<T>>;
+  // Supabase generates a literal union of RPC names. This structural boundary
+  // intentionally accepts both that generated client and lightweight test doubles.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  rpc: (...args: any[]) => PromiseLike<DbResult<unknown>>;
 };
 
 type TenantStatusRow = {
@@ -14,11 +17,11 @@ type TenantStatusRow = {
 const blockedOperationalStatuses = new Set(["suspended", "canceled"]);
 
 export async function resolveCurrentTenantId(supabase: RpcClient) {
-  const { data, error } = await supabase.rpc<string>("current_tenant_id");
+  const { data, error } = await supabase.rpc("current_tenant_id");
   if (error) throw new Error(error.message);
   const tenantId = data ?? null;
   if (!tenantId) throw new Error("tenant nao encontrado para o usuario");
-  return tenantId;
+  return String(tenantId);
 }
 
 /**
@@ -33,7 +36,7 @@ export async function resolveOperationalTenantForRequest(
   userId: string,
   requestedTenantId?: string | null,
 ) {
-  const { data: isSuperAdmin, error: roleError } = await supabase.rpc<boolean>("is_super_admin", {
+  const { data: isSuperAdmin, error: roleError } = await supabase.rpc("is_super_admin", {
     _user_id: userId,
   });
   if (roleError) throw new Error(roleError.message);
