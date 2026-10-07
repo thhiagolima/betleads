@@ -63,3 +63,14 @@ Registre uma linha por operador e por tarefa. Não inclua telefone, e-mail, cont
 ## Síntese e decisão do gerente de projeto
 
 Ao terminar, o gerente deve registrar no escopo: participantes (apenas apelidos), métricas calculadas, três principais dificuldades, decisão de **go/no-go**, dono de cada correção, prazo e data do reteste. Priorizar correções pelo impacto em risco de envio, frequência e tempo perdido pelo operador.
+
+## Evidência de validação técnica — 07/10/2026
+
+Foi executada uma passagem técnica local, sem autenticação de operador, sem gravação de campanhas e sem chamada a provedores:
+
+- rotas do composer para SMS, e-mail e voz responderam HTTP 200;
+- páginas dos três canais (`/sms`, `/email` e `/ligacoes`) responderam HTTP 200;
+- suíte automatizada: 18 testes aprovados;
+- build de produção: aprovado.
+
+Essa passagem confirma a disponibilidade dos caminhos do roteiro, mas **não substitui** o teste com os três operadores nem produz as métricas humanas de tempo e erro exigidas para o aceite.
