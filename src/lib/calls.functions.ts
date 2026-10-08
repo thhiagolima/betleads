@@ -13,6 +13,7 @@ import {
   defaultVoiceId,
   FAKE_LEAD,
   renderCallScript,
+  runVoiceQueueDispatcher,
   uploadAudioToStorage,
   type LeadLike,
   type VoiceSettings,
@@ -897,16 +898,17 @@ export const bulkDispatchCalls = createServerFn({ method: "POST" })
         }
 
         // 4. dispara
-        const dispatchResult = (await dispatchCallQueueItem({
-          data: { call_queue_id: q.id },
-        })) as any;
-        if (dispatchResult?.ok === false && dispatchResult?.pending) {
+        const dispatchResult = await runVoiceQueueDispatcher(1, q.id);
+        if (dispatchResult.failed > 0) {
+          throw new Error("Não foi possível concluir o envio de voz. Consulte o histórico para os detalhes.");
+        }
+        if (dispatchResult.deferred > 0) {
           pending += 1;
           results.push({
             ok: true,
             lead_id: target.lead_id ?? null,
             phone: target.phone_number ?? null,
-            error: dispatchResult.message,
+            error: "Ligação adiada pela política de contato ou disponibilidade do provedor.",
           });
         } else {
           queued += 1;

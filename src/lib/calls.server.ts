@@ -261,17 +261,18 @@ export function buildProviderPayload(
  * sequential runner; this worker covers the regular call_queue, including
  * scheduled campaigns that previously stayed at audio_ready indefinitely.
  */
-export async function runVoiceQueueDispatcher(limit = 200) {
+export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string) {
   const now = new Date().toISOString();
-  const { data: queue, error } = await supabaseAdmin
+  let query = supabaseAdmin
     .from("call_queue")
     .select(
       "id,tenant_id,lead_id,script_id,voice_asset_id,phone_number,audio_url,status,scheduled_at",
     )
     .eq("status", "audio_ready")
     .lte("scheduled_at", now)
-    .order("scheduled_at", { ascending: true })
-    .limit(limit);
+    .order("scheduled_at", { ascending: true });
+  if (callQueueId) query = query.eq("id", callQueueId);
+  const { data: queue, error } = await query.limit(limit);
   if (error) throw new Error(error.message);
 
   let dispatched = 0;
