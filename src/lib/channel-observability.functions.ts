@@ -104,6 +104,10 @@ export const getChannelObservability = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(
     async ({ context }): Promise<{ channels: ChannelObservability[]; generatedAt: string }> => {
+      // Operational provider, queue and worker data is platform infrastructure,
+      // never tenant-facing information. Keep this guard server-side so a
+      // direct server-function request is denied as well as the UI access.
+      await assertSuperAdmin(context.userId);
       const tenantId = await resolveOperationalTenantId(context.supabase);
       const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       const campaignStuckBefore = new Date(Date.now() - 15 * 60 * 1000).toISOString();

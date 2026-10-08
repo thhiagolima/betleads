@@ -16,6 +16,7 @@ import {
   type ObservabilityChannel,
 } from "@/lib/channel-observability.functions";
 import { cn } from "@/lib/utils";
+import { useIsSuperAdmin } from "@/hooks/use-is-super-admin";
 
 const labels: Record<ObservabilityChannel, string> = {
   sms: "SMS",
@@ -24,6 +25,7 @@ const labels: Record<ObservabilityChannel, string> = {
 };
 
 export function ChannelObservabilityPanel() {
+  const { isSuperAdmin } = useIsSuperAdmin();
   const queryClient = useQueryClient();
   const getOverview = useServerFn(getChannelObservability);
   const setPause = useServerFn(setChannelOperationalPause);
@@ -33,6 +35,7 @@ export function ChannelObservabilityPanel() {
     queryKey: ["channel-observability"],
     queryFn: () => getOverview(),
     refetchInterval: 30_000,
+    enabled: isSuperAdmin,
   });
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["channel-observability"] });
   const pause = useMutation({
@@ -56,6 +59,8 @@ export function ChannelObservabilityPanel() {
     },
     onError: (error: Error) => toast.error(error.message),
   });
+
+  if (!isSuperAdmin) return null;
 
   return (
     <Card className="border-border/70 bg-card/70">
