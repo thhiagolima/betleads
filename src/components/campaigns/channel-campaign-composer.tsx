@@ -75,6 +75,7 @@ import { scheduleBulkSms, sendBulkSms } from "@/lib/sms.functions";
 import { estimateSms } from "@/lib/link-tracking-preview";
 
 type Channel = "sms" | "email" | "voice";
+type ConversionObjective = "acquisition" | "conversion" | "reactivation";
 type AudienceOption = { id: string; name: string; criteria: SmsAudienceCriteria; system?: boolean };
 type ResolvedAudience = ResolvedCampaignAudience;
 
@@ -82,6 +83,33 @@ const channelMeta: Record<Channel, { label: string; icon: typeof MessageSquare; 
   sms: { label: "SMS", icon: MessageSquare, tone: "text-sky-500" },
   email: { label: "E-mail", icon: Mail, tone: "text-violet-500" },
   voice: { label: "Voz", icon: Phone, tone: "text-amber-500" },
+};
+
+const funnelSteps: Record<
+  ConversionObjective,
+  Array<{ id: string; label: string; optional?: boolean }>
+> = {
+  acquisition: [
+    { id: "sent", label: "Enviado" },
+    { id: "delivered", label: "Entregue", optional: true },
+    { id: "clicked", label: "Clique", optional: true },
+    { id: "registered", label: "Cadastro", optional: true },
+    { id: "first_deposit_approved", label: "Primeiro depósito" },
+  ],
+  conversion: [
+    { id: "sent", label: "Enviado" },
+    { id: "delivered", label: "Entregue", optional: true },
+    { id: "clicked", label: "Clique", optional: true },
+    { id: "registered", label: "Cadastro", optional: true },
+    { id: "deposit_approved", label: "Depósito aprovado" },
+  ],
+  reactivation: [
+    { id: "sent", label: "Enviado" },
+    { id: "delivered", label: "Entregue", optional: true },
+    { id: "clicked", label: "Clique", optional: true },
+    { id: "login_or_game", label: "Login ou jogo", optional: true },
+    { id: "deposit_approved", label: "Depósito aprovado" },
+  ],
 };
 
 const fieldIds = {
@@ -144,6 +172,10 @@ export function ChannelCampaignComposer({
   const [when, setWhen] = useState<"now" | "schedule">("now");
   const [scheduledAt, setScheduledAt] = useState("");
   const [trackLinks, setTrackLinks] = useState(true);
+  const [conversionObjective, setConversionObjective] = useState<ConversionObjective>("conversion");
+  const [enabledFunnelSteps, setEnabledFunnelSteps] = useState<string[]>(
+    funnelSteps.conversion.map((step) => step.id),
+  );
   const [riskConfirmed, setRiskConfirmed] = useState(false);
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [smsTemplateDialogOpen, setSmsTemplateDialogOpen] = useState(false);
@@ -261,6 +293,8 @@ export function ChannelCampaignComposer({
     setWhen("now");
     setScheduledAt("");
     setTrackLinks(true);
+    setConversionObjective("conversion");
+    setEnabledFunnelSteps(funnelSteps.conversion.map((step) => step.id));
     setRiskConfirmed(false);
     setSubmitAttempted(false);
     setDraftId(null);
@@ -289,6 +323,17 @@ export function ChannelCampaignComposer({
     setWhen(draft.scheduledAt ? "schedule" : "now");
     setScheduledAt(draft.scheduledAt ? draft.scheduledAt.slice(0, 16) : "");
     setTrackLinks(draft.trackLinks);
+    const savedObjective = ["acquisition", "conversion", "reactivation"].includes(
+      String(payload.conversionObjective),
+    )
+      ? (payload.conversionObjective as ConversionObjective)
+      : "conversion";
+    setConversionObjective(savedObjective);
+    setEnabledFunnelSteps(
+      Array.isArray(payload.enabledFunnelSteps)
+        ? payload.enabledFunnelSteps.filter((step): step is string => typeof step === "string")
+        : funnelSteps[savedObjective].map((step) => step.id),
+    );
     setRiskConfirmed(false);
     setDraftState("saved");
     hydratedDraftId.current = draft.id;
@@ -374,7 +419,13 @@ export function ChannelCampaignComposer({
       content: channel === "sms" ? smsContent : previewContent,
       scheduledAt: when === "schedule" && scheduledAt ? new Date(scheduledAt).toISOString() : null,
       trackLinks,
-      payload: { smsTemplateId, emailTemplateId, voiceMode },
+      payload: {
+        smsTemplateId,
+        emailTemplateId,
+        voiceMode,
+        conversionObjective,
+        enabledFunnelSteps,
+      },
     }),
     [
       channel,
@@ -393,6 +444,8 @@ export function ChannelCampaignComposer({
       when,
       scheduledAt,
       trackLinks,
+      conversionObjective,
+      enabledFunnelSteps,
     ],
   );
   const serializedDraft = JSON.stringify(draftPayload);
@@ -492,6 +545,8 @@ export function ChannelCampaignComposer({
           ratePerMinute: 1000,
           trackLinks,
           templateId: smsTemplateId || undefined,
+          conversionObjective,
+          enabledFunnelSteps,
         };
         const result =
           when === "schedule"
@@ -519,6 +574,8 @@ export function ChannelCampaignComposer({
             targetPlayerIds: audience.eligiblePlayerIds,
             extraEmails: [],
             trackLinks,
+            conversionObjective,
+            enabledFunnelSteps,
           },
         } as never);
         const completed =
@@ -677,6 +734,57 @@ export function ChannelCampaignComposer({
                 </p>
               )}
             </div>
+            {channel !== "voice" ? (
+              <div className="space-y-3 rounded-lg border p-3">
+                <div className="space-y-2">
+                  <Label>Objetivo da campanha</Label>
+                  <Select
+                    value={conversionObjective}
+                    onValueChange={(value) => {
+                      const objective = value as ConversionObjective;
+                      setConversionObjective(objective);
+                      setEnabledFunnelSteps(funnelSteps[objective].map((step) => step.id));
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="acquisition">Aquisição de novos depositantes</SelectItem>
+                      <SelectItem value="conversion">Conversão em depósito</SelectItem>
+                      <SelectItem value="reactivation">Reativação de jogadores</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <p className="text-sm font-medium">Etapas do relatório</p>
+                  <p className="text-xs text-muted-foreground">
+                    As etapas essenciais ficam protegidas. Desmarque apenas o que não se aplica.
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-3">
+                    {funnelSteps[conversionObjective].map((step) => {
+                      const checked = enabledFunnelSteps.includes(step.id);
+                      return (
+                        <label className="flex items-center gap-2 text-sm" key={step.id}>
+                          <Checkbox
+                            checked={checked}
+                            disabled={!step.optional}
+                            onCheckedChange={(value) =>
+                              setEnabledFunnelSteps((current) =>
+                                value
+                                  ? Array.from(new Set([...current, step.id]))
+                                  : current.filter((id) => id !== step.id),
+                              )
+                            }
+                          />
+                          {step.label}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            ) : null}
             {channel === "sms" && (
               <div className="space-y-3">
                 <div className="space-y-2">

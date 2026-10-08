@@ -571,6 +571,7 @@ const CampanhaInputSchema = z.object({
   extraEmails: z.array(z.string().email().max(255)).max(5000).optional(),
   trackLinks: z.boolean().default(true),
   conversionObjective: z.enum(["acquisition", "conversion", "reactivation"]).default("conversion"),
+  enabledFunnelSteps: z.array(z.string().max(80)).max(10).optional(),
 });
 
 function campanhaRowToUI(r: any) {
@@ -658,6 +659,7 @@ export const saveEmailCampaign = createServerFn({ method: "POST" })
             conversion_funnel_snapshot: conversionFunnelSnapshot(
               data.conversionObjective,
               "campaign",
+              data.enabledFunnelSteps,
             ),
           }),
     };

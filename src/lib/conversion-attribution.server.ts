@@ -30,7 +30,8 @@ function isUuid(value: string | null): value is string {
 /**
  * Records only deterministic, direct attribution. A follow-up event may reuse
  * the token captured at signup, but it must belong to the same player and fit
- * the frozen seven-day P0 window.
+ * the frozen seven-day P0 window. Events from day 8 to day 14 are retained
+ * separately as assisted, never added to direct revenue.
  */
 export async function attributeConversionEvent(input: AttributionEvent) {
   if (!isUuid(input.trackingToken)) return { attributed: false as const, reason: "missing_token" };
@@ -62,11 +63,14 @@ export async function attributeConversionEvent(input: AttributionEvent) {
     !Number.isFinite(sentAt) ||
     !Number.isFinite(occurredAt) ||
     occurredAt < sentAt ||
-    occurredAt > sentAt + 7 * 86_400_000
+    occurredAt > sentAt + 14 * 86_400_000
   ) {
     return { attributed: false as const, reason: "outside_window" };
   }
 
+  const classification = occurredAt <= sentAt + 7 * 86_400_000 ? "direct" : "assisted";
+  const attributionModel =
+    classification === "direct" ? "last_tracked_click" : "last_tracked_click_assisted";
   const { error: insertError } = await db.from("conversion_attributions").upsert(
     {
       tenant_id: input.tenantId,
@@ -80,9 +84,9 @@ export async function attributeConversionEvent(input: AttributionEvent) {
       occurred_at: new Date(occurredAt).toISOString(),
       monetary_value: input.monetaryValue ?? null,
       is_ftd: input.isFtd === true,
-      attribution_model: "last_tracked_click",
-      attribution_window_days: 7,
-      classification: "direct",
+      attribution_model: attributionModel,
+      attribution_window_days: classification === "direct" ? 7 : 14,
+      classification,
       evidence: { token_source: "utm_content", dispatch_sent_at: candidate.sent_at },
     },
     {
@@ -93,6 +97,7 @@ export async function attributeConversionEvent(input: AttributionEvent) {
   if (insertError) throw new Error(`Falha ao gravar atribuição: ${insertError.message}`);
   return {
     attributed: true as const,
+    classification,
     sourceType: candidate.source_type,
     sourceId: candidate.source_id,
   };

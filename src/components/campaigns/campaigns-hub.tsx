@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { Plus, RotateCw, Search, Send, Trash2, Workflow } from "lucide-react";
+import { BarChart3, Plus, RotateCw, Search, Send, Trash2, Workflow } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
 
@@ -200,6 +200,12 @@ export function CampaignsHub() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button variant="outline" asChild>
+            <Link to="/relatorios/conversao">
+              <BarChart3 className="mr-2 h-4 w-4" />
+              Conversão
+            </Link>
+          </Button>
           <Button variant="outline" asChild>
             <Link to="/automacoes">
               <Workflow className="mr-2 h-4 w-4" />

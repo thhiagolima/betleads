@@ -57,6 +57,7 @@ const crmItems: NavItem[] = [
 
 const engagementItems: NavItem[] = [
   { title: "Campanhas", url: "/campanhas", icon: Megaphone },
+  { title: "Conversão", url: "/relatorios/conversao", icon: BarChart3 },
   {
     title: "Automações",
     url: "/automacoes",
@@ -189,13 +190,7 @@ function NavSection({
     <SidebarSection label={label}>
       {items.map((item) =>
         item.subItems ? (
-          <NestedItem
-            key={item.url}
-            item={item}
-            pathname={pathname}
-            hash={hash}
-            unread={0}
-          />
+          <NestedItem key={item.url} item={item} pathname={pathname} hash={hash} unread={0} />
         ) : (
           <SimpleItem key={item.url} item={item} pathname={pathname} />
         ),
@@ -301,12 +296,7 @@ export function AppSidebar({
       <SidebarNav>
         <NavSection label="Visão geral" items={overviewItems} pathname={pathname} hash={hash} />
         <NavSection label="CRM" items={crmItems} pathname={pathname} hash={hash} />
-        <NavSection
-          label="Engajamento"
-          items={engagementItems}
-          pathname={pathname}
-          hash={hash}
-        />
+        <NavSection label="Engajamento" items={engagementItems} pathname={pathname} hash={hash} />
         <NavSection
           label="Inteligência"
           items={intelligenceItems}

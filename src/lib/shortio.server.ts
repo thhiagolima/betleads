@@ -24,6 +24,8 @@ export type LinkTrackingContext = {
   deliveryKey?: string | null;
   /** Explicit choice made in the composer. Undefined preserves legacy behaviour. */
   enabled?: boolean;
+  experimentId?: string | null;
+  experimentVariant?: "A" | "B" | null;
 };
 
 type TenantShortioSettings = {
@@ -360,6 +362,8 @@ async function persistDispatch(args: {
         url_position: args.position,
         original_url: args.originalUrl,
         sent_url: args.sentUrl,
+        experiment_id: args.context.experimentId ?? null,
+        experiment_variant: args.context.experimentVariant ?? null,
       },
       { onConflict: "tenant_id,idempotency_key", ignoreDuplicates: true },
     )
@@ -381,6 +385,31 @@ async function persistDispatch(args: {
   return String(data.id);
 }
 
+async function experimentForContext(context: LinkTrackingContext) {
+  if (
+    (context.sourceType !== "campaign" && context.sourceType !== "journey") ||
+    !context.sourceId ||
+    !/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(context.sourceId)
+  )
+    return null;
+  const recipientKey = context.recipientPlayerId ?? context.recipientHash ?? context.deliveryKey;
+  if (!recipientKey) return null;
+  const { data, error } = await (supabaseAdmin as any).rpc("resolve_conversion_experiment", {
+    p_tenant_id: context.tenantId,
+    p_source_type: context.sourceType,
+    p_source_id: context.sourceId,
+    p_recipient_key: recipientKey,
+    p_player_id: context.recipientPlayerId ?? null,
+  });
+  if (error) throw new Error(`Falha ao resolver experimento: ${error.message}`);
+  return data as null | {
+    experiment_id: string;
+    variant: "A" | "B";
+    dimension: string;
+    payload: Record<string, unknown>;
+  };
+}
+
 /**
  * Rewrites eligible URLs in final plain text. Call this only after template
  * variables are rendered, immediately before the provider request.
@@ -397,15 +426,21 @@ export async function prepareTrackedText(
   )
     return { content, links: [], trackingEnabled: false };
 
+  const experiment = await experimentForContext(context);
+  const dispatchContext: LinkTrackingContext = experiment
+    ? { ...context, experimentId: experiment.experiment_id, experimentVariant: experiment.variant }
+    : context;
   const matches = Array.from(content.matchAll(URL_PATTERN));
   const replacements: Array<{ start: number; end: number; value: string }> = [];
   const links: PreparedTrackedLink[] = [];
   for (let position = 0; position < matches.length; position++) {
     const match = matches[position];
-    const raw = stripTrackingUrlTrailingPunctuation(match[0]);
+    const originalRaw = stripTrackingUrlTrailingPunctuation(match[0]);
+    const variantUrl = experiment?.dimension === "cta" ? experiment.payload.destination_url : null;
+    const raw = typeof variantUrl === "string" && variantUrl ? variantUrl : originalRaw;
     if (
       !raw ||
-      isProtectedDestination(raw) ||
+      isProtectedDestination(originalRaw) ||
       !isShortioEligibleUrl(raw, {
         domain: settings.domain,
         allowedHosts: settings.allowed_destination_hosts,
@@ -415,8 +450,8 @@ export async function prepareTrackedText(
     }
     try {
       await assertResolvedPublicDestination(raw);
-      const trackingToken = await deterministicToken(context, position);
-      const trackedOriginal = withTrackingToken(raw, trackingToken, context);
+      const trackingToken = await deterministicToken(dispatchContext, position);
+      const trackedOriginal = withTrackingToken(raw, trackingToken, dispatchContext);
       const tracked = await getOrCreateTrackedLink({
         tenantId: context.tenantId,
         originalUrl: trackedOriginal,
@@ -429,10 +464,10 @@ export async function prepareTrackedText(
         originalUrl: raw,
         sentUrl: tracked.short_url,
         position,
-        context,
+        context: dispatchContext,
       });
       const start = match.index ?? 0;
-      replacements.push({ start, end: start + raw.length, value: tracked.short_url });
+      replacements.push({ start, end: start + originalRaw.length, value: tracked.short_url });
       links.push({
         trackedLinkId: tracked.id,
         dispatchId,
@@ -465,23 +500,34 @@ export async function prepareTrackedEmailHtml(
     !settings.enabled_channels.includes("email")
   )
     return { content: html, links: [], trackingEnabled: false };
+  const baseContext: LinkTrackingContext = { ...context, channel: "email" };
+  const experiment = await experimentForContext(baseContext);
+  const dispatchContext: LinkTrackingContext = experiment
+    ? {
+        ...baseContext,
+        experimentId: experiment.experiment_id,
+        experimentVariant: experiment.variant,
+      }
+    : baseContext;
   const hrefPattern = /(\bhref\s*=\s*)(["'])([^"']*)\2/gi;
   const matches = Array.from(html.matchAll(hrefPattern));
   const replacements: Array<{ start: number; end: number; value: string }> = [];
   const links: PreparedTrackedLink[] = [];
   for (let position = 0; position < matches.length; position++) {
     const match = matches[position];
-    const raw = match[3].trim();
+    const originalRaw = match[3].trim();
+    const variantUrl = experiment?.dimension === "cta" ? experiment.payload.destination_url : null;
+    const raw = typeof variantUrl === "string" && variantUrl ? variantUrl : originalRaw;
     let protectedLink = false;
     try {
-      const parsed = new URL(raw);
+      const parsed = new URL(originalRaw);
       protectedLink = isProtectedDestination(parsed.toString());
     } catch {
       protectedLink = true;
     }
     if (
       protectedLink ||
-      /(?:unsubscribe|descadastr|opt[ -]?out)/i.test(raw) ||
+      /(?:unsubscribe|descadastr|opt[ -]?out)/i.test(originalRaw) ||
       !isShortioEligibleUrl(raw, {
         domain: settings.domain,
         allowedHosts: settings.allowed_destination_hosts,
@@ -491,11 +537,8 @@ export async function prepareTrackedEmailHtml(
     }
     try {
       await assertResolvedPublicDestination(raw);
-      const trackingToken = await deterministicToken({ ...context, channel: "email" }, position);
-      const trackedOriginal = withTrackingToken(raw, trackingToken, {
-        ...context,
-        channel: "email",
-      });
+      const trackingToken = await deterministicToken(dispatchContext, position);
+      const trackedOriginal = withTrackingToken(raw, trackingToken, dispatchContext);
       const tracked = await getOrCreateTrackedLink({
         tenantId: context.tenantId,
         originalUrl: trackedOriginal,
@@ -508,12 +551,12 @@ export async function prepareTrackedEmailHtml(
         originalUrl: raw,
         sentUrl: tracked.short_url,
         position,
-        context: { ...context, channel: "email" },
+        context: dispatchContext,
       });
       const valueStart = (match.index ?? 0) + match[1].length + 1;
       replacements.push({
         start: valueStart,
-        end: valueStart + raw.length,
+        end: valueStart + originalRaw.length,
         value: tracked.short_url,
       });
       links.push({

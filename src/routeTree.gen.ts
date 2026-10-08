@@ -42,6 +42,7 @@ import { Route as JornadasJourneyIdRouteImport } from './routes/jornadas.$journe
 import { Route as JornadasNovaRouteImport } from './routes/jornadas.nova'
 import { Route as LinksConfiguracoesRouteImport } from './routes/links.configuracoes'
 import { Route as PlayersPlayerIdRouteImport } from './routes/players.$playerId'
+import { Route as RelatoriosConversaoRouteImport } from './routes/relatorios.conversao'
 import { Route as SmsTemplatesRouteImport } from './routes/sms.templates'
 import { Route as UTokenRouteImport } from './routes/u.$token'
 import { Route as ApiPublicEvolutionWebhookRouteImport } from './routes/api/public/evolution-webhook'
@@ -236,6 +237,11 @@ const PlayersPlayerIdRoute = PlayersPlayerIdRouteImport.update({
   path: '/$playerId',
   getParentRoute: () => PlayersRoute,
 } as any)
+const RelatoriosConversaoRoute = RelatoriosConversaoRouteImport.update({
+  id: '/relatorios/conversao',
+  path: '/relatorios/conversao',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SmsTemplatesRoute = SmsTemplatesRouteImport.update({
   id: '/templates',
   path: '/templates',
@@ -429,6 +435,7 @@ export interface FileRoutesByFullPath {
   '/jornadas/nova': typeof JornadasNovaRoute
   '/links/configuracoes': typeof LinksConfiguracoesRoute
   '/players/$playerId': typeof PlayersPlayerIdRoute
+  '/relatorios/conversao': typeof RelatoriosConversaoRoute
   '/sms/templates': typeof SmsTemplatesRoute
   '/u/$token': typeof UTokenRoute
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
@@ -492,6 +499,7 @@ export interface FileRoutesByTo {
   '/jornadas/nova': typeof JornadasNovaRoute
   '/links/configuracoes': typeof LinksConfiguracoesRoute
   '/players/$playerId': typeof PlayersPlayerIdRoute
+  '/relatorios/conversao': typeof RelatoriosConversaoRoute
   '/sms/templates': typeof SmsTemplatesRoute
   '/u/$token': typeof UTokenRoute
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
@@ -556,6 +564,7 @@ export interface FileRoutesById {
   '/jornadas/nova': typeof JornadasNovaRoute
   '/links/configuracoes': typeof LinksConfiguracoesRoute
   '/players/$playerId': typeof PlayersPlayerIdRoute
+  '/relatorios/conversao': typeof RelatoriosConversaoRoute
   '/sms/templates': typeof SmsTemplatesRoute
   '/u/$token': typeof UTokenRoute
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
@@ -621,6 +630,7 @@ export interface FileRouteTypes {
     | '/jornadas/nova'
     | '/links/configuracoes'
     | '/players/$playerId'
+    | '/relatorios/conversao'
     | '/sms/templates'
     | '/u/$token'
     | '/api/public/evolution-webhook'
@@ -684,6 +694,7 @@ export interface FileRouteTypes {
     | '/jornadas/nova'
     | '/links/configuracoes'
     | '/players/$playerId'
+    | '/relatorios/conversao'
     | '/sms/templates'
     | '/u/$token'
     | '/api/public/evolution-webhook'
@@ -747,6 +758,7 @@ export interface FileRouteTypes {
     | '/jornadas/nova'
     | '/links/configuracoes'
     | '/players/$playerId'
+    | '/relatorios/conversao'
     | '/sms/templates'
     | '/u/$token'
     | '/api/public/evolution-webhook'
@@ -803,6 +815,7 @@ export interface RootRouteChildren {
   TreinoIaRoute: typeof TreinoIaRoute
   WebhooksRoute: typeof WebhooksRoute
   WhatsappRoute: typeof WhatsappRoute
+  RelatoriosConversaoRoute: typeof RelatoriosConversaoRoute
   UTokenRoute: typeof UTokenRoute
   ApiPublicEvolutionWebhookRoute: typeof ApiPublicEvolutionWebhookRoute
   ApiPublicSmsWebhookRoute: typeof ApiPublicSmsWebhookRoute
@@ -1062,6 +1075,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/players/$playerId'
       preLoaderRoute: typeof PlayersPlayerIdRouteImport
       parentRoute: typeof PlayersRoute
+    }
+    '/relatorios/conversao': {
+      id: '/relatorios/conversao'
+      path: '/relatorios/conversao'
+      fullPath: '/relatorios/conversao'
+      preLoaderRoute: typeof RelatoriosConversaoRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/sms/templates': {
       id: '/sms/templates'
@@ -1374,6 +1394,7 @@ const rootRouteChildren: RootRouteChildren = {
   TreinoIaRoute: TreinoIaRoute,
   WebhooksRoute: WebhooksRoute,
   WhatsappRoute: WhatsappRoute,
+  RelatoriosConversaoRoute: RelatoriosConversaoRoute,
   UTokenRoute: UTokenRoute,
   ApiPublicEvolutionWebhookRoute: ApiPublicEvolutionWebhookRoute,
   ApiPublicSmsWebhookRoute: ApiPublicSmsWebhookRoute,

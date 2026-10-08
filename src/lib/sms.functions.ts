@@ -834,6 +834,10 @@ export const sendBulkSms = createServerFn({ method: "POST" })
         ratePerMinute: z.number().int().min(1).max(5000).optional().default(1000),
         trackLinks: z.boolean().optional().default(true),
         templateId: dbUuid().optional(),
+        conversionObjective: z
+          .enum(["acquisition", "conversion", "reactivation"])
+          .default("conversion"),
+        enabledFunnelSteps: z.array(z.string().max(80)).max(10).optional(),
       })
       .parse(input),
   )
@@ -898,8 +902,12 @@ export const sendBulkSms = createServerFn({ method: "POST" })
           track_links: data.trackLinks,
           template_id: data.templateId ?? null,
           template_snapshot: templateSnapshot,
-          conversion_objective: "conversion",
-          conversion_funnel_snapshot: conversionFunnelSnapshot("conversion", "campaign"),
+          conversion_objective: data.conversionObjective,
+          conversion_funnel_snapshot: conversionFunnelSnapshot(
+            data.conversionObjective,
+            "campaign",
+            data.enabledFunnelSteps,
+          ),
           created_by: context.userId,
         })
         .select("id")
@@ -997,8 +1005,12 @@ export const sendBulkSms = createServerFn({ method: "POST" })
         track_links: data.trackLinks,
         template_id: data.templateId ?? null,
         template_snapshot: templateSnapshot,
-        conversion_objective: "conversion",
-        conversion_funnel_snapshot: conversionFunnelSnapshot("conversion", "campaign"),
+        conversion_objective: data.conversionObjective,
+        conversion_funnel_snapshot: conversionFunnelSnapshot(
+          data.conversionObjective,
+          "campaign",
+          data.enabledFunnelSteps,
+        ),
         created_by: context.userId,
       })
       .select("id")
@@ -1731,6 +1743,8 @@ const ScheduleBulkSchema = z.object({
   ratePerMinute: z.number().int().min(1).max(5000).optional().default(1000),
   trackLinks: z.boolean().optional().default(true),
   templateId: dbUuid().optional(),
+  conversionObjective: z.enum(["acquisition", "conversion", "reactivation"]).default("conversion"),
+  enabledFunnelSteps: z.array(z.string().max(80)).max(10).optional(),
 });
 
 /** Match telefone → playerId dentro do tenant, mesmo shape usado em sendBulkSms. */
@@ -1834,8 +1848,12 @@ export const scheduleBulkSms = createServerFn({ method: "POST" })
         track_links: data.trackLinks,
         template_id: data.templateId ?? null,
         template_snapshot: templateSnapshot,
-        conversion_objective: "conversion",
-        conversion_funnel_snapshot: conversionFunnelSnapshot("conversion", "campaign"),
+        conversion_objective: data.conversionObjective,
+        conversion_funnel_snapshot: conversionFunnelSnapshot(
+          data.conversionObjective,
+          "campaign",
+          data.enabledFunnelSteps,
+        ),
         created_by: context.userId,
       })
       .select("id, name, scheduled_at, total_count, status")

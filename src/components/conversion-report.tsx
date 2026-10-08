@@ -1,6 +1,13 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { getConversionReport } from "@/lib/conversion-report.functions";
+import {
+  exportConversionDrilldownCsv,
+  getConversionDataHealth,
+  getConversionDrilldown,
+  getConversionReport,
+} from "@/lib/conversion-report.functions";
+import { ConversionExperimentPanel } from "@/components/conversion-experiment-panel";
 
 export function ConversionReport({
   sourceType,
@@ -9,9 +16,20 @@ export function ConversionReport({
   sourceType: "campaign" | "journey";
   sourceId: string;
 }) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const query = useQuery({
     queryKey: ["conversion-report", sourceType, sourceId],
     queryFn: () => getConversionReport({ data: { sourceType, sourceId } }),
+  });
+  const details = useQuery({
+    queryKey: ["conversion-drilldown", sourceType, sourceId],
+    queryFn: () => getConversionDrilldown({ data: { sourceType, sourceId, limit: 100 } }),
+    enabled: detailsOpen,
+    retry: false,
+  });
+  const health = useQuery({
+    queryKey: ["conversion-data-health", sourceType, sourceId],
+    queryFn: () => getConversionDataHealth({ data: { sourceType, sourceId } }),
   });
   if (query.isLoading) return <main className="p-6">Carregando relatório…</main>;
   if (query.isError || !query.data)
@@ -59,6 +77,14 @@ export function ConversionReport({
         </div>
       ) : (
         <>
+          {health.data?.alerts.map((alert) => (
+            <div
+              className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm"
+              key={alert.code}
+            >
+              {alert.message}
+            </div>
+          ))}
           <section className="grid gap-3 md:grid-cols-5">
             {stages.map(([label, value, detail]) => (
               <div className="rounded-lg border p-4" key={label}>
@@ -77,6 +103,88 @@ export function ConversionReport({
               FTD: {data.ftd} · Atualizado:{" "}
               {data.latest ? new Date(data.latest).toLocaleString("pt-BR") : "—"}
             </p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Receita assistida (8–14 dias, separada):{" "}
+              {data.assistedRevenue.toLocaleString("pt-BR", {
+                style: "currency",
+                currency: "BRL",
+              })}
+            </p>
+          </section>
+          <ConversionExperimentPanel sourceType={sourceType} sourceId={sourceId} />
+          <section className="rounded-lg border p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 className="font-semibold">Conversões auditáveis</h2>
+                <p className="text-xs text-muted-foreground">
+                  Restrito a administradores e super administradores.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  className="rounded-md border px-3 py-2 text-sm"
+                  onClick={() => setDetailsOpen(true)}
+                >
+                  Ver conversões
+                </button>
+                <button
+                  className="rounded-md border px-3 py-2 text-sm"
+                  onClick={async () => {
+                    const result = await exportConversionDrilldownCsv({
+                      data: { sourceType, sourceId },
+                    });
+                    const url = URL.createObjectURL(
+                      new Blob([result.csv], { type: "text/csv;charset=utf-8" }),
+                    );
+                    const anchor = document.createElement("a");
+                    anchor.href = url;
+                    anchor.download = `conversoes-${sourceId}.csv`;
+                    anchor.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                >
+                  Exportar CSV
+                </button>
+              </div>
+            </div>
+            {detailsOpen && details.isError ? (
+              <p className="mt-3 text-sm text-destructive">Acesso restrito ou falha ao carregar.</p>
+            ) : null}
+            {details.data ? (
+              <div className="mt-4 overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-left">
+                      <th className="p-2">Jogador</th>
+                      <th className="p-2">Evento</th>
+                      <th className="p-2">Data</th>
+                      <th className="p-2">Valor</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {details.data.rows.map((row: any) => (
+                      <tr className="border-b" key={`${row.event_type}:${row.event_id}`}>
+                        <td className="p-2">
+                          {row.players?.nome ?? "—"}
+                          <br />
+                          <span className="text-xs text-muted-foreground">
+                            {row.players?.email ?? row.players?.telefone ?? ""}
+                          </span>
+                        </td>
+                        <td className="p-2">{row.event_type}</td>
+                        <td className="p-2">{new Date(row.occurred_at).toLocaleString("pt-BR")}</td>
+                        <td className="p-2">
+                          {Number(row.monetary_value ?? 0).toLocaleString("pt-BR", {
+                            style: "currency",
+                            currency: "BRL",
+                          })}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
           </section>
         </>
       )}
