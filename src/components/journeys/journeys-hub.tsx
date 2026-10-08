@@ -21,9 +21,11 @@ import { toast } from "sonner";
 import {
   convertLegacyJourney,
   deleteJourney,
+  getJourneyContactLimits,
   listJourneyOperations,
   listJourneys,
   listLegacyJourneys,
+  saveJourneyContactLimits,
   retireLegacyJourney,
   setJourneyStatus,
 } from "@/lib/journeys.functions";
@@ -84,6 +86,8 @@ export function JourneysHub() {
   const legacyFn = useServerFn(listLegacyJourneys);
   const convertFn = useServerFn(convertLegacyJourney);
   const retireFn = useServerFn(retireLegacyJourney);
+  const contactLimitsFn = useServerFn(getJourneyContactLimits);
+  const saveContactLimitsFn = useServerFn(saveJourneyContactLimits);
   const [filter, setFilter] = useState<"all" | Journey["status"]>("all");
   const [search, setSearch] = useState("");
   const [view, setView] = useState<"journeys" | "queue" | "conflicts" | "failures">("journeys");
@@ -119,6 +123,10 @@ export function JourneysHub() {
   };
   const journeys = useQuery({ queryKey: ["journeys"], queryFn: () => list() });
   const operations = useQuery({ queryKey: ["journey-operations"], queryFn: () => operationsFn() });
+  const contactLimits = useQuery({
+    queryKey: ["journey-contact-limits"],
+    queryFn: () => contactLimitsFn(),
+  });
   const legacy = useQuery({ queryKey: ["legacy-journeys"], queryFn: () => legacyFn() });
   const status = useMutation({
     mutationFn: (input: { id: string; status: Journey["status"] }) => changeStatus({ data: input }),
@@ -165,6 +173,26 @@ export function JourneysHub() {
     },
     onError: (error: Error) => toast.error(error.message),
   });
+  const saveContactLimits = useMutation({
+    mutationFn: () =>
+      saveContactLimitsFn({
+        data: {
+          max24h: dailyMessageLimit.trim() ? Number(dailyMessageLimit) : null,
+          max7d: weeklyMessageLimit.trim() ? Number(weeklyMessageLimit) : null,
+        },
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["journey-contact-limits"] });
+      setSettingsOpen(false);
+      toast.success("Limites de contato salvos.");
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+  const openContactSettings = () => {
+    setDailyMessageLimit(contactLimits.data?.max24h?.toString() ?? "");
+    setWeeklyMessageLimit(contactLimits.data?.max7d?.toString() ?? "");
+    setSettingsOpen(true);
+  };
   const rows = useMemo(
     () =>
       ((journeys.data?.journeys ?? []) as Journey[]).filter(
@@ -343,7 +371,7 @@ export function JourneysHub() {
           </button>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => setSettingsOpen(true)}>
+          <Button variant="outline" size="sm" onClick={openContactSettings}>
             Configuracoes
           </Button>
           <Button variant="outline" size="sm" onClick={() => setInfoOpen(true)}>
@@ -664,7 +692,8 @@ export function JourneysHub() {
           <div className="rounded-2xl border p-5">
             <h3 className="font-semibold">Limite de mensagens por pessoa</h3>
             <p className="mt-1 text-sm text-muted-foreground">
-              Os limites de jornadas e campanhas sao somados. Em branco, nao ha limite.
+              Os limites das jornadas incluem os envios de SMS e e-mail já registrados no tenant. Em
+              branco, não há limite.
             </p>
             <div className="mt-5 grid gap-3 sm:grid-cols-2">
               <label className="text-sm font-medium">
@@ -695,12 +724,10 @@ export function JourneysHub() {
           </div>
           <DialogFooter>
             <Button
-              onClick={() => {
-                setSettingsOpen(false);
-                toast.success("Limites salvos nesta sessao.");
-              }}
+              disabled={saveContactLimits.isPending}
+              onClick={() => saveContactLimits.mutate()}
             >
-              Salvar limite
+              {saveContactLimits.isPending ? "Salvando..." : "Salvar limite"}
             </Button>
           </DialogFooter>
         </DialogContent>

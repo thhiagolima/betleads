@@ -18,6 +18,20 @@ const manualEnrollmentSchema = z.object({
   playerId: z.string().uuid(),
   entryKey: z.string().trim().min(1).max(160).default("manual"),
 });
+const journeyContactLimitsSchema = z
+  .object({
+    max24h: z.number().int().min(1).max(1000).nullable(),
+    max7d: z.number().int().min(1).max(5000).nullable(),
+  })
+  .superRefine((value, context) => {
+    if (value.max24h != null && value.max7d != null && value.max7d < value.max24h) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["max7d"],
+        message: "O limite de 7 dias deve ser igual ou maior que o de 24 horas.",
+      });
+    }
+  });
 const db = supabaseAdmin as unknown as {
   from: (table: string) => any;
   rpc: (
@@ -790,4 +804,39 @@ export const listJourneyOperations = createServerFn({ method: "GET" })
         failed: items.filter((item: any) => item.status === "failed").length,
       },
     };
+  });
+
+export const getJourneyContactLimits = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const tenantId = await tenant(context);
+    const { data, error } = await db
+      .from("journey_contact_limits")
+      .select("max_messages_24h,max_messages_7d")
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+    if (error) throw new Error("Não foi possível carregar os limites de contato.");
+    return {
+      max24h: data?.max_messages_24h == null ? null : Number(data.max_messages_24h),
+      max7d: data?.max_messages_7d == null ? null : Number(data.max_messages_7d),
+    };
+  });
+
+export const saveJourneyContactLimits = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((value: unknown) => journeyContactLimitsSchema.parse(value))
+  .handler(async ({ data, context }) => {
+    const tenantId = await tenant(context);
+    await requireJourneyDraftEditor(context.userId, tenantId);
+    const { error } = await db.from("journey_contact_limits").upsert(
+      {
+        tenant_id: tenantId,
+        max_messages_24h: data.max24h,
+        max_messages_7d: data.max7d,
+        updated_by: context.userId,
+      },
+      { onConflict: "tenant_id" },
+    );
+    if (error) throw new Error("Não foi possível salvar os limites de contato.");
+    return { ok: true };
   });

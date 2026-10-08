@@ -256,7 +256,7 @@ async function execution(enrollment: EnrollmentRow, step: StepRow, channel: stri
 }
 
 async function reserveDelivery(enrollment: EnrollmentRow, step: StepRow, journey: JourneyRow) {
-  const { data, error } = await db.rpc("reserve_journey_delivery", {
+  const { data, error } = await db.rpc("reserve_journey_delivery_with_contact_limits", {
     p_tenant_id: enrollment.tenant_id,
     p_journey_id: enrollment.journey_id,
     p_enrollment_id: enrollment.id,
