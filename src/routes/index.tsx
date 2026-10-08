@@ -1281,14 +1281,14 @@ function Dashboard() {
           <div className="space-y-2">
             <InfoRow
               icon={Users}
-              label="Na fila da régua"
+              label="Na fila da jornada"
               value={num(data.reactivationQueue)}
               tone="blue"
               chevron
             />
             <InfoRow
               icon={MessageSquare}
-              label="Réguas ligadas"
+              label="Jornadas ativas"
               value={`${num(data.activeFlows)}/${num(data.totalFlows)}`}
               tone="blue"
               chevron

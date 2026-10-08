@@ -141,7 +141,7 @@ import {
 
 export const Route = createFileRoute("/whatsapp")({
   beforeLoad: () => {
-    throw redirect({ to: "/jornadas" });
+    throw redirect({ to: "/automacoes" });
   },
   head: () => ({
     meta: [{ title: "WhatsApp — BETLEADS" }],

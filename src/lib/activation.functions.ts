@@ -198,7 +198,7 @@ export const getActivationStatus = createServerFn({ method: "GET" })
     };
   });
 
-/** Resumo operacional unificado das réguas de SMS e e-mail. */
+/** Resumo operacional das automações legadas de SMS e e-mail. */
 export const listAutomationJourneys = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {

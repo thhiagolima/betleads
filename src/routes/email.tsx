@@ -305,7 +305,7 @@ function EmailPage() {
       void navigate({ to: "/campanhas", search: { newChannel: "email" } as never, replace: true });
     }
     if (hash === "automacoes") {
-      void navigate({ to: "/automacoes/email", replace: true });
+      void navigate({ to: "/automacoes", replace: true });
     }
     if (legacySettings) {
       void navigate({ to: "/email", hash: "dashboard", replace: true });
@@ -331,7 +331,7 @@ function EmailPage() {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => void navigate({ to: "/automacoes/email" })}
+              onClick={() => void navigate({ to: "/automacoes" })}
             >
               <Workflow className="mr-1.5 h-3.5 w-3.5" /> Automações
             </Button>

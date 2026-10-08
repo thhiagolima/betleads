@@ -254,7 +254,7 @@ export function JourneyEditor({
     setSteps((all) => all.map((s, n) => (n === i ? value : s)));
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6 p-4 sm:p-6">
-      <Button variant="ghost" size="sm" onClick={() => navigate({ to: "/jornadas" })}>
+      <Button variant="ghost" size="sm" onClick={() => navigate({ to: "/automacoes" })}>
         <ArrowLeft className="mr-1 h-4 w-4" /> Jornadas
       </Button>
       <div>
@@ -351,7 +351,7 @@ export function JourneyEditor({
         </section>
         <section className="grid gap-4 rounded-lg border p-4 sm:grid-cols-2">
           <div>
-            <p className="font-medium">Quem entra nesta régua</p>
+            <p className="font-medium">Quem entra nesta jornada</p>
             <p className="mt-1 text-xs text-muted-foreground">
               Todos os jogadores ativos que atingirem o gatilho, respeitando opt-out e
               elegibilidade.

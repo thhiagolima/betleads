@@ -1261,6 +1261,63 @@ export type Database = {
           },
         ]
       }
+      call_script_versions: {
+        Row: {
+          changed_by: string | null
+          content: string
+          created_at: string
+          default_voice_id: string | null
+          id: string
+          name: string
+          script_id: string
+          status: Database["public"]["Enums"]["call_script_status"]
+          tenant_id: string
+          version: number
+          voice_settings: Json
+        }
+        Insert: {
+          changed_by?: string | null
+          content: string
+          created_at?: string
+          default_voice_id?: string | null
+          id?: string
+          name: string
+          script_id: string
+          status: Database["public"]["Enums"]["call_script_status"]
+          tenant_id: string
+          version: number
+          voice_settings?: Json
+        }
+        Update: {
+          changed_by?: string | null
+          content?: string
+          created_at?: string
+          default_voice_id?: string | null
+          id?: string
+          name?: string
+          script_id?: string
+          status?: Database["public"]["Enums"]["call_script_status"]
+          tenant_id?: string
+          version?: number
+          voice_settings?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "call_script_versions_script_id_fkey"
+            columns: ["script_id"]
+            isOneToOne: false
+            referencedRelation: "call_scripts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "call_script_versions_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       call_scripts: {
         Row: {
           content: string
@@ -1952,6 +2009,7 @@ export type Database = {
           subject_override: string | null
           template_ids: string[]
           tenant_id: string
+          track_links: boolean
         }
         Insert: {
           block_type: Database["public"]["Enums"]["email_flow_block_type"]
@@ -1973,6 +2031,7 @@ export type Database = {
           subject_override?: string | null
           template_ids?: string[]
           tenant_id?: string
+          track_links?: boolean
         }
         Update: {
           block_type?: Database["public"]["Enums"]["email_flow_block_type"]
@@ -1994,6 +2053,7 @@ export type Database = {
           subject_override?: string | null
           template_ids?: string[]
           tenant_id?: string
+          track_links?: boolean
         }
         Relationships: [
           {
@@ -2423,6 +2483,75 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "email_smtp_configs_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      email_template_versions: {
+        Row: {
+          body_html: string
+          body_text: string
+          changed_by: string | null
+          created_at: string
+          from_name: string | null
+          id: string
+          lifecycle_status: string
+          name: string
+          preheader: string | null
+          subject: string
+          tags: string[]
+          template_id: string
+          tenant_id: string
+          track_links: boolean
+          version: number
+        }
+        Insert: {
+          body_html: string
+          body_text?: string
+          changed_by?: string | null
+          created_at?: string
+          from_name?: string | null
+          id?: string
+          lifecycle_status: string
+          name: string
+          preheader?: string | null
+          subject: string
+          tags?: string[]
+          template_id: string
+          tenant_id: string
+          track_links?: boolean
+          version: number
+        }
+        Update: {
+          body_html?: string
+          body_text?: string
+          changed_by?: string | null
+          created_at?: string
+          from_name?: string | null
+          id?: string
+          lifecycle_status?: string
+          name?: string
+          preheader?: string | null
+          subject?: string
+          tags?: string[]
+          template_id?: string
+          tenant_id?: string
+          track_links?: boolean
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "email_template_versions_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "email_templates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "email_template_versions_tenant_id_fkey"
             columns: ["tenant_id"]
             isOneToOne: false
             referencedRelation: "tenants"
@@ -3330,6 +3459,7 @@ export type Database = {
       }
       journey_voice_assets: {
         Row: {
+          archived_at: string | null
           content_type: string
           created_at: string
           duration_seconds: number | null
@@ -3345,6 +3475,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          archived_at?: string | null
           content_type: string
           created_at?: string
           duration_seconds?: number | null
@@ -3360,6 +3491,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          archived_at?: string | null
           content_type?: string
           created_at?: string
           duration_seconds?: number | null
@@ -3397,9 +3529,13 @@ export type Database = {
           entry_rules: Json
           exit_rules: Json
           id: string
+          legacy_migrated_at: string | null
+          legacy_source_id: string | null
+          legacy_source_type: string | null
           name: string
           paused_at: string | null
           published_version: number | null
+          revision_of: string | null
           status: Database["public"]["Enums"]["journey_status"]
           tenant_id: string
           timezone: string
@@ -3420,9 +3556,13 @@ export type Database = {
           entry_rules?: Json
           exit_rules?: Json
           id?: string
+          legacy_migrated_at?: string | null
+          legacy_source_id?: string | null
+          legacy_source_type?: string | null
           name: string
           paused_at?: string | null
           published_version?: number | null
+          revision_of?: string | null
           status?: Database["public"]["Enums"]["journey_status"]
           tenant_id: string
           timezone?: string
@@ -3443,9 +3583,13 @@ export type Database = {
           entry_rules?: Json
           exit_rules?: Json
           id?: string
+          legacy_migrated_at?: string | null
+          legacy_source_id?: string | null
+          legacy_source_type?: string | null
           name?: string
           paused_at?: string | null
           published_version?: number | null
+          revision_of?: string | null
           status?: Database["public"]["Enums"]["journey_status"]
           tenant_id?: string
           timezone?: string
@@ -3455,6 +3599,13 @@ export type Database = {
           version?: number
         }
         Relationships: [
+          {
+            foreignKeyName: "journeys_revision_of_fkey"
+            columns: ["revision_of"]
+            isOneToOne: false
+            referencedRelation: "journeys"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "journeys_tenant_id_fkey"
             columns: ["tenant_id"]
@@ -5695,6 +5846,63 @@ export type Database = {
           },
         ]
       }
+      sms_template_versions: {
+        Row: {
+          category: string
+          changed_by: string | null
+          content: string
+          created_at: string
+          id: string
+          is_active: boolean
+          name: string
+          tags: string[]
+          template_id: string
+          tenant_id: string
+          version: number
+        }
+        Insert: {
+          category: string
+          changed_by?: string | null
+          content: string
+          created_at?: string
+          id?: string
+          is_active: boolean
+          name: string
+          tags?: string[]
+          template_id: string
+          tenant_id: string
+          version: number
+        }
+        Update: {
+          category?: string
+          changed_by?: string | null
+          content?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name?: string
+          tags?: string[]
+          template_id?: string
+          tenant_id?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sms_template_versions_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "sms_templates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sms_template_versions_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sms_templates: {
         Row: {
           category: string
@@ -7128,6 +7336,11 @@ export type Database = {
       is_super_admin: { Args: { _user_id?: string }; Returns: boolean }
       is_tenant_admin: { Args: { _tenant: string }; Returns: boolean }
       is_tenant_owner: { Args: { _tenant: string }; Returns: boolean }
+      journey_metrics: {
+        Args: { p_journey_id: string; p_tenant_id: string }
+        Returns: Json
+      }
+      normalize_brazilian_phone: { Args: { p_raw: string }; Returns: string }
       player_filter_contextual_facets_v1: {
         Args: {
           _date_field?: string
@@ -7245,6 +7458,7 @@ export type Database = {
           row_id: string
         }[]
       }
+      recover_orphaned_journey_claims: { Args: never; Returns: number }
       recover_stuck_email_campaigns: { Args: never; Returns: number }
       recover_stuck_email_leads: { Args: never; Returns: number }
       recover_stuck_sms_campaigns: { Args: never; Returns: number }
@@ -7280,6 +7494,25 @@ export type Database = {
         }
         Returns: undefined
       }
+      reserve_journey_delivery: {
+        Args: {
+          p_channel: string
+          p_cooldown_hours: number
+          p_daily_limit: number
+          p_enrollment_id: string
+          p_journey_id: string
+          p_player_id: string
+          p_step_id: string
+          p_step_position: number
+          p_tenant_id: string
+        }
+        Returns: {
+          blocked_reason: string
+          execution_id: string
+          idempotency_key: string
+          retry_at: string
+        }[]
+      }
       reserve_sms_credits: {
         Args: {
           _credits: number
@@ -7299,9 +7532,23 @@ export type Database = {
         }
         Returns: boolean
       }
+      resolve_campaign_channel_eligibility: {
+        Args: { p_candidates: Json; p_channel: string; p_tenant_id: string }
+        Returns: Json
+      }
       resolve_sms_audience_v2: {
         Args: { _criteria: Json; _tenant: string }
         Returns: Json
+      }
+      save_journey_draft: {
+        Args: {
+          p_actor_user_id: string
+          p_journey: Json
+          p_journey_id: string
+          p_steps: Json
+          p_tenant_id: string
+        }
+        Returns: string
       }
       sms_audience_player_matches: {
         Args: {

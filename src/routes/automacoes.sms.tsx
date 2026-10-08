@@ -6,7 +6,7 @@ import { consumeAutomationJourneyDraft, type AutomationJourneyDraft } from "@/li
 
 export const Route = createFileRoute("/automacoes/sms")({
   beforeLoad: () => {
-    throw redirect({ to: "/jornadas" });
+    throw redirect({ to: "/automacoes" });
   },
   component: SmsAutomationFlowsPage,
 });

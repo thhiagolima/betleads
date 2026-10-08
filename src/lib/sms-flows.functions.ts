@@ -36,14 +36,14 @@ const FluxoInputSchema = z
       ctx.addIssue({
         code: "custom",
         path: ["gatilho"],
-        message: "Escolha o gatilho da régua ativa.",
+        message: "Escolha o gatilho da automação legada ativa.",
       });
     }
     if (!flow.etapas.some((step) => step.tipo === "sms" && step.mensagem.trim())) {
       ctx.addIssue({
         code: "custom",
         path: ["etapas"],
-        message: "Uma régua ativa precisa ter ao menos um SMS preenchido.",
+        message: "Uma automação legada ativa precisa ter ao menos um SMS preenchido.",
       });
     }
   });

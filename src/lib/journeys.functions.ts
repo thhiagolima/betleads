@@ -8,6 +8,10 @@ import { journeyInputSchema, journeyStatusSchema } from "./journeys.shared";
 import { journeyEntryKey } from "./journey-policy";
 
 const journeyIdSchema = z.object({ id: z.string().uuid() });
+const legacyJourneySchema = z.object({
+  sourceType: z.enum(["sms_flow", "email_flow"]),
+  sourceId: z.string().uuid(),
+});
 const manualEnrollmentSchema = z.object({
   journeyId: z.string().uuid(),
   playerId: z.string().uuid(),
@@ -15,7 +19,10 @@ const manualEnrollmentSchema = z.object({
 });
 const db = supabaseAdmin as unknown as {
   from: (table: string) => any;
-  rpc: (name: string, params: Record<string, unknown>) => Promise<{ data: unknown; error: { message: string } | null }>;
+  rpc: (
+    name: string,
+    params: Record<string, unknown>,
+  ) => Promise<{ data: unknown; error: { message: string } | null }>;
 };
 
 async function tenant(context: { supabase: Parameters<typeof resolveOperationalTenantId>[0] }) {
@@ -69,6 +76,333 @@ export const listJourneys = createServerFn({ method: "GET" })
     return { journeys: data ?? [] };
   });
 
+/** Compatibility inventory used only while the old SMS/e-mail engines are retired. */
+export const listLegacyJourneys = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const tenantId = await tenant(context);
+    const [sms, email, converted] = await Promise.all([
+      db
+        .from("sms_flows")
+        .select("id,name,trigger_name,is_active,updated_at")
+        .eq("tenant_id", tenantId)
+        .order("updated_at", { ascending: false }),
+      db
+        .from("email_flows")
+        .select("id,name,trigger_type,active,updated_at")
+        .eq("tenant_id", tenantId)
+        .order("updated_at", { ascending: false }),
+      db
+        .from("journeys")
+        .select("id,status,legacy_source_type,legacy_source_id")
+        .eq("tenant_id", tenantId)
+        .not("legacy_source_id", "is", null),
+    ]);
+    if (sms.error || email.error || converted.error)
+      throw new Error("Não foi possível carregar as automações legadas.");
+    const migrated = new Map(
+      (converted.data ?? []).map((row: any) => [
+        `${row.legacy_source_type}:${row.legacy_source_id}`,
+        { id: row.id, status: row.status },
+      ]),
+    );
+    return {
+      items: [
+        ...(sms.data ?? []).map((flow: any) => ({
+          sourceType: "sms_flow" as const,
+          sourceId: flow.id,
+          channel: "sms" as const,
+          name: flow.name,
+          trigger: flow.trigger_name ?? "manual",
+          active: flow.is_active,
+          updatedAt: flow.updated_at,
+          journeyId: migrated.get(`sms_flow:${flow.id}`)?.id ?? null,
+          journeyStatus: migrated.get(`sms_flow:${flow.id}`)?.status ?? null,
+        })),
+        ...(email.data ?? []).map((flow: any) => ({
+          sourceType: "email_flow" as const,
+          sourceId: flow.id,
+          channel: "email" as const,
+          name: flow.name,
+          trigger: flow.trigger_type,
+          active: flow.active,
+          updatedAt: flow.updated_at,
+          journeyId: migrated.get(`email_flow:${flow.id}`)?.id ?? null,
+          journeyStatus: migrated.get(`email_flow:${flow.id}`)?.status ?? null,
+        })),
+      ],
+    };
+  });
+
+/** Final sunset step: disable the old runner only after its replacement is active. */
+export const retireLegacyJourney = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((value: unknown) => legacyJourneySchema.parse(value))
+  .handler(async ({ data, context }) => {
+    const tenantId = await tenant(context);
+    await requireJourneyPublisher(context.userId, tenantId);
+    const { data: journey, error } = await db
+      .from("journeys")
+      .select("id,status")
+      .eq("tenant_id", tenantId)
+      .eq("legacy_source_type", data.sourceType)
+      .eq("legacy_source_id", data.sourceId)
+      .maybeSingle();
+    if (error || !journey) throw new Error("Converta esta automação antes de desativá-la.");
+    if (journey.status !== "active")
+      throw new Error("Revise e publique a jornada convertida antes de desativar o legado.");
+    const table = data.sourceType === "sms_flow" ? "sms_flows" : "email_flows";
+    const activeColumn = data.sourceType === "sms_flow" ? "is_active" : "active";
+    const { error: retireError } = await db
+      .from(table)
+      .update({ [activeColumn]: false })
+      .eq("tenant_id", tenantId)
+      .eq("id", data.sourceId);
+    if (retireError) throw new Error("Não foi possível desativar a automação legada.");
+    await db.from("journey_events").insert({
+      tenant_id: tenantId,
+      journey_id: journey.id,
+      event_type: "legacy_retired",
+      actor_user_id: context.userId,
+      detail: { source_type: data.sourceType, source_id: data.sourceId },
+    });
+    return { ok: true };
+  });
+
+/** Converts one legacy automation to an inert, reviewable journey draft. */
+export const convertLegacyJourney = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((value: unknown) => legacyJourneySchema.parse(value))
+  .handler(async ({ data, context }) => {
+    const tenantId = await tenant(context);
+    await requireJourneyDraftEditor(context.userId, tenantId);
+    const { data: existing } = await db
+      .from("journeys")
+      .select("id")
+      .eq("tenant_id", tenantId)
+      .eq("legacy_source_type", data.sourceType)
+      .eq("legacy_source_id", data.sourceId)
+      .maybeSingle();
+    if (existing) return { id: existing.id, alreadyConverted: true, warnings: [] as string[] };
+
+    const steps: Array<{
+      step_type: "wait" | "sms" | "email" | "end";
+      label?: string;
+      config: Record<string, unknown>;
+    }> = [];
+    const warnings: string[] = [];
+    const addWait = (seconds: number, label?: string) => {
+      if (seconds > 0)
+        steps.push({
+          step_type: "wait",
+          label,
+          config: { delay_seconds: Math.max(60, Math.round(seconds)) },
+        });
+    };
+    let journey: {
+      name: string;
+      trigger: string;
+      dailyLimit: number;
+      cooldownHours: number;
+      exitRules: Record<string, unknown>;
+    };
+
+    if (data.sourceType === "sms_flow") {
+      const { data: flow, error } = await db
+        .from("sms_flows")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .eq("id", data.sourceId)
+        .maybeSingle();
+      if (error || !flow) throw new Error("Automação legada de SMS não encontrada.");
+      const { data: legacySteps, error: stepError } = await db
+        .from("sms_flow_steps")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .eq("flow_id", data.sourceId)
+        .eq("is_active", true)
+        .order("order_index", { ascending: true });
+      if (stepError) throw new Error("Não foi possível ler as etapas legadas de SMS.");
+      const templateIds = (legacySteps ?? []).map((step: any) => step.template_id).filter(Boolean);
+      const templates = templateIds.length
+        ? await db
+            .from("sms_templates")
+            .select("id,name,content,version,is_active")
+            .eq("tenant_id", tenantId)
+            .in("id", templateIds)
+        : { data: [], error: null };
+      const byId = new Map((templates.data ?? []).map((template: any) => [template.id, template]));
+      for (const step of legacySteps ?? []) {
+        const delay = Number(step.delay_days ?? 0) * 86400 + Number(step.delay_hours ?? 0) * 3600;
+        addWait(delay, delay ? `Espera antes de ${Number(step.order_index) + 1}` : undefined);
+        if (step.step_type === "delay") continue;
+        const template: any = step.template_id ? byId.get(step.template_id) : null;
+        const content = String(
+          step.content ?? template?.content ?? step.template_snapshot?.content ?? "",
+        ).trim();
+        if (!content)
+          throw new Error(`A etapa ${Number(step.order_index) + 1} não possui mensagem de SMS.`);
+        if (step.template_id && (!template || template.is_active === false))
+          warnings.push(
+            `A etapa ${Number(step.order_index) + 1} usava um template inativo ou removido; o texto salvo foi preservado.`,
+          );
+        steps.push({
+          step_type: "sms",
+          label: `SMS ${Number(step.order_index) + 1}`,
+          config: {
+            content,
+            ...(template
+              ? {
+                  template_id: template.id,
+                  template_snapshot: {
+                    id: template.id,
+                    name: template.name,
+                    content,
+                    version: Number(template.version ?? 1),
+                  },
+                }
+              : {}),
+          },
+        });
+      }
+      journey = {
+        name: flow.name,
+        trigger: flow.trigger_name ?? "manual",
+        dailyLimit: flow.daily_limit,
+        cooldownHours: flow.cooldown_hours,
+        exitRules: flow.exit_conditions ?? {},
+      };
+    } else {
+      const { data: flow, error } = await db
+        .from("email_flows")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .eq("id", data.sourceId)
+        .maybeSingle();
+      if (error || !flow) throw new Error("Automação legada de e-mail não encontrada.");
+      const { data: blocks, error: blockError } = await db
+        .from("email_flow_blocks")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .eq("flow_id", data.sourceId)
+        .order("order_index", { ascending: true });
+      if (blockError) throw new Error("Não foi possível ler as etapas legadas de e-mail.");
+      const templateIds = (blocks ?? []).flatMap((block: any) => block.template_ids ?? []);
+      const templates = templateIds.length
+        ? await db
+            .from("email_templates")
+            .select("id,subject,body_html,version,is_active,lifecycle_status")
+            .eq("tenant_id", tenantId)
+            .in("id", templateIds)
+        : { data: [], error: null };
+      const byId = new Map((templates.data ?? []).map((template: any) => [template.id, template]));
+      for (const block of blocks ?? []) {
+        if (block.block_type === "start") continue;
+        if (block.block_type === "delay") {
+          addWait(Number(block.delay_seconds ?? 0), block.label ?? "Espera");
+          continue;
+        }
+        if (block.block_type === "end" || block.block_type === "remove") {
+          steps.push({ step_type: "end", label: block.label ?? "Fim", config: {} });
+          continue;
+        }
+        if (block.block_type === "condition" || block.block_type === "tag") {
+          warnings.push(
+            `O bloco "${block.label ?? block.block_type}" era apenas informativo no executor legado e não foi copiado.`,
+          );
+          continue;
+        }
+        if (block.block_type !== "send_email") continue;
+        addWait(Number(block.pre_delay_seconds ?? 0), `Espera antes de ${block.label ?? "e-mail"}`);
+        const ids = block.template_ids ?? [];
+        const template: any = byId.get(ids[0]);
+        if (!template || template.is_active === false || template.lifecycle_status === "archived")
+          throw new Error(
+            `O bloco "${block.label ?? "E-mail"}" não possui um template ativo para conversão.`,
+          );
+        if (ids.length > 1)
+          warnings.push(
+            `O bloco "${block.label ?? "E-mail"}" tinha variações; a primeira foi mantida para revisão.`,
+          );
+        if (block.send_at_hour != null)
+          warnings.push(
+            `O horário fixo do bloco "${block.label ?? "E-mail"}" deve ser revisado antes da publicação.`,
+          );
+        steps.push({
+          step_type: "email",
+          label: block.label ?? "E-mail",
+          config: {
+            template_id: template.id,
+            ...(block.smtp_config_id ? { sender_id: block.smtp_config_id } : {}),
+            template_snapshot: {
+              id: template.id,
+              subject: block.subject_override ?? template.subject,
+              body_html: template.body_html,
+              version: Number(template.version ?? 1),
+            },
+          },
+        });
+      }
+      journey = {
+        name: flow.name,
+        trigger: flow.trigger_type,
+        dailyLimit: flow.daily_limit,
+        cooldownHours: flow.cooldown_hours,
+        exitRules: flow.exit_conditions ?? {},
+      };
+    }
+    if (!steps.some((step) => step.step_type === "sms" || step.step_type === "email"))
+      throw new Error("A automação legada não possui nenhuma etapa de envio compatível.");
+    if (steps.at(-1)?.step_type !== "end")
+      steps.push({ step_type: "end", label: "Fim", config: {} });
+    const { data: journeyId, error: saveError } = await db.rpc("save_journey_draft", {
+      p_tenant_id: tenantId,
+      p_journey_id: null,
+      p_actor_user_id: context.userId,
+      p_journey: {
+        name: journey.name,
+        description: `Convertida de uma automação legada de ${data.sourceType === "sms_flow" ? "SMS" : "e-mail"}. Revise antes de publicar.`,
+        trigger_type: journey.trigger,
+        trigger_config: {},
+        entry_rules: { reentry: "never" },
+        exit_rules: journey.exitRules,
+        daily_limit: journey.dailyLimit,
+        cooldown_hours: journey.cooldownHours,
+      },
+      p_steps: steps,
+    });
+    if (saveError || !journeyId) throw new Error("Não foi possível criar o rascunho convertido.");
+    const { error: linkError } = await db
+      .from("journeys")
+      .update({
+        legacy_source_type: data.sourceType,
+        legacy_source_id: data.sourceId,
+        legacy_migrated_at: new Date().toISOString(),
+      })
+      .eq("id", journeyId)
+      .eq("tenant_id", tenantId);
+    if (linkError) {
+      await db.from("journeys").delete().eq("id", journeyId).eq("tenant_id", tenantId);
+      const { data: raced } = await db
+        .from("journeys")
+        .select("id")
+        .eq("tenant_id", tenantId)
+        .eq("legacy_source_type", data.sourceType)
+        .eq("legacy_source_id", data.sourceId)
+        .maybeSingle();
+      if (raced) return { id: raced.id, alreadyConverted: true, warnings: [] as string[] };
+      throw new Error("Não foi possível vincular a conversão ao item legado.");
+    }
+    await db.from("journey_events").insert({
+      tenant_id: tenantId,
+      journey_id: journeyId,
+      event_type: "legacy_converted",
+      actor_user_id: context.userId,
+      detail: { source_type: data.sourceType, source_id: data.sourceId, warnings },
+    });
+    return { id: String(journeyId), alreadyConverted: false, warnings };
+  });
+
 export const getJourney = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((value: unknown) => journeyIdSchema.parse(value))
@@ -94,8 +428,12 @@ export const getJourney = createServerFn({ method: "GET" })
     });
     if (metricsError) throw new Error(metricsError.message);
     const aggregate = (metricData ?? {}) as {
-      total?: number; byStatus?: Record<string, number>; exits?: Record<string, number>;
-      positions?: Record<string, number>; recovered?: number; sentByChannel?: Record<string, number>;
+      total?: number;
+      byStatus?: Record<string, number>;
+      exits?: Record<string, number>;
+      positions?: Record<string, number>;
+      recovered?: number;
+      sentByChannel?: Record<string, number>;
     };
     const sentByChannel = aggregate.sentByChannel ?? {};
     const recovered = Number(aggregate.recovered ?? 0);
@@ -138,31 +476,55 @@ export const saveJourney = createServerFn({ method: "POST" })
       daily_limit: input.daily_limit,
       cooldown_hours: input.cooldown_hours,
     };
-    const steps = await Promise.all(input.steps.map(async (step, position) => {
-      let config: Record<string, unknown> = step.config;
-      if (step.step_type === "email") {
-        const { data: template } = await db.from("email_templates")
-          .select("id,subject,body_html,version,is_active,lifecycle_status")
-          .eq("id", step.config.template_id).eq("tenant_id", tenantId).maybeSingle();
-        if (!template || template.is_active === false || template.lifecycle_status === "archived")
-          throw new Error("Selecione um template de e-mail ativo deste tenant.");
-        if (step.config.sender_id) {
-          const { data: sender } = await db.from("email_smtp_configs").select("id")
-            .eq("id", step.config.sender_id).eq("tenant_id", tenantId).maybeSingle();
-          if (!sender) throw new Error("Selecione um remetente de e-mail deste tenant.");
+    const steps = await Promise.all(
+      input.steps.map(async (step, position) => {
+        let config: Record<string, unknown> = step.config;
+        if (step.step_type === "email") {
+          const { data: template } = await db
+            .from("email_templates")
+            .select("id,subject,body_html,version,is_active,lifecycle_status")
+            .eq("id", step.config.template_id)
+            .eq("tenant_id", tenantId)
+            .maybeSingle();
+          if (!template || template.is_active === false || template.lifecycle_status === "archived")
+            throw new Error("Selecione um template de e-mail ativo deste tenant.");
+          if (step.config.sender_id) {
+            const { data: sender } = await db
+              .from("email_smtp_configs")
+              .select("id")
+              .eq("id", step.config.sender_id)
+              .eq("tenant_id", tenantId)
+              .maybeSingle();
+            if (!sender) throw new Error("Selecione um remetente de e-mail deste tenant.");
+          }
+          config = {
+            ...step.config,
+            template_snapshot: {
+              id: template.id,
+              subject: template.subject,
+              body_html: template.body_html,
+              version: Number(template.version ?? 1),
+            },
+          };
         }
-        config = { ...step.config, template_snapshot: {
-          id: template.id, subject: template.subject, body_html: template.body_html,
-          version: Number(template.version ?? 1),
-        } };
-      }
-      if (step.step_type === "voice") {
-        const { data: asset } = await db.from("journey_voice_assets").select("id")
-          .eq("id", step.config.asset_id).eq("tenant_id", tenantId).maybeSingle();
-        if (!asset) throw new Error("Selecione um áudio de voz deste tenant.");
-      }
-      return { tenant_id: tenantId, position, step_type: step.step_type, label: step.label ?? null, config };
-    }));
+        if (step.step_type === "voice") {
+          const { data: asset } = await db
+            .from("journey_voice_assets")
+            .select("id")
+            .eq("id", step.config.asset_id)
+            .eq("tenant_id", tenantId)
+            .maybeSingle();
+          if (!asset) throw new Error("Selecione um áudio de voz deste tenant.");
+        }
+        return {
+          tenant_id: tenantId,
+          position,
+          step_type: step.step_type,
+          label: step.label ?? null,
+          config,
+        };
+      }),
+    );
     const { data: journeyId, error } = await db.rpc("save_journey_draft", {
       p_tenant_id: tenantId,
       p_journey_id: data.id ?? null,
@@ -188,7 +550,9 @@ export const setJourneyStatus = createServerFn({ method: "POST" })
     await requireJourneyPublisher(context.userId, tenantId);
     if (data.status === "active") {
       if (process.env.JOURNEYS_PUBLISHING_ENABLED !== "true") {
-        throw new Error("A publicação de jornadas está temporariamente indisponível enquanto a validação operacional é concluída.");
+        throw new Error(
+          "A publicação de jornadas está temporariamente indisponível enquanto a validação operacional é concluída.",
+        );
       }
       const { data: steps, error: stepsError } = await db
         .from("journey_steps")
@@ -201,7 +565,7 @@ export const setJourneyStatus = createServerFn({ method: "POST" })
         (step: { step_type: string }) => step.step_type !== "end",
       );
       if (!actionable.length)
-        throw new Error("Adicione ao menos uma etapa de envio antes de publicar a régua.");
+        throw new Error("Adicione ao menos uma etapa de envio antes de publicar a jornada.");
       for (const step of actionable as Array<{
         step_type: string;
         config: Record<string, unknown>;
@@ -211,7 +575,9 @@ export const setJourneyStatus = createServerFn({ method: "POST" })
         if (step.step_type === "email" && !step.config.template_id)
           throw new Error("Há uma etapa de e-mail sem template.");
         if (step.step_type === "voice")
-          throw new Error("Etapas de voz não podem ser publicadas até a certificação operacional do canal.");
+          throw new Error(
+            "Etapas de voz não podem ser publicadas até a certificação operacional do canal.",
+          );
       }
     }
     const { error } = await db
@@ -248,22 +614,43 @@ export const enrollJourneyManually = createServerFn({ method: "POST" })
     if (playerError || !player) throw new Error("Jogador não encontrado.");
     if (journey.entry_rules?.reentry === "after_cooldown") {
       const hours = Math.max(1, Number(journey.entry_rules.reentry_cooldown_hours ?? 24));
-      const { data: previous } = await db.from("journey_enrollments").select("created_at")
-        .eq("journey_id", journey.id).eq("player_id", player.id)
-        .order("created_at", { ascending: false }).limit(1).maybeSingle();
+      const { data: previous } = await db
+        .from("journey_enrollments")
+        .select("created_at")
+        .eq("journey_id", journey.id)
+        .eq("player_id", player.id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
       if (previous && Date.parse(previous.created_at) > Date.now() - hours * 3600_000)
         throw new Error("Este jogador ainda está no período de reentrada da jornada.");
     }
-    const { data: created, error } = await db.from("journey_enrollments").insert({
-      tenant_id: tenantId, journey_id: journey.id, journey_version: journey.version,
-      player_id: player.id, entry_key: journeyEntryKey("manual", journey.entry_rules ?? {}, data.entryKey),
-      metadata: { trigger: "manual", actor_user_id: context.userId, deposited_before_entry: Number(player.total_depositado ?? 0) },
-    }).select("id").maybeSingle();
-    if (error && !/duplicate|unique/i.test(error.message)) throw new Error("Não foi possível matricular o jogador.");
+    const { data: created, error } = await db
+      .from("journey_enrollments")
+      .insert({
+        tenant_id: tenantId,
+        journey_id: journey.id,
+        journey_version: journey.version,
+        player_id: player.id,
+        entry_key: journeyEntryKey("manual", journey.entry_rules ?? {}, data.entryKey),
+        metadata: {
+          trigger: "manual",
+          actor_user_id: context.userId,
+          deposited_before_entry: Number(player.total_depositado ?? 0),
+        },
+      })
+      .select("id")
+      .maybeSingle();
+    if (error && !/duplicate|unique/i.test(error.message))
+      throw new Error("Não foi possível matricular o jogador.");
     if (!created) return { ok: true, duplicate: true };
     await db.from("journey_events").insert({
-      tenant_id: tenantId, journey_id: journey.id, enrollment_id: created.id, event_type: "manually_enrolled",
-      detail: { player_id: player.id, occurrence_key: data.entryKey }, actor_user_id: context.userId,
+      tenant_id: tenantId,
+      journey_id: journey.id,
+      enrollment_id: created.id,
+      event_type: "manually_enrolled",
+      detail: { player_id: player.id, occurrence_key: data.entryKey },
+      actor_user_id: context.userId,
     });
     return { ok: true, duplicate: false };
   });

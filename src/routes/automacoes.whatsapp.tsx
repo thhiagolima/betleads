@@ -4,7 +4,7 @@ import { WhatsappAutomationFlowsPanel } from "@/routes/whatsapp";
 
 export const Route = createFileRoute("/automacoes/whatsapp")({
   beforeLoad: () => {
-    throw redirect({ to: "/jornadas" });
+    throw redirect({ to: "/automacoes" });
   },
   component: WhatsappAutomationFlowsPage,
 });

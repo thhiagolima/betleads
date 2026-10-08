@@ -4,7 +4,7 @@ import { FlowsTab } from "@/components/ligacoes/flows-tab";
 
 export const Route = createFileRoute("/automacoes/ligacoes")({
   beforeLoad: () => {
-    throw redirect({ to: "/jornadas" });
+    throw redirect({ to: "/automacoes" });
   },
   component: CallAutomationFlowsPage,
 });

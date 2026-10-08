@@ -93,7 +93,7 @@ export function SmsChannelHealth({
               <Link to="/campanhas">Abrir campanhas</Link>
             </Button>
             <Button variant="outline" asChild>
-              <Link to="/automacoes/sms">Gerenciar fluxos</Link>
+              <Link to="/automacoes">Gerenciar jornadas</Link>
             </Button>
             <Button variant="outline" onClick={onOpenHistory}>
               Ver histórico

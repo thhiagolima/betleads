@@ -3473,7 +3473,7 @@ function EditorFluxo({
 
           <div className="grid grid-cols-1 gap-3 rounded-md border border-border/60 p-3 md:grid-cols-2">
             <div className="space-y-1.5">
-              <Label>Limite diário da régua</Label>
+              <Label>Limite diário da automação legada</Label>
               <Input
                 type="number"
                 min={1}
@@ -3484,7 +3484,7 @@ function EditorFluxo({
                 }
               />
               <p className="text-[11px] text-muted-foreground">
-                Máximo de SMS desta régua por dia.
+                Máximo de SMS desta automação legada por dia.
               </p>
             </div>
             <div className="space-y-1.5">
@@ -3499,12 +3499,12 @@ function EditorFluxo({
                 }
               />
               <p className="text-[11px] text-muted-foreground">
-                Evita novo SMS desta mesma régua antes do prazo.
+                Evita novo SMS desta mesma automação legada antes do prazo.
               </p>
             </div>
           </div>
           <p className="rounded-md border border-border/60 bg-muted/20 p-3 text-xs text-muted-foreground">
-            A janela de envio é global do canal SMS e é aplicada pelo dispatcher a todas as réguas.
+            A janela de envio é global do canal SMS e também se aplica às automações legadas.
           </p>
 
           <div>
@@ -3676,8 +3676,8 @@ function EditorFluxo({
             <DialogHeader>
               <DialogTitle>Teste controlado de SMS</DialogTitle>
               <DialogDescription>
-                Envia apenas a primeira mensagem preenchida desta régua para o telefone informado. O
-                teste não ativa a régua nem inclui jogadores na fila.
+                Envia apenas a primeira mensagem preenchida desta automação legada para o telefone
+                informado. O teste não a ativa nem inclui jogadores na fila.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-3">

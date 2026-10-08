@@ -1,9 +1,8 @@
-import { createFileRoute, Outlet, useLocation } from "@tanstack/react-router";
-import { JourneysHub } from "@/components/journeys/journeys-hub";
+import { createFileRoute, Navigate, Outlet, useLocation } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/jornadas")({ component: JourneysPage });
 function JourneysPage() {
   const location = useLocation();
   if (location.pathname !== "/jornadas") return <Outlet />;
-  return <JourneysHub />;
+  return <Navigate to="/automacoes" replace />;
 }

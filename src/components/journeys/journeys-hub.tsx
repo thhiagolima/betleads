@@ -2,19 +2,16 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, useNavigate } from "@tanstack/react-router";
-import {
-  Mail,
-  MessageSquare,
-  Pause,
-  Play,
-  Plus,
-  Route,
-  Search,
-  Timer,
-  Volume2,
-} from "lucide-react";
+import { Mail, MessageSquare, Pause, Play, Plus, Route, Search } from "lucide-react";
 import { toast } from "sonner";
-import { listJourneyOperations, listJourneys, setJourneyStatus } from "@/lib/journeys.functions";
+import {
+  convertLegacyJourney,
+  listJourneyOperations,
+  listJourneys,
+  listLegacyJourneys,
+  retireLegacyJourney,
+  setJourneyStatus,
+} from "@/lib/journeys.functions";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -38,6 +35,17 @@ type Journey = {
   daily_limit: number;
   journey_steps: Array<{ id: string }>;
 };
+type LegacyJourney = {
+  sourceType: "sms_flow" | "email_flow";
+  sourceId: string;
+  channel: "sms" | "email";
+  name: string;
+  trigger: string;
+  active: boolean;
+  updatedAt: string;
+  journeyId: string | null;
+  journeyStatus: Journey["status"] | null;
+};
 
 export function JourneysHub() {
   const navigate = useNavigate();
@@ -45,9 +53,12 @@ export function JourneysHub() {
   const list = useServerFn(listJourneys);
   const changeStatus = useServerFn(setJourneyStatus);
   const operationsFn = useServerFn(listJourneyOperations);
+  const legacyFn = useServerFn(listLegacyJourneys);
+  const convertFn = useServerFn(convertLegacyJourney);
+  const retireFn = useServerFn(retireLegacyJourney);
   const [filter, setFilter] = useState<"all" | Journey["status"]>("all");
   const [search, setSearch] = useState("");
-  const [view, setView] = useState<"rules" | "queue" | "failures">("rules");
+  const [view, setView] = useState<"journeys" | "queue" | "failures">("journeys");
   const [newOpen, setNewOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [entryMode, setEntryMode] = useState<"event" | "inactivity" | "manual">("event");
@@ -59,9 +70,15 @@ export function JourneysHub() {
       "journey-draft",
       JSON.stringify({
         name: newName,
-        trigger: entryMode === "manual" ? "manual" : entryMode === "inactivity" ? "inactivity" : newTrigger,
+        trigger:
+          entryMode === "manual"
+            ? "manual"
+            : entryMode === "inactivity"
+              ? "inactivity"
+              : newTrigger,
         entryMode,
-        triggerConfig: entryMode === "inactivity" ? { field: inactivityField, hours: inactivityHours } : {},
+        triggerConfig:
+          entryMode === "inactivity" ? { field: inactivityField, hours: inactivityHours } : {},
       }),
     );
     setNewOpen(false);
@@ -69,9 +86,39 @@ export function JourneysHub() {
   };
   const journeys = useQuery({ queryKey: ["journeys"], queryFn: () => list() });
   const operations = useQuery({ queryKey: ["journey-operations"], queryFn: () => operationsFn() });
+  const legacy = useQuery({ queryKey: ["legacy-journeys"], queryFn: () => legacyFn() });
   const status = useMutation({
     mutationFn: (input: { id: string; status: Journey["status"] }) => changeStatus({ data: input }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["journeys"] }),
+    onError: (error: Error) => toast.error(error.message),
+  });
+  const convert = useMutation({
+    mutationFn: (input: { sourceType: LegacyJourney["sourceType"]; sourceId: string }) =>
+      convertFn({ data: input }),
+    onSuccess: async (result) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["journeys"] }),
+        queryClient.invalidateQueries({ queryKey: ["legacy-journeys"] }),
+      ]);
+      if (result.warnings.length)
+        toast.warning(`Rascunho criado com ${result.warnings.length} aviso(s) para revisão.`);
+      else
+        toast.success(
+          result.alreadyConverted
+            ? "Esta automação já foi convertida."
+            : "Rascunho convertido com sucesso.",
+        );
+      navigate({ to: "/jornadas/$journeyId", params: { journeyId: result.id } });
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+  const retire = useMutation({
+    mutationFn: (input: { sourceType: LegacyJourney["sourceType"]; sourceId: string }) =>
+      retireFn({ data: input }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["legacy-journeys"] });
+      toast.success("Automação legada desativada. A migração foi concluída.");
+    },
     onError: (error: Error) => toast.error(error.message),
   });
   const rows = useMemo(
@@ -94,7 +141,7 @@ export function JourneysHub() {
           </p>
         </div>
         <Button onClick={() => setNewOpen(true)}>
-          <Plus className="mr-2 h-4 w-4" /> Nova régua
+          <Plus className="mr-2 h-4 w-4" /> Nova jornada
         </Button>
       </div>
       <Card className="border-primary/20 bg-primary/[0.03]">
@@ -122,13 +169,13 @@ export function JourneysHub() {
         <div className="inline-flex rounded-lg bg-muted p-1 text-sm">
           <button
             className={
-              view === "rules"
+              view === "journeys"
                 ? "rounded-md bg-background px-3 py-2 font-medium shadow-sm"
                 : "px-3 py-2 text-muted-foreground"
             }
-            onClick={() => setView("rules")}
+            onClick={() => setView("journeys")}
           >
-            Réguas
+            Jornadas
           </button>
           <button
             className={
@@ -157,11 +204,11 @@ export function JourneysHub() {
             className="h-10 w-full rounded-md border bg-background pl-9 pr-3 text-sm sm:w-72"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Buscar régua..."
+            placeholder="Buscar jornada..."
           />
         </label>
       </div>
-      {view !== "rules" && (
+      {view !== "journeys" && (
         <Card>
           <CardHeader>
             <CardTitle>{view === "queue" ? "Fila de envio" : "Falhas"}</CardTitle>
@@ -206,7 +253,7 @@ export function JourneysHub() {
           </CardContent>
         </Card>
       )}
-      {view === "rules" && (
+      {view === "journeys" && (
         <Card>
           <CardHeader>
             <CardTitle>Jornadas</CardTitle>
@@ -271,22 +318,97 @@ export function JourneysHub() {
           </CardContent>
         </Card>
       )}
-      <div className="grid gap-3 sm:grid-cols-3">
-        <ChannelCard icon={<MessageSquare className="h-4 w-4" />} text="SMS" />
-        <ChannelCard icon={<Mail className="h-4 w-4" />} text="E-mail" />
-        <ChannelCard icon={<Volume2 className="h-4 w-4" />} text="Voz por áudio" pending />
-      </div>
+      {view === "journeys" && ((legacy.data?.items ?? []).length > 0 || legacy.isLoading) && (
+        <Card id="legado" className="border-dashed">
+          <CardHeader>
+            <div className="flex flex-wrap items-center gap-2">
+              <CardTitle>Automações legadas</CardTitle>
+              <Badge variant="outline">compatibilidade temporária</Badge>
+            </div>
+            <CardDescription>
+              Plano de desativação: converter, revisar o rascunho, publicar a jornada e só então
+              desligar a origem. Novas criações acontecem exclusivamente como jornadas.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {legacy.isLoading ? (
+              <p className="text-sm text-muted-foreground">Carregando itens legados…</p>
+            ) : (
+              (legacy.data?.items ?? []).map((item: LegacyJourney) => (
+                <div
+                  key={`${item.sourceType}:${item.sourceId}`}
+                  className="flex flex-col gap-3 rounded-lg border p-4 lg:flex-row lg:items-center"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {item.channel === "sms" ? (
+                        <MessageSquare className="h-4 w-4 text-primary" />
+                      ) : (
+                        <Mail className="h-4 w-4 text-primary" />
+                      )}
+                      <p className="font-medium">{item.name}</p>
+                      <Badge variant="outline">Legado</Badge>
+                      <Badge variant={item.active ? "default" : "secondary"}>
+                        {item.active ? "Em execução" : "Desligada"}
+                      </Badge>
+                      {item.journeyId && <Badge variant="secondary">Convertida</Badge>}
+                      {!item.active && item.journeyId && (
+                        <Badge variant="secondary">Migração concluída</Badge>
+                      )}
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {item.channel === "sms" ? "SMS" : "E-mail"} · entrada {item.trigger}
+                    </p>
+                  </div>
+                  {item.journeyId ? (
+                    <div className="flex flex-wrap gap-2">
+                      <Button asChild size="sm" variant="outline">
+                        <Link to="/jornadas/$journeyId" params={{ journeyId: item.journeyId }}>
+                          Abrir jornada
+                        </Link>
+                      </Button>
+                      {item.active && item.journeyStatus === "active" && (
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          disabled={retire.isPending}
+                          onClick={() =>
+                            retire.mutate({ sourceType: item.sourceType, sourceId: item.sourceId })
+                          }
+                        >
+                          Desativar legado
+                        </Button>
+                      )}
+                    </div>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={convert.isPending}
+                      onClick={() =>
+                        convert.mutate({ sourceType: item.sourceType, sourceId: item.sourceId })
+                      }
+                    >
+                      Converter em jornada
+                    </Button>
+                  )}
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+      )}
       <Dialog open={newOpen} onOpenChange={setNewOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Nova régua</DialogTitle>
+            <DialogTitle>Nova jornada</DialogTitle>
             <DialogDescription>
               Escolha o gatilho. Os degraus são montados na tela seguinte.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <label className="block text-sm font-medium">
-              Nome da régua
+              Nome da jornada
               <Input
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
@@ -337,13 +459,27 @@ export function JourneysHub() {
             )}
             {entryMode === "inactivity" && (
               <div className="grid grid-cols-2 gap-2">
-                <label className="text-sm font-medium">Sem atividade em
-                  <select className="mt-1 flex h-10 w-full rounded-md border bg-background px-3 text-sm" value={inactivityField} onChange={(e) => setInactivityField(e.target.value)}>
-                    <option value="ultimo_login">Login</option><option value="ultimo_jogo">Jogo</option><option value="ultimo_deposito">Depósito</option>
+                <label className="text-sm font-medium">
+                  Sem atividade em
+                  <select
+                    className="mt-1 flex h-10 w-full rounded-md border bg-background px-3 text-sm"
+                    value={inactivityField}
+                    onChange={(e) => setInactivityField(e.target.value)}
+                  >
+                    <option value="ultimo_login">Login</option>
+                    <option value="ultimo_jogo">Jogo</option>
+                    <option value="ultimo_deposito">Depósito</option>
                   </select>
                 </label>
-                <label className="text-sm font-medium">Horas
-                  <Input type="number" min={1} max={8760} value={inactivityHours} onChange={(e) => setInactivityHours(Number(e.target.value))} />
+                <label className="text-sm font-medium">
+                  Horas
+                  <Input
+                    type="number"
+                    min={1}
+                    max={8760}
+                    value={inactivityHours}
+                    onChange={(e) => setInactivityHours(Number(e.target.value))}
+                  />
                 </label>
               </div>
             )}
@@ -362,26 +498,3 @@ export function JourneysHub() {
   );
 }
 const labels = { draft: "Rascunho", active: "Ativa", paused: "Pausada", archived: "Arquivada" };
-function ChannelCard({
-  icon,
-  text,
-  pending,
-}: {
-  icon: React.ReactNode;
-  text: string;
-  pending?: boolean;
-}) {
-  return (
-    <Card>
-      <CardContent className="flex items-center gap-2 p-4 text-sm">
-        <span className="text-primary">{icon}</span>
-        {text}
-        {pending ? (
-          <span className="ml-auto text-xs text-muted-foreground">em preparação</span>
-        ) : (
-          <Timer className="ml-auto h-4 w-4 text-muted-foreground" />
-        )}
-      </CardContent>
-    </Card>
-  );
-}

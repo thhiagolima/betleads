@@ -49,7 +49,7 @@ export const CHANNEL_WORKSPACE_DESTINATIONS: Record<
     overview: { to: "/sms", hash: "saude" },
     create: { to: "/campanhas", search: { newChannel: "sms" } },
     library: { to: "/sms/templates" },
-    campaigns: { to: "/jornadas" },
+    campaigns: { to: "/automacoes" },
     history: { to: "/sms", hash: "historico" },
     settings: { to: "/sms", hash: "configuracoes" },
   },
@@ -57,7 +57,7 @@ export const CHANNEL_WORKSPACE_DESTINATIONS: Record<
     overview: { to: "/email", hash: "dashboard" },
     create: { to: "/campanhas", search: { newChannel: "email" } },
     library: { to: "/email", hash: "templates" },
-    campaigns: { to: "/jornadas" },
+    campaigns: { to: "/automacoes" },
     history: { to: "/email", hash: "historico" },
     settings: { to: "/email", hash: "configuracoes" },
   },
@@ -78,13 +78,13 @@ export function resolveChannelWorkspaceSection(
 ): ChannelWorkspaceSection {
   if (channel === "sms") {
     if (pathname === "/sms/templates") return "library";
-    if (pathname === "/jornadas") return "campaigns";
+    if (pathname === "/automacoes" || pathname.startsWith("/jornadas/")) return "campaigns";
     if (hash === "historico") return "history";
     if (hash === "configuracoes") return "settings";
     return "overview";
   }
   if (channel === "email") {
-    if (pathname === "/jornadas") return "campaigns";
+    if (pathname === "/automacoes" || pathname.startsWith("/jornadas/")) return "campaigns";
     if (hash === "templates") return "library";
     if (hash === "historico") return "history";
     if (hash === "configuracoes" || hash === "remetentes" || hash === "smtp") return "settings";
