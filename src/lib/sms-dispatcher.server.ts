@@ -4,6 +4,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { sendSmsInternal } from "./sms.functions";
 import { buildPlayerVariables, renderTemplate } from "./template-vars.server";
 import { deferIfOutsideWindow } from "./send-window.server";
+import { checkContactFrequencyLimit } from "./contact-frequency.server";
 import { brtDayStart } from "./tz";
 import {
   consumeBudget,
@@ -831,7 +832,31 @@ export async function runScheduledSmsCampaigns({ limit = 20 }: { limit?: number 
       continue;
     }
     const chunkSize = Math.min(budget, remaining);
-    const targets = allTargets.slice(cursor, cursor + chunkSize);
+    const candidateTargets = allTargets.slice(cursor, cursor + chunkSize);
+    // Mantém a ordem do cursor: ao encontrar um contato limitado, a campanha
+    // aguarda esse destinatário em vez de pulá-lo e perder o envio.
+    const targets = [] as CampaignTarget[];
+    let contactRetryAt: string | null = null;
+    for (const target of candidateTargets) {
+      const contact = await checkContactFrequencyLimit(c.tenant_id, target.playerId ?? null);
+      if (!contact.allowed) {
+        contactRetryAt = contact.retryAt;
+        break;
+      }
+      targets.push(target);
+    }
+    if (targets.length === 0) {
+      await supabaseAdmin
+        .from("sms_campaigns")
+        .update({
+          status: "enviando",
+          scheduled_at: contactRetryAt ?? new Date(Date.now() + 3600_000).toISOString(),
+          locked_at: null,
+          locked_by: null,
+        })
+        .eq("id", c.id);
+      continue;
+    }
 
     // RESERVA OTIMISTA: avança o cursor ANTES de enviar. Se o worker morrer no
     // meio do chunk, o próximo tick pula esses telefones — pior caso perde

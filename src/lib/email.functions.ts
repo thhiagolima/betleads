@@ -7,6 +7,7 @@ import { assertSuperAdmin, tenantChannelHealth } from "@/lib/provider-governance
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { sendInfobipEmail, resolveSender } from "./email-send.server";
+import { checkContactFrequencyLimit } from "./contact-frequency.server";
 import { loadPlayersForSegment, countPlayersForSegment } from "./email-segments.server";
 import { buildPlayerVariables } from "./template-vars.server";
 import { renderTemplate } from "./template-vars.server";
@@ -958,6 +959,22 @@ export async function runCampaignSend(campaignId: string) {
   for (const p of players) {
     if (!p.email) continue;
     try {
+      const contact = await checkContactFrequencyLimit(camp.tenant_id, p.id);
+      if (!contact.allowed) {
+        pendentes++;
+        await supabaseAdmin.from("email_send_logs").insert({
+          to_email: p.email,
+          subject: tpl.subject ?? "",
+          status: "pending",
+          error: contact.reason ?? "global_contact_limit",
+          sent_at: null,
+          player_id: p.id,
+          campaign_id: campaignId,
+          tenant_id: camp.tenant_id,
+          provider_response: { retry_at: contact.retryAt, reason: contact.reason } as never,
+        });
+        continue;
+      }
       const vars = buildPlayerVariables(p);
       const subject = renderTemplate(tpl.subject ?? "", vars);
       const html = renderTemplate(tpl.body_html ?? "", vars);
