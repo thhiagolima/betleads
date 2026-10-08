@@ -10,13 +10,50 @@ function authorized(request: Request): boolean {
   return timingSafeEqual(Buffer.from(expected), Buffer.from(received));
 }
 
-function completion(payload: Record<string, unknown>): string | null {
-  const event = String(payload.eventType ?? payload.event ?? payload.status ?? "").toUpperCase();
-  if (event.includes("FINISHED")) return "completed";
-  if (event.includes("BUSY")) return "busy";
-  if (event.includes("NO_ANSWER")) return "not_answered";
-  if (event.includes("FAILED")) return "failed";
+function valueAt(payload: Record<string, unknown>, ...keys: string[]): unknown {
+  for (const source of [payload, payload.data, payload.properties, payload.call]) {
+    if (!source || typeof source !== "object" || Array.isArray(source)) continue;
+    for (const key of keys) {
+      const value = (source as Record<string, unknown>)[key];
+      if (value != null) return value;
+    }
+  }
   return null;
+}
+
+function callIdOf(payload: Record<string, unknown>): string | null {
+  const value = valueAt(payload, "callId", "call_id", "id");
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function durationOf(payload: Record<string, unknown>): number | null {
+  const value = valueAt(payload, "duration", "durationSeconds", "duration_seconds", "callDuration", "call_duration_seconds");
+  const seconds = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(seconds) && seconds >= 0 ? Math.round(seconds) : null;
+}
+
+function completion(payload: Record<string, unknown>): string | null {
+  // Alguns produtos/versões da Infobip devolvem status como string; outros,
+  // como objeto { groupName, name, description }. Mantemos ambos legíveis.
+  const statusValue = valueAt(payload, "eventType", "event", "type", "status", "state");
+  const event = (typeof statusValue === "string"
+    ? statusValue
+    : JSON.stringify(statusValue ?? ""))
+    .toUpperCase();
+  if (event.includes("ESTABLISHED") || event.includes("ANSWERED") || event.includes("CONNECTED")) return "answered";
+  if (event.includes("BUSY")) return "busy";
+  if (event.includes("NO_ANSWER") || event.includes("NOT_ANSWERED") || event.includes("UNANSWERED")) return "not_answered";
+  if (event.includes("FAILED") || event.includes("REJECTED") || event.includes("ERROR")) return "failed";
+  if (
+    event.includes("FINISHED") || event.includes("COMPLETED") || event.includes("HANGUP") ||
+    event.includes("DISCONNECTED") || event.includes("DELIVERED") || event.includes("SUCCESS")
+  ) return "completed";
+  return null;
+}
+
+function errorOf(payload: Record<string, unknown>): string | null {
+  const error = valueAt(payload, "errorDetails", "errorCode", "reason", "cause");
+  return typeof error === "string" && error.trim() ? error.slice(0, 1000) : null;
 }
 
 export const Route = createFileRoute("/api/public/infobip/voice/events")({
@@ -30,18 +67,44 @@ export const Route = createFileRoute("/api/public/infobip/voice/events")({
         } catch {
           return Response.json({ error: "invalid json" }, { status: 400 });
         }
-        const callId = typeof payload.callId === "string" ? payload.callId : null;
+        const callId = callIdOf(payload);
         if (!callId) return Response.json({ ok: true, skipped: "missing_call_id" });
         const result = completion(payload);
+        const duration = durationOf(payload);
+        const { data: history } = await supabaseAdmin
+          .from("call_history")
+          .select("id, call_queue_id, provider_response")
+          .eq("provider_call_id", callId)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        const previous = (history?.provider_response && typeof history.provider_response === "object")
+          ? history.provider_response as Record<string, unknown>
+          : {};
+        const callbacks = Array.isArray(previous.callbacks) ? previous.callbacks : [];
+        const callback = { received_at: new Date().toISOString(), payload };
+        const historyStatus = result === "answered" ? "answered" : result === "completed" ? "completed" : result ? "failed" : "pending";
+        const update: Record<string, unknown> = {
+          provider_response: { ...previous, callbacks: [...callbacks, callback], last_callback: callback },
+          status: historyStatus,
+          result: result ?? null,
+          error_message: errorOf(payload),
+        };
+        if (duration != null) update.duration_seconds = duration;
         await supabaseAdmin
           .from("call_history")
-          .update({
-            provider_response: payload as never,
-            status: result ? (result === "completed" ? "completed" : "failed") : "pending",
-          } as never)
+          .update(update as never)
           .eq("provider_call_id", callId);
-        if (result) await handleCallCompletion({ providerCallId: callId, status: result });
-        return Response.json({ ok: true });
+        if (history?.call_queue_id && result && result !== "answered") {
+          await supabaseAdmin
+            .from("call_queue")
+            .update({ status: result === "completed" ? "completed" : "failed", provider_status: result } as never)
+            .eq("id", history.call_queue_id);
+        }
+        if (result && result !== "answered") {
+          await handleCallCompletion({ providerCallId: callId, status: result, durationSeconds: duration ?? 0 });
+        }
+        return Response.json({ ok: true, call_id: callId, status: result, duration_seconds: duration });
       },
     },
   },

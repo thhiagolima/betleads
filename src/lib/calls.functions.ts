@@ -531,7 +531,7 @@ export const listCallHistory = createServerFn({ method: "POST" })
     let q = context.supabase
       .from("call_history")
       .select(
-        "id, lead_id, script_id, call_queue_id, to_phone, status, duration_seconds, recording_url, created_at, error_message",
+        "id, lead_id, script_id, call_queue_id, to_phone, status, duration_seconds, recording_url, created_at, error_message, provider, provider_call_id, provider_status_code, provider_response, audio_url, result",
       )
       .order("created_at", { ascending: false })
       .limit(data.limit);
