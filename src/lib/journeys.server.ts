@@ -510,7 +510,7 @@ async function executeEnrollment(id: string): Promise<void> {
     if (signedError || !signed?.signedUrl)
       throw new Error("Não foi possível disponibilizar o áudio para a ligação");
     const to = normalizeE164BR(player.telefone);
-    const result = await callInfobipVoice(to, signed.signedUrl);
+    const result = await callInfobipVoice(to, { type: "audio", audioUrl: signed.signedUrl });
     if (!result.ok) throw new Error("Ligação não aceita pelo provedor");
     await supabaseAdmin.from("call_history").insert({
       tenant_id: enrollment.tenant_id,

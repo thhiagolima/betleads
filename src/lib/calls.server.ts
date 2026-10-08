@@ -280,14 +280,16 @@ export async function runVoiceQueueDispatcher(limit = 200) {
   for (const item of queue ?? []) {
     try {
       let phone = item.phone_number ?? "";
-      if (!phone && item.lead_id) {
-        const { data: player } = await supabaseAdmin
+      let player: LeadLike | null = null;
+      if (item.lead_id) {
+        const { data } = await supabaseAdmin
           .from("players")
-          .select("telefone")
+          .select("*")
           .eq("id", item.lead_id)
           .eq("tenant_id", item.tenant_id)
           .maybeSingle();
-        phone = player?.telefone ?? "";
+        player = data as LeadLike | null;
+        if (!phone) phone = player?.telefone ?? "";
       }
       if (!phone) throw new Error("Telefone do destinatário ausente.");
       const to = normalizeE164BR(phone);
@@ -325,9 +327,23 @@ export async function runVoiceQueueDispatcher(limit = 200) {
           throw new Error("Não foi possível preparar o áudio para a ligação.");
         audioUrl = signed.signedUrl;
       }
-      if (!audioUrl) throw new Error("Áudio da ligação não está pronto.");
+      let content: Parameters<typeof callInfobipVoice>[1];
+      let renderedText: string | null = null;
+      if (item.script_id) {
+        const { data: script } = await supabaseAdmin
+          .from("call_scripts")
+          .select("content")
+          .eq("id", item.script_id)
+          .maybeSingle();
+        if (!script?.content) throw new Error("Script de voz não encontrado.");
+        renderedText = renderCallScript(script.content, player ?? FAKE_LEAD);
+        content = { type: "tts", text: renderedText, language: "pt" };
+      } else {
+        if (!audioUrl) throw new Error("Áudio da ligação não está pronto.");
+        content = { type: "audio", audioUrl };
+      }
 
-      const result = await callInfobipVoice(to, audioUrl);
+      const result = await callInfobipVoice(to, content);
       const body = (result.body ?? {}) as { non_json?: boolean };
       const transient =
         !result.ok &&
@@ -356,11 +372,16 @@ export async function runVoiceQueueDispatcher(limit = 200) {
         script_id: item.script_id,
         call_queue_id: item.id,
         audio_url: audioUrl,
+        rendered_text: renderedText,
         to_phone: to,
         status: result.ok ? "pending" : "failed",
         provider: "infobip",
         provider_call_id: result.providerCallId ?? result.idempotencyKey,
-        provider_response: result.body as never,
+        provider_response: {
+          ...((result.body && typeof result.body === "object" && !Array.isArray(result.body)) ? result.body : {}),
+          correlation_id: result.idempotencyKey,
+          cml: content.type === "tts" ? { type: "say", text: content.text, language: content.language ?? "pt" } : undefined,
+        } as never,
         provider_status_code: result.status,
         error_message: result.ok ? null : JSON.stringify(result.body).slice(0, 1000),
       } as never);

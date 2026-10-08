@@ -94,7 +94,7 @@ describe("Infobip provider adapters", () => {
     expect(normalizeE164BR("(11) 99999-9999")).toBe("+5511999999999");
     const result = await callInfobipVoice(
       "+5511999999999",
-      "https://assets.example.test/call.mp3",
+      { type: "audio", audioUrl: "https://assets.example.test/call.mp3" },
     );
 
     expect(result).toMatchObject({ ok: true, status: 200, providerCallId: "voice-provider-1" });
@@ -108,5 +108,31 @@ describe("Infobip provider adapters", () => {
     expect(body.callback.url).toContain("token=callback-token");
     expect(body.callback.url).toContain("audio=https%3A%2F%2Fassets.example.test%2Fcall.mp3");
     expect(body.notifyUrl).toContain("correlation=" + result.idempotencyKey);
+  });
+
+  it("uses a correlated CML callback for Infobip-native TTS without exposing the script in the URL", async () => {
+    process.env.INFOBIP_BASE_URL = "https://api.infobip.test/";
+    process.env.INFOBIP_API_KEY = "test-api-key";
+    process.env.INFOBIP_VOICE_FROM = "+551130000000";
+    process.env.INFOBIP_VOICE_CALLBACK_TOKEN = "callback-token";
+    process.env.PUBLIC_APP_URL = "https://app.example.test/";
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ callId: "voice-provider-tts" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const script = "Olá, este é um lembrete reservado.";
+    const result = await callInfobipVoice("+5511999999999", {
+      type: "tts",
+      text: script,
+      language: "pt",
+    });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(String(init.body));
+    expect(body.callback.url).toContain("mode=say");
+    expect(body.callback.url).toContain("correlation=" + result.idempotencyKey);
+    expect(body.callback.url).not.toContain("audio=");
+    expect(body.callback.url).not.toContain(encodeURIComponent(script));
   });
 });

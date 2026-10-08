@@ -15,6 +15,10 @@ export type InfobipVoiceResult = {
   providerCallId: string | null;
 };
 
+export type InfobipVoiceContent =
+  | { type: "audio"; audioUrl: string }
+  | { type: "tts"; text: string; language?: string };
+
 function jsonBody(text: string): unknown {
   try {
     return text ? JSON.parse(text) : null;
@@ -34,12 +38,17 @@ function callbackUrl(path: string, params: Record<string, string>): string | nul
 }
 
 /** Starts a CML call. Infobip fetches the callback only after the call is answered. */
-export async function callInfobipVoice(to: string, audioUrl: string): Promise<InfobipVoiceResult> {
+export async function callInfobipVoice(to: string, content: InfobipVoiceContent): Promise<InfobipVoiceResult> {
   const baseUrl = process.env.INFOBIP_BASE_URL?.trim().replace(/\/$/, "");
   const apiKey = process.env.INFOBIP_API_KEY?.trim();
   const from = process.env.INFOBIP_VOICE_FROM?.replace(/\D/g, "");
   const idempotencyKey = crypto.randomUUID();
-  const callback = callbackUrl("/api/public/infobip/voice/cml", { audio: audioUrl });
+  const callback = callbackUrl(
+    "/api/public/infobip/voice/cml",
+    content.type === "audio"
+      ? { audio: content.audioUrl, correlation: idempotencyKey }
+      : { mode: "say", correlation: idempotencyKey },
+  );
   // The event webhook is unique per request as well. `customData` is kept as
   // a second correlation mechanism because providers may omit URL parameters
   // from a forwarded event payload.

@@ -655,7 +655,7 @@ export const dispatchCallQueueItem = createServerFn({ method: "POST" })
       .maybeSingle();
     if (qErr) throw new Error(qErr.message);
     if (!q) throw new Error("Item da fila não encontrado");
-    if (!q.audio_url) throw new Error("Áudio ainda não está pronto");
+    if (!q.script_id && !q.audio_url) throw new Error("Conteúdo da ligação ainda não está pronto");
 
     // resolve telefone
     let rawPhone = q.phone_number ?? "";
@@ -699,7 +699,22 @@ export const dispatchCallQueueItem = createServerFn({ method: "POST" })
       };
     }
 
-    const result = await callInfobipVoice(to, q.audio_url);
+    let content: Parameters<typeof callInfobipVoice>[1];
+    let renderedText: string | null = null;
+    if (q.script_id) {
+      const { data: script, error: scriptError } = await supabase
+        .from("call_scripts")
+        .select("content")
+        .eq("id", q.script_id)
+        .maybeSingle();
+      if (scriptError) throw new Error(scriptError.message);
+      if (!script?.content) throw new Error("Script de voz não encontrado");
+      renderedText = renderCallScript(script.content, await loadLead(supabase, q.lead_id));
+      content = { type: "tts", text: renderedText, language: "pt" };
+    } else {
+      content = { type: "audio", audioUrl: q.audio_url! };
+    }
+    const result = await callInfobipVoice(to, content);
 
     // 5xx ou body não-JSON (HTML) = falha transitória do provedor.
     // Preservamos o item em audio_ready com provider_status='provider_unavailable'
@@ -747,11 +762,16 @@ export const dispatchCallQueueItem = createServerFn({ method: "POST" })
       call_queue_id: q.id,
       script_id: q.script_id,
       audio_url: q.audio_url,
+      rendered_text: renderedText,
       status: historyStatus as any,
       provider: "infobip",
       provider_call_id: result.providerCallId ?? result.idempotencyKey ?? null,
       error_message: result.ok ? null : JSON.stringify(result.body).slice(0, 1000),
-      provider_response: (result.body ?? {}) as any,
+      provider_response: {
+        ...((result.body && typeof result.body === "object" && !Array.isArray(result.body)) ? result.body : {}),
+        correlation_id: result.idempotencyKey,
+        cml: content.type === "tts" ? { type: "say", text: content.text, language: content.language ?? "pt" } : undefined,
+      } as any,
       provider_status_code: result.status,
       to_phone: to,
       tenant_id: tenantId,
@@ -836,6 +856,7 @@ export const bulkDispatchCalls = createServerFn({ method: "POST" })
     let failed = 0;
 
     for (const target of data.targets) {
+      let queueId: string | null = null;
       try {
         // 1. cria item na fila
         const { data: q, error: qErr } = await supabase
@@ -852,21 +873,16 @@ export const bulkDispatchCalls = createServerFn({ method: "POST" })
           .select("id")
           .single();
         if (qErr) throw new Error(qErr.message);
+        queueId = q.id;
 
-        // 2. gera áudio (cache hits aceleram muito)
-        const audioRes = fixedAudioUrl
-          ? { audio: { id: null, audio_url: fixedAudioUrl } }
-          : await generateLeadVoiceAudio({
-              data: { script_id: data.script_id!, lead_id: target.lead_id ?? null },
-            });
-
-        // 3. marca audio_ready
+        // Scripts são sintetizados pela Infobip quando a chamada é atendida.
+        // Arquivos da biblioteca continuam usando URL assinada e a ação CML `play`.
         await supabase
           .from("call_queue")
           .update({
-            audio_generation_id: audioRes.audio.id,
-            audio_url: audioRes.audio.audio_url,
             status: "audio_ready",
+            audio_generation_id: null,
+            audio_url: fixedAudioUrl,
           })
           .eq("id", q.id);
 
@@ -903,6 +919,18 @@ export const bulkDispatchCalls = createServerFn({ method: "POST" })
       } catch (err) {
         failed += 1;
         const msg = err instanceof Error ? err.message : String(err);
+        // Registra a falha no item criado para que a fila não o apresente
+        // como se estivesse aguardando o provedor.
+        if (queueId) {
+          await supabase
+            .from("call_queue")
+            .update({
+              status: "failed",
+              provider_status: "dispatch_preparation_failed",
+              provider_response: { stage: "dispatch_preparation", error: msg } as any,
+            } as any)
+            .eq("id", queueId);
+        }
         results.push({
           ok: false,
           lead_id: target.lead_id ?? null,

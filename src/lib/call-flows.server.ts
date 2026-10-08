@@ -7,14 +7,8 @@
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import {
-  callElevenLabs,
-  computeAudioHash,
-  DEFAULT_VOICE_SETTINGS,
-  defaultVoiceId,
   renderCallScript,
-  uploadAudioToStorage,
   type LeadLike,
-  type VoiceSettings,
 } from "./calls.server";
 import { callInfobipVoice, normalizeE164BR } from "./infobip-voice.server";
 import { sendSmsInternal } from "./sms.functions";
@@ -159,24 +153,18 @@ async function loadBlocks(flowId: string) {
 
 /** Dispara a ligação de um bloco call e atualiza o progresso. */
 async function executeCallBlock(progress: any, block: any, player: any): Promise<void> {
-  // 1. resolve roteiro + voz
+  // 1. resolve roteiro
   let scriptContent = "";
   const scriptId: string | null = block.script_id ?? null;
-  let provider = "elevenlabs";
-  let voiceId = block.voice_id || defaultVoiceId();
-  let voiceSettings: VoiceSettings = DEFAULT_VOICE_SETTINGS;
 
   if (scriptId) {
     const { data: s } = await supabaseAdmin
       .from("call_scripts")
-      .select("content, default_voice_id, provider, voice_settings")
+      .select("content")
       .eq("id", scriptId)
       .maybeSingle();
     if (s) {
       scriptContent = (s.content as string) ?? "";
-      provider = (s.provider as string) || provider;
-      if (!block.voice_id && s.default_voice_id) voiceId = s.default_voice_id as string;
-      voiceSettings = (s.voice_settings as unknown as VoiceSettings) ?? DEFAULT_VOICE_SETTINGS;
     }
   }
   if (!scriptContent) {
@@ -209,75 +197,16 @@ async function executeCallBlock(progress: any, block: any, player: any): Promise
     risco: player?.risco,
   };
   const renderedText = renderCallScript(scriptContent, leadLike);
-  const hash = computeAudioHash({
-    rendered_text: renderedText,
-    voice_id: voiceId,
-    provider,
-    voice_settings: voiceSettings,
-  });
-
-  // 2. áudio (cache)
-  let audioUrl: string | null = null;
-  let audioPath: string | null = null;
-  const { data: cached } = await supabaseAdmin
-    .from("call_audio_generations")
-    .select("audio_url, audio_path")
-    .eq("audio_hash", hash)
-    .eq("generation_status", "ready")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (cached?.audio_url) {
-    audioUrl = cached.audio_url;
-    audioPath = cached.audio_path;
-  } else {
-    try {
-      const buf = await callElevenLabs({ text: renderedText, voiceId, voiceSettings });
-      const up = await uploadAudioToStorage(buf, hash);
-      audioUrl = up.signedUrl;
-      audioPath = up.path;
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      await logEvent(
-        progress.id,
-        progress.flow_id,
-        progress.player_id,
-        progress.current_block_index,
-        "audio_error",
-        { error: msg },
-      );
-      // tenta de novo no próximo tick (1 min)
-      await supabaseAdmin
-        .from("call_flow_progress")
-        .update({ next_run_at: new Date(Date.now() + 60_000).toISOString() } as any)
-        .eq("id", progress.id);
-      return;
-    }
-  }
-  await supabaseAdmin.from("call_audio_generations").insert({
-    lead_id: progress.player_id,
-    script_id: scriptId,
-    provider,
-    voice_id: voiceId,
-    original_text: scriptContent,
-    rendered_text: renderedText,
-    audio_url: audioUrl,
-    audio_path: audioPath,
-    audio_hash: hash,
-    generation_status: "ready",
-    voice_settings: voiceSettings as any,
-  } as any);
-
-  // 3. telefone
+  // 2. telefone
   const rawPhone = progress.phone_e164 || player?.telefone || "";
-  if (!rawPhone || !audioUrl) {
+  if (!rawPhone) {
     await logEvent(
       progress.id,
       progress.flow_id,
       progress.player_id,
       progress.current_block_index,
       "call_skipped",
-      { reason: "no_phone_or_audio" },
+      { reason: "no_phone" },
     );
     await scheduleNext(progress, block);
     return;
@@ -323,8 +252,9 @@ async function executeCallBlock(progress: any, block: any, player: any): Promise
     return;
   }
 
-  // 4. dispara provedor
-  const result = await callInfobipVoice(to, audioUrl);
+  // 3. A Infobip sintetiza o script com CML `say` quando a ligação é atendida.
+  const content = { type: "tts" as const, text: renderedText, language: "pt" };
+  const result = await callInfobipVoice(to, content);
   const isAuthError = result.status === 401 || result.status === 403;
   if (isAuthError) {
     console.warn(`[call-flow] auth_error ${result.status} — mantendo lead na fila, retry em 10min`);
@@ -334,11 +264,15 @@ async function executeCallBlock(progress: any, block: any, player: any): Promise
   await supabaseAdmin.from("call_history").insert({
     lead_id: progress.player_id,
     script_id: scriptId,
-    audio_url: audioUrl,
+    audio_url: null,
     status: result.ok ? ("pending" as any) : isAuthError ? ("pending" as any) : ("failed" as any),
     provider: "infobip",
     provider_call_id: result.providerCallId ?? (result.idempotencyKey || null),
-    provider_response: (result.body ?? {}) as any,
+    provider_response: {
+      ...((result.body && typeof result.body === "object" && !Array.isArray(result.body)) ? result.body : {}),
+      correlation_id: result.idempotencyKey,
+      cml: { type: "say", text: content.text, language: content.language },
+    } as any,
     provider_status_code: result.status,
     to_phone: to,
     tenant_id: progress.tenant_id,
