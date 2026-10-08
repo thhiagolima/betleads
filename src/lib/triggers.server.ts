@@ -27,7 +27,8 @@ export type TriggerType =
   | "cashback_pago"
   | "pix_gerado_nao_pago"
   | "primeiro_deposito"
-  | "saque_pago";
+  | "saque_pago"
+  | "nivel_alterado";
 
 // Mapeia o nome interno do gatilho (somente os baseados em alerta) para o
 // AlertaTipo correspondente em player-rules. Gatilhos de segmento são
@@ -68,6 +69,7 @@ export const TRIGGER_NAMES: Record<TriggerType, string> = {
   pix_gerado_nao_pago: "PIX gerado e não pago",
   primeiro_deposito: "Primeiro depósito",
   saque_pago: "Saque pago",
+  nivel_alterado: "Mudou de nível",
 };
 
 export const TRIGGER_MEANINGS: Record<TriggerType, string> = {
@@ -93,6 +95,7 @@ export const TRIGGER_MEANINGS: Record<TriggerType, string> = {
   pix_gerado_nao_pago: "Gerou um PIX que permanece pendente de pagamento",
   primeiro_deposito: "Primeiro depósito aprovado do jogador",
   saque_pago: "Saque aprovado/pago para o jogador",
+  nivel_alterado: "Jogador entrou em um novo nível de gamificação após depósito aprovado",
 };
 
 // ------------------------------------------------------------------

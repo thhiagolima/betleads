@@ -22,6 +22,7 @@ export const TRIGGER_NAMES = {
   pix_gerado_nao_pago: "PIX gerado e não pago",
   primeiro_deposito: "Primeiro depósito",
   saque_pago: "Saque pago",
+  nivel_alterado: "Mudou de nível",
 } as const;
 
 export const TRIGGER_MEANINGS = {
@@ -47,6 +48,7 @@ export const TRIGGER_MEANINGS = {
   pix_gerado_nao_pago: "Gerou um PIX que permanece pendente de pagamento",
   primeiro_deposito: "Primeiro depósito aprovado do jogador",
   saque_pago: "Saque aprovado/pago para o jogador",
+  nivel_alterado: "Jogador entrou em um novo nível de gamificação após depósito aprovado",
 } as const;
 
 export type TriggerType = keyof typeof TRIGGER_NAMES;
