@@ -7,7 +7,7 @@ import {
   smsAudienceCriteriaSchema,
 } from "@/lib/sms-audience-criteria";
 import { withServerResultCache } from "@/lib/server-result-cache";
-import { channelEligibility, type BlockReason } from "@/lib/channel-eligibility.server";
+import type { BlockReason } from "@/lib/channel-eligibility.server";
 
 const audienceInput = z.object({ criteria: smsAudienceCriteriaSchema });
 
@@ -86,62 +86,47 @@ export const resolveCampaignAudience = createServerFn({ method: "POST" })
     });
     if (error || !raw) throw new Error("Não foi possível calcular o público desta campanha.");
     const base = raw as unknown as ResolvedSmsAudience;
-    const exclusions: Partial<Record<BlockReason, number>> = {};
-    const bump = (reason: BlockReason) => {
-      exclusions[reason] = (exclusions[reason] ?? 0) + 1;
+    const candidates = data.channel === "email" ? (base.emailPlayerIds ?? []) : (base.phones ?? []);
+    const rpcClient = context.supabase as unknown as {
+      rpc: (name: string, args: Record<string, unknown>) => Promise<{
+        data: unknown; error: { message: string } | null;
+      }>;
     };
-
-    if (data.channel === "email") {
-      const ids = base.emailPlayerIds ?? [];
-      const { data: players, error: playerError } = ids.length
-        ? await context.supabase.from("players").select("id,email,telefone").in("id", ids)
-        : { data: [], error: null };
-      if (playerError) throw new Error("Não foi possível validar os contatos do público.");
-      const eligibleIdentifiers: string[] = [];
-      const eligiblePlayerIds: string[] = [];
-      for (const player of players ?? []) {
-        const result = await channelEligibility(
-          "email",
-          { email: player.email, telefone: player.telefone },
-          tenantId,
-        );
-        if (result.eligible && result.email) {
-          eligibleIdentifiers.push(result.email);
-          eligiblePlayerIds.push(player.id);
-        } else if (result.reason) bump(result.reason);
-      }
-      const contactsNotReturned = Math.max(0, base.total - ids.length);
-      if (contactsNotReturned) exclusions.missing_email = contactsNotReturned;
-      return {
-        ...base,
-        channel: data.channel,
-        eligibleTotal: eligiblePlayerIds.length,
-        excludedTotal: Math.max(0, base.total - eligiblePlayerIds.length),
-        eligibleIdentifiers,
-        eligiblePlayerIds,
-        exclusions,
-      };
+    const { data: eligibilityRaw, error: eligibilityError } = await rpcClient.rpc(
+      "resolve_campaign_channel_eligibility",
+      { p_tenant_id: tenantId, p_channel: data.channel, p_candidates: candidates },
+    );
+    if (eligibilityError || !eligibilityRaw)
+      throw new Error("Não foi possível validar os contatos do público.");
+    const eligibility = eligibilityRaw as {
+      candidateCount: number;
+      eligibleIdentifiers: string[];
+      eligiblePlayerIds: string[];
+      invalidCount: number;
+      optOutCount: number;
+    };
+    const eligibleIdentifiers = eligibility.eligibleIdentifiers ?? [];
+    const eligiblePlayerIds = eligibility.eligiblePlayerIds ?? [];
+    const exclusions: Partial<Record<BlockReason, number>> = {};
+    const missing = Math.max(0, base.total - candidates.length);
+    if (missing) exclusions[data.channel === "email" ? "missing_email" : "missing_phone"] = missing;
+    if (eligibility.invalidCount)
+      exclusions[data.channel === "email" ? "invalid_email" : "invalid_phone"] = eligibility.invalidCount;
+    if (eligibility.optOutCount) {
+      const reason = data.channel === "email"
+        ? "email_opt_out"
+        : data.channel === "voice"
+          ? "voice_opt_out"
+          : "sms_opt_out";
+      exclusions[reason] = eligibility.optOutCount;
     }
-
-    const eligibleIdentifiers: string[] = [];
-    for (const phone of base.phones ?? []) {
-      const result = await channelEligibility(
-        data.channel === "voice" ? "call" : "sms",
-        { telefone: phone, email: null },
-        tenantId,
-      );
-      if (result.eligible && result.phone) eligibleIdentifiers.push(result.phone);
-      else if (result.reason) bump(result.reason);
-    }
-    const contactsNotReturned = Math.max(0, base.total - (base.phones?.length ?? 0));
-    if (contactsNotReturned) exclusions.missing_phone = contactsNotReturned;
     return {
       ...base,
       channel: data.channel,
       eligibleTotal: eligibleIdentifiers.length,
       excludedTotal: Math.max(0, base.total - eligibleIdentifiers.length),
       eligibleIdentifiers,
-      eligiblePlayerIds: [],
+      eligiblePlayerIds,
       exclusions,
     };
   });
