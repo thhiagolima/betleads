@@ -3,7 +3,6 @@ import { Phone } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageHeader } from "@/components/ui-premium";
 import { SendWindowCard } from "@/components/send-window-card";
-import { LigacoesPausedBanner } from "@/components/ligacoes/paused-banner";
 import { ProvidersPausedBanner } from "@/components/providers-paused-banner";
 import { ScriptsTab } from "@/components/ligacoes/scripts-tab";
 import { QueueTab } from "@/components/ligacoes/queue-tab";
@@ -48,9 +47,6 @@ function LigacoesPage() {
         title="Voz"
         subtitle="Envie áudios e acompanhe a disponibilidade e a fila de chamadas."
       />
-
-      <LigacoesPausedBanner />
-
       <ProvidersPausedBanner channel="call" />
 
       <SendWindowCard compact />

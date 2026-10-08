@@ -424,6 +424,9 @@ export function JourneyEditor({
               <Button type="button" size="sm" variant="outline" onClick={() => add("email")}>
                 <Mail className="mr-1 h-4 w-4" /> E-mail
               </Button>
+              <Button type="button" size="sm" variant="outline" onClick={() => add("voice")}>
+                <Phone className="mr-1 h-4 w-4" /> Voz
+              </Button>
             </div>
           </div>
           {steps.map((s, i) => (
