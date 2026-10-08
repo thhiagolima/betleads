@@ -50,11 +50,24 @@ export const Route = createFileRoute("/api/public/webhook/$token/$evento")({
           return Response.json({ ok: false, error: "Server misconfigured" }, { status: 500 });
         }
 
-        const { data: tenantRow } = await sb
+        const { data: tenantRow, error: tenantLookupError } = await sb
           .from("tenants")
           .select("id,webhook_secret")
           .eq("webhook_token", token)
           .maybeSingle();
+        // Do not report an infrastructure/credential failure as an invalid token.
+        // Providers won't retry a 404, while a 503 correctly marks the delivery as
+        // temporary and makes the deployment configuration problem observable.
+        if (tenantLookupError) {
+          console.error("Webhook tenant lookup failed", {
+            code: tenantLookupError.code,
+            message: tenantLookupError.message,
+          });
+          return Response.json(
+            { ok: false, error: "webhook service temporarily unavailable" },
+            { status: 503 },
+          );
+        }
         const tenantId = tenantRow?.id as string | undefined;
         if (!tenantRow || !tenantId) {
           return Response.json({ ok: false, error: "token inválido" }, { status: 404 });
