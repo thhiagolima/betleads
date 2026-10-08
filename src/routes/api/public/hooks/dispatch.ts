@@ -4,6 +4,7 @@ import { runEmailFlowDispatcher } from "@/lib/email-automations.server";
 import { tickFlows } from "@/lib/call-flows.server";
 import { runDispatcher as runWhatsappDispatcher } from "@/lib/automation.server";
 import { runJourneyDispatcher } from "@/lib/journeys.server";
+import { runVoiceQueueDispatcher } from "@/lib/calls.server";
 import { requireSharedSecret } from "@/lib/cron-auth.server";
 
 export const Route = createFileRoute("/api/public/hooks/dispatch")({
@@ -31,8 +32,13 @@ export const Route = createFileRoute("/api/public/hooks/dispatch")({
             const flows = await runSmsDispatcher({ limit: 2000 });
             result = { campaigns, flows };
           } else if (channel === "email") result = await runEmailFlowDispatcher({ limit: 2000 });
-          else if (channel === "call") result = await tickFlows(200);
-          else if (channel === "journey") result = await runJourneyDispatcher(200);
+          else if (channel === "call") {
+            const [queue, flows] = await Promise.all([
+              runVoiceQueueDispatcher(200),
+              tickFlows(200),
+            ]);
+            result = { queue, flows };
+          } else if (channel === "journey") result = await runJourneyDispatcher(200);
           else if (channel === "whatsapp") result = await runWhatsappDispatcher({ limit: 50 });
           else return Response.json({ ok: false, error: "channel inválido" }, { status: 400 });
           return Response.json({ ok: true, channel, result });

@@ -2,10 +2,21 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { Mail, MessageSquare, Pause, Play, Plus, Route, Search } from "lucide-react";
+import {
+  ChevronRight,
+  Mail,
+  MessageSquare,
+  Pause,
+  Play,
+  Plus,
+  Route,
+  Search,
+  Trash2,
+} from "lucide-react";
 import { toast } from "sonner";
 import {
   convertLegacyJourney,
+  deleteJourney,
   listJourneyOperations,
   listJourneys,
   listLegacyJourneys,
@@ -33,7 +44,19 @@ type Journey = {
   status: "draft" | "active" | "paused" | "archived";
   trigger_type: string;
   daily_limit: number;
-  journey_steps: Array<{ id: string }>;
+  journey_steps: Array<{
+    id: string;
+    position: number;
+    step_type: "wait" | "sms" | "email" | "voice" | "end";
+    config: Record<string, unknown>;
+    is_enabled: boolean;
+  }>;
+  metrics: {
+    byStatus?: Record<string, number>;
+    exits?: Record<string, number>;
+    recovered?: number;
+    sentByChannel?: Record<string, number>;
+  };
 };
 type LegacyJourney = {
   sourceType: "sms_flow" | "email_flow";
@@ -52,6 +75,7 @@ export function JourneysHub() {
   const queryClient = useQueryClient();
   const list = useServerFn(listJourneys);
   const changeStatus = useServerFn(setJourneyStatus);
+  const removeJourney = useServerFn(deleteJourney);
   const operationsFn = useServerFn(listJourneyOperations);
   const legacyFn = useServerFn(listLegacyJourneys);
   const convertFn = useServerFn(convertLegacyJourney);
@@ -89,7 +113,18 @@ export function JourneysHub() {
   const legacy = useQuery({ queryKey: ["legacy-journeys"], queryFn: () => legacyFn() });
   const status = useMutation({
     mutationFn: (input: { id: string; status: Journey["status"] }) => changeStatus({ data: input }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["journeys"] }),
+    onSuccess: async (_, variables) => {
+      await queryClient.invalidateQueries({ queryKey: ["journeys"] });
+      toast.success(variables.status === "active" ? "Jornada publicada" : "Jornada desligada");
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => removeJourney({ data: { id } }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["journeys"] });
+      toast.success("Jornada excluída");
+    },
     onError: (error: Error) => toast.error(error.message),
   });
   const convert = useMutation({
@@ -254,12 +289,12 @@ export function JourneysHub() {
         </Card>
       )}
       {view === "journeys" && (
-        <Card>
-          <CardHeader>
+        <Card className="overflow-hidden">
+          <CardHeader className="border-b">
             <CardTitle>Jornadas</CardTitle>
             <CardDescription>{rows.length} encontrada(s)</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent className="p-0">
             {journeys.isLoading ? (
               <p className="py-8 text-center text-sm text-muted-foreground">Carregando jornadas…</p>
             ) : rows.length === 0 ? (
@@ -267,53 +302,122 @@ export function JourneysHub() {
                 Nenhuma jornada nesta visão.
               </div>
             ) : (
-              rows.map((journey) => (
-                <div
-                  key={journey.id}
-                  className="flex flex-col gap-3 rounded-lg border p-4 lg:flex-row lg:items-center"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="font-medium">{journey.name}</p>
-                      <Badge variant={journey.status === "active" ? "default" : "outline"}>
-                        {labels[journey.status]}
-                      </Badge>
+              rows.map((journey) => {
+                const steps = journey.journey_steps
+                  .filter((step) => step.is_enabled && step.step_type !== "end")
+                  .sort((a, b) => a.position - b.position);
+                const metrics = journey.metrics ?? {};
+                const queued =
+                  Number(metrics.byStatus?.active ?? 0) + Number(metrics.byStatus?.waiting ?? 0);
+                const sent = Object.values(metrics.sentByChannel ?? {}).reduce(
+                  (total, value) => total + Number(value),
+                  0,
+                );
+                const deposits =
+                  Number(metrics.exits?.deposit ?? 0) + Number(metrics.exits?.first_deposit ?? 0);
+                return (
+                  <div
+                    key={journey.id}
+                    className="grid gap-5 border-b p-5 last:border-b-0 xl:grid-cols-[minmax(0,1fr)_auto_auto] xl:items-center"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-semibold">{journey.name}</p>
+                        <Badge
+                          variant="outline"
+                          className={
+                            journey.status === "active"
+                              ? "border-emerald-500/20 bg-emerald-500/15 text-emerald-500"
+                              : "bg-muted text-muted-foreground"
+                          }
+                        >
+                          {labels[journey.status].toLowerCase()}
+                        </Badge>
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                        {steps.length === 0 ? (
+                          <span>Sem etapas configuradas</span>
+                        ) : (
+                          steps.map((step, index) =>
+                            step.step_type === "wait" ? (
+                              <span key={step.id}>
+                                {formatWait(Number(step.config.delay_seconds ?? 0))}
+                              </span>
+                            ) : (
+                              <span key={step.id} className="contents">
+                                {index > 0 && steps[index - 1]?.step_type !== "wait" && (
+                                  <ChevronRight className="h-4 w-4" />
+                                )}
+                                <span
+                                  className={`rounded-full border px-2.5 py-1 text-xs font-medium ${channelStyles[step.step_type]}`}
+                                >
+                                  {channelNames[step.step_type]}
+                                </span>
+                                {index < steps.length - 1 && <ChevronRight className="h-4 w-4" />}
+                              </span>
+                            ),
+                          )
+                        )}
+                      </div>
                     </div>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {journey.description || `Gatilho: ${journey.trigger_type}`}
-                    </p>
-                    <div className="mt-3 flex gap-3 text-xs text-muted-foreground">
-                      <span>{journey.journey_steps.length} etapas</span>
-                      <span>Limite diário: {journey.daily_limit}</span>
+                    <div className="grid grid-cols-2 gap-x-7 gap-y-3 sm:grid-cols-4">
+                      <JourneyMetric label="Na fila" value={queued.toLocaleString("pt-BR")} />
+                      <JourneyMetric label="Enviados" value={sent.toLocaleString("pt-BR")} />
+                      <JourneyMetric label="Depósitos" value={deposits.toLocaleString("pt-BR")} />
+                      <JourneyMetric
+                        label="Recuperado"
+                        value={Number(metrics.recovered ?? 0).toLocaleString("pt-BR", {
+                          style: "currency",
+                          currency: "BRL",
+                          maximumFractionDigits: 0,
+                        })}
+                        accent
+                      />
                     </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button asChild variant="outline" size="sm">
-                      <Link to="/jornadas/$journeyId" params={{ journeyId: journey.id }}>
-                        Editar
-                      </Link>
-                    </Button>
-                    {journey.status === "active" ? (
+                    <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+                      <Button asChild variant="outline" size="sm">
+                        <Link to="/jornadas/$journeyId" params={{ journeyId: journey.id }}>
+                          Editar
+                        </Link>
+                      </Button>
+                      {journey.status === "active" ? (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={status.isPending}
+                          onClick={() => status.mutate({ id: journey.id, status: "paused" })}
+                        >
+                          <Pause className="mr-1 h-4 w-4" /> Desligar
+                        </Button>
+                      ) : (
+                        <Button
+                          size="sm"
+                          disabled={status.isPending || journey.status === "archived"}
+                          onClick={() => status.mutate({ id: journey.id, status: "active" })}
+                        >
+                          <Play className="mr-1 h-4 w-4" /> Publicar
+                        </Button>
+                      )}
                       <Button
                         size="sm"
-                        variant="outline"
-                        disabled={status.isPending}
-                        onClick={() => status.mutate({ id: journey.id, status: "paused" })}
+                        variant="ghost"
+                        className="text-muted-foreground hover:text-destructive"
+                        disabled={remove.isPending}
+                        onClick={() => {
+                          if (
+                            window.confirm(
+                              `Excluir a jornada “${journey.name}”? Esta ação não pode ser desfeita.`,
+                            )
+                          )
+                            remove.mutate(journey.id);
+                        }}
                       >
-                        <Pause className="mr-1 h-4 w-4" /> Pausar
+                        <Trash2 className="mr-1 h-4 w-4" /> Excluir
                       </Button>
-                    ) : (
-                      <Button
-                        size="sm"
-                        disabled={status.isPending || journey.status === "archived"}
-                        onClick={() => status.mutate({ id: journey.id, status: "active" })}
-                      >
-                        <Play className="mr-1 h-4 w-4" /> Publicar
-                      </Button>
-                    )}
+                    </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </CardContent>
         </Card>
@@ -498,3 +602,41 @@ export function JourneysHub() {
   );
 }
 const labels = { draft: "Rascunho", active: "Ativa", paused: "Pausada", archived: "Arquivada" };
+
+const channelNames = { wait: "espera", sms: "sms", email: "e-mail", voice: "voz", end: "fim" };
+const channelStyles = {
+  wait: "",
+  sms: "border-blue-500/30 text-blue-500",
+  email: "border-violet-500/30 text-violet-500",
+  voice: "border-emerald-500/30 text-emerald-500",
+  end: "",
+};
+
+function formatWait(seconds: number) {
+  if (seconds < 3600) return `${Math.max(1, Math.round(seconds / 60))} min`;
+  if (seconds < 86400) {
+    const hours = seconds / 3600;
+    return `${Number.isInteger(hours) ? hours : hours.toFixed(1).replace(".", ",")} h`;
+  }
+  const days = seconds / 86400;
+  return `${Number.isInteger(days) ? days : days.toFixed(1).replace(".", ",")} d`;
+}
+
+function JourneyMetric({
+  label,
+  value,
+  accent = false,
+}: {
+  label: string;
+  value: string;
+  accent?: boolean;
+}) {
+  return (
+    <div className="text-right">
+      <p className="whitespace-nowrap text-xs text-muted-foreground">{label}</p>
+      <p className={`mt-0.5 font-semibold tabular-nums ${accent ? "text-emerald-500" : ""}`}>
+        {value}
+      </p>
+    </div>
+  );
+}

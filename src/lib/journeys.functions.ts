@@ -68,12 +68,22 @@ export const listJourneys = createServerFn({ method: "GET" })
     const { data, error } = await db
       .from("journeys")
       .select(
-        "id,name,description,status,trigger_type,daily_limit,cooldown_hours,updated_at,journey_steps(id)",
+        "id,name,description,status,trigger_type,daily_limit,cooldown_hours,updated_at,journey_steps(id,position,step_type,config,is_enabled)",
       )
       .eq("tenant_id", tenantId)
       .order("updated_at", { ascending: false });
     if (error) throw new Error(error.message);
-    return { journeys: data ?? [] };
+    const journeys = await Promise.all(
+      (data ?? []).map(async (journey: any) => {
+        const { data: metricData, error: metricsError } = await db.rpc("journey_metrics", {
+          p_tenant_id: tenantId,
+          p_journey_id: journey.id,
+        });
+        if (metricsError) throw new Error(metricsError.message);
+        return { ...journey, metrics: metricData ?? {} };
+      }),
+    );
+    return { journeys };
   });
 
 /** Compatibility inventory used only while the old SMS/e-mail engines are retired. */
@@ -100,8 +110,18 @@ export const listLegacyJourneys = createServerFn({ method: "GET" })
     ]);
     if (sms.error || email.error || converted.error)
       throw new Error("Não foi possível carregar as automações legadas.");
-    const migrated = new Map(
-      (converted.data ?? []).map((row: any) => [
+    const migrated = new Map<
+      string,
+      { id: string; status: "draft" | "active" | "paused" | "archived" }
+    >(
+      (
+        (converted.data ?? []) as Array<{
+          id: string;
+          status: "draft" | "active" | "paused" | "archived";
+          legacy_source_type: string;
+          legacy_source_id: string;
+        }>
+      ).map((row) => [
         `${row.legacy_source_type}:${row.legacy_source_id}`,
         { id: row.id, status: row.status },
       ]),
@@ -549,12 +569,14 @@ export const setJourneyStatus = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const tenantId = await tenant(context);
     await requireJourneyPublisher(context.userId, tenantId);
+    const { data: journey, error: journeyError } = await db
+      .from("journeys")
+      .select("id,version,status")
+      .eq("id", data.id)
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+    if (journeyError || !journey) throw new Error("Jornada não encontrada.");
     if (data.status === "active") {
-      if (process.env.JOURNEYS_PUBLISHING_ENABLED !== "true") {
-        throw new Error(
-          "A publicação de jornadas está temporariamente indisponível enquanto a validação operacional é concluída.",
-        );
-      }
       const { data: steps, error: stepsError } = await db
         .from("journey_steps")
         .select("step_type,config,is_enabled")
@@ -584,17 +606,61 @@ export const setJourneyStatus = createServerFn({ method: "POST" })
             .eq("tenant_id", tenantId)
             .eq("is_archived", false)
             .maybeSingle();
-          if (!asset)
-            throw new Error("Há uma etapa de voz sem áudio ativo deste tenant.");
+          if (!asset) throw new Error("Há uma etapa de voz sem áudio ativo deste tenant.");
         }
       }
     }
+    const now = new Date().toISOString();
+    const statusFields =
+      data.status === "active"
+        ? {
+            activated_at: now,
+            paused_at: null,
+            archived_at: null,
+            published_version: journey.version,
+            approved_by: context.userId,
+          }
+        : data.status === "paused"
+          ? { paused_at: now }
+          : data.status === "archived"
+            ? { archived_at: now }
+            : {};
     const { error } = await db
       .from("journeys")
-      .update({ status: data.status })
+      .update({ status: data.status, ...statusFields })
       .eq("id", data.id)
       .eq("tenant_id", tenantId);
     if (error) throw new Error(error.message);
+    await db.from("journey_events").insert({
+      tenant_id: tenantId,
+      journey_id: data.id,
+      event_type: "status_changed",
+      actor_user_id: context.userId,
+      detail: { from: journey.status, to: data.status, version: journey.version },
+    });
+    return { ok: true };
+  });
+
+export const deleteJourney = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((value: unknown) => journeyIdSchema.parse(value))
+  .handler(async ({ data, context }) => {
+    const tenantId = await tenant(context);
+    await requireJourneyPublisher(context.userId, tenantId);
+    const { data: journey, error: findError } = await db
+      .from("journeys")
+      .select("id,status")
+      .eq("id", data.id)
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+    if (findError || !journey) throw new Error("Jornada não encontrada.");
+    if (journey.status === "active") throw new Error("Desligue a jornada antes de excluí-la.");
+    const { error } = await db
+      .from("journeys")
+      .delete()
+      .eq("id", data.id)
+      .eq("tenant_id", tenantId);
+    if (error) throw new Error("Não foi possível excluir a jornada.");
     return { ok: true };
   });
 

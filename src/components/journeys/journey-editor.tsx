@@ -34,9 +34,14 @@ export function JourneyEditor({
 }: {
   id?: string;
   initial?: {
-    name: string; description: string | null; trigger_type: string;
-    trigger_config?: Record<string, unknown>; entry_rules?: Record<string, unknown>;
-    exit_rules?: Record<string, boolean>; daily_limit?: number; cooldown_hours?: number;
+    name: string;
+    description: string | null;
+    trigger_type: string;
+    trigger_config?: Record<string, unknown>;
+    entry_rules?: Record<string, unknown>;
+    exit_rules?: Record<string, boolean>;
+    daily_limit?: number;
+    cooldown_hours?: number;
   };
   initialSteps?: SavedStep[];
   metrics?: {
@@ -110,16 +115,20 @@ export function JourneyEditor({
   const [triggerConfig] = useState(initial?.trigger_config ?? draft?.triggerConfig ?? {});
   const [dailyLimit, setDailyLimit] = useState(initial?.daily_limit ?? 1000);
   const [cooldownHours, setCooldownHours] = useState(initial?.cooldown_hours ?? 72);
-  const [windowStart, setWindowStart] = useState(String(initial?.entry_rules?.window_start ?? "08:00"));
+  const [windowStart, setWindowStart] = useState(
+    String(initial?.entry_rules?.window_start ?? "08:00"),
+  );
   const [windowEnd, setWindowEnd] = useState(String(initial?.entry_rules?.window_end ?? "22:00"));
   const [audience, setAudience] = useState(String(initial?.entry_rules?.audience ?? "all_active"));
   const [reentry, setReentry] = useState(String(initial?.entry_rules?.reentry ?? "once"));
-  const [exitRules, setExitRules] = useState<Record<string, boolean>>(initial?.exit_rules ?? {
-    deposit: true,
-    first_deposit: true,
-    login: false,
-    voltou_jogar: false,
-  });
+  const [exitRules, setExitRules] = useState<Record<string, boolean>>(
+    initial?.exit_rules ?? {
+      deposit: true,
+      first_deposit: true,
+      login: false,
+      voltou_jogar: false,
+    },
+  );
   const [steps, setSteps] = useState<Step[]>(() =>
     initialSteps.flatMap((s): Step[] =>
       s.step_type === "wait"
@@ -181,16 +190,29 @@ export function JourneyEditor({
               : []
             : s.kind === "email"
               ? s.templateId
-                ? [{
-                    step_type: "email",
-                    config: (() => {
-                      const template = (templates.data?.items ?? []).find((item) => item.id === s.templateId);
-                      return {
-                        template_id: s.templateId,
-                        ...(template ? { template_snapshot: { id: template.id, subject: template.assunto, body_html: template.corpo, version: template.version } } : {}),
-                      };
-                    })(),
-                  }]
+                ? [
+                    {
+                      step_type: "email",
+                      config: (() => {
+                        const template = (templates.data?.items ?? []).find(
+                          (item) => item.id === s.templateId,
+                        );
+                        return {
+                          template_id: s.templateId,
+                          ...(template
+                            ? {
+                                template_snapshot: {
+                                  id: template.id,
+                                  subject: template.assunto,
+                                  body_html: template.corpo,
+                                  version: template.version,
+                                },
+                              }
+                            : {}),
+                        };
+                      })(),
+                    },
+                  ]
                 : []
               : s.assetId
                 ? [
@@ -235,7 +257,8 @@ export function JourneyEditor({
     onSuccess: (r) => {
       toast.success("Jornada salva como rascunho");
       if (!r.id) throw new Error("Jornada salva sem identificador");
-      navigate({ to: "/jornadas/$journeyId", params: { journeyId: r.id } });
+      window.sessionStorage.removeItem("journey-draft");
+      navigate({ to: "/automacoes" });
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -366,7 +389,11 @@ export function JourneyEditor({
             </select>
             <label className="mt-3 block text-xs text-muted-foreground">
               Reentrada
-              <select className="mt-1 flex h-10 w-full rounded-md border bg-background px-3 text-sm" value={reentry} onChange={(e) => setReentry(e.target.value)}>
+              <select
+                className="mt-1 flex h-10 w-full rounded-md border bg-background px-3 text-sm"
+                value={reentry}
+                onChange={(e) => setReentry(e.target.value)}
+              >
                 <option value="once">Uma única vez</option>
                 <option value="per_occurrence">A cada ocorrência</option>
                 <option value="after_cooldown">Após o cooldown</option>

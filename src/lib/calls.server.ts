@@ -4,6 +4,8 @@
 
 import { createHash } from "crypto";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { evaluateVoiceContactPolicy } from "./consent.server";
+import { callInfobipVoice, normalizeE164BR } from "./infobip-voice.server";
 
 // ============================================================
 // Tipos
@@ -252,4 +254,141 @@ export function buildProviderPayload(
     return val;
   };
   return replace(template) as Record<string, unknown>;
+}
+
+/**
+ * Dispatches due items created by voice campaigns. Call flows use their own
+ * sequential runner; this worker covers the regular call_queue, including
+ * scheduled campaigns that previously stayed at audio_ready indefinitely.
+ */
+export async function runVoiceQueueDispatcher(limit = 200) {
+  const now = new Date().toISOString();
+  const { data: queue, error } = await supabaseAdmin
+    .from("call_queue")
+    .select(
+      "id,tenant_id,lead_id,script_id,voice_asset_id,phone_number,audio_url,status,scheduled_at",
+    )
+    .eq("status", "audio_ready")
+    .lte("scheduled_at", now)
+    .order("scheduled_at", { ascending: true })
+    .limit(limit);
+  if (error) throw new Error(error.message);
+
+  let dispatched = 0;
+  let deferred = 0;
+  let failed = 0;
+  for (const item of queue ?? []) {
+    try {
+      let phone = item.phone_number ?? "";
+      if (!phone && item.lead_id) {
+        const { data: player } = await supabaseAdmin
+          .from("players")
+          .select("telefone")
+          .eq("id", item.lead_id)
+          .eq("tenant_id", item.tenant_id)
+          .maybeSingle();
+        phone = player?.telefone ?? "";
+      }
+      if (!phone) throw new Error("Telefone do destinatário ausente.");
+      const to = normalizeE164BR(phone);
+      const policy = await evaluateVoiceContactPolicy(item.tenant_id, to);
+      if (!policy.allowed) {
+        const revoked = policy.reason === "consent_revoked";
+        await supabaseAdmin
+          .from("call_queue")
+          .update({
+            status: revoked ? "cancelled" : "audio_ready",
+            provider_status: policy.reason,
+            scheduled_at: policy.retryAt ?? new Date(Date.now() + 60 * 60_000).toISOString(),
+          } as never)
+          .eq("id", item.id);
+        deferred++;
+        continue;
+      }
+
+      // Fixed-library assets receive a fresh signed URL at dispatch time, so a
+      // campaign scheduled for later does not rely on the URL created at draft time.
+      let audioUrl = item.audio_url;
+      if (item.voice_asset_id) {
+        const { data: asset } = await supabaseAdmin
+          .from("journey_voice_assets")
+          .select("storage_path,is_archived")
+          .eq("id", item.voice_asset_id)
+          .eq("tenant_id", item.tenant_id)
+          .maybeSingle();
+        if (!asset || asset.is_archived)
+          throw new Error("Áudio da biblioteca não está disponível.");
+        const { data: signed, error: signError } = await supabaseAdmin.storage
+          .from("call-audios")
+          .createSignedUrl(asset.storage_path, 60 * 60);
+        if (signError || !signed?.signedUrl)
+          throw new Error("Não foi possível preparar o áudio para a ligação.");
+        audioUrl = signed.signedUrl;
+      }
+      if (!audioUrl) throw new Error("Áudio da ligação não está pronto.");
+
+      const result = await callInfobipVoice(to, audioUrl);
+      const body = (result.body ?? {}) as { non_json?: boolean };
+      const transient =
+        !result.ok &&
+        (result.status === 0 ||
+          result.status === 429 ||
+          (result.status >= 500 && result.status < 600) ||
+          body.non_json);
+      if (transient) {
+        await supabaseAdmin
+          .from("call_queue")
+          .update({
+            status: "audio_ready",
+            provider_status: "provider_unavailable",
+            provider_response: result.body as never,
+            provider_request_id: result.idempotencyKey,
+            scheduled_at: new Date(Date.now() + 5 * 60_000).toISOString(),
+          } as never)
+          .eq("id", item.id);
+        deferred++;
+        continue;
+      }
+
+      await supabaseAdmin.from("call_history").insert({
+        tenant_id: item.tenant_id,
+        lead_id: item.lead_id,
+        script_id: item.script_id,
+        call_queue_id: item.id,
+        audio_url: audioUrl,
+        to_phone: to,
+        status: result.ok ? "pending" : "failed",
+        provider: "infobip",
+        provider_call_id: result.providerCallId ?? result.idempotencyKey,
+        provider_response: result.body as never,
+        provider_status_code: result.status,
+        error_message: result.ok ? null : JSON.stringify(result.body).slice(0, 1000),
+      } as never);
+      await supabaseAdmin
+        .from("call_queue")
+        .update({
+          status: result.ok ? "waiting_provider" : "failed",
+          provider_status: result.ok ? "sent" : `error_${result.status}`,
+          provider_response: result.body as never,
+          provider_request_id: result.idempotencyKey,
+          audio_url: audioUrl,
+        } as never)
+        .eq("id", item.id);
+      if (result.ok) dispatched++;
+      else failed++;
+    } catch (cause) {
+      failed++;
+      await supabaseAdmin
+        .from("call_queue")
+        .update({
+          status: "failed",
+          provider_status: "dispatch_error",
+          provider_response: {
+            error: cause instanceof Error ? cause.message : String(cause),
+          } as never,
+        } as never)
+        .eq("id", item.id);
+    }
+  }
+  return { due: queue?.length ?? 0, dispatched, deferred, failed };
 }
