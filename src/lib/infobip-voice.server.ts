@@ -1,12 +1,10 @@
+import { requireBrazilianPhone } from "./phone-normalization";
+
 // Infobip Calls Markup Language (CML) adapter for outbound recorded calls.
 // Voz do CRM é atendida exclusivamente pela Infobip.
 
 export function normalizeE164BR(raw: string): string {
-  const digits = raw.replace(/\D/g, "");
-  if (!digits) throw new Error("Telefone vazio");
-  const withCountry = digits.startsWith("55") ? digits : `55${digits}`;
-  if (withCountry.length < 12 || withCountry.length > 13) throw new Error(`Telefone inválido: ${raw}`);
-  return `+${withCountry}`;
+  return requireBrazilianPhone(raw);
 }
 
 export type InfobipVoiceResult = {

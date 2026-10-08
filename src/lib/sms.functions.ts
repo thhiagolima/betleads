@@ -21,6 +21,7 @@ import {
 } from "./shortio.server";
 import type { Json } from "@/integrations/supabase/types";
 import { isChannelRevoked } from "./consent.server";
+import { requireBrazilianPhone } from "./phone-normalization";
 
 const DEFAULT_SHORT_BRASIL_SINGLE_URL = "http://lp01-short.painelsms.com/bot/single-sms.php";
 const DEFAULT_SHORT_BRASIL_BULK_URL = "http://lp01-short.painelsms.com/bot/bulk-sms.php";
@@ -60,14 +61,7 @@ async function credentialFingerprint(value: string): Promise<string> {
 }
 
 function normalizeE164BR(raw: string): string {
-  const digits = raw.replace(/\D/g, "");
-  if (!digits) throw new Error("Telefone vazio");
-  // já vem com 55 na frente?
-  const withCountry = digits.startsWith("55") ? digits : `55${digits}`;
-  if (withCountry.length < 12 || withCountry.length > 13) {
-    throw new Error(`Telefone inválido: ${raw}`);
-  }
-  return `+${withCountry}`;
+  return requireBrazilianPhone(raw);
 }
 
 function toShortBrasilCell(e164OrRaw: string): string {

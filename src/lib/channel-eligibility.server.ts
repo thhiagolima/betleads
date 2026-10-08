@@ -1,6 +1,7 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { isSuppressed } from "./email-deliverability.server";
 import { getChannelConsentStatus, isChannelRevoked } from "./consent.server";
+import { normalizeBrazilianPhone } from "./phone-normalization";
 
 export type Channel = "sms" | "email" | "call" | "whatsapp";
 export type BlockReason =
@@ -20,11 +21,7 @@ export type ChannelEligibility = {
 };
 
 export function normalizePhone(raw: string | null | undefined): string | null {
-  if (!raw) return null;
-  const digits = raw.replace(/\D/g, "");
-  if (/^[1-9]{2}9?\d{8}$/.test(digits)) return `+55${digits}`;
-  if (/^55[1-9]{2}9?\d{8}$/.test(digits)) return `+${digits}`;
-  return null;
+  return normalizeBrazilianPhone(raw);
 }
 
 export function normalizeEmail(raw: string | null | undefined): string | null {
