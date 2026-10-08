@@ -141,13 +141,19 @@ export function CampaignsHub() {
   const voiceRows: Campaign[] = ((voiceQueue.data?.items ?? []) as any[]).map((item) => {
     const scheduledAt = item.scheduled_at ?? item.created_at ?? new Date().toISOString();
     const isFuture = new Date(scheduledAt).getTime() > Date.now();
+    const isContactLimited = ["rolling_24h_limit", "cooldown"].includes(item.provider_status);
     return {
       id: item.id,
       name: item.script_name ?? item.audio_name ?? "Ligação por voz",
       scheduled_at: scheduledAt,
       // `audio_ready` means the audio was prepared successfully. It is only
       // waiting for the selected schedule, not for the provider.
-      status: item.status === "audio_ready" && isFuture ? "agendada" : (item.status ?? "pendente"),
+      status:
+        item.status === "audio_ready" && isContactLimited
+          ? "paused_limit"
+          : item.status === "audio_ready" && isFuture
+            ? "agendada"
+            : (item.status ?? "pendente"),
       total_count: 1,
       sent_count: ["dispatched", "sent", "completed", "answered", "waiting_provider"].includes(
         item.status,

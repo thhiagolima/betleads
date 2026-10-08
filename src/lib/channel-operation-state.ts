@@ -66,8 +66,13 @@ export function getChannelOperationState(
     return {
       label: "Pausado por limite",
       description:
-        "O envio foi interrompido para respeitar um limite de crédito, volume ou janela.",
-      nextAction: "Revise os limites do canal antes de retomar.",
+        channel === "voice"
+          ? "O envio respeita o cooldown e o limite de contato de voz nas últimas 24 horas."
+          : "O envio foi interrompido para respeitar um limite de crédito, volume ou janela.",
+      nextAction:
+        channel === "voice"
+          ? "A chamada será liberada quando a política de contato permitir."
+          : "Revise os limites do canal antes de retomar.",
       actionLabel: channel === "sms" ? "Ver créditos" : "Ver configurações",
       actionTo: channel === "sms" ? "/creditos-sms" : SETTINGS_DESTINATION[channel],
       tone: "border-orange-500/30 bg-orange-500/10 text-orange-700 dark:text-orange-300",

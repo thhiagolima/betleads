@@ -41,6 +41,14 @@ import { listSmsTemplates } from "@/lib/sms-templates.functions";
 import { listJourneyVoiceAssets } from "@/lib/journey-voice-assets.functions";
 
 type Channel = "sms" | "email" | "voice";
+type VoiceDispatchSummary = {
+  pending?: number;
+  results?: Array<{ error?: string }>;
+};
+
+function isVoiceDispatchSummary(value: unknown): value is VoiceDispatchSummary {
+  return typeof value === "object" && value !== null && "pending" in value;
+}
 
 function renderMessage(message: string, name: string, phone: string) {
   const fullName = name.trim();
@@ -180,8 +188,21 @@ export function IndividualSmsDialog({
         },
       });
     },
-    onSuccess: () => {
-      toast.success("Envio individual registrado para processamento");
+    onSuccess: (result) => {
+      const voiceWasDeferred =
+        channel === "voice" && isVoiceDispatchSummary(result) && Number(result.pending ?? 0) > 0;
+      if (voiceWasDeferred) {
+        toast.warning(
+          result.results?.find((item) => item.error)?.error ??
+            "A ligação foi adiada pela política de contato de voz; ela não foi agendada manualmente.",
+        );
+      } else {
+        toast.success(
+          channel === "voice"
+            ? "Ligação individual enviada para o provedor"
+            : "Envio individual registrado para processamento",
+        );
+      }
       queryClient.invalidateQueries({ queryKey: ["sms-scheduled-campaigns"] });
       queryClient.invalidateQueries({ queryKey: ["sms-compact-dashboard"] });
       queryClient.invalidateQueries({ queryKey: ["sms-credits"] });
@@ -203,7 +224,7 @@ export function IndividualSmsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl">
+      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-xl overflow-y-auto overscroll-contain">
         <DialogHeader>
           <DialogTitle>Envio individual / teste</DialogTitle>
           <DialogDescription>

@@ -506,6 +506,7 @@ export const listCallQueue = createServerFn({ method: "POST" })
         phone_number: row.phone_number,
         audio_url: row.audio_url,
         scheduled_at: row.scheduled_at,
+        provider_status: row.provider_status,
         retryable:
           row.status === "audio_ready" &&
           (row.provider_status === "provider_unavailable" || !row.provider_status),

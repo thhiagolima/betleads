@@ -83,7 +83,9 @@ export async function evaluateVoiceContactPolicy(tenantId: string, subject: stri
     .eq("tenant_id", tenantId)
     .maybeSingle();
   if (policyError) throw new Error(`Falha ao validar politica de voz: ${policyError.message}`);
-  if (policy?.enabled === false) return { allowed: true as const, reason: null, retryAt: null };
+  // Frequency controls are opt-in. Consent and the account contact window are
+  // always checked above, even when the tenant chooses unlimited voice sends.
+  if (policy?.enabled !== true) return { allowed: true as const, reason: null, retryAt: null };
 
   const cooldownHours = Number(policy?.cooldown_hours ?? 24);
   const dailyLimit = Number(policy?.rolling_24h_limit ?? 1);

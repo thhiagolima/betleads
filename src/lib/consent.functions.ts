@@ -46,7 +46,7 @@ export const listChannelConsents = createServerFn({ method: "GET" })
     return {
       items: data ?? [],
       audit: audit ?? [],
-      voicePolicy: voicePolicy ?? { enabled: true, cooldown_hours: 24, rolling_24h_limit: 1 },
+      voicePolicy: voicePolicy ?? { enabled: false, cooldown_hours: 0, rolling_24h_limit: 100 },
     };
   });
 
