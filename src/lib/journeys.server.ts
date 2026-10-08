@@ -17,6 +17,9 @@ export { nextJourneyWindowOpen } from "./journey-policy";
 type JourneyRow = {
   id: string;
   status: string;
+  tenant_id?: string;
+  trigger_type?: string;
+  trigger_config?: Record<string, unknown>;
   exit_rules: Record<string, boolean>;
   entry_rules: Record<string, unknown>;
   daily_limit: number;
@@ -290,6 +293,29 @@ async function playerFor(enrollment: EnrollmentRow) {
   return data;
 }
 
+async function stillMatchesJourneyEntry(
+  enrollment: EnrollmentRow,
+  journey: JourneyRow,
+): Promise<boolean> {
+  const trigger = journey.trigger_type ?? "manual";
+  if (trigger === "manual" || trigger === "nivel_alterado") return true;
+  const player = await playerFor(enrollment);
+  if (!player) return false;
+  const triggerConfig = journey.trigger_config ?? {};
+  const eventMatch = await matchFinancialTrigger(
+    {
+      tenant_id: enrollment.tenant_id,
+      trigger_type: trigger,
+      trigger_config: triggerConfig,
+    },
+    player as Record<string, unknown>,
+  );
+  if (eventMatch) return eventMatch.matches;
+  return trigger === "inactivity"
+    ? qualifiesForInactivity(player as Record<string, unknown>, triggerConfig)
+    : detectTriggersForPlayer(player as never).includes(trigger as never);
+}
+
 async function executeEnrollment(id: string): Promise<void> {
   const { data: enrollmentRaw, error: enrollmentError } = await db
     .from("journey_enrollments")
@@ -302,12 +328,23 @@ async function executeEnrollment(id: string): Promise<void> {
 
   const { data: journeyRaw } = await db
     .from("journeys")
-    .select("id,status,exit_rules,entry_rules,daily_limit,cooldown_hours")
+    .select(
+      "id,status,trigger_type,trigger_config,exit_rules,entry_rules,daily_limit,cooldown_hours",
+    )
     .eq("id", enrollment.journey_id)
     .maybeSingle();
   const journey = journeyRaw as JourneyRow | null;
   if (!journey || journey.status !== "active") {
     await release(enrollment, { status: "paused" });
+    return;
+  }
+  if (!(await stillMatchesJourneyEntry(enrollment, journey))) {
+    await release(enrollment, {
+      status: "exited",
+      exited_at: new Date().toISOString(),
+      exit_reason: "entry_no_longer_matches",
+    });
+    await event(enrollment, "entry_eligibility_lost", { trigger: journey.trigger_type });
     return;
   }
   const nextOpen = nextJourneyWindowOpen(journey.entry_rules ?? {});
@@ -395,6 +432,7 @@ async function executeEnrollment(id: string): Promise<void> {
   }
   const reservation = await reserveDelivery(enrollment, step, journey);
   if (!reservation?.execution_id || !reservation.idempotency_key) {
+    if (reservation?.blocked_reason === "priority_paused") return;
     const retryAt = reservation?.retry_at ?? new Date(Date.now() + 60_000).toISOString();
     await release(enrollment, { status: "waiting", next_run_at: retryAt });
     await event(enrollment, "step_deferred", {
@@ -617,6 +655,10 @@ export async function runJourneyDispatcher(limit = 100) {
   const { error: recoveryError } = await db.rpc("recover_orphaned_journey_claims");
   if (recoveryError) throw new Error(recoveryError.message);
   const enrolled = await enrollEligibleJourneyPlayers(limit);
+  const { error: resumeError } = await db.rpc("resume_priority_paused_journeys", {
+    p_limit: limit,
+  });
+  if (resumeError) throw new Error(resumeError.message);
   const { data: claimed, error } = await db.rpc("claim_due_journey_enrollments", {
     p_limit: limit,
   });
