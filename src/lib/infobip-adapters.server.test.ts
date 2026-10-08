@@ -6,6 +6,7 @@ import { callInfobipVoice, normalizeE164BR } from "./infobip-voice.server";
 const INFOBIP_ENV = [
   "INFOBIP_BASE_URL",
   "INFOBIP_API_KEY",
+  "INFOBIP_EMAIL_CALLBACK_TOKEN",
   "INFOBIP_VOICE_FROM",
   "INFOBIP_VOICE_CALLBACK_TOKEN",
   "PUBLIC_APP_URL",
@@ -46,6 +47,8 @@ describe("Infobip provider adapters", () => {
   it("sends email with provider authentication and callback correlation", async () => {
     process.env.INFOBIP_BASE_URL = "https://api.infobip.test/";
     process.env.INFOBIP_API_KEY = "test-api-key";
+    process.env.INFOBIP_EMAIL_CALLBACK_TOKEN = "email-callback-token";
+    process.env.PUBLIC_APP_URL = "https://app.example.test/";
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ messages: [{ messageId: "email-provider-1" }] }), {
         status: 200,
@@ -72,6 +75,9 @@ describe("Infobip provider adapters", () => {
     const form = init.body as FormData;
     expect(form.get("from")).toBe("BETLEADS <remetente@example.test>");
     expect(form.get("callbackData")).toBe("email-delivery-2");
+    expect(String(form.get("notifyUrl"))).toContain("/api/public/infobip/email/events");
+    expect(String(form.get("notifyUrl"))).toContain("correlation=email-delivery-2");
+    expect(form.get("notifyContentType")).toBe("application/json");
   });
 
   it("normalizes Brazilian numbers and builds a correlated voice request", async () => {
@@ -101,5 +107,6 @@ describe("Infobip provider adapters", () => {
     expect(body.customData).toBe(result.idempotencyKey);
     expect(body.callback.url).toContain("token=callback-token");
     expect(body.callback.url).toContain("audio=https%3A%2F%2Fassets.example.test%2Fcall.mp3");
+    expect(body.notifyUrl).toContain("correlation=" + result.idempotencyKey);
   });
 });

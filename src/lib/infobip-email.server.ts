@@ -24,6 +24,17 @@ function endpoint(): string | null {
   return baseUrl ? `${baseUrl}/email/3/send` : null;
 }
 
+function notifyUrl(correlationId: string): string | null {
+  const appUrl = process.env.PUBLIC_APP_URL?.trim().replace(/\/$/, "");
+  const token = process.env.INFOBIP_EMAIL_CALLBACK_TOKEN?.trim()
+    ?? process.env.INFOBIP_VOICE_CALLBACK_TOKEN?.trim();
+  if (!appUrl || !token) return null;
+  const url = new URL(`${appUrl}/api/public/infobip/email/events`);
+  url.searchParams.set("token", token);
+  url.searchParams.set("correlation", correlationId);
+  return url.toString();
+}
+
 function parseBody(text: string, contentType: string | null): unknown {
   try {
     return text ? JSON.parse(text) : null;
@@ -53,8 +64,14 @@ export async function callInfobipEmail(input: InfobipEmailInput): Promise<Infobi
   form.set("subject", input.subject);
   form.set("html", input.html);
   if (input.replyTo) form.set("replyTo", input.replyTo);
-  // This comes back in delivery reports and is safe to use for correlation.
+  // Both values are per-request: the URL routes the provider event and the
+  // opaque key links it to exactly one local delivery without exposing PII.
   form.set("callbackData", idempotencyKey);
+  const deliveryUrl = notifyUrl(idempotencyKey);
+  if (deliveryUrl) {
+    form.set("notifyUrl", deliveryUrl);
+    form.set("notifyContentType", "application/json");
+  }
 
   try {
     const response = await fetch(url, {

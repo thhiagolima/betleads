@@ -40,7 +40,12 @@ export async function callInfobipVoice(to: string, audioUrl: string): Promise<In
   const from = process.env.INFOBIP_VOICE_FROM?.replace(/\D/g, "");
   const idempotencyKey = crypto.randomUUID();
   const callback = callbackUrl("/api/public/infobip/voice/cml", { audio: audioUrl });
-  const notifyUrl = callbackUrl("/api/public/infobip/voice/events", {});
+  // The event webhook is unique per request as well. `customData` is kept as
+  // a second correlation mechanism because providers may omit URL parameters
+  // from a forwarded event payload.
+  const notifyUrl = callbackUrl("/api/public/infobip/voice/events", {
+    correlation: idempotencyKey,
+  });
   if (!baseUrl || !apiKey || !from || !callback || !notifyUrl) {
     return {
       ok: false,

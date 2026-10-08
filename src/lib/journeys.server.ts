@@ -389,6 +389,7 @@ async function executeEnrollment(id: string): Promise<void> {
         journey_execution_id: run.id,
         provider: "infobip",
         body: result.body,
+        idempotency_key: result.idempotencyKey,
       } as never,
     });
     await finishExecution(run.id, {
