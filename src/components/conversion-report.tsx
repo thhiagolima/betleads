@@ -111,81 +111,125 @@ export function ConversionReport({
               })}
             </p>
           </section>
-          <ConversionExperimentPanel sourceType={sourceType} sourceId={sourceId} />
-          <section className="rounded-lg border p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h2 className="font-semibold">Conversões auditáveis</h2>
-                <p className="text-xs text-muted-foreground">
-                  Restrito a administradores e super administradores.
-                </p>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  className="rounded-md border px-3 py-2 text-sm"
-                  onClick={() => setDetailsOpen(true)}
-                >
-                  Ver conversões
-                </button>
-                <button
-                  className="rounded-md border px-3 py-2 text-sm"
-                  onClick={async () => {
-                    const result = await exportConversionDrilldownCsv({
-                      data: { sourceType, sourceId },
-                    });
-                    const url = URL.createObjectURL(
-                      new Blob([result.csv], { type: "text/csv;charset=utf-8" }),
-                    );
-                    const anchor = document.createElement("a");
-                    anchor.href = url;
-                    anchor.download = `conversoes-${sourceId}.csv`;
-                    anchor.click();
-                    URL.revokeObjectURL(url);
-                  }}
-                >
-                  Exportar CSV
-                </button>
-              </div>
-            </div>
-            {detailsOpen && details.isError ? (
-              <p className="mt-3 text-sm text-destructive">Acesso restrito ou falha ao carregar.</p>
-            ) : null}
-            {details.data ? (
-              <div className="mt-4 overflow-x-auto">
+          {data.canViewSensitive ? (
+            <ConversionExperimentPanel sourceType={sourceType} sourceId={sourceId} />
+          ) : null}
+          {sourceType === "journey" && data.byStepChannel.length > 0 ? (
+            <section className="rounded-lg border p-4">
+              <h2 className="font-semibold">Desempenho por etapa e canal</h2>
+              <p className="mb-3 text-xs text-muted-foreground">
+                Cada destinatário conta uma vez por envio, mesmo quando a mensagem possui vários
+                links.
+              </p>
+              <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b text-left">
-                      <th className="p-2">Jogador</th>
-                      <th className="p-2">Evento</th>
-                      <th className="p-2">Data</th>
-                      <th className="p-2">Valor</th>
+                      <th className="p-2">Etapa</th>
+                      <th className="p-2">Canal</th>
+                      <th className="p-2">Enviados</th>
+                      <th className="p-2">Entregues</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {details.data.rows.map((row: any) => (
-                      <tr className="border-b" key={`${row.event_type}:${row.event_id}`}>
+                    {data.byStepChannel.map((row) => (
+                      <tr
+                        className="border-b"
+                        key={`${row.stepId ?? row.stepPosition}:${row.channel}`}
+                      >
                         <td className="p-2">
-                          {row.players?.nome ?? "—"}
-                          <br />
-                          <span className="text-xs text-muted-foreground">
-                            {row.players?.email ?? row.players?.telefone ?? ""}
-                          </span>
+                          {row.stepPosition === null ? "Legado" : `Etapa ${row.stepPosition + 1}`}
                         </td>
-                        <td className="p-2">{row.event_type}</td>
-                        <td className="p-2">{new Date(row.occurred_at).toLocaleString("pt-BR")}</td>
-                        <td className="p-2">
-                          {Number(row.monetary_value ?? 0).toLocaleString("pt-BR", {
-                            style: "currency",
-                            currency: "BRL",
-                          })}
-                        </td>
+                        <td className="p-2 uppercase">{row.channel}</td>
+                        <td className="p-2">{row.sent}</td>
+                        <td className="p-2">{row.delivered || "—"}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-            ) : null}
-          </section>
+            </section>
+          ) : null}
+          {data.canViewSensitive ? (
+            <section className="rounded-lg border p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h2 className="font-semibold">Conversões auditáveis</h2>
+                  <p className="text-xs text-muted-foreground">
+                    Restrito a administradores e super administradores.
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    className="rounded-md border px-3 py-2 text-sm"
+                    onClick={() => setDetailsOpen(true)}
+                  >
+                    Ver conversões
+                  </button>
+                  <button
+                    className="rounded-md border px-3 py-2 text-sm"
+                    onClick={async () => {
+                      const result = await exportConversionDrilldownCsv({
+                        data: { sourceType, sourceId },
+                      });
+                      const url = URL.createObjectURL(
+                        new Blob([result.csv], { type: "text/csv;charset=utf-8" }),
+                      );
+                      const anchor = document.createElement("a");
+                      anchor.href = url;
+                      anchor.download = `conversoes-${sourceId}.csv`;
+                      anchor.click();
+                      URL.revokeObjectURL(url);
+                    }}
+                  >
+                    Exportar CSV
+                  </button>
+                </div>
+              </div>
+              {detailsOpen && details.isError ? (
+                <p className="mt-3 text-sm text-destructive">
+                  Acesso restrito ou falha ao carregar.
+                </p>
+              ) : null}
+              {details.data ? (
+                <div className="mt-4 overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b text-left">
+                        <th className="p-2">Jogador</th>
+                        <th className="p-2">Evento</th>
+                        <th className="p-2">Data</th>
+                        <th className="p-2">Valor</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {details.data.rows.map((row: any) => (
+                        <tr className="border-b" key={`${row.event_type}:${row.event_id}`}>
+                          <td className="p-2">
+                            {row.players?.nome ?? "—"}
+                            <br />
+                            <span className="text-xs text-muted-foreground">
+                              {row.players?.email ?? row.players?.telefone ?? ""}
+                            </span>
+                          </td>
+                          <td className="p-2">{row.event_type}</td>
+                          <td className="p-2">
+                            {new Date(row.occurred_at).toLocaleString("pt-BR")}
+                          </td>
+                          <td className="p-2">
+                            {Number(row.monetary_value ?? 0).toLocaleString("pt-BR", {
+                              style: "currency",
+                              currency: "BRL",
+                            })}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
+            </section>
+          ) : null}
         </>
       )}
     </main>

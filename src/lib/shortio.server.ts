@@ -26,6 +26,8 @@ export type LinkTrackingContext = {
   enabled?: boolean;
   experimentId?: string | null;
   experimentVariant?: "A" | "B" | null;
+  journeyStepId?: string | null;
+  journeyStepPosition?: number | null;
 };
 
 type TenantShortioSettings = {
@@ -364,6 +366,8 @@ async function persistDispatch(args: {
         sent_url: args.sentUrl,
         experiment_id: args.context.experimentId ?? null,
         experiment_variant: args.context.experimentVariant ?? null,
+        journey_step_id: args.context.journeyStepId ?? null,
+        journey_step_position: args.context.journeyStepPosition ?? null,
       },
       { onConflict: "tenant_id,idempotency_key", ignoreDuplicates: true },
     )

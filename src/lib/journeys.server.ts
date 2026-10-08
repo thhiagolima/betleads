@@ -377,7 +377,12 @@ async function executeEnrollment(id: string): Promise<void> {
       playerId: enrollment.player_id,
       tenantId: enrollment.tenant_id,
       triggerName: `journey:${enrollment.journey_id}`,
-      linkTrackingOrigin: { sourceType: "journey", sourceId: enrollment.journey_id },
+      linkTrackingOrigin: {
+        sourceType: "journey",
+        sourceId: enrollment.journey_id,
+        journeyStepId: step.id,
+        journeyStepPosition: step.position,
+      },
       variables: vars,
       linkTrackingEnabled: step.config.track_links !== false,
       deliveryKey: run.idempotency_key,
@@ -439,6 +444,8 @@ async function executeEnrollment(id: string): Promise<void> {
         recipientPlayerId: enrollment.player_id,
         messageLogType: "email_send_logs",
         enabled: step.config.track_links !== false,
+        journeyStepId: step.id,
+        journeyStepPosition: step.position,
       },
     });
     if (!result.ok) throw new Error(JSON.stringify(result.body));

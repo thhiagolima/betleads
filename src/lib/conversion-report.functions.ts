@@ -3,26 +3,33 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { resolveOperationalTenantId } from "./tenant-access.server";
+import { canAccessConversionDrilldown, uniqueDeliveryCount } from "./conversion-report";
 
 const inputSchema = z.object({
   sourceType: z.enum(["campaign", "journey"]),
   sourceId: z.string().uuid(),
 });
 
-async function requireConversionReportAdmin(context: any, tenantId: string) {
+async function hasConversionReportAdmin(context: any, tenantId: string) {
   const db = context.supabase as any;
   const { data: superAdmin, error: superAdminError } = await db.rpc("is_super_admin", {
     _user_id: context.userId,
   });
   if (superAdminError) throw new Error("Não foi possível validar a permissão.");
-  if (superAdmin) return;
+  if (superAdmin) return true;
   const { data: membership, error } = await db
     .from("user_roles")
     .select("role")
     .eq("tenant_id", tenantId)
     .eq("user_id", context.userId)
     .maybeSingle();
-  if (error || membership?.role !== "admin") throw new Error("Acesso restrito a administradores.");
+  if (error) throw new Error("Não foi possível validar a permissão.");
+  return canAccessConversionDrilldown(membership?.role ?? null, false);
+}
+
+async function requireConversionReportAdmin(context: any, tenantId: string) {
+  if (!(await hasConversionReportAdmin(context, tenantId)))
+    throw new Error("Acesso restrito a administradores.");
 }
 
 const drilldownSchema = inputSchema.extend({
@@ -43,6 +50,14 @@ export const getConversionDataHealth = createServerFn({ method: "GET" })
       .eq("source_type", data.sourceType)
       .eq("source_id", data.sourceId);
     if (error) throw new Error(error.message);
+    const issueSince = new Date(Date.now() - 24 * 60 * 60_000).toISOString();
+    const { data: issues, error: issuesError } = await db
+      .from("conversion_attribution_issues")
+      .select("reason,source_type,source_id")
+      .eq("tenant_id", tenantId)
+      .gte("created_at", issueSince);
+    if (issuesError && !String(issuesError.message).includes("permission"))
+      throw new Error(issuesError.message);
     const rows = dispatches ?? [];
     const preparedStale = rows.filter(
       (row: any) => row.send_status === "prepared" && row.created_at < staleAt,
@@ -63,6 +78,17 @@ export const getConversionDataHealth = createServerFn({ method: "GET" })
         code: "click_sync_stale",
         severity: "warning",
         message: `${syncStale} link(s) ainda não possuem sincronização recente de cliques.`,
+      });
+    const relevantIssues = (issues ?? []).filter(
+      (issue: any) =>
+        !issue.source_id ||
+        (issue.source_type === data.sourceType && issue.source_id === data.sourceId),
+    );
+    if (relevantIssues.length)
+      alerts.push({
+        code: "attribution_rejected",
+        severity: "warning",
+        message: `${relevantIssues.length} evento(s) sem atribuição determinística nas últimas 24 horas. Verifique token, origem e envio.`,
       });
     return { healthy: alerts.length === 0, alerts };
   });
@@ -148,7 +174,9 @@ export const getConversionReport = createServerFn({ method: "GET" })
     const [dispatchResult, attributionResult] = await Promise.all([
       db
         .from("link_dispatches")
-        .select("id,tracked_link_id,send_status,delivery_status,sent_at,updated_at")
+        .select(
+          "id,tracked_link_id,idempotency_key,message_log_id,send_status,delivery_status,sent_at,updated_at,channel,journey_step_id,journey_step_position",
+        )
         .eq("tenant_id", tenantId)
         .eq("source_type", data.sourceType)
         .eq("source_id", data.sourceId),
@@ -165,12 +193,15 @@ export const getConversionReport = createServerFn({ method: "GET" })
     const dispatches = dispatchResult.data ?? [];
     const attributions = attributionResult.data ?? [];
     const linkIds = dispatches.map((item: any) => item.tracked_link_id).filter(Boolean);
-    const { data: snapshots, error: snapshotError } = linkIds.length
-      ? await db
-          .from("link_click_snapshots")
-          .select("tracked_link_id,clicks,snapshot_at")
-          .in("tracked_link_id", linkIds)
-      : { data: [], error: null };
+    const [{ data: snapshots, error: snapshotError }, canViewSensitive] = await Promise.all([
+      linkIds.length
+        ? await db
+            .from("link_click_snapshots")
+            .select("tracked_link_id,clicks,human_clicks,snapshot_at")
+            .in("tracked_link_id", linkIds)
+        : Promise.resolve({ data: [], error: null }),
+      hasConversionReportAdmin(context, tenantId),
+    ]);
     if (snapshotError) throw new Error(snapshotError.message);
     const clicksByLink = new Map<string, { clicks: number; snapshot_at: string }>();
     for (const snapshot of snapshots ?? []) {
@@ -178,8 +209,11 @@ export const getConversionReport = createServerFn({ method: "GET" })
       if (!previous || snapshot.snapshot_at > previous.snapshot_at)
         clicksByLink.set(snapshot.tracked_link_id, snapshot);
     }
-    const sent = dispatches.filter((item: any) => item.send_status === "sent").length;
-    const delivered = dispatches.filter((item: any) => item.delivery_status === "delivered").length;
+    const sent = uniqueDeliveryCount(dispatches, (item) => item.send_status === "sent");
+    const deliveredCount = uniqueDeliveryCount(
+      dispatches,
+      (item) => item.delivery_status === "delivered",
+    );
     const clicked = [...clicksByLink.values()].reduce(
       (sum, item) => sum + Number(item.clicks ?? 0),
       0,
@@ -202,7 +236,7 @@ export const getConversionReport = createServerFn({ method: "GET" })
         .at(-1) ?? null;
     return {
       sent,
-      delivered: delivered || null,
+      delivered: deliveredCount || null,
       clicked: clicksByLink.size ? clicked : null,
       registered: count("registered"),
       loginOrGame: count("login") + count("game"),
@@ -219,6 +253,27 @@ export const getConversionReport = createServerFn({ method: "GET" })
         )
         .reduce((sum: number, item: any) => sum + Number(item.monetary_value ?? 0), 0),
       latest,
+      canViewSensitive,
+      byStepChannel: Array.from(
+        dispatches.reduce((groups: Map<string, any>, row: any) => {
+          const key = `${row.journey_step_position ?? "-"}:${row.channel}`;
+          const current = groups.get(key) ?? {
+            stepId: row.journey_step_id,
+            stepPosition: row.journey_step_position,
+            channel: row.channel,
+            rows: [],
+          };
+          current.rows.push(row);
+          groups.set(key, current);
+          return groups;
+        }, new Map<string, any>()),
+      ).map(([, group]: any) => ({
+        stepId: group.stepId,
+        stepPosition: group.stepPosition,
+        channel: group.channel,
+        sent: uniqueDeliveryCount(group.rows, (row) => row.send_status === "sent"),
+        delivered: uniqueDeliveryCount(group.rows, (row) => row.delivery_status === "delivered"),
+      })),
       historical: dispatches.length === 0 && attributions.length === 0,
     };
   });

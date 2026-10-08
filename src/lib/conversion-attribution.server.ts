@@ -34,9 +34,27 @@ function isUuid(value: string | null): value is string {
  * separately as assisted, never added to direct revenue.
  */
 export async function attributeConversionEvent(input: AttributionEvent) {
-  if (!isUuid(input.trackingToken)) return { attributed: false as const, reason: "missing_token" };
-
   const db = supabaseAdmin as any;
+  const reject = async (
+    reason:
+      "missing_token" | "token_without_dispatch" | "invalid_origin_or_player" | "dispatch_not_sent",
+    dispatch?: Dispatch | null,
+  ) => {
+    const { error } = await db.from("conversion_attribution_issues").upsert(
+      {
+        tenant_id: input.tenantId,
+        event_type: input.eventType,
+        event_id: input.eventId,
+        reason,
+        source_type: dispatch?.source_type ?? null,
+        source_id: isUuid(dispatch?.source_id ?? null) ? dispatch!.source_id : null,
+      },
+      { onConflict: "tenant_id,event_type,event_id,reason", ignoreDuplicates: true },
+    );
+    if (error) console.error("Falha ao registrar alerta de atribuição", error.message);
+    return { attributed: false as const, reason };
+  };
+  if (!isUuid(input.trackingToken)) return reject("missing_token");
   const { data: dispatch, error: dispatchError } = await db
     .from("link_dispatches")
     .select("id,source_type,source_id,recipient_player_id,tracking_token,sent_at")
@@ -45,7 +63,7 @@ export async function attributeConversionEvent(input: AttributionEvent) {
     .maybeSingle();
   if (dispatchError)
     throw new Error(`Falha ao resolver token de atribuição: ${dispatchError.message}`);
-  if (!dispatch) return { attributed: false as const, reason: "token_without_dispatch" };
+  if (!dispatch) return reject("token_without_dispatch");
 
   const candidate = dispatch as Dispatch;
   if (
@@ -53,9 +71,9 @@ export async function attributeConversionEvent(input: AttributionEvent) {
     !isUuid(candidate.source_id) ||
     (candidate.recipient_player_id && candidate.recipient_player_id !== input.playerId)
   ) {
-    return { attributed: false as const, reason: "invalid_origin_or_player" };
+    return reject("invalid_origin_or_player", candidate);
   }
-  if (!candidate.sent_at) return { attributed: false as const, reason: "dispatch_not_sent" };
+  if (!candidate.sent_at) return reject("dispatch_not_sent", candidate);
 
   const sentAt = Date.parse(candidate.sent_at);
   const occurredAt = Date.parse(input.occurredAt);

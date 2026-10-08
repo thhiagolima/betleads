@@ -520,7 +520,10 @@ export async function sendSmsInternal(args: {
   tenantId?: string | null;
   linkTrackingEnabled?: boolean;
   /** Structured origin for campaign/journey attribution. Never infer this from display text. */
-  linkTrackingOrigin?: Pick<LinkTrackingContext, "sourceType" | "sourceId">;
+  linkTrackingOrigin?: Pick<
+    LinkTrackingContext,
+    "sourceType" | "sourceId" | "journeyStepId" | "journeyStepPosition"
+  >;
   /** Stable identity supplied by a queue/worker when retrying one delivery. */
   deliveryKey?: string | null;
 }) {
@@ -595,6 +598,8 @@ export async function sendSmsInternal(args: {
               ? "test"
               : "manual"),
       sourceId: args.linkTrackingOrigin?.sourceId ?? args.flowId ?? args.triggerName ?? null,
+      journeyStepId: args.linkTrackingOrigin?.journeyStepId ?? null,
+      journeyStepPosition: args.linkTrackingOrigin?.journeyStepPosition ?? null,
       recipientPlayerId: args.playerId ?? null,
       messageLogType: "sms_send_logs",
       deliveryKey,
