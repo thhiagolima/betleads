@@ -64,6 +64,7 @@ import { Route as ApiPublicPrecallDispatchRouteImport } from './routes/api/publi
 import { Route as ApiPublicShortioSyncRouteImport } from './routes/api/public/shortio/sync'
 import { Route as ApiPublicWebhookEventoRouteImport } from './routes/api/public/webhook.$evento'
 import { Route as ApiPublicEmailImgAssetIdFilenameRouteImport } from './routes/api/public/email-img.$assetId.$filename'
+import { Route as ApiPublicInfobipEmailEventsRouteImport } from './routes/api/public/infobip/email/events'
 import { Route as ApiPublicInfobipVoiceCmlRouteImport } from './routes/api/public/infobip/voice/cml'
 import { Route as ApiPublicInfobipVoiceEventsRouteImport } from './routes/api/public/infobip/voice/events'
 import { Route as ApiPublicWebhookTokenEventoRouteImport } from './routes/api/public/webhook.$token.$evento'
@@ -355,6 +356,12 @@ const ApiPublicEmailImgAssetIdFilenameRoute =
     path: '/api/public/email-img/$assetId/$filename',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicInfobipEmailEventsRoute =
+  ApiPublicInfobipEmailEventsRouteImport.update({
+    id: '/api/public/infobip/email/events',
+    path: '/api/public/infobip/email/events',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicInfobipVoiceCmlRoute =
   ApiPublicInfobipVoiceCmlRouteImport.update({
     id: '/api/public/infobip/voice/cml',
@@ -430,6 +437,7 @@ export interface FileRoutesByFullPath {
   '/api/public/shortio/sync': typeof ApiPublicShortioSyncRoute
   '/api/public/webhook/$evento': typeof ApiPublicWebhookEventoRoute
   '/api/public/email-img/$assetId/$filename': typeof ApiPublicEmailImgAssetIdFilenameRoute
+  '/api/public/infobip/email/events': typeof ApiPublicInfobipEmailEventsRoute
   '/api/public/infobip/voice/cml': typeof ApiPublicInfobipVoiceCmlRoute
   '/api/public/infobip/voice/events': typeof ApiPublicInfobipVoiceEventsRoute
   '/api/public/webhook/$token/$evento': typeof ApiPublicWebhookTokenEventoRoute
@@ -490,6 +498,7 @@ export interface FileRoutesByTo {
   '/api/public/shortio/sync': typeof ApiPublicShortioSyncRoute
   '/api/public/webhook/$evento': typeof ApiPublicWebhookEventoRoute
   '/api/public/email-img/$assetId/$filename': typeof ApiPublicEmailImgAssetIdFilenameRoute
+  '/api/public/infobip/email/events': typeof ApiPublicInfobipEmailEventsRoute
   '/api/public/infobip/voice/cml': typeof ApiPublicInfobipVoiceCmlRoute
   '/api/public/infobip/voice/events': typeof ApiPublicInfobipVoiceEventsRoute
   '/api/public/webhook/$token/$evento': typeof ApiPublicWebhookTokenEventoRoute
@@ -551,6 +560,7 @@ export interface FileRoutesById {
   '/api/public/shortio/sync': typeof ApiPublicShortioSyncRoute
   '/api/public/webhook/$evento': typeof ApiPublicWebhookEventoRoute
   '/api/public/email-img/$assetId/$filename': typeof ApiPublicEmailImgAssetIdFilenameRoute
+  '/api/public/infobip/email/events': typeof ApiPublicInfobipEmailEventsRoute
   '/api/public/infobip/voice/cml': typeof ApiPublicInfobipVoiceCmlRoute
   '/api/public/infobip/voice/events': typeof ApiPublicInfobipVoiceEventsRoute
   '/api/public/webhook/$token/$evento': typeof ApiPublicWebhookTokenEventoRoute
@@ -613,6 +623,7 @@ export interface FileRouteTypes {
     | '/api/public/shortio/sync'
     | '/api/public/webhook/$evento'
     | '/api/public/email-img/$assetId/$filename'
+    | '/api/public/infobip/email/events'
     | '/api/public/infobip/voice/cml'
     | '/api/public/infobip/voice/events'
     | '/api/public/webhook/$token/$evento'
@@ -673,6 +684,7 @@ export interface FileRouteTypes {
     | '/api/public/shortio/sync'
     | '/api/public/webhook/$evento'
     | '/api/public/email-img/$assetId/$filename'
+    | '/api/public/infobip/email/events'
     | '/api/public/infobip/voice/cml'
     | '/api/public/infobip/voice/events'
     | '/api/public/webhook/$token/$evento'
@@ -733,6 +745,7 @@ export interface FileRouteTypes {
     | '/api/public/shortio/sync'
     | '/api/public/webhook/$evento'
     | '/api/public/email-img/$assetId/$filename'
+    | '/api/public/infobip/email/events'
     | '/api/public/infobip/voice/cml'
     | '/api/public/infobip/voice/events'
     | '/api/public/webhook/$token/$evento'
@@ -785,6 +798,7 @@ export interface RootRouteChildren {
   ApiPublicShortioSyncRoute: typeof ApiPublicShortioSyncRoute
   ApiPublicWebhookEventoRoute: typeof ApiPublicWebhookEventoRoute
   ApiPublicEmailImgAssetIdFilenameRoute: typeof ApiPublicEmailImgAssetIdFilenameRoute
+  ApiPublicInfobipEmailEventsRoute: typeof ApiPublicInfobipEmailEventsRoute
   ApiPublicInfobipVoiceCmlRoute: typeof ApiPublicInfobipVoiceCmlRoute
   ApiPublicInfobipVoiceEventsRoute: typeof ApiPublicInfobipVoiceEventsRoute
   ApiPublicWebhookTokenEventoRoute: typeof ApiPublicWebhookTokenEventoRoute
@@ -1177,6 +1191,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicEmailImgAssetIdFilenameRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/infobip/email/events': {
+      id: '/api/public/infobip/email/events'
+      path: '/api/public/infobip/email/events'
+      fullPath: '/api/public/infobip/email/events'
+      preLoaderRoute: typeof ApiPublicInfobipEmailEventsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/infobip/voice/cml': {
       id: '/api/public/infobip/voice/cml'
       path: '/api/public/infobip/voice/cml'
@@ -1311,6 +1332,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicShortioSyncRoute: ApiPublicShortioSyncRoute,
   ApiPublicWebhookEventoRoute: ApiPublicWebhookEventoRoute,
   ApiPublicEmailImgAssetIdFilenameRoute: ApiPublicEmailImgAssetIdFilenameRoute,
+  ApiPublicInfobipEmailEventsRoute: ApiPublicInfobipEmailEventsRoute,
   ApiPublicInfobipVoiceCmlRoute: ApiPublicInfobipVoiceCmlRoute,
   ApiPublicInfobipVoiceEventsRoute: ApiPublicInfobipVoiceEventsRoute,
   ApiPublicWebhookTokenEventoRoute: ApiPublicWebhookTokenEventoRoute,
