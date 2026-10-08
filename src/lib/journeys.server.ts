@@ -4,13 +4,18 @@ import { callInfobipVoice, normalizeE164BR } from "./infobip-voice.server";
 import { sendSmsInternal } from "./sms.functions";
 import { buildPlayerVariables, renderTemplate } from "./template-vars.server";
 import { detectTriggersForPlayer } from "./triggers.server";
-import { evaluateVoiceContactPolicy } from "./consent.server";
+import { evaluateVoiceContactPolicy, isChannelRevoked } from "./consent.server";
+import { journeyEntryKey, nextJourneyWindowOpen, qualifiesForInactivity, triggerOccurrence } from "./journey-policy";
+
+export { nextJourneyWindowOpen } from "./journey-policy";
 
 type JourneyRow = {
   id: string;
   status: string;
   exit_rules: Record<string, boolean>;
   entry_rules: Record<string, unknown>;
+  daily_limit: number;
+  cooldown_hours: number;
 };
 type EnrollmentRow = {
   id: string;
@@ -55,6 +60,7 @@ async function enrollEligibleJourneyPlayers(limit = 500) {
     JourneyRow & {
       tenant_id: string;
       trigger_type: string;
+      trigger_config: Record<string, unknown>;
       version: number;
       entry_rules: Record<string, unknown>;
     }
@@ -68,14 +74,24 @@ async function enrollEligibleJourneyPlayers(limit = 500) {
       const audience = String(journey.entry_rules?.audience ?? "all_active");
       if (audience === "vip" && !player.vip) continue;
       if (audience === "manual") continue;
-      if (!detectTriggersForPlayer(player as never).includes(journey.trigger_type as never))
-        continue;
+      const matches = journey.trigger_type === "inactivity"
+        ? qualifiesForInactivity(player as Record<string, unknown>, journey.trigger_config ?? {})
+        : detectTriggersForPlayer(player as never).includes(journey.trigger_type as never);
+      if (!matches) continue;
+      if (journey.entry_rules?.reentry === "after_cooldown") {
+        const hours = Math.max(1, Number(journey.entry_rules.reentry_cooldown_hours ?? journey.cooldown_hours ?? 24));
+        const { data: previous } = await db.from("journey_enrollments").select("created_at")
+          .eq("journey_id", journey.id).eq("player_id", player.id)
+          .order("created_at", { ascending: false }).limit(1).maybeSingle();
+        if (previous && Date.parse(previous.created_at) > Date.now() - hours * 3600_000) continue;
+      }
+      const occurrence = triggerOccurrence(journey.trigger_type, player as Record<string, unknown>, journey.trigger_config ?? {});
       const { error } = await db.from("journey_enrollments").insert({
         tenant_id: journey.tenant_id,
         journey_id: journey.id,
         journey_version: journey.version,
         player_id: player.id,
-        entry_key: "default",
+        entry_key: journeyEntryKey(journey.trigger_type, journey.entry_rules ?? {}, String(occurrence)),
         metadata: {
           trigger: journey.trigger_type,
           deposited_before_entry: Number(player.total_depositado ?? 0),
@@ -151,6 +167,17 @@ async function execution(enrollment: EnrollmentRow, step: StepRow, channel: stri
   return data as { id: string; idempotency_key: string };
 }
 
+async function reserveDelivery(enrollment: EnrollmentRow, step: StepRow, journey: JourneyRow) {
+  const { data, error } = await db.rpc("reserve_journey_delivery", {
+    p_tenant_id: enrollment.tenant_id, p_journey_id: enrollment.journey_id,
+    p_enrollment_id: enrollment.id, p_step_id: step.id, p_step_position: step.position,
+    p_player_id: enrollment.player_id, p_channel: step.step_type,
+    p_daily_limit: journey.daily_limit, p_cooldown_hours: journey.cooldown_hours,
+  });
+  if (error) throw new Error(error.message);
+  return (data?.[0] ?? null) as { execution_id: string | null; idempotency_key: string | null; retry_at: string | null; blocked_reason: string | null } | null;
+}
+
 async function finishExecution(id: string, patch: Record<string, unknown>) {
   await db
     .from("journey_step_executions")
@@ -168,25 +195,6 @@ async function playerFor(enrollment: EnrollmentRow) {
   return data;
 }
 
-function nextWindowOpen(rules: Record<string, unknown>): string | null {
-  const start = typeof rules.window_start === "string" ? rules.window_start : null;
-  const end = typeof rules.window_end === "string" ? rules.window_end : null;
-  if (!start || !end || !/^\d\d:\d\d$/.test(start) || !/^\d\d:\d\d$/.test(end)) return null;
-  const now = new Date();
-  const [startHour, startMinute] = start.split(":").map(Number);
-  const [endHour, endMinute] = end.split(":").map(Number);
-  const minute = now.getHours() * 60 + now.getMinutes();
-  const startAt = startHour * 60 + startMinute;
-  const endAt = endHour * 60 + endMinute;
-  const allowed =
-    startAt <= endAt ? minute >= startAt && minute < endAt : minute >= startAt || minute < endAt;
-  if (allowed) return null;
-  const next = new Date(now);
-  next.setHours(startHour, startMinute, 0, 0);
-  if (minute >= endAt && startAt <= endAt) next.setDate(next.getDate() + 1);
-  return next.toISOString();
-}
-
 async function executeEnrollment(id: string): Promise<void> {
   const { data: enrollmentRaw, error: enrollmentError } = await db
     .from("journey_enrollments")
@@ -199,7 +207,7 @@ async function executeEnrollment(id: string): Promise<void> {
 
   const { data: journeyRaw } = await db
     .from("journeys")
-    .select("id,status,exit_rules")
+    .select("id,status,exit_rules,entry_rules,daily_limit,cooldown_hours")
     .eq("id", enrollment.journey_id)
     .maybeSingle();
   const journey = journeyRaw as JourneyRow | null;
@@ -207,7 +215,7 @@ async function executeEnrollment(id: string): Promise<void> {
     await release(enrollment, { status: "paused" });
     return;
   }
-  const nextOpen = nextWindowOpen(journey.entry_rules ?? {});
+  const nextOpen = nextJourneyWindowOpen(journey.entry_rules ?? {});
   if (nextOpen) {
     await release(enrollment, { status: "waiting", next_run_at: nextOpen });
     await event(enrollment, "deferred_outside_window", { next_run_at: nextOpen });
@@ -271,9 +279,50 @@ async function executeEnrollment(id: string): Promise<void> {
   if (!player) throw new Error("Jogador da jornada não encontrado");
   const vars = buildPlayerVariables(player);
   const channel = step.step_type;
-  const run = await execution(enrollment, step, channel);
+  const consentTarget = channel === "email" ? player.email : player.telefone;
+  if (
+    (channel === "sms" || channel === "email") &&
+    consentTarget &&
+    (await isChannelRevoked(enrollment.tenant_id, channel, consentTarget))
+  ) {
+    await release(enrollment, {
+      status: "active",
+      current_position: step.position + 1,
+      next_run_at: new Date().toISOString(),
+      attempts: 0,
+    });
+    await event(enrollment, "step_skipped", {
+      channel,
+      step_position: step.position,
+      reason: "consent_revoked",
+    });
+    return;
+  }
+  const reservation = await reserveDelivery(enrollment, step, journey);
+  if (!reservation?.execution_id || !reservation.idempotency_key) {
+    const retryAt = reservation?.retry_at ?? new Date(Date.now() + 60_000).toISOString();
+    await release(enrollment, { status: "waiting", next_run_at: retryAt });
+    await event(enrollment, "step_deferred", { channel, step_position: step.position, reason: reservation?.blocked_reason ?? "limit" });
+    return;
+  }
+  const run = { id: reservation.execution_id, idempotency_key: reservation.idempotency_key };
+  const finalExitReason = await shouldExit(enrollment, journey.exit_rules ?? {});
+  if (finalExitReason) {
+    await finishExecution(run.id, { status: "skipped", provider: "exit_policy" });
+    await release(enrollment, {
+      status: "exited", exited_at: new Date().toISOString(), exit_reason: finalExitReason,
+    });
+    await event(enrollment, "exited", { reason: finalExitReason, step_position: step.position });
+    return;
+  }
 
   if (step.step_type === "sms") {
+    if (await isChannelRevoked(enrollment.tenant_id, "sms", player.telefone ?? "")) {
+      await finishExecution(run.id, { status: "skipped", provider: "consent" });
+      await release(enrollment, { status: "active", current_position: step.position + 1, next_run_at: new Date().toISOString(), attempts: 0 });
+      await event(enrollment, "step_skipped", { channel, step_position: step.position, reason: "consent_revoked" });
+      return;
+    }
     const content = renderTemplate(String(step.config.content ?? ""), vars);
     const result = await sendSmsInternal({
       to: player.telefone ?? "",
@@ -293,12 +342,17 @@ async function executeEnrollment(id: string): Promise<void> {
     });
   } else if (step.step_type === "email") {
     if (!player.email) throw new Error("Jogador sem e-mail");
+    if (await isChannelRevoked(enrollment.tenant_id, "email", player.email)) {
+      await finishExecution(run.id, { status: "skipped", provider: "consent" });
+      await release(enrollment, { status: "active", current_position: step.position + 1, next_run_at: new Date().toISOString(), attempts: 0 });
+      await event(enrollment, "step_skipped", { channel, step_position: step.position, reason: "consent_revoked" });
+      return;
+    }
     const templateId = String(step.config.template_id ?? "");
-    const { data: template } = await supabaseAdmin
-      .from("email_templates")
-      .select("subject,body_html")
-      .eq("id", templateId)
-      .maybeSingle();
+    const snapshot = step.config.template_snapshot as { subject?: string; body_html?: string } | undefined;
+    const { data: template } = snapshot?.subject && snapshot.body_html
+      ? { data: { subject: snapshot.subject, body_html: snapshot.body_html } }
+      : await supabaseAdmin.from("email_templates").select("subject,body_html").eq("id", templateId).eq("tenant_id", enrollment.tenant_id).maybeSingle();
     if (!template) throw new Error("Template de e-mail não encontrado");
     const sender = await resolveSender(
       String(step.config.sender_id ?? "") || null,
@@ -420,6 +474,13 @@ async function executeEnrollment(id: string): Promise<void> {
 }
 
 export async function runJourneyDispatcher(limit = 100) {
+  // A cron may be installed before the final operational acceptance. The
+  // dispatcher itself remains fail-closed until the platform enables it.
+  if (process.env.JOURNEYS_DISPATCH_ENABLED !== "true") {
+    return { enrolled: 0, claimed: 0, processed: 0, failed: 0, disabled: true };
+  }
+  const { error: recoveryError } = await db.rpc("recover_orphaned_journey_claims");
+  if (recoveryError) throw new Error(recoveryError.message);
   const enrolled = await enrollEligibleJourneyPlayers(limit);
   const { data: claimed, error } = await db.rpc("claim_due_journey_enrollments", {
     p_limit: limit,
@@ -440,6 +501,11 @@ export async function runJourneyDispatcher(limit = 100) {
         .eq("id", row.id)
         .maybeSingle();
       if (enrollment) {
+        const attempts = Number(enrollment.attempts ?? 0) + 1;
+        const { data: retryJourney } = await db.from("journeys").select("entry_rules").eq("id", enrollment.journey_id).maybeSingle();
+        const maxAttempts = Math.min(10, Math.max(1, Number(retryJourney?.entry_rules?.max_attempts ?? 3)));
+        const retryBaseSeconds = Math.min(3600, Math.max(10, Number(retryJourney?.entry_rules?.retry_base_seconds ?? 60)));
+        const retryAt = new Date(Date.now() + Math.min(6 * 3600_000, retryBaseSeconds * 1000 * 2 ** Math.max(0, attempts - 1))).toISOString();
         await db
           .from("journey_step_executions")
           .update({
@@ -449,12 +515,12 @@ export async function runJourneyDispatcher(limit = 100) {
           })
           .eq("enrollment_id", row.id)
           .eq("status", "claimed");
-        await release(enrollment as EnrollmentRow, {
-          status: "failed",
-          exit_reason: message.slice(0, 500),
-          attempts: Number(enrollment.attempts ?? 0) + 1,
+        await release(enrollment as EnrollmentRow, attempts < maxAttempts
+          ? { status: "waiting", next_run_at: retryAt, attempts }
+          : { status: "failed", exit_reason: message.slice(0, 500), attempts });
+        await event(enrollment as EnrollmentRow, attempts < maxAttempts ? "retry_scheduled" : "failed", {
+          error: message, attempts, retry_at: attempts < maxAttempts ? retryAt : null,
         });
-        await event(enrollment as EnrollmentRow, "failed", { error: message });
       }
       console.error("[journey dispatcher] execution failed", {
         enrollmentId: row.id,

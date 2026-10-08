@@ -52,13 +52,16 @@ export function JourneysHub() {
   const [newName, setNewName] = useState("");
   const [entryMode, setEntryMode] = useState<"event" | "inactivity" | "manual">("event");
   const [newTrigger, setNewTrigger] = useState("lead_cadastrado");
+  const [inactivityField, setInactivityField] = useState("ultimo_login");
+  const [inactivityHours, setInactivityHours] = useState(168);
   const create = () => {
     window.sessionStorage.setItem(
       "journey-draft",
       JSON.stringify({
         name: newName,
-        trigger: entryMode === "manual" ? "manual" : newTrigger,
+        trigger: entryMode === "manual" ? "manual" : entryMode === "inactivity" ? "inactivity" : newTrigger,
         entryMode,
+        triggerConfig: entryMode === "inactivity" ? { field: inactivityField, hours: inactivityHours } : {},
       }),
     );
     setNewOpen(false);
@@ -316,7 +319,7 @@ export function JourneysHub() {
                 Entrada manual ou API
               </Button>
             </div>
-            {entryMode !== "manual" && (
+            {entryMode === "event" && (
               <label className="block text-sm font-medium">
                 Qual evento
                 <select
@@ -331,6 +334,18 @@ export function JourneysHub() {
                   ))}
                 </select>
               </label>
+            )}
+            {entryMode === "inactivity" && (
+              <div className="grid grid-cols-2 gap-2">
+                <label className="text-sm font-medium">Sem atividade em
+                  <select className="mt-1 flex h-10 w-full rounded-md border bg-background px-3 text-sm" value={inactivityField} onChange={(e) => setInactivityField(e.target.value)}>
+                    <option value="ultimo_login">Login</option><option value="ultimo_jogo">Jogo</option><option value="ultimo_deposito">Depósito</option>
+                  </select>
+                </label>
+                <label className="text-sm font-medium">Horas
+                  <Input type="number" min={1} max={8760} value={inactivityHours} onChange={(e) => setInactivityHours(Number(e.target.value))} />
+                </label>
+              </div>
             )}
           </div>
           <DialogFooter>

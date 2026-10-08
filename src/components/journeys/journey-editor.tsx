@@ -33,7 +33,11 @@ export function JourneyEditor({
   metrics,
 }: {
   id?: string;
-  initial?: { name: string; description: string | null; trigger_type: string };
+  initial?: {
+    name: string; description: string | null; trigger_type: string;
+    trigger_config?: Record<string, unknown>; entry_rules?: Record<string, unknown>;
+    exit_rules?: Record<string, boolean>; daily_limit?: number; cooldown_hours?: number;
+  };
   initialSteps?: SavedStep[];
   metrics?: {
     total: number;
@@ -52,6 +56,7 @@ export function JourneyEditor({
             return JSON.parse(window.sessionStorage.getItem("journey-draft") ?? "null") as {
               name?: string;
               trigger?: string;
+              triggerConfig?: Record<string, unknown>;
             } | null;
           } catch {
             return null;
@@ -102,12 +107,14 @@ export function JourneyEditor({
   const [name, setName] = useState(initial?.name ?? draft?.name ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
   const [trigger, setTrigger] = useState(initial?.trigger_type ?? draft?.trigger ?? "manual");
-  const [dailyLimit, setDailyLimit] = useState(1000);
-  const [cooldownHours, setCooldownHours] = useState(72);
-  const [windowStart, setWindowStart] = useState("08:00");
-  const [windowEnd, setWindowEnd] = useState("22:00");
-  const [audience, setAudience] = useState("all_active");
-  const [exitRules, setExitRules] = useState<Record<string, boolean>>({
+  const [triggerConfig] = useState(initial?.trigger_config ?? draft?.triggerConfig ?? {});
+  const [dailyLimit, setDailyLimit] = useState(initial?.daily_limit ?? 1000);
+  const [cooldownHours, setCooldownHours] = useState(initial?.cooldown_hours ?? 72);
+  const [windowStart, setWindowStart] = useState(String(initial?.entry_rules?.window_start ?? "08:00"));
+  const [windowEnd, setWindowEnd] = useState(String(initial?.entry_rules?.window_end ?? "22:00"));
+  const [audience, setAudience] = useState(String(initial?.entry_rules?.audience ?? "all_active"));
+  const [reentry, setReentry] = useState(String(initial?.entry_rules?.reentry ?? "once"));
+  const [exitRules, setExitRules] = useState<Record<string, boolean>>(initial?.exit_rules ?? {
     deposit: true,
     first_deposit: true,
     login: false,
@@ -174,7 +181,16 @@ export function JourneyEditor({
               : []
             : s.kind === "email"
               ? s.templateId
-                ? [{ step_type: "email", config: { template_id: s.templateId } }]
+                ? [{
+                    step_type: "email",
+                    config: (() => {
+                      const template = (templates.data?.items ?? []).find((item) => item.id === s.templateId);
+                      return {
+                        template_id: s.templateId,
+                        ...(template ? { template_snapshot: { id: template.id, subject: template.assunto, body_html: template.corpo, version: template.version } } : {}),
+                      };
+                    })(),
+                  }]
                 : []
               : s.assetId
                 ? [
@@ -197,11 +213,17 @@ export function JourneyEditor({
             name,
             description: description || null,
             trigger_type: trigger,
+            trigger_config: triggerConfig,
             exit_rules: exitRules,
             entry_rules: {
               audience,
               window_start: windowStart,
               window_end: windowEnd,
+              weekdays: [1, 2, 3, 4, 5, 6, 0],
+              reentry,
+              reentry_cooldown_hours: cooldownHours,
+              max_attempts: 3,
+              retry_base_seconds: 60,
             },
             daily_limit: dailyLimit,
             cooldown_hours: cooldownHours,
@@ -342,6 +364,15 @@ export function JourneyEditor({
               <option value="all_active">Todos os jogadores ativos</option>
               <option value="vip">Somente VIP</option>
             </select>
+            <label className="mt-3 block text-xs text-muted-foreground">
+              Reentrada
+              <select className="mt-1 flex h-10 w-full rounded-md border bg-background px-3 text-sm" value={reentry} onChange={(e) => setReentry(e.target.value)}>
+                <option value="once">Uma única vez</option>
+                <option value="per_occurrence">A cada ocorrência</option>
+                <option value="after_cooldown">Após o cooldown</option>
+                <option value="never">Nunca reentrar</option>
+              </select>
+            </label>
           </div>
           <div>
             <p className="font-medium">Proteção contra excesso</p>

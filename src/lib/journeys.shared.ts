@@ -6,9 +6,6 @@ export const journeyStepTypeSchema = z.enum([
   "sms",
   "email",
   "voice",
-  "condition",
-  "split",
-  "update_player",
   "end",
 ]);
 
@@ -35,6 +32,12 @@ const smsConfigSchema = z.object({
 const emailConfigSchema = z.object({
   template_id: z.string().uuid(),
   sender_id: z.string().uuid().optional(),
+  template_snapshot: z.object({
+    id: z.string().uuid(),
+    subject: z.string().max(255),
+    body_html: z.string(),
+    version: z.number().int().positive().optional(),
+  }).optional(),
 });
 const voiceConfigSchema = z.object({
   asset_id: z.string().uuid(),
@@ -70,21 +73,6 @@ export const journeyStepInputSchema = z.discriminatedUnion("step_type", [
     config: voiceConfigSchema,
   }),
   z.object({
-    step_type: z.literal("condition"),
-    label: z.string().trim().max(120).optional(),
-    config: z.record(z.string(), z.unknown()),
-  }),
-  z.object({
-    step_type: z.literal("split"),
-    label: z.string().trim().max(120).optional(),
-    config: z.record(z.string(), z.unknown()),
-  }),
-  z.object({
-    step_type: z.literal("update_player"),
-    label: z.string().trim().max(120).optional(),
-    config: z.record(z.string(), z.unknown()),
-  }),
-  z.object({
     step_type: z.literal("end"),
     label: z.string().trim().max(120).optional(),
     config: z.object({}),
@@ -101,10 +89,6 @@ export const journeyInputSchema = z.object({
   daily_limit: z.number().int().min(1).max(100000).default(1000),
   cooldown_hours: z.number().int().min(0).max(720).default(72),
   steps: z.array(journeyStepInputSchema).min(1).max(100),
-}).superRefine((value, ctx) => {
-  if (value.trigger_type === "manual" && value.entry_rules.audience === "manual") {
-    ctx.addIssue({ code: "custom", path: ["entry_rules", "audience"], message: "Público manual ainda não está disponível." });
-  }
 });
 
 export type JourneyInput = z.infer<typeof journeyInputSchema>;
