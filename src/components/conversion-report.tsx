@@ -22,8 +22,18 @@ export function ConversionReport({
     denominator ? `${((value / denominator) * 100).toFixed(1)}%` : "—";
   const stages = [
     ["Enviado", data.sent, rate(data.sent)],
-    ["Entregue", data.delivered, "Indisponível: sem callback confiável"],
-    ["Clique", data.clicked, "Indisponível: sincronização por destinatário pendente"],
+    [
+      "Entregue",
+      data.delivered,
+      data.delivered === null ? "Indisponível: sem callback confiável" : rate(data.delivered),
+    ],
+    [
+      "Clique",
+      data.clicked,
+      data.clicked === null
+        ? "Indisponível: sincronização pendente"
+        : `${data.clicked.toLocaleString("pt-BR")} cliques agregados`,
+    ],
     [
       sourceType === "journey" ? "Login ou jogo" : "Cadastro",
       sourceType === "journey" ? data.loginOrGame : data.registered,

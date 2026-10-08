@@ -45,8 +45,7 @@ function extractToken(request: Request): string | null {
 }
 
 function authorizeCallback(request: Request): Response | null {
-  const expected =
-    process.env.SHORT_BRASIL_WEBHOOK_SECRET;
+  const expected = process.env.SHORT_BRASIL_WEBHOOK_SECRET;
   if (!expected) {
     return Response.json(
       { ok: false, error: "SHORT_BRASIL_WEBHOOK_SECRET not configured" },
@@ -210,6 +209,16 @@ async function updateFromPayload(payload: CallbackPayload): Promise<boolean> {
       .eq("idempotency_key", idempotencyKey)
       .select("id");
     matched = !!data && data.length > 0;
+  }
+
+  // A dispatch uses `${sms_log.idempotency_key}:position`; this carries the
+  // provider's confirmed delivery back to the conversion report without ever
+  // treating accepted/sent as delivered.
+  if (idempotencyKey && ["delivered", "failed"].includes(patch.delivery_status)) {
+    await (supabaseAdmin as any)
+      .from("link_dispatches")
+      .update({ delivery_status: patch.delivery_status, delivered_at: deliveredAt })
+      .like("idempotency_key", `${idempotencyKey}:%`);
   }
 
   if (!matched) {
