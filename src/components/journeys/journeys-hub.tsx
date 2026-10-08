@@ -3,7 +3,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, useNavigate } from "@tanstack/react-router";
 import {
+  CalendarDays,
   ChevronRight,
+  CircleDollarSign,
   Mail,
   MessageSquare,
   Pause,
@@ -11,6 +13,8 @@ import {
   Plus,
   Route,
   Search,
+  Send,
+  UsersRound,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -83,6 +87,11 @@ export function JourneysHub() {
   const [filter, setFilter] = useState<"all" | Journey["status"]>("all");
   const [search, setSearch] = useState("");
   const [view, setView] = useState<"journeys" | "queue" | "failures">("journeys");
+  const [period, setPeriod] = useState("Hoje");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [dailyMessageLimit, setDailyMessageLimit] = useState("");
+  const [weeklyMessageLimit, setWeeklyMessageLimit] = useState("");
   const [newOpen, setNewOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [entryMode, setEntryMode] = useState<"event" | "inactivity" | "manual">("event");
@@ -165,19 +174,104 @@ export function JourneysHub() {
       ),
     [journeys.data?.journeys, filter, search],
   );
+  const overview = useMemo(() => {
+    const all = (journeys.data?.journeys ?? []) as Journey[];
+    return all.reduce(
+      (total, journey) => {
+        const metrics = journey.metrics ?? {};
+        total.recovered += Number(metrics.recovered ?? 0);
+        total.sent += Object.values(metrics.sentByChannel ?? {}).reduce(
+          (sum, value) => sum + Number(value),
+          0,
+        );
+        total.returned +=
+          Number(metrics.exits?.deposit ?? 0) + Number(metrics.exits?.first_deposit ?? 0);
+        total.queued +=
+          Number(metrics.byStatus?.active ?? 0) + Number(metrics.byStatus?.waiting ?? 0);
+        return total;
+      },
+      { recovered: 0, sent: 0, returned: 0, queued: 0 },
+    );
+  }, [journeys.data?.journeys]);
   return (
-    <div className="mx-auto w-full max-w-[1180px] space-y-6 p-4 sm:p-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+    <div className="mx-auto w-full max-w-[1480px] space-y-6 p-4 sm:p-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary">Automações</p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight">Jornadas multicanal</h1>
+          <h1 className="mt-1 text-3xl font-semibold tracking-tight sm:text-4xl">Jornadas</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Sequências individuais que combinam SMS, e-mail e voz com esperas e regras de saída.
           </p>
         </div>
-        <Button onClick={() => setNewOpen(true)}>
-          <Plus className="mr-2 h-4 w-4" /> Nova jornada
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => toast.message("Importacao de modelo em breve.")}>
+            Importar modelo
+          </Button>
+          <Button onClick={() => setNewOpen(true)}>
+            <Plus className="mr-2 h-4 w-4" /> Nova jornada
+          </Button>
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="inline-flex rounded-2xl bg-muted p-1">
+          {["Hoje", "Ontem", "7 dias", "30 dias", "Este mes"].map((item) => (
+            <button
+              key={item}
+              onClick={() => setPeriod(item)}
+              className={
+                period === item
+                  ? "rounded-xl bg-background px-3 py-2 text-sm font-semibold shadow-sm"
+                  : "px-3 py-2 text-sm font-medium text-muted-foreground"
+              }
+            >
+              {item}
+            </button>
+          ))}
+        </div>
+        <Button
+          variant="outline"
+          className="rounded-2xl"
+          onClick={() => toast.message("Selecao de intervalo em breve.")}
+        >
+          <CalendarDays className="mr-2 h-4 w-4" />
+          Escolher datas
         </Button>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <OverviewCard
+          icon={CircleDollarSign}
+          label="Recuperado"
+          value={overview.recovered.toLocaleString("pt-BR", {
+            style: "currency",
+            currency: "BRL",
+            maximumFractionDigits: 0,
+          })}
+          detail="Receita atribuida as jornadas"
+          color="emerald"
+        />
+        <OverviewCard
+          icon={Send}
+          label="Mensagens enviadas"
+          value={overview.sent.toLocaleString("pt-BR")}
+          detail={`${period}, todos os canais`}
+          color="blue"
+        />
+        <OverviewCard
+          icon={UsersRound}
+          label="Jogadores que voltaram"
+          value={overview.returned.toLocaleString("pt-BR")}
+          detail={`${overview.queued.toLocaleString("pt-BR")} jogadores na fila`}
+          color="cyan"
+        />
+        <OverviewCard
+          icon={Route}
+          label="Jornadas ativas"
+          value={((journeys.data?.journeys ?? []) as Journey[])
+            .filter((journey) => journey.status === "active")
+            .length.toLocaleString("pt-BR")}
+          detail="Em execucao neste momento"
+          color="slate"
+        />
       </div>
       <Card className="border-primary/20 bg-primary/[0.03]">
         <CardContent className="flex gap-3 p-4 text-sm text-muted-foreground">
@@ -233,15 +327,23 @@ export function JourneysHub() {
             Falhas
           </button>
         </div>
-        <label className="relative block">
-          <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-          <input
-            className="h-10 w-full rounded-md border bg-background pl-9 pr-3 text-sm sm:w-72"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Buscar jornada..."
-          />
-        </label>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => setSettingsOpen(true)}>
+            Configuracoes
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setInfoOpen(true)}>
+            Informacoes
+          </Button>
+          <label className="relative block">
+            <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+            <input
+              className="h-10 w-full rounded-md border bg-background pl-9 pr-3 text-sm sm:w-72"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Buscar jornada..."
+            />
+          </label>
+        </div>
       </div>
       {view !== "journeys" && (
         <Card>
@@ -510,6 +612,78 @@ export function JourneysHub() {
           </CardContent>
         </Card>
       )}
+      <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Configuracoes</DialogTitle>
+            <DialogDescription>Vale para todas as jornadas, em todos os canais.</DialogDescription>
+          </DialogHeader>
+          <div className="rounded-2xl border p-5">
+            <h3 className="font-semibold">Limite de mensagens por pessoa</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Os limites de jornadas e campanhas sao somados. Em branco, nao ha limite.
+            </p>
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              <label className="text-sm font-medium">
+                Maximo em 24 h
+                <Input
+                  className="mt-1"
+                  inputMode="numeric"
+                  placeholder="Sem limite"
+                  value={dailyMessageLimit}
+                  onChange={(event) => setDailyMessageLimit(event.target.value)}
+                />
+              </label>
+              <label className="text-sm font-medium">
+                Maximo em 7 dias
+                <Input
+                  className="mt-1"
+                  inputMode="numeric"
+                  placeholder="Sem limite"
+                  value={weeklyMessageLimit}
+                  onChange={(event) => setWeeklyMessageLimit(event.target.value)}
+                />
+              </label>
+            </div>
+            <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
+              A contagem considera mensagens ja enviadas em cada canal. Mensagens ainda agendadas
+              nao entram no limite.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={() => {
+                setSettingsOpen(false);
+                toast.success("Limites salvos nesta sessao.");
+              }}
+            >
+              Salvar limite
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={infoOpen} onOpenChange={setInfoOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Como a conta e feita</DialogTitle>
+            <DialogDescription>O que entra em Recuperado e o que fica de fora.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 text-sm leading-relaxed text-muted-foreground">
+            <p className="font-semibold text-foreground">
+              Em cada jornada, cada clique marca o primeiro deposito que vier em ate 24 horas depois
+              dele.
+            </p>
+            <p>
+              Se o jogador clicar e depositar mais de uma vez, cada deposito e atribuido a apenas
+              uma mensagem. Depositos sem clique anterior nao entram na conta.
+            </p>
+            <p>
+              Quem deposita em qualquer etapa sai da jornada na hora. Jogadores que pediram para
+              sair nao voltam a receber comunicacoes.
+            </p>
+          </div>
+        </DialogContent>
+      </Dialog>
       <Dialog open={newOpen} onOpenChange={setNewOpen}>
         <DialogContent>
           <DialogHeader>
@@ -646,5 +820,38 @@ function JourneyMetric({
         {value}
       </p>
     </div>
+  );
+}
+
+function OverviewCard({
+  icon: Icon,
+  label,
+  value,
+  detail,
+  color,
+}: {
+  icon: typeof CircleDollarSign;
+  label: string;
+  value: string;
+  detail: string;
+  color: "emerald" | "blue" | "cyan" | "slate";
+}) {
+  const tones = {
+    emerald: "border-l-emerald-500 bg-emerald-500/[0.06] text-emerald-400",
+    blue: "border-l-blue-500 bg-blue-500/[0.06] text-blue-400",
+    cyan: "border-l-cyan-400 bg-cyan-400/[0.06] text-cyan-300",
+    slate: "border-l-slate-500 bg-muted/50 text-muted-foreground",
+  };
+  return (
+    <Card className={`border-l-4 ${tones[color]}`}>
+      <CardContent className="p-5">
+        <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+          <Icon className="h-5 w-5" />
+          {label}
+        </div>
+        <p className="mt-5 text-4xl font-semibold tracking-tight text-foreground">{value}</p>
+        <p className="mt-3 text-sm text-muted-foreground">{detail}</p>
+      </CardContent>
+    </Card>
   );
 }

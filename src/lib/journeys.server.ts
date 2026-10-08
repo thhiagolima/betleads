@@ -48,6 +48,65 @@ type PlayerActivity = {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const db = supabaseAdmin as any;
 
+type EventTriggerMatch = { matches: boolean; occurrence: string };
+
+/**
+ * Event triggers are occurrence-based. Requiring `start_after` prevents
+ * activating a new journey from replaying an entire tenant history.
+ */
+async function matchFinancialTrigger(
+  journey: { tenant_id: string; trigger_type: string; trigger_config: Record<string, unknown> },
+  player: Record<string, unknown>,
+): Promise<EventTriggerMatch | null> {
+  const startAfter = String(journey.trigger_config?.start_after ?? "");
+  const startAt = Date.parse(startAfter);
+  if (
+    ![
+      "cadastrados_sem_deposito",
+      "pix_gerado_nao_pago",
+      "primeiro_deposito",
+      "saque_pago",
+    ].includes(journey.trigger_type)
+  )
+    return null;
+  if (!Number.isFinite(startAt)) return null;
+
+  if (journey.trigger_type === "cadastrados_sem_deposito") {
+    const createdAt = String(player.created_at ?? "");
+    const occurredAt = Date.parse(createdAt);
+    return {
+      matches: !player.ftd_em && Number.isFinite(occurredAt) && occurredAt >= startAt,
+      occurrence: createdAt || "missing_registration",
+    };
+  }
+
+  if (journey.trigger_type === "primeiro_deposito") {
+    const firstDepositAt = String(player.ftd_em ?? "");
+    const occurredAt = Date.parse(firstDepositAt);
+    return {
+      matches: Number.isFinite(occurredAt) && occurredAt >= startAt,
+      occurrence: firstDepositAt || "missing_first_deposit",
+    };
+  }
+
+  const table = journey.trigger_type === "saque_pago" ? "withdrawals" : "deposits";
+  let query = db
+    .from(table)
+    .select("id,created_at,updated_at,metodo,status")
+    .eq("tenant_id", journey.tenant_id)
+    .eq("player_id", player.id)
+    .gte("created_at", new Date(startAt).toISOString())
+    .order("created_at", { ascending: false })
+    .limit(1);
+  query =
+    journey.trigger_type === "saque_pago"
+      ? query.eq("status", "aprovado")
+      : query.eq("status", "pendente").ilike("metodo", "%pix%");
+  const { data, error } = await query.maybeSingle();
+  if (error || !data) return { matches: false, occurrence: "none" };
+  return { matches: true, occurrence: String(data.id) };
+}
+
 async function enrollEligibleJourneyPlayers(limit = 500) {
   const { data: journeys } = await db
     .from("journeys")
@@ -55,11 +114,7 @@ async function enrollEligibleJourneyPlayers(limit = 500) {
     .eq("status", "active")
     .limit(100);
   if (!journeys?.length) return 0;
-  const { data: players } = await supabaseAdmin
-    .from("players")
-    .select("*")
-    .eq("status", "ativo")
-    .limit(limit);
+  const { data: players } = await supabaseAdmin.from("players").select("*").limit(limit);
   let enrolled = 0;
   for (const journey of journeys as Array<
     JourneyRow & {
@@ -77,10 +132,16 @@ async function enrollEligibleJourneyPlayers(limit = 500) {
     for (const player of players ?? []) {
       if (player.tenant_id !== journey.tenant_id) continue;
       const audience = String(journey.entry_rules?.audience ?? "all_active");
+      if (audience === "all_active" && player.status !== "ativo") continue;
       if (audience === "vip" && !player.vip) continue;
       if (audience === "manual") continue;
-      const matches =
-        journey.trigger_type === "inactivity"
+      const financialMatch = await matchFinancialTrigger(
+        journey,
+        player as Record<string, unknown>,
+      );
+      const matches = financialMatch
+        ? financialMatch.matches
+        : journey.trigger_type === "inactivity"
           ? qualifiesForInactivity(player as Record<string, unknown>, journey.trigger_config ?? {})
           : detectTriggersForPlayer(player as never).includes(journey.trigger_type as never);
       if (!matches) continue;
@@ -99,11 +160,13 @@ async function enrollEligibleJourneyPlayers(limit = 500) {
           .maybeSingle();
         if (previous && Date.parse(previous.created_at) > Date.now() - hours * 3600_000) continue;
       }
-      const occurrence = triggerOccurrence(
-        journey.trigger_type,
-        player as Record<string, unknown>,
-        journey.trigger_config ?? {},
-      );
+      const occurrence =
+        financialMatch?.occurrence ??
+        triggerOccurrence(
+          journey.trigger_type,
+          player as Record<string, unknown>,
+          journey.trigger_config ?? {},
+        );
       const { error } = await db.from("journey_enrollments").insert({
         tenant_id: journey.tenant_id,
         journey_id: journey.id,

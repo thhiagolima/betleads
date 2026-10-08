@@ -24,7 +24,10 @@ export type TriggerType =
   | "sem_login_35_44"
   | "sem_login_45_59"
   | "sem_login_60_mais"
-  | "cashback_pago";
+  | "cashback_pago"
+  | "pix_gerado_nao_pago"
+  | "primeiro_deposito"
+  | "saque_pago";
 
 // Mapeia o nome interno do gatilho (somente os baseados em alerta) para o
 // AlertaTipo correspondente em player-rules. Gatilhos de segmento são
@@ -62,6 +65,9 @@ export const TRIGGER_NAMES: Record<TriggerType, string> = {
   sem_login_45_59: "45 a 59 dias sem login",
   sem_login_60_mais: "60+ dias sem login",
   cashback_pago: "Cashback pago",
+  pix_gerado_nao_pago: "PIX gerado e não pago",
+  primeiro_deposito: "Primeiro depósito",
+  saque_pago: "Saque pago",
 };
 
 export const TRIGGER_MEANINGS: Record<TriggerType, string> = {
@@ -84,6 +90,9 @@ export const TRIGGER_MEANINGS: Record<TriggerType, string> = {
   sem_login_45_59: "Último login entre 45 e 59 dias atrás (sai ao logar)",
   sem_login_60_mais: "Sem login há 60+ dias (sai ao logar)",
   cashback_pago: "Player recebeu cashback hoje (via webhook)",
+  pix_gerado_nao_pago: "Gerou um PIX que permanece pendente de pagamento",
+  primeiro_deposito: "Primeiro depósito aprovado do jogador",
+  saque_pago: "Saque aprovado/pago para o jogador",
 };
 
 // ------------------------------------------------------------------
@@ -133,7 +142,9 @@ function matchesSegmentTrigger(p: PlayerLike, trigger: TriggerType): boolean {
       // início do dia BRT em UTC: BRT = UTC-3
       const now = new Date();
       const brt = new Date(now.getTime() - 3 * 3600 * 1000);
-      const y = brt.getUTCFullYear(), m = brt.getUTCMonth(), d = brt.getUTCDate();
+      const y = brt.getUTCFullYear(),
+        m = brt.getUTCMonth(),
+        d = brt.getUTCDate();
       const startBrtUtc = Date.UTC(y, m, d) + 3 * 3600 * 1000;
       return paid >= startBrtUtc;
     }

@@ -134,12 +134,14 @@ export function ChannelCampaignComposer({
   onCreated,
   initialChannel = "sms",
   initialDraftId = null,
+  initialAudienceId = "",
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreated: () => void;
   initialChannel?: Channel;
   initialDraftId?: string | null;
+  initialAudienceId?: string;
 }) {
   const queryClient = useQueryClient();
   const resolveAudience = useServerFn(resolveCampaignAudience);
@@ -160,7 +162,7 @@ export function ChannelCampaignComposer({
 
   const [channel, setChannel] = useState<Channel>(initialChannel);
   const [name, setName] = useState("");
-  const [audienceId, setAudienceId] = useState("");
+  const [audienceId, setAudienceId] = useState(initialAudienceId);
   const [audienceCriteria, setAudienceCriteria] = useState<SmsAudienceCriteria | null>(null);
   const [audience, setAudience] = useState<ResolvedAudience | null>(null);
   const [smsTemplateId, setSmsTemplateId] = useState("");
@@ -240,6 +242,7 @@ export function ChannelCampaignComposer({
     ],
     [savedAudiences.data],
   );
+
   const smsTemplates = (
     (smsTemplatesQuery.data?.items ?? []) as Array<{
       id: string;
@@ -282,7 +285,7 @@ export function ChannelCampaignComposer({
     if (!open || initialDraftId) return;
     setChannel(initialChannel);
     setName("");
-    setAudienceId("");
+    setAudienceId(initialAudienceId);
     setAudienceCriteria(null);
     setAudience(null);
     setSmsTemplateId("");
@@ -303,7 +306,7 @@ export function ChannelCampaignComposer({
     submitted.current = false;
     hydratedDraftId.current = null;
     idempotencyKey.current = crypto.randomUUID();
-  }, [open, initialChannel, initialDraftId]);
+  }, [open, initialChannel, initialDraftId, initialAudienceId]);
 
   useEffect(() => {
     const draft = draftQuery.data as CampaignDraft | undefined;
@@ -351,6 +354,15 @@ export function ChannelCampaignComposer({
     onSuccess: (result) => setAudience(result),
     onError: (error: Error) => toast.error(tenantSafeChannelError(error)),
   });
+
+  useEffect(() => {
+    if (!open || initialDraftId || !initialAudienceId) return;
+    const selected = audienceOptions.find((item) => item.id === initialAudienceId);
+    if (!selected) return;
+    setAudienceId(selected.id);
+    setAudienceCriteria(selected.criteria);
+    audienceMutation.mutate({ criteria: selected.criteria, channel });
+  }, [audienceOptions, channel, initialAudienceId, initialDraftId, open]);
 
   const activeEmailTemplate = emailTemplates.find((item) => item.id === emailTemplateId);
   const activeScript = scripts.find((item) => item.id === voiceSourceId);
@@ -712,7 +724,11 @@ export function ChannelCampaignComposer({
                 <SelectContent>
                   {audienceOptions.map((item) => (
                     <SelectItem key={item.id} value={item.id}>
-                      {item.system ? `Nível · ${item.name}` : item.name}
+                      {item.system
+                        ? item.id === "system:all-leads"
+                          ? `Público automático · ${item.name}`
+                          : `Nível · ${item.name}`
+                        : item.name}
                     </SelectItem>
                   ))}
                 </SelectContent>

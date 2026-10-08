@@ -31,6 +31,7 @@ export function JourneyEditor({
   initial,
   initialSteps = [],
   metrics,
+  initialAudience,
 }: {
   id?: string;
   initial?: {
@@ -44,6 +45,7 @@ export function JourneyEditor({
     cooldown_hours?: number;
   };
   initialSteps?: SavedStep[];
+  initialAudience?: string;
   metrics?: {
     total: number;
     byStatus: Record<string, number>;
@@ -119,7 +121,9 @@ export function JourneyEditor({
     String(initial?.entry_rules?.window_start ?? "08:00"),
   );
   const [windowEnd, setWindowEnd] = useState(String(initial?.entry_rules?.window_end ?? "22:00"));
-  const [audience, setAudience] = useState(String(initial?.entry_rules?.audience ?? "all_active"));
+  const [audience, setAudience] = useState(
+    String(initial?.entry_rules?.audience ?? initialAudience ?? "all_active"),
+  );
   const [reentry, setReentry] = useState(String(initial?.entry_rules?.reentry ?? "once"));
   const [exitRules, setExitRules] = useState<Record<string, boolean>>(
     initial?.exit_rules ?? {
@@ -384,6 +388,7 @@ export function JourneyEditor({
               value={audience}
               onChange={(event) => setAudience(event.target.value)}
             >
+              <option value="system:all-leads">Todos os leads do tenant</option>
               <option value="all_active">Todos os jogadores ativos</option>
               <option value="vip">Somente VIP</option>
             </select>

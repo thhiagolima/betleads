@@ -19,6 +19,9 @@ export const TRIGGER_NAMES = {
   sem_login_45_59: "45 a 59 dias sem login",
   sem_login_60_mais: "60+ dias sem login",
   cashback_pago: "Cashback pago",
+  pix_gerado_nao_pago: "PIX gerado e não pago",
+  primeiro_deposito: "Primeiro depósito",
+  saque_pago: "Saque pago",
 } as const;
 
 export const TRIGGER_MEANINGS = {
@@ -41,6 +44,9 @@ export const TRIGGER_MEANINGS = {
   sem_login_45_59: "Último login entre 45 e 59 dias atrás (sai ao logar)",
   sem_login_60_mais: "Sem login há 60+ dias (sai ao logar)",
   cashback_pago: "Player recebeu cashback hoje (via webhook)",
+  pix_gerado_nao_pago: "Gerou um PIX que permanece pendente de pagamento",
+  primeiro_deposito: "Primeiro depósito aprovado do jogador",
+  saque_pago: "Saque aprovado/pago para o jogador",
 } as const;
 
 export type TriggerType = keyof typeof TRIGGER_NAMES;

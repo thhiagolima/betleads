@@ -66,6 +66,7 @@ export function CampaignsHub() {
   const deleteDraftFn = useServerFn(deleteCampaignDraft);
   const [composerOpen, setComposerOpen] = useState(false);
   const [initialChannel, setInitialChannel] = useState<"sms" | "email" | "voice">("sms");
+  const [initialAudienceId, setInitialAudienceId] = useState("");
   const [individualOpen, setIndividualOpen] = useState(false);
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -79,6 +80,7 @@ export function CampaignsHub() {
       setComposerOpen(true);
     } else if (params.get("newCampaign") === "1") {
       setInitialChannel("sms");
+      setInitialAudienceId(params.get("audience") === "system:all-leads" ? "system:all-leads" : "");
       setComposerOpen(true);
     }
   }, []);
@@ -222,6 +224,7 @@ export function CampaignsHub() {
               <DropdownMenuItem
                 onClick={() => {
                   setActiveDraftId(null);
+                  setInitialAudienceId("");
                   setInitialChannel("sms");
                   setComposerOpen(true);
                 }}
@@ -369,6 +372,7 @@ export function CampaignsHub() {
                   onClick={() => {
                     setInitialChannel("sms");
                     setActiveDraftId(null);
+                    setInitialAudienceId("");
                     setComposerOpen(true);
                   }}
                 >
@@ -455,6 +459,7 @@ export function CampaignsHub() {
         onOpenChange={setComposerOpen}
         initialChannel={initialChannel}
         initialDraftId={activeDraftId}
+        initialAudienceId={initialAudienceId}
         onCreated={() => {
           queryClient.invalidateQueries({ queryKey: ["sms-scheduled-campaigns"] });
           queryClient.invalidateQueries({ queryKey: ["email-campaigns"] });

@@ -21,6 +21,7 @@ import {
   Trophy,
   Users,
   WalletCards,
+  Workflow,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -506,14 +507,23 @@ function PublicosPage() {
                           </div>
                         </div>
                       </div>
-                      <Button size="sm" variant="outline" asChild>
-                        <a
-                          href={`/campanhas?newCampaign=1&audience=${encodeURIComponent(audience.id)}`}
-                        >
-                          <Megaphone className="h-3.5 w-3.5" />
-                          Usar
-                        </a>
-                      </Button>
+                      <div className="flex shrink-0 gap-1.5">
+                        <Button size="sm" variant="outline" asChild>
+                          <a
+                            href={`/campanhas?newCampaign=1&audience=${encodeURIComponent(audience.id)}`}
+                          >
+                            <Megaphone className="h-3.5 w-3.5" />
+                            {audience.id === "system:all-leads" ? "Campanha" : "Usar"}
+                          </a>
+                        </Button>
+                        {audience.id === "system:all-leads" && (
+                          <Button size="sm" variant="outline" asChild>
+                            <a href="/jornadas/nova?audience=system%3Aall-leads">
+                              <Workflow className="h-3.5 w-3.5" /> Jornada
+                            </a>
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   );
                 })}

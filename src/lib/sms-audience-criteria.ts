@@ -49,6 +49,12 @@ export const SYSTEM_SMS_AUDIENCES: Array<{
   criteria: SmsAudienceCriteria;
 }> = [
   {
+    id: "system:all-leads",
+    name: "Todos os leads",
+    description: "Todos os jogadores cadastrados neste tenant.",
+    criteria: EMPTY_SMS_AUDIENCE,
+  },
+  {
     id: "system:level:bronze",
     name: "Bronze",
     description: "Jogadores classificados no nível Bronze.",
