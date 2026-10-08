@@ -86,7 +86,7 @@ export function JourneysHub() {
   const retireFn = useServerFn(retireLegacyJourney);
   const [filter, setFilter] = useState<"all" | Journey["status"]>("all");
   const [search, setSearch] = useState("");
-  const [view, setView] = useState<"journeys" | "queue" | "failures">("journeys");
+  const [view, setView] = useState<"journeys" | "queue" | "conflicts" | "failures">("journeys");
   const [period, setPeriod] = useState("Hoje");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
@@ -326,6 +326,21 @@ export function JourneysHub() {
           >
             Falhas
           </button>
+          <button
+            className={
+              view === "conflicts"
+                ? "rounded-md bg-background px-3 py-2 font-medium shadow-sm"
+                : "px-3 py-2 text-muted-foreground"
+            }
+            onClick={() => setView("conflicts")}
+          >
+            Conflitos
+            {Number(operations.data?.summary?.pausedByPriority ?? 0) > 0 && (
+              <span className="ml-1.5 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-xs text-amber-700">
+                {operations.data?.summary?.pausedByPriority}
+              </span>
+            )}
+          </button>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => setSettingsOpen(true)}>
@@ -348,11 +363,21 @@ export function JourneysHub() {
       {view !== "journeys" && (
         <Card>
           <CardHeader>
-            <CardTitle>{view === "queue" ? "Fila de envio" : "Falhas"}</CardTitle>
+            <CardTitle>
+              {view === "queue"
+                ? "Fila de envio"
+                : view === "conflicts"
+                  ? "Conflitos e pausas"
+                  : "Falhas"}
+            </CardTitle>
             <CardDescription>
               {
                 (operations.data?.items ?? []).filter((item: { status: string }) =>
-                  view === "failures" ? item.status === "failed" : item.status !== "failed",
+                  view === "failures"
+                    ? item.status === "failed"
+                    : view === "conflicts"
+                      ? item.status === "paused_by_priority"
+                      : item.status !== "failed" && item.status !== "paused_by_priority",
                 ).length
               }{" "}
               registro(s)
@@ -361,7 +386,11 @@ export function JourneysHub() {
           <CardContent className="space-y-2">
             {(operations.data?.items ?? [])
               .filter((item: { status: string }) =>
-                view === "failures" ? item.status === "failed" : item.status !== "failed",
+                view === "failures"
+                  ? item.status === "failed"
+                  : view === "conflicts"
+                    ? item.status === "paused_by_priority"
+                    : item.status !== "failed" && item.status !== "paused_by_priority",
               )
               .map(
                 (item: {
@@ -370,6 +399,9 @@ export function JourneysHub() {
                   current_position: number;
                   next_run_at: string | null;
                   exit_reason: string | null;
+                  priority_paused_at: string | null;
+                  priority_pause_reason: string | null;
+                  priority_paused_by_journey_name: string | null;
                   journeys: { name: string } | null;
                   players: { nome: string | null } | null;
                 }) => (
@@ -384,6 +416,17 @@ export function JourneysHub() {
                         : ""}
                       {item.exit_reason ? ` · ${item.exit_reason}` : ""}
                     </p>
+                    {item.status === "paused_by_priority" && (
+                      <p className="mt-1 text-amber-700 dark:text-amber-400">
+                        Pausada por prioridade
+                        {item.priority_paused_by_journey_name
+                          ? `: ${item.priority_paused_by_journey_name} venceu a disputa.`
+                          : ". Aguardando o fim da jornada vencedora."}
+                        {item.priority_paused_at
+                          ? ` ${new Date(item.priority_paused_at).toLocaleString("pt-BR")}`
+                          : ""}
+                      </p>
+                    )}
                   </div>
                 ),
               )}

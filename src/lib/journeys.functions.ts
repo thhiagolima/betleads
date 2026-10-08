@@ -754,12 +754,40 @@ export const listJourneyOperations = createServerFn({ method: "GET" })
     const { data, error } = await db
       .from("journey_enrollments")
       .select(
-        "id,journey_id,player_id,status,current_position,next_run_at,exit_reason,journeys(name),players(nome,telefone)",
+        "id,journey_id,player_id,status,current_position,next_run_at,exit_reason,priority_paused_at,priority_pause_reason,priority_paused_by_journey_id,journeys(name),players(nome,telefone)",
       )
       .eq("tenant_id", tenantId)
-      .in("status", ["active", "waiting", "failed"])
+      .in("status", ["active", "waiting", "paused_by_priority", "failed"])
       .order("next_run_at", { ascending: true })
       .limit(200);
     if (error) throw new Error(error.message);
-    return { items: data ?? [] };
+    const winnerIds = [
+      ...new Set(
+        (data ?? []).map((item: any) => item.priority_paused_by_journey_id).filter(Boolean),
+      ),
+    ];
+    const { data: winners, error: winnersError } = winnerIds.length
+      ? await db.from("journeys").select("id,name").eq("tenant_id", tenantId).in("id", winnerIds)
+      : { data: [], error: null };
+    if (winnersError) throw new Error(winnersError.message);
+    const winnerNames = new Map((winners ?? []).map((journey: any) => [journey.id, journey.name]));
+    const items = (data ?? []).map((item: any) => ({
+      ...item,
+      priority_paused_by_journey_name: item.priority_paused_by_journey_id
+        ? (winnerNames.get(item.priority_paused_by_journey_id) ?? null)
+        : null,
+    }));
+    return {
+      items,
+      summary: {
+        pausedByPriority: items.filter((item: any) => item.status === "paused_by_priority").length,
+        deferred: items.filter(
+          (item: any) =>
+            item.status === "waiting" &&
+            item.next_run_at &&
+            Date.parse(item.next_run_at) > Date.now(),
+        ).length,
+        failed: items.filter((item: any) => item.status === "failed").length,
+      },
+    };
   });
