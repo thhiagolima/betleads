@@ -1,13 +1,7 @@
 import { z } from "zod";
 
 export const journeyStatusSchema = z.enum(["draft", "active", "paused", "archived"]);
-export const journeyStepTypeSchema = z.enum([
-  "wait",
-  "sms",
-  "email",
-  "voice",
-  "end",
-]);
+export const journeyStepTypeSchema = z.enum(["wait", "sms", "email", "voice", "end"]);
 
 const waitConfigSchema = z.object({
   delay_seconds: z
@@ -32,12 +26,14 @@ const smsConfigSchema = z.object({
 const emailConfigSchema = z.object({
   template_id: z.string().uuid(),
   sender_id: z.string().uuid().optional(),
-  template_snapshot: z.object({
-    id: z.string().uuid(),
-    subject: z.string().max(255),
-    body_html: z.string(),
-    version: z.number().int().positive().optional(),
-  }).optional(),
+  template_snapshot: z
+    .object({
+      id: z.string().uuid(),
+      subject: z.string().max(255),
+      body_html: z.string(),
+      version: z.number().int().positive().optional(),
+    })
+    .optional(),
 });
 const voiceConfigSchema = z.object({
   asset_id: z.string().uuid(),
@@ -88,6 +84,9 @@ export const journeyInputSchema = z.object({
   exit_rules: z.record(z.string(), z.unknown()).default({}),
   daily_limit: z.number().int().min(1).max(100000).default(1000),
   cooldown_hours: z.number().int().min(0).max(720).default(72),
+  conversion_objective: z
+    .enum(["acquisition", "conversion", "reactivation", "journey"])
+    .default("journey"),
   steps: z.array(journeyStepInputSchema).min(1).max(100),
 });
 

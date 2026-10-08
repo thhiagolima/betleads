@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { attributeConversionEvent } from "./conversion-attribution.server";
 
 export function getServiceClient(): SupabaseClient | null {
   const supabaseUrl = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL;
@@ -79,7 +80,6 @@ export async function processWebhookEvent(
         .eq("tenant_id", tenantId)
         .eq("provider_event_id", receiptEventId);
     }
-
   };
 
   try {
@@ -262,6 +262,8 @@ export async function processWebhookEvent(
       }
     }
 
+    const financialEvent = resolveFinancialEvent(evento);
+
     if (playerId) {
       const now = new Date().toISOString();
       const updates: Record<string, unknown> = { updated_at: now };
@@ -301,7 +303,6 @@ export async function processWebhookEvent(
       if (evento === "login") updates.ultimo_login = eventIso;
       if (evento === "jogo-iniciado") updates.ultimo_jogo = eventIso;
 
-      const financialEvent = resolveFinancialEvent(evento);
       if (financialEvent && valor) {
         if (!transactionId) {
           await markLog("erro", {
@@ -578,6 +579,59 @@ export async function processWebhookEvent(
           { ok: false, evento, error: playerUpdateError.message },
           { status: 200 },
         );
+      }
+      const conversionEvent = isSignupEvent(evento, payload)
+        ? "registered"
+        : evento === "login"
+          ? "login"
+          : evento === "jogo-iniciado"
+            ? "game"
+            : financialEvent?.kind === "deposit" && financialEvent.status === "aprovado"
+              ? "deposit_approved"
+              : null;
+      if (conversionEvent) {
+        let trackingToken = utm.utm_content;
+        if (!trackingToken) {
+          const { data: playerTracking, error: playerTrackingError } = await sb
+            .from("players")
+            .select("utm_content")
+            .eq("tenant_id", tenantId)
+            .eq("id", playerId)
+            .maybeSingle();
+          if (playerTrackingError) {
+            await markLog("erro", {
+              step: "load_attribution_token",
+              error: playerTrackingError.message,
+            });
+            return Response.json(
+              { ok: false, evento, error: playerTrackingError.message },
+              { status: 503 },
+            );
+          }
+          trackingToken = (playerTracking?.utm_content as string | null) ?? null;
+        }
+        const attributionEventId = providerEventId ?? transactionId;
+        if (attributionEventId) {
+          try {
+            await attributeConversionEvent({
+              tenantId,
+              playerId,
+              eventType: conversionEvent,
+              eventId: attributionEventId,
+              occurredAt: eventIso,
+              trackingToken,
+              monetaryValue: conversionEvent === "deposit_approved" ? valor : null,
+              isFtd: conversionEvent === "deposit_approved" && data.isFtd === true,
+            });
+          } catch (attributionError) {
+            const error =
+              attributionError instanceof Error
+                ? attributionError.message
+                : String(attributionError);
+            await markLog("erro", { step: "attribute_conversion", error });
+            return Response.json({ ok: false, evento, error }, { status: 503 });
+          }
+        }
       }
       if (signupEvent) {
         await savePlayerAttribution(sb, {

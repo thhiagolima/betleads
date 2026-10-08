@@ -12,6 +12,7 @@ import { buildPlayerVariables } from "./template-vars.server";
 import { renderTemplate } from "./template-vars.server";
 import { resolveOperationalTenantId } from "./tenant-access.server";
 import { bindTrackedDispatchesToMessageLog } from "./shortio.server";
+import { conversionFunnelSnapshot, type ConversionObjective } from "./conversion-funnel";
 
 // ============ Helpers ============
 
@@ -135,20 +136,24 @@ export const sendTestEmail = createServerFn({ method: "POST" })
     });
 
     // Log
-    const { data: log, error: logErr } = await supabaseAdmin.from("email_send_logs").insert({
-      tenant_id: tenantId,
-      to_email: data.to,
-      subject,
-      status: result.ok ? "sent" : "error",
-      error: result.ok ? null : JSON.stringify(result.body).slice(0, 1000),
-      sent_at: result.ok ? new Date().toISOString() : null,
-      player_id: playerId,
-      provider_response: {
-        status: result.status,
-        body: result.body,
-        idempotency_key: result.idempotencyKey,
-      } as never,
-    }).select("id").single();
+    const { data: log, error: logErr } = await supabaseAdmin
+      .from("email_send_logs")
+      .insert({
+        tenant_id: tenantId,
+        to_email: data.to,
+        subject,
+        status: result.ok ? "sent" : "error",
+        error: result.ok ? null : JSON.stringify(result.body).slice(0, 1000),
+        sent_at: result.ok ? new Date().toISOString() : null,
+        player_id: playerId,
+        provider_response: {
+          status: result.status,
+          body: result.body,
+          idempotency_key: result.idempotencyKey,
+        } as never,
+      })
+      .select("id")
+      .single();
     if (logErr) console.error("email_send_logs insert error", logErr.message);
     if (log?.id) {
       await bindTrackedDispatchesToMessageLog({
@@ -490,7 +495,9 @@ export const saveEmailTemplate = createServerFn({ method: "POST" })
         .in("status", ["agendada", "enviando", "enviado"]);
       if (campaignError) throw new Error(campaignError.message);
       if ((count ?? 0) > 0) {
-        throw new Error("Este template já está em uma campanha ativa. Duplique-o para criar uma nova versão.");
+        throw new Error(
+          "Este template já está em uma campanha ativa. Duplique-o para criar uma nova versão.",
+        );
       }
       const { error } = await context.supabase
         .from("email_templates")
@@ -563,6 +570,7 @@ const CampanhaInputSchema = z.object({
   targetPlayerIds: z.array(dbUuid()).max(5000).optional(),
   extraEmails: z.array(z.string().email().max(255)).max(5000).optional(),
   trackLinks: z.boolean().default(true),
+  conversionObjective: z.enum(["acquisition", "conversion", "reactivation"]).default("conversion"),
 });
 
 function campanhaRowToUI(r: any) {
@@ -616,7 +624,9 @@ export const saveEmailCampaign = createServerFn({ method: "POST" })
     if (data.templateId) {
       const { data: template, error: templateError } = await context.supabase
         .from("email_templates")
-        .select("id, name, subject, preheader, from_name, body_html, body_text, tags, track_links, lifecycle_status, version")
+        .select(
+          "id, name, subject, preheader, from_name, body_html, body_text, tags, track_links, lifecycle_status, version",
+        )
         .eq("id", data.templateId)
         .single();
       if (templateError || !template) throw new Error("Template selecionado não foi encontrado.");
@@ -641,6 +651,15 @@ export const saveEmailCampaign = createServerFn({ method: "POST" })
       status: data.status,
       track_links: data.trackLinks,
       template_snapshot: templateSnapshot,
+      conversion_objective: data.conversionObjective,
+      ...(data.id
+        ? {}
+        : {
+            conversion_funnel_snapshot: conversionFunnelSnapshot(
+              data.conversionObjective,
+              "campaign",
+            ),
+          }),
     };
     if (data.id) {
       const { error } = await context.supabase
@@ -650,7 +669,7 @@ export const saveEmailCampaign = createServerFn({ method: "POST" })
       if (error) throw new Error(error.message);
       return { id: data.id };
     }
-    const { data: created, error } = await context.supabase
+    const { data: created, error } = await (context.supabase as any)
       .from("email_campaigns")
       .insert(payload)
       .select("id")
@@ -682,13 +701,14 @@ export const duplicateEmailCampaign = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ id: dbUuid() }).parse(d))
   .handler(async ({ data, context }) => {
-    const { data: orig, error: oErr } = await context.supabase
+    const { data: original, error: oErr } = await context.supabase
       .from("email_campaigns")
       .select("*")
       .eq("id", data.id)
       .single();
-    if (oErr) throw new Error(oErr.message);
-    const { data: created, error } = await context.supabase
+    if (oErr || !original) throw new Error(oErr?.message ?? "Campanha não encontrada.");
+    const orig = original as any;
+    const { data: created, error } = await (context.supabase as any)
       .from("email_campaigns")
       .insert({
         name: `${orig.name} (cópia)`,
@@ -697,6 +717,11 @@ export const duplicateEmailCampaign = createServerFn({ method: "POST" })
         smtp_id: orig.smtp_id,
         status: "rascunho",
         track_links: orig.track_links,
+        conversion_objective: (orig.conversion_objective ?? "conversion") as ConversionObjective,
+        conversion_funnel_snapshot: conversionFunnelSnapshot(
+          (orig.conversion_objective ?? "conversion") as ConversionObjective,
+          "campaign",
+        ),
       })
       .select("id")
       .single();
@@ -947,8 +972,8 @@ export async function runCampaignSend(campaignId: string) {
           sourceType: "campaign",
           sourceId: campaignId,
           recipientPlayerId: p.id,
-        messageLogType: "email_send_logs",
-        enabled: camp.track_links !== false,
+          messageLogType: "email_send_logs",
+          enabled: camp.track_links !== false,
         },
       });
       const errSnippet = r.ok

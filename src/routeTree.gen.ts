@@ -46,6 +46,8 @@ import { Route as SmsTemplatesRouteImport } from './routes/sms.templates'
 import { Route as UTokenRouteImport } from './routes/u.$token'
 import { Route as ApiPublicEvolutionWebhookRouteImport } from './routes/api/public/evolution-webhook'
 import { Route as ApiPublicSmsWebhookRouteImport } from './routes/api/public/sms-webhook'
+import { Route as CampanhasCampaignIdRelatorioRouteImport } from './routes/campanhas.$campaignId.relatorio'
+import { Route as JornadasJourneyIdRelatorioRouteImport } from './routes/jornadas.$journeyId.relatorio'
 import { Route as ApiPublicAutomationsDispatchRouteImport } from './routes/api/public/automations/dispatch'
 import { Route as ApiPublicAutomationsEvaluateRouteImport } from './routes/api/public/automations/evaluate'
 import { Route as ApiPublicCallFlowsTickRouteImport } from './routes/api/public/call-flows/tick'
@@ -255,6 +257,18 @@ const ApiPublicSmsWebhookRoute = ApiPublicSmsWebhookRouteImport.update({
   path: '/api/public/sms-webhook',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CampanhasCampaignIdRelatorioRoute =
+  CampanhasCampaignIdRelatorioRouteImport.update({
+    id: '/$campaignId/relatorio',
+    path: '/$campaignId/relatorio',
+    getParentRoute: () => CampanhasRoute,
+  } as any)
+const JornadasJourneyIdRelatorioRoute =
+  JornadasJourneyIdRelatorioRouteImport.update({
+    id: '/relatorio',
+    path: '/relatorio',
+    getParentRoute: () => JornadasJourneyIdRoute,
+  } as any)
 const ApiPublicAutomationsDispatchRoute =
   ApiPublicAutomationsDispatchRouteImport.update({
     id: '/api/public/automations/dispatch',
@@ -386,7 +400,7 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AdminRoute
   '/alertas': typeof AlertasRoute
   '/automacoes': typeof AutomacoesRouteWithChildren
-  '/campanhas': typeof CampanhasRoute
+  '/campanhas': typeof CampanhasRouteWithChildren
   '/configuracoes': typeof ConfiguracoesRoute
   '/consentimentos': typeof ConsentimentosRoute
   '/creditos-sms': typeof CreditosSmsRoute
@@ -411,7 +425,7 @@ export interface FileRoutesByFullPath {
   '/automacoes/ligacoes': typeof AutomacoesLigacoesRoute
   '/automacoes/sms': typeof AutomacoesSmsRoute
   '/automacoes/whatsapp': typeof AutomacoesWhatsappRoute
-  '/jornadas/$journeyId': typeof JornadasJourneyIdRoute
+  '/jornadas/$journeyId': typeof JornadasJourneyIdRouteWithChildren
   '/jornadas/nova': typeof JornadasNovaRoute
   '/links/configuracoes': typeof LinksConfiguracoesRoute
   '/players/$playerId': typeof PlayersPlayerIdRoute
@@ -419,6 +433,8 @@ export interface FileRoutesByFullPath {
   '/u/$token': typeof UTokenRoute
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
   '/api/public/sms-webhook': typeof ApiPublicSmsWebhookRoute
+  '/campanhas/$campaignId/relatorio': typeof CampanhasCampaignIdRelatorioRoute
+  '/jornadas/$journeyId/relatorio': typeof JornadasJourneyIdRelatorioRoute
   '/api/public/automations/dispatch': typeof ApiPublicAutomationsDispatchRoute
   '/api/public/automations/evaluate': typeof ApiPublicAutomationsEvaluateRoute
   '/api/public/call-flows/tick': typeof ApiPublicCallFlowsTickRoute
@@ -447,7 +463,7 @@ export interface FileRoutesByTo {
   '/admin': typeof AdminRoute
   '/alertas': typeof AlertasRoute
   '/automacoes': typeof AutomacoesRouteWithChildren
-  '/campanhas': typeof CampanhasRoute
+  '/campanhas': typeof CampanhasRouteWithChildren
   '/configuracoes': typeof ConfiguracoesRoute
   '/consentimentos': typeof ConsentimentosRoute
   '/creditos-sms': typeof CreditosSmsRoute
@@ -472,7 +488,7 @@ export interface FileRoutesByTo {
   '/automacoes/ligacoes': typeof AutomacoesLigacoesRoute
   '/automacoes/sms': typeof AutomacoesSmsRoute
   '/automacoes/whatsapp': typeof AutomacoesWhatsappRoute
-  '/jornadas/$journeyId': typeof JornadasJourneyIdRoute
+  '/jornadas/$journeyId': typeof JornadasJourneyIdRouteWithChildren
   '/jornadas/nova': typeof JornadasNovaRoute
   '/links/configuracoes': typeof LinksConfiguracoesRoute
   '/players/$playerId': typeof PlayersPlayerIdRoute
@@ -480,6 +496,8 @@ export interface FileRoutesByTo {
   '/u/$token': typeof UTokenRoute
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
   '/api/public/sms-webhook': typeof ApiPublicSmsWebhookRoute
+  '/campanhas/$campaignId/relatorio': typeof CampanhasCampaignIdRelatorioRoute
+  '/jornadas/$journeyId/relatorio': typeof JornadasJourneyIdRelatorioRoute
   '/api/public/automations/dispatch': typeof ApiPublicAutomationsDispatchRoute
   '/api/public/automations/evaluate': typeof ApiPublicAutomationsEvaluateRoute
   '/api/public/call-flows/tick': typeof ApiPublicCallFlowsTickRoute
@@ -509,7 +527,7 @@ export interface FileRoutesById {
   '/admin': typeof AdminRoute
   '/alertas': typeof AlertasRoute
   '/automacoes': typeof AutomacoesRouteWithChildren
-  '/campanhas': typeof CampanhasRoute
+  '/campanhas': typeof CampanhasRouteWithChildren
   '/configuracoes': typeof ConfiguracoesRoute
   '/consentimentos': typeof ConsentimentosRoute
   '/creditos-sms': typeof CreditosSmsRoute
@@ -534,7 +552,7 @@ export interface FileRoutesById {
   '/automacoes/ligacoes': typeof AutomacoesLigacoesRoute
   '/automacoes/sms': typeof AutomacoesSmsRoute
   '/automacoes/whatsapp': typeof AutomacoesWhatsappRoute
-  '/jornadas/$journeyId': typeof JornadasJourneyIdRoute
+  '/jornadas/$journeyId': typeof JornadasJourneyIdRouteWithChildren
   '/jornadas/nova': typeof JornadasNovaRoute
   '/links/configuracoes': typeof LinksConfiguracoesRoute
   '/players/$playerId': typeof PlayersPlayerIdRoute
@@ -542,6 +560,8 @@ export interface FileRoutesById {
   '/u/$token': typeof UTokenRoute
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
   '/api/public/sms-webhook': typeof ApiPublicSmsWebhookRoute
+  '/campanhas/$campaignId/relatorio': typeof CampanhasCampaignIdRelatorioRoute
+  '/jornadas/$journeyId/relatorio': typeof JornadasJourneyIdRelatorioRoute
   '/api/public/automations/dispatch': typeof ApiPublicAutomationsDispatchRoute
   '/api/public/automations/evaluate': typeof ApiPublicAutomationsEvaluateRoute
   '/api/public/call-flows/tick': typeof ApiPublicCallFlowsTickRoute
@@ -605,6 +625,8 @@ export interface FileRouteTypes {
     | '/u/$token'
     | '/api/public/evolution-webhook'
     | '/api/public/sms-webhook'
+    | '/campanhas/$campaignId/relatorio'
+    | '/jornadas/$journeyId/relatorio'
     | '/api/public/automations/dispatch'
     | '/api/public/automations/evaluate'
     | '/api/public/call-flows/tick'
@@ -666,6 +688,8 @@ export interface FileRouteTypes {
     | '/u/$token'
     | '/api/public/evolution-webhook'
     | '/api/public/sms-webhook'
+    | '/campanhas/$campaignId/relatorio'
+    | '/jornadas/$journeyId/relatorio'
     | '/api/public/automations/dispatch'
     | '/api/public/automations/evaluate'
     | '/api/public/call-flows/tick'
@@ -727,6 +751,8 @@ export interface FileRouteTypes {
     | '/u/$token'
     | '/api/public/evolution-webhook'
     | '/api/public/sms-webhook'
+    | '/campanhas/$campaignId/relatorio'
+    | '/jornadas/$journeyId/relatorio'
     | '/api/public/automations/dispatch'
     | '/api/public/automations/evaluate'
     | '/api/public/call-flows/tick'
@@ -756,7 +782,7 @@ export interface RootRouteChildren {
   AdminRoute: typeof AdminRoute
   AlertasRoute: typeof AlertasRoute
   AutomacoesRoute: typeof AutomacoesRouteWithChildren
-  CampanhasRoute: typeof CampanhasRoute
+  CampanhasRoute: typeof CampanhasRouteWithChildren
   ConfiguracoesRoute: typeof ConfiguracoesRoute
   ConsentimentosRoute: typeof ConsentimentosRoute
   CreditosSmsRoute: typeof CreditosSmsRoute
@@ -1065,6 +1091,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicSmsWebhookRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/campanhas/$campaignId/relatorio': {
+      id: '/campanhas/$campaignId/relatorio'
+      path: '/$campaignId/relatorio'
+      fullPath: '/campanhas/$campaignId/relatorio'
+      preLoaderRoute: typeof CampanhasCampaignIdRelatorioRouteImport
+      parentRoute: typeof CampanhasRoute
+    }
+    '/jornadas/$journeyId/relatorio': {
+      id: '/jornadas/$journeyId/relatorio'
+      path: '/relatorio'
+      fullPath: '/jornadas/$journeyId/relatorio'
+      preLoaderRoute: typeof JornadasJourneyIdRelatorioRouteImport
+      parentRoute: typeof JornadasJourneyIdRoute
+    }
     '/api/public/automations/dispatch': {
       id: '/api/public/automations/dispatch'
       path: '/api/public/automations/dispatch'
@@ -1240,13 +1280,36 @@ const AutomacoesRouteWithChildren = AutomacoesRoute._addFileChildren(
   AutomacoesRouteChildren,
 )
 
+interface CampanhasRouteChildren {
+  CampanhasCampaignIdRelatorioRoute: typeof CampanhasCampaignIdRelatorioRoute
+}
+
+const CampanhasRouteChildren: CampanhasRouteChildren = {
+  CampanhasCampaignIdRelatorioRoute: CampanhasCampaignIdRelatorioRoute,
+}
+
+const CampanhasRouteWithChildren = CampanhasRoute._addFileChildren(
+  CampanhasRouteChildren,
+)
+
+interface JornadasJourneyIdRouteChildren {
+  JornadasJourneyIdRelatorioRoute: typeof JornadasJourneyIdRelatorioRoute
+}
+
+const JornadasJourneyIdRouteChildren: JornadasJourneyIdRouteChildren = {
+  JornadasJourneyIdRelatorioRoute: JornadasJourneyIdRelatorioRoute,
+}
+
+const JornadasJourneyIdRouteWithChildren =
+  JornadasJourneyIdRoute._addFileChildren(JornadasJourneyIdRouteChildren)
+
 interface JornadasRouteChildren {
-  JornadasJourneyIdRoute: typeof JornadasJourneyIdRoute
+  JornadasJourneyIdRoute: typeof JornadasJourneyIdRouteWithChildren
   JornadasNovaRoute: typeof JornadasNovaRoute
 }
 
 const JornadasRouteChildren: JornadasRouteChildren = {
-  JornadasJourneyIdRoute: JornadasJourneyIdRoute,
+  JornadasJourneyIdRoute: JornadasJourneyIdRouteWithChildren,
   JornadasNovaRoute: JornadasNovaRoute,
 }
 
@@ -1290,7 +1353,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminRoute: AdminRoute,
   AlertasRoute: AlertasRoute,
   AutomacoesRoute: AutomacoesRouteWithChildren,
-  CampanhasRoute: CampanhasRoute,
+  CampanhasRoute: CampanhasRouteWithChildren,
   ConfiguracoesRoute: ConfiguracoesRoute,
   ConsentimentosRoute: ConsentimentosRoute,
   CreditosSmsRoute: CreditosSmsRoute,

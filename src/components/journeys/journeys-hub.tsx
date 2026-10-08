@@ -380,6 +380,14 @@ export function JourneysHub() {
                           Editar
                         </Link>
                       </Button>
+                      <Button asChild variant="outline" size="sm">
+                        <Link
+                          to="/jornadas/$journeyId/relatorio"
+                          params={{ journeyId: journey.id }}
+                        >
+                          Ver relatório
+                        </Link>
+                      </Button>
                       {journey.status === "active" ? (
                         <Button
                           size="sm"

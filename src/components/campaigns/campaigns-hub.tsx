@@ -415,7 +415,15 @@ export function CampaignsHub() {
                   label="Progresso"
                   value={`${total ? Math.round((delivered / total) * 100) : 0}%`}
                 />
-                <div className="flex justify-end">
+                <div className="flex justify-end gap-1">
+                  <Button size="sm" variant="outline" asChild>
+                    <Link
+                      to="/campanhas/$campaignId/relatorio"
+                      params={{ campaignId: campaign.id }}
+                    >
+                      Relatório
+                    </Link>
+                  </Button>
                   {campaign.cancellable ? (
                     <Button
                       size="sm"

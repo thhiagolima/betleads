@@ -22,6 +22,8 @@ import {
 import type { Json } from "@/integrations/supabase/types";
 import { isChannelRevoked } from "./consent.server";
 import { requireBrazilianPhone } from "./phone-normalization";
+import type { LinkTrackingContext } from "./shortio.server";
+import { conversionFunnelSnapshot } from "./conversion-funnel";
 
 const DEFAULT_SHORT_BRASIL_SINGLE_URL = "http://lp01-short.painelsms.com/bot/single-sms.php";
 const DEFAULT_SHORT_BRASIL_BULK_URL = "http://lp01-short.painelsms.com/bot/bulk-sms.php";
@@ -517,6 +519,8 @@ export async function sendSmsInternal(args: {
   flowLeadId?: string | null;
   tenantId?: string | null;
   linkTrackingEnabled?: boolean;
+  /** Structured origin for campaign/journey attribution. Never infer this from display text. */
+  linkTrackingOrigin?: Pick<LinkTrackingContext, "sourceType" | "sourceId">;
   /** Stable identity supplied by a queue/worker when retrying one delivery. */
   deliveryKey?: string | null;
 }) {
@@ -581,14 +585,16 @@ export async function sendSmsInternal(args: {
     const prepared = await prepareTrackedText(renderedContent, {
       tenantId: billingTenantId ?? args.tenantId!,
       channel: "sms",
-      sourceType: args.triggerName?.startsWith("journey:")
-        ? "journey"
-        : args.flowId
-          ? "sms_flow"
-          : args.triggerName === "teste-manual"
-            ? "test"
-            : "manual",
-      sourceId: args.flowId ?? args.triggerName ?? null,
+      sourceType:
+        args.linkTrackingOrigin?.sourceType ??
+        (args.triggerName?.startsWith("journey:")
+          ? "journey"
+          : args.flowId
+            ? "sms_flow"
+            : args.triggerName === "teste-manual"
+              ? "test"
+              : "manual"),
+      sourceId: args.linkTrackingOrigin?.sourceId ?? args.flowId ?? args.triggerName ?? null,
       recipientPlayerId: args.playerId ?? null,
       messageLogType: "sms_send_logs",
       deliveryKey,
@@ -877,7 +883,7 @@ export const sendBulkSms = createServerFn({ method: "POST" })
         targets.filter((t) => !t.playerId).map((t) => t.phone),
         targets.filter((t) => t.playerId) as Array<{ phone: string; playerId?: string }>,
       );
-      const { data: inserted, error: insErr } = await context.supabase
+      const { data: inserted, error: insErr } = await (context.supabase as any)
         .from("sms_campaigns")
         .insert({
           tenant_id: tenantId,
@@ -892,6 +898,8 @@ export const sendBulkSms = createServerFn({ method: "POST" })
           track_links: data.trackLinks,
           template_id: data.templateId ?? null,
           template_snapshot: templateSnapshot,
+          conversion_objective: "conversion",
+          conversion_funnel_snapshot: conversionFunnelSnapshot("conversion", "campaign"),
           created_by: context.userId,
         })
         .select("id")
@@ -970,6 +978,37 @@ export const sendBulkSms = createServerFn({ method: "POST" })
       });
     }
 
+    // Even immediate sends are campaigns. Persisting the record before the
+    // provider call gives every tracked dispatch a stable UUID origin.
+    const { data: immediateCampaign, error: immediateCampaignError } = await (
+      context.supabase as any
+    )
+      .from("sms_campaigns")
+      .insert({
+        tenant_id: tenantId,
+        name: data.campaignName,
+        content: data.content,
+        route: data.route,
+        recipients: targets as unknown as Json,
+        total_count: targets.length,
+        scheduled_at: new Date().toISOString(),
+        status: "enviando",
+        rate_per_minute: data.ratePerMinute,
+        track_links: data.trackLinks,
+        template_id: data.templateId ?? null,
+        template_snapshot: templateSnapshot,
+        conversion_objective: "conversion",
+        conversion_funnel_snapshot: conversionFunnelSnapshot("conversion", "campaign"),
+        created_by: context.userId,
+      })
+      .select("id")
+      .single();
+    if (immediateCampaignError || !immediateCampaign) {
+      throw new Error(
+        immediateCampaignError?.message ?? "Não foi possível registrar a campanha SMS.",
+      );
+    }
+
     console.info("Bulk SMS campaign started", {
       campaignName: data.campaignName,
       route: data.route,
@@ -990,6 +1029,7 @@ export const sendBulkSms = createServerFn({ method: "POST" })
             variables,
             tenantId,
             linkTrackingEnabled: data.trackLinks,
+            linkTrackingOrigin: { sourceType: "campaign", sourceId: immediateCampaign.id },
           });
           return {
             phone: t.phone,
@@ -1012,7 +1052,23 @@ export const sendBulkSms = createServerFn({ method: "POST" })
       failed,
       pending,
     });
-    return { total: results.length, sent, failed, pending, results };
+    await (context.supabase as any)
+      .from("sms_campaigns")
+      .update({
+        status: pending > 0 ? "enviando" : failed === results.length ? "falhou" : "enviado",
+        sent_count: sent,
+        failed_count: failed,
+      })
+      .eq("id", immediateCampaign.id)
+      .eq("tenant_id", tenantId);
+    return {
+      total: results.length,
+      sent,
+      failed,
+      pending,
+      results,
+      campaignId: immediateCampaign.id,
+    };
   });
 
 // ============================================================
@@ -1763,7 +1819,7 @@ export const scheduleBulkSms = createServerFn({ method: "POST" })
     const targets = await resolveRecipientsForTenant(tenantId, data.phones, data.recipients);
     if (targets.length === 0) throw new Error("Sem destinatários válidos");
 
-    const { data: inserted, error } = await context.supabase
+    const { data: inserted, error } = await (context.supabase as any)
       .from("sms_campaigns")
       .insert({
         tenant_id: tenantId,
@@ -1778,6 +1834,8 @@ export const scheduleBulkSms = createServerFn({ method: "POST" })
         track_links: data.trackLinks,
         template_id: data.templateId ?? null,
         template_snapshot: templateSnapshot,
+        conversion_objective: "conversion",
+        conversion_funnel_snapshot: conversionFunnelSnapshot("conversion", "campaign"),
         created_by: context.userId,
       })
       .select("id, name, scheduled_at, total_count, status")

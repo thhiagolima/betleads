@@ -911,6 +911,7 @@ export async function runScheduledSmsCampaigns({ limit = 20 }: { limit?: number 
               variables,
               tenantId: c.tenant_id,
               linkTrackingEnabled: c.track_links !== false,
+              linkTrackingOrigin: { sourceType: "campaign", sourceId: c.id },
             });
             return r;
           } catch (e) {

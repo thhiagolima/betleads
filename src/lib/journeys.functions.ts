@@ -6,6 +6,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { resolveOperationalTenantId } from "./tenant-access.server";
 import { journeyInputSchema, journeyStatusSchema } from "./journeys.shared";
 import { journeyEntryKey } from "./journey-policy";
+import { conversionFunnelSnapshot } from "./conversion-funnel";
 
 const journeyIdSchema = z.object({ id: z.string().uuid() });
 const legacyJourneySchema = z.object({
@@ -495,6 +496,7 @@ export const saveJourney = createServerFn({ method: "POST" })
       exit_rules: input.exit_rules,
       daily_limit: input.daily_limit,
       cooldown_hours: input.cooldown_hours,
+      conversion_objective: input.conversion_objective,
     };
     const steps = await Promise.all(
       input.steps.map(async (step, position) => {
@@ -571,7 +573,7 @@ export const setJourneyStatus = createServerFn({ method: "POST" })
     await requireJourneyPublisher(context.userId, tenantId);
     const { data: journey, error: journeyError } = await db
       .from("journeys")
-      .select("id,version,status")
+      .select("id,version,status,conversion_objective,conversion_funnel_snapshot")
       .eq("id", data.id)
       .eq("tenant_id", tenantId)
       .maybeSingle();
@@ -619,6 +621,9 @@ export const setJourneyStatus = createServerFn({ method: "POST" })
             archived_at: null,
             published_version: journey.version,
             approved_by: context.userId,
+            conversion_funnel_snapshot:
+              journey.conversion_funnel_snapshot ??
+              conversionFunnelSnapshot(journey.conversion_objective ?? "journey", "journey"),
           }
         : data.status === "paused"
           ? { paused_at: now }
