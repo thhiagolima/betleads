@@ -510,11 +510,12 @@ export const saveJourney = createServerFn({ method: "POST" })
         if (step.step_type === "voice") {
           const { data: asset } = await db
             .from("journey_voice_assets")
-            .select("id")
+            .select("id, is_archived")
             .eq("id", step.config.asset_id)
             .eq("tenant_id", tenantId)
             .maybeSingle();
-          if (!asset) throw new Error("Selecione um áudio de voz deste tenant.");
+          if (!asset || asset.is_archived)
+            throw new Error("Selecione um áudio de voz ativo deste tenant.");
         }
         return {
           tenant_id: tenantId,
@@ -574,10 +575,18 @@ export const setJourneyStatus = createServerFn({ method: "POST" })
           throw new Error("Há uma etapa de SMS sem mensagem.");
         if (step.step_type === "email" && !step.config.template_id)
           throw new Error("Há uma etapa de e-mail sem template.");
-        if (step.step_type === "voice")
-          throw new Error(
-            "Etapas de voz não podem ser publicadas até a certificação operacional do canal.",
-          );
+        if (step.step_type === "voice") {
+          const assetId = String(step.config.asset_id ?? "");
+          const { data: asset } = await db
+            .from("journey_voice_assets")
+            .select("id")
+            .eq("id", assetId)
+            .eq("tenant_id", tenantId)
+            .eq("is_archived", false)
+            .maybeSingle();
+          if (!asset)
+            throw new Error("Há uma etapa de voz sem áudio ativo deste tenant.");
+        }
       }
     }
     const { error } = await db

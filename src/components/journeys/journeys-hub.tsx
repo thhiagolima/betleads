@@ -149,7 +149,7 @@ export function JourneysHub() {
           <Route className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
           <span>
             Campanhas são disparos pontuais. Jornadas entram por gatilho e avançam pessoa a pessoa.
-            A voz será liberada após o upload do áudio estar concluído.
+            Etapas de voz usam um áudio ativo da biblioteca da tenant.
           </span>
         </CardContent>
       </Card>
