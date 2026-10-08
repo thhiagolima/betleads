@@ -138,17 +138,27 @@ export function CampaignsHub() {
     channel: "email" as const,
     cancellable: false,
   }));
-  const voiceRows: Campaign[] = ((voiceQueue.data?.items ?? []) as any[]).map((item) => ({
-    id: item.id,
-    name: item.script_name ?? item.audio_name ?? "Ligação por voz",
-    scheduled_at: item.scheduled_at ?? item.created_at ?? new Date().toISOString(),
-    status: item.status ?? "pendente",
-    total_count: 1,
-    sent_count: ["dispatched", "sent", "completed", "answered"].includes(item.status) ? 1 : 0,
-    failed_count: ["failed", "error", "cancelled"].includes(item.status) ? 1 : 0,
-    channel: "voice",
-    cancellable: false,
-  }));
+  const voiceRows: Campaign[] = ((voiceQueue.data?.items ?? []) as any[]).map((item) => {
+    const scheduledAt = item.scheduled_at ?? item.created_at ?? new Date().toISOString();
+    const isFuture = new Date(scheduledAt).getTime() > Date.now();
+    return {
+      id: item.id,
+      name: item.script_name ?? item.audio_name ?? "Ligação por voz",
+      scheduled_at: scheduledAt,
+      // `audio_ready` means the audio was prepared successfully. It is only
+      // waiting for the selected schedule, not for the provider.
+      status: item.status === "audio_ready" && isFuture ? "agendada" : (item.status ?? "pendente"),
+      total_count: 1,
+      sent_count: ["dispatched", "sent", "completed", "answered", "waiting_provider"].includes(
+        item.status,
+      )
+        ? 1
+        : 0,
+      failed_count: ["failed", "error", "cancelled"].includes(item.status) ? 1 : 0,
+      channel: "voice",
+      cancellable: false,
+    };
+  });
   const all: Campaign[] = [...smsCampaigns, ...emailRows, ...voiceRows].sort(
     (a, b) => new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime(),
   );

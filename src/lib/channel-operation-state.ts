@@ -85,7 +85,11 @@ export function getChannelOperationState(
     };
   }
 
-  if (["enviando", "running", "processing", "dispatched", "in_progress"].includes(normalized)) {
+  if (
+    ["enviando", "running", "processing", "dispatched", "in_progress", "waiting_provider"].includes(
+      normalized,
+    )
+  ) {
     return {
       label: "Em processamento",
       description: "O provedor está processando os destinatários desta campanha.",
