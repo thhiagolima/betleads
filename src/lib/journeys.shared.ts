@@ -84,6 +84,9 @@ export const journeyInputSchema = z.object({
   exit_rules: z.record(z.string(), z.unknown()).default({}),
   daily_limit: z.number().int().min(1).max(100000).default(1000),
   cooldown_hours: z.number().int().min(0).max(720).default(72),
+  conflict_family: z.string().trim().max(80).nullable().optional().default(null),
+  journey_priority: z.number().int().min(1).max(100).default(4),
+  conflict_policy: z.enum(["coexist", "pause_lower_priority", "exclusive"]).default("coexist"),
   conversion_objective: z
     .enum(["acquisition", "conversion", "reactivation", "journey"])
     .default("journey"),

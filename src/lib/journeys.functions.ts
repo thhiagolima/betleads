@@ -69,7 +69,7 @@ export const listJourneys = createServerFn({ method: "GET" })
     const { data, error } = await db
       .from("journeys")
       .select(
-        "id,name,description,status,trigger_type,daily_limit,cooldown_hours,updated_at,journey_steps(id,position,step_type,config,is_enabled)",
+        "id,name,description,status,trigger_type,conflict_family,journey_priority,conflict_policy,daily_limit,cooldown_hours,updated_at,journey_steps(id,position,step_type,config,is_enabled)",
       )
       .eq("tenant_id", tenantId)
       .order("updated_at", { ascending: false });
@@ -559,6 +559,18 @@ export const saveJourney = createServerFn({ method: "POST" })
       // The database keeps detailed diagnostics in its logs; never expose its
       // schema/provider details to a tenant user.
       throw new Error("Não foi possível salvar a jornada. Revise os dados e tente novamente.");
+    }
+    const { error: conflictError } = await db
+      .from("journeys")
+      .update({
+        conflict_family: input.conflict_family,
+        journey_priority: input.journey_priority,
+        conflict_policy: input.conflict_policy,
+      })
+      .eq("id", journeyId)
+      .eq("tenant_id", tenantId);
+    if (conflictError) {
+      throw new Error("Não foi possível salvar as regras de conflito da jornada.");
     }
     return { id: String(journeyId) };
   });

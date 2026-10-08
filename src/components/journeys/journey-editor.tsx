@@ -43,6 +43,9 @@ export function JourneyEditor({
     exit_rules?: Record<string, boolean>;
     daily_limit?: number;
     cooldown_hours?: number;
+    conflict_family?: string | null;
+    journey_priority?: number;
+    conflict_policy?: "coexist" | "pause_lower_priority" | "exclusive";
   };
   initialSteps?: SavedStep[];
   initialAudience?: string;
@@ -114,9 +117,16 @@ export function JourneyEditor({
   const [name, setName] = useState(initial?.name ?? draft?.name ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
   const [trigger, setTrigger] = useState(initial?.trigger_type ?? draft?.trigger ?? "manual");
-  const [triggerConfig] = useState(initial?.trigger_config ?? draft?.triggerConfig ?? {});
+  const [triggerConfig, setTriggerConfig] = useState(
+    initial?.trigger_config ?? draft?.triggerConfig ?? {},
+  );
   const [dailyLimit, setDailyLimit] = useState(initial?.daily_limit ?? 1000);
   const [cooldownHours, setCooldownHours] = useState(initial?.cooldown_hours ?? 72);
+  const [conflictFamily, setConflictFamily] = useState(initial?.conflict_family ?? "");
+  const [journeyPriority, setJourneyPriority] = useState(initial?.journey_priority ?? 4);
+  const [conflictPolicy, setConflictPolicy] = useState<
+    "coexist" | "pause_lower_priority" | "exclusive"
+  >(initial?.conflict_policy ?? "coexist");
   const [windowStart, setWindowStart] = useState(
     String(initial?.entry_rules?.window_start ?? "08:00"),
   );
@@ -164,6 +174,9 @@ export function JourneyEditor({
   );
   const mutation = useMutation({
     mutationFn: () => {
+      if (trigger === "nivel_alterado" && !String(triggerConfig.level ?? "")) {
+        throw new Error("Selecione o nível que inicia esta jornada.");
+      }
       const body = steps.flatMap((s): JourneyStepInput[] =>
         s.kind === "wait"
           ? [{ step_type: "wait", config: { delay_seconds: Math.max(60, s.seconds) } }]
@@ -253,6 +266,9 @@ export function JourneyEditor({
             },
             daily_limit: dailyLimit,
             cooldown_hours: cooldownHours,
+            conflict_family: conflictFamily || null,
+            journey_priority: journeyPriority,
+            conflict_policy: conflictPolicy,
             steps: [...body, { step_type: "end", config: {} }],
           },
         },
@@ -341,7 +357,16 @@ export function JourneyEditor({
           <select
             className="mt-1 flex h-10 w-full rounded-md border bg-background px-3 text-sm"
             value={trigger}
-            onChange={(e) => setTrigger(e.target.value)}
+            onChange={(e) => {
+              const nextTrigger = e.target.value;
+              setTrigger(nextTrigger);
+              if (nextTrigger === "nivel_alterado") {
+                setConflictFamily("progressao_niveis");
+                setConflictPolicy("exclusive");
+                setJourneyPriority(2);
+                setExitRules((current) => ({ ...current, level_changed: true }));
+              }
+            }}
           >
             <option value="manual">Entrada manual</option>
             {Object.entries(TRIGGER_NAMES).map(([value, label]) => (
@@ -351,6 +376,28 @@ export function JourneyEditor({
             ))}
           </select>
         </label>
+        {trigger === "nivel_alterado" && (
+          <section className="rounded-lg border border-primary/30 bg-primary/5 p-4 text-sm">
+            <p className="font-medium">Nível de destino</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Ao atingir este nível, o jogador sai da jornada do nível anterior e entra nesta.
+            </p>
+            <select
+              className="mt-3 flex h-10 w-full max-w-sm rounded-md border bg-background px-3 text-sm"
+              value={String(triggerConfig.level ?? "")}
+              onChange={(event) =>
+                setTriggerConfig((current) => ({ ...current, level: event.target.value }))
+              }
+            >
+              <option value="">Selecione o nível</option>
+              <option value="bronze">Bronze</option>
+              <option value="silver">Prata</option>
+              <option value="gold">Ouro</option>
+              <option value="diamond">Diamante</option>
+              <option value="black">Black VIP</option>
+            </select>
+          </section>
+        )}
         <section className="rounded-lg border p-4 text-sm">
           <p className="font-medium">Gatilhos de saída</p>
           <p className="mt-1 text-xs text-muted-foreground">
@@ -362,6 +409,7 @@ export function JourneyEditor({
               { key: "first_deposit", label: "Fez primeiro depósito" },
               { key: "login", label: "Fez login" },
               { key: "voltou_jogar", label: "Voltou a jogar" },
+              { key: "level_changed", label: "Mudou de nível" },
             ].map((rule) => (
               <label key={rule.key} className="flex items-center gap-2">
                 <input
@@ -375,6 +423,60 @@ export function JourneyEditor({
               </label>
             ))}
           </div>
+        </section>
+        <section className="rounded-lg border p-4 text-sm">
+          <p className="font-medium">Conflitos entre jornadas</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Use uma família para definir como jornadas relacionadas se comportam para o mesmo
+            jogador.
+          </p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            <label className="block text-xs text-muted-foreground">
+              Família
+              <select
+                className="mt-1 flex h-10 w-full rounded-md border bg-background px-3 text-sm"
+                value={conflictFamily}
+                onChange={(event) => setConflictFamily(event.target.value)}
+              >
+                <option value="">Sem família</option>
+                <option value="progressao_niveis">Progressão de níveis</option>
+              </select>
+            </label>
+            <label className="block text-xs text-muted-foreground">
+              Prioridade (1 é maior)
+              <Input
+                className="mt-1"
+                type="number"
+                min={1}
+                max={100}
+                value={journeyPriority}
+                onChange={(event) => setJourneyPriority(Number(event.target.value) || 1)}
+              />
+            </label>
+            <label className="block text-xs text-muted-foreground">
+              Ao competir
+              <select
+                className="mt-1 flex h-10 w-full rounded-md border bg-background px-3 text-sm"
+                value={conflictPolicy}
+                onChange={(event) =>
+                  setConflictPolicy(
+                    event.target.value as "coexist" | "pause_lower_priority" | "exclusive",
+                  )
+                }
+              >
+                <option value="coexist">Permitir coexistência</option>
+                <option value="pause_lower_priority">Pausar a menor prioridade</option>
+                <option value="exclusive">Manter apenas esta família</option>
+              </select>
+            </label>
+          </div>
+          <p className="mt-3 text-xs text-muted-foreground">
+            {conflictFamily === "progressao_niveis"
+              ? "Prévia: ao mudar de nível, a jornada anterior é encerrada antes da entrada na nova jornada."
+              : conflictPolicy === "pause_lower_priority"
+                ? "Prévia: para o mesmo canal, a jornada com menor número de prioridade segue; a outra aguarda."
+                : "Prévia: esta jornada não bloqueará outras jornadas."}
+          </p>
         </section>
         <section className="grid gap-4 rounded-lg border p-4 sm:grid-cols-2">
           <div>
