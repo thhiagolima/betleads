@@ -7,6 +7,8 @@ type AttributionEvent = {
   eventId: string;
   occurredAt: string;
   trackingToken: string | null;
+  touchAt?: string | null;
+  tokenSource?: "bl_click_id" | "utm_content" | "player";
   monetaryValue?: number | null;
   isFtd?: boolean;
 };
@@ -21,10 +23,30 @@ type Dispatch = {
 };
 
 function isUuid(value: string | null): value is string {
-  return (
-    !!value &&
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
-  );
+  return !!value && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
+export function resolveAttributionWindow(
+  sentAtValue: string,
+  occurredAtValue: string,
+  touchAtValue?: string | null,
+) {
+  const sentAt = Date.parse(sentAtValue);
+  const occurredAt = Date.parse(occurredAtValue);
+  if (!Number.isFinite(sentAt) || !Number.isFinite(occurredAt) || occurredAt < sentAt) return null;
+
+  const suppliedTouchAt = touchAtValue ? Date.parse(touchAtValue) : Number.NaN;
+  const hasValidTouchAt =
+    Number.isFinite(suppliedTouchAt) && suppliedTouchAt >= sentAt && suppliedTouchAt <= occurredAt;
+  const windowStartedAt = hasValidTouchAt ? suppliedTouchAt : sentAt;
+  if (occurredAt > windowStartedAt + 14 * 86_400_000) return null;
+
+  return {
+    classification:
+      occurredAt <= windowStartedAt + 7 * 86_400_000 ? ("direct" as const) : ("assisted" as const),
+    windowStartedAt: new Date(windowStartedAt).toISOString(),
+    anchor: hasValidTouchAt ? ("click_captured_at" as const) : ("sent_at" as const),
+  };
 }
 
 /**
@@ -75,20 +97,20 @@ export async function attributeConversionEvent(input: AttributionEvent) {
   }
   if (!candidate.sent_at) return reject("dispatch_not_sent", candidate);
 
-  const sentAt = Date.parse(candidate.sent_at);
+  const window = resolveAttributionWindow(candidate.sent_at, input.occurredAt, input.touchAt);
+  if (!window) return { attributed: false as const, reason: "outside_window" };
   const occurredAt = Date.parse(input.occurredAt);
-  if (
-    !Number.isFinite(sentAt) ||
-    !Number.isFinite(occurredAt) ||
-    occurredAt < sentAt ||
-    occurredAt > sentAt + 14 * 86_400_000
-  ) {
-    return { attributed: false as const, reason: "outside_window" };
-  }
-
-  const classification = occurredAt <= sentAt + 7 * 86_400_000 ? "direct" : "assisted";
+  const { classification, windowStartedAt, anchor } = window;
   const attributionModel =
     classification === "direct" ? "last_tracked_click" : "last_tracked_click_assisted";
+  if (anchor === "click_captured_at") {
+    const { error: touchError } = await db
+      .from("link_dispatches")
+      .update({ landing_captured_at: windowStartedAt })
+      .eq("tenant_id", input.tenantId)
+      .eq("id", candidate.id);
+    if (touchError) throw new Error(`Falha ao gravar instante do clique: ${touchError.message}`);
+  }
   const { error: insertError } = await db.from("conversion_attributions").upsert(
     {
       tenant_id: input.tenantId,
@@ -104,8 +126,14 @@ export async function attributeConversionEvent(input: AttributionEvent) {
       is_ftd: input.isFtd === true,
       attribution_model: attributionModel,
       attribution_window_days: classification === "direct" ? 7 : 14,
+      window_started_at: windowStartedAt,
+      attribution_window_anchor: anchor,
       classification,
-      evidence: { token_source: "utm_content", dispatch_sent_at: candidate.sent_at },
+      evidence: {
+        token_source: input.tokenSource ?? "bl_click_id",
+        dispatch_sent_at: candidate.sent_at,
+        supplied_touch_at: input.touchAt ?? null,
+      },
     },
     {
       onConflict: "tenant_id,event_type,event_id,attribution_model,classification",

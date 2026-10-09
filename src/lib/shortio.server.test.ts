@@ -46,7 +46,7 @@ describe("Short.io link tracking policy", () => {
     );
   });
 
-  it("preserves preexisting UTMs and adds only missing tracking values", () => {
+  it("preserves preexisting UTMs and adds the dedicated click id", () => {
     const url = new URL(
       withTrackingToken(
         "https://marca.com/a?utm_source=ads",
@@ -58,6 +58,20 @@ describe("Short.io link tracking policy", () => {
     expect(url.searchParams.get("utm_medium")).toBe("sms");
     expect(url.searchParams.get("utm_campaign")).toBe("camp-1");
     expect(url.searchParams.get("utm_content")).toBe("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+    expect(url.searchParams.get("bl_click_id")).toBe("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+  });
+
+  it("does not replace creative metadata when adding the click id", () => {
+    const url = new URL(
+      withTrackingToken(
+        "https://marca.com/a?utm_content=video-01&utm_id=ad-99&bl_click_id=stale",
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        { tenantId: "tenant", channel: "email", sourceType: "journey", sourceId: "journey-1" },
+      ),
+    );
+    expect(url.searchParams.get("utm_content")).toBe("video-01");
+    expect(url.searchParams.get("utm_id")).toBe("ad-99");
+    expect(url.searchParams.get("bl_click_id")).toBe("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
   });
 
   it("removes prose punctuation without damaging balanced URL parentheses", () => {

@@ -103,6 +103,18 @@ export async function processWebhookEvent(
     const signupAttribution = asRecord(data.signupAttribution ?? data.signup_attribution);
     const subject = asRecord(payload.subject);
     const utm = resolveUtm(data, tracking, signupAttribution);
+    const inboundClickId = resolveBetleadsClickId(data, tracking, signupAttribution, utm);
+    const inboundClickTokenSource = resolveBetleadsClickTokenSource(
+      data,
+      tracking,
+      signupAttribution,
+      utm,
+    );
+    const inboundClickCapturedAt = resolveBetleadsClickCapturedAt(
+      data,
+      tracking,
+      signupAttribution,
+    );
     const affiliate = asRecord(data.affiliate);
     const affiliateId =
       firstString(
@@ -274,6 +286,9 @@ export async function processWebhookEvent(
       if (utm.utm_content) updates.utm_content = utm.utm_content;
       if (utm.utm_term) updates.utm_term = utm.utm_term;
       if (utm.utm_id) updates.utm_id = utm.utm_id;
+      if (inboundClickId) updates.bl_click_id = inboundClickId;
+      if (inboundClickId && inboundClickCapturedAt)
+        updates.bl_click_captured_at = inboundClickCapturedAt;
       if (origem) updates.origem = origem;
 
       if (affiliateId) {
@@ -590,11 +605,15 @@ export async function processWebhookEvent(
               ? "deposit_approved"
               : null;
       if (conversionEvent) {
-        let trackingToken = utm.utm_content;
-        if (!trackingToken) {
+        let trackingToken = inboundClickId;
+        let touchAt = inboundClickId ? inboundClickCapturedAt : null;
+        let tokenSource: "bl_click_id" | "utm_content" | "player" = inboundClickId
+          ? (inboundClickTokenSource ?? "bl_click_id")
+          : "player";
+        if (!trackingToken || !touchAt) {
           const { data: playerTracking, error: playerTrackingError } = await sb
             .from("players")
-            .select("utm_content")
+            .select("bl_click_id,bl_click_captured_at,utm_content")
             .eq("tenant_id", tenantId)
             .eq("id", playerId)
             .maybeSingle();
@@ -608,9 +627,21 @@ export async function processWebhookEvent(
               { status: 503 },
             );
           }
-          trackingToken = (playerTracking?.utm_content as string | null) ?? null;
+          if (!trackingToken) {
+            const storedClickId = (playerTracking?.bl_click_id as string | null) ?? null;
+            const legacyUtmContent = (playerTracking?.utm_content as string | null) ?? null;
+            trackingToken =
+              storedClickId ?? (isTrackingToken(legacyUtmContent) ? legacyUtmContent : null);
+            tokenSource = storedClickId ? "player" : "utm_content";
+          }
+          if (!touchAt && trackingToken && playerTracking?.bl_click_id === trackingToken) {
+            touchAt = (playerTracking.bl_click_captured_at as string | null) ?? null;
+          }
         }
-        const attributionEventId = providerEventId ?? transactionId;
+        const attributionEventId =
+          providerEventId ??
+          transactionId ??
+          (conversionEvent === "registered" && externalId ? `signup:${externalId}` : null);
         if (attributionEventId) {
           try {
             await attributeConversionEvent({
@@ -620,6 +651,8 @@ export async function processWebhookEvent(
               eventId: attributionEventId,
               occurredAt: eventIso,
               trackingToken,
+              touchAt,
+              tokenSource,
               monetaryValue: conversionEvent === "deposit_approved" ? valor : null,
               isFtd: conversionEvent === "deposit_approved" && data.isFtd === true,
             });
@@ -1175,6 +1208,67 @@ function resolveUtm(
   };
 }
 
+export function isTrackingToken(value: string | null | undefined): value is string {
+  return (
+    typeof value === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
+  );
+}
+
+export function resolveBetleadsClickId(
+  data: Record<string, unknown>,
+  tracking: Record<string, unknown>,
+  signupAttribution: Record<string, unknown>,
+  utm: ResolvedUtm,
+): string | null {
+  const dedicated = firstString(
+    data.bl_click_id,
+    data.blClickId,
+    tracking.bl_click_id,
+    tracking.blClickId,
+    signupAttribution.bl_click_id,
+    signupAttribution.blClickId,
+  );
+  if (isTrackingToken(dedicated)) return dedicated;
+  return isTrackingToken(utm.utm_content) ? utm.utm_content : null;
+}
+
+export function resolveBetleadsClickTokenSource(
+  data: Record<string, unknown>,
+  tracking: Record<string, unknown>,
+  signupAttribution: Record<string, unknown>,
+  utm: ResolvedUtm,
+): "bl_click_id" | "utm_content" | null {
+  const dedicated = firstString(
+    data.bl_click_id,
+    data.blClickId,
+    tracking.bl_click_id,
+    tracking.blClickId,
+    signupAttribution.bl_click_id,
+    signupAttribution.blClickId,
+  );
+  if (isTrackingToken(dedicated)) return "bl_click_id";
+  return isTrackingToken(utm.utm_content) ? "utm_content" : null;
+}
+
+export function resolveBetleadsClickCapturedAt(
+  data: Record<string, unknown>,
+  tracking: Record<string, unknown>,
+  signupAttribution: Record<string, unknown>,
+): string | null {
+  const value = firstString(
+    data.bl_click_captured_at,
+    data.blClickCapturedAt,
+    tracking.bl_click_captured_at,
+    tracking.blClickCapturedAt,
+    signupAttribution.bl_click_captured_at,
+    signupAttribution.blClickCapturedAt,
+  );
+  if (!value) return null;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
+}
+
 type ResolvedUtm = ReturnType<typeof resolveUtm>;
 
 async function savePlayerAttribution(
@@ -1231,6 +1325,17 @@ async function savePlayerAttribution(
         ) ?? null,
       event_type: "signup",
       provider,
+      bl_click_id: resolveBetleadsClickId(
+        args.data,
+        args.tracking,
+        args.signupAttribution,
+        args.utm,
+      ),
+      bl_click_captured_at: resolveBetleadsClickCapturedAt(
+        args.data,
+        args.tracking,
+        args.signupAttribution,
+      ),
       ...args.utm,
       ...clickIds,
       raw_payload: {

@@ -3816,6 +3816,7 @@ export type Database = {
           created_at: string
           id: string
           idempotency_key: string
+          landing_captured_at: string | null
           message_log_id: string | null
           message_log_type: string | null
           original_url: string
@@ -3837,6 +3838,7 @@ export type Database = {
           created_at?: string
           id?: string
           idempotency_key: string
+          landing_captured_at?: string | null
           message_log_id?: string | null
           message_log_type?: string | null
           original_url: string
@@ -3858,6 +3860,7 @@ export type Database = {
           created_at?: string
           id?: string
           idempotency_key?: string
+          landing_captured_at?: string | null
           message_log_id?: string | null
           message_log_type?: string | null
           original_url?: string
@@ -4522,6 +4525,8 @@ export type Database = {
       }
       player_attributions: {
         Row: {
+          bl_click_captured_at: string | null
+          bl_click_id: string | null
           captured_at: string
           created_at: string
           event_id: string | null
@@ -4553,6 +4558,8 @@ export type Database = {
           wbraid: string | null
         }
         Insert: {
+          bl_click_captured_at?: string | null
+          bl_click_id?: string | null
           captured_at?: string
           created_at?: string
           event_id?: string | null
@@ -4584,6 +4591,8 @@ export type Database = {
           wbraid?: string | null
         }
         Update: {
+          bl_click_captured_at?: string | null
+          bl_click_id?: string | null
           captured_at?: string
           created_at?: string
           event_id?: string | null
@@ -4634,6 +4643,8 @@ export type Database = {
       players: {
         Row: {
           affiliate_id: string | null
+          bl_click_captured_at: string | null
+          bl_click_id: string | null
           cpf: string | null
           created_at: string
           data_nascimento: string | null
@@ -4676,6 +4687,8 @@ export type Database = {
         }
         Insert: {
           affiliate_id?: string | null
+          bl_click_captured_at?: string | null
+          bl_click_id?: string | null
           cpf?: string | null
           created_at?: string
           data_nascimento?: string | null
@@ -4718,6 +4731,8 @@ export type Database = {
         }
         Update: {
           affiliate_id?: string | null
+          bl_click_captured_at?: string | null
+          bl_click_id?: string | null
           cpf?: string | null
           created_at?: string
           data_nascimento?: string | null

@@ -224,6 +224,9 @@ export async function deterministicToken(context: LinkTrackingContext, position:
 
 export function withTrackingToken(raw: string, token: string, context: LinkTrackingContext) {
   const url = new URL(raw);
+  // Machine attribution must not compete with marketing UTMs. Always own the
+  // dedicated parameter, while retaining utm_content for legacy receivers.
+  url.searchParams.set("bl_click_id", token);
   if (!url.searchParams.has("utm_source")) url.searchParams.set("utm_source", "betleads");
   if (!url.searchParams.has("utm_medium")) url.searchParams.set("utm_medium", context.channel);
   if (!url.searchParams.has("utm_campaign"))
