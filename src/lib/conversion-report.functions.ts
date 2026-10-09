@@ -36,6 +36,285 @@ const drilldownSchema = inputSchema.extend({
   limit: z.number().int().min(1).max(500).default(100),
 });
 
+const campaignDetailsSchema = z.object({
+  campaignId: z.string().uuid(),
+  limit: z.number().int().min(1).max(500).default(500),
+});
+
+const csvCell = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+
+/**
+ * Operational detail used by the campaign report. Link dispatches are grouped by
+ * idempotency key because a message may contain more than one tracked URL.
+ */
+export const getCampaignReportDetails = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((value: unknown) => campaignDetailsSchema.parse(value))
+  .handler(async ({ data, context }) => {
+    const tenantId = await resolveOperationalTenantId(context.supabase);
+    const db = context.supabase as any;
+
+    const [smsResult, emailResult, dispatchResult] = await Promise.all([
+      db
+        .from("sms_campaigns")
+        .select(
+          "id,name,content,route,status,total_count,sent_count,failed_count,scheduled_at,created_at,updated_at,recipients",
+        )
+        .eq("tenant_id", tenantId)
+        .eq("id", data.campaignId)
+        .maybeSingle(),
+      db
+        .from("email_campaigns")
+        .select(
+          "id,name,status,stats,scheduled_at,created_at,updated_at,template_snapshot,audience_filter",
+        )
+        .eq("tenant_id", tenantId)
+        .eq("id", data.campaignId)
+        .maybeSingle(),
+      db
+        .from("link_dispatches")
+        .select(
+          "id,tracked_link_id,tracking_token,idempotency_key,recipient_player_id,send_status,delivery_status,sent_at,delivered_at,created_at,updated_at,message_log_id,channel",
+        )
+        .eq("tenant_id", tenantId)
+        .eq("source_type", "campaign")
+        .eq("source_id", data.campaignId)
+        .order("created_at", { ascending: true })
+        .limit(Math.min(data.limit * 4, 2000)),
+    ]);
+    if (dispatchResult.error) throw new Error(dispatchResult.error.message);
+    if (smsResult.error && emailResult.error)
+      throw new Error(smsResult.error.message || emailResult.error.message);
+
+    const sms = smsResult.data;
+    const email = emailResult.data;
+    const campaign = sms
+      ? {
+          channel: "sms" as const,
+          name: sms.name,
+          content: sms.content,
+          route: sms.route,
+          status: sms.status,
+          total: Number(sms.total_count ?? 0),
+          sent: Number(sms.sent_count ?? 0),
+          failed: Number(sms.failed_count ?? 0),
+          scheduledAt: sms.scheduled_at,
+          createdAt: sms.created_at,
+          finishedAt: sms.updated_at,
+          audience: Array.isArray(sms.recipients) ? sms.recipients.length : 0,
+        }
+      : email
+        ? {
+            channel: "email" as const,
+            name: email.name,
+            content:
+              email.template_snapshot?.subject ??
+              email.template_snapshot?.name ??
+              "Conteúdo de e-mail preservado no template da campanha.",
+            route: "E-mail",
+            status: email.status,
+            total: Number(email.stats?.total ?? email.stats?.destinatarios ?? 0),
+            sent: Number(email.stats?.sent ?? email.stats?.enviados ?? 0),
+            failed: Number(email.stats?.failed ?? email.stats?.falhas ?? 0),
+            scheduledAt: email.scheduled_at,
+            createdAt: email.created_at,
+            finishedAt: email.updated_at,
+            audience: Number(email.stats?.total ?? email.stats?.destinatarios ?? 0),
+          }
+        : null;
+
+    const dispatches = dispatchResult.data ?? [];
+    const deliveryMap = new Map<string, any[]>();
+    for (const row of dispatches) {
+      const key = row.idempotency_key || row.message_log_id || row.id;
+      const group = deliveryMap.get(key) ?? [];
+      group.push(row);
+      deliveryMap.set(key, group);
+    }
+    const deliveries = [...deliveryMap.entries()].slice(0, data.limit);
+    const playerIds = [
+      ...new Set(deliveries.map(([, rows]) => rows[0]?.recipient_player_id).filter(Boolean)),
+    ];
+    const linkIds = [
+      ...new Set(deliveries.flatMap(([, rows]) => rows.map((row) => row.tracked_link_id))),
+    ];
+    const tokens = [
+      ...new Set(deliveries.flatMap(([, rows]) => rows.map((row) => row.tracking_token))),
+    ];
+    const messageLogIds = [
+      ...new Set(deliveries.map(([, rows]) => rows[0]?.message_log_id).filter(Boolean)),
+    ];
+
+    const [playersResult, snapshotsResult, attributionsResult, depositsResult, smsLogsResult] =
+      await Promise.all([
+        playerIds.length
+          ? db
+              .from("players")
+              .select("id,nome,telefone,email,total_depositado")
+              .eq("tenant_id", tenantId)
+              .in("id", playerIds)
+          : Promise.resolve({ data: [], error: null }),
+        linkIds.length
+          ? db
+              .from("link_click_snapshots")
+              .select("tracked_link_id,clicks,human_clicks,snapshot_at")
+              .eq("tenant_id", tenantId)
+              .in("tracked_link_id", linkIds)
+          : Promise.resolve({ data: [], error: null }),
+        tokens.length
+          ? db
+              .from("conversion_attributions")
+              .select("tracking_token,event_type,occurred_at,monetary_value,classification")
+              .eq("tenant_id", tenantId)
+              .eq("source_type", "campaign")
+              .eq("source_id", data.campaignId)
+              .in("tracking_token", tokens)
+          : Promise.resolve({ data: [], error: null }),
+        playerIds.length
+          ? db
+              .from("deposits")
+              .select("player_id,valor,status,completed_at,created_at")
+              .eq("tenant_id", tenantId)
+              .in("player_id", playerIds)
+              .eq("status", "aprovado")
+          : Promise.resolve({ data: [], error: null }),
+        sms?.id && messageLogIds.length
+          ? db
+              .from("sms_send_logs")
+              .select("id,status,error,to_phone,created_at,delivered_at,delivery_status")
+              .eq("tenant_id", tenantId)
+              .in("id", messageLogIds)
+          : Promise.resolve({ data: [], error: null }),
+      ]);
+    const firstError = [
+      playersResult.error,
+      snapshotsResult.error,
+      attributionsResult.error,
+      depositsResult.error,
+      smsLogsResult.error,
+    ].find(Boolean);
+    if (firstError) throw new Error(firstError.message);
+
+    const players = new Map<string, any>(
+      (playersResult.data ?? []).map((row: any) => [row.id, row]),
+    );
+    const logs = new Map<string, any>((smsLogsResult.data ?? []).map((row: any) => [row.id, row]));
+    const latestSnapshot = new Map<string, any>();
+    for (const row of snapshotsResult.data ?? []) {
+      const previous = latestSnapshot.get(row.tracked_link_id);
+      if (!previous || row.snapshot_at > previous.snapshot_at)
+        latestSnapshot.set(row.tracked_link_id, row);
+    }
+    const depositsByPlayer = new Map<string, any[]>();
+    for (const row of depositsResult.data ?? []) {
+      const group = depositsByPlayer.get(row.player_id) ?? [];
+      group.push(row);
+      depositsByPlayer.set(row.player_id, group);
+    }
+    const attributionsByToken = new Map<string, any[]>();
+    for (const row of attributionsResult.data ?? []) {
+      const group = attributionsByToken.get(row.tracking_token) ?? [];
+      group.push(row);
+      attributionsByToken.set(row.tracking_token, group);
+    }
+
+    const recipients = deliveries.map(([key, rows]) => {
+      const first = rows[0];
+      const player = players.get(first.recipient_player_id) ?? null;
+      const log = logs.get(first.message_log_id) ?? null;
+      const snapshots = rows.map((row) => latestSnapshot.get(row.tracked_link_id)).filter(Boolean);
+      const clicked = snapshots.some((row) => Number(row.human_clicks ?? row.clicks ?? 0) > 0);
+      const clickCount = snapshots.reduce(
+        (sum, row) => sum + Number(row.human_clicks ?? row.clicks ?? 0),
+        0,
+      );
+      const attributionRows = rows.flatMap(
+        (row) => attributionsByToken.get(row.tracking_token) ?? [],
+      );
+      const deposit = attributionRows
+        .filter((row) => row.event_type === "deposit_approved" && row.classification === "direct")
+        .sort((a, b) => String(a.occurred_at).localeCompare(String(b.occurred_at)))[0];
+      const historicalDeposits = depositsByPlayer.get(first.recipient_player_id) ?? [];
+      return {
+        id: key,
+        playerId: first.recipient_player_id,
+        playerName: player?.nome ?? log?.to_phone ?? "Destinatário não identificado",
+        contact: player?.telefone ?? player?.email ?? log?.to_phone ?? "",
+        sendStatus: first.send_status,
+        deliveryStatus: first.delivery_status ?? log?.delivery_status ?? null,
+        error: log?.error ?? null,
+        sentAt: first.sent_at ?? first.created_at,
+        deliveredAt: first.delivered_at ?? log?.delivered_at ?? null,
+        clicked,
+        clickCount,
+        clickedAt: clicked
+          ? (snapshots
+              .map((row) => row.snapshot_at)
+              .sort()
+              .at(0) ?? null)
+          : null,
+        depositAt: deposit?.occurred_at ?? null,
+        depositValue: Number(deposit?.monetary_value ?? 0),
+        historicalDepositCount: historicalDeposits.length,
+        historicalDepositValue: historicalDeposits.reduce(
+          (sum, row) => sum + Number(row.valor ?? 0),
+          0,
+        ),
+      };
+    });
+
+    return {
+      campaign,
+      recipients,
+      recipientsShown: recipients.length,
+      trackedDeliveries: deliveryMap.size,
+      failureReasons: [...logs.values()]
+        .filter((row: any) => row.error)
+        .reduce((groups: Record<string, number>, row: any) => {
+          const reason = String(row.error).slice(0, 140);
+          groups[reason] = (groups[reason] ?? 0) + 1;
+          return groups;
+        }, {}),
+    };
+  });
+
+export const exportCampaignRecipientsCsv = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((value: unknown) => z.object({ campaignId: z.string().uuid() }).parse(value))
+  .handler(async ({ data, context }) => {
+    const tenantId = await resolveOperationalTenantId(context.supabase);
+    await requireConversionReportAdmin(context, tenantId);
+    const db = context.supabase as any;
+    const { data: dispatches, error } = await db
+      .from("link_dispatches")
+      .select(
+        "recipient_player_id,send_status,delivery_status,sent_at,delivered_at,tracking_token,players(nome,email,telefone)",
+      )
+      .eq("tenant_id", tenantId)
+      .eq("source_type", "campaign")
+      .eq("source_id", data.campaignId)
+      .limit(10000);
+    if (error) throw new Error(error.message);
+    const csv = [
+      "jogador,email,telefone,status_envio,status_entrega,enviado_em,entregue_em,token_rastreamento",
+      ...(dispatches ?? []).map((row: any) =>
+        [
+          row.players?.nome,
+          row.players?.email,
+          row.players?.telefone,
+          row.send_status,
+          row.delivery_status,
+          row.sent_at,
+          row.delivered_at,
+          row.tracking_token,
+        ]
+          .map(csvCell)
+          .join(","),
+      ),
+    ].join("\n");
+    return { csv };
+  });
+
 export const getConversionDataHealth = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((value: unknown) => inputSchema.parse(value))
