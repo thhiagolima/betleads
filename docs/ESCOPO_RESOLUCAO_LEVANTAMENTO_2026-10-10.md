@@ -19,6 +19,8 @@
 
 > **Progresso em 10/10/2026 — P0.6:** o typecheck foi promovido a comando oficial e gate bloqueante do CI. A auditoria de dependências continua pendente da P0.5, pois há vulnerabilidades altas transitivas que exigem atualização incompatível do Nitro; os checks remotos de migrations permanecem obrigatórios no procedimento de deploy até que credenciais apropriadas sejam disponibilizadas ao CI.
 
+> **Levantamento em 10/10/2026 — P0.5:** `npm audit --omit=dev` identificou 4 vulnerabilidades altas e 4 moderadas. A simulação de atualização compatível atualiza `@cloudflare/vite-plugin`, `wrangler` e `source-map-js`, mas mantém `sharp` e `undici` transitivos; a correção integral requer Nitro `3.0.260903-beta`, classificada pelo npm como breaking change. A atualização deve ocorrer em branch própria com regressão de SSR, rotas públicas, upload/imagem e workers antes de promoção. Até lá, o risco residual está registrado e nenhuma atualização forçada foi aplicada em `main`.
+
 ## 1. Objetivo
 
 Transformar o levantamento técnico e documental do Betleads em um plano executável, priorizando primeiro riscos de operação, envio indevido, divergência entre banco e código, segurança e atribuição financeira. Em seguida, consolidar a fonte de verdade documental, ampliar a cobertura de testes e concluir a experiência operacional.
