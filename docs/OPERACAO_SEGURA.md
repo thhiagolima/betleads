@@ -45,7 +45,7 @@
 
 - **SMS:** valide saldo, limite de partes, supressão/SAIR, janela de envio e callback Short Brasil antes de reabrir.
 - **E-mail:** valide remetente/domínio, supressão/descadastro, URLs/imagens e callback do provedor antes de reabrir.
-- **Voz:** mantenha o cron desligado até a chamada real, callback assinado, status final e retentativa serem aceitos. Uma falha não deve disparar nova chamada sem política de frequência e idempotência.
+- **Voz:** mantenha o despacho automático desligado (`VOICE_DISPATCH_ENABLED=false`) até a chamada real, callback assinado, status final e retentativa serem aceitos. O cron de reconciliação pode permanecer ativo porque apenas audita callbacks pendentes; ele não cria chamadas. Uma falha não deve disparar nova chamada sem política de frequência e idempotência.
 
 ## Critério de retorno à operação
 
@@ -89,10 +89,10 @@ O painel **Campanhas > Operação dos canais** é a fonte única para a primeira
 
 ### Voz
 
-1. Pause voz imediatamente em qualquer chamada inesperada. O cron continua desabilitado até o aceite ponta a ponta.
+1. Pause voz imediatamente em qualquer chamada inesperada. Mantenha `VOICE_DISPATCH_ENABLED=false` até o aceite ponta a ponta; o cron de reconciliação não precisa ser desligado porque não despacha chamadas.
 2. Confirme consentimento, janela, cooldown, limite móvel, asset/script versionado e credencial Infobip.
 3. Reprocessar presos apenas devolve chamadas em `calling` com lock expirado para a fila; valide idempotência antes de permitir novo despacho.
-4. Em rollback, mantenha o cron desligado, restaure a release anterior e preserve áudio, fila e histórico.
+4. Em rollback, mantenha `VOICE_DISPATCH_ENABLED=false`, restaure a release anterior e preserve áudio, fila e histórico.
 5. A retomada automática exige chamada real autorizada, callback assinado, relatório e decisão formal de go/no-go.
 
 ## Comunicação e registro

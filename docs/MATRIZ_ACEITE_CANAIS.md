@@ -37,7 +37,7 @@ Use esta matriz a cada tenant/provedor antes de classificar um canal como plenam
 
 ## Voz
 
-> Não habilite cron/automação de voz até concluir todos os itens abaixo.
+> Não habilite o **despacho automático** de voz (`VOICE_DISPATCH_ENABLED=true`) até concluir todos os itens abaixo. O cron de reconciliação de callbacks pode continuar ativo, pois apenas audita pendências e não cria chamadas.
 
 | Cenário | Evidência exigida | Resultado |
 | --- | --- | --- |

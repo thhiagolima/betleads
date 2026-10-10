@@ -6,6 +6,7 @@ import { runDispatcher as runWhatsappDispatcher } from "@/lib/automation.server"
 import { runJourneyDispatcher } from "@/lib/journeys.server";
 import { runVoiceQueueDispatcher } from "@/lib/calls.server";
 import { requireSharedSecret } from "@/lib/cron-auth.server";
+import { isVoiceDispatchEnabled } from "@/lib/voice-dispatch-policy";
 
 export const Route = createFileRoute("/api/public/hooks/dispatch")({
   server: {
@@ -33,6 +34,13 @@ export const Route = createFileRoute("/api/public/hooks/dispatch")({
             result = { campaigns, flows };
           } else if (channel === "email") result = await runEmailFlowDispatcher({ limit: 2000 });
           else if (channel === "call") {
+            if (!isVoiceDispatchEnabled()) {
+              result = {
+                disabled: true,
+                reason: "VOICE_DISPATCH_ENABLED is not enabled",
+              };
+              return Response.json({ ok: true, channel, result });
+            }
             const [queue, flows] = await Promise.all([
               runVoiceQueueDispatcher(200),
               tickFlows(200),
