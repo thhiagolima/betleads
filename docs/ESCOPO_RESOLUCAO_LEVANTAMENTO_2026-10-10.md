@@ -17,6 +17,8 @@
 
 > **Progresso em 10/10/2026 — P0.2 (callback):** a rota de evento de voz agora é coberta para rejeição sem token, correlação e persistência do resultado final. Falhas ao gravar o histórico ou a fila deixam de ser reconhecidas como sucesso, permitindo nova tentativa do provedor. A prova com callback real do Infobip permanece obrigatória para o aceite.
 
+> **Progresso em 10/10/2026 — P0.6:** o typecheck foi promovido a comando oficial e gate bloqueante do CI. A auditoria de dependências continua pendente da P0.5, pois há vulnerabilidades altas transitivas que exigem atualização incompatível do Nitro; os checks remotos de migrations permanecem obrigatórios no procedimento de deploy até que credenciais apropriadas sejam disponibilizadas ao CI.
+
 ## 1. Objetivo
 
 Transformar o levantamento técnico e documental do Betleads em um plano executável, priorizando primeiro riscos de operação, envio indevido, divergência entre banco e código, segurança e atribuição financeira. Em seguida, consolidar a fonte de verdade documental, ampliar a cobertura de testes e concluir a experiência operacional.
