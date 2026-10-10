@@ -26,6 +26,13 @@ function callIdOf(payload: Record<string, unknown>): string | null {
   return typeof value === "string" && value.trim() ? value : null;
 }
 
+function correlationOf(request: Request, payload: Record<string, unknown>): string | null {
+  const queryValue = new URL(request.url).searchParams.get("correlation");
+  if (queryValue) return queryValue;
+  const value = valueAt(payload, "customData", "custom_data", "correlation");
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
 function durationOf(payload: Record<string, unknown>): number | null {
   const value = valueAt(payload, "duration", "durationSeconds", "duration_seconds", "callDuration", "call_duration_seconds");
   const seconds = typeof value === "number" ? value : Number(value);
@@ -68,33 +75,49 @@ export const Route = createFileRoute("/api/public/infobip/voice/events")({
           return Response.json({ error: "invalid json" }, { status: 400 });
         }
         const callId = callIdOf(payload);
-        if (!callId) return Response.json({ ok: true, skipped: "missing_call_id" });
+        const correlation = correlationOf(request, payload);
+        if (!callId && !correlation) return Response.json({ ok: true, skipped: "missing_correlation" });
         const result = completion(payload);
         const duration = durationOf(payload);
-        const { data: history } = await supabaseAdmin
+        let history = null;
+        if (callId) {
+          const { data } = await supabaseAdmin
           .from("call_history")
-          .select("id, call_queue_id, provider_response")
+          .select("id, call_queue_id, provider_call_id, provider_response")
           .eq("provider_call_id", callId)
           .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle();
+          history = data;
+        }
+        if (!history && correlation) {
+          const { data } = await supabaseAdmin
+            .from("call_history")
+            .select("id, call_queue_id, provider_call_id, provider_response")
+            .contains("provider_response", { correlation_id: correlation })
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          history = data;
+        }
         const previous = (history?.provider_response && typeof history.provider_response === "object")
           ? history.provider_response as Record<string, unknown>
           : {};
         const callbacks = Array.isArray(previous.callbacks) ? previous.callbacks : [];
         const callback = { received_at: new Date().toISOString(), payload };
-        const historyStatus = result === "answered" ? "answered" : result === "completed" ? "completed" : result ? "failed" : "pending";
         const update: Record<string, unknown> = {
           provider_response: { ...previous, callbacks: [...callbacks, callback], last_callback: callback },
-          status: historyStatus,
-          result: result ?? null,
-          error_message: errorOf(payload),
         };
+        if (result) {
+          update.status = result === "answered" ? "answered" : result === "completed" ? "completed" : "failed";
+          update.result = result;
+          update.error_message = errorOf(payload);
+        }
         if (duration != null) update.duration_seconds = duration;
         await supabaseAdmin
           .from("call_history")
           .update(update as never)
-          .eq("provider_call_id", callId);
+          .eq("id", history?.id ?? "00000000-0000-0000-0000-000000000000");
         if (history?.call_queue_id && result && result !== "answered") {
           await supabaseAdmin
             .from("call_queue")
@@ -102,9 +125,13 @@ export const Route = createFileRoute("/api/public/infobip/voice/events")({
             .eq("id", history.call_queue_id);
         }
         if (result && result !== "answered") {
-          await handleCallCompletion({ providerCallId: callId, status: result, durationSeconds: duration ?? 0 });
+          await handleCallCompletion({
+            providerCallId: callId ?? history?.provider_call_id ?? correlation ?? "",
+            status: result,
+            durationSeconds: duration ?? 0,
+          });
         }
-        return Response.json({ ok: true, call_id: callId, status: result, duration_seconds: duration });
+        return Response.json({ ok: true, call_id: callId, correlation, matched: Boolean(history), status: result, duration_seconds: duration });
       },
     },
   },
