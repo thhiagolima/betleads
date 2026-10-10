@@ -15,6 +15,8 @@
 
 > **Progresso em 10/10/2026 — P0.2 (limites):** foi identificada uma desativação global preexistente de cooldown e limite móvel de voz. A correção restaura a linha de base defensiva de 24 horas/1 chamada por destinatário e faz o runtime aplicar essa linha de base quando uma tenant ainda não possuir política persistida. A flag global de despacho continua `false`; esta correção não autoriza chamadas nem substitui o aceite operacional.
 
+> **Progresso em 10/10/2026 — P0.2 (callback):** a rota de evento de voz agora é coberta para rejeição sem token, correlação e persistência do resultado final. Falhas ao gravar o histórico ou a fila deixam de ser reconhecidas como sucesso, permitindo nova tentativa do provedor. A prova com callback real do Infobip permanece obrigatória para o aceite.
+
 ## 1. Objetivo
 
 Transformar o levantamento técnico e documental do Betleads em um plano executável, priorizando primeiro riscos de operação, envio indevido, divergência entre banco e código, segurança e atribuição financeira. Em seguida, consolidar a fonte de verdade documental, ampliar a cobertura de testes e concluir a experiência operacional.

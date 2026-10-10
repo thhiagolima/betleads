@@ -114,15 +114,17 @@ export const Route = createFileRoute("/api/public/infobip/voice/events")({
           update.error_message = errorOf(payload);
         }
         if (duration != null) update.duration_seconds = duration;
-        await supabaseAdmin
+        const { error: historyUpdateError } = await supabaseAdmin
           .from("call_history")
           .update(update as never)
           .eq("id", history?.id ?? "00000000-0000-0000-0000-000000000000");
+        if (historyUpdateError) throw historyUpdateError;
         if (history?.call_queue_id && result && result !== "answered") {
-          await supabaseAdmin
+          const { error: queueUpdateError } = await supabaseAdmin
             .from("call_queue")
             .update({ status: result === "completed" ? "completed" : "failed", provider_status: result } as never)
             .eq("id", history.call_queue_id);
+          if (queueUpdateError) throw queueUpdateError;
         }
         if (result && result !== "answered") {
           await handleCallCompletion({
