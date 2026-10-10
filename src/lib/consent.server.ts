@@ -4,6 +4,18 @@ import { deferIfOutsideWindow } from "./send-window.server";
 export type ConsentChannel = "sms" | "email" | "voice";
 export type ConsentStatus = "granted" | "revoked";
 
+export const DEFAULT_VOICE_FREQUENCY_POLICY = {
+  enabled: true,
+  cooldown_hours: 24,
+  rolling_24h_limit: 1,
+} as const;
+
+export function resolveVoiceFrequencyPolicy(
+  policy: { enabled: boolean; cooldown_hours: number; rolling_24h_limit: number } | null,
+) {
+  return policy ?? DEFAULT_VOICE_FREQUENCY_POLICY;
+}
+
 export function normalizeConsentSubject(channel: ConsentChannel, subject: string) {
   if (channel === "email") return subject.trim().toLowerCase();
   const digits = subject.replace(/\D/g, "");
@@ -83,12 +95,14 @@ export async function evaluateVoiceContactPolicy(tenantId: string, subject: stri
     .eq("tenant_id", tenantId)
     .maybeSingle();
   if (policyError) throw new Error(`Falha ao validar politica de voz: ${policyError.message}`);
-  // Frequency controls are opt-in. Consent and the account contact window are
-  // always checked above, even when the tenant chooses unlimited voice sends.
-  if (policy?.enabled !== true) return { allowed: true as const, reason: null, retryAt: null };
+  // Voice is fail-closed for frequency: a missing policy must not turn a
+  // configuration/data issue into unlimited automatic calls. Operators can
+  // change the values later, but the safe account baseline is always applied.
+  const frequencyPolicy = resolveVoiceFrequencyPolicy(policy);
+  if (frequencyPolicy.enabled !== true) return { allowed: true as const, reason: null, retryAt: null };
 
-  const cooldownHours = Number(policy?.cooldown_hours ?? 24);
-  const dailyLimit = Number(policy?.rolling_24h_limit ?? 1);
+  const cooldownHours = Number(frequencyPolicy.cooldown_hours);
+  const dailyLimit = Number(frequencyPolicy.rolling_24h_limit);
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const candidates = [phone, `+${phone}`];
   const { data: recent, error } = await supabaseAdmin

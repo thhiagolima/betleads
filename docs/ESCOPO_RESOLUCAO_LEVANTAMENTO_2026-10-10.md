@@ -13,6 +13,8 @@
 
 > **Progresso em 10/10/2026 — P0.2:** o despacho automático de voz passou a falhar fechado por `VOICE_DISPATCH_ENABLED`; a flag é `false` no exemplo de ambiente. O cron de reconciliação foi explicitamente separado do cron de despacho, pois só audita callbacks pendentes. A ativação em um ambiente continua condicionada ao aceite integral da matriz de voz. Após essa proteção, `npm test` (18 arquivos/58 testes), `npx tsc --noEmit`, `npm run lint` (667 avisos preexistentes, sem erros) e `npm run build -- --logLevel error` passaram.
 
+> **Progresso em 10/10/2026 — P0.2 (limites):** foi identificada uma desativação global preexistente de cooldown e limite móvel de voz. A correção restaura a linha de base defensiva de 24 horas/1 chamada por destinatário e faz o runtime aplicar essa linha de base quando uma tenant ainda não possuir política persistida. A flag global de despacho continua `false`; esta correção não autoriza chamadas nem substitui o aceite operacional.
+
 ## 1. Objetivo
 
 Transformar o levantamento técnico e documental do Betleads em um plano executável, priorizando primeiro riscos de operação, envio indevido, divergência entre banco e código, segurança e atribuição financeira. Em seguida, consolidar a fonte de verdade documental, ampliar a cobertura de testes e concluir a experiência operacional.
