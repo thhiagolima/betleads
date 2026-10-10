@@ -9,7 +9,7 @@
 **Baseline de código:** `main` no commit `119e557`
 **Aceite funcional:** por entrega, conforme os critérios definidos neste documento
 
-> **Progresso em 10/10/2026 — P0.1:** a rota de reconciliação, o serviço, a migration já aplicada e o callback de voz foram revisados no workspace. Foram adicionados testes que garantem que a reconciliação somente audita pendências e falha quando não consegue persistir a auditoria. `npm test` (17 arquivos/56 testes), `npx tsc --noEmit` e `npm run build -- --logLevel error` passaram. A promoção continua pendente: os arquivos da reconciliação e a migration ainda precisam entrar em um commit revisado e ser implantados juntos.
+> **Concluído em 10/10/2026 — P0.1:** a rota de reconciliação, o serviço, a migration já aplicada e o callback de voz foram revisados e versionados no commit `02171a8` (`fix(voice): version callback reconciliation`), enviado para `main`. Foram adicionados testes que garantem que a reconciliação somente audita pendências e falha quando não consegue persistir a auditoria. `npm test` (17 arquivos/56 testes), `npx tsc --noEmit` e `npm run build -- --logLevel error` passaram na implementação inicial. A promoção posterior confirmou `npx supabase db push` sem pendências, migrations locais/remotas alinhadas e `npx supabase db lint --linked` sem erros de schema.
 
 > **Progresso em 10/10/2026 — P0.2:** o despacho automático de voz passou a falhar fechado por `VOICE_DISPATCH_ENABLED`; a flag é `false` no exemplo de ambiente. O cron de reconciliação foi explicitamente separado do cron de despacho, pois só audita callbacks pendentes. A ativação em um ambiente continua condicionada ao aceite integral da matriz de voz. Após essa proteção, `npm test` (18 arquivos/58 testes), `npx tsc --noEmit`, `npm run lint` (667 avisos preexistentes, sem erros) e `npm run build -- --logLevel error` passaram.
 
@@ -476,7 +476,7 @@ Nenhum item deve ser marcado como concluído sem registrar:
 
 | ID | Entrega | Estado inicial | Bloqueia |
 | --- | --- | --- | --- |
-| P0.1 | paridade Git/aplicação/banco | implementação local validada; pendente de commit e promoção | voz, release reproduzível |
+| P0.1 | paridade Git/aplicação/banco | concluída em `02171a8`; migration e schema remoto validados | voz, release reproduzível |
 | P0.2 | estado operacional de voz | parcial | aceite de voz e jornadas com voz |
 | P0.3 | matriz real dos canais | parcial/bloqueada | certificação dos canais |
 | P0.4 | atribuição homologada com a casa | parcial/bloqueada externamente | receita oficial e aceite do funil |
