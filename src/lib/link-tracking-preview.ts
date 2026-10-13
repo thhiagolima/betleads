@@ -1,9 +1,11 @@
-const URL_PATTERN = /https?:\/\/[^\s<>"']+/gi;
+const URL_PATTERN = /(?:https?:\/\/|www\.)[^\s<>"']+/gi;
 
 export const LINK_TRACKING_PREVIEW_URL = "bmkt.click/abc123";
 
 export function messageUrls(value: string) {
-  return Array.from(value.matchAll(URL_PATTERN), (match) => match[0]);
+  return Array.from(value.matchAll(URL_PATTERN), (match) =>
+    /^www\./i.test(match[0]) ? `https://${match[0]}` : match[0],
+  );
 }
 
 /**

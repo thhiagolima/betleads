@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { estimateSms, previewTrackedText } from "./link-tracking-preview";
+import { estimateSms, messageUrls, previewTrackedText } from "./link-tracking-preview";
 
 describe("SMS tracking preview", () => {
   it("uses GSM-7 concatenation and extension characters", () => {
@@ -9,5 +9,13 @@ describe("SMS tracking preview", () => {
   it("uses UCS-2 and replaces every URL", () => {
     expect(estimateSms("😀".repeat(71))).toMatchObject({ encoding: "UCS-2", parts: 2 });
     expect(previewTrackedText("https://a.example/x https://b.example/y", true)).toBe("bmkt.click/abc123 bmkt.click/abc123");
+  });
+  it("previews and reports compact www links as HTTPS destinations", () => {
+    expect(messageUrls("Acesse www.sortealta.io agora")).toEqual([
+      "https://www.sortealta.io",
+    ]);
+    expect(previewTrackedText("Acesse www.sortealta.io agora", true)).toBe(
+      "Acesse bmkt.click/abc123 agora",
+    );
   });
 });

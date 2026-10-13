@@ -801,6 +801,40 @@ export async function runScheduledSmsCampaigns({ limit = 20 }: { limit?: number 
       continue;
     }
 
+    // Campaigns created before recipient resolution was introduced may retain
+    // only a phone number. Resolve them at dispatch time as a final attribution
+    // safeguard so Short.io clicks can be joined to webhook player IDs.
+    const unresolvedTargets = allTargets.filter((target) => !target.playerId);
+    if (unresolvedTargets.length > 0) {
+      const { data: tenantPlayers, error: playerLookupError } = await supabaseAdmin
+        .from("players")
+        .select("id,telefone")
+        .eq("tenant_id", c.tenant_id)
+        .range(0, 49_999);
+      if (playerLookupError) {
+        console.error("[sms-campaigns] falha ao resolver destinatarios", playerLookupError);
+      } else {
+        const playersByPhone = new Map<string, string>();
+        for (const player of tenantPlayers ?? []) {
+          const digits = String(player.telefone ?? "").replace(/\D/g, "");
+          if (!digits) continue;
+          const withCountry = digits.startsWith("55") ? digits : `55${digits}`;
+          playersByPhone.set(digits, player.id);
+          playersByPhone.set(withCountry, player.id);
+          playersByPhone.set(withCountry.slice(2), player.id);
+        }
+        for (const target of unresolvedTargets) {
+          const digits = target.phone.replace(/\D/g, "");
+          const withCountry = digits.startsWith("55") ? digits : `55${digits}`;
+          target.playerId =
+            playersByPhone.get(digits) ??
+            playersByPhone.get(withCountry) ??
+            playersByPhone.get(withCountry.slice(2)) ??
+            null;
+        }
+      }
+    }
+
     // Retoma de onde parou no último tick (0 se primeira execução).
     const cursor = Math.max(0, c.sent_cursor ?? 0);
     const remaining = allTargets.length - cursor;

@@ -2,7 +2,10 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 
 const SHORTIO_API_URL = "https://api.short.io/links";
-const URL_PATTERN = /https?:\/\/[^\s<>"']+/gi;
+// SMS copy commonly contains a compact `www.example.com` address. Treat it as
+// HTTPS so enabling tracking cannot silently produce a campaign with no
+// measurable dispatches.
+const URL_PATTERN = /(?:https?:\/\/|www\.)[^\s<>"']+/gi;
 const TRAILING_PUNCTUATION = /[.,;:!?]+$/;
 
 // WhatsApp is retained only so legacy callers type-check; it is never enabled
@@ -116,6 +119,11 @@ export function stripTrackingUrlTrailingPunctuation(raw: string) {
     value = value.slice(0, -1);
   }
   return value;
+}
+
+export function normalizeTrackingUrl(raw: string) {
+  const stripped = stripTrackingUrlTrailingPunctuation(raw);
+  return /^www\./i.test(stripped) ? `https://${stripped}` : stripped;
 }
 
 function isPrivateIpv4(hostname: string) {
@@ -442,7 +450,8 @@ export async function prepareTrackedText(
   const links: PreparedTrackedLink[] = [];
   for (let position = 0; position < matches.length; position++) {
     const match = matches[position];
-    const originalRaw = stripTrackingUrlTrailingPunctuation(match[0]);
+    const matchedRaw = stripTrackingUrlTrailingPunctuation(match[0]);
+    const originalRaw = normalizeTrackingUrl(matchedRaw);
     const variantUrl = experiment?.dimension === "cta" ? experiment.payload.destination_url : null;
     const raw = typeof variantUrl === "string" && variantUrl ? variantUrl : originalRaw;
     if (
@@ -474,7 +483,7 @@ export async function prepareTrackedText(
         context: dispatchContext,
       });
       const start = match.index ?? 0;
-      replacements.push({ start, end: start + originalRaw.length, value: tracked.short_url });
+      replacements.push({ start, end: start + matchedRaw.length, value: tracked.short_url });
       links.push({
         trackedLinkId: tracked.id,
         dispatchId,

@@ -3,6 +3,7 @@ import {
   isShortioEligibleUrl,
   isProtectedDestination,
   deterministicToken,
+  normalizeTrackingUrl,
   stripTrackingUrlTrailingPunctuation,
   withTrackingToken,
 } from "./shortio.server";
@@ -14,6 +15,13 @@ describe("Short.io link tracking policy", () => {
     expect(isShortioEligibleUrl("https://localhost/test")).toBe(false);
     expect(isShortioEligibleUrl("http://[::1]/admin")).toBe(false);
     expect(isShortioEligibleUrl("https://go.example/abc", { domain: "go.example" })).toBe(false);
+  });
+
+  it("normalizes compact www links to HTTPS", () => {
+    expect(normalizeTrackingUrl("www.sortealta.io")).toBe("https://www.sortealta.io");
+    expect(normalizeTrackingUrl("https://www.sortealta.io")).toBe(
+      "https://www.sortealta.io",
+    );
   });
 
   it("protects signed and temporary destinations from rewriting", () => {
