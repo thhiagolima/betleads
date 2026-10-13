@@ -83,19 +83,32 @@ export const listJourneys = createServerFn({ method: "GET" })
     const { data, error } = await db
       .from("journeys")
       .select(
-        "id,name,description,status,trigger_type,conflict_family,journey_priority,conflict_policy,daily_limit,cooldown_hours,updated_at,journey_steps(id,position,step_type,config,is_enabled)",
+        "id,name,description,status,trigger_type,trigger_config,entry_rules,conflict_family,journey_priority,conflict_policy,daily_limit,cooldown_hours,updated_at,journey_steps(id,position,step_type,config,is_enabled)",
       )
       .eq("tenant_id", tenantId)
       .order("updated_at", { ascending: false });
     if (error) throw new Error(error.message);
     const journeys = await Promise.all(
       (data ?? []).map(async (journey: any) => {
-        const { data: metricData, error: metricsError } = await db.rpc("journey_metrics", {
-          p_tenant_id: tenantId,
-          p_journey_id: journey.id,
-        });
-        if (metricsError) throw new Error(metricsError.message);
-        return { ...journey, metrics: metricData ?? {} };
+        const [metricsResult, eligibleResult] = await Promise.all([
+          db.rpc("journey_metrics", {
+            p_tenant_id: tenantId,
+            p_journey_id: journey.id,
+          }),
+          db.rpc("journey_eligible_lead_count", {
+            p_tenant_id: tenantId,
+            p_journey_id: journey.id,
+          }),
+        ]);
+        if (metricsResult.error) throw new Error(metricsResult.error.message);
+        if (eligibleResult.error) throw new Error(eligibleResult.error.message);
+        return {
+          ...journey,
+          metrics: {
+            ...(metricsResult.data ?? {}),
+            eligible: Number(eligibleResult.data ?? 0),
+          },
+        };
       }),
     );
     return { journeys };

@@ -58,6 +58,7 @@ type Journey = {
     is_enabled: boolean;
   }>;
   metrics: {
+    eligible?: number;
     byStatus?: Record<string, number>;
     exits?: Record<string, number>;
     recovered?: number;
@@ -533,7 +534,11 @@ export function JourneysHub() {
                         )}
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-x-7 gap-y-3 sm:grid-cols-4">
+                    <div className="grid grid-cols-2 gap-x-7 gap-y-3 sm:grid-cols-5">
+                      <JourneyMetric
+                        label="Elegíveis agora"
+                        value={Number(metrics.eligible ?? 0).toLocaleString("pt-BR")}
+                      />
                       <JourneyMetric label="Na fila" value={queued.toLocaleString("pt-BR")} />
                       <JourneyMetric label="Enviados" value={sent.toLocaleString("pt-BR")} />
                       <JourneyMetric label="Depósitos" value={deposits.toLocaleString("pt-BR")} />

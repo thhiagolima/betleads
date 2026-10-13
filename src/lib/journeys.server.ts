@@ -33,6 +33,7 @@ type EnrollmentRow = {
   current_position: number;
   entered_at: string;
   attempts: number;
+  loop_iteration: number;
 };
 type StepRow = {
   id: string;
@@ -245,6 +246,7 @@ async function execution(enrollment: EnrollmentRow, step: StepRow, channel: stri
       enrollment_id: enrollment.id,
       step_id: step.id,
       step_position: step.position,
+      loop_iteration: Number(enrollment.loop_iteration ?? 0),
       channel,
       attempt: enrollment.attempts + 1,
       status: "claimed",
@@ -298,7 +300,11 @@ async function stillMatchesJourneyEntry(
   journey: JourneyRow,
 ): Promise<boolean> {
   const trigger = journey.trigger_type ?? "manual";
-  if (trigger === "manual" || trigger === "nivel_alterado") return true;
+  // These triggers describe an occurrence that was already captured when the
+  // enrollment was created. Cashback intentionally waits until D+1, so it
+  // must not be invalidated merely because the calendar day changed.
+  if (trigger === "manual" || trigger === "nivel_alterado" || trigger === "cashback_pago")
+    return true;
   const player = await playerFor(enrollment);
   if (!player) return false;
   const triggerConfig = journey.trigger_config ?? {};
@@ -398,6 +404,30 @@ async function executeEnrollment(id: string): Promise<void> {
   if (step.step_type === "end") {
     const run = await execution(enrollment, step, null);
     await finishExecution(run.id, { status: "sent", executed_at: new Date().toISOString() });
+    const loopToPosition = Number(step.config.loop_to_position);
+    if (Number.isInteger(loopToPosition) && loopToPosition >= 0 && loopToPosition < step.position) {
+      const { data: loopTarget } = await db
+        .from("journey_steps")
+        .select("id")
+        .eq("journey_id", enrollment.journey_id)
+        .eq("position", loopToPosition)
+        .eq("is_enabled", true)
+        .maybeSingle();
+      if (!loopTarget) throw new Error("Destino do loop da jornada nao encontrado");
+      await release(enrollment, {
+        status: "active",
+        current_position: loopToPosition,
+        loop_iteration: Number(enrollment.loop_iteration ?? 0) + 1,
+        next_run_at: new Date().toISOString(),
+        attempts: 0,
+      });
+      await event(enrollment, "loop_restarted", {
+        step_position: step.position,
+        loop_to_position: loopToPosition,
+        loop_iteration: Number(enrollment.loop_iteration ?? 0) + 1,
+      });
+      return;
+    }
     await release(enrollment, {
       status: "completed",
       completed_at: new Date().toISOString(),

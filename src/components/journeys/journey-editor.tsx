@@ -143,6 +143,12 @@ export function JourneyEditor({
       voltou_jogar: false,
     },
   );
+  const initialEndIndex = initialSteps.findIndex((step) => step.step_type === "end");
+  const initialLoopToPosition = initialSteps[initialEndIndex]?.config.loop_to_position;
+  const loopTailLength =
+    typeof initialLoopToPosition === "number" && initialEndIndex > initialLoopToPosition
+      ? initialEndIndex - initialLoopToPosition
+      : null;
   const [steps, setSteps] = useState<Step[]>(() =>
     initialSteps.flatMap((s): Step[] =>
       s.step_type === "wait"
@@ -269,7 +275,16 @@ export function JourneyEditor({
             conflict_family: conflictFamily || null,
             journey_priority: journeyPriority,
             conflict_policy: conflictPolicy,
-            steps: [...body, { step_type: "end", config: {} }],
+            steps: [
+              ...body,
+              {
+                step_type: "end",
+                config:
+                  loopTailLength !== null && body.length >= loopTailLength
+                    ? { loop_to_position: body.length - loopTailLength }
+                    : {},
+              },
+            ],
           },
         },
       });

@@ -71,7 +71,9 @@ export const journeyStepInputSchema = z.discriminatedUnion("step_type", [
   z.object({
     step_type: z.literal("end"),
     label: z.string().trim().max(120).optional(),
-    config: z.object({}),
+    config: z.object({
+      loop_to_position: z.number().int().min(0).optional(),
+    }),
   }),
 ]);
 
