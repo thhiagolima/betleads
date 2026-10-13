@@ -738,29 +738,43 @@ export async function syncShortioMetrics(
   const snapshotAt = new Date();
   snapshotAt.setUTCMinutes(0, 0, 0);
   const syncLinks = links ?? [];
-  const concurrency = 10;
+  const concurrency = 3;
+  const fetchStatistics = async (shortioLinkId: string) => {
+    let response: Response | null = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      response = await fetch(
+        `https://statistics.short.io/statistics/link/${encodeURIComponent(shortioLinkId)}/by_interval`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: apiKey,
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            period: "last30",
+            clicksChartInterval: "day",
+            tz: "America/Sao_Paulo",
+          }),
+          signal: AbortSignal.timeout(10_000),
+        },
+      );
+      if (response.ok) return response;
+      if (response.status !== 429 && response.status < 500) break;
+      const retryAfter = Number(response.headers.get("retry-after"));
+      const waitMs =
+        Number.isFinite(retryAfter) && retryAfter > 0
+          ? Math.min(retryAfter * 1_000, 5_000)
+          : 750 * (attempt + 1);
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
+    throw new Error(`Short.io retornou HTTP ${response?.status ?? 0}`);
+  };
   for (let offset = 0; offset < syncLinks.length; offset += concurrency) {
     await Promise.all(
       syncLinks.slice(offset, offset + concurrency).map(async (link: any) => {
         try {
-          const response = await fetch(
-            `https://statistics.short.io/statistics/link/${encodeURIComponent(link.shortio_link_id)}/by_interval`,
-            {
-              method: "POST",
-              headers: {
-                Authorization: apiKey,
-                Accept: "application/json",
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                period: "last30",
-                clicksChartInterval: "day",
-                tz: "America/Sao_Paulo",
-              }),
-              signal: AbortSignal.timeout(10_000),
-            },
-          );
-          if (!response.ok) throw new Error(`Short.io retornou HTTP ${response.status}`);
+          const response = await fetchStatistics(link.shortio_link_id);
           const payload = (await response.json()) as {
             clicksStatistics?: Array<{ x?: string; y?: number }>;
             // Kept for compatibility with older API responses.

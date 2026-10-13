@@ -12,7 +12,10 @@ export const Route = createFileRoute("/api/public/shortio/sync")({
           return response as Response;
         }
         try {
-          return Response.json({ ok: true, ...(await syncShortioMetrics(100)) });
+          // Keep the request inside the reverse-proxy timeout and below the
+          // Short.io statistics rate limit. The cursor resumes on the next
+          // 15-minute cron tick.
+          return Response.json({ ok: true, ...(await syncShortioMetrics(50)) });
         } catch (error) {
           const message = error instanceof Error ? error.message : "Falha ao sincronizar Short.io.";
           console.error("[shortio sync]", message);
