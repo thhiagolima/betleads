@@ -513,3 +513,17 @@ Nenhum item deve ser marcado como concluído sem registrar:
 Suspender novas frentes funcionais até concluir P0.1, P0.2 e P0.6. Manter campanhas, jornadas e voz limitadas ao estado já autorizado por ambiente até que a matriz de canais e a homologação da atribuição produzam evidência real. Executar P1 em paralelo apenas onde não houver conflito com a estabilização operacional.
 
 O produto possui base suficiente para avançar sem reescrita ampla. A prioridade é tornar o que já existe reproduzível, homologado, observável e documentado antes de ampliar o escopo.
+
+## 16. Correção do rastreamento de campanhas SMS — 2026-10-13
+
+Levantamento executado sobre a campanha `6c183d14-ccca-49e9-912f-b40ef6c04deb` e convertido em correções estruturais:
+
+| Entrega | Resultado | Revisão |
+| --- | --- | --- |
+| links compactos `www.*` | normalizados para HTTPS antes da criação Short.io; prévia alinhada ao envio | `941e700` |
+| identidade do destinatário | campanhas legadas resolvem telefone para `player_id` no disparo | `941e700` |
+| deduplicação | destinatários suprimidos não incrementam mais `sent_count`; novo `deduplicated_count` | `8b619b6` |
+| relatório sem dispatch rastreado | envio operacional passa a ser exibido mesmo quando não há link rastreável | `8b619b6` |
+| saúde da atribuição | alerta da origem separado do passivo global; contagem exata e agrupada por motivo | `d8f9467` |
+
+A migration `20261013143000_add_sms_campaign_deduplicated_count.sql` foi aplicada no banco remoto. Atribuição retroativa da campanha analisada permanece tecnicamente indisponível porque os SMS históricos saíram sem link Short.io, token ou dispatch individual. As correções protegem os novos disparos e campanhas legadas ainda não processadas.
