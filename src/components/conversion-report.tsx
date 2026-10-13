@@ -23,6 +23,9 @@ type Recipient = {
   clicked: boolean;
   clickCount: number;
   clickedAt: string | null;
+  registeredAt: string | null;
+  loginOrGameAt: string | null;
+  firstDepositAt: string | null;
   depositAt: string | null;
   depositValue: number;
   historicalDepositCount: number;
@@ -30,7 +33,16 @@ type Recipient = {
 };
 
 type RecipientFilter =
-  "all" | "sent" | "delivered" | "clicked" | "not-clicked" | "deposited" | "clicked-no-deposit";
+  | "all"
+  | "sent"
+  | "delivered"
+  | "clicked"
+  | "not-clicked"
+  | "registered"
+  | "engaged"
+  | "first-deposit"
+  | "deposited"
+  | "clicked-no-deposit";
 
 const money = (value: number) =>
   value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -73,8 +85,12 @@ export function ConversionReport({
 
   if (sourceType === "journey")
     return (
-      <JourneyReport data={query.data} sourceId={sourceId} alerts={health.data?.alerts ?? []}
-        globalAttributionHealth={health.data?.globalAttributionHealth} />
+      <JourneyReport
+        data={query.data}
+        sourceId={sourceId}
+        alerts={health.data?.alerts ?? []}
+        globalAttributionHealth={health.data?.globalAttributionHealth}
+      />
     );
 
   return (
@@ -125,6 +141,9 @@ function CampaignReport({
         if (filter === "delivered") return row.deliveryStatus === "delivered";
         if (filter === "clicked") return row.clicked;
         if (filter === "not-clicked") return !row.clicked;
+        if (filter === "registered") return Boolean(row.registeredAt);
+        if (filter === "engaged") return Boolean(row.loginOrGameAt);
+        if (filter === "first-deposit") return Boolean(row.firstDepositAt);
         if (filter === "deposited") return Boolean(row.depositAt);
         if (filter === "clicked-no-deposit") return row.clicked && !row.depositAt;
         return true;
@@ -208,7 +227,8 @@ function CampaignReport({
               </p>
               <p className="mt-1 text-xs text-sky-300">
                 {Object.entries(globalAttributionHealth.reasons)
-                  .map(([reason, count]) => `${reason}: ${number(count)}`).join(" · ")}
+                  .map(([reason, count]) => `${reason}: ${number(count)}`)
+                  .join(" · ")}
               </p>
             </div>
           ) : null}
@@ -244,7 +264,7 @@ function CampaignReport({
             </section>
           ) : null}
 
-          <section className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+          <section className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
             <Metric label="Enviados" value={number(data.sent)} />
             <Metric label="Deduplicados" value={number(data.deduplicated)} />
             <Metric label="Entregues" value={data.delivered === null ? "—" : number(delivered)} />
@@ -257,6 +277,9 @@ function CampaignReport({
                   : undefined
               }
             />
+            <Metric label="Cadastros" value={number(data.registered)} />
+            <Metric label="Login ou jogo" value={number(data.loginOrGame)} />
+            <Metric label="Primeiro depósito" value={number(data.ftd)} accent />
             <Metric
               label="Depositaram"
               value={number(data.deposits)}
@@ -349,6 +372,25 @@ function CampaignReport({
                 Não clicaram {number(notClicked)}
               </FilterButton>
               <FilterButton
+                active={filter === "registered"}
+                onClick={() => setActiveFilter("registered")}
+              >
+                Cadastros {number(data.registered)}
+              </FilterButton>
+              <FilterButton
+                active={filter === "engaged"}
+                onClick={() => setActiveFilter("engaged")}
+              >
+                Login ou jogo {number(data.loginOrGame)}
+              </FilterButton>
+              <FilterButton
+                active={filter === "first-deposit"}
+                onClick={() => setActiveFilter("first-deposit")}
+                tone="green"
+              >
+                Primeiro depósito {number(data.ftd)}
+              </FilterButton>
+              <FilterButton
                 active={filter === "deposited"}
                 onClick={() => setActiveFilter("deposited")}
                 tone="green"
@@ -429,13 +471,16 @@ function CampaignReport({
 function RecipientTable({ rows }: { rows: Recipient[] }) {
   return (
     <div className="overflow-x-auto rounded-2xl border">
-      <table className="w-full min-w-[760px] text-xs">
+      <table className="w-full min-w-[1180px] text-xs">
         <thead>
           <tr className="border-b text-left text-sky-200">
             <th className="p-3">Jogador</th>
             <th className="p-3">Envio</th>
             <th className="p-3">Clique</th>
             <th className="p-3 text-right">Cliques</th>
+            <th className="p-3">Cadastro</th>
+            <th className="p-3">Login ou jogo</th>
+            <th className="p-3">Primeiro depósito</th>
             <th className="p-3">Depósito</th>
             <th className="p-3 text-right">Valor</th>
           </tr>
@@ -454,6 +499,9 @@ function RecipientTable({ rows }: { rows: Recipient[] }) {
                 {dateTime(row.clickedAt)}
               </td>
               <td className="p-3 text-right font-semibold">{row.clickCount || "—"}</td>
+              <td className="p-3 text-sky-300">{dateTime(row.registeredAt)}</td>
+              <td className="p-3 text-sky-300">{dateTime(row.loginOrGameAt)}</td>
+              <td className="p-3 text-sky-300">{dateTime(row.firstDepositAt)}</td>
               <td className="p-3 text-sky-300">{dateTime(row.depositAt)}</td>
               <td
                 className={cn(
@@ -546,9 +594,9 @@ function JourneyReport({
       ))}
       {globalAttributionHealth?.count ? (
         <div className="rounded-lg border border-sky-500/30 bg-sky-500/5 p-3 text-sm">
-          <strong>Saúde geral da integração:</strong>{" "}
-          {number(globalAttributionHealth.count)} eventos sem origem nas últimas{" "}
-          {globalAttributionHealth.periodHours} horas. Eles não pertencem a esta jornada.
+          <strong>Saúde geral da integração:</strong> {number(globalAttributionHealth.count)}{" "}
+          eventos sem origem nas últimas {globalAttributionHealth.periodHours} horas. Eles não
+          pertencem a esta jornada.
         </div>
       ) : null}
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

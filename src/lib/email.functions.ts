@@ -651,7 +651,7 @@ export const saveEmailCampaign = createServerFn({ method: "POST" })
       smtp_id: smtpIdNorm,
       scheduled_at: data.agendadoPara ? new Date(data.agendadoPara).toISOString() : null,
       status: data.status,
-      track_links: data.trackLinks,
+      track_links: true,
       template_snapshot: templateSnapshot,
       conversion_objective: data.conversionObjective,
       ...(data.id

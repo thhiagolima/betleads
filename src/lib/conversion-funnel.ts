@@ -7,6 +7,16 @@ const stepsByObjective: Record<ConversionObjective, string[]> = {
   journey: ["entry", "step_sent", "clicked", "conversion_event", "deposit_approved"],
 };
 
+export const COMPLETE_CAMPAIGN_FUNNEL_STEPS = [
+  "sent",
+  "delivered",
+  "clicked",
+  "registered",
+  "login_or_game",
+  "first_deposit_approved",
+  "deposit_approved",
+] as const;
+
 export function conversionFunnelPreset(objective: ConversionObjective) {
   return stepsByObjective[objective].map((id) => ({ id, enabled: true }));
 }
@@ -34,9 +44,14 @@ export function conversionFunnelSnapshot(
   sourceType: "campaign" | "journey",
   enabledSteps = stepsByObjective[objective],
 ) {
-  const normalizedSteps = normalizeEnabledFunnelSteps(objective, enabledSteps);
+  const availableSteps =
+    sourceType === "campaign" ? [...COMPLETE_CAMPAIGN_FUNNEL_STEPS] : stepsByObjective[objective];
+  const normalizedSteps =
+    sourceType === "campaign"
+      ? availableSteps
+      : normalizeEnabledFunnelSteps(objective, enabledSteps);
   return {
-    version: 1,
+    version: sourceType === "campaign" ? 2 : 1,
     objective,
     source_type: sourceType,
     attribution: {
@@ -45,7 +60,7 @@ export function conversionFunnelSnapshot(
       window_days: 7,
       timezone: "America/Sao_Paulo",
     },
-    steps: stepsByObjective[objective].map((step) => ({
+    steps: availableSteps.map((step) => ({
       id: step,
       enabled: normalizedSteps.includes(step),
     })),

@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { conversionFunnelSnapshot } from "./conversion-funnel";
 
 describe("conversionFunnelSnapshot", () => {
-  it("freezes the P0 last-click attribution contract", () => {
+  it("always freezes the complete campaign attribution contract", () => {
     expect(conversionFunnelSnapshot("conversion", "campaign")).toMatchObject({
-      version: 1,
+      version: 2,
       objective: "conversion",
       source_type: "campaign",
       attribution: {
@@ -18,6 +18,8 @@ describe("conversionFunnelSnapshot", () => {
         { id: "delivered", enabled: true },
         { id: "clicked", enabled: true },
         { id: "registered", enabled: true },
+        { id: "login_or_game", enabled: true },
+        { id: "first_deposit_approved", enabled: true },
         { id: "deposit_approved", enabled: true },
       ],
     });
@@ -33,12 +35,14 @@ describe("conversionFunnelSnapshot", () => {
     ]);
   });
 
-  it("keeps boundary stages enabled when optional stages are hidden", () => {
+  it("does not allow campaign clients to disable tracking stages", () => {
     expect(conversionFunnelSnapshot("conversion", "campaign", ["clicked"]).steps).toEqual([
       { id: "sent", enabled: true },
-      { id: "delivered", enabled: false },
+      { id: "delivered", enabled: true },
       { id: "clicked", enabled: true },
-      { id: "registered", enabled: false },
+      { id: "registered", enabled: true },
+      { id: "login_or_game", enabled: true },
+      { id: "first_deposit_approved", enabled: true },
       { id: "deposit_approved", enabled: true },
     ]);
   });

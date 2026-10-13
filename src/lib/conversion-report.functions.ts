@@ -166,7 +166,7 @@ export const getCampaignReportDetails = createServerFn({ method: "GET" })
         tokens.length
           ? db
               .from("conversion_attributions")
-              .select("tracking_token,event_type,occurred_at,monetary_value,classification")
+              .select("tracking_token,event_type,occurred_at,monetary_value,is_ftd,classification")
               .eq("tenant_id", tenantId)
               .eq("source_type", "campaign")
               .eq("source_id", data.campaignId)
@@ -233,9 +233,17 @@ export const getCampaignReportDetails = createServerFn({ method: "GET" })
       const attributionRows = rows.flatMap(
         (row) => attributionsByToken.get(row.tracking_token) ?? [],
       );
-      const deposit = attributionRows
-        .filter((row) => row.event_type === "deposit_approved" && row.classification === "direct")
-        .sort((a, b) => String(a.occurred_at).localeCompare(String(b.occurred_at)))[0];
+      const directAttributions = attributionRows
+        .filter((row) => row.classification === "direct")
+        .sort((a, b) => String(a.occurred_at).localeCompare(String(b.occurred_at)));
+      const registered = directAttributions.find((row) => row.event_type === "registered");
+      const loginOrGame = directAttributions.find(
+        (row) => row.event_type === "login" || row.event_type === "game",
+      );
+      const firstDeposit = directAttributions.find(
+        (row) => row.event_type === "deposit_approved" && row.is_ftd === true,
+      );
+      const deposit = directAttributions.find((row) => row.event_type === "deposit_approved");
       const historicalDeposits = depositsByPlayer.get(first.recipient_player_id) ?? [];
       return {
         id: key,
@@ -255,6 +263,9 @@ export const getCampaignReportDetails = createServerFn({ method: "GET" })
               .sort()
               .at(0) ?? null)
           : null,
+        registeredAt: registered?.occurred_at ?? null,
+        loginOrGameAt: loginOrGame?.occurred_at ?? null,
+        firstDepositAt: firstDeposit?.occurred_at ?? null,
         depositAt: deposit?.occurred_at ?? null,
         depositValue: Number(deposit?.monetary_value ?? 0),
         historicalDepositCount: historicalDeposits.length,
@@ -339,19 +350,32 @@ export const getConversionDataHealth = createServerFn({ method: "GET" })
       "dispatch_not_sent",
     ] as const;
     const [sourceIssues, globalIssues, ...globalReasonResults] = await Promise.all([
-      db.from("conversion_attribution_issues").select("id", { count: "exact", head: true })
-        .eq("tenant_id", tenantId).eq("source_type", data.sourceType)
-        .eq("source_id", data.sourceId).gte("created_at", issueSince),
-      db.from("conversion_attribution_issues").select("id", { count: "exact", head: true })
-        .eq("tenant_id", tenantId).is("source_id", null).gte("created_at", issueSince),
+      db
+        .from("conversion_attribution_issues")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .eq("source_type", data.sourceType)
+        .eq("source_id", data.sourceId)
+        .gte("created_at", issueSince),
+      db
+        .from("conversion_attribution_issues")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .is("source_id", null)
+        .gte("created_at", issueSince),
       ...issueReasons.map((reason) =>
-        db.from("conversion_attribution_issues").select("id", { count: "exact", head: true })
-          .eq("tenant_id", tenantId).is("source_id", null)
-          .eq("reason", reason).gte("created_at", issueSince),
+        db
+          .from("conversion_attribution_issues")
+          .select("id", { count: "exact", head: true })
+          .eq("tenant_id", tenantId)
+          .is("source_id", null)
+          .eq("reason", reason)
+          .gte("created_at", issueSince),
       ),
     ]);
     const issueError = [sourceIssues, globalIssues, ...globalReasonResults]
-      .map((result: any) => result.error).find(Boolean);
+      .map((result: any) => result.error)
+      .find(Boolean);
     if (issueError && !String(issueError.message).includes("permission"))
       throw new Error(issueError.message);
     const rows = dispatches ?? [];
@@ -478,38 +502,38 @@ export const getConversionReport = createServerFn({ method: "GET" })
     const db = context.supabase as any;
     const [dispatchResult, attributionResult, smsCampaignResult, emailCampaignResult] =
       await Promise.all([
-      db
-        .from("link_dispatches")
-        .select(
-          "id,tracked_link_id,idempotency_key,message_log_id,send_status,delivery_status,sent_at,updated_at,channel,journey_step_id,journey_step_position",
-        )
-        .eq("tenant_id", tenantId)
-        .eq("source_type", data.sourceType)
-        .eq("source_id", data.sourceId),
-      db
-        .from("conversion_attributions")
-        .select("event_type,monetary_value,is_ftd,occurred_at,created_at,classification")
-        .eq("tenant_id", tenantId)
-        .eq("source_type", data.sourceType)
-        .eq("source_id", data.sourceId)
-        .in("classification", ["direct", "assisted"]),
-      data.sourceType === "campaign"
-        ? db
-            .from("sms_campaigns")
-            .select("sent_count,deduplicated_count")
-            .eq("tenant_id", tenantId)
-            .eq("id", data.sourceId)
-            .maybeSingle()
-        : Promise.resolve({ data: null, error: null }),
-      data.sourceType === "campaign"
-        ? db
-            .from("email_campaigns")
-            .select("stats")
-            .eq("tenant_id", tenantId)
-            .eq("id", data.sourceId)
-            .maybeSingle()
-        : Promise.resolve({ data: null, error: null }),
-    ]);
+        db
+          .from("link_dispatches")
+          .select(
+            "id,tracked_link_id,idempotency_key,message_log_id,send_status,delivery_status,sent_at,updated_at,channel,journey_step_id,journey_step_position",
+          )
+          .eq("tenant_id", tenantId)
+          .eq("source_type", data.sourceType)
+          .eq("source_id", data.sourceId),
+        db
+          .from("conversion_attributions")
+          .select("event_type,monetary_value,is_ftd,occurred_at,created_at,classification")
+          .eq("tenant_id", tenantId)
+          .eq("source_type", data.sourceType)
+          .eq("source_id", data.sourceId)
+          .in("classification", ["direct", "assisted"]),
+        data.sourceType === "campaign"
+          ? db
+              .from("sms_campaigns")
+              .select("sent_count,deduplicated_count")
+              .eq("tenant_id", tenantId)
+              .eq("id", data.sourceId)
+              .maybeSingle()
+          : Promise.resolve({ data: null, error: null }),
+        data.sourceType === "campaign"
+          ? db
+              .from("email_campaigns")
+              .select("stats")
+              .eq("tenant_id", tenantId)
+              .eq("id", data.sourceId)
+              .maybeSingle()
+          : Promise.resolve({ data: null, error: null }),
+      ]);
     if (dispatchResult.error) throw new Error(dispatchResult.error.message);
     if (attributionResult.error) throw new Error(attributionResult.error.message);
     const dispatches = dispatchResult.data ?? [];
@@ -536,9 +560,7 @@ export const getConversionReport = createServerFn({ method: "GET" })
       ? Number(smsCampaignResult.data.sent_count ?? 0)
       : emailCampaignResult.data
         ? Number(
-            emailCampaignResult.data.stats?.sent ??
-              emailCampaignResult.data.stats?.enviados ??
-              0,
+            emailCampaignResult.data.stats?.sent ?? emailCampaignResult.data.stats?.enviados ?? 0,
           )
         : 0;
     const sent = Math.max(trackedSent, operationalSent);
