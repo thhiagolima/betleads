@@ -749,14 +749,19 @@ export async function syncShortioMetrics(
       );
       if (!response.ok) throw new Error(`Short.io retornou HTTP ${response.status}`);
       const payload = (await response.json()) as {
-        clicksStatistics?: Array<{ y?: number }>;
+        clicksStatistics?: Array<{ x?: string; y?: number }>;
         // Kept for compatibility with older API responses.
-        clickStatistics?: Array<{ y?: number }>;
+        clickStatistics?: Array<{ x?: string; y?: number }>;
       };
-      const clicks = (payload.clicksStatistics ?? payload.clickStatistics ?? []).reduce(
+      const intervals = payload.clicksStatistics ?? payload.clickStatistics ?? [];
+      const clicks = intervals.reduce(
         (total, item) => total + Number(item.y ?? 0),
         0,
       );
+      const clickInstants = intervals
+        .filter((item) => Number(item.y ?? 0) > 0 && item.x && Number.isFinite(Date.parse(item.x)))
+        .map((item) => new Date(item.x!).toISOString())
+        .sort();
       const { error: snapshotError } = await db.from("link_click_snapshots").upsert(
         {
           tenant_id: link.tenant_id,
@@ -768,6 +773,18 @@ export async function syncShortioMetrics(
         { onConflict: "tracked_link_id,snapshot_at" },
       );
       if (snapshotError) throw new Error(snapshotError.message);
+      if (clickInstants.length > 0) {
+        const { error: dispatchError } = await db
+          .from("link_dispatches")
+          .update({
+            shortio_first_clicked_at: clickInstants[0],
+            shortio_last_clicked_at: clickInstants[clickInstants.length - 1],
+            shortio_click_count: clicks,
+          })
+          .eq("tenant_id", link.tenant_id)
+          .eq("tracked_link_id", link.id);
+        if (dispatchError) throw new Error(dispatchError.message);
+      }
       await db
         .from("tracked_links")
         .update({ last_synced_at: new Date().toISOString() })

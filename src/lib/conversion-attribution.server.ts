@@ -20,6 +20,7 @@ type Dispatch = {
   recipient_player_id: string | null;
   tracking_token: string;
   sent_at: string | null;
+  shortio_last_clicked_at?: string | null;
 };
 
 function isUuid(value: string | null): value is string {
@@ -147,4 +148,33 @@ export async function attributeConversionEvent(input: AttributionEvent) {
     sourceType: candidate.source_type,
     sourceId: candidate.source_id,
   };
+}
+
+/**
+ * Fallback for redeposits when the destination does not return a click token.
+ * The player is already known from the provider webhook; we only use a
+ * Short.io click tied to that same player, and retain the evidence model.
+ */
+export async function attributeRedepositFromLastShortioClick(input: Omit<AttributionEvent, "trackingToken" | "touchAt" | "tokenSource">) {
+  const db = supabaseAdmin as any;
+  const { data, error } = await db
+    .from("link_dispatches")
+    .select("id,source_type,source_id,recipient_player_id,tracking_token,sent_at,shortio_last_clicked_at")
+    .eq("tenant_id", input.tenantId)
+    .eq("recipient_player_id", input.playerId)
+    .in("channel", ["sms", "email"])
+    .not("shortio_last_clicked_at", "is", null)
+    .lte("shortio_last_clicked_at", input.occurredAt)
+    .order("shortio_last_clicked_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(`Falha ao resolver ultimo clique Short.io: ${error.message}`);
+  const dispatch = data as Dispatch | null;
+  if (!dispatch) return { attributed: false as const, reason: "no_eligible_shortio_click" };
+  return attributeConversionEvent({
+    ...input,
+    trackingToken: dispatch.tracking_token,
+    touchAt: dispatch.shortio_last_clicked_at ?? null,
+    tokenSource: "player",
+  });
 }

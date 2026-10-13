@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { attributeConversionEvent } from "./conversion-attribution.server";
+import { attributeConversionEvent, attributeRedepositFromLastShortioClick } from "./conversion-attribution.server";
 
 export function getServiceClient(): SupabaseClient | null {
   const supabaseUrl = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL;
@@ -644,18 +644,13 @@ export async function processWebhookEvent(
           (conversionEvent === "registered" && externalId ? `signup:${externalId}` : null);
         if (attributionEventId) {
           try {
-            await attributeConversionEvent({
-              tenantId,
-              playerId,
-              eventType: conversionEvent,
-              eventId: attributionEventId,
-              occurredAt: eventIso,
-              trackingToken,
-              touchAt,
-              tokenSource,
-              monetaryValue: conversionEvent === "deposit_approved" ? valor : null,
+            const baseAttribution = {
+              tenantId, playerId, eventType: conversionEvent, eventId: attributionEventId,
+              occurredAt: eventIso, monetaryValue: conversionEvent === "deposit_approved" ? valor : null,
               isFtd: conversionEvent === "deposit_approved" && data.isFtd === true,
-            });
+            } as const;
+            if (trackingToken) await attributeConversionEvent({ ...baseAttribution, trackingToken, touchAt, tokenSource });
+            else if (conversionEvent === "deposit_approved") await attributeRedepositFromLastShortioClick(baseAttribution);
           } catch (attributionError) {
             const error =
               attributionError instanceof Error
