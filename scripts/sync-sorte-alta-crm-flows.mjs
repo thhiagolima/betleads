@@ -177,7 +177,7 @@ const definitions = [
     aliases: ["Dormindo - 7 dias sem deposito"],
     description: "Regua diaria para jogador ha 7 dias sem depositar.",
     trigger_type: "inactivity",
-    trigger_config: { field: "ultimo_deposito", hours: 168, start_after: now },
+    trigger_config: { field: "ultimo_deposito", hours: 168, start_after: null },
     entry_rules: { ...commonRules, reentry: "per_occurrence" },
     exit_rules: { deposit: true },
     conflict_family: "inatividade_deposito",
@@ -191,7 +191,7 @@ const definitions = [
     aliases: ["30 dias sem deposito"],
     description: "Regua diaria de retorno para jogador ha 30 dias sem depositar.",
     trigger_type: "inactivity",
-    trigger_config: { field: "ultimo_deposito", hours: 720, start_after: now },
+    trigger_config: { field: "ultimo_deposito", hours: 720, start_after: null },
     entry_rules: { ...commonRules, reentry: "per_occurrence" },
     exit_rules: { deposit: true },
     conflict_family: "inatividade_deposito",
@@ -319,10 +319,14 @@ async function main() {
   if (!APPLY) return;
 
   for (const { definition, row } of plans) {
+    const overridesStartAfter = Object.hasOwn(definition.trigger_config, "start_after");
     const triggerConfig = {
       ...definition.trigger_config,
-      ...(row?.trigger_config?.start_after ? { start_after: row.trigger_config.start_after } : {}),
+      ...(!overridesStartAfter && row?.trigger_config?.start_after
+        ? { start_after: row.trigger_config.start_after }
+        : {}),
     };
+    if (triggerConfig.start_after === null) delete triggerConfig.start_after;
     const journeyData = {
       tenant_id: tenant.id,
       name: definition.name,
