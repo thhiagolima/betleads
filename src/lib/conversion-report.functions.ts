@@ -58,7 +58,7 @@ export const getCampaignReportDetails = createServerFn({ method: "GET" })
       db
         .from("sms_campaigns")
         .select(
-          "id,name,content,route,status,total_count,sent_count,failed_count,scheduled_at,created_at,updated_at,recipients",
+          "id,name,content,route,status,total_count,sent_count,deduplicated_count,failed_count,scheduled_at,created_at,updated_at,recipients",
         )
         .eq("tenant_id", tenantId)
         .eq("id", data.campaignId)
@@ -97,6 +97,7 @@ export const getCampaignReportDetails = createServerFn({ method: "GET" })
           status: sms.status,
           total: Number(sms.total_count ?? 0),
           sent: Number(sms.sent_count ?? 0),
+          deduplicated: Number(sms.deduplicated_count ?? 0),
           failed: Number(sms.failed_count ?? 0),
           scheduledAt: sms.scheduled_at,
           createdAt: sms.created_at,
@@ -115,6 +116,7 @@ export const getCampaignReportDetails = createServerFn({ method: "GET" })
             status: email.status,
             total: Number(email.stats?.total ?? email.stats?.destinatarios ?? 0),
             sent: Number(email.stats?.sent ?? email.stats?.enviados ?? 0),
+            deduplicated: 0,
             failed: Number(email.stats?.failed ?? email.stats?.falhas ?? 0),
             scheduledAt: email.scheduled_at,
             createdAt: email.created_at,
@@ -450,7 +452,8 @@ export const getConversionReport = createServerFn({ method: "GET" })
   .handler(async ({ data, context }) => {
     const tenantId = await resolveOperationalTenantId(context.supabase);
     const db = context.supabase as any;
-    const [dispatchResult, attributionResult] = await Promise.all([
+    const [dispatchResult, attributionResult, smsCampaignResult, emailCampaignResult] =
+      await Promise.all([
       db
         .from("link_dispatches")
         .select(
@@ -466,6 +469,22 @@ export const getConversionReport = createServerFn({ method: "GET" })
         .eq("source_type", data.sourceType)
         .eq("source_id", data.sourceId)
         .in("classification", ["direct", "assisted"]),
+      data.sourceType === "campaign"
+        ? db
+            .from("sms_campaigns")
+            .select("sent_count,deduplicated_count")
+            .eq("tenant_id", tenantId)
+            .eq("id", data.sourceId)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+      data.sourceType === "campaign"
+        ? db
+            .from("email_campaigns")
+            .select("stats")
+            .eq("tenant_id", tenantId)
+            .eq("id", data.sourceId)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
     ]);
     if (dispatchResult.error) throw new Error(dispatchResult.error.message);
     if (attributionResult.error) throw new Error(attributionResult.error.message);
@@ -488,7 +507,18 @@ export const getConversionReport = createServerFn({ method: "GET" })
       if (!previous || snapshot.snapshot_at > previous.snapshot_at)
         clicksByLink.set(snapshot.tracked_link_id, snapshot);
     }
-    const sent = uniqueDeliveryCount(dispatches, (item) => item.send_status === "sent");
+    const trackedSent = uniqueDeliveryCount(dispatches, (item) => item.send_status === "sent");
+    const operationalSent = smsCampaignResult.data
+      ? Number(smsCampaignResult.data.sent_count ?? 0)
+      : emailCampaignResult.data
+        ? Number(
+            emailCampaignResult.data.stats?.sent ??
+              emailCampaignResult.data.stats?.enviados ??
+              0,
+          )
+        : 0;
+    const sent = Math.max(trackedSent, operationalSent);
+    const deduplicated = Number(smsCampaignResult.data?.deduplicated_count ?? 0);
     const deliveredCount = uniqueDeliveryCount(
       dispatches,
       (item) => item.delivery_status === "delivered",
@@ -515,6 +545,7 @@ export const getConversionReport = createServerFn({ method: "GET" })
         .at(-1) ?? null;
     return {
       sent,
+      deduplicated,
       delivered: deliveredCount || null,
       clicked: clicksByLink.size ? clicked : null,
       registered: count("registered"),

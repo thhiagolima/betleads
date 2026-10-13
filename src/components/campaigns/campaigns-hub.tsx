@@ -35,6 +35,7 @@ type Campaign = {
   status: string;
   total_count: number | null;
   sent_count: number | null;
+  deduplicated_count?: number | null;
   failed_count: number | null;
   channel: "sms" | "email" | "voice";
   cancellable?: boolean;
@@ -395,11 +396,13 @@ export function CampaignsHub() {
           {rows.map((campaign) => {
             const total = Number(campaign.total_count ?? 0);
             const delivered = Number(campaign.sent_count ?? 0);
+            const deduplicated = Number(campaign.deduplicated_count ?? 0);
+            const completed = delivered + deduplicated + Number(campaign.failed_count ?? 0);
             const operation = getChannelOperationState(campaign.status, campaign.channel);
             return (
               <div
                 key={campaign.id}
-                className="grid gap-3 border-b border-border/50 px-4 py-3 last:border-0 md:grid-cols-[minmax(220px,1fr)_110px_90px_90px_150px] md:items-center"
+                className="grid gap-3 border-b border-border/50 px-4 py-3 last:border-0 md:grid-cols-[minmax(220px,1fr)_100px_100px_80px_90px_150px] md:items-center"
               >
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
@@ -420,10 +423,11 @@ export function CampaignsHub() {
                   <p className="mt-1 text-xs text-muted-foreground">{operation.nextAction}</p>
                 </div>
                 <CampaignMetric label="Enviados" value={num(delivered)} />
+                <CampaignMetric label="Deduplicados" value={num(deduplicated)} />
                 <CampaignMetric label="Falhas" value={num(campaign.failed_count ?? 0)} />
                 <CampaignMetric
                   label="Progresso"
-                  value={`${total ? Math.round((delivered / total) * 100) : 0}%`}
+                  value={`${total ? Math.round((completed / total) * 100) : 0}%`}
                 />
                 <div className="flex justify-end gap-1">
                   <Button size="sm" variant="outline" asChild>

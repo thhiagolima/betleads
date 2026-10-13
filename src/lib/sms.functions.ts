@@ -1875,7 +1875,7 @@ export const listScheduledSmsCampaigns = createServerFn({ method: "GET" })
     const { data, error } = await context.supabase
       .from("sms_campaigns")
       .select(
-        "id, name, scheduled_at, status, total_count, sent_count, failed_count, last_error, created_at, updated_at",
+        "id, name, scheduled_at, status, total_count, sent_count, deduplicated_count, failed_count, last_error, created_at, updated_at",
       )
       .eq("tenant_id", tenantId)
       .gte("created_at", since)

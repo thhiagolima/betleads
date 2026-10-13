@@ -226,8 +226,9 @@ function CampaignReport({
             </section>
           ) : null}
 
-          <section className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <section className="grid grid-cols-2 gap-2 sm:grid-cols-5">
             <Metric label="Enviados" value={number(data.sent)} />
+            <Metric label="Deduplicados" value={number(data.deduplicated)} />
             <Metric label="Entregues" value={data.delivered === null ? "—" : number(delivered)} />
             <Metric
               label="Clicaram"

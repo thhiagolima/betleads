@@ -720,6 +720,7 @@ type CampaignRow = {
   recipients: unknown;
   total_count: number;
   sent_count: number;
+  deduplicated_count: number;
   failed_count: number;
   scheduled_at: string;
   sent_cursor: number;
@@ -927,6 +928,7 @@ export async function runScheduledSmsCampaigns({ limit = 20 }: { limit?: number 
     }
 
     let sent = 0;
+    let deduplicated = 0;
     let failed = 0;
     let lastError: string | null = null;
     const trigger = `campanha:${c.name}:${c.route}`;
@@ -982,7 +984,8 @@ export async function runScheduledSmsCampaigns({ limit = 20 }: { limit?: number 
         }),
       );
       for (const r of results) {
-        if (r.ok) sent++;
+        if (r.ok && "deduped" in r && r.deduped) deduplicated++;
+        else if (r.ok) sent++;
         else {
           failed++;
           const err = (r as { error?: string }).error;
@@ -995,14 +998,20 @@ export async function runScheduledSmsCampaigns({ limit = 20 }: { limit?: number 
     totalFailed += failed;
 
     const newSent = (c.sent_count ?? 0) + sent;
+    const newDeduplicated = (c.deduplicated_count ?? 0) + deduplicated;
     const newFailed = (c.failed_count ?? 0) + failed;
     const isDone = reservedCursor >= allTargets.length;
-    const finalStatus = isDone ? (newSent === 0 ? "falhou" : "enviado") : "enviando";
+    const finalStatus = isDone
+      ? newSent + newDeduplicated === 0
+        ? "falhou"
+        : "enviado"
+      : "enviando";
     await supabaseAdmin
       .from("sms_campaigns")
       .update({
         status: finalStatus,
         sent_count: newSent,
+        deduplicated_count: newDeduplicated,
         failed_count: newFailed,
         last_error: lastError ?? c.last_error ?? null,
         // Libera lock para o próximo tick continuar (quando não terminou).

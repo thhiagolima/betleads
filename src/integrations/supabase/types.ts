@@ -5220,6 +5220,7 @@ export type Database = {
           content: string
           created_at: string
           created_by: string | null
+          deduplicated_count: number
           failed_count: number
           id: string
           last_error: string | null
@@ -5244,6 +5245,7 @@ export type Database = {
           content: string
           created_at?: string
           created_by?: string | null
+          deduplicated_count?: number
           failed_count?: number
           id?: string
           last_error?: string | null
@@ -5268,6 +5270,7 @@ export type Database = {
           content?: string
           created_at?: string
           created_by?: string | null
+          deduplicated_count?: number
           failed_count?: number
           id?: string
           last_error?: string | null
@@ -7173,6 +7176,7 @@ export type Database = {
           content: string
           created_at: string
           created_by: string | null
+          deduplicated_count: number
           failed_count: number
           id: string
           last_error: string | null
