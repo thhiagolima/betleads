@@ -6,6 +6,6 @@ function JourneyReportRoute() {
   return <ConversionReport sourceType="journey" sourceId={journeyId} />;
 }
 
-export const Route = createFileRoute("/jornadas/$journeyId/relatorio")({
+export const Route = createFileRoute("/jornadas/$journeyId_/relatorio")({
   component: JourneyReportRoute,
 });

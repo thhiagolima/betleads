@@ -48,7 +48,7 @@ import { Route as UTokenRouteImport } from './routes/u.$token'
 import { Route as ApiPublicEvolutionWebhookRouteImport } from './routes/api/public/evolution-webhook'
 import { Route as ApiPublicSmsWebhookRouteImport } from './routes/api/public/sms-webhook'
 import { Route as CampanhasCampaignIdRelatorioRouteImport } from './routes/campanhas.$campaignId.relatorio'
-import { Route as JornadasJourneyIdRelatorioRouteImport } from './routes/jornadas.$journeyId.relatorio'
+import { Route as JornadasJourneyIdRelatorioRouteImport } from './routes/jornadas.$journeyId_.relatorio'
 import { Route as ApiPublicAutomationsDispatchRouteImport } from './routes/api/public/automations/dispatch'
 import { Route as ApiPublicAutomationsEvaluateRouteImport } from './routes/api/public/automations/evaluate'
 import { Route as ApiPublicCallFlowsTickRouteImport } from './routes/api/public/call-flows/tick'
@@ -272,9 +272,9 @@ const CampanhasCampaignIdRelatorioRoute =
   } as any)
 const JornadasJourneyIdRelatorioRoute =
   JornadasJourneyIdRelatorioRouteImport.update({
-    id: '/relatorio',
-    path: '/relatorio',
-    getParentRoute: () => JornadasJourneyIdRoute,
+    id: '/$journeyId_/relatorio',
+    path: '/$journeyId/relatorio',
+    getParentRoute: () => JornadasRoute,
   } as any)
 const ApiPublicAutomationsDispatchRoute =
   ApiPublicAutomationsDispatchRouteImport.update({
@@ -438,7 +438,7 @@ export interface FileRoutesByFullPath {
   '/automacoes/ligacoes': typeof AutomacoesLigacoesRoute
   '/automacoes/sms': typeof AutomacoesSmsRoute
   '/automacoes/whatsapp': typeof AutomacoesWhatsappRoute
-  '/jornadas/$journeyId': typeof JornadasJourneyIdRouteWithChildren
+  '/jornadas/$journeyId': typeof JornadasJourneyIdRoute
   '/jornadas/nova': typeof JornadasNovaRoute
   '/links/configuracoes': typeof LinksConfiguracoesRoute
   '/players/$playerId': typeof PlayersPlayerIdRoute
@@ -503,7 +503,7 @@ export interface FileRoutesByTo {
   '/automacoes/ligacoes': typeof AutomacoesLigacoesRoute
   '/automacoes/sms': typeof AutomacoesSmsRoute
   '/automacoes/whatsapp': typeof AutomacoesWhatsappRoute
-  '/jornadas/$journeyId': typeof JornadasJourneyIdRouteWithChildren
+  '/jornadas/$journeyId': typeof JornadasJourneyIdRoute
   '/jornadas/nova': typeof JornadasNovaRoute
   '/links/configuracoes': typeof LinksConfiguracoesRoute
   '/players/$playerId': typeof PlayersPlayerIdRoute
@@ -569,7 +569,7 @@ export interface FileRoutesById {
   '/automacoes/ligacoes': typeof AutomacoesLigacoesRoute
   '/automacoes/sms': typeof AutomacoesSmsRoute
   '/automacoes/whatsapp': typeof AutomacoesWhatsappRoute
-  '/jornadas/$journeyId': typeof JornadasJourneyIdRouteWithChildren
+  '/jornadas/$journeyId': typeof JornadasJourneyIdRoute
   '/jornadas/nova': typeof JornadasNovaRoute
   '/links/configuracoes': typeof LinksConfiguracoesRoute
   '/players/$playerId': typeof PlayersPlayerIdRoute
@@ -579,7 +579,7 @@ export interface FileRoutesById {
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
   '/api/public/sms-webhook': typeof ApiPublicSmsWebhookRoute
   '/campanhas/$campaignId/relatorio': typeof CampanhasCampaignIdRelatorioRoute
-  '/jornadas/$journeyId/relatorio': typeof JornadasJourneyIdRelatorioRoute
+  '/jornadas/$journeyId_/relatorio': typeof JornadasJourneyIdRelatorioRoute
   '/api/public/automations/dispatch': typeof ApiPublicAutomationsDispatchRoute
   '/api/public/automations/evaluate': typeof ApiPublicAutomationsEvaluateRoute
   '/api/public/call-flows/tick': typeof ApiPublicCallFlowsTickRoute
@@ -776,7 +776,7 @@ export interface FileRouteTypes {
     | '/api/public/evolution-webhook'
     | '/api/public/sms-webhook'
     | '/campanhas/$campaignId/relatorio'
-    | '/jornadas/$journeyId/relatorio'
+    | '/jornadas/$journeyId_/relatorio'
     | '/api/public/automations/dispatch'
     | '/api/public/automations/evaluate'
     | '/api/public/call-flows/tick'
@@ -1132,12 +1132,12 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CampanhasCampaignIdRelatorioRouteImport
       parentRoute: typeof CampanhasRoute
     }
-    '/jornadas/$journeyId/relatorio': {
-      id: '/jornadas/$journeyId/relatorio'
-      path: '/relatorio'
+    '/jornadas/$journeyId_/relatorio': {
+      id: '/jornadas/$journeyId_/relatorio'
+      path: '/$journeyId/relatorio'
       fullPath: '/jornadas/$journeyId/relatorio'
       preLoaderRoute: typeof JornadasJourneyIdRelatorioRouteImport
-      parentRoute: typeof JornadasJourneyIdRoute
+      parentRoute: typeof JornadasRoute
     }
     '/api/public/automations/dispatch': {
       id: '/api/public/automations/dispatch'
@@ -1333,25 +1333,16 @@ const CampanhasRouteWithChildren = CampanhasRoute._addFileChildren(
   CampanhasRouteChildren,
 )
 
-interface JornadasJourneyIdRouteChildren {
+interface JornadasRouteChildren {
+  JornadasJourneyIdRoute: typeof JornadasJourneyIdRoute
+  JornadasNovaRoute: typeof JornadasNovaRoute
   JornadasJourneyIdRelatorioRoute: typeof JornadasJourneyIdRelatorioRoute
 }
 
-const JornadasJourneyIdRouteChildren: JornadasJourneyIdRouteChildren = {
-  JornadasJourneyIdRelatorioRoute: JornadasJourneyIdRelatorioRoute,
-}
-
-const JornadasJourneyIdRouteWithChildren =
-  JornadasJourneyIdRoute._addFileChildren(JornadasJourneyIdRouteChildren)
-
-interface JornadasRouteChildren {
-  JornadasJourneyIdRoute: typeof JornadasJourneyIdRouteWithChildren
-  JornadasNovaRoute: typeof JornadasNovaRoute
-}
-
 const JornadasRouteChildren: JornadasRouteChildren = {
-  JornadasJourneyIdRoute: JornadasJourneyIdRouteWithChildren,
+  JornadasJourneyIdRoute: JornadasJourneyIdRoute,
   JornadasNovaRoute: JornadasNovaRoute,
+  JornadasJourneyIdRelatorioRoute: JornadasJourneyIdRelatorioRoute,
 }
 
 const JornadasRouteWithChildren = JornadasRoute._addFileChildren(
