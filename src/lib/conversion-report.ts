@@ -1,5 +1,7 @@
 export type ConversionDispatch = {
   id: string;
+  tracked_link_id?: string | null;
+  tracking_token?: string | null;
   idempotency_key?: string | null;
   message_log_id?: string | null;
   send_status?: string | null;

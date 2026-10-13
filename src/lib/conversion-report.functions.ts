@@ -41,7 +41,90 @@ const campaignDetailsSchema = z.object({
   limit: z.number().int().min(1).max(500).default(500),
 });
 
+const journeyDetailsSchema = z.object({ journeyId: z.string().uuid() });
+
 const csvCell = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+
+export const getJourneyReportDetails = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((value: unknown) => journeyDetailsSchema.parse(value))
+  .handler(async ({ data, context }) => {
+    const tenantId = await resolveOperationalTenantId(context.supabase);
+    const db = context.supabase as any;
+    const [journeyResult, stepsResult, metricsResult, eligibleResult] = await Promise.all([
+      db
+        .from("journeys")
+        .select("id,name,description,status,trigger_type,trigger_config,created_at,updated_at")
+        .eq("tenant_id", tenantId)
+        .eq("id", data.journeyId)
+        .maybeSingle(),
+      db
+        .from("journey_steps")
+        .select("id,position,step_type,label,config,is_enabled")
+        .eq("tenant_id", tenantId)
+        .eq("journey_id", data.journeyId)
+        .eq("is_enabled", true)
+        .order("position"),
+      db.rpc("journey_metrics", {
+        p_tenant_id: tenantId,
+        p_journey_id: data.journeyId,
+      }),
+      db.rpc("journey_eligible_lead_count", {
+        p_tenant_id: tenantId,
+        p_journey_id: data.journeyId,
+      }),
+    ]);
+    const error = [
+      journeyResult.error,
+      stepsResult.error,
+      metricsResult.error,
+      eligibleResult.error,
+    ].find(Boolean);
+    if (error) throw new Error(error.message);
+    if (!journeyResult.data) return { journey: null, steps: [], metrics: null };
+
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60_000).toISOString();
+    const countExecutions = async (
+      stepId: string,
+      statuses: string[],
+      since?: string,
+    ): Promise<number> => {
+      let query = db
+        .from("journey_step_executions")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .eq("journey_id", data.journeyId)
+        .eq("step_id", stepId)
+        .in("status", statuses);
+      if (since) query = query.gte("executed_at", since);
+      const result = await query;
+      if (result.error) throw new Error(result.error.message);
+      return Number(result.count ?? 0);
+    };
+    const steps = await Promise.all(
+      (stepsResult.data ?? []).map(async (step: any) => {
+        if (step.step_type === "wait" || step.step_type === "end")
+          return { ...step, queued: 0, sent: 0, sent7d: 0, failed: 0 };
+        const [queued, sent, sent7d, failed] = await Promise.all([
+          countExecutions(step.id, ["pending", "claimed", "retrying"]),
+          countExecutions(step.id, ["sent", "delivered"]),
+          countExecutions(step.id, ["sent", "delivered"], sevenDaysAgo),
+          countExecutions(step.id, ["failed", "cancelled"]),
+        ]);
+        return { ...step, queued, sent, sent7d, failed };
+      }),
+    );
+    const aggregate = metricsResult.data ?? {};
+    return {
+      journey: journeyResult.data,
+      steps,
+      metrics: {
+        ...aggregate,
+        eligible: Number(eligibleResult.data ?? 0),
+        queued: Number(aggregate.byStatus?.active ?? 0) + Number(aggregate.byStatus?.waiting ?? 0),
+      },
+    };
+  });
 
 /**
  * Operational detail used by the campaign report. Link dispatches are grouped by
@@ -611,14 +694,16 @@ export const getConversionReport = createServerFn({ method: "GET" })
         db
           .from("link_dispatches")
           .select(
-            "id,tracked_link_id,idempotency_key,message_log_id,send_status,delivery_status,sent_at,updated_at,channel,journey_step_id,journey_step_position",
+            "id,tracked_link_id,tracking_token,recipient_player_id,idempotency_key,message_log_id,send_status,delivery_status,sent_at,updated_at,channel,journey_step_id,journey_step_position",
           )
           .eq("tenant_id", tenantId)
           .eq("source_type", data.sourceType)
           .eq("source_id", data.sourceId),
         db
           .from("conversion_attributions")
-          .select("event_type,monetary_value,is_ftd,occurred_at,created_at,classification")
+          .select(
+            "tracking_token,event_type,event_id,monetary_value,is_ftd,occurred_at,created_at,classification",
+          )
           .eq("tenant_id", tenantId)
           .eq("source_type", data.sourceType)
           .eq("source_id", data.sourceId)
@@ -735,6 +820,26 @@ export const getConversionReport = createServerFn({ method: "GET" })
         channel: group.channel,
         sent: uniqueDeliveryCount(group.rows, (row) => row.send_status === "sent"),
         delivered: uniqueDeliveryCount(group.rows, (row) => row.delivery_status === "delivered"),
+        clicked: uniqueDeliveryCount(
+          group.rows,
+          (row) =>
+            Boolean(row.tracked_link_id) &&
+            Number(clicksByLink.get(row.tracked_link_id!)?.clicks ?? 0) > 0,
+        ),
+        deposits: attributions.filter(
+          (item: any) =>
+            item.classification === "direct" &&
+            item.event_type === "deposit_approved" &&
+            group.rows.some((row: any) => row.tracking_token === item.tracking_token),
+        ).length,
+        recovered: attributions
+          .filter(
+            (item: any) =>
+              item.classification === "direct" &&
+              item.event_type === "deposit_approved" &&
+              group.rows.some((row: any) => row.tracking_token === item.tracking_token),
+          )
+          .reduce((sum: number, item: any) => sum + Number(item.monetary_value ?? 0), 0),
       })),
       historical: dispatches.length === 0 && attributions.length === 0,
     };

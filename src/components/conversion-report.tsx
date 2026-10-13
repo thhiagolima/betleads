@@ -7,7 +7,9 @@ import {
   getCampaignReportDetails,
   getConversionDataHealth,
   getConversionReport,
+  getJourneyReportDetails,
 } from "@/lib/conversion-report.functions";
+import { TRIGGER_NAMES, type TriggerType } from "@/lib/triggers";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -69,6 +71,11 @@ export function ConversionReport({
     queryFn: () => getCampaignReportDetails({ data: { campaignId: sourceId, limit: 500 } }),
     enabled: sourceType === "campaign",
   });
+  const journeyDetails = useQuery({
+    queryKey: ["journey-report-details", sourceId],
+    queryFn: () => getJourneyReportDetails({ data: { journeyId: sourceId } }),
+    enabled: sourceType === "journey",
+  });
   const isVoice = campaignDetails.data?.campaign?.channel === "voice";
   const conversionEnabled =
     sourceType === "journey" ||
@@ -86,10 +93,13 @@ export function ConversionReport({
 
   if (
     (sourceType === "campaign" && campaignDetails.isLoading) ||
+    (sourceType === "journey" && journeyDetails.isLoading) ||
     (!isVoice && conversionEnabled && query.isLoading)
   )
     return <ReportState>Carregando relatório…</ReportState>;
   if (sourceType === "campaign" && campaignDetails.isError)
+    return <ReportState>Não foi possível carregar o relatório.</ReportState>;
+  if (sourceType === "journey" && journeyDetails.isError)
     return <ReportState>Não foi possível carregar o relatório.</ReportState>;
 
   if (sourceType === "campaign" && isVoice && campaignDetails.data)
@@ -102,7 +112,7 @@ export function ConversionReport({
     return (
       <JourneyReport
         data={query.data}
-        sourceId={sourceId}
+        details={journeyDetails.data}
         alerts={health.data?.alerts ?? []}
         globalAttributionHealth={health.data?.globalAttributionHealth}
       />
@@ -691,68 +701,204 @@ function ConversionTable({ rows }: { rows: Recipient[] }) {
 
 function JourneyReport({
   data,
-  sourceId,
+  details,
   alerts,
   globalAttributionHealth,
 }: {
   data: Awaited<ReturnType<typeof getConversionReport>>;
-  sourceId: string;
+  details: Awaited<ReturnType<typeof getJourneyReportDetails>> | undefined;
   alerts: Array<{ code: string; message: string }>;
   globalAttributionHealth?: { count: number; periodHours: number; reasons: Record<string, number> };
 }) {
+  const journey = details?.journey;
+  const allSteps = details?.steps ?? [];
+  const actionableSteps = allSteps.filter((step) => !["wait", "end"].includes(step.step_type));
+  const stepRows = actionableSteps.map((step) => {
+    const conversion = data.byStepChannel.find(
+      (row) =>
+        (row.stepId && row.stepId === step.id) ||
+        (row.stepPosition === step.position && row.channel === step.step_type),
+    );
+    const waitSeconds = allSteps
+      .filter((candidate) => candidate.step_type === "wait" && candidate.position < step.position)
+      .filter(
+        (candidate) =>
+          !allSteps.some(
+            (between) =>
+              !["wait", "end"].includes(between.step_type) &&
+              between.position > candidate.position &&
+              between.position < step.position,
+          ),
+      )
+      .reduce((sum, candidate) => sum + Number((candidate.config as any)?.delay_seconds ?? 0), 0);
+    const previousStep = [...allSteps]
+      .filter((candidate) => candidate.position < step.position)
+      .sort((a, b) => b.position - a.position)[0];
+    const queuePosition =
+      previousStep?.step_type === "wait" ? previousStep.position : step.position;
+    return {
+      ...step,
+      waitSeconds,
+      queued: Number(details?.metrics?.positions?.[String(queuePosition)] ?? step.queued ?? 0),
+      delivered: Number(conversion?.delivered ?? 0),
+      clicked: Number(conversion?.clicked ?? 0),
+      deposits: Number(conversion?.deposits ?? 0),
+      recovered: Number(conversion?.recovered ?? 0),
+    };
+  });
+  const sent7d = stepRows.reduce((sum, step) => sum + Number(step.sent7d ?? 0), 0);
+  const failed = stepRows.reduce((sum, step) => sum + Number(step.failed ?? 0), 0);
+  const recovered = Number(details?.metrics?.recovered ?? data.revenue);
+  const deposits =
+    Number(details?.metrics?.exits?.deposit ?? 0) +
+    Number(details?.metrics?.exits?.first_deposit ?? 0);
+  const triggerName = journey?.trigger_type
+    ? (TRIGGER_NAMES[journey.trigger_type as TriggerType] ?? journey.trigger_type)
+    : "Não informado";
+
   return (
-    <main className="mx-auto max-w-6xl space-y-5 p-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Relatório da jornada</h1>
-          <p className="text-sm text-muted-foreground">
-            Último clique rastreado · janela de 7 dias · America/Sao_Paulo
-          </p>
-        </div>
-        <Link to="/jornadas">Voltar</Link>
-      </div>
-      {alerts.map((alert) => (
-        <div
-          className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm"
-          key={alert.code}
-        >
-          {alert.message}
-        </div>
-      ))}
-      {globalAttributionHealth?.count ? (
-        <div className="rounded-lg border border-sky-500/30 bg-sky-500/5 p-3 text-sm">
-          <strong>Saúde geral da integração:</strong> {number(globalAttributionHealth.count)}{" "}
-          eventos sem origem nas últimas {globalAttributionHealth.periodHours} horas. Eles não
-          pertencem a esta jornada.
-        </div>
-      ) : null}
-      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Metric label="Enviados" value={number(data.sent)} />
-        <Metric label="Entregues" value={data.delivered === null ? "—" : number(data.delivered)} />
-        <Metric label="Login ou jogo" value={number(data.loginOrGame)} />
-        <Metric label="Depósitos" value={number(data.deposits)} accent />
-      </section>
-      <section className="rounded-xl border p-4">
-        <p className="text-sm text-muted-foreground">Receita diretamente atribuída</p>
-        <p className="text-3xl font-semibold text-emerald-400">{money(data.revenue)}</p>
-      </section>
-      {data.byStepChannel.length ? (
-        <section className="rounded-xl border p-4">
-          <h2 className="mb-3 font-semibold">Desempenho por etapa e canal</h2>
-          {data.byStepChannel.map((row) => (
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-background/95 backdrop-blur-sm">
+      <main className="mx-auto min-h-full max-w-6xl border-x border-border/70 bg-background shadow-2xl">
+        <header className="sticky top-0 z-20 flex items-start justify-between gap-4 border-b border-border/70 bg-background/95 px-5 py-4 backdrop-blur">
+          <div className="min-w-0">
+            <div className="mb-1 flex items-center gap-2">
+              <Link to="/jornadas" className="text-muted-foreground hover:text-foreground">
+                <ArrowLeft className="size-4" />
+              </Link>
+              <h1 className="truncate text-base font-bold">
+                {journey?.name ?? "Relatório da jornada"}
+              </h1>
+            </div>
+            <p className="text-xs text-sky-400">
+              Resultado de cada etapa · atribuição por último clique em até 7 dias
+            </p>
+          </div>
+          <Button variant="ghost" size="icon" asChild>
+            <Link to="/jornadas" aria-label="Fechar relatório">
+              <X className="size-4" />
+            </Link>
+          </Button>
+        </header>
+
+        <div className="space-y-4 p-4 sm:p-5">
+          <section className="rounded-xl border bg-card/40 p-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">
+                Evento: {triggerName}
+              </span>
+              {journey?.status ? (
+                <span className="rounded-full border px-2.5 py-1 text-xs capitalize text-muted-foreground">
+                  {journey.status}
+                </span>
+              ) : null}
+            </div>
+            {journey?.description ? (
+              <p className="mt-3 text-sm text-muted-foreground">{journey.description}</p>
+            ) : null}
+          </section>
+
+          {alerts.map((alert) => (
             <div
-              key={`${row.stepId ?? row.stepPosition}:${row.channel}`}
-              className="grid grid-cols-3 border-b py-2 text-sm"
+              className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm"
+              key={alert.code}
             >
-              <span>{row.stepPosition === null ? "Legado" : `Etapa ${row.stepPosition + 1}`}</span>
-              <span className="uppercase">{row.channel}</span>
-              <span>{number(row.sent)} enviados</span>
+              {alert.message}
             </div>
           ))}
-        </section>
-      ) : null}
-      <p className="hidden">{sourceId}</p>
-    </main>
+          {globalAttributionHealth?.count ? (
+            <div className="rounded-lg border border-sky-500/30 bg-sky-500/5 p-3 text-sm">
+              <strong>Saúde geral da integração:</strong> {number(globalAttributionHealth.count)}{" "}
+              eventos sem origem nas últimas {globalAttributionHealth.periodHours} horas. Eles não
+              pertencem a esta jornada.
+            </div>
+          ) : null}
+
+          <section className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+            <Metric label="Elegíveis agora" value={number(details?.metrics?.eligible ?? 0)} />
+            <Metric label="Na fila" value={number(details?.metrics?.queued ?? 0)} />
+            <Metric label="Enviados 7d" value={number(sent7d)} />
+            <Metric label="Clicaram" value={data.clicked === null ? "—" : number(data.clicked)} />
+            <Metric label="Depósitos" value={number(deposits)} />
+            <Metric label="Recuperado" value={money(recovered)} accent />
+          </section>
+
+          <section className="rounded-2xl border border-border/80">
+            <div className="border-b px-4 py-3">
+              <h2 className="font-semibold">Os degraus — resultado de cada etapa</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Envios vêm da execução da jornada; cliques, depósitos e valor recuperado usam o
+                vínculo rastreado de cada etapa.
+              </p>
+            </div>
+            {stepRows.length ? (
+              <div className="divide-y divide-border/70">
+                {stepRows.map((step, index) => (
+                  <div key={step.id} className="space-y-3 p-4">
+                    <div className="flex flex-wrap items-center gap-2 text-sm">
+                      <span className="grid size-6 place-items-center rounded-full bg-muted text-xs font-bold">
+                        {index + 1}
+                      </span>
+                      <span className="rounded-full border border-sky-500/30 bg-sky-500/5 px-2 py-0.5 text-xs font-semibold uppercase text-sky-300">
+                        {step.step_type}
+                      </span>
+                      <strong>{step.label || `Etapa ${index + 1}`}</strong>
+                      <span className="text-xs text-muted-foreground">
+                        {formatJourneyDelay(step.waitSeconds)}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+                      <JourneyStepMetric label="Na fila" value={step.queued} />
+                      <JourneyStepMetric label="Enviados 7d" value={step.sent7d} />
+                      <JourneyStepMetric label="Enviados total" value={step.sent} />
+                      <JourneyStepMetric label="Entregues" value={step.delivered} />
+                      <JourneyStepMetric label="Clicaram" value={step.clicked} />
+                      <JourneyStepMetric label="Depósitos" value={step.deposits} />
+                      <JourneyStepMetric
+                        label="Recuperado"
+                        value={step.recovered}
+                        currency
+                        accent
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="p-5 text-sm text-muted-foreground">
+                Esta jornada ainda não possui etapas de comunicação configuradas.
+              </p>
+            )}
+          </section>
+
+          {failed ? (
+            <p className="text-xs text-amber-300">
+              {number(failed)} execução(ões) falharam ou foram canceladas nas etapas acima.
+            </p>
+          ) : null}
+        </div>
+      </main>
+    </div>
+  );
+}
+
+function JourneyStepMetric({
+  label,
+  value,
+  currency = false,
+  accent = false,
+}: {
+  label: string;
+  value: number;
+  currency?: boolean;
+  accent?: boolean;
+}) {
+  return (
+    <div className="rounded-lg bg-card/60 px-3 py-2">
+      <p className="text-[11px] text-muted-foreground">{label}</p>
+      <p className={cn("mt-0.5 font-bold", accent && "text-emerald-400")}>
+        {currency ? money(value) : number(value)}
+      </p>
+    </div>
   );
 }
 
@@ -841,6 +987,18 @@ function formatCallDuration(seconds: number | null) {
   const minutes = Math.floor(seconds / 60);
   const remainder = seconds % 60;
   return remainder ? `${minutes}min ${remainder}s` : `${minutes}min`;
+}
+
+function formatJourneyDelay(seconds: number) {
+  if (!seconds) return "na hora";
+  if (seconds < 60) return `${seconds}s depois`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)} min depois`;
+  if (seconds < 86400) {
+    const hours = seconds / 3600;
+    return `${Number.isInteger(hours) ? hours : hours.toFixed(1)} h depois`;
+  }
+  const days = seconds / 86400;
+  return `${Number.isInteger(days) ? days : days.toFixed(1)} d depois`;
 }
 
 function voiceStatusLabel(status: string, providerStatus: string | null) {
