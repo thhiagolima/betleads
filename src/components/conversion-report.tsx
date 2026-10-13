@@ -73,7 +73,8 @@ export function ConversionReport({
 
   if (sourceType === "journey")
     return (
-      <JourneyReport data={query.data} sourceId={sourceId} alerts={health.data?.alerts ?? []} />
+      <JourneyReport data={query.data} sourceId={sourceId} alerts={health.data?.alerts ?? []}
+        globalAttributionHealth={health.data?.globalAttributionHealth} />
     );
 
   return (
@@ -83,6 +84,7 @@ export function ConversionReport({
       details={campaignDetails.data}
       detailsError={campaignDetails.isError}
       alerts={health.data?.alerts ?? []}
+      globalAttributionHealth={health.data?.globalAttributionHealth}
     />
   );
 }
@@ -93,12 +95,14 @@ function CampaignReport({
   details,
   detailsError,
   alerts,
+  globalAttributionHealth,
 }: {
   sourceId: string;
   data: Awaited<ReturnType<typeof getConversionReport>>;
   details: Awaited<ReturnType<typeof getCampaignReportDetails>> | undefined;
   detailsError: boolean;
   alerts: Array<{ code: string; message: string }>;
+  globalAttributionHealth?: { count: number; periodHours: number; reasons: Record<string, number> };
 }) {
   const [filter, setFilter] = useState<RecipientFilter>("all");
   const [page, setPage] = useState(1);
@@ -194,6 +198,20 @@ function CampaignReport({
               {alert.message}
             </div>
           ))}
+          {globalAttributionHealth?.count ? (
+            <div className="rounded-lg border border-sky-500/30 bg-sky-500/5 p-3 text-sm">
+              <p className="font-semibold">Saúde geral da integração</p>
+              <p className="mt-1 text-muted-foreground">
+                {number(globalAttributionHealth.count)} evento(s) do tenant chegaram sem origem nas
+                últimas {globalAttributionHealth.periodHours} horas. Este total é global e não foi
+                atribuído a esta campanha.
+              </p>
+              <p className="mt-1 text-xs text-sky-300">
+                {Object.entries(globalAttributionHealth.reasons)
+                  .map(([reason, count]) => `${reason}: ${number(count)}`).join(" · ")}
+              </p>
+            </div>
+          ) : null}
 
           {campaign?.failed || failureReasons.length > 0 ? (
             <section className="rounded-2xl border border-border/80 p-4">
@@ -500,10 +518,12 @@ function JourneyReport({
   data,
   sourceId,
   alerts,
+  globalAttributionHealth,
 }: {
   data: Awaited<ReturnType<typeof getConversionReport>>;
   sourceId: string;
   alerts: Array<{ code: string; message: string }>;
+  globalAttributionHealth?: { count: number; periodHours: number; reasons: Record<string, number> };
 }) {
   return (
     <main className="mx-auto max-w-6xl space-y-5 p-6">
@@ -524,6 +544,13 @@ function JourneyReport({
           {alert.message}
         </div>
       ))}
+      {globalAttributionHealth?.count ? (
+        <div className="rounded-lg border border-sky-500/30 bg-sky-500/5 p-3 text-sm">
+          <strong>Saúde geral da integração:</strong>{" "}
+          {number(globalAttributionHealth.count)} eventos sem origem nas últimas{" "}
+          {globalAttributionHealth.periodHours} horas. Eles não pertencem a esta jornada.
+        </div>
+      ) : null}
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Metric label="Enviados" value={number(data.sent)} />
         <Metric label="Entregues" value={data.delivered === null ? "—" : number(data.delivered)} />

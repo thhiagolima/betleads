@@ -332,13 +332,28 @@ export const getConversionDataHealth = createServerFn({ method: "GET" })
       .eq("source_id", data.sourceId);
     if (error) throw new Error(error.message);
     const issueSince = new Date(Date.now() - 24 * 60 * 60_000).toISOString();
-    const { data: issues, error: issuesError } = await db
-      .from("conversion_attribution_issues")
-      .select("reason,source_type,source_id")
-      .eq("tenant_id", tenantId)
-      .gte("created_at", issueSince);
-    if (issuesError && !String(issuesError.message).includes("permission"))
-      throw new Error(issuesError.message);
+    const issueReasons = [
+      "missing_token",
+      "token_without_dispatch",
+      "invalid_origin_or_player",
+      "dispatch_not_sent",
+    ] as const;
+    const [sourceIssues, globalIssues, ...globalReasonResults] = await Promise.all([
+      db.from("conversion_attribution_issues").select("id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId).eq("source_type", data.sourceType)
+        .eq("source_id", data.sourceId).gte("created_at", issueSince),
+      db.from("conversion_attribution_issues").select("id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId).is("source_id", null).gte("created_at", issueSince),
+      ...issueReasons.map((reason) =>
+        db.from("conversion_attribution_issues").select("id", { count: "exact", head: true })
+          .eq("tenant_id", tenantId).is("source_id", null)
+          .eq("reason", reason).gte("created_at", issueSince),
+      ),
+    ]);
+    const issueError = [sourceIssues, globalIssues, ...globalReasonResults]
+      .map((result: any) => result.error).find(Boolean);
+    if (issueError && !String(issueError.message).includes("permission"))
+      throw new Error(issueError.message);
     const rows = dispatches ?? [];
     const preparedStale = rows.filter(
       (row: any) => row.send_status === "prepared" && row.created_at < staleAt,
@@ -360,18 +375,27 @@ export const getConversionDataHealth = createServerFn({ method: "GET" })
         severity: "warning",
         message: `${syncStale} link(s) ainda não possuem sincronização recente de cliques.`,
       });
-    const relevantIssues = (issues ?? []).filter(
-      (issue: any) =>
-        !issue.source_id ||
-        (issue.source_type === data.sourceType && issue.source_id === data.sourceId),
-    );
-    if (relevantIssues.length)
+    const sourceIssueCount = Number(sourceIssues.count ?? 0);
+    if (sourceIssueCount)
       alerts.push({
         code: "attribution_rejected",
         severity: "warning",
-        message: `${relevantIssues.length} evento(s) sem atribuição determinística nas últimas 24 horas. Verifique token, origem e envio.`,
+        message: `${sourceIssueCount} evento(s) desta origem ficaram sem atribuição determinística nas últimas 24 horas.`,
       });
-    return { healthy: alerts.length === 0, alerts };
+    const globalIssueReasons = Object.fromEntries(
+      issueReasons
+        .map((reason, index) => [reason, Number(globalReasonResults[index]?.count ?? 0)] as const)
+        .filter(([, count]) => count > 0),
+    );
+    return {
+      healthy: alerts.length === 0,
+      alerts,
+      globalAttributionHealth: {
+        count: Number(globalIssues.count ?? 0),
+        periodHours: 24,
+        reasons: globalIssueReasons,
+      },
+    };
   });
 
 export const getConversionDrilldown = createServerFn({ method: "GET" })
