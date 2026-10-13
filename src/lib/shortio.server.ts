@@ -699,39 +699,43 @@ export async function syncShortioMetrics(
   // tenant-scoped e por isso só registra execuções com tenant explícito.
   const runId = run.data ? String(run.data.id) : null;
 
-  const { data: previousRun } = await db
-    .from("link_tracking_sync_runs")
-    .select("cursor")
-    .eq("tenant_id", tenantId)
-    .eq("status", "completed")
-    .not("cursor", "is", null)
-    .order("finished_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  const cursor = typeof previousRun?.cursor === "string" ? previousRun.cursor : null;
-
-  let query = db
+  // Keep newly sent links near-real-time even when a tenant owns thousands of
+  // historical links. A pure UUID cursor can leave a new link behind the
+  // cursor for days, so every run reserves capacity for the last 24 hours and
+  // uses the remaining slots for the stalest historical links.
+  const recentLimit = Math.min(10, limit);
+  const recentSince = new Date(Date.now() - 24 * 60 * 60_000).toISOString();
+  const recentResult = await db
     .from("tracked_links")
     .select("id,tenant_id,shortio_link_id")
     .eq("status", "active")
-    .order("id", { ascending: true })
-    .limit(limit);
-  if (tenantId) query = query.eq("tenant_id", tenantId);
-  if (cursor) query = query.gt("id", cursor);
-  let { data: links, error } = await query;
-  // Reached the end of the cursor window: begin the next reconciliation pass.
-  if (!error && cursor && (!links || links.length === 0)) {
-    const retry = await db
-      .from("tracked_links")
-      .select("id,tenant_id,shortio_link_id")
-      .eq("status", "active")
-      .eq("tenant_id", tenantId)
-      .order("id", { ascending: true })
-      .limit(limit);
-    links = retry.data;
-    error = retry.error;
-  }
-  if (error) throw new Error(`Falha ao listar links para sincronização: ${error.message}`);
+    .eq("tenant_id", tenantId)
+    .gte("created_at", recentSince)
+    .order("last_synced_at", { ascending: true, nullsFirst: true })
+    .order("created_at", { ascending: false })
+    .limit(recentLimit);
+  if (recentResult.error)
+    throw new Error(`Falha ao listar links recentes: ${recentResult.error.message}`);
+
+  const recentLinks = recentResult.data ?? [];
+  const recentIds = new Set(recentLinks.map((link: any) => String(link.id)));
+  const backgroundLimit = Math.max(0, limit - recentLinks.length);
+  const backgroundResult = backgroundLimit
+    ? await db
+        .from("tracked_links")
+        .select("id,tenant_id,shortio_link_id")
+        .eq("status", "active")
+        .eq("tenant_id", tenantId)
+        .order("last_synced_at", { ascending: true, nullsFirst: true })
+        .order("created_at", { ascending: true })
+        .limit(backgroundLimit + recentLinks.length)
+    : { data: [], error: null };
+  if (backgroundResult.error)
+    throw new Error(`Falha ao listar links históricos: ${backgroundResult.error.message}`);
+  const backgroundLinks = (backgroundResult.data ?? [])
+    .filter((link: any) => !recentIds.has(String(link.id)))
+    .slice(0, backgroundLimit);
+  const links = [...recentLinks, ...backgroundLinks];
 
   let processed = 0;
   let failures = 0;
