@@ -34,7 +34,14 @@ function correlationOf(request: Request, payload: Record<string, unknown>): stri
 }
 
 function durationOf(payload: Record<string, unknown>): number | null {
-  const value = valueAt(payload, "duration", "durationSeconds", "duration_seconds", "callDuration", "call_duration_seconds");
+  const value = valueAt(
+    payload,
+    "duration",
+    "durationSeconds",
+    "duration_seconds",
+    "callDuration",
+    "call_duration_seconds",
+  );
   const seconds = typeof value === "number" ? value : Number(value);
   return Number.isFinite(seconds) && seconds >= 0 ? Math.round(seconds) : null;
 }
@@ -43,18 +50,25 @@ function completion(payload: Record<string, unknown>): string | null {
   // Alguns produtos/versões da Infobip devolvem status como string; outros,
   // como objeto { groupName, name, description }. Mantemos ambos legíveis.
   const statusValue = valueAt(payload, "eventType", "event", "type", "status", "state");
-  const event = (typeof statusValue === "string"
-    ? statusValue
-    : JSON.stringify(statusValue ?? ""))
-    .toUpperCase();
-  if (event.includes("ESTABLISHED") || event.includes("ANSWERED") || event.includes("CONNECTED")) return "answered";
+  const event = (
+    typeof statusValue === "string" ? statusValue : JSON.stringify(statusValue ?? "")
+  ).toUpperCase();
+  if (event.includes("ESTABLISHED") || event.includes("ANSWERED") || event.includes("CONNECTED"))
+    return "answered";
   if (event.includes("BUSY")) return "busy";
-  if (event.includes("NO_ANSWER") || event.includes("NOT_ANSWERED") || event.includes("UNANSWERED")) return "not_answered";
-  if (event.includes("FAILED") || event.includes("REJECTED") || event.includes("ERROR")) return "failed";
+  if (event.includes("NO_ANSWER") || event.includes("NOT_ANSWERED") || event.includes("UNANSWERED"))
+    return "not_answered";
+  if (event.includes("FAILED") || event.includes("REJECTED") || event.includes("ERROR"))
+    return "failed";
   if (
-    event.includes("FINISHED") || event.includes("COMPLETED") || event.includes("HANGUP") ||
-    event.includes("DISCONNECTED") || event.includes("DELIVERED") || event.includes("SUCCESS")
-  ) return "completed";
+    event.includes("FINISHED") ||
+    event.includes("COMPLETED") ||
+    event.includes("HANGUP") ||
+    event.includes("DISCONNECTED") ||
+    event.includes("DELIVERED") ||
+    event.includes("SUCCESS")
+  )
+    return "completed";
   return null;
 }
 
@@ -76,18 +90,19 @@ export const Route = createFileRoute("/api/public/infobip/voice/events")({
         }
         const callId = callIdOf(payload);
         const correlation = correlationOf(request, payload);
-        if (!callId && !correlation) return Response.json({ ok: true, skipped: "missing_correlation" });
+        if (!callId && !correlation)
+          return Response.json({ ok: true, skipped: "missing_correlation" });
         const result = completion(payload);
         const duration = durationOf(payload);
         let history = null;
         if (callId) {
           const { data } = await supabaseAdmin
-          .from("call_history")
-          .select("id, call_queue_id, provider_call_id, provider_response")
-          .eq("provider_call_id", callId)
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
+            .from("call_history")
+            .select("id, call_queue_id, provider_call_id, provider_response")
+            .eq("provider_call_id", callId)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
           history = data;
         }
         if (!history && correlation) {
@@ -100,16 +115,22 @@ export const Route = createFileRoute("/api/public/infobip/voice/events")({
             .maybeSingle();
           history = data;
         }
-        const previous = (history?.provider_response && typeof history.provider_response === "object")
-          ? history.provider_response as Record<string, unknown>
-          : {};
+        const previous =
+          history?.provider_response && typeof history.provider_response === "object"
+            ? (history.provider_response as Record<string, unknown>)
+            : {};
         const callbacks = Array.isArray(previous.callbacks) ? previous.callbacks : [];
         const callback = { received_at: new Date().toISOString(), payload };
         const update: Record<string, unknown> = {
-          provider_response: { ...previous, callbacks: [...callbacks, callback], last_callback: callback },
+          provider_response: {
+            ...previous,
+            callbacks: [...callbacks, callback],
+            last_callback: callback,
+          },
         };
         if (result) {
-          update.status = result === "answered" ? "answered" : result === "completed" ? "completed" : "failed";
+          update.status =
+            result === "answered" ? "answered" : result === "completed" ? "completed" : "failed";
           update.result = result;
           update.error_message = errorOf(payload);
         }
@@ -119,10 +140,18 @@ export const Route = createFileRoute("/api/public/infobip/voice/events")({
           .update(update as never)
           .eq("id", history?.id ?? "00000000-0000-0000-0000-000000000000");
         if (historyUpdateError) throw historyUpdateError;
-        if (history?.call_queue_id && result && result !== "answered") {
+        if (history?.call_queue_id && result) {
           const { error: queueUpdateError } = await supabaseAdmin
             .from("call_queue")
-            .update({ status: result === "completed" ? "completed" : "failed", provider_status: result } as never)
+            .update({
+              status:
+                result === "answered"
+                  ? "completed"
+                  : result === "completed"
+                    ? "completed"
+                    : "failed",
+              provider_status: result,
+            } as never)
             .eq("id", history.call_queue_id);
           if (queueUpdateError) throw queueUpdateError;
         }
@@ -133,7 +162,14 @@ export const Route = createFileRoute("/api/public/infobip/voice/events")({
             durationSeconds: duration ?? 0,
           });
         }
-        return Response.json({ ok: true, call_id: callId, correlation, matched: Boolean(history), status: result, duration_seconds: duration });
+        return Response.json({
+          ok: true,
+          call_id: callId,
+          correlation,
+          matched: Boolean(history),
+          status: result,
+          duration_seconds: duration,
+        });
       },
     },
   },

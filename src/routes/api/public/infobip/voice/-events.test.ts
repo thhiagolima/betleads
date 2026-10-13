@@ -14,9 +14,11 @@ vi.mock("@/lib/call-flows.server", () => ({ handleCallCompletion }));
 import { Route } from "./events";
 
 type PostHandler = (input: { request: Request }) => Promise<Response>;
-const post = (Route as unknown as {
-  options: { server: { handlers: { POST: PostHandler } } };
-}).options.server.handlers.POST;
+const post = (
+  Route as unknown as {
+    options: { server: { handlers: { POST: PostHandler } } };
+  }
+).options.server.handlers.POST;
 
 function historyLookup(history: Record<string, unknown> | null) {
   const query = {
@@ -76,22 +78,38 @@ describe("Infobip voice event callback", () => {
     });
     const historyUpdate = updateQuery();
     const queueUpdate = updateQuery();
-    from.mockReturnValueOnce(history).mockReturnValueOnce(historyUpdate).mockReturnValueOnce(queueUpdate);
+    from
+      .mockReturnValueOnce(history)
+      .mockReturnValueOnce(historyUpdate)
+      .mockReturnValueOnce(queueUpdate);
 
     const response = await post({
-      request: new Request("https://betleads.io/api/public/infobip/voice/events?token=callback-secret", {
-        method: "POST",
-        body: JSON.stringify({ callId: "provider-call", status: "COMPLETED", duration: 17 }),
-      }),
+      request: new Request(
+        "https://betleads.io/api/public/infobip/voice/events?token=callback-secret",
+        {
+          method: "POST",
+          body: JSON.stringify({ callId: "provider-call", status: "COMPLETED", duration: 17 }),
+        },
+      ),
     });
 
-    expect(await response.json()).toMatchObject({ ok: true, matched: true, status: "completed", duration_seconds: 17 });
-    expect(historyUpdate.update).toHaveBeenCalledWith(expect.objectContaining({
+    expect(await response.json()).toMatchObject({
+      ok: true,
+      matched: true,
       status: "completed",
-      result: "completed",
       duration_seconds: 17,
-    }));
-    expect(queueUpdate.update).toHaveBeenCalledWith({ status: "completed", provider_status: "completed" });
+    });
+    expect(historyUpdate.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "completed",
+        result: "completed",
+        duration_seconds: 17,
+      }),
+    );
+    expect(queueUpdate.update).toHaveBeenCalledWith({
+      status: "completed",
+      provider_status: "completed",
+    });
     expect(handleCallCompletion).toHaveBeenCalledWith({
       providerCallId: "provider-call",
       status: "completed",
@@ -99,15 +117,60 @@ describe("Infobip voice event callback", () => {
     });
   });
 
+  it("finishes the queue when the provider confirms the call was answered", async () => {
+    const history = historyLookup({
+      id: "history-answered",
+      call_queue_id: "queue-answered",
+      provider_call_id: "provider-call",
+      provider_response: {},
+    });
+    const historyUpdate = updateQuery();
+    const queueUpdate = updateQuery();
+    from
+      .mockReturnValueOnce(history)
+      .mockReturnValueOnce(historyUpdate)
+      .mockReturnValueOnce(queueUpdate);
+
+    const response = await post({
+      request: new Request(
+        "https://betleads.io/api/public/infobip/voice/events?token=callback-secret",
+        {
+          method: "POST",
+          body: JSON.stringify({ callId: "provider-call", status: "ANSWERED" }),
+        },
+      ),
+    });
+
+    expect(await response.json()).toMatchObject({ ok: true, matched: true, status: "answered" });
+    expect(queueUpdate.update).toHaveBeenCalledWith({
+      status: "completed",
+      provider_status: "answered",
+    });
+    expect(handleCallCompletion).not.toHaveBeenCalled();
+  });
+
   it("does not acknowledge a callback when its history update fails", async () => {
-    from.mockReturnValueOnce(historyLookup({ id: "history-2", call_queue_id: null, provider_call_id: "provider-call", provider_response: {} }))
+    from
+      .mockReturnValueOnce(
+        historyLookup({
+          id: "history-2",
+          call_queue_id: null,
+          provider_call_id: "provider-call",
+          provider_response: {},
+        }),
+      )
       .mockReturnValueOnce(updateQuery(new Error("database unavailable")));
 
-    await expect(post({
-      request: new Request("https://betleads.io/api/public/infobip/voice/events?token=callback-secret", {
-        method: "POST",
-        body: JSON.stringify({ callId: "provider-call", status: "COMPLETED" }),
+    await expect(
+      post({
+        request: new Request(
+          "https://betleads.io/api/public/infobip/voice/events?token=callback-secret",
+          {
+            method: "POST",
+            body: JSON.stringify({ callId: "provider-call", status: "COMPLETED" }),
+          },
+        ),
       }),
-    })).rejects.toThrow("database unavailable");
+    ).rejects.toThrow("database unavailable");
   });
 });
