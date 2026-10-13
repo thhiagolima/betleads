@@ -64,22 +64,37 @@ export function ConversionReport({
   sourceType: "campaign" | "journey";
   sourceId: string;
 }) {
-  const query = useQuery({
-    queryKey: ["conversion-report", sourceType, sourceId],
-    queryFn: () => getConversionReport({ data: { sourceType, sourceId } }),
-  });
-  const health = useQuery({
-    queryKey: ["conversion-data-health", sourceType, sourceId],
-    queryFn: () => getConversionDataHealth({ data: { sourceType, sourceId } }),
-  });
   const campaignDetails = useQuery({
     queryKey: ["campaign-report-details", sourceId],
     queryFn: () => getCampaignReportDetails({ data: { campaignId: sourceId, limit: 500 } }),
     enabled: sourceType === "campaign",
   });
+  const isVoice = campaignDetails.data?.campaign?.channel === "voice";
+  const conversionEnabled =
+    sourceType === "journey" ||
+    (sourceType === "campaign" && campaignDetails.isSuccess && !isVoice);
+  const query = useQuery({
+    queryKey: ["conversion-report", sourceType, sourceId],
+    queryFn: () => getConversionReport({ data: { sourceType, sourceId } }),
+    enabled: conversionEnabled,
+  });
+  const health = useQuery({
+    queryKey: ["conversion-data-health", sourceType, sourceId],
+    queryFn: () => getConversionDataHealth({ data: { sourceType, sourceId } }),
+    enabled: conversionEnabled,
+  });
 
-  if (query.isLoading || (sourceType === "campaign" && campaignDetails.isLoading))
+  if (
+    (sourceType === "campaign" && campaignDetails.isLoading) ||
+    (!isVoice && conversionEnabled && query.isLoading)
+  )
     return <ReportState>Carregando relatório…</ReportState>;
+  if (sourceType === "campaign" && campaignDetails.isError)
+    return <ReportState>Não foi possível carregar o relatório.</ReportState>;
+
+  if (sourceType === "campaign" && isVoice && campaignDetails.data)
+    return <VoiceCampaignReport details={campaignDetails.data} />;
+
   if (query.isError || !query.data)
     return <ReportState>Não foi possível carregar o relatório.</ReportState>;
 
@@ -102,6 +117,118 @@ export function ConversionReport({
       alerts={health.data?.alerts ?? []}
       globalAttributionHealth={health.data?.globalAttributionHealth}
     />
+  );
+}
+
+function VoiceCampaignReport({
+  details,
+}: {
+  details: Awaited<ReturnType<typeof getCampaignReportDetails>>;
+}) {
+  const campaign = details.campaign;
+  const voice = details.voice;
+  if (!campaign || campaign.channel !== "voice" || !voice)
+    return <ReportState>Não foi possível carregar o relatório de voz.</ReportState>;
+
+  const status = voiceStatusLabel(voice.queueStatus, voice.providerStatus);
+  const answeredLabel = voice.answered
+    ? "Sim"
+    : ["completed", "failed", "cancelled"].includes(voice.queueStatus)
+      ? "Não"
+      : "Aguardando";
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-background/95 backdrop-blur-sm">
+      <main className="mx-auto min-h-full max-w-5xl border-x border-border/70 bg-background shadow-2xl">
+        <header className="sticky top-0 z-20 flex items-start justify-between gap-4 border-b border-border/70 bg-background/95 px-5 py-4 backdrop-blur">
+          <div className="min-w-0">
+            <div className="mb-1 flex items-center gap-2">
+              <Link
+                to="/campanhas"
+                className="text-muted-foreground hover:text-foreground"
+                aria-label="Voltar"
+              >
+                <ArrowLeft className="size-4" />
+              </Link>
+              <h1 className="truncate text-base font-bold">{campaign.name}</h1>
+            </div>
+            <p className="text-xs text-sky-400">Relatório operacional da ligação de voz</p>
+          </div>
+          <Button variant="ghost" size="icon" asChild>
+            <Link to="/campanhas" aria-label="Fechar relatório">
+              <X className="size-4" />
+            </Link>
+          </Button>
+        </header>
+
+        <div className="space-y-4 p-4 sm:p-5">
+          <section className="grid gap-3 rounded-xl bg-card/60 p-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
+            <TimelineValue label="Criada em" value={dateTime(campaign.createdAt)} />
+            <TimelineValue label="Agendada para" value={dateTime(campaign.scheduledAt)} />
+            <TimelineValue label="Tentativa iniciada" value={dateTime(voice.attemptedAt)} />
+            <TimelineValue label="Canal" value="Infobip Voice" />
+          </section>
+
+          <section className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+            <Metric label="Status" value={status} />
+            <Metric label="Atendida" value={answeredLabel} accent={voice.answered} />
+            <Metric
+              label="Tempo de chamada"
+              value={formatCallDuration(voice.durationSeconds)}
+              hint={voice.durationSeconds === null ? "não informado pelo provedor" : undefined}
+            />
+            <Metric
+              label="Tentativas"
+              value={number(Math.max(voice.attempts, voice.attemptedAt ? 1 : 0))}
+            />
+          </section>
+
+          {voice.error ? (
+            <section className="rounded-xl border border-rose-500/30 bg-rose-500/5 p-4">
+              <p className="text-xs text-rose-300">Motivo da falha</p>
+              <p className="mt-1 text-sm font-semibold">{voice.error}</p>
+            </section>
+          ) : null}
+
+          <section className="rounded-2xl border border-border/80 p-4">
+            <h2 className="mb-3 text-sm font-semibold">Resultado da ligação</h2>
+            <div className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
+              <VoiceDetail label="Destinatário" value={voice.playerName ?? "Não identificado"} />
+              <VoiceDetail label="Telefone" value={voice.phone ?? "Não informado"} />
+              <VoiceDetail label="Resultado" value={voiceResultLabel(voice.result)} />
+              <VoiceDetail label="Status no provedor" value={voice.providerStatus ?? "—"} />
+              <VoiceDetail label="Provedor" value={voice.provider ?? "Infobip"} />
+              <VoiceDetail
+                label="Código HTTP do provedor"
+                value={voice.providerStatusCode === null ? "—" : String(voice.providerStatusCode)}
+              />
+            </div>
+          </section>
+
+          <section>
+            <h2 className="mb-2 text-sm font-semibold">Conteúdo da ligação</h2>
+            <div className="rounded-xl border bg-card/40 p-3 text-sm font-medium">
+              {campaign.content ?? "O conteúdo original não está disponível para esta ligação."}
+            </div>
+          </section>
+
+          {voice.providerCallId ? (
+            <p className="text-xs text-muted-foreground">
+              Identificador no provedor: <span className="font-mono">{voice.providerCallId}</span>
+            </p>
+          ) : null}
+        </div>
+      </main>
+    </div>
+  );
+}
+
+function VoiceDetail({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl bg-card/60 p-3">
+      <p className="text-xs text-sky-300">{label}</p>
+      <p className="mt-1 break-words font-semibold">{value}</p>
+    </div>
   );
 }
 
@@ -706,6 +833,42 @@ function formatElapsed(value: number | null) {
   const minutes = Math.floor(value / 60_000);
   if (minutes < 60) return `${minutes} min`;
   return `${(minutes / 60).toFixed(1)} h`;
+}
+
+function formatCallDuration(seconds: number | null) {
+  if (seconds === null) return "—";
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return remainder ? `${minutes}min ${remainder}s` : `${minutes}min`;
+}
+
+function voiceStatusLabel(status: string, providerStatus: string | null) {
+  if (providerStatus === "answered") return "Concluída";
+  const labels: Record<string, string> = {
+    pending_audio: "Preparando áudio",
+    audio_ready: "Aguardando envio",
+    queued: "Na fila",
+    waiting_provider: "Aguardando provedor",
+    calling: "Chamando",
+    completed: "Concluída",
+    failed: "Falhou",
+    cancelled: "Cancelada",
+    paused: "Pausada",
+  };
+  return labels[status] ?? status;
+}
+
+function voiceResultLabel(result: string | null) {
+  if (!result) return "Aguardando resultado";
+  const labels: Record<string, string> = {
+    answered: "Atendida",
+    completed: "Concluída",
+    busy: "Ocupado",
+    not_answered: "Não atendida",
+    failed: "Falhou",
+  };
+  return labels[result] ?? result;
 }
 
 async function downloadRecipients(sourceId: string) {

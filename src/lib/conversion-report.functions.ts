@@ -54,7 +54,7 @@ export const getCampaignReportDetails = createServerFn({ method: "GET" })
     const tenantId = await resolveOperationalTenantId(context.supabase);
     const db = context.supabase as any;
 
-    const [smsResult, emailResult, dispatchResult] = await Promise.all([
+    const [smsResult, emailResult, voiceResult, dispatchResult] = await Promise.all([
       db
         .from("sms_campaigns")
         .select(
@@ -72,6 +72,14 @@ export const getCampaignReportDetails = createServerFn({ method: "GET" })
         .eq("id", data.campaignId)
         .maybeSingle(),
       db
+        .from("call_queue")
+        .select(
+          "id,lead_id,script_id,voice_asset_id,trigger_name,status,provider_status,phone_number,scheduled_at,created_at,updated_at,attempts,provider_response",
+        )
+        .eq("tenant_id", tenantId)
+        .eq("id", data.campaignId)
+        .maybeSingle(),
+      db
         .from("link_dispatches")
         .select(
           "id,tracked_link_id,tracking_token,idempotency_key,recipient_player_id,send_status,delivery_status,sent_at,delivered_at,created_at,updated_at,message_log_id,channel",
@@ -83,11 +91,66 @@ export const getCampaignReportDetails = createServerFn({ method: "GET" })
         .limit(Math.min(data.limit * 4, 2000)),
     ]);
     if (dispatchResult.error) throw new Error(dispatchResult.error.message);
-    if (smsResult.error && emailResult.error)
-      throw new Error(smsResult.error.message || emailResult.error.message);
+    const sourceError = [smsResult.error, emailResult.error, voiceResult.error].find(Boolean);
+    if (sourceError) throw new Error(sourceError.message);
 
     const sms = smsResult.data;
     const email = emailResult.data;
+    const voice = voiceResult.data;
+    const [voiceHistoryResult, voicePlayerResult, voiceScriptResult, voiceAssetResult] = voice
+      ? await Promise.all([
+          db
+            .from("call_history")
+            .select(
+              "id,status,result,duration_seconds,created_at,error_message,provider,provider_call_id,to_phone,provider_status_code,provider_response",
+            )
+            .eq("tenant_id", tenantId)
+            .eq("call_queue_id", voice.id)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+          voice.lead_id
+            ? db
+                .from("players")
+                .select("id,nome,telefone")
+                .eq("tenant_id", tenantId)
+                .eq("id", voice.lead_id)
+                .maybeSingle()
+            : Promise.resolve({ data: null, error: null }),
+          voice.script_id
+            ? db
+                .from("call_scripts")
+                .select("id,name,content")
+                .eq("tenant_id", tenantId)
+                .eq("id", voice.script_id)
+                .maybeSingle()
+            : Promise.resolve({ data: null, error: null }),
+          voice.voice_asset_id
+            ? db
+                .from("journey_voice_assets")
+                .select("id,name")
+                .eq("tenant_id", tenantId)
+                .eq("id", voice.voice_asset_id)
+                .maybeSingle()
+            : Promise.resolve({ data: null, error: null }),
+        ])
+      : [
+          { data: null, error: null },
+          { data: null, error: null },
+          { data: null, error: null },
+          { data: null, error: null },
+        ];
+    const voiceDetailError = [
+      voiceHistoryResult.error,
+      voicePlayerResult.error,
+      voiceScriptResult.error,
+      voiceAssetResult.error,
+    ].find(Boolean);
+    if (voiceDetailError) throw new Error(voiceDetailError.message);
+    const voiceHistory = voiceHistoryResult.data;
+    const voicePlayer = voicePlayerResult.data;
+    const voiceScript = voiceScriptResult.data;
+    const voiceAsset = voiceAssetResult.data;
     const campaign = sms
       ? {
           channel: "sms" as const,
@@ -123,7 +186,49 @@ export const getCampaignReportDetails = createServerFn({ method: "GET" })
             finishedAt: email.updated_at,
             audience: Number(email.stats?.total ?? email.stats?.destinatarios ?? 0),
           }
-        : null;
+        : voice
+          ? {
+              channel: "voice" as const,
+              name:
+                voice.trigger_name ?? voiceScript?.name ?? voiceAsset?.name ?? "Ligação por voz",
+              content:
+                voiceScript?.content ?? (voiceAsset?.name ? `Áudio: ${voiceAsset.name}` : null),
+              route: "Infobip Voice",
+              status: voice.status,
+              total: 1,
+              sent: voiceHistory ? 1 : 0,
+              deduplicated: 0,
+              failed: voice.status === "failed" || voice.status === "cancelled" ? 1 : 0,
+              scheduledAt: voice.scheduled_at,
+              createdAt: voice.created_at,
+              finishedAt: ["completed", "failed", "cancelled"].includes(voice.status)
+                ? voice.updated_at
+                : null,
+              audience: 1,
+            }
+          : null;
+
+    const voiceDetails = voice
+      ? {
+          queueStatus: voice.status,
+          providerStatus: voice.provider_status,
+          playerName: voicePlayer?.nome ?? null,
+          phone: voiceHistory?.to_phone ?? voicePlayer?.telefone ?? voice.phone_number ?? null,
+          attemptedAt: voiceHistory?.created_at ?? null,
+          result: voiceHistory?.result ?? null,
+          historyStatus: voiceHistory?.status ?? null,
+          answered:
+            voiceHistory?.result === "answered" ||
+            voiceHistory?.status === "answered" ||
+            voice.provider_status === "answered",
+          durationSeconds: voiceHistory?.duration_seconds ?? null,
+          error: voiceHistory?.error_message ?? null,
+          provider: voiceHistory?.provider ?? "infobip",
+          providerCallId: voiceHistory?.provider_call_id ?? null,
+          providerStatusCode: voiceHistory?.provider_status_code ?? null,
+          attempts: Number(voice.attempts ?? 0),
+        }
+      : null;
 
     const dispatches = dispatchResult.data ?? [];
     const deliveryMap = new Map<string, any[]>();
@@ -278,6 +383,7 @@ export const getCampaignReportDetails = createServerFn({ method: "GET" })
 
     return {
       campaign,
+      voice: voiceDetails,
       recipients,
       recipientsShown: recipients.length,
       trackedDeliveries: deliveryMap.size,
