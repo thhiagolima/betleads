@@ -67,6 +67,12 @@ export function ActiveTenantSwitcher() {
   function confirmChange() {
     if (!pending) return;
     window.localStorage.setItem("betleads:active-tenant", pending.id);
+
+    if (window.location.pathname.startsWith("/campanhas/")) {
+      window.location.replace("/campanhas");
+      return;
+    }
+
     window.location.reload();
   }
 
