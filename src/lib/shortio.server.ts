@@ -737,75 +737,80 @@ export async function syncShortioMetrics(
   let failures = 0;
   const snapshotAt = new Date();
   snapshotAt.setUTCMinutes(0, 0, 0);
-  for (const link of links ?? []) {
-    try {
-      const response = await fetch(
-        `https://statistics.short.io/statistics/link/${encodeURIComponent(link.shortio_link_id)}/by_interval`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: apiKey,
-            Accept: "application/json",
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            period: "last30",
-            clicksChartInterval: "day",
-            tz: "America/Sao_Paulo",
-          }),
-          signal: AbortSignal.timeout(10_000),
-        },
-      );
-      if (!response.ok) throw new Error(`Short.io retornou HTTP ${response.status}`);
-      const payload = (await response.json()) as {
-        clicksStatistics?: Array<{ x?: string; y?: number }>;
-        // Kept for compatibility with older API responses.
-        clickStatistics?: Array<{ x?: string; y?: number }>;
-      };
-      const intervals = payload.clicksStatistics ?? payload.clickStatistics ?? [];
-      const clicks = intervals.reduce(
-        (total, item) => total + Number(item.y ?? 0),
-        0,
-      );
-      const clickInstants = intervals
-        .filter((item) => Number(item.y ?? 0) > 0 && item.x && Number.isFinite(Date.parse(item.x)))
-        .map((item) => new Date(item.x!).toISOString())
-        .sort();
-      const { error: snapshotError } = await db.from("link_click_snapshots").upsert(
-        {
-          tenant_id: link.tenant_id,
-          tracked_link_id: link.id,
-          snapshot_at: snapshotAt.toISOString(),
-          clicks,
-          payload,
-        },
-        { onConflict: "tracked_link_id,snapshot_at" },
-      );
-      if (snapshotError) throw new Error(snapshotError.message);
-      if (clickInstants.length > 0) {
-        const { error: dispatchError } = await db
-          .from("link_dispatches")
-          .update({
-            shortio_first_clicked_at: clickInstants[0],
-            shortio_last_clicked_at: clickInstants[clickInstants.length - 1],
-            shortio_click_count: clicks,
-          })
-          .eq("tenant_id", link.tenant_id)
-          .eq("tracked_link_id", link.id);
-        if (dispatchError) throw new Error(dispatchError.message);
-      }
-      await db
-        .from("tracked_links")
-        .update({ last_synced_at: new Date().toISOString() })
-        .eq("id", link.id);
-      processed++;
-    } catch (syncError) {
-      failures++;
-      console.error("Falha ao sincronizar métricas Short.io", {
-        linkId: link.id,
-        error: syncError instanceof Error ? syncError.message : String(syncError),
-      });
-    }
+  const syncLinks = links ?? [];
+  const concurrency = 10;
+  for (let offset = 0; offset < syncLinks.length; offset += concurrency) {
+    await Promise.all(
+      syncLinks.slice(offset, offset + concurrency).map(async (link: any) => {
+        try {
+          const response = await fetch(
+            `https://statistics.short.io/statistics/link/${encodeURIComponent(link.shortio_link_id)}/by_interval`,
+            {
+              method: "POST",
+              headers: {
+                Authorization: apiKey,
+                Accept: "application/json",
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                period: "last30",
+                clicksChartInterval: "day",
+                tz: "America/Sao_Paulo",
+              }),
+              signal: AbortSignal.timeout(10_000),
+            },
+          );
+          if (!response.ok) throw new Error(`Short.io retornou HTTP ${response.status}`);
+          const payload = (await response.json()) as {
+            clicksStatistics?: Array<{ x?: string; y?: number }>;
+            // Kept for compatibility with older API responses.
+            clickStatistics?: Array<{ x?: string; y?: number }>;
+          };
+          const intervals = payload.clicksStatistics ?? payload.clickStatistics ?? [];
+          const clicks = intervals.reduce((total, item) => total + Number(item.y ?? 0), 0);
+          const clickInstants = intervals
+            .filter(
+              (item) => Number(item.y ?? 0) > 0 && item.x && Number.isFinite(Date.parse(item.x)),
+            )
+            .map((item) => new Date(item.x!).toISOString())
+            .sort();
+          const { error: snapshotError } = await db.from("link_click_snapshots").upsert(
+            {
+              tenant_id: link.tenant_id,
+              tracked_link_id: link.id,
+              snapshot_at: snapshotAt.toISOString(),
+              clicks,
+              payload,
+            },
+            { onConflict: "tracked_link_id,snapshot_at" },
+          );
+          if (snapshotError) throw new Error(snapshotError.message);
+          if (clickInstants.length > 0) {
+            const { error: dispatchError } = await db
+              .from("link_dispatches")
+              .update({
+                shortio_first_clicked_at: clickInstants[0],
+                shortio_last_clicked_at: clickInstants[clickInstants.length - 1],
+                shortio_click_count: clicks,
+              })
+              .eq("tenant_id", link.tenant_id)
+              .eq("tracked_link_id", link.id);
+            if (dispatchError) throw new Error(dispatchError.message);
+          }
+          await db
+            .from("tracked_links")
+            .update({ last_synced_at: new Date().toISOString() })
+            .eq("id", link.id);
+          processed++;
+        } catch (syncError) {
+          failures++;
+          console.error("Falha ao sincronizar métricas Short.io", {
+            linkId: link.id,
+            error: syncError instanceof Error ? syncError.message : String(syncError),
+          });
+        }
+      }),
+    );
   }
   if (runId) {
     await db
