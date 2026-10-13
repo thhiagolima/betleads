@@ -42,13 +42,15 @@ export const adminGetSmsProviderConfig = createServerFn({ method: "GET" })
     const channels = [
       {
         channel: "SMS",
-        provider: "Short Brasil",
+        provider: process.env.SHORTCODE_SMS_TOKEN ? "Short Code" : "Short Brasil (legado)",
         configured: Boolean(
-          process.env.SHORT_BRASIL_SMS_USUARIO && process.env.SHORT_BRASIL_SMS_CHAVE,
+          process.env.SHORTCODE_SMS_TOKEN ||
+          (process.env.SHORT_BRASIL_SMS_USUARIO && process.env.SHORT_BRASIL_SMS_CHAVE),
         ),
-        endpoint:
-          process.env.SHORT_BRASIL_SMS_SINGLE_URL ??
-          "http://lp01-short.painelsms.com/bot/single-sms.php",
+        endpoint: process.env.SHORTCODE_SMS_TOKEN
+          ? (process.env.SHORTCODE_SMS_URL ?? "https://api.shortcode.com.br/messages")
+          : (process.env.SHORT_BRASIL_SMS_SINGLE_URL ??
+            "http://lp01-short.painelsms.com/bot/single-sms.php"),
         callbackUrl: `${appUrl}/api/public/sms-webhook?token=${encodeURIComponent(webhookSecret)}`,
       },
       {
@@ -69,14 +71,17 @@ export const adminGetSmsProviderConfig = createServerFn({ method: "GET" })
     return {
       channels,
       configured: Boolean(
-        process.env.SHORT_BRASIL_SMS_USUARIO && process.env.SHORT_BRASIL_SMS_CHAVE,
+        process.env.SHORTCODE_SMS_TOKEN ||
+        (process.env.SHORT_BRASIL_SMS_USUARIO && process.env.SHORT_BRASIL_SMS_CHAVE),
       ),
-      provider: "Short Brasil",
-      endpoint:
-        process.env.SHORT_BRASIL_SMS_SINGLE_URL ??
-        "http://lp01-short.painelsms.com/bot/single-sms.php",
+      provider: process.env.SHORTCODE_SMS_TOKEN ? "Short Code" : "Short Brasil (legado)",
+      endpoint: process.env.SHORTCODE_SMS_TOKEN
+        ? (process.env.SHORTCODE_SMS_URL ?? "https://api.shortcode.com.br/messages")
+        : (process.env.SHORT_BRASIL_SMS_SINGLE_URL ??
+          "http://lp01-short.painelsms.com/bot/single-sms.php"),
       callbackUrl: `${appUrl}/api/public/sms-webhook?token=${encodeURIComponent(webhookSecret)}`,
       credentials: {
+        token: Boolean(process.env.SHORTCODE_SMS_TOKEN),
         usuario: Boolean(process.env.SHORT_BRASIL_SMS_USUARIO),
         chave: Boolean(process.env.SHORT_BRASIL_SMS_CHAVE),
         webhookSecret: Boolean(process.env.SHORT_BRASIL_WEBHOOK_SECRET),

@@ -31,10 +31,10 @@ export const getProviderAuthHealth = createServerFn({ method: "GET" })
       if (!isActive) continue;
       if (channel === "sms" && /SMS_TOKEN/i.test(err)) {
         err =
-          "SHORT_BRASIL_SMS_USUARIO/SHORT_BRASIL_SMS_CHAVE nao configurados. Reinicie o servidor apos alterar o .env.";
+          "SHORTCODE_SMS_TOKEN ou credenciais legadas de SMS nao configurados. Reinicie o servidor apos alterar o .env.";
       }
       if (
-        /401|403|unauthor|auth_error|credenciais|autenticacao|SHORT_BRASIL_SMS_USUARIO|SHORT_BRASIL_SMS_CHAVE|status=101/i.test(
+        /401|403|unauthor|auth_error|credenciais|autenticacao|SHORTCODE_SMS_TOKEN|SHORT_BRASIL_SMS_USUARIO|SHORT_BRASIL_SMS_CHAVE|status=101/i.test(
           err,
         )
       ) {

@@ -73,7 +73,10 @@ export function summarizeChannelDelivery(channel: ObservabilityChannel, rows: St
 
 function providerConfigured(channel: ObservabilityChannel) {
   if (channel === "sms") {
-    return Boolean(process.env.SHORT_BRASIL_SMS_USUARIO && process.env.SHORT_BRASIL_SMS_CHAVE);
+    return Boolean(
+      process.env.SHORTCODE_SMS_TOKEN ||
+      (process.env.SHORT_BRASIL_SMS_USUARIO && process.env.SHORT_BRASIL_SMS_CHAVE),
+    );
   }
   return Boolean(process.env.INFOBIP_BASE_URL && process.env.INFOBIP_API_KEY);
 }

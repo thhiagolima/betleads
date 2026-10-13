@@ -36,9 +36,9 @@ export function ProviderAuthBanner() {
               Credenciais do provedor inválidas — disparos pausados ({issueList(authIssues)})
             </p>
             <p className="text-xs text-amber-100/80">
-              Para SMS, atualize <code>SHORT_BRASIL_SMS_USUARIO</code> e{" "}
-              <code>SHORT_BRASIL_SMS_CHAVE</code>. Para Email/Voz, atualize <code>INFOBIP_API_KEY</code>.
-              Depois reinicie o servidor para recarregar o <code>.env</code>.
+              Para SMS, configure <code>SHORTCODE_SMS_TOKEN</code> (preferido) ou as credenciais
+              legadas. Para Email/Voz, atualize <code>INFOBIP_API_KEY</code>. Depois reinicie o
+              servidor para recarregar o <code>.env</code>.
             </p>
           </div>
         </div>

@@ -690,10 +690,10 @@ function Provedor() {
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle>Provedor SMS — Short Brasil</CardTitle>
+          <CardTitle>Provedor SMS — Short Code / Short Brasil</CardTitle>
           <CardDescription>
-            Integração via API REST. Endpoint:{" "}
-            <code className="text-xs">lp01-short.painelsms.com/bot/single-sms.php</code>
+            Integração via API REST. O endpoint exibido corresponde à configuração ativa do
+            servidor.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-2">
@@ -711,7 +711,7 @@ function Provedor() {
           </div>
           <p className="text-xs text-muted-foreground">
             Os números são normalizados para E.164 (+55 + DDD + número) antes do envio. Cada
-            requisição usa um <code>parceiroId</code> único para casar o callback.
+            requisição usa um identificador externo único para casar o callback.
           </p>
         </CardContent>
       </Card>

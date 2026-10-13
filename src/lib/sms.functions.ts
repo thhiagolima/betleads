@@ -1,7 +1,5 @@
-// Integracao com a API SMS Short Brasil.
-// Doc do cliente: POST http://lp01-short.painelsms.com/bot/single-sms.php
-// Headers: usuario: <usuario>, chave: <chave>, Content-Type: application/json
-// Body: { celular: "11988887777", mensagem: "...", parceiroId?: "<id>" }
+// Integracao SMS. A API HTTPS atual usa Bearer token; o formato legado
+// usuario/chave continua disponivel apenas para instalacoes que ainda o exigem.
 import { createServerFn } from "@tanstack/react-start";
 import { tenantChannelHealth } from "@/lib/provider-governance.server";
 import { dbUuid } from "@/lib/zod-helpers";
@@ -27,6 +25,7 @@ import { conversionFunnelSnapshot } from "./conversion-funnel";
 
 const DEFAULT_SHORT_BRASIL_SINGLE_URL = "http://lp01-short.painelsms.com/bot/single-sms.php";
 const DEFAULT_SHORT_BRASIL_BULK_URL = "http://lp01-short.painelsms.com/bot/bulk-sms.php";
+const DEFAULT_SHORTCODE_MESSAGES_URL = "https://api.shortcode.com.br/messages";
 // Mantém a tentativa abaixo do timeout de uma server function. Sem isso, uma
 // conexão TCP bloqueada pelo provedor pode deixar o envio preso indefinidamente.
 const SHORT_BRASIL_REQUEST_TIMEOUT_MS = 8_000;
@@ -37,6 +36,10 @@ function shortBrasilSingleUrl(): string {
 
 function shortBrasilBulkUrl(): string {
   return process.env.SHORT_BRASIL_SMS_BULK_URL ?? DEFAULT_SHORT_BRASIL_BULK_URL;
+}
+
+function shortcodeMessagesUrl(): string {
+  return process.env.SHORTCODE_SMS_URL ?? DEFAULT_SHORTCODE_MESSAGES_URL;
 }
 
 function cleanCredential(raw: string | undefined): string {
@@ -93,6 +96,10 @@ function shortBrasilCredentials(): { usuario: string; chave: string } {
   };
 }
 
+function shortcodeToken(): string {
+  return cleanCredential(process.env.SHORTCODE_SMS_TOKEN);
+}
+
 async function shortBrasilFetch(url: string, init: RequestInit): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), SHORT_BRASIL_REQUEST_TIMEOUT_MS);
@@ -121,29 +128,40 @@ function isShortBrasilApplicationError(body: unknown): boolean {
   return status === 101 || status === 303 || status === 404 || status === 505;
 }
 
+function shortcodeResponseFailed(body: unknown): boolean {
+  if (!Array.isArray(body) || body.length === 0) return true;
+  return body.some((item) => {
+    if (!item || typeof item !== "object") return true;
+    return String((item as Record<string, unknown>).status ?? "").toLowerCase() !== "accepted";
+  });
+}
+
 async function callShortBrasil(
   to: string,
   content: string,
   variables?: Record<string, string | number> | null,
   idempotencyKey: string = crypto.randomUUID(),
 ) {
+  const token = shortcodeToken();
   const { usuario, chave } = shortBrasilCredentials();
-  if (!usuario || !chave) {
+  if (!token && (!usuario || !chave)) {
     console.error("SMS Short Brasil credentials missing");
     return {
       ok: false as const,
       status: 0,
-      body: { error: "SHORT_BRASIL_SMS_USUARIO/SHORT_BRASIL_SMS_CHAVE nao configurados" },
+      body: {
+        error:
+          "SHORTCODE_SMS_TOKEN ou SHORT_BRASIL_SMS_USUARIO/SHORT_BRASIL_SMS_CHAVE nao configurados",
+      },
       idempotencyKey: "",
     };
   }
-  const usuarioFp = await credentialFingerprint(usuario);
+  const credentialFp = await credentialFingerprint(token || usuario);
   let res: Response;
-  const payload = {
-    celular: toShortBrasilCell(to),
-    mensagem: renderSmsVariables(content, variables),
-    parceiroId: idempotencyKey,
-  };
+  const message = renderSmsVariables(content, variables);
+  const payload = token
+    ? [{ external_id: idempotencyKey, number: toShortBrasilCell(to), message }]
+    : { celular: toShortBrasilCell(to), mensagem: message, parceiroId: idempotencyKey };
   const maxAttempts = 3;
   let attempt = 0;
   while (true) {
@@ -152,17 +170,19 @@ async function callShortBrasil(
       console.info("SMS Short Brasil request started", {
         to,
         idempotencyKey,
-        usuarioFp,
+        credentialFp,
+        api: token ? "shortcode-v1" : "short-brasil-legacy",
         attempt,
       });
-      res = await shortBrasilFetch(shortBrasilSingleUrl(), {
+      res = await shortBrasilFetch(token ? shortcodeMessagesUrl() : shortBrasilSingleUrl(), {
         method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          usuario,
-          chave,
-        },
+        headers: token
+          ? {
+              Accept: "application/json",
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            }
+          : { Accept: "application/json", "Content-Type": "application/json", usuario, chave },
         body: JSON.stringify(payload),
       });
     } catch (err) {
@@ -209,7 +229,7 @@ async function callShortBrasil(
       snippet,
     };
   }
-  const appError = isShortBrasilApplicationError(body);
+  const appError = token ? shortcodeResponseFailed(body) : isShortBrasilApplicationError(body);
   console.info("SMS Short Brasil response received", {
     to,
     idempotencyKey,
@@ -239,39 +259,50 @@ export async function callShortBrasilSmsBulk(args: {
   dispatchId: string | null;
   temporary?: boolean;
 }> {
+  const token = shortcodeToken();
   const { usuario, chave } = shortBrasilCredentials();
-  if (!usuario || !chave) {
+  if (!token && (!usuario || !chave)) {
     return {
       ok: false,
       status: 0,
-      body: { error: "SHORT_BRASIL_SMS_USUARIO/SHORT_BRASIL_SMS_CHAVE nao configurados" },
+      body: {
+        error:
+          "SHORTCODE_SMS_TOKEN ou SHORT_BRASIL_SMS_USUARIO/SHORT_BRASIL_SMS_CHAVE nao configurados",
+      },
       idempotencyKey: "",
       dispatchId: null,
     };
   }
   const idempotencyKey = crypto.randomUUID();
   const mensagem = renderSmsVariables(args.content, args.variables);
-  const payload = {
-    bulk: args.recipients.slice(0, 5000).map((to) => ({
-      celular: toShortBrasilCell(to),
-      mensagem,
-      parceiroId: crypto.randomUUID(),
-    })),
-  };
+  const payload = token
+    ? args.recipients.slice(0, 1000).map((to) => ({
+        external_id: crypto.randomUUID(),
+        number: toShortBrasilCell(to),
+        message: mensagem,
+      }))
+    : {
+        bulk: args.recipients.slice(0, 5000).map((to) => ({
+          celular: toShortBrasilCell(to),
+          mensagem,
+          parceiroId: crypto.randomUUID(),
+        })),
+      };
   const maxAttempts = 3;
   let attempt = 0;
   let res: Response;
   while (true) {
     attempt++;
     try {
-      res = await shortBrasilFetch(shortBrasilBulkUrl(), {
+      res = await shortBrasilFetch(token ? shortcodeMessagesUrl() : shortBrasilBulkUrl(), {
         method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          usuario,
-          chave,
-        },
+        headers: token
+          ? {
+              Accept: "application/json",
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            }
+          : { Accept: "application/json", "Content-Type": "application/json", usuario, chave },
         body: JSON.stringify(payload),
       });
     } catch (err) {
@@ -301,7 +332,7 @@ export async function callShortBrasilSmsBulk(args: {
   } catch {
     body = { non_json: true, snippet: text.slice(0, 300) };
   }
-  const appError = isShortBrasilApplicationError(body);
+  const appError = token ? shortcodeResponseFailed(body) : isShortBrasilApplicationError(body);
   let dispatchId: string | null = null;
   if (body && typeof body === "object") {
     const o = body as Record<string, unknown>;
@@ -379,6 +410,14 @@ async function logSend(row: {
 }
 
 function extractProviderMessageId(body: unknown): string | null {
+  if (Array.isArray(body)) {
+    const first = body[0];
+    if (first && typeof first === "object") {
+      const value = (first as Record<string, unknown>).external_id;
+      if (typeof value === "string" && value.length > 0) return value;
+    }
+    return null;
+  }
   if (!body || typeof body !== "object") return null;
   const o = body as Record<string, unknown>;
   const data = o.data && typeof o.data === "object" ? (o.data as Record<string, unknown>) : null;
@@ -407,6 +446,16 @@ function summarizeProviderError(status: number, body: unknown): string {
     }
     return "Sem resposta do provedor";
   }
+  if (Array.isArray(body)) {
+    const failed = body.find(
+      (item) =>
+        item &&
+        typeof item === "object" &&
+        String((item as Record<string, unknown>).status ?? "").toLowerCase() !== "accepted",
+    ) as Record<string, unknown> | undefined;
+    const reason = failed?.reason ?? failed?.message ?? failed?.error;
+    return reason ? `Short Code recusou o SMS: ${String(reason)}` : `HTTP ${status} do provedor`;
+  }
   if (body && typeof body === "object") {
     const b = body as Record<string, unknown>;
     if (b.non_json) {
@@ -429,7 +478,7 @@ function summarizeProviderError(status: number, body: unknown): string {
       null;
     if (msg) {
       if (status === 401 || appStatus === 101) {
-        return `Short Brasil recusou as credenciais (HTTP ${status}: ${msg}). Confira SHORT_BRASIL_SMS_USUARIO e SHORT_BRASIL_SMS_CHAVE.`;
+        return `Provedor SMS recusou as credenciais (HTTP ${status}: ${msg}). Confira SHORTCODE_SMS_TOKEN ou as credenciais legadas.`;
       }
       return `HTTP ${status}: ${msg}`;
     }
@@ -697,7 +746,10 @@ export const smsProviderStatus = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async () => {
     const health = tenantChannelHealth(
-      Boolean(process.env.SHORT_BRASIL_SMS_USUARIO && process.env.SHORT_BRASIL_SMS_CHAVE),
+      Boolean(
+        process.env.SHORTCODE_SMS_TOKEN ||
+        (process.env.SHORT_BRASIL_SMS_USUARIO && process.env.SHORT_BRASIL_SMS_CHAVE),
+      ),
     );
     return { ...health, configured: health.available };
   });
