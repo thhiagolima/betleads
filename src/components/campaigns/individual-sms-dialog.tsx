@@ -96,8 +96,8 @@ export function IndividualSmsDialog({
   const previewContent = previewTrackedText(message, trackLinks);
   const parts = smsPartsForLength(previewContent.length);
   const preview = useMemo(
-    () => renderMessage(message, name || "Cliente", digits),
-    [message, name, digits],
+    () => previewTrackedText(renderMessage(message, name || "Cliente", digits), trackLinks),
+    [message, name, digits, trackLinks],
   );
 
   const scripts = useQuery({
