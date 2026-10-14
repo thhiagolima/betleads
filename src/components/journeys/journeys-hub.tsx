@@ -123,12 +123,21 @@ export function JourneysHub() {
     navigate({ to: "/jornadas/nova" });
   };
   const journeys = useQuery({ queryKey: ["journeys"], queryFn: () => list() });
-  const operations = useQuery({ queryKey: ["journey-operations"], queryFn: () => operationsFn() });
+  const operations = useQuery({
+    queryKey: ["journey-operations"],
+    queryFn: () => operationsFn(),
+    enabled: view !== "journeys",
+  });
   const contactLimits = useQuery({
     queryKey: ["journey-contact-limits"],
     queryFn: () => contactLimitsFn(),
+    enabled: settingsOpen,
   });
-  const legacy = useQuery({ queryKey: ["legacy-journeys"], queryFn: () => legacyFn() });
+  const legacy = useQuery({
+    queryKey: ["legacy-journeys"],
+    queryFn: () => legacyFn(),
+    enabled: Boolean(journeys.data) && view === "journeys",
+  });
   const status = useMutation({
     mutationFn: (input: { id: string; status: Journey["status"] }) => changeStatus({ data: input }),
     onSuccess: async (_, variables) => {
@@ -189,9 +198,10 @@ export function JourneysHub() {
     },
     onError: (error: Error) => toast.error(error.message),
   });
-  const openContactSettings = () => {
-    setDailyMessageLimit(contactLimits.data?.max24h?.toString() ?? "");
-    setWeeklyMessageLimit(contactLimits.data?.max7d?.toString() ?? "");
+  const openContactSettings = async () => {
+    const result = await contactLimits.refetch();
+    setDailyMessageLimit(result.data?.max24h?.toString() ?? "");
+    setWeeklyMessageLimit(result.data?.max7d?.toString() ?? "");
     setSettingsOpen(true);
   };
   const rows = useMemo(
@@ -372,7 +382,7 @@ export function JourneysHub() {
           </button>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="sm" onClick={openContactSettings}>
+          <Button variant="outline" size="sm" onClick={() => void openContactSettings()}>
             Configuracoes
           </Button>
           <Button variant="outline" size="sm" onClick={() => setInfoOpen(true)}>
@@ -535,10 +545,7 @@ export function JourneysHub() {
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-x-7 gap-y-3 sm:grid-cols-5">
-                      <JourneyMetric
-                        label="Elegíveis agora"
-                        value={Number(metrics.eligible ?? 0).toLocaleString("pt-BR")}
-                      />
+                      <JourneyMetric label="Elegíveis agora" value="—" />
                       <JourneyMetric label="Na fila" value={queued.toLocaleString("pt-BR")} />
                       <JourneyMetric label="Enviados" value={sent.toLocaleString("pt-BR")} />
                       <JourneyMetric label="Depósitos" value={deposits.toLocaleString("pt-BR")} />

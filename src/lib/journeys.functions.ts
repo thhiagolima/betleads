@@ -80,37 +80,31 @@ export const listJourneys = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const tenantId = await tenant(context);
-    const { data, error } = await db
-      .from("journeys")
-      .select(
-        "id,name,description,status,trigger_type,trigger_config,entry_rules,conflict_family,journey_priority,conflict_policy,daily_limit,cooldown_hours,updated_at,journey_steps(id,position,step_type,config,is_enabled)",
-      )
-      .eq("tenant_id", tenantId)
-      .order("updated_at", { ascending: false });
+    const [journeysResult, metricsResult] = await Promise.all([
+      db
+        .from("journeys")
+        .select(
+          "id,name,description,status,trigger_type,trigger_config,entry_rules,conflict_family,journey_priority,conflict_policy,daily_limit,cooldown_hours,updated_at,journey_steps(id,position,step_type,config,is_enabled)",
+        )
+        .eq("tenant_id", tenantId)
+        .order("updated_at", { ascending: false }),
+      db.rpc("list_journey_metrics", { p_tenant_id: tenantId }),
+    ]);
+    const { data, error } = journeysResult;
     if (error) throw new Error(error.message);
-    const journeys = await Promise.all(
-      (data ?? []).map(async (journey: any) => {
-        const [metricsResult, eligibleResult] = await Promise.all([
-          db.rpc("journey_metrics", {
-            p_tenant_id: tenantId,
-            p_journey_id: journey.id,
-          }),
-          db.rpc("journey_eligible_lead_count", {
-            p_tenant_id: tenantId,
-            p_journey_id: journey.id,
-          }),
-        ]);
-        if (metricsResult.error) throw new Error(metricsResult.error.message);
-        if (eligibleResult.error) throw new Error(eligibleResult.error.message);
-        return {
-          ...journey,
-          metrics: {
-            ...(metricsResult.data ?? {}),
-            eligible: Number(eligibleResult.data ?? 0),
-          },
-        };
-      }),
+    if (metricsResult.error) throw new Error(metricsResult.error.message);
+    const metricsByJourney = new Map(
+      (
+        (metricsResult.data ?? []) as Array<{
+          journey_id: string;
+          metrics: Record<string, unknown>;
+        }>
+      ).map((row) => [row.journey_id, row.metrics]),
     );
+    const journeys = (data ?? []).map((journey: any) => ({
+      ...journey,
+      metrics: metricsByJourney.get(journey.id) ?? {},
+    }));
     return { journeys };
   });
 
