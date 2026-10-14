@@ -20,8 +20,10 @@ Em 14/10/2026 foi iniciada a primeira entrega, ainda fail-closed:
 - varredura removida do caminho de envio;
 - testes de elegibilidade historica, `start_after`, audiencia, PIX e kill switch.
 
-As migrations e flags permanecem pendentes de promocao/ativacao controlada. A
-presenca do codigo nao autoriza disparos em producao.
+As migrations `20261014123000` e `20261014124000` foram aplicadas no Supabase
+remoto em 14/10/2026. A nova rota ainda retornava 404 porque o container da VPS
+permanecia na imagem anterior. As flags continuam pendentes de ativacao
+controlada; a presenca do schema e do codigo nao autoriza disparos em producao.
 
 ## 1. Objetivo
 
