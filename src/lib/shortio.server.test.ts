@@ -5,6 +5,7 @@ import {
   deterministicToken,
   normalizeTrackingUrl,
   stripTrackingUrlTrailingPunctuation,
+  withDeliveryContext,
   withTrackingToken,
 } from "./shortio.server";
 
@@ -80,6 +81,22 @@ describe("Short.io link tracking policy", () => {
     expect(url.searchParams.get("utm_content")).toBe("video-01");
     expect(url.searchParams.get("utm_id")).toBe("ad-99");
     expect(url.searchParams.get("bl_click_id")).toBe("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+  });
+
+  it("keeps marketing context but does not leak the internal click token downstream", () => {
+    const url = new URL(
+      withDeliveryContext("https://marca.com/a?utm_content=video-01&bl_click_id=legacy", {
+        tenantId: "tenant",
+        channel: "sms",
+        sourceType: "journey",
+        sourceId: "journey-1",
+      }),
+    );
+    expect(url.searchParams.get("utm_source")).toBe("betleads");
+    expect(url.searchParams.get("utm_medium")).toBe("sms");
+    expect(url.searchParams.get("utm_campaign")).toBe("journey-1");
+    expect(url.searchParams.get("utm_content")).toBe("video-01");
+    expect(url.searchParams.has("bl_click_id")).toBe(false);
   });
 
   it("removes prose punctuation without damaging balanced URL parentheses", () => {

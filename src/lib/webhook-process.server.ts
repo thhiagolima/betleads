@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { attributeConversionEvent, attributeRedepositFromLastShortioClick } from "./conversion-attribution.server";
+import { attributeFromLastFirstPartyClick } from "./conversion-attribution.server";
 
 export function getServiceClient(): SupabaseClient | null {
   const supabaseUrl = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL;
@@ -103,18 +103,6 @@ export async function processWebhookEvent(
     const signupAttribution = asRecord(data.signupAttribution ?? data.signup_attribution);
     const subject = asRecord(payload.subject);
     const utm = resolveUtm(data, tracking, signupAttribution);
-    const inboundClickId = resolveBetleadsClickId(data, tracking, signupAttribution, utm);
-    const inboundClickTokenSource = resolveBetleadsClickTokenSource(
-      data,
-      tracking,
-      signupAttribution,
-      utm,
-    );
-    const inboundClickCapturedAt = resolveBetleadsClickCapturedAt(
-      data,
-      tracking,
-      signupAttribution,
-    );
     const affiliate = asRecord(data.affiliate);
     const affiliateId =
       firstString(
@@ -286,9 +274,6 @@ export async function processWebhookEvent(
       if (utm.utm_content) updates.utm_content = utm.utm_content;
       if (utm.utm_term) updates.utm_term = utm.utm_term;
       if (utm.utm_id) updates.utm_id = utm.utm_id;
-      if (inboundClickId) updates.bl_click_id = inboundClickId;
-      if (inboundClickId && inboundClickCapturedAt)
-        updates.bl_click_captured_at = inboundClickCapturedAt;
       if (origem) updates.origem = origem;
 
       if (affiliateId) {
@@ -605,39 +590,6 @@ export async function processWebhookEvent(
               ? "deposit_approved"
               : null;
       if (conversionEvent) {
-        let trackingToken = inboundClickId;
-        let touchAt = inboundClickId ? inboundClickCapturedAt : null;
-        let tokenSource: "bl_click_id" | "utm_content" | "player" = inboundClickId
-          ? (inboundClickTokenSource ?? "bl_click_id")
-          : "player";
-        if (!trackingToken || !touchAt) {
-          const { data: playerTracking, error: playerTrackingError } = await sb
-            .from("players")
-            .select("bl_click_id,bl_click_captured_at,utm_content")
-            .eq("tenant_id", tenantId)
-            .eq("id", playerId)
-            .maybeSingle();
-          if (playerTrackingError) {
-            await markLog("erro", {
-              step: "load_attribution_token",
-              error: playerTrackingError.message,
-            });
-            return Response.json(
-              { ok: false, evento, error: playerTrackingError.message },
-              { status: 503 },
-            );
-          }
-          if (!trackingToken) {
-            const storedClickId = (playerTracking?.bl_click_id as string | null) ?? null;
-            const legacyUtmContent = (playerTracking?.utm_content as string | null) ?? null;
-            trackingToken =
-              storedClickId ?? (isTrackingToken(legacyUtmContent) ? legacyUtmContent : null);
-            tokenSource = storedClickId ? "player" : "utm_content";
-          }
-          if (!touchAt && trackingToken && playerTracking?.bl_click_id === trackingToken) {
-            touchAt = (playerTracking.bl_click_captured_at as string | null) ?? null;
-          }
-        }
         const attributionEventId =
           providerEventId ??
           transactionId ??
@@ -649,15 +601,24 @@ export async function processWebhookEvent(
               occurredAt: eventIso, monetaryValue: conversionEvent === "deposit_approved" ? valor : null,
               isFtd: conversionEvent === "deposit_approved" && data.isFtd === true,
             } as const;
-            if (trackingToken) await attributeConversionEvent({ ...baseAttribution, trackingToken, touchAt, tokenSource });
-            else if (conversionEvent === "deposit_approved") await attributeRedepositFromLastShortioClick(baseAttribution);
+            // The provider identifies the player, while BetLeads owns the
+            // click proof. Do not trust query parameters echoed by the casino:
+            // attribution requires an exact, first-party recorded click.
+            await attributeFromLastFirstPartyClick(baseAttribution);
           } catch (attributionError) {
             const error =
               attributionError instanceof Error
                 ? attributionError.message
                 : String(attributionError);
-            await markLog("erro", { step: "attribute_conversion", error });
-            return Response.json({ ok: false, evento, error }, { status: 503 });
+            // Financial and player events are the source of truth. Analytics
+            // failures are observable but must never reject or replay them.
+            console.error("[conversion attribution] async-compatible failure", {
+              tenantId,
+              playerId,
+              eventType: conversionEvent,
+              eventId: attributionEventId,
+              error,
+            });
           }
         }
       }

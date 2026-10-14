@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- tables are introduced by this migration and are absent from the checked-in generated Supabase types. */
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { buildFirstPartyClickUrl } from "./click-tracking.server";
 
 const SHORTIO_API_URL = "https://api.short.io/links";
 // SMS copy commonly contains a compact `www.example.com` address. Treat it as
@@ -243,6 +244,20 @@ export function withTrackingToken(raw: string, token: string, context: LinkTrack
   return url.toString();
 }
 
+/**
+ * Keeps useful source UTMs without exposing the internal click capability to
+ * the destination. Player attribution is resolved through the dispatch row.
+ */
+export function withDeliveryContext(raw: string, context: LinkTrackingContext) {
+  const url = new URL(raw);
+  if (!url.searchParams.has("utm_source")) url.searchParams.set("utm_source", "betleads");
+  if (!url.searchParams.has("utm_medium")) url.searchParams.set("utm_medium", context.channel);
+  if (!url.searchParams.has("utm_campaign"))
+    url.searchParams.set("utm_campaign", context.sourceId ?? context.sourceType);
+  url.searchParams.delete("bl_click_id");
+  return url.toString();
+}
+
 async function createShortioLink(input: {
   originalUrl: string;
   domain: string;
@@ -467,17 +482,18 @@ export async function prepareTrackedText(
     try {
       await assertResolvedPublicDestination(raw);
       const trackingToken = await deterministicToken(dispatchContext, position);
-      const trackedOriginal = withTrackingToken(raw, trackingToken, dispatchContext);
+      const finalDestination = withDeliveryContext(raw, dispatchContext);
+      const firstPartyRedirect = await buildFirstPartyClickUrl(trackingToken);
       const tracked = await getOrCreateTrackedLink({
         tenantId: context.tenantId,
-        originalUrl: trackedOriginal,
+        originalUrl: firstPartyRedirect,
         settings,
         sourceType: context.sourceType,
       });
       const dispatchId = await persistDispatch({
         trackedLinkId: tracked.id,
         trackingToken,
-        originalUrl: raw,
+        originalUrl: finalDestination,
         sentUrl: tracked.short_url,
         position,
         context: dispatchContext,
@@ -554,17 +570,18 @@ export async function prepareTrackedEmailHtml(
     try {
       await assertResolvedPublicDestination(raw);
       const trackingToken = await deterministicToken(dispatchContext, position);
-      const trackedOriginal = withTrackingToken(raw, trackingToken, dispatchContext);
+      const finalDestination = withDeliveryContext(raw, dispatchContext);
+      const firstPartyRedirect = await buildFirstPartyClickUrl(trackingToken);
       const tracked = await getOrCreateTrackedLink({
         tenantId: context.tenantId,
-        originalUrl: trackedOriginal,
+        originalUrl: firstPartyRedirect,
         settings,
         sourceType: context.sourceType,
       });
       const dispatchId = await persistDispatch({
         trackedLinkId: tracked.id,
         trackingToken,
-        originalUrl: raw,
+        originalUrl: finalDestination,
         sentUrl: tracked.short_url,
         position,
         context: dispatchContext,

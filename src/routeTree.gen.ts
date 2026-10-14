@@ -52,6 +52,7 @@ import { Route as JornadasJourneyIdRelatorioRouteImport } from './routes/jornada
 import { Route as ApiPublicAutomationsDispatchRouteImport } from './routes/api/public/automations/dispatch'
 import { Route as ApiPublicAutomationsEvaluateRouteImport } from './routes/api/public/automations/evaluate'
 import { Route as ApiPublicCallFlowsTickRouteImport } from './routes/api/public/call-flows/tick'
+import { Route as ApiPublicClickTokenRouteImport } from './routes/api/public/click.$token'
 import { Route as ApiPublicEmailCampaignsTickRouteImport } from './routes/api/public/email-campaigns/tick'
 import { Route as ApiPublicEmailFlowsTickRouteImport } from './routes/api/public/email-flows/tick'
 import { Route as ApiPublicHooksCashbackCatchupRouteImport } from './routes/api/public/hooks/cashback-catchup'
@@ -294,6 +295,11 @@ const ApiPublicCallFlowsTickRoute = ApiPublicCallFlowsTickRouteImport.update({
   path: '/api/public/call-flows/tick',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicClickTokenRoute = ApiPublicClickTokenRouteImport.update({
+  id: '/api/public/click/$token',
+  path: '/api/public/click/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicEmailCampaignsTickRoute =
   ApiPublicEmailCampaignsTickRouteImport.update({
     id: '/api/public/email-campaigns/tick',
@@ -459,6 +465,7 @@ export interface FileRoutesByFullPath {
   '/api/public/automations/dispatch': typeof ApiPublicAutomationsDispatchRoute
   '/api/public/automations/evaluate': typeof ApiPublicAutomationsEvaluateRoute
   '/api/public/call-flows/tick': typeof ApiPublicCallFlowsTickRoute
+  '/api/public/click/$token': typeof ApiPublicClickTokenRoute
   '/api/public/email-campaigns/tick': typeof ApiPublicEmailCampaignsTickRoute
   '/api/public/email-flows/tick': typeof ApiPublicEmailFlowsTickRoute
   '/api/public/hooks/cashback-catchup': typeof ApiPublicHooksCashbackCatchupRoute
@@ -525,6 +532,7 @@ export interface FileRoutesByTo {
   '/api/public/automations/dispatch': typeof ApiPublicAutomationsDispatchRoute
   '/api/public/automations/evaluate': typeof ApiPublicAutomationsEvaluateRoute
   '/api/public/call-flows/tick': typeof ApiPublicCallFlowsTickRoute
+  '/api/public/click/$token': typeof ApiPublicClickTokenRoute
   '/api/public/email-campaigns/tick': typeof ApiPublicEmailCampaignsTickRoute
   '/api/public/email-flows/tick': typeof ApiPublicEmailFlowsTickRoute
   '/api/public/hooks/cashback-catchup': typeof ApiPublicHooksCashbackCatchupRoute
@@ -592,6 +600,7 @@ export interface FileRoutesById {
   '/api/public/automations/dispatch': typeof ApiPublicAutomationsDispatchRoute
   '/api/public/automations/evaluate': typeof ApiPublicAutomationsEvaluateRoute
   '/api/public/call-flows/tick': typeof ApiPublicCallFlowsTickRoute
+  '/api/public/click/$token': typeof ApiPublicClickTokenRoute
   '/api/public/email-campaigns/tick': typeof ApiPublicEmailCampaignsTickRoute
   '/api/public/email-flows/tick': typeof ApiPublicEmailFlowsTickRoute
   '/api/public/hooks/cashback-catchup': typeof ApiPublicHooksCashbackCatchupRoute
@@ -660,6 +669,7 @@ export interface FileRouteTypes {
     | '/api/public/automations/dispatch'
     | '/api/public/automations/evaluate'
     | '/api/public/call-flows/tick'
+    | '/api/public/click/$token'
     | '/api/public/email-campaigns/tick'
     | '/api/public/email-flows/tick'
     | '/api/public/hooks/cashback-catchup'
@@ -726,6 +736,7 @@ export interface FileRouteTypes {
     | '/api/public/automations/dispatch'
     | '/api/public/automations/evaluate'
     | '/api/public/call-flows/tick'
+    | '/api/public/click/$token'
     | '/api/public/email-campaigns/tick'
     | '/api/public/email-flows/tick'
     | '/api/public/hooks/cashback-catchup'
@@ -792,6 +803,7 @@ export interface FileRouteTypes {
     | '/api/public/automations/dispatch'
     | '/api/public/automations/evaluate'
     | '/api/public/call-flows/tick'
+    | '/api/public/click/$token'
     | '/api/public/email-campaigns/tick'
     | '/api/public/email-flows/tick'
     | '/api/public/hooks/cashback-catchup'
@@ -848,6 +860,7 @@ export interface RootRouteChildren {
   ApiPublicAutomationsDispatchRoute: typeof ApiPublicAutomationsDispatchRoute
   ApiPublicAutomationsEvaluateRoute: typeof ApiPublicAutomationsEvaluateRoute
   ApiPublicCallFlowsTickRoute: typeof ApiPublicCallFlowsTickRoute
+  ApiPublicClickTokenRoute: typeof ApiPublicClickTokenRoute
   ApiPublicEmailCampaignsTickRoute: typeof ApiPublicEmailCampaignsTickRoute
   ApiPublicEmailFlowsTickRoute: typeof ApiPublicEmailFlowsTickRoute
   ApiPublicHooksCashbackCatchupRoute: typeof ApiPublicHooksCashbackCatchupRoute
@@ -1174,6 +1187,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicCallFlowsTickRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/click/$token': {
+      id: '/api/public/click/$token'
+      path: '/api/public/click/$token'
+      fullPath: '/api/public/click/$token'
+      preLoaderRoute: typeof ApiPublicClickTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/email-campaigns/tick': {
       id: '/api/public/email-campaigns/tick'
       path: '/api/public/email-campaigns/tick'
@@ -1434,6 +1454,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicAutomationsDispatchRoute: ApiPublicAutomationsDispatchRoute,
   ApiPublicAutomationsEvaluateRoute: ApiPublicAutomationsEvaluateRoute,
   ApiPublicCallFlowsTickRoute: ApiPublicCallFlowsTickRoute,
+  ApiPublicClickTokenRoute: ApiPublicClickTokenRoute,
   ApiPublicEmailCampaignsTickRoute: ApiPublicEmailCampaignsTickRoute,
   ApiPublicEmailFlowsTickRoute: ApiPublicEmailFlowsTickRoute,
   ApiPublicHooksCashbackCatchupRoute: ApiPublicHooksCashbackCatchupRoute,

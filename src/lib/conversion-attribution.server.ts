@@ -8,7 +8,7 @@ type AttributionEvent = {
   occurredAt: string;
   trackingToken: string | null;
   touchAt?: string | null;
-  tokenSource?: "bl_click_id" | "utm_content" | "player";
+  tokenSource?: "bl_click_id" | "utm_content" | "player" | "first_party_click";
   monetaryValue?: number | null;
   isFtd?: boolean;
 };
@@ -151,30 +151,41 @@ export async function attributeConversionEvent(input: AttributionEvent) {
 }
 
 /**
- * Fallback for redeposits when the destination does not return a click token.
- * The player is already known from the provider webhook; we only use a
- * Short.io click tied to that same player, and retain the evidence model.
+ * Resolves attribution without requiring the destination to return a click
+ * token. Every dispatch already belongs to a known player, so the exact
+ * first-party click can be joined to the player identified by the webhook.
  */
-export async function attributeRedepositFromLastShortioClick(input: Omit<AttributionEvent, "trackingToken" | "touchAt" | "tokenSource">) {
+export async function attributeFromLastFirstPartyClick(
+  input: Omit<AttributionEvent, "trackingToken" | "touchAt" | "tokenSource">,
+) {
   const db = supabaseAdmin as any;
-  const { data, error } = await db
-    .from("link_dispatches")
-    .select("id,source_type,source_id,recipient_player_id,tracking_token,sent_at,shortio_last_clicked_at")
-    .eq("tenant_id", input.tenantId)
-    .eq("recipient_player_id", input.playerId)
-    .in("channel", ["sms", "email"])
-    .not("shortio_last_clicked_at", "is", null)
-    .lte("shortio_last_clicked_at", input.occurredAt)
-    .order("shortio_last_clicked_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error) throw new Error(`Falha ao resolver ultimo clique Short.io: ${error.message}`);
-  const dispatch = data as Dispatch | null;
-  if (!dispatch) return { attributed: false as const, reason: "no_eligible_shortio_click" };
+  const { data, error } = await db.rpc("resolve_last_attributable_click", {
+    p_tenant_id: input.tenantId,
+    p_player_id: input.playerId,
+    p_occurred_at: input.occurredAt,
+  });
+  if (error) throw new Error(`Falha ao resolver ultimo clique confirmado: ${error.message}`);
+  const click = Array.isArray(data) ? data[0] : data;
+  if (!click) {
+    const { error: issueError } = await db.from("conversion_attribution_issues").upsert(
+      {
+        tenant_id: input.tenantId,
+        event_type: input.eventType,
+        event_id: input.eventId,
+        reason: "no_confirmed_click",
+        source_type: null,
+        source_id: null,
+      },
+      { onConflict: "tenant_id,event_type,event_id,reason", ignoreDuplicates: true },
+    );
+    if (issueError)
+      console.error("Falha ao registrar conversao sem clique confirmado", issueError.message);
+    return { attributed: false as const, reason: "no_confirmed_click" };
+  }
   return attributeConversionEvent({
     ...input,
-    trackingToken: dispatch.tracking_token,
-    touchAt: dispatch.shortio_last_clicked_at ?? null,
-    tokenSource: "player",
+    trackingToken: String(click.tracking_token),
+    touchAt: String(click.clicked_at),
+    tokenSource: "first_party_click",
   });
 }
