@@ -55,76 +55,73 @@ export const getJourneyReportDetails = createServerFn({ method: "GET" })
     // Tenant access is validated above using the authenticated request; every
     // elevated query below remains explicitly scoped to that tenant.
     const db = supabaseAdmin as any;
-    const [journeyResult, stepsResult, metricsResult, eligibleResult] = await Promise.all([
-      db
-        .from("journeys")
-        .select("id,name,description,status,trigger_type,trigger_config,created_at,updated_at")
-        .eq("tenant_id", tenantId)
-        .eq("id", data.journeyId)
-        .maybeSingle(),
-      db
-        .from("journey_steps")
-        .select("id,position,step_type,label,config,is_enabled")
-        .eq("tenant_id", tenantId)
-        .eq("journey_id", data.journeyId)
-        .eq("is_enabled", true)
-        .order("position"),
-      db.rpc("journey_metrics", {
-        p_tenant_id: tenantId,
-        p_journey_id: data.journeyId,
-      }),
-      db.rpc("journey_eligible_lead_count", {
-        p_tenant_id: tenantId,
-        p_journey_id: data.journeyId,
-      }),
-    ]);
+    const [journeyResult, stepsResult, metricsResult, eligibleResult, executionsResult] =
+      await Promise.all([
+        db
+          .from("journeys")
+          .select("id,name,description,status,trigger_type,trigger_config,created_at,updated_at")
+          .eq("tenant_id", tenantId)
+          .eq("id", data.journeyId)
+          .maybeSingle(),
+        db
+          .from("journey_steps")
+          .select("id,position,step_type,label,config,is_enabled")
+          .eq("tenant_id", tenantId)
+          .eq("journey_id", data.journeyId)
+          .eq("is_enabled", true)
+          .order("position"),
+        db.rpc("journey_metrics", {
+          p_tenant_id: tenantId,
+          p_journey_id: data.journeyId,
+        }),
+        db.rpc("journey_eligible_lead_count", {
+          p_tenant_id: tenantId,
+          p_journey_id: data.journeyId,
+        }),
+        db
+          .from("journey_step_executions")
+          .select("step_id,status,executed_at,completed_at,updated_at")
+          .eq("tenant_id", tenantId)
+          .eq("journey_id", data.journeyId),
+      ]);
     const error = [
       journeyResult.error,
       stepsResult.error,
       metricsResult.error,
       eligibleResult.error,
+      executionsResult.error,
     ].find(Boolean);
     if (error) throw new Error(error.message);
     if (!journeyResult.data) return { journey: null, steps: [], metrics: null };
 
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60_000).toISOString();
-    const countExecutions = async (
-      stepId: string,
-      statuses: string[],
-      since?: string,
-    ): Promise<number> => {
-      let query = db
-        .from("journey_step_executions")
-        .select("id", { count: "exact", head: true })
-        .eq("tenant_id", tenantId)
-        .eq("journey_id", data.journeyId)
-        .eq("step_id", stepId)
-        .in("status", statuses);
-      if (since) {
-        // Older executions can be terminal with `executed_at` null. A
-        // completed/updated timestamp is still valid operational evidence of
-        // a send and must not make the seven-day counter show zero.
-        query = query.or(
-          `executed_at.gte.${since},completed_at.gte.${since},updated_at.gte.${since}`,
-        );
-      }
-      const result = await query;
-      if (result.error) throw new Error(result.error.message);
-      return Number(result.count ?? 0);
-    };
-    const steps = await Promise.all(
-      (stepsResult.data ?? []).map(async (step: any) => {
-        if (step.step_type === "wait" || step.step_type === "end")
-          return { ...step, queued: 0, sent: 0, sent7d: 0, failed: 0 };
-        const [queued, sent, sent7d, failed] = await Promise.all([
-          countExecutions(step.id, ["pending", "claimed", "retrying"]),
-          countExecutions(step.id, ["sent", "delivered"]),
-          countExecutions(step.id, ["sent", "delivered"], sevenDaysAgo),
-          countExecutions(step.id, ["failed", "cancelled"]),
-        ]);
-        return { ...step, queued, sent, sent7d, failed };
-      }),
-    );
+    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60_000;
+    const executionsByStep = new Map<string, any[]>();
+    for (const execution of executionsResult.data ?? []) {
+      const group = executionsByStep.get(execution.step_id) ?? [];
+      group.push(execution);
+      executionsByStep.set(execution.step_id, group);
+    }
+    const steps = (stepsResult.data ?? []).map((step: any) => {
+      if (step.step_type === "wait" || step.step_type === "end")
+        return { ...step, queued: 0, sent: 0, sent7d: 0, failed: 0 };
+      const executions = executionsByStep.get(step.id) ?? [];
+      const queued = executions.filter((execution) =>
+        ["pending", "claimed", "retrying"].includes(execution.status),
+      ).length;
+      const sentExecutions = executions.filter((execution) =>
+        ["sent", "delivered"].includes(execution.status),
+      );
+      const sent = sentExecutions.length;
+      const failed = executions.filter((execution) =>
+        ["failed", "cancelled"].includes(execution.status),
+      ).length;
+      const sent7d = sentExecutions.filter((execution) => {
+        const terminalAt =
+          execution.executed_at ?? execution.completed_at ?? execution.updated_at ?? null;
+        return terminalAt && new Date(terminalAt).getTime() >= sevenDaysAgo;
+      }).length;
+      return { ...step, queued, sent, sent7d, failed };
+    });
     const aggregate = metricsResult.data ?? {};
     return {
       journey: journeyResult.data,

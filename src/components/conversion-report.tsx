@@ -720,7 +720,7 @@ function JourneyReport({
   globalAttributionHealth?: { count: number; periodHours: number; reasons: Record<string, number> };
 }) {
   const journey = details?.journey;
-  const allSteps = details?.steps ?? [];
+  const allSteps: any[] = details?.steps ?? [];
   const actionableSteps = allSteps.filter((step) => !["wait", "end"].includes(step.step_type));
   const stepRows = actionableSteps.map((step) => {
     const conversion = data.byStepChannel.find(
