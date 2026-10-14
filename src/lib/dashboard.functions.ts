@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { brtDayEnd, brtDayKey, brtDayStart } from "@/lib/tz";
+import { brtDayEnd, brtDayStart } from "@/lib/tz";
 import { withServerResultCache } from "@/lib/server-result-cache";
 import { resolveOperationalTenantForRequest } from "@/lib/tenant-access.server";
 
@@ -125,16 +125,6 @@ export const getDashboardSummary = createServerFn({ method: "POST" })
       withTimeout(
         (async () => {
           const supabase = context.supabase as unknown as DashboardDb;
-          const { error: refreshError } = await supabase.rpc(
-            "refresh_dashboard_daily_metrics_range",
-            {
-              _tenant: tenantId,
-              _from: brtDayKey(prevStartDate),
-              _to: brtDayKey(endDate),
-            },
-          );
-          if (refreshError) throw new Error(refreshError.message);
-
           const { data: settings, error: settingsError } = await supabase
             .from("dashboard_settings")
             .select("reset_at")
