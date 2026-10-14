@@ -748,10 +748,13 @@ function JourneyReport({
   });
   const sent7d = stepRows.reduce((sum, step) => sum + Number(step.sent7d ?? 0), 0);
   const failed = stepRows.reduce((sum, step) => sum + Number(step.failed ?? 0), 0);
-  const recovered = Number(details?.metrics?.recovered ?? data.revenue);
-  const deposits =
-    Number(details?.metrics?.exits?.deposit ?? 0) +
-    Number(details?.metrics?.exits?.first_deposit ?? 0);
+  // Keep the headline consistent with the stages: only direct, tracked
+  // attributions are revenue recovered by this journey. `journey_metrics`
+  // is operational state and can include a player's unrelated balance.
+  const recovered = Number(data.revenue ?? 0);
+  const deposits = Number(data.deposits ?? 0);
+  const operationalRecovered = Number(details?.metrics?.recovered ?? 0);
+  const unattributedRecovered = Math.max(0, operationalRecovered - recovered);
   const triggerName = journey?.trigger_type
     ? (TRIGGER_NAMES[journey.trigger_type as TriggerType] ?? journey.trigger_type)
     : "Não informado";
@@ -819,8 +822,15 @@ function JourneyReport({
             <Metric label="Enviados 7d" value={number(sent7d)} />
             <Metric label="Clicaram" value={data.clicked === null ? "—" : number(data.clicked)} />
             <Metric label="Depósitos" value={number(deposits)} />
-            <Metric label="Recuperado" value={money(recovered)} accent />
+            <Metric label="Recuperado atribuído" value={money(recovered)} accent />
           </section>
+
+          {unattributedRecovered > 0 ? (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm text-amber-100">
+              {money(unattributedRecovered)} recuperado operacionalmente ainda não possui clique e
+              envio rastreados para atribuição a uma etapa desta jornada.
+            </div>
+          ) : null}
 
           <section className="rounded-2xl border border-border/80">
             <div className="border-b px-4 py-3">

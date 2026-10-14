@@ -698,7 +698,7 @@ export const getConversionReport = createServerFn({ method: "GET" })
         db
           .from("link_dispatches")
           .select(
-            "id,tracked_link_id,tracking_token,recipient_player_id,idempotency_key,message_log_id,send_status,delivery_status,sent_at,updated_at,channel,journey_step_id,journey_step_position",
+            "id,tracked_link_id,tracking_token,recipient_player_id,idempotency_key,message_log_id,send_status,delivery_status,sent_at,updated_at,channel,journey_step_id,journey_step_position,shortio_click_count,shortio_last_clicked_at",
           )
           .eq("tenant_id", tenantId)
           .eq("source_type", data.sourceType)
@@ -706,7 +706,7 @@ export const getConversionReport = createServerFn({ method: "GET" })
         db
           .from("conversion_attributions")
           .select(
-            "tracking_token,event_type,event_id,monetary_value,is_ftd,occurred_at,created_at,classification",
+            "link_dispatch_id,tracking_token,event_type,event_id,monetary_value,is_ftd,occurred_at,created_at,classification",
           )
           .eq("tenant_id", tenantId)
           .eq("source_type", data.sourceType)
@@ -764,10 +764,16 @@ export const getConversionReport = createServerFn({ method: "GET" })
       dispatches,
       (item) => item.delivery_status === "delivered",
     );
-    const clicked = [...clicksByLink.values()].reduce(
-      (sum, item) => sum + Number(item.clicks ?? 0),
-      0,
-    );
+    // The Short.io synchronizer persists the latest aggregate both in the
+    // snapshot and in every individual dispatch. Prefer the dispatch value:
+    // it remains tied to the exact journey step even when a tracked link is
+    // shared by more than one message.
+    const dispatchClickCount = (row: any) =>
+      Math.max(
+        Number(row.shortio_click_count ?? 0),
+        Number(clicksByLink.get(row.tracked_link_id)?.clicks ?? 0),
+      );
+    const clicked = uniqueDeliveryCount(dispatches, (row: any) => dispatchClickCount(row) > 0);
     const count = (eventType: string) =>
       attributions.filter(
         (item: any) => item.event_type === eventType && item.classification === "direct",
@@ -826,22 +832,28 @@ export const getConversionReport = createServerFn({ method: "GET" })
         delivered: uniqueDeliveryCount(group.rows, (row) => row.delivery_status === "delivered"),
         clicked: uniqueDeliveryCount(
           group.rows,
-          (row) =>
-            Boolean(row.tracked_link_id) &&
-            Number(clicksByLink.get(row.tracked_link_id!)?.clicks ?? 0) > 0,
+          (row) => dispatchClickCount(row) > 0,
         ),
         deposits: attributions.filter(
           (item: any) =>
             item.classification === "direct" &&
             item.event_type === "deposit_approved" &&
-            group.rows.some((row: any) => row.tracking_token === item.tracking_token),
+            group.rows.some(
+              (row: any) =>
+                row.id === item.link_dispatch_id ||
+                (!item.link_dispatch_id && row.tracking_token === item.tracking_token),
+            ),
         ).length,
         recovered: attributions
           .filter(
             (item: any) =>
               item.classification === "direct" &&
               item.event_type === "deposit_approved" &&
-              group.rows.some((row: any) => row.tracking_token === item.tracking_token),
+              group.rows.some(
+                (row: any) =>
+                  row.id === item.link_dispatch_id ||
+                  (!item.link_dispatch_id && row.tracking_token === item.tracking_token),
+              ),
           )
           .reduce((sum: number, item: any) => sum + Number(item.monetary_value ?? 0), 0),
       })),
