@@ -116,11 +116,11 @@ async function enrollEligibleJourneyPlayers(limit = 500) {
     .from("journeys")
     .select("*")
     .eq("status", "active")
-    .limit(100);
+    .order("tenant_id", { ascending: true })
+    .order("name", { ascending: true })
+    .limit(500);
   if (!journeys?.length) return 0;
-  const { data: players } = await supabaseAdmin.from("players").select("*").limit(limit);
-  let enrolled = 0;
-  for (const journey of journeys as Array<
+  const activeJourneys = journeys as Array<
     JourneyRow & {
       tenant_id: string;
       trigger_type: string;
@@ -128,7 +128,36 @@ async function enrollEligibleJourneyPlayers(limit = 500) {
       version: number;
       entry_rules: Record<string, unknown>;
     }
-  >) {
+  >;
+  const tenantIds = [...new Set(activeJourneys.map((journey) => journey.tenant_id))];
+  const perTenantLimit = Math.max(1, Math.floor(limit / tenantIds.length));
+  const minute = Math.floor(Date.now() / 60_000);
+  const playerBatches = await Promise.all(
+    tenantIds.map(async (tenantId, tenantIndex) => {
+      const { count, error: countError } = await supabaseAdmin
+        .from("players")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId);
+      if (countError) throw new Error(countError.message);
+      const total = count ?? 0;
+      if (!total) return [];
+      const pageCount = Math.max(1, Math.ceil(total / perTenantLimit));
+      const page = (minute + tenantIndex) % pageCount;
+      const from = page * perTenantLimit;
+      const to = Math.min(total - 1, from + perTenantLimit - 1);
+      const { data, error } = await supabaseAdmin
+        .from("players")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to);
+      if (error) throw new Error(error.message);
+      return data ?? [];
+    }),
+  );
+  const players = playerBatches.flat();
+  let enrolled = 0;
+  for (const journey of activeJourneys) {
     // Jornadas manuais só podem receber matrículas por uma API auditada. Até
     // essa API existir, o worker nunca pode transformar uma entrada manual em
     // uma varredura automática da base.
@@ -684,13 +713,16 @@ export async function runJourneyDispatcher(limit = 100) {
   }
   const { error: recoveryError } = await db.rpc("recover_orphaned_journey_claims");
   if (recoveryError) throw new Error(recoveryError.message);
-  const enrolled = await enrollEligibleJourneyPlayers(limit);
   const { error: resumeError } = await db.rpc("resume_priority_paused_journeys", {
     p_limit: limit,
   });
   if (resumeError) throw new Error(resumeError.message);
+  // Sending must always take precedence over the eligibility scan. The scan can
+  // involve many journeys and players and used to consume the whole serverless
+  // request, leaving due enrollments permanently unclaimed.
+  const dispatchLimit = Math.min(limit, 25);
   const { data: claimed, error } = await db.rpc("claim_due_journey_enrollments", {
-    p_limit: limit,
+    p_limit: dispatchLimit,
   });
   if (error) throw new Error(error.message);
   let processed = 0;
@@ -757,5 +789,8 @@ export async function runJourneyDispatcher(limit = 100) {
       });
     }
   }
+  // New enrollments are intentionally discovered after dispatch. They become
+  // due immediately and are processed by the next one-minute cron cycle.
+  const enrolled = await enrollEligibleJourneyPlayers(limit);
   return { enrolled, claimed: (claimed ?? []).length, processed, failed };
 }
