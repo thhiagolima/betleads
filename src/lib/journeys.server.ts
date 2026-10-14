@@ -5,6 +5,7 @@ import { sendSmsInternal } from "./sms.functions";
 import { buildPlayerVariables, renderTemplate } from "./template-vars.server";
 import { detectTriggersForPlayer } from "./triggers.server";
 import { evaluateVoiceContactPolicy, isChannelRevoked } from "./consent.server";
+import { recordRun } from "./dispatch-rate.server";
 import {
   journeyEntryKey,
   nextJourneyWindowOpen,
@@ -54,16 +55,14 @@ const db = supabaseAdmin as any;
 
 type EventTriggerMatch = { matches: boolean; occurrence: string };
 
-/**
- * Event triggers are occurrence-based. Requiring `start_after` prevents
- * activating a new journey from replaying an entire tenant history.
- */
-async function matchFinancialTrigger(
+/** Event triggers optionally use `start_after`; without it, backfill is allowed. */
+export async function matchFinancialTrigger(
   journey: { tenant_id: string; trigger_type: string; trigger_config: Record<string, unknown> },
   player: Record<string, unknown>,
 ): Promise<EventTriggerMatch | null> {
   const startAfter = String(journey.trigger_config?.start_after ?? "");
-  const startAt = Date.parse(startAfter);
+  const parsedStartAt = Date.parse(startAfter);
+  const startAt = Number.isFinite(parsedStartAt) ? parsedStartAt : null;
   if (
     ![
       "cadastrados_sem_deposito",
@@ -73,13 +72,12 @@ async function matchFinancialTrigger(
     ].includes(journey.trigger_type)
   )
     return null;
-  if (!Number.isFinite(startAt)) return null;
-
   if (journey.trigger_type === "cadastrados_sem_deposito") {
     const createdAt = String(player.created_at ?? "");
     const occurredAt = Date.parse(createdAt);
     return {
-      matches: !player.ftd_em && Number.isFinite(occurredAt) && occurredAt >= startAt,
+      matches:
+        !player.ftd_em && Number.isFinite(occurredAt) && (startAt == null || occurredAt >= startAt),
       occurrence: createdAt || "missing_registration",
     };
   }
@@ -88,7 +86,7 @@ async function matchFinancialTrigger(
     const firstDepositAt = String(player.ftd_em ?? "");
     const occurredAt = Date.parse(firstDepositAt);
     return {
-      matches: Number.isFinite(occurredAt) && occurredAt >= startAt,
+      matches: Number.isFinite(occurredAt) && (startAt == null || occurredAt >= startAt),
       occurrence: firstDepositAt || "missing_first_deposit",
     };
   }
@@ -99,9 +97,9 @@ async function matchFinancialTrigger(
     .select("id,created_at,updated_at,metodo,status")
     .eq("tenant_id", journey.tenant_id)
     .eq("player_id", player.id)
-    .gte("created_at", new Date(startAt).toISOString())
     .order("created_at", { ascending: false })
     .limit(1);
+  if (startAt != null) query = query.gte("created_at", new Date(startAt).toISOString());
   query =
     journey.trigger_type === "saque_pago"
       ? query.eq("status", "aprovado")
@@ -706,11 +704,21 @@ async function executeEnrollment(id: string): Promise<void> {
 }
 
 export async function runJourneyDispatcher(limit = 100) {
+  const startedAt = Date.now();
   // A cron may be installed before the final operational acceptance. The
   // dispatcher itself remains fail-closed until the platform enables it.
   if (process.env.JOURNEYS_DISPATCH_ENABLED !== "true") {
+    await recordRun(startedAt, {
+      channel: "journey",
+      stop_reason: "disabled",
+    });
     return { enrolled: 0, claimed: 0, processed: 0, failed: 0, disabled: true };
   }
+  const { count: queueBefore } = await db
+    .from("journey_enrollments")
+    .select("id", { count: "exact", head: true })
+    .in("status", ["active", "waiting"])
+    .lte("next_run_at", new Date().toISOString());
   const { error: recoveryError } = await db.rpc("recover_orphaned_journey_claims");
   if (recoveryError) throw new Error(recoveryError.message);
   const { error: resumeError } = await db.rpc("resume_priority_paused_journeys", {
@@ -723,77 +731,96 @@ export async function runJourneyDispatcher(limit = 100) {
   // A provider attempt can take up to ~24s including retries. Keep the batch
   // small and execute it concurrently so one slow recipient cannot consume the
   // whole cron request before the remaining claimed rows are released.
-  const dispatchLimit = Math.min(limit, 5);
+  const configuredBatch = Number(process.env.JOURNEYS_DISPATCH_BATCH_SIZE ?? 5);
+  const dispatchLimit = Math.min(
+    limit,
+    Math.max(1, Math.min(Number.isFinite(configuredBatch) ? configuredBatch : 5, 50)),
+  );
   const { data: claimed, error } = await db.rpc("claim_due_journey_enrollments", {
     p_limit: dispatchLimit,
   });
   if (error) throw new Error(error.message);
   let processed = 0;
   let failed = 0;
-  await Promise.all(((claimed ?? []) as Array<{ id: string }>).map(async (row) => {
-    try {
-      await executeEnrollment(row.id);
-      processed++;
-    } catch (error) {
-      failed++;
-      const message = error instanceof Error ? error.message : String(error);
-      const { data: enrollment } = await db
-        .from("journey_enrollments")
-        .select("*")
-        .eq("id", row.id)
-        .maybeSingle();
-      if (enrollment) {
-        const attempts = Number(enrollment.attempts ?? 0) + 1;
-        const { data: retryJourney } = await db
-          .from("journeys")
-          .select("entry_rules")
-          .eq("id", enrollment.journey_id)
+  await Promise.all(
+    ((claimed ?? []) as Array<{ id: string }>).map(async (row) => {
+      try {
+        await executeEnrollment(row.id);
+        processed++;
+      } catch (error) {
+        failed++;
+        const message = error instanceof Error ? error.message : String(error);
+        const { data: enrollment } = await db
+          .from("journey_enrollments")
+          .select("*")
+          .eq("id", row.id)
           .maybeSingle();
-        const maxAttempts = Math.min(
-          10,
-          Math.max(1, Number(retryJourney?.entry_rules?.max_attempts ?? 3)),
-        );
-        const retryBaseSeconds = Math.min(
-          3600,
-          Math.max(10, Number(retryJourney?.entry_rules?.retry_base_seconds ?? 60)),
-        );
-        const retryAt = new Date(
-          Date.now() +
-            Math.min(6 * 3600_000, retryBaseSeconds * 1000 * 2 ** Math.max(0, attempts - 1)),
-        ).toISOString();
-        await db
-          .from("journey_step_executions")
-          .update({
-            status: "failed",
-            error: message,
-            completed_at: new Date().toISOString(),
-          })
-          .eq("enrollment_id", row.id)
-          .eq("status", "claimed");
-        await release(
-          enrollment as EnrollmentRow,
-          attempts < maxAttempts
-            ? { status: "waiting", next_run_at: retryAt, attempts }
-            : { status: "failed", exit_reason: message.slice(0, 500), attempts },
-        );
-        await event(
-          enrollment as EnrollmentRow,
-          attempts < maxAttempts ? "retry_scheduled" : "failed",
-          {
-            error: message,
-            attempts,
-            retry_at: attempts < maxAttempts ? retryAt : null,
-          },
-        );
+        if (enrollment) {
+          const attempts = Number(enrollment.attempts ?? 0) + 1;
+          const { data: retryJourney } = await db
+            .from("journeys")
+            .select("entry_rules")
+            .eq("id", enrollment.journey_id)
+            .maybeSingle();
+          const maxAttempts = Math.min(
+            10,
+            Math.max(1, Number(retryJourney?.entry_rules?.max_attempts ?? 3)),
+          );
+          const retryBaseSeconds = Math.min(
+            3600,
+            Math.max(10, Number(retryJourney?.entry_rules?.retry_base_seconds ?? 60)),
+          );
+          const retryAt = new Date(
+            Date.now() +
+              Math.min(6 * 3600_000, retryBaseSeconds * 1000 * 2 ** Math.max(0, attempts - 1)),
+          ).toISOString();
+          await db
+            .from("journey_step_executions")
+            .update({
+              status: "failed",
+              error: message,
+              completed_at: new Date().toISOString(),
+            })
+            .eq("enrollment_id", row.id)
+            .eq("status", "claimed");
+          await release(
+            enrollment as EnrollmentRow,
+            attempts < maxAttempts
+              ? { status: "waiting", next_run_at: retryAt, attempts }
+              : { status: "failed", exit_reason: message.slice(0, 500), attempts },
+          );
+          await event(
+            enrollment as EnrollmentRow,
+            attempts < maxAttempts ? "retry_scheduled" : "failed",
+            {
+              error: message,
+              attempts,
+              retry_at: attempts < maxAttempts ? retryAt : null,
+            },
+          );
+        }
+        console.error("[journey dispatcher] execution failed", {
+          enrollmentId: row.id,
+          error: message,
+        });
       }
-      console.error("[journey dispatcher] execution failed", {
-        enrollmentId: row.id,
-        error: message,
-      });
-    }
-  }));
-  // New enrollments are intentionally discovered after dispatch. They become
-  // due immediately and are processed by the next one-minute cron cycle.
-  const enrolled = await enrollEligibleJourneyPlayers(limit);
-  return { enrolled, claimed: (claimed ?? []).length, processed, failed };
+    }),
+  );
+  await recordRun(startedAt, {
+    channel: "journey",
+    queue_before: queueBefore ?? 0,
+    claimed: (claimed ?? []).length,
+    sent: processed,
+    errors: failed,
+    stop_reason: (claimed ?? []).length === 0 ? "queue_empty" : null,
+  });
+  // Eligibility discovery is intentionally handled by journey-scan. Keeping
+  // this compatibility field avoids breaking existing cron diagnostics.
+  return {
+    enrolled: 0,
+    claimed: (claimed ?? []).length,
+    processed,
+    failed,
+    scannerSeparated: true,
+  };
 }

@@ -43,6 +43,12 @@
 
 ### Regras por canal
 
+`JOURNEYS_DISPATCH_ENABLED` é o kill switch global do worker de jornadas e deve
+existir apenas no ambiente server-side. Publicar uma jornada não liga o worker.
+Em Docker Compose, altere o `.env`, recrie o container e confirme que o cron
+deixou de responder `disabled: true`. Ative primeiro em canário: uma fila
+histórica pode produzir envios reais assim que o worker for liberado.
+
 - **SMS:** valide saldo, limite de partes, supressão/SAIR, janela de envio e callback Short Brasil antes de reabrir.
 - **E-mail:** valide remetente/domínio, supressão/descadastro, URLs/imagens e callback do provedor antes de reabrir.
 - **Voz:** mantenha o despacho automático desligado (`VOICE_DISPATCH_ENABLED=false`) até a chamada real, callback assinado, status final e retentativa serem aceitos. O cron de reconciliação pode permanecer ativo porque apenas audita callbacks pendentes; ele não cria chamadas. Uma falha não deve disparar nova chamada sem política de frequência e idempotência.
