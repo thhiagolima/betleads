@@ -715,7 +715,11 @@ export async function syncShortioMetrics(
   // historical links. A pure UUID cursor can leave a new link behind the
   // cursor for days, so every run reserves capacity for the last 24 hours and
   // uses the remaining slots for the stalest historical links.
-  const recentLimit = Math.min(10, limit);
+  // New sends must become observable while the journey is still running.  A
+  // fixed ten-link reserve leaves the tail of a large SMS batch unsynchronised
+  // for hours; spend most of each tick on fresh links and reconcile history
+  // with the remaining capacity.
+  const recentLimit = Math.max(1, Math.min(limit, Math.ceil(limit * 0.8)));
   const recentSince = new Date(Date.now() - 24 * 60 * 60_000).toISOString();
   const recentResult = await db
     .from("tracked_links")
