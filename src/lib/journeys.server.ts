@@ -758,7 +758,7 @@ export async function runJourneyDispatcher(limit = 100) {
   const configuredConcurrency = Number(process.env.JOURNEYS_DISPATCH_CONCURRENCY ?? 12);
   const concurrency = Math.max(
     1,
-    Math.min(Number.isFinite(configuredConcurrency) ? configuredConcurrency : 12, 25),
+    Math.min(Number.isFinite(configuredConcurrency) ? configuredConcurrency : 12, 12),
   );
   const { data: claimed, error } = await db.rpc("claim_due_journey_enrollments", {
     p_limit: dispatchLimit,
