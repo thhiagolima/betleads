@@ -30,6 +30,16 @@ const DEFAULT_SHORTCODE_MESSAGES_URL = "https://api.shortcode.com.br/messages";
 // conexão TCP bloqueada pelo provedor pode deixar o envio preso indefinidamente.
 const SHORT_BRASIL_REQUEST_TIMEOUT_MS = 8_000;
 
+function requireRegisteredCampaignRecipients(
+  targets: Array<{ phone: string; playerId?: string | null }>,
+) {
+  const missing = targets.filter((target) => !target.playerId);
+  if (missing.length === 0) return;
+  throw new Error(
+    `Campanhas só podem enviar para jogadores cadastrados. ${missing.length} destinatário(s) não foram vinculados a um player deste tenant.`,
+  );
+}
+
 function shortBrasilSingleUrl(): string {
   return process.env.SHORT_BRASIL_SMS_SINGLE_URL ?? DEFAULT_SHORT_BRASIL_SINGLE_URL;
 }
@@ -944,6 +954,7 @@ export const sendBulkSms = createServerFn({ method: "POST" })
         targets.filter((t) => !t.playerId).map((t) => t.phone),
         targets.filter((t) => t.playerId) as Array<{ phone: string; playerId?: string }>,
       );
+      requireRegisteredCampaignRecipients(resolved);
       const { data: inserted, error: insErr } = await (context.supabase as any)
         .from("sms_campaigns")
         .insert({
@@ -1025,6 +1036,7 @@ export const sendBulkSms = createServerFn({ method: "POST" })
         }
       }
     }
+    requireRegisteredCampaignRecipients(targets);
 
     // Carrega variáveis dos players envolvidos (uma query só)
     const playerIds = Array.from(
@@ -1889,6 +1901,7 @@ export const scheduleBulkSms = createServerFn({ method: "POST" })
 
     const targets = await resolveRecipientsForTenant(tenantId, data.phones, data.recipients);
     if (targets.length === 0) throw new Error("Sem destinatários válidos");
+    requireRegisteredCampaignRecipients(targets);
 
     const { data: inserted, error } = await (context.supabase as any)
       .from("sms_campaigns")

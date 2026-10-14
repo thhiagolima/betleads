@@ -837,6 +837,36 @@ export async function runScheduledSmsCampaigns({ limit = 20 }: { limit?: number 
     }
 
     // Retoma de onde parou no último tick (0 se primeira execução).
+    const unresolvedAfterLookup = allTargets.filter((target) => !target.playerId);
+    if (unresolvedAfterLookup.length > 0) {
+      // A campaign conversion can only be measured when the recipient is a
+      // known player. Do not send a trackable campaign that would create an
+      // unprovable click/conversion chain.
+      await supabaseAdmin
+        .from("sms_campaigns")
+        .update({
+          status: "falhou",
+          last_error: `${unresolvedAfterLookup.length} destinatário(s) sem player vinculado; envio bloqueado para preservar rastreabilidade.`,
+          locked_at: null,
+          locked_by: null,
+        })
+        .eq("id", c.id);
+      continue;
+    }
+
+    if (unresolvedTargets.length > 0) {
+      const { error: persistRecipientsError } = await supabaseAdmin
+        .from("sms_campaigns")
+        .update({ recipients: allTargets as never })
+        .eq("id", c.id);
+      if (persistRecipientsError) {
+        console.error("[sms-campaigns] falha ao persistir players resolvidos", {
+          campaignId: c.id,
+          error: persistRecipientsError.message,
+        });
+      }
+    }
+
     const cursor = Math.max(0, c.sent_cursor ?? 0);
     const remaining = allTargets.length - cursor;
     if (remaining <= 0) {

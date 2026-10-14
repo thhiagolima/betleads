@@ -477,7 +477,7 @@ Escolher um fornecedor por função; não adotar todos.
 - [x] Fazer Short.io apontar novos links para o redirect BetLeads.
 - [x] Certificar a resolução do identificador externo da Sorte Alta com logs reais.
 - [ ] Certificar ForrandoBet e PixReals com fixtures e logs reais.
-- [ ] Corrigir campanhas sem player e bloquear novos dispatches rastreados sem `recipient_player_id`.
+- [x] Bloquear novos dispatches rastreados de campanha sem `recipient_player_id`; campanhas legadas tentam resolver e persistir o player antes do envio, ou são bloqueadas.
 - [ ] Implementar read model de relatório e drill-down.
 - [ ] Backfill conservador: legado recebe grau B/C/D, nunca A inventado.
 
