@@ -812,15 +812,26 @@ function Dashboard() {
   const from = range?.from ?? new Date();
   const to = range?.to ?? from;
 
-  const { data: tenants } = useQuery({
+  const {
+    data: tenants,
+    isLoading: tenantsLoading,
+    error: tenantsError,
+    refetch: refetchTenants,
+  } = useQuery({
     queryKey: ["accessible-tenants"],
     queryFn: async () => {
-      const { data } = await supabase.from("tenants").select("id, nome").order("nome");
+      const { data, error } = await supabase.from("tenants").select("id, nome").order("nome");
+      if (error) throw new Error(error.message);
       return (data ?? []) as Array<{ id: string; nome: string }>;
     },
     staleTime: 5 * 60_000,
   });
-  const { data: sessionTenantId } = useQuery({
+  const {
+    data: sessionTenantId,
+    isLoading: sessionTenantLoading,
+    error: sessionTenantError,
+    refetch: refetchSessionTenant,
+  } = useQuery({
     queryKey: ["current-tenant-id-dashboard"],
     queryFn: async () => {
       const { data, error } = await supabase.rpc("current_tenant_id");
@@ -851,7 +862,7 @@ function Dashboard() {
 
   const fetchDashboard = useServerFn(getDashboardSummary);
   const includesToday = brtDayStart(to).getTime() >= brtDayStart(new Date()).getTime();
-  const { data, isLoading, isFetching, refetch } = useQuery({
+  const { data, isLoading, isFetching, error, refetch } = useQuery({
     queryKey: ["dashboard", tenantId, brtDayKeyLocal(from), brtDayKeyLocal(to)],
     queryFn: () =>
       fetchDashboard({
@@ -865,6 +876,7 @@ function Dashboard() {
     staleTime: includesToday ? 20_000 : 5 * 60_000,
     refetchInterval: includesToday ? 30_000 : false,
     placeholderData: (previous) => previous,
+    retry: 1,
   });
 
   const greeting = useMemo(() => {
@@ -879,7 +891,7 @@ function Dashboard() {
     [data?.cashflowChart],
   );
 
-  if (isLoading || !data) {
+  if (tenantsLoading || sessionTenantLoading || (Boolean(tenantId) && isLoading)) {
     return (
       <div className="space-y-4">
         <Skeleton className="h-24" />
@@ -889,6 +901,36 @@ function Dashboard() {
           ))}
         </div>
       </div>
+    );
+  }
+
+  const loadError = tenantsError ?? sessionTenantError ?? error;
+  if (loadError || !tenantId || !data) {
+    const message =
+      loadError instanceof Error
+        ? loadError.message
+        : !tenantId
+          ? "Nenhuma conta disponível para este usuário."
+          : "Não foi possível carregar os dados do painel.";
+
+    return (
+      <Card>
+        <CardContent className="flex min-h-64 flex-col items-center justify-center gap-3 p-6 text-center">
+          <p className="text-base font-medium">Não foi possível carregar o painel</p>
+          <p className="max-w-lg text-sm text-muted-foreground">{message}</p>
+          <Button
+            variant="outline"
+            onClick={() => {
+              void refetchTenants();
+              void refetchSessionTenant();
+              void refetch();
+            }}
+          >
+            <RefreshCw className="mr-2 h-4 w-4" />
+            Tentar novamente
+          </Button>
+        </CardContent>
+      </Card>
     );
   }
 
