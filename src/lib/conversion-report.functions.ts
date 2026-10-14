@@ -2,6 +2,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { resolveOperationalTenantId } from "./tenant-access.server";
 import { canAccessConversionDrilldown, uniqueDeliveryCount } from "./conversion-report";
 
@@ -50,7 +51,10 @@ export const getJourneyReportDetails = createServerFn({ method: "GET" })
   .inputValidator((value: unknown) => journeyDetailsSchema.parse(value))
   .handler(async ({ data, context }) => {
     const tenantId = await resolveOperationalTenantId(context.supabase);
-    const db = context.supabase as any;
+    // The journey aggregate RPCs are intentionally restricted to service_role.
+    // Tenant access is validated above using the authenticated request; every
+    // elevated query below remains explicitly scoped to that tenant.
+    const db = supabaseAdmin as any;
     const [journeyResult, stepsResult, metricsResult, eligibleResult] = await Promise.all([
       db
         .from("journeys")
