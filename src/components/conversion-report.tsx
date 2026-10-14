@@ -5,6 +5,7 @@ import { AlertTriangle, ArrowLeft, ChevronLeft, ChevronRight, Download, X } from
 import {
   exportCampaignRecipientsCsv,
   getCampaignReportDetails,
+  getConversionDrilldown,
   getConversionDataHealth,
   getConversionReport,
   getJourneyReportDetails,
@@ -90,6 +91,11 @@ export function ConversionReport({
     queryFn: () => getConversionDataHealth({ data: { sourceType, sourceId } }),
     enabled: conversionEnabled,
   });
+  const drilldown = useQuery({
+    queryKey: ["conversion-drilldown", sourceType, sourceId],
+    queryFn: () => getConversionDrilldown({ data: { sourceType, sourceId, limit: 200 } }),
+    enabled: sourceType === "journey" && conversionEnabled,
+  });
 
   if (
     (sourceType === "campaign" && campaignDetails.isLoading) ||
@@ -113,6 +119,7 @@ export function ConversionReport({
       <JourneyReport
         data={query.data}
         details={journeyDetails.data}
+        drilldown={drilldown.data}
         alerts={health.data?.alerts ?? []}
         globalAttributionHealth={health.data?.globalAttributionHealth}
       />
@@ -702,11 +709,13 @@ function ConversionTable({ rows }: { rows: Recipient[] }) {
 function JourneyReport({
   data,
   details,
+  drilldown,
   alerts,
   globalAttributionHealth,
 }: {
   data: Awaited<ReturnType<typeof getConversionReport>>;
   details: Awaited<ReturnType<typeof getJourneyReportDetails>> | undefined;
+  drilldown: Awaited<ReturnType<typeof getConversionDrilldown>> | undefined;
   alerts: Array<{ code: string; message: string }>;
   globalAttributionHealth?: { count: number; periodHours: number; reasons: Record<string, number> };
 }) {
@@ -876,6 +885,54 @@ function JourneyReport({
               {number(failed)} execução(ões) falharam ou foram canceladas nas etapas acima.
             </p>
           ) : null}
+
+          <section className="rounded-2xl border border-border/80">
+            <div className="border-b px-4 py-3">
+              <h2 className="font-semibold">Leads rastreados</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Clique, login e depósito só aparecem quando pertencem ao mesmo envio rastreado.
+              </p>
+            </div>
+            {!drilldown ? (
+              <p className="p-4 text-sm text-muted-foreground">Carregando detalhes…</p>
+            ) : drilldown.rows.length === 0 ? (
+              <p className="p-4 text-sm text-muted-foreground">
+                Ainda não há envios rastreáveis nesta jornada.
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[760px] text-left text-xs">
+                  <thead className="border-b text-muted-foreground">
+                    <tr>
+                      <th className="px-4 py-3 font-medium">Lead</th>
+                      <th className="px-4 py-3 font-medium">Enviado</th>
+                      <th className="px-4 py-3 font-medium">Clicou</th>
+                      <th className="px-4 py-3 font-medium">Login/jogo</th>
+                      <th className="px-4 py-3 font-medium">Depósito</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/70">
+                    {drilldown.rows.map((row, index) => (
+                      <tr key={`${row.playerId}-${row.sentAt}-${index}`}>
+                        <td className="px-4 py-3">
+                          <p className="font-medium">{row.playerName}</p>
+                          <p className="text-muted-foreground">{row.contact ?? "—"}</p>
+                        </td>
+                        <td className="px-4 py-3">{dateTime(row.sentAt)}</td>
+                        <td className="px-4 py-3">{dateTime(row.clickedAt)}</td>
+                        <td className="px-4 py-3">{dateTime(row.loginAt)}</td>
+                        <td className="px-4 py-3">
+                          {row.depositedAt
+                            ? `${dateTime(row.depositedAt)} · ${money(row.depositValue)}`
+                            : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
         </div>
       </main>
     </div>

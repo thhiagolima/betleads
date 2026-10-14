@@ -627,17 +627,100 @@ export const getConversionDrilldown = createServerFn({ method: "GET" })
     const tenantId = await resolveOperationalTenantId(context.supabase);
     await requireConversionReportAdmin(context, tenantId);
     const db = context.supabase as any;
-    const { data: rows, error } = await db
-      .from("conversion_attributions")
-      .select(
-        "event_type,event_id,occurred_at,monetary_value,is_ftd,tracking_token,players(nome,email,telefone)",
-      )
+    const { data: dispatches, error: dispatchError } = await db
+      .from("link_dispatches")
+      .select("id,recipient_player_id,idempotency_key,sent_at,created_at,send_status")
       .eq("tenant_id", tenantId)
       .eq("source_type", data.sourceType)
       .eq("source_id", data.sourceId)
-      .order("occurred_at", { ascending: false })
-      .limit(data.limit);
-    if (error) throw new Error(error.message);
+      .not("recipient_player_id", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(data.limit * 3);
+    if (dispatchError) throw new Error(dispatchError.message);
+    const dispatchRows = dispatches ?? [];
+    const dispatchIds = dispatchRows.map((row: any) => row.id);
+    const playerIds = [...new Set(dispatchRows.map((row: any) => row.recipient_player_id))];
+    const [clickResult, attributionResult, playersResult] = await Promise.all([
+      dispatchIds.length
+        ? db
+            .from("click_events")
+            .select("link_dispatch_id,occurred_at")
+            .eq("tenant_id", tenantId)
+            .eq("is_human", true)
+            .in("link_dispatch_id", dispatchIds)
+            .order("occurred_at", { ascending: true })
+        : Promise.resolve({ data: [], error: null }),
+      dispatchIds.length
+        ? db
+            .from("conversion_attributions")
+            .select("link_dispatch_id,event_type,occurred_at,monetary_value,is_ftd")
+            .eq("tenant_id", tenantId)
+            .eq("source_type", data.sourceType)
+            .eq("source_id", data.sourceId)
+            .in("link_dispatch_id", dispatchIds)
+        : Promise.resolve({ data: [], error: null }),
+      playerIds.length
+        ? db
+            .from("players")
+            .select("id,nome,email,telefone")
+            .eq("tenant_id", tenantId)
+            .in("id", playerIds)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+    const firstError = [clickResult.error, attributionResult.error, playersResult.error].find(
+      Boolean,
+    );
+    if (firstError) throw new Error(firstError.message);
+    const clicksByDispatch = new Map<string, string>();
+    for (const click of clickResult.data ?? []) {
+      if (!clicksByDispatch.has(click.link_dispatch_id))
+        clicksByDispatch.set(click.link_dispatch_id, click.occurred_at);
+    }
+    const eventsByDispatch = new Map<string, any[]>();
+    for (const event of attributionResult.data ?? []) {
+      const group = eventsByDispatch.get(event.link_dispatch_id) ?? [];
+      group.push(event);
+      eventsByDispatch.set(event.link_dispatch_id, group);
+    }
+    const playersById = new Map<string, any>(
+      (playersResult.data ?? []).map((row: any) => [row.id, row]),
+    );
+    const grouped = new Map<string, any[]>();
+    for (const dispatch of dispatchRows) {
+      const key = dispatch.idempotency_key || dispatch.id;
+      const group = grouped.get(key) ?? [];
+      group.push(dispatch);
+      grouped.set(key, group);
+    }
+    const rows = Array.from(grouped.values())
+      .slice(0, data.limit)
+      .map((group: any[]) => {
+        const first = group[0];
+        const events = group.flatMap((dispatch) => eventsByDispatch.get(dispatch.id) ?? []);
+        const findEvent = (types: string[]) =>
+          events
+            .filter((event: any) => types.includes(event.event_type))
+            .sort((a: any, b: any) =>
+              String(a.occurred_at).localeCompare(String(b.occurred_at)),
+            )[0] ?? null;
+        const deposit = findEvent(["deposit_approved"]);
+        const player = playersById.get(first.recipient_player_id);
+        return {
+          playerId: first.recipient_player_id,
+          playerName: player?.nome ?? "Jogador não identificado",
+          contact: player?.telefone ?? player?.email ?? null,
+          sentAt: first.sent_at ?? first.created_at,
+          clickedAt:
+            group
+              .map((dispatch) => clicksByDispatch.get(dispatch.id))
+              .filter(Boolean)
+              .sort()[0] ?? null,
+          loginAt: findEvent(["login", "game"])?.occurred_at ?? null,
+          depositedAt: deposit?.occurred_at ?? null,
+          depositValue: Number(deposit?.monetary_value ?? 0),
+          isFtd: deposit?.is_ftd === true,
+        };
+      });
     await db.from("conversion_report_audit_events").insert({
       tenant_id: tenantId,
       source_type: data.sourceType,
