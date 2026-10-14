@@ -557,7 +557,7 @@ export function JourneysHub() {
                         value={deposits.toLocaleString("pt-BR")}
                       />
                       <JourneyMetric
-                        label="Recuperado"
+                        label="Recuperado operacional"
                         value={Number(metrics.recovered ?? 0).toLocaleString("pt-BR", {
                           style: "currency",
                           currency: "BRL",

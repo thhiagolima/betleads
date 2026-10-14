@@ -345,8 +345,9 @@ export const getCampaignReportDetails = createServerFn({ method: "GET" })
     const messageLogIds = [
       ...new Set(deliveries.map(([, rows]) => rows[0]?.message_log_id).filter(Boolean)),
     ];
+    const dispatchIds = [...new Set(deliveries.flatMap(([, rows]) => rows.map((row) => row.id)))];
 
-    const [playersResult, snapshotsResult, attributionsResult, depositsResult, smsLogsResult] =
+    const [playersResult, snapshotsResult, clickEventsResult, attributionsResult, depositsResult, smsLogsResult] =
       await Promise.all([
         playerIds.length
           ? db
@@ -361,6 +362,15 @@ export const getCampaignReportDetails = createServerFn({ method: "GET" })
               .select("tracked_link_id,clicks,human_clicks,snapshot_at")
               .eq("tenant_id", tenantId)
               .in("tracked_link_id", linkIds)
+          : Promise.resolve({ data: [], error: null }),
+        dispatchIds.length
+          ? db
+              .from("click_events")
+              .select("link_dispatch_id,occurred_at")
+              .eq("tenant_id", tenantId)
+              .eq("is_human", true)
+              .in("link_dispatch_id", dispatchIds)
+              .order("occurred_at", { ascending: true })
           : Promise.resolve({ data: [], error: null }),
         tokens.length
           ? db
@@ -390,6 +400,7 @@ export const getCampaignReportDetails = createServerFn({ method: "GET" })
     const firstError = [
       playersResult.error,
       snapshotsResult.error,
+      clickEventsResult.error,
       attributionsResult.error,
       depositsResult.error,
       smsLogsResult.error,
@@ -405,6 +416,14 @@ export const getCampaignReportDetails = createServerFn({ method: "GET" })
       const previous = latestSnapshot.get(row.tracked_link_id);
       if (!previous || row.snapshot_at > previous.snapshot_at)
         latestSnapshot.set(row.tracked_link_id, row);
+    }
+    const confirmedClicksByDispatch = new Map<string, string[]>();
+    for (const event of clickEventsResult.data ?? []) {
+      const dispatchId = String(event.link_dispatch_id ?? "");
+      if (!dispatchId || !event.occurred_at) continue;
+      const clicks = confirmedClicksByDispatch.get(dispatchId) ?? [];
+      clicks.push(event.occurred_at);
+      confirmedClicksByDispatch.set(dispatchId, clicks);
     }
     const depositsByPlayer = new Map<string, any[]>();
     for (const row of depositsResult.data ?? []) {
@@ -424,8 +443,12 @@ export const getCampaignReportDetails = createServerFn({ method: "GET" })
       const player = players.get(first.recipient_player_id) ?? null;
       const log = logs.get(first.message_log_id) ?? null;
       const snapshots = rows.map((row) => latestSnapshot.get(row.tracked_link_id)).filter(Boolean);
-      const clicked = snapshots.some((row) => Number(row.human_clicks ?? row.clicks ?? 0) > 0);
-      const clickCount = snapshots.reduce(
+      const clickInstants = rows
+        .flatMap((row) => confirmedClicksByDispatch.get(row.id) ?? [])
+        .sort();
+      const clicked = clickInstants.length > 0;
+      const clickCount = clickInstants.length;
+      const observedClickCount = snapshots.reduce(
         (sum, row) => sum + Number(row.human_clicks ?? row.clicks ?? 0),
         0,
       );
@@ -456,12 +479,8 @@ export const getCampaignReportDetails = createServerFn({ method: "GET" })
         deliveredAt: first.delivered_at ?? log?.delivered_at ?? null,
         clicked,
         clickCount,
-        clickedAt: clicked
-          ? (snapshots
-              .map((row) => row.snapshot_at)
-              .sort()
-              .at(0) ?? null)
-          : null,
+        clickedAt: clickInstants.at(0) ?? null,
+        observedClickCount,
         registeredAt: registered?.occurred_at ?? null,
         loginOrGameAt: loginOrGame?.occurred_at ?? null,
         firstDepositAt: firstDeposit?.occurred_at ?? null,

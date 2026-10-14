@@ -842,11 +842,18 @@ function JourneyReport({
               depósito atribuído e recuperado permanecem em zero; não é falha de sincronização.
             </div>
           ) : null}
+          {data.observedClicked && data.observedClicked > (data.clicked ?? 0) ? (
+            <div className="rounded-lg border border-sky-500/30 bg-sky-500/5 p-3 text-sm text-muted-foreground">
+              O Short.io observou {number(data.observedClicked)} clique(s), mas apenas {number(data.clicked ?? 0)}
+              foi(ram) confirmado(s) pelo redirecionamento próprio. Os observados não entram em atribuição.
+            </div>
+          ) : null}
 
-          <section className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+          <section className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
             <Metric label="Elegíveis agora" value={number(details?.metrics?.eligible ?? 0)} />
             <Metric label="Na fila" value={number(details?.metrics?.queued ?? 0)} />
             <Metric label="Enviados 7d" value={number(sent7d)} />
+            <Metric label="Enviados rastreados" value={number(data.trackedSent)} />
             <Metric label="Clicaram" value={data.clicked === null ? "—" : number(data.clicked)} />
             <Metric label="Depósitos" value={number(deposits)} />
             <Metric label="Recuperado atribuído" value={money(recovered)} accent />
