@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 
@@ -39,7 +40,7 @@ export const rotateMyWebhookCredentials = createServerFn({ method: "POST" })
     const webhook_secret = randomHex(32);
     const { error } = await (supabaseAdmin as any)
       .from("tenants")
-      .update({ webhook_token, webhook_secret })
+      .update({ webhook_token, webhook_secret, webhook_hmac_enforced: false })
       .eq("id", tenantId);
     if (error) throw new Error(error.message);
     await supabaseAdmin.from("tenant_audit_logs").insert({
@@ -48,9 +49,61 @@ export const rotateMyWebhookCredentials = createServerFn({ method: "POST" })
       action: "webhook.credentials_rotated",
       entity_type: "tenant",
       entity_id: tenantId,
-      metadata: { token_rotated: true, hmac_rotated: true },
+      metadata: { token_rotated: true, hmac_rotated: true, hmac_enforced: false },
     });
     return { token: webhook_token, secret: webhook_secret };
+  });
+
+export const provisionMyWebhookHmacSecret = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const tenantId = await requireWebhookManager(context);
+    const webhook_secret = randomHex(32);
+    const { error } = await (supabaseAdmin as any)
+      .from("tenants")
+      .update({ webhook_secret, webhook_hmac_enforced: false })
+      .eq("id", tenantId);
+    if (error) throw new Error(error.message);
+    await supabaseAdmin.from("tenant_audit_logs").insert({
+      tenant_id: tenantId,
+      actor_user_id: context.userId,
+      action: "webhook.hmac_secret_provisioned",
+      entity_type: "tenant",
+      entity_id: tenantId,
+      metadata: { hmac_enforced: false },
+    });
+    return { secret: webhook_secret };
+  });
+
+export const setMyWebhookHmacEnforcement = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((value: unknown) => z.object({ enforce: z.boolean() }).parse(value))
+  .handler(async ({ data, context }) => {
+    const tenantId = await requireWebhookManager(context);
+    if (data.enforce) {
+      const { data: tenant, error: lookupError } = await (supabaseAdmin as any)
+        .from("tenants")
+        .select("webhook_secret")
+        .eq("id", tenantId)
+        .maybeSingle();
+      if (lookupError) throw new Error(lookupError.message);
+      if (!tenant?.webhook_secret)
+        throw new Error("Gere uma chave HMAC antes de exigir assinatura.");
+    }
+    const { error } = await (supabaseAdmin as any)
+      .from("tenants")
+      .update({ webhook_hmac_enforced: data.enforce })
+      .eq("id", tenantId);
+    if (error) throw new Error(error.message);
+    await supabaseAdmin.from("tenant_audit_logs").insert({
+      tenant_id: tenantId,
+      actor_user_id: context.userId,
+      action: "webhook.hmac_enforcement_changed",
+      entity_type: "tenant",
+      entity_id: tenantId,
+      metadata: { enforced: data.enforce },
+    });
+    return { enforced: data.enforce };
   });
 
 // Retorna o webhook_token do tenant do usuário logado.
@@ -61,7 +114,7 @@ export const getMyWebhookToken = createServerFn({ method: "GET" })
     const currentTenantId = await requireWebhookManager(context);
     const { data, error } = await supabaseAdmin
       .from("tenants")
-      .select("id, nome, legacy_webhook, webhook_token")
+      .select("id, nome, legacy_webhook, webhook_token, webhook_secret, webhook_hmac_enforced")
       .eq("id", currentTenantId)
       .maybeSingle();
     if (error) throw new Error(error.message);
@@ -74,6 +127,8 @@ export const getMyWebhookToken = createServerFn({ method: "GET" })
       // Mesmo o tenant legado usa agora URL/token próprios. O campo histórico
       // legacy_webhook não deve mais gerar endpoint global.
       legacy: false,
+      hmacConfigured: Boolean((data as any)?.webhook_secret),
+      hmacEnforced: Boolean((data as any)?.webhook_hmac_enforced),
     };
   });
 

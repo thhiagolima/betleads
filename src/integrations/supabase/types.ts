@@ -6222,6 +6222,8 @@ export type Database = {
           slug: string
           status: string
           updated_at: string
+          webhook_hmac_enforced: boolean
+          webhook_secret: string | null
           webhook_token: string
         }
         Insert: {
@@ -6236,6 +6238,8 @@ export type Database = {
           slug: string
           status?: string
           updated_at?: string
+          webhook_hmac_enforced?: boolean
+          webhook_secret?: string | null
           webhook_token?: string
         }
         Update: {
@@ -6250,6 +6254,8 @@ export type Database = {
           slug?: string
           status?: string
           updated_at?: string
+          webhook_hmac_enforced?: boolean
+          webhook_secret?: string | null
           webhook_token?: string
         }
         Relationships: []

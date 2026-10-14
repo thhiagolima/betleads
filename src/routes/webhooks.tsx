@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,7 +29,14 @@ import { WEBHOOK_EVENTS } from "@/lib/webhook-events";
 import { PageHeader } from "@/components/ui-premium/page-header";
 import { DataCard } from "@/components/ui-premium/data-card";
 import { EmptyState } from "@/components/ui-premium/empty-state";
-import { getMyWebhookAccess, getMyWebhookHealth, getMyWebhookLogs, getMyWebhookToken } from "@/lib/webhooks.functions";
+import {
+  getMyWebhookAccess,
+  getMyWebhookHealth,
+  getMyWebhookLogs,
+  getMyWebhookToken,
+  provisionMyWebhookHmacSecret,
+  setMyWebhookHmacEnforcement,
+} from "@/lib/webhooks.functions";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/webhooks")({
@@ -75,6 +82,9 @@ function WebhooksPage() {
   const fetchToken = useServerFn(getMyWebhookToken);
   const fetchLogs = useServerFn(getMyWebhookLogs);
   const fetchHealth = useServerFn(getMyWebhookHealth);
+  const provisionHmac = useServerFn(provisionMyWebhookHmacSecret);
+  const setHmacEnforcement = useServerFn(setMyWebhookHmacEnforcement);
+  const queryClient = useQueryClient();
   const { data: access, isLoading: accessLoading } = useQuery({
     queryKey: ["my-webhook-access"],
     queryFn: () => fetchAccess(),
@@ -104,6 +114,24 @@ function WebhooksPage() {
 
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   const [selectedLog, setSelectedLog] = useState<WebhookLog | null>(null);
+  const [provisionedSecret, setProvisionedSecret] = useState<string | null>(null);
+  const provision = useMutation({
+    mutationFn: () => provisionHmac(),
+    onSuccess: ({ secret }) => {
+      setProvisionedSecret(secret);
+      queryClient.invalidateQueries({ queryKey: ["my-webhook-token"] });
+      toast.success("Chave HMAC gerada. Configure-a na casa antes de ativar a exigência.");
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+  const enforceHmac = useMutation({
+    mutationFn: (enforce: boolean) => setHmacEnforcement({ data: { enforce } }),
+    onSuccess: ({ enforced }) => {
+      queryClient.invalidateQueries({ queryKey: ["my-webhook-token"] });
+      toast.success(enforced ? "Assinatura HMAC passou a ser obrigatória." : "Exigência HMAC desativada.");
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
 
   function copy(text: string) {
     navigator.clipboard.writeText(text);
@@ -161,6 +189,41 @@ function WebhooksPage() {
           </div>
         </div>
       }
+
+      <DataCard
+        title="Assinatura HMAC"
+        description="Ative somente depois de configurar a mesma chave na plataforma da casa."
+        icon={<ShieldAlert className="h-4 w-4" />}
+      >
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <Badge variant="outline" className={tokenInfo?.hmacEnforced ? "border-emerald-500/40 text-emerald-400" : "border-amber-500/40 text-amber-300"}>
+            {tokenInfo?.hmacEnforced ? "assinatura obrigatória" : "assinatura ainda opcional"}
+          </Badge>
+          <span className="text-muted-foreground">
+            {tokenInfo?.hmacConfigured ? "Chave provisionada." : "Nenhuma chave provisionada."}
+          </span>
+          <Button size="sm" variant="outline" disabled={provision.isPending} onClick={() => provision.mutate()}>
+            {provision.isPending ? "Gerando..." : tokenInfo?.hmacConfigured ? "Rotacionar chave" : "Gerar chave"}
+          </Button>
+          {tokenInfo?.hmacEnforced ? (
+            <Button size="sm" variant="outline" disabled={enforceHmac.isPending} onClick={() => enforceHmac.mutate(false)}>
+              Permitir transição
+            </Button>
+          ) : (
+            <Button size="sm" disabled={!tokenInfo?.hmacConfigured || enforceHmac.isPending} onClick={() => enforceHmac.mutate(true)}>
+              Exigir assinatura
+            </Button>
+          )}
+        </div>
+        {provisionedSecret ? (
+          <div className="mt-3 flex gap-2">
+            <Input value={provisionedSecret} readOnly className="font-mono text-xs" aria-label="Chave HMAC gerada" />
+            <Button size="sm" variant="outline" onClick={() => copy(provisionedSecret)}>
+              <Copy className="mr-1 h-3.5 w-3.5" /> Copiar
+            </Button>
+          </div>
+        ) : null}
+      </DataCard>
 
       <section
         className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5"

@@ -24,6 +24,7 @@ export const Route = createFileRoute("/api/public/hooks/webhook-replay")({
         // somente `recebido` e deixava falhas financeiras fora da fila padrão.
         const status = typeof body.status === "string" ? body.status : "pendente";
         const evento = typeof body.evento === "string" ? body.evento : undefined;
+        const dryRun = body.dry_run === true;
         const limitRaw = Number(body.limit ?? 100);
         const limit = Math.min(Math.max(Number.isFinite(limitRaw) ? limitRaw : 100, 1), 500);
 
@@ -44,22 +45,53 @@ export const Route = createFileRoute("/api/public/hooks/webhook-replay")({
         const { data: rows, error } = await query;
         if (error) return Response.json({ ok: false, error: error.message }, { status: 500 });
 
-        let processed = 0;
-        let failed = 0;
-        for (const row of rows ?? []) {
-          const response = await processWebhookEvent(
-            sb,
-            row.tenant_id as string,
-            row.evento as string,
-            (row.payload ?? {}) as Record<string, unknown>,
-            { mirror: true, existingLogId: row.id as string },
-          );
-          const result = await response.json().catch(() => ({ ok: false }));
-          if ((result as { ok?: boolean }).ok) processed += 1;
-          else failed += 1;
+        const selected = rows ?? [];
+        if (dryRun) {
+          const byEvent = selected.reduce<Record<string, number>>((summary, row) => {
+            summary[row.evento as string] = (summary[row.evento as string] ?? 0) + 1;
+            return summary;
+          }, {});
+          return Response.json({
+            ok: true,
+            dry_run: true,
+            scanned: selected.length,
+            by_event: byEvent,
+            sample: selected.slice(0, 10).map((row) => ({
+              id: row.id,
+              tenant_id: row.tenant_id,
+              evento: row.evento,
+            })),
+          });
         }
 
-        return Response.json({ ok: true, scanned: rows?.length ?? 0, processed, failed });
+        let processed = 0;
+        let failed = 0;
+        // Keep replay bounded. Five concurrent events are enough to drain a
+        // backlog without causing the same database contention that made the
+        // report endpoints time out.
+        const concurrency = 5;
+        for (let offset = 0; offset < selected.length; offset += concurrency) {
+          const batch = selected.slice(offset, offset + concurrency);
+          const results = await Promise.all(
+            batch.map(async (row) => {
+              const response = await processWebhookEvent(
+                sb,
+                row.tenant_id as string,
+                row.evento as string,
+                (row.payload ?? {}) as Record<string, unknown>,
+                { mirror: true, existingLogId: row.id as string },
+              );
+              const result = await response.json().catch(() => ({ ok: false }));
+              return Boolean((result as { ok?: boolean }).ok);
+            }),
+          );
+          for (const ok of results) {
+            if (ok) processed += 1;
+            else failed += 1;
+          }
+        }
+
+        return Response.json({ ok: true, dry_run: false, scanned: selected.length, processed, failed });
       },
     },
   },

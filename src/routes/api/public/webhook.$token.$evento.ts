@@ -52,7 +52,7 @@ export const Route = createFileRoute("/api/public/webhook/$token/$evento")({
 
         const { data: tenantRow, error: tenantLookupError } = await sb
           .from("tenants")
-          .select("id,webhook_secret")
+          .select("id,webhook_secret,webhook_hmac_enforced")
           .eq("webhook_token", token)
           .maybeSingle();
         // Do not report an infrastructure/credential failure as an invalid token.
@@ -73,6 +73,7 @@ export const Route = createFileRoute("/api/public/webhook/$token/$evento")({
           return Response.json({ ok: false, error: "token inválido" }, { status: 404 });
         }
         if (
+          tenantRow.webhook_hmac_enforced &&
           tenantRow.webhook_secret &&
           !(await validSignature(
             tenantRow.webhook_secret as string,
