@@ -739,16 +739,32 @@ export const getConversionReport = createServerFn({ method: "GET" })
     const dispatches = dispatchResult.data ?? [];
     const attributions = attributionResult.data ?? [];
     const linkIds = dispatches.map((item: any) => item.tracked_link_id).filter(Boolean);
-    const [{ data: snapshots, error: snapshotError }, canViewSensitive] = await Promise.all([
+    const [
+      { data: snapshots, error: snapshotError },
+      { data: clickEvents, error: clickEventsError },
+      canViewSensitive,
+    ] = await Promise.all([
       linkIds.length
         ? await db
             .from("link_click_snapshots")
             .select("tracked_link_id,clicks,human_clicks,snapshot_at")
             .in("tracked_link_id", linkIds)
         : Promise.resolve({ data: [], error: null }),
+      dispatches.length
+        ? await db
+            .from("click_events")
+            .select("link_dispatch_id")
+            .eq("tenant_id", tenantId)
+            .eq("is_human", true)
+            .in(
+              "link_dispatch_id",
+              dispatches.map((item: any) => item.id),
+            )
+        : Promise.resolve({ data: [], error: null }),
       hasConversionReportAdmin(context, tenantId),
     ]);
     if (snapshotError) throw new Error(snapshotError.message);
+    if (clickEventsError) throw new Error(clickEventsError.message);
     const clicksByLink = new Map<string, { clicks: number; snapshot_at: string }>();
     for (const snapshot of snapshots ?? []) {
       const previous = clicksByLink.get(snapshot.tracked_link_id);
@@ -778,7 +794,14 @@ export const getConversionReport = createServerFn({ method: "GET" })
         Number(row.shortio_click_count ?? 0),
         Number(clicksByLink.get(row.tracked_link_id)?.clicks ?? 0),
       );
-    const clicked = uniqueDeliveryCount(dispatches, (row: any) => dispatchClickCount(row) > 0);
+    const confirmedDispatchIds = new Set(
+      (clickEvents ?? []).map((event: any) => String(event.link_dispatch_id)),
+    );
+    const clicked = uniqueDeliveryCount(dispatches, (row: any) => confirmedDispatchIds.has(row.id));
+    const observedClicked = uniqueDeliveryCount(
+      dispatches,
+      (row: any) => dispatchClickCount(row) > 0,
+    );
     const count = (eventType: string) =>
       attributions.filter(
         (item: any) => item.event_type === eventType && item.classification === "direct",
@@ -799,7 +822,11 @@ export const getConversionReport = createServerFn({ method: "GET" })
       sent,
       deduplicated,
       delivered: deliveredCount || null,
-      clicked: clicksByLink.size ? clicked : null,
+      // Attribution and the main funnel use only a click recorded by our
+      // redirect. The aggregate Short.io number is retained separately for
+      // legacy diagnostics and is never causal evidence.
+      clicked: dispatches.length ? clicked : null,
+      observedClicked: clicksByLink.size ? observedClicked : null,
       registered: count("registered"),
       loginOrGame: count("login") + count("game"),
       deposits,
@@ -835,10 +862,7 @@ export const getConversionReport = createServerFn({ method: "GET" })
         channel: group.channel,
         sent: uniqueDeliveryCount(group.rows, (row) => row.send_status === "sent"),
         delivered: uniqueDeliveryCount(group.rows, (row) => row.delivery_status === "delivered"),
-        clicked: uniqueDeliveryCount(
-          group.rows,
-          (row) => dispatchClickCount(row) > 0,
-        ),
+        clicked: uniqueDeliveryCount(group.rows, (row) => confirmedDispatchIds.has(row.id)),
         deposits: attributions.filter(
           (item: any) =>
             item.classification === "direct" &&
