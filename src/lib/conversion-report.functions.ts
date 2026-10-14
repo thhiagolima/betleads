@@ -910,6 +910,7 @@ export const getConversionReport = createServerFn({ method: "GET" })
         .at(-1) ?? null;
     return {
       sent,
+      trackedSent,
       deduplicated,
       delivered: deliveredCount || null,
       // Attribution and the main funnel use only a click recorded by our

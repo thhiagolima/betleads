@@ -822,6 +822,12 @@ function JourneyReport({
               pertencem a esta jornada.
             </div>
           ) : null}
+          {sent7d > 0 && data.trackedSent === 0 ? (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm text-amber-100">
+              Esta jornada enviou mensagens, mas nenhuma continha link rastreável. Por isso clique,
+              depósito atribuído e recuperado permanecem em zero; não é falha de sincronização.
+            </div>
+          ) : null}
 
           <section className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
             <Metric label="Elegíveis agora" value={number(details?.metrics?.eligible ?? 0)} />
