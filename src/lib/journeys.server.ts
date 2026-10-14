@@ -720,14 +720,17 @@ export async function runJourneyDispatcher(limit = 100) {
   // Sending must always take precedence over the eligibility scan. The scan can
   // involve many journeys and players and used to consume the whole serverless
   // request, leaving due enrollments permanently unclaimed.
-  const dispatchLimit = Math.min(limit, 25);
+  // A provider attempt can take up to ~24s including retries. Keep the batch
+  // small and execute it concurrently so one slow recipient cannot consume the
+  // whole cron request before the remaining claimed rows are released.
+  const dispatchLimit = Math.min(limit, 5);
   const { data: claimed, error } = await db.rpc("claim_due_journey_enrollments", {
     p_limit: dispatchLimit,
   });
   if (error) throw new Error(error.message);
   let processed = 0;
   let failed = 0;
-  for (const row of (claimed ?? []) as Array<{ id: string }>) {
+  await Promise.all(((claimed ?? []) as Array<{ id: string }>).map(async (row) => {
     try {
       await executeEnrollment(row.id);
       processed++;
@@ -788,7 +791,7 @@ export async function runJourneyDispatcher(limit = 100) {
         error: message,
       });
     }
-  }
+  }));
   // New enrollments are intentionally discovered after dispatch. They become
   // due immediately and are processed by the next one-minute cron cycle.
   const enrolled = await enrollEligibleJourneyPlayers(limit);
