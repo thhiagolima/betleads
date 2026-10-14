@@ -29,17 +29,17 @@ Os problemas determinantes são:
 
 Antes de alterar telas, banco ou workers, todos os times devem usar as mesmas definições:
 
-| Métrica | Definição | Fonte de verdade |
-|---|---|---|
-| Elegível agora | Player que satisfaz as regras neste instante e ainda pode entrar | snapshot do scanner com `calculated_at` |
-| Na fila | inscrição criada e não terminal; separar pronta, futura, pausada e em retry | `journey_enrollments` |
-| Enviado | provedor aceitou o disparo | execução/log do canal |
-| Entregue | callback do provedor confirmou entrega | callback do canal |
-| Enviado rastreado | envio que contém ao menos um token/link rastreável | `link_dispatches` |
-| Clique observado | provedor externo informou contagem positiva, sem horário exato | snapshot Short.io |
-| Clique confirmado | redirect BetLeads registrou evento individual com timestamp | `click_events` |
-| Conversão atribuída | conversão com evidência válida, identidade e janela temporal | `conversion_attributions` |
-| Conversão operacional | FTD/redepósito real, mas sem cadeia causal | ledger financeiro; fora do ROI da jornada |
+| Métrica               | Definição                                                                   | Fonte de verdade                          |
+| --------------------- | --------------------------------------------------------------------------- | ----------------------------------------- |
+| Elegível agora        | Player que satisfaz as regras neste instante e ainda pode entrar            | snapshot do scanner com `calculated_at`   |
+| Na fila               | inscrição criada e não terminal; separar pronta, futura, pausada e em retry | `journey_enrollments`                     |
+| Enviado               | provedor aceitou o disparo                                                  | execução/log do canal                     |
+| Entregue              | callback do provedor confirmou entrega                                      | callback do canal                         |
+| Enviado rastreado     | envio que contém ao menos um token/link rastreável                          | `link_dispatches`                         |
+| Clique observado      | provedor externo informou contagem positiva, sem horário exato              | snapshot Short.io                         |
+| Clique confirmado     | redirect BetLeads registrou evento individual com timestamp                 | `click_events`                            |
+| Conversão atribuída   | conversão com evidência válida, identidade e janela temporal                | `conversion_attributions`                 |
+| Conversão operacional | FTD/redepósito real, mas sem cadeia causal                                  | ledger financeiro; fora do ROI da jornada |
 
 Não somar “conversão operacional” em “recuperado pela jornada”. Ela pode aparecer em uma tela geral de operação, claramente separada e sem associação causal.
 
@@ -128,12 +128,12 @@ Logo, a ausência de `bl_click_id` no webhook não é bloqueadora. O passivo his
 
 Snapshot de itens vencidos em 14/10/2026:
 
-| Tenant | Ativos vencidos | Waiting vencidos | Enviáveis vencidos | Pausados por prioridade |
-|---|---:|---:|---:|---:|
-| Sorte Alta | 9.473 | 1.162 | 10.635 | 565 |
-| PixReals | 6.540 | 765 | 7.305 | 351 |
-| ForrandoBet | 1.464 | 68 | 1.532 | 294 |
-| **Total** | **17.477** | **1.995** | **19.472** | **1.210** |
+| Tenant      | Ativos vencidos | Waiting vencidos | Enviáveis vencidos | Pausados por prioridade |
+| ----------- | --------------: | ---------------: | -----------------: | ----------------------: |
+| Sorte Alta  |           9.473 |            1.162 |             10.635 |                     565 |
+| PixReals    |           6.540 |              765 |              7.305 |                     351 |
+| ForrandoBet |           1.464 |               68 |              1.532 |                     294 |
+| **Total**   |      **17.477** |        **1.995** |         **19.472** |               **1.210** |
 
 Na última hora completa observada, o dispatcher:
 
@@ -398,31 +398,31 @@ Não é necessária uma camada provisória de `recipient_identities` enquanto a 
 
 ### Níveis de evidência
 
-| Grau | Evidência | Uso permitido |
-|---|---|---|
-| A | clique first-party exato + token + player + janela | conversão direta e receita atribuída |
-| B | link individual com contagem externa, horário inexato | clique observado; sem receita causal |
-| C | envio rastreado sem clique confirmado | exposição/view-through separada |
-| D | conversão operacional sem cadeia | operação geral; nunca ROI da fonte |
+| Grau | Evidência                                             | Uso permitido                        |
+| ---- | ----------------------------------------------------- | ------------------------------------ |
+| A    | clique first-party exato + token + player + janela    | conversão direta e receita atribuída |
+| B    | link individual com contagem externa, horário inexato | clique observado; sem receita causal |
+| C    | envio rastreado sem clique confirmado                 | exposição/view-through separada      |
+| D    | conversão operacional sem cadeia                      | operação geral; nunca ROI da fonte   |
 
 ## 8. Serviços recomendados
 
 Escolher um fornecedor por função; não adotar todos.
 
-| Função | Recomendação inicial | Alternativas | Decisão |
-|---|---|---|---|
-| Redirect first-party | Cloudflare Workers + domínio próprio | AWS CloudFront/API Gateway + Lambda@Edge | Cloudflare reduz latência e já há configuração Wrangler |
-| Fila durável | AWS SQS Standard + DLQ | Cloudflare Queues, Upstash QStash, Supabase Queues/pgmq | SQS para isolamento e escala; pgmq serve como transição |
-| Click/event storage | DynamoDB para ingestão + export | Cloudflare D1/Queues, Postgres particionado | evitar escrita síncrona de cada redirect no Postgres principal |
-| Object storage | Cloudflare R2 ou AWS S3 | Supabase Storage | bruto de webhooks, clicks e logs com lifecycle |
-| Erros frontend/backend | Sentry | Rollbar | prioridade alta |
-| Logs e tracing | OpenTelemetry + Grafana Cloud/Axiom | Datadog, Better Stack | usar trace IDs ponta a ponta |
-| Uptime/synthetic | Checkly + Better Uptime | Pingdom | testar redirect e webhook continuamente |
-| Produto/feature flags | PostHog | LaunchDarkly/Unleash | analytics, flags e session replay com cuidado de PII |
-| Warehouse | ClickHouse Cloud | BigQuery, Snowflake | adotar após read model/retention; BigQuery é opção simples para BI |
-| Secrets | AWS Secrets Manager ou Doppler | 1Password Secrets, Supabase Vault | retirar secrets de URL/env compartilhado |
-| Contratos | JSON Schema + Pact | AsyncAPI | versionar o identificador externo e payload por cassino |
-| Carga/E2E | k6 + Playwright | Artillery | integrar ao CI |
+| Função                 | Recomendação inicial                 | Alternativas                                            | Decisão                                                            |
+| ---------------------- | ------------------------------------ | ------------------------------------------------------- | ------------------------------------------------------------------ |
+| Redirect first-party   | Cloudflare Workers + domínio próprio | AWS CloudFront/API Gateway + Lambda@Edge                | Cloudflare reduz latência e já há configuração Wrangler            |
+| Fila durável           | AWS SQS Standard + DLQ               | Cloudflare Queues, Upstash QStash, Supabase Queues/pgmq | SQS para isolamento e escala; pgmq serve como transição            |
+| Click/event storage    | DynamoDB para ingestão + export      | Cloudflare D1/Queues, Postgres particionado             | evitar escrita síncrona de cada redirect no Postgres principal     |
+| Object storage         | Cloudflare R2 ou AWS S3              | Supabase Storage                                        | bruto de webhooks, clicks e logs com lifecycle                     |
+| Erros frontend/backend | Sentry                               | Rollbar                                                 | prioridade alta                                                    |
+| Logs e tracing         | OpenTelemetry + Grafana Cloud/Axiom  | Datadog, Better Stack                                   | usar trace IDs ponta a ponta                                       |
+| Uptime/synthetic       | Checkly + Better Uptime              | Pingdom                                                 | testar redirect e webhook continuamente                            |
+| Produto/feature flags  | PostHog                              | LaunchDarkly/Unleash                                    | analytics, flags e session replay com cuidado de PII               |
+| Warehouse              | ClickHouse Cloud                     | BigQuery, Snowflake                                     | adotar após read model/retention; BigQuery é opção simples para BI |
+| Secrets                | AWS Secrets Manager ou Doppler       | 1Password Secrets, Supabase Vault                       | retirar secrets de URL/env compartilhado                           |
+| Contratos              | JSON Schema + Pact                   | AsyncAPI                                                | versionar o identificador externo e payload por cassino            |
+| Carga/E2E              | k6 + Playwright                      | Artillery                                               | integrar ao CI                                                     |
 
 **Firebase:** não é recomendado como segundo backend de autenticação/banco/realtime, pois duplicaria estado e consistência com Supabase. Usar apenas FCM se houver requisito real de push mobile.
 
@@ -432,27 +432,32 @@ Escolher um fornecedor por função; não adotar todos.
 
 ## 9. SLOs e alertas
 
-| Indicador | Meta inicial | Alerta |
-|---|---:|---:|
-| redirect p95 | < 150 ms | > 300 ms por 5 min |
-| click disponível no relatório p95 | < 5 s | > 30 s |
-| ACK de webhook p95 | < 2 s | > 5 s |
-| processamento webhook p95 | < 30 s | > 2 min |
-| idade da fila pronta p95 | < 5 min | > 10 min |
-| duplicação de envio | 0 | qualquer ocorrência |
-| falha de dispatch | < 1% | > 2% por 5 min |
-| dispatches com `recipient_player_id` | 100% | qualquer ausência |
-| atribuição sem grau A | 0 | qualquer ocorrência |
-| DLQ sem resolução | 0 > 15 min | qualquer ocorrência |
-| staleness de métricas | < 60 s operacional | > 5 min |
-| rollback DB | baseline + limite definido | desvio 2x |
-| disco/temp | < 70% sustentado | > 80% ou crescimento anormal |
+| Indicador                            |               Meta inicial |                       Alerta |
+| ------------------------------------ | -------------------------: | ---------------------------: |
+| redirect p95                         |                   < 150 ms |           > 300 ms por 5 min |
+| click disponível no relatório p95    |                      < 5 s |                       > 30 s |
+| ACK de webhook p95                   |                      < 2 s |                        > 5 s |
+| processamento webhook p95            |                     < 30 s |                      > 2 min |
+| idade da fila pronta p95             |                    < 5 min |                     > 10 min |
+| duplicação de envio                  |                          0 |          qualquer ocorrência |
+| falha de dispatch                    |                       < 1% |               > 2% por 5 min |
+| dispatches com `recipient_player_id` |                       100% |            qualquer ausência |
+| atribuição sem grau A                |                          0 |          qualquer ocorrência |
+| DLQ sem resolução                    |                 0 > 15 min |          qualquer ocorrência |
+| staleness de métricas                |         < 60 s operacional |                      > 5 min |
+| rollback DB                          | baseline + limite definido |                    desvio 2x |
+| disco/temp                           |           < 70% sustentado | > 80% ou crescimento anormal |
 
 ## 10. Roadmap e escopo executável
 
 ### Fase 0 — contenção (0–3 dias)
 
 **Objetivo:** parar perda financeira, números enganosos e falhas evitáveis.
+
+**Complemento identificado na auditoria da jornada FTD:**
+
+- [ ] Corrigir “Enviados 7d” para usar `completed_at`/`updated_at` quando `executed_at` estiver nulo; cobrir execução terminal com teste de regressão.
+- [ ] Rotular “Depósitos” na lista como “Depósitos operacionais”; deixar depósitos atribuídos exclusivamente no relatório com clique confirmado.
 
 - [ ] Corrigir trigger de nível e criar migration de regressão.
 - [ ] Identificar/reprocessar 109+ webhooks afetados, com dry-run e idempotência.

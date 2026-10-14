@@ -100,7 +100,14 @@ export const getJourneyReportDetails = createServerFn({ method: "GET" })
         .eq("journey_id", data.journeyId)
         .eq("step_id", stepId)
         .in("status", statuses);
-      if (since) query = query.gte("executed_at", since);
+      if (since) {
+        // Older executions can be terminal with `executed_at` null. A
+        // completed/updated timestamp is still valid operational evidence of
+        // a send and must not make the seven-day counter show zero.
+        query = query.or(
+          `executed_at.gte.${since},completed_at.gte.${since},updated_at.gte.${since}`,
+        );
+      }
       const result = await query;
       if (result.error) throw new Error(result.error.message);
       return Number(result.count ?? 0);

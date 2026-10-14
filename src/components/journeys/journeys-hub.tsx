@@ -552,7 +552,10 @@ export function JourneysHub() {
                       <JourneyMetric label="Elegíveis agora" value="—" />
                       <JourneyMetric label="Na fila" value={queued.toLocaleString("pt-BR")} />
                       <JourneyMetric label="Enviados" value={sent.toLocaleString("pt-BR")} />
-                      <JourneyMetric label="Depósitos" value={deposits.toLocaleString("pt-BR")} />
+                      <JourneyMetric
+                        label="Depósitos operacionais"
+                        value={deposits.toLocaleString("pt-BR")}
+                      />
                       <JourneyMetric
                         label="Recuperado"
                         value={Number(metrics.recovered ?? 0).toLocaleString("pt-BR", {
