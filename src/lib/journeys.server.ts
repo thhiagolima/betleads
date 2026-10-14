@@ -747,15 +747,18 @@ export async function runJourneyDispatcher(limit = 100) {
   // Claim a meaningful batch, but bound active provider requests separately.
   // The old default of five items per cron tick capped a healthy provider at
   // 300 messages/hour, leaving a normal backlog stalled for hours.
+  // Keep database admission centralized in one worker, then use bounded
+  // provider parallelism. This clears multi-tenant backlogs quickly without
+  // multiplying reservation RPCs through concurrent cron invocations.
   const configuredBatch = Number(process.env.JOURNEYS_DISPATCH_BATCH_SIZE ?? 250);
   const dispatchLimit = Math.min(
     limit,
     Math.max(1, Math.min(Number.isFinite(configuredBatch) ? configuredBatch : 250, 1000)),
   );
-  const configuredConcurrency = Number(process.env.JOURNEYS_DISPATCH_CONCURRENCY ?? 40);
+  const configuredConcurrency = Number(process.env.JOURNEYS_DISPATCH_CONCURRENCY ?? 12);
   const concurrency = Math.max(
     1,
-    Math.min(Number.isFinite(configuredConcurrency) ? configuredConcurrency : 40, 100),
+    Math.min(Number.isFinite(configuredConcurrency) ? configuredConcurrency : 12, 25),
   );
   const { data: claimed, error } = await db.rpc("claim_due_journey_enrollments", {
     p_limit: dispatchLimit,
