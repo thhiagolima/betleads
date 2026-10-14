@@ -29,6 +29,9 @@ const player = (overrides: Record<string, unknown> = {}) =>
 
 afterEach(() => {
   delete process.env.JOURNEYS_SCANNER_ENABLED;
+  delete process.env.JOURNEYS_CANARY_TENANT_IDS;
+  delete process.env.JOURNEYS_CANARY_JOURNEY_IDS;
+  delete process.env.JOURNEYS_ALLOW_ALL_TENANTS;
 });
 
 describe("journey scanner eligibility", () => {
@@ -87,6 +90,15 @@ describe("journey scanner kill switch", () => {
       eligible: 0,
       enrolled: 0,
       failed: 0,
+    });
+  });
+
+  it("fails closed when enabled without a canary scope", async () => {
+    process.env.JOURNEYS_SCANNER_ENABLED = "true";
+    await expect(runJourneyScanner()).resolves.toMatchObject({
+      disabled: true,
+      reason: "canary_scope_required",
+      jobs: 0,
     });
   });
 });

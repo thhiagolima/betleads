@@ -25,6 +25,9 @@ JOURNEYS_SCANNER_ENABLED=false
 JOURNEYS_SCANNER_JOB_LIMIT=3
 JOURNEYS_SCANNER_BATCH_SIZE=500
 JOURNEYS_DISPATCH_BATCH_SIZE=5
+JOURNEYS_CANARY_TENANT_IDS=
+JOURNEYS_CANARY_JOURNEY_IDS=
+JOURNEYS_ALLOW_ALL_TENANTS=false
 EVOLUTION_API_URL=<evolution-base-url>
 EVOLUTION_API_KEY=<evolution-api-key>
 EVOLUTION_WEBHOOK_SECRET=<strong-random-webhook-secret>
@@ -44,12 +47,21 @@ O scanner de elegibilidade possui uma flag independente:
 - `JOURNEYS_DISPATCH_ENABLED=true`: processa inscricoes vencidas e chama provedores;
 - `JOURNEYS_SCANNER_JOB_LIMIT` e `JOURNEYS_SCANNER_BATCH_SIZE`: controlam o canario;
 - `JOURNEYS_DISPATCH_BATCH_SIZE`: controla quantos envios podem ser reivindicados por tick.
+- `JOURNEYS_CANARY_TENANT_IDS` e `JOURNEYS_CANARY_JOURNEY_IDS`: allowlists CSV;
+- `JOURNEYS_ALLOW_ALL_TENANTS=true`: libera operacao global somente apos o canario.
+
+Mesmo com uma flag de worker ligada, a ausencia de allowlist mantem o processo
+fail-closed com `reason: canary_scope_required`. Nao use a liberacao global na
+primeira ativacao.
 
 Na VPS, a partir do diretorio que contem `docker-compose.yml`, defina:
 
 ```env
 JOURNEYS_SCANNER_ENABLED=true
 JOURNEYS_DISPATCH_ENABLED=false
+JOURNEYS_CANARY_TENANT_IDS=<tenant-uuid-do-canario>
+JOURNEYS_CANARY_JOURNEY_IDS=<journey-uuid-do-canario>
+JOURNEYS_ALLOW_ALL_TENANTS=false
 ```
 
 Primeiro libere somente o scanner e confirme que as contagens/cursor avancam
@@ -62,11 +74,12 @@ Nao use prefixo `VITE_`: a flag e exclusivamente server-side. Um simples
 ```bash
 docker compose up -d --build --force-recreate crm
 docker compose exec crm node -e "console.log(process.env.JOURNEYS_DISPATCH_ENABLED)"
+docker compose exec crm node -e "console.log(process.env.JOURNEYS_SCANNER_ENABLED)"
 docker compose ps
 docker compose logs --since=10m crm
 ```
 
-O segundo comando deve imprimir `true`. O cron `betleads-dispatch-journey`
+Os comandos devem refletir os valores configurados. O cron `betleads-dispatch-journey`
 chama `/api/public/hooks/dispatch?channel=journey` a cada minuto. Uma resposta
 com `disabled: true` significa que o container ainda nao recebeu a flag.
 

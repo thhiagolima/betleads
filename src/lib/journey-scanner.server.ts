@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { recordRun } from "./dispatch-rate.server";
 import { journeyEntryKey, qualifiesForInactivity, triggerOccurrence } from "./journey-policy";
+import { resolveJourneyWorkerScope } from "./journey-worker-scope";
 import { detectTriggersForPlayer } from "./triggers.server";
 
 // The migration is deployed together with this worker, before generated types refresh.
@@ -237,6 +238,18 @@ export async function runJourneyScanner(options: { jobs?: number; batchSize?: nu
   if (process.env.JOURNEYS_SCANNER_ENABLED !== "true") {
     return { disabled: true, jobs: 0, scanned: 0, eligible: 0, enrolled: 0, failed: 0 };
   }
+  const scope = resolveJourneyWorkerScope();
+  if (!scope.allowed) {
+    return {
+      disabled: true,
+      reason: "canary_scope_required",
+      jobs: 0,
+      scanned: 0,
+      eligible: 0,
+      enrolled: 0,
+      failed: 0,
+    };
+  }
   const startedAt = Date.now();
   const workerId = `journey-scanner-${randomUUID()}`;
   const configuredJobs = Number(process.env.JOURNEYS_SCANNER_JOB_LIMIT ?? 3);
@@ -253,6 +266,8 @@ export async function runJourneyScanner(options: { jobs?: number; batchSize?: nu
     p_limit: jobLimit,
     p_worker_id: workerId,
     p_lease_seconds: 120,
+    p_tenant_ids: scope.tenantIds,
+    p_journey_ids: scope.journeyIds,
   });
   if (claimError) throw new Error(claimError.message);
 

@@ -17,6 +17,7 @@ Em 14/10/2026 foi iniciada a primeira entrega, ainda fail-closed:
 - endpoint e cron separados do dispatcher;
 - heartbeat em `dispatcher_runs` para scanner e dispatcher;
 - flags e tamanhos de lote separados para canario;
+- allowlists obrigatorias por tenant/jornada e liberacao global explicita;
 - varredura removida do caminho de envio;
 - testes de elegibilidade historica, `start_after`, audiencia, PIX e kill switch.
 

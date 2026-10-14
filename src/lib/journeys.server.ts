@@ -6,6 +6,7 @@ import { buildPlayerVariables, renderTemplate } from "./template-vars.server";
 import { detectTriggersForPlayer } from "./triggers.server";
 import { evaluateVoiceContactPolicy, isChannelRevoked } from "./consent.server";
 import { recordRun } from "./dispatch-rate.server";
+import { resolveJourneyWorkerScope } from "./journey-worker-scope";
 import {
   journeyEntryKey,
   nextJourneyWindowOpen,
@@ -714,6 +715,21 @@ export async function runJourneyDispatcher(limit = 100) {
     });
     return { enrolled: 0, claimed: 0, processed: 0, failed: 0, disabled: true };
   }
+  const scope = resolveJourneyWorkerScope();
+  if (!scope.allowed) {
+    await recordRun(startedAt, {
+      channel: "journey",
+      stop_reason: "canary_scope_required",
+    });
+    return {
+      enrolled: 0,
+      claimed: 0,
+      processed: 0,
+      failed: 0,
+      disabled: true,
+      reason: "canary_scope_required",
+    };
+  }
   const { count: queueBefore } = await db
     .from("journey_enrollments")
     .select("id", { count: "exact", head: true })
@@ -738,6 +754,8 @@ export async function runJourneyDispatcher(limit = 100) {
   );
   const { data: claimed, error } = await db.rpc("claim_due_journey_enrollments", {
     p_limit: dispatchLimit,
+    p_tenant_ids: scope.tenantIds,
+    p_journey_ids: scope.journeyIds,
   });
   if (error) throw new Error(error.message);
   let processed = 0;
