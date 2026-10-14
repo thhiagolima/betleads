@@ -226,7 +226,9 @@ export function JourneysHub() {
         total.returned +=
           Number(metrics.exits?.deposit ?? 0) + Number(metrics.exits?.first_deposit ?? 0);
         total.queued +=
-          Number(metrics.byStatus?.active ?? 0) + Number(metrics.byStatus?.waiting ?? 0);
+          Number(metrics.byStatus?.active ?? 0) +
+          Number(metrics.byStatus?.waiting ?? 0) +
+          Number(metrics.byStatus?.paused_by_priority ?? 0);
         return total;
       },
       { recovered: 0, sent: 0, returned: 0, queued: 0 },
@@ -492,7 +494,9 @@ export function JourneysHub() {
                   .sort((a, b) => a.position - b.position);
                 const metrics = journey.metrics ?? {};
                 const queued =
-                  Number(metrics.byStatus?.active ?? 0) + Number(metrics.byStatus?.waiting ?? 0);
+                  Number(metrics.byStatus?.active ?? 0) +
+                  Number(metrics.byStatus?.waiting ?? 0) +
+                  Number(metrics.byStatus?.paused_by_priority ?? 0);
                 const sent = Object.values(metrics.sentByChannel ?? {}).reduce(
                   (total, value) => total + Number(value),
                   0,

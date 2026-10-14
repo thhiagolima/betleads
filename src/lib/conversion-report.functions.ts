@@ -125,7 +125,10 @@ export const getJourneyReportDetails = createServerFn({ method: "GET" })
       metrics: {
         ...aggregate,
         eligible: Number(eligibleResult.data ?? 0),
-        queued: Number(aggregate.byStatus?.active ?? 0) + Number(aggregate.byStatus?.waiting ?? 0),
+        queued:
+          Number(aggregate.byStatus?.active ?? 0) +
+          Number(aggregate.byStatus?.waiting ?? 0) +
+          Number(aggregate.byStatus?.paused_by_priority ?? 0),
       },
     };
   });
