@@ -679,6 +679,18 @@ export async function syncShortioMetrics(
     };
   }
   const staleBefore = new Date(Date.now() - 20 * 60_000).toISOString();
+  // A killed HTTP request must not leave a tenant permanently represented as
+  // "running". Preserve the audit row, but close it before the next attempt.
+  await db
+    .from("link_tracking_sync_runs")
+    .update({
+      status: "failed",
+      finished_at: new Date().toISOString(),
+      error: "Sincronizacao interrompida antes da conclusao; retomada automaticamente.",
+    })
+    .eq("tenant_id", tenantId)
+    .eq("status", "running")
+    .lt("started_at", staleBefore);
   const { data: activeRun } = await db
     .from("link_tracking_sync_runs")
     .select("id")
@@ -742,7 +754,11 @@ export async function syncShortioMetrics(
   const snapshotAt = new Date();
   snapshotAt.setUTCMinutes(0, 0, 0);
   const syncLinks = links ?? [];
-  const concurrency = 3;
+  const configuredConcurrency = Number(process.env.SHORTIO_SYNC_CONCURRENCY ?? 15);
+  const concurrency = Math.max(
+    1,
+    Math.min(Number.isFinite(configuredConcurrency) ? configuredConcurrency : 15, 25),
+  );
   const fetchStatistics = async (shortioLinkId: string) => {
     let response: Response | null = null;
     for (let attempt = 0; attempt < 3; attempt++) {

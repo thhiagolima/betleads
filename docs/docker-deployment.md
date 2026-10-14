@@ -24,10 +24,13 @@ JOURNEYS_DISPATCH_ENABLED=false
 JOURNEYS_SCANNER_ENABLED=false
 JOURNEYS_SCANNER_JOB_LIMIT=3
 JOURNEYS_SCANNER_BATCH_SIZE=500
-JOURNEYS_DISPATCH_BATCH_SIZE=5
+JOURNEYS_DISPATCH_BATCH_SIZE=250
+JOURNEYS_DISPATCH_CONCURRENCY=40
 JOURNEYS_CANARY_TENANT_IDS=
 JOURNEYS_CANARY_JOURNEY_IDS=
 JOURNEYS_ALLOW_ALL_TENANTS=false
+SHORTIO_SYNC_BATCH_SIZE=200
+SHORTIO_SYNC_CONCURRENCY=15
 EVOLUTION_API_URL=<evolution-base-url>
 EVOLUTION_API_KEY=<evolution-api-key>
 EVOLUTION_WEBHOOK_SECRET=<strong-random-webhook-secret>
@@ -47,6 +50,7 @@ O scanner de elegibilidade possui uma flag independente:
 - `JOURNEYS_DISPATCH_ENABLED=true`: processa inscricoes vencidas e chama provedores;
 - `JOURNEYS_SCANNER_JOB_LIMIT` e `JOURNEYS_SCANNER_BATCH_SIZE`: controlam o canario;
 - `JOURNEYS_DISPATCH_BATCH_SIZE`: controla quantos envios podem ser reivindicados por tick.
+- `JOURNEYS_DISPATCH_CONCURRENCY`: limita chamadas simultaneas ao provedor dentro do lote.
 - `JOURNEYS_CANARY_TENANT_IDS` e `JOURNEYS_CANARY_JOURNEY_IDS`: allowlists CSV;
 - `JOURNEYS_ALLOW_ALL_TENANTS=true`: libera operacao global somente apos o canario.
 

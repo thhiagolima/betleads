@@ -46,7 +46,7 @@ export const Route = createFileRoute("/api/public/hooks/dispatch")({
               tickFlows(200),
             ]);
             result = { queue, flows };
-          } else if (channel === "journey") result = await runJourneyDispatcher(200);
+          } else if (channel === "journey") result = await runJourneyDispatcher(1000);
           else if (channel === "whatsapp") result = await runWhatsappDispatcher({ limit: 50 });
           else return Response.json({ ok: false, error: "channel inválido" }, { status: 400 });
           return Response.json({ ok: true, channel, result });

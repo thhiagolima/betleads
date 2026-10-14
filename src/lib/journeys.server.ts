@@ -744,13 +744,18 @@ export async function runJourneyDispatcher(limit = 100) {
   // Sending must always take precedence over the eligibility scan. The scan can
   // involve many journeys and players and used to consume the whole serverless
   // request, leaving due enrollments permanently unclaimed.
-  // A provider attempt can take up to ~24s including retries. Keep the batch
-  // small and execute it concurrently so one slow recipient cannot consume the
-  // whole cron request before the remaining claimed rows are released.
-  const configuredBatch = Number(process.env.JOURNEYS_DISPATCH_BATCH_SIZE ?? 5);
+  // Claim a meaningful batch, but bound active provider requests separately.
+  // The old default of five items per cron tick capped a healthy provider at
+  // 300 messages/hour, leaving a normal backlog stalled for hours.
+  const configuredBatch = Number(process.env.JOURNEYS_DISPATCH_BATCH_SIZE ?? 250);
   const dispatchLimit = Math.min(
     limit,
-    Math.max(1, Math.min(Number.isFinite(configuredBatch) ? configuredBatch : 5, 50)),
+    Math.max(1, Math.min(Number.isFinite(configuredBatch) ? configuredBatch : 250, 1000)),
+  );
+  const configuredConcurrency = Number(process.env.JOURNEYS_DISPATCH_CONCURRENCY ?? 40);
+  const concurrency = Math.max(
+    1,
+    Math.min(Number.isFinite(configuredConcurrency) ? configuredConcurrency : 40, 100),
   );
   const { data: claimed, error } = await db.rpc("claim_due_journey_enrollments", {
     p_limit: dispatchLimit,
@@ -760,8 +765,7 @@ export async function runJourneyDispatcher(limit = 100) {
   if (error) throw new Error(error.message);
   let processed = 0;
   let failed = 0;
-  await Promise.all(
-    ((claimed ?? []) as Array<{ id: string }>).map(async (row) => {
+  const executeClaimed = async (row: { id: string }) => {
       try {
         await executeEnrollment(row.id);
         processed++;
@@ -822,8 +826,11 @@ export async function runJourneyDispatcher(limit = 100) {
           error: message,
         });
       }
-    }),
-  );
+  };
+  const rows = (claimed ?? []) as Array<{ id: string }>;
+  for (let offset = 0; offset < rows.length; offset += concurrency) {
+    await Promise.all(rows.slice(offset, offset + concurrency).map(executeClaimed));
+  }
   await recordRun(startedAt, {
     channel: "journey",
     queue_before: queueBefore ?? 0,

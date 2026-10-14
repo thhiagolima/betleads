@@ -586,7 +586,9 @@ export const getConversionDataHealth = createServerFn({ method: "GET" })
         severity: "error",
         message: `${preparedStale} envio(s) rastreado(s) permanecem preparados há mais de 30 minutos.`,
       });
-    if (syncStale)
+    // Click synchronization is eventually consistent. Its operational health
+    // is monitored by sync runs; it must not be presented as a journey fault.
+    if (syncStale && process.env.EXPOSE_LINK_SYNC_DIAGNOSTICS === "true")
       alerts.push({
         code: "click_sync_stale",
         severity: "warning",
