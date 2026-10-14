@@ -753,8 +753,6 @@ function JourneyReport({
   // is operational state and can include a player's unrelated balance.
   const recovered = Number(data.revenue ?? 0);
   const deposits = Number(data.deposits ?? 0);
-  const operationalRecovered = Number(details?.metrics?.recovered ?? 0);
-  const unattributedRecovered = Math.max(0, operationalRecovered - recovered);
   const triggerName = journey?.trigger_type
     ? (TRIGGER_NAMES[journey.trigger_type as TriggerType] ?? journey.trigger_type)
     : "Não informado";
@@ -824,13 +822,6 @@ function JourneyReport({
             <Metric label="Depósitos" value={number(deposits)} />
             <Metric label="Recuperado atribuído" value={money(recovered)} accent />
           </section>
-
-          {unattributedRecovered > 0 ? (
-            <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm text-amber-100">
-              {money(unattributedRecovered)} recuperado operacionalmente ainda não possui clique e
-              envio rastreados para atribuição a uma etapa desta jornada.
-            </div>
-          ) : null}
 
           <section className="rounded-2xl border border-border/80">
             <div className="border-b px-4 py-3">
