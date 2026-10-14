@@ -67,15 +67,18 @@ export function ConversionReport({
   sourceType: "campaign" | "journey";
   sourceId: string;
 }) {
+  const [loadJourneyDrilldown, setLoadJourneyDrilldown] = useState(false);
   const campaignDetails = useQuery({
     queryKey: ["campaign-report-details", sourceId],
     queryFn: () => getCampaignReportDetails({ data: { campaignId: sourceId, limit: 500 } }),
     enabled: sourceType === "campaign",
+    retry: false,
   });
   const journeyDetails = useQuery({
     queryKey: ["journey-report-details", sourceId],
     queryFn: () => getJourneyReportDetails({ data: { journeyId: sourceId } }),
     enabled: sourceType === "journey",
+    retry: false,
   });
   const isVoice = campaignDetails.data?.campaign?.channel === "voice";
   const conversionEnabled =
@@ -85,16 +88,24 @@ export function ConversionReport({
     queryKey: ["conversion-report", sourceType, sourceId],
     queryFn: () => getConversionReport({ data: { sourceType, sourceId } }),
     enabled: conversionEnabled,
+    retry: false,
   });
   const health = useQuery({
     queryKey: ["conversion-data-health", sourceType, sourceId],
     queryFn: () => getConversionDataHealth({ data: { sourceType, sourceId } }),
-    enabled: conversionEnabled,
+    enabled: conversionEnabled && query.isSuccess && journeyDetails.isSuccess,
+    retry: false,
   });
   const drilldown = useQuery({
     queryKey: ["conversion-drilldown", sourceType, sourceId],
     queryFn: () => getConversionDrilldown({ data: { sourceType, sourceId, limit: 200 } }),
-    enabled: sourceType === "journey" && conversionEnabled,
+    enabled:
+      sourceType === "journey" &&
+      conversionEnabled &&
+      loadJourneyDrilldown &&
+      query.isSuccess &&
+      journeyDetails.isSuccess,
+    retry: false,
   });
 
   if (
@@ -120,6 +131,7 @@ export function ConversionReport({
         data={query.data}
         details={journeyDetails.data}
         drilldown={drilldown.data}
+        onLoadDrilldown={() => setLoadJourneyDrilldown(true)}
         alerts={health.data?.alerts ?? []}
         globalAttributionHealth={health.data?.globalAttributionHealth}
       />
@@ -710,12 +722,14 @@ function JourneyReport({
   data,
   details,
   drilldown,
+  onLoadDrilldown,
   alerts,
   globalAttributionHealth,
 }: {
   data: Awaited<ReturnType<typeof getConversionReport>>;
   details: Awaited<ReturnType<typeof getJourneyReportDetails>> | undefined;
   drilldown: Awaited<ReturnType<typeof getConversionDrilldown>> | undefined;
+  onLoadDrilldown: () => void;
   alerts: Array<{ code: string; message: string }>;
   globalAttributionHealth?: { count: number; periodHours: number; reasons: Record<string, number> };
 }) {
@@ -900,7 +914,14 @@ function JourneyReport({
               </p>
             </div>
             {!drilldown ? (
-              <p className="p-4 text-sm text-muted-foreground">Carregando detalhes…</p>
+              <div className="p-4">
+                <p className="text-sm text-muted-foreground">
+                  Carregue os detalhes individuais sob demanda para não atrasar o relatório.
+                </p>
+                <Button className="mt-3" size="sm" variant="outline" onClick={onLoadDrilldown}>
+                  Carregar leads rastreados
+                </Button>
+              </div>
             ) : drilldown.rows.length === 0 ? (
               <p className="p-4 text-sm text-muted-foreground">
                 Ainda não há envios rastreáveis nesta jornada.
