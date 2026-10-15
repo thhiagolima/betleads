@@ -395,6 +395,63 @@ async function stillMatchesJourneyEntry(
     : detectTriggersForPlayer(player as never).includes(trigger as never);
 }
 
+/**
+ * Time-sensitive triggers lose their meaning when delivery is very late (e.g.
+ * a "PIX not paid" SMS hours after the PIX, after a provider outage).
+ * `trigger_config.max_delay_minutes` overrides the default; 0 disables.
+ */
+const DEFAULT_MAX_DELAY_MINUTES: Record<string, number> = {
+  pix_gerado_nao_pago: 120,
+  saque_pago: 120,
+};
+
+export function maxSendDelayMinutes(
+  triggerType: string,
+  triggerConfig: Record<string, unknown> | null | undefined,
+): number | null {
+  const configured = Number(triggerConfig?.max_delay_minutes);
+  if (triggerConfig && "max_delay_minutes" in triggerConfig && Number.isFinite(configured)) {
+    return configured > 0 ? configured : null;
+  }
+  return DEFAULT_MAX_DELAY_MINUTES[triggerType] ?? null;
+}
+
+/**
+ * How late a send step is versus its planned time (entry + the waits before
+ * it). next_run_at cannot be used: deferrals (cooldown, provider breaker)
+ * rewrite it. Returns null when there is no limit or the step is on time.
+ */
+export function staleSendLatencyMinutes(args: {
+  triggerType: string;
+  triggerConfig: Record<string, unknown> | null | undefined;
+  enteredAt: string;
+  waitSecondsBefore: number;
+  loopIteration: number;
+  now?: number;
+}): number | null {
+  const limit = maxSendDelayMinutes(args.triggerType, args.triggerConfig);
+  if (limit == null || args.loopIteration > 0) return null;
+  const entered = Date.parse(args.enteredAt);
+  if (!Number.isFinite(entered)) return null;
+  const planned = entered + Math.max(0, args.waitSecondsBefore) * 1000;
+  const lateMinutes = ((args.now ?? Date.now()) - planned) / 60_000;
+  return lateMinutes > limit ? Math.floor(lateMinutes) : null;
+}
+
+async function waitSecondsBeforePosition(journeyId: string, position: number) {
+  const { data } = await db
+    .from("journey_steps")
+    .select("config")
+    .eq("journey_id", journeyId)
+    .eq("step_type", "wait")
+    .eq("is_enabled", true)
+    .lt("position", position);
+  return ((data ?? []) as Array<{ config: Record<string, unknown> }>).reduce(
+    (total, row) => total + Math.max(0, Number(row.config?.delay_seconds ?? 0) || 0),
+    0,
+  );
+}
+
 async function executeEnrollment(
   id: string,
   ctx: DispatchContext,
@@ -512,6 +569,29 @@ async function executeEnrollment(
     });
     await event(enrollment, "completed", { step_position: step.position });
     return;
+  }
+
+  if (maxSendDelayMinutes(journey.trigger_type ?? "", journey.trigger_config) != null) {
+    const lateMinutes = staleSendLatencyMinutes({
+      triggerType: journey.trigger_type ?? "",
+      triggerConfig: journey.trigger_config,
+      enteredAt: enrollment.entered_at,
+      waitSecondsBefore: await waitSecondsBeforePosition(enrollment.journey_id, step.position),
+      loopIteration: Number(enrollment.loop_iteration ?? 0),
+    });
+    if (lateMinutes != null) {
+      await release(enrollment, ctx, {
+        status: "exited",
+        exited_at: new Date().toISOString(),
+        exit_reason: "stale_message",
+      });
+      await event(enrollment, "exited", {
+        reason: "stale_message",
+        step_position: step.position,
+        late_minutes: lateMinutes,
+      });
+      return;
+    }
   }
 
   const player = await playerFor(enrollment);
