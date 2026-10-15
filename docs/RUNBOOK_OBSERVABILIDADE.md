@@ -204,3 +204,207 @@ limit 10;
 ## 8. Sentry
 
 > Seção a ser preenchida (DSN, ambientes, releases, tags `job`/`tenant_id`, alertas e regras de scrub de PII).
+
+## 9. Provedor SMS sem saldo (circuit breaker do SMS)
+
+Incidente de 15/10/2026: desde 11:38 BRT a Short Brasil respondeu `{"status": 101, "statusDetalhe": "Erro de Autenticação"}` a todo envio. A causa real era a **rota sem saldo** (o provedor responde 101 em vez de 505). Como o app tratava isso como erro do lead, cada item de jornada queimou as 3 tentativas e terminou `failed`.
+
+### 9.1 Como o sistema se defende agora
+
+* **Classificação** (`src/lib/rate-limit/transport-errors.ts`, `smsProviderAccountReason`): `status` 101 ou 505 no corpo, ou HTTP 401/402/403 do provedor, são erros de **conta** (`errorKind = provider_account`). `sendSmsInternal` e o envio em lote marcam o resultado assim, devolvem o crédito e avisam o breaker. Erros do lead (número inválido, 303/404, recusa por item) continuam como antes. HTTP 402 de **crédito do tenant** (`Saldo de créditos SMS insuficiente`) não vem do provedor e não abre o breaker.
+* **Breaker global** (`public.provider_circuit_breakers`, migração `20261015123000_sms_provider_breaker.sql`; código em `src/lib/sms-provider-breaker.server.ts`): uma conta Short Brasil para todos os tenants, então o estado é por canal (`sms`).
+  * `closed`: envio normal.
+  * `open`: ninguém envia SMS. Backoff de 2 min na primeira abertura, dobrando a cada reabertura (2, 4, 8, 16, 30 min).
+  * `half_open`: passado o backoff, **um** worker pega a vez (`provider_breaker_acquire` devolve `probe`) e envia **um** item real da fila. Aceito: `closed`. Recusado por conta: `open` com backoff dobrado. Sem resposta conclusiva (o item saiu da jornada, consentimento etc.): a vez é devolvida (`provider_breaker_release_probe`). Se o worker sumir, outro assume a prova após 5 min.
+  * Cada transição é uma função SQL que trava a única linha (`FOR UPDATE`). Processos concorrentes não abrem duas vezes, não fazem duas provas e não alertam em dobro. Um envio iniciado antes da última (re)abertura não fecha nem dobra o breaker.
+* **Comportamento durante o incidente:**
+  * Jornadas: com o breaker aberto, o claim exclui `(tenant, sms)` via `p_exclude`. Itens SMS ficam `waiting` no mesmo passo e **nenhuma tentativa é consumida**. Um item que recebe 101/505 no meio da execução gera `step_deferred` (`reason = provider_account`, `attempt_consumed = false`) e volta em `backoff_until`, com a execução `retrying`. E-mail e voz seguem normalmente.
+  * Campanhas: o tick para antes do próximo lote com `stop_reason = provider_unavailable`, sem mover o cursor nem marcar destinatários como falha, e grava a mensagem do breaker em `last_error`. Um destinatário recusado por conta no meio do lote é `retryable`, e o lote é cortado nele. O envio imediato ("enviar agora") deixa os destinatários pendentes para o worker.
+  * Fluxos SMS (`sms_flow_leads`): o tick não faz claim (`dispatcher_runs.stop_reason = provider_unavailable`). Um lead recusado por conta volta com `attempts` intacto.
+* **Alertas:** na abertura e, enquanto não fecha, no máximo a cada 15 min: Sentry `captureServerMessage` nível `error` (tags `job = sms_provider` e `reason = auth|no_balance`) e heartbeat **fail** de `sms_provider` (`BETTERSTACK_HEARTBEAT_SMS_PROVIDER`). Com o breaker fechado, o heartbeat recebe **ok** (no máximo 1 a cada 30 s por processo). O fechamento também manda ok, mais um evento `info` no Sentry.
+* **Painel:** em Campanhas > "Operação dos canais" (super admin), o card SMS mostra: *"Envio de SMS suspenso: provedor recusou (sem saldo/autenticação) desde HH:MM — tentando novamente às HH:MM"*.
+
+Estado atual:
+
+```sql
+select state, reason, first_opened_at, opened_at, open_count, backoff_until,
+       probe_holder, probe_started_at, last_alert_at, left(last_error, 120) as last_error
+from public.provider_circuit_breakers where channel = 'sms';
+```
+
+Depois da recarga não é preciso fazer nada: a próxima prova fecha o breaker. Para testar na hora, envie um SMS de teste pelo app: um envio aceito fecha o breaker. Só em emergência mexa na linha à mão, e apenas para antecipar a próxima prova: `update public.provider_circuit_breakers set state = 'open', backoff_until = now(), probe_holder = null where channel = 'sms';`.
+
+### 9.2 Recuperar jornadas que falharam por erro de conta
+
+Use a função `requeueProviderAccountFailures` (`src/lib/sms-provider-recovery.server.ts`), exposta ao super admin como a server function `requeueSmsProviderFailures({ since, dryRun })` em `src/lib/channel-observability.functions.ts`. Ela age no tenant operacional, roda em **dry-run por padrão** e fica auditada em `tenant_audit_logs`. Tanto ela quanto o SQL abaixo recolocam no **mesmo passo** (`waiting`, `next_run_at = now()`, `attempts = 0`) somente as inscrições que:
+
+* estão `failed` desde `since`, com `exit_reason` de erro de conta (`Short Brasil: erro de autenticacao`, `Short Brasil: saldo insuficiente`, `Provedor SMS recusou as credenciais…`);
+* são de uma jornada `active` cujo passo atual é um SMS habilitado ainda não aceito (sem `journey_step_executions` `sent`/`delivered` para o passo e a volta);
+* são de um lead que **não depositou desde a entrada** (`ultimo_deposito` ou `ftd_em` > `entered_at`, sempre), respeitando também `exit_rules.login` e `voltou_jogar` da jornada;
+* têm consentimento SMS não revogado (`channel_consents`);
+* não têm outra inscrição viva do mesmo lead na mesma jornada (reentrada).
+
+Na hora do envio, o dispatcher ainda reavalia `shouldExit`, consentimento, janela, limites e idempotência. Rode a recuperação **depois** que o breaker fechar; antes disso, os itens apenas esperam o breaker.
+
+**1) Diagnóstico (somente leitura):**
+
+```sql
+SET default_transaction_read_only = on;
+SET statement_timeout = '15s';
+with params as (select timestamptz '2026-10-15 14:38:00+00' as since),
+failed as (
+  select e.id, e.tenant_id, e.journey_id, e.player_id, e.current_position, e.loop_iteration, e.entered_at,
+         j.status::text as journey_status, coalesce(j.exit_rules, '{}'::jsonb) as exit_rules,
+         s.step_type::text as step_type, p.telefone, p.ultimo_deposito, p.ftd_em, p.ultimo_login, p.ultimo_jogo
+  from public.journey_enrollments e
+  cross join params
+  join public.journeys j on j.id = e.journey_id
+  left join public.journey_steps s on s.journey_id = e.journey_id and s.position = e.current_position and s.is_enabled
+  left join public.players p on p.id = e.player_id
+  where e.status = 'failed'
+    and e.updated_at >= params.since
+    and (e.exit_reason like 'Short Brasil: erro de autenticacao%'
+      or e.exit_reason like 'Short Brasil: saldo insuficiente%'
+      or e.exit_reason like 'Provedor SMS recusou as credenciais%')
+),
+classified as (
+  select f.*,
+    case
+      when f.journey_status <> 'active' then 'journey_inactive'
+      when f.step_type is distinct from 'sms' then 'step_not_sms'
+      when f.player_id is null or f.telefone is null then 'no_player'
+      when f.ultimo_deposito > f.entered_at or f.ftd_em > f.entered_at then 'deposited'
+      when (f.exit_rules->>'login')::boolean is true and (f.ultimo_login > f.entered_at or f.ultimo_jogo > f.entered_at) then 'exit_rule'
+      when (f.exit_rules->>'voltou_jogar')::boolean is true and f.ultimo_jogo > f.entered_at then 'exit_rule'
+      when exists (
+        select 1 from public.channel_consents c
+        where c.tenant_id = f.tenant_id and c.channel = 'sms' and c.status = 'revoked'
+          and c.subject = case when length(regexp_replace(f.telefone, '\D', '', 'g')) in (10, 11)
+                               then '55' || regexp_replace(f.telefone, '\D', '', 'g')
+                               else regexp_replace(f.telefone, '\D', '', 'g') end) then 'consent_revoked'
+      when exists (
+        select 1 from public.journey_enrollments o
+        where o.journey_id = f.journey_id and o.player_id = f.player_id and o.id <> f.id
+          and o.status in ('active', 'waiting', 'paused', 'paused_by_priority')) then 'reentered'
+      when exists (
+        select 1 from public.journey_step_executions x
+        where x.enrollment_id = f.id and x.step_position = f.current_position
+          and x.loop_iteration = f.loop_iteration and x.status in ('sent', 'delivered')) then 'already_sent'
+      else 'eligible'
+    end as decision
+  from failed f
+)
+select t.nome as tenant, j.name as journey, c.decision, count(*) as enrollments
+from classified c
+join public.tenants t on t.id = c.tenant_id
+join public.journeys j on j.id = c.journey_id
+group by 1, 2, 3
+order by 1, 3, 4 desc;
+```
+
+**2) Reenfileirar (NÃO executado; revisar antes a contagem do passo 1):**
+
+```sql
+BEGIN;
+SET LOCAL statement_timeout = '30s';
+with params as (select timestamptz '2026-10-15 14:38:00+00' as since),
+failed as (
+  select e.id, e.tenant_id, e.journey_id, e.player_id, e.current_position, e.loop_iteration, e.entered_at,
+         j.status::text as journey_status, coalesce(j.exit_rules, '{}'::jsonb) as exit_rules,
+         s.step_type::text as step_type, p.telefone, p.ultimo_deposito, p.ftd_em, p.ultimo_login, p.ultimo_jogo
+  from public.journey_enrollments e
+  cross join params
+  join public.journeys j on j.id = e.journey_id
+  left join public.journey_steps s on s.journey_id = e.journey_id and s.position = e.current_position and s.is_enabled
+  left join public.players p on p.id = e.player_id
+  where e.status = 'failed'
+    and e.updated_at >= params.since
+    and (e.exit_reason like 'Short Brasil: erro de autenticacao%'
+      or e.exit_reason like 'Short Brasil: saldo insuficiente%'
+      or e.exit_reason like 'Provedor SMS recusou as credenciais%')
+),
+classified as (
+  select f.*,
+    case
+      when f.journey_status <> 'active' then 'journey_inactive'
+      when f.step_type is distinct from 'sms' then 'step_not_sms'
+      when f.player_id is null or f.telefone is null then 'no_player'
+      when f.ultimo_deposito > f.entered_at or f.ftd_em > f.entered_at then 'deposited'
+      when (f.exit_rules->>'login')::boolean is true and (f.ultimo_login > f.entered_at or f.ultimo_jogo > f.entered_at) then 'exit_rule'
+      when (f.exit_rules->>'voltou_jogar')::boolean is true and f.ultimo_jogo > f.entered_at then 'exit_rule'
+      when exists (
+        select 1 from public.channel_consents c
+        where c.tenant_id = f.tenant_id and c.channel = 'sms' and c.status = 'revoked'
+          and c.subject = case when length(regexp_replace(f.telefone, '\D', '', 'g')) in (10, 11)
+                               then '55' || regexp_replace(f.telefone, '\D', '', 'g')
+                               else regexp_replace(f.telefone, '\D', '', 'g') end) then 'consent_revoked'
+      when exists (
+        select 1 from public.journey_enrollments o
+        where o.journey_id = f.journey_id and o.player_id = f.player_id and o.id <> f.id
+          and o.status in ('active', 'waiting', 'paused', 'paused_by_priority')) then 'reentered'
+      when exists (
+        select 1 from public.journey_step_executions x
+        where x.enrollment_id = f.id and x.step_position = f.current_position
+          and x.loop_iteration = f.loop_iteration and x.status in ('sent', 'delivered')) then 'already_sent'
+      else 'eligible'
+    end as decision
+  from failed f
+)
+, requeued as (
+  update public.journey_enrollments e
+     set status = 'waiting', next_run_at = now(), attempts = 0, exit_reason = null,
+         claimed_at = null, claimed_by = null, lease_expires_at = null,
+         metadata = coalesce(e.metadata, '{}'::jsonb) || jsonb_build_object(
+           'provider_outage_requeue', jsonb_build_object('at', now(), 'previous_exit_reason', e.exit_reason))
+    from classified c
+   where c.id = e.id and c.decision = 'eligible' and e.status = 'failed'
+  returning e.id, e.tenant_id, e.journey_id
+)
+insert into public.journey_events (tenant_id, journey_id, enrollment_id, event_type, detail)
+select tenant_id, journey_id, id, 'provider_outage_requeued', jsonb_build_object('reason', 'provider_account_outage')
+from requeued;
+-- Conferir o número de linhas inseridas (= reenfileiradas); então COMMIT (ou ROLLBACK).
+COMMIT;
+```
+
+Com o app novo, os itens que ainda estavam em retry (`waiting` com `attempts` 1–2 e último `retry_scheduled` com erro 101) **não** falham mais: a próxima recusa por conta não consome tentativa. Para zerar as tentativas deles também:
+
+```sql
+-- NÃO executado
+update public.journey_enrollments e set attempts = 0
+where e.status = 'waiting' and e.attempts > 0
+  and e.updated_at >= timestamptz '2026-10-15 14:38:00+00'
+  and exists (select 1 from public.journey_events ev
+              where ev.enrollment_id = e.id and ev.event_type = 'retry_scheduled'
+                and ev.created_at >= timestamptz '2026-10-15 14:38:00+00'
+                and ev.detail->>'error' like 'Short Brasil:%');
+```
+
+### 9.3 Campanhas atingidas (listar para reenvio, sem reenviar automaticamente)
+
+A consulta abaixo lista os destinatários de campanha com erro de conta desde o início do incidente. Quem não tem envio aceito para a mesma campanha e jogador pode receber de novo: crie uma campanha nova com a lista ou reagende a original.
+
+```sql
+SET default_transaction_read_only = on;
+select t.nome as tenant, l.trigger_name, l.player_id, l.to_phone, max(l.created_at) as last_error_at,
+       min(l.error) as error
+from public.sms_send_logs l
+join public.tenants t on t.id = l.tenant_id
+where l.created_at >= timestamptz '2026-10-15 14:38:00+00'
+  and l.status = 'error'
+  and l.trigger_name like 'campanha:%'
+  and (l.error like 'Short Brasil: erro de autenticacao%'
+    or l.error like 'Short Brasil: saldo insuficiente%'
+    or l.error like 'Provedor SMS recusou as credenciais%')
+  and not exists (
+    select 1 from public.sms_send_logs ok
+    where ok.tenant_id = l.tenant_id and ok.player_id = l.player_id
+      and ok.trigger_name = l.trigger_name and ok.status = 'sent'
+      and ok.created_at >= l.created_at)
+group by 1, 2, 3, 4
+order by 1, 2;
+```
+
+Campanhas com o cursor parado pelo breaker retomam sozinhas quando ele fecha. Para listá-las: `select id, tenant_id, status, sent_cursor, total_count, last_error from public.sms_campaigns where last_error like 'Envio de SMS suspenso%';`.
+
+Situação em 15/10/2026, por volta de 16:30 UTC (somente leitura): **nenhum** log de campanha com 101/505 (os 797 logs de erro eram todos de jornadas) e nenhum lead de fluxo SMS falhou.

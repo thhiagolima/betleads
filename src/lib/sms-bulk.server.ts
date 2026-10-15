@@ -33,7 +33,15 @@ import { assertTenantCanOperate } from "./tenant-access.server";
 import { captureServerException } from "./observability/sentry.server";
 import { normalizeConsentSubject } from "./consent.server";
 import { requireBrazilianPhone } from "./phone-normalization";
-import { transportErrorKind, type ProviderErrorKind } from "./rate-limit/transport-errors";
+import {
+  smsProviderAccountReason,
+  transportErrorKind,
+  type ProviderErrorKind,
+} from "./rate-limit/transport-errors";
+import {
+  noteSmsProviderSuccess,
+  reportSmsProviderAccountFailure,
+} from "./sms-provider-breaker.server";
 import { findAcceptedDeliveryKeys, type CampaignDb } from "./campaign-recipients.server";
 import {
   markTrackedDispatchesFailed,
@@ -262,6 +270,8 @@ type BulkMapping = {
   accepted: Map<string, string>;
   /** parceiroId -> reason, entries of this chunk explicitly reported as errors. */
   rejected: Map<string, string>;
+  /** parceiroIds rejected with an ACCOUNT code (101/505): retryable, not the lead's fault. */
+  accountRejected: Set<string>;
 };
 
 const ITEM_ERROR_CODES = new Set([101, 303, 404, 505]);
@@ -280,7 +290,7 @@ function mapBulkResponse(body: unknown, sentKeys: Set<string>): BulkMapping | nu
   if (!body || typeof body !== "object" || Array.isArray(body)) return null;
   const list = (body as Record<string, unknown>).bulk;
   if (!Array.isArray(list)) return null;
-  const mapping: BulkMapping = { accepted: new Map(), rejected: new Map() };
+  const mapping: BulkMapping = { accepted: new Map(), rejected: new Map(), accountRejected: new Set() };
   for (const entry of list) {
     if (!entry || typeof entry !== "object") continue;
     const e = entry as Record<string, unknown>;
@@ -295,6 +305,7 @@ function mapBulkResponse(body: unknown, sentKeys: Set<string>): BulkMapping | nu
     if (explicitError) {
       const detail = e.statusDetalhe ?? e.detalhe ?? e.error ?? e.erro ?? appStatus;
       mapping.rejected.set(parceiroId, `Short Brasil recusou a mensagem: ${String(detail)}`);
+      if (appStatus === 101 || appStatus === 505) mapping.accountRejected.add(parceiroId);
     } else if (id) {
       mapping.accepted.set(parceiroId, id);
     }
@@ -324,6 +335,7 @@ async function sendChunk(chunk: Prepared[]): Promise<{
       parceiroId: p.item.deliveryKey,
     })),
   };
+  const sendStartedAt = new Date();
   const call = await postBulk(payload);
 
   const refund = async (items: Prepared[], reason: string) =>
@@ -389,19 +401,16 @@ async function sendChunk(chunk: Prepared[]): Promise<{
   const mapping = mapBulkResponse(call.body, new Set(chunk.map((p) => p.item.deliveryKey)));
   if (!mapping) {
     // A request-level answer with an application code was not processed.
-    if (
-      appStatus === 101 ||
-      appStatus === 505 ||
-      call.status === 401 ||
-      call.status === 403 ||
-      call.status === 429
-    ) {
-      return wholeChunkFailed(
-        summarizeProviderError(call.status, call.body),
-        true,
-        null,
-        appStatus === 505,
-      );
+    // 101/505 and HTTP 401/402/403 refuse the ACCOUNT (incident 15/10/2026:
+    // 101 = route without balance): refunded, retryable, breaker opened.
+    const accountReason = smsProviderAccountReason(call.status, call.body);
+    if (accountReason) {
+      const reason = summarizeProviderError(call.status, call.body);
+      await reportSmsProviderAccountFailure({ reason: accountReason, error: reason, sendStartedAt });
+      return wholeChunkFailed(reason, true, "provider_account", accountReason === "no_balance");
+    }
+    if (call.status === 429) {
+      return wholeChunkFailed(summarizeProviderError(call.status, call.body), true, null);
     }
     if (appStatus === 303 || appStatus === 404 || (call.status >= 400 && call.status < 500)) {
       return wholeChunkFailed(summarizeProviderError(call.status, call.body), false, null);
@@ -416,6 +425,15 @@ async function sendChunk(chunk: Prepared[]): Promise<{
 
   const map = mapping.accepted;
   const lote = loteId(call.body);
+  if (map.size > 0) await noteSmsProviderSuccess(sendStartedAt);
+  if (mapping.accountRejected.size > 0) {
+    const first = chunk.find((p) => mapping.accountRejected.has(p.item.deliveryKey));
+    await reportSmsProviderAccountFailure({
+      reason: "auth",
+      error: first ? (mapping.rejected.get(first.item.deliveryKey) ?? "Short Brasil 101/505") : "Short Brasil 101/505",
+      sendStartedAt,
+    });
+  }
   const ok = chunk.filter((p) => map.has(p.item.deliveryKey));
   const rejected = chunk.filter((p) => !map.has(p.item.deliveryKey));
   const absentReason = "Short Brasil não aceitou esta mensagem no lote";
@@ -484,13 +502,23 @@ async function sendChunk(chunk: Prepared[]): Promise<{
             providerMessageId: map.get(p.item.deliveryKey)!,
             logId: p.logId,
           }
-        : {
-            status: "rejected" as const,
-            ok: false,
-            retryable: false,
-            error: reasonFor(p),
-            logId: p.logId,
-          },
+        : mapping.accountRejected.has(p.item.deliveryKey)
+          ? {
+              // Refunded above; the account was refused, not this number.
+              status: "failed" as const,
+              ok: false,
+              retryable: true,
+              errorKind: "provider_account" as const,
+              error: reasonFor(p),
+              logId: p.logId,
+            }
+          : {
+              status: "rejected" as const,
+              ok: false,
+              retryable: false,
+              error: reasonFor(p),
+              logId: p.logId,
+            },
     ),
   };
 }
@@ -548,11 +576,14 @@ export async function sendSmsBatch(items: SmsBatchItem[]): Promise<SmsBatchResul
           deliveryKey: item.deliveryKey,
         });
         const alreadySent = "alreadySent" in r && r.alreadySent === true;
+        const providerAccount =
+          !r.ok && (r as { errorKind?: unknown }).errorKind === "provider_account";
         outcomes[index] = {
           deliveryKey: item.deliveryKey,
           status: r.ok ? (alreadySent ? "already_sent" : "accepted") : "failed",
           ok: r.ok,
-          retryable: false,
+          retryable: providerAccount,
+          ...(providerAccount ? { errorKind: "provider_account" as const } : {}),
           error: r.ok ? undefined : (r as { error?: string }).error,
         };
       },

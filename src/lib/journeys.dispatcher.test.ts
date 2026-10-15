@@ -121,12 +121,17 @@ const monitor = vi.hoisted(() => {
 
 const sms = vi.hoisted(() => ({ sendSmsInternal: vi.fn() }));
 const voice = vi.hoisted(() => ({ callInfobipVoice: vi.fn() }));
-const sentry = vi.hoisted(() => ({ captureServerException: vi.fn() }));
+const sentry = vi.hoisted(() => ({ captureServerException: vi.fn(), captureServerMessage: vi.fn() }));
+const heartbeat = vi.hoisted(() => ({ pingHeartbeat: vi.fn(async () => undefined) }));
 
 vi.mock("@/integrations/supabase/client.server", () => ({ supabaseAdmin: fake.client }));
-vi.mock("./observability/job-monitor.server", () => ({ startJobRun: monitor.startJobRun }));
+vi.mock("./observability/job-monitor.server", () => ({
+  startJobRun: monitor.startJobRun,
+  pingHeartbeat: heartbeat.pingHeartbeat,
+}));
 vi.mock("./observability/sentry.server", () => ({
   captureServerException: sentry.captureServerException,
+  captureServerMessage: sentry.captureServerMessage,
 }));
 vi.mock("./sms.functions", () => ({ sendSmsInternal: sms.sendSmsInternal }));
 vi.mock("./email-send.server", () => ({ sendInfobipEmail: vi.fn(), resolveSender: vi.fn() }));
@@ -146,6 +151,7 @@ vi.mock("./template-vars.server", () => ({
 
 import { runJourneyDispatcher } from "./journeys.server";
 import { MAX_NO_COST_DEFERS } from "./rate-limit/provider-errors.server";
+import { __resetSmsBreakerCacheForTests } from "./sms-provider-breaker.server";
 
 const TENANT = "11111111-1111-4111-8111-111111111111";
 const JOURNEY = "33333333-3333-4333-8333-333333333333";
@@ -221,6 +227,8 @@ const rpcNames = () => fake.rpcCalls.map((call) => call.name);
 
 beforeEach(() => {
   fake.reset();
+  __resetSmsBreakerCacheForTests();
+  sentry.captureServerException.mockClear();
   monitor.finish.mockClear();
   sms.sendSmsInternal.mockReset();
   voice.callInfobipVoice.mockReset();
@@ -509,5 +517,155 @@ describe("runJourneyDispatcher", () => {
       current_position: 0,
       claimed_by: "journey-dispatcher:other",
     });
+  });
+});
+
+describe("runJourneyDispatcher with the SMS provider breaker (incident 15/10/2026)", () => {
+  const SHORT_BRASIL_101 = {
+    ok: false,
+    status: 200,
+    error: "Short Brasil: erro de autenticacao",
+    temporary: true,
+    body: JSON.stringify({ status: 101, statusDetalhe: "Erro de Autenticação" }),
+    errorKind: "provider_account",
+  };
+
+  /** Breaker row + acquire RPC as the migration would answer them. */
+  function breaker(state: "open" | "half_open", decision: "open" | "probe") {
+    const retryAt = new Date(Date.now() + 120_000).toISOString();
+    fake.tables.provider_circuit_breakers = [
+      {
+        channel: "sms",
+        state,
+        reason: "auth",
+        first_opened_at: new Date().toISOString(),
+        backoff_until: retryAt,
+      },
+    ];
+    fake.rpcs.provider_breaker_acquire = () => [
+      {
+        decision,
+        state: decision === "probe" ? "half_open" : "open",
+        reason: "auth",
+        retry_at: retryAt,
+        alert_due: false,
+      },
+    ];
+    fake.tables.tenants = [{ id: TENANT }];
+  }
+
+  /** Claim that honours p_exclude like the SQL does (`tenant:step_type`). */
+  function claimWithExclusion(stepType = "sms") {
+    const claims: Row[] = [];
+    fake.rpcs.claim_journey_enrollments_leased = (args) => {
+      claims.push(args);
+      const exclude = (args.p_exclude as string[] | null) ?? [];
+      return fake.tables.journey_enrollments
+        // Only items still at the SMS step (position 0) are due for this fake.
+        .filter((row) => row.claimed_by == null && row.status !== "failed" && row.current_position === 0)
+        .filter((row) => !exclude.includes(`${row.tenant_id}:${stepType}`))
+        .filter((row) => !row.next_run_at || Date.parse(String(row.next_run_at)) <= Date.now())
+        .slice(0, Number(args.p_limit))
+        .map((row) => {
+          row.claimed_at = new Date().toISOString();
+          row.claimed_by = args.p_worker_id;
+          return { id: row.id, tenant_id: row.tenant_id, step_type: stepType };
+        });
+    };
+    return claims;
+  }
+
+  it("101 (route without balance) defers WITHOUT consuming an attempt and never fails the item", async () => {
+    seed(["e1"]);
+    // Even at the no-cost defer cap: an account error never costs an attempt.
+    enrollment("e1").metadata = {
+      provider_deferrals: { step_position: 0, loop_iteration: 0, count: MAX_NO_COST_DEFERS },
+    };
+    sms.sendSmsInternal.mockResolvedValue(SHORT_BRASIL_101);
+    const before = Date.now();
+    const result = await runJourneyDispatcher(1000);
+    expect(result).toMatchObject({ failed: 0, processed: 0, providerSuspended: 1 });
+    const row = enrollment("e1");
+    expect(row).toMatchObject({ status: "waiting", attempts: 1, current_position: 0, claimed_by: null });
+    expect(Date.parse(String(row.next_run_at))).toBeGreaterThanOrEqual(before + 30_000);
+    expect(fake.tables.journey_step_executions[0].status).toBe("retrying");
+    expect(fake.tables.journey_events.at(-1)).toMatchObject({
+      event_type: "step_deferred",
+      detail: expect.objectContaining({ reason: "provider_account", attempt_consumed: false }),
+    });
+    expect(sentry.captureServerException).not.toHaveBeenCalled();
+  });
+
+  it("after the first 101 the rest of the run stops claiming SMS (no burst of failures)", async () => {
+    seed(["e1", "e2", "e3"]);
+    vi.stubEnv("JOURNEYS_DISPATCH_CONCURRENCY", "1");
+    fake.tables.tenants = [{ id: TENANT }];
+    const claims = claimWithExclusion();
+    sms.sendSmsInternal.mockResolvedValue(SHORT_BRASIL_101);
+    const result = await runJourneyDispatcher(1000);
+    expect(sms.sendSmsInternal).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ failed: 0, stopReason: "provider_unavailable" });
+    expect(claims.at(-1)?.p_exclude).toEqual([`${TENANT}:sms`]);
+    for (const id of ["e1", "e2", "e3"]) {
+      expect(enrollment(id)).toMatchObject({ attempts: 1, current_position: 0, claimed_by: null });
+      expect(enrollment(id).status).not.toBe("failed");
+    }
+  });
+
+  it("breaker open: the claim excludes (tenant, sms) and nothing is sent or touched", async () => {
+    seed(["e1", "e2"]);
+    breaker("open", "open");
+    const claims = claimWithExclusion();
+    const result = await runJourneyDispatcher(1000);
+    expect(sms.sendSmsInternal).not.toHaveBeenCalled();
+    expect(claims[0].p_exclude).toEqual([`${TENANT}:sms`]);
+    expect(result).toMatchObject({
+      claimed: 0,
+      failed: 0,
+      stopReason: "provider_unavailable",
+      smsBreaker: "open",
+    });
+    for (const id of ["e1", "e2"]) {
+      expect(enrollment(id)).toMatchObject({ status: "active", attempts: 1, claimed_by: null });
+    }
+    expect(fake.tables.journey_step_executions).toHaveLength(0);
+  });
+
+  it("half-open: one probe item is sent; on another refusal the others stay untouched", async () => {
+    seed(["e1", "e2", "e3"]);
+    vi.stubEnv("JOURNEYS_DISPATCH_CONCURRENCY", "3");
+    breaker("half_open", "probe");
+    claimWithExclusion();
+    sms.sendSmsInternal.mockImplementation(async () => {
+      // The probe was refused again: the breaker re-opens (as the RPC would).
+      fake.tables.provider_circuit_breakers[0].state = "open";
+      return SHORT_BRASIL_101;
+    });
+    const result = await runJourneyDispatcher(1000);
+    expect(sms.sendSmsInternal).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ failed: 0, stopReason: "provider_unavailable" });
+    for (const id of ["e1", "e2", "e3"]) {
+      expect(enrollment(id)).toMatchObject({ attempts: 1, current_position: 0, claimed_by: null });
+      expect(enrollment(id).status).not.toBe("failed");
+    }
+    const acquire = fake.rpcCalls.find((c) => c.name === "provider_breaker_acquire")!;
+    expect(String(acquire.args.p_holder)).toMatch(/^journey-dispatcher:/);
+  });
+
+  it("half-open probe accepted closes the breaker and the run resumes SMS", async () => {
+    seed(["e1", "e2"]);
+    vi.stubEnv("JOURNEYS_DISPATCH_CONCURRENCY", "1");
+    breaker("half_open", "probe");
+    claimWithExclusion();
+    sms.sendSmsInternal.mockImplementation(async () => {
+      // sendSmsInternal -> noteSmsProviderSuccess -> provider_breaker_report_success
+      fake.tables.provider_circuit_breakers[0].state = "closed";
+      return { ok: true, status: 200, response: "{}" };
+    });
+    const result = await runJourneyDispatcher(1000);
+    expect(sms.sendSmsInternal).toHaveBeenCalledTimes(2);
+    expect(result).toMatchObject({ processed: 2, failed: 0, smsBreaker: "closed" });
+    expect(enrollment("e1")).toMatchObject({ current_position: 1, attempts: 0 });
+    expect(enrollment("e2")).toMatchObject({ current_position: 1, attempts: 0 });
   });
 });

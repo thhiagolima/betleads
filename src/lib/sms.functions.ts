@@ -20,7 +20,18 @@ import {
 import type { Json } from "@/integrations/supabase/types";
 import { isChannelRevoked } from "./consent.server";
 import { requireBrazilianPhone } from "./phone-normalization";
-import { transportErrorKind, type ProviderErrorKind } from "./rate-limit/transport-errors";
+import {
+  smsProviderAccountReason,
+  transportErrorKind,
+  type ProviderErrorKind,
+} from "./rate-limit/transport-errors";
+import {
+  cachedSmsBreaker,
+  noteSmsProviderSuccess,
+  readSmsBreaker,
+  reportSmsProviderAccountFailure,
+  smsSuspendedMessage,
+} from "./sms-provider-breaker.server";
 import type { LinkTrackingContext } from "./shortio.server";
 import { conversionFunnelSnapshot } from "./conversion-funnel";
 import {
@@ -813,10 +824,24 @@ export async function sendSmsInternal(args: {
     creditReserved = true;
   }
 
+  const sendStartedAt = new Date();
   const r = await callShortBrasil(normalized, preparedContent, undefined, deliveryKey);
   const providerMessageId = r.ok ? extractProviderMessageId(r.body) : null;
   const errorSummary = r.ok ? null : summarizeProviderError(r.status, r.body);
   const isTemporary = !r.ok && (r.status === 0 || r.status === 429 || r.status >= 500);
+  // Account-level refusal (101/505, HTTP 401/402/403): not the lead's fault.
+  // Opens the SMS circuit breaker; workers defer without consuming attempts.
+  const accountReason =
+    !r.ok && r.errorKind === null && r.status > 0 ? smsProviderAccountReason(r.status, r.body) : null;
+  if (accountReason) {
+    await reportSmsProviderAccountFailure({
+      reason: accountReason,
+      error: errorSummary ?? `HTTP ${r.status}`,
+      sendStartedAt,
+    });
+  } else if (r.ok) {
+    await noteSmsProviderSuccess(sendStartedAt);
+  }
   if (!r.ok && creditReserved && billingTenantId) {
     await refundSmsCredit(
       billingTenantId,
@@ -866,9 +891,12 @@ export async function sendSmsInternal(args: {
         ok: false as const,
         status: r.status,
         error: errorSummary ?? `HTTP ${r.status}`,
-        temporary: isTemporary,
+        // provider_account is retryable later (nothing was sent, credit refunded).
+        temporary: isTemporary || accountReason !== null,
         body: JSON.stringify(r.body ?? null),
-        errorKind: r.errorKind ?? null,
+        errorKind: (accountReason ? "provider_account" : (r.errorKind ?? null)) as
+          | ProviderErrorKind
+          | null,
       };
 }
 
@@ -1189,10 +1217,24 @@ export const sendBulkSms = createServerFn({ method: "POST" })
       temporary?: boolean;
     }[] = [];
     const concurrency = 5;
+    // SMS circuit breaker: while the provider refuses the account, nothing is
+    // sent here; recipients stay pending for the campaign worker (same key).
+    const breaker = await readSmsBreaker({ force: true });
+    let providerSuspended: string | null =
+      breaker.state === "closed" ? null : smsSuspendedMessage(breaker);
     for (let i = 0; i < targets.length; i += concurrency) {
       const batch = targets.slice(i, i + concurrency);
       const batchResults = await Promise.all(
         batch.map(async (t) => {
+          if (providerSuspended) {
+            return {
+              phone: t.phone,
+              playerId: t.playerId,
+              ok: false,
+              error: providerSuspended,
+              temporary: true,
+            };
+          }
           const variables = varsByPlayer.get(t.playerId) ?? null;
           const r = await sendSmsInternal({
             to: t.phone,
@@ -1207,6 +1249,9 @@ export const sendBulkSms = createServerFn({ method: "POST" })
             // destinatário nunca chega de novo ao provedor nem à cobrança.
             deliveryKey: await campaignDeliveryKey(immediateCampaign.id, t.playerId),
           });
+          if (!r.ok && (r as { errorKind?: unknown }).errorKind === "provider_account") {
+            providerSuspended = smsSuspendedMessage(cachedSmsBreaker());
+          }
           return {
             phone: t.phone,
             playerId: t.playerId,

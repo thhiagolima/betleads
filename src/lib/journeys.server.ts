@@ -24,6 +24,15 @@ import {
   ProviderSendError,
   classifyProviderFailure,
 } from "./rate-limit/provider-errors.server";
+import {
+  BREAKER_CACHE_MS,
+  acquireSmsSendGate,
+  breakerRetryAt,
+  cachedSmsBreaker,
+  readSmsBreaker,
+  releaseSmsProbe,
+  type SmsSendGate,
+} from "./sms-provider-breaker.server";
 import { resolveDispatchWorkerConfig } from "./rate-limit/worker-config";
 import {
   journeyEntryKey,
@@ -914,6 +923,26 @@ type DispatchCounters = {
   rateLimited: number;
   outcomeUnknown: number;
   leaseLost: number;
+  /** SMS items held back (no attempt consumed) because the provider breaker is open. */
+  providerSuspended: number;
+};
+
+/**
+ * This run's view of the global SMS provider circuit breaker.
+ *   closed : SMS items are sent.
+ *   open   : SMS items are not claimed (p_exclude) / handed back untouched.
+ *   probe  : this worker holds the half-open probe: exactly ONE SMS item is
+ *            sent (probeItem); the others wait for its verdict.
+ */
+type SmsRunGate = {
+  mode: SmsSendGate["mode"];
+  holder: string;
+  probeItem: string | null;
+  heldProbe: boolean;
+  retryAt: string | null;
+  checkedAt: number;
+  /** Tenants of this run's scope, loaded only when SMS must be excluded from claims. */
+  tenantIds: string[] | null;
 };
 
 type DispatchContext = {
@@ -924,7 +953,98 @@ type DispatchContext = {
   executions: Map<string, string>;
   /** `${tenant_id}:${channel}` -> epoch ms until which its budget is exhausted. */
   exhausted: Map<string, number>;
+  sms: SmsRunGate;
 };
+
+function newSmsRunGate(holder: string): SmsRunGate {
+  return {
+    mode: "closed",
+    holder,
+    probeItem: null,
+    heldProbe: false,
+    retryAt: null,
+    checkedAt: 0,
+    tenantIds: null,
+  };
+}
+
+function applySmsGate(ctx: DispatchContext, decision: SmsSendGate) {
+  ctx.sms.mode = decision.mode;
+  ctx.sms.retryAt = decision.mode === "closed" ? null : decision.snapshot.retryAt;
+  ctx.sms.checkedAt = Date.now();
+  if (decision.mode === "probe") ctx.sms.heldProbe = true;
+}
+
+/** Re-asks the global breaker (another process may have opened/closed it). */
+async function refreshSmsGate(ctx: DispatchContext, force = false) {
+  // While our probe is in flight its verdict decides; nothing else may send.
+  if (ctx.sms.probeItem) return;
+  if (!force && Date.now() - ctx.sms.checkedAt < BREAKER_CACHE_MS) return;
+  // Claimed before awaiting so concurrent pool slots do not all re-ask at once.
+  ctx.sms.checkedAt = Date.now();
+  applySmsGate(ctx, await acquireSmsSendGate(ctx.sms.holder));
+}
+
+/** SMS must not be sent by this run right now (open, or our single probe is taken). */
+function smsBlocked(ctx: DispatchContext): boolean {
+  return ctx.sms.mode === "open" || (ctx.sms.mode === "probe" && ctx.sms.probeItem !== null);
+}
+
+/** p_exclude keys that keep SMS items out of the claim while SMS is blocked. */
+async function smsExcludeKeys(ctx: DispatchContext, scopeTenantIds: string[]): Promise<string[]> {
+  if (!smsBlocked(ctx)) return [];
+  if (!ctx.sms.tenantIds) {
+    if (scopeTenantIds.length) {
+      ctx.sms.tenantIds = scopeTenantIds;
+    } else {
+      const { data, error } = await db.from("tenants").select("id");
+      if (error) {
+        console.error("[journey dispatcher] tenant list for sms exclusion failed", error.message);
+        return [];
+      }
+      ctx.sms.tenantIds = ((data ?? []) as Array<{ id: string }>).map((row) => row.id);
+    }
+  }
+  return (ctx.sms.tenantIds ?? []).map((tenantId) => `${tenantId}:sms`);
+}
+
+/**
+ * Admission of one claimed SMS item against the breaker. Returns false when
+ * the item was handed back untouched (no attempt, no execution, next_run_at
+ * kept); the claim RPC then excludes SMS for the rest of this run.
+ */
+async function admitSmsItem(row: ClaimedRow, ctx: DispatchContext): Promise<boolean> {
+  await refreshSmsGate(ctx);
+  if (ctx.sms.mode === "closed") return true;
+  if (ctx.sms.mode === "probe" && ctx.sms.probeItem === null) {
+    ctx.sms.probeItem = row.id;
+    console.warn("[journey dispatcher] sms breaker half-open: probing with one item", {
+      enrollmentId: row.id,
+      workerId: ctx.workerId,
+    });
+    return true;
+  }
+  ctx.counters.providerSuspended++;
+  await release({ id: row.id } as EnrollmentRow, ctx, {});
+  return false;
+}
+
+/** After the probe item: learn the verdict (closed / reopened / still ours). */
+async function settleSmsProbe(row: ClaimedRow, ctx: DispatchContext) {
+  if (ctx.sms.probeItem !== row.id) return;
+  ctx.sms.probeItem = null;
+  const snapshot = await readSmsBreaker({ force: true });
+  ctx.sms.checkedAt = Date.now();
+  if (snapshot.state === "closed") {
+    ctx.sms.mode = "closed";
+    ctx.sms.retryAt = null;
+  } else if (snapshot.state === "open") {
+    ctx.sms.mode = "open";
+    ctx.sms.retryAt = snapshot.retryAt;
+  }
+  // Still half_open: the probe never got a provider verdict (exit, consent,
+  // per-lead error...): the next SMS item of this run probes instead.
+}
 
 /** step_type is the current step's channel (claim RPC since I2; may be absent). */
 type ClaimedRow = { id: string; tenant_id: string; step_type?: string | null };
@@ -1003,6 +1123,41 @@ async function handleItemFailure(row: ClaimedRow, ctx: DispatchContext, error: u
     return;
   }
   const enrollment = enrollmentRaw as EnrollmentRow & Record<string, unknown>;
+
+  if (decision.kind === "provider_account") {
+    // The provider refused the ACCOUNT (101/505, 401/402/403): every lead would
+    // get the same answer. No attempt consumed, no failure, no defer cap: the
+    // item waits for the breaker (sendSmsInternal already reported it).
+    ctx.counters.providerSuspended++;
+    if (error instanceof ProviderSendError && error.channel === "sms" && ctx.sms.probeItem !== row.id) {
+      ctx.sms.mode = "open";
+      ctx.sms.checkedAt = Date.now();
+    }
+    const snapshot = cachedSmsBreaker();
+    const retryAt = breakerRetryAt(
+      snapshot.state === "closed" ? null : snapshot,
+      decision.retryAfterMs,
+    );
+    ctx.sms.retryAt = retryAt;
+    await finishOwnExecution(ctx, row.id, {
+      status: "retrying",
+      error: message.slice(0, 1000),
+      completed_at: nowIso(),
+    });
+    // attempts and provider_deferrals intentionally unchanged.
+    await release(enrollment, ctx, { status: "waiting", next_run_at: retryAt });
+    await event(enrollment, "step_deferred", {
+      reason: decision.reason,
+      error: message.slice(0, 500),
+      retry_at: retryAt,
+      attempt_consumed: false,
+    });
+    console.warn("[journey dispatcher] provider refused the account; item deferred", {
+      enrollmentId: row.id,
+      retryAt,
+    });
+    return;
+  }
 
   if (decision.kind === "defer") {
     const deferrals = nextNoCostDeferral(enrollment);
@@ -1186,9 +1341,11 @@ async function runJourneyDispatcherMonitored(limit: number, run: JobRunHandle) {
       rateLimited: 0,
       outcomeUnknown: 0,
       leaseLost: 0,
+      providerSuspended: 0,
     },
     executions: new Map(),
     exhausted: new Map(),
+    sms: newSmsRunGate(workerId),
   };
   const owned = new Set<string>();
   let keeper: LeaseKeeper | null = null;
@@ -1208,6 +1365,8 @@ async function runJourneyDispatcherMonitored(limit: number, run: JobRunHandle) {
     });
     if (resumeError) throw new Error(resumeError.message);
     run.progress({ queue_before: queueBefore ?? 0 });
+    // Global SMS provider breaker: while open, SMS items are not claimed.
+    await refreshSmsGate(ctx, true);
 
     keeper = startLeaseKeeper({
       intervalMs: config.renewIntervalMs,
@@ -1245,8 +1404,10 @@ async function runJourneyDispatcherMonitored(limit: number, run: JobRunHandle) {
       canClaim: budget.canClaim,
       claim: async (count) => {
         for (;;) {
-          // I2: (tenant, channel) pairs whose budget is exhausted right now.
-          const exclude = exhaustedKeys(ctx);
+          // I2: (tenant, channel) pairs whose budget is exhausted right now,
+          // plus every (tenant, sms) pair while the SMS provider breaker blocks.
+          const budgetExclude = exhaustedKeys(ctx);
+          const exclude = [...budgetExclude, ...(await smsExcludeKeys(ctx, scope.tenantIds))];
           const { data, error } = await db.rpc("claim_journey_enrollments_leased", {
             p_limit: count,
             p_worker_id: workerId,
@@ -1258,7 +1419,7 @@ async function runJourneyDispatcherMonitored(limit: number, run: JobRunHandle) {
           if (error) throw new Error(error.message);
           const rows = (data ?? []) as ClaimedRow[];
           for (const row of rows) owned.add(row.id);
-          if (rows.length || !exclude.length || !budget.canClaim()) return rows;
+          if (rows.length || !budgetExclude.length || !budget.canClaim()) return rows;
           // Only budget-limited work is due: wait for the earliest refill
           // instead of ending the run as "queue_empty".
           const wakeAt = Math.min(...ctx.exhausted.values());
@@ -1283,6 +1444,11 @@ async function runJourneyDispatcherMonitored(limit: number, run: JobRunHandle) {
         let gate: ChannelGate | null = null;
         try {
           const channel = row.step_type && SEND_CHANNELS.has(row.step_type) ? row.step_type : null;
+          if (channel === "sms" && !(await admitSmsItem(row, ctx))) {
+            // Provider breaker open: handed back untouched, not part of the batch.
+            claimingSource.giveBack();
+            return;
+          }
           if (channel) {
             gate = await admitClaimedItem(row, channel, ctx);
             if (!gate) {
@@ -1296,6 +1462,7 @@ async function runJourneyDispatcherMonitored(limit: number, run: JobRunHandle) {
         } catch (error) {
           await handleItemFailure(row, ctx, error);
         } finally {
+          await settleSmsProbe(row, ctx);
           if (gate && !gate.keepPermit) await channelBudget.release(gate.admission);
           owned.delete(row.id);
           ctx.executions.delete(row.id);
@@ -1318,9 +1485,11 @@ async function runJourneyDispatcherMonitored(limit: number, run: JobRunHandle) {
     const stopReason =
       outcome === "hard_deadline"
         ? "hard_deadline"
-        : claimingSource.claimed === 0
-          ? "queue_empty"
-          : claimingSource.stopReason;
+        : ctx.sms.mode !== "closed" && (ctx.sms.mode === "open" || ctx.counters.providerSuspended > 0)
+          ? "provider_unavailable"
+          : claimingSource.claimed === 0
+            ? "queue_empty"
+            : claimingSource.stopReason;
     await run.finish({
       queue_before: queueBefore ?? 0,
       claimed: claimingSource.claimed,
@@ -1341,6 +1510,8 @@ async function runJourneyDispatcherMonitored(limit: number, run: JobRunHandle) {
       rateLimited: ctx.counters.rateLimited,
       outcomeUnknown: ctx.counters.outcomeUnknown,
       leaseLost: ctx.counters.leaseLost,
+      providerSuspended: ctx.counters.providerSuspended,
+      smsBreaker: ctx.sms.mode,
       stopReason,
       scannerSeparated: true,
     };
@@ -1363,6 +1534,8 @@ async function runJourneyDispatcherMonitored(limit: number, run: JobRunHandle) {
       for (const row of unstarted) owned.delete(row.id);
     }
     await keeper?.stop();
+    // A probe we took but never resolved goes back so the next worker can probe.
+    if (ctx.sms.heldProbe && ctx.sms.mode === "probe") await releaseSmsProbe(workerId);
     const { error: slotReleaseError } = await db.rpc("release_journey_dispatcher_slot", {
       p_slot: slot,
       p_holder: workerId,

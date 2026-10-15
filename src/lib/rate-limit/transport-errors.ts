@@ -11,10 +11,20 @@
 //                     Brasil does not deduplicate by external_id and Infobip
 //                     voice has no idempotency header, so a blind retry can
 //                     deliver twice.
+//   provider_account: the provider answered, but refused the ACCOUNT, not the
+//                     lead (Short Brasil 101 auth / 505 no balance, HTTP
+//                     401/402/403). Nothing was sent; every lead would get the
+//                     same answer. Never consumes a lead attempt: the item is
+//                     deferred and the SMS circuit breaker opens
+//                     (src/lib/sms-provider-breaker.server.ts).
 //
 // Pure module (no I/O): imported by the SMS, voice and e-mail adapters.
 
-export type ProviderErrorKind = "misconfigured" | "not_sent" | "outcome_unknown";
+export type ProviderErrorKind =
+  | "misconfigured"
+  | "not_sent"
+  | "outcome_unknown"
+  | "provider_account";
 
 // Failures that happen before a TCP connection exists (nothing was written).
 const NOT_SENT_CODES = new Set([
@@ -67,7 +77,9 @@ function messagesOf(error: unknown): string {
  * Classifies an exception thrown by fetch() (or a wrapper) for a provider
  * call. Anything that is not provably "never left" is `outcome_unknown`.
  */
-export function transportErrorKind(error: unknown): Exclude<ProviderErrorKind, "misconfigured"> {
+export function transportErrorKind(
+  error: unknown,
+): Exclude<ProviderErrorKind, "misconfigured" | "provider_account"> {
   const codes = codesOf(error);
   if (codes.some((code) => NOT_SENT_CODES.has(code))) return "not_sent";
   // A timeout/abort/reset anywhere in the chain wins over a message match.
@@ -76,5 +88,36 @@ export function transportErrorKind(error: unknown): Exclude<ProviderErrorKind, "
 }
 
 export function isProviderErrorKind(value: unknown): value is ProviderErrorKind {
-  return value === "misconfigured" || value === "not_sent" || value === "outcome_unknown";
+  return (
+    value === "misconfigured" ||
+    value === "not_sent" ||
+    value === "outcome_unknown" ||
+    value === "provider_account"
+  );
+}
+
+export type ProviderAccountReason = "auth" | "no_balance";
+
+function appStatusOf(body: unknown): number | null {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return null;
+  const raw = (body as Record<string, unknown>).status;
+  if (typeof raw === "number") return raw;
+  if (typeof raw === "string" && /^\d+$/.test(raw)) return Number(raw);
+  return null;
+}
+
+/**
+ * Account-level refusal of an SMS provider answer (HTTP status + parsed body),
+ * or null when the answer is about the lead / not a refusal. Incident
+ * 15/10/2026: Short Brasil answered `{"status":101}` (auth) for a route with
+ * no balance, so 101 and 505 are treated alike.
+ */
+export function smsProviderAccountReason(
+  httpStatus: number,
+  body: unknown,
+): ProviderAccountReason | null {
+  const app = appStatusOf(body);
+  if (app === 505 || httpStatus === 402) return "no_balance";
+  if (app === 101 || httpStatus === 401 || httpStatus === 403) return "auth";
+  return null;
 }

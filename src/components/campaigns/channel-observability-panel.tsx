@@ -149,6 +149,15 @@ function ChannelCard({
           {data.paused ? "Pausado" : healthy ? "Saudável" : "Atenção"}
         </Badge>
       </div>
+      {data.providerBreaker && (
+        <div
+          className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1.5 text-xs text-destructive"
+          role="alert"
+        >
+          <CircleAlert className="mt-0.5 size-3.5 shrink-0" />
+          <span>{data.providerBreaker.message}</span>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-2 text-xs">
         <Metric label="Pendentes" value={data.pending} />
         <Metric label="Presos" value={data.stuck} danger={data.stuck > 0} />
@@ -164,18 +173,20 @@ function ChannelCard({
         <Metric
           label="Provedor"
           value={
-            data.providerAvailable
-              ? "Disponível"
-              : data.providerConfigured
-                ? "Em backoff"
-                : "Não configurado"
+            data.providerBreaker
+              ? "Suspenso"
+              : data.providerAvailable
+                ? "Disponível"
+                : data.providerConfigured
+                  ? "Em backoff"
+                  : "Não configurado"
           }
           danger={!data.providerAvailable}
         />
       </div>
-      {(data.providerError || data.pauseReason) && (
+      {((!data.providerBreaker && data.providerError) || data.pauseReason) && (
         <p className="rounded-md bg-muted px-2 py-1.5 text-xs text-muted-foreground">
-          {data.providerError || data.pauseReason}
+          {(!data.providerBreaker && data.providerError) || data.pauseReason}
         </p>
       )}
       <Input

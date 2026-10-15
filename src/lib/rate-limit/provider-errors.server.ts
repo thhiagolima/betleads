@@ -11,6 +11,11 @@
 //             known kind) -> treat as possibly sent: keep the execution
 //             `claimed` (reserve_journey_delivery answers `in_flight` for
 //             15 min), consume an attempt, retry no sooner than 15 min.
+//   provider_account : the provider refused the ACCOUNT (Short Brasil 101 /
+//             505, HTTP 401/402/403 from the provider; errorKind
+//             `provider_account`). Not the lead's fault: never consumes an
+//             attempt, never fails the item, no MAX_NO_COST_DEFERS cap. The
+//             item waits for the SMS circuit breaker (sms-provider-breaker).
 //   fail    : definitely not accepted (invalid recipient, 4xx, request never
 //             left: DNS/ECONNREFUSED) or provider misconfigured (missing
 //             credentials) -> the caller's normal attempts/backoff policy.
@@ -24,12 +29,13 @@ import { isProviderErrorKind, type ProviderErrorKind } from "./transport-errors"
 
 export type { ProviderErrorKind } from "./transport-errors";
 
-export type ProviderFailureKind = "defer" | "unknown" | "fail";
+export type ProviderFailureKind = "defer" | "unknown" | "fail" | "provider_account";
 
 export type ProviderFailureDecision = {
   kind: ProviderFailureKind;
   reason:
     | "insufficient_credit"
+    | "provider_account"
     | "provider_rate_limited"
     | "provider_unavailable"
     | "transient_error"
@@ -49,6 +55,8 @@ export const CREDIT_DEFER_MS = 15 * 60_000;
  * window of reserve_journey_delivery (20261015111000, c_in_flight_lease).
  */
 export const OUTCOME_UNKNOWN_RETRY_MS = 15 * 60_000;
+/** Fallback wait for provider_account when the breaker state is unknown. */
+export const PROVIDER_ACCOUNT_DEFER_MS = 2 * 60_000;
 /** Consecutive no-cost defers per step before attempts start being consumed. */
 export const MAX_NO_COST_DEFERS = 10;
 const MAX_DEFER_MS = 10 * 60_000;
@@ -94,6 +102,13 @@ function parseBody(body: unknown): unknown {
 
 export function classifyProviderFailure(error: unknown): ProviderFailureDecision {
   if (error instanceof ProviderSendError) {
+    if (error.errorKind === "provider_account") {
+      return {
+        kind: "provider_account",
+        reason: "provider_account",
+        retryAfterMs: PROVIDER_ACCOUNT_DEFER_MS,
+      };
+    }
     if (error.errorKind === "misconfigured") {
       return { kind: "fail", reason: "provider_misconfigured", retryAfterMs: 0 };
     }

@@ -68,8 +68,21 @@ export type SendOutcome = {
   pendingConfirmation?: boolean;
   /** ENV-10: nothing reached the provider and resending later is safe. */
   retryable?: boolean;
+  /** The provider refused the ACCOUNT (101/505, 401/402/403): retryable, never the lead's fault. */
+  providerAccount?: boolean;
   error?: string;
 };
+
+/**
+ * SMS provider circuit breaker, asked before every batch:
+ *   closed -> normal batch; open -> the tick stops before the batch
+ *   (stop_reason provider_unavailable, cursor untouched); probe -> a batch of
+ *   ONE recipient (the half-open probe).
+ */
+export type ProviderGateDecision =
+  | { mode: "closed" }
+  | { mode: "probe" }
+  | { mode: "open"; message: string };
 
 export type CampaignSendItem = {
   target: CampaignTarget & { playerId: string };
@@ -109,6 +122,8 @@ export type CampaignDispatchDeps = {
    * When absent, `send` is called per recipient.
    */
   sendBatch?: (args: { campaign: SmsCampaignRow; items: CampaignSendItem[] }) => Promise<SendOutcome[]>;
+  /** SMS provider breaker; absent = always closed. */
+  providerGate?: () => Promise<ProviderGateDecision>;
 };
 
 export type CampaignTickResult = {
@@ -276,7 +291,17 @@ export async function processSmsCampaignTick(
       break;
     }
     const batchStartedAt = deps.now();
-    const want = campaignBatchSize(concurrency, quota - processedSendable);
+    const gate: ProviderGateDecision = deps.providerGate
+      ? await deps.providerGate()
+      : { mode: "closed" };
+    if (gate.mode === "open") {
+      // Provider refuses the account: nothing is sent, the cursor stays.
+      lastError = gate.message;
+      stop = "provider_unavailable";
+      break;
+    }
+    const want =
+      gate.mode === "probe" ? 1 : campaignBatchSize(concurrency, quota - processedSendable);
 
     // Collect the next window in cursor order: skipped (unresolved) entries are
     // free; sendable ones count towards the batch size.

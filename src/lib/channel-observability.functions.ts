@@ -6,6 +6,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import type { Json } from "@/integrations/supabase/types";
 import { resolveOperationalTenantId } from "@/lib/tenant-access.server";
 import { assertSuperAdmin } from "@/lib/provider-governance.server";
+import { smsSuspendedMessage } from "@/lib/sms-provider-breaker.server";
 
 const channelSchema = z.enum(["sms", "email", "voice"]);
 export type ObservabilityChannel = z.infer<typeof channelSchema>;
@@ -28,7 +29,59 @@ export type ChannelObservability = {
   lastWorkerAt: string | null;
   workerDelayMinutes: number | null;
   workerHealthy: boolean;
+  /** Global provider circuit breaker (SMS only); null when closed/unavailable. */
+  providerBreaker: ProviderBreakerView | null;
 };
+
+export type ProviderBreakerView = {
+  state: "open" | "half_open";
+  reason: string | null;
+  since: string | null;
+  retryAt: string | null;
+  message: string;
+};
+
+type BreakerRow = {
+  channel: string;
+  state: string;
+  reason: string | null;
+  first_opened_at: string | null;
+  backoff_until: string | null;
+  probe_started_at: string | null;
+};
+
+/** Admin banner text for an open/half-open breaker row (pure; null when closed). */
+export function providerBreakerView(row: BreakerRow | null | undefined): ProviderBreakerView | null {
+  if (!row || (row.state !== "open" && row.state !== "half_open")) return null;
+  const retryAt =
+    row.state === "half_open" && row.probe_started_at
+      ? new Date(Date.parse(row.probe_started_at) + 5 * 60_000).toISOString()
+      : row.backoff_until;
+  return {
+    state: row.state,
+    reason: row.reason,
+    since: row.first_opened_at,
+    retryAt,
+    message: smsSuspendedMessage({ since: row.first_opened_at, retryAt }),
+  };
+}
+
+/** Fail-soft: the table only exists after migration 20261015123000. */
+async function loadBreakerRows(): Promise<BreakerRow[]> {
+  try {
+    const { data, error } = await (supabaseAdmin as unknown as {
+      from: (t: string) => {
+        select: (c: string) => PromiseLike<{ data: unknown; error: { message: string } | null }>;
+      };
+    })
+      .from("provider_circuit_breakers")
+      .select("channel,state,reason,first_opened_at,backoff_until,probe_started_at");
+    if (error) return [];
+    return (data ?? []) as BreakerRow[];
+  } catch {
+    return [];
+  }
+}
 
 type StatusRow = { status: string; delivery_status?: string | null };
 type RunRow = {
@@ -129,6 +182,7 @@ export const getChannelObservability = createServerFn({ method: "GET" })
         smsLogs,
         emailLogs,
         voiceLogs,
+        breakerRows,
       ] = await Promise.all([
         supabaseAdmin
           .from("dispatch_pause_state")
@@ -193,6 +247,7 @@ export const getChannelObservability = createServerFn({ method: "GET" })
           .eq("tenant_id", tenantId)
           .gte("created_at", since)
           .limit(10_000),
+        loadBreakerRows(),
       ]);
 
       const results = [
@@ -243,7 +298,12 @@ export const getChannelObservability = createServerFn({ method: "GET" })
           ? new Date(providerRate.backoff_until).getTime() > Date.now()
           : false;
         const configured = providerConfigured(channel);
-        const providerError = backoffActive ? (providerRate?.last_provider_error ?? null) : null;
+        const breaker = providerBreakerView(
+          breakerRows.find((row) => aliases.includes(row.channel)),
+        );
+        const providerError =
+          breaker?.message ??
+          (backoffActive ? (providerRate?.last_provider_error ?? null) : null);
         return {
           channel,
           provider: channel === "sms" ? "Short Brasil" : "Infobip",
@@ -263,6 +323,7 @@ export const getChannelObservability = createServerFn({ method: "GET" })
           workerDelayMinutes,
           workerHealthy:
             workerDelayMinutes !== null && workerDelayMinutes <= 10 && !lastRun?.stop_reason,
+          providerBreaker: breaker,
         } satisfies ChannelObservability;
       });
 
@@ -378,4 +439,47 @@ export const reprocessStuckChannel = createServerFn({ method: "POST" })
       metadata: { recovered_count: recoveredIds.length, recovered_ids: recoveredIds.slice(0, 100) },
     });
     return { ok: true, recovered: recoveredIds.length };
+  });
+
+/**
+ * Incident recovery (SMS provider refused the ACCOUNT: 101/505...): requeues
+ * the operational tenant's journey enrollments that FAILED for that reason
+ * since `since`, on the same step with attempts reset, skipping depositors,
+ * exit rules, revoked consent and re-entries. Dry-run unless `dryRun: false`.
+ * Run only after the breaker closed (or the items just wait for it).
+ */
+export const requeueSmsProviderFailures = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((value: unknown) =>
+    z
+      .object({
+        since: z.string().datetime({ offset: true }),
+        dryRun: z.boolean().default(true),
+      })
+      .parse(value),
+  )
+  .handler(async ({ data, context }) => {
+    await assertSuperAdmin(context.userId);
+    const tenantId = await resolveOperationalTenantId(context.supabase);
+    const { requeueProviderAccountFailures } = await import("@/lib/sms-provider-recovery.server");
+    const report = await requeueProviderAccountFailures({
+      since: data.since,
+      tenantId,
+      dryRun: data.dryRun,
+    });
+    if (!report.dryRun) {
+      await auditOperation({
+        tenantId,
+        userId: context.userId,
+        action: "journeys.provider_outage_requeued",
+        channel: "sms",
+        metadata: {
+          since: report.since,
+          requeued: report.requeued,
+          candidates: report.candidates,
+          skipped: report.skipped,
+        },
+      });
+    }
+    return report;
   });

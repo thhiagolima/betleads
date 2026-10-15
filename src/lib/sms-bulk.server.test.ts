@@ -279,6 +279,47 @@ describe("sendSmsBatch (ENV-10, Short Brasil bulk)", () => {
     expect(credits.charged()).toBe(0);
   });
 
+  it("request-level 101 (incident 15/10: route without balance): provider_account, refunded, breaker opened", async () => {
+    settings("block");
+    const reports: Array<Record<string, unknown>> = [];
+    fake.db.onRpc("provider_breaker_report_failure", (args) => {
+      reports.push(args);
+      return { data: [{ state: "open", opened: true, open_count: 1, alert_due: false }], error: null };
+    });
+    smsBehaviour = () => Response.json({ status: 101, statusDetalhe: "Erro de Autenticação" });
+    const r = await sendSmsBatch([item(1), item(2)]);
+    expect(
+      r.outcomes.every((o) => o.status === "failed" && o.retryable && o.errorKind === "provider_account"),
+    ).toBe(true);
+    expect(credits.charged()).toBe(0);
+    expect(reports).toHaveLength(1);
+    expect(reports[0]).toMatchObject({ p_channel: "sms", p_reason: "auth" });
+  });
+
+  it("per-item 101/505 in bulk[] is retryable provider_account; a real per-item rejection stays final", async () => {
+    settings("block");
+    fake.db.onRpc("provider_breaker_report_failure", () => ({
+      data: [{ state: "open", opened: true, open_count: 1, alert_due: false }],
+      error: null,
+    }));
+    smsBehaviour = (body) =>
+      Response.json({
+        id: "lote-9",
+        bulk: body.bulk.map((b, i) =>
+          i === 0
+            ? { id: "msg-1", parceiroId: b.parceiroId }
+            : i === 1
+              ? { parceiroId: b.parceiroId, status: 505, statusDetalhe: "Saldo insuficiente" }
+              : { parceiroId: b.parceiroId, status: 303, statusDetalhe: "Numero invalido" },
+        ),
+      });
+    const r = await sendSmsBatch([item(1), item(2), item(3)]);
+    expect(r.outcomes[0]).toMatchObject({ status: "accepted", ok: true });
+    expect(r.outcomes[1]).toMatchObject({ status: "failed", retryable: true, errorKind: "provider_account" });
+    expect(r.outcomes[2]).toMatchObject({ status: "rejected", retryable: false });
+    expect(credits.charged()).toBe(1);
+  });
+
   it("missing credentials: nothing logged, charged or sent", async () => {
     vi.stubEnv("SHORT_BRASIL_SMS_USUARIO", "");
     const r = await sendSmsBatch([item(1)]);

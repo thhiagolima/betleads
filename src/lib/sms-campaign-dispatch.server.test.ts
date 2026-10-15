@@ -423,3 +423,57 @@ describe("processSmsCampaignTick with sendBatch (ENV-10 bulk)", () => {
     expect(w.batches[1]).toHaveLength(4);
   });
 });
+
+describe("processSmsCampaignTick with the SMS provider breaker (incident 15/10/2026)", () => {
+  const recipients = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ phone: phone(i), playerId: pid(i + 1) }));
+  const SUSPENDED = "Envio de SMS suspenso: provedor recusou (sem saldo/autenticação) desde 11:38 — tentando novamente às 11:40";
+
+  it("breaker open: stops before any send, cursor and counters untouched", async () => {
+    const { state, deps } = world();
+    deps.providerGate = async () => ({ mode: "open", message: SUSPENDED });
+    const r = await processSmsCampaignTick(campaign(recipients(10)), deps, { deadline: 45_000 });
+    expect(r).toMatchObject({ sent: 0, failed: 0, advanced: 0, status: "enviando", stopReason: "provider_unavailable" });
+    expect(state.sendCalls).toHaveLength(0);
+    expect(state.patches.some((p) => "sent_cursor" in p)).toBe(false);
+    expect(lastPatch(state.patches)).toMatchObject({ status: "enviando", last_error: SUSPENDED, locked_by: null });
+  });
+
+  it("half-open probe: exactly one recipient is sent, then the tick stops while still open", async () => {
+    const { state, deps } = world();
+    const gates: Array<"probe" | "open"> = ["probe", "open"];
+    deps.providerGate = async () => {
+      const mode = gates.shift() ?? "open";
+      return mode === "probe" ? { mode } : { mode, message: SUSPENDED };
+    };
+    const r = await processSmsCampaignTick(campaign(recipients(10)), deps, { deadline: 45_000 });
+    expect(state.sendCalls).toHaveLength(1);
+    expect(r).toMatchObject({ sent: 1, advanced: 1, stopReason: "provider_unavailable" });
+    expect(state.patches.filter((p) => "sent_cursor" in p).map((p) => p.sent_cursor)).toEqual([1]);
+  });
+
+  it("half-open probe accepted -> breaker closed -> the tick continues normally", async () => {
+    const { state, deps } = world();
+    let calls = 0;
+    deps.providerGate = async () => (++calls === 1 ? { mode: "probe" } : { mode: "closed" });
+    const r = await processSmsCampaignTick(campaign(recipients(10)), deps, { deadline: 45_000 });
+    expect(r).toMatchObject({ sent: 10, status: "enviado", stopReason: "done" });
+    expect(state.sendCalls).toHaveLength(10);
+  });
+
+  it("a recipient refused for the ACCOUNT (101/505) is not failed: cursor stops before it", async () => {
+    const { state, deps } = world();
+    let n = 0;
+    deps.send = async ({ deliveryKey }) => {
+      state.sendCalls.push(deliveryKey);
+      if (++n <= 2) return { ok: true };
+      return { ok: false, retryable: true, providerAccount: true, error: "Short Brasil: erro de autenticacao" };
+    };
+    deps.providerGate = async () => ({ mode: "closed" });
+    const c = campaign(recipients(5), { rate_per_minute: 5 });
+    const r = await processSmsCampaignTick(c, deps, { deadline: 45_000 });
+    expect(r).toMatchObject({ sent: 2, failed: 0, stopReason: "provider_unavailable" });
+    expect(state.patches.filter((p) => "sent_cursor" in p).map((p) => p.sent_cursor)).toEqual([2]);
+    expect(lastPatch(state.patches)).toMatchObject({ status: "enviando", last_error: "Short Brasil: erro de autenticacao" });
+  });
+});
