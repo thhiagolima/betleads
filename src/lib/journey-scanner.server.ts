@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { recordRun } from "./dispatch-rate.server";
+import { startJobRun, type JobRunHandle } from "./observability/job-monitor.server";
 import { journeyEntryKey, qualifiesForInactivity, triggerOccurrence } from "./journey-policy";
 import { resolveJourneyWorkerScope } from "./journey-worker-scope";
 import { detectTriggersForPlayer } from "./triggers.server";
@@ -250,7 +250,20 @@ export async function runJourneyScanner(options: { jobs?: number; batchSize?: nu
       failed: 0,
     };
   }
-  const startedAt = Date.now();
+  const run = await startJobRun("journey_scan", { channel: "journey_scan", kind: "tick" });
+  try {
+    return await runJourneyScannerMonitored(options, scope, run);
+  } catch (error) {
+    await run.fail(error);
+    throw error;
+  }
+}
+
+async function runJourneyScannerMonitored(
+  options: { jobs?: number; batchSize?: number },
+  scope: ReturnType<typeof resolveJourneyWorkerScope>,
+  run: JobRunHandle,
+) {
   const workerId = `journey-scanner-${randomUUID()}`;
   const configuredJobs = Number(process.env.JOURNEYS_SCANNER_JOB_LIMIT ?? 3);
   const configuredBatch = Number(process.env.JOURNEYS_SCANNER_BATCH_SIZE ?? 500);
@@ -280,6 +293,12 @@ export async function runJourneyScanner(options: { jobs?: number; batchSize?: nu
         totals.scanned += result.scanned;
         totals.eligible += result.eligible;
         totals.enrolled += result.enrolled;
+        run.progress({
+          claimed: totals.jobs,
+          sent: totals.enrolled,
+          errors: totals.failed,
+          actual_rate: totals.scanned,
+        });
       } catch (error) {
         totals.failed++;
         const message = error instanceof Error ? error.message : String(error);
@@ -292,8 +311,7 @@ export async function runJourneyScanner(options: { jobs?: number; batchSize?: nu
       }
     }),
   );
-  await recordRun(startedAt, {
-    channel: "journey_scan",
+  await run.finish({
     claimed: totals.jobs,
     sent: totals.enrolled,
     errors: totals.failed,

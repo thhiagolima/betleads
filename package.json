@@ -9,7 +9,7 @@
     "build:dev": "vite build --mode development",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "start": "node --env-file=.env .output/server/index.mjs",
+    "start": "node --env-file=.env --import ./instrument.mjs .output/server/index.mjs",
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write ."
@@ -48,6 +48,9 @@
     "@radix-ui/react-toggle": "^1.1.10",
     "@radix-ui/react-toggle-group": "^1.1.11",
     "@radix-ui/react-tooltip": "^1.2.8",
+    "@sentry/core": "11.7.0",
+    "@sentry/node": "11.7.0",
+    "@sentry/react": "11.7.0",
     "@supabase/supabase-js": "^2.106.0",
     "@tabler/icons-react": "^3.48.0",
     "@tailwindcss/vite": "^4.2.1",
@@ -85,6 +88,7 @@
   "devDependencies": {
     "@eslint/js": "^9.32.0",
     "@lovable.dev/vite-tanstack-config": "2.13.1",
+    "@sentry/vite-plugin": "^5.4.1",
     "@types/node": "^22.16.5",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",

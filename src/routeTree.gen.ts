@@ -46,6 +46,7 @@ import { Route as RelatoriosConversaoRouteImport } from './routes/relatorios.con
 import { Route as SmsTemplatesRouteImport } from './routes/sms.templates'
 import { Route as UTokenRouteImport } from './routes/u.$token'
 import { Route as ApiPublicEvolutionWebhookRouteImport } from './routes/api/public/evolution-webhook'
+import { Route as ApiPublicHealthRouteImport } from './routes/api/public/health'
 import { Route as ApiPublicSmsWebhookRouteImport } from './routes/api/public/sms-webhook'
 import { Route as CampanhasCampaignIdRelatorioRouteImport } from './routes/campanhas.$campaignId.relatorio'
 import { Route as JornadasJourneyIdRelatorioRouteImport } from './routes/jornadas.$journeyId_.relatorio'
@@ -261,6 +262,11 @@ const ApiPublicEvolutionWebhookRoute =
     path: '/api/public/evolution-webhook',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicHealthRoute = ApiPublicHealthRouteImport.update({
+  id: '/api/public/health',
+  path: '/api/public/health',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicSmsWebhookRoute = ApiPublicSmsWebhookRouteImport.update({
   id: '/api/public/sms-webhook',
   path: '/api/public/sms-webhook',
@@ -459,6 +465,7 @@ export interface FileRoutesByFullPath {
   '/sms/templates': typeof SmsTemplatesRoute
   '/u/$token': typeof UTokenRoute
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
+  '/api/public/health': typeof ApiPublicHealthRoute
   '/api/public/sms-webhook': typeof ApiPublicSmsWebhookRoute
   '/campanhas/$campaignId/relatorio': typeof CampanhasCampaignIdRelatorioRoute
   '/jornadas/$journeyId/relatorio': typeof JornadasJourneyIdRelatorioRoute
@@ -526,6 +533,7 @@ export interface FileRoutesByTo {
   '/sms/templates': typeof SmsTemplatesRoute
   '/u/$token': typeof UTokenRoute
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
+  '/api/public/health': typeof ApiPublicHealthRoute
   '/api/public/sms-webhook': typeof ApiPublicSmsWebhookRoute
   '/campanhas/$campaignId/relatorio': typeof CampanhasCampaignIdRelatorioRoute
   '/jornadas/$journeyId/relatorio': typeof JornadasJourneyIdRelatorioRoute
@@ -594,6 +602,7 @@ export interface FileRoutesById {
   '/sms/templates': typeof SmsTemplatesRoute
   '/u/$token': typeof UTokenRoute
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
+  '/api/public/health': typeof ApiPublicHealthRoute
   '/api/public/sms-webhook': typeof ApiPublicSmsWebhookRoute
   '/campanhas/$campaignId/relatorio': typeof CampanhasCampaignIdRelatorioRoute
   '/jornadas/$journeyId_/relatorio': typeof JornadasJourneyIdRelatorioRoute
@@ -663,6 +672,7 @@ export interface FileRouteTypes {
     | '/sms/templates'
     | '/u/$token'
     | '/api/public/evolution-webhook'
+    | '/api/public/health'
     | '/api/public/sms-webhook'
     | '/campanhas/$campaignId/relatorio'
     | '/jornadas/$journeyId/relatorio'
@@ -730,6 +740,7 @@ export interface FileRouteTypes {
     | '/sms/templates'
     | '/u/$token'
     | '/api/public/evolution-webhook'
+    | '/api/public/health'
     | '/api/public/sms-webhook'
     | '/campanhas/$campaignId/relatorio'
     | '/jornadas/$journeyId/relatorio'
@@ -797,6 +808,7 @@ export interface FileRouteTypes {
     | '/sms/templates'
     | '/u/$token'
     | '/api/public/evolution-webhook'
+    | '/api/public/health'
     | '/api/public/sms-webhook'
     | '/campanhas/$campaignId/relatorio'
     | '/jornadas/$journeyId_/relatorio'
@@ -856,6 +868,7 @@ export interface RootRouteChildren {
   RelatoriosConversaoRoute: typeof RelatoriosConversaoRoute
   UTokenRoute: typeof UTokenRoute
   ApiPublicEvolutionWebhookRoute: typeof ApiPublicEvolutionWebhookRoute
+  ApiPublicHealthRoute: typeof ApiPublicHealthRoute
   ApiPublicSmsWebhookRoute: typeof ApiPublicSmsWebhookRoute
   ApiPublicAutomationsDispatchRoute: typeof ApiPublicAutomationsDispatchRoute
   ApiPublicAutomationsEvaluateRoute: typeof ApiPublicAutomationsEvaluateRoute
@@ -1143,6 +1156,13 @@ declare module '@tanstack/react-router' {
       path: '/api/public/evolution-webhook'
       fullPath: '/api/public/evolution-webhook'
       preLoaderRoute: typeof ApiPublicEvolutionWebhookRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/health': {
+      id: '/api/public/health'
+      path: '/api/public/health'
+      fullPath: '/api/public/health'
+      preLoaderRoute: typeof ApiPublicHealthRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/public/sms-webhook': {
@@ -1450,6 +1470,7 @@ const rootRouteChildren: RootRouteChildren = {
   RelatoriosConversaoRoute: RelatoriosConversaoRoute,
   UTokenRoute: UTokenRoute,
   ApiPublicEvolutionWebhookRoute: ApiPublicEvolutionWebhookRoute,
+  ApiPublicHealthRoute: ApiPublicHealthRoute,
   ApiPublicSmsWebhookRoute: ApiPublicSmsWebhookRoute,
   ApiPublicAutomationsDispatchRoute: ApiPublicAutomationsDispatchRoute,
   ApiPublicAutomationsEvaluateRoute: ApiPublicAutomationsEvaluateRoute,

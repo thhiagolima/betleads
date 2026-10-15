@@ -6,6 +6,18 @@ services:
         VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
         VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY}
         VITE_PUBLIC_APP_URL: ${VITE_PUBLIC_APP_URL:-http://localhost:3000}
+        # Sentry (opcional): vazio = desligado.
+        VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
+        VITE_SENTRY_TRACES_SAMPLE_RATE: ${VITE_SENTRY_TRACES_SAMPLE_RATE:-}
+        SENTRY_ORG: ${SENTRY_ORG:-}
+        SENTRY_PROJECT: ${SENTRY_PROJECT:-}
+        SENTRY_RELEASE: ${SENTRY_RELEASE:-}
+      # Upload de source maps (opcional): exporte SENTRY_AUTH_TOKEN no shell do
+      # deploy e descomente as duas linhas abaixo + o bloco secrets no fim do
+      # arquivo. O token entra como secret de build e nao fica na imagem.
+      # Mantido comentado porque o compose pode falhar se SENTRY_AUTH_TOKEN nao existir.
+      # secrets:
+      #   - sentry_auth_token
     image: crm-betleads:local
     env_file:
       - .env
@@ -18,3 +30,7 @@ services:
     ports:
       - "3000:3000"
     restart: unless-stopped
+
+# secrets:
+#   sentry_auth_token:
+#     environment: SENTRY_AUTH_TOKEN

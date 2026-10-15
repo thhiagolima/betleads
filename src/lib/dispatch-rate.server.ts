@@ -2,6 +2,7 @@
 // Centraliza acesso a dispatch_rate_state e dispatcher_runs.
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { recordCompletedRun } from "@/lib/observability/job-monitor.server";
 
 export type Channel = "sms" | "email";
 
@@ -93,31 +94,43 @@ export type RunRecord = {
   stop_reason?: string | null;
   provider?: string | null;
   last_provider_error?: string | null;
+  /** Job name for health/heartbeats. Default: `${channel}_${kind}`. */
+  job?: string;
+  status?: "succeeded" | "failed" | "partial";
+  tenantId?: string | null;
+  /** Ping the Better Stack heartbeat for `job` (default true). */
+  heartbeat?: boolean;
 };
 
+/**
+ * Writes one already-finished run. Kept for existing callers; long-running
+ * jobs should use `startJobRun` (src/lib/observability/job-monitor.server.ts)
+ * so a hung worker leaves a 'running' row with a stale heartbeat.
+ */
 export async function recordRun(start: number, rec: RunRecord) {
-  const finished = Date.now();
-  const duration_ms = finished - start;
+  const kind = rec.kind ?? "tick";
   try {
-    await supabaseAdmin.from("dispatcher_runs").insert({
-      channel: rec.channel,
-      kind: rec.kind ?? "tick",
-      started_at: new Date(start).toISOString(),
-      finished_at: new Date(finished).toISOString(),
-      duration_ms,
-      queue_before: rec.queue_before ?? 0,
-      claimed: rec.claimed ?? 0,
-      sent: rec.sent ?? 0,
-      errors: rec.errors ?? 0,
-      rescheduled: rec.rescheduled ?? 0,
-      rate_limited: rec.rate_limited ?? 0,
-      lock_recovered: rec.lock_recovered ?? 0,
-      target_rate: rec.target_rate ?? null,
-      actual_rate: rec.actual_rate ?? (rec.sent ?? 0),
-      stop_reason: rec.stop_reason ?? null,
-      provider: rec.provider ?? null,
-      last_provider_error: rec.last_provider_error?.slice(0, 800) ?? null,
-    });
+    await recordCompletedRun(
+      rec.job ?? `${rec.channel}_${kind}`,
+      start,
+      { channel: rec.channel, kind, tenantId: rec.tenantId ?? null, provider: rec.provider },
+      {
+        status: rec.status,
+        queue_before: rec.queue_before,
+        claimed: rec.claimed,
+        sent: rec.sent,
+        errors: rec.errors,
+        rescheduled: rec.rescheduled,
+        rate_limited: rec.rate_limited,
+        lock_recovered: rec.lock_recovered,
+        target_rate: rec.target_rate,
+        actual_rate: rec.actual_rate,
+        stop_reason: rec.stop_reason,
+        provider: rec.provider,
+        last_provider_error: rec.last_provider_error,
+      },
+      { heartbeat: rec.heartbeat },
+    );
   } catch (e) {
     console.error("[dispatch-rate] recordRun insert falhou", e);
   }

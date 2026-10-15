@@ -18,6 +18,13 @@ import {
   isInsufficientFunds,
   pauseChannelForInsufficientFunds,
 } from "./dispatch-pause-insufficient.server";
+import {
+  pingHeartbeat,
+  startJobRun,
+  type JobRunHandle,
+} from "./observability/job-monitor.server";
+
+const SMS_CAMPAIGN_JOB = "sms_campaign_dispatch";
 
 /**
  * Converte (entered_at, day_offset, "HH:MM") em instante UTC,
@@ -750,18 +757,52 @@ function parseCampaignTargets(raw: unknown): CampaignTarget[] {
 export async function runScheduledSmsCampaigns({ limit = 20 }: { limit?: number } = {}) {
   // Fora da janela → deixa pra próximo tick (idem outros canais).
   const deferTo = await deferIfOutsideWindow();
-  if (deferTo) return { processed: 0, deferred_until: deferTo };
+  if (deferTo) {
+    // Idle ticks only prove liveness; they do not write dispatcher_runs rows.
+    void pingHeartbeat(SMS_CAMPAIGN_JOB, true);
+    return { processed: 0, deferred_until: deferTo };
+  }
 
   const { data: claimed, error: claimErr } = await supabaseAdmin.rpc("claim_due_sms_campaigns", {
     p_limit: limit,
   });
   if (claimErr) {
     console.error("[sms-campaigns] claim falhou", claimErr);
+    const failedRun = await startJobRun(SMS_CAMPAIGN_JOB, { channel: "sms", kind: "campaign" });
+    await failedRun.fail(new Error(`claim_due_sms_campaigns: ${claimErr.message}`), {
+      provider: "short-brasil",
+    });
     return { processed: 0, error: claimErr.message };
   }
   const campaigns = (claimed ?? []) as CampaignRow[];
-  if (campaigns.length === 0) return { processed: 0 };
+  if (campaigns.length === 0) {
+    void pingHeartbeat(SMS_CAMPAIGN_JOB, true);
+    return { processed: 0 };
+  }
 
+  const run = await startJobRun(SMS_CAMPAIGN_JOB, {
+    channel: "sms",
+    kind: "campaign",
+    provider: "short-brasil",
+  });
+  run.progress({ queue_before: campaigns.length, claimed: campaigns.length });
+  try {
+    const result = await dispatchClaimedSmsCampaigns(campaigns, run);
+    await run.finish({
+      queue_before: campaigns.length,
+      claimed: campaigns.length,
+      sent: result.sent,
+      errors: result.failed,
+      stop_reason: result.failed > 0 ? "errors" : "ok",
+    });
+    return result;
+  } catch (error) {
+    await run.fail(error);
+    throw error;
+  }
+}
+
+async function dispatchClaimedSmsCampaigns(campaigns: CampaignRow[], run: JobRunHandle) {
   const { sendSmsInternal } = await import("./sms.functions");
 
   // O worker é chamado ~12x por minuto (a cada 5s). O lote de cada rodada é
@@ -1026,6 +1067,7 @@ export async function runScheduledSmsCampaigns({ limit = 20 }: { limit?: number 
 
     totalSent += sent;
     totalFailed += failed;
+    run.progress({ sent: totalSent, errors: totalFailed });
 
     const newSent = (c.sent_count ?? 0) + sent;
     const newDeduplicated = (c.deduplicated_count ?? 0) + deduplicated;

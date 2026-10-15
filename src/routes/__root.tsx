@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   Outlet,
@@ -14,6 +15,17 @@ import { AppLayout } from "@/components/app-layout";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthGate } from "@/components/auth-gate";
 import { SystemDialogHost } from "@/components/system-dialog-host";
+import { createClientOnlyFn } from "@tanstack/react-start";
+import { captureClientException } from "@/lib/observability/sentry.client";
+
+// Compiled away on the server (import protection forbids *.client.ts there).
+const reportBoundaryError = createClientOnlyFn(
+  (error: unknown, componentStack: string | undefined) =>
+    captureClientException(error, {
+      tags: { boundary: "root_error_component" },
+      componentStack,
+    }),
+);
 
 function NotFoundComponent() {
   return (
@@ -37,9 +49,22 @@ function NotFoundComponent() {
   );
 }
 
-function ErrorComponent({ error, reset }: { error: unknown; reset: () => void }) {
+function ErrorComponent({
+  error,
+  reset,
+  info,
+}: {
+  error: unknown;
+  reset: () => void;
+  info?: { componentStack: string };
+}) {
   console.error(error);
   const router = useRouter();
+
+  // Effects only run in the browser; SSR errors are reported by the server.
+  useEffect(() => {
+    reportBoundaryError(error, info?.componentStack);
+  }, [error, info]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">

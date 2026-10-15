@@ -5,7 +5,7 @@ import { sendSmsInternal } from "./sms.functions";
 import { buildPlayerVariables, renderTemplate } from "./template-vars.server";
 import { detectTriggersForPlayer } from "./triggers.server";
 import { evaluateVoiceContactPolicy, isChannelRevoked } from "./consent.server";
-import { recordRun } from "./dispatch-rate.server";
+import { startJobRun, type JobRunHandle } from "./observability/job-monitor.server";
 import { resolveJourneyWorkerScope } from "./journey-worker-scope";
 import {
   journeyEntryKey,
@@ -705,22 +705,25 @@ async function executeEnrollment(id: string): Promise<void> {
 }
 
 export async function runJourneyDispatcher(limit = 100) {
-  const startedAt = Date.now();
+  const run = await startJobRun("journey_dispatch", { channel: "journey", kind: "tick" });
+  try {
+    return await runJourneyDispatcherMonitored(limit, run);
+  } catch (error) {
+    await run.fail(error);
+    throw error;
+  }
+}
+
+async function runJourneyDispatcherMonitored(limit: number, run: JobRunHandle) {
   // A cron may be installed before the final operational acceptance. The
   // dispatcher itself remains fail-closed until the platform enables it.
   if (process.env.JOURNEYS_DISPATCH_ENABLED !== "true") {
-    await recordRun(startedAt, {
-      channel: "journey",
-      stop_reason: "disabled",
-    });
+    await run.finish({ stop_reason: "disabled" });
     return { enrolled: 0, claimed: 0, processed: 0, failed: 0, disabled: true };
   }
   const scope = resolveJourneyWorkerScope();
   if (!scope.allowed) {
-    await recordRun(startedAt, {
-      channel: "journey",
-      stop_reason: "canary_scope_required",
-    });
+    await run.finish({ stop_reason: "canary_scope_required" });
     return {
       enrolled: 0,
       claimed: 0,
@@ -766,6 +769,7 @@ export async function runJourneyDispatcher(limit = 100) {
     p_journey_ids: scope.journeyIds,
   });
   if (error) throw new Error(error.message);
+  run.progress({ queue_before: queueBefore ?? 0, claimed: (claimed ?? []).length });
   let processed = 0;
   let failed = 0;
   const executeClaimed = async (row: { id: string }) => {
@@ -833,9 +837,9 @@ export async function runJourneyDispatcher(limit = 100) {
   const rows = (claimed ?? []) as Array<{ id: string }>;
   for (let offset = 0; offset < rows.length; offset += concurrency) {
     await Promise.all(rows.slice(offset, offset + concurrency).map(executeClaimed));
+    run.progress({ sent: processed, errors: failed });
   }
-  await recordRun(startedAt, {
-    channel: "journey",
+  await run.finish({
     queue_before: queueBefore ?? 0,
     claimed: (claimed ?? []).length,
     sent: processed,

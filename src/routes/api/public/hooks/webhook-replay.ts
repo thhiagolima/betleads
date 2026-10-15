@@ -1,6 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { requireSharedSecret } from "@/lib/cron-auth.server";
 import { getServiceClient, processWebhookEvent } from "@/lib/webhook-process.server";
+import { pingHeartbeat, startJobRun } from "@/lib/observability/job-monitor.server";
+
+const JOB = "webhook_replay";
 
 export const Route = createFileRoute("/api/public/hooks/webhook-replay")({
   server: {
@@ -47,7 +50,17 @@ export const Route = createFileRoute("/api/public/hooks/webhook-replay")({
         if (evento) query = query.eq("evento", evento);
 
         const { data: rows, error } = await query;
-        if (error) return Response.json({ ok: false, error: error.message }, { status: 500 });
+        if (error) {
+          if (!dryRun) {
+            const failedRun = await startJobRun(JOB, {
+              channel: "webhook",
+              kind: "replay",
+              tenantId: tenantId ?? null,
+            });
+            await failedRun.fail(new Error(`webhook_logs select: ${error.message}`));
+          }
+          return Response.json({ ok: false, error: error.message }, { status: 500 });
+        }
 
         const selected = rows ?? [];
         if (dryRun) {
@@ -70,32 +83,71 @@ export const Route = createFileRoute("/api/public/hooks/webhook-replay")({
           });
         }
 
+        // Empty ticks (the normal state) only prove liveness; rows are written
+        // only when there is a backlog to replay.
+        if (selected.length === 0) {
+          void pingHeartbeat(JOB, true);
+          return Response.json({
+            ok: true,
+            dry_run: false,
+            limit,
+            has_more: false,
+            scanned: 0,
+            processed: 0,
+            failed: 0,
+          });
+        }
+
+        const run = await startJobRun(JOB, {
+          channel: "webhook",
+          kind: "replay",
+          tenantId: tenantId ?? null,
+        });
+        run.progress({ queue_before: selected.length, claimed: selected.length });
         let processed = 0;
         let failed = 0;
         // Keep replay bounded. Five concurrent events are enough to drain a
         // backlog without causing the same database contention that made the
         // report endpoints time out.
         const concurrency = 5;
-        for (let offset = 0; offset < selected.length; offset += concurrency) {
-          const batch = selected.slice(offset, offset + concurrency);
-          const results = await Promise.all(
-            batch.map(async (row) => {
-              const response = await processWebhookEvent(
-                sb,
-                row.tenant_id as string,
-                row.evento as string,
-                (row.payload ?? {}) as Record<string, unknown>,
-                { mirror: true, existingLogId: row.id as string },
-              );
-              const result = await response.json().catch(() => ({ ok: false }));
-              return Boolean((result as { ok?: boolean }).ok);
-            }),
-          );
-          for (const ok of results) {
-            if (ok) processed += 1;
-            else failed += 1;
+        try {
+          for (let offset = 0; offset < selected.length; offset += concurrency) {
+            const batch = selected.slice(offset, offset + concurrency);
+            const results = await Promise.all(
+              batch.map(async (row) => {
+                const response = await processWebhookEvent(
+                  sb,
+                  row.tenant_id as string,
+                  row.evento as string,
+                  (row.payload ?? {}) as Record<string, unknown>,
+                  { mirror: true, existingLogId: row.id as string },
+                );
+                const result = await response.json().catch(() => ({ ok: false }));
+                return Boolean((result as { ok?: boolean }).ok);
+              }),
+            );
+            for (const ok of results) {
+              if (ok) processed += 1;
+              else failed += 1;
+            }
+            run.progress({ sent: processed, errors: failed });
           }
+        } catch (replayError) {
+          await run.fail(replayError, {
+            queue_before: selected.length,
+            claimed: selected.length,
+            sent: processed,
+            errors: failed,
+          });
+          throw replayError;
         }
+        await run.finish({
+          queue_before: selected.length,
+          claimed: selected.length,
+          sent: processed,
+          errors: failed,
+          stop_reason: selected.length === limit ? "has_more" : "drained",
+        });
 
         return Response.json({
           ok: true,
