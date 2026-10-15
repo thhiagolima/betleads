@@ -1,0 +1,1181 @@
+{
+ "captured_at": "2026-10-15 (read-only: pg_class.relacl, pg_proc.proacl; CON-08 + 110000/111000/113000 applied)",
+ "tables": [
+  {
+   "table": "activation_runs",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "admin_audit_logs",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "ai_feedback",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "ai_intents",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "ai_logs",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "ai_synonyms",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "ai_training_examples",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "antiban_settings",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "automation_settings",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "call_audio_generations",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "call_flow_block_sms",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "call_flow_blocks",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "call_flow_executions",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "call_flow_history",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "call_flow_post_action",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "call_flow_progress",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "call_flow_scripts",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "call_flows",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "call_history",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "call_providers",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "call_queue",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "call_script_versions",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "call_scripts",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "campaign_drafts",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "cashback_payments",
+   "acl": "anon=rDxtm/postgres,authenticated=rDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "channel_budget_buckets",
+   "acl": "service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "channel_concurrency_permits",
+   "acl": "service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "channel_consent_audit",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "channel_consents",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "channel_rate_limits",
+   "acl": "service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "click_events",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "conversion_attribution_issues",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "conversion_attributions",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "conversion_experiment_assignments",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "conversion_experiments",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "conversion_report_audit_events",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "dashboard_settings",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "deposits",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "dispatch_pause_state",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "dispatch_rate_state",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "dispatcher_runs",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "email_automations",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "email_campaigns",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "email_flow_blocks",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "email_flow_leads",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "email_flow_logs",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "email_flows",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "email_send_logs",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "email_senders",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "email_smtp_configs",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "email_template_versions",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "email_templates",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "email_unsubscribe_tokens",
+   "acl": "service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "events",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "experts",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "financial_webhook_attempts",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "flow_blocks",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "flow_leads",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "flow_logs",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "flow_templates",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "flows",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "gamification_settings",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "journey_contact_limits",
+   "acl": "anon=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "journey_dispatcher_slots",
+   "acl": "service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "journey_enrollments",
+   "acl": "anon=arwdDxtm/postgres,authenticated=rDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "journey_events",
+   "acl": "anon=arwdDxtm/postgres,authenticated=rDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "journey_scan_jobs",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "journey_step_executions",
+   "acl": "anon=arwdDxtm/postgres,authenticated=rDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "journey_steps",
+   "acl": "anon=arwdDxtm/postgres,authenticated=rDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "journey_voice_assets",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "journeys",
+   "acl": "anon=arwdDxtm/postgres,authenticated=rDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "lead_alerts",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "lead_followups",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "lead_whatsapp_assignments",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "link_click_snapshots",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "link_dispatches",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "link_tracking_sync_runs",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "marketing_ad_metrics_daily",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "marketing_integrations",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "meta_ad_accounts",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "meta_connection_audit",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "meta_connections",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "meta_oauth_states",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "meta_sync_jobs",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "meta_sync_runs",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "platform_pricing",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "player_attributions",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "players",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "precall_campaigns",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "precall_leads",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "precall_templates",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "rules",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "send_window_settings",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "sessions",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "shortio_settings",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "sms_audiences",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "sms_campaigns",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "sms_credit_ledger",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "sms_credit_orders",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "sms_credit_packages",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "sms_credit_settings",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "sms_flow_daily_usage",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "sms_flow_leads",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "sms_flow_steps",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "sms_flows",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "sms_send_logs",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "sms_suppressions",
+   "acl": "service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "sms_template_versions",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "sms_templates",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "suppressed_emails",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "system_alerts",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "tenant_audit_logs",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "tenant_daily_metrics",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "tenant_sms_credit_balances",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "tenant_sms_pricing",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "tenants",
+   "acl": "anon=arwdDxtm/postgres,authenticated=awdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "tracked_links",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "user_roles",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "voice_contact_policies",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "webhook_configs",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "webhook_event_receipts",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "webhook_logs",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "whatsapp_chats",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "whatsapp_external_events",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "whatsapp_external_integrations",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "whatsapp_messages",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "whatsapp_proxies",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "whatsapp_proxy_logs",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "whatsapp_sessions",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  },
+  {
+   "table": "withdrawals",
+   "acl": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+  }
+ ],
+ "functions": [
+  {
+   "sig": "accessible_tenant_ids()",
+   "secdef": true,
+   "trigger": false,
+   "acl": "authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "acquire_channel_slot(uuid,text,text,integer,text)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "acquire_journey_dispatcher_slot(text,integer,integer)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "admin_adjust_sms_credits(uuid,integer,text,text)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "admin_clear_tenant_sms_pricing(uuid)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "admin_list_users_with_usage(timestamp with time zone,timestamp with time zone)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "admin_mark_sms_credit_order_paid(uuid,text,text,jsonb)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "admin_platform_metrics(timestamp with time zone,timestamp with time zone)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "admin_set_sms_credit_settings(numeric,numeric,integer,integer)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "admin_set_tenant_sms_pricing(uuid,numeric,numeric)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "admin_sms_credit_overview()",
+   "secdef": true,
+   "trigger": false,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "apply_first_party_click_to_dispatch()",
+   "secdef": true,
+   "trigger": true,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "apply_sms_credit_mutation(uuid,integer,text,text,text,text,text,jsonb,uuid)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "assign_conversion_experiment()",
+   "secdef": true,
+   "trigger": true,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "bump_call_script_version()",
+   "secdef": false,
+   "trigger": true,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "bump_email_template_version()",
+   "secdef": false,
+   "trigger": true,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "bump_sms_template_version()",
+   "secdef": false,
+   "trigger": true,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "capture_call_script_version()",
+   "secdef": true,
+   "trigger": true,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "capture_email_template_version()",
+   "secdef": true,
+   "trigger": true,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "capture_sms_template_version()",
+   "secdef": true,
+   "trigger": true,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "channel_rate_limit_for(uuid,text,text)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "check_contact_frequency_limit(uuid,uuid)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "claim_call_flow_progress(integer)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "claim_due_email_campaigns(integer)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "claim_due_journey_enrollments(integer,uuid[],uuid[])",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "claim_due_journey_enrollments(integer)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "claim_due_sms_campaigns(integer)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "claim_email_flow_leads(integer)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "claim_journey_enrollments_leased(integer,text,integer,uuid[],uuid[],text[])",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "claim_journey_scan_jobs(integer,text,integer,uuid[],uuid[])",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "claim_journey_scan_jobs(integer,text,integer)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "claim_meta_sync_jobs(integer,text)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "claim_sms_flow_leads(integer)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "claim_webhook_event(uuid,text,text)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "claim_webhook_logs_for_replay(integer,interval,integer,uuid,text,text[],integer,boolean)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "complete_journey_scan_job_batch(uuid,text,uuid,boolean,integer,integer,integer,integer,integer)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "consume_channel_budget(uuid,text,integer,text)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "consume_dispatch_budget(text,integer)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "create_sms_credit_checkout(uuid,uuid,integer)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "current_tenant_id()",
+   "secdef": true,
+   "trigger": false,
+   "acl": "authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "dashboard_summary_v2(uuid,timestamp with time zone,timestamp with time zone,timestamp with time zone,timestamp with time zone,timestamp with time zone)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "dashboard_totals(uuid,timestamp with time zone,timestamp with time zone,timestamp with time zone)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "fail_journey_scan_job(uuid,text,text)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "flows_set_activated_at()",
+   "secdef": false,
+   "trigger": true,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "gamification_snapshot_v2(uuid)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "get_my_webhook_token(uuid)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "get_players_alert_ids()",
+   "secdef": false,
+   "trigger": false,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "get_tenant_webhook_token(uuid)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "get_webhook_config_secret(uuid)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "has_role(uuid,app_role)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres,authenticated=X/postgres"
+  },
+  {
+   "sig": "has_tenant_access(uuid,uuid)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "increment_player_totals(uuid,numeric,numeric,boolean,boolean,boolean)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "is_super_admin(uuid)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "is_tenant_admin(uuid)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "is_tenant_owner(uuid)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "journey_eligible_lead_count(uuid,uuid)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "journey_level_for_total(uuid,numeric)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "journey_metrics(uuid,uuid)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "list_journey_metrics(uuid)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "normalize_brazilian_phone(text)",
+   "secdef": false,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "normalize_player_phone_before_write()",
+   "secdef": false,
+   "trigger": true,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "observability_job_health()",
+   "secdef": false,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "observability_queue_metrics()",
+   "secdef": false,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "player_filter_contextual_facets_v1(uuid,text[],text,text,text,text,text,timestamp with time zone,timestamp with time zone)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "player_filter_facets_v1(uuid,text,text)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "player_filter_facets_v1(uuid)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "player_matches_behavior_filters(players,text[],text,numeric)",
+   "secdef": false,
+   "trigger": false,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "players_by_behavior_filters(text[],text,numeric)",
+   "secdef": false,
+   "trigger": false,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "prevent_conversion_funnel_snapshot_rewrite()",
+   "secdef": false,
+   "trigger": true,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "reconcile_meta_attributions(uuid)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "record_financial_webhook_batch(jsonb)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "record_financial_webhook_event(uuid,uuid,text,text,text,numeric,text,text,text,timestamp with time zone,jsonb)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "recover_orphaned_journey_claims()",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "recover_stuck_email_campaigns()",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "recover_stuck_email_leads()",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "recover_stuck_sms_campaigns()",
+   "secdef": true,
+   "trigger": false,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "recover_stuck_sms_leads()",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "refresh_daily_metric_from_row()",
+   "secdef": true,
+   "trigger": true,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "refresh_dashboard_daily_metric(uuid,date)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "refresh_dashboard_daily_metrics_range(uuid,date,date)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "refresh_financial_daily_metrics_statement()",
+   "secdef": true,
+   "trigger": true,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "refresh_player_daily_metrics_statement()",
+   "secdef": true,
+   "trigger": true,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "refresh_recent_dashboard_metrics()",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "refresh_tenant_daily_metric_day(uuid,date)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "refund_sms_credits(uuid,integer,text,text,text,text)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "register_provider_throttle(text,integer,text)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "release_channel_slot(uuid)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "release_journey_dispatcher_slot(integer,text)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "release_journey_enrollment_claims(text,uuid[])",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "renew_journey_dispatch_leases(text,integer,uuid[],integer)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "reserve_journey_delivery_with_contact_limits(uuid,uuid,uuid,uuid,integer,uuid,text,integer,integer)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "reserve_journey_delivery(uuid,uuid,uuid,uuid,integer,uuid,text,integer,integer)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "reserve_sms_credits(uuid,integer,text,text,text)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "reserve_sms_flow_daily_slot(uuid,uuid,integer,date)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "resolve_campaign_channel_eligibility(uuid,text,jsonb)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "resolve_conversion_experiment(uuid,text,uuid,text,uuid)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "resolve_last_attributable_click(uuid,uuid,timestamp with time zone)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "resolve_sms_audience_v2(uuid,jsonb)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "resume_priority_paused_journeys(integer)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "save_journey_draft(uuid,uuid,uuid,jsonb,jsonb)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "set_updated_at()",
+   "secdef": false,
+   "trigger": true,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "set_voice_asset_archived_at()",
+   "secdef": false,
+   "trigger": true,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "sms_audience_player_matches(numeric,timestamp with time zone,timestamp with time zone,timestamp with time zone,timestamp with time zone,timestamp with time zone,boolean,boolean,boolean,jsonb,jsonb,integer,integer)",
+   "secdef": false,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "sms_credit_summary(uuid)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "sms_effective_pricing(uuid)",
+   "secdef": true,
+   "trigger": false,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "sync_journey_scan_jobs()",
+   "secdef": true,
+   "trigger": false,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "transition_journey_level_on_deposit()",
+   "secdef": true,
+   "trigger": true,
+   "acl": "service_role=X/postgres"
+  },
+  {
+   "sig": "update_updated_at_column()",
+   "secdef": false,
+   "trigger": true,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  },
+  {
+   "sig": "validate_conversion_dispatch_source()",
+   "secdef": true,
+   "trigger": true,
+   "acl": "=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres"
+  }
+ ]
+}

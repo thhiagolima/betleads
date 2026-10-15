@@ -1,0 +1,1513 @@
+table	persona	header	phase	select_visible	select_secret_visible	insert_ok	update_ok	delete_ok	move_ok	promote_gestor_ok	promote_admin_ok
+automation_settings	super_admin	none	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+automation_settings	super_admin	none	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+automation_settings	super_admin	hdr_A	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+automation_settings	super_admin	hdr_A	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+automation_settings	super_admin	hdr_B	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+automation_settings	super_admin	hdr_B	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+automation_settings	super_admin	hdr_C	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+automation_settings	super_admin	hdr_C	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+automation_settings	super_admin	hdr_garbage	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+automation_settings	super_admin	hdr_garbage	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+automation_settings	admin_A	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+automation_settings	admin_A	none	sec01(=)	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+automation_settings	admin_A	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+automation_settings	admin_A	hdr_A	sec01(=)	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+automation_settings	admin_A	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+automation_settings	admin_A	hdr_B	sec01(=)	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+automation_settings	admin_A	hdr_C	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+automation_settings	admin_A	hdr_C	sec01(=)	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+automation_settings	admin_A	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+automation_settings	admin_A	hdr_garbage	sec01(=)	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+automation_settings	gestor_A	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+automation_settings	gestor_A	none	sec01(=)	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+automation_settings	gestor_A	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+automation_settings	gestor_A	hdr_A	sec01(=)	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+automation_settings	gestor_A	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+automation_settings	gestor_A	hdr_B	sec01(=)	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+automation_settings	gestor_A	hdr_C	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+automation_settings	gestor_A	hdr_C	sec01(=)	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+automation_settings	gestor_A	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+automation_settings	gestor_A	hdr_garbage	sec01(=)	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+automation_settings	member_A	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+automation_settings	member_A	none	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+automation_settings	member_A	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+automation_settings	member_A	hdr_A	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+automation_settings	member_A	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+automation_settings	member_A	hdr_B	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+automation_settings	member_A	hdr_C	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+automation_settings	member_A	hdr_C	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+automation_settings	member_A	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+automation_settings	member_A	hdr_garbage	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+automation_settings	gestor_B	none	con08	B		B	B	B	-	-	-
+automation_settings	gestor_B	none	sec01(=)	B		B	B	B	-	-	-
+automation_settings	gestor_B	hdr_A	con08	B		B	B	B	-	-	-
+automation_settings	gestor_B	hdr_A	sec01(=)	B		B	B	B	-	-	-
+automation_settings	gestor_B	hdr_B	con08	B		B	B	B	-	-	-
+automation_settings	gestor_B	hdr_B	sec01(=)	B		B	B	B	-	-	-
+automation_settings	gestor_B	hdr_C	con08	B		B	B	B	-	-	-
+automation_settings	gestor_B	hdr_C	sec01(=)	B		B	B	B	-	-	-
+automation_settings	gestor_B	hdr_garbage	con08	B		B	B	B	-	-	-
+automation_settings	gestor_B	hdr_garbage	sec01(=)	B		B	B	B	-	-	-
+automation_settings	admin_B	none	con08	B		B	B	B	-	-	-
+automation_settings	admin_B	none	sec01(=)	B		B	B	B	-	-	-
+automation_settings	admin_B	hdr_A	con08	B		B	B	B	-	-	-
+automation_settings	admin_B	hdr_A	sec01(=)	B		B	B	B	-	-	-
+automation_settings	admin_B	hdr_B	con08	B		B	B	B	-	-	-
+automation_settings	admin_B	hdr_B	sec01(=)	B		B	B	B	-	-	-
+automation_settings	admin_B	hdr_C	con08	B		B	B	B	-	-	-
+automation_settings	admin_B	hdr_C	sec01(=)	B		B	B	B	-	-	-
+automation_settings	admin_B	hdr_garbage	con08	B		B	B	B	-	-	-
+automation_settings	admin_B	hdr_garbage	sec01(=)	B		B	B	B	-	-	-
+automation_settings	multi_mA_aC	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+automation_settings	multi_mA_aC	none	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+automation_settings	multi_mA_aC	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+automation_settings	multi_mA_aC	hdr_A	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+automation_settings	multi_mA_aC	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+automation_settings	multi_mA_aC	hdr_B	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+automation_settings	multi_mA_aC	hdr_C	con08	C		C	C	C	-	-	-
+automation_settings	multi_mA_aC	hdr_C	sec01(=)	C		C	C	C	-	-	-
+automation_settings	multi_mA_aC	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+automation_settings	multi_mA_aC	hdr_garbage	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+automation_settings	no_role	none	con08	∅		-	-	-	-	-	-
+automation_settings	no_role	none	sec01(=)	∅		-	-	-	-	-	-
+automation_settings	no_role	hdr_A	con08	∅		-	-	-	-	-	-
+automation_settings	no_role	hdr_A	sec01(=)	∅		-	-	-	-	-	-
+automation_settings	no_role	hdr_B	con08	∅		-	-	-	-	-	-
+automation_settings	no_role	hdr_B	sec01(=)	∅		-	-	-	-	-	-
+automation_settings	no_role	hdr_C	con08	∅		-	-	-	-	-	-
+automation_settings	no_role	hdr_C	sec01(=)	∅		-	-	-	-	-	-
+automation_settings	no_role	hdr_garbage	con08	∅		-	-	-	-	-	-
+automation_settings	no_role	hdr_garbage	sec01(=)	∅		-	-	-	-	-	-
+automation_settings	anon	none	con08	∅		-	-	-	-	-	-
+automation_settings	anon	none	sec01(=)	∅		-	-	-	-	-	-
+automation_settings	anon	hdr_A	con08	∅		-	-	-	-	-	-
+automation_settings	anon	hdr_A	sec01(=)	∅		-	-	-	-	-	-
+call_providers	super_admin	none	con08	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+call_providers	super_admin	none	sec01(DIFF)	A,A_sent,B,C,NULL	ERR:42501	A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+call_providers	super_admin	hdr_A	con08	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+call_providers	super_admin	hdr_A	sec01(DIFF)	A,A_sent,B,C,NULL	ERR:42501	A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+call_providers	super_admin	hdr_B	con08	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+call_providers	super_admin	hdr_B	sec01(DIFF)	A,A_sent,B,C,NULL	ERR:42501	A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+call_providers	super_admin	hdr_C	con08	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+call_providers	super_admin	hdr_C	sec01(DIFF)	A,A_sent,B,C,NULL	ERR:42501	A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+call_providers	super_admin	hdr_garbage	con08	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+call_providers	super_admin	hdr_garbage	sec01(DIFF)	A,A_sent,B,C,NULL	ERR:42501	A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+call_providers	admin_A	none	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+call_providers	admin_A	none	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+call_providers	admin_A	hdr_A	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+call_providers	admin_A	hdr_A	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+call_providers	admin_A	hdr_B	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+call_providers	admin_A	hdr_B	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+call_providers	admin_A	hdr_C	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+call_providers	admin_A	hdr_C	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+call_providers	admin_A	hdr_garbage	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+call_providers	admin_A	hdr_garbage	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+call_providers	gestor_A	none	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+call_providers	gestor_A	none	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+call_providers	gestor_A	hdr_A	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+call_providers	gestor_A	hdr_A	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+call_providers	gestor_A	hdr_B	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+call_providers	gestor_A	hdr_B	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+call_providers	gestor_A	hdr_C	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+call_providers	gestor_A	hdr_C	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+call_providers	gestor_A	hdr_garbage	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+call_providers	gestor_A	hdr_garbage	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+call_providers	member_A	none	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+call_providers	member_A	none	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+call_providers	member_A	hdr_A	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+call_providers	member_A	hdr_A	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+call_providers	member_A	hdr_B	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+call_providers	member_A	hdr_B	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+call_providers	member_A	hdr_C	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+call_providers	member_A	hdr_C	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+call_providers	member_A	hdr_garbage	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+call_providers	member_A	hdr_garbage	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+call_providers	gestor_B	none	con08	B	B	B	B	B	-	-	-
+call_providers	gestor_B	none	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+call_providers	gestor_B	hdr_A	con08	B	B	B	B	B	-	-	-
+call_providers	gestor_B	hdr_A	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+call_providers	gestor_B	hdr_B	con08	B	B	B	B	B	-	-	-
+call_providers	gestor_B	hdr_B	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+call_providers	gestor_B	hdr_C	con08	B	B	B	B	B	-	-	-
+call_providers	gestor_B	hdr_C	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+call_providers	gestor_B	hdr_garbage	con08	B	B	B	B	B	-	-	-
+call_providers	gestor_B	hdr_garbage	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+call_providers	admin_B	none	con08	B	B	B	B	B	-	-	-
+call_providers	admin_B	none	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+call_providers	admin_B	hdr_A	con08	B	B	B	B	B	-	-	-
+call_providers	admin_B	hdr_A	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+call_providers	admin_B	hdr_B	con08	B	B	B	B	B	-	-	-
+call_providers	admin_B	hdr_B	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+call_providers	admin_B	hdr_C	con08	B	B	B	B	B	-	-	-
+call_providers	admin_B	hdr_C	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+call_providers	admin_B	hdr_garbage	con08	B	B	B	B	B	-	-	-
+call_providers	admin_B	hdr_garbage	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+call_providers	multi_mA_aC	none	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+call_providers	multi_mA_aC	none	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+call_providers	multi_mA_aC	hdr_A	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+call_providers	multi_mA_aC	hdr_A	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+call_providers	multi_mA_aC	hdr_B	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+call_providers	multi_mA_aC	hdr_B	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+call_providers	multi_mA_aC	hdr_C	con08	C	C	C	C	C	-	-	-
+call_providers	multi_mA_aC	hdr_C	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+call_providers	multi_mA_aC	hdr_garbage	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+call_providers	multi_mA_aC	hdr_garbage	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+call_providers	no_role	none	con08	∅	∅	-	-	-	-	-	-
+call_providers	no_role	none	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+call_providers	no_role	hdr_A	con08	∅	∅	-	-	-	-	-	-
+call_providers	no_role	hdr_A	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+call_providers	no_role	hdr_B	con08	∅	∅	-	-	-	-	-	-
+call_providers	no_role	hdr_B	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+call_providers	no_role	hdr_C	con08	∅	∅	-	-	-	-	-	-
+call_providers	no_role	hdr_C	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+call_providers	no_role	hdr_garbage	con08	∅	∅	-	-	-	-	-	-
+call_providers	no_role	hdr_garbage	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+call_providers	anon	none	con08	∅	∅	-	-	-	-	-	-
+call_providers	anon	none	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+call_providers	anon	hdr_A	con08	∅	∅	-	-	-	-	-	-
+call_providers	anon	hdr_A	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+dashboard_settings	super_admin	none	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+dashboard_settings	super_admin	none	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+dashboard_settings	super_admin	hdr_A	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+dashboard_settings	super_admin	hdr_A	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+dashboard_settings	super_admin	hdr_B	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+dashboard_settings	super_admin	hdr_B	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+dashboard_settings	super_admin	hdr_C	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+dashboard_settings	super_admin	hdr_C	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+dashboard_settings	super_admin	hdr_garbage	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+dashboard_settings	super_admin	hdr_garbage	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+dashboard_settings	admin_A	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+dashboard_settings	admin_A	none	sec01(=)	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+dashboard_settings	admin_A	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+dashboard_settings	admin_A	hdr_A	sec01(=)	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+dashboard_settings	admin_A	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+dashboard_settings	admin_A	hdr_B	sec01(=)	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+dashboard_settings	admin_A	hdr_C	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+dashboard_settings	admin_A	hdr_C	sec01(=)	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+dashboard_settings	admin_A	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+dashboard_settings	admin_A	hdr_garbage	sec01(=)	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+dashboard_settings	gestor_A	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+dashboard_settings	gestor_A	none	sec01(=)	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+dashboard_settings	gestor_A	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+dashboard_settings	gestor_A	hdr_A	sec01(=)	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+dashboard_settings	gestor_A	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+dashboard_settings	gestor_A	hdr_B	sec01(=)	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+dashboard_settings	gestor_A	hdr_C	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+dashboard_settings	gestor_A	hdr_C	sec01(=)	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+dashboard_settings	gestor_A	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+dashboard_settings	gestor_A	hdr_garbage	sec01(=)	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+dashboard_settings	member_A	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+dashboard_settings	member_A	none	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+dashboard_settings	member_A	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+dashboard_settings	member_A	hdr_A	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+dashboard_settings	member_A	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+dashboard_settings	member_A	hdr_B	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+dashboard_settings	member_A	hdr_C	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+dashboard_settings	member_A	hdr_C	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+dashboard_settings	member_A	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+dashboard_settings	member_A	hdr_garbage	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+dashboard_settings	gestor_B	none	con08	B		B	B	B	-	-	-
+dashboard_settings	gestor_B	none	sec01(=)	B		B	B	B	-	-	-
+dashboard_settings	gestor_B	hdr_A	con08	B		B	B	B	-	-	-
+dashboard_settings	gestor_B	hdr_A	sec01(=)	B		B	B	B	-	-	-
+dashboard_settings	gestor_B	hdr_B	con08	B		B	B	B	-	-	-
+dashboard_settings	gestor_B	hdr_B	sec01(=)	B		B	B	B	-	-	-
+dashboard_settings	gestor_B	hdr_C	con08	B		B	B	B	-	-	-
+dashboard_settings	gestor_B	hdr_C	sec01(=)	B		B	B	B	-	-	-
+dashboard_settings	gestor_B	hdr_garbage	con08	B		B	B	B	-	-	-
+dashboard_settings	gestor_B	hdr_garbage	sec01(=)	B		B	B	B	-	-	-
+dashboard_settings	admin_B	none	con08	B		B	B	B	-	-	-
+dashboard_settings	admin_B	none	sec01(=)	B		B	B	B	-	-	-
+dashboard_settings	admin_B	hdr_A	con08	B		B	B	B	-	-	-
+dashboard_settings	admin_B	hdr_A	sec01(=)	B		B	B	B	-	-	-
+dashboard_settings	admin_B	hdr_B	con08	B		B	B	B	-	-	-
+dashboard_settings	admin_B	hdr_B	sec01(=)	B		B	B	B	-	-	-
+dashboard_settings	admin_B	hdr_C	con08	B		B	B	B	-	-	-
+dashboard_settings	admin_B	hdr_C	sec01(=)	B		B	B	B	-	-	-
+dashboard_settings	admin_B	hdr_garbage	con08	B		B	B	B	-	-	-
+dashboard_settings	admin_B	hdr_garbage	sec01(=)	B		B	B	B	-	-	-
+dashboard_settings	multi_mA_aC	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+dashboard_settings	multi_mA_aC	none	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+dashboard_settings	multi_mA_aC	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+dashboard_settings	multi_mA_aC	hdr_A	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+dashboard_settings	multi_mA_aC	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+dashboard_settings	multi_mA_aC	hdr_B	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+dashboard_settings	multi_mA_aC	hdr_C	con08	C		C	C	C	-	-	-
+dashboard_settings	multi_mA_aC	hdr_C	sec01(=)	C		C	C	C	-	-	-
+dashboard_settings	multi_mA_aC	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+dashboard_settings	multi_mA_aC	hdr_garbage	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+dashboard_settings	no_role	none	con08	∅		-	-	-	-	-	-
+dashboard_settings	no_role	none	sec01(=)	∅		-	-	-	-	-	-
+dashboard_settings	no_role	hdr_A	con08	∅		-	-	-	-	-	-
+dashboard_settings	no_role	hdr_A	sec01(=)	∅		-	-	-	-	-	-
+dashboard_settings	no_role	hdr_B	con08	∅		-	-	-	-	-	-
+dashboard_settings	no_role	hdr_B	sec01(=)	∅		-	-	-	-	-	-
+dashboard_settings	no_role	hdr_C	con08	∅		-	-	-	-	-	-
+dashboard_settings	no_role	hdr_C	sec01(=)	∅		-	-	-	-	-	-
+dashboard_settings	no_role	hdr_garbage	con08	∅		-	-	-	-	-	-
+dashboard_settings	no_role	hdr_garbage	sec01(=)	∅		-	-	-	-	-	-
+dashboard_settings	anon	none	con08	∅		-	-	-	-	-	-
+dashboard_settings	anon	none	sec01(=)	∅		-	-	-	-	-	-
+dashboard_settings	anon	hdr_A	con08	∅		-	-	-	-	-	-
+dashboard_settings	anon	hdr_A	sec01(=)	∅		-	-	-	-	-	-
+deposits	super_admin	none	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+deposits	super_admin	none	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+deposits	super_admin	hdr_A	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+deposits	super_admin	hdr_A	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+deposits	super_admin	hdr_B	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+deposits	super_admin	hdr_B	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+deposits	super_admin	hdr_C	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+deposits	super_admin	hdr_C	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+deposits	super_admin	hdr_garbage	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+deposits	super_admin	hdr_garbage	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+deposits	admin_A	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+deposits	admin_A	none	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+deposits	admin_A	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+deposits	admin_A	hdr_A	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+deposits	admin_A	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+deposits	admin_A	hdr_B	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+deposits	admin_A	hdr_C	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+deposits	admin_A	hdr_C	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+deposits	admin_A	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+deposits	admin_A	hdr_garbage	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+deposits	gestor_A	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+deposits	gestor_A	none	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+deposits	gestor_A	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+deposits	gestor_A	hdr_A	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+deposits	gestor_A	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+deposits	gestor_A	hdr_B	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+deposits	gestor_A	hdr_C	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+deposits	gestor_A	hdr_C	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+deposits	gestor_A	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+deposits	gestor_A	hdr_garbage	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+deposits	member_A	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+deposits	member_A	none	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+deposits	member_A	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+deposits	member_A	hdr_A	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+deposits	member_A	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+deposits	member_A	hdr_B	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+deposits	member_A	hdr_C	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+deposits	member_A	hdr_C	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+deposits	member_A	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+deposits	member_A	hdr_garbage	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+deposits	gestor_B	none	con08	B		B	B	B	-	-	-
+deposits	gestor_B	none	sec01(DIFF)	B		-	-	-	-	-	-
+deposits	gestor_B	hdr_A	con08	B		B	B	B	-	-	-
+deposits	gestor_B	hdr_A	sec01(DIFF)	B		-	-	-	-	-	-
+deposits	gestor_B	hdr_B	con08	B		B	B	B	-	-	-
+deposits	gestor_B	hdr_B	sec01(DIFF)	B		-	-	-	-	-	-
+deposits	gestor_B	hdr_C	con08	B		B	B	B	-	-	-
+deposits	gestor_B	hdr_C	sec01(DIFF)	B		-	-	-	-	-	-
+deposits	gestor_B	hdr_garbage	con08	B		B	B	B	-	-	-
+deposits	gestor_B	hdr_garbage	sec01(DIFF)	B		-	-	-	-	-	-
+deposits	admin_B	none	con08	B		B	B	B	-	-	-
+deposits	admin_B	none	sec01(DIFF)	B		-	-	-	-	-	-
+deposits	admin_B	hdr_A	con08	B		B	B	B	-	-	-
+deposits	admin_B	hdr_A	sec01(DIFF)	B		-	-	-	-	-	-
+deposits	admin_B	hdr_B	con08	B		B	B	B	-	-	-
+deposits	admin_B	hdr_B	sec01(DIFF)	B		-	-	-	-	-	-
+deposits	admin_B	hdr_C	con08	B		B	B	B	-	-	-
+deposits	admin_B	hdr_C	sec01(DIFF)	B		-	-	-	-	-	-
+deposits	admin_B	hdr_garbage	con08	B		B	B	B	-	-	-
+deposits	admin_B	hdr_garbage	sec01(DIFF)	B		-	-	-	-	-	-
+deposits	multi_mA_aC	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+deposits	multi_mA_aC	none	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+deposits	multi_mA_aC	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+deposits	multi_mA_aC	hdr_A	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+deposits	multi_mA_aC	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+deposits	multi_mA_aC	hdr_B	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+deposits	multi_mA_aC	hdr_C	con08	C		C	C	C	-	-	-
+deposits	multi_mA_aC	hdr_C	sec01(DIFF)	C		-	-	-	-	-	-
+deposits	multi_mA_aC	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+deposits	multi_mA_aC	hdr_garbage	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+deposits	no_role	none	con08	∅		-	-	-	-	-	-
+deposits	no_role	none	sec01(=)	∅		-	-	-	-	-	-
+deposits	no_role	hdr_A	con08	∅		-	-	-	-	-	-
+deposits	no_role	hdr_A	sec01(=)	∅		-	-	-	-	-	-
+deposits	no_role	hdr_B	con08	∅		-	-	-	-	-	-
+deposits	no_role	hdr_B	sec01(=)	∅		-	-	-	-	-	-
+deposits	no_role	hdr_C	con08	∅		-	-	-	-	-	-
+deposits	no_role	hdr_C	sec01(=)	∅		-	-	-	-	-	-
+deposits	no_role	hdr_garbage	con08	∅		-	-	-	-	-	-
+deposits	no_role	hdr_garbage	sec01(=)	∅		-	-	-	-	-	-
+deposits	anon	none	con08	∅		-	-	-	-	-	-
+deposits	anon	none	sec01(=)	∅		-	-	-	-	-	-
+deposits	anon	hdr_A	con08	∅		-	-	-	-	-	-
+deposits	anon	hdr_A	sec01(=)	∅		-	-	-	-	-	-
+email_senders	super_admin	none	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+email_senders	super_admin	none	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+email_senders	super_admin	hdr_A	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+email_senders	super_admin	hdr_A	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+email_senders	super_admin	hdr_B	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+email_senders	super_admin	hdr_B	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+email_senders	super_admin	hdr_C	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+email_senders	super_admin	hdr_C	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+email_senders	super_admin	hdr_garbage	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+email_senders	super_admin	hdr_garbage	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+email_senders	admin_A	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_senders	admin_A	none	sec01(DIFF)	∅		-	-	-	-	-	-
+email_senders	admin_A	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_senders	admin_A	hdr_A	sec01(DIFF)	∅		-	-	-	-	-	-
+email_senders	admin_A	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_senders	admin_A	hdr_B	sec01(DIFF)	∅		-	-	-	-	-	-
+email_senders	admin_A	hdr_C	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_senders	admin_A	hdr_C	sec01(DIFF)	∅		-	-	-	-	-	-
+email_senders	admin_A	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_senders	admin_A	hdr_garbage	sec01(DIFF)	∅		-	-	-	-	-	-
+email_senders	gestor_A	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_senders	gestor_A	none	sec01(DIFF)	∅		-	-	-	-	-	-
+email_senders	gestor_A	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_senders	gestor_A	hdr_A	sec01(DIFF)	∅		-	-	-	-	-	-
+email_senders	gestor_A	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_senders	gestor_A	hdr_B	sec01(DIFF)	∅		-	-	-	-	-	-
+email_senders	gestor_A	hdr_C	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_senders	gestor_A	hdr_C	sec01(DIFF)	∅		-	-	-	-	-	-
+email_senders	gestor_A	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_senders	gestor_A	hdr_garbage	sec01(DIFF)	∅		-	-	-	-	-	-
+email_senders	member_A	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_senders	member_A	none	sec01(DIFF)	∅		-	-	-	-	-	-
+email_senders	member_A	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_senders	member_A	hdr_A	sec01(DIFF)	∅		-	-	-	-	-	-
+email_senders	member_A	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_senders	member_A	hdr_B	sec01(DIFF)	∅		-	-	-	-	-	-
+email_senders	member_A	hdr_C	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_senders	member_A	hdr_C	sec01(DIFF)	∅		-	-	-	-	-	-
+email_senders	member_A	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_senders	member_A	hdr_garbage	sec01(DIFF)	∅		-	-	-	-	-	-
+email_senders	gestor_B	none	con08	B		B	B	B	-	-	-
+email_senders	gestor_B	none	sec01(DIFF)	∅		-	-	-	-	-	-
+email_senders	gestor_B	hdr_A	con08	B		B	B	B	-	-	-
+email_senders	gestor_B	hdr_A	sec01(DIFF)	∅		-	-	-	-	-	-
+email_senders	gestor_B	hdr_B	con08	B		B	B	B	-	-	-
+email_senders	gestor_B	hdr_B	sec01(DIFF)	∅		-	-	-	-	-	-
+email_senders	gestor_B	hdr_C	con08	B		B	B	B	-	-	-
+email_senders	gestor_B	hdr_C	sec01(DIFF)	∅		-	-	-	-	-	-
+email_senders	gestor_B	hdr_garbage	con08	B		B	B	B	-	-	-
+email_senders	gestor_B	hdr_garbage	sec01(DIFF)	∅		-	-	-	-	-	-
+email_senders	admin_B	none	con08	B		B	B	B	-	-	-
+email_senders	admin_B	none	sec01(DIFF)	∅		-	-	-	-	-	-
+email_senders	admin_B	hdr_A	con08	B		B	B	B	-	-	-
+email_senders	admin_B	hdr_A	sec01(DIFF)	∅		-	-	-	-	-	-
+email_senders	admin_B	hdr_B	con08	B		B	B	B	-	-	-
+email_senders	admin_B	hdr_B	sec01(DIFF)	∅		-	-	-	-	-	-
+email_senders	admin_B	hdr_C	con08	B		B	B	B	-	-	-
+email_senders	admin_B	hdr_C	sec01(DIFF)	∅		-	-	-	-	-	-
+email_senders	admin_B	hdr_garbage	con08	B		B	B	B	-	-	-
+email_senders	admin_B	hdr_garbage	sec01(DIFF)	∅		-	-	-	-	-	-
+email_senders	multi_mA_aC	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_senders	multi_mA_aC	none	sec01(DIFF)	∅		-	-	-	-	-	-
+email_senders	multi_mA_aC	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_senders	multi_mA_aC	hdr_A	sec01(DIFF)	∅		-	-	-	-	-	-
+email_senders	multi_mA_aC	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_senders	multi_mA_aC	hdr_B	sec01(DIFF)	∅		-	-	-	-	-	-
+email_senders	multi_mA_aC	hdr_C	con08	C		C	C	C	-	-	-
+email_senders	multi_mA_aC	hdr_C	sec01(DIFF)	∅		-	-	-	-	-	-
+email_senders	multi_mA_aC	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_senders	multi_mA_aC	hdr_garbage	sec01(DIFF)	∅		-	-	-	-	-	-
+email_senders	no_role	none	con08	∅		-	-	-	-	-	-
+email_senders	no_role	none	sec01(=)	∅		-	-	-	-	-	-
+email_senders	no_role	hdr_A	con08	∅		-	-	-	-	-	-
+email_senders	no_role	hdr_A	sec01(=)	∅		-	-	-	-	-	-
+email_senders	no_role	hdr_B	con08	∅		-	-	-	-	-	-
+email_senders	no_role	hdr_B	sec01(=)	∅		-	-	-	-	-	-
+email_senders	no_role	hdr_C	con08	∅		-	-	-	-	-	-
+email_senders	no_role	hdr_C	sec01(=)	∅		-	-	-	-	-	-
+email_senders	no_role	hdr_garbage	con08	∅		-	-	-	-	-	-
+email_senders	no_role	hdr_garbage	sec01(=)	∅		-	-	-	-	-	-
+email_senders	anon	none	con08	∅		-	-	-	-	-	-
+email_senders	anon	none	sec01(=)	∅		-	-	-	-	-	-
+email_senders	anon	hdr_A	con08	∅		-	-	-	-	-	-
+email_senders	anon	hdr_A	sec01(=)	∅		-	-	-	-	-	-
+email_smtp_configs	super_admin	none	con08	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+email_smtp_configs	super_admin	none	sec01(=)	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+email_smtp_configs	super_admin	hdr_A	con08	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+email_smtp_configs	super_admin	hdr_A	sec01(=)	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+email_smtp_configs	super_admin	hdr_B	con08	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+email_smtp_configs	super_admin	hdr_B	sec01(=)	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+email_smtp_configs	super_admin	hdr_C	con08	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+email_smtp_configs	super_admin	hdr_C	sec01(=)	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+email_smtp_configs	super_admin	hdr_garbage	con08	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+email_smtp_configs	super_admin	hdr_garbage	sec01(=)	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+email_smtp_configs	admin_A	none	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_smtp_configs	admin_A	none	sec01(DIFF)	∅	∅	-	-	-	-	-	-
+email_smtp_configs	admin_A	hdr_A	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_smtp_configs	admin_A	hdr_A	sec01(DIFF)	∅	∅	-	-	-	-	-	-
+email_smtp_configs	admin_A	hdr_B	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_smtp_configs	admin_A	hdr_B	sec01(DIFF)	∅	∅	-	-	-	-	-	-
+email_smtp_configs	admin_A	hdr_C	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_smtp_configs	admin_A	hdr_C	sec01(DIFF)	∅	∅	-	-	-	-	-	-
+email_smtp_configs	admin_A	hdr_garbage	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_smtp_configs	admin_A	hdr_garbage	sec01(DIFF)	∅	∅	-	-	-	-	-	-
+email_smtp_configs	gestor_A	none	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_smtp_configs	gestor_A	none	sec01(DIFF)	∅	∅	-	-	-	-	-	-
+email_smtp_configs	gestor_A	hdr_A	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_smtp_configs	gestor_A	hdr_A	sec01(DIFF)	∅	∅	-	-	-	-	-	-
+email_smtp_configs	gestor_A	hdr_B	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_smtp_configs	gestor_A	hdr_B	sec01(DIFF)	∅	∅	-	-	-	-	-	-
+email_smtp_configs	gestor_A	hdr_C	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_smtp_configs	gestor_A	hdr_C	sec01(DIFF)	∅	∅	-	-	-	-	-	-
+email_smtp_configs	gestor_A	hdr_garbage	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_smtp_configs	gestor_A	hdr_garbage	sec01(DIFF)	∅	∅	-	-	-	-	-	-
+email_smtp_configs	member_A	none	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_smtp_configs	member_A	none	sec01(DIFF)	∅	∅	-	-	-	-	-	-
+email_smtp_configs	member_A	hdr_A	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_smtp_configs	member_A	hdr_A	sec01(DIFF)	∅	∅	-	-	-	-	-	-
+email_smtp_configs	member_A	hdr_B	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_smtp_configs	member_A	hdr_B	sec01(DIFF)	∅	∅	-	-	-	-	-	-
+email_smtp_configs	member_A	hdr_C	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_smtp_configs	member_A	hdr_C	sec01(DIFF)	∅	∅	-	-	-	-	-	-
+email_smtp_configs	member_A	hdr_garbage	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_smtp_configs	member_A	hdr_garbage	sec01(DIFF)	∅	∅	-	-	-	-	-	-
+email_smtp_configs	gestor_B	none	con08	B	B	B	B	B	-	-	-
+email_smtp_configs	gestor_B	none	sec01(DIFF)	∅	∅	-	-	-	-	-	-
+email_smtp_configs	gestor_B	hdr_A	con08	B	B	B	B	B	-	-	-
+email_smtp_configs	gestor_B	hdr_A	sec01(DIFF)	∅	∅	-	-	-	-	-	-
+email_smtp_configs	gestor_B	hdr_B	con08	B	B	B	B	B	-	-	-
+email_smtp_configs	gestor_B	hdr_B	sec01(DIFF)	∅	∅	-	-	-	-	-	-
+email_smtp_configs	gestor_B	hdr_C	con08	B	B	B	B	B	-	-	-
+email_smtp_configs	gestor_B	hdr_C	sec01(DIFF)	∅	∅	-	-	-	-	-	-
+email_smtp_configs	gestor_B	hdr_garbage	con08	B	B	B	B	B	-	-	-
+email_smtp_configs	gestor_B	hdr_garbage	sec01(DIFF)	∅	∅	-	-	-	-	-	-
+email_smtp_configs	admin_B	none	con08	B	B	B	B	B	-	-	-
+email_smtp_configs	admin_B	none	sec01(DIFF)	∅	∅	-	-	-	-	-	-
+email_smtp_configs	admin_B	hdr_A	con08	B	B	B	B	B	-	-	-
+email_smtp_configs	admin_B	hdr_A	sec01(DIFF)	∅	∅	-	-	-	-	-	-
+email_smtp_configs	admin_B	hdr_B	con08	B	B	B	B	B	-	-	-
+email_smtp_configs	admin_B	hdr_B	sec01(DIFF)	∅	∅	-	-	-	-	-	-
+email_smtp_configs	admin_B	hdr_C	con08	B	B	B	B	B	-	-	-
+email_smtp_configs	admin_B	hdr_C	sec01(DIFF)	∅	∅	-	-	-	-	-	-
+email_smtp_configs	admin_B	hdr_garbage	con08	B	B	B	B	B	-	-	-
+email_smtp_configs	admin_B	hdr_garbage	sec01(DIFF)	∅	∅	-	-	-	-	-	-
+email_smtp_configs	multi_mA_aC	none	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_smtp_configs	multi_mA_aC	none	sec01(DIFF)	∅	∅	-	-	-	-	-	-
+email_smtp_configs	multi_mA_aC	hdr_A	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_smtp_configs	multi_mA_aC	hdr_A	sec01(DIFF)	∅	∅	-	-	-	-	-	-
+email_smtp_configs	multi_mA_aC	hdr_B	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_smtp_configs	multi_mA_aC	hdr_B	sec01(DIFF)	∅	∅	-	-	-	-	-	-
+email_smtp_configs	multi_mA_aC	hdr_C	con08	C	C	C	C	C	-	-	-
+email_smtp_configs	multi_mA_aC	hdr_C	sec01(DIFF)	∅	∅	-	-	-	-	-	-
+email_smtp_configs	multi_mA_aC	hdr_garbage	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+email_smtp_configs	multi_mA_aC	hdr_garbage	sec01(DIFF)	∅	∅	-	-	-	-	-	-
+email_smtp_configs	no_role	none	con08	∅	∅	-	-	-	-	-	-
+email_smtp_configs	no_role	none	sec01(=)	∅	∅	-	-	-	-	-	-
+email_smtp_configs	no_role	hdr_A	con08	∅	∅	-	-	-	-	-	-
+email_smtp_configs	no_role	hdr_A	sec01(=)	∅	∅	-	-	-	-	-	-
+email_smtp_configs	no_role	hdr_B	con08	∅	∅	-	-	-	-	-	-
+email_smtp_configs	no_role	hdr_B	sec01(=)	∅	∅	-	-	-	-	-	-
+email_smtp_configs	no_role	hdr_C	con08	∅	∅	-	-	-	-	-	-
+email_smtp_configs	no_role	hdr_C	sec01(=)	∅	∅	-	-	-	-	-	-
+email_smtp_configs	no_role	hdr_garbage	con08	∅	∅	-	-	-	-	-	-
+email_smtp_configs	no_role	hdr_garbage	sec01(=)	∅	∅	-	-	-	-	-	-
+email_smtp_configs	anon	none	con08	∅	∅	-	-	-	-	-	-
+email_smtp_configs	anon	none	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+email_smtp_configs	anon	hdr_A	con08	∅	∅	-	-	-	-	-	-
+email_smtp_configs	anon	hdr_A	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+email_unsubscribe_tokens	super_admin	none	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	super_admin	none	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	super_admin	hdr_A	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	super_admin	hdr_A	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	super_admin	hdr_B	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	super_admin	hdr_B	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	super_admin	hdr_C	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	super_admin	hdr_C	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	super_admin	hdr_garbage	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	super_admin	hdr_garbage	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	admin_A	none	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	admin_A	none	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	admin_A	hdr_A	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	admin_A	hdr_A	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	admin_A	hdr_B	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	admin_A	hdr_B	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	admin_A	hdr_C	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	admin_A	hdr_C	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	admin_A	hdr_garbage	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	admin_A	hdr_garbage	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	gestor_A	none	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	gestor_A	none	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	gestor_A	hdr_A	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	gestor_A	hdr_A	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	gestor_A	hdr_B	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	gestor_A	hdr_B	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	gestor_A	hdr_C	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	gestor_A	hdr_C	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	gestor_A	hdr_garbage	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	gestor_A	hdr_garbage	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	member_A	none	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	member_A	none	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	member_A	hdr_A	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	member_A	hdr_A	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	member_A	hdr_B	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	member_A	hdr_B	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	member_A	hdr_C	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	member_A	hdr_C	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	member_A	hdr_garbage	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	member_A	hdr_garbage	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	gestor_B	none	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	gestor_B	none	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	gestor_B	hdr_A	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	gestor_B	hdr_A	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	gestor_B	hdr_B	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	gestor_B	hdr_B	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	gestor_B	hdr_C	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	gestor_B	hdr_C	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	gestor_B	hdr_garbage	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	gestor_B	hdr_garbage	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	admin_B	none	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	admin_B	none	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	admin_B	hdr_A	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	admin_B	hdr_A	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	admin_B	hdr_B	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	admin_B	hdr_B	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	admin_B	hdr_C	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	admin_B	hdr_C	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	admin_B	hdr_garbage	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	admin_B	hdr_garbage	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	multi_mA_aC	none	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	multi_mA_aC	none	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	multi_mA_aC	hdr_A	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	multi_mA_aC	hdr_A	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	multi_mA_aC	hdr_B	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	multi_mA_aC	hdr_B	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	multi_mA_aC	hdr_C	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	multi_mA_aC	hdr_C	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	multi_mA_aC	hdr_garbage	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	multi_mA_aC	hdr_garbage	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	no_role	none	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	no_role	none	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	no_role	hdr_A	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	no_role	hdr_A	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	no_role	hdr_B	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	no_role	hdr_B	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	no_role	hdr_C	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	no_role	hdr_C	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	no_role	hdr_garbage	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	no_role	hdr_garbage	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	anon	none	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	anon	none	sec01(=)	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	anon	hdr_A	con08	ERR:42501		-	-	-	-	-	-
+email_unsubscribe_tokens	anon	hdr_A	sec01(=)	ERR:42501		-	-	-	-	-	-
+meta_connections	super_admin	none	con08	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+meta_connections	super_admin	none	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	super_admin	hdr_A	con08	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+meta_connections	super_admin	hdr_A	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	super_admin	hdr_B	con08	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+meta_connections	super_admin	hdr_B	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	super_admin	hdr_C	con08	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+meta_connections	super_admin	hdr_C	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	super_admin	hdr_garbage	con08	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+meta_connections	super_admin	hdr_garbage	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	admin_A	none	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_connections	admin_A	none	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	admin_A	hdr_A	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_connections	admin_A	hdr_A	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	admin_A	hdr_B	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_connections	admin_A	hdr_B	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	admin_A	hdr_C	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_connections	admin_A	hdr_C	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	admin_A	hdr_garbage	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_connections	admin_A	hdr_garbage	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	gestor_A	none	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_connections	gestor_A	none	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	gestor_A	hdr_A	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_connections	gestor_A	hdr_A	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	gestor_A	hdr_B	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_connections	gestor_A	hdr_B	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	gestor_A	hdr_C	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_connections	gestor_A	hdr_C	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	gestor_A	hdr_garbage	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_connections	gestor_A	hdr_garbage	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	member_A	none	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_connections	member_A	none	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	member_A	hdr_A	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_connections	member_A	hdr_A	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	member_A	hdr_B	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_connections	member_A	hdr_B	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	member_A	hdr_C	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_connections	member_A	hdr_C	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	member_A	hdr_garbage	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_connections	member_A	hdr_garbage	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	gestor_B	none	con08	B	B	B	B	B	-	-	-
+meta_connections	gestor_B	none	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	gestor_B	hdr_A	con08	B	B	B	B	B	-	-	-
+meta_connections	gestor_B	hdr_A	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	gestor_B	hdr_B	con08	B	B	B	B	B	-	-	-
+meta_connections	gestor_B	hdr_B	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	gestor_B	hdr_C	con08	B	B	B	B	B	-	-	-
+meta_connections	gestor_B	hdr_C	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	gestor_B	hdr_garbage	con08	B	B	B	B	B	-	-	-
+meta_connections	gestor_B	hdr_garbage	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	admin_B	none	con08	B	B	B	B	B	-	-	-
+meta_connections	admin_B	none	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	admin_B	hdr_A	con08	B	B	B	B	B	-	-	-
+meta_connections	admin_B	hdr_A	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	admin_B	hdr_B	con08	B	B	B	B	B	-	-	-
+meta_connections	admin_B	hdr_B	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	admin_B	hdr_C	con08	B	B	B	B	B	-	-	-
+meta_connections	admin_B	hdr_C	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	admin_B	hdr_garbage	con08	B	B	B	B	B	-	-	-
+meta_connections	admin_B	hdr_garbage	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	multi_mA_aC	none	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_connections	multi_mA_aC	none	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	multi_mA_aC	hdr_A	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_connections	multi_mA_aC	hdr_A	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	multi_mA_aC	hdr_B	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_connections	multi_mA_aC	hdr_B	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	multi_mA_aC	hdr_C	con08	C	C	C	C	C	-	-	-
+meta_connections	multi_mA_aC	hdr_C	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	multi_mA_aC	hdr_garbage	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_connections	multi_mA_aC	hdr_garbage	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	no_role	none	con08	∅	∅	-	-	-	-	-	-
+meta_connections	no_role	none	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	no_role	hdr_A	con08	∅	∅	-	-	-	-	-	-
+meta_connections	no_role	hdr_A	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	no_role	hdr_B	con08	∅	∅	-	-	-	-	-	-
+meta_connections	no_role	hdr_B	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	no_role	hdr_C	con08	∅	∅	-	-	-	-	-	-
+meta_connections	no_role	hdr_C	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	no_role	hdr_garbage	con08	∅	∅	-	-	-	-	-	-
+meta_connections	no_role	hdr_garbage	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	anon	none	con08	∅	∅	-	-	-	-	-	-
+meta_connections	anon	none	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_connections	anon	hdr_A	con08	∅	∅	-	-	-	-	-	-
+meta_connections	anon	hdr_A	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+meta_oauth_states	super_admin	none	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+meta_oauth_states	super_admin	none	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	super_admin	hdr_A	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+meta_oauth_states	super_admin	hdr_A	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	super_admin	hdr_B	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+meta_oauth_states	super_admin	hdr_B	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	super_admin	hdr_C	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+meta_oauth_states	super_admin	hdr_C	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	super_admin	hdr_garbage	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+meta_oauth_states	super_admin	hdr_garbage	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	admin_A	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_oauth_states	admin_A	none	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	admin_A	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_oauth_states	admin_A	hdr_A	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	admin_A	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_oauth_states	admin_A	hdr_B	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	admin_A	hdr_C	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_oauth_states	admin_A	hdr_C	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	admin_A	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_oauth_states	admin_A	hdr_garbage	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	gestor_A	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_oauth_states	gestor_A	none	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	gestor_A	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_oauth_states	gestor_A	hdr_A	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	gestor_A	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_oauth_states	gestor_A	hdr_B	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	gestor_A	hdr_C	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_oauth_states	gestor_A	hdr_C	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	gestor_A	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_oauth_states	gestor_A	hdr_garbage	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	member_A	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_oauth_states	member_A	none	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	member_A	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_oauth_states	member_A	hdr_A	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	member_A	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_oauth_states	member_A	hdr_B	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	member_A	hdr_C	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_oauth_states	member_A	hdr_C	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	member_A	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_oauth_states	member_A	hdr_garbage	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	gestor_B	none	con08	B		B	B	B	-	-	-
+meta_oauth_states	gestor_B	none	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	gestor_B	hdr_A	con08	B		B	B	B	-	-	-
+meta_oauth_states	gestor_B	hdr_A	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	gestor_B	hdr_B	con08	B		B	B	B	-	-	-
+meta_oauth_states	gestor_B	hdr_B	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	gestor_B	hdr_C	con08	B		B	B	B	-	-	-
+meta_oauth_states	gestor_B	hdr_C	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	gestor_B	hdr_garbage	con08	B		B	B	B	-	-	-
+meta_oauth_states	gestor_B	hdr_garbage	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	admin_B	none	con08	B		B	B	B	-	-	-
+meta_oauth_states	admin_B	none	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	admin_B	hdr_A	con08	B		B	B	B	-	-	-
+meta_oauth_states	admin_B	hdr_A	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	admin_B	hdr_B	con08	B		B	B	B	-	-	-
+meta_oauth_states	admin_B	hdr_B	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	admin_B	hdr_C	con08	B		B	B	B	-	-	-
+meta_oauth_states	admin_B	hdr_C	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	admin_B	hdr_garbage	con08	B		B	B	B	-	-	-
+meta_oauth_states	admin_B	hdr_garbage	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	multi_mA_aC	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_oauth_states	multi_mA_aC	none	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	multi_mA_aC	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_oauth_states	multi_mA_aC	hdr_A	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	multi_mA_aC	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_oauth_states	multi_mA_aC	hdr_B	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	multi_mA_aC	hdr_C	con08	C		C	C	C	-	-	-
+meta_oauth_states	multi_mA_aC	hdr_C	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	multi_mA_aC	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+meta_oauth_states	multi_mA_aC	hdr_garbage	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	no_role	none	con08	∅		-	-	-	-	-	-
+meta_oauth_states	no_role	none	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	no_role	hdr_A	con08	∅		-	-	-	-	-	-
+meta_oauth_states	no_role	hdr_A	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	no_role	hdr_B	con08	∅		-	-	-	-	-	-
+meta_oauth_states	no_role	hdr_B	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	no_role	hdr_C	con08	∅		-	-	-	-	-	-
+meta_oauth_states	no_role	hdr_C	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	no_role	hdr_garbage	con08	∅		-	-	-	-	-	-
+meta_oauth_states	no_role	hdr_garbage	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	anon	none	con08	∅		-	-	-	-	-	-
+meta_oauth_states	anon	none	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+meta_oauth_states	anon	hdr_A	con08	∅		-	-	-	-	-	-
+meta_oauth_states	anon	hdr_A	sec01(DIFF)	ERR:42501		-	-	-	-	-	-
+shortio_settings	super_admin	none	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+shortio_settings	super_admin	none	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+shortio_settings	super_admin	hdr_A	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+shortio_settings	super_admin	hdr_A	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+shortio_settings	super_admin	hdr_B	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+shortio_settings	super_admin	hdr_B	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+shortio_settings	super_admin	hdr_C	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+shortio_settings	super_admin	hdr_C	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+shortio_settings	super_admin	hdr_garbage	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+shortio_settings	super_admin	hdr_garbage	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+shortio_settings	admin_A	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+shortio_settings	admin_A	none	sec01(=)	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+shortio_settings	admin_A	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+shortio_settings	admin_A	hdr_A	sec01(=)	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+shortio_settings	admin_A	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+shortio_settings	admin_A	hdr_B	sec01(=)	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+shortio_settings	admin_A	hdr_C	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+shortio_settings	admin_A	hdr_C	sec01(=)	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+shortio_settings	admin_A	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+shortio_settings	admin_A	hdr_garbage	sec01(=)	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+shortio_settings	gestor_A	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+shortio_settings	gestor_A	none	sec01(=)	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+shortio_settings	gestor_A	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+shortio_settings	gestor_A	hdr_A	sec01(=)	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+shortio_settings	gestor_A	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+shortio_settings	gestor_A	hdr_B	sec01(=)	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+shortio_settings	gestor_A	hdr_C	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+shortio_settings	gestor_A	hdr_C	sec01(=)	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+shortio_settings	gestor_A	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+shortio_settings	gestor_A	hdr_garbage	sec01(=)	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+shortio_settings	member_A	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+shortio_settings	member_A	none	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+shortio_settings	member_A	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+shortio_settings	member_A	hdr_A	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+shortio_settings	member_A	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+shortio_settings	member_A	hdr_B	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+shortio_settings	member_A	hdr_C	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+shortio_settings	member_A	hdr_C	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+shortio_settings	member_A	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+shortio_settings	member_A	hdr_garbage	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+shortio_settings	gestor_B	none	con08	B		B	B	B	-	-	-
+shortio_settings	gestor_B	none	sec01(=)	B		B	B	B	-	-	-
+shortio_settings	gestor_B	hdr_A	con08	B		B	B	B	-	-	-
+shortio_settings	gestor_B	hdr_A	sec01(=)	B		B	B	B	-	-	-
+shortio_settings	gestor_B	hdr_B	con08	B		B	B	B	-	-	-
+shortio_settings	gestor_B	hdr_B	sec01(=)	B		B	B	B	-	-	-
+shortio_settings	gestor_B	hdr_C	con08	B		B	B	B	-	-	-
+shortio_settings	gestor_B	hdr_C	sec01(=)	B		B	B	B	-	-	-
+shortio_settings	gestor_B	hdr_garbage	con08	B		B	B	B	-	-	-
+shortio_settings	gestor_B	hdr_garbage	sec01(=)	B		B	B	B	-	-	-
+shortio_settings	admin_B	none	con08	B		B	B	B	-	-	-
+shortio_settings	admin_B	none	sec01(=)	B		B	B	B	-	-	-
+shortio_settings	admin_B	hdr_A	con08	B		B	B	B	-	-	-
+shortio_settings	admin_B	hdr_A	sec01(=)	B		B	B	B	-	-	-
+shortio_settings	admin_B	hdr_B	con08	B		B	B	B	-	-	-
+shortio_settings	admin_B	hdr_B	sec01(=)	B		B	B	B	-	-	-
+shortio_settings	admin_B	hdr_C	con08	B		B	B	B	-	-	-
+shortio_settings	admin_B	hdr_C	sec01(=)	B		B	B	B	-	-	-
+shortio_settings	admin_B	hdr_garbage	con08	B		B	B	B	-	-	-
+shortio_settings	admin_B	hdr_garbage	sec01(=)	B		B	B	B	-	-	-
+shortio_settings	multi_mA_aC	none	con08	A,A_sent,C		A,C,A_by_other	A,A_sent,C	A,A_sent,C	-	-	-
+shortio_settings	multi_mA_aC	none	sec01(DIFF)	A,A_sent,C		C	C	C	-	-	-
+shortio_settings	multi_mA_aC	hdr_A	con08	A,A_sent,C		A,C,A_by_other	A,A_sent,C	A,A_sent,C	-	-	-
+shortio_settings	multi_mA_aC	hdr_A	sec01(DIFF)	A,A_sent,C		C	C	C	-	-	-
+shortio_settings	multi_mA_aC	hdr_B	con08	A,A_sent,C		A,C,A_by_other	A,A_sent,C	A,A_sent,C	-	-	-
+shortio_settings	multi_mA_aC	hdr_B	sec01(DIFF)	A,A_sent,C		C	C	C	-	-	-
+shortio_settings	multi_mA_aC	hdr_C	con08	A,A_sent,C		A,C,A_by_other	A,A_sent,C	A,A_sent,C	-	-	-
+shortio_settings	multi_mA_aC	hdr_C	sec01(DIFF)	A,A_sent,C		C	C	C	-	-	-
+shortio_settings	multi_mA_aC	hdr_garbage	con08	A,A_sent,C		A,C,A_by_other	A,A_sent,C	A,A_sent,C	-	-	-
+shortio_settings	multi_mA_aC	hdr_garbage	sec01(DIFF)	A,A_sent,C		C	C	C	-	-	-
+shortio_settings	no_role	none	con08	∅		-	-	-	-	-	-
+shortio_settings	no_role	none	sec01(=)	∅		-	-	-	-	-	-
+shortio_settings	no_role	hdr_A	con08	∅		-	-	-	-	-	-
+shortio_settings	no_role	hdr_A	sec01(=)	∅		-	-	-	-	-	-
+shortio_settings	no_role	hdr_B	con08	∅		-	-	-	-	-	-
+shortio_settings	no_role	hdr_B	sec01(=)	∅		-	-	-	-	-	-
+shortio_settings	no_role	hdr_C	con08	∅		-	-	-	-	-	-
+shortio_settings	no_role	hdr_C	sec01(=)	∅		-	-	-	-	-	-
+shortio_settings	no_role	hdr_garbage	con08	∅		-	-	-	-	-	-
+shortio_settings	no_role	hdr_garbage	sec01(=)	∅		-	-	-	-	-	-
+shortio_settings	anon	none	con08	∅		-	-	-	-	-	-
+shortio_settings	anon	none	sec01(=)	∅		-	-	-	-	-	-
+shortio_settings	anon	hdr_A	con08	∅		-	-	-	-	-	-
+shortio_settings	anon	hdr_A	sec01(=)	∅		-	-	-	-	-	-
+sms_credit_ledger	super_admin	none	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+sms_credit_ledger	super_admin	none	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+sms_credit_ledger	super_admin	hdr_A	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+sms_credit_ledger	super_admin	hdr_A	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+sms_credit_ledger	super_admin	hdr_B	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+sms_credit_ledger	super_admin	hdr_B	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+sms_credit_ledger	super_admin	hdr_C	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+sms_credit_ledger	super_admin	hdr_C	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+sms_credit_ledger	super_admin	hdr_garbage	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+sms_credit_ledger	super_admin	hdr_garbage	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+sms_credit_ledger	admin_A	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_ledger	admin_A	none	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_ledger	admin_A	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_ledger	admin_A	hdr_A	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_ledger	admin_A	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_ledger	admin_A	hdr_B	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_ledger	admin_A	hdr_C	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_ledger	admin_A	hdr_C	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_ledger	admin_A	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_ledger	admin_A	hdr_garbage	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_ledger	gestor_A	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_ledger	gestor_A	none	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_ledger	gestor_A	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_ledger	gestor_A	hdr_A	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_ledger	gestor_A	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_ledger	gestor_A	hdr_B	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_ledger	gestor_A	hdr_C	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_ledger	gestor_A	hdr_C	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_ledger	gestor_A	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_ledger	gestor_A	hdr_garbage	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_ledger	member_A	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_ledger	member_A	none	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_ledger	member_A	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_ledger	member_A	hdr_A	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_ledger	member_A	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_ledger	member_A	hdr_B	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_ledger	member_A	hdr_C	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_ledger	member_A	hdr_C	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_ledger	member_A	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_ledger	member_A	hdr_garbage	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_ledger	gestor_B	none	con08	B		B	B	B	-	-	-
+sms_credit_ledger	gestor_B	none	sec01(DIFF)	B		-	-	-	-	-	-
+sms_credit_ledger	gestor_B	hdr_A	con08	B		B	B	B	-	-	-
+sms_credit_ledger	gestor_B	hdr_A	sec01(DIFF)	B		-	-	-	-	-	-
+sms_credit_ledger	gestor_B	hdr_B	con08	B		B	B	B	-	-	-
+sms_credit_ledger	gestor_B	hdr_B	sec01(DIFF)	B		-	-	-	-	-	-
+sms_credit_ledger	gestor_B	hdr_C	con08	B		B	B	B	-	-	-
+sms_credit_ledger	gestor_B	hdr_C	sec01(DIFF)	B		-	-	-	-	-	-
+sms_credit_ledger	gestor_B	hdr_garbage	con08	B		B	B	B	-	-	-
+sms_credit_ledger	gestor_B	hdr_garbage	sec01(DIFF)	B		-	-	-	-	-	-
+sms_credit_ledger	admin_B	none	con08	B		B	B	B	-	-	-
+sms_credit_ledger	admin_B	none	sec01(DIFF)	B		-	-	-	-	-	-
+sms_credit_ledger	admin_B	hdr_A	con08	B		B	B	B	-	-	-
+sms_credit_ledger	admin_B	hdr_A	sec01(DIFF)	B		-	-	-	-	-	-
+sms_credit_ledger	admin_B	hdr_B	con08	B		B	B	B	-	-	-
+sms_credit_ledger	admin_B	hdr_B	sec01(DIFF)	B		-	-	-	-	-	-
+sms_credit_ledger	admin_B	hdr_C	con08	B		B	B	B	-	-	-
+sms_credit_ledger	admin_B	hdr_C	sec01(DIFF)	B		-	-	-	-	-	-
+sms_credit_ledger	admin_B	hdr_garbage	con08	B		B	B	B	-	-	-
+sms_credit_ledger	admin_B	hdr_garbage	sec01(DIFF)	B		-	-	-	-	-	-
+sms_credit_ledger	multi_mA_aC	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_ledger	multi_mA_aC	none	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_ledger	multi_mA_aC	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_ledger	multi_mA_aC	hdr_A	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_ledger	multi_mA_aC	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_ledger	multi_mA_aC	hdr_B	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_ledger	multi_mA_aC	hdr_C	con08	C		C	C	C	-	-	-
+sms_credit_ledger	multi_mA_aC	hdr_C	sec01(DIFF)	C		-	-	-	-	-	-
+sms_credit_ledger	multi_mA_aC	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_ledger	multi_mA_aC	hdr_garbage	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_ledger	no_role	none	con08	∅		-	-	-	-	-	-
+sms_credit_ledger	no_role	none	sec01(=)	∅		-	-	-	-	-	-
+sms_credit_ledger	no_role	hdr_A	con08	∅		-	-	-	-	-	-
+sms_credit_ledger	no_role	hdr_A	sec01(=)	∅		-	-	-	-	-	-
+sms_credit_ledger	no_role	hdr_B	con08	∅		-	-	-	-	-	-
+sms_credit_ledger	no_role	hdr_B	sec01(=)	∅		-	-	-	-	-	-
+sms_credit_ledger	no_role	hdr_C	con08	∅		-	-	-	-	-	-
+sms_credit_ledger	no_role	hdr_C	sec01(=)	∅		-	-	-	-	-	-
+sms_credit_ledger	no_role	hdr_garbage	con08	∅		-	-	-	-	-	-
+sms_credit_ledger	no_role	hdr_garbage	sec01(=)	∅		-	-	-	-	-	-
+sms_credit_ledger	anon	none	con08	∅		-	-	-	-	-	-
+sms_credit_ledger	anon	none	sec01(=)	∅		-	-	-	-	-	-
+sms_credit_ledger	anon	hdr_A	con08	∅		-	-	-	-	-	-
+sms_credit_ledger	anon	hdr_A	sec01(=)	∅		-	-	-	-	-	-
+sms_credit_orders	super_admin	none	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+sms_credit_orders	super_admin	none	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+sms_credit_orders	super_admin	hdr_A	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+sms_credit_orders	super_admin	hdr_A	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+sms_credit_orders	super_admin	hdr_B	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+sms_credit_orders	super_admin	hdr_B	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+sms_credit_orders	super_admin	hdr_C	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+sms_credit_orders	super_admin	hdr_C	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+sms_credit_orders	super_admin	hdr_garbage	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+sms_credit_orders	super_admin	hdr_garbage	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+sms_credit_orders	admin_A	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_orders	admin_A	none	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_orders	admin_A	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_orders	admin_A	hdr_A	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_orders	admin_A	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_orders	admin_A	hdr_B	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_orders	admin_A	hdr_C	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_orders	admin_A	hdr_C	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_orders	admin_A	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_orders	admin_A	hdr_garbage	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_orders	gestor_A	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_orders	gestor_A	none	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_orders	gestor_A	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_orders	gestor_A	hdr_A	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_orders	gestor_A	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_orders	gestor_A	hdr_B	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_orders	gestor_A	hdr_C	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_orders	gestor_A	hdr_C	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_orders	gestor_A	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_orders	gestor_A	hdr_garbage	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_orders	member_A	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_orders	member_A	none	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_orders	member_A	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_orders	member_A	hdr_A	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_orders	member_A	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_orders	member_A	hdr_B	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_orders	member_A	hdr_C	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_orders	member_A	hdr_C	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_orders	member_A	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_orders	member_A	hdr_garbage	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_orders	gestor_B	none	con08	B		B	B	B	-	-	-
+sms_credit_orders	gestor_B	none	sec01(DIFF)	B		-	-	-	-	-	-
+sms_credit_orders	gestor_B	hdr_A	con08	B		B	B	B	-	-	-
+sms_credit_orders	gestor_B	hdr_A	sec01(DIFF)	B		-	-	-	-	-	-
+sms_credit_orders	gestor_B	hdr_B	con08	B		B	B	B	-	-	-
+sms_credit_orders	gestor_B	hdr_B	sec01(DIFF)	B		-	-	-	-	-	-
+sms_credit_orders	gestor_B	hdr_C	con08	B		B	B	B	-	-	-
+sms_credit_orders	gestor_B	hdr_C	sec01(DIFF)	B		-	-	-	-	-	-
+sms_credit_orders	gestor_B	hdr_garbage	con08	B		B	B	B	-	-	-
+sms_credit_orders	gestor_B	hdr_garbage	sec01(DIFF)	B		-	-	-	-	-	-
+sms_credit_orders	admin_B	none	con08	B		B	B	B	-	-	-
+sms_credit_orders	admin_B	none	sec01(DIFF)	B		-	-	-	-	-	-
+sms_credit_orders	admin_B	hdr_A	con08	B		B	B	B	-	-	-
+sms_credit_orders	admin_B	hdr_A	sec01(DIFF)	B		-	-	-	-	-	-
+sms_credit_orders	admin_B	hdr_B	con08	B		B	B	B	-	-	-
+sms_credit_orders	admin_B	hdr_B	sec01(DIFF)	B		-	-	-	-	-	-
+sms_credit_orders	admin_B	hdr_C	con08	B		B	B	B	-	-	-
+sms_credit_orders	admin_B	hdr_C	sec01(DIFF)	B		-	-	-	-	-	-
+sms_credit_orders	admin_B	hdr_garbage	con08	B		B	B	B	-	-	-
+sms_credit_orders	admin_B	hdr_garbage	sec01(DIFF)	B		-	-	-	-	-	-
+sms_credit_orders	multi_mA_aC	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_orders	multi_mA_aC	none	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_orders	multi_mA_aC	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_orders	multi_mA_aC	hdr_A	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_orders	multi_mA_aC	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_orders	multi_mA_aC	hdr_B	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_orders	multi_mA_aC	hdr_C	con08	C		C	C	C	-	-	-
+sms_credit_orders	multi_mA_aC	hdr_C	sec01(DIFF)	C		-	-	-	-	-	-
+sms_credit_orders	multi_mA_aC	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+sms_credit_orders	multi_mA_aC	hdr_garbage	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+sms_credit_orders	no_role	none	con08	∅		-	-	-	-	-	-
+sms_credit_orders	no_role	none	sec01(=)	∅		-	-	-	-	-	-
+sms_credit_orders	no_role	hdr_A	con08	∅		-	-	-	-	-	-
+sms_credit_orders	no_role	hdr_A	sec01(=)	∅		-	-	-	-	-	-
+sms_credit_orders	no_role	hdr_B	con08	∅		-	-	-	-	-	-
+sms_credit_orders	no_role	hdr_B	sec01(=)	∅		-	-	-	-	-	-
+sms_credit_orders	no_role	hdr_C	con08	∅		-	-	-	-	-	-
+sms_credit_orders	no_role	hdr_C	sec01(=)	∅		-	-	-	-	-	-
+sms_credit_orders	no_role	hdr_garbage	con08	∅		-	-	-	-	-	-
+sms_credit_orders	no_role	hdr_garbage	sec01(=)	∅		-	-	-	-	-	-
+sms_credit_orders	anon	none	con08	∅		-	-	-	-	-	-
+sms_credit_orders	anon	none	sec01(=)	∅		-	-	-	-	-	-
+sms_credit_orders	anon	hdr_A	con08	∅		-	-	-	-	-	-
+sms_credit_orders	anon	hdr_A	sec01(=)	∅		-	-	-	-	-	-
+tenant_audit_logs	super_admin	none	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+tenant_audit_logs	super_admin	none	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+tenant_audit_logs	super_admin	hdr_A	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+tenant_audit_logs	super_admin	hdr_A	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+tenant_audit_logs	super_admin	hdr_B	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+tenant_audit_logs	super_admin	hdr_B	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+tenant_audit_logs	super_admin	hdr_C	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+tenant_audit_logs	super_admin	hdr_C	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+tenant_audit_logs	super_admin	hdr_garbage	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+tenant_audit_logs	super_admin	hdr_garbage	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+tenant_audit_logs	admin_A	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_audit_logs	admin_A	none	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_audit_logs	admin_A	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_audit_logs	admin_A	hdr_A	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_audit_logs	admin_A	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_audit_logs	admin_A	hdr_B	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_audit_logs	admin_A	hdr_C	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_audit_logs	admin_A	hdr_C	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_audit_logs	admin_A	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_audit_logs	admin_A	hdr_garbage	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_audit_logs	gestor_A	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_audit_logs	gestor_A	none	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_audit_logs	gestor_A	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_audit_logs	gestor_A	hdr_A	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_audit_logs	gestor_A	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_audit_logs	gestor_A	hdr_B	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_audit_logs	gestor_A	hdr_C	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_audit_logs	gestor_A	hdr_C	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_audit_logs	gestor_A	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_audit_logs	gestor_A	hdr_garbage	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_audit_logs	member_A	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_audit_logs	member_A	none	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_audit_logs	member_A	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_audit_logs	member_A	hdr_A	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_audit_logs	member_A	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_audit_logs	member_A	hdr_B	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_audit_logs	member_A	hdr_C	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_audit_logs	member_A	hdr_C	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_audit_logs	member_A	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_audit_logs	member_A	hdr_garbage	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_audit_logs	gestor_B	none	con08	B		B	B	B	-	-	-
+tenant_audit_logs	gestor_B	none	sec01(DIFF)	B		-	-	-	-	-	-
+tenant_audit_logs	gestor_B	hdr_A	con08	B		B	B	B	-	-	-
+tenant_audit_logs	gestor_B	hdr_A	sec01(DIFF)	B		-	-	-	-	-	-
+tenant_audit_logs	gestor_B	hdr_B	con08	B		B	B	B	-	-	-
+tenant_audit_logs	gestor_B	hdr_B	sec01(DIFF)	B		-	-	-	-	-	-
+tenant_audit_logs	gestor_B	hdr_C	con08	B		B	B	B	-	-	-
+tenant_audit_logs	gestor_B	hdr_C	sec01(DIFF)	B		-	-	-	-	-	-
+tenant_audit_logs	gestor_B	hdr_garbage	con08	B		B	B	B	-	-	-
+tenant_audit_logs	gestor_B	hdr_garbage	sec01(DIFF)	B		-	-	-	-	-	-
+tenant_audit_logs	admin_B	none	con08	B		B	B	B	-	-	-
+tenant_audit_logs	admin_B	none	sec01(DIFF)	B		-	-	-	-	-	-
+tenant_audit_logs	admin_B	hdr_A	con08	B		B	B	B	-	-	-
+tenant_audit_logs	admin_B	hdr_A	sec01(DIFF)	B		-	-	-	-	-	-
+tenant_audit_logs	admin_B	hdr_B	con08	B		B	B	B	-	-	-
+tenant_audit_logs	admin_B	hdr_B	sec01(DIFF)	B		-	-	-	-	-	-
+tenant_audit_logs	admin_B	hdr_C	con08	B		B	B	B	-	-	-
+tenant_audit_logs	admin_B	hdr_C	sec01(DIFF)	B		-	-	-	-	-	-
+tenant_audit_logs	admin_B	hdr_garbage	con08	B		B	B	B	-	-	-
+tenant_audit_logs	admin_B	hdr_garbage	sec01(DIFF)	B		-	-	-	-	-	-
+tenant_audit_logs	multi_mA_aC	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_audit_logs	multi_mA_aC	none	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_audit_logs	multi_mA_aC	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_audit_logs	multi_mA_aC	hdr_A	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_audit_logs	multi_mA_aC	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_audit_logs	multi_mA_aC	hdr_B	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_audit_logs	multi_mA_aC	hdr_C	con08	C		C	C	C	-	-	-
+tenant_audit_logs	multi_mA_aC	hdr_C	sec01(DIFF)	C		-	-	-	-	-	-
+tenant_audit_logs	multi_mA_aC	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_audit_logs	multi_mA_aC	hdr_garbage	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_audit_logs	no_role	none	con08	∅		-	-	-	-	-	-
+tenant_audit_logs	no_role	none	sec01(=)	∅		-	-	-	-	-	-
+tenant_audit_logs	no_role	hdr_A	con08	∅		-	-	-	-	-	-
+tenant_audit_logs	no_role	hdr_A	sec01(=)	∅		-	-	-	-	-	-
+tenant_audit_logs	no_role	hdr_B	con08	∅		-	-	-	-	-	-
+tenant_audit_logs	no_role	hdr_B	sec01(=)	∅		-	-	-	-	-	-
+tenant_audit_logs	no_role	hdr_C	con08	∅		-	-	-	-	-	-
+tenant_audit_logs	no_role	hdr_C	sec01(=)	∅		-	-	-	-	-	-
+tenant_audit_logs	no_role	hdr_garbage	con08	∅		-	-	-	-	-	-
+tenant_audit_logs	no_role	hdr_garbage	sec01(=)	∅		-	-	-	-	-	-
+tenant_audit_logs	anon	none	con08	∅		-	-	-	-	-	-
+tenant_audit_logs	anon	none	sec01(=)	∅		-	-	-	-	-	-
+tenant_audit_logs	anon	hdr_A	con08	∅		-	-	-	-	-	-
+tenant_audit_logs	anon	hdr_A	sec01(=)	∅		-	-	-	-	-	-
+tenant_sms_credit_balances	super_admin	none	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+tenant_sms_credit_balances	super_admin	none	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+tenant_sms_credit_balances	super_admin	hdr_A	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+tenant_sms_credit_balances	super_admin	hdr_A	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+tenant_sms_credit_balances	super_admin	hdr_B	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+tenant_sms_credit_balances	super_admin	hdr_B	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+tenant_sms_credit_balances	super_admin	hdr_C	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+tenant_sms_credit_balances	super_admin	hdr_C	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+tenant_sms_credit_balances	super_admin	hdr_garbage	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+tenant_sms_credit_balances	super_admin	hdr_garbage	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+tenant_sms_credit_balances	admin_A	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_credit_balances	admin_A	none	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_credit_balances	admin_A	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_credit_balances	admin_A	hdr_A	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_credit_balances	admin_A	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_credit_balances	admin_A	hdr_B	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_credit_balances	admin_A	hdr_C	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_credit_balances	admin_A	hdr_C	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_credit_balances	admin_A	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_credit_balances	admin_A	hdr_garbage	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_credit_balances	gestor_A	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_credit_balances	gestor_A	none	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_credit_balances	gestor_A	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_credit_balances	gestor_A	hdr_A	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_credit_balances	gestor_A	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_credit_balances	gestor_A	hdr_B	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_credit_balances	gestor_A	hdr_C	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_credit_balances	gestor_A	hdr_C	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_credit_balances	gestor_A	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_credit_balances	gestor_A	hdr_garbage	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_credit_balances	member_A	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_credit_balances	member_A	none	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_credit_balances	member_A	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_credit_balances	member_A	hdr_A	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_credit_balances	member_A	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_credit_balances	member_A	hdr_B	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_credit_balances	member_A	hdr_C	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_credit_balances	member_A	hdr_C	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_credit_balances	member_A	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_credit_balances	member_A	hdr_garbage	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_credit_balances	gestor_B	none	con08	B		B	B	B	-	-	-
+tenant_sms_credit_balances	gestor_B	none	sec01(DIFF)	B		-	-	-	-	-	-
+tenant_sms_credit_balances	gestor_B	hdr_A	con08	B		B	B	B	-	-	-
+tenant_sms_credit_balances	gestor_B	hdr_A	sec01(DIFF)	B		-	-	-	-	-	-
+tenant_sms_credit_balances	gestor_B	hdr_B	con08	B		B	B	B	-	-	-
+tenant_sms_credit_balances	gestor_B	hdr_B	sec01(DIFF)	B		-	-	-	-	-	-
+tenant_sms_credit_balances	gestor_B	hdr_C	con08	B		B	B	B	-	-	-
+tenant_sms_credit_balances	gestor_B	hdr_C	sec01(DIFF)	B		-	-	-	-	-	-
+tenant_sms_credit_balances	gestor_B	hdr_garbage	con08	B		B	B	B	-	-	-
+tenant_sms_credit_balances	gestor_B	hdr_garbage	sec01(DIFF)	B		-	-	-	-	-	-
+tenant_sms_credit_balances	admin_B	none	con08	B		B	B	B	-	-	-
+tenant_sms_credit_balances	admin_B	none	sec01(DIFF)	B		-	-	-	-	-	-
+tenant_sms_credit_balances	admin_B	hdr_A	con08	B		B	B	B	-	-	-
+tenant_sms_credit_balances	admin_B	hdr_A	sec01(DIFF)	B		-	-	-	-	-	-
+tenant_sms_credit_balances	admin_B	hdr_B	con08	B		B	B	B	-	-	-
+tenant_sms_credit_balances	admin_B	hdr_B	sec01(DIFF)	B		-	-	-	-	-	-
+tenant_sms_credit_balances	admin_B	hdr_C	con08	B		B	B	B	-	-	-
+tenant_sms_credit_balances	admin_B	hdr_C	sec01(DIFF)	B		-	-	-	-	-	-
+tenant_sms_credit_balances	admin_B	hdr_garbage	con08	B		B	B	B	-	-	-
+tenant_sms_credit_balances	admin_B	hdr_garbage	sec01(DIFF)	B		-	-	-	-	-	-
+tenant_sms_credit_balances	multi_mA_aC	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_credit_balances	multi_mA_aC	none	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_credit_balances	multi_mA_aC	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_credit_balances	multi_mA_aC	hdr_A	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_credit_balances	multi_mA_aC	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_credit_balances	multi_mA_aC	hdr_B	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_credit_balances	multi_mA_aC	hdr_C	con08	C		C	C	C	-	-	-
+tenant_sms_credit_balances	multi_mA_aC	hdr_C	sec01(DIFF)	C		-	-	-	-	-	-
+tenant_sms_credit_balances	multi_mA_aC	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_credit_balances	multi_mA_aC	hdr_garbage	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_credit_balances	no_role	none	con08	∅		-	-	-	-	-	-
+tenant_sms_credit_balances	no_role	none	sec01(=)	∅		-	-	-	-	-	-
+tenant_sms_credit_balances	no_role	hdr_A	con08	∅		-	-	-	-	-	-
+tenant_sms_credit_balances	no_role	hdr_A	sec01(=)	∅		-	-	-	-	-	-
+tenant_sms_credit_balances	no_role	hdr_B	con08	∅		-	-	-	-	-	-
+tenant_sms_credit_balances	no_role	hdr_B	sec01(=)	∅		-	-	-	-	-	-
+tenant_sms_credit_balances	no_role	hdr_C	con08	∅		-	-	-	-	-	-
+tenant_sms_credit_balances	no_role	hdr_C	sec01(=)	∅		-	-	-	-	-	-
+tenant_sms_credit_balances	no_role	hdr_garbage	con08	∅		-	-	-	-	-	-
+tenant_sms_credit_balances	no_role	hdr_garbage	sec01(=)	∅		-	-	-	-	-	-
+tenant_sms_credit_balances	anon	none	con08	∅		-	-	-	-	-	-
+tenant_sms_credit_balances	anon	none	sec01(=)	∅		-	-	-	-	-	-
+tenant_sms_credit_balances	anon	hdr_A	con08	∅		-	-	-	-	-	-
+tenant_sms_credit_balances	anon	hdr_A	sec01(=)	∅		-	-	-	-	-	-
+tenant_sms_pricing	super_admin	none	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+tenant_sms_pricing	super_admin	none	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+tenant_sms_pricing	super_admin	hdr_A	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+tenant_sms_pricing	super_admin	hdr_A	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+tenant_sms_pricing	super_admin	hdr_B	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+tenant_sms_pricing	super_admin	hdr_B	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+tenant_sms_pricing	super_admin	hdr_C	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+tenant_sms_pricing	super_admin	hdr_C	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+tenant_sms_pricing	super_admin	hdr_garbage	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+tenant_sms_pricing	super_admin	hdr_garbage	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+tenant_sms_pricing	admin_A	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_pricing	admin_A	none	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_pricing	admin_A	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_pricing	admin_A	hdr_A	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_pricing	admin_A	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_pricing	admin_A	hdr_B	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_pricing	admin_A	hdr_C	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_pricing	admin_A	hdr_C	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_pricing	admin_A	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_pricing	admin_A	hdr_garbage	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_pricing	gestor_A	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_pricing	gestor_A	none	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_pricing	gestor_A	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_pricing	gestor_A	hdr_A	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_pricing	gestor_A	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_pricing	gestor_A	hdr_B	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_pricing	gestor_A	hdr_C	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_pricing	gestor_A	hdr_C	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_pricing	gestor_A	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_pricing	gestor_A	hdr_garbage	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_pricing	member_A	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_pricing	member_A	none	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_pricing	member_A	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_pricing	member_A	hdr_A	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_pricing	member_A	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_pricing	member_A	hdr_B	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_pricing	member_A	hdr_C	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_pricing	member_A	hdr_C	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_pricing	member_A	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_pricing	member_A	hdr_garbage	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_pricing	gestor_B	none	con08	B		B	B	B	-	-	-
+tenant_sms_pricing	gestor_B	none	sec01(DIFF)	B		-	-	-	-	-	-
+tenant_sms_pricing	gestor_B	hdr_A	con08	B		B	B	B	-	-	-
+tenant_sms_pricing	gestor_B	hdr_A	sec01(DIFF)	B		-	-	-	-	-	-
+tenant_sms_pricing	gestor_B	hdr_B	con08	B		B	B	B	-	-	-
+tenant_sms_pricing	gestor_B	hdr_B	sec01(DIFF)	B		-	-	-	-	-	-
+tenant_sms_pricing	gestor_B	hdr_C	con08	B		B	B	B	-	-	-
+tenant_sms_pricing	gestor_B	hdr_C	sec01(DIFF)	B		-	-	-	-	-	-
+tenant_sms_pricing	gestor_B	hdr_garbage	con08	B		B	B	B	-	-	-
+tenant_sms_pricing	gestor_B	hdr_garbage	sec01(DIFF)	B		-	-	-	-	-	-
+tenant_sms_pricing	admin_B	none	con08	B		B	B	B	-	-	-
+tenant_sms_pricing	admin_B	none	sec01(DIFF)	B		-	-	-	-	-	-
+tenant_sms_pricing	admin_B	hdr_A	con08	B		B	B	B	-	-	-
+tenant_sms_pricing	admin_B	hdr_A	sec01(DIFF)	B		-	-	-	-	-	-
+tenant_sms_pricing	admin_B	hdr_B	con08	B		B	B	B	-	-	-
+tenant_sms_pricing	admin_B	hdr_B	sec01(DIFF)	B		-	-	-	-	-	-
+tenant_sms_pricing	admin_B	hdr_C	con08	B		B	B	B	-	-	-
+tenant_sms_pricing	admin_B	hdr_C	sec01(DIFF)	B		-	-	-	-	-	-
+tenant_sms_pricing	admin_B	hdr_garbage	con08	B		B	B	B	-	-	-
+tenant_sms_pricing	admin_B	hdr_garbage	sec01(DIFF)	B		-	-	-	-	-	-
+tenant_sms_pricing	multi_mA_aC	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_pricing	multi_mA_aC	none	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_pricing	multi_mA_aC	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_pricing	multi_mA_aC	hdr_A	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_pricing	multi_mA_aC	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_pricing	multi_mA_aC	hdr_B	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_pricing	multi_mA_aC	hdr_C	con08	C		C	C	C	-	-	-
+tenant_sms_pricing	multi_mA_aC	hdr_C	sec01(DIFF)	C		-	-	-	-	-	-
+tenant_sms_pricing	multi_mA_aC	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+tenant_sms_pricing	multi_mA_aC	hdr_garbage	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+tenant_sms_pricing	no_role	none	con08	∅		-	-	-	-	-	-
+tenant_sms_pricing	no_role	none	sec01(=)	∅		-	-	-	-	-	-
+tenant_sms_pricing	no_role	hdr_A	con08	∅		-	-	-	-	-	-
+tenant_sms_pricing	no_role	hdr_A	sec01(=)	∅		-	-	-	-	-	-
+tenant_sms_pricing	no_role	hdr_B	con08	∅		-	-	-	-	-	-
+tenant_sms_pricing	no_role	hdr_B	sec01(=)	∅		-	-	-	-	-	-
+tenant_sms_pricing	no_role	hdr_C	con08	∅		-	-	-	-	-	-
+tenant_sms_pricing	no_role	hdr_C	sec01(=)	∅		-	-	-	-	-	-
+tenant_sms_pricing	no_role	hdr_garbage	con08	∅		-	-	-	-	-	-
+tenant_sms_pricing	no_role	hdr_garbage	sec01(=)	∅		-	-	-	-	-	-
+tenant_sms_pricing	anon	none	con08	∅		-	-	-	-	-	-
+tenant_sms_pricing	anon	none	sec01(=)	∅		-	-	-	-	-	-
+tenant_sms_pricing	anon	hdr_A	con08	∅		-	-	-	-	-	-
+tenant_sms_pricing	anon	hdr_A	sec01(=)	∅		-	-	-	-	-	-
+user_roles	super_admin	none	con08	admin_A:admin,admin_B:admin,gestor_A:gestor,gestor_B:gestor,member_A:member,multi_mA_aC:admin,multi_mA_aC:member,super_admin:super_admin		member@A,member@B,member@C,member@NULL,gestor@A,gestor@B,gestor@C,gestor@NULL,admin@A,admin@B,admin@C,admin@NULL,super_admin@A,super_admin@B,super_admin@C,super_admin@NULL	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin	B:super_admin:super_admin,B:admin_A:admin,B:gestor_A:gestor,B:member_A:member,B:gestor_B:gestor,B:admin_B:admin,B:multi_mA_aC:member,B:multi_mA_aC:admin	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin
+user_roles	super_admin	none	sec01(=)	admin_A:admin,admin_B:admin,gestor_A:gestor,gestor_B:gestor,member_A:member,multi_mA_aC:admin,multi_mA_aC:member,super_admin:super_admin		member@A,member@B,member@C,member@NULL,gestor@A,gestor@B,gestor@C,gestor@NULL,admin@A,admin@B,admin@C,admin@NULL,super_admin@A,super_admin@B,super_admin@C,super_admin@NULL	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin	B:super_admin:super_admin,B:admin_A:admin,B:gestor_A:gestor,B:member_A:member,B:gestor_B:gestor,B:admin_B:admin,B:multi_mA_aC:member,B:multi_mA_aC:admin	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin
+user_roles	super_admin	hdr_A	con08	admin_A:admin,admin_B:admin,gestor_A:gestor,gestor_B:gestor,member_A:member,multi_mA_aC:admin,multi_mA_aC:member,super_admin:super_admin		member@A,member@B,member@C,member@NULL,gestor@A,gestor@B,gestor@C,gestor@NULL,admin@A,admin@B,admin@C,admin@NULL,super_admin@A,super_admin@B,super_admin@C,super_admin@NULL	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin	B:super_admin:super_admin,B:admin_A:admin,B:gestor_A:gestor,B:member_A:member,B:gestor_B:gestor,B:admin_B:admin,B:multi_mA_aC:member,B:multi_mA_aC:admin	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin
+user_roles	super_admin	hdr_A	sec01(=)	admin_A:admin,admin_B:admin,gestor_A:gestor,gestor_B:gestor,member_A:member,multi_mA_aC:admin,multi_mA_aC:member,super_admin:super_admin		member@A,member@B,member@C,member@NULL,gestor@A,gestor@B,gestor@C,gestor@NULL,admin@A,admin@B,admin@C,admin@NULL,super_admin@A,super_admin@B,super_admin@C,super_admin@NULL	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin	B:super_admin:super_admin,B:admin_A:admin,B:gestor_A:gestor,B:member_A:member,B:gestor_B:gestor,B:admin_B:admin,B:multi_mA_aC:member,B:multi_mA_aC:admin	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin
+user_roles	super_admin	hdr_B	con08	admin_A:admin,admin_B:admin,gestor_A:gestor,gestor_B:gestor,member_A:member,multi_mA_aC:admin,multi_mA_aC:member,super_admin:super_admin		member@A,member@B,member@C,member@NULL,gestor@A,gestor@B,gestor@C,gestor@NULL,admin@A,admin@B,admin@C,admin@NULL,super_admin@A,super_admin@B,super_admin@C,super_admin@NULL	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin	B:super_admin:super_admin,B:admin_A:admin,B:gestor_A:gestor,B:member_A:member,B:gestor_B:gestor,B:admin_B:admin,B:multi_mA_aC:member,B:multi_mA_aC:admin	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin
+user_roles	super_admin	hdr_B	sec01(=)	admin_A:admin,admin_B:admin,gestor_A:gestor,gestor_B:gestor,member_A:member,multi_mA_aC:admin,multi_mA_aC:member,super_admin:super_admin		member@A,member@B,member@C,member@NULL,gestor@A,gestor@B,gestor@C,gestor@NULL,admin@A,admin@B,admin@C,admin@NULL,super_admin@A,super_admin@B,super_admin@C,super_admin@NULL	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin	B:super_admin:super_admin,B:admin_A:admin,B:gestor_A:gestor,B:member_A:member,B:gestor_B:gestor,B:admin_B:admin,B:multi_mA_aC:member,B:multi_mA_aC:admin	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin
+user_roles	super_admin	hdr_C	con08	admin_A:admin,admin_B:admin,gestor_A:gestor,gestor_B:gestor,member_A:member,multi_mA_aC:admin,multi_mA_aC:member,super_admin:super_admin		member@A,member@B,member@C,member@NULL,gestor@A,gestor@B,gestor@C,gestor@NULL,admin@A,admin@B,admin@C,admin@NULL,super_admin@A,super_admin@B,super_admin@C,super_admin@NULL	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin	B:super_admin:super_admin,B:admin_A:admin,B:gestor_A:gestor,B:member_A:member,B:gestor_B:gestor,B:admin_B:admin,B:multi_mA_aC:member,B:multi_mA_aC:admin	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin
+user_roles	super_admin	hdr_C	sec01(=)	admin_A:admin,admin_B:admin,gestor_A:gestor,gestor_B:gestor,member_A:member,multi_mA_aC:admin,multi_mA_aC:member,super_admin:super_admin		member@A,member@B,member@C,member@NULL,gestor@A,gestor@B,gestor@C,gestor@NULL,admin@A,admin@B,admin@C,admin@NULL,super_admin@A,super_admin@B,super_admin@C,super_admin@NULL	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin	B:super_admin:super_admin,B:admin_A:admin,B:gestor_A:gestor,B:member_A:member,B:gestor_B:gestor,B:admin_B:admin,B:multi_mA_aC:member,B:multi_mA_aC:admin	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin
+user_roles	super_admin	hdr_garbage	con08	admin_A:admin,admin_B:admin,gestor_A:gestor,gestor_B:gestor,member_A:member,multi_mA_aC:admin,multi_mA_aC:member,super_admin:super_admin		member@A,member@B,member@C,member@NULL,gestor@A,gestor@B,gestor@C,gestor@NULL,admin@A,admin@B,admin@C,admin@NULL,super_admin@A,super_admin@B,super_admin@C,super_admin@NULL	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin	B:super_admin:super_admin,B:admin_A:admin,B:gestor_A:gestor,B:member_A:member,B:gestor_B:gestor,B:admin_B:admin,B:multi_mA_aC:member,B:multi_mA_aC:admin	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin
+user_roles	super_admin	hdr_garbage	sec01(=)	admin_A:admin,admin_B:admin,gestor_A:gestor,gestor_B:gestor,member_A:member,multi_mA_aC:admin,multi_mA_aC:member,super_admin:super_admin		member@A,member@B,member@C,member@NULL,gestor@A,gestor@B,gestor@C,gestor@NULL,admin@A,admin@B,admin@C,admin@NULL,super_admin@A,super_admin@B,super_admin@C,super_admin@NULL	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin	B:super_admin:super_admin,B:admin_A:admin,B:gestor_A:gestor,B:member_A:member,B:gestor_B:gestor,B:admin_B:admin,B:multi_mA_aC:member,B:multi_mA_aC:admin	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin	super_admin:super_admin,admin_A:admin,gestor_A:gestor,member_A:member,gestor_B:gestor,admin_B:admin,multi_mA_aC:member,multi_mA_aC:admin
+user_roles	admin_A	none	con08	gestor_A:gestor,member_A:member,multi_mA_aC:member		member@A,gestor@A	gestor_A:gestor,member_A:member,multi_mA_aC:member	gestor_A:gestor,member_A:member,multi_mA_aC:member	-	gestor_A:gestor,member_A:member,multi_mA_aC:member	-
+user_roles	admin_A	none	sec01(DIFF)	admin_A:admin		-	-	-	-	-	-
+user_roles	admin_A	hdr_A	con08	gestor_A:gestor,member_A:member,multi_mA_aC:member		member@A,gestor@A	gestor_A:gestor,member_A:member,multi_mA_aC:member	gestor_A:gestor,member_A:member,multi_mA_aC:member	-	gestor_A:gestor,member_A:member,multi_mA_aC:member	-
+user_roles	admin_A	hdr_A	sec01(DIFF)	admin_A:admin		-	-	-	-	-	-
+user_roles	admin_A	hdr_B	con08	gestor_A:gestor,member_A:member,multi_mA_aC:member		member@A,gestor@A	gestor_A:gestor,member_A:member,multi_mA_aC:member	gestor_A:gestor,member_A:member,multi_mA_aC:member	-	gestor_A:gestor,member_A:member,multi_mA_aC:member	-
+user_roles	admin_A	hdr_B	sec01(DIFF)	admin_A:admin		-	-	-	-	-	-
+user_roles	admin_A	hdr_C	con08	gestor_A:gestor,member_A:member,multi_mA_aC:member		member@A,gestor@A	gestor_A:gestor,member_A:member,multi_mA_aC:member	gestor_A:gestor,member_A:member,multi_mA_aC:member	-	gestor_A:gestor,member_A:member,multi_mA_aC:member	-
+user_roles	admin_A	hdr_C	sec01(DIFF)	admin_A:admin		-	-	-	-	-	-
+user_roles	admin_A	hdr_garbage	con08	gestor_A:gestor,member_A:member,multi_mA_aC:member		member@A,gestor@A	gestor_A:gestor,member_A:member,multi_mA_aC:member	gestor_A:gestor,member_A:member,multi_mA_aC:member	-	gestor_A:gestor,member_A:member,multi_mA_aC:member	-
+user_roles	admin_A	hdr_garbage	sec01(DIFF)	admin_A:admin		-	-	-	-	-	-
+user_roles	gestor_A	none	con08	gestor_A:gestor,member_A:member,multi_mA_aC:member		member@A,gestor@A	gestor_A:gestor,member_A:member,multi_mA_aC:member	gestor_A:gestor,member_A:member,multi_mA_aC:member	-	gestor_A:gestor,member_A:member,multi_mA_aC:member	-
+user_roles	gestor_A	none	sec01(DIFF)	gestor_A:gestor		-	-	-	-	-	-
+user_roles	gestor_A	hdr_A	con08	gestor_A:gestor,member_A:member,multi_mA_aC:member		member@A,gestor@A	gestor_A:gestor,member_A:member,multi_mA_aC:member	gestor_A:gestor,member_A:member,multi_mA_aC:member	-	gestor_A:gestor,member_A:member,multi_mA_aC:member	-
+user_roles	gestor_A	hdr_A	sec01(DIFF)	gestor_A:gestor		-	-	-	-	-	-
+user_roles	gestor_A	hdr_B	con08	gestor_A:gestor,member_A:member,multi_mA_aC:member		member@A,gestor@A	gestor_A:gestor,member_A:member,multi_mA_aC:member	gestor_A:gestor,member_A:member,multi_mA_aC:member	-	gestor_A:gestor,member_A:member,multi_mA_aC:member	-
+user_roles	gestor_A	hdr_B	sec01(DIFF)	gestor_A:gestor		-	-	-	-	-	-
+user_roles	gestor_A	hdr_C	con08	gestor_A:gestor,member_A:member,multi_mA_aC:member		member@A,gestor@A	gestor_A:gestor,member_A:member,multi_mA_aC:member	gestor_A:gestor,member_A:member,multi_mA_aC:member	-	gestor_A:gestor,member_A:member,multi_mA_aC:member	-
+user_roles	gestor_A	hdr_C	sec01(DIFF)	gestor_A:gestor		-	-	-	-	-	-
+user_roles	gestor_A	hdr_garbage	con08	gestor_A:gestor,member_A:member,multi_mA_aC:member		member@A,gestor@A	gestor_A:gestor,member_A:member,multi_mA_aC:member	gestor_A:gestor,member_A:member,multi_mA_aC:member	-	gestor_A:gestor,member_A:member,multi_mA_aC:member	-
+user_roles	gestor_A	hdr_garbage	sec01(DIFF)	gestor_A:gestor		-	-	-	-	-	-
+user_roles	member_A	none	con08	gestor_A:gestor,member_A:member,multi_mA_aC:member		member@A,gestor@A	gestor_A:gestor,member_A:member,multi_mA_aC:member	gestor_A:gestor,member_A:member,multi_mA_aC:member	-	gestor_A:gestor,member_A:member,multi_mA_aC:member	-
+user_roles	member_A	none	sec01(DIFF)	member_A:member		-	-	-	-	-	-
+user_roles	member_A	hdr_A	con08	gestor_A:gestor,member_A:member,multi_mA_aC:member		member@A,gestor@A	gestor_A:gestor,member_A:member,multi_mA_aC:member	gestor_A:gestor,member_A:member,multi_mA_aC:member	-	gestor_A:gestor,member_A:member,multi_mA_aC:member	-
+user_roles	member_A	hdr_A	sec01(DIFF)	member_A:member		-	-	-	-	-	-
+user_roles	member_A	hdr_B	con08	gestor_A:gestor,member_A:member,multi_mA_aC:member		member@A,gestor@A	gestor_A:gestor,member_A:member,multi_mA_aC:member	gestor_A:gestor,member_A:member,multi_mA_aC:member	-	gestor_A:gestor,member_A:member,multi_mA_aC:member	-
+user_roles	member_A	hdr_B	sec01(DIFF)	member_A:member		-	-	-	-	-	-
+user_roles	member_A	hdr_C	con08	gestor_A:gestor,member_A:member,multi_mA_aC:member		member@A,gestor@A	gestor_A:gestor,member_A:member,multi_mA_aC:member	gestor_A:gestor,member_A:member,multi_mA_aC:member	-	gestor_A:gestor,member_A:member,multi_mA_aC:member	-
+user_roles	member_A	hdr_C	sec01(DIFF)	member_A:member		-	-	-	-	-	-
+user_roles	member_A	hdr_garbage	con08	gestor_A:gestor,member_A:member,multi_mA_aC:member		member@A,gestor@A	gestor_A:gestor,member_A:member,multi_mA_aC:member	gestor_A:gestor,member_A:member,multi_mA_aC:member	-	gestor_A:gestor,member_A:member,multi_mA_aC:member	-
+user_roles	member_A	hdr_garbage	sec01(DIFF)	member_A:member		-	-	-	-	-	-
+user_roles	gestor_B	none	con08	gestor_B:gestor		member@B,gestor@B	gestor_B:gestor	gestor_B:gestor	B:gestor_B:gestor	gestor_B:gestor	-
+user_roles	gestor_B	none	sec01(DIFF)	gestor_B:gestor		-	-	-	-	-	-
+user_roles	gestor_B	hdr_A	con08	gestor_B:gestor		member@B,gestor@B	gestor_B:gestor	gestor_B:gestor	B:gestor_B:gestor	gestor_B:gestor	-
+user_roles	gestor_B	hdr_A	sec01(DIFF)	gestor_B:gestor		-	-	-	-	-	-
+user_roles	gestor_B	hdr_B	con08	gestor_B:gestor		member@B,gestor@B	gestor_B:gestor	gestor_B:gestor	B:gestor_B:gestor	gestor_B:gestor	-
+user_roles	gestor_B	hdr_B	sec01(DIFF)	gestor_B:gestor		-	-	-	-	-	-
+user_roles	gestor_B	hdr_C	con08	gestor_B:gestor		member@B,gestor@B	gestor_B:gestor	gestor_B:gestor	B:gestor_B:gestor	gestor_B:gestor	-
+user_roles	gestor_B	hdr_C	sec01(DIFF)	gestor_B:gestor		-	-	-	-	-	-
+user_roles	gestor_B	hdr_garbage	con08	gestor_B:gestor		member@B,gestor@B	gestor_B:gestor	gestor_B:gestor	B:gestor_B:gestor	gestor_B:gestor	-
+user_roles	gestor_B	hdr_garbage	sec01(DIFF)	gestor_B:gestor		-	-	-	-	-	-
+user_roles	admin_B	none	con08	gestor_B:gestor		member@B,gestor@B	gestor_B:gestor	gestor_B:gestor	B:gestor_B:gestor	gestor_B:gestor	-
+user_roles	admin_B	none	sec01(DIFF)	admin_B:admin		-	-	-	-	-	-
+user_roles	admin_B	hdr_A	con08	gestor_B:gestor		member@B,gestor@B	gestor_B:gestor	gestor_B:gestor	B:gestor_B:gestor	gestor_B:gestor	-
+user_roles	admin_B	hdr_A	sec01(DIFF)	admin_B:admin		-	-	-	-	-	-
+user_roles	admin_B	hdr_B	con08	gestor_B:gestor		member@B,gestor@B	gestor_B:gestor	gestor_B:gestor	B:gestor_B:gestor	gestor_B:gestor	-
+user_roles	admin_B	hdr_B	sec01(DIFF)	admin_B:admin		-	-	-	-	-	-
+user_roles	admin_B	hdr_C	con08	gestor_B:gestor		member@B,gestor@B	gestor_B:gestor	gestor_B:gestor	B:gestor_B:gestor	gestor_B:gestor	-
+user_roles	admin_B	hdr_C	sec01(DIFF)	admin_B:admin		-	-	-	-	-	-
+user_roles	admin_B	hdr_garbage	con08	gestor_B:gestor		member@B,gestor@B	gestor_B:gestor	gestor_B:gestor	B:gestor_B:gestor	gestor_B:gestor	-
+user_roles	admin_B	hdr_garbage	sec01(DIFF)	admin_B:admin		-	-	-	-	-	-
+user_roles	multi_mA_aC	none	con08	gestor_A:gestor,member_A:member,multi_mA_aC:member		member@A,gestor@A	gestor_A:gestor,member_A:member,multi_mA_aC:member	gestor_A:gestor,member_A:member,multi_mA_aC:member	-	gestor_A:gestor,member_A:member,multi_mA_aC:member	-
+user_roles	multi_mA_aC	none	sec01(DIFF)	multi_mA_aC:admin,multi_mA_aC:member		-	-	-	-	-	-
+user_roles	multi_mA_aC	hdr_A	con08	gestor_A:gestor,member_A:member,multi_mA_aC:member		member@A,gestor@A	gestor_A:gestor,member_A:member,multi_mA_aC:member	gestor_A:gestor,member_A:member,multi_mA_aC:member	-	gestor_A:gestor,member_A:member,multi_mA_aC:member	-
+user_roles	multi_mA_aC	hdr_A	sec01(DIFF)	multi_mA_aC:admin,multi_mA_aC:member		-	-	-	-	-	-
+user_roles	multi_mA_aC	hdr_B	con08	gestor_A:gestor,member_A:member,multi_mA_aC:member		member@A,gestor@A	gestor_A:gestor,member_A:member,multi_mA_aC:member	gestor_A:gestor,member_A:member,multi_mA_aC:member	-	gestor_A:gestor,member_A:member,multi_mA_aC:member	-
+user_roles	multi_mA_aC	hdr_B	sec01(DIFF)	multi_mA_aC:admin,multi_mA_aC:member		-	-	-	-	-	-
+user_roles	multi_mA_aC	hdr_C	con08	∅		member@C,gestor@C	-	-	-	-	-
+user_roles	multi_mA_aC	hdr_C	sec01(DIFF)	multi_mA_aC:admin,multi_mA_aC:member		-	-	-	-	-	-
+user_roles	multi_mA_aC	hdr_garbage	con08	gestor_A:gestor,member_A:member,multi_mA_aC:member		member@A,gestor@A	gestor_A:gestor,member_A:member,multi_mA_aC:member	gestor_A:gestor,member_A:member,multi_mA_aC:member	-	gestor_A:gestor,member_A:member,multi_mA_aC:member	-
+user_roles	multi_mA_aC	hdr_garbage	sec01(DIFF)	multi_mA_aC:admin,multi_mA_aC:member		-	-	-	-	-	-
+user_roles	no_role	none	con08	∅		-	-	-	-	-	-
+user_roles	no_role	none	sec01(=)	∅		-	-	-	-	-	-
+user_roles	no_role	hdr_A	con08	∅		-	-	-	-	-	-
+user_roles	no_role	hdr_A	sec01(=)	∅		-	-	-	-	-	-
+user_roles	no_role	hdr_B	con08	∅		-	-	-	-	-	-
+user_roles	no_role	hdr_B	sec01(=)	∅		-	-	-	-	-	-
+user_roles	no_role	hdr_C	con08	∅		-	-	-	-	-	-
+user_roles	no_role	hdr_C	sec01(=)	∅		-	-	-	-	-	-
+user_roles	no_role	hdr_garbage	con08	∅		-	-	-	-	-	-
+user_roles	no_role	hdr_garbage	sec01(=)	∅		-	-	-	-	-	-
+user_roles	anon	none	con08	∅		-	-	-	-	-	-
+user_roles	anon	none	sec01(=)	∅		-	-	-	-	-	-
+user_roles	anon	hdr_A	con08	∅		-	-	-	-	-	-
+user_roles	anon	hdr_A	sec01(=)	∅		-	-	-	-	-	-
+webhook_configs	super_admin	none	con08	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+webhook_configs	super_admin	none	sec01(DIFF)	A,A_sent,B,C,NULL	ERR:42501	A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+webhook_configs	super_admin	hdr_A	con08	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+webhook_configs	super_admin	hdr_A	sec01(DIFF)	A,A_sent,B,C,NULL	ERR:42501	A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+webhook_configs	super_admin	hdr_B	con08	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+webhook_configs	super_admin	hdr_B	sec01(DIFF)	A,A_sent,B,C,NULL	ERR:42501	A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+webhook_configs	super_admin	hdr_C	con08	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+webhook_configs	super_admin	hdr_C	sec01(DIFF)	A,A_sent,B,C,NULL	ERR:42501	A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+webhook_configs	super_admin	hdr_garbage	con08	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+webhook_configs	super_admin	hdr_garbage	sec01(DIFF)	A,A_sent,B,C,NULL	ERR:42501	A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+webhook_configs	admin_A	none	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+webhook_configs	admin_A	none	sec01(DIFF)	A,A_sent	ERR:42501	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+webhook_configs	admin_A	hdr_A	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+webhook_configs	admin_A	hdr_A	sec01(DIFF)	A,A_sent	ERR:42501	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+webhook_configs	admin_A	hdr_B	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+webhook_configs	admin_A	hdr_B	sec01(DIFF)	A,A_sent	ERR:42501	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+webhook_configs	admin_A	hdr_C	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+webhook_configs	admin_A	hdr_C	sec01(DIFF)	A,A_sent	ERR:42501	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+webhook_configs	admin_A	hdr_garbage	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+webhook_configs	admin_A	hdr_garbage	sec01(DIFF)	A,A_sent	ERR:42501	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+webhook_configs	gestor_A	none	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+webhook_configs	gestor_A	none	sec01(DIFF)	A,A_sent	ERR:42501	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+webhook_configs	gestor_A	hdr_A	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+webhook_configs	gestor_A	hdr_A	sec01(DIFF)	A,A_sent	ERR:42501	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+webhook_configs	gestor_A	hdr_B	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+webhook_configs	gestor_A	hdr_B	sec01(DIFF)	A,A_sent	ERR:42501	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+webhook_configs	gestor_A	hdr_C	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+webhook_configs	gestor_A	hdr_C	sec01(DIFF)	A,A_sent	ERR:42501	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+webhook_configs	gestor_A	hdr_garbage	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+webhook_configs	gestor_A	hdr_garbage	sec01(DIFF)	A,A_sent	ERR:42501	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+webhook_configs	member_A	none	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+webhook_configs	member_A	none	sec01(DIFF)	A,A_sent	ERR:42501	-	-	-	-	-	-
+webhook_configs	member_A	hdr_A	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+webhook_configs	member_A	hdr_A	sec01(DIFF)	A,A_sent	ERR:42501	-	-	-	-	-	-
+webhook_configs	member_A	hdr_B	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+webhook_configs	member_A	hdr_B	sec01(DIFF)	A,A_sent	ERR:42501	-	-	-	-	-	-
+webhook_configs	member_A	hdr_C	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+webhook_configs	member_A	hdr_C	sec01(DIFF)	A,A_sent	ERR:42501	-	-	-	-	-	-
+webhook_configs	member_A	hdr_garbage	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+webhook_configs	member_A	hdr_garbage	sec01(DIFF)	A,A_sent	ERR:42501	-	-	-	-	-	-
+webhook_configs	gestor_B	none	con08	B	B	B	B	B	-	-	-
+webhook_configs	gestor_B	none	sec01(DIFF)	B	ERR:42501	B	B	B	-	-	-
+webhook_configs	gestor_B	hdr_A	con08	B	B	B	B	B	-	-	-
+webhook_configs	gestor_B	hdr_A	sec01(DIFF)	B	ERR:42501	B	B	B	-	-	-
+webhook_configs	gestor_B	hdr_B	con08	B	B	B	B	B	-	-	-
+webhook_configs	gestor_B	hdr_B	sec01(DIFF)	B	ERR:42501	B	B	B	-	-	-
+webhook_configs	gestor_B	hdr_C	con08	B	B	B	B	B	-	-	-
+webhook_configs	gestor_B	hdr_C	sec01(DIFF)	B	ERR:42501	B	B	B	-	-	-
+webhook_configs	gestor_B	hdr_garbage	con08	B	B	B	B	B	-	-	-
+webhook_configs	gestor_B	hdr_garbage	sec01(DIFF)	B	ERR:42501	B	B	B	-	-	-
+webhook_configs	admin_B	none	con08	B	B	B	B	B	-	-	-
+webhook_configs	admin_B	none	sec01(DIFF)	B	ERR:42501	B	B	B	-	-	-
+webhook_configs	admin_B	hdr_A	con08	B	B	B	B	B	-	-	-
+webhook_configs	admin_B	hdr_A	sec01(DIFF)	B	ERR:42501	B	B	B	-	-	-
+webhook_configs	admin_B	hdr_B	con08	B	B	B	B	B	-	-	-
+webhook_configs	admin_B	hdr_B	sec01(DIFF)	B	ERR:42501	B	B	B	-	-	-
+webhook_configs	admin_B	hdr_C	con08	B	B	B	B	B	-	-	-
+webhook_configs	admin_B	hdr_C	sec01(DIFF)	B	ERR:42501	B	B	B	-	-	-
+webhook_configs	admin_B	hdr_garbage	con08	B	B	B	B	B	-	-	-
+webhook_configs	admin_B	hdr_garbage	sec01(DIFF)	B	ERR:42501	B	B	B	-	-	-
+webhook_configs	multi_mA_aC	none	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+webhook_configs	multi_mA_aC	none	sec01(DIFF)	A,A_sent	ERR:42501	-	-	-	-	-	-
+webhook_configs	multi_mA_aC	hdr_A	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+webhook_configs	multi_mA_aC	hdr_A	sec01(DIFF)	A,A_sent	ERR:42501	-	-	-	-	-	-
+webhook_configs	multi_mA_aC	hdr_B	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+webhook_configs	multi_mA_aC	hdr_B	sec01(DIFF)	A,A_sent	ERR:42501	-	-	-	-	-	-
+webhook_configs	multi_mA_aC	hdr_C	con08	C	C	C	C	C	-	-	-
+webhook_configs	multi_mA_aC	hdr_C	sec01(DIFF)	C	ERR:42501	C	C	C	-	-	-
+webhook_configs	multi_mA_aC	hdr_garbage	con08	A,A_sent	A,A_sent	A,A_by_other	A,A_sent	A,A_sent	-	-	-
+webhook_configs	multi_mA_aC	hdr_garbage	sec01(DIFF)	A,A_sent	ERR:42501	-	-	-	-	-	-
+webhook_configs	no_role	none	con08	∅	∅	-	-	-	-	-	-
+webhook_configs	no_role	none	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+webhook_configs	no_role	hdr_A	con08	∅	∅	-	-	-	-	-	-
+webhook_configs	no_role	hdr_A	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+webhook_configs	no_role	hdr_B	con08	∅	∅	-	-	-	-	-	-
+webhook_configs	no_role	hdr_B	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+webhook_configs	no_role	hdr_C	con08	∅	∅	-	-	-	-	-	-
+webhook_configs	no_role	hdr_C	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+webhook_configs	no_role	hdr_garbage	con08	∅	∅	-	-	-	-	-	-
+webhook_configs	no_role	hdr_garbage	sec01(DIFF)	∅	ERR:42501	-	-	-	-	-	-
+webhook_configs	anon	none	con08	∅	∅	-	-	-	-	-	-
+webhook_configs	anon	none	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+webhook_configs	anon	hdr_A	con08	∅	∅	-	-	-	-	-	-
+webhook_configs	anon	hdr_A	sec01(DIFF)	ERR:42501	ERR:42501	-	-	-	-	-	-
+withdrawals	super_admin	none	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+withdrawals	super_admin	none	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+withdrawals	super_admin	hdr_A	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+withdrawals	super_admin	hdr_A	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+withdrawals	super_admin	hdr_B	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+withdrawals	super_admin	hdr_B	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+withdrawals	super_admin	hdr_C	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+withdrawals	super_admin	hdr_C	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+withdrawals	super_admin	hdr_garbage	con08	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+withdrawals	super_admin	hdr_garbage	sec01(=)	A,A_sent,B,C,NULL		A,B,C,NULL,A_by_other	A,A_sent,B,C,NULL	A,A_sent,B,C,NULL	B:A,A:B	-	-
+withdrawals	admin_A	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+withdrawals	admin_A	none	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+withdrawals	admin_A	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+withdrawals	admin_A	hdr_A	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+withdrawals	admin_A	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+withdrawals	admin_A	hdr_B	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+withdrawals	admin_A	hdr_C	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+withdrawals	admin_A	hdr_C	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+withdrawals	admin_A	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+withdrawals	admin_A	hdr_garbage	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+withdrawals	gestor_A	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+withdrawals	gestor_A	none	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+withdrawals	gestor_A	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+withdrawals	gestor_A	hdr_A	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+withdrawals	gestor_A	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+withdrawals	gestor_A	hdr_B	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+withdrawals	gestor_A	hdr_C	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+withdrawals	gestor_A	hdr_C	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+withdrawals	gestor_A	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+withdrawals	gestor_A	hdr_garbage	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+withdrawals	member_A	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+withdrawals	member_A	none	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+withdrawals	member_A	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+withdrawals	member_A	hdr_A	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+withdrawals	member_A	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+withdrawals	member_A	hdr_B	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+withdrawals	member_A	hdr_C	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+withdrawals	member_A	hdr_C	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+withdrawals	member_A	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+withdrawals	member_A	hdr_garbage	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+withdrawals	gestor_B	none	con08	B		B	B	B	-	-	-
+withdrawals	gestor_B	none	sec01(DIFF)	B		-	-	-	-	-	-
+withdrawals	gestor_B	hdr_A	con08	B		B	B	B	-	-	-
+withdrawals	gestor_B	hdr_A	sec01(DIFF)	B		-	-	-	-	-	-
+withdrawals	gestor_B	hdr_B	con08	B		B	B	B	-	-	-
+withdrawals	gestor_B	hdr_B	sec01(DIFF)	B		-	-	-	-	-	-
+withdrawals	gestor_B	hdr_C	con08	B		B	B	B	-	-	-
+withdrawals	gestor_B	hdr_C	sec01(DIFF)	B		-	-	-	-	-	-
+withdrawals	gestor_B	hdr_garbage	con08	B		B	B	B	-	-	-
+withdrawals	gestor_B	hdr_garbage	sec01(DIFF)	B		-	-	-	-	-	-
+withdrawals	admin_B	none	con08	B		B	B	B	-	-	-
+withdrawals	admin_B	none	sec01(DIFF)	B		-	-	-	-	-	-
+withdrawals	admin_B	hdr_A	con08	B		B	B	B	-	-	-
+withdrawals	admin_B	hdr_A	sec01(DIFF)	B		-	-	-	-	-	-
+withdrawals	admin_B	hdr_B	con08	B		B	B	B	-	-	-
+withdrawals	admin_B	hdr_B	sec01(DIFF)	B		-	-	-	-	-	-
+withdrawals	admin_B	hdr_C	con08	B		B	B	B	-	-	-
+withdrawals	admin_B	hdr_C	sec01(DIFF)	B		-	-	-	-	-	-
+withdrawals	admin_B	hdr_garbage	con08	B		B	B	B	-	-	-
+withdrawals	admin_B	hdr_garbage	sec01(DIFF)	B		-	-	-	-	-	-
+withdrawals	multi_mA_aC	none	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+withdrawals	multi_mA_aC	none	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+withdrawals	multi_mA_aC	hdr_A	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+withdrawals	multi_mA_aC	hdr_A	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+withdrawals	multi_mA_aC	hdr_B	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+withdrawals	multi_mA_aC	hdr_B	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+withdrawals	multi_mA_aC	hdr_C	con08	C		C	C	C	-	-	-
+withdrawals	multi_mA_aC	hdr_C	sec01(DIFF)	C		-	-	-	-	-	-
+withdrawals	multi_mA_aC	hdr_garbage	con08	A,A_sent		A,A_by_other	A,A_sent	A,A_sent	-	-	-
+withdrawals	multi_mA_aC	hdr_garbage	sec01(DIFF)	A,A_sent		-	-	-	-	-	-
+withdrawals	no_role	none	con08	∅		-	-	-	-	-	-
+withdrawals	no_role	none	sec01(=)	∅		-	-	-	-	-	-
+withdrawals	no_role	hdr_A	con08	∅		-	-	-	-	-	-
+withdrawals	no_role	hdr_A	sec01(=)	∅		-	-	-	-	-	-
+withdrawals	no_role	hdr_B	con08	∅		-	-	-	-	-	-
+withdrawals	no_role	hdr_B	sec01(=)	∅		-	-	-	-	-	-
+withdrawals	no_role	hdr_C	con08	∅		-	-	-	-	-	-
+withdrawals	no_role	hdr_C	sec01(=)	∅		-	-	-	-	-	-
+withdrawals	no_role	hdr_garbage	con08	∅		-	-	-	-	-	-
+withdrawals	no_role	hdr_garbage	sec01(=)	∅		-	-	-	-	-	-
+withdrawals	anon	none	con08	∅		-	-	-	-	-	-
+withdrawals	anon	none	sec01(=)	∅		-	-	-	-	-	-
+withdrawals	anon	hdr_A	con08	∅		-	-	-	-	-	-
+withdrawals	anon	hdr_A	sec01(=)	∅		-	-	-	-	-	-

@@ -1,0 +1,70 @@
+{
+ "READONLY": [
+  "tenant_sms_credit_balances",
+  "sms_credit_ledger",
+  "sms_credit_orders",
+  "tenant_sms_pricing",
+  "deposits",
+  "withdrawals",
+  "tenant_audit_logs"
+ ],
+ "MANAGER_CUR": [
+  "automation_settings",
+  "dashboard_settings",
+  "webhook_configs"
+ ],
+ "MANAGER_ACC": [
+  "shortio_settings"
+ ],
+ "SAONLY": [
+  "call_providers",
+  "email_senders",
+  "email_smtp_configs"
+ ],
+ "SERVICEONLY": [
+  "meta_connections",
+  "meta_oauth_states",
+  "email_unsubscribe_tokens"
+ ],
+ "COLSECRET": [
+  [
+   "call_providers",
+   [
+    "api_key",
+    "api_secret",
+    "headers_config"
+   ]
+  ],
+  [
+   "webhook_configs",
+   [
+    "secret"
+   ]
+  ]
+ ],
+ "FN_CLIENT": [
+  "admin_adjust_sms_credits(uuid,integer,text,text)",
+  "admin_clear_tenant_sms_pricing(uuid)",
+  "admin_list_users_with_usage(timestamp with time zone,timestamp with time zone)",
+  "admin_mark_sms_credit_order_paid(uuid,text,text,jsonb)",
+  "admin_platform_metrics(timestamp with time zone,timestamp with time zone)",
+  "admin_set_sms_credit_settings(numeric,numeric,integer,integer)",
+  "admin_set_tenant_sms_pricing(uuid,numeric,numeric)",
+  "admin_sms_credit_overview()",
+  "apply_sms_credit_mutation(uuid,integer,text,text,text,text,text,jsonb,uuid)",
+  "create_sms_credit_checkout(uuid,uuid,integer)",
+  "dashboard_totals(uuid,timestamp with time zone,timestamp with time zone,timestamp with time zone)",
+  "get_my_webhook_token(uuid)",
+  "get_tenant_webhook_token(uuid)",
+  "get_webhook_config_secret(uuid)",
+  "is_tenant_admin(uuid)",
+  "refund_sms_credits(uuid,integer,text,text,text,text)",
+  "reserve_sms_credits(uuid,integer,text,text,text)",
+  "sms_credit_summary(uuid)",
+  "sms_effective_pricing(uuid)"
+ ],
+ "FN_SERVICE": [
+  "claim_due_sms_campaigns(integer)",
+  "recover_stuck_sms_campaigns()"
+ ]
+}

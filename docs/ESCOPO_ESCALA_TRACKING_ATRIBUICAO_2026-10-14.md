@@ -14,7 +14,7 @@ Legenda: ✅ concluído · 🟡 parcial / depende de ação externa · ⏳ pende
 | ---- | -------- | ------- | ----- |
 | A — Observabilidade | ✅ código; 🟡 configuração | `bcf7183`, `1406a9a` | `20261014220000` aplicada |
 | B — Contenção | ✅ código e banco | `37ea079`, `76f53c2`, `58f9a80` | `20261015090000`, `…091000`, `…092000` aplicadas |
-| SEC-01 — Correção de permissões | 🟡 pronto, aguardando decisão | não commitado | `20261015100000` **não aplicada** |
+| SEC-01 — Correção de permissões | ✅ aplicada (WhatsApp fora, documentado) | ver commit SEC-01 | `20261015100000` aplicada |
 | C — Integridade do envio | 🟡 código pronto e revisado; aguarda migrations e deploy | ver commit da Fase C | `…110000`, `…111000`, `…112000`, `…113000` **não aplicadas** |
 
 Pendências fora do código:
@@ -181,7 +181,7 @@ Sem medição não há como provar ganho das demais fases.
 
 ---
 
-**🟡 SEC-01 — Correção de permissões (achados F1–F4 do CON-08)**
+**✅ SEC-01 — Correção de permissões (achados F1–F4 do CON-08)**
 - Migration `20261015100000_fix_rls_privilege_escalation.sql`, rollback e matriz em `supabase/tests/rls/`; detalhes em `SEC-01_CORRECAO_PERMISSOES.md`.
 - Membros perdem escrita em créditos/preços de SMS, depósitos, saques e auditoria; `user_roles` só escrito pelo super admin; tabelas com credenciais restritas; `anon` sem escrita.
 - Matriz: 2.560 diferenças, todas intencionais e restritas às 16 tabelas alvo.
