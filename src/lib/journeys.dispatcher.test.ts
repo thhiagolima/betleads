@@ -567,10 +567,10 @@ describe("runJourneyDispatcher per-player rules (journey P0)", () => {
     expect(response?.variant_index).toBeGreaterThanOrEqual(0);
   });
 
-  it("runs the priority-paused sweep on every dispatch (S-02)", async () => {
+  it("runs the exit sweep on every dispatch (S-01, S-02)", async () => {
     seed([]);
     await runJourneyDispatcher(1000);
-    expect(rpcNames()).toContain("sweep_priority_paused_enrollments");
+    expect(rpcNames()).toContain("sweep_journey_exits");
   });
 });
 

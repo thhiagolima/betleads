@@ -1541,12 +1541,12 @@ async function runJourneyDispatcherMonitored(limit: number, run: JobRunHandle) {
       p_limit: limit,
     });
     if (resumeError) throw new Error(resumeError.message);
-    // S-02: paused-by-priority enrollments are never claimed, so their exit
-    // rules are evaluated here. Best effort: never blocks the dispatch.
-    const { error: sweepError } = await db.rpc("sweep_priority_paused_enrollments", {
-      p_limit: 500,
-    });
-    if (sweepError) console.error("[journeys] priority sweep failed", sweepError.message);
+    // Exit rules of every open enrollment (deposit, band change, archived
+    // journey, no contact) are applied here, so a category switch ends the old
+    // journey within a cycle instead of at its next step (S-01, S-02, F-2).
+    // Best effort: never blocks the dispatch.
+    const { error: sweepError } = await db.rpc("sweep_journey_exits", { p_limit: 1000 });
+    if (sweepError) console.error("[journeys] exit sweep failed", sweepError.message);
     run.progress({ queue_before: queueBefore ?? 0 });
     // Global SMS provider breaker: while open, SMS items are not claimed.
     await refreshSmsGate(ctx, true);

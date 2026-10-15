@@ -1,6 +1,7 @@
 // Journey P0 rules — SQL regression tests for
 // supabase/migrations/20261015200000_journey_p0_rules.sql
-// (single open enrollment, per-player caps, priority-paused sweep).
+// (single open enrollment, per-player caps, priority-paused sweep) and
+// supabase/migrations/20261016090000_journey_p1_exits.sql (exit sweep, reachability).
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -13,6 +14,7 @@ const read = (file: string) => readFileSync(resolve(root, "supabase/migrations",
 const LEASES = read("20261015110000_journey_dispatch_leases_fairness_rate_limits.sql");
 const EXPRESS = read("20261015122000_express_journeys.sql");
 const P0 = read("20261015200000_journey_p0_rules.sql");
+const P1_EXITS = read("20261016090000_journey_p1_exits.sql");
 
 const SCHEMA = `
 create role anon nologin;
@@ -41,7 +43,7 @@ create table public.journey_steps (
   position integer not null, step_type public.journey_step_type not null,
   is_enabled boolean not null default true, unique (journey_id, position));
 create table public.players (
-  id uuid primary key, ultimo_deposito timestamptz, ftd_em timestamptz,
+  id uuid primary key, telefone text, ultimo_deposito timestamptz, ftd_em timestamptz,
   ultimo_login timestamptz, ultimo_jogo timestamptz);
 create table public.journey_enrollments (
   id uuid primary key default gen_random_uuid(),
@@ -156,6 +158,8 @@ beforeAll(async () => {
   // Applied twice: the migration must be idempotent.
   await db.exec(`begin; ${P0}; commit;`);
   await db.exec(`begin; ${P0}; commit;`);
+  await db.exec(`begin; ${P1_EXITS}; commit;`);
+  await db.exec(`begin; ${P1_EXITS}; commit;`);
 }, 60_000);
 
 afterAll(async () => {
@@ -167,7 +171,7 @@ beforeEach(async () => {
     truncate journey_events, journey_step_executions, journey_enrollments, journey_steps, journeys,
       players, journey_contact_limits, sms_send_logs, email_send_logs, dispatch_pause_state, tenants cascade;
     insert into tenants values ('${T1}');
-    insert into players (id) values ('${P1}');
+    insert into players (id, telefone) values ('${P1}', '11999999999');
     insert into journeys (id, tenant_id, express, entry_rules, trigger_config, exit_rules) values
       ('${PIX}', '${T1}', false, '{"reentry":"per_occurrence"}', '{}', '{"deposit":true}'),
       ('${SAQUE}', '${T1}', true,
@@ -298,5 +302,106 @@ describe("priority-paused sweep (S-02)", () => {
       [id],
     );
     expect(row.status).toBe("paused_by_priority");
+  });
+});
+
+describe("reachable entries (P1)", () => {
+  it("skips a player without phone in an SMS-only journey", async () => {
+    await db.query(`update players set telefone = null`);
+    expect(await insertEnrollment(PIX, "pix_gerado_nao_pago:pix-1")).toHaveLength(0);
+  });
+
+  it("accepts the player once a phone number exists", async () => {
+    await db.query(`update players set telefone = ' (11) 99999-0000 '`);
+    expect(await insertEnrollment(PIX, "pix_gerado_nao_pago:pix-1")).toHaveLength(1);
+  });
+
+  it("does not require a phone when the journey also sends e-mail", async () => {
+    await db.query(`update players set telefone = null`);
+    await db.query(
+      `insert into journey_steps (journey_id, position, step_type) values ($1, 1, 'email')`,
+      [PIX],
+    );
+    expect(await insertEnrollment(PIX, "pix_gerado_nao_pago:pix-1")).toHaveLength(1);
+  });
+});
+
+describe("general exit sweep (P1)", () => {
+  async function openEnrollment(journey: string, entryKey = "once", status = "waiting") {
+    const [row] = await rows<{ id: string }>(
+      `insert into journey_enrollments (tenant_id, journey_id, player_id, entry_key, status, entered_at)
+       values ($1, $2, $3, $4, $5::journey_enrollment_status, now() - interval '1 hour') returning id`,
+      [T1, journey, P1, entryKey, status],
+    );
+    return row.id;
+  }
+  async function sweep() {
+    const [{ swept }] = await rows<{ swept: number }>(`select sweep_journey_exits(1000) swept`);
+    return swept;
+  }
+  async function enrollment(id: string) {
+    const [row] = await rows<{ status: string; exit_reason: string | null; entry_key: string }>(
+      `select status, exit_reason, entry_key from journey_enrollments where id = $1`,
+      [id],
+    );
+    return row;
+  }
+
+  it("exits a waiting enrollment right after a deposit (F-2)", async () => {
+    await db.query(`update players set ultimo_deposito = now() - interval '72 hours'`);
+    const id = await openEnrollment(ESFRIANDO);
+    expect(await sweep()).toBe(0);
+    await db.query(`update players set ultimo_deposito = now()`);
+    expect(await sweep()).toBe(1);
+    expect(await enrollment(id)).toMatchObject({ status: "exited", exit_reason: "deposit" });
+  });
+
+  it("exits an active band whose threshold passed", async () => {
+    await db.query(`update players set ultimo_deposito = now() - interval '200 hours'`);
+    const id = await openEnrollment(ESFRIANDO, "once", "active");
+    await sweep();
+    expect(await enrollment(id)).toMatchObject({ exit_reason: "inactivity_threshold" });
+  });
+
+  it("never touches an item leased by a worker", async () => {
+    await db.query(`update players set ultimo_deposito = now()`);
+    const id = await openEnrollment(ESFRIANDO, "once", "active");
+    await db.query(
+      `update journey_enrollments set claimed_at = now(), claimed_by = 'w1',
+         lease_expires_at = now() + interval '5 minutes' where id = $1`,
+      [id],
+    );
+    expect(await sweep()).toBe(0);
+    expect((await enrollment(id)).status).toBe("active");
+  });
+
+  it("exits enrollments of an archived journey", async () => {
+    const id = await openEnrollment(ESFRIANDO);
+    await db.query(`update journeys set status = 'archived' where id = $1`, [ESFRIANDO]);
+    await sweep();
+    expect(await enrollment(id)).toMatchObject({ exit_reason: "journey_archived" });
+  });
+
+  it("exits players without phone and releases the entry key for a later re-entry", async () => {
+    const id = await openEnrollment(PIX, "once");
+    await db.query(`update players set telefone = ''`);
+    expect(await sweep()).toBe(1);
+    const row = await enrollment(id);
+    expect(row).toMatchObject({ status: "exited", exit_reason: "no_contact" });
+    expect(row.entry_key).toMatch(/^once:no_contact:/);
+    await db.query(`update players set telefone = '11988887777'`);
+    expect(await insertEnrollment(PIX, "once")).toHaveLength(1);
+  });
+
+  it("logs one event per exit", async () => {
+    await db.query(`update players set ultimo_deposito = now()`);
+    const id = await openEnrollment(PIX);
+    await sweep();
+    const events = await rows<{ detail: { source: string } }>(
+      `select detail from journey_events where enrollment_id = $1`,
+      [id],
+    );
+    expect(events).toHaveLength(1);
+    expect(events[0].detail.source).toBe("exit_sweep");
   });
 });
