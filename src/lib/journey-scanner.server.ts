@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { startJobRun, type JobRunHandle } from "./observability/job-monitor.server";
+import { captureServerException } from "./observability/sentry.server";
 import { journeyEntryKey, qualifiesForInactivity, triggerOccurrence } from "./journey-policy";
 import { resolveJourneyWorkerScope } from "./journey-worker-scope";
 import { detectTriggersForPlayer } from "./triggers.server";
@@ -61,28 +62,34 @@ function optionalStartAt(journey: Journey) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+const FINANCIAL_LOOKUP_CHUNK = 100;
+
 async function financialOccurrences(journey: Journey, players: Player[]) {
   const occurrences = new Map<string, string>();
   if (!["pix_gerado_nao_pago", "saque_pago"].includes(journey.trigger_type)) return occurrences;
   const playerIds = players.map((player) => player.id);
   if (!playerIds.length) return occurrences;
   const table = journey.trigger_type === "saque_pago" ? "withdrawals" : "deposits";
-  let query = db
-    .from(table)
-    .select("id,player_id,created_at")
-    .eq("tenant_id", journey.tenant_id)
-    .in("player_id", playerIds)
-    .order("created_at", { ascending: false });
-  query =
-    journey.trigger_type === "saque_pago"
-      ? query.eq("status", "aprovado")
-      : query.eq("status", "pendente").ilike("metodo", "%pix%");
   const startAt = optionalStartAt(journey);
-  if (startAt != null) query = query.gte("created_at", new Date(startAt).toISOString());
-  const { data, error } = await query;
-  if (error) throw new Error(error.message);
-  for (const row of data ?? []) {
-    if (!occurrences.has(row.player_id)) occurrences.set(row.player_id, String(row.id));
+  // A 500-id `in` filter travels in the GET URL and broke every pix/saque scan
+  // with "fetch failed"; keep each request small.
+  for (let offset = 0; offset < playerIds.length; offset += FINANCIAL_LOOKUP_CHUNK) {
+    let query = db
+      .from(table)
+      .select("id,player_id,created_at")
+      .eq("tenant_id", journey.tenant_id)
+      .in("player_id", playerIds.slice(offset, offset + FINANCIAL_LOOKUP_CHUNK))
+      .order("created_at", { ascending: false });
+    query =
+      journey.trigger_type === "saque_pago"
+        ? query.eq("status", "aprovado")
+        : query.eq("status", "pendente").ilike("metodo", "%pix%");
+    if (startAt != null) query = query.gte("created_at", new Date(startAt).toISOString());
+    const { data, error } = await query;
+    if (error) throw new Error(error.message);
+    for (const row of data ?? []) {
+      if (!occurrences.has(row.player_id)) occurrences.set(row.player_id, String(row.id));
+    }
   }
   return occurrences;
 }
@@ -232,6 +239,140 @@ async function scanJob(job: ScanJob, batchSize: number): Promise<ScanBatchResult
     duplicates: Math.max(0, eligible.length - enrolled),
     complete,
   };
+}
+
+// ------------------------------------------------------------------
+// Event-driven entry (ENV-09)
+// ------------------------------------------------------------------
+// The periodic scan needs hours per cycle on large tenants, so a lead could
+// qualify long before it entered a journey. Webhooks now enroll the player the
+// moment the qualifying event is recorded, using exactly the scanner's rules
+// (matcher, start_after, audience, cooldown, entry_key). The scan keeps running
+// as a safety net; the shared entry_key makes both paths idempotent.
+
+/** Journey triggers that can become true at the moment of each webhook event. */
+const EVENT_ENTRY_TRIGGERS: Record<string, readonly string[]> = {
+  cadastro: ["cadastrados_sem_deposito"],
+  "deposito-pendente": ["pix_gerado_nao_pago"],
+  "deposito-aprovado": ["primeiro_deposito", "quase_vip", "reativacao_em_curso", "alto_potencial"],
+  "saque-aprovado": ["saque_pago"],
+  "saque-concluido": ["saque_pago"],
+};
+
+export function eventEntryTriggers(evento: string): readonly string[] {
+  return EVENT_ENTRY_TRIGGERS[evento] ?? [];
+}
+
+export function eventEntryEnabled(env: NodeJS.ProcessEnv = process.env) {
+  // Same kill switch as the scanner, plus a dedicated off switch.
+  return env.JOURNEYS_SCANNER_ENABLED === "true" && env.JOURNEYS_EVENT_ENTRY_ENABLED !== "false";
+}
+
+export function journeyInWorkerScope(
+  journey: Pick<Journey, "id" | "tenant_id">,
+  scope: ReturnType<typeof resolveJourneyWorkerScope>,
+) {
+  if (!scope.allowed) return false;
+  if (scope.tenantIds.length && !scope.tenantIds.includes(journey.tenant_id)) return false;
+  if (scope.journeyIds.length && !scope.journeyIds.includes(journey.id)) return false;
+  return true;
+}
+
+export type EventEntryResult = {
+  skipped?: string;
+  evaluated: number;
+  enrolled: number;
+  journeyIds: string[];
+};
+
+/**
+ * Enrolls one player into every active journey whose trigger the event can
+ * satisfy. Never throws: entry must not affect webhook processing.
+ */
+export async function enrollPlayerOnEvent(
+  tenantId: string,
+  playerId: string,
+  evento: string,
+): Promise<EventEntryResult> {
+  const result: EventEntryResult = { evaluated: 0, enrolled: 0, journeyIds: [] };
+  try {
+    const triggers = eventEntryTriggers(evento);
+    if (!triggers.length) return { ...result, skipped: "no_event_trigger" };
+    if (!eventEntryEnabled()) return { ...result, skipped: "disabled" };
+    const scope = resolveJourneyWorkerScope();
+    if (!scope.allowed) return { ...result, skipped: "canary_scope_required" };
+
+    const { data: journeyRows, error: journeysError } = await db
+      .from("journeys")
+      .select("id,tenant_id,version,status,trigger_type,trigger_config,entry_rules,cooldown_hours")
+      .eq("tenant_id", tenantId)
+      .eq("status", "active")
+      .in("trigger_type", [...triggers]);
+    if (journeysError) throw new Error(journeysError.message);
+    const journeys = ((journeyRows ?? []) as Journey[]).filter((journey) =>
+      journeyInWorkerScope(journey, scope),
+    );
+    if (!journeys.length) return { ...result, skipped: "no_active_journey" };
+
+    const { data: playerRow, error: playerError } = await db
+      .from("players")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .eq("id", playerId)
+      .maybeSingle();
+    if (playerError) throw new Error(playerError.message);
+    if (!playerRow) return { ...result, skipped: "player_not_found" };
+    const player = playerRow as Player;
+
+    for (const journey of journeys) {
+      result.evaluated++;
+      const occurrences = await financialOccurrences(journey, [player]);
+      const match = matchJourneyScanPlayer(journey, player, occurrences);
+      if (!match.matches) continue;
+      const blocked = await recentCooldownPlayers(journey, [player.id]);
+      if (blocked.has(player.id)) continue;
+      const { data, error } = await db
+        .from("journey_enrollments")
+        .upsert(
+          [
+            {
+              tenant_id: journey.tenant_id,
+              journey_id: journey.id,
+              journey_version: journey.version,
+              player_id: player.id,
+              entry_key: journeyEntryKey(
+                journey.trigger_type,
+                journey.entry_rules ?? {},
+                match.occurrence,
+              ),
+              metadata: {
+                trigger: journey.trigger_type,
+                trigger_occurrence: match.occurrence,
+                deposited_before_entry: Number(player.total_depositado ?? 0),
+                scanner: "event-v1",
+                source_event: evento,
+              },
+            },
+          ],
+          { onConflict: "journey_id,player_id,entry_key", ignoreDuplicates: true },
+        )
+        .select("id");
+      if (error) throw new Error(error.message);
+      if (data?.length) {
+        result.enrolled += data.length;
+        result.journeyIds.push(journey.id);
+      }
+    }
+    return result;
+  } catch (error) {
+    console.error("[journey event entry] failed", {
+      tenantId,
+      evento,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    captureServerException(error, { job: "journey_event_entry", tenantId, tags: { evento } });
+    return { ...result, skipped: "error" };
+  }
 }
 
 export async function runJourneyScanner(options: { jobs?: number; batchSize?: number } = {}) {

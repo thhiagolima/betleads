@@ -279,7 +279,7 @@ export function JourneysHub() {
         />
         <OverviewCard
           icon={UsersRound}
-          label="Jogadores na fila"
+          label="Em andamento"
           value={overview.queued.toLocaleString("pt-BR")}
           detail="Ativos, aguardando ou pausados por prioridade"
           color="cyan"
@@ -473,10 +473,14 @@ export function JourneysHub() {
                   .filter((step) => step.is_enabled && step.step_type !== "end")
                   .sort((a, b) => a.position - b.position);
                 const metrics = journey.metrics ?? {};
-                const queued =
+                // Leads enter the moment they qualify (ENV-09), so there is no
+                // "eligible but waiting" pool: everyone inside is in progress.
+                const inProgress =
                   Number(metrics.byStatus?.active ?? 0) +
                   Number(metrics.byStatus?.waiting ?? 0) +
                   Number(metrics.byStatus?.paused_by_priority ?? 0);
+                const finished =
+                  Number(metrics.byStatus?.completed ?? 0) + Number(metrics.byStatus?.exited ?? 0);
                 const sent = Object.values(metrics.sentByChannel ?? {}).reduce(
                   (total, value) => total + Number(value),
                   0,
@@ -484,11 +488,11 @@ export function JourneysHub() {
                 return (
                   <div
                     key={journey.id}
-                    className="grid gap-5 border-b p-5 last:border-b-0 xl:grid-cols-[minmax(0,1fr)_auto_auto] xl:items-center"
+                    className="grid gap-4 border-b p-5 last:border-b-0 xl:grid-cols-[minmax(16rem,1fr)_auto_auto] xl:items-center xl:gap-6"
                   >
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <p className="font-semibold">{journey.name}</p>
+                        <p className="truncate font-semibold">{journey.name}</p>
                         <Badge
                           variant="outline"
                           className={
@@ -500,35 +504,23 @@ export function JourneysHub() {
                           {labels[journey.status].toLowerCase()}
                         </Badge>
                       </div>
-                      <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                        {steps.length === 0 ? (
-                          <span>Sem etapas configuradas</span>
-                        ) : (
-                          steps.map((step, index) =>
-                            step.step_type === "wait" ? (
-                              <span key={step.id}>
-                                {formatWait(Number(step.config.delay_seconds ?? 0))}
-                              </span>
-                            ) : (
-                              <span key={step.id} className="contents">
-                                {index > 0 && steps[index - 1]?.step_type !== "wait" && (
-                                  <ChevronRight className="h-4 w-4" />
-                                )}
-                                <span
-                                  className={`rounded-full border px-2.5 py-1 text-xs font-medium ${channelStyles[step.step_type]}`}
-                                >
-                                  {channelNames[step.step_type]}
-                                </span>
-                                {index < steps.length - 1 && <ChevronRight className="h-4 w-4" />}
-                              </span>
-                            ),
-                          )
-                        )}
-                      </div>
+                      <p className="mt-1 truncate text-xs text-muted-foreground">
+                        {TRIGGER_NAMES[journey.trigger_type as keyof typeof TRIGGER_NAMES] ??
+                          journey.trigger_type}
+                      </p>
+                      <JourneyStepSummary steps={steps} />
                     </div>
                     <div className="grid grid-cols-2 gap-x-7 gap-y-3 sm:grid-cols-4">
-                      <JourneyMetric label="Elegíveis agora" value="—" />
-                      <JourneyMetric label="Na fila" value={queued.toLocaleString("pt-BR")} />
+                      <JourneyMetric
+                        label="Em andamento"
+                        hint="Leads dentro da jornada agora: aguardando a próxima etapa, a janela de envio ou pausados por prioridade."
+                        value={inProgress.toLocaleString("pt-BR")}
+                      />
+                      <JourneyMetric
+                        label="Concluíram"
+                        hint="Leads que terminaram a jornada ou saíram dela (por exemplo, ao depositar)."
+                        value={finished.toLocaleString("pt-BR")}
+                      />
                       <JourneyMetric label="Enviados" value={sent.toLocaleString("pt-BR")} />
                       <JourneyMetric
                         label="Recuperado atribuído"
@@ -574,9 +566,11 @@ export function JourneysHub() {
                         </Button>
                       )}
                       <Button
-                        size="sm"
+                        size="icon"
                         variant="ghost"
-                        className="text-muted-foreground hover:text-destructive"
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                        aria-label={`Excluir a jornada ${journey.name}`}
+                        title="Excluir"
                         disabled={remove.isPending}
                         onClick={() => {
                           if (
@@ -587,7 +581,7 @@ export function JourneysHub() {
                             remove.mutate(journey.id);
                         }}
                       >
-                        <Trash2 className="mr-1 h-4 w-4" /> Excluir
+                        <Trash2 className="h-4 w-4" aria-hidden="true" />
                       </Button>
                     </div>
                   </div>
@@ -864,6 +858,73 @@ const channelStyles = {
   voice: "border-emerald-500/30 text-emerald-500",
   end: "",
 };
+
+const STEP_SEQUENCE_MAX = 10;
+
+/**
+ * One-line summary of the step sequence: "7 SMS · 6 dias" plus a compact
+ * dot sequence, instead of one chip per step that wrapped into a tall column.
+ */
+function JourneyStepSummary({ steps }: { steps: Journey["journey_steps"] }) {
+  const sends = steps.filter((step) => step.step_type !== "wait");
+  if (sends.length === 0) {
+    return <p className="mt-2 text-sm text-muted-foreground">Sem etapas configuradas</p>;
+  }
+  const byChannel = sends.reduce<Record<string, number>>((acc, step) => {
+    acc[step.step_type] = (acc[step.step_type] ?? 0) + 1;
+    return acc;
+  }, {});
+  const totalWaitSeconds = steps
+    .filter((step) => step.step_type === "wait")
+    .reduce((total, step) => total + Number(step.config.delay_seconds ?? 0), 0);
+  const sequence = steps.slice(0, STEP_SEQUENCE_MAX);
+  const hidden = steps.length - sequence.length;
+  const fullSequence = steps
+    .map((step) =>
+      step.step_type === "wait"
+        ? formatWait(Number(step.config.delay_seconds ?? 0))
+        : channelNames[step.step_type],
+    )
+    .join(" → ");
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm">
+      <div className="flex flex-wrap items-center gap-1.5">
+        {Object.entries(byChannel).map(([channel, count]) => (
+          <span
+            key={channel}
+            className={`rounded-full border px-2 py-0.5 text-xs font-medium ${channelStyles[channel as keyof typeof channelStyles]}`}
+          >
+            {count} {channelNames[channel as keyof typeof channelNames]}
+          </span>
+        ))}
+        {totalWaitSeconds > 0 && (
+          <span className="text-xs text-muted-foreground">
+            em {formatWait(totalWaitSeconds)}
+          </span>
+        )}
+      </div>
+      <div
+        className="flex items-center gap-1"
+        role="img"
+        aria-label={`Sequência: ${fullSequence}`}
+        title={fullSequence}
+      >
+        {sequence.map((step) =>
+          step.step_type === "wait" ? (
+            <span key={step.id} className="h-px w-3 bg-border" aria-hidden="true" />
+          ) : (
+            <span
+              key={step.id}
+              className={`h-2 w-2 rounded-full border ${channelStyles[step.step_type]}`}
+              aria-hidden="true"
+            />
+          ),
+        )}
+        {hidden > 0 && <span className="text-xs text-muted-foreground">+{hidden}</span>}
+      </div>
+    </div>
+  );
+}
 
 function formatWait(seconds: number) {
   if (seconds < 3600) return `${Math.max(1, Math.round(seconds / 60))} min`;

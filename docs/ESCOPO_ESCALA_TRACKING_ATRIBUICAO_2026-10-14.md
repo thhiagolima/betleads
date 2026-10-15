@@ -6,6 +6,30 @@
 **Área coberta:** campanhas, jornadas, links, cliques, webhooks de cassino, ledger financeiro, atribuição, relatórios de jornada/campanha e a infraestrutura que os sustenta
 **Fora de escopo:** composer, gamificação, Meta/ads, automações de e-mail fora de jornada, autenticação do CRM
 
+## Status de execução (atualizado em 15/10/2026)
+
+Legenda: ✅ concluído · 🟡 parcial / depende de ação externa · ⏳ pendente
+
+| Fase | Situação | Commits | Banco |
+| ---- | -------- | ------- | ----- |
+| A — Observabilidade | ✅ código; 🟡 configuração | `bcf7183`, `1406a9a` | `20261014220000` aplicada |
+| B — Contenção | ✅ código e banco | `37ea079`, `76f53c2`, `58f9a80` | `20261015090000`, `…091000`, `…092000` aplicadas |
+| SEC-01 — Correção de permissões | 🟡 pronto, aguardando decisão | não commitado | `20261015100000` **não aplicada** |
+| C — Integridade do envio | ⏳ em andamento | — | — |
+
+Pendências fora do código:
+
+- **Deploy no VPS** do código das Fases A e B (`docker compose up -d --build`). Até lá, produção roda o código anterior sobre o banco novo (compatível).
+- **OBS-01:** CPU/RAM de 24 h após o upgrade (dashboard Supabase) e Index/Performance Advisor.
+- **OBS-02/03:** preencher `SENTRY_DSN` (Node) e `VITE_SENTRY_DSN` (React); ativar scrubber e "não guardar IP" nos projetos.
+- **OBS-04:** criar monitores e heartbeats no Better Stack conforme `RUNBOOK_OBSERVABILIDADE.md` e preencher `BETTERSTACK_HEARTBEAT_*`.
+- **Realtime:** confirmar que reconectou após o restart do upgrade.
+
+Ações operacionais executadas:
+
+- 15/10 00h55 BRT: `start_after = 2026-10-15T03:55:01Z` na jornada "PIX gerado e não pago" da Sorte Alta, que nunca havia inscrito ninguém e dispararia para todo o histórico de PIX pendentes.
+- Eventos perdidos pelo CON-04 já haviam sido reprocessados; efeitos colaterais e correções propostas em `RECUPERACAO_EVENTOS_PERDIDOS_2026-10-15.md` (aguardando decisão: 25 inscrições de nível, 71 depósitos com detalhe sobrescrito, 6 `ultimo_login` regredidos).
+
 ## 0. Contexto e decisões tomadas
 
 A Fase 0/1 da auditoria corrigiu a **semântica** da atribuição: clique first-party, grau A, correção dos UUIDs no trigger de nível e `recipient_player_id` obrigatório. A revisão de código desta data mostra que a **capacidade** e a **integridade operacional** continuam abertas. O sistema tem tetos globais fixos que não crescem com o número de tenants, e há caminhos de envio duplicado e de perda de evento.
@@ -63,11 +87,11 @@ Cada item tem ID para rastreio em PR/commit. Ordem das fases = ordem recomendada
 
 ---
 
-### Fase A — Observabilidade e capacidade (dias 1–2)
+### Fase A — Observabilidade e capacidade (dias 1–2) — ✅ código concluído
 
 Sem medição não há como provar ganho das demais fases.
 
-**OBS-01 — Linha de base do banco após o upgrade para Large**
+**🟡 OBS-01 — Linha de base do banco após o upgrade para Large**
 
 - Registrar CPU, RAM, conexões, cache hit e temp files por 24 h após o upgrade.
 - Exportar top 20 queries por tempo total em Query Performance (`pg_stat_statements`).
@@ -75,7 +99,7 @@ Sem medição não há como provar ganho das demais fases.
 - Candidatos já identificados: `reserve_journey_delivery` (`count(*)` diário sob advisory lock), `list_journey_metrics`, scanner (`select *` em players), `refresh_recent_dashboard_metrics`, escritas do sync Short.io, `journey_eligible_lead_count`.
 - **Aceite:** tabela "query → tempo total → ação" registrada; meta de CPU revisada com dado real.
 
-**OBS-02 — Sentry no servidor (Node 22, VPS)**
+**✅ OBS-02 — Sentry no servidor (Node 22, VPS)**
 
 - `@sentry/node` com `instrument.mjs` carregado por `node --import ./instrument.mjs .output/server/index.mjs`. O arquivo precisa ser copiado para o estágio `runner` do `Dockerfile` e o `CMD` ajustado.
 - DSN somente por variável `SENTRY_DSN`; nunca commitado. `SENTRY_ENVIRONMENT` e `SENTRY_RELEASE` (SHA do git).
@@ -85,20 +109,20 @@ Sem medição não há como provar ganho das demais fases.
 - Substituir `console.error` silenciosos dos caminhos críticos por `Sentry.captureException` com contexto.
 - **Aceite:** erro de teste visível no Sentry com tags e sem PII; release identificada.
 
-**OBS-03 — Sentry no front-end**
+**✅ OBS-03 — Sentry no front-end**
 
 - `@sentry/react` com `VITE_SENTRY_DSN`; session replay desligado (PII).
 - Upload de source maps no build.
 - **Aceite:** erro de tela rastreável até o componente.
 
-**OBS-04 — Better Stack: uptime e heartbeats**
+**🟡 OBS-04 — Better Stack: uptime e heartbeats**
 
 - Uptime: home do CRM, rota de redirect com token sintético, rota de webhook (health sem efeito colateral).
 - Heartbeats: dispatcher de jornadas, scanner, dispatcher de campanhas, replay de webhook, sync Short.io, refresh do dashboard. Cada job faz ping ao concluir; ausência = alerta.
 - Logs do container do VPS enviados ao Better Stack.
 - **Aceite:** derrubar um job em homologação dispara alerta em < 5 min.
 
-**OBS-05 — Heartbeat real e métricas de fila**
+**✅ OBS-05 — Heartbeat real e métricas de fila**
 
 - `dispatcher_runs` passa a registrar início, progresso e fim (hoje só registra o fim).
 - Expor por tenant/canal: fila pronta, idade p95 do item mais antigo, enviados/min, erros/min.
@@ -106,9 +130,9 @@ Sem medição não há como provar ganho das demais fases.
 
 ---
 
-### Fase B — Contenção de baixo risco (dias 2–4)
+### Fase B — Contenção de baixo risco (dias 2–4) — ✅ concluída
 
-**CON-08 — RLS avaliado uma vez por query, não por linha (executar primeiro)**
+**✅ CON-08 — RLS avaliado uma vez por query, não por linha (executar primeiro)**
 - Origem: `BASELINE_BANCO_2026-10-14.md` (NOVO-A). As telas do CRM via PostgREST (`authenticated`) respondem por **44% do tempo medido** do banco.
 - Causa: `players`, `sms_send_logs`, `deposits`, `webhook_logs`, `activation_runs` (e demais tabelas por tenant) têm até 3 políticas permissivas, duas delas idênticas, chamando `has_tenant_access(tenant_id)`, `current_tenant_id()` e `is_super_admin()` sem `(select …)`. Cada função roda por linha; `user_roles` (11 linhas) acumulou 143 milhões de seq scans. O mesmo `count(*)` de players leva 8,6 ms sem RLS e ~4 s via PostgREST.
 - Mudanças:
@@ -119,43 +143,49 @@ Sem medição não há como provar ganho das demais fases.
 - **Revisão de segurança obrigatória:** matriz de acesso antes × depois (super admin, admin/gestor/member do tenant A, usuário do tenant B, usuário sem vínculo, `anon`) para SELECT/INSERT/UPDATE/DELETE em cada tabela alterada.
 - **Aceite:** matriz de acesso idêntica; `count(*)` de players via `authenticated` < 100 ms; nenhuma tela com timeout de 8 s; CPU p95 reavaliada.
 
-**CON-01 — Índice de lookup do clique**
+**✅ CON-01 — Índice de lookup do clique**
 - `link_dispatches` só tem `unique (tenant_id, tracking_token)`; o redirect busca por `tracking_token` sozinho (`src/lib/click-tracking.server.ts:107-113`).
 - Criar `CREATE UNIQUE INDEX CONCURRENTLY` em `link_dispatches (tracking_token)`.
 - **Aceite:** `EXPLAIN` do lookup usa index scan.
 
-**CON-02 — Segredo de assinatura vazio derruba o tracking**
+**✅ CON-02 — Segredo de assinatura vazio derruba o tracking**
 - `trackingSecret` usa `??`; `CLICK_TRACKING_SECRET=` vazio vira `""` e lança exceção em todo envio rastreado e redirect (`src/lib/click-tracking.server.ts:13-19`).
 - Trocar por `||` e validar no boot (falhar o deploy, não o tráfego).
 - **Aceite:** teste unitário cobre variável vazia, ausente e curta.
 
-**CON-03 — Replay de webhook sem bloqueio de cabeça de fila**
+**✅ CON-03 — Replay de webhook sem bloqueio de cabeça de fila**
 - `webhook-replay.ts` seleciona os 20 mais antigos `recebido/erro` sem contador; 20 erros permanentes travam o backlog.
 - Adicionar em `webhook_logs`: `replay_attempts`, `next_replay_at`, `dead_lettered_at`; backoff exponencial; DLQ após 5 tentativas; seleção por `next_replay_at` com distribuição por tenant; idade mínima de 2 min; claim com `FOR UPDATE SKIP LOCKED` via RPC.
 - Índice parcial `webhook_logs (next_replay_at) WHERE status IN ('recebido','erro') AND dead_lettered_at IS NULL`.
 - **Aceite:** teste com evento envenenado não impede o processamento dos seguintes.
 
-**CON-04 — Evento perdido como "duplicado"**
+**✅ CON-04 — Evento perdido como "duplicado"**
 - Quando `claim_webhook_event` não devolve recibo porque outro processamento está em andamento (< 10 min), o log é marcado `duplicado` e responde 200 (`src/lib/webhook-process.server.ts:195-197`). O replay ignora `duplicado`; se o processamento original morreu, o evento some.
 - Diferenciar "já processado" (200, `duplicado`) de "em processamento" (409/503, log continua elegível ao replay).
 - **Aceite:** teste de crash após claim seguido de retry processa o evento uma vez.
 
-**CON-05 — Rótulos e valores de jornada (decisão de produto)**
+**✅ CON-05 — Rótulos e valores de jornada (decisão de produto)**
 - Remover "Depósitos operacionais" e qualquer valor operacional das telas de jornada.
 - Renomear "Recuperado operacional" (`src/components/journeys/journeys-hub.tsx:560`) para **"Recuperado atribuído"** — o valor já vem de `conversion_attributions` direct.
 - Esconder o seletor Hoje/7/30 dias da lista até ele filtrar no servidor.
 - Corrigir o modal "Como a conta é feita": janela de 7 dias, não 24 h.
 - **Aceite:** nenhuma tela de jornada exibe valor sem grau A; textos coerentes com o atribuidor.
 
-**CON-06 — Teste de regressão do trigger de nível**
+**✅ CON-06 — Teste de regressão do trigger de nível**
 - O bug de UUIDs foi corrigido em `20261014200000`, sem teste.
 - Teste SQL (ou integração contra banco local) que cria jornada de nível, deposita e valida `journey_events`/`journey_enrollments`.
 
-**CON-07 — Documentação obsoleta**
+**✅ CON-07 — Documentação obsoleta**
 - Atualizar `CONTRATO_RASTREAMENTO_CLIQUE_WEBHOOK.md`: `bl_click_id` não é mais a chave; identidade = clique first-party → dispatch → player + `player_external_id` no webhook.
 - Marcar na auditoria os itens `[x]` que valem só para Sorte Alta.
 
 ---
+
+**🟡 SEC-01 — Correção de permissões (achados F1–F4 do CON-08)**
+- Migration `20261015100000_fix_rls_privilege_escalation.sql`, rollback e matriz em `supabase/tests/rls/`; detalhes em `SEC-01_CORRECAO_PERMISSOES.md`.
+- Membros perdem escrita em créditos/preços de SMS, depósitos, saques e auditoria; `user_roles` só escrito pelo super admin; tabelas com credenciais restritas; `anon` sem escrita.
+- Matriz: 2.560 diferenças, todas intencionais e restritas às 16 tabelas alvo.
+- Exige deploy de `whatsapp-proxies.functions.ts` junto ou antes da migration.
 
 ### Fase C — Integridade do envio (semana 1–2)
 

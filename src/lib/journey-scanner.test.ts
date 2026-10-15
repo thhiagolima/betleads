@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { matchFinancialTrigger } from "./journeys.server";
-import { matchJourneyScanPlayer, runJourneyScanner } from "./journey-scanner.server";
+import {
+  eventEntryEnabled,
+  eventEntryTriggers,
+  journeyInWorkerScope,
+  matchJourneyScanPlayer,
+  runJourneyScanner,
+} from "./journey-scanner.server";
 
 const journey = (overrides: Record<string, unknown> = {}) =>
   ({
@@ -118,5 +124,41 @@ describe("journey dispatcher revalidation", () => {
       matches: true,
       occurrence: "2026-01-10T10:00:00.000Z",
     });
+  });
+});
+
+describe("event-driven journey entry (ENV-09)", () => {
+  it("maps webhook events to the triggers they can satisfy", () => {
+    expect(eventEntryTriggers("cadastro")).toEqual(["cadastrados_sem_deposito"]);
+    expect(eventEntryTriggers("deposito-pendente")).toEqual(["pix_gerado_nao_pago"]);
+    expect(eventEntryTriggers("deposito-aprovado")).toContain("primeiro_deposito");
+    expect(eventEntryTriggers("saque-concluido")).toEqual(["saque_pago"]);
+    expect(eventEntryTriggers("login")).toEqual([]);
+  });
+
+  it("follows the scanner kill switch and has its own off switch", () => {
+    expect(eventEntryEnabled({ JOURNEYS_SCANNER_ENABLED: "true" } as NodeJS.ProcessEnv)).toBe(true);
+    expect(eventEntryEnabled({} as NodeJS.ProcessEnv)).toBe(false);
+    expect(
+      eventEntryEnabled({
+        JOURNEYS_SCANNER_ENABLED: "true",
+        JOURNEYS_EVENT_ENTRY_ENABLED: "false",
+      } as NodeJS.ProcessEnv),
+    ).toBe(false);
+  });
+
+  it("respects the same canary scope as the scanner", () => {
+    const tenant = "11111111-1111-4111-8111-111111111111";
+    const other = "22222222-2222-4222-8222-222222222222";
+    const journey = { id: "33333333-3333-4333-8333-333333333333", tenant_id: tenant };
+    expect(
+      journeyInWorkerScope(journey, { tenantIds: [], journeyIds: [], allowAll: true, allowed: true }),
+    ).toBe(true);
+    expect(
+      journeyInWorkerScope(journey, { tenantIds: [other], journeyIds: [], allowAll: false, allowed: true }),
+    ).toBe(false);
+    expect(
+      journeyInWorkerScope(journey, { tenantIds: [], journeyIds: [], allowAll: false, allowed: false }),
+    ).toBe(false);
   });
 });

@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { attributeFromLastFirstPartyClick } from "./conversion-attribution.server";
+import { enrollPlayerOnEvent, eventEntryTriggers } from "./journey-scanner.server";
 
 export function getServiceClient(): SupabaseClient | null {
   const supabaseUrl = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL;
@@ -923,6 +924,13 @@ export async function processWebhookEvent(
     }
 
     await markLog("processado");
+
+    // ENV-09: enroll the player now in journeys this event qualifies for,
+    // instead of waiting for the next scan cycle. Runs after the ledger and
+    // never blocks or fails the webhook (errors are logged and reported).
+    if (eventEntryTriggers(evento).length) {
+      void enrollPlayerOnEvent(tenantId, playerId, evento);
+    }
 
     // Espelhamento para CRMs Expert.
     // Quando um evento chega no tenant principal (CRM_PLATAFORMA) e o
