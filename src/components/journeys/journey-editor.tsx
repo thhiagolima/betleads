@@ -1,8 +1,19 @@
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { ArrowLeft, Clock3, Mail, MessageSquare, Phone, Save, Trash2, Upload } from "lucide-react";
+import {
+  ArrowLeft,
+  Clock3,
+  HelpCircle,
+  Mail,
+  MessageSquare,
+  Phone,
+  Save,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
 import { saveJourney } from "@/lib/journeys.functions";
 import { TRIGGER_NAMES } from "@/lib/triggers";
@@ -18,6 +29,7 @@ import type { JourneyStepInput } from "@/lib/journeys.shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 type Step =
   | { kind: "wait"; seconds: number }
@@ -25,6 +37,132 @@ type Step =
   | { kind: "email"; templateId: string }
   | { kind: "voice"; assetId: string; callerId: string };
 type SavedStep = { step_type: string; config: Record<string, unknown> };
+
+const JOURNEY_HELP = {
+  name: ["Nome", "Use um nome que deixe claro o objetivo da jornada para a equipe."],
+  description: [
+    "Descrição",
+    "Registre o contexto e a intenção da jornada. Ela não é enviada ao jogador.",
+  ],
+  trigger: [
+    "Gatilho de entrada",
+    "É o evento que coloca um jogador na jornada. Ele só entra se também fizer parte do público escolhido.",
+  ],
+  level: [
+    "Nível de destino",
+    "O jogador entra nesta jornada ao alcançar este nível. A jornada do nível anterior é encerrada automaticamente.",
+  ],
+  exit: [
+    "Gatilhos de saída",
+    "Marque os eventos que devem encerrar a jornada para evitar mensagens fora de contexto.",
+  ],
+  conflicts: [
+    "Conflitos",
+    "Define como esta jornada se comporta quando disputa a atenção do mesmo jogador com outra jornada.",
+  ],
+  family: [
+    "Família",
+    "Agrupa jornadas relacionadas. A família de níveis garante que o jogador fique em apenas um nível por vez.",
+  ],
+  priority: ["Prioridade", "Em uma disputa, o menor número vence. Prioridade 1 é a mais alta."],
+  policy: [
+    "Ao competir",
+    "Escolha se as jornadas podem coexistir ou se a menos prioritária deve aguardar.",
+  ],
+  audience: [
+    "Público",
+    "Define quem pode entrar depois de cumprir o gatilho. Consentimento e canal disponível ainda são verificados no envio.",
+  ],
+  reentry: ["Reentrada", "Define se o mesmo jogador pode voltar à jornada após sair dela."],
+  dailyLimit: [
+    "Limite diário",
+    "É o máximo de mensagens desta jornada por dia. Protege a operação contra envios em excesso.",
+  ],
+  cooldown: [
+    "Cooldown",
+    "É o intervalo mínimo antes de outra jornada enviar no mesmo canal. Não altera a espera entre etapas desta própria jornada.",
+  ],
+  window: [
+    "Janela de envio",
+    "Mensagens fora desse horário aguardam a próxima abertura da janela, no horário de Brasília.",
+  ],
+  sequence: [
+    "Sequência",
+    "Monte a ordem das esperas e mensagens. Cada etapa só ocorre depois que a etapa anterior termina.",
+  ],
+  wait: ["Espera", "Define quantos segundos a jornada aguarda antes da próxima etapa."],
+  sms: ["SMS", "Escolha um template aprovado. A jornada guarda uma cópia da versão usada."],
+  email: ["E-mail", "Escolha o template de e-mail que será enviado nesta etapa."],
+  voice: ["Voz", "Envie um áudio e selecione-o para fazer uma ligação automatizada."],
+} as const;
+
+function JourneyHelp({
+  id,
+  activeId,
+  setActiveId,
+  help,
+}: {
+  id: string;
+  activeId: string | null;
+  setActiveId: (id: string | null) => void;
+  help: readonly [string, string];
+}) {
+  return (
+    <Popover open={activeId === id} onOpenChange={(open) => setActiveId(open ? id : null)}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={`Ajuda: ${help[0]}`}
+          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <HelpCircle className="h-4 w-4" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        side="bottom"
+        collisionPadding={16}
+        className="w-[calc(100vw-2rem)] max-w-sm rounded-xl p-4"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="font-semibold">{help[0]}</p>
+            <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{help[1]}</p>
+          </div>
+          <button
+            type="button"
+            aria-label="Fechar ajuda"
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md hover:bg-muted"
+            onClick={() => setActiveId(null)}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function JourneyFieldTitle({
+  children,
+  helpId,
+  activeHelp,
+  setActiveHelp,
+  help,
+}: {
+  children: ReactNode;
+  helpId: string;
+  activeHelp: string | null;
+  setActiveHelp: (id: string | null) => void;
+  help: readonly [string, string];
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span>{children}</span>
+      <JourneyHelp id={helpId} activeId={activeHelp} setActiveId={setActiveHelp} help={help} />
+    </div>
+  );
+}
 
 export function JourneyEditor({
   id,
@@ -127,6 +265,7 @@ export function JourneyEditor({
   const [conflictPolicy, setConflictPolicy] = useState<
     "coexist" | "pause_lower_priority" | "exclusive"
   >(initial?.conflict_policy ?? "coexist");
+  const [activeHelp, setActiveHelp] = useState<string | null>(null);
   const [windowStart, setWindowStart] = useState(
     String(initial?.entry_rules?.window_start ?? "08:00"),
   );
@@ -359,16 +498,37 @@ export function JourneyEditor({
             )}
           </section>
         )}
-        <label className="block text-sm font-medium">
-          Nome
+        <div className="block text-sm font-medium">
+          <JourneyFieldTitle
+            helpId="name"
+            activeHelp={activeHelp}
+            setActiveHelp={setActiveHelp}
+            help={JOURNEY_HELP.name}
+          >
+            Nome
+          </JourneyFieldTitle>
           <Input value={name} onChange={(e) => setName(e.target.value)} />
-        </label>
-        <label className="block text-sm font-medium">
-          Descrição
+        </div>
+        <div className="block text-sm font-medium">
+          <JourneyFieldTitle
+            helpId="description"
+            activeHelp={activeHelp}
+            setActiveHelp={setActiveHelp}
+            help={JOURNEY_HELP.description}
+          >
+            Descrição
+          </JourneyFieldTitle>
           <Textarea value={description} onChange={(e) => setDescription(e.target.value)} />
-        </label>
-        <label className="block text-sm font-medium">
-          Gatilho de entrada
+        </div>
+        <div className="block text-sm font-medium">
+          <JourneyFieldTitle
+            helpId="trigger"
+            activeHelp={activeHelp}
+            setActiveHelp={setActiveHelp}
+            help={JOURNEY_HELP.trigger}
+          >
+            Gatilho de entrada
+          </JourneyFieldTitle>
           <select
             className="mt-1 flex h-10 w-full rounded-md border bg-background px-3 text-sm"
             value={trigger}
@@ -390,10 +550,17 @@ export function JourneyEditor({
               </option>
             ))}
           </select>
-        </label>
+        </div>
         {trigger === "nivel_alterado" && (
           <section className="rounded-lg border border-primary/30 bg-primary/5 p-4 text-sm">
-            <p className="font-medium">Nível de destino</p>
+            <JourneyFieldTitle
+              helpId="level"
+              activeHelp={activeHelp}
+              setActiveHelp={setActiveHelp}
+              help={JOURNEY_HELP.level}
+            >
+              Nível de destino
+            </JourneyFieldTitle>
             <p className="mt-1 text-xs text-muted-foreground">
               Ao atingir este nível, o jogador sai da jornada do nível anterior e entra nesta.
             </p>
@@ -414,7 +581,14 @@ export function JourneyEditor({
           </section>
         )}
         <section className="rounded-lg border p-4 text-sm">
-          <p className="font-medium">Gatilhos de saída</p>
+          <JourneyFieldTitle
+            helpId="exit"
+            activeHelp={activeHelp}
+            setActiveHelp={setActiveHelp}
+            help={JOURNEY_HELP.exit}
+          >
+            Gatilhos de saída
+          </JourneyFieldTitle>
           <p className="mt-1 text-xs text-muted-foreground">
             A jornada encerra para o jogador quando um destes eventos ocorre.
           </p>
@@ -440,14 +614,28 @@ export function JourneyEditor({
           </div>
         </section>
         <section className="rounded-lg border p-4 text-sm">
-          <p className="font-medium">Conflitos entre jornadas</p>
+          <JourneyFieldTitle
+            helpId="conflicts"
+            activeHelp={activeHelp}
+            setActiveHelp={setActiveHelp}
+            help={JOURNEY_HELP.conflicts}
+          >
+            Conflitos entre jornadas
+          </JourneyFieldTitle>
           <p className="mt-1 text-xs text-muted-foreground">
             Use uma família para definir como jornadas relacionadas se comportam para o mesmo
             jogador.
           </p>
           <div className="mt-3 grid gap-3 sm:grid-cols-3">
-            <label className="block text-xs text-muted-foreground">
-              Família
+            <div className="block text-xs text-muted-foreground">
+              <JourneyFieldTitle
+                helpId="family"
+                activeHelp={activeHelp}
+                setActiveHelp={setActiveHelp}
+                help={JOURNEY_HELP.family}
+              >
+                Família
+              </JourneyFieldTitle>
               <select
                 className="mt-1 flex h-10 w-full rounded-md border bg-background px-3 text-sm"
                 value={conflictFamily}
@@ -456,9 +644,16 @@ export function JourneyEditor({
                 <option value="">Sem família</option>
                 <option value="progressao_niveis">Progressão de níveis</option>
               </select>
-            </label>
-            <label className="block text-xs text-muted-foreground">
-              Prioridade (1 é maior)
+            </div>
+            <div className="block text-xs text-muted-foreground">
+              <JourneyFieldTitle
+                helpId="priority"
+                activeHelp={activeHelp}
+                setActiveHelp={setActiveHelp}
+                help={JOURNEY_HELP.priority}
+              >
+                Prioridade (1 é maior)
+              </JourneyFieldTitle>
               <Input
                 className="mt-1"
                 type="number"
@@ -467,9 +662,16 @@ export function JourneyEditor({
                 value={journeyPriority}
                 onChange={(event) => setJourneyPriority(Number(event.target.value) || 1)}
               />
-            </label>
-            <label className="block text-xs text-muted-foreground">
-              Ao competir
+            </div>
+            <div className="block text-xs text-muted-foreground">
+              <JourneyFieldTitle
+                helpId="policy"
+                activeHelp={activeHelp}
+                setActiveHelp={setActiveHelp}
+                help={JOURNEY_HELP.policy}
+              >
+                Ao competir
+              </JourneyFieldTitle>
               <select
                 className="mt-1 flex h-10 w-full rounded-md border bg-background px-3 text-sm"
                 value={conflictPolicy}
@@ -483,7 +685,7 @@ export function JourneyEditor({
                 <option value="pause_lower_priority">Pausar a menor prioridade</option>
                 <option value="exclusive">Manter apenas esta família</option>
               </select>
-            </label>
+            </div>
           </div>
           <p className="mt-3 text-xs text-muted-foreground">
             {conflictFamily === "progressao_niveis"
@@ -495,7 +697,14 @@ export function JourneyEditor({
         </section>
         <section className="grid gap-4 rounded-lg border p-4 sm:grid-cols-2">
           <div>
-            <p className="font-medium">Quem entra nesta jornada</p>
+            <JourneyFieldTitle
+              helpId="audience"
+              activeHelp={activeHelp}
+              setActiveHelp={setActiveHelp}
+              help={JOURNEY_HELP.audience}
+            >
+              Quem entra nesta jornada
+            </JourneyFieldTitle>
             <p className="mt-1 text-xs text-muted-foreground">
               Todos os jogadores ativos que atingirem o gatilho, respeitando opt-out e
               elegibilidade.
@@ -509,8 +718,15 @@ export function JourneyEditor({
               <option value="all_active">Todos os jogadores ativos</option>
               <option value="vip">Somente VIP</option>
             </select>
-            <label className="mt-3 block text-xs text-muted-foreground">
-              Reentrada
+            <div className="mt-3 block text-xs text-muted-foreground">
+              <JourneyFieldTitle
+                helpId="reentry"
+                activeHelp={activeHelp}
+                setActiveHelp={setActiveHelp}
+                help={JOURNEY_HELP.reentry}
+              >
+                Reentrada
+              </JourneyFieldTitle>
               <select
                 className="mt-1 flex h-10 w-full rounded-md border bg-background px-3 text-sm"
                 value={reentry}
@@ -521,32 +737,53 @@ export function JourneyEditor({
                 <option value="after_cooldown">Após o cooldown</option>
                 <option value="never">Nunca reentrar</option>
               </select>
-            </label>
+            </div>
           </div>
           <div>
             <p className="font-medium">Proteção contra excesso</p>
-            <label className="mt-3 block text-xs text-muted-foreground">
-              Limite diário
+            <div className="mt-3 block text-xs text-muted-foreground">
+              <JourneyFieldTitle
+                helpId="daily-limit"
+                activeHelp={activeHelp}
+                setActiveHelp={setActiveHelp}
+                help={JOURNEY_HELP.dailyLimit}
+              >
+                Limite diário
+              </JourneyFieldTitle>
               <Input
                 type="number"
                 min={1}
                 value={dailyLimit}
                 onChange={(e) => setDailyLimit(Number(e.target.value))}
               />
-            </label>
-            <label className="mt-3 block text-xs text-muted-foreground">
-              Cooldown (horas)
+            </div>
+            <div className="mt-3 block text-xs text-muted-foreground">
+              <JourneyFieldTitle
+                helpId="cooldown"
+                activeHelp={activeHelp}
+                setActiveHelp={setActiveHelp}
+                help={JOURNEY_HELP.cooldown}
+              >
+                Cooldown (horas)
+              </JourneyFieldTitle>
               <Input
                 type="number"
                 min={0}
                 value={cooldownHours}
                 onChange={(e) => setCooldownHours(Number(e.target.value))}
               />
-            </label>
+            </div>
           </div>
         </section>
         <section className="rounded-lg border p-4">
-          <p className="font-medium">Quando pode disparar</p>
+          <JourneyFieldTitle
+            helpId="window"
+            activeHelp={activeHelp}
+            setActiveHelp={setActiveHelp}
+            help={JOURNEY_HELP.window}
+          >
+            Quando pode disparar
+          </JourneyFieldTitle>
           <p className="mt-1 text-xs text-muted-foreground">
             Mensagens fora da janela aguardam a próxima abertura, no horário de Brasília.
           </p>
@@ -561,8 +798,15 @@ export function JourneyEditor({
           </div>
         </section>
         <section className="space-y-3">
-          <div className="flex items-center justify-between">
-            <b className="text-sm">Sequência</b>
+          <div className="flex items-center justify-between gap-2">
+            <JourneyFieldTitle
+              helpId="sequence"
+              activeHelp={activeHelp}
+              setActiveHelp={setActiveHelp}
+              help={JOURNEY_HELP.sequence}
+            >
+              Sequência
+            </JourneyFieldTitle>
             <div className="flex gap-2">
               <Button type="button" size="sm" variant="outline" onClick={() => add("wait")}>
                 <Clock3 className="mr-1 h-4 w-4" /> Espera
@@ -580,17 +824,33 @@ export function JourneyEditor({
           </div>
           {steps.map((s, i) => (
             <div key={i} className="rounded-lg border p-4">
-              <div className="mb-2 flex justify-between font-medium">
-                {s.kind === "wait"
-                  ? "Aguardar"
-                  : s.kind === "sms"
-                    ? "Enviar SMS"
-                    : s.kind === "email"
-                      ? "Enviar e-mail"
-                      : "Fazer ligação"}
+              <div className="mb-2 flex items-center justify-between gap-2 font-medium">
+                <JourneyFieldTitle
+                  helpId={`step-${i}`}
+                  activeHelp={activeHelp}
+                  setActiveHelp={setActiveHelp}
+                  help={
+                    s.kind === "wait"
+                      ? JOURNEY_HELP.wait
+                      : s.kind === "sms"
+                        ? JOURNEY_HELP.sms
+                        : s.kind === "email"
+                          ? JOURNEY_HELP.email
+                          : JOURNEY_HELP.voice
+                  }
+                >
+                  {s.kind === "wait"
+                    ? "Aguardar"
+                    : s.kind === "sms"
+                      ? "Enviar SMS"
+                      : s.kind === "email"
+                        ? "Enviar e-mail"
+                        : "Fazer ligação"}
+                </JourneyFieldTitle>
                 <Button
                   size="icon"
                   variant="ghost"
+                  aria-label="Remover etapa"
                   onClick={() => setSteps((all) => all.filter((_, n) => n !== i))}
                 >
                   <Trash2 className="h-4 w-4" />
