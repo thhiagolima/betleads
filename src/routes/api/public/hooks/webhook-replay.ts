@@ -25,8 +25,12 @@ export const Route = createFileRoute("/api/public/hooks/webhook-replay")({
         const status = typeof body.status === "string" ? body.status : "pendente";
         const evento = typeof body.evento === "string" ? body.evento : undefined;
         const dryRun = body.dry_run === true;
-        const limitRaw = Number(body.limit ?? 100);
-        const limit = Math.min(Math.max(Number.isFinite(limitRaw) ? limitRaw : 100, 1), 500);
+        // This route runs behind the public proxy. A large HTTP replay is not
+        // a queue: it times out and leaves callers without an outcome. Keep a
+        // bounded batch; pg_cron invokes the endpoint every minute until the
+        // backlog is empty.
+        const limitRaw = Number(body.limit ?? 20);
+        const limit = Math.min(Math.max(Number.isFinite(limitRaw) ? limitRaw : 20, 1), 20);
 
         let query = sb
           .from("webhook_logs")
@@ -54,6 +58,8 @@ export const Route = createFileRoute("/api/public/hooks/webhook-replay")({
           return Response.json({
             ok: true,
             dry_run: true,
+            limit,
+            has_more: selected.length === limit,
             scanned: selected.length,
             by_event: byEvent,
             sample: selected.slice(0, 10).map((row) => ({
@@ -91,7 +97,15 @@ export const Route = createFileRoute("/api/public/hooks/webhook-replay")({
           }
         }
 
-        return Response.json({ ok: true, dry_run: false, scanned: selected.length, processed, failed });
+        return Response.json({
+          ok: true,
+          dry_run: false,
+          limit,
+          has_more: selected.length === limit,
+          scanned: selected.length,
+          processed,
+          failed,
+        });
       },
     },
   },
