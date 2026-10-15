@@ -19,23 +19,25 @@ describe("runBoundedPool", () => {
     let index = 0;
     let inFlight = 0;
     let maxInFlight = 0;
-    const startedAt: number[] = [];
-    const t0 = Date.now();
+    let slowDone = false;
+    const shortStartedBeforeSlowDone: boolean[] = [];
     await runBoundedPool({
       concurrency: 2,
       next: async () => (index < items.length ? items[index++] : null),
       handle: async (ms) => {
         inFlight++;
         maxInFlight = Math.max(maxInFlight, inFlight);
-        startedAt.push(Date.now() - t0);
+        if (ms !== 300) shortStartedBeforeSlowDone.push(!slowDone);
         await sleep(ms);
+        if (ms === 300) slowDone = true;
         inFlight--;
       },
     });
     expect(maxInFlight).toBe(2);
-    // With waves of 2 the last item would start only after the 300 ms item.
-    // A continuous pool runs the five short items alongside the slow one.
-    expect(Math.max(...startedAt)).toBeLessThan(200);
+    // With waves of 2 the short items would wait for the 300 ms item. A
+    // continuous pool runs all five alongside it. Ordering, not wall-clock
+    // timing, so the test does not flake on a loaded machine.
+    expect(shortStartedBeforeSlowDone).toEqual([true, true, true, true, true]);
   });
 
   it("keeps going when an item throws and reports it", async () => {

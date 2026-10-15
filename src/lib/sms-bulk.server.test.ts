@@ -1,0 +1,537 @@
+// ENV-10 — Short Brasil bulk sends with per-recipient text and tracked links.
+// Runs the real sendSmsBatch, prepareTrackedTextBatch, findAcceptedDeliveryKeys,
+// credit reservation and the real sms-webhook route against an in-memory
+// database and mocked fetch (no real SMS / Short.io calls).
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createFakeDb, installCreditLedger } from "./sms-bulk.test-support";
+
+const fake = vi.hoisted(() => ({ db: null as unknown as ReturnType<typeof createFakeDb> }));
+
+vi.mock("@/integrations/supabase/client.server", async () => {
+  const { createFakeDb } = await import("./sms-bulk.test-support");
+  fake.db = createFakeDb();
+  return { supabaseAdmin: fake.db.client };
+});
+vi.mock("@/lib/tenant-access.server", () => ({
+  assertTenantCanOperate: vi.fn(async () => undefined),
+  resolveCurrentTenantId: vi.fn(),
+  resolveOperationalTenantId: vi.fn(),
+}));
+vi.mock("node:dns/promises", () => ({
+  lookup: vi.fn(async () => [{ address: "93.184.216.34", family: 4 }]),
+}));
+vi.mock("@tanstack/react-router", () => ({
+  createFileRoute: () => (options: unknown) => ({ options }),
+}));
+
+import {
+  reconcileStaleSubmittingLogs,
+  sendSmsBatch,
+  smsBulkEnabled,
+  SmsBatchDeferredError,
+  type SmsBatchItem,
+} from "./sms-bulk.server";
+import { Route as SmsWebhookRoute } from "@/routes/api/public/sms-webhook";
+
+const TENANT = "00000000-0000-4000-8000-000000000001";
+const CAMPAIGN = "11111111-1111-4111-8111-111111111111";
+const key = (n: number) => `22222222-2222-4222-8222-${String(n).padStart(12, "0")}`;
+const player = (n: number) => `33333333-3333-4333-8333-${String(n).padStart(12, "0")}`;
+
+function item(n: number, over: Partial<SmsBatchItem> = {}): SmsBatchItem {
+  return {
+    tenantId: TENANT,
+    to: `+55119${String(10000000 + n).slice(-8)}`,
+    content: `Oi Jogador ${n}, sua oferta: https://casa.example/promo`,
+    deliveryKey: key(n),
+    playerId: player(n),
+    triggerName: "campanha:Teste:iGaming",
+    linkTrackingEnabled: true,
+    linkTrackingOrigin: { sourceType: "campaign", sourceId: CAMPAIGN },
+    ...over,
+  };
+}
+
+type SmsBody = { bulk: Array<{ celular: string; mensagem: string; parceiroId: string }> };
+type Behaviour = (body: SmsBody) => Response | Promise<Response>;
+
+let smsBehaviour: Behaviour;
+let shortioBehaviour: (links: Array<{ originalURL: string }>) => Response;
+const smsCalls: SmsBody[] = [];
+const shortioCalls: Array<{ links: Array<{ originalURL: string }> }> = [];
+let budgetCalls: Array<{ channel: string; n: number }> = [];
+let credits: ReturnType<typeof installCreditLedger>;
+
+const acceptAll: Behaviour = (body) =>
+  Response.json({
+    id: "lote-1",
+    bulk: body.bulk.map((b, i) => ({ id: `msg-${i + 1}`, parceiroId: b.parceiroId })),
+  });
+
+function shortioOk(links: Array<{ originalURL: string }>) {
+  return Response.json(
+    links.map((l, i) => ({
+      idString: `lnk_${shortioCalls.length}_${i}`,
+      shortURL: `https://go.example/s${shortioCalls.length}x${i}`,
+      originalURL: l.originalURL,
+    })),
+  );
+}
+
+function installFetch() {
+  const fetchMock = vi.fn(async (url: string | URL, init?: RequestInit) => {
+    const href = String(url);
+    const body = JSON.parse(String(init?.body ?? "{}"));
+    if (href.startsWith("https://api.short.io/links/bulk")) {
+      shortioCalls.push(body);
+      return shortioBehaviour(body.links);
+    }
+    if (href.includes("bulk-sms.php")) {
+      smsCalls.push(body);
+      return smsBehaviour(body);
+    }
+    throw new Error(`unexpected fetch ${href}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+function settings(fallback: "block" | "passthrough") {
+  fake.db.rows("shortio_settings").push({
+    tenant_id: TENANT,
+    enabled: true,
+    domain: "go.example",
+    fallback_mode: fallback,
+    default_ttl_days: null,
+    allowed_destination_hosts: [],
+    enabled_channels: ["sms", "email"],
+  });
+}
+
+const logs = () => fake.db.rows("sms_send_logs");
+const logFor = (k: string) => logs().filter((l) => l.idempotency_key === k);
+
+describe("sendSmsBatch (ENV-10, Short Brasil bulk)", () => {
+  beforeEach(() => {
+    fake.db.reset();
+    credits = installCreditLedger(fake.db);
+    budgetCalls = [];
+    fake.db.onRpc("consume_channel_budget", (args) => {
+      budgetCalls.push({ channel: String(args.p_channel), n: Number(args.p_n) });
+      return { data: [{ granted: args.p_n, retry_after_ms: 0, limited_by: null }], error: null };
+    });
+    smsCalls.length = 0;
+    shortioCalls.length = 0;
+    smsBehaviour = acceptAll;
+    shortioBehaviour = shortioOk;
+    vi.stubEnv("SHORTCODE_SMS_TOKEN", "");
+    vi.stubEnv("SHORT_BRASIL_SMS_USUARIO", "user");
+    vi.stubEnv("SHORT_BRASIL_SMS_CHAVE", "key");
+    vi.stubEnv("SHORTIO_API_KEY", "shortio-test-key");
+    vi.stubEnv("CLICK_TRACKING_SECRET", "x".repeat(40));
+    vi.stubEnv("PUBLIC_APP_URL", "https://app.example");
+    vi.stubEnv("SHORT_BRASIL_WEBHOOK_SECRET", "hook-secret");
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    installFetch();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("one HTTP call, personalised text and one tracked short link per recipient, mapped by parceiroId", async () => {
+    settings("block");
+    const items = [item(1), item(2), item(3)];
+    const r = await sendSmsBatch(items);
+
+    expect(smsCalls).toHaveLength(1);
+    expect(shortioCalls).toHaveLength(1); // 3 links in one Short.io bulk call
+    expect(shortioCalls[0].links).toHaveLength(3);
+    expect(budgetCalls.filter((b) => b.channel === "shortio")).toEqual([{ channel: "shortio", n: 1 }]);
+
+    const sent = smsCalls[0].bulk;
+    expect(sent.map((b) => b.parceiroId)).toEqual(items.map((i) => i.deliveryKey));
+    expect(sent[0].mensagem).toMatch(/^Oi Jogador 1, sua oferta: https:\/\/go\.example\/\S+$/);
+    expect(new Set(sent.map((b) => b.mensagem.split(" ").pop())).size).toBe(3);
+    expect(sent[0].celular).toBe("11910000001");
+
+    expect(r.outcomes.map((o) => o.status)).toEqual(["accepted", "accepted", "accepted"]);
+    expect(r.lotes).toEqual(["lote-1"]);
+    items.forEach((it, i) => {
+      const [log] = logFor(it.deliveryKey);
+      expect(log).toMatchObject({
+        status: "sent",
+        delivery_status: "sent",
+        provider: "short-brasil",
+        provider_message_id: `msg-${i + 1}`,
+        player_id: it.playerId,
+        tenant_id: TENANT,
+      });
+      const dispatches = fake.db
+        .rows("link_dispatches")
+        .filter((d) => d.idempotency_key === `${it.deliveryKey}:0`);
+      expect(dispatches).toHaveLength(1);
+      expect(dispatches[0]).toMatchObject({
+        message_log_id: log.id,
+        source_type: "campaign",
+        source_id: CAMPAIGN,
+        recipient_player_id: it.playerId,
+        send_status: "sent",
+      });
+    });
+    expect(credits.charged()).toBe(3);
+    expect(credits.ledger().map((l) => l.idempotency_key)).toContain(
+      `sms-reserve:delivery:${key(1)}`,
+    );
+  });
+
+  it("partial rejection: only the items missing from bulk[] fail and are refunded", async () => {
+    settings("block");
+    smsBehaviour = (body) =>
+      Response.json({
+        id: "lote-2",
+        bulk: body.bulk
+          .filter((b) => b.parceiroId !== key(2))
+          .map((b, i) => ({ id: `m${i}`, parceiroId: b.parceiroId })),
+      });
+    const r = await sendSmsBatch([item(1), item(2), item(3)]);
+
+    expect(r.outcomes.map((o) => o.status)).toEqual(["accepted", "rejected", "accepted"]);
+    expect(r.outcomes[1]).toMatchObject({ ok: false, retryable: false });
+    expect(logFor(key(2))[0]).toMatchObject({ status: "error", delivery_status: "failed" });
+    expect(logFor(key(1))[0]).toMatchObject({ status: "sent", delivery_status: "sent" });
+    expect(credits.charged()).toBe(2);
+    expect(credits.ledger().some((l) => l.idempotency_key === `sms-refund:delivery:${key(2)}`)).toBe(true);
+    const failedDispatch = fake.db
+      .rows("link_dispatches")
+      .find((d) => d.idempotency_key === `${key(2)}:0`);
+    expect(failedDispatch?.send_status).toBe("failed");
+  });
+
+  it("timeout after the request left: no retry, kept as pending confirmation, never resent", async () => {
+    settings("block");
+    smsBehaviour = () => {
+      throw Object.assign(new TypeError("fetch failed"), {
+        cause: Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" }),
+      });
+    };
+    const items = [item(1), item(2)];
+    const first = await sendSmsBatch(items);
+
+    expect(smsCalls).toHaveLength(1); // never resent inside the module
+    expect(first.outcomes.map((o) => o.status)).toEqual([
+      "pending_confirmation",
+      "pending_confirmation",
+    ]);
+    expect(first.outcomes[0]).toMatchObject({ ok: true, errorKind: "outcome_unknown" });
+    expect(logFor(key(1))[0]).toMatchObject({ status: "sent", delivery_status: "unconfirmed" });
+    expect(credits.charged()).toBe(2); // possibly sent: not refunded
+
+    // Next run (worker retry / crash recovery): nothing reaches the provider.
+    smsBehaviour = acceptAll;
+    const second = await sendSmsBatch(items);
+    expect(smsCalls).toHaveLength(1);
+    expect(second.outcomes.map((o) => o.status)).toEqual(["already_sent", "already_sent"]);
+    expect(credits.charged()).toBe(2);
+  });
+
+  it("a 5xx is treated as outcome unknown (not resent)", async () => {
+    settings("block");
+    smsBehaviour = () => new Response("<html>bad gateway</html>", { status: 502 });
+    const r = await sendSmsBatch([item(1)]);
+    expect(smsCalls).toHaveLength(1);
+    expect(r.outcomes[0].status).toBe("pending_confirmation");
+  });
+
+  it("not_sent (connection refused): retried, then the whole chunk fails retryable and is refunded", async () => {
+    settings("block");
+    smsBehaviour = () => {
+      throw Object.assign(new TypeError("fetch failed"), {
+        cause: Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }),
+      });
+    };
+    const items = [item(1), item(2)];
+    const r = await sendSmsBatch(items);
+    expect(smsCalls).toHaveLength(3);
+    expect(r.outcomes.every((o) => o.status === "failed" && o.retryable)).toBe(true);
+    expect(credits.charged()).toBe(0);
+    expect(logFor(key(1))[0]).toMatchObject({ status: "error", delivery_status: "failed" });
+
+    // Later resend is charged once more under the next billing generation.
+    smsBehaviour = acceptAll;
+    const retry = await sendSmsBatch(items);
+    expect(retry.outcomes.map((o) => o.status)).toEqual(["accepted", "accepted"]);
+    expect(credits.charged()).toBe(2);
+    expect(credits.ledger().map((l) => l.idempotency_key)).toContain(
+      `sms-reserve:delivery:${key(1)}:1`,
+    );
+  }, 15_000);
+
+  it("request-level 505 (provider balance): whole chunk failed, retryable, refunded", async () => {
+    settings("block");
+    smsBehaviour = () => Response.json({ status: 505, detalhe: "saldo insuficiente" });
+    const r = await sendSmsBatch([item(1), item(2)]);
+    expect(r.outcomes.every((o) => o.status === "failed" && o.retryable && o.insufficientFunds)).toBe(true);
+    expect(credits.charged()).toBe(0);
+  });
+
+  it("missing credentials: nothing logged, charged or sent", async () => {
+    vi.stubEnv("SHORT_BRASIL_SMS_USUARIO", "");
+    const r = await sendSmsBatch([item(1)]);
+    expect(r.outcomes[0]).toMatchObject({ status: "failed", retryable: true, errorKind: "misconfigured" });
+    expect(smsCalls).toHaveLength(0);
+    expect(credits.charged()).toBe(0);
+    expect(logs()).toHaveLength(0);
+  });
+
+  it("insufficient internal credits fail only the uncovered items", async () => {
+    fake.db.reset();
+    credits = installCreditLedger(fake.db, { balance: () => 1 });
+    fake.db.onRpc("consume_channel_budget", (args) => ({
+      data: [{ granted: args.p_n, retry_after_ms: 0, limited_by: null }],
+      error: null,
+    }));
+    const r = await sendSmsBatch([item(1, { linkTrackingEnabled: false }), item(2, { linkTrackingEnabled: false })]);
+    expect(r.outcomes.filter((o) => o.status === "accepted")).toHaveLength(1);
+    expect(r.outcomes.filter((o) => o.status === "failed")).toHaveLength(1);
+    expect(smsCalls[0].bulk).toHaveLength(1);
+    expect(credits.charged()).toBe(1);
+  });
+
+  it("revoked consent and invalid phones are skipped and logged without charge", async () => {
+    fake.db.rows("channel_consents").push({
+      tenant_id: TENANT,
+      channel: "sms",
+      subject: "5511910000002",
+      status: "revoked",
+    });
+    const r = await sendSmsBatch([item(1), item(2), item(3, { to: "123" })]);
+    expect(r.outcomes.map((o) => o.status)).toEqual(["accepted", "failed", "failed"]);
+    expect(r.outcomes[1].suppressed).toBe(true);
+    expect(smsCalls[0].bulk.map((b) => b.parceiroId)).toEqual([key(1)]);
+    expect(credits.charged()).toBe(1);
+  });
+
+  it("Short.io bulk failure + passthrough: sends the first-party redirect, still tracked", async () => {
+    settings("passthrough");
+    shortioBehaviour = () => new Response("down", { status: 503 });
+    const r = await sendSmsBatch([item(1), item(2)]);
+
+    expect(shortioCalls).toHaveLength(3); // retried, then fell back
+    expect(r.outcomes.map((o) => o.status)).toEqual(["accepted", "accepted"]);
+    for (const b of smsCalls[0].bulk)
+      expect(b.mensagem).toMatch(/https:\/\/app\.example\/api\/public\/click\/[0-9a-f-]{36}\?s=/);
+    const tracked = fake.db.rows("tracked_links");
+    expect(tracked).toHaveLength(2);
+    expect(tracked.every((t) => t.status === "failed")).toBe(true); // excluded from Short.io sync
+    expect(fake.db.rows("link_dispatches")).toHaveLength(2);
+  }, 10_000);
+
+  it("Short.io bulk failure + block: batch deferred before any charge or send", async () => {
+    settings("block");
+    shortioBehaviour = () => new Response("bad", { status: 400 });
+    await expect(sendSmsBatch([item(1), item(2)])).rejects.toBeInstanceOf(SmsBatchDeferredError);
+    expect(smsCalls).toHaveLength(0);
+    expect(credits.charged()).toBe(0);
+    expect(logs()).toHaveLength(0);
+  });
+
+  it("chunks at 500 items per HTTP request", async () => {
+    const items = Array.from({ length: 1_200 }, (_, i) => item(i + 1, { linkTrackingEnabled: false }));
+    const r = await sendSmsBatch(items);
+    expect(smsCalls.map((c) => c.bulk.length)).toEqual([500, 500, 200]);
+    expect(r.httpCalls).toBe(3);
+    expect(r.outcomes.every((o) => o.status === "accepted")).toBe(true);
+  }, 20_000);
+
+  it("callbacks (bulk lote by provider id, single GET by parceiroId) match bulk-sent rows", async () => {
+    settings("block");
+    const r = await sendSmsBatch([item(1)]);
+    expect(r.outcomes[0].status).toBe("accepted");
+    // A second delivery whose outcome is unknown (no provider id stored).
+    smsBehaviour = () => {
+      throw Object.assign(new Error("aborted"), { name: "AbortError" });
+    };
+    await sendSmsBatch([item(2)]);
+    expect(logFor(key(2))[0].delivery_status).toBe("unconfirmed");
+
+    const handlers = (
+      SmsWebhookRoute as unknown as {
+        options: {
+          server: {
+            handlers: {
+              GET: (i: { request: Request }) => Promise<Response>;
+              POST: (i: { request: Request }) => Promise<Response>;
+            };
+          };
+        };
+      }
+    ).options.server.handlers;
+    const post = await handlers.POST({
+      request: new Request("https://app.example/api/public/sms-webhook?token=hook-secret", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          lote: [{ id: "msg-1", parceiroId: key(1), statusConfirmacao: "CONFIRMADO" }],
+        }),
+      }),
+    });
+    expect(await post.json()).toMatchObject({ processed: 1, matched: 1 });
+    const get = await handlers.GET({
+      request: new Request(
+        `https://app.example/api/public/sms-webhook?token=hook-secret&parceiroId=${key(2)}&statusConfirmacao=CONFIRMADO`,
+      ),
+    });
+    expect(await get.json()).toMatchObject({ processed: 1, matched: 1 });
+
+    expect(logFor(key(1))[0].delivery_status).toBe("delivered");
+    expect(logFor(key(2))[0].delivery_status).toBe("delivered");
+    expect(logs().some((l) => l.trigger_name === "callback-orphan")).toBe(false);
+    const dispatch = fake.db.rows("link_dispatches").find((d) => d.idempotency_key === `${key(1)}:0`);
+    expect(dispatch?.delivery_status).toBe("delivered");
+  });
+
+  it("B1: bulk is OFF unless SMS_BULK_ENABLED is exactly true", () => {
+    vi.stubEnv("SMS_BULK_ENABLED", "");
+    expect(smsBulkEnabled()).toBe(false);
+    vi.stubEnv("SMS_BULK_ENABLED", "1");
+    expect(smsBulkEnabled()).toBe(false);
+    vi.stubEnv("SMS_BULK_ENABLED", "true");
+    expect(smsBulkEnabled()).toBe(true);
+  });
+
+  it("B1: a 2xx whose bulk[] echoes none of the sent parceiroIds is unknown, not rejected", async () => {
+    smsBehaviour = (body) =>
+      Response.json({ id: "lote-x", bulk: body.bulk.map((_, i) => ({ id: `m${i}` })) });
+    const items = [item(1, { linkTrackingEnabled: false }), item(2, { linkTrackingEnabled: false })];
+    const r = await sendSmsBatch(items);
+    expect(r.outcomes.map((o) => o.status)).toEqual(["pending_confirmation", "pending_confirmation"]);
+    expect(credits.charged()).toBe(2);
+    expect(logFor(key(1))[0]).toMatchObject({ status: "sent", delivery_status: "unconfirmed" });
+    // never resent
+    smsBehaviour = acceptAll;
+    await sendSmsBatch(items);
+    expect(smsCalls).toHaveLength(1);
+
+    smsBehaviour = () =>
+      Response.json({ id: "lote-y", bulk: [{ id: "z", parceiroId: "someone-else" }] });
+    const other = await sendSmsBatch([item(3, { linkTrackingEnabled: false })]);
+    expect(other.outcomes[0].status).toBe("pending_confirmation");
+    smsBehaviour = () => Response.json({ id: "lote-z" }); // bulk[] missing
+    const missing = await sendSmsBatch([item(4, { linkTrackingEnabled: false })]);
+    expect(missing.outcomes[0].status).toBe("pending_confirmation");
+  });
+
+  it("B1: an explicit per-item error rejects only that item, with its reason", async () => {
+    smsBehaviour = (body) =>
+      Response.json({
+        id: "lote-e",
+        bulk: body.bulk.map((b, i) =>
+          i === 0
+            ? { parceiroId: b.parceiroId, status: 303, statusDetalhe: "numero invalido" }
+            : { id: `m${i}`, parceiroId: b.parceiroId },
+        ),
+      });
+    const r = await sendSmsBatch([
+      item(1, { linkTrackingEnabled: false }),
+      item(2, { linkTrackingEnabled: false }),
+    ]);
+    expect(r.outcomes.map((o) => o.status)).toEqual(["rejected", "accepted"]);
+    expect(r.outcomes[0].error).toMatch(/numero invalido/);
+    expect(credits.charged()).toBe(1);
+  });
+
+  it("I2: stale submitting rows move to unconfirmed (never resent); recent rows untouched", async () => {
+    const now = Date.parse("2026-10-15T12:00:00Z");
+    const row = (id: string, k: string, delivery_status: string, created_at: string) => ({
+      id,
+      idempotency_key: k,
+      status: "sent",
+      delivery_status,
+      tenant_id: TENANT,
+      created_at,
+    });
+    fake.db
+      .rows("sms_send_logs")
+      .push(
+        row("old", key(1), "submitting", "2026-10-15T11:00:00.000Z"),
+        row("new", key(2), "submitting", "2026-10-15T11:50:00.000Z"),
+        row("done", key(3), "delivered", "2026-10-15T10:00:00.000Z"),
+      );
+    const r = await reconcileStaleSubmittingLogs({ now });
+    expect(r).toEqual({ moved: 1, ids: ["old"] });
+    const byId = (id: string) => logs().find((l) => l.id === id);
+    expect(byId("old")?.delivery_status).toBe("unconfirmed");
+    expect(byId("new")?.delivery_status).toBe("submitting");
+    expect(byId("done")?.delivery_status).toBe("delivered");
+    expect(smsCalls).toHaveLength(0);
+  });
+
+  it("I3: a parceiroId callback updates only the latest accepted row, not old error rows", async () => {
+    fake.db.rows("sms_send_logs").push(
+      {
+        id: "err",
+        idempotency_key: key(9),
+        status: "error",
+        delivery_status: "failed",
+        created_at: "2026-10-15T10:00:00.000Z",
+      },
+      {
+        id: "ok",
+        idempotency_key: key(9),
+        status: "sent",
+        delivery_status: "sent",
+        created_at: "2026-10-15T10:05:00.000Z",
+      },
+    );
+    const handlers = (
+      SmsWebhookRoute as unknown as {
+        options: { server: { handlers: { GET: (i: { request: Request }) => Promise<Response> } } };
+      }
+    ).options.server.handlers;
+    const res = await handlers.GET({
+      request: new Request(
+        `https://app.example/api/public/sms-webhook?token=hook-secret&parceiroId=${key(9)}&statusConfirmacao=CONFIRMADO`,
+      ),
+    });
+    expect(await res.json()).toMatchObject({ matched: 1 });
+    expect(logs().find((l) => l.id === "ok")?.delivery_status).toBe("delivered");
+    expect(logs().find((l) => l.id === "err")?.delivery_status).toBe("failed");
+  });
+
+  it("I4: Short.io results are matched by originalURL only; an unmatched link is a Short.io failure", async () => {
+    settings("passthrough");
+    // Reversed order: positional mapping would swap the two recipients' links.
+    shortioBehaviour = (links) =>
+      Response.json(
+        links
+          .map((l, i) => ({
+            idString: `id${i}`,
+            shortURL: `https://go.example/k${i}`,
+            originalURL: l.originalURL,
+          }))
+          .reverse(),
+      );
+    await sendSmsBatch([item(1), item(2)]);
+    const dispatches = fake.db.rows("link_dispatches");
+    const tracked = fake.db.rows("tracked_links");
+    expect(dispatches).toHaveLength(2);
+    for (const d of dispatches) {
+      const t = tracked.find((x) => x.id === d.tracked_link_id)!;
+      expect(String(t.original_url)).toContain(String(d.tracking_token));
+      expect(d.sent_url).toBe(t.short_url);
+      expect(t.status).not.toBe("failed");
+    }
+
+    // No originalURL echo: not trusted -> block mode defers the batch.
+    fake.db.rows("shortio_settings").length = 0;
+    settings("block");
+    shortioBehaviour = (links) =>
+      Response.json(links.map((_, i) => ({ idString: `x${i}`, shortURL: `https://go.example/x${i}` })));
+    await expect(sendSmsBatch([item(5), item(6)])).rejects.toBeInstanceOf(SmsBatchDeferredError);
+  });
+});

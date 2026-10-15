@@ -7,6 +7,7 @@ import { resolveOperationalTenantId } from "./tenant-access.server";
 import { journeyInputSchema, journeyStatusSchema } from "./journeys.shared";
 import { journeyEntryKey } from "./journey-policy";
 import { conversionFunnelSnapshot } from "./conversion-funnel";
+import { toggleJourneyExpress } from "./journey-express";
 
 const journeyIdSchema = z.object({ id: z.string().uuid() });
 const legacyJourneySchema = z.object({
@@ -84,7 +85,7 @@ export const listJourneys = createServerFn({ method: "GET" })
       db
         .from("journeys")
         .select(
-          "id,name,description,status,trigger_type,trigger_config,entry_rules,conflict_family,journey_priority,conflict_policy,daily_limit,cooldown_hours,updated_at,journey_steps(id,position,step_type,config,is_enabled)",
+          "id,name,description,status,trigger_type,trigger_config,entry_rules,conflict_family,journey_priority,conflict_policy,express,daily_limit,cooldown_hours,updated_at,journey_steps(id,position,step_type,config,is_enabled)",
         )
         .eq("tenant_id", tenantId)
         .order("updated_at", { ascending: false }),
@@ -677,6 +678,62 @@ export const setJourneyStatus = createServerFn({ method: "POST" })
       detail: { from: journey.status, to: data.status, version: journey.version },
     });
     return { ok: true };
+  });
+
+/**
+ * "Envio imediato — fura fila": skips the cross-journey cooldown, global
+ * contact limits and priority arbitration (rules in 20261015122000). Same
+ * permission as editing a journey. Enabling also pulls items that were
+ * deferred by those rules back to now.
+ */
+export const setJourneyExpress = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((value: unknown) =>
+    z.object({ id: z.string().uuid(), express: z.boolean() }).parse(value),
+  )
+  .handler(async ({ data, context }) => {
+    const tenantId = await tenant(context);
+    return toggleJourneyExpress(
+      {
+        role: () => journeyRole(context.userId, tenantId),
+        async loadJourney() {
+          const { data: journey, error } = await db
+            .from("journeys")
+            .select("id,express,status")
+            .eq("id", data.id)
+            .eq("tenant_id", tenantId)
+            .maybeSingle();
+          if (error) throw new Error("Não foi possível carregar a jornada.");
+          return journey ? { ...journey, express: Boolean(journey.express) } : null;
+        },
+        async updateExpress(express) {
+          const { error } = await db
+            .from("journeys")
+            .update({ express })
+            .eq("id", data.id)
+            .eq("tenant_id", tenantId);
+          if (error) throw new Error("Não foi possível alterar o envio imediato.");
+        },
+        async requeue() {
+          const { data: count, error } = await db.rpc("requeue_express_journey_enrollments", {
+            p_tenant_id: tenantId,
+            p_journey_id: data.id,
+          });
+          if (error) throw new Error(error.message);
+          return Number(count ?? 0);
+        },
+        async audit(detail) {
+          await db.from("journey_events").insert({
+            tenant_id: tenantId,
+            journey_id: data.id,
+            event_type: "express_changed",
+            actor_user_id: context.userId,
+            detail,
+          });
+        },
+      },
+      data.express,
+    );
   });
 
 export const deleteJourney = createServerFn({ method: "POST" })

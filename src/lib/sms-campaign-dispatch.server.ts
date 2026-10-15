@@ -64,7 +64,17 @@ export type SendOutcome = {
   ok: boolean;
   /** sendSmsInternal found an accepted log for the same delivery key. */
   alreadySent?: boolean;
+  /** ENV-10: possibly sent (timeout after the request left); counted as sent, never resent. */
+  pendingConfirmation?: boolean;
+  /** ENV-10: nothing reached the provider and resending later is safe. */
+  retryable?: boolean;
   error?: string;
+};
+
+export type CampaignSendItem = {
+  target: CampaignTarget & { playerId: string };
+  deliveryKey: string;
+  variables: Record<string, string> | null;
 };
 
 export type ContactDecision = { allowed: boolean; retryAt: string | null };
@@ -92,6 +102,13 @@ export type CampaignDispatchDeps = {
     deliveryKey: string;
     variables: Record<string, string> | null;
   }) => Promise<SendOutcome>;
+  /**
+   * ENV-10: sends the whole batch in one provider call per chunk (Short Brasil
+   * bulk). Returns one outcome per item, in order. Throwing means nothing was
+   * sent or charged: the batch is retried in a later tick (cursor not moved).
+   * When absent, `send` is called per recipient.
+   */
+  sendBatch?: (args: { campaign: SmsCampaignRow; items: CampaignSendItem[] }) => Promise<SendOutcome[]>;
 };
 
 export type CampaignTickResult = {
@@ -110,7 +127,10 @@ export type CampaignTickResult = {
     | "lock_lost"
     | "resolution_error"
     | "no_recipients"
-    | "none_resolved";
+    | "none_resolved"
+    | "provider_unavailable";
+  /** ENV-10: sends whose provider outcome is unknown (counted in `sent`). */
+  pendingConfirmation?: number;
 };
 
 /** Consecutive empty budget grants (each after acquireSendBudget's own wait) before the tick stops. */
@@ -363,25 +383,65 @@ export async function processSmsCampaignTick(
     const vars = sends.length
       ? await deps.loadPlayerVariables(Array.from(new Set(sends.map((s) => s.target.playerId))))
       : new Map<string, Record<string, string>>();
-    const outcomes = await runPool(sends, concurrency, async (it) => {
+    let outcomes: SendOutcome[];
+    let deferredError: string | null = null;
+    if (deps.sendBatch && sends.length > 0) {
       try {
-        return await deps.send({
+        outcomes = await deps.sendBatch({
           campaign: c,
-          target: it.target,
-          deliveryKey: it.key,
-          variables: vars.get(it.target.playerId) ?? null,
+          items: sends.map((it) => ({
+            target: it.target,
+            deliveryKey: it.key,
+            variables: vars.get(it.target.playerId) ?? null,
+          })),
         });
       } catch (error) {
-        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+        outcomes = [];
+        deferredError = error instanceof Error ? error.message : String(error);
       }
-    });
+    } else {
+      outcomes = await runPool(sends, concurrency, async (it) => {
+        try {
+          return await deps.send({
+            campaign: c,
+            target: it.target,
+            deliveryKey: it.key,
+            variables: vars.get(it.target.playerId) ?? null,
+          });
+        } catch (error) {
+          return { ok: false, error: error instanceof Error ? error.message : String(error) };
+        }
+      });
+    }
+    // QA I1: a retryable failure (nothing reached the provider: connection
+    // refused, no credentials, 101/505, write-ahead failure of a later chunk)
+    // must not be burnt by the cursor. The batch is cut at the FIRST retryable
+    // recipient (cursor order preserved): everything before it is counted and
+    // checkpointed; from it onwards is re-processed next tick (accepted items
+    // after the cut are deduped by their delivery key, never resent).
+    const firstRetryable = deferredError !== null ? 0 : outcomes.findIndex((o) => !o?.ok && o?.retryable);
+    if (firstRetryable >= 0) {
+      lastError =
+        deferredError ?? outcomes[firstRetryable]?.error ?? "Provedor SMS indisponível";
+      stop = "provider_unavailable";
+      const cutKey = sends[firstRetryable]?.key;
+      const cutAt = batch.findIndex((it) => it.kind === "send" && it.key === cutKey);
+      batch = cutAt >= 0 ? batch.slice(0, cutAt) : [];
+      outcomes = outcomes.slice(0, firstRetryable);
+      if (batch.length === 0) break;
+    }
     let batchSent = 0;
     let batchDedup = batch.filter((it) => it.kind === "dup").length;
     let batchFailed = 0;
     for (const o of outcomes) {
       if (o?.ok && o.alreadySent) batchDedup++;
-      else if (o?.ok) batchSent++;
-      else {
+      else if (o?.ok) {
+        batchSent++;
+        if (o.pendingConfirmation) {
+          result.pendingConfirmation = (result.pendingConfirmation ?? 0) + 1;
+          lastError = `SMS aguardando confirmação do provedor: ${o.error ?? "sem resposta"}`;
+        }
+      } else {
         batchFailed++;
         if (o?.error) lastError = o.error;
       }
@@ -420,6 +480,7 @@ export async function processSmsCampaignTick(
   if (!isDone && result.stopReason === "contact_limit") {
     patch.scheduled_at = retryAt ?? new Date(deps.now() + 3600_000).toISOString();
   }
+  if (result.stopReason === "provider_unavailable") patch.last_error = lastError;
   await deps.updateCampaign(c, patch);
   return result;
 }

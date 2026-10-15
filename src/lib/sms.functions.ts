@@ -72,7 +72,7 @@ function shortBrasilSingleUrl(): string {
   return process.env.SHORT_BRASIL_SMS_SINGLE_URL ?? DEFAULT_SHORT_BRASIL_SINGLE_URL;
 }
 
-function shortBrasilBulkUrl(): string {
+export function shortBrasilBulkUrl(): string {
   return process.env.SHORT_BRASIL_SMS_BULK_URL ?? DEFAULT_SHORT_BRASIL_BULK_URL;
 }
 
@@ -107,7 +107,7 @@ function normalizeE164BR(raw: string): string {
   return requireBrazilianPhone(raw);
 }
 
-function toShortBrasilCell(e164OrRaw: string): string {
+export function toShortBrasilCell(e164OrRaw: string): string {
   const digits = e164OrRaw.replace(/\D/g, "");
   const local = digits.startsWith("55") ? digits.slice(2) : digits;
   if (local.length < 10 || local.length > 11) {
@@ -116,7 +116,7 @@ function toShortBrasilCell(e164OrRaw: string): string {
   return local;
 }
 
-function renderSmsVariables(
+export function renderSmsVariables(
   content: string,
   variables?: Record<string, string | number> | null,
 ): string {
@@ -127,14 +127,14 @@ function renderSmsVariables(
   });
 }
 
-function shortBrasilCredentials(): { usuario: string; chave: string } {
+export function shortBrasilCredentials(): { usuario: string; chave: string } {
   return {
     usuario: cleanCredential(process.env.SHORT_BRASIL_SMS_USUARIO),
     chave: cleanCredential(process.env.SHORT_BRASIL_SMS_CHAVE),
   };
 }
 
-function shortcodeToken(): string {
+export function shortcodeToken(): string {
   return cleanCredential(process.env.SHORTCODE_SMS_TOKEN);
 }
 
@@ -153,7 +153,7 @@ async function shortBrasilFetch(url: string, init: RequestInit): Promise<Respons
   }
 }
 
-function getShortBrasilAppStatus(body: unknown): number | null {
+export function getShortBrasilAppStatus(body: unknown): number | null {
   if (!body || typeof body !== "object") return null;
   const raw = (body as Record<string, unknown>).status;
   if (typeof raw === "number") return raw;
@@ -491,7 +491,7 @@ function extractProviderMessageId(body: unknown): string | null {
   return null;
 }
 
-function summarizeProviderError(status: number, body: unknown): string {
+export function summarizeProviderError(status: number, body: unknown): string {
   if (status === 0) {
     if (body && typeof body === "object" && "error" in body) {
       return `Sem resposta do provedor: ${String((body as { error: unknown }).error)}`;
@@ -589,7 +589,7 @@ async function reserveSmsCredit(tenantId: string, referenceId: string) {
   return { ok: true as const, data };
 }
 
-async function refundSmsCredit(tenantId: string, referenceId: string, reason: string) {
+export async function refundSmsCredit(tenantId: string, referenceId: string, reason: string) {
   const { error } = await smsCreditDb().rpc("refund_sms_credits", {
     _tenant: tenantId,
     _credits: 1,

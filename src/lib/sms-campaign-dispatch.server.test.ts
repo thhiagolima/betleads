@@ -5,6 +5,7 @@ import {
   processSmsCampaignTick,
   type CampaignDispatchDeps,
   type CampaignTarget,
+  type SendOutcome,
   type SmsCampaignRow,
 } from "./sms-campaign-dispatch.server";
 
@@ -216,7 +217,7 @@ describe("processSmsCampaignTick", () => {
     expect(new Set(paced.state.sendCalls).size).toBe(r.sent);
     expect(r.deduplicated).toBe(0);
     expect(paced.state.events.at(-1)).toEqual({ type: "cursor", cursor: r.sent });
-  });
+  }, 20_000); // simulated clock; CPU-bound key derivation is slow under the full parallel suite
 
   it("a partial grant cut before a contact-limited recipient keeps going", async () => {
     const recipients = Array.from({ length: 10 }, (_, i) => ({
@@ -286,5 +287,139 @@ describe("processSmsCampaignTick", () => {
       100, 150,
     ]);
     expect(lastPatch(state.patches)).toMatchObject({ status: "enviado" });
+  });
+});
+
+describe("processSmsCampaignTick with sendBatch (ENV-10 bulk)", () => {
+  const recipients = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ phone: phone(i), playerId: pid(i + 1) }));
+
+  function batchWorld(opts: Parameters<typeof world>[0] = {}) {
+    const w = world(opts);
+    const batches: string[][] = [];
+    const budgetAsks: number[] = [];
+    const acquire = w.deps.acquireSendBudget;
+    w.deps.acquireSendBudget = async (tenant, want) => {
+      budgetAsks.push(want);
+      return acquire(tenant, want);
+    };
+    let behaviour: (key: string) => SendOutcome = (key) => {
+      if (w.state.accepted.has(key)) return { ok: true, alreadySent: true };
+      w.state.accepted.add(key);
+      return { ok: true };
+    };
+    w.deps.send = async () => {
+      throw new Error("per-recipient send must not be used when sendBatch exists");
+    };
+    w.deps.sendBatch = async ({ items }) => {
+      batches.push(items.map((it) => it.deliveryKey));
+      return items.map((it) => behaviour(it.deliveryKey));
+    };
+    return {
+      ...w,
+      batches,
+      budgetAsks,
+      setBehaviour: (fn: (key: string) => SendOutcome) => (behaviour = fn),
+    };
+  }
+
+  it("sends each budgeted batch in one call and checkpoints after it", async () => {
+    const w = batchWorld({ budget: (want) => Math.min(want, 45) });
+    const r = await processSmsCampaignTick(campaign(recipients(100)), w.deps, { deadline: 45_000 });
+    expect(r.sent).toBe(100);
+    // Budget is consumed for the batch size before sending; the batch is cut to the grant.
+    expect(w.batches.map((b) => b.length)).toEqual([45, 45, 10]);
+    expect(w.budgetAsks[0]).toBe(100);
+    expect(w.state.patches.filter((p) => "sent_cursor" in p).map((p) => p.sent_cursor)).toEqual([
+      45, 90, 100,
+    ]);
+    expect(lastPatch(w.state.patches)).toMatchObject({ status: "enviado" });
+  });
+
+  it("pending confirmation counts as sent and is deduped on the next run", async () => {
+    const w = batchWorld();
+    w.setBehaviour((key) => {
+      w.state.accepted.add(key); // write-ahead log counts as accepted
+      return { ok: true, pendingConfirmation: true, error: "timeout" };
+    });
+    const c = campaign(recipients(10));
+    const r1 = await processSmsCampaignTick(c, w.deps, { deadline: 45_000 });
+    expect(r1).toMatchObject({ sent: 10, pendingConfirmation: 10, failed: 0 });
+    expect(lastPatch(w.state.patches.filter((p) => "last_error" in p)).last_error).toMatch(
+      /aguardando confirmação/,
+    );
+
+    // Crash before the checkpoint → the same recipients come back: nothing is resent.
+    const r2 = await processSmsCampaignTick(c, w.deps, { deadline: 45_000 });
+    expect(r2).toMatchObject({ sent: 0, deduplicated: 10 });
+    expect(w.batches).toHaveLength(1);
+  });
+
+  it("all items retryable (nothing reached the provider): cursor kept, tick stops", async () => {
+    const w = batchWorld();
+    w.setBehaviour(() => ({ ok: false, retryable: true, error: "Sem resposta do provedor" }));
+    const r = await processSmsCampaignTick(campaign(recipients(30)), w.deps, { deadline: 45_000 });
+    expect(r).toMatchObject({ sent: 0, failed: 0, advanced: 0, stopReason: "provider_unavailable" });
+    expect(w.state.patches.some((p) => "sent_cursor" in p)).toBe(false);
+    expect(lastPatch(w.state.patches)).toMatchObject({
+      status: "enviando",
+      last_error: "Sem resposta do provedor",
+      locked_by: null,
+    });
+  });
+
+  it("a thrown batch (e.g. link tracking blocked) is deferred without moving the cursor", async () => {
+    const w = batchWorld();
+    w.deps.sendBatch = async () => {
+      throw new Error("Rastreamento de links indisponível");
+    };
+    const r = await processSmsCampaignTick(campaign(recipients(5)), w.deps, { deadline: 45_000 });
+    expect(r.stopReason).toBe("provider_unavailable");
+    expect(w.state.patches.some((p) => "sent_cursor" in p)).toBe(false);
+  });
+
+  it("partial rejection advances past the rejected items as failures", async () => {
+    const w = batchWorld();
+    let n = 0;
+    w.setBehaviour((key) => {
+      n++;
+      if (n === 2) return { ok: false, error: "rejeitado" };
+      w.state.accepted.add(key);
+      return { ok: true };
+    });
+    const r = await processSmsCampaignTick(campaign(recipients(5)), w.deps, { deadline: 45_000 });
+    expect(r).toMatchObject({ sent: 4, failed: 1, status: "enviado" });
+  });
+
+  it("I1: mixed batch stops the cursor at the first retryable recipient", async () => {
+    const w = batchWorld();
+    const c = campaign(recipients(6));
+    let call = 0;
+    w.setBehaviour((key) => {
+      call++;
+      // 1 accepted, 2 rejected (final), 3.. retryable (their chunk never left)
+      if (call === 1) {
+        w.state.accepted.add(key);
+        return { ok: true };
+      }
+      if (call === 2) return { ok: false, error: "rejeitado" };
+      return { ok: false, retryable: true, error: "Sem resposta do provedor" };
+    });
+    const r1 = await processSmsCampaignTick(c, w.deps, { deadline: 45_000 });
+    expect(r1).toMatchObject({ sent: 1, failed: 1, advanced: 2, stopReason: "provider_unavailable" });
+    expect(w.state.patches.filter((p) => "sent_cursor" in p).map((p) => p.sent_cursor)).toEqual([2]);
+
+    // Next tick resumes at recipient 3: the retryable ones are sent now.
+    w.setBehaviour((key) => {
+      w.state.accepted.add(key);
+      return { ok: true };
+    });
+    const r2 = await processSmsCampaignTick(
+      { ...c, sent_cursor: 2, sent_count: 1, failed_count: 1 },
+      w.deps,
+      { deadline: 45_000 },
+    );
+    expect(r2).toMatchObject({ sent: 4, status: "enviado" });
+    expect(w.batches[1]).toHaveLength(4);
   });
 });

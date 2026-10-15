@@ -3,7 +3,13 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { channelBudget } from "./rate-limit/channel-budget.server";
 import { sleep } from "./rate-limit/pool";
-import { sendSmsInternal } from "./sms.functions";
+import { renderSmsVariables, sendSmsInternal } from "./sms.functions";
+import {
+  reconcileStaleSubmittingLogs,
+  sendSmsBatch,
+  smsBulkEnabled,
+  smsBulkTransport,
+} from "./sms-bulk.server";
 import { buildPlayerVariables, renderTemplate } from "./template-vars.server";
 import { deferIfOutsideWindow } from "./send-window.server";
 import { checkContactFrequencyLimit } from "./contact-frequency.server";
@@ -836,10 +842,59 @@ function campaignDeps(): CampaignDispatchDeps {
         error: r.ok ? undefined : (r as { error?: string }).error,
       };
     },
+    // ENV-10: one Short Brasil bulk request per batch (personalised text and
+    // tracked links per recipient). Off unless SMS_BULK_ENABLED=true (QA B1);
+    // the Bearer API keeps the per-recipient path.
+    ...(smsBulkEnabled() && smsBulkTransport() === "short-brasil-bulk"
+      ? {
+          async sendBatch({ campaign, items }) {
+            const { outcomes } = await sendSmsBatch(
+              items.map((it) => ({
+                tenantId: campaign.tenant_id,
+                to: it.target.phone,
+                content: renderSmsVariables(campaign.content, it.variables),
+                deliveryKey: it.deliveryKey,
+                playerId: it.target.playerId,
+                triggerName: `campanha:${campaign.name}:${campaign.route}`,
+                linkTrackingEnabled: campaign.track_links !== false,
+                linkTrackingOrigin: { sourceType: "campaign" as const, sourceId: campaign.id },
+              })),
+            );
+            const insufficient = outcomes.find((o) => o.insufficientFunds);
+            if (insufficient) {
+              await registerThrottle("sms", 1800, `insufficient_funds: ${insufficient.error ?? ""}`);
+            }
+            return outcomes.map((o) => ({
+              ok: o.ok,
+              alreadySent: o.status === "already_sent",
+              pendingConfirmation: o.status === "pending_confirmation",
+              retryable: o.retryable,
+              error: o.ok && o.status !== "pending_confirmation" ? undefined : o.error,
+            }));
+          },
+        }
+      : {}),
   };
 }
 
+/** QA I2: reconcile stale bulk write-ahead rows at most every 5 min per process. */
+const BULK_RECONCILE_EVERY_MS = 5 * 60_000;
+let lastBulkReconcileAt = 0;
+
+async function maybeReconcileBulkSubmissions() {
+  if (!smsBulkEnabled() || Date.now() - lastBulkReconcileAt < BULK_RECONCILE_EVERY_MS) return;
+  lastBulkReconcileAt = Date.now();
+  try {
+    await reconcileStaleSubmittingLogs();
+  } catch (error) {
+    console.error("[sms-campaigns] reconciliação de envios em lote falhou", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 export async function runScheduledSmsCampaigns({ limit = 20 }: { limit?: number } = {}) {
+  await maybeReconcileBulkSubmissions();
   // Fora da janela → deixa pra próximo tick (idem outros canais).
   const deferTo = await deferIfOutsideWindow();
   if (deferTo) {

@@ -16,6 +16,7 @@ import {
   Send,
   UsersRound,
   Trash2,
+  Zap,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -27,8 +28,10 @@ import {
   listLegacyJourneys,
   saveJourneyContactLimits,
   retireLegacyJourney,
+  setJourneyExpress,
   setJourneyStatus,
 } from "@/lib/journeys.functions";
+import { EXPRESS_JOURNEY_HINT } from "@/lib/journey-express";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -41,6 +44,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { TRIGGER_NAMES } from "@/lib/triggers";
 
@@ -56,6 +60,7 @@ type Journey = {
   status: "draft" | "active" | "paused" | "archived";
   trigger_type: string;
   daily_limit: number;
+  express?: boolean;
   journey_steps: Array<{
     id: string;
     position: number;
@@ -88,6 +93,8 @@ export function JourneysHub() {
   const queryClient = useQueryClient();
   const list = useServerFn(listJourneys);
   const changeStatus = useServerFn(setJourneyStatus);
+  const changeExpress = useServerFn(setJourneyExpress);
+  const [expressCandidate, setExpressCandidate] = useState<Journey | null>(null);
   const removeJourney = useServerFn(deleteJourney);
   const operationsFn = useServerFn(listJourneyOperations);
   const legacyFn = useServerFn(listLegacyJourneys);
@@ -148,6 +155,21 @@ export function JourneysHub() {
     onSuccess: async (_, variables) => {
       await queryClient.invalidateQueries({ queryKey: ["journeys"] });
       toast.success(variables.status === "active" ? "Jornada publicada" : "Jornada desligada");
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+  const express = useMutation({
+    mutationFn: (input: { id: string; express: boolean }) => changeExpress({ data: input }),
+    onSuccess: async (result) => {
+      setExpressCandidate(null);
+      await queryClient.invalidateQueries({ queryKey: ["journeys"] });
+      toast.success(
+        result.express
+          ? result.requeued > 0
+            ? `Envio imediato ligado. ${result.requeued} lead(s) adiado(s) voltaram para a fila.`
+            : "Envio imediato ligado."
+          : "Envio imediato desligado.",
+      );
     },
     onError: (error: Error) => toast.error(error.message),
   });
@@ -503,6 +525,15 @@ export function JourneysHub() {
                         >
                           {labels[journey.status].toLowerCase()}
                         </Badge>
+                        {journey.express && (
+                          <Badge
+                            variant="outline"
+                            className="gap-1 border-amber-500/30 bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                            title={EXPRESS_JOURNEY_HINT}
+                          >
+                            <Zap className="h-3 w-3" aria-hidden="true" /> Envio imediato
+                          </Badge>
+                        )}
                       </div>
                       <p className="mt-1 truncate text-xs text-muted-foreground">
                         {TRIGGER_NAMES[journey.trigger_type as keyof typeof TRIGGER_NAMES] ??
@@ -534,6 +565,35 @@ export function JourneysHub() {
                       />
                     </div>
                     <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+                      <TooltipProvider delayDuration={150}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <label className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border px-2 text-xs font-medium">
+                              <Zap
+                                className={
+                                  journey.express
+                                    ? "h-3.5 w-3.5 text-amber-500"
+                                    : "h-3.5 w-3.5 text-muted-foreground"
+                                }
+                                aria-hidden="true"
+                              />
+                              Envio imediato
+                              <Switch
+                                checked={Boolean(journey.express)}
+                                disabled={express.isPending}
+                                aria-label={`Envio imediato (fura fila) na jornada ${journey.name}`}
+                                onCheckedChange={(checked) => {
+                                  if (checked) setExpressCandidate(journey);
+                                  else express.mutate({ id: journey.id, express: false });
+                                }}
+                              />
+                            </label>
+                          </TooltipTrigger>
+                          <TooltipContent className="max-w-xs whitespace-normal text-left">
+                            {EXPRESS_JOURNEY_HINT}
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
                       <Button asChild variant="outline" size="sm">
                         <Link to="/jornadas/$journeyId" params={{ journeyId: journey.id }}>
                           Editar
@@ -671,6 +731,52 @@ export function JourneysHub() {
           </CardContent>
         </Card>
       )}
+      <Dialog
+        open={expressCandidate !== null}
+        onOpenChange={(open) => {
+          if (!open && !express.isPending) setExpressCandidate(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Zap className="h-4 w-4 text-amber-500" aria-hidden="true" /> Ligar envio imediato?
+            </DialogTitle>
+            <DialogDescription>
+              {expressCandidate ? `Jornada “${expressCandidate.name}”.` : null}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 text-sm text-muted-foreground">
+            <p>{EXPRESS_JOURNEY_HINT}</p>
+            <ul className="list-disc space-y-1 pl-5">
+              <li>Passa na frente das outras jornadas na fila de envio.</li>
+              <li>Continua respeitando o limite diário da própria jornada e a reentrada.</li>
+              <li>
+                Leads desta jornada que foram adiados pelo intervalo entre jornadas ou por limite
+                global voltam para a fila agora.
+              </li>
+            </ul>
+            <p>Use só em jornadas urgentes, como saque pago ou PIX gerado.</p>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={express.isPending}
+              onClick={() => setExpressCandidate(null)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              disabled={express.isPending || !expressCandidate}
+              onClick={() =>
+                expressCandidate && express.mutate({ id: expressCandidate.id, express: true })
+              }
+            >
+              <Zap className="mr-1 h-4 w-4" aria-hidden="true" /> Ligar envio imediato
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
@@ -898,9 +1004,7 @@ function JourneyStepSummary({ steps }: { steps: Journey["journey_steps"] }) {
           </span>
         ))}
         {totalWaitSeconds > 0 && (
-          <span className="text-xs text-muted-foreground">
-            em {formatWait(totalWaitSeconds)}
-          </span>
+          <span className="text-xs text-muted-foreground">em {formatWait(totalWaitSeconds)}</span>
         )}
       </div>
       <div

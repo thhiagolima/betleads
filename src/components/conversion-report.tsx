@@ -19,6 +19,7 @@ import {
 } from "@/lib/conversion-report.functions";
 import { TRIGGER_NAMES, type TriggerType } from "@/lib/triggers";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 type Recipient = {
@@ -140,7 +141,7 @@ export function ConversionReport({
         drilldown={drilldown.data}
         onLoadDrilldown={() => setLoadJourneyDrilldown(true)}
         alerts={health.data?.alerts ?? []}
-        globalAttributionHealth={health.data?.globalAttributionHealth}
+        globalAttributionHealth={health.data?.globalAttributionHealth ?? undefined}
       />
     );
 
@@ -151,7 +152,7 @@ export function ConversionReport({
       details={campaignDetails.data}
       detailsError={campaignDetails.isError}
       alerts={health.data?.alerts ?? []}
-      globalAttributionHealth={health.data?.globalAttributionHealth}
+      globalAttributionHealth={health.data?.globalAttributionHealth ?? undefined}
     />
   );
 }
@@ -384,9 +385,9 @@ function CampaignReport({
             <div className="rounded-lg border border-sky-500/30 bg-sky-500/5 p-3 text-sm">
               <p className="font-semibold">Saúde geral da integração</p>
               <p className="mt-1 text-muted-foreground">
-                {number(globalAttributionHealth.count)} evento(s) do tenant chegaram sem origem nas
-                últimas {globalAttributionHealth.periodHours} horas. Este total é global e não foi
-                atribuído a esta campanha.
+                {number(globalAttributionHealth.count)} evento(s) da operação chegaram sem origem
+                identificada nas últimas {globalAttributionHealth.periodHours} horas. Indicador
+                geral, não relacionado a esta campanha.
               </p>
               <p className="mt-1 text-xs text-sky-300">
                 {Object.entries(globalAttributionHealth.reasons)
@@ -840,11 +841,7 @@ function JourneyReport({
   const allSteps: any[] = details?.steps ?? [];
   const actionableSteps = allSteps.filter((step) => !["wait", "end"].includes(step.step_type));
   const stepRows = actionableSteps.map((step) => {
-    const conversion = data.byStepChannel.find(
-      (row) =>
-        (row.stepId && row.stepId === step.id) ||
-        (row.stepPosition === step.position && row.channel === step.step_type),
-    );
+    const conversion = data.byStep.find((row) => row.stepId === step.id);
     const waitSeconds = allSteps
       .filter((candidate) => candidate.step_type === "wait" && candidate.position < step.position)
       .filter(
@@ -857,15 +854,10 @@ function JourneyReport({
           ),
       )
       .reduce((sum, candidate) => sum + Number((candidate.config as any)?.delay_seconds ?? 0), 0);
-    const previousStep = [...allSteps]
-      .filter((candidate) => candidate.position < step.position)
-      .sort((a, b) => b.position - a.position)[0];
-    const queuePosition =
-      previousStep?.step_type === "wait" ? previousStep.position : step.position;
     return {
       ...step,
       waitSeconds,
-      queued: Number(details?.metrics?.positions?.[String(queuePosition)] ?? step.queued ?? 0),
+      current: Number(step.current ?? 0),
       delivered: Number(conversion?.delivered ?? 0),
       clicked: Number(conversion?.clicked ?? 0),
       deposits: Number(conversion?.deposits ?? 0),
@@ -879,6 +871,7 @@ function JourneyReport({
   // is operational state and can include a player's unrelated balance.
   const recovered = Number(data.revenue ?? 0);
   const deposits = Number(data.deposits ?? 0);
+  const unassigned = data.unassignedStep ?? { deposits: 0, recovered: 0 };
   const triggerName = journey?.trigger_type
     ? (TRIGGER_NAMES[journey.trigger_type as TriggerType] ?? journey.trigger_type)
     : "Não informado";
@@ -939,9 +932,16 @@ function JourneyReport({
           {globalAttributionHealth?.count ? (
             <div className="rounded-lg border border-sky-500/30 bg-sky-500/5 p-3 text-sm">
               <strong>Saúde geral da integração:</strong> {number(globalAttributionHealth.count)}{" "}
-              eventos sem origem nas últimas {globalAttributionHealth.periodHours} horas. Eles não
-              pertencem a esta jornada.
+              evento(s) da operação sem origem identificada nas últimas{" "}
+              {globalAttributionHealth.periodHours} horas. Indicador geral, não relacionado a esta
+              jornada.
             </div>
+          ) : null}
+          {data.truncated || details?.metrics?.truncated ? (
+            <p className="text-xs text-muted-foreground">
+              Volume muito alto: alguns números abaixo consideram apenas os primeiros 100 mil
+              registros.
+            </p>
           ) : null}
           {sent7d > 0 && data.trackedSent === 0 ? (
             <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm text-amber-100">
@@ -951,14 +951,16 @@ function JourneyReport({
           ) : null}
           {data.observedClicked && data.observedClicked > (data.clicked ?? 0) ? (
             <div className="rounded-lg border border-sky-500/30 bg-sky-500/5 p-3 text-sm text-muted-foreground">
-              O Short.io observou {number(data.observedClicked)} clique(s), mas apenas {number(data.clicked ?? 0)}
-              foi(ram) confirmado(s) pelo redirecionamento próprio. Os observados não entram em atribuição.
+              O Short.io observou {number(data.observedClicked)} clique(s), mas apenas{" "}
+              {number(data.clicked ?? 0)}
+              foi(ram) confirmado(s) pelo redirecionamento próprio. Os observados não entram em
+              atribuição.
             </div>
           ) : null}
 
           <section className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
-            <Metric label="Elegíveis agora" value={number(details?.metrics?.eligible ?? 0)} />
-            <Metric label="Na fila" value={number(details?.metrics?.queued ?? 0)} />
+            <Metric label="Entraram (7 dias)" value={number(details?.metrics?.entered7d ?? 0)} />
+            <Metric label="Em andamento" value={number(details?.metrics?.inProgress ?? 0)} />
             <Metric label="Enviados 7d" value={number(sent7d)} />
             <Metric label="Enviados rastreados" value={number(data.trackedSent)} />
             <Metric label="Clicaram" value={data.clicked === null ? "—" : number(data.clicked)} />
@@ -975,38 +977,51 @@ function JourneyReport({
               </p>
             </div>
             {stepRows.length ? (
-              <div className="divide-y divide-border/70">
-                {stepRows.map((step, index) => (
-                  <div key={step.id} className="space-y-3 p-4">
-                    <div className="flex flex-wrap items-center gap-2 text-sm">
-                      <span className="grid size-6 place-items-center rounded-full bg-muted text-xs font-bold">
-                        {index + 1}
-                      </span>
-                      <span className="rounded-full border border-sky-500/30 bg-sky-500/5 px-2 py-0.5 text-xs font-semibold uppercase text-sky-300">
-                        {step.step_type}
-                      </span>
-                      <strong>{step.label || `Etapa ${index + 1}`}</strong>
-                      <span className="text-xs text-muted-foreground">
-                        {formatJourneyDelay(step.waitSeconds)}
-                      </span>
+              <TooltipProvider delayDuration={150}>
+                <div className="divide-y divide-border/70">
+                  {stepRows.map((step, index) => (
+                    <div key={step.id} className="space-y-3 p-4">
+                      <div className="flex flex-wrap items-center gap-2 text-sm">
+                        <span className="grid size-6 place-items-center rounded-full bg-muted text-xs font-bold">
+                          {index + 1}
+                        </span>
+                        <span className="rounded-full border border-sky-500/30 bg-sky-500/5 px-2 py-0.5 text-xs font-semibold uppercase text-sky-300">
+                          {step.step_type}
+                        </span>
+                        <strong>{step.label || `Etapa ${index + 1}`}</strong>
+                        <span className="text-xs text-muted-foreground">
+                          {formatJourneyDelay(step.waitSeconds)}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+                        <JourneyStepMetric
+                          label="Neste degrau agora"
+                          value={step.current}
+                          hint="Leads que já entraram e aguardam o envio ou o próximo passo deste degrau"
+                        />
+                        <JourneyStepMetric label="Enviados 7d" value={step.sent7d} />
+                        <JourneyStepMetric label="Enviados total" value={step.sent} />
+                        <JourneyStepMetric label="Entregues" value={step.delivered} />
+                        <JourneyStepMetric label="Clicaram" value={step.clicked} />
+                        <JourneyStepMetric label="Depósitos atribuídos" value={step.deposits} />
+                        <JourneyStepMetric
+                          label="Recuperado atribuído"
+                          value={step.recovered}
+                          currency
+                          accent
+                        />
+                      </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
-                      <JourneyStepMetric label="Na fila" value={step.queued} />
-                      <JourneyStepMetric label="Enviados 7d" value={step.sent7d} />
-                      <JourneyStepMetric label="Enviados total" value={step.sent} />
-                      <JourneyStepMetric label="Entregues" value={step.delivered} />
-                      <JourneyStepMetric label="Clicaram" value={step.clicked} />
-                      <JourneyStepMetric label="Depósitos atribuídos" value={step.deposits} />
-                      <JourneyStepMetric
-                        label="Recuperado atribuído"
-                        value={step.recovered}
-                        currency
-                        accent
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                  {unassigned.deposits > 0 ? (
+                    <p className="px-4 py-3 text-xs text-muted-foreground">
+                      Sem degrau identificado: {number(unassigned.deposits)} depósito(s) ·{" "}
+                      {money(unassigned.recovered)} — o envio de origem não corresponde a uma etapa
+                      atual da jornada.
+                    </p>
+                  ) : null}
+                </div>
+              </TooltipProvider>
             ) : (
               <p className="p-5 text-sm text-muted-foreground">
                 Esta jornada ainda não possui etapas de comunicação configuradas.
@@ -1083,17 +1098,33 @@ function JourneyReport({
 function JourneyStepMetric({
   label,
   value,
+  hint,
   currency = false,
   accent = false,
 }: {
   label: string;
   value: number;
+  hint?: string;
   currency?: boolean;
   accent?: boolean;
 }) {
   return (
     <div className="rounded-lg bg-card/60 px-3 py-2">
-      <p className="text-[11px] text-muted-foreground">{label}</p>
+      {hint ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <p
+              tabIndex={0}
+              className="cursor-help text-[11px] text-muted-foreground underline decoration-dotted underline-offset-2"
+            >
+              {label}
+            </p>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-60">{hint}</TooltipContent>
+        </Tooltip>
+      ) : (
+        <p className="text-[11px] text-muted-foreground">{label}</p>
+      )}
       <p className={cn("mt-0.5 font-bold", accent && "text-emerald-400")}>
         {currency ? money(value) : number(value)}
       </p>

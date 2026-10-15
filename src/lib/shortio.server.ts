@@ -1,8 +1,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- tables are introduced by this migration and are absent from the checked-in generated Supabase types. */
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { buildFirstPartyClickUrl } from "./click-tracking.server";
+import { channelBudget } from "./rate-limit/channel-budget.server";
 
 const SHORTIO_API_URL = "https://api.short.io/links";
+const SHORTIO_BULK_API_URL = "https://api.short.io/links/bulk";
+/** Short.io accepts at most 1000 links per bulk call. */
+export const SHORTIO_BULK_MAX_LINKS = 1000;
 // SMS copy commonly contains a compact `www.example.com` address. Treat it as
 // HTTPS so enabling tracking cannot silently produce a campaign with no
 // measurable dispatches.
@@ -880,4 +884,536 @@ export async function syncShortioMetrics(
       .eq("id", runId);
   }
   return { startedAt, processed, failures, total: (links ?? []).length };
+}
+
+// ============================================================
+// ENV-10 — batch preparation for bulk SMS sends.
+//
+// Same rules as prepareTrackedText (one tracked link + one dispatch per
+// recipient and URL position, deterministic tokens, fallback_mode), but the
+// database work is done in set-based statements and the missing short links
+// are created with Short.io's bulk endpoint (<= 1000 links per call), paced by
+// the `shortio` global budget in channel_rate_limits (1 token per HTTP call).
+//
+// Fallback when Short.io cannot shorten a link:
+//   fallback_mode = 'passthrough' -> the first-party redirect
+//     (/api/public/click/<token>?s=...) is sent unshortened. Clicks are still
+//     attributed: the redirect resolves the dispatch by token. A tracked_links
+//     row with status 'failed' satisfies the dispatch FK and is skipped by the
+//     Short.io metrics sync (which reads only 'active' rows).
+//   fallback_mode = 'block' -> the item comes back with an error and the caller
+//     must not send it (same as prepareTrackedText throwing).
+// ============================================================
+
+export type BatchTrackedTextInput = { content: string; context: LinkTrackingContext };
+
+export type BatchTrackedTextResult =
+  | (PreparedText & { ok: true; unshortened: number })
+  | { ok: false; error: string; fallbackMode: "block" | "passthrough" };
+
+type ShortioBulkLink = { originalUrl: string; created: CreatedLink | null; error: string | null };
+
+const SHORTIO_BUDGET_MAX_WAIT_MS = 3_000;
+const DB_IN_CHUNK = 200;
+
+async function chunked<T>(items: T[], size: number, fn: (part: T[]) => Promise<void>) {
+  for (let i = 0; i < items.length; i += size) await fn(items.slice(i, i + size));
+}
+
+async function runLimited<T>(items: T[], concurrency: number, fn: (item: T) => Promise<void>) {
+  let next = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (next < items.length) await fn(items[next++]);
+  });
+  await Promise.all(workers);
+}
+
+/** One `shortio` budget token per Short.io HTTP call (global 40/s). */
+async function acquireShortioCall(tenantId: string): Promise<boolean> {
+  const deadline = Date.now() + SHORTIO_BUDGET_MAX_WAIT_MS;
+  while (true) {
+    const grant = await channelBudget.consume(tenantId, "shortio", 1);
+    if (grant.granted >= 1) return true;
+    // The limiter itself is unavailable: the single-link path never consumed
+    // this budget, so a limiter outage must not become a tracking outage.
+    if (grant.limitedBy === "error") return true;
+    const waitMs = Math.min(1_000, Math.max(100, grant.retryAfterMs || 250));
+    if (Date.now() + waitMs > deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+  }
+}
+
+function parseBulkLink(item: unknown): CreatedLink | null {
+  if (!item || typeof item !== "object") return null;
+  const o = item as Record<string, unknown>;
+  if (o.error) return null;
+  const id = o.idString ?? o.id;
+  if ((typeof id !== "string" && typeof id !== "number") || typeof o.shortURL !== "string")
+    return null;
+  return { id: String(id), shortURL: o.shortURL, path: typeof o.path === "string" ? o.path : null };
+}
+
+/**
+ * Creates short links in bulk (POST /links/bulk, <= 1000 per call). Never
+ * throws: each URL comes back with the created link or the reason it failed.
+ */
+export async function createShortioLinksBulk(input: {
+  tenantId: string;
+  originalUrls: string[];
+  domain: string;
+  ttlDays: number | null;
+  sourceType: string;
+}): Promise<ShortioBulkLink[]> {
+  const urls = Array.from(new Set(input.originalUrls));
+  const out = new Map<string, ShortioBulkLink>();
+  const apiKey = process.env.SHORTIO_API_KEY?.trim();
+  if (!apiKey) {
+    return urls.map((originalUrl) => ({
+      originalUrl,
+      created: null,
+      error: "SHORTIO_API_KEY não configurada no servidor",
+    }));
+  }
+  const ttl = input.ttlDays ? new Date(Date.now() + input.ttlDays * 86400000).toISOString() : null;
+  for (let offset = 0; offset < urls.length; offset += SHORTIO_BULK_MAX_LINKS) {
+    const part = urls.slice(offset, offset + SHORTIO_BULK_MAX_LINKS);
+    const payload = {
+      domain: input.domain,
+      allowDuplicates: false,
+      links: part.map((originalURL) => ({
+        originalURL,
+        tags: ["betleads", input.sourceType.slice(0, 64)],
+        ...(ttl ? { ttl } : {}),
+      })),
+    };
+    let lastError = "";
+    let items: unknown[] | null = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      if (!(await acquireShortioCall(input.tenantId))) {
+        lastError = "orçamento da API Short.io esgotado";
+        break;
+      }
+      try {
+        const response = await fetch(SHORTIO_BULK_API_URL, {
+          method: "POST",
+          headers: {
+            Authorization: apiKey,
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(20_000),
+        });
+        const body = (await response.json().catch(() => null)) as unknown;
+        const list = Array.isArray(body)
+          ? body
+          : body && typeof body === "object" && Array.isArray((body as { links?: unknown }).links)
+            ? (body as { links: unknown[] }).links
+            : null;
+        if (response.ok && list) {
+          items = list;
+          break;
+        }
+        lastError = `Short.io retornou HTTP ${response.status}`;
+        if (response.status !== 429 && response.status < 500) break;
+      } catch (error) {
+        // allowDuplicates=false: a resend returns the links created before.
+        lastError = error instanceof Error ? error.message : String(error);
+      }
+      if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
+    }
+    if (!items) {
+      for (const originalUrl of part)
+        out.set(originalUrl, {
+          originalUrl,
+          created: null,
+          error: `Falha ao criar links Short.io em lote: ${lastError || "sem resposta"}`,
+        });
+      continue;
+    }
+    // QA I4: match ONLY by the echoed originalURL. A positional fallback could
+    // bind one recipient's link to another's token; an unmatched URL is a
+    // Short.io failure for that link (fallback_mode decides what happens).
+    // Exact echo, compared after WHATWG URL serialisation on both sides.
+    const canonical = (raw: string) => {
+      try {
+        return new URL(raw).toString();
+      } catch {
+        return raw;
+      }
+    };
+    const byOriginal = new Map<string, unknown>();
+    for (const it of items) {
+      const original =
+        it && typeof it === "object" ? (it as Record<string, unknown>).originalURL : null;
+      if (typeof original === "string" && !byOriginal.has(canonical(original)))
+        byOriginal.set(canonical(original), it);
+    }
+    for (const originalUrl of part) {
+      const created = parseBulkLink(byOriginal.get(canonical(originalUrl)));
+      out.set(originalUrl, {
+        originalUrl,
+        created,
+        error: created ? null : "Short.io não confirmou o link criado (originalURL ausente na resposta)",
+      });
+    }
+  }
+  return urls.map((url) => out.get(url)!);
+}
+
+async function selectTrackedLinksByHash(tenantId: string, hashes: string[]) {
+  const db = supabaseAdmin as any;
+  const found = new Map<string, { id: string; short_url: string }>();
+  await chunked(Array.from(new Set(hashes)), DB_IN_CHUNK, async (part) => {
+    const { data, error } = await db
+      .from("tracked_links")
+      .select("id,short_url,canonical_url_hash")
+      .eq("tenant_id", tenantId)
+      .in("canonical_url_hash", part);
+    if (error) throw new Error(`Falha ao consultar links rastreados: ${error.message}`);
+    for (const row of (data ?? []) as Array<Record<string, unknown>>)
+      found.set(String(row.canonical_url_hash), {
+        id: String(row.id),
+        short_url: String(row.short_url),
+      });
+  });
+  return found;
+}
+
+async function insertTrackedLinks(rows: Array<Record<string, unknown>>) {
+  if (rows.length === 0) return;
+  const db = supabaseAdmin as any;
+  await chunked(rows, 500, async (part) => {
+    const { error } = await db
+      .from("tracked_links")
+      .upsert(part, { onConflict: "tenant_id,canonical_url_hash", ignoreDuplicates: true });
+    if (error) throw new Error(`Falha ao persistir links rastreados: ${error.message}`);
+  });
+}
+
+/** Experiments are rare: one lookup per (tenant, source) before any per-recipient RPC. */
+async function experimentsForBatch(contexts: LinkTrackingContext[]) {
+  const result = new Map<number, Awaited<ReturnType<typeof experimentForContext>>>();
+  const sources = new Map<string, number[]>();
+  contexts.forEach((context, index) => {
+    if (
+      (context.sourceType !== "campaign" && context.sourceType !== "journey") ||
+      !context.sourceId ||
+      !/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(context.sourceId)
+    )
+      return;
+    const key = `${context.tenantId}|${context.sourceType}|${context.sourceId}`;
+    sources.set(key, [...(sources.get(key) ?? []), index]);
+  });
+  for (const [key, indexes] of sources) {
+    const [tenantId, sourceType, sourceId] = key.split("|");
+    const { data, error } = await (supabaseAdmin as any)
+      .from("conversion_experiments")
+      .select("id")
+      .eq("tenant_id", tenantId)
+      .eq("source_type", sourceType)
+      .eq("source_id", sourceId)
+      .eq("status", "active")
+      .limit(1);
+    if (error) throw new Error(`Falha ao consultar experimentos: ${error.message}`);
+    if (!Array.isArray(data) || data.length === 0) continue;
+    await runLimited(indexes, 10, async (index) => {
+      result.set(index, await experimentForContext(contexts[index]));
+    });
+  }
+  return result;
+}
+
+type PlannedLink = {
+  item: number;
+  position: number;
+  start: number;
+  end: number;
+  raw: string;
+  token: string;
+  finalDestination: string;
+  firstParty: string;
+  hash: string;
+  context: LinkTrackingContext;
+};
+
+/**
+ * Batch counterpart of prepareTrackedText. Items may belong to different
+ * tenants; each result is independent (an error never leaks to other items).
+ */
+export async function prepareTrackedTextBatch(
+  inputs: BatchTrackedTextInput[],
+): Promise<BatchTrackedTextResult[]> {
+  const results: Array<BatchTrackedTextResult | undefined> = new Array(inputs.length);
+  const byTenant = new Map<string, number[]>();
+  inputs.forEach((input, index) => {
+    byTenant.set(input.context.tenantId, [...(byTenant.get(input.context.tenantId) ?? []), index]);
+  });
+
+  for (const [tenantId, indexes] of byTenant) {
+    const settings = await settingsForTenant(tenantId);
+    const active: number[] = [];
+    for (const index of indexes) {
+      const { context, content } = inputs[index];
+      if (
+        context.enabled === false ||
+        !settings.enabled ||
+        !settings.enabled_channels.includes(context.channel)
+      ) {
+        results[index] = { ok: true, content, links: [], trackingEnabled: false, unshortened: 0 };
+      } else active.push(index);
+    }
+    if (active.length === 0) continue;
+
+    const fail = (index: number, error: unknown) => {
+      if (results[index]) return;
+      results[index] = {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+        fallbackMode: settings.fallback_mode,
+      };
+    };
+
+    const experiments = await experimentsForBatch(active.map((i) => inputs[i].context));
+    const dnsChecks = new Map<string, Promise<void>>();
+    const planned: PlannedLink[] = [];
+    for (let k = 0; k < active.length; k++) {
+      const index = active[k];
+      const experiment = experiments.get(k) ?? null;
+      const base = inputs[index].context;
+      const context: LinkTrackingContext = experiment
+        ? { ...base, experimentId: experiment.experiment_id, experimentVariant: experiment.variant }
+        : base;
+      const matches = Array.from(inputs[index].content.matchAll(URL_PATTERN));
+      for (let position = 0; position < matches.length; position++) {
+        const match = matches[position];
+        const matchedRaw = stripTrackingUrlTrailingPunctuation(match[0]);
+        const originalRaw = normalizeTrackingUrl(matchedRaw);
+        const variantUrl =
+          experiment?.dimension === "cta" ? experiment.payload.destination_url : null;
+        const raw = typeof variantUrl === "string" && variantUrl ? variantUrl : originalRaw;
+        if (
+          !raw ||
+          isProtectedDestination(originalRaw) ||
+          !isShortioEligibleUrl(raw, {
+            domain: settings.domain,
+            allowedHosts: settings.allowed_destination_hosts,
+          })
+        )
+          continue;
+        try {
+          let check = dnsChecks.get(raw);
+          if (!check) {
+            check = assertResolvedPublicDestination(raw);
+            check.catch(() => undefined);
+            dnsChecks.set(raw, check);
+          }
+          await check;
+          const token = await deterministicToken(context, position);
+          const firstParty = await buildFirstPartyClickUrl(token);
+          const start = match.index ?? 0;
+          planned.push({
+            item: index,
+            position,
+            start,
+            end: start + matchedRaw.length,
+            raw,
+            token,
+            finalDestination: withDeliveryContext(raw, context),
+            firstParty,
+            hash: await canonicalHash(firstParty),
+            context,
+          });
+        } catch (error) {
+          // Same as prepareTrackedText: passthrough leaves this URL untouched.
+          if (settings.fallback_mode === "block") fail(index, error);
+        }
+      }
+    }
+
+    // Tracked links: reuse existing rows (retries), create the rest in bulk.
+    const live = () => planned.filter((p) => !results[p.item]);
+    let tracked = await selectTrackedLinksByHash(
+      tenantId,
+      live().map((p) => p.hash),
+    );
+    const missing = new Map<string, PlannedLink>();
+    for (const p of live()) if (!tracked.has(p.hash)) missing.set(p.hash, p);
+    if (missing.size > 0) {
+      const missingList = Array.from(missing.values());
+      const bulk: ShortioBulkLink[] = settings.domain
+        ? await createShortioLinksBulk({
+            tenantId,
+            originalUrls: missingList.map((p) => p.firstParty),
+            domain: settings.domain,
+            ttlDays: settings.default_ttl_days,
+            sourceType: missingList[0].context.sourceType,
+          })
+        : missingList.map((p) => ({
+            originalUrl: p.firstParty,
+            created: null,
+            error: "SHORTIO_DOMAIN não configurado para este tenant",
+          }));
+      const byUrl = new Map(bulk.map((b) => [b.originalUrl, b]));
+      const expiresAt = settings.default_ttl_days
+        ? new Date(Date.now() + settings.default_ttl_days * 86400000).toISOString()
+        : null;
+      const rows: Array<Record<string, unknown>> = [];
+      const shortenFailures: Array<{ p: PlannedLink; error: string }> = [];
+      for (const p of missingList) {
+        const b = byUrl.get(p.firstParty);
+        if (b?.created) {
+          rows.push({
+            tenant_id: tenantId,
+            shortio_link_id: b.created.id,
+            short_url: b.created.shortURL,
+            original_url: p.firstParty,
+            canonical_url_hash: p.hash,
+            path: b.created.path ?? null,
+            expires_at: expiresAt,
+          });
+        } else {
+          shortenFailures.push({ p, error: b?.error ?? "Short.io não criou o link" });
+        }
+      }
+      for (const { p, error } of shortenFailures) {
+        if (settings.fallback_mode === "block") {
+          for (const q of planned) if (q.hash === p.hash) fail(q.item, new Error(error));
+          continue;
+        }
+        rows.push({
+          tenant_id: tenantId,
+          shortio_link_id: `first-party:${p.hash.slice(0, 40)}`,
+          short_url: p.firstParty,
+          original_url: p.firstParty,
+          canonical_url_hash: p.hash,
+          path: null,
+          status: "failed",
+          expires_at: expiresAt,
+        });
+      }
+      if (shortenFailures.length > 0)
+        console.warn("[shortio] bulk shortening failed", {
+          tenantId,
+          links: shortenFailures.length,
+          fallbackMode: settings.fallback_mode,
+          error: shortenFailures[0].error,
+        });
+      try {
+        await insertTrackedLinks(rows);
+        tracked = await selectTrackedLinksByHash(
+          tenantId,
+          live().map((p) => p.hash),
+        );
+      } catch (error) {
+        for (const p of live()) if (!tracked.has(p.hash)) fail(p.item, error);
+      }
+    }
+
+    // Dispatch rows: one upsert per chunk, then read back the ids (a retry of
+    // the same delivery returns the rows written by the first attempt).
+    const dispatchRows = live()
+      .filter((p) => tracked.has(p.hash))
+      .map((p) => ({
+        p,
+        row: {
+          tenant_id: tenantId,
+          idempotency_key: `${p.context.deliveryKey ?? p.context.messageLogId ?? p.context.sourceId ?? "one-off"}:${p.position}`,
+          tracked_link_id: tracked.get(p.hash)!.id,
+          tracking_token: p.token,
+          channel: p.context.channel,
+          recipient_player_id: p.context.recipientPlayerId ?? null,
+          recipient_hash: p.context.recipientHash ?? null,
+          source_type: p.context.sourceType,
+          source_id: p.context.sourceId ?? null,
+          message_log_type: p.context.messageLogType ?? null,
+          message_log_id: p.context.messageLogId ?? null,
+          url_position: p.position,
+          original_url: p.finalDestination,
+          sent_url: tracked.get(p.hash)!.short_url,
+          experiment_id: p.context.experimentId ?? null,
+          experiment_variant: p.context.experimentVariant ?? null,
+          journey_step_id: p.context.journeyStepId ?? null,
+          journey_step_position: p.context.journeyStepPosition ?? null,
+        },
+      }));
+    const dispatchIds = new Map<string, { id: string; messageLogId: string | null }>();
+    try {
+      const db = supabaseAdmin as any;
+      await chunked(dispatchRows, 500, async (part) => {
+        const { error } = await db.from("link_dispatches").upsert(
+          part.map((d) => d.row),
+          { onConflict: "tenant_id,idempotency_key", ignoreDuplicates: true },
+        );
+        if (error) throw new Error(`Falha ao registrar dispatches de link: ${error.message}`);
+      });
+      await chunked(
+        dispatchRows.map((d) => d.row.idempotency_key),
+        DB_IN_CHUNK,
+        async (keys) => {
+          const { data, error } = await db
+            .from("link_dispatches")
+            .select("id,idempotency_key,message_log_id")
+            .eq("tenant_id", tenantId)
+            .in("idempotency_key", keys);
+          if (error) throw new Error(`Falha ao ler dispatches de link: ${error.message}`);
+          for (const row of (data ?? []) as Array<Record<string, unknown>>)
+            dispatchIds.set(String(row.idempotency_key), {
+              id: String(row.id),
+              messageLogId: (row.message_log_id as string | null) ?? null,
+            });
+        },
+      );
+      // A retried delivery (new send log) re-binds its pre-existing dispatches.
+      for (const d of dispatchRows) {
+        const existing = dispatchIds.get(d.row.idempotency_key);
+        if (existing && d.row.message_log_id && existing.messageLogId !== d.row.message_log_id) {
+          await db
+            .from("link_dispatches")
+            .update({
+              message_log_id: d.row.message_log_id,
+              message_log_type: d.row.message_log_type,
+            })
+            .eq("id", existing.id);
+        }
+      }
+    } catch (error) {
+      for (const d of dispatchRows) fail(d.p.item, error);
+    }
+
+    // Assemble the rewritten text per item.
+    for (const index of active) {
+      if (results[index]) continue;
+      const mine = dispatchRows.filter((d) => d.p.item === index);
+      const links: PreparedTrackedLink[] = [];
+      const replacements: Array<{ start: number; end: number; value: string }> = [];
+      let unshortened = 0;
+      let missingDispatch = false;
+      for (const { p, row } of mine) {
+        const dispatch = dispatchIds.get(row.idempotency_key);
+        if (!dispatch) {
+          missingDispatch = true;
+          break;
+        }
+        if (row.sent_url === p.firstParty) unshortened++;
+        replacements.push({ start: p.start, end: p.end, value: row.sent_url });
+        links.push({
+          trackedLinkId: row.tracked_link_id,
+          dispatchId: dispatch.id,
+          shortUrl: row.sent_url,
+          originalUrl: p.raw,
+          trackingToken: p.token,
+        });
+      }
+      if (missingDispatch) {
+        fail(index, new Error("Dispatch de link não encontrado após registro"));
+        continue;
+      }
+      let rewritten = inputs[index].content;
+      for (const r of replacements.sort((a, b) => b.start - a.start))
+        rewritten = `${rewritten.slice(0, r.start)}${r.value}${rewritten.slice(r.end)}`;
+      results[index] = { ok: true, content: rewritten, links, trackingEnabled: true, unshortened };
+    }
+  }
+  return results as BatchTrackedTextResult[];
 }

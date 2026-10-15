@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import type { Json } from "@/integrations/supabase/types";
+import { ACCEPTED_SMS_STATUSES } from "@/lib/campaign-recipients.server";
 
 // Callback Short Brasil SMS.
 // URL sugerida:
@@ -203,12 +204,24 @@ async function updateFromPayload(payload: CallbackPayload): Promise<boolean> {
     matched = !!data && data.length > 0;
   }
   if (!matched && idempotencyKey) {
-    const { data } = await supabaseAdmin
+    // A delivery key can have older 'error' rows (refunded attempts) besides
+    // the accepted one: update only the most recent accepted row.
+    const { data: candidates } = await supabaseAdmin
       .from("sms_send_logs")
-      .update(patch)
+      .select("id")
       .eq("idempotency_key", idempotencyKey)
-      .select("id");
-    matched = !!data && data.length > 0;
+      .in("status", ACCEPTED_SMS_STATUSES)
+      .order("created_at", { ascending: false })
+      .limit(1);
+    const targetId = candidates?.[0]?.id;
+    if (targetId) {
+      const { data } = await supabaseAdmin
+        .from("sms_send_logs")
+        .update(patch)
+        .eq("id", targetId)
+        .select("id");
+      matched = !!data && data.length > 0;
+    }
   }
 
   // A dispatch uses `${sms_log.idempotency_key}:position`; this carries the

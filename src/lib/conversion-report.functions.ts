@@ -4,7 +4,12 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { resolveOperationalTenantId } from "./tenant-access.server";
-import { canAccessConversionDrilldown, uniqueDeliveryCount } from "./conversion-report";
+import {
+  buildJourneyStepConversions,
+  canAccessConversionDrilldown,
+  journeyStepPositionRanges,
+  uniqueDeliveryCount,
+} from "./conversion-report";
 import {
   buildUnresolvedRecipientsCsv,
   countUnresolvedByReason,
@@ -42,6 +47,39 @@ async function selectInChunks<T>(
   }
   return { data: rows, error: null };
 }
+
+// PostgREST caps every response at `max_rows` (1000 on Supabase) without an
+// error. Large journeys exceed it (~1.7k dispatches, ~3.7k executions), which
+// silently dropped rows from the per-step metrics. Page by keyset on `id`
+// (stable under concurrent inserts, unlike OFFSET) up to a hard ceiling.
+const PAGE_SIZE = 1000;
+const MAX_PAGES = 100;
+
+type PagedResult<T> = { data: T[]; error: { message: string } | null; truncated: boolean };
+
+async function selectAllPages<T extends { id: string }>(
+  label: string,
+  build: () => any,
+): Promise<PagedResult<T>> {
+  const rows: T[] = [];
+  let lastId: string | null = null;
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    let query = build();
+    if (lastId) query = query.gt("id", lastId);
+    const result: ChunkResult<T> = await query.order("id", { ascending: true }).limit(PAGE_SIZE);
+    if (result.error) return { data: rows, error: result.error, truncated: false };
+    const data = result.data ?? [];
+    rows.push(...data);
+    if (data.length < PAGE_SIZE) return { data: rows, error: null, truncated: false };
+    lastId = String(data[data.length - 1].id);
+  }
+  console.warn(
+    `[conversion-report] ${label}: stopped after ${MAX_PAGES * PAGE_SIZE} rows; report truncated.`,
+  );
+  return { data: rows, error: null, truncated: true };
+}
+
+const UNFINISHED_ENROLLMENT_STATUSES = ["active", "waiting", "paused_by_priority"];
 
 function byOccurredAt(a: { occurred_at?: string | null }, b: { occurred_at?: string | null }) {
   return String(a.occurred_at ?? "").localeCompare(String(b.occurred_at ?? ""));
@@ -111,7 +149,13 @@ async function loadCampaignUnresolved(
     .maybeSingle();
   if (error) {
     if (!isMissingColumnError(error)) throw new Error(error.message);
-    return { total: 0, byReason: countUnresolvedByReason([]), sample: [], all: [], available: false };
+    return {
+      total: 0,
+      byReason: countUnresolvedByReason([]),
+      sample: [],
+      all: [],
+      available: false,
+    };
   }
   const all = parseUnresolvedRecipients(data?.unresolved_recipients);
   return {
@@ -132,7 +176,8 @@ export const getJourneyReportDetails = createServerFn({ method: "GET" })
     // Tenant access is validated above using the authenticated request; every
     // elevated query below remains explicitly scoped to that tenant.
     const db = supabaseAdmin as any;
-    const [journeyResult, stepsResult, metricsResult, eligibleResult, executionsResult] =
+    const enteredSince = new Date(Date.now() - 7 * 24 * 60 * 60_000).toISOString();
+    const [journeyResult, stepsResult, metricsResult, enteredResult, executionsResult] =
       await Promise.all([
         db
           .from("journeys")
@@ -151,25 +196,50 @@ export const getJourneyReportDetails = createServerFn({ method: "GET" })
           p_tenant_id: tenantId,
           p_journey_id: data.journeyId,
         }),
-        db.rpc("journey_eligible_lead_count", {
-          p_tenant_id: tenantId,
-          p_journey_id: data.journeyId,
-        }),
         db
-          .from("journey_step_executions")
-          .select("step_id,status,executed_at,completed_at,updated_at")
+          .from("journey_enrollments")
+          .select("id", { count: "exact", head: true })
           .eq("tenant_id", tenantId)
-          .eq("journey_id", data.journeyId),
+          .eq("journey_id", data.journeyId)
+          .gte("created_at", enteredSince),
+        selectAllPages<any>("journey_step_executions", () =>
+          db
+            .from("journey_step_executions")
+            .select("id,step_id,status,executed_at,completed_at,updated_at,created_at")
+            .eq("tenant_id", tenantId)
+            .eq("journey_id", data.journeyId),
+        ),
       ]);
     const error = [
       journeyResult.error,
       stepsResult.error,
       metricsResult.error,
-      eligibleResult.error,
+      enteredResult.error,
       executionsResult.error,
     ].find(Boolean);
     if (error) throw new Error(error.message);
     if (!journeyResult.data) return { journey: null, steps: [], metrics: null };
+
+    // "Neste degrau agora": unfinished enrollments positioned on the step or on
+    // the waits leading to it. Counted in SQL (head) - no row transfer.
+    const ranges = journeyStepPositionRanges(stepsResult.data ?? []);
+    const currentCounts = await Promise.all(
+      ranges.map((range) =>
+        db
+          .from("journey_enrollments")
+          .select("id", { count: "exact", head: true })
+          .eq("tenant_id", tenantId)
+          .eq("journey_id", data.journeyId)
+          .in("status", UNFINISHED_ENROLLMENT_STATUSES)
+          .gte("current_position", range.from)
+          .lte("current_position", range.to),
+      ),
+    );
+    const currentError = currentCounts.map((result: any) => result.error).find(Boolean);
+    if (currentError) throw new Error(currentError.message);
+    const currentByStep = new Map<string, number>(
+      ranges.map((range, index) => [range.stepId, Number(currentCounts[index]?.count ?? 0)]),
+    );
 
     const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60_000;
     const executionsByStep = new Map<string, any[]>();
@@ -180,7 +250,7 @@ export const getJourneyReportDetails = createServerFn({ method: "GET" })
     }
     const steps = (stepsResult.data ?? []).map((step: any) => {
       if (step.step_type === "wait" || step.step_type === "end")
-        return { ...step, queued: 0, sent: 0, sent7d: 0, failed: 0 };
+        return { ...step, current: 0, queued: 0, sent: 0, sent7d: 0, failed: 0 };
       const executions = executionsByStep.get(step.id) ?? [];
       const queued = executions.filter((execution) =>
         ["pending", "claimed", "retrying"].includes(execution.status),
@@ -193,11 +263,17 @@ export const getJourneyReportDetails = createServerFn({ method: "GET" })
         ["failed", "cancelled"].includes(execution.status),
       ).length;
       const sent7d = sentExecutions.filter((execution) => {
+        // The dispatcher fills `completed_at` and may leave `executed_at` null.
         const terminalAt =
-          execution.executed_at ?? execution.completed_at ?? execution.updated_at ?? null;
+          execution.executed_at ??
+          execution.completed_at ??
+          execution.updated_at ??
+          execution.created_at ??
+          null;
         return terminalAt && new Date(terminalAt).getTime() >= sevenDaysAgo;
       }).length;
-      return { ...step, queued, sent, sent7d, failed };
+      const current = currentByStep.get(step.id) ?? 0;
+      return { ...step, current, queued, sent, sent7d, failed };
     });
     const aggregate = metricsResult.data ?? {};
     return {
@@ -205,8 +281,9 @@ export const getJourneyReportDetails = createServerFn({ method: "GET" })
       steps,
       metrics: {
         ...aggregate,
-        eligible: Number(eligibleResult.data ?? 0),
-        queued:
+        entered7d: Number(enteredResult.count ?? 0),
+        truncated: Boolean(executionsResult.truncated),
+        inProgress:
           Number(aggregate.byStatus?.active ?? 0) +
           Number(aggregate.byStatus?.waiting ?? 0) +
           Number(aggregate.byStatus?.paused_by_priority ?? 0),
@@ -424,58 +501,64 @@ export const getCampaignReportDetails = createServerFn({ method: "GET" })
     ];
     const dispatchIds = [...new Set(deliveries.flatMap(([, rows]) => rows.map((row) => row.id)))];
 
-    const [playersResult, snapshotsResult, clickEventsResult, attributionsResult, depositsResult, smsLogsResult] =
-      await Promise.all([
-        selectInChunks<any>(playerIds, (chunk) =>
-          db
-            .from("players")
-            .select("id,nome,telefone,email,total_depositado")
-            .eq("tenant_id", tenantId)
-            .in("id", chunk),
-        ),
-        selectInChunks<any>(linkIds, (chunk) =>
-          db
-            .from("link_click_snapshots")
-            .select("tracked_link_id,clicks,human_clicks,snapshot_at")
-            .eq("tenant_id", tenantId)
-            .in("tracked_link_id", chunk),
-        ),
-        selectInChunks<any>(dispatchIds, (chunk) =>
-          db
-            .from("click_events")
-            .select("link_dispatch_id,occurred_at")
-            .eq("tenant_id", tenantId)
-            .eq("is_human", true)
-            .in("link_dispatch_id", chunk)
-            .order("occurred_at", { ascending: true }),
-        ).then((result) => ({ ...result, data: result.data.sort(byOccurredAt) })),
-        selectInChunks<any>(tokens, (chunk) =>
-          db
-            .from("conversion_attributions")
-            .select("tracking_token,event_type,occurred_at,monetary_value,is_ftd,classification")
-            .eq("tenant_id", tenantId)
-            .eq("source_type", "campaign")
-            .eq("source_id", data.campaignId)
-            .in("tracking_token", chunk),
-        ),
-        selectInChunks<any>(playerIds, (chunk) =>
-          db
-            .from("deposits")
-            .select("player_id,valor,status,completed_at,created_at")
-            .eq("tenant_id", tenantId)
-            .in("player_id", chunk)
-            .eq("status", "aprovado"),
-        ),
-        sms?.id && messageLogIds.length
-          ? selectInChunks<any>(messageLogIds, (chunk) =>
-              db
-                .from("sms_send_logs")
-                .select("id,status,error,to_phone,created_at,delivered_at,delivery_status")
-                .eq("tenant_id", tenantId)
-                .in("id", chunk),
-            )
-          : Promise.resolve({ data: [], error: null }),
-      ]);
+    const [
+      playersResult,
+      snapshotsResult,
+      clickEventsResult,
+      attributionsResult,
+      depositsResult,
+      smsLogsResult,
+    ] = await Promise.all([
+      selectInChunks<any>(playerIds, (chunk) =>
+        db
+          .from("players")
+          .select("id,nome,telefone,email,total_depositado")
+          .eq("tenant_id", tenantId)
+          .in("id", chunk),
+      ),
+      selectInChunks<any>(linkIds, (chunk) =>
+        db
+          .from("link_click_snapshots")
+          .select("tracked_link_id,clicks,human_clicks,snapshot_at")
+          .eq("tenant_id", tenantId)
+          .in("tracked_link_id", chunk),
+      ),
+      selectInChunks<any>(dispatchIds, (chunk) =>
+        db
+          .from("click_events")
+          .select("link_dispatch_id,occurred_at")
+          .eq("tenant_id", tenantId)
+          .eq("is_human", true)
+          .in("link_dispatch_id", chunk)
+          .order("occurred_at", { ascending: true }),
+      ).then((result) => ({ ...result, data: result.data.sort(byOccurredAt) })),
+      selectInChunks<any>(tokens, (chunk) =>
+        db
+          .from("conversion_attributions")
+          .select("tracking_token,event_type,occurred_at,monetary_value,is_ftd,classification")
+          .eq("tenant_id", tenantId)
+          .eq("source_type", "campaign")
+          .eq("source_id", data.campaignId)
+          .in("tracking_token", chunk),
+      ),
+      selectInChunks<any>(playerIds, (chunk) =>
+        db
+          .from("deposits")
+          .select("player_id,valor,status,completed_at,created_at")
+          .eq("tenant_id", tenantId)
+          .in("player_id", chunk)
+          .eq("status", "aprovado"),
+      ),
+      sms?.id && messageLogIds.length
+        ? selectInChunks<any>(messageLogIds, (chunk) =>
+            db
+              .from("sms_send_logs")
+              .select("id,status,error,to_phone,created_at,delivered_at,delivery_status")
+              .eq("tenant_id", tenantId)
+              .in("id", chunk),
+          )
+        : Promise.resolve({ data: [], error: null }),
+    ]);
     const firstError = [
       playersResult.error,
       snapshotsResult.error,
@@ -740,14 +823,18 @@ export const getConversionDataHealth = createServerFn({ method: "GET" })
         .map((reason, index) => [reason, Number(globalReasonResults[index]?.count ?? 0)] as const)
         .filter(([, count]) => count > 0),
     );
+    // Tenant-wide integration health is technical: only super admins get it.
+    const { data: superAdmin } = await db.rpc("is_super_admin", { _user_id: context.userId });
     return {
       healthy: alerts.length === 0,
       alerts,
-      globalAttributionHealth: {
-        count: Number(globalIssues.count ?? 0),
-        periodHours: 24,
-        reasons: globalIssueReasons,
-      },
+      globalAttributionHealth: superAdmin
+        ? {
+            count: Number(globalIssues.count ?? 0),
+            periodHours: 24,
+            reasons: globalIssueReasons,
+          }
+        : null,
     };
   });
 
@@ -912,8 +999,14 @@ export const getConversionReport = createServerFn({ method: "GET" })
   .handler(async ({ data, context }) => {
     const tenantId = await resolveOperationalTenantId(context.supabase);
     const db = context.supabase as any;
-    const [dispatchResult, attributionResult, smsCampaignResult, emailCampaignResult] =
-      await Promise.all([
+    const [
+      dispatchResult,
+      attributionResult,
+      smsCampaignResult,
+      emailCampaignResult,
+      journeyStepsResult,
+    ] = await Promise.all([
+      selectAllPages<any>("link_dispatches", () =>
         db
           .from("link_dispatches")
           .select(
@@ -922,34 +1015,47 @@ export const getConversionReport = createServerFn({ method: "GET" })
           .eq("tenant_id", tenantId)
           .eq("source_type", data.sourceType)
           .eq("source_id", data.sourceId),
+      ),
+      selectAllPages<any>("conversion_attributions", () =>
         db
           .from("conversion_attributions")
           .select(
-            "link_dispatch_id,tracking_token,event_type,event_id,monetary_value,is_ftd,occurred_at,created_at,classification",
+            "id,link_dispatch_id,tracking_token,event_type,event_id,monetary_value,is_ftd,occurred_at,created_at,classification",
           )
           .eq("tenant_id", tenantId)
           .eq("source_type", data.sourceType)
           .eq("source_id", data.sourceId)
           .in("classification", ["direct", "assisted"]),
-        data.sourceType === "campaign"
-          ? db
-              .from("sms_campaigns")
-              .select("sent_count,deduplicated_count")
-              .eq("tenant_id", tenantId)
-              .eq("id", data.sourceId)
-              .maybeSingle()
-          : Promise.resolve({ data: null, error: null }),
-        data.sourceType === "campaign"
-          ? db
-              .from("email_campaigns")
-              .select("stats")
-              .eq("tenant_id", tenantId)
-              .eq("id", data.sourceId)
-              .maybeSingle()
-          : Promise.resolve({ data: null, error: null }),
-      ]);
+      ),
+      data.sourceType === "campaign"
+        ? db
+            .from("sms_campaigns")
+            .select("sent_count,deduplicated_count")
+            .eq("tenant_id", tenantId)
+            .eq("id", data.sourceId)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+      data.sourceType === "campaign"
+        ? db
+            .from("email_campaigns")
+            .select("stats")
+            .eq("tenant_id", tenantId)
+            .eq("id", data.sourceId)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+      data.sourceType === "journey"
+        ? db
+            .from("journey_steps")
+            .select("id,position,step_type")
+            .eq("tenant_id", tenantId)
+            .eq("journey_id", data.sourceId)
+            .eq("is_enabled", true)
+            .order("position")
+        : Promise.resolve({ data: [], error: null }),
+    ]);
     if (dispatchResult.error) throw new Error(dispatchResult.error.message);
     if (attributionResult.error) throw new Error(attributionResult.error.message);
+    if (journeyStepsResult.error) throw new Error(journeyStepsResult.error.message);
     const dispatches = dispatchResult.data ?? [];
     const attributions = attributionResult.data ?? [];
     const linkIds = dispatches.map((item: any) => item.tracked_link_id).filter(Boolean);
@@ -1057,49 +1163,16 @@ export const getConversionReport = createServerFn({ method: "GET" })
         .reduce((sum: number, item: any) => sum + Number(item.monetary_value ?? 0), 0),
       latest,
       canViewSensitive,
-      byStepChannel: Array.from(
-        dispatches.reduce((groups: Map<string, any>, row: any) => {
-          const key = `${row.journey_step_position ?? "-"}:${row.channel}`;
-          const current = groups.get(key) ?? {
-            stepId: row.journey_step_id,
-            stepPosition: row.journey_step_position,
-            channel: row.channel,
-            rows: [],
-          };
-          current.rows.push(row);
-          groups.set(key, current);
-          return groups;
-        }, new Map<string, any>()),
-      ).map(([, group]: any) => ({
-        stepId: group.stepId,
-        stepPosition: group.stepPosition,
-        channel: group.channel,
-        sent: uniqueDeliveryCount(group.rows, (row) => row.send_status === "sent"),
-        delivered: uniqueDeliveryCount(group.rows, (row) => row.delivery_status === "delivered"),
-        clicked: uniqueDeliveryCount(group.rows, (row) => confirmedDispatchIds.has(row.id)),
-        deposits: attributions.filter(
-          (item: any) =>
-            item.classification === "direct" &&
-            item.event_type === "deposit_approved" &&
-            group.rows.some(
-              (row: any) =>
-                row.id === item.link_dispatch_id ||
-                (!item.link_dispatch_id && row.tracking_token === item.tracking_token),
-            ),
-        ).length,
-        recovered: attributions
-          .filter(
-            (item: any) =>
-              item.classification === "direct" &&
-              item.event_type === "deposit_approved" &&
-              group.rows.some(
-                (row: any) =>
-                  row.id === item.link_dispatch_id ||
-                  (!item.link_dispatch_id && row.tracking_token === item.tracking_token),
-              ),
-          )
-          .reduce((sum: number, item: any) => sum + Number(item.monetary_value ?? 0), 0),
-      })),
+      ...(() => {
+        const result = buildJourneyStepConversions({
+          steps: journeyStepsResult.data ?? [],
+          dispatches,
+          attributions,
+          confirmedDispatchIds,
+        });
+        return { byStep: result.steps, unassignedStep: result.unassigned };
+      })(),
+      truncated: Boolean(dispatchResult.truncated || attributionResult.truncated),
       historical: dispatches.length === 0 && attributions.length === 0,
     };
   });
