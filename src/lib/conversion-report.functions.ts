@@ -15,6 +15,38 @@ import {
 } from "./campaign-recipients";
 import { isMissingColumnError } from "./campaign-recipients.server";
 
+// `.in(column, ids)` travels in the GET URL: a journey with ~1.8k dispatches
+// produced a ~65 KB URL and the gateway answered "Bad Request". Query in small
+// chunks until REP-01 moves these counts into SQL aggregates.
+const IN_CHUNK_SIZE = 100;
+const IN_CHUNK_CONCURRENCY = 4;
+
+type ChunkResult<T> = { data: T[] | null; error: { message: string } | null };
+
+async function selectInChunks<T>(
+  ids: readonly unknown[],
+  run: (chunk: string[]) => PromiseLike<ChunkResult<T>>,
+): Promise<{ data: T[]; error: { message: string } | null }> {
+  const unique = [...new Set(ids.filter((id) => id != null && id !== "").map(String))];
+  const chunks: string[][] = [];
+  for (let i = 0; i < unique.length; i += IN_CHUNK_SIZE) {
+    chunks.push(unique.slice(i, i + IN_CHUNK_SIZE));
+  }
+  const rows: T[] = [];
+  for (let i = 0; i < chunks.length; i += IN_CHUNK_CONCURRENCY) {
+    const results = await Promise.all(chunks.slice(i, i + IN_CHUNK_CONCURRENCY).map(run));
+    for (const result of results) {
+      if (result.error) return { data: rows, error: result.error };
+      rows.push(...(result.data ?? []));
+    }
+  }
+  return { data: rows, error: null };
+}
+
+function byOccurredAt(a: { occurred_at?: string | null }, b: { occurred_at?: string | null }) {
+  return String(a.occurred_at ?? "").localeCompare(String(b.occurred_at ?? ""));
+}
+
 const inputSchema = z.object({
   sourceType: z.enum(["campaign", "journey"]),
   sourceId: z.string().uuid(),
@@ -394,52 +426,54 @@ export const getCampaignReportDetails = createServerFn({ method: "GET" })
 
     const [playersResult, snapshotsResult, clickEventsResult, attributionsResult, depositsResult, smsLogsResult] =
       await Promise.all([
-        playerIds.length
-          ? db
-              .from("players")
-              .select("id,nome,telefone,email,total_depositado")
-              .eq("tenant_id", tenantId)
-              .in("id", playerIds)
-          : Promise.resolve({ data: [], error: null }),
-        linkIds.length
-          ? db
-              .from("link_click_snapshots")
-              .select("tracked_link_id,clicks,human_clicks,snapshot_at")
-              .eq("tenant_id", tenantId)
-              .in("tracked_link_id", linkIds)
-          : Promise.resolve({ data: [], error: null }),
-        dispatchIds.length
-          ? db
-              .from("click_events")
-              .select("link_dispatch_id,occurred_at")
-              .eq("tenant_id", tenantId)
-              .eq("is_human", true)
-              .in("link_dispatch_id", dispatchIds)
-              .order("occurred_at", { ascending: true })
-          : Promise.resolve({ data: [], error: null }),
-        tokens.length
-          ? db
-              .from("conversion_attributions")
-              .select("tracking_token,event_type,occurred_at,monetary_value,is_ftd,classification")
-              .eq("tenant_id", tenantId)
-              .eq("source_type", "campaign")
-              .eq("source_id", data.campaignId)
-              .in("tracking_token", tokens)
-          : Promise.resolve({ data: [], error: null }),
-        playerIds.length
-          ? db
-              .from("deposits")
-              .select("player_id,valor,status,completed_at,created_at")
-              .eq("tenant_id", tenantId)
-              .in("player_id", playerIds)
-              .eq("status", "aprovado")
-          : Promise.resolve({ data: [], error: null }),
+        selectInChunks<any>(playerIds, (chunk) =>
+          db
+            .from("players")
+            .select("id,nome,telefone,email,total_depositado")
+            .eq("tenant_id", tenantId)
+            .in("id", chunk),
+        ),
+        selectInChunks<any>(linkIds, (chunk) =>
+          db
+            .from("link_click_snapshots")
+            .select("tracked_link_id,clicks,human_clicks,snapshot_at")
+            .eq("tenant_id", tenantId)
+            .in("tracked_link_id", chunk),
+        ),
+        selectInChunks<any>(dispatchIds, (chunk) =>
+          db
+            .from("click_events")
+            .select("link_dispatch_id,occurred_at")
+            .eq("tenant_id", tenantId)
+            .eq("is_human", true)
+            .in("link_dispatch_id", chunk)
+            .order("occurred_at", { ascending: true }),
+        ).then((result) => ({ ...result, data: result.data.sort(byOccurredAt) })),
+        selectInChunks<any>(tokens, (chunk) =>
+          db
+            .from("conversion_attributions")
+            .select("tracking_token,event_type,occurred_at,monetary_value,is_ftd,classification")
+            .eq("tenant_id", tenantId)
+            .eq("source_type", "campaign")
+            .eq("source_id", data.campaignId)
+            .in("tracking_token", chunk),
+        ),
+        selectInChunks<any>(playerIds, (chunk) =>
+          db
+            .from("deposits")
+            .select("player_id,valor,status,completed_at,created_at")
+            .eq("tenant_id", tenantId)
+            .in("player_id", chunk)
+            .eq("status", "aprovado"),
+        ),
         sms?.id && messageLogIds.length
-          ? db
-              .from("sms_send_logs")
-              .select("id,status,error,to_phone,created_at,delivered_at,delivery_status")
-              .eq("tenant_id", tenantId)
-              .in("id", messageLogIds)
+          ? selectInChunks<any>(messageLogIds, (chunk) =>
+              db
+                .from("sms_send_logs")
+                .select("id,status,error,to_phone,created_at,delivered_at,delivery_status")
+                .eq("tenant_id", tenantId)
+                .in("id", chunk),
+            )
           : Promise.resolve({ data: [], error: null }),
       ]);
     const firstError = [
@@ -738,31 +772,31 @@ export const getConversionDrilldown = createServerFn({ method: "GET" })
     const dispatchIds = dispatchRows.map((row: any) => row.id);
     const playerIds = [...new Set(dispatchRows.map((row: any) => row.recipient_player_id))];
     const [clickResult, attributionResult, playersResult] = await Promise.all([
-      dispatchIds.length
-        ? db
-            .from("click_events")
-            .select("link_dispatch_id,occurred_at")
-            .eq("tenant_id", tenantId)
-            .eq("is_human", true)
-            .in("link_dispatch_id", dispatchIds)
-            .order("occurred_at", { ascending: true })
-        : Promise.resolve({ data: [], error: null }),
-      dispatchIds.length
-        ? db
-            .from("conversion_attributions")
-            .select("link_dispatch_id,event_type,occurred_at,monetary_value,is_ftd")
-            .eq("tenant_id", tenantId)
-            .eq("source_type", data.sourceType)
-            .eq("source_id", data.sourceId)
-            .in("link_dispatch_id", dispatchIds)
-        : Promise.resolve({ data: [], error: null }),
-      playerIds.length
-        ? db
-            .from("players")
-            .select("id,nome,email,telefone")
-            .eq("tenant_id", tenantId)
-            .in("id", playerIds)
-        : Promise.resolve({ data: [], error: null }),
+      selectInChunks<any>(dispatchIds, (chunk) =>
+        db
+          .from("click_events")
+          .select("link_dispatch_id,occurred_at")
+          .eq("tenant_id", tenantId)
+          .eq("is_human", true)
+          .in("link_dispatch_id", chunk)
+          .order("occurred_at", { ascending: true }),
+      ).then((result) => ({ ...result, data: result.data.sort(byOccurredAt) })),
+      selectInChunks<any>(dispatchIds, (chunk) =>
+        db
+          .from("conversion_attributions")
+          .select("link_dispatch_id,event_type,occurred_at,monetary_value,is_ftd")
+          .eq("tenant_id", tenantId)
+          .eq("source_type", data.sourceType)
+          .eq("source_id", data.sourceId)
+          .in("link_dispatch_id", chunk),
+      ),
+      selectInChunks<any>(playerIds, (chunk) =>
+        db
+          .from("players")
+          .select("id,nome,email,telefone")
+          .eq("tenant_id", tenantId)
+          .in("id", chunk),
+      ),
     ]);
     const firstError = [clickResult.error, attributionResult.error, playersResult.error].find(
       Boolean,
@@ -924,23 +958,22 @@ export const getConversionReport = createServerFn({ method: "GET" })
       { data: clickEvents, error: clickEventsError },
       canViewSensitive,
     ] = await Promise.all([
-      linkIds.length
-        ? await db
-            .from("link_click_snapshots")
-            .select("tracked_link_id,clicks,human_clicks,snapshot_at")
-            .in("tracked_link_id", linkIds)
-        : Promise.resolve({ data: [], error: null }),
-      dispatches.length
-        ? await db
+      selectInChunks<any>(linkIds, (chunk) =>
+        db
+          .from("link_click_snapshots")
+          .select("tracked_link_id,clicks,human_clicks,snapshot_at")
+          .in("tracked_link_id", chunk),
+      ),
+      selectInChunks<any>(
+        dispatches.map((item: any) => item.id),
+        (chunk) =>
+          db
             .from("click_events")
             .select("link_dispatch_id")
             .eq("tenant_id", tenantId)
             .eq("is_human", true)
-            .in(
-              "link_dispatch_id",
-              dispatches.map((item: any) => item.id),
-            )
-        : Promise.resolve({ data: [], error: null }),
+            .in("link_dispatch_id", chunk),
+      ),
       hasConversionReportAdmin(context, tenantId),
     ]);
     if (snapshotError) throw new Error(snapshotError.message);
