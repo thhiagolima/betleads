@@ -191,7 +191,29 @@ export type ClickBotReason =
   | "automation"
   | "non_browser_headers"
   | "machine_speed"
-  | "ip_hop_repeat";
+  | "ip_hop_repeat"
+  | "shortio_link_crawler";
+
+/**
+ * User-agent hashes (privacyHash, same key as click_events.user_agent_hash)
+ * of fetchers that hit the redirect without a person behind them. Measured
+ * on 15/10/2026: one UA made 97% of all "clicks", ~91% within 2 min of the
+ * Short.io link creation, while Short.io counted 0 clicks on those short
+ * links — the shortener fetching our long URL, not the player. Extend with
+ * CLICK_KNOWN_CRAWLER_UA_HASHES (comma-separated) without a deploy of code.
+ */
+const BUILTIN_CRAWLER_UA_HASHES = ["1qFewyagIOHGqnWnCWhnJbdV"];
+
+export function knownCrawlerUaHashes(env: NodeJS.ProcessEnv = process.env): Set<string> {
+  const extra = (env.CLICK_KNOWN_CRAWLER_UA_HASHES ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return new Set([...BUILTIN_CRAWLER_UA_HASHES, ...extra]);
+}
+
+/** Window after link creation in which a fetch is suspicious enough to keep its UA. */
+const UA_SAMPLE_WINDOW_MS = 180_000;
 
 export type ClickClassification = {
   classification: "human" | "suspected_bot" | "unknown";
@@ -374,6 +396,7 @@ type DispatchRow = {
   source_id: string;
   original_url: string;
   sent_at: string | null;
+  created_at?: string | null;
 };
 
 const tokenLimiter = new FixedWindowLimiter(CLICK_LIMIT_PER_TOKEN_PER_MIN, 60_000);
@@ -450,6 +473,12 @@ async function recordClick(args: {
     privacyHash(requestIp(request)),
     privacyHash(userAgent),
   ]);
+  if (uaHash && knownCrawlerUaHashes().has(uaHash)) verdict = suspect("shortio_link_crawler");
+  const createdAtMs = dispatch.created_at ? Date.parse(dispatch.created_at) : Number.NaN;
+  // Keep the raw UA only for suspicious fetches (bot verdict or right after the
+  // link was created) so new crawlers can be identified; never for players.
+  const keepUaSample =
+    !verdict.isHuman || (Number.isFinite(createdAtMs) && nowMs - createdAtMs < UA_SAMPLE_WINDOW_MS);
 
   // Cheap: served by click_events_dispatch_time_idx (link_dispatch_id, occurred_at desc).
   const { data: recentRows, error: recentError } = await db
@@ -508,6 +537,7 @@ async function recordClick(args: {
       sec_fetch_mode: shortHeader(request, "sec-fetch-mode"),
       sec_fetch_site: shortHeader(request, "sec-fetch-site"),
       request_ref: (headers.get("cf-ray") ?? headers.get("x-request-id"))?.slice(0, 64) ?? null,
+      ua_sample: keepUaSample ? (userAgent?.slice(0, 200) ?? null) : null,
     },
   });
   if (insertError?.code === "23505") return { outcome: "duplicate", trackingError: null };
@@ -546,7 +576,7 @@ export async function resolveAndRecordFirstPartyClick(
     const { data, error: dispatchError } = await db
       .from("link_dispatches")
       .select(
-        "id,tenant_id,tracking_token,recipient_player_id,source_type,source_id,original_url,sent_at",
+        "id,tenant_id,tracking_token,recipient_player_id,source_type,source_id,original_url,sent_at,created_at",
       )
       .eq("tracking_token", args.token)
       .maybeSingle();

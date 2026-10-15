@@ -349,7 +349,11 @@ describe("channel budget (ENV-04)", () => {
     const T4 = "00000000-0000-4000-8000-000000000004";
     const T5 = "00000000-0000-4000-8000-000000000005";
     let total = 0;
-    for (const tenant of [T1, T2, T3]) total += (await consume(tenant, "sms", 5)).granted;
+    for (const tenant of [T1, T2, T3]) {
+      total += (await consume(tenant, "sms", 5)).granted;
+      // Freeze after each call: refill between the queries made this flaky.
+      await freezeBuckets();
+    }
     expect(total).toBe(15);
     await freezeBuckets(); // no refill between the queries (was time-sensitive)
     const starved = await consume(T4, "sms", 1);

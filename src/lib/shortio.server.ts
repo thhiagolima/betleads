@@ -5,6 +5,7 @@ import { channelBudget } from "./rate-limit/channel-budget.server";
 
 const SHORTIO_API_URL = "https://api.short.io/links";
 const SHORTIO_BULK_API_URL = "https://api.short.io/links/bulk";
+const SHORTIO_LINK_TITLE = "BetLeads";
 /** Short.io accepts at most 1000 links per bulk call. */
 export const SHORTIO_BULK_MAX_LINKS = 1000;
 // SMS copy commonly contains a compact `www.example.com` address. Treat it as
@@ -274,6 +275,9 @@ async function createShortioLink(input: {
     originalURL: input.originalUrl,
     domain: input.domain,
     allowDuplicates: false,
+    // A title avoids Short.io fetching the destination (our click redirect)
+    // to read it, which was being recorded as a player click (TRK-06).
+    title: SHORTIO_LINK_TITLE,
     tags: ["betleads", input.sourceType.slice(0, 64)],
   };
   if (input.ttlDays) payload.ttl = new Date(Date.now() + input.ttlDays * 86400000).toISOString();
@@ -982,6 +986,7 @@ export async function createShortioLinksBulk(input: {
       allowDuplicates: false,
       links: part.map((originalURL) => ({
         originalURL,
+        title: SHORTIO_LINK_TITLE,
         tags: ["betleads", input.sourceType.slice(0, 64)],
         ...(ttl ? { ttl } : {}),
       })),

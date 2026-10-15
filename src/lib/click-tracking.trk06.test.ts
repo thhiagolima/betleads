@@ -424,3 +424,18 @@ describe("TRK-06 resolveAndRecordFirstPartyClick", () => {
     expect(fake.counters.dispatchLookups).toBe(0);
   });
 });
+
+describe("known crawler user agents", () => {
+  it("includes the Short.io link crawler measured on 15/10/2026", async () => {
+    const { knownCrawlerUaHashes } = await import("./click-tracking.server");
+    expect(knownCrawlerUaHashes({} as NodeJS.ProcessEnv).has("1qFewyagIOHGqnWnCWhnJbdV")).toBe(true);
+  });
+
+  it("accepts extra hashes from CLICK_KNOWN_CRAWLER_UA_HASHES", async () => {
+    const { knownCrawlerUaHashes } = await import("./click-tracking.server");
+    const set = knownCrawlerUaHashes({ CLICK_KNOWN_CRAWLER_UA_HASHES: " abc , def ,," } as NodeJS.ProcessEnv);
+    expect(set.has("abc")).toBe(true);
+    expect(set.has("def")).toBe(true);
+    expect(set.has("")).toBe(false);
+  });
+});
