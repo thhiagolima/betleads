@@ -2,7 +2,13 @@ import { randomUUID } from "node:crypto";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { startJobRun, type JobRunHandle } from "./observability/job-monitor.server";
 import { captureServerException } from "./observability/sentry.server";
-import { journeyEntryKey, qualifiesForInactivity, triggerOccurrence } from "./journey-policy";
+import {
+  inactivityBandConfig,
+  journeyEntryKey,
+  pixExpiryHours,
+  qualifiesForInactivity,
+  triggerOccurrence,
+} from "./journey-policy";
 import { resolveJourneyWorkerScope } from "./journey-worker-scope";
 import { detectTriggersForPlayer } from "./triggers.server";
 
@@ -27,6 +33,7 @@ export type Journey = {
   trigger_type: string;
   trigger_config: Record<string, unknown>;
   entry_rules: Record<string, unknown>;
+  exit_rules?: Record<string, unknown> | null;
   cooldown_hours: number;
 };
 
@@ -50,7 +57,7 @@ type ScanBatchResult = {
 };
 
 export const JOURNEY_SELECT_COLUMNS =
-  "id,tenant_id,version,status,trigger_type,trigger_config,entry_rules,cooldown_hours";
+  "id,tenant_id,version,status,trigger_type,trigger_config,entry_rules,exit_rules,cooldown_hours";
 
 /**
  * Every player column read by the matchers (audience, detectTriggersForPlayer /
@@ -113,6 +120,11 @@ async function financialOccurrences(journey: Journey, players: Player[]) {
         ? query.eq("status", "aprovado")
         : query.eq("status", "pendente").ilike("metodo", "%pix%");
     if (startAt != null) query = query.gte("created_at", new Date(startAt).toISOString());
+    // D-6: a pending PIX older than the expiry no longer drives the journey.
+    const expiryHours =
+      journey.trigger_type === "pix_gerado_nao_pago" ? pixExpiryHours(journey.trigger_config) : null;
+    if (expiryHours != null)
+      query = query.gte("created_at", new Date(Date.now() - expiryHours * 3600_000).toISOString());
     const { data, error } = await query;
     if (error) throw new Error(error.message);
     for (const row of data ?? []) {
@@ -152,7 +164,10 @@ export function matchJourneyScanPlayer(
   }
   if (journey.trigger_type === "inactivity") {
     return {
-      matches: qualifiesForInactivity(player, journey.trigger_config ?? {}),
+      matches: qualifiesForInactivity(
+        player,
+        inactivityBandConfig(journey.trigger_config, journey.exit_rules),
+      ),
       occurrence: triggerOccurrence(journey.trigger_type, player, journey.trigger_config ?? {}),
     };
   }

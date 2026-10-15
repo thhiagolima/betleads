@@ -34,10 +34,15 @@ import {
   type SmsSendGate,
 } from "./sms-provider-breaker.server";
 import { resolveDispatchWorkerConfig } from "./rate-limit/worker-config";
+import { brtDayStart } from "./tz";
 import {
+  inactivityBandConfig,
   journeyEntryKey,
   nextJourneyWindowOpen,
+  pickSmsVariant,
+  pixExpiryHours,
   qualifiesForInactivity,
+  smsVariants,
   triggerOccurrence,
 } from "./journey-policy";
 
@@ -63,6 +68,7 @@ type EnrollmentRow = {
   entered_at: string;
   attempts: number;
   loop_iteration: number;
+  entry_key?: string;
 };
 type StepRow = {
   id: string;
@@ -128,6 +134,11 @@ export async function matchFinancialTrigger(
     .order("created_at", { ascending: false })
     .limit(1);
   if (startAt != null) query = query.gte("created_at", new Date(startAt).toISOString());
+  // D-6: a pending PIX older than the expiry no longer keeps the player in the journey.
+  const expiryHours =
+    journey.trigger_type === "pix_gerado_nao_pago" ? pixExpiryHours(journey.trigger_config) : null;
+  if (expiryHours != null)
+    query = query.gte("created_at", new Date(Date.now() - expiryHours * 3600_000).toISOString());
   query =
     journey.trigger_type === "saque_pago"
       ? query.eq("status", "aprovado")
@@ -290,6 +301,7 @@ async function release(
 async function shouldExit(
   enrollment: EnrollmentRow,
   rules: Record<string, boolean>,
+  inactivityField = "ultimo_deposito",
 ): Promise<string | null> {
   if (!enrollment.player_id) return null;
   const { data: player } = await supabaseAdmin
@@ -309,12 +321,48 @@ async function shouldExit(
   if (rules.voltou_jogar && afterEntry(activity.ultimo_jogo)) return "voltou_jogar";
   // Category switch between inactivity journeys (Esfriando → Dormindo → 30
   // dias): leave this journey once the player crossed the next one's threshold.
+  // Measured on the same field the journey's entry uses (S-05).
   const overHours = Number((rules as Record<string, unknown>).inactivity_over_hours);
-  if (Number.isFinite(overHours) && overHours > 0 && player.ultimo_deposito) {
-    const idleMs = Date.now() - new Date(player.ultimo_deposito).getTime();
+  const lastActivity = (player as Record<string, unknown>)[
+    ["ultimo_login", "ultimo_jogo", "ultimo_deposito"].includes(inactivityField)
+      ? inactivityField
+      : "ultimo_deposito"
+  ];
+  if (Number.isFinite(overHours) && overHours > 0 && typeof lastActivity === "string") {
+    const idleMs = Date.now() - new Date(lastActivity).getTime();
     if (idleMs >= overHours * 3600_000) return "inactivity_threshold";
   }
   return null;
+}
+
+function inactivityField(journey: JourneyRow) {
+  return journey.trigger_type === "inactivity"
+    ? String(journey.trigger_config?.field ?? "ultimo_deposito")
+    : "ultimo_deposito";
+}
+
+/** Variation indexes this player already received today from this journey (D-8). */
+async function variantsUsedToday(enrollment: EnrollmentRow): Promise<number[]> {
+  // Only a preference (avoid repeating a text): a failed lookup must never
+  // block the send itself.
+  try {
+    const dayStart = brtDayStart(new Date()).toISOString();
+    const { data, error } = await db
+      .from("journey_step_executions")
+      .select("provider_response,journey_enrollments!inner(player_id)")
+      .eq("tenant_id", enrollment.tenant_id)
+      .eq("journey_id", enrollment.journey_id)
+      .eq("journey_enrollments.player_id", enrollment.player_id)
+      .in("status", ["sent", "delivered"])
+      .gte("created_at", dayStart);
+    if (error) return [];
+    return ((data ?? []) as Array<{ provider_response: Record<string, unknown> | null }>)
+      .map((row) => Number(row.provider_response?.variant_index))
+      .filter((index) => Number.isInteger(index));
+  } catch (error) {
+    console.warn("[journeys] variant history lookup failed", error);
+    return [];
+  }
 }
 
 async function execution(enrollment: EnrollmentRow, step: StepRow, channel: string | null) {
@@ -338,7 +386,7 @@ async function execution(enrollment: EnrollmentRow, step: StepRow, channel: stri
 }
 
 async function reserveDelivery(enrollment: EnrollmentRow, step: StepRow, journey: JourneyRow) {
-  const { data, error } = await db.rpc("reserve_journey_delivery_with_contact_limits", {
+  const { data, error } = await db.rpc("reserve_journey_delivery_v2", {
     p_tenant_id: enrollment.tenant_id,
     p_journey_id: enrollment.journey_id,
     p_enrollment_id: enrollment.id,
@@ -398,7 +446,10 @@ async function stillMatchesJourneyEntry(
   );
   if (eventMatch) return eventMatch.matches;
   return trigger === "inactivity"
-    ? qualifiesForInactivity(player as Record<string, unknown>, triggerConfig)
+    ? qualifiesForInactivity(
+        player as Record<string, unknown>,
+        inactivityBandConfig(triggerConfig, journey.exit_rules),
+      )
     : detectTriggersForPlayer(player as never).includes(trigger as never);
 }
 
@@ -508,7 +559,11 @@ async function executeEnrollment(
     await event(enrollment, "deferred_outside_window", { next_run_at: nextOpen });
     return;
   }
-  const exitReason = await shouldExit(enrollment, journey.exit_rules ?? {});
+  const exitReason = await shouldExit(
+    enrollment,
+    journey.exit_rules ?? {},
+    inactivityField(journey),
+  );
   if (exitReason) {
     await release(enrollment, ctx, {
       status: "exited",
@@ -740,6 +795,19 @@ async function deliverStep(
   }
   if (!reservation?.execution_id || !reservation.idempotency_key) {
     if (reservation?.blocked_reason === "priority_paused") return;
+    // D-8: past the per-player daily cap this occurrence gets no message.
+    if (reservation?.blocked_reason === "journey_player_daily_cap") {
+      await release(enrollment, ctx, {
+        status: "exited",
+        exited_at: new Date().toISOString(),
+        exit_reason: "journey_player_daily_cap",
+      });
+      await event(enrollment, "exited", {
+        reason: "journey_player_daily_cap",
+        step_position: step.position,
+      });
+      return;
+    }
     const retryAt = reservation?.retry_at ?? new Date(Date.now() + 60_000).toISOString();
     await release(enrollment, ctx, { status: "waiting", next_run_at: retryAt });
     await event(enrollment, "step_deferred", {
@@ -752,7 +820,11 @@ async function deliverStep(
   const run = { id: reservation.execution_id, idempotency_key: reservation.idempotency_key };
   // Failure handling updates exactly this execution (never another worker's).
   ctx.executions.set(enrollment.id, run.id);
-  const finalExitReason = await shouldExit(enrollment, journey.exit_rules ?? {});
+  const finalExitReason = await shouldExit(
+    enrollment,
+    journey.exit_rules ?? {},
+    inactivityField(journey),
+  );
   if (finalExitReason) {
     await finishExecution(run.id, { status: "skipped", provider: "exit_policy" });
     await release(enrollment, ctx, {
@@ -780,7 +852,16 @@ async function deliverStep(
       });
       return;
     }
-    const content = renderTemplate(String(step.config.content ?? ""), vars);
+    const variants = smsVariants(step.config);
+    const variantIndex =
+      variants.length > 1
+        ? pickSmsVariant(
+            variants,
+            enrollment.entry_key ?? enrollment.id,
+            await variantsUsedToday(enrollment),
+          )
+        : 0;
+    const content = renderTemplate(variants[variantIndex], vars);
     const result = await sendSmsInternal({
       to: player.telefone ?? "",
       content,
@@ -801,7 +882,7 @@ async function deliverStep(
     await finishExecution(run.id, {
       status: "sent",
       provider: "short-brasil",
-      provider_response: result,
+      provider_response: variants.length > 1 ? { ...result, variant_index: variantIndex } : result,
     });
   } else if (step.step_type === "email") {
     if (!player.email) throw new Error("Jogador sem e-mail");
@@ -1460,6 +1541,12 @@ async function runJourneyDispatcherMonitored(limit: number, run: JobRunHandle) {
       p_limit: limit,
     });
     if (resumeError) throw new Error(resumeError.message);
+    // S-02: paused-by-priority enrollments are never claimed, so their exit
+    // rules are evaluated here. Best effort: never blocks the dispatch.
+    const { error: sweepError } = await db.rpc("sweep_priority_paused_enrollments", {
+      p_limit: 500,
+    });
+    if (sweepError) console.error("[journeys] priority sweep failed", sweepError.message);
     run.progress({ queue_before: queueBefore ?? 0 });
     // Global SMS provider breaker: while open, SMS items are not claimed.
     await refreshSmsGate(ctx, true);

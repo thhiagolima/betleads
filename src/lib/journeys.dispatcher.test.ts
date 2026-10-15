@@ -196,7 +196,7 @@ function seed(enrollmentIds: string[]) {
   seedClaimAgain();
   fake.rpcs.consume_channel_budget = () => [{ granted: 1, retry_after_ms: 0, limited_by: null }];
   let execution = 0;
-  fake.rpcs.reserve_journey_delivery_with_contact_limits = (args) => {
+  fake.rpcs.reserve_journey_delivery_v2 = (args) => {
     execution++;
     fake.tables.journey_step_executions.push({
       id: `exec-${execution}`,
@@ -346,7 +346,7 @@ describe("runJourneyDispatcher", () => {
     // Same rule as reserve_journey_delivery (20261015111000): a `claimed`
     // execution of this step younger than 15 min answers `in_flight`.
     let execution = 0;
-    fake.rpcs.reserve_journey_delivery_with_contact_limits = (args) => {
+    fake.rpcs.reserve_journey_delivery_v2 = (args) => {
       const live = fake.tables.journey_step_executions.find(
         (e) => e.enrollment_id === args.p_enrollment_id && e.status === "claimed",
       );
@@ -499,7 +499,7 @@ describe("runJourneyDispatcher", () => {
     fake.rpcs.consume_channel_budget = () => [{ granted: 0, retry_after_ms: 30_000, limited_by: "global" }];
     const result = await runJourneyDispatcher(1000);
     expect(result).toMatchObject({ rateLimited: 1, failed: 0 });
-    expect(rpcNames()).not.toContain("reserve_journey_delivery_with_contact_limits");
+    expect(rpcNames()).not.toContain("reserve_journey_delivery_v2");
     expect(sms.sendSmsInternal).not.toHaveBeenCalled();
     expect(enrollment("e1")).toMatchObject({ attempts: 1, claimed_by: null });
   });
@@ -517,6 +517,60 @@ describe("runJourneyDispatcher", () => {
       current_position: 0,
       claimed_by: "journey-dispatcher:other",
     });
+  });
+});
+
+describe("runJourneyDispatcher per-player rules (journey P0)", () => {
+  it("past the per-player daily cap the occurrence exits without a message (D-8)", async () => {
+    seed(["e1"]);
+    fake.rpcs.reserve_journey_delivery_v2 = () => [
+      { execution_id: null, idempotency_key: null, retry_at: null, blocked_reason: "journey_player_daily_cap" },
+    ];
+    await runJourneyDispatcher(1000);
+    expect(sms.sendSmsInternal).not.toHaveBeenCalled();
+    expect(enrollment("e1")).toMatchObject({ status: "exited", exit_reason: "journey_player_daily_cap" });
+    expect(fake.tables.journey_events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ event_type: "exited", detail: expect.objectContaining({ reason: "journey_player_daily_cap" }) }),
+      ]),
+    );
+  });
+
+  it("the minimum interval defers to the returned time instead of exiting (D-8)", async () => {
+    seed(["e1"]);
+    const retryAt = new Date(Date.now() + 10 * 60_000).toISOString();
+    fake.rpcs.reserve_journey_delivery_v2 = () => [
+      { execution_id: null, idempotency_key: null, retry_at: retryAt, blocked_reason: "journey_player_min_interval" },
+    ];
+    await runJourneyDispatcher(1000);
+    expect(sms.sendSmsInternal).not.toHaveBeenCalled();
+    expect(enrollment("e1")).toMatchObject({ status: "waiting", next_run_at: retryAt });
+  });
+
+  it("sends one of the step variations, the same one for the same occurrence (D-8)", async () => {
+    const variants = ["msg A {{nome}}", "msg B", "msg C", "msg D"];
+    const sentFor = async (entryKey: string) => {
+      sms.sendSmsInternal.mockReset();
+      sms.sendSmsInternal.mockResolvedValue({ ok: true, status: 200, response: "{}" });
+      seed(["e1"]);
+      fake.tables.journey_steps[0].config = { content: variants[0], variants };
+      fake.tables.journey_enrollments[0].entry_key = entryKey;
+      await runJourneyDispatcher(1000);
+      expect(sms.sendSmsInternal).toHaveBeenCalledTimes(1);
+      return String(vi.mocked(sms.sendSmsInternal).mock.calls[0][0].content);
+    };
+    const first = await sentFor("saque_pago:w-1");
+    expect(variants.some((variant) => first.startsWith(variant.split(" {{")[0]))).toBe(true);
+    expect(await sentFor("saque_pago:w-1")).toBe(first);
+    const execution = fake.tables.journey_step_executions.find((row) => row.status === "sent");
+    const response = execution?.provider_response as { variant_index?: number } | undefined;
+    expect(response?.variant_index).toBeGreaterThanOrEqual(0);
+  });
+
+  it("runs the priority-paused sweep on every dispatch (S-02)", async () => {
+    seed([]);
+    await runJourneyDispatcher(1000);
+    expect(rpcNames()).toContain("sweep_priority_paused_enrollments");
   });
 });
 

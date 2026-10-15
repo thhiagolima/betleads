@@ -76,11 +76,83 @@ export function qualifiesForInactivity(
   if (!Number.isFinite(hours) || hours < 1 || typeof value !== "string") return false;
   const timestamp = Date.parse(value);
   const startAfter = typeof config.start_after === "string" ? Date.parse(config.start_after) : NaN;
+  // Bands (Esfriando 48–168 h, Dormindo 168–720 h) are exclusive: a player
+  // already past `hours_max` belongs to the next band, not this one.
+  const hoursMax = Number(config.hours_max);
+  const withinUpperBound =
+    !Number.isFinite(hoursMax) || hoursMax <= hours || timestamp > now.getTime() - hoursMax * 3600_000;
   return (
     Number.isFinite(timestamp) &&
     timestamp <= now.getTime() - hours * 3600_000 &&
+    withinUpperBound &&
     (!Number.isFinite(startAfter) || timestamp >= startAfter)
   );
+}
+
+/**
+ * Upper bound of an inactivity band. An explicit `trigger_config.hours_max`
+ * wins; otherwise the journey's own exit threshold (`inactivity_over_hours`)
+ * is used, so a player can never enter a band they would leave immediately.
+ */
+export function inactivityUpperBoundHours(
+  triggerConfig: Record<string, unknown> | null | undefined,
+  exitRules: Record<string, unknown> | null | undefined,
+): number | null {
+  for (const value of [triggerConfig?.hours_max, exitRules?.inactivity_over_hours]) {
+    const hours = Number(value);
+    if (value != null && value !== "" && Number.isFinite(hours) && hours > 0) return hours;
+  }
+  return null;
+}
+
+/** Trigger config of an inactivity journey with its band upper bound applied. */
+export function inactivityBandConfig(
+  triggerConfig: Record<string, unknown> | null | undefined,
+  exitRules: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  const hoursMax = inactivityUpperBoundHours(triggerConfig, exitRules);
+  return hoursMax == null ? { ...triggerConfig } : { ...triggerConfig, hours_max: hoursMax };
+}
+
+/**
+ * A pending PIX stops driving its journey after this many hours (D-6).
+ * `trigger_config.expire_hours` overrides the 72 h default; 0 disables.
+ */
+export function pixExpiryHours(triggerConfig: Record<string, unknown> | null | undefined) {
+  const configured = Number(triggerConfig?.expire_hours);
+  if (triggerConfig && "expire_hours" in triggerConfig && Number.isFinite(configured)) {
+    return configured > 0 ? configured : null;
+  }
+  return 72;
+}
+
+/** Message variations of an SMS step; a step without `variants` has one. */
+export function smsVariants(config: Record<string, unknown>): string[] {
+  const variants = Array.isArray(config.variants)
+    ? config.variants.filter((item): item is string => typeof item === "string" && item.trim() !== "")
+    : [];
+  return variants.length ? variants : [String(config.content ?? "")];
+}
+
+function seedHash(seed: string) {
+  // FNV-1a: stable across processes, so a retried send picks the same text.
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < seed.length; i++) {
+    hash ^= seed.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
+}
+
+/**
+ * Picks the variation for one send (D-8): deterministic for the seed and
+ * avoiding variations the player already received today, until all were used.
+ */
+export function pickSmsVariant(variants: string[], seed: string, usedToday: number[]) {
+  const all = variants.map((_, index) => index);
+  const fresh = all.filter((index) => !usedToday.includes(index));
+  const pool = fresh.length ? fresh : all;
+  return pool[seedHash(seed) % pool.length];
 }
 
 export function journeyEntryKey(

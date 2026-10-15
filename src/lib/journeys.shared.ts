@@ -12,6 +12,8 @@ const waitConfigSchema = z.object({
 });
 const smsConfigSchema = z.object({
   content: z.string().trim().min(1).max(1600),
+  // D-8: each send picks one variation (deterministic per occurrence).
+  variants: z.array(z.string().trim().min(1).max(1600)).max(20).optional(),
   sender: z.string().trim().max(30).optional(),
   template_id: z.string().uuid().optional(),
   template_snapshot: z
