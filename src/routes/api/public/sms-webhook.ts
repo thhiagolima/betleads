@@ -2,6 +2,12 @@ import { createFileRoute } from "@tanstack/react-router";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import type { Json } from "@/integrations/supabase/types";
 import { ACCEPTED_SMS_STATUSES } from "@/lib/campaign-recipients.server";
+import {
+  SECRET_KEYS,
+  hasIdentity,
+  parseSmsCallbackPayloads,
+  type CallbackPayload,
+} from "@/lib/sms-callback-parse";
 
 // Callback Short Brasil SMS.
 // URL sugerida:
@@ -18,7 +24,6 @@ const CORS = {
   "Access-Control-Max-Age": "86400",
 } as const;
 
-type CallbackPayload = Record<string, unknown>;
 
 function timingSafeEqualStr(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
@@ -126,43 +131,22 @@ function deliveredAtFor(status: string, payload: CallbackPayload): string | null
   );
 }
 
-async function parsePayloads(request: Request): Promise<CallbackPayload[]> {
-  if (request.method === "GET") {
-    const url = new URL(request.url);
-    const payload: CallbackPayload = {};
-    url.searchParams.forEach((value, key) => {
-      if (!["token", "secret", "webhook_secret"].includes(key)) payload[key] = value;
-    });
-    return [payload];
-  }
 
-  const contentType = request.headers.get("content-type") ?? "";
-  const text = await request.text();
-  if (!text) return [{}];
 
-  if (contentType.includes("application/x-www-form-urlencoded")) {
-    const params = new URLSearchParams(text);
-    const payload: CallbackPayload = {};
-    params.forEach((value, key) => {
-      payload[key] = value;
-    });
-    return [payload];
-  }
+let lastUnrecognizedLogAt = 0;
 
-  try {
-    const parsed = JSON.parse(text);
-    if (parsed && typeof parsed === "object" && Array.isArray(parsed.lote)) {
-      return parsed.lote.filter((item: unknown): item is CallbackPayload => {
-        return !!item && typeof item === "object" && !Array.isArray(item);
-      });
-    }
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return [parsed as CallbackPayload];
-    }
-  } catch {
-    // Cai no retorno vazio abaixo.
-  }
-  return [{}];
+/** Logs the shape (never the values) of a callback we could not read. */
+function logUnrecognizedShape(request: Request, payloads: CallbackPayload[]) {
+  const now = Date.now();
+  if (now - lastUnrecognizedLogAt < 60_000) return;
+  lastUnrecognizedLogAt = now;
+  const url = new URL(request.url);
+  console.warn("[sms-webhook] callback without identifiable fields", {
+    method: request.method,
+    contentType: request.headers.get("content-type"),
+    queryKeys: [...url.searchParams.keys()].filter((key) => !SECRET_KEYS.has(key)),
+    payloadKeys: payloads.map((payload) => Object.keys(payload).slice(0, 20)),
+  });
 }
 
 async function updateFromPayload(payload: CallbackPayload): Promise<boolean> {
@@ -259,18 +243,28 @@ async function handleCallback(request: Request): Promise<Response> {
 
   let processed = 0;
   let matched = 0;
+  let unidentified = 0;
   try {
-    const payloads = await parsePayloads(request);
+    const payloads = await parseSmsCallbackPayloads(request);
     for (const payload of payloads) {
-      if (!payload || Object.keys(payload).length === 0) continue;
+      // Without any id there is nothing to match or keep: recording it only
+      // created ~180k empty "callback-orphan" rows per day.
+      if (!payload || !hasIdentity(payload)) {
+        unidentified++;
+        continue;
+      }
       processed++;
       if (await updateFromPayload(payload)) matched++;
     }
+    if (unidentified > 0) logUnrecognizedShape(request, payloads);
   } catch (err) {
     console.error("sms-webhook handler error:", err);
   }
 
-  return Response.json({ received: true, processed, matched }, { status: 200, headers: CORS });
+  return Response.json(
+    { received: true, processed, matched, unidentified },
+    { status: 200, headers: CORS },
+  );
 }
 
 export const Route = createFileRoute("/api/public/sms-webhook")({
