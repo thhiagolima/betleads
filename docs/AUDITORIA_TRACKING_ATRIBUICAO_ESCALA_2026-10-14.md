@@ -478,8 +478,8 @@ Escolher um fornecedor por função; não adotar todos.
 **Status em 14/10/2026:** migrations aplicadas em produção; ativação depende da publicação desta versão da aplicação.
 
 - [x] Implementar redirect first-party e `click_events`.
-- [x] Assinar tokens e proteger contra cross-tenant/replay.
-- [x] Fazer Short.io apontar novos links para o redirect BetLeads.
+- [x] Assinar tokens e proteger contra cross-tenant/replay. _(Revisão 15/10: vale para tokens de clique; sem rotação de chave — ver TRK-05. O HMAC de webhook ainda não tem anti-replay — ver WHK-05.)_
+- [x] Fazer Short.io apontar novos links para o redirect BetLeads. _(Revisão 15/10: somente Sorte Alta; ForrandoBet e PixReals sem rastreamento — ver TRK-01.)_
 - [x] Certificar a resolução do identificador externo da Sorte Alta com logs reais.
 - [ ] Certificar ForrandoBet e PixReals com fixtures e logs reais.
 - [x] Bloquear novos dispatches rastreados de campanha sem `recipient_player_id`; campanhas legadas tentam resolver e persistir o player antes do envio, ou são bloqueadas.
