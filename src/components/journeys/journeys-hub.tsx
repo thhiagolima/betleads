@@ -61,6 +61,7 @@ type Journey = {
   trigger_type: string;
   daily_limit: number;
   express?: boolean;
+  ends_at?: string | null;
   journey_steps: Array<{
     id: string;
     position: number;
@@ -525,6 +526,16 @@ export function JourneysHub() {
                         >
                           {labels[journey.status].toLowerCase()}
                         </Badge>
+                        {journey.ends_at && (
+                          <Badge variant="outline" className="bg-muted text-muted-foreground">
+                            {Date.parse(journey.ends_at) <= Date.now()
+                              ? "encerrada em "
+                              : "encerra em "}
+                            {new Date(journey.ends_at).toLocaleDateString("pt-BR", {
+                              timeZone: "America/Sao_Paulo",
+                            })}
+                          </Badge>
+                        )}
                         {journey.express && (
                           <Badge
                             variant="outline"

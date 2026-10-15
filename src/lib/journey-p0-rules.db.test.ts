@@ -15,6 +15,7 @@ const LEASES = read("20261015110000_journey_dispatch_leases_fairness_rate_limits
 const EXPRESS = read("20261015122000_express_journeys.sql");
 const P0 = read("20261015200000_journey_p0_rules.sql");
 const P1_EXITS = read("20261016090000_journey_p1_exits.sql");
+const END_DATE = read("20261016100000_journey_end_date.sql");
 
 const SCHEMA = `
 create role anon nologin;
@@ -160,6 +161,8 @@ beforeAll(async () => {
   await db.exec(`begin; ${P0}; commit;`);
   await db.exec(`begin; ${P1_EXITS}; commit;`);
   await db.exec(`begin; ${P1_EXITS}; commit;`);
+  await db.exec(`begin; ${END_DATE}; commit;`);
+  await db.exec(`begin; ${END_DATE}; commit;`);
 }, 60_000);
 
 afterAll(async () => {
@@ -403,5 +406,28 @@ describe("general exit sweep (P1)", () => {
     );
     expect(events).toHaveLength(1);
     expect(events[0].detail.source).toBe("exit_sweep");
+  });
+});
+
+describe("journey end date (D-4)", () => {
+  it("takes no new entries after the end date", async () => {
+    await db.query(`update journeys set ends_at = now() - interval '1 minute' where id = $1`, [PIX]);
+    expect(await insertEnrollment(PIX, "pix_gerado_nao_pago:pix-1")).toHaveLength(0);
+  });
+
+  it("keeps entering while the end date is in the future", async () => {
+    await db.query(`update journeys set ends_at = now() + interval '1 day' where id = $1`, [PIX]);
+    expect(await insertEnrollment(PIX, "pix_gerado_nao_pago:pix-1")).toHaveLength(1);
+  });
+
+  it("exits open enrollments once the end date passed", async () => {
+    const [row] = await insertEnrollment(PIX, "pix_gerado_nao_pago:pix-1");
+    await db.query(`update journeys set ends_at = now() - interval '1 minute' where id = $1`, [PIX]);
+    await rows(`select sweep_journey_exits(1000)`);
+    const [after] = await rows<{ status: string; exit_reason: string }>(
+      `select status, exit_reason from journey_enrollments where id = $1`,
+      [row.id],
+    );
+    expect(after).toEqual({ status: "exited", exit_reason: "journey_ended" });
   });
 });

@@ -27,16 +27,17 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import type { JourneyStepInput } from "@/lib/journeys.shared";
 import { Button } from "@/components/ui/button";
+import { fromBrtInput, smsExtra, toBrtInput } from "./journey-editor-config";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 type Step =
   | { kind: "wait"; seconds: number }
-  | { kind: "sms"; templateId: string; content: string }
+  | { kind: "sms"; templateId: string; content: string; extra?: Record<string, unknown> }
   | { kind: "email"; templateId: string }
   | { kind: "voice"; assetId: string; callerId: string };
-type SavedStep = { step_type: string; config: Record<string, unknown> };
+type SavedStep = { step_type: string; config: Record<string, unknown>; is_enabled?: boolean };
 
 const JOURNEY_HELP = {
   name: ["Nome", "Use um nome que deixe claro o objetivo da jornada para a equipe."],
@@ -81,6 +82,10 @@ const JOURNEY_HELP = {
   cooldown: [
     "Cooldown",
     "É o intervalo mínimo antes de outra jornada enviar no mesmo canal. Não altera a espera entre etapas desta própria jornada.",
+  ],
+  endsAt: [
+    "Data de término",
+    "Opcional. A partir dela a jornada não recebe novos jogadores e encerra os que ainda estão nela. Sem data, os loops continuam até o jogador mudar de categoria.",
   ],
   window: [
     "Janela de envio",
@@ -181,6 +186,7 @@ export function JourneyEditor({
     exit_rules?: Record<string, boolean>;
     daily_limit?: number;
     cooldown_hours?: number;
+    ends_at?: string | null;
     conflict_family?: string | null;
     journey_priority?: number;
     conflict_policy?: "coexist" | "pause_lower_priority" | "exclusive";
@@ -260,6 +266,7 @@ export function JourneyEditor({
   );
   const [dailyLimit, setDailyLimit] = useState(initial?.daily_limit ?? 1000);
   const [cooldownHours, setCooldownHours] = useState(initial?.cooldown_hours ?? 72);
+  const [endsAt, setEndsAt] = useState(() => toBrtInput(initial?.ends_at));
   const [conflictFamily, setConflictFamily] = useState(initial?.conflict_family ?? "");
   const [journeyPriority, setJourneyPriority] = useState(initial?.journey_priority ?? 4);
   const [conflictPolicy, setConflictPolicy] = useState<
@@ -282,14 +289,15 @@ export function JourneyEditor({
       voltou_jogar: false,
     },
   );
-  const initialEndIndex = initialSteps.findIndex((step) => step.step_type === "end");
-  const initialLoopToPosition = initialSteps[initialEndIndex]?.config.loop_to_position;
+  const enabledSteps = initialSteps.filter((step) => step.is_enabled !== false);
+  const initialEndIndex = enabledSteps.findIndex((step) => step.step_type === "end");
+  const initialLoopToPosition = enabledSteps[initialEndIndex]?.config.loop_to_position;
   const loopTailLength =
     typeof initialLoopToPosition === "number" && initialEndIndex > initialLoopToPosition
       ? initialEndIndex - initialLoopToPosition
       : null;
   const [steps, setSteps] = useState<Step[]>(() =>
-    initialSteps.flatMap((s): Step[] =>
+    enabledSteps.flatMap((s): Step[] =>
       s.step_type === "wait"
         ? [{ kind: "wait" as const, seconds: Number(s.config.delay_seconds ?? 3600) }]
         : s.step_type === "sms"
@@ -302,6 +310,7 @@ export function JourneyEditor({
                     s.config.content ??
                     "",
                 ),
+                extra: smsExtra(s.config),
               },
             ]
           : s.step_type === "email"
@@ -326,30 +335,33 @@ export function JourneyEditor({
         s.kind === "wait"
           ? [{ step_type: "wait", config: { delay_seconds: Math.max(60, s.seconds) } }]
           : s.kind === "sms"
-            ? s.templateId && s.content.trim()
-              ? [
-                  {
-                    step_type: "sms",
-                    config: {
-                      template_id: s.templateId,
-                      content: s.content,
-                      template_snapshot: (() => {
-                        const template = (smsTemplates.data?.items ?? []).find(
-                          (item) => item.id === s.templateId,
-                        );
-                        return template
-                          ? {
-                              id: template.id,
-                              name: template.name,
-                              content: template.content,
-                              version: template.version,
-                            }
-                          : { id: s.templateId, content: s.content };
-                      })(),
+            ? s.content.trim() && !s.templateId
+              ? [{ step_type: "sms", config: { ...s.extra, content: s.content } }]
+              : s.templateId && s.content.trim()
+                ? [
+                    {
+                      step_type: "sms",
+                      config: {
+                        ...s.extra,
+                        template_id: s.templateId,
+                        content: s.content,
+                        template_snapshot: (() => {
+                          const template = (smsTemplates.data?.items ?? []).find(
+                            (item) => item.id === s.templateId,
+                          );
+                          return template
+                            ? {
+                                id: template.id,
+                                name: template.name,
+                                content: template.content,
+                                version: template.version,
+                              }
+                            : { id: s.templateId, content: s.content };
+                        })(),
+                      },
                     },
-                  },
-                ]
-              : []
+                  ]
+                : []
             : s.kind === "email"
               ? s.templateId
                 ? [
@@ -400,6 +412,7 @@ export function JourneyEditor({
             trigger_config: triggerConfig,
             exit_rules: exitRules,
             entry_rules: {
+              ...(initial?.entry_rules ?? {}),
               audience,
               window_start: windowStart,
               window_end: windowEnd,
@@ -411,6 +424,7 @@ export function JourneyEditor({
             },
             daily_limit: dailyLimit,
             cooldown_hours: cooldownHours,
+            ends_at: fromBrtInput(endsAt),
             conflict_family: conflictFamily || null,
             journey_priority: journeyPriority,
             conflict_policy: conflictPolicy,
@@ -773,6 +787,34 @@ export function JourneyEditor({
                 onChange={(e) => setCooldownHours(Number(e.target.value))}
               />
             </div>
+            <div className="mt-3 block text-xs text-muted-foreground">
+              <JourneyFieldTitle
+                helpId="ends-at"
+                activeHelp={activeHelp}
+                setActiveHelp={setActiveHelp}
+                help={JOURNEY_HELP.endsAt}
+              >
+                Data de término (opcional)
+              </JourneyFieldTitle>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="datetime-local"
+                  value={endsAt}
+                  onChange={(e) => setEndsAt(e.target.value)}
+                  aria-label="Data de término, horário de Brasília"
+                />
+                {endsAt && (
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setEndsAt("")}>
+                    Limpar
+                  </Button>
+                )}
+              </div>
+              <p className="mt-1">
+                {endsAt
+                  ? "Horário de Brasília. Depois dessa data ninguém entra e quem estiver na jornada sai."
+                  : "Sem data: a jornada roda até ser pausada ou arquivada."}
+              </p>
+            </div>
           </div>
         </section>
         <section className="rounded-lg border p-4">
@@ -889,6 +931,12 @@ export function JourneyEditor({
                       ))}
                   </select>
                   <Textarea value={s.content} readOnly placeholder="Conteúdo do template" />
+                  {Array.isArray(s.extra?.variants) && s.extra.variants.length > 1 && (
+                    <p className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-300">
+                      Este passo sorteia entre {s.extra.variants.length} variações a cada envio; o
+                      texto acima é a primeira. Escolher um template substitui todas.
+                    </p>
+                  )}
                   <p className="text-xs text-muted-foreground">
                     A jornada guarda uma cópia desta versão para não mudar após a publicação.
                   </p>

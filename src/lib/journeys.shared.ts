@@ -14,6 +14,7 @@ const smsConfigSchema = z.object({
   content: z.string().trim().min(1).max(1600),
   // D-8: each send picks one variation (deterministic per occurrence).
   variants: z.array(z.string().trim().min(1).max(1600)).max(20).optional(),
+  track_links: z.boolean().optional(),
   sender: z.string().trim().max(30).optional(),
   template_id: z.string().uuid().optional(),
   template_snapshot: z
@@ -91,6 +92,8 @@ export const journeyInputSchema = z.object({
   conflict_family: z.string().trim().max(80).nullable().optional().default(null),
   journey_priority: z.number().int().min(1).max(100).default(4),
   conflict_policy: z.enum(["coexist", "pause_lower_priority", "exclusive"]).default("coexist"),
+  // D-4: optional end of the journey; loops keep running when absent.
+  ends_at: z.string().datetime({ offset: true }).nullable().optional().default(null),
   conversion_objective: z
     .enum(["acquisition", "conversion", "reactivation", "journey"])
     .default("journey"),

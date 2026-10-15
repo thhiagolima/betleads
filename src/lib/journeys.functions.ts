@@ -85,7 +85,7 @@ export const listJourneys = createServerFn({ method: "GET" })
       db
         .from("journeys")
         .select(
-          "id,name,description,status,trigger_type,trigger_config,entry_rules,conflict_family,journey_priority,conflict_policy,express,daily_limit,cooldown_hours,updated_at,journey_steps(id,position,step_type,config,is_enabled)",
+          "id,name,description,status,trigger_type,trigger_config,entry_rules,conflict_family,journey_priority,conflict_policy,express,daily_limit,cooldown_hours,ends_at,updated_at,journey_steps(id,position,step_type,config,is_enabled)",
         )
         .eq("tenant_id", tenantId)
         .order("updated_at", { ascending: false }),
@@ -509,6 +509,22 @@ export const saveJourney = createServerFn({ method: "POST" })
     const tenantId = await tenant(context);
     await requireJourneyDraftEditor(context.userId, tenantId);
     const input = data.journey;
+    if (input.ends_at) {
+      // Only a new or changed end date must be in the future: an ended journey
+      // can still be edited without touching its date.
+      const { data: current } = data.id
+        ? await db
+            .from("journeys")
+            .select("ends_at")
+            .eq("id", data.id)
+            .eq("tenant_id", tenantId)
+            .maybeSingle()
+        : { data: null };
+      const unchanged =
+        current?.ends_at && Date.parse(current.ends_at) === Date.parse(input.ends_at);
+      if (!unchanged && Date.parse(input.ends_at) <= Date.now())
+        throw new Error("A data de término precisa ser no futuro.");
+    }
     const payload = {
       name: input.name,
       description: input.description ?? null,
@@ -588,6 +604,7 @@ export const saveJourney = createServerFn({ method: "POST" })
         conflict_family: input.conflict_family,
         journey_priority: input.journey_priority,
         conflict_policy: input.conflict_policy,
+        ends_at: input.ends_at ?? null,
       })
       .eq("id", journeyId)
       .eq("tenant_id", tenantId);
