@@ -193,8 +193,34 @@ export async function processWebhookEvent(
         return Response.json({ ok: false, evento, error: claimError.message }, { status: 503 });
       }
       if (!claimed) {
-        await markLog("duplicado", { provider_event_id: providerEventId });
-        return Response.json({ ok: true, evento, duplicate: true });
+        // `claim_webhook_event` returns false both when the event was already
+        // processed and when another delivery still holds the receipt (or a
+        // failure is inside its 30 s cool-down). Only the first is a real
+        // duplicate: marking an in-flight event `duplicado` drops it forever
+        // when the original worker dies, because replay ignores duplicates.
+        const receipt = await readReceiptState(sb, tenantId, providerEventId);
+        if (receipt.state === "completed") {
+          await markLog("duplicado", { provider_event_id: providerEventId });
+          return Response.json({ ok: true, evento, duplicate: true });
+        }
+        const retryAfter = receipt.retryAfterSeconds;
+        await deferLogForReplay(sb, logId, payload, {
+          provider_event_id: providerEventId,
+          deferred: "receipt_in_progress",
+          receipt_status: receipt.status,
+          retry_after_seconds: retryAfter,
+        });
+        // 202, not 4xx: the log is kept replayable, so the provider does not
+        // need to retry, and some providers disable endpoints after 4xx bursts.
+        return Response.json(
+          {
+            ok: true,
+            evento,
+            in_progress: true,
+            retry_after: retryAfter,
+          },
+          { status: 202, headers: { "Retry-After": String(retryAfter) } },
+        );
       }
       receiptClaimed = true;
       receiptEventId = providerEventId;
@@ -990,6 +1016,97 @@ export async function processWebhookEvent(
     await markLog("erro", { step: "exception", error: String(e) });
     return Response.json({ ok: false, evento, error: String(e) }, { status: 200 });
   }
+}
+
+/** Must match the processing lease in `claim_webhook_event`. */
+export const RECEIPT_PROCESSING_LEASE_MS = 10 * 60 * 1000;
+/** Must match the failed-receipt cool-down in `claim_webhook_event`. */
+export const RECEIPT_FAILED_COOLDOWN_MS = 30 * 1000;
+export const MIN_RETRY_AFTER_SECONDS = 30;
+export const MAX_RETRY_AFTER_SECONDS = 600;
+/** Extra slack before replay retries a deferred log, so the lease has expired. */
+const REPLAY_DEFER_MARGIN_SECONDS = 30;
+
+export type ReceiptState = {
+  state: "completed" | "in_progress";
+  status: string | null;
+  retryAfterSeconds: number;
+};
+
+/**
+ * Tells "already processed" apart from "still in flight" after
+ * `claim_webhook_event` refused the claim. Reads the receipt directly, so it
+ * works with the original boolean RPC (no DB change required). Anything that
+ * is not positively `completed` is treated as in progress: retrying an event
+ * is safe (the receipt keeps it idempotent), dropping it is not.
+ */
+export async function readReceiptState(
+  sb: SupabaseClient,
+  tenantId: string,
+  providerEventId: string,
+  now: number = Date.now(),
+): Promise<ReceiptState> {
+  const clamp = (seconds: number) =>
+    Math.min(MAX_RETRY_AFTER_SECONDS, Math.max(MIN_RETRY_AFTER_SECONDS, Math.ceil(seconds)));
+  const { data, error } = await sb
+    .from("webhook_event_receipts")
+    .select("status, locked_at, updated_at")
+    .eq("tenant_id", tenantId)
+    .eq("provider_event_id", providerEventId)
+    .maybeSingle();
+  if (error || !data) {
+    return { state: "in_progress", status: null, retryAfterSeconds: clamp(60) };
+  }
+  const status = (data.status as string | null) ?? null;
+  if (status === "completed") {
+    return { state: "completed", status, retryAfterSeconds: 0 };
+  }
+  if (status === "failed") {
+    const updatedAt = Date.parse(String(data.updated_at ?? ""));
+    const remaining = Number.isFinite(updatedAt)
+      ? (updatedAt + RECEIPT_FAILED_COOLDOWN_MS - now) / 1000
+      : RECEIPT_FAILED_COOLDOWN_MS / 1000;
+    return { state: "in_progress", status, retryAfterSeconds: clamp(remaining) };
+  }
+  const lockedAt = Date.parse(String(data.locked_at ?? ""));
+  const remaining = Number.isFinite(lockedAt)
+    ? (lockedAt + RECEIPT_PROCESSING_LEASE_MS - now) / 1000
+    : RECEIPT_PROCESSING_LEASE_MS / 1000;
+  return { state: "in_progress", status, retryAfterSeconds: clamp(remaining) };
+}
+
+/**
+ * Keeps a log row eligible for replay (`recebido`) and pushes its
+ * `next_replay_at` past the receipt lease. Tolerates a database where the
+ * CON-03 migration has not been applied yet (column missing): the row then
+ * simply stays `recebido` and is retried by the legacy replay selection.
+ */
+async function deferLogForReplay(
+  sb: SupabaseClient,
+  logId: string | undefined,
+  payload: Record<string, unknown>,
+  note: Record<string, unknown> & { retry_after_seconds: number },
+) {
+  if (!logId) return;
+  const base = { status: "recebido", payload: { ...payload, _processing: note } };
+  const nextReplayAt = new Date(
+    Date.now() + (note.retry_after_seconds + REPLAY_DEFER_MARGIN_SECONDS) * 1000,
+  ).toISOString();
+  const { error } = await sb
+    .from("webhook_logs")
+    .update({ ...base, next_replay_at: nextReplayAt })
+    .eq("id", logId);
+  if (error && isMissingColumnError(error)) {
+    await sb.from("webhook_logs").update(base).eq("id", logId);
+  }
+}
+
+function isMissingColumnError(error: { code?: string; message?: string }) {
+  return (
+    error.code === "42703" ||
+    error.code === "PGRST204" ||
+    /column .* does not exist|could not find the .* column/i.test(error.message ?? "")
+  );
 }
 
 // Valida CPF (11 dígitos + dígitos verificadores). Rejeita máscaras/parciais.

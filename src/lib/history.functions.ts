@@ -8,6 +8,36 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
  * Somente leitura. Não toca em nenhuma lógica de envio.
  */
 
+/**
+ * CON-08 — explicit tenant filter for authenticated reads.
+ *
+ * RLS on these tables is `is_super_admin() OR tenant_id = current_tenant_id()`.
+ * Repeating the tenant as `.eq("tenant_id", …)` lets PostgREST use the
+ * `(tenant_id, …)` indexes instead of scanning the whole table under RLS.
+ * Returns the tenant to filter by, or null when no extra filter must be added
+ * so the result stays identical to RLS alone:
+ *   - super admins: RLS shows every tenant to them, so they stay unfiltered;
+ *   - no active tenant / RPC failure: RLS already decides (normally: no rows).
+ */
+export async function resolveTenantReadFilter(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sb: any,
+  userId: string,
+): Promise<string | null> {
+  const [superAdmin, current] = await Promise.all([
+    sb.rpc("is_super_admin", { _user_id: userId }),
+    sb.rpc("current_tenant_id"),
+  ]);
+  if (superAdmin.error || current.error || superAdmin.data) return null;
+  return current.data ? String(current.data) : null;
+}
+
+/** Adds `.eq("tenant_id", tenantId)` when a tenant filter applies (see resolveTenantReadFilter). */
+export function withTenantFilter<Q>(query: Q, tenantId: string | null): Q {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return tenantId ? (query as any).eq("tenant_id", tenantId) : query;
+}
+
 export type ChannelKey = "sms" | "email" | "calls" | "whatsapp";
 export type StatusColor = "green" | "yellow" | "red" | "blue" | "gray";
 
@@ -137,6 +167,7 @@ function previewText(s: string | null | undefined, n = 80): string | null {
 async function enrichConversions(
   supabase: any,
   rows: HistoryRow[],
+  tenantId: string | null,
 ): Promise<HistoryRow[]> {
   const playerIds = Array.from(
     new Set(rows.map((r) => r.player_id).filter((x): x is string => !!x)),
@@ -144,12 +175,15 @@ async function enrichConversions(
   if (playerIds.length === 0) return rows;
   // Pega depósitos aprovados nos últimos 30 dias para todos os players da página
   const since = new Date(Date.now() - 30 * 86400000).toISOString();
-  const { data: deps } = await supabase
-    .from("deposits")
-    .select("player_id, created_at, status")
-    .in("player_id", playerIds)
-    .gte("created_at", since)
-    .eq("status", "aprovado");
+  const { data: deps } = await withTenantFilter(
+    supabase
+      .from("deposits")
+      .select("player_id, created_at, status")
+      .in("player_id", playerIds)
+      .gte("created_at", since)
+      .eq("status", "aprovado"),
+    tenantId,
+  );
   const byPlayer = new Map<string, number[]>();
   for (const d of deps ?? []) {
     const arr = byPlayer.get(d.player_id as string) ?? [];
@@ -175,6 +209,7 @@ export const getChannelHistory = createServerFn({ method: "POST" })
   .inputValidator((d) => HistoryInput.parse(d))
   .handler(async ({ data, context }) => {
     const sb = context.supabase;
+    const tenantId = await resolveTenantReadFilter(sb, context.userId);
     const { channel } = data;
     const from = data.page * data.pageSize;
     const to = from + data.pageSize - 1;
@@ -191,6 +226,7 @@ export const getChannelHistory = createServerFn({ method: "POST" })
           { count: "exact" },
         )
         .order("created_at", { ascending: false });
+      q = withTenantFilter(q, tenantId);
       if (data.from) q = q.gte("created_at", data.from);
       if (data.to) q = q.lte("created_at", data.to);
       if (data.flowId) q = q.eq("flow_id", data.flowId);
@@ -234,6 +270,7 @@ export const getChannelHistory = createServerFn({ method: "POST" })
           { count: "exact" },
         )
         .order("created_at", { ascending: false });
+      q = withTenantFilter(q, tenantId);
       if (data.from) q = q.gte("created_at", data.from);
       if (data.to) q = q.lte("created_at", data.to);
       if (data.flowId)
@@ -276,6 +313,7 @@ export const getChannelHistory = createServerFn({ method: "POST" })
           { count: "exact" },
         )
         .order("created_at", { ascending: false });
+      q = withTenantFilter(q, tenantId);
       if (data.from) q = q.gte("created_at", data.from);
       if (data.to) q = q.lte("created_at", data.to);
       if (search) q = q.ilike("to_phone", `%${search}%`);
@@ -288,10 +326,13 @@ export const getChannelHistory = createServerFn({ method: "POST" })
       );
       const flowByQueue = new Map<string, { flow_id: string; flow_name: string | null }>();
       if (queueIds.length) {
-        const { data: execs } = await sb
-          .from("call_flow_executions")
-          .select("call_queue_id, flow_id, flow:call_flows(name)")
-          .in("call_queue_id", queueIds);
+        const { data: execs } = await withTenantFilter(
+          sb
+            .from("call_flow_executions")
+            .select("call_queue_id, flow_id, flow:call_flows(name)")
+            .in("call_queue_id", queueIds),
+          tenantId,
+        );
         for (const e of execs ?? []) {
           flowByQueue.set(e.call_queue_id as string, {
             flow_id: e.flow_id as string,
@@ -335,6 +376,7 @@ export const getChannelHistory = createServerFn({ method: "POST" })
           { count: "exact" },
         )
         .order("message_timestamp", { ascending: false });
+      q = withTenantFilter(q, tenantId);
       if (data.direction === "outgoing") q = q.eq("from_me", true);
       else if (data.direction === "incoming") q = q.eq("from_me", false);
       if (data.from) q = q.gte("message_timestamp", data.from);
@@ -352,10 +394,10 @@ export const getChannelHistory = createServerFn({ method: "POST" })
       );
       const playerByPhone = new Map<string, { id: string; nome: string | null }>();
       if (phones.length) {
-        const { data: pls } = await (sb as any)
-          .from("players")
-          .select("id, nome, telefone")
-          .in("telefone", phones);
+        const { data: pls } = await withTenantFilter(
+          (sb as any).from("players").select("id, nome, telefone").in("telefone", phones),
+          tenantId,
+        );
         for (const p of pls ?? []) {
           if (p.telefone) playerByPhone.set(p.telefone as string, { id: p.id, nome: p.nome });
         }
@@ -393,7 +435,7 @@ export const getChannelHistory = createServerFn({ method: "POST" })
       rows = rows.filter((r) => matchesStatusFilter(r.status_color, data.status as string));
     }
 
-    rows = await enrichConversions(sb, rows);
+    rows = await enrichConversions(sb, rows, tenantId);
     return { rows, total };
   });
 
@@ -472,12 +514,11 @@ async function fetchStatusRows(
   channel: ChannelKey,
   fromIso: string,
   toIso: string,
+  tenantId: string | null,
 ): Promise<any[]> {
   const cfg = CHANNEL_CFG[channel];
   // Página única, sem paginar — limitada a 50k linhas (suficiente p/ janelas de 30d).
-  const { data, error } = await sb
-    .from(cfg.table)
-    .select(cfg.selectCols)
+  const { data, error } = await withTenantFilter(sb.from(cfg.table).select(cfg.selectCols), tenantId)
     .gte(cfg.tsCol, fromIso)
     .lte(cfg.tsCol, toIso)
     .order(cfg.tsCol, { ascending: false })
@@ -494,6 +535,7 @@ export const getChannelHistoryStats = createServerFn({ method: "POST" })
   .inputValidator((d) => StatsInput.parse(d))
   .handler(async ({ data, context }) => {
     const sb = context.supabase;
+    const tenantId = await resolveTenantReadFilter(sb, context.userId);
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
     const dayIso = startOfDay.toISOString();
@@ -508,8 +550,8 @@ export const getChannelHistoryStats = createServerFn({ method: "POST" })
     const prevFromIso = new Date(fromMs - (toMs - fromMs)).toISOString();
 
     const [rows, prevRows] = await Promise.all([
-      fetchStatusRows(sb, data.channel, fromIso, toIso),
-      fetchStatusRows(sb, data.channel, prevFromIso, prevToIso),
+      fetchStatusRows(sb, data.channel, fromIso, toIso, tenantId),
+      fetchStatusRows(sb, data.channel, prevFromIso, prevToIso, tenantId),
     ]);
 
     let success = 0, failed = 0, pending = 0;
@@ -527,7 +569,7 @@ export const getChannelHistoryStats = createServerFn({ method: "POST" })
 
     let conversions = 0;
     if (data.channel !== "calls" && total > 0) {
-      conversions = await countConversions(sb, cfg.table, fromIso, toIso);
+      conversions = await countConversions(sb, cfg.table, fromIso, toIso, tenantId);
     }
 
     return {
@@ -547,12 +589,11 @@ async function countConversions(
   table: string,
   fromIso: string,
   toIso: string,
+  tenantId: string | null,
 ): Promise<number> {
   // best-effort: contagem distinta de player_id que recebeu envio no período e
   // teve depósito aprovado em até 72h
-  const { data: logs } = await sb
-    .from(table)
-    .select("player_id, created_at")
+  const { data: logs } = await withTenantFilter(sb.from(table).select("player_id, created_at"), tenantId)
     .gte("created_at", fromIso)
     .lte("created_at", toIso)
     .not("player_id", "is", null)
@@ -561,9 +602,10 @@ async function countConversions(
   const playerIds = Array.from(new Set(logs.map((l: any) => l.player_id)));
   const since = new Date(Date.parse(fromIso) - 0).toISOString();
   const until = new Date(Date.parse(toIso) + 72 * 3600 * 1000).toISOString();
-  const { data: deps } = await sb
-    .from("deposits")
-    .select("player_id, created_at")
+  const { data: deps } = await withTenantFilter(
+    sb.from("deposits").select("player_id, created_at"),
+    tenantId,
+  )
     .in("player_id", playerIds)
     .eq("status", "aprovado")
     .gte("created_at", since)
@@ -633,13 +675,15 @@ export const getChannelFlowSummary = createServerFn({ method: "POST" })
   .inputValidator((d) => StatsInput.parse(d))
   .handler(async ({ data, context }) => {
     const sb = context.supabase;
+    const tenantId = await resolveTenantReadFilter(sb, context.userId);
     const fromIso = data.from ?? new Date(Date.now() - 7 * 86400000).toISOString();
     const toIso = data.to ?? new Date().toISOString();
 
     if (data.channel === "sms") {
-      const { data: rs } = await sb
-        .from("sms_send_logs")
-        .select("flow_id, status, delivery_status, created_at")
+      const { data: rs } = await withTenantFilter(
+        sb.from("sms_send_logs").select("flow_id, status, delivery_status, created_at"),
+        tenantId,
+      )
         .gte("created_at", fromIso)
         .lte("created_at", toIso)
         .not("flow_id", "is", null)
@@ -647,9 +691,10 @@ export const getChannelFlowSummary = createServerFn({ method: "POST" })
       return aggregate(rs, "flow_id", "created_at", sb, "sms_flows", "sms");
     }
     if (data.channel === "email") {
-      const { data: rs } = await sb
-        .from("email_send_logs")
-        .select("flow_id, automation_id, status, created_at")
+      const { data: rs } = await withTenantFilter(
+        sb.from("email_send_logs").select("flow_id, automation_id, status, created_at"),
+        tenantId,
+      )
         .gte("created_at", fromIso)
         .lte("created_at", toIso)
         .limit(30000);
@@ -660,9 +705,10 @@ export const getChannelFlowSummary = createServerFn({ method: "POST" })
       return aggregateEmail(normalized, sb);
     }
     if (data.channel === "calls") {
-      const { data: rs } = await sb
-        .from("call_flow_executions")
-        .select("flow_id, status, created_at")
+      const { data: rs } = await withTenantFilter(
+        sb.from("call_flow_executions").select("flow_id, status, created_at"),
+        tenantId,
+      )
         .gte("created_at", fromIso)
         .lte("created_at", toIso)
         .not("flow_id", "is", null)
@@ -822,12 +868,11 @@ export const getChannelDispatchTimeline = createServerFn({ method: "POST" })
   .inputValidator((d) => TimelineInput.parse(d))
   .handler(async ({ data, context }) => {
     const sb = context.supabase;
+    const tenantId = await resolveTenantReadFilter(sb, context.userId);
     const cfg = CHANNEL_CFG[data.channel];
     const fromIso = data.from ?? new Date(Date.now() - 86400000).toISOString();
     const toIso = data.to ?? new Date().toISOString();
-    const { data: rs } = await (sb as any)
-      .from(cfg.table)
-      .select(cfg.tsCol)
+    const { data: rs } = await withTenantFilter((sb as any).from(cfg.table).select(cfg.tsCol), tenantId)
       .gte(cfg.tsCol, fromIso)
       .lte(cfg.tsCol, toIso)
       .order(cfg.tsCol, { ascending: true })
@@ -860,6 +905,7 @@ export const getPlayerContactHistory = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const sb = context.supabase;
+    const tenantId = await resolveTenantReadFilter(sb, context.userId);
     const lim = data.limit;
     const { data: player } = await sb
       .from("players")
@@ -888,9 +934,12 @@ export const getPlayerContactHistory = createServerFn({ method: "POST" })
         .order("created_at", { ascending: false })
         .limit(lim),
       phone
-        ? sb
-            .from("whatsapp_messages")
-            .select("id, text, message_timestamp, status, chat:whatsapp_chats!whatsapp_messages_chat_id_fkey(phone)")
+        ? withTenantFilter(
+            sb
+              .from("whatsapp_messages")
+              .select("id, text, message_timestamp, status, chat:whatsapp_chats!whatsapp_messages_chat_id_fkey(phone)"),
+            tenantId,
+          )
             .eq("from_me", true)
             .order("message_timestamp", { ascending: false })
             .limit(lim * 2)

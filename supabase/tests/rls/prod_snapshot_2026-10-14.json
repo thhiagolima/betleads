@@ -1,0 +1,4949 @@
+{
+ "captured_at": "2026-10-14 (read-only, pg_policies/pg_class/pg_proc/information_schema)",
+ "policies": [
+  {
+   "tablename": "activation_runs",
+   "policyname": "activation_runs_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "activation_runs",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "activation_runs",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "admin_audit_logs",
+   "policyname": "admin_audit_logs_super_admin",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "is_super_admin()",
+   "with_check": "is_super_admin()"
+  },
+  {
+   "tablename": "ai_feedback",
+   "policyname": "ai_feedback_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "ai_feedback",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "ai_feedback",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "ai_intents",
+   "policyname": "ai_intents_super_admin_write",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "is_super_admin()",
+   "with_check": "is_super_admin()"
+  },
+  {
+   "tablename": "ai_intents",
+   "policyname": "ai_intents_tenant_read",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "SELECT",
+   "qual": "(is_super_admin() OR (tenant_id = current_tenant_id()))",
+   "with_check": null
+  },
+  {
+   "tablename": "ai_intents",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "ai_intents",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "ai_logs",
+   "policyname": "ai_logs_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "ai_logs",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "ai_logs",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "ai_synonyms",
+   "policyname": "ai_synonyms_super_admin_write",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "is_super_admin()",
+   "with_check": "is_super_admin()"
+  },
+  {
+   "tablename": "ai_synonyms",
+   "policyname": "ai_synonyms_tenant_read",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "SELECT",
+   "qual": "(is_super_admin() OR (tenant_id = current_tenant_id()))",
+   "with_check": null
+  },
+  {
+   "tablename": "ai_synonyms",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "ai_synonyms",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "ai_training_examples",
+   "policyname": "ai_training_examples_super_admin_write",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "is_super_admin()",
+   "with_check": "is_super_admin()"
+  },
+  {
+   "tablename": "ai_training_examples",
+   "policyname": "ai_training_examples_tenant_read",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "SELECT",
+   "qual": "(is_super_admin() OR (tenant_id = current_tenant_id()))",
+   "with_check": null
+  },
+  {
+   "tablename": "ai_training_examples",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "ai_training_examples",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "antiban_settings",
+   "policyname": "antiban_settings_super_admin_read",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "SELECT",
+   "qual": "is_super_admin()",
+   "with_check": null
+  },
+  {
+   "tablename": "antiban_settings",
+   "policyname": "antiban_settings_super_admin_write",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "is_super_admin()",
+   "with_check": "is_super_admin()"
+  },
+  {
+   "tablename": "antiban_settings",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "antiban_settings",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "automation_settings",
+   "policyname": "automation_settings_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "automation_settings",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "automation_settings",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "call_audio_generations",
+   "policyname": "call_audio_generations_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "call_audio_generations",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "call_audio_generations",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "call_flow_block_sms",
+   "policyname": "call_flow_block_sms_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "call_flow_block_sms",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "call_flow_block_sms",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "call_flow_blocks",
+   "policyname": "call_flow_blocks_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "call_flow_blocks",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "call_flow_blocks",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "call_flow_executions",
+   "policyname": "call_flow_executions_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "call_flow_executions",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "call_flow_executions",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "call_flow_history",
+   "policyname": "call_flow_history_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "call_flow_history",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "call_flow_history",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "call_flow_post_action",
+   "policyname": "call_flow_post_action_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "call_flow_post_action",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "call_flow_post_action",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "call_flow_progress",
+   "policyname": "call_flow_progress_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "call_flow_progress",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "call_flow_progress",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "call_flow_scripts",
+   "policyname": "call_flow_scripts_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "call_flow_scripts",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "call_flow_scripts",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "call_flows",
+   "policyname": "call_flows_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "call_flows",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "call_flows",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "call_history",
+   "policyname": "call_history_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "call_history",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "call_history",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "call_providers",
+   "policyname": "call_providers_super_admin_read",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "SELECT",
+   "qual": "is_super_admin()",
+   "with_check": null
+  },
+  {
+   "tablename": "call_providers",
+   "policyname": "call_providers_super_admin_write",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "is_super_admin()",
+   "with_check": "is_super_admin()"
+  },
+  {
+   "tablename": "call_providers",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "call_providers",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "call_queue",
+   "policyname": "call_queue_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "call_queue",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "call_queue",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "call_script_versions",
+   "policyname": "call_script_versions_tenant_select",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "SELECT",
+   "qual": "(tenant_id = current_tenant_id())",
+   "with_check": null
+  },
+  {
+   "tablename": "call_scripts",
+   "policyname": "call_scripts_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "call_scripts",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "call_scripts",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "campaign_drafts",
+   "policyname": "campaign_drafts_tenant_delete",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "DELETE",
+   "qual": "(has_tenant_access(tenant_id) AND (status = 'draft'::text))",
+   "with_check": null
+  },
+  {
+   "tablename": "campaign_drafts",
+   "policyname": "campaign_drafts_tenant_insert",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "INSERT",
+   "qual": null,
+   "with_check": "(has_tenant_access(tenant_id) AND (created_by = auth.uid()))"
+  },
+  {
+   "tablename": "campaign_drafts",
+   "policyname": "campaign_drafts_tenant_select",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "SELECT",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": null
+  },
+  {
+   "tablename": "campaign_drafts",
+   "policyname": "campaign_drafts_tenant_update",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "UPDATE",
+   "qual": "(has_tenant_access(tenant_id) AND (status = 'draft'::text))",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "cashback_payments",
+   "policyname": "cashback_payments_block_client_delete",
+   "permissive": "RESTRICTIVE",
+   "roles": "{anon,authenticated}",
+   "cmd": "DELETE",
+   "qual": "false",
+   "with_check": null
+  },
+  {
+   "tablename": "cashback_payments",
+   "policyname": "cashback_payments_block_client_insert",
+   "permissive": "RESTRICTIVE",
+   "roles": "{anon,authenticated}",
+   "cmd": "INSERT",
+   "qual": null,
+   "with_check": "false"
+  },
+  {
+   "tablename": "cashback_payments",
+   "policyname": "cashback_payments_block_client_update",
+   "permissive": "RESTRICTIVE",
+   "roles": "{anon,authenticated}",
+   "cmd": "UPDATE",
+   "qual": "false",
+   "with_check": "false"
+  },
+  {
+   "tablename": "cashback_payments",
+   "policyname": "tenant members read cashback_payments",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "SELECT",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": null
+  },
+  {
+   "tablename": "cashback_payments",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "cashback_payments",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "channel_consent_audit",
+   "policyname": "channel_consent_audit_tenant_read",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "SELECT",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": null
+  },
+  {
+   "tablename": "channel_consents",
+   "policyname": "channel_consents_tenant_access",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "click_events",
+   "policyname": "click_events_tenant_select",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "SELECT",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": null
+  },
+  {
+   "tablename": "conversion_attribution_issues",
+   "policyname": "conversion_attribution_issues_admin_select",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "SELECT",
+   "qual": "(is_super_admin() OR (EXISTS ( SELECT 1\n   FROM user_roles ur\n  WHERE ((ur.user_id = auth.uid()) AND (ur.tenant_id = conversion_attribution_issues.tenant_id) AND (ur.role = 'admin'::app_role)))))",
+   "with_check": null
+  },
+  {
+   "tablename": "conversion_attributions",
+   "policyname": "conversion_attributions_tenant_select",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "SELECT",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": null
+  },
+  {
+   "tablename": "conversion_experiment_assignments",
+   "policyname": "conversion_experiment_assignments_tenant_select",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "SELECT",
+   "qual": "(is_super_admin() OR (EXISTS ( SELECT 1\n   FROM user_roles ur\n  WHERE ((ur.user_id = auth.uid()) AND (ur.tenant_id = conversion_experiment_assignments.tenant_id) AND (ur.role = 'admin'::app_role)))))",
+   "with_check": null
+  },
+  {
+   "tablename": "conversion_experiments",
+   "policyname": "conversion_experiments_admin_delete",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "DELETE",
+   "qual": "(is_super_admin() OR (EXISTS ( SELECT 1\n   FROM user_roles ur\n  WHERE ((ur.user_id = auth.uid()) AND (ur.tenant_id = conversion_experiments.tenant_id) AND (ur.role = 'admin'::app_role)))))",
+   "with_check": null
+  },
+  {
+   "tablename": "conversion_experiments",
+   "policyname": "conversion_experiments_admin_insert",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "INSERT",
+   "qual": null,
+   "with_check": "(is_super_admin() OR (EXISTS ( SELECT 1\n   FROM user_roles ur\n  WHERE ((ur.user_id = auth.uid()) AND (ur.tenant_id = conversion_experiments.tenant_id) AND (ur.role = 'admin'::app_role)))))"
+  },
+  {
+   "tablename": "conversion_experiments",
+   "policyname": "conversion_experiments_admin_update",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "UPDATE",
+   "qual": "(is_super_admin() OR (EXISTS ( SELECT 1\n   FROM user_roles ur\n  WHERE ((ur.user_id = auth.uid()) AND (ur.tenant_id = conversion_experiments.tenant_id) AND (ur.role = 'admin'::app_role)))))",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "conversion_experiments",
+   "policyname": "conversion_experiments_tenant_select",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "SELECT",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": null
+  },
+  {
+   "tablename": "dashboard_settings",
+   "policyname": "dashboard settings tenant isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "deposits",
+   "policyname": "deposits_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "deposits",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "deposits",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "dispatch_pause_state",
+   "policyname": "pause_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "dispatch_pause_state",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "dispatch_pause_state",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "dispatch_rate_state",
+   "policyname": "dispatch_rate_state_super_admin",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "SELECT",
+   "qual": "is_super_admin()",
+   "with_check": null
+  },
+  {
+   "tablename": "dispatcher_runs",
+   "policyname": "dispatcher_runs_super_admin",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "SELECT",
+   "qual": "is_super_admin()",
+   "with_check": null
+  },
+  {
+   "tablename": "email_automations",
+   "policyname": "email_automations_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "email_automations",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "email_automations",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "email_campaigns",
+   "policyname": "email_campaigns_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "email_campaigns",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "email_campaigns",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "email_flow_blocks",
+   "policyname": "email_flow_blocks_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "email_flow_blocks",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "email_flow_blocks",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "email_flow_leads",
+   "policyname": "email_flow_leads_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "email_flow_leads",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "email_flow_leads",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "email_flow_logs",
+   "policyname": "email_flow_logs_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "email_flow_logs",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "email_flow_logs",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "email_flows",
+   "policyname": "email_flows_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "email_flows",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "email_flows",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "email_send_logs",
+   "policyname": "email_send_logs_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "email_send_logs",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "email_send_logs",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "email_senders",
+   "policyname": "email_senders_super_admin_mutate",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "is_super_admin()",
+   "with_check": "is_super_admin()"
+  },
+  {
+   "tablename": "email_senders",
+   "policyname": "email_senders_super_admin_select",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "SELECT",
+   "qual": "is_super_admin()",
+   "with_check": null
+  },
+  {
+   "tablename": "email_senders",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "email_senders",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "email_smtp_configs",
+   "policyname": "email_smtp_configs_super_admin_mutate",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "is_super_admin()",
+   "with_check": "is_super_admin()"
+  },
+  {
+   "tablename": "email_smtp_configs",
+   "policyname": "email_smtp_configs_super_admin_select",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "SELECT",
+   "qual": "is_super_admin()",
+   "with_check": null
+  },
+  {
+   "tablename": "email_smtp_configs",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "email_smtp_configs",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "email_template_versions",
+   "policyname": "email_template_versions_tenant_select",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "SELECT",
+   "qual": "(tenant_id = current_tenant_id())",
+   "with_check": null
+  },
+  {
+   "tablename": "email_templates",
+   "policyname": "email_templates_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "email_templates",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "email_templates",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "email_unsubscribe_tokens",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "email_unsubscribe_tokens",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "email_unsubscribe_tokens",
+   "policyname": "unsub_tokens_no_client_access",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "SELECT",
+   "qual": "false",
+   "with_check": null
+  },
+  {
+   "tablename": "events",
+   "policyname": "events_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "events",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "events",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "experts",
+   "policyname": "experts_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "experts",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "experts",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "financial_webhook_attempts",
+   "policyname": "financial_webhook_attempts_service_only",
+   "permissive": "PERMISSIVE",
+   "roles": "{service_role}",
+   "cmd": "ALL",
+   "qual": "true",
+   "with_check": "true"
+  },
+  {
+   "tablename": "flow_blocks",
+   "policyname": "flow_blocks_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "flow_blocks",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "flow_blocks",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "flow_leads",
+   "policyname": "flow_leads_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "flow_leads",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "flow_leads",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "flow_logs",
+   "policyname": "flow_logs_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "flow_logs",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "flow_logs",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "flow_templates",
+   "policyname": "flow_templates_tenant_access",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "flow_templates",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "flow_templates",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "flows",
+   "policyname": "flows_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "flows",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "flows",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "gamification_settings",
+   "policyname": "gamification_settings_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "gamification_settings",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "gamification_settings",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "journey_contact_limits",
+   "policyname": "journey_contact_limits_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "journey_enrollments",
+   "policyname": "journey_enrollments_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "journey_events",
+   "policyname": "journey_events_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "journey_scan_jobs",
+   "policyname": "journey_scan_jobs_tenant_read",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "SELECT",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": null
+  },
+  {
+   "tablename": "journey_step_executions",
+   "policyname": "journey_step_executions_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "journey_steps",
+   "policyname": "journey_steps_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "journey_voice_assets",
+   "policyname": "journey_voice_assets_tenant_access",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "(tenant_id = current_tenant_id())",
+   "with_check": "(tenant_id = current_tenant_id())"
+  },
+  {
+   "tablename": "journeys",
+   "policyname": "journeys_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "lead_alerts",
+   "policyname": "lead_alerts_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "lead_alerts",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "lead_alerts",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "lead_followups",
+   "policyname": "lead_followups_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "lead_followups",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "lead_followups",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "lead_whatsapp_assignments",
+   "policyname": "lead_whatsapp_assignments_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "lead_whatsapp_assignments",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "lead_whatsapp_assignments",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "link_click_snapshots",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "link_click_snapshots",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "link_dispatches",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "link_dispatches",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "link_tracking_sync_runs",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "link_tracking_sync_runs",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "marketing_ad_metrics_daily",
+   "policyname": "marketing_ad_metrics_daily_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{public}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "marketing_ad_metrics_daily",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "marketing_ad_metrics_daily",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "marketing_integrations",
+   "policyname": "marketing_integrations_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{public}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "marketing_integrations",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "marketing_integrations",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "meta_ad_accounts",
+   "policyname": "meta_ad_accounts_tenant_select",
+   "permissive": "PERMISSIVE",
+   "roles": "{public}",
+   "cmd": "SELECT",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": null
+  },
+  {
+   "tablename": "meta_ad_accounts",
+   "policyname": "meta_ad_accounts_tenant_update",
+   "permissive": "PERMISSIVE",
+   "roles": "{public}",
+   "cmd": "UPDATE",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "meta_ad_accounts",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "meta_ad_accounts",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "meta_connection_audit",
+   "policyname": "meta_connection_audit_service_only",
+   "permissive": "PERMISSIVE",
+   "roles": "{public}",
+   "cmd": "ALL",
+   "qual": "(auth.role() = 'service_role'::text)",
+   "with_check": "(auth.role() = 'service_role'::text)"
+  },
+  {
+   "tablename": "meta_connections",
+   "policyname": "meta_connections_service_only",
+   "permissive": "PERMISSIVE",
+   "roles": "{public}",
+   "cmd": "ALL",
+   "qual": "(auth.role() = 'service_role'::text)",
+   "with_check": "(auth.role() = 'service_role'::text)"
+  },
+  {
+   "tablename": "meta_connections",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "meta_connections",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "meta_oauth_states",
+   "policyname": "meta_oauth_states_service_only",
+   "permissive": "PERMISSIVE",
+   "roles": "{public}",
+   "cmd": "ALL",
+   "qual": "(auth.role() = 'service_role'::text)",
+   "with_check": "(auth.role() = 'service_role'::text)"
+  },
+  {
+   "tablename": "meta_oauth_states",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "meta_oauth_states",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "meta_sync_jobs",
+   "policyname": "meta_sync_jobs_tenant_select",
+   "permissive": "PERMISSIVE",
+   "roles": "{public}",
+   "cmd": "SELECT",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": null
+  },
+  {
+   "tablename": "meta_sync_runs",
+   "policyname": "meta_sync_runs_tenant_select",
+   "permissive": "PERMISSIVE",
+   "roles": "{public}",
+   "cmd": "SELECT",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": null
+  },
+  {
+   "tablename": "platform_pricing",
+   "policyname": "anyone authed can read pricing",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "SELECT",
+   "qual": "true",
+   "with_check": null
+  },
+  {
+   "tablename": "platform_pricing",
+   "policyname": "super admin manages pricing",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "is_super_admin()",
+   "with_check": "is_super_admin()"
+  },
+  {
+   "tablename": "player_attributions",
+   "policyname": "player_attributions_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{public}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "player_attributions",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "player_attributions",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "players",
+   "policyname": "players_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "players",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "players",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "precall_campaigns",
+   "policyname": "precall_campaigns_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "precall_campaigns",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "precall_campaigns",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "precall_leads",
+   "policyname": "precall_leads_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "precall_leads",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "precall_leads",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "precall_templates",
+   "policyname": "precall_templates_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "precall_templates",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "precall_templates",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "rules",
+   "policyname": "rules_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "rules",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "rules",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "send_window_settings",
+   "policyname": "send_window_settings_super_admin_read",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "SELECT",
+   "qual": "is_super_admin()",
+   "with_check": null
+  },
+  {
+   "tablename": "send_window_settings",
+   "policyname": "send_window_settings_super_admin_write",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "is_super_admin()",
+   "with_check": "is_super_admin()"
+  },
+  {
+   "tablename": "send_window_settings",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "send_window_settings",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "sessions",
+   "policyname": "sessions_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "sessions",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "sessions",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "shortio_settings",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "shortio_settings",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "sms_audiences",
+   "policyname": "sms audiences tenant access",
+   "permissive": "PERMISSIVE",
+   "roles": "{public}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "sms_campaigns",
+   "policyname": "Tenant members manage sms campaigns",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "sms_campaigns",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "sms_campaigns",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "sms_credit_ledger",
+   "policyname": "sms_credit_ledger_read_own",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "SELECT",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": null
+  },
+  {
+   "tablename": "sms_credit_ledger",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "sms_credit_ledger",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "sms_credit_orders",
+   "policyname": "sms_credit_orders_read_own",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "SELECT",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": null
+  },
+  {
+   "tablename": "sms_credit_orders",
+   "policyname": "sms_credit_orders_super_write",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "is_super_admin()",
+   "with_check": "is_super_admin()"
+  },
+  {
+   "tablename": "sms_credit_orders",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "sms_credit_orders",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "sms_credit_packages",
+   "policyname": "sms_credit_packages_read_active",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "SELECT",
+   "qual": "(is_active OR is_super_admin())",
+   "with_check": null
+  },
+  {
+   "tablename": "sms_credit_packages",
+   "policyname": "sms_credit_packages_super_write",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "is_super_admin()",
+   "with_check": "is_super_admin()"
+  },
+  {
+   "tablename": "sms_credit_settings",
+   "policyname": "sms_credit_settings_super_read",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "SELECT",
+   "qual": "is_super_admin()",
+   "with_check": null
+  },
+  {
+   "tablename": "sms_credit_settings",
+   "policyname": "sms_credit_settings_super_write",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "is_super_admin()",
+   "with_check": "is_super_admin()"
+  },
+  {
+   "tablename": "sms_flow_leads",
+   "policyname": "sms_flow_leads_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "sms_flow_leads",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "sms_flow_leads",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "sms_flow_steps",
+   "policyname": "sms_flow_steps_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "sms_flow_steps",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "sms_flow_steps",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "sms_flows",
+   "policyname": "sms_flows_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "sms_flows",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "sms_flows",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "sms_send_logs",
+   "policyname": "sms_send_logs_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "sms_send_logs",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "sms_send_logs",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "sms_template_versions",
+   "policyname": "sms_template_versions_tenant_select",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "SELECT",
+   "qual": "(tenant_id = current_tenant_id())",
+   "with_check": null
+  },
+  {
+   "tablename": "sms_templates",
+   "policyname": "sms templates tenant access",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "(tenant_id = current_tenant_id())",
+   "with_check": "(tenant_id = current_tenant_id())"
+  },
+  {
+   "tablename": "suppressed_emails",
+   "policyname": "suppressed_emails_tenant_delete",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "DELETE",
+   "qual": "(is_super_admin() OR ((tenant_id IS NOT NULL) AND has_tenant_access(tenant_id)))",
+   "with_check": null
+  },
+  {
+   "tablename": "suppressed_emails",
+   "policyname": "suppressed_emails_tenant_insert",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "INSERT",
+   "qual": null,
+   "with_check": "(is_super_admin() OR ((tenant_id IS NOT NULL) AND has_tenant_access(tenant_id)))"
+  },
+  {
+   "tablename": "suppressed_emails",
+   "policyname": "suppressed_emails_tenant_update",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "UPDATE",
+   "qual": "(is_super_admin() OR ((tenant_id IS NOT NULL) AND has_tenant_access(tenant_id)))",
+   "with_check": "(is_super_admin() OR ((tenant_id IS NOT NULL) AND has_tenant_access(tenant_id)))"
+  },
+  {
+   "tablename": "suppressed_emails",
+   "policyname": "tenant members can view suppression list",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "SELECT",
+   "qual": "(is_super_admin() OR ((tenant_id IS NOT NULL) AND has_tenant_access(tenant_id)))",
+   "with_check": null
+  },
+  {
+   "tablename": "suppressed_emails",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "suppressed_emails",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "system_alerts",
+   "policyname": "system_alerts_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "system_alerts",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "system_alerts",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "tenant_audit_logs",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "tenant_audit_logs",
+   "policyname": "tenant_audit_logs_read_own",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "SELECT",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": null
+  },
+  {
+   "tablename": "tenant_audit_logs",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "tenant_daily_metrics",
+   "policyname": "tenant daily metrics read",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "SELECT",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": null
+  },
+  {
+   "tablename": "tenant_sms_credit_balances",
+   "policyname": "sms_credit_balances_read_own",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "SELECT",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": null
+  },
+  {
+   "tablename": "tenant_sms_credit_balances",
+   "policyname": "sms_credit_balances_super_write",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "is_super_admin()",
+   "with_check": "is_super_admin()"
+  },
+  {
+   "tablename": "tenant_sms_credit_balances",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "tenant_sms_credit_balances",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "tenant_sms_pricing",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "tenant_sms_pricing",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "tenant_sms_pricing",
+   "policyname": "tenant_sms_pricing_super_read",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "SELECT",
+   "qual": "is_super_admin()",
+   "with_check": null
+  },
+  {
+   "tablename": "tenant_sms_pricing",
+   "policyname": "tenant_sms_pricing_super_write",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "is_super_admin()",
+   "with_check": "is_super_admin()"
+  },
+  {
+   "tablename": "tenants",
+   "policyname": "tenants_member_select_own",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "SELECT",
+   "qual": "has_tenant_access(id)",
+   "with_check": null
+  },
+  {
+   "tablename": "tenants",
+   "policyname": "tenants_super_admin_all",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "is_super_admin()",
+   "with_check": "is_super_admin()"
+  },
+  {
+   "tablename": "tracked_links",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "tracked_links",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "user_roles",
+   "policyname": "Users read own roles",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "SELECT",
+   "qual": "(auth.uid() = user_id)",
+   "with_check": null
+  },
+  {
+   "tablename": "user_roles",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "user_roles",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "user_roles",
+   "policyname": "user_roles_block_super_admin_escalation",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((role <> 'super_admin'::app_role) OR is_super_admin(auth.uid()))",
+   "with_check": "((role <> 'super_admin'::app_role) OR is_super_admin(auth.uid()))"
+  },
+  {
+   "tablename": "user_roles",
+   "policyname": "user_roles_block_tenant_admin_escalation",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((role <> 'admin'::app_role) OR is_super_admin(auth.uid()))",
+   "with_check": "((role <> 'admin'::app_role) OR is_super_admin(auth.uid()))"
+  },
+  {
+   "tablename": "user_roles",
+   "policyname": "user_roles_owner_manage_tenant",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id IS NOT NULL) AND is_tenant_owner(tenant_id))",
+   "with_check": "((tenant_id IS NOT NULL) AND is_tenant_owner(tenant_id))"
+  },
+  {
+   "tablename": "user_roles",
+   "policyname": "user_roles_select_own",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "SELECT",
+   "qual": "((user_id = auth.uid()) OR is_super_admin())",
+   "with_check": null
+  },
+  {
+   "tablename": "user_roles",
+   "policyname": "user_roles_super_admin_all",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "is_super_admin()",
+   "with_check": "is_super_admin()"
+  },
+  {
+   "tablename": "voice_contact_policies",
+   "policyname": "voice_contact_policies_tenant_access",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "webhook_configs",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "webhook_configs",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "webhook_configs",
+   "policyname": "webhook_configs_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "webhook_event_receipts",
+   "policyname": "webhook_event_receipts_service_only",
+   "permissive": "PERMISSIVE",
+   "roles": "{public}",
+   "cmd": "ALL",
+   "qual": "(auth.role() = 'service_role'::text)",
+   "with_check": "(auth.role() = 'service_role'::text)"
+  },
+  {
+   "tablename": "webhook_logs",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "webhook_logs",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "webhook_logs",
+   "policyname": "webhook_logs_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "whatsapp_chats",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "whatsapp_chats",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "whatsapp_chats",
+   "policyname": "whatsapp_chats_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "whatsapp_external_events",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "whatsapp_external_events",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "whatsapp_external_events",
+   "policyname": "wee_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "whatsapp_external_integrations",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "whatsapp_external_integrations",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "whatsapp_external_integrations",
+   "policyname": "wei_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "whatsapp_messages",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "whatsapp_messages",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "whatsapp_messages",
+   "policyname": "whatsapp_messages_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "whatsapp_proxies",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "whatsapp_proxies",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "whatsapp_proxies",
+   "policyname": "whatsapp_proxies_super_admin_read",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "SELECT",
+   "qual": "is_super_admin()",
+   "with_check": null
+  },
+  {
+   "tablename": "whatsapp_proxies",
+   "policyname": "whatsapp_proxies_super_admin_write",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "is_super_admin()",
+   "with_check": "is_super_admin()"
+  },
+  {
+   "tablename": "whatsapp_proxy_logs",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "whatsapp_proxy_logs",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "whatsapp_proxy_logs",
+   "policyname": "whatsapp_proxy_logs_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "whatsapp_sessions",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "whatsapp_sessions",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "whatsapp_sessions",
+   "policyname": "whatsapp_sessions_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "withdrawals",
+   "policyname": "tenant_access_base",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "has_tenant_access(tenant_id)",
+   "with_check": "has_tenant_access(tenant_id)"
+  },
+  {
+   "tablename": "withdrawals",
+   "policyname": "tenant_isolation_guard",
+   "permissive": "RESTRICTIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  },
+  {
+   "tablename": "withdrawals",
+   "policyname": "withdrawals_tenant_isolation",
+   "permissive": "PERMISSIVE",
+   "roles": "{authenticated}",
+   "cmd": "ALL",
+   "qual": "((tenant_id = current_tenant_id()) OR is_super_admin())",
+   "with_check": "((tenant_id = current_tenant_id()) OR is_super_admin())"
+  }
+ ],
+ "rls": [
+  {
+   "relname": "activation_runs",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "admin_audit_logs",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "ai_feedback",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "ai_intents",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "ai_logs",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "ai_synonyms",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "ai_training_examples",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "antiban_settings",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "automation_settings",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "call_audio_generations",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "call_flow_block_sms",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "call_flow_blocks",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "call_flow_executions",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "call_flow_history",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "call_flow_post_action",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "call_flow_progress",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "call_flow_scripts",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "call_flows",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "call_history",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "call_providers",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "call_queue",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "call_script_versions",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "call_scripts",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "campaign_drafts",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "cashback_payments",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "channel_consent_audit",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "channel_consents",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "click_events",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "conversion_attribution_issues",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "conversion_attributions",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "conversion_experiment_assignments",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "conversion_experiments",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "conversion_report_audit_events",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "dashboard_settings",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "deposits",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "dispatch_pause_state",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "dispatch_rate_state",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "dispatcher_runs",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "email_automations",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "email_campaigns",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "email_flow_blocks",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "email_flow_leads",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "email_flow_logs",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "email_flows",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "email_send_logs",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "email_senders",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "email_smtp_configs",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "email_template_versions",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "email_templates",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "email_unsubscribe_tokens",
+   "relrowsecurity": true,
+   "relforcerowsecurity": true
+  },
+  {
+   "relname": "events",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "experts",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "financial_webhook_attempts",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "flow_blocks",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "flow_leads",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "flow_logs",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "flow_templates",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "flows",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "gamification_settings",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "journey_contact_limits",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "journey_enrollments",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "journey_events",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "journey_scan_jobs",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "journey_step_executions",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "journey_steps",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "journey_voice_assets",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "journeys",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "lead_alerts",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "lead_followups",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "lead_whatsapp_assignments",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "link_click_snapshots",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "link_dispatches",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "link_tracking_sync_runs",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "marketing_ad_metrics_daily",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "marketing_integrations",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "meta_ad_accounts",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "meta_connection_audit",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "meta_connections",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "meta_oauth_states",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "meta_sync_jobs",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "meta_sync_runs",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "platform_pricing",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "player_attributions",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "players",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "precall_campaigns",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "precall_leads",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "precall_templates",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "rules",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "send_window_settings",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "sessions",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "shortio_settings",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "sms_audiences",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "sms_campaigns",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "sms_credit_ledger",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "sms_credit_orders",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "sms_credit_packages",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "sms_credit_settings",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "sms_flow_daily_usage",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "sms_flow_leads",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "sms_flow_steps",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "sms_flows",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "sms_send_logs",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "sms_suppressions",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "sms_template_versions",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "sms_templates",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "suppressed_emails",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "system_alerts",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "tenant_audit_logs",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "tenant_daily_metrics",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "tenant_sms_credit_balances",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "tenant_sms_pricing",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "tenants",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "tracked_links",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "user_roles",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "voice_contact_policies",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "webhook_configs",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "webhook_event_receipts",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "webhook_logs",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "whatsapp_chats",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "whatsapp_external_events",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "whatsapp_external_integrations",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "whatsapp_messages",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "whatsapp_proxies",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "whatsapp_proxy_logs",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "whatsapp_sessions",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  },
+  {
+   "relname": "withdrawals",
+   "relrowsecurity": true,
+   "relforcerowsecurity": false
+  }
+ ],
+ "grants": [
+  {
+   "table_name": "activation_runs",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "activation_runs",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "admin_audit_logs",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "admin_audit_logs",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "ai_feedback",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "ai_feedback",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "ai_intents",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "ai_intents",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "ai_logs",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "ai_logs",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "ai_synonyms",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "ai_synonyms",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "ai_training_examples",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "ai_training_examples",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "antiban_settings",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "antiban_settings",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "automation_settings",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "automation_settings",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "call_audio_generations",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "call_audio_generations",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "call_flow_block_sms",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "call_flow_block_sms",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "call_flow_blocks",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "call_flow_blocks",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "call_flow_executions",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "call_flow_executions",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "call_flow_history",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "call_flow_history",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "call_flow_post_action",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "call_flow_post_action",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "call_flow_progress",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "call_flow_progress",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "call_flow_scripts",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "call_flow_scripts",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "call_flows",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "call_flows",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "call_history",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "call_history",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "call_providers",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "call_providers",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "call_queue",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "call_queue",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "call_script_versions",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "call_script_versions",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "call_scripts",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "call_scripts",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "campaign_drafts",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "campaign_drafts",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "cashback_payments",
+   "grantee": "anon",
+   "privs": "REFERENCES,SELECT,TRIGGER,TRUNCATE"
+  },
+  {
+   "table_name": "cashback_payments",
+   "grantee": "authenticated",
+   "privs": "REFERENCES,SELECT,TRIGGER,TRUNCATE"
+  },
+  {
+   "table_name": "channel_consent_audit",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "channel_consent_audit",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "channel_consents",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "channel_consents",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "click_events",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "click_events",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "conversion_attribution_issues",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "conversion_attribution_issues",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "conversion_attributions",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "conversion_attributions",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "conversion_experiment_assignments",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "conversion_experiment_assignments",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "conversion_experiments",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "conversion_experiments",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "conversion_report_audit_events",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "conversion_report_audit_events",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "dashboard_settings",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "dashboard_settings",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "deposits",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "deposits",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "dispatch_pause_state",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "dispatch_pause_state",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "dispatch_rate_state",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "dispatch_rate_state",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "dispatcher_runs",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "dispatcher_runs",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "email_automations",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "email_automations",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "email_campaigns",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "email_campaigns",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "email_flow_blocks",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "email_flow_blocks",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "email_flow_leads",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "email_flow_leads",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "email_flow_logs",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "email_flow_logs",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "email_flows",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "email_flows",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "email_send_logs",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "email_send_logs",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "email_senders",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "email_senders",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "email_smtp_configs",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "email_smtp_configs",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "email_template_versions",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "email_template_versions",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "email_templates",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "email_templates",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "events",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "events",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "experts",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "experts",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "financial_webhook_attempts",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "financial_webhook_attempts",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "flow_blocks",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "flow_blocks",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "flow_leads",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "flow_leads",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "flow_logs",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "flow_logs",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "flow_templates",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "flow_templates",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "flows",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "flows",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "gamification_settings",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "gamification_settings",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "journey_contact_limits",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "journey_enrollments",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "journey_enrollments",
+   "grantee": "authenticated",
+   "privs": "REFERENCES,SELECT,TRIGGER,TRUNCATE"
+  },
+  {
+   "table_name": "journey_events",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "journey_events",
+   "grantee": "authenticated",
+   "privs": "REFERENCES,SELECT,TRIGGER,TRUNCATE"
+  },
+  {
+   "table_name": "journey_scan_jobs",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "journey_scan_jobs",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "journey_step_executions",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "journey_step_executions",
+   "grantee": "authenticated",
+   "privs": "REFERENCES,SELECT,TRIGGER,TRUNCATE"
+  },
+  {
+   "table_name": "journey_steps",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "journey_steps",
+   "grantee": "authenticated",
+   "privs": "REFERENCES,SELECT,TRIGGER,TRUNCATE"
+  },
+  {
+   "table_name": "journey_voice_assets",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "journey_voice_assets",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "journeys",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "journeys",
+   "grantee": "authenticated",
+   "privs": "REFERENCES,SELECT,TRIGGER,TRUNCATE"
+  },
+  {
+   "table_name": "lead_alerts",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "lead_alerts",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "lead_followups",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "lead_followups",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "lead_whatsapp_assignments",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "lead_whatsapp_assignments",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "link_click_snapshots",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "link_click_snapshots",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "link_dispatches",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "link_dispatches",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "link_tracking_sync_runs",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "link_tracking_sync_runs",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "marketing_ad_metrics_daily",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "marketing_ad_metrics_daily",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "marketing_integrations",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "marketing_integrations",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "meta_ad_accounts",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "meta_ad_accounts",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "meta_connection_audit",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "meta_connection_audit",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "meta_connections",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "meta_connections",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "meta_oauth_states",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "meta_oauth_states",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "meta_sync_jobs",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "meta_sync_jobs",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "meta_sync_runs",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "meta_sync_runs",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "platform_pricing",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "platform_pricing",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "player_attributions",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "player_attributions",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "players",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "players",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "precall_campaigns",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "precall_campaigns",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "precall_leads",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "precall_leads",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "precall_templates",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "precall_templates",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "rules",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "rules",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "send_window_settings",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "send_window_settings",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "sessions",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "sessions",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "shortio_settings",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "shortio_settings",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "sms_audiences",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "sms_audiences",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "sms_campaigns",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "sms_campaigns",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "sms_credit_ledger",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "sms_credit_ledger",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "sms_credit_orders",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "sms_credit_orders",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "sms_credit_packages",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "sms_credit_packages",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "sms_credit_settings",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "sms_credit_settings",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "sms_flow_daily_usage",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "sms_flow_daily_usage",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "sms_flow_leads",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "sms_flow_leads",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "sms_flow_steps",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "sms_flow_steps",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "sms_flows",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "sms_flows",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "sms_send_logs",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "sms_send_logs",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "sms_template_versions",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "sms_template_versions",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "sms_templates",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "sms_templates",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "suppressed_emails",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "suppressed_emails",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "system_alerts",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "system_alerts",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "tenant_audit_logs",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "tenant_audit_logs",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "tenant_daily_metrics",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "tenant_daily_metrics",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "tenant_sms_credit_balances",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "tenant_sms_credit_balances",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "tenant_sms_pricing",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "tenant_sms_pricing",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "tenants",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "tenants",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "tracked_links",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "tracked_links",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "user_roles",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "user_roles",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "voice_contact_policies",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "voice_contact_policies",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "webhook_configs",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "webhook_configs",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "webhook_event_receipts",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "webhook_event_receipts",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "webhook_logs",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "webhook_logs",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "whatsapp_chats",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "whatsapp_chats",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "whatsapp_external_events",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "whatsapp_external_events",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "whatsapp_external_integrations",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "whatsapp_external_integrations",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "whatsapp_messages",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "whatsapp_messages",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "whatsapp_proxies",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "whatsapp_proxies",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "whatsapp_proxy_logs",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "whatsapp_proxy_logs",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "whatsapp_sessions",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "whatsapp_sessions",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "withdrawals",
+   "grantee": "anon",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  {
+   "table_name": "withdrawals",
+   "grantee": "authenticated",
+   "privs": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  }
+ ],
+ "functions": [
+  {
+   "sig": "current_tenant_id()",
+   "acl": "{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+   "def": "CREATE OR REPLACE FUNCTION public.current_tenant_id()\n RETURNS uuid\n LANGUAGE plpgsql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\nDECLARE\n  v_uid uuid := auth.uid();\n  v_requested text;\n  v_tenant uuid;\nBEGIN\n  IF v_uid IS NULL THEN RETURN NULL; END IF;\n\n  BEGIN\n    v_requested := current_setting('request.headers', true)::jsonb ->> 'x-active-tenant';\n    IF v_requested IS NOT NULL AND v_requested <> '' THEN\n      v_tenant := v_requested::uuid;\n      IF public.has_tenant_access(v_tenant, v_uid) THEN\n        RETURN v_tenant;\n      END IF;\n    END IF;\n  EXCEPTION WHEN OTHERS THEN\n    NULL;\n  END;\n\n  SELECT tenant_id INTO v_tenant\n  FROM public.user_roles\n  WHERE user_id = v_uid\n    AND tenant_id IS NOT NULL\n    AND role IN ('admin', 'gestor', 'member')\n  ORDER BY tenant_id\n  LIMIT 1;\n  RETURN v_tenant;\nEND;\n$function$\n"
+  },
+  {
+   "sig": "is_super_admin(uuid)",
+   "acl": "{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+   "def": "CREATE OR REPLACE FUNCTION public.is_super_admin(_user_id uuid DEFAULT auth.uid())\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  SELECT EXISTS (\n    SELECT 1 FROM public.user_roles\n    WHERE user_id = _user_id\n      AND role = 'super_admin'\n      AND tenant_id IS NULL\n  )\n$function$\n"
+  },
+  {
+   "sig": "has_role(uuid,app_role)",
+   "acl": "{postgres=X/postgres,service_role=X/postgres,authenticated=X/postgres}",
+   "def": "CREATE OR REPLACE FUNCTION public.has_role(_user_id uuid, _role app_role)\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  SELECT EXISTS (\n    SELECT 1 FROM public.user_roles\n    WHERE user_id = _user_id\n      AND role = _role\n      AND (\n        _role <> 'super_admin'\n        OR tenant_id IS NULL\n      )\n  )\n$function$\n"
+  },
+  {
+   "sig": "is_tenant_owner(uuid)",
+   "acl": "{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+   "def": "CREATE OR REPLACE FUNCTION public.is_tenant_owner(_tenant uuid)\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  SELECT public.is_super_admin() OR EXISTS (\n    SELECT 1 FROM public.user_roles\n    WHERE user_id = auth.uid() AND tenant_id = _tenant AND role = 'admin'\n  )\n$function$\n"
+  },
+  {
+   "sig": "is_tenant_admin(uuid)",
+   "acl": "{=X/postgres,postgres=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+   "def": "CREATE OR REPLACE FUNCTION public.is_tenant_admin(_tenant uuid)\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  SELECT public.is_super_admin() OR EXISTS (\n    SELECT 1 FROM public.user_roles\n    WHERE user_id = auth.uid() AND tenant_id = _tenant AND role = 'admin'\n  )\n$function$\n"
+  },
+  {
+   "sig": "has_tenant_access(uuid,uuid)",
+   "acl": "{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+   "def": "CREATE OR REPLACE FUNCTION public.has_tenant_access(_tenant_id uuid, _user_id uuid DEFAULT auth.uid())\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  SELECT public.is_super_admin(_user_id) OR EXISTS (\n    SELECT 1 FROM public.user_roles\n    WHERE user_id = _user_id AND tenant_id = _tenant_id\n      AND role IN ('admin', 'gestor', 'member')\n  )\n$function$\n"
+  }
+ ],
+ "user_roles": {
+  "columns": [
+   {
+    "column_name": "id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "column_default": "gen_random_uuid()",
+    "udt_name": "uuid"
+   },
+   {
+    "column_name": "user_id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "column_default": null,
+    "udt_name": "uuid"
+   },
+   {
+    "column_name": "role",
+    "data_type": "USER-DEFINED",
+    "is_nullable": "NO",
+    "column_default": null,
+    "udt_name": "app_role"
+   },
+   {
+    "column_name": "created_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "NO",
+    "column_default": "now()",
+    "udt_name": "timestamptz"
+   },
+   {
+    "column_name": "tenant_id",
+    "data_type": "uuid",
+    "is_nullable": "YES",
+    "column_default": null,
+    "udt_name": "uuid"
+   }
+  ],
+  "indexes": [
+   {
+    "indexname": "user_roles_pkey",
+    "indexdef": "CREATE UNIQUE INDEX user_roles_pkey ON public.user_roles USING btree (id)"
+   },
+   {
+    "indexname": "user_roles_user_tenant_role_uniq",
+    "indexdef": "CREATE UNIQUE INDEX user_roles_user_tenant_role_uniq ON public.user_roles USING btree (user_id, COALESCE((tenant_id)::text, 'GLOBAL'::text), role)"
+   },
+   {
+    "indexname": "user_roles_tenant_id_idx",
+    "indexdef": "CREATE INDEX user_roles_tenant_id_idx ON public.user_roles USING btree (tenant_id)"
+   },
+   {
+    "indexname": "user_roles_one_membership_per_tenant",
+    "indexdef": "CREATE UNIQUE INDEX user_roles_one_membership_per_tenant ON public.user_roles USING btree (user_id, tenant_id) WHERE (tenant_id IS NOT NULL)"
+   },
+   {
+    "indexname": "user_roles_one_admin_per_tenant",
+    "indexdef": "CREATE UNIQUE INDEX user_roles_one_admin_per_tenant ON public.user_roles USING btree (tenant_id) WHERE (role = 'admin'::app_role)"
+   }
+  ],
+  "constraints": [
+   {
+    "conname": "user_roles_canonical_scope",
+    "def": "CHECK ((((role = 'super_admin'::app_role) AND (tenant_id IS NULL)) OR ((role = ANY (ARRAY['admin'::app_role, 'gestor'::app_role, 'member'::app_role])) AND (tenant_id IS NOT NULL)))) NOT VALID"
+   },
+   {
+    "conname": "user_roles_pkey",
+    "def": "PRIMARY KEY (id)"
+   },
+   {
+    "conname": "user_roles_tenant_id_fkey",
+    "def": "FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE"
+   },
+   {
+    "conname": "user_roles_user_id_fkey",
+    "def": "FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE"
+   }
+  ],
+  "distribution": [
+   {
+    "role": "super_admin",
+    "null_tenant": true,
+    "count": "2"
+   },
+   {
+    "role": "member",
+    "null_tenant": false,
+    "count": "1"
+   },
+   {
+    "role": "gestor",
+    "null_tenant": false,
+    "count": "7"
+   },
+   {
+    "role": "admin",
+    "null_tenant": false,
+    "count": "5"
+   }
+  ]
+ },
+ "app_role": [
+  "admin",
+  "user",
+  "super_admin",
+  "owner",
+  "member",
+  "gestor"
+ ]
+}

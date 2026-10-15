@@ -1,0 +1,30 @@
+{
+ "generated_at": "2026-10-15T03:05:28.962Z",
+ "tables": 120,
+ "personas": [
+  "super_admin",
+  "admin_A",
+  "gestor_A",
+  "member_A",
+  "gestor_B",
+  "admin_B",
+  "multi_mA_aC",
+  "no_role",
+  "anon"
+ ],
+ "headers": [
+  "none",
+  "hdr_A",
+  "hdr_B",
+  "hdr_C",
+  "hdr_garbage"
+ ],
+ "cells": 5040,
+ "operations": 91938,
+ "differences_before_vs_after": 0,
+ "raw_differences_before_vs_after": 0,
+ "differences_after_vs_reapply": 0,
+ "differences_before_vs_rollback": 0,
+ "diff": [],
+ "raw_examples": []
+}

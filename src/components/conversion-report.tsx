@@ -786,7 +786,11 @@ function JourneyReport({
         <header className="sticky top-0 z-20 flex items-start justify-between gap-4 border-b border-border/70 bg-background/95 px-5 py-4 backdrop-blur">
           <div className="min-w-0">
             <div className="mb-1 flex items-center gap-2">
-              <Link to="/jornadas" className="text-muted-foreground hover:text-foreground">
+              <Link
+                to="/jornadas"
+                className="text-muted-foreground hover:text-foreground"
+                aria-label="Voltar para jornadas"
+              >
                 <ArrowLeft className="size-4" />
               </Link>
               <h1 className="truncate text-base font-bold">
@@ -855,7 +859,7 @@ function JourneyReport({
             <Metric label="Enviados 7d" value={number(sent7d)} />
             <Metric label="Enviados rastreados" value={number(data.trackedSent)} />
             <Metric label="Clicaram" value={data.clicked === null ? "—" : number(data.clicked)} />
-            <Metric label="Depósitos" value={number(deposits)} />
+            <Metric label="Depósitos atribuídos" value={number(deposits)} />
             <Metric label="Recuperado atribuído" value={money(recovered)} accent />
           </section>
 
@@ -889,9 +893,9 @@ function JourneyReport({
                       <JourneyStepMetric label="Enviados total" value={step.sent} />
                       <JourneyStepMetric label="Entregues" value={step.delivered} />
                       <JourneyStepMetric label="Clicaram" value={step.clicked} />
-                      <JourneyStepMetric label="Depósitos" value={step.deposits} />
+                      <JourneyStepMetric label="Depósitos atribuídos" value={step.deposits} />
                       <JourneyStepMetric
-                        label="Recuperado"
+                        label="Recuperado atribuído"
                         value={step.recovered}
                         currency
                         accent

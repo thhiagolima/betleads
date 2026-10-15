@@ -1,0 +1,129 @@
+===== BEFORE (production policies) =====
+--- member_A (x-active-tenant=A): count(*) RLS only
+Aggregate (actual time=2626.377..2626.380 rows=1.00 loops=1)
+  Buffers: shared hit=110255
+  ->  Seq Scan on players (actual time=0.554..2597.156 rows=20001.00 loops=1)
+        Filter: (((tenant_id = current_tenant_id()) OR is_super_admin((COALESCE(NULLIF(current_setting('request.jwt.claim.sub'::text, true), ''::text), ((NULLIF(current_setting('request.jwt.claims'::text, true), ''::text))::jsonb ->> 'sub'::text)))::uuid)) AND (has_tenant_access(tenant_id, (COALESCE(NULLIF(current_setting('request.jwt.claim.sub'::text, true), ''::text), ((NULLIF(current_setting('request.jwt.claims'::text, true), ''::text))::jsonb ->> 'sub'::text)))::uuid) OR (tenant_id = current_tenant_id()) OR is_super_admin((COALESCE(NULLIF(current_setting('request.jwt.claim.sub'::text, true), ''::text), ((NULLIF(current_setting('request.jwt.claims'::text, true), ''::text))::jsonb ->> 'sub'::text)))::uuid)))
+        Rows Removed by Filter: 10000
+        Buffers: shared hit=110255
+Planning:
+  Buffers: shared hit=203 read=1
+Planning Time: 2.759 ms
+Execution Time: 2626.524 ms
+
+count = 20001
+--- super_admin (x-active-tenant=A): count(*) RLS only
+Aggregate (actual time=2801.254..2801.258 rows=1.00 loops=1)
+  Buffers: shared hit=70253
+  ->  Seq Scan on players (actual time=0.099..2767.526 rows=30001.00 loops=1)
+        Filter: (((tenant_id = current_tenant_id()) OR is_super_admin((COALESCE(NULLIF(current_setting('request.jwt.claim.sub'::text, true), ''::text), ((NULLIF(current_setting('request.jwt.claims'::text, true), ''::text))::jsonb ->> 'sub'::text)))::uuid)) AND (has_tenant_access(tenant_id, (COALESCE(NULLIF(current_setting('request.jwt.claim.sub'::text, true), ''::text), ((NULLIF(current_setting('request.jwt.claims'::text, true), ''::text))::jsonb ->> 'sub'::text)))::uuid) OR (tenant_id = current_tenant_id()) OR is_super_admin((COALESCE(NULLIF(current_setting('request.jwt.claim.sub'::text, true), ''::text), ((NULLIF(current_setting('request.jwt.claims'::text, true), ''::text))::jsonb ->> 'sub'::text)))::uuid)))
+        Buffers: shared hit=70253
+Planning:
+  Buffers: shared hit=2
+Planning Time: 0.416 ms
+Execution Time: 2801.300 ms
+
+count = 30001
+--- member_A (x-active-tenant=A): count(*) with explicit tenant filter
+Aggregate (actual time=1891.785..1891.787 rows=1.00 loops=1)
+  Buffers: shared hit=80188
+  ->  Index Only Scan using players_tenant_id_idx on players (actual time=0.314..1871.084 rows=20001.00 loops=1)
+        Index Cond: (tenant_id = '00000000-0000-4000-8000-00000000000a'::uuid)
+        Filter: (((tenant_id = current_tenant_id()) OR is_super_admin((COALESCE(NULLIF(current_setting('request.jwt.claim.sub'::text, true), ''::text), ((NULLIF(current_setting('request.jwt.claims'::text, true), ''::text))::jsonb ->> 'sub'::text)))::uuid)) AND (has_tenant_access(tenant_id, (COALESCE(NULLIF(current_setting('request.jwt.claim.sub'::text, true), ''::text), ((NULLIF(current_setting('request.jwt.claims'::text, true), ''::text))::jsonb ->> 'sub'::text)))::uuid) OR (tenant_id = current_tenant_id()) OR is_super_admin((COALESCE(NULLIF(current_setting('request.jwt.claim.sub'::text, true), ''::text), ((NULLIF(current_setting('request.jwt.claims'::text, true), ''::text))::jsonb ->> 'sub'::text)))::uuid)))
+        Heap Fetches: 20002
+        Index Searches: 1
+        Buffers: shared hit=80188
+Planning:
+  Buffers: shared hit=4
+Planning Time: 0.394 ms
+Execution Time: 1891.878 ms
+
+count = 20001
+--- super_admin (x-active-tenant=A): count(*) with explicit tenant filter
+Aggregate (actual time=1999.075..1999.076 rows=1.00 loops=1)
+  Buffers: shared hit=40186
+  ->  Index Only Scan using players_tenant_id_idx on players (actual time=0.110..1974.541 rows=20001.00 loops=1)
+        Index Cond: (tenant_id = '00000000-0000-4000-8000-00000000000a'::uuid)
+        Filter: (((tenant_id = current_tenant_id()) OR is_super_admin((COALESCE(NULLIF(current_setting('request.jwt.claim.sub'::text, true), ''::text), ((NULLIF(current_setting('request.jwt.claims'::text, true), ''::text))::jsonb ->> 'sub'::text)))::uuid)) AND (has_tenant_access(tenant_id, (COALESCE(NULLIF(current_setting('request.jwt.claim.sub'::text, true), ''::text), ((NULLIF(current_setting('request.jwt.claims'::text, true), ''::text))::jsonb ->> 'sub'::text)))::uuid) OR (tenant_id = current_tenant_id()) OR is_super_admin((COALESCE(NULLIF(current_setting('request.jwt.claim.sub'::text, true), ''::text), ((NULLIF(current_setting('request.jwt.claims'::text, true), ''::text))::jsonb ->> 'sub'::text)))::uuid)))
+        Heap Fetches: 20002
+        Index Searches: 1
+        Buffers: shared hit=40186
+Planning:
+  Buffers: shared hit=2
+Planning Time: 0.405 ms
+Execution Time: 1999.122 ms
+
+count = 20001
+
+===== AFTER (20261015090000_consolidate_tenant_rls) =====
+--- member_A (x-active-tenant=A): count(*) RLS only
+Aggregate (actual time=31.933..31.939 rows=1.00 loops=1)
+  Buffers: shared hit=393
+  InitPlan 1
+    ->  Result (actual time=0.932..0.934 rows=1.00 loops=1)
+          Buffers: shared hit=104
+  InitPlan 2
+    ->  Result (actual time=1.101..1.103 rows=1.00 loops=1)
+          Buffers: shared hit=38
+  ->  Seq Scan on players (actual time=2.117..20.811 rows=20001.00 loops=1)
+        Filter: ((InitPlan 1).col1 OR (tenant_id = (InitPlan 2).col1))
+        Rows Removed by Filter: 10000
+        Buffers: shared hit=393
+Planning:
+  Buffers: shared hit=65 read=1
+Planning Time: 1.009 ms
+Execution Time: 32.081 ms
+
+count = 20001
+--- super_admin (x-active-tenant=A): count(*) RLS only
+Aggregate (actual time=26.430..26.433 rows=1.00 loops=1)
+  Buffers: shared hit=252
+  InitPlan 1
+    ->  Result (actual time=0.149..0.150 rows=1.00 loops=1)
+          Buffers: shared hit=1
+  InitPlan 2
+    ->  Result (never executed)
+  ->  Seq Scan on players (actual time=0.167..14.577 rows=30001.00 loops=1)
+        Filter: ((InitPlan 1).col1 OR (tenant_id = (InitPlan 2).col1))
+        Buffers: shared hit=252
+Planning Time: 0.168 ms
+Execution Time: 26.473 ms
+
+count = 30001
+--- member_A (x-active-tenant=A): count(*) with explicit tenant filter
+Aggregate (actual time=19.971..19.974 rows=1.00 loops=1)
+  Buffers: shared hit=187
+  InitPlan 1
+    ->  Result (actual time=0.068..0.070 rows=1.00 loops=1)
+          Buffers: shared hit=1
+  InitPlan 2
+    ->  Result (actual time=0.238..0.239 rows=1.00 loops=1)
+          Buffers: shared hit=2
+  ->  Index Only Scan using players_tenant_id_idx on players (actual time=0.395..12.807 rows=20001.00 loops=1)
+        Index Cond: (tenant_id = '00000000-0000-4000-8000-00000000000a'::uuid)
+        Filter: ((InitPlan 1).col1 OR (tenant_id = (InitPlan 2).col1))
+        Heap Fetches: 20002
+        Index Searches: 1
+        Buffers: shared hit=187
+Planning Time: 0.200 ms
+Execution Time: 20.019 ms
+
+count = 20001
+--- super_admin (x-active-tenant=A): count(*) with explicit tenant filter
+Aggregate (actual time=19.345..19.348 rows=1.00 loops=1)
+  Buffers: shared hit=185
+  InitPlan 1
+    ->  Result (actual time=0.067..0.068 rows=1.00 loops=1)
+          Buffers: shared hit=1
+  InitPlan 2
+    ->  Result (never executed)
+  ->  Index Only Scan using players_tenant_id_idx on players (actual time=0.091..12.101 rows=20001.00 loops=1)
+        Index Cond: (tenant_id = '00000000-0000-4000-8000-00000000000a'::uuid)
+        Filter: ((InitPlan 1).col1 OR (tenant_id = (InitPlan 2).col1))
+        Heap Fetches: 20002
+        Index Searches: 1
+        Buffers: shared hit=185
+Planning Time: 0.220 ms
+Execution Time: 19.391 ms
+
+count = 20001

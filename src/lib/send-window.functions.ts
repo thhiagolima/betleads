@@ -3,6 +3,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { resolveTenantReadFilter, withTenantFilter } from "@/lib/history.functions";
 
 const TimeSchema = z
   .string()
@@ -23,6 +24,8 @@ export const getSendWindowStatus = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const { supabase } = context;
+    // CON-08: explicit tenant filter (null for super admins = unchanged RLS behavior).
+    const tenantId = await resolveTenantReadFilter(supabase, context.userId);
     const { getSendWindow, isWithinWindow, nextAllowedAt, invalidateSendWindowCache } =
       await import("./send-window.server");
     invalidateSendWindowCache();
@@ -37,19 +40,22 @@ export const getSendWindowStatus = createServerFn({ method: "GET" })
     // mas com flag de fora-da-janela.
     const inOneDayIso = new Date(now.getTime() + 26 * 3600_000).toISOString();
     const [emailLeads, callProgress, scheduledCampaigns] = await Promise.all([
-      supabase
-        .from("email_flow_leads")
-        .select("id,next_run_at", { count: "exact", head: false })
+      withTenantFilter(
+        supabase.from("email_flow_leads").select("id,next_run_at", { count: "exact", head: false }),
+        tenantId,
+      )
         .in("status", ["pending", "running"])
         .lte("next_run_at", inOneDayIso),
-      supabase
-        .from("call_flow_progress")
-        .select("id,next_run_at", { count: "exact", head: false })
+      withTenantFilter(
+        supabase.from("call_flow_progress").select("id,next_run_at", { count: "exact", head: false }),
+        tenantId,
+      )
         .eq("status", "active")
         .lte("next_run_at", inOneDayIso),
-      supabase
-        .from("email_campaigns")
-        .select("id,scheduled_at", { count: "exact", head: false })
+      withTenantFilter(
+        supabase.from("email_campaigns").select("id,scheduled_at", { count: "exact", head: false }),
+        tenantId,
+      )
         .eq("status", "agendada")
         .lte("scheduled_at", inOneDayIso),
     ]);
@@ -76,15 +82,11 @@ export const getSendWindowStatus = createServerFn({ method: "GET" })
 
     // última execução = mais recente envio nos canais (email + sms)
     const [lastEmail, lastSms] = await Promise.all([
-      supabase
-        .from("email_send_logs")
-        .select("sent_at,created_at")
+      withTenantFilter(supabase.from("email_send_logs").select("sent_at,created_at"), tenantId)
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle(),
-      supabase
-        .from("sms_send_logs")
-        .select("created_at")
+      withTenantFilter(supabase.from("sms_send_logs").select("created_at"), tenantId)
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle(),

@@ -131,26 +131,21 @@ type SettingsClient = {
   };
 };
 
+type DepositCountFilter = {
+  eq: (column: string, value: unknown) => DepositCountFilter;
+  range: (
+    from: number,
+    to: number,
+  ) => Promise<{
+    data: Array<{ player_id: string | null }> | null;
+    error: { message: string } | null;
+  }>;
+};
+
 type DepositCountClient = {
   from: (table: string) => {
     select: (columns: string) => {
-      in: (
-        column: string,
-        values: string[],
-      ) => {
-        eq: (
-          column: string,
-          value: unknown,
-        ) => {
-          range: (
-            from: number,
-            to: number,
-          ) => Promise<{
-            data: Array<{ player_id: string | null }> | null;
-            error: { message: string } | null;
-          }>;
-        };
-      };
+      in: (column: string, values: string[]) => DepositCountFilter;
     };
   };
 };
@@ -277,7 +272,15 @@ function applyGamificationDimensions<T extends QueryLike>(
   return result;
 }
 
-async function attachDepositCounts(client: unknown, rows: PlayerRow[]): Promise<PlayerRow[]> {
+async function attachDepositCounts(
+  client: unknown,
+  rows: PlayerRow[],
+  // CON-08: tenant of the rows when the caller filtered players by it, so the deposits
+  // query carries an explicit tenant filter instead of relying on RLS alone. null when
+  // the rows came from players_by_behavior_filters (security invoker, no tenant filter:
+  // for a super admin it may span tenants), keeping that path exactly as before.
+  tenantId: string | null,
+): Promise<PlayerRow[]> {
   const supabase = client as DepositCountClient;
   if (rows.length === 0) return rows;
   const ids = rows.map((row) => row.id);
@@ -285,10 +288,9 @@ async function attachDepositCounts(client: unknown, rows: PlayerRow[]): Promise<
   const pageSize = 1000;
 
   for (let from = 0; ; from += pageSize) {
-    const { data, error } = await supabase
-      .from("deposits")
-      .select("player_id")
-      .in("player_id", ids)
+    let query = supabase.from("deposits").select("player_id").in("player_id", ids);
+    if (tenantId) query = query.eq("tenant_id", tenantId);
+    const { data, error } = await query
       .eq("status", "aprovado")
       .range(from, from + pageSize - 1);
     if (error) throw new Error(error.message);
@@ -493,6 +495,7 @@ export const getPlayersPage = createServerFn({ method: "POST" })
       const enrichedRows = await attachDepositCounts(
         supabase,
         (rows ?? []) as unknown as PlayerRow[],
+        usesCombinedBehaviorFilters ? null : (tenantId as string),
       );
       return { rows: enrichedRows, total: count ?? 0 };
     }
@@ -644,7 +647,11 @@ export const getPlayersPage = createServerFn({ method: "POST" })
     // re-ordena conforme pageIds
     const byId = new Map((rows ?? []).map((r) => [(r as { id: string }).id, r]));
     const ordered = pageIds.map((id) => byId.get(id)).filter(Boolean) as unknown as PlayerRow[];
-    const enrichedRows = await attachDepositCounts(supabase, ordered);
+    const enrichedRows = await attachDepositCounts(
+      supabase,
+      ordered,
+      usesCombinedBehaviorFilters ? null : (tenantId as string),
+    );
     return { rows: enrichedRows, total: total || all.length };
   });
 

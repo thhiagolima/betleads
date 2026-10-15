@@ -3,9 +3,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, useNavigate } from "@tanstack/react-router";
 import {
-  CalendarDays,
   ChevronRight,
   CircleDollarSign,
+  Info,
   Mail,
   MessageSquare,
   Pause,
@@ -41,7 +41,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { TRIGGER_NAMES } from "@/lib/triggers";
+
+// Grade A only: direct conversion_attributions (confirmed first-party click,
+// same player, up to 7 days). Operational deposits never appear in journeys.
+const ATTRIBUTED_RECOVERY_HINT =
+  "Depósitos com clique confirmado no link da jornada, até 7 dias após o clique.";
 
 type Journey = {
   id: string;
@@ -92,7 +98,6 @@ export function JourneysHub() {
   const [filter, setFilter] = useState<"all" | Journey["status"]>("all");
   const [search, setSearch] = useState("");
   const [view, setView] = useState<"journeys" | "queue" | "conflicts" | "failures">("journeys");
-  const [period, setPeriod] = useState("Hoje");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
   const [dailyMessageLimit, setDailyMessageLimit] = useState("");
@@ -223,15 +228,13 @@ export function JourneysHub() {
           (sum, value) => sum + Number(value),
           0,
         );
-        total.returned +=
-          Number(metrics.exits?.deposit ?? 0) + Number(metrics.exits?.first_deposit ?? 0);
         total.queued +=
           Number(metrics.byStatus?.active ?? 0) +
           Number(metrics.byStatus?.waiting ?? 0) +
           Number(metrics.byStatus?.paused_by_priority ?? 0);
         return total;
       },
-      { recovered: 0, sent: 0, returned: 0, queued: 0 },
+      { recovered: 0, sent: 0, queued: 0 },
     );
   }, [journeys.data?.journeys]);
   return (
@@ -253,55 +256,32 @@ export function JourneysHub() {
           </Button>
         </div>
       </div>
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="inline-flex rounded-2xl bg-muted p-1">
-          {["Hoje", "Ontem", "7 dias", "30 dias", "Este mes"].map((item) => (
-            <button
-              key={item}
-              onClick={() => setPeriod(item)}
-              className={
-                period === item
-                  ? "rounded-xl bg-background px-3 py-2 text-sm font-semibold shadow-sm"
-                  : "px-3 py-2 text-sm font-medium text-muted-foreground"
-              }
-            >
-              {item}
-            </button>
-          ))}
-        </div>
-        <Button
-          variant="outline"
-          className="rounded-2xl"
-          onClick={() => toast.message("Selecao de intervalo em breve.")}
-        >
-          <CalendarDays className="mr-2 h-4 w-4" />
-          Escolher datas
-        </Button>
-      </div>
+      {/* Period selector (Hoje/7/30 dias) hidden: list_journey_metrics has no
+          date filter, so totals below are all-time. Restore with REP-02. */}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <OverviewCard
           icon={CircleDollarSign}
-          label="Recuperado"
+          label="Recuperado atribuído"
           value={overview.recovered.toLocaleString("pt-BR", {
             style: "currency",
             currency: "BRL",
             maximumFractionDigits: 0,
           })}
-          detail="Receita atribuida as jornadas"
+          detail={ATTRIBUTED_RECOVERY_HINT}
           color="emerald"
         />
         <OverviewCard
           icon={Send}
           label="Mensagens enviadas"
           value={overview.sent.toLocaleString("pt-BR")}
-          detail={`${period}, todos os canais`}
+          detail="Desde o início, todos os canais"
           color="blue"
         />
         <OverviewCard
           icon={UsersRound}
-          label="Jogadores que voltaram"
-          value={overview.returned.toLocaleString("pt-BR")}
-          detail={`${overview.queued.toLocaleString("pt-BR")} jogadores na fila`}
+          label="Jogadores na fila"
+          value={overview.queued.toLocaleString("pt-BR")}
+          detail="Ativos, aguardando ou pausados por prioridade"
           color="cyan"
         />
         <OverviewCard
@@ -501,8 +481,6 @@ export function JourneysHub() {
                   (total, value) => total + Number(value),
                   0,
                 );
-                const deposits =
-                  Number(metrics.exits?.deposit ?? 0) + Number(metrics.exits?.first_deposit ?? 0);
                 return (
                   <div
                     key={journey.id}
@@ -548,16 +526,13 @@ export function JourneysHub() {
                         )}
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-x-7 gap-y-3 sm:grid-cols-5">
+                    <div className="grid grid-cols-2 gap-x-7 gap-y-3 sm:grid-cols-4">
                       <JourneyMetric label="Elegíveis agora" value="—" />
                       <JourneyMetric label="Na fila" value={queued.toLocaleString("pt-BR")} />
                       <JourneyMetric label="Enviados" value={sent.toLocaleString("pt-BR")} />
                       <JourneyMetric
-                        label="Depósitos operacionais"
-                        value={deposits.toLocaleString("pt-BR")}
-                      />
-                      <JourneyMetric
-                        label="Recuperado operacional"
+                        label="Recuperado atribuído"
+                        hint={ATTRIBUTED_RECOVERY_HINT}
                         value={Number(metrics.recovered ?? 0).toLocaleString("pt-BR", {
                           style: "currency",
                           currency: "BRL",
@@ -755,16 +730,23 @@ export function JourneysHub() {
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Como a conta e feita</DialogTitle>
-            <DialogDescription>O que entra em Recuperado e o que fica de fora.</DialogDescription>
+            <DialogDescription>
+              O que entra em Recuperado atribuído e o que fica de fora.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 text-sm leading-relaxed text-muted-foreground">
             <p className="font-semibold text-foreground">
-              Em cada jornada, cada clique marca o primeiro deposito que vier em ate 24 horas depois
-              dele.
+              Conta como recuperado o depósito do mesmo jogador feito em até 7 dias depois de um
+              clique confirmado no link da jornada.
             </p>
             <p>
-              Se o jogador clicar e depositar mais de uma vez, cada deposito e atribuido a apenas
-              uma mensagem. Depositos sem clique anterior nao entram na conta.
+              Cada depósito é atribuído a apenas uma mensagem: a do último clique rastreado.
+              Depósitos entre o 8º e o 14º dia ficam registrados como assistidos e não entram no
+              recuperado.
+            </p>
+            <p>
+              Depósitos sem clique confirmado no link da jornada são operacionais e não aparecem nas
+              telas de jornadas.
             </p>
             <p>
               Quem deposita em qualquer etapa sai da jornada na hora. Jogadores que pediram para
@@ -896,15 +878,37 @@ function formatWait(seconds: number) {
 function JourneyMetric({
   label,
   value,
+  hint,
   accent = false,
 }: {
   label: string;
   value: string;
+  hint?: string;
   accent?: boolean;
 }) {
   return (
     <div className="text-right">
-      <p className="whitespace-nowrap text-xs text-muted-foreground">{label}</p>
+      <p className="flex items-center justify-end gap-1 whitespace-nowrap text-xs text-muted-foreground">
+        {label}
+        {hint ? (
+          <TooltipProvider delayDuration={150}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={`Sobre ${label}: ${hint}`}
+                  className="rounded-full text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <Info className="h-3.5 w-3.5" aria-hidden="true" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs whitespace-normal text-left">
+                {hint}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        ) : null}
+      </p>
       <p className={`mt-0.5 font-semibold tabular-nums ${accent ? "text-emerald-500" : ""}`}>
         {value}
       </p>

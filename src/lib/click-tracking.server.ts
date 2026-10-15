@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { captureServerException } from "@/lib/observability/sentry.server";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const BOT_PATTERN =
@@ -10,14 +11,95 @@ function bytesToBase64Url(bytes: Uint8Array) {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
-function trackingSecret(explicit?: string) {
-  const secret =
-    explicit ?? process.env.CLICK_TRACKING_SECRET?.trim() ?? process.env.CRON_SECRET?.trim();
-  if (!secret || secret.length < 32) {
-    throw new Error("CLICK_TRACKING_SECRET (ou CRON_SECRET) deve possuir ao menos 32 caracteres");
+const MIN_SECRET_LENGTH = 32;
+
+type SecretEnv = Record<string, string | undefined>;
+
+export type ClickTrackingSecretResolution =
+  | { ok: true; secret: string; source: "explicit" | "CLICK_TRACKING_SECRET" | "CRON_SECRET" }
+  | {
+      ok: false;
+      source: "explicit" | "CLICK_TRACKING_SECRET" | "CRON_SECRET" | null;
+      reason: string;
+    };
+
+/**
+ * Picks the HMAC secret for click tokens. Empty or whitespace-only values are
+ * treated as missing (`.env.example` ships `CLICK_TRACKING_SECRET=`), so the
+ * CRON_SECRET fallback still applies. A non-empty secret shorter than 32
+ * characters is a misconfiguration and is reported, never silently skipped:
+ * falling through would change every issued signature.
+ * The returned reason never contains secret material.
+ */
+export function resolveClickTrackingSecret(
+  explicit?: string,
+  env: SecretEnv = process.env,
+): ClickTrackingSecretResolution {
+  const candidates = [
+    ["explicit", explicit],
+    ["CLICK_TRACKING_SECRET", env.CLICK_TRACKING_SECRET],
+    ["CRON_SECRET", env.CRON_SECRET],
+  ] as const;
+  for (const [source, raw] of candidates) {
+    const value = raw?.trim();
+    if (!value) continue;
+    if (value.length < MIN_SECRET_LENGTH) {
+      return {
+        ok: false,
+        source,
+        reason: `${source} deve possuir ao menos ${MIN_SECRET_LENGTH} caracteres (atual: ${value.length})`,
+      };
+    }
+    return { ok: true, secret: value, source };
   }
-  return secret;
+  return {
+    ok: false,
+    source: null,
+    reason: "CLICK_TRACKING_SECRET e CRON_SECRET ausentes ou vazios",
+  };
 }
+
+let configReported = false;
+
+/**
+ * Validates the environment secret once per process. When invalid it logs a
+ * clear error and reports to Sentry, but never throws: unrelated routes that
+ * import this module must keep working. Tracked sends and the redirect still
+ * fail closed through trackingSecret().
+ */
+export function validateClickTrackingConfig(env: SecretEnv = process.env): boolean {
+  const resolution = resolveClickTrackingSecret(undefined, env);
+  if (resolution.ok || configReported) return resolution.ok;
+  configReported = true;
+  const message = `[click-tracking] configuração inválida: ${resolution.reason}. Envios rastreados e o redirect /api/public/click falharão até que CLICK_TRACKING_SECRET (ou CRON_SECRET) tenha ao menos ${MIN_SECRET_LENGTH} caracteres.`;
+  console.error(message);
+  captureServerException(new Error(message), {
+    job: "click-tracking-config",
+    tags: { secret_source: resolution.source ?? "none" },
+  });
+  return false;
+}
+
+/** Test-only: allows the once-per-process report to fire again. */
+export function resetClickTrackingConfigReportForTests() {
+  configReported = false;
+}
+
+function trackingSecret(explicit?: string) {
+  const resolution = resolveClickTrackingSecret(explicit);
+  if (!resolution.ok) {
+    if (!explicit?.trim()) validateClickTrackingConfig();
+    throw new Error(
+      `CLICK_TRACKING_SECRET (ou CRON_SECRET) deve possuir ao menos ${MIN_SECRET_LENGTH} caracteres: ${resolution.reason}`,
+    );
+  }
+  return resolution.secret;
+}
+
+// Boot-time check: runs when the server bundle first loads this module (the
+// click route and every tracked-send path import it). Skipped under vitest so
+// tests control the environment explicitly.
+if (typeof process !== "undefined" && !process.env?.VITEST) validateClickTrackingConfig();
 
 async function hmac(value: string, explicitSecret?: string) {
   const key = await crypto.subtle.importKey(
