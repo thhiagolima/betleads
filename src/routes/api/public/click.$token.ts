@@ -27,6 +27,8 @@ export const Route = createFileRoute("/api/public/click/$token")({
               error: result.trackingError,
             });
           }
+          // Bots, duplicates and rate-limited hits are redirected exactly like
+          // humans (TRK-06): filtering only changes what is recorded.
           return new Response(null, {
             status: 302,
             headers: {
@@ -51,6 +53,8 @@ export const Route = createFileRoute("/api/public/click/$token")({
           );
         }
       },
+      // TRK-06 R2: HEAD is never a tap (link checkers / scanners). It is answered
+      // without touching the database and is never recorded as a click.
       HEAD: async ({ request, params }: { request: Request; params: { token: string } }) => {
         void request;
         void params;

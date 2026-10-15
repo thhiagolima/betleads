@@ -2,8 +2,6 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { captureServerException } from "@/lib/observability/sentry.server";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const BOT_PATTERN =
-  /bot|crawler|spider|preview|facebookexternalhit|facebot|whatsapp|telegrambot|slackbot|discordbot|googleimageproxy|outlook|skypeuripreview|headless/i;
 
 function bytesToBase64Url(bytes: Uint8Array) {
   let binary = "";
@@ -143,13 +141,256 @@ export async function buildFirstPartyClickUrl(token: string, explicitSecret?: st
   return `${base}/api/public/click/${encodeURIComponent(token)}?s=${encodeURIComponent(signature)}`;
 }
 
-export function classifyClickUserAgent(userAgent: string | null) {
-  if (!userAgent) return { classification: "unknown" as const, isHuman: true };
-  if (BOT_PATTERN.test(userAgent)) {
-    return { classification: "suspected_bot" as const, isHuman: false };
-  }
-  return { classification: "human" as const, isHuman: true };
+// ---------------------------------------------------------------------------
+// TRK-06 — bot, preview and abuse filtering for the first-party redirect.
+//
+// Every request that reaches the redirect still gets its 302. These rules only
+// decide whether the event counts as a human click (`is_human`), which is the
+// sole input of reported clicks and of resolve_last_attributable_click. The
+// reason is stored in metadata.bot_reason; bot_classification keeps its
+// existing values ('human' | 'suspected_bot' | 'unknown') so the CHECK
+// constraint and the deploy order stay independent.
+// ---------------------------------------------------------------------------
+
+/**
+ * Link-preview fetchers of messengers, social networks and SMS apps. They fetch
+ * the URL when a message is rendered, not when someone taps it. Apple's
+ * iMessage preview identifies itself with the "facebookexternalhit ...
+ * Facebot Twitterbot" composite UA.
+ */
+const LINK_PREVIEW_PATTERN =
+  /facebookexternalhit|facebot|twitterbot|whatsapp|telegrambot|slackbot|slack-imgproxy|discordbot|skypeuripreview|microsoftpreview|linkedinbot|pinterest|redditbot|embedly|iframely|vkshare|viber|snapchat|googleimageproxy|google-pagerenderer|google messages|googlemessages|com\.google\.android\.apps\.messaging|outlook|preview/i;
+
+/**
+ * Mail/URL security gateways and AV link checkers (Microsoft Defender /
+ * Safe Links, Proofpoint, Mimecast, Barracuda, Cisco IronPort, Bitdefender,
+ * Kaspersky, ...). Several of them also use plain browser UAs; those are
+ * caught by the header and timing rules instead. Consumer browsers that ship
+ * with an AV brand (Avast/AVG/Norton Secure Browser) are deliberately absent.
+ */
+const SECURITY_SCANNER_PATTERN =
+  /safelinks|microsoft-atp|defender|proofpoint|ppops|mimecast|barracuda|ironport|cisco|bitdefender|kaspersky|trendmicro|trend micro|sophos|fortiguard|fortinet|zscaler|forcepoint|websense|symantec|checkpoint|check point|paloalto|safebrowsing|virustotal|urlscan|netcraft|phishtank|scanner/i;
+
+/** Crawlers, headless browsers and HTTP libraries. */
+const AUTOMATION_PATTERN =
+  /bot\b|bot\/|crawler|spider|slurp|headless|phantomjs|selenium|puppeteer|playwright|lighthouse|curl\/|wget\/|python-|python\/|aiohttp|httpx|scrapy|go-http-client|okhttp|java\/|libwww|httpclient|apache-http|axios\/|node-fetch|undici|ruby|perl\/|php\/|postmanruntime|insomnia/i;
+
+/** Real devices whose model name ends in "bot" (e.g. "CUBOT KINGKONG 5"). */
+const DEVICE_NAME_FALSE_POSITIVES = /cubot/gi;
+
+export const MACHINE_SPEED_MS = 3_000;
+export const DUPLICATE_WINDOW_MS = 10_000;
+export const IP_HOP_WINDOW_MS = 60_000;
+
+export type ClickBotReason =
+  | "missing_user_agent"
+  | "head_request"
+  | "prefetch"
+  | "link_preview"
+  | "security_scanner"
+  | "automation"
+  | "non_browser_headers"
+  | "machine_speed"
+  | "ip_hop_repeat";
+
+export type ClickClassification = {
+  classification: "human" | "suspected_bot" | "unknown";
+  isHuman: boolean;
+  reason: ClickBotReason | null;
+};
+
+export type ClickRequestSignals = {
+  method: string;
+  userAgent: string | null;
+  accept: string | null;
+  acceptLanguage: string | null;
+  /** `Sec-Purpose` / `Purpose` / `X-Moz` header, when present. */
+  purpose: string | null;
+  /** link_dispatches.sent_at (ISO) or null when not yet marked as sent. */
+  sentAt: string | null;
+  nowMs: number;
+};
+
+const HUMAN: ClickClassification = { classification: "human", isHuman: true, reason: null };
+
+function suspect(reason: ClickBotReason): ClickClassification {
+  return {
+    classification: reason === "missing_user_agent" ? "unknown" : "suspected_bot",
+    isHuman: false,
+    reason,
+  };
 }
+
+/** UA-only rules: missing UA, previews, scanners, automation. */
+export function classifyClickUserAgent(userAgent: string | null): ClickClassification {
+  const ua = userAgent?.trim();
+  // R1 — browsers always send a User-Agent; its absence is a script.
+  if (!ua) return suspect("missing_user_agent");
+  const normalized = ua.replace(DEVICE_NAME_FALSE_POSITIVES, "");
+  // R3 — preview fetchers render the message, nobody tapped the link.
+  if (LINK_PREVIEW_PATTERN.test(normalized)) return suspect("link_preview");
+  // R4 — mail / SMS / AV security gateways detonating URLs.
+  if (SECURITY_SCANNER_PATTERN.test(normalized)) return suspect("security_scanner");
+  // R5 — crawlers, headless browsers and HTTP client libraries.
+  if (AUTOMATION_PATTERN.test(normalized)) return suspect("automation");
+  return HUMAN;
+}
+
+function isBrowserNavigationAccept(accept: string | null) {
+  if (!accept) return false;
+  return /text\/html|application\/xhtml\+xml/i.test(accept);
+}
+
+/**
+ * Pure classifier for one redirect request. Rules are evaluated in order and
+ * the first match wins; see TRK-06 in
+ * docs/ESCOPO_ESCALA_TRACKING_ATRIBUICAO_2026-10-14.md.
+ */
+export function classifyClickRequest(signals: ClickRequestSignals): ClickClassification {
+  // R2 — HEAD never comes from a tap: link checkers probe without a body.
+  if (signals.method.toUpperCase() === "HEAD") return suspect("head_request");
+  const byUserAgent = classifyClickUserAgent(signals.userAgent);
+  if (!byUserAgent.isHuman) return byUserAgent;
+  // R2b — speculative prefetch/prerender is not a navigation.
+  if (signals.purpose && /prefetch|prerender/i.test(signals.purpose)) return suspect("prefetch");
+  // R6 — a browser navigation always sends Accept-Language and an Accept that
+  // includes text/html. Missing both signals is a script with a spoofed UA.
+  if (!signals.acceptLanguage?.trim() && !isBrowserNavigationAccept(signals.accept)) {
+    return suspect("non_browser_headers");
+  }
+  // R7 — nobody receives, reads and taps an SMS/e-mail within 3 s of the
+  // provider ack. Negative deltas are NOT flagged: sent_at is written after
+  // the provider call returns (batch), so real clicks may precede it.
+  if (signals.sentAt) {
+    const sentMs = Date.parse(signals.sentAt);
+    const delta = signals.nowMs - sentMs;
+    if (Number.isFinite(sentMs) && delta >= 0 && delta < MACHINE_SPEED_MS) {
+      return suspect("machine_speed");
+    }
+  }
+  return HUMAN;
+}
+
+export type RecentClick = {
+  occurredAtMs: number;
+  ipHash: string | null;
+  uaHash: string | null;
+  isHuman: boolean;
+};
+
+export type RecentClickDecision =
+  { action: "skip_duplicate" } | { action: "record"; ipHop: boolean };
+
+/**
+ * Pure dedupe/repeat decision against the recent events of the same dispatch.
+ * - R8 duplicate: same ip_hash + ua_hash within 10 s of an event that is at
+ *   least as "human" as this one → not inserted. A human click is never
+ *   swallowed by an earlier non-human event (e.g. a machine-speed fetch).
+ * - R9 IP hop: same ua_hash from a DIFFERENT ip_hash within 60 s of an
+ *   earlier event → the repeat is a scanner pool re-fetching the link (the
+ *   dominant pattern observed in production: two fetches, one UA, two IPs).
+ *   The first event keeps its classification, so attribution is unaffected.
+ */
+export function evaluateRecentClicks(args: {
+  recent: RecentClick[];
+  ipHash: string | null;
+  uaHash: string | null;
+  isHuman: boolean;
+  nowMs: number;
+}): RecentClickDecision {
+  let ipHop = false;
+  for (const click of args.recent) {
+    const age = args.nowMs - click.occurredAtMs;
+    if (!Number.isFinite(age) || age < -DUPLICATE_WINDOW_MS || age >= IP_HOP_WINDOW_MS) continue;
+    const sameUa = click.uaHash === args.uaHash;
+    const sameIp = click.ipHash === args.ipHash;
+    if (sameUa && sameIp && age < DUPLICATE_WINDOW_MS && (click.isHuman || !args.isHuman)) {
+      return { action: "skip_duplicate" };
+    }
+    if (sameUa && !sameIp && args.uaHash !== null) ipHop = true;
+  }
+  return { action: "record", ipHop };
+}
+
+// ---------------------------------------------------------------------------
+// In-process limiter (best effort, per instance). Over the limit the request
+// is still redirected but not recorded, so a flood never reaches the database
+// beyond the dispatch lookup (served from a short cache while throttled).
+// ---------------------------------------------------------------------------
+
+export class FixedWindowLimiter {
+  private readonly windows = new Map<string, { startMs: number; count: number }>();
+
+  constructor(
+    private readonly limit: number,
+    private readonly windowMs: number,
+    private readonly maxKeys = 10_000,
+  ) {}
+
+  /** Counts the hit and returns true while the key is within its limit. */
+  hit(key: string, nowMs: number): boolean {
+    let entry = this.windows.get(key);
+    if (!entry || nowMs - entry.startMs >= this.windowMs) {
+      if (!entry && this.windows.size >= this.maxKeys) this.evict(nowMs);
+      entry = { startMs: nowMs, count: 0 };
+      this.windows.set(key, entry);
+    }
+    entry.count += 1;
+    return entry.count <= this.limit;
+  }
+
+  get size() {
+    return this.windows.size;
+  }
+
+  clear() {
+    this.windows.clear();
+  }
+
+  private evict(nowMs: number) {
+    for (const [key, entry] of this.windows) {
+      if (nowMs - entry.startMs >= this.windowMs) this.windows.delete(key);
+    }
+    // Still full: drop the oldest quarter (Map keeps insertion order).
+    if (this.windows.size >= this.maxKeys) {
+      let toDrop = Math.ceil(this.maxKeys / 4);
+      for (const key of this.windows.keys()) {
+        if (toDrop-- <= 0) break;
+        this.windows.delete(key);
+      }
+    }
+  }
+}
+
+export const CLICK_LIMIT_PER_TOKEN_PER_MIN = 20;
+export const CLICK_LIMIT_PER_IP_PER_MIN = 120;
+
+type DispatchRow = {
+  id: string;
+  tenant_id: string;
+  tracking_token: string;
+  recipient_player_id: string | null;
+  source_type: string;
+  source_id: string;
+  original_url: string;
+  sent_at: string | null;
+};
+
+const tokenLimiter = new FixedWindowLimiter(CLICK_LIMIT_PER_TOKEN_PER_MIN, 60_000);
+const ipLimiter = new FixedWindowLimiter(CLICK_LIMIT_PER_IP_PER_MIN, 60_000);
+const throttledDispatchCache = new Map<string, { dispatch: DispatchRow; expiresMs: number }>();
+const THROTTLED_CACHE_TTL_MS = 60_000;
+const THROTTLED_CACHE_MAX = 2_000;
+
+/** Test-only: resets the in-process limiters and the throttled cache. */
+export function resetClickLimitersForTests() {
+  tokenLimiter.clear();
+  ipLimiter.clear();
+  throttledDispatchCache.clear();
+}
+
+/** Recording never delays the 302 by more than this; it finishes in background. */
+export const RECORD_BUDGET_MS = 1_500;
 
 async function privacyHash(value: string | null) {
   if (!value) return null;
@@ -176,22 +417,143 @@ function refererHost(request: Request) {
   }
 }
 
-export async function resolveAndRecordFirstPartyClick(args: {
-  token: string;
-  signature: string | null;
+function shortHeader(request: Request, name: string, max = 32) {
+  return request.headers.get(name)?.slice(0, max) ?? null;
+}
+
+export type ClickRecordOutcome = "recorded" | "duplicate" | "rate_limited" | "error" | "pending";
+
+type RecordResult = { outcome: ClickRecordOutcome; trackingError: string | null };
+
+type ClickDeps = { db?: any; nowMs?: () => number; recordBudgetMs?: number };
+
+async function recordClick(args: {
+  db: any;
+  dispatch: DispatchRow;
   request: Request;
-}) {
+  nowMs: number;
+}): Promise<RecordResult> {
+  const { db, dispatch, request, nowMs } = args;
+  const headers = request.headers;
+  const userAgent = headers.get("user-agent");
+  const accept = headers.get("accept");
+  let verdict = classifyClickRequest({
+    method: request.method,
+    userAgent,
+    accept,
+    acceptLanguage: headers.get("accept-language"),
+    purpose: headers.get("sec-purpose") ?? headers.get("purpose") ?? headers.get("x-moz"),
+    sentAt: dispatch.sent_at,
+    nowMs,
+  });
+  const [ipHash, uaHash] = await Promise.all([
+    privacyHash(requestIp(request)),
+    privacyHash(userAgent),
+  ]);
+
+  // Cheap: served by click_events_dispatch_time_idx (link_dispatch_id, occurred_at desc).
+  const { data: recentRows, error: recentError } = await db
+    .from("click_events")
+    .select("occurred_at,ip_hash,user_agent_hash,is_human")
+    .eq("link_dispatch_id", dispatch.id)
+    .gte("occurred_at", new Date(nowMs - IP_HOP_WINDOW_MS).toISOString())
+    .order("occurred_at", { ascending: false })
+    .limit(20);
+  // A failed lookup must not drop the click: record it and let the unique
+  // bucket key below absorb concurrent duplicates.
+  const recent: RecentClick[] = recentError
+    ? []
+    : ((recentRows ?? []) as any[]).map((row) => ({
+        occurredAtMs: Date.parse(String(row.occurred_at)),
+        ipHash: row.ip_hash ?? null,
+        uaHash: row.user_agent_hash ?? null,
+        isHuman: Boolean(row.is_human),
+      }));
+  const decision = evaluateRecentClicks({
+    recent,
+    ipHash,
+    uaHash,
+    isHuman: verdict.isHuman,
+    nowMs,
+  });
+  if (decision.action === "skip_duplicate") return { outcome: "duplicate", trackingError: null };
+  if (decision.ipHop && verdict.isHuman) verdict = suspect("ip_hop_repeat");
+
+  // Race-free dedupe for concurrent requests: one row per 10 s bucket per
+  // (dispatch, ip, ua, humanity) through the existing unique (tenant_id, request_id).
+  const bucket = Math.floor(nowMs / DUPLICATE_WINDOW_MS);
+  const bucketDigest = await hmac(
+    `click-dedupe-v1:${dispatch.id}|${ipHash}|${uaHash}|${verdict.isHuman ? 1 : 0}|${bucket}`,
+  );
+  const { error: insertError } = await db.from("click_events").insert({
+    tenant_id: dispatch.tenant_id,
+    link_dispatch_id: dispatch.id,
+    tracking_token: dispatch.tracking_token,
+    request_id: `dd1:${bytesToBase64Url(bucketDigest.slice(0, 18))}`,
+    ip_hash: ipHash,
+    user_agent_hash: uaHash,
+    referer_host: refererHost(request),
+    bot_classification: verdict.classification,
+    is_human: verdict.isHuman,
+    metadata: {
+      country: headers.get("cf-ipcountry")?.slice(0, 8) ?? null,
+      source_type: dispatch.source_type,
+      source_id: dispatch.source_id,
+      player_bound: Boolean(dispatch.recipient_player_id),
+      classifier: "trk06-v1",
+      bot_reason: verdict.reason,
+      // Non-PII request shape, kept to re-measure the rules in production.
+      accept_kind: !accept ? "none" : isBrowserNavigationAccept(accept) ? "html" : "other",
+      accept_language: Boolean(headers.get("accept-language")?.trim()),
+      sec_fetch_mode: shortHeader(request, "sec-fetch-mode"),
+      sec_fetch_site: shortHeader(request, "sec-fetch-site"),
+      request_ref: (headers.get("cf-ray") ?? headers.get("x-request-id"))?.slice(0, 64) ?? null,
+    },
+  });
+  if (insertError?.code === "23505") return { outcome: "duplicate", trackingError: null };
+  if (insertError) {
+    return { outcome: "error", trackingError: `Falha ao registrar clique: ${insertError.message}` };
+  }
+  return { outcome: "recorded", trackingError: null };
+}
+
+function rememberThrottledDispatch(token: string, dispatch: DispatchRow, nowMs: number) {
+  if (throttledDispatchCache.size >= THROTTLED_CACHE_MAX) throttledDispatchCache.clear();
+  throttledDispatchCache.set(token, { dispatch, expiresMs: nowMs + THROTTLED_CACHE_TTL_MS });
+}
+
+export async function resolveAndRecordFirstPartyClick(
+  args: { token: string; signature: string | null; request: Request },
+  deps: ClickDeps = {},
+) {
   if (!(await verifyClickTokenSignature(args.token, args.signature))) {
     return { ok: false as const, status: 404, reason: "invalid_token" };
   }
+  const db = deps.db ?? (supabaseAdmin as any);
+  const nowMs = (deps.nowMs ?? Date.now)();
 
-  const db = supabaseAdmin as any;
-  const { data: dispatch, error: dispatchError } = await db
-    .from("link_dispatches")
-    .select("id,tenant_id,tracking_token,recipient_player_id,source_type,source_id,original_url")
-    .eq("tracking_token", args.token)
-    .maybeSingle();
-  if (dispatchError) throw new Error(`Falha ao resolver dispatch: ${dispatchError.message}`);
+  // The limiter runs after the signature check so forged tokens cannot fill it.
+  const ip = requestIp(args.request);
+  const tokenAllowed = tokenLimiter.hit(args.token, nowMs);
+  const ipAllowed = ip ? ipLimiter.hit(ip, nowMs) : true;
+  const throttled = !tokenAllowed || !ipAllowed;
+
+  let dispatch: DispatchRow | null = null;
+  const cached = throttled ? throttledDispatchCache.get(args.token) : undefined;
+  if (cached && cached.expiresMs > nowMs) {
+    dispatch = cached.dispatch;
+  } else {
+    const { data, error: dispatchError } = await db
+      .from("link_dispatches")
+      .select(
+        "id,tenant_id,tracking_token,recipient_player_id,source_type,source_id,original_url,sent_at",
+      )
+      .eq("tracking_token", args.token)
+      .maybeSingle();
+    if (dispatchError) throw new Error(`Falha ao resolver dispatch: ${dispatchError.message}`);
+    dispatch = (data as DispatchRow | null) ?? null;
+    if (dispatch && throttled) rememberThrottledDispatch(args.token, dispatch, nowMs);
+  }
   if (!dispatch) return { ok: false as const, status: 404, reason: "dispatch_not_found" };
 
   let destination: URL;
@@ -202,40 +564,53 @@ export async function resolveAndRecordFirstPartyClick(args: {
     return { ok: false as const, status: 410, reason: "invalid_destination" };
   }
 
-  const userAgent = args.request.headers.get("user-agent");
-  const bot = classifyClickUserAgent(userAgent);
-  const requestId =
-    args.request.headers.get("cf-ray") ?? args.request.headers.get("x-request-id") ?? null;
-  const { error: insertError } = await db.from("click_events").insert({
-    tenant_id: dispatch.tenant_id,
-    link_dispatch_id: dispatch.id,
-    tracking_token: dispatch.tracking_token,
-    request_id: requestId?.slice(0, 255) ?? null,
-    ip_hash: await privacyHash(requestIp(args.request)),
-    user_agent_hash: await privacyHash(userAgent),
-    referer_host: refererHost(args.request),
-    bot_classification: bot.classification,
-    is_human: bot.isHuman,
-    metadata: {
-      country: args.request.headers.get("cf-ipcountry")?.slice(0, 8) ?? null,
-      source_type: dispatch.source_type,
-      source_id: dispatch.source_id,
-      player_bound: Boolean(dispatch.recipient_player_id),
-    },
+  if (throttled) {
+    return {
+      ok: true as const,
+      destination: destination.toString(),
+      duplicate: false,
+      outcome: "rate_limited" as ClickRecordOutcome,
+      trackingError: null,
+    };
+  }
+
+  // Delivery must never be held hostage by telemetry: any recording failure is
+  // surfaced to observability while the player still reaches the casino, and a
+  // slow database cannot delay the 302 beyond the record budget (the insert
+  // keeps running in background on the long-lived Node server).
+  const recording: Promise<RecordResult> = recordClick({
+    db,
+    dispatch,
+    request: args.request,
+    nowMs,
+  }).catch((error: unknown) => ({
+    outcome: "error" as const,
+    trackingError: `Falha ao registrar clique: ${error instanceof Error ? error.message : String(error)}`,
+  }));
+  let budgetTimer: ReturnType<typeof setTimeout> | undefined;
+  const budget = new Promise<RecordResult>((resolve) => {
+    budgetTimer = setTimeout(
+      () => resolve({ outcome: "pending", trackingError: null }),
+      deps.recordBudgetMs ?? RECORD_BUDGET_MS,
+    );
   });
-  // Delivery must never be held hostage by telemetry. The final destination
-  // was validated above; a database outage is surfaced to observability while
-  // the player still reaches the casino. Phase 2 will durably enqueue this
-  // event for replay when the insert is unavailable.
-  const trackingError =
-    insertError && insertError.code !== "23505"
-      ? `Falha ao registrar clique: ${insertError.message}`
-      : null;
+  const result = await Promise.race([recording, budget]);
+  clearTimeout(budgetTimer);
+  if (result.outcome === "pending") {
+    void recording.then((late) => {
+      if (late.trackingError) {
+        console.error("[click redirect] late click event was not persisted", {
+          error: late.trackingError,
+        });
+      }
+    });
+  }
 
   return {
     ok: true as const,
     destination: destination.toString(),
-    duplicate: insertError?.code === "23505",
-    trackingError,
+    duplicate: result.outcome === "duplicate",
+    outcome: result.outcome,
+    trackingError: result.trackingError,
   };
 }

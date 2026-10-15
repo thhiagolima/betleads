@@ -341,6 +341,31 @@ Ferramenta: **Supabase Queues (pgmq)** como fila durável inicial, sem novo forn
 - Dedupe por (dispatch, ip_hash, ua_hash, janela de 10 s).
 - Agregado em `link_dispatches` atualizado só no primeiro clique.
 
+**TRK-06 — Implementação (2026-10-15)** · `src/lib/click-tracking.server.ts`, migration `20261015131000_click_bot_filtering.sql` (não aplicada)
+
+Toda requisição com assinatura e destino válidos recebe 302; as regras só decidem `is_human` (única entrada de cliques reportados e de `resolve_last_attributable_click`). Motivo em `metadata.bot_reason`; `bot_classification` mantém `human | suspected_bot | unknown` (sem mudança de CHECK, deploy independente da migration).
+
+| Regra | Condição | Resultado |
+| --- | --- | --- |
+| R1 | sem `User-Agent` (ou vazio) | `unknown`, não humano |
+| R2 | método `HEAD` (a rota responde 204 sem gravar); `Sec-Purpose`/`Purpose: prefetch` | `suspected_bot` |
+| R3 | UA de preview: WhatsApp, Telegram, Slack, Discord, Skype/Teams (`SkypeUriPreview`), iMessage (`facebookexternalhit … Facebot Twitterbot`), Google Messages, Outlook, LinkedIn, `preview` | `link_preview` |
+| R4 | UA de gateway/AV: Safe Links/Defender, Proofpoint, Mimecast, Barracuda, Cisco/IronPort, Bitdefender, Kaspersky, Trend Micro, Sophos, Fortinet, Zscaler, Forcepoint, Symantec, Check Point, Palo Alto, VirusTotal, urlscan | `security_scanner` |
+| R5 | crawlers, headless e bibliotecas HTTP (`bot/`, `curl/`, `python-`, `okhttp`, `Go-http-client`…) — `CUBOT` (marca de celular) é exceção | `automation` |
+| R6 | sem `Accept-Language` **e** `Accept` sem `text/html` | `non_browser_headers` |
+| R7 | 0 ≤ (clique − `sent_at`) < 3 s. Delta negativo não marca: `sent_at` é gravado após o ack do provedor | `machine_speed` |
+| R8 | mesmo dispatch + `ip_hash` + `ua_hash` < 10 s de evento igual ou "mais humano" | não insere (duplicado) |
+| R9 | mesmo dispatch + mesmo `ua_hash` de **outro** `ip_hash` < 60 s | `ip_hop_repeat` (o 1º evento permanece) |
+
+- Dedupe: consulta `click_events (link_dispatch_id, occurred_at ≥ agora − 60 s)` servida por `click_events_dispatch_time_idx` (sem índice novo) + `request_id = dd1:<hmac(dispatch, ip, ua, humano, balde 10 s)>` no índice único `(tenant_id, request_id)` para concorrência. Atribuição inalterada: duplicado nunca suprime um clique humano.
+- Limiter em processo (por instância): > 20 hits/min por token ou > 120/min por IP → redireciona sem gravar; dispatch servido de cache de 60 s enquanto limitado. Gravação nunca segura o 302 por mais de 1,5 s (termina em background).
+- Gatilho: `link_dispatches` só é atualizado no primeiro clique humano (`first_party_click_count` vira 0/1; contagem exata vem de `click_events`).
+- Metadata não-PII nova (`accept_kind`, `accept_language`, `sec_fetch_*`, `request_ref`) para medir R6 em produção.
+
+Cloudflare (aplicar no painel — não temos acesso): *Security → WAF → Rate limiting rules* · expressão `(http.request.uri.path wildcard "/api/public/click/*")` · contar por IP · 300 req / 1 min · ação **Block** por 1 min. Não usar *Challenge* (quebra o 302 em webviews e no fluxo Short.io). Limite folgado de propósito: NAT de operadora concentra muitos jogadores num IP; o corte fino fica no limiter da aplicação, que nunca bloqueia o redirect. **Atenção:** em 2026-10-15 nenhum `click_events` tinha `cf-ray`/`cf-ipcountry` — a origem não está passando pelo proxy do Cloudflare (ou os headers são removidos); a regra só vale com o registro DNS proxied (nuvem laranja).
+
+Medição read-only em produção (2026-10-15, 2.323 eventos de 14–15/out, 3 tenants, 1.270 dispatches): R1 0; R7 0 (< 3 s); R8 2 (0,1%); R9 ≈ 943 (2º acesso de 943 dispatches com 2 cliques: mesmo UA, IPs diferentes, 3–60 s). R3–R6 não mensuráveis retroativamente (UA só em hash, headers não gravados). Sinal forte de scanner: um único `ua_hash` responde por 2.256 eventos (97%) em 1.249 dispatches, 12 IPs concentram 2.255 eventos, CTR aparente 32% (1.263/3.937 SMS) com mediana de 57 s após o envio; 83 das 109 atribuições diretas dependem só desse UA. Nenhuma atribuição muda com R7; o dado sugere que a maior parte dos "cliques" atuais é varredura do operador/SMS e merece revisão antes de confiar no número.
+
 ---
 
 ### Fase F — Relatórios e UX (semana 3–4, CON-05 antecipado)

@@ -42,8 +42,14 @@ describe("first-party click tracking", () => {
     expect(classifyClickUserAgent("Mozilla/5.0 Chrome/131 Safari/537.36")).toEqual({
       classification: "human",
       isHuman: true,
+      reason: null,
     });
-    expect(classifyClickUserAgent(null).classification).toBe("unknown");
+    // TRK-06 R1: a missing User-Agent is no longer counted as human.
+    expect(classifyClickUserAgent(null)).toEqual({
+      classification: "unknown",
+      isHuman: false,
+      reason: "missing_user_agent",
+    });
   });
 });
 

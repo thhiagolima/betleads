@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { POLL_INTERVALS, UpdatedAgo } from "@/hooks/use-updated-ago";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -482,25 +483,21 @@ function AlertRow({
 
 function AlertasPage() {
   const qc = useQueryClient();
-  const { data, isLoading, refetch, isFetching } = useQuery({
+  const { data, isLoading, refetch, isFetching, dataUpdatedAt } = useQuery({
     queryKey: ["alertas"],
     queryFn: fetchAlertsData,
-    refetchInterval: 60000,
+    staleTime: 30_000,
+    refetchInterval: POLL_INTERVALS.stats,
+    refetchOnWindowFocus: true,
   });
 
-  // Realtime: atualiza automaticamente quando players/deposits/sessions/followups mudam
+  // players/deposits/sessions saíram do Realtime (REP-05: escrita alta, cada
+  // mudança refazia a fila inteira) — cobertos pelo polling de 60 s acima.
+  // lead_followups (escrita baixa, feita pelo próprio operador) segue em
+  // Realtime para a fila refletir na hora quem já foi atendido.
   useEffect(() => {
     const channel = supabase
       .channel("alertas-realtime")
-      .on("postgres_changes", { event: "*", schema: "public", table: "players" }, () => {
-        qc.invalidateQueries({ queryKey: ["alertas"] });
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "deposits" }, () => {
-        qc.invalidateQueries({ queryKey: ["alertas"] });
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "sessions" }, () => {
-        qc.invalidateQueries({ queryKey: ["alertas"] });
-      })
       .on("postgres_changes", { event: "*", schema: "public", table: "lead_followups" }, () => {
         qc.invalidateQueries({ queryKey: ["alertas"] });
       })
@@ -606,16 +603,19 @@ function AlertasPage() {
         subtitle="Fila de oportunidades — players com maior potencial de retorno e receita recuperável primeiro."
         icon={<HeartHandshake className="h-5 w-5 text-primary-foreground" />}
         actions={
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => refetch()}
-            disabled={isFetching}
-            className="gap-2"
-          >
-            <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
-            Atualizar
-          </Button>
+          <div className="flex items-center gap-3">
+            <UpdatedAgo ts={dataUpdatedAt} className="hidden sm:inline" />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => refetch()}
+              disabled={isFetching}
+              className="gap-2"
+            >
+              <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
+              Atualizar
+            </Button>
+          </div>
         }
       />
 

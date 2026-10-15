@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
+import { POLL_INTERVALS, UpdatedAgo } from "@/hooks/use-updated-ago";
 import {
   DashboardDateRangePicker,
   defaultTodayRange,
@@ -1412,15 +1412,15 @@ function Dashboard() {
     queryFn: () => breakdownFn({ data: { date: rk.to } }),
     enabled: resendOpen,
   });
-  useRealtimeInvalidate(
-    "sms-dashboard-realtime",
-    ["sms_send_logs", "sms_flow_leads", "dispatcher_runs", "dispatch_rate_state"],
-    [["sms-dashboard"]],
-  );
-  const { data } = useQuery({
+  // Sem Realtime (REP-05): sms_send_logs recebe dezenas de inserts por minuto
+  // e cada um invalidava este dashboard. Polling de 30 s (só com a aba
+  // visível) + refetch ao voltar o foco.
+  const { data, dataUpdatedAt } = useQuery({
     queryKey: ["sms-dashboard", rk.from, rk.to],
     queryFn: () => fn({ data: rk }),
-    refetchInterval: 10_000,
+    staleTime: 15_000,
+    refetchInterval: POLL_INTERVALS.dashboard,
+    refetchOnWindowFocus: true,
     placeholderData: (prev) => prev,
   });
 
@@ -1466,7 +1466,10 @@ function Dashboard() {
             Métricas atualizadas a cada 30s · janela de conversão: 72h pós-SMS
           </p>
         </div>
-        <DashboardDateRangePicker range={range} onChange={setRange} />
+        <div className="flex items-center gap-3">
+          <UpdatedAgo ts={dataUpdatedAt} className="hidden sm:inline" />
+          <DashboardDateRangePicker range={range} onChange={setRange} />
+        </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

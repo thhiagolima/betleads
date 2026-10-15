@@ -2,6 +2,7 @@ import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tan
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { POLL_INTERVALS } from "@/hooks/use-updated-ago";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -625,25 +626,13 @@ function PlayersPage() {
     return new Set(alertIdsData.byTipo[filter] ?? []);
   }, [alertIdsData, filter]);
 
-  // Realtime: atualiza a tabela quando players/depositos mudarem.
-  // Faz debounce (3s) pra não disparar uma rajada de refetches em horário de pico.
+  // REP-05: players/deposits saíram da publicação Realtime (escrita alta). A
+  // tabela agora faz polling de 60 s (ver query "players-page"). Fica só
+  // lead_followups em Realtime: escrita baixa, feita pelo operador, e as
+  // listas de follow-up precisam refletir na hora.
   useEffect(() => {
-    let pending: ReturnType<typeof setTimeout> | null = null;
-    let lastRefreshAt = 0;
-    const schedule = () => {
-      if (pending) clearTimeout(pending);
-      const wait = Math.max(0, 30_000 - (Date.now() - lastRefreshAt));
-      pending = setTimeout(() => {
-        pending = null;
-        lastRefreshAt = Date.now();
-        qc.invalidateQueries({ queryKey: ["players-page"] });
-      }, wait);
-    };
     const channel = supabase
       .channel("players-realtime")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "players" }, schedule)
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "players" }, schedule)
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "deposits" }, schedule)
       .on("postgres_changes", { event: "*", schema: "public", table: "lead_followups" }, () => {
         qc.invalidateQueries({ queryKey: ["players-alerts"] });
         qc.invalidateQueries({ queryKey: ["players-recent-followup-keys"] });
@@ -654,7 +643,6 @@ function PlayersPage() {
       })
       .subscribe();
     return () => {
-      if (pending) clearTimeout(pending);
       supabase.removeChannel(channel);
     };
   }, [qc]);
@@ -810,6 +798,10 @@ function PlayersPage() {
       : true,
     placeholderData: (prev) => prev,
     staleTime: 60_000,
+    // Substitui o Realtime de players/deposits (REP-05): mesma cadência
+    // efetiva de antes (o Realtime já era limitado a 1 refresh a cada 30 s),
+    // sem depender do WAL das tabelas de alta escrita.
+    refetchInterval: POLL_INTERVALS.stats,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     refetchOnMount: false,

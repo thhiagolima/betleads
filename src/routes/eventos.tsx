@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { POLL_INTERVALS, UpdatedAgo } from "@/hooks/use-updated-ago";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -52,9 +52,7 @@ const config: Record<
 };
 
 function EventosPage() {
-  const qc = useQueryClient();
-
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, dataUpdatedAt } = useQuery({
     queryKey: ["events"],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -65,27 +63,18 @@ function EventosPage() {
       if (error) throw error;
       return data ?? [];
     },
+    // REP-05: `events` saiu da publicação Realtime (escrita alta). O feed
+    // passa a buscar os 100 mais recentes a cada 15 s com a aba visível.
+    staleTime: 10_000,
+    refetchInterval: POLL_INTERVALS.liveList,
+    refetchOnWindowFocus: true,
   });
-
-  useEffect(() => {
-    const ch = supabase
-      .channel("events-feed")
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "events" },
-        () => qc.invalidateQueries({ queryKey: ["events"] }),
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(ch);
-    };
-  }, [qc]);
 
   return (
     <div className="space-y-4">
       <PageHeader
         title="Stream de Eventos"
-        subtitle="Atividade dos players em tempo real — logins, depósitos, jogos e mais"
+        subtitle="Atividade recente dos players — logins, depósitos, jogos e mais"
         icon={<Activity className="h-5 w-5 text-primary-foreground" />}
       />
       <Card className="border-border/50 bg-card/60 backdrop-blur">
@@ -93,10 +82,11 @@ function EventosPage() {
         <div className="flex items-center justify-between border-b border-border/60 px-5 py-3">
           <div className="flex items-center gap-2 text-sm">
             <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_8px] shadow-emerald-400/70 animate-pulse" />
-            Stream em tempo real
+            Atualização automática a cada 15 s
           </div>
-          <div className="text-xs text-muted-foreground">
-            {data?.length ?? 0} eventos recentes
+          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+            <UpdatedAgo ts={dataUpdatedAt} />
+            <span>{data?.length ?? 0} eventos recentes</span>
           </div>
         </div>
         <div className="max-h-[calc(100vh-220px)] overflow-y-auto divide-y divide-border/40">

@@ -83,3 +83,30 @@ create table public.journey_events (
   detail jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now()
 );
+
+-- Run log written by process_journey_level_outbox() (WHK-01). Columns from
+-- 20260607023626 (dispatcher_runs) + 20261014220000 (status/heartbeat_at/job/tenant_id).
+create table public.dispatcher_runs (
+  id bigserial primary key,
+  channel text not null,
+  kind text not null default 'tick',
+  started_at timestamptz not null default now(),
+  finished_at timestamptz,
+  duration_ms int,
+  queue_before int not null default 0,
+  claimed int not null default 0,
+  sent int not null default 0,
+  errors int not null default 0,
+  rescheduled int not null default 0,
+  rate_limited int not null default 0,
+  lock_recovered int not null default 0,
+  target_rate int,
+  actual_rate int,
+  stop_reason text,
+  provider text,
+  last_provider_error text,
+  status text check (status is null or status in ('running', 'succeeded', 'failed', 'partial')),
+  heartbeat_at timestamptz,
+  job text,
+  tenant_id uuid
+);

@@ -408,3 +408,45 @@ order by 1, 2;
 Campanhas com o cursor parado pelo breaker retomam sozinhas quando ele fecha. Para listá-las: `select id, tenant_id, status, sent_cursor, total_count, last_error from public.sms_campaigns where last_error like 'Envio de SMS suspenso%';`.
 
 Situação em 15/10/2026, por volta de 16:30 UTC (somente leitura): **nenhum** log de campanha com 101/505 (os 797 logs de erro eram todos de jornadas) e nenhum lead de fluxo SMS falhou.
+
+## 10. Transição de nível fora do depósito (WHK-01)
+
+Migration `20261015130000_level_transition_outbox.sql` (Fase D de `docs/ESCOPO_ESCALA_TRACKING_ATRIBUICAO_2026-10-14.md`).
+
+### 10.1 Como funciona
+
+- O trigger `trg_players_journey_level_transition` (função `transition_journey_level_on_deposit()`, mesmo nome) agora só calcula os dois níveis e, se mudou, grava uma linha em `public.journey_level_outbox` (com o `deposit_id` aprovado mais recente). Nada em `journey_enrollments`/`journey_events` roda na transação do depósito: lock, FK ou timeout da jornada não desfazem mais o depósito.
+- `public.process_journey_level_outbox(500)` roda no pg_cron (`betleads-journey-level-outbox`, `* * * * *`, SQL puro, `statement_timeout` 50 s, `lock_timeout` 5 s). Cada linha é aplicada em subtransação com a mesma semântica de antes (sai das inscrições `progressao_niveis` com `exit_reason='level_changed'` + evento `level_changed`; entra na jornada do novo nível com `entry_key='level:<nível>'` + evento `level_entered`).
+- **Latência:** a jornada de nível começa até ~1 min (+ processamento) após o commit do depósito. Jornadas por evento (`enrollPlayerOnEvent`) não mudam.
+- Ordem por jogador: uma linha só é processada quando não há linha anterior pendente do mesmo jogador. Erro em uma linha só segura as linhas seguintes daquele jogador.
+- Erro: `attempts + 1`, `last_error = '<SQLSTATE>: <mensagem>'`, nova tentativa em 1, 2, 4, 8, 16, 30… min. Após 10 tentativas: `dead_at` preenchido (não tenta mais e libera as próximas linhas do jogador).
+- Cada execução grava uma linha em `dispatcher_runs` (`job='journey_level_outbox'`), então aparece em `observability_job_health()`. Linhas processadas há mais de 30 dias são apagadas pelo próprio worker (até 1000 por execução).
+
+### 10.2 Consultas
+
+```sql
+SET default_transaction_read_only = on;
+SET statement_timeout = '15s';
+select * from public.observability_journey_level_outbox();
+select * from public.observability_job_health() where job = 'journey_level_outbox';
+select jobid, status, return_message, start_time, end_time
+from cron.job_run_details
+where jobid = (select jobid from cron.job where jobname = 'betleads-journey-level-outbox')
+order by start_time desc limit 10;
+```
+
+| Indicador | Normal | Alerta |
+| --- | --- | --- |
+| `oldest_pending_age_seconds` | < 120 | > 300 (worker parado ou travado) |
+| `ready` | 0 entre execuções | > 0 por 3 min |
+| `retrying` | 0 | > 0 por 15 min → ver `last_error` |
+| `dead_last_24h` | 0 | qualquer ocorrência |
+| `seconds_since_last_start` (`journey_level_outbox`) | < 90 | > 180 → cron parado |
+
+### 10.3 Procedimentos
+
+- Ver as linhas com erro: `select id, tenant_id, current_level, attempts, last_error, next_attempt_at, dead_at from public.journey_level_outbox where processed_at is null and last_error is not null order by id;`
+- Reenfileirar após corrigir a causa (escrita, fora do modo somente leitura): `update public.journey_level_outbox set dead_at = null, attempts = 0, next_attempt_at = now() where id = <id>;`. Atenção: uma linha morta reprocessada depois de linhas posteriores do mesmo jogador sairia da jornada do nível atual; nesse caso, marcar como processada (`processed_at = now(), result = 'manual_skip'`) em vez de reenfileirar.
+- Rodar já, sem esperar o cron: `select public.process_journey_level_outbox(500);` (service_role/postgres).
+- Pausar: `select cron.unschedule('betleads-journey-level-outbox');` — os depósitos continuam gravando na outbox; ao reagendar, o backlog é aplicado em ordem.
+- Rollback do WHK-01: reaplicar a função de `20261014200000_fix_journey_level_transition_event_order.sql` **depois** de drenar a outbox (`ready = 0` e `pending = 0`), senão as linhas pendentes ficam sem aplicar.

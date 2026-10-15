@@ -42,7 +42,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis } from "recharts";
-import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
+import { POLL_INTERVALS, UpdatedAgo } from "@/hooks/use-updated-ago";
 import {
   getChannelHistory,
   getChannelHistoryStats,
@@ -63,12 +63,12 @@ const CHANNEL_LABEL: Record<ChannelKey, string> = {
   whatsapp: "WhatsApp",
 };
 
-const CHANNEL_TABLE: Record<ChannelKey, string> = {
-  sms: "sms_send_logs",
-  email: "email_send_logs",
-  calls: "call_history",
-  whatsapp: "whatsapp_messages",
-};
+// Polling das telas de histórico: estatísticas pesadas, 60 s é suficiente.
+const HISTORY_POLL = {
+  staleTime: 30_000,
+  refetchInterval: POLL_INTERVALS.stats,
+  refetchOnWindowFocus: true,
+} as const;
 
 const RANGE_OPTIONS = [
   { value: "today", label: "Hoje" },
@@ -78,6 +78,11 @@ const RANGE_OPTIONS = [
   { value: "all", label: "Tudo" },
 ];
 
+// Janelas abertas ("hoje", "7 dias", "30 dias", "tudo") mandam `to: null`: o
+// servidor usa "agora" (mesma semântica de antes, inclusive a janela anterior
+// do delta). Antes o `to` era `new Date()` a cada render, o que mudava a
+// queryKey a cada render e fazia cada resposta disparar uma nova busca.
+// O `from` é estável dentro do dia (o componente memoiza por range + dia).
 function rangeIso(value: string): {
   from: string | null;
   to: string | null;
@@ -86,15 +91,13 @@ function rangeIso(value: string): {
   if (value === "all")
     return {
       from: new Date(Date.now() - 30 * 86400000).toISOString(),
-      to: new Date().toISOString(),
+      to: null,
       bucket: "day",
     };
-  const now = new Date();
-  const to = now.toISOString();
   if (value === "today") {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
-    return { from: d.toISOString(), to, bucket: "hour" };
+    return { from: d.toISOString(), to: null, bucket: "hour" };
   }
   if (value === "yesterday") {
     const start = new Date();
@@ -107,12 +110,12 @@ function rangeIso(value: string): {
   if (value === "7d")
     return {
       from: new Date(Date.now() - 7 * 86400000).toISOString(),
-      to,
+      to: null,
       bucket: "day",
     };
   return {
     from: new Date(Date.now() - 30 * 86400000).toISOString(),
-    to,
+    to: null,
     bucket: "day",
   };
 }
@@ -178,7 +181,10 @@ export function HistoryShell({
     setStep("all");
   }, [flowId]);
 
-  const iso = rangeIso(range);
+  // Recalcula só quando muda o período ou o dia (virada da meia-noite).
+  const dayKey = new Date().toDateString();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const iso = useMemo(() => rangeIso(range), [range, dayKey]);
   const showFlow = options.showFlow !== false;
   const showStep = options.showStep !== false;
   const showDirection = channel === "whatsapp";
@@ -193,7 +199,7 @@ export function HistoryShell({
   const stats = useQuery({
     queryKey: ["history-stats", channel, iso.from, iso.to],
     queryFn: () => statsFn({ data: { channel, from: iso.from, to: iso.to } }),
-    staleTime: 15_000,
+    ...HISTORY_POLL,
   });
   const flows = useQuery({
     queryKey: ["history-flows", channel],
@@ -211,13 +217,13 @@ export function HistoryShell({
     queryKey: ["history-summary", channel, iso.from, iso.to],
     queryFn: () => summaryFn({ data: { channel, from: iso.from, to: iso.to } }),
     enabled: showFlow,
-    staleTime: 15_000,
+    ...HISTORY_POLL,
   });
   const timeline = useQuery({
     queryKey: ["history-timeline", channel, iso.from, iso.to, iso.bucket],
     queryFn: () =>
       timelineFn({ data: { channel, from: iso.from, to: iso.to, bucket: iso.bucket } }),
-    staleTime: 30_000,
+    ...HISTORY_POLL,
   });
   const hist = useQuery({
     queryKey: [
@@ -247,24 +253,12 @@ export function HistoryShell({
           pageSize,
         },
       }),
-    staleTime: 15_000,
+    ...HISTORY_POLL,
   });
 
-  // Realtime — invalida tudo do canal quando o banco muda
-  useRealtimeInvalidate(
-    `history-${channel}`,
-    [CHANNEL_TABLE[channel]],
-    useMemo(
-      () => [
-        ["history-stats", channel],
-        ["history-summary", channel],
-        ["history-timeline", channel],
-        ["history-rows", channel],
-      ],
-      [channel],
-    ),
-    1500,
-  );
+  // Sem Realtime (REP-05): as tabelas de log (sms_send_logs etc.) têm escrita
+  // alta e cada mudança re-executava as estatísticas pesadas. Agora as queries
+  // acima fazem polling a cada 60 s (só com a aba visível) e ao voltar o foco.
 
   const cards = options.cardLabels ?? {
     total: "Disparos",
@@ -327,6 +321,7 @@ export function HistoryShell({
               ))}
             </SelectContent>
           </Select>
+          <UpdatedAgo ts={stats.dataUpdatedAt} className="hidden sm:inline" />
           <Button variant="outline" size="sm" onClick={refresh} className="gap-1.5">
             <RefreshCw className={`h-3.5 w-3.5 ${stats.isFetching ? "animate-spin" : ""}`} />
             Atualizar
