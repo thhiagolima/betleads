@@ -307,6 +307,13 @@ async function shouldExit(
   if (rules.login && (afterEntry(player.ultimo_login) || afterEntry(activity.ultimo_jogo)))
     return "login";
   if (rules.voltou_jogar && afterEntry(activity.ultimo_jogo)) return "voltou_jogar";
+  // Category switch between inactivity journeys (Esfriando → Dormindo → 30
+  // dias): leave this journey once the player crossed the next one's threshold.
+  const overHours = Number((rules as Record<string, unknown>).inactivity_over_hours);
+  if (Number.isFinite(overHours) && overHours > 0 && player.ultimo_deposito) {
+    const idleMs = Date.now() - new Date(player.ultimo_deposito).getTime();
+    if (idleMs >= overHours * 3600_000) return "inactivity_threshold";
+  }
   return null;
 }
 
@@ -427,13 +434,21 @@ export function staleSendLatencyMinutes(args: {
   enteredAt: string;
   waitSecondsBefore: number;
   loopIteration: number;
+  /** Send window (entry_rules). A step planned outside it is due at the next opening. */
+  entryRules?: Record<string, unknown> | null;
   now?: number;
 }): number | null {
   const limit = maxSendDelayMinutes(args.triggerType, args.triggerConfig);
   if (limit == null || args.loopIteration > 0) return null;
   const entered = Date.parse(args.enteredAt);
   if (!Number.isFinite(entered)) return null;
-  const planned = entered + Math.max(0, args.waitSecondsBefore) * 1000;
+  const rawPlanned = entered + Math.max(0, args.waitSecondsBefore) * 1000;
+  // Waiting for the send window is planned, not late (e.g. a PIX at 22:30
+  // whose Dia 1 goes at 08:00).
+  const windowOpen = args.entryRules
+    ? nextJourneyWindowOpen(args.entryRules, new Date(rawPlanned))
+    : null;
+  const planned = windowOpen ? Date.parse(windowOpen) : rawPlanned;
   const lateMinutes = ((args.now ?? Date.now()) - planned) / 60_000;
   return lateMinutes > limit ? Math.floor(lateMinutes) : null;
 }
@@ -578,6 +593,7 @@ async function executeEnrollment(
       enteredAt: enrollment.entered_at,
       waitSecondsBefore: await waitSecondsBeforePosition(enrollment.journey_id, step.position),
       loopIteration: Number(enrollment.loop_iteration ?? 0),
+      entryRules: journey.entry_rules ?? {},
     });
     if (lateMinutes != null) {
       await release(enrollment, ctx, {

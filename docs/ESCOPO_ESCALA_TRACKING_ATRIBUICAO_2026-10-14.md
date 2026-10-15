@@ -462,3 +462,16 @@ Valores ficam em tabela, alteráveis sem deploy. Revisar após 7 dias de operaç
 - Campanhas enviam aos resolvidos e reportam os não resolvidos.
 - Todo job crítico com heartbeat, alerta e reprocessamento seguro.
 - CPU do banco < 60% sustentado, com top queries documentadas.
+
+## Réguas do documento "FLUXO CRM" (15/10/2026)
+
+Conferência do documento base contra produção nas 3 casas (Sorte Alta, ForrandoBet, PixReals):
+
+- ✅ Loop D1–D5 + alternância D4/D5; virada de nível imediata; onboarding; PIX (D1 imediato, D2, loop D3); Esfriando 48 h, Dormindo 7 d, 30 dias; níveis Bronze→Black VIP — textos e estrutura conforme o documento, replicados nas 3 casas.
+- ✅ Prioridade definida (menor número vence): PIX 1, Cashback 2, 30 dias 3, Dormindo 4, Esfriando 5, Níveis VIP 6, Cadastro 7. Saque pago fica como envio imediato (fora da arbitragem).
+- ✅ Troca de régua por inatividade: regra de saída `exit_rules.inactivity_over_hours` (Esfriando sai aos 168 h, Dormindo aos 720 h sem depósito). Requer o deploy do código que lê a regra.
+- ✅ Cashback: regra do saldo negativo descartada; a régua dispara pelo webhook `cashback-pago` (a integrar pelas casas) e envia ~1 min depois. O gatilho considera "recebeu cashback hoje" por `paid_at` (BRT).
+- ✅ Teto de atraso de PIX/saque considera a janela de envio (PIX gerado à noite não é descartado).
+- Mantido sem mudança: faixas de nível (10 / 200 / 500 / 1.000 / 3.000) e janela 08–22 para PIX.
+
+Contrato do webhook de cashback: `POST /api/public/webhook/{token}/cashback-pago` com o identificador do jogador (mesmo campo dos demais eventos), `eventId` único, valor do cashback e `paid_at` (momento do crédito).
