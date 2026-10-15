@@ -15,7 +15,7 @@ Legenda: ✅ concluído · 🟡 parcial / depende de ação externa · ⏳ pende
 | A — Observabilidade | ✅ código; 🟡 configuração | `bcf7183`, `1406a9a` | `20261014220000` aplicada |
 | B — Contenção | ✅ código e banco | `37ea079`, `76f53c2`, `58f9a80` | `20261015090000`, `…091000`, `…092000` aplicadas |
 | SEC-01 — Correção de permissões | 🟡 pronto, aguardando decisão | não commitado | `20261015100000` **não aplicada** |
-| C — Integridade do envio | ⏳ em andamento | — | — |
+| C — Integridade do envio | 🟡 código pronto e revisado; aguarda migrations e deploy | ver commit da Fase C | `…110000`, `…111000`, `…112000`, `…113000` **não aplicadas** |
 
 Pendências fora do código:
 
@@ -187,9 +187,9 @@ Sem medição não há como provar ganho das demais fases.
 - Matriz: 2.560 diferenças, todas intencionais e restritas às 16 tabelas alvo.
 - Exige deploy de `whatsapp-proxies.functions.ts` junto ou antes da migration.
 
-### Fase C — Integridade do envio (semana 1–2)
+### Fase C — Integridade do envio (semana 1–2) — 🟡 código pronto (🟡 = aguardando migration + deploy)
 
-**ENV-01 — Lease explícito, prazo e exclusão mútua no dispatcher**
+**🟡 ENV-01 — Lease explícito, prazo e exclusão mútua no dispatcher**
 - Hoje: lease implícito de 10 min (`claimed_at < now()-10min`), `recover_orphaned_journey_claims` no início de cada tick, execuções de 16–29 min observadas e pg_net desistindo em 55 s enquanto o Node continua.
 - Mudanças:
   - `lease_expires_at` e `claimed_by` por item; renovação durante o processamento;
@@ -199,28 +199,28 @@ Sem medição não há como provar ganho das demais fases.
   - alinhar `.env.example`/`docs/docker-deployment.md` (40) com o teto real (12) ou parametrizar de verdade.
 - **Aceite:** dois workers concorrentes + kill no meio do lote = zero duplicidade, zero item perdido.
 
-**ENV-02 — `already_sent` na reserva**
+**🟡 ENV-02 — `already_sent` na reserva**
 - `reserve_journey_delivery` não verifica execução `sent` para (enrollment, step_position, loop_iteration). Falha após aceite do provedor reenvia o passo.
 - A reserva retorna `already_sent` e avança a posição.
 - Chave de idempotência estável repassada a: SMS (`external_id`), billing (`billingReferenceId` hoje novo a cada chamada em `src/lib/sms.functions.ts`), voz (`src/lib/infobip-voice.server.ts` gera UUID novo) e e-mail.
 - **Aceite:** teste "provedor aceitou → commit falhou → retry" não gera segundo envio nem segunda cobrança.
 
-**ENV-03 — Reserva com custo constante**
+**🟡 ENV-03 — Reserva com custo constante**
 - Substituir `count(*)` diário por contador materializado por (tenant, journey, channel, dia).
 - Índices: `journey_step_executions (tenant_id, channel, player_id, created_at)` ou `player_id` desnormalizado; `sms_send_logs (tenant_id, player_id, created_at)`; `email_send_logs (tenant_id, player_id, created_at)`.
 - **Aceite:** tempo da RPC estável com 10x o histórico atual.
 
-**ENV-04 — Rate limit por provedor e por tenant (seção 5)**
+**🟡 ENV-04 — Rate limit por provedor e por tenant (seção 5)**
 - Tabela `channel_rate_limits (provider, channel, tenant_id null = global, per_second, max_concurrency)`.
 - Token bucket aplicado em jornadas e campanhas (hoje jornadas não chamam `consumeBudget`).
 - 429/402/5xx do provedor: adiar o item e pausar o canal do tenant, sem consumir tentativa. Hoje 3 falhas tornam a inscrição `failed` definitiva.
 - **Aceite:** provedor simulado fora por 10 min não gera nenhuma inscrição `failed`.
 
-**ENV-05 — Justiça entre tenants**
+**🟡 ENV-05 — Justiça entre tenants**
 - Claim do dispatcher, do scanner, das campanhas e do replay com cota por tenant (`LATERAL ... LIMIT k` por tenant ou round-robin ponderado).
 - **Aceite:** tenant com 10k itens não aumenta a idade p95 da fila de um tenant com 100 itens.
 
-**ENV-06 — Campanha: enviar aos resolvidos, reportar os demais (decisão de produto)**
+**🟡 ENV-06 — Campanha: enviar aos resolvidos, reportar os demais (decisão de produto)**
 - Resolução hoje carrega players com `.range(0, 49_999)` sem ORDER (`src/lib/sms-dispatcher.server.ts:814`, `src/lib/sms.functions.ts:1023` e `:1846`): risco de falso "não cadastrado" acima do limite e de `max_rows` do PostgREST.
 - Resolver por `telefone_normalizado = ANY($1)` com índice `players (tenant_id, telefone_normalizado)`.
 - Persistir destinatários não resolvidos com motivo (`sem_cadastro`, `telefone_invalido`, `sem_consentimento`).
@@ -229,13 +229,21 @@ Sem medição não há como provar ganho das demais fases.
 - Campanha só falha inteira se **nenhum** destinatário resolver.
 - **Aceite:** campanha com 5% não resolvidos envia 95% e lista os 5%.
 
-**ENV-07 — Campanhas: vazão e dedupe**
+**🟡 ENV-07 — Campanhas: vazão e dedupe**
 - `ROUNDS_PER_MINUTE = 12` supõe ticks de 5 s, mas o cron roda 1×/min (`src/lib/sms-dispatcher.server.ts:770`). Unificar campanhas no mesmo modelo de worker/rate limit das jornadas.
 - Dedupe compara template cru com `preparedContent` renderizado: nunca deduplica com links rastreados. Deduplicar por (campanha, player).
 - Cursor avança antes do envio: mover para depois do registro do envio.
 - Passar `deliveryKey` estável nos envios de campanha.
 
-**ENV-08 — Scanner**
+**🟡 ENV-09 — Entrada imediata na jornada (decisão de produto de 15/10: sem "elegível aguardando")**
+- ✅ Parte 1 (commit `3d2835f`): webhook inscreve na hora em jornadas de evento — cadastro → cadastrados sem depósito; depósito pendente → PIX não pago; depósito aprovado → primeiro depósito, quase VIP, reativação, alto potencial; saques → saque pago. Mesmas regras do scanner (matcher, `start_after`, público, cooldown, `entry_key`), mesmo escopo canário; desligável com `JOURNEYS_EVENT_ENTRY_ENABLED=false`.
+- ✅ Correção junto: scans de PIX/saque falhavam sempre com `fetch failed` (500 ids na URL); agora em lotes de 100. Antes disso, `start_after` foi aplicado nas 6 jornadas de PIX/saque para impedir disparo ao histórico.
+- ✅ Lista de jornadas: "Elegíveis agora"/"Na fila" substituídos por "Em andamento"/"Concluíram"; etapas em resumo de uma linha.
+- 🟡 Parte 2 (código pronto, aguarda migration 112000 + deploy): gatilhos de tempo (inatividade, sem login N dias, VIP esfriando…) entram no minuto em que cruzam o limiar, por janela incremental indexada; scanner completo vira rede de segurança que conta "entradas tardias".
+- ⏳ Ativação de jornada com escolha explícita: "somente novos" (grava `start_after`) ou "incluir quem já cumpre hoje (N)".
+- Pendência de produto: jornadas "Cashback — Reativação Automática" nunca inscrevem (não há regra de entrada para `cashback_pago`).
+
+**ENV-08 — Scanner** _(substituído em grande parte pelo ENV-09)_
 - Um scan por tenant avaliando todas as jornadas no mesmo lote, colunas explícitas no lugar de `select *`, índice `players (tenant_id, id)` para o cursor.
 - `sync_journey_scan_jobs` só altera jobs que mudaram (hoje faz upsert de todas as jornadas a cada minuto).
 - Workers de scanner em processo próprio (Fase D).

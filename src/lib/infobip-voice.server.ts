@@ -1,4 +1,6 @@
+import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { requireBrazilianPhone } from "./phone-normalization";
+import { transportErrorKind, type ProviderErrorKind } from "./rate-limit/transport-errors";
 
 // Infobip Calls Markup Language (CML) adapter for outbound recorded calls.
 // Voz do CRM é atendida exclusivamente pela Infobip.
@@ -13,6 +15,20 @@ export type InfobipVoiceResult = {
   body: unknown;
   idempotencyKey: string;
   providerCallId: string | null;
+  /** True when a call for this idempotency key already exists locally; no new call was placed. */
+  alreadySent?: boolean;
+  /** Set when there is no provider response (B1): whether the call may exist. */
+  errorKind?: ProviderErrorKind | null;
+};
+
+export type InfobipVoiceOptions = {
+  /**
+   * Stable identity of one logical call (e.g. the journey delivery key). It is
+   * forwarded as `customData` and callback correlation, and a call already
+   * recorded in call_history with this correlation is never placed again.
+   */
+  idempotencyKey?: string | null;
+  tenantId?: string | null;
 };
 
 export type InfobipVoiceContent =
@@ -37,12 +53,59 @@ function callbackUrl(path: string, params: Record<string, string>): string | nul
   return url.toString();
 }
 
+async function findExistingCall(
+  idempotencyKey: string,
+  tenantId: string | null | undefined,
+): Promise<{ id: string; provider_call_id: string | null } | null> {
+  let query = supabaseAdmin
+    .from("call_history")
+    .select("id, provider_call_id")
+    .eq("provider_response->>correlation_id", idempotencyKey);
+  if (tenantId) query = query.eq("tenant_id", tenantId);
+  const { data, error } = await query.limit(1);
+  if (error) throw new Error(error.message);
+  return data?.[0] ?? null;
+}
+
 /** Starts a CML call. Infobip fetches the callback only after the call is answered. */
-export async function callInfobipVoice(to: string, content: InfobipVoiceContent): Promise<InfobipVoiceResult> {
+export async function callInfobipVoice(
+  to: string,
+  content: InfobipVoiceContent,
+  options: InfobipVoiceOptions = {},
+): Promise<InfobipVoiceResult> {
   const baseUrl = process.env.INFOBIP_BASE_URL?.trim().replace(/\/$/, "");
   const apiKey = process.env.INFOBIP_API_KEY?.trim();
   const from = process.env.INFOBIP_VOICE_FROM?.replace(/\D/g, "");
-  const idempotencyKey = crypto.randomUUID();
+  const idempotencyKey = options.idempotencyKey || crypto.randomUUID();
+  // The CML create endpoint has no request-idempotency contract, so a retried
+  // delivery is deduplicated against local state before dialing anyone.
+  if (options.idempotencyKey) {
+    try {
+      const existing = await findExistingCall(idempotencyKey, options.tenantId);
+      if (existing) {
+        return {
+          ok: true,
+          status: 200,
+          body: { already_sent: true, call_history_id: existing.id },
+          idempotencyKey,
+          providerCallId: existing.provider_call_id,
+          alreadySent: true,
+        };
+      }
+    } catch (error) {
+      return {
+        ok: false,
+        status: 0,
+        body: {
+          error: `Falha ao verificar ligação existente: ${error instanceof Error ? error.message : String(error)}`,
+        },
+        idempotencyKey,
+        providerCallId: null,
+        // The local duplicate check failed: the provider was never called.
+        errorKind: "not_sent",
+      };
+    }
+  }
   const callback = callbackUrl(
     "/api/public/infobip/voice/cml",
     content.type === "audio"
@@ -62,6 +125,7 @@ export async function callInfobipVoice(to: string, content: InfobipVoiceContent)
       body: { error: "Configuração Infobip Voice incompleta" },
       idempotencyKey,
       providerCallId: null,
+      errorKind: "misconfigured",
     };
   }
   try {
@@ -97,6 +161,9 @@ export async function callInfobipVoice(to: string, content: InfobipVoiceContent)
       body: { error: error instanceof Error ? error.message : String(error) },
       idempotencyKey,
       providerCallId: null,
+      // A 20 s timeout or reset may still have placed the call (no
+      // idempotency header on the CML create endpoint).
+      errorKind: transportErrorKind(error),
     };
   }
 }

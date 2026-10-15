@@ -7,6 +7,24 @@ import { detectTriggersForPlayer } from "./triggers.server";
 import { evaluateVoiceContactPolicy, isChannelRevoked } from "./consent.server";
 import { startJobRun, type JobRunHandle } from "./observability/job-monitor.server";
 import { resolveJourneyWorkerScope } from "./journey-worker-scope";
+import { channelBudget, type Admission } from "./rate-limit/channel-budget.server";
+import { captureServerException } from "./observability/sentry.server";
+import {
+  createClaimingSource,
+  createTimeBudget,
+  runBoundedPool,
+  sleep,
+  startLeaseKeeper,
+  type ClaimingSource,
+  type LeaseKeeper,
+  type TimeBudget,
+} from "./rate-limit/pool";
+import {
+  MAX_NO_COST_DEFERS,
+  ProviderSendError,
+  classifyProviderFailure,
+} from "./rate-limit/provider-errors.server";
+import { resolveDispatchWorkerConfig } from "./rate-limit/worker-config";
 import {
   journeyEntryKey,
   nextJourneyWindowOpen,
@@ -234,12 +252,30 @@ async function event(
   });
 }
 
-async function release(enrollment: EnrollmentRow, patch: Record<string, unknown>) {
-  const { error } = await db
+/**
+ * Writes the item's next state and gives up the claim. Fenced on claimed_by:
+ * if this worker's lease expired and another worker took the item over, the
+ * write is dropped (and counted) instead of clobbering the new owner's state.
+ */
+async function release(
+  enrollment: EnrollmentRow,
+  ctx: DispatchContext,
+  patch: Record<string, unknown>,
+) {
+  const { data, error } = await db
     .from("journey_enrollments")
-    .update({ ...patch, claimed_at: null, claimed_by: null })
-    .eq("id", enrollment.id);
+    .update({ ...patch, claimed_at: null, claimed_by: null, lease_expires_at: null })
+    .eq("id", enrollment.id)
+    .eq("claimed_by", ctx.workerId)
+    .select("id");
   if (error) throw new Error(error.message);
+  if (!data?.length) {
+    ctx.counters.leaseLost++;
+    console.warn("[journey dispatcher] lease lost; state write dropped", {
+      enrollmentId: enrollment.id,
+      workerId: ctx.workerId,
+    });
+  }
 }
 
 async function shouldExit(
@@ -350,7 +386,11 @@ async function stillMatchesJourneyEntry(
     : detectTriggersForPlayer(player as never).includes(trigger as never);
 }
 
-async function executeEnrollment(id: string): Promise<void> {
+async function executeEnrollment(
+  id: string,
+  ctx: DispatchContext,
+  preAdmitted: ChannelGate | null = null,
+): Promise<void> {
   const { data: enrollmentRaw, error: enrollmentError } = await db
     .from("journey_enrollments")
     .select("*")
@@ -369,11 +409,11 @@ async function executeEnrollment(id: string): Promise<void> {
     .maybeSingle();
   const journey = journeyRaw as JourneyRow | null;
   if (!journey || journey.status !== "active") {
-    await release(enrollment, { status: "paused" });
+    await release(enrollment, ctx, { status: "paused" });
     return;
   }
   if (!(await stillMatchesJourneyEntry(enrollment, journey))) {
-    await release(enrollment, {
+    await release(enrollment, ctx, {
       status: "exited",
       exited_at: new Date().toISOString(),
       exit_reason: "entry_no_longer_matches",
@@ -383,13 +423,13 @@ async function executeEnrollment(id: string): Promise<void> {
   }
   const nextOpen = nextJourneyWindowOpen(journey.entry_rules ?? {});
   if (nextOpen) {
-    await release(enrollment, { status: "waiting", next_run_at: nextOpen });
+    await release(enrollment, ctx, { status: "waiting", next_run_at: nextOpen });
     await event(enrollment, "deferred_outside_window", { next_run_at: nextOpen });
     return;
   }
   const exitReason = await shouldExit(enrollment, journey.exit_rules ?? {});
   if (exitReason) {
-    await release(enrollment, {
+    await release(enrollment, ctx, {
       status: "exited",
       exited_at: new Date().toISOString(),
       exit_reason: exitReason,
@@ -406,7 +446,7 @@ async function executeEnrollment(id: string): Promise<void> {
     .maybeSingle();
   const step = stepRaw as StepRow | null;
   if (!step) {
-    await release(enrollment, {
+    await release(enrollment, ctx, {
       status: "completed",
       completed_at: new Date().toISOString(),
       exit_reason: "finished",
@@ -420,7 +460,7 @@ async function executeEnrollment(id: string): Promise<void> {
     const seconds = Number(step.config.delay_seconds ?? 0);
     if (!Number.isInteger(seconds) || seconds < 60) throw new Error("Passo de espera inválido");
     await finishExecution(run.id, { status: "sent", executed_at: new Date().toISOString() });
-    await release(enrollment, {
+    await release(enrollment, ctx, {
       status: "waiting",
       current_position: step.position + 1,
       next_run_at: new Date(Date.now() + seconds * 1000).toISOString(),
@@ -442,7 +482,7 @@ async function executeEnrollment(id: string): Promise<void> {
         .eq("is_enabled", true)
         .maybeSingle();
       if (!loopTarget) throw new Error("Destino do loop da jornada nao encontrado");
-      await release(enrollment, {
+      await release(enrollment, ctx, {
         status: "active",
         current_position: loopToPosition,
         loop_iteration: Number(enrollment.loop_iteration ?? 0) + 1,
@@ -456,7 +496,7 @@ async function executeEnrollment(id: string): Promise<void> {
       });
       return;
     }
-    await release(enrollment, {
+    await release(enrollment, ctx, {
       status: "completed",
       completed_at: new Date().toISOString(),
       exit_reason: "end_step",
@@ -475,7 +515,7 @@ async function executeEnrollment(id: string): Promise<void> {
     consentTarget &&
     (await isChannelRevoked(enrollment.tenant_id, channel, consentTarget))
   ) {
-    await release(enrollment, {
+    await release(enrollment, ctx, {
       status: "active",
       current_position: step.position + 1,
       next_run_at: new Date().toISOString(),
@@ -488,11 +528,115 @@ async function executeEnrollment(id: string): Promise<void> {
     });
     return;
   }
+  // ENV-04: provider/tenant rate limit before reserving the delivery. The
+  // dispatcher normally admits the item before any pre-check (I2, see
+  // admitClaimedItem); this path covers claims without a step type or a step
+  // that changed channel since the claim. The caller frees a pre-admitted
+  // permit unless deliverStep keeps it.
+  if (preAdmitted?.channel === channel) {
+    await deliverStep(enrollment, ctx, journey, step, player, vars, preAdmitted);
+    return;
+  }
+  const admission = await channelBudget.acquire(enrollment.tenant_id, channel, {
+    deadline: ctx.budget.claimDeadline,
+    holder: ctx.workerId,
+  });
+  if (!admission.ok) {
+    ctx.counters.rateLimited++;
+    await release(enrollment, ctx, {
+      next_run_at: new Date(Date.now() + Math.max(1_000, admission.retryAfterMs)).toISOString(),
+    });
+    return;
+  }
+  const gate: ChannelGate = { channel, admission, keepPermit: false };
+  try {
+    await deliverStep(enrollment, ctx, journey, step, player, vars, gate);
+  } finally {
+    if (!gate.keepPermit) await channelBudget.release(admission);
+  }
+}
+
+/**
+ * A rate-limit admission held while one item is processed. Voice keeps its
+ * concurrency permit after a placed call (`keepPermit`); the Infobip event
+ * callback releases it when the call ends (permit id stored in
+ * call_history.provider_response.channel_permit_id), otherwise it expires
+ * after concurrency_hold_seconds. Every other outcome frees it.
+ */
+type ChannelGate = {
+  channel: string;
+  admission: Extract<Admission, { ok: true }>;
+  keepPermit: boolean;
+};
+
+const SEND_CHANNELS = new Set(["sms", "email", "voice"]);
+
+/**
+ * I2: admits a claimed item against the channel budget BEFORE the expensive
+ * pre-checks (enrollment/journey/player/step reads). When the tenant's bucket
+ * is empty the item is handed back with one fenced update and the
+ * (tenant, channel) pair is excluded from this run's next claims until the
+ * bucket refills, so budget-deferred items neither redo the pre-checks nor
+ * fill the batch (the caller gives the claim back to the source).
+ * Returns null when the item was deferred.
+ */
+async function admitClaimedItem(
+  row: ClaimedRow,
+  channel: string,
+  ctx: DispatchContext,
+): Promise<ChannelGate | null> {
+  const key = `${row.tenant_id}:${channel}`;
+  const exhaustedUntil = ctx.exhausted.get(key) ?? 0;
+  let retryAfterMs: number;
+  if (exhaustedUntil > Date.now()) {
+    retryAfterMs = exhaustedUntil - Date.now();
+  } else {
+    const admission = await channelBudget.acquire(row.tenant_id, channel, {
+      deadline: ctx.budget.claimDeadline,
+      holder: ctx.workerId,
+    });
+    if (admission.ok) return { channel, admission, keepPermit: false };
+    retryAfterMs = admission.retryAfterMs;
+    ctx.exhausted.set(key, Date.now() + Math.max(1_000, retryAfterMs));
+  }
+  ctx.counters.rateLimited++;
+  await release({ id: row.id } as EnrollmentRow, ctx, {
+    next_run_at: new Date(Date.now() + Math.max(1_000, retryAfterMs)).toISOString(),
+  });
+  return null;
+}
+
+async function deliverStep(
+  enrollment: EnrollmentRow,
+  ctx: DispatchContext,
+  journey: JourneyRow,
+  step: StepRow,
+  player: NonNullable<Awaited<ReturnType<typeof playerFor>>>,
+  vars: ReturnType<typeof buildPlayerVariables>,
+  gate: ChannelGate,
+): Promise<void> {
+  const channel = step.step_type;
   const reservation = await reserveDelivery(enrollment, step, journey);
+  // ENV-02: this step already has a sent execution (e.g. a previous attempt
+  // reached the provider but failed before advancing): move on, never resend.
+  if (reservation?.blocked_reason === "already_sent") {
+    await release(enrollment, ctx, {
+      status: "active",
+      current_position: step.position + 1,
+      next_run_at: new Date().toISOString(),
+      attempts: 0,
+    });
+    await event(enrollment, "step_already_sent", {
+      channel,
+      step_position: step.position,
+      execution_id: reservation.execution_id,
+    });
+    return;
+  }
   if (!reservation?.execution_id || !reservation.idempotency_key) {
     if (reservation?.blocked_reason === "priority_paused") return;
     const retryAt = reservation?.retry_at ?? new Date(Date.now() + 60_000).toISOString();
-    await release(enrollment, { status: "waiting", next_run_at: retryAt });
+    await release(enrollment, ctx, { status: "waiting", next_run_at: retryAt });
     await event(enrollment, "step_deferred", {
       channel,
       step_position: step.position,
@@ -501,10 +645,12 @@ async function executeEnrollment(id: string): Promise<void> {
     return;
   }
   const run = { id: reservation.execution_id, idempotency_key: reservation.idempotency_key };
+  // Failure handling updates exactly this execution (never another worker's).
+  ctx.executions.set(enrollment.id, run.id);
   const finalExitReason = await shouldExit(enrollment, journey.exit_rules ?? {});
   if (finalExitReason) {
     await finishExecution(run.id, { status: "skipped", provider: "exit_policy" });
-    await release(enrollment, {
+    await release(enrollment, ctx, {
       status: "exited",
       exited_at: new Date().toISOString(),
       exit_reason: finalExitReason,
@@ -516,7 +662,7 @@ async function executeEnrollment(id: string): Promise<void> {
   if (step.step_type === "sms") {
     if (await isChannelRevoked(enrollment.tenant_id, "sms", player.telefone ?? "")) {
       await finishExecution(run.id, { status: "skipped", provider: "consent" });
-      await release(enrollment, {
+      await release(enrollment, ctx, {
         status: "active",
         current_position: step.position + 1,
         next_run_at: new Date().toISOString(),
@@ -546,7 +692,7 @@ async function executeEnrollment(id: string): Promise<void> {
       linkTrackingEnabled: step.config.track_links !== false,
       deliveryKey: run.idempotency_key,
     });
-    if (!result.ok) throw new Error(result.error ?? "SMS não aceito pelo provedor");
+    if (!result.ok) throw smsSendError(result);
     await finishExecution(run.id, {
       status: "sent",
       provider: "short-brasil",
@@ -556,7 +702,7 @@ async function executeEnrollment(id: string): Promise<void> {
     if (!player.email) throw new Error("Jogador sem e-mail");
     if (await isChannelRevoked(enrollment.tenant_id, "email", player.email)) {
       await finishExecution(run.id, { status: "skipped", provider: "consent" });
-      await release(enrollment, {
+      await release(enrollment, ctx, {
         status: "active",
         current_position: step.position + 1,
         next_run_at: new Date().toISOString(),
@@ -607,21 +753,32 @@ async function executeEnrollment(id: string): Promise<void> {
         journeyStepPosition: step.position,
       },
     });
-    if (!result.ok) throw new Error(JSON.stringify(result.body));
-    await supabaseAdmin.from("email_send_logs").insert({
-      tenant_id: enrollment.tenant_id,
-      player_id: enrollment.player_id,
-      to_email: player.email,
-      subject: renderTemplate(template.subject, vars),
-      status: "sent",
-      sent_at: new Date().toISOString(),
-      provider_response: {
-        journey_execution_id: run.id,
-        provider: "infobip",
+    if (!result.ok)
+      throw new ProviderSendError({
+        channel: "email",
+        message: JSON.stringify(result.body),
+        status: result.status,
         body: result.body,
-        idempotency_key: result.idempotencyKey,
-      } as never,
-    });
+        temporary: result.temporary,
+        errorKind: result.errorKind ?? null,
+      });
+    // An already-sent key was logged by the first attempt; do not log twice.
+    if (!result.alreadySent) {
+      await supabaseAdmin.from("email_send_logs").insert({
+        tenant_id: enrollment.tenant_id,
+        player_id: enrollment.player_id,
+        to_email: player.email,
+        subject: renderTemplate(template.subject, vars),
+        status: "sent",
+        sent_at: new Date().toISOString(),
+        provider_response: {
+          journey_execution_id: run.id,
+          provider: "infobip",
+          body: result.body,
+          idempotency_key: result.idempotencyKey,
+        } as never,
+      });
+    }
     await finishExecution(run.id, {
       status: "sent",
       provider: "infobip",
@@ -641,7 +798,7 @@ async function executeEnrollment(id: string): Promise<void> {
           retry_at: contactPolicy.retryAt,
         },
       });
-      await release(enrollment, {
+      await release(enrollment, ctx, {
         status: "active",
         current_position: consentRevoked ? step.position + 1 : step.position,
         next_run_at: contactPolicy.retryAt ?? new Date(Date.now() + 3600_000).toISOString(),
@@ -669,19 +826,42 @@ async function executeEnrollment(id: string): Promise<void> {
     if (signedError || !signed?.signedUrl)
       throw new Error("Não foi possível disponibilizar o áudio para a ligação");
     const to = normalizeE164BR(player.telefone);
-    const result = await callInfobipVoice(to, { type: "audio", audioUrl: signed.signedUrl });
-    if (!result.ok) throw new Error("Ligação não aceita pelo provedor");
-    await supabaseAdmin.from("call_history").insert({
-      tenant_id: enrollment.tenant_id,
-      lead_id: enrollment.player_id,
-      audio_url: signed.signedUrl,
-      status: "pending",
-      provider: "infobip",
-      provider_call_id: result.providerCallId ?? result.idempotencyKey ?? null,
-      provider_response: (result.body ?? {}) as never,
-      provider_status_code: result.status,
-      to_phone: to,
-    });
+    const result = await callInfobipVoice(
+      to,
+      { type: "audio", audioUrl: signed.signedUrl },
+      { idempotencyKey: run.idempotency_key, tenantId: enrollment.tenant_id },
+    );
+    if (!result.ok)
+      throw new ProviderSendError({
+        channel: "voice",
+        message: `Ligação não aceita pelo provedor: ${JSON.stringify(result.body ?? null).slice(0, 300)}`,
+        status: result.status,
+        body: result.body,
+        errorKind: result.errorKind ?? null,
+      });
+    // correlation_id is what the voice duplicate check looks up next time.
+    if (!result.alreadySent) {
+      // The call is ongoing: keep the concurrency permit until the event
+      // callback reports the end (I3) or concurrency_hold_seconds elapse.
+      gate.keepPermit = Boolean(gate.admission.permitId);
+      await supabaseAdmin.from("call_history").insert({
+        tenant_id: enrollment.tenant_id,
+        lead_id: enrollment.player_id,
+        audio_url: signed.signedUrl,
+        status: "pending",
+        provider: "infobip",
+        provider_call_id: result.providerCallId ?? result.idempotencyKey ?? null,
+        provider_response: {
+          ...(result.body && typeof result.body === "object" && !Array.isArray(result.body)
+            ? (result.body as Record<string, unknown>)
+            : { body: result.body ?? null }),
+          correlation_id: result.idempotencyKey,
+          channel_permit_id: gate.keepPermit ? gate.admission.permitId : null,
+        } as never,
+        provider_status_code: result.status,
+        to_phone: to,
+      });
+    }
     await finishExecution(run.id, {
       status: "sent",
       provider: "infobip",
@@ -691,7 +871,7 @@ async function executeEnrollment(id: string): Promise<void> {
     throw new Error(`Passo ${step.step_type} ainda não está habilitado no dispatcher`);
   }
 
-  await release(enrollment, {
+  await release(enrollment, ctx, {
     status: "active",
     current_position: step.position + 1,
     next_run_at: new Date().toISOString(),
@@ -702,6 +882,246 @@ async function executeEnrollment(id: string): Promise<void> {
     step_position: step.position,
     execution_id: run.id,
   });
+}
+
+/**
+ * sendSmsInternal returns several failure shapes; keep status/body/temporary
+ * for the classifier. Local validation failures (no status) and consent
+ * suppression (status 200) are permanent.
+ */
+function smsSendError(result: unknown): ProviderSendError {
+  const r = (result ?? {}) as {
+    status?: number;
+    error?: string;
+    body?: unknown;
+    temporary?: boolean;
+    errorKind?: ProviderSendError["errorKind"];
+  };
+  return new ProviderSendError({
+    channel: "sms",
+    message: r.error ?? "SMS não aceito pelo provedor",
+    status: typeof r.status === "number" ? r.status : 400,
+    body: r.body,
+    temporary: r.temporary,
+    errorKind: r.errorKind ?? null,
+  });
+}
+
+type DispatchCounters = {
+  processed: number;
+  failed: number;
+  rescheduled: number;
+  rateLimited: number;
+  outcomeUnknown: number;
+  leaseLost: number;
+};
+
+type DispatchContext = {
+  workerId: string;
+  budget: TimeBudget;
+  counters: DispatchCounters;
+  /** enrollment id -> execution reserved by THIS worker for the current item. */
+  executions: Map<string, string>;
+  /** `${tenant_id}:${channel}` -> epoch ms until which its budget is exhausted. */
+  exhausted: Map<string, number>;
+};
+
+/** step_type is the current step's channel (claim RPC since I2; may be absent). */
+type ClaimedRow = { id: string; tenant_id: string; step_type?: string | null };
+
+type ProviderDeferrals = { step_position: number; loop_iteration: number; count: number };
+
+/** Consecutive no-cost defers of the enrollment's CURRENT step (resets on a new step/loop). */
+function nextNoCostDeferral(enrollment: Record<string, unknown>): ProviderDeferrals {
+  const metadata = (enrollment.metadata ?? {}) as Record<string, unknown>;
+  const previous = metadata.provider_deferrals as Partial<ProviderDeferrals> | undefined;
+  const position = Number(enrollment.current_position ?? 0);
+  const loop = Number(enrollment.loop_iteration ?? 0);
+  const sameStep = previous?.step_position === position && previous?.loop_iteration === loop;
+  return {
+    step_position: position,
+    loop_iteration: loop,
+    count: (sameStep ? Number(previous?.count ?? 0) : 0) + 1,
+  };
+}
+
+async function retryPolicy(journeyId: string) {
+  const { data: retryJourney } = await db
+    .from("journeys")
+    .select("entry_rules")
+    .eq("id", journeyId)
+    .maybeSingle();
+  return {
+    maxAttempts: Math.min(10, Math.max(1, Number(retryJourney?.entry_rules?.max_attempts ?? 3))),
+    retryBaseSeconds: Math.min(
+      3600,
+      Math.max(10, Number(retryJourney?.entry_rules?.retry_base_seconds ?? 60)),
+    ),
+  };
+}
+
+/** Updates only the execution this worker reserved, and only while it is still `claimed`. */
+async function finishOwnExecution(
+  ctx: DispatchContext,
+  enrollmentId: string,
+  patch: Record<string, unknown>,
+) {
+  const executionId = ctx.executions.get(enrollmentId);
+  if (!executionId) return;
+  await db
+    .from("journey_step_executions")
+    .update(patch)
+    .eq("id", executionId)
+    .eq("status", "claimed");
+}
+
+/**
+ * Error path for one item (B1 / ENV-04):
+ * - defer   (provider answered 429/5xx/402...): reschedule WITHOUT consuming an
+ *           attempt, at most MAX_NO_COST_DEFERS times in a row per step; after
+ *           that every further failure consumes an attempt (never infinite).
+ *           Missing credit no longer pauses the tenant channel (I4): the item
+ *           just comes back in 15 min, so a recharge resumes sends by itself.
+ * - unknown (no response, may have been accepted): possibly sent. The
+ *           execution stays `claimed`, so reserve_journey_delivery answers
+ *           `in_flight` for 15 min; the item waits 15 min and an attempt is
+ *           consumed; at max_attempts the enrollment fails.
+ * - fail    : the journey's max_attempts/backoff policy; a misconfigured
+ *           provider (missing credentials) is also reported to Sentry.
+ */
+async function handleItemFailure(row: ClaimedRow, ctx: DispatchContext, error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  const decision = classifyProviderFailure(error);
+  const nowIso = () => new Date().toISOString();
+  const { data: enrollmentRaw } = await db
+    .from("journey_enrollments")
+    .select("*")
+    .eq("id", row.id)
+    .maybeSingle();
+  if (!enrollmentRaw) {
+    await finishOwnExecution(ctx, row.id, { status: "failed", error: message, completed_at: nowIso() });
+    return;
+  }
+  const enrollment = enrollmentRaw as EnrollmentRow & Record<string, unknown>;
+
+  if (decision.kind === "defer") {
+    const deferrals = nextNoCostDeferral(enrollment);
+    if (deferrals.count <= MAX_NO_COST_DEFERS) {
+      ctx.counters.rescheduled++;
+      const retryAt = new Date(Date.now() + decision.retryAfterMs).toISOString();
+      await finishOwnExecution(ctx, row.id, {
+        status: "retrying",
+        error: message,
+        completed_at: nowIso(),
+      });
+      // attempts intentionally unchanged.
+      await release(enrollment, ctx, {
+        status: "waiting",
+        next_run_at: retryAt,
+        metadata: {
+          ...((enrollment.metadata ?? {}) as Record<string, unknown>),
+          provider_deferrals: deferrals,
+        },
+      });
+      await event(enrollment, "step_deferred", {
+        reason: decision.reason,
+        error: message.slice(0, 500),
+        retry_at: retryAt,
+        attempt_consumed: false,
+        no_cost_defers: deferrals.count,
+      });
+      console.warn("[journey dispatcher] provider failure deferred", {
+        enrollmentId: row.id,
+        reason: decision.reason,
+        retryAt,
+        noCostDefers: deferrals.count,
+      });
+      return;
+    }
+    // Cap reached: from now on the failure costs an attempt (below).
+  }
+
+  const policy = await retryPolicy(enrollment.journey_id);
+  const attempts = Number(enrollment.attempts ?? 0) + 1;
+  const exhausted = attempts >= policy.maxAttempts;
+
+  if (decision.kind === "unknown") {
+    ctx.counters.outcomeUnknown++;
+    const retryAt = new Date(Date.now() + decision.retryAfterMs).toISOString();
+    const detail = `outcome_unknown: ${message}`;
+    if (exhausted) {
+      ctx.counters.failed++;
+      await finishOwnExecution(ctx, row.id, {
+        status: "failed",
+        error: detail.slice(0, 1000),
+        completed_at: nowIso(),
+      });
+      await release(enrollment, ctx, {
+        status: "failed",
+        exit_reason: detail.slice(0, 500),
+        attempts,
+      });
+      await event(enrollment, "failed", { error: message, attempts, reason: "outcome_unknown" });
+    } else {
+      ctx.counters.rescheduled++;
+      // The execution stays `claimed` (possibly sent): only the error is recorded.
+      await finishOwnExecution(ctx, row.id, { error: detail.slice(0, 1000) });
+      await release(enrollment, ctx, { status: "waiting", next_run_at: retryAt, attempts });
+      await event(enrollment, "step_outcome_unknown", {
+        error: message.slice(0, 500),
+        attempts,
+        retry_at: retryAt,
+        attempt_consumed: true,
+      });
+    }
+    console.warn("[journey dispatcher] provider outcome unknown (possibly sent)", {
+      enrollmentId: row.id,
+      attempts,
+      failed: exhausted,
+    });
+    return;
+  }
+
+  ctx.counters.failed++;
+  if (decision.reason === "provider_misconfigured") {
+    captureServerException(error, {
+      job: "journey_dispatch",
+      tenantId: row.tenant_id,
+      tags: { reason: decision.reason },
+    });
+  }
+  const retryAt = new Date(
+    Date.now() +
+      Math.min(6 * 3600_000, policy.retryBaseSeconds * 1000 * 2 ** Math.max(0, attempts - 1)),
+  ).toISOString();
+  await finishOwnExecution(ctx, row.id, { status: "failed", error: message, completed_at: nowIso() });
+  await release(
+    enrollment,
+    ctx,
+    !exhausted
+      ? { status: "waiting", next_run_at: retryAt, attempts }
+      : { status: "failed", exit_reason: message.slice(0, 500), attempts },
+  );
+  await event(enrollment, !exhausted ? "retry_scheduled" : "failed", {
+    error: message,
+    reason: decision.reason,
+    attempts,
+    retry_at: !exhausted ? retryAt : null,
+  });
+  console.error("[journey dispatcher] execution failed", {
+    enrollmentId: row.id,
+    error: message,
+  });
+}
+
+function exhaustedKeys(ctx: DispatchContext): string[] {
+  const now = Date.now();
+  const keys: string[] = [];
+  for (const [key, until] of ctx.exhausted) {
+    if (until > now) keys.push(key);
+    else ctx.exhausted.delete(key);
+  }
+  return keys;
 }
 
 export async function runJourneyDispatcher(limit = 100) {
@@ -733,126 +1153,225 @@ async function runJourneyDispatcherMonitored(limit: number, run: JobRunHandle) {
       reason: "canary_scope_required",
     };
   }
-  const { count: queueBefore } = await db
-    .from("journey_enrollments")
-    .select("id", { count: "exact", head: true })
-    .in("status", ["active", "waiting"])
-    .lte("next_run_at", new Date().toISOString());
-  const { error: recoveryError } = await db.rpc("recover_orphaned_journey_claims");
-  if (recoveryError) throw new Error(recoveryError.message);
-  const { error: resumeError } = await db.rpc("resume_priority_paused_journeys", {
-    p_limit: limit,
+
+  // ENV-01: explicit leases, a per-run time budget, at most N concurrent runs
+  // and a continuous concurrency pool. Sizing: src/lib/rate-limit/worker-config.ts.
+  const config = resolveDispatchWorkerConfig("JOURNEYS_DISPATCH");
+  const dispatchLimit = Math.max(1, Math.min(limit, config.batchSize));
+  const workerId = `journey-dispatcher:${crypto.randomUUID()}`;
+  const budget = createTimeBudget({
+    claimMs: config.timeBudgetMs,
+    hardMs: config.hardDeadlineMs,
   });
-  if (resumeError) throw new Error(resumeError.message);
-  // Sending must always take precedence over the eligibility scan. The scan can
-  // involve many journeys and players and used to consume the whole serverless
-  // request, leaving due enrollments permanently unclaimed.
-  // Claim a meaningful batch, but bound active provider requests separately.
-  // The old default of five items per cron tick capped a healthy provider at
-  // 300 messages/hour, leaving a normal backlog stalled for hours.
-  // Keep database admission centralized in one worker, then use bounded
-  // provider parallelism. This clears multi-tenant backlogs quickly without
-  // multiplying reservation RPCs through concurrent cron invocations.
-  const configuredBatch = Number(process.env.JOURNEYS_DISPATCH_BATCH_SIZE ?? 250);
-  const dispatchLimit = Math.min(
-    limit,
-    Math.max(1, Math.min(Number.isFinite(configuredBatch) ? configuredBatch : 250, 1000)),
-  );
-  const configuredConcurrency = Number(process.env.JOURNEYS_DISPATCH_CONCURRENCY ?? 12);
-  const concurrency = Math.max(
-    1,
-    Math.min(Number.isFinite(configuredConcurrency) ? configuredConcurrency : 12, 12),
-  );
-  const { data: claimed, error } = await db.rpc("claim_due_journey_enrollments", {
-    p_limit: dispatchLimit,
-    p_tenant_ids: scope.tenantIds,
-    p_journey_ids: scope.journeyIds,
+
+  const { data: slot, error: slotError } = await db.rpc("acquire_journey_dispatcher_slot", {
+    p_holder: workerId,
+    p_max_slots: config.maxWorkers,
+    p_lease_seconds: config.leaseSeconds,
   });
-  if (error) throw new Error(error.message);
-  run.progress({ queue_before: queueBefore ?? 0, claimed: (claimed ?? []).length });
-  let processed = 0;
-  let failed = 0;
-  const executeClaimed = async (row: { id: string }) => {
-      try {
-        await executeEnrollment(row.id);
-        processed++;
-      } catch (error) {
-        failed++;
-        const message = error instanceof Error ? error.message : String(error);
-        const { data: enrollment } = await db
-          .from("journey_enrollments")
-          .select("*")
-          .eq("id", row.id)
-          .maybeSingle();
-        if (enrollment) {
-          const attempts = Number(enrollment.attempts ?? 0) + 1;
-          const { data: retryJourney } = await db
-            .from("journeys")
-            .select("entry_rules")
-            .eq("id", enrollment.journey_id)
-            .maybeSingle();
-          const maxAttempts = Math.min(
-            10,
-            Math.max(1, Number(retryJourney?.entry_rules?.max_attempts ?? 3)),
-          );
-          const retryBaseSeconds = Math.min(
-            3600,
-            Math.max(10, Number(retryJourney?.entry_rules?.retry_base_seconds ?? 60)),
-          );
-          const retryAt = new Date(
-            Date.now() +
-              Math.min(6 * 3600_000, retryBaseSeconds * 1000 * 2 ** Math.max(0, attempts - 1)),
-          ).toISOString();
-          await db
-            .from("journey_step_executions")
-            .update({
-              status: "failed",
-              error: message,
-              completed_at: new Date().toISOString(),
-            })
-            .eq("enrollment_id", row.id)
-            .eq("status", "claimed");
-          await release(
-            enrollment as EnrollmentRow,
-            attempts < maxAttempts
-              ? { status: "waiting", next_run_at: retryAt, attempts }
-              : { status: "failed", exit_reason: message.slice(0, 500), attempts },
-          );
-          await event(
-            enrollment as EnrollmentRow,
-            attempts < maxAttempts ? "retry_scheduled" : "failed",
-            {
-              error: message,
-              attempts,
-              retry_at: attempts < maxAttempts ? retryAt : null,
-            },
-          );
+  if (slotError) throw new Error(slotError.message);
+  if (slot === null || slot === undefined) {
+    // Every slot is held (e.g. the previous tick is still finishing in-flight items).
+    await run.finish({ stop_reason: "busy" });
+    return { enrolled: 0, claimed: 0, processed: 0, failed: 0, busy: true };
+  }
+
+  const ctx: DispatchContext = {
+    workerId,
+    budget,
+    counters: {
+      processed: 0,
+      failed: 0,
+      rescheduled: 0,
+      rateLimited: 0,
+      outcomeUnknown: 0,
+      leaseLost: 0,
+    },
+    executions: new Map(),
+    exhausted: new Map(),
+  };
+  const owned = new Set<string>();
+  let keeper: LeaseKeeper | null = null;
+  let source: ClaimingSource<ClaimedRow> | null = null;
+  let hardTimer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    const { count: queueBefore } = await db
+      .from("journey_enrollments")
+      .select("id", { count: "exact", head: true })
+      .in("status", ["active", "waiting"])
+      .lte("next_run_at", new Date().toISOString());
+    // Lease-based since 20261015110000: only expired leases are recovered.
+    const { error: recoveryError } = await db.rpc("recover_orphaned_journey_claims");
+    if (recoveryError) throw new Error(recoveryError.message);
+    const { error: resumeError } = await db.rpc("resume_priority_paused_journeys", {
+      p_limit: limit,
+    });
+    if (resumeError) throw new Error(resumeError.message);
+    run.progress({ queue_before: queueBefore ?? 0 });
+
+    keeper = startLeaseKeeper({
+      intervalMs: config.renewIntervalMs,
+      renew: async () => {
+        const { data, error } = await db.rpc("renew_journey_dispatch_leases", {
+          p_worker_id: workerId,
+          p_slot: slot,
+          p_ids: [...owned],
+          p_lease_seconds: config.leaseSeconds,
+        });
+        if (error) throw new Error(error.message);
+        const renewal = (Array.isArray(data) ? data[0] : data) as {
+          slot_held?: boolean;
+          lost_ids?: string[];
+        } | null;
+        const lost = (renewal?.lost_ids ?? []).filter((id) => owned.has(id));
+        if (!renewal?.slot_held || lost.length) {
+          console.warn("[journey dispatcher] lease renewal incomplete", {
+            workerId,
+            slotHeld: Boolean(renewal?.slot_held),
+            lost: lost.length,
+          });
         }
-        console.error("[journey dispatcher] execution failed", {
+      },
+      onError: (error) =>
+        console.error("[journey dispatcher] lease renewal failed", {
+          workerId,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+    });
+
+    const claimingSource = createClaimingSource<ClaimedRow>({
+      chunkSize: config.claimChunk,
+      maxItems: dispatchLimit,
+      canClaim: budget.canClaim,
+      claim: async (count) => {
+        for (;;) {
+          // I2: (tenant, channel) pairs whose budget is exhausted right now.
+          const exclude = exhaustedKeys(ctx);
+          const { data, error } = await db.rpc("claim_journey_enrollments_leased", {
+            p_limit: count,
+            p_worker_id: workerId,
+            p_lease_seconds: config.leaseSeconds,
+            p_tenant_ids: scope.tenantIds,
+            p_journey_ids: scope.journeyIds,
+            p_exclude: exclude,
+          });
+          if (error) throw new Error(error.message);
+          const rows = (data ?? []) as ClaimedRow[];
+          for (const row of rows) owned.add(row.id);
+          if (rows.length || !exclude.length || !budget.canClaim()) return rows;
+          // Only budget-limited work is due: wait for the earliest refill
+          // instead of ending the run as "queue_empty".
+          const wakeAt = Math.min(...ctx.exhausted.values());
+          await sleep(Math.max(50, Math.min(wakeAt - Date.now(), budget.claimRemainingMs())));
+        }
+      },
+    });
+    source = claimingSource;
+
+    const progress = () =>
+      run.progress({
+        claimed: claimingSource.claimed,
+        sent: ctx.counters.processed,
+        errors: ctx.counters.failed,
+        rescheduled: ctx.counters.rescheduled,
+        rate_limited: ctx.counters.rateLimited,
+      });
+    const pool = runBoundedPool<ClaimedRow>({
+      concurrency: config.concurrency,
+      next: () => claimingSource.next(),
+      handle: async (row) => {
+        let gate: ChannelGate | null = null;
+        try {
+          const channel = row.step_type && SEND_CHANNELS.has(row.step_type) ? row.step_type : null;
+          if (channel) {
+            gate = await admitClaimedItem(row, channel, ctx);
+            if (!gate) {
+              // Budget-deferred: does not count toward the batch size.
+              claimingSource.giveBack();
+              return;
+            }
+          }
+          await executeEnrollment(row.id, ctx, gate);
+          ctx.counters.processed++;
+        } catch (error) {
+          await handleItemFailure(row, ctx, error);
+        } finally {
+          if (gate && !gate.keepPermit) await channelBudget.release(gate.admission);
+          owned.delete(row.id);
+          ctx.executions.delete(row.id);
+          progress();
+        }
+      },
+      onError: (error, row) =>
+        console.error("[journey dispatcher] failure handling failed", {
           enrollmentId: row.id,
-          error: message,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+    });
+    // A hung provider call must not hold the run (and its slot) forever.
+    const hardDeadline = new Promise<"hard_deadline">((resolve) => {
+      hardTimer = setTimeout(() => resolve("hard_deadline"), budget.hardRemainingMs());
+    });
+    pool.catch(() => undefined);
+    const outcome = await Promise.race([pool.then(() => "done" as const), hardDeadline]);
+
+    const stopReason =
+      outcome === "hard_deadline"
+        ? "hard_deadline"
+        : claimingSource.claimed === 0
+          ? "queue_empty"
+          : claimingSource.stopReason;
+    await run.finish({
+      queue_before: queueBefore ?? 0,
+      claimed: claimingSource.claimed,
+      sent: ctx.counters.processed,
+      errors: ctx.counters.failed,
+      rescheduled: ctx.counters.rescheduled,
+      rate_limited: ctx.counters.rateLimited,
+      stop_reason: stopReason,
+    });
+    // Eligibility discovery is intentionally handled by journey-scan. Keeping
+    // this compatibility field avoids breaking existing cron diagnostics.
+    return {
+      enrolled: 0,
+      claimed: claimingSource.claimed,
+      processed: ctx.counters.processed,
+      failed: ctx.counters.failed,
+      rescheduled: ctx.counters.rescheduled,
+      rateLimited: ctx.counters.rateLimited,
+      outcomeUnknown: ctx.counters.outcomeUnknown,
+      leaseLost: ctx.counters.leaseLost,
+      stopReason,
+      scannerSeparated: true,
+    };
+  } finally {
+    if (hardTimer) clearTimeout(hardTimer);
+    // Claimed but never started (time budget over): hand back immediately.
+    const unstarted = source?.drainUnstarted() ?? [];
+    if (unstarted.length) {
+      const { error } = await db.rpc("release_journey_enrollment_claims", {
+        p_worker_id: workerId,
+        p_ids: unstarted.map((row) => row.id),
+      });
+      if (error) {
+        console.error("[journey dispatcher] release of unstarted claims failed", {
+          workerId,
+          count: unstarted.length,
+          error: error.message,
         });
       }
-  };
-  const rows = (claimed ?? []) as Array<{ id: string }>;
-  for (let offset = 0; offset < rows.length; offset += concurrency) {
-    await Promise.all(rows.slice(offset, offset + concurrency).map(executeClaimed));
-    run.progress({ sent: processed, errors: failed });
+      for (const row of unstarted) owned.delete(row.id);
+    }
+    await keeper?.stop();
+    const { error: slotReleaseError } = await db.rpc("release_journey_dispatcher_slot", {
+      p_slot: slot,
+      p_holder: workerId,
+    });
+    if (slotReleaseError) {
+      console.error("[journey dispatcher] slot release failed", {
+        workerId,
+        error: slotReleaseError.message,
+      });
+    }
   }
-  await run.finish({
-    queue_before: queueBefore ?? 0,
-    claimed: (claimed ?? []).length,
-    sent: processed,
-    errors: failed,
-    stop_reason: (claimed ?? []).length === 0 ? "queue_empty" : null,
-  });
-  // Eligibility discovery is intentionally handled by journey-scan. Keeping
-  // this compatibility field avoids breaking existing cron diagnostics.
-  return {
-    enrolled: 0,
-    claimed: (claimed ?? []).length,
-    processed,
-    failed,
-    scannerSeparated: true,
-  };
 }

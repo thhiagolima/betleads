@@ -25,7 +25,11 @@ JOURNEYS_SCANNER_ENABLED=false
 JOURNEYS_SCANNER_JOB_LIMIT=3
 JOURNEYS_SCANNER_BATCH_SIZE=500
 JOURNEYS_DISPATCH_BATCH_SIZE=250
-JOURNEYS_DISPATCH_CONCURRENCY=40
+JOURNEYS_DISPATCH_CONCURRENCY=12
+JOURNEYS_DISPATCH_TIME_BUDGET_SECONDS=45
+JOURNEYS_DISPATCH_HARD_DEADLINE_SECONDS=240
+JOURNEYS_DISPATCH_LEASE_SECONDS=120
+JOURNEYS_DISPATCH_MAX_WORKERS=1
 JOURNEYS_CANARY_TENANT_IDS=
 JOURNEYS_CANARY_JOURNEY_IDS=
 JOURNEYS_ALLOW_ALL_TENANTS=false
@@ -49,8 +53,21 @@ O scanner de elegibilidade possui uma flag independente:
 - `JOURNEYS_SCANNER_ENABLED=true`: descobre elegiveis e cria inscricoes; nao envia;
 - `JOURNEYS_DISPATCH_ENABLED=true`: processa inscricoes vencidas e chama provedores;
 - `JOURNEYS_SCANNER_JOB_LIMIT` e `JOURNEYS_SCANNER_BATCH_SIZE`: controlam o canario;
-- `JOURNEYS_DISPATCH_BATCH_SIZE`: controla quantos envios podem ser reivindicados por tick.
-- `JOURNEYS_DISPATCH_CONCURRENCY`: limita chamadas simultaneas ao provedor dentro do lote.
+- `JOURNEYS_DISPATCH_BATCH_SIZE`: maximo de itens reivindicados por execucao (1..1000).
+- `JOURNEYS_DISPATCH_CONCURRENCY`: itens em processamento simultaneo por execucao
+  (pool continuo). Padrao 12, teto 40: valores maiores sao limitados, porque cada
+  item faz ~25 chamadas sequenciais ao banco e o pool do PostgREST e compartilhado.
+  A vazao ao provedor nao depende deste valor: ela e limitada pela tabela
+  `channel_rate_limits` (SMS 15/s global e 5/s por tenant; e-mail 10/s e 4/s;
+  voz 5 e 2 simultaneas), editavel sem deploy.
+- `JOURNEYS_DISPATCH_TIME_BUDGET_SECONDS` (45, faixa 5..50): a execucao so
+  reivindica itens novos nesse intervalo; itens em andamento terminam e os nao
+  iniciados sao devolvidos na hora. `JOURNEYS_DISPATCH_HARD_DEADLINE_SECONDS`
+  (240) limita a espera pelos itens em andamento.
+- `JOURNEYS_DISPATCH_LEASE_SECONDS` (120): lease explicito por item e por slot,
+  renovado a cada 1/4 do prazo; so itens com lease vencido sao recuperados.
+- `JOURNEYS_DISPATCH_MAX_WORKERS` (1): execucoes simultaneas; um tick que encontra
+  todos os slots ocupados termina com `stop_reason = busy`.
 - `JOURNEYS_CANARY_TENANT_IDS` e `JOURNEYS_CANARY_JOURNEY_IDS`: allowlists CSV;
 - `JOURNEYS_ALLOW_ALL_TENANTS=true`: libera operacao global somente apos o canario.
 

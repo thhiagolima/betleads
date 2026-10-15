@@ -20,8 +20,21 @@ import {
 import type { Json } from "@/integrations/supabase/types";
 import { isChannelRevoked } from "./consent.server";
 import { requireBrazilianPhone } from "./phone-normalization";
+import { transportErrorKind, type ProviderErrorKind } from "./rate-limit/transport-errors";
 import type { LinkTrackingContext } from "./shortio.server";
 import { conversionFunnelSnapshot } from "./conversion-funnel";
+import {
+  campaignDeliveryKey,
+  countUnresolvedByReason,
+  noRecipientResolvedMessage,
+  type RecipientResolution,
+} from "./campaign-recipients";
+import {
+  isMissingColumnError,
+  persistCampaignUnresolved,
+  resolveCampaignRecipients,
+  type CampaignDb,
+} from "./campaign-recipients.server";
 
 const DEFAULT_SHORT_BRASIL_SINGLE_URL = "http://lp01-short.painelsms.com/bot/single-sms.php";
 const DEFAULT_SHORT_BRASIL_BULK_URL = "http://lp01-short.painelsms.com/bot/bulk-sms.php";
@@ -30,14 +43,29 @@ const DEFAULT_SHORTCODE_MESSAGES_URL = "https://api.shortcode.com.br/messages";
 // conexão TCP bloqueada pelo provedor pode deixar o envio preso indefinidamente.
 const SHORT_BRASIL_REQUEST_TIMEOUT_MS = 8_000;
 
-function requireRegisteredCampaignRecipients(
+const campaignDb = () => supabaseAdmin as unknown as CampaignDb;
+
+/**
+ * ENV-06: campaigns send to every recipient that resolves to a player of the
+ * tenant and report the rest. Only a campaign with NO resolvable recipient is
+ * refused.
+ */
+async function resolveCampaignTargetsForSend(
+  tenantId: string,
   targets: Array<{ phone: string; playerId?: string | null }>,
 ) {
-  const missing = targets.filter((target) => !target.playerId);
-  if (missing.length === 0) return;
-  throw new Error(
-    `Campanhas só podem enviar para jogadores cadastrados. ${missing.length} destinatário(s) não foram vinculados a um player deste tenant.`,
-  );
+  const resolution = await resolveCampaignRecipients(campaignDb(), tenantId, targets);
+  if (resolution.resolved.length === 0)
+    throw new Error(noRecipientResolvedMessage(resolution.unresolved));
+  return resolution;
+}
+
+function campaignUnresolvedSummary(resolution: RecipientResolution) {
+  return {
+    unresolvedCount: resolution.unresolved.length,
+    unresolvedByReason: countUnresolvedByReason(resolution.unresolved),
+    duplicates: resolution.duplicates,
+  };
 }
 
 function shortBrasilSingleUrl(): string {
@@ -164,6 +192,7 @@ async function callShortBrasil(
           "SHORTCODE_SMS_TOKEN ou SHORT_BRASIL_SMS_USUARIO/SHORT_BRASIL_SMS_CHAVE nao configurados",
       },
       idempotencyKey: "",
+      errorKind: "misconfigured" as ProviderErrorKind,
     };
   }
   const credentialFp = await credentialFingerprint(token || usuario);
@@ -196,13 +225,18 @@ async function callShortBrasil(
         body: JSON.stringify(payload),
       });
     } catch (err) {
+      // B1: only a request that provably never left is retried here. A
+      // timeout/reset may have been accepted (Short Brasil does not dedupe by
+      // external_id), so it goes back to the caller as outcome_unknown.
+      const errorKind = transportErrorKind(err);
       console.error("SMS Short Brasil request failed before response", {
         to,
         idempotencyKey,
         attempt,
+        errorKind,
         error: err instanceof Error ? err.message : String(err),
       });
-      if (attempt < maxAttempts) {
+      if (errorKind === "not_sent" && attempt < maxAttempts) {
         await new Promise((r) => setTimeout(r, 800 * attempt));
         continue;
       }
@@ -211,6 +245,7 @@ async function callShortBrasil(
         status: 0,
         body: { error: err instanceof Error ? err.message : String(err), attempts: attempt },
         idempotencyKey,
+        errorKind: errorKind as ProviderErrorKind,
       };
     }
     if (res.status >= 500 && res.status <= 599 && attempt < maxAttempts) {
@@ -247,7 +282,13 @@ async function callShortBrasil(
     ok: res.ok && !appError,
     attempts: attempt,
   });
-  return { ok: res.ok && !appError, status: res.status, body, idempotencyKey };
+  return {
+    ok: res.ok && !appError,
+    status: res.status,
+    body,
+    idempotencyKey,
+    errorKind: null as ProviderErrorKind | null,
+  };
 }
 
 /**
@@ -316,7 +357,8 @@ export async function callShortBrasilSmsBulk(args: {
         body: JSON.stringify(payload),
       });
     } catch (err) {
-      if (attempt < maxAttempts) {
+      // B1: never resend a bulk request that may have been accepted.
+      if (transportErrorKind(err) === "not_sent" && attempt < maxAttempts) {
         await new Promise((r) => setTimeout(r, 500 * attempt));
         continue;
       }
@@ -565,6 +607,70 @@ async function refundSmsCredit(tenantId: string, referenceId: string, reason: st
   }
 }
 
+/** Max refunded attempts of one delivery that still get a deterministic billing reference. */
+export const SMS_BILLING_MAX_GENERATIONS = 20;
+
+/**
+ * Billing reference for one logical delivery. Generation 0 is the first charge;
+ * a retry only moves to the next generation after the previous charge was
+ * refunded, so "provider accepted -> commit failed -> retry" never charges twice
+ * and a retry after a refunded rejection is still charged once.
+ */
+export function smsBillingReference(deliveryKey: string, generation: number): string {
+  return generation === 0 ? `delivery:${deliveryKey}` : `delivery:${deliveryKey}:${generation}`;
+}
+
+async function smsCreditWasRefunded(tenantId: string, referenceId: string): Promise<boolean> {
+  const { data, error } = await (supabaseAdmin as any)
+    .from("sms_credit_ledger")
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .eq("idempotency_key", `sms-refund:${referenceId}`)
+    .limit(1);
+  if (error) throw new Error(error.message);
+  return Array.isArray(data) && data.length > 0;
+}
+
+/**
+ * Reserves the credit for one send. Without a delivery key every call is a new
+ * charge (campaigns, manual sends). With one, the reference is derived from it:
+ * an existing, non-refunded reservation is reused instead of charging again.
+ */
+export async function reserveSmsCreditForDelivery(
+  tenantId: string,
+  deliveryKey: string | null | undefined,
+): Promise<{ ok: true; referenceId: string } | { ok: false; referenceId: string; error: string }> {
+  if (!deliveryKey) {
+    const referenceId = crypto.randomUUID();
+    const reservation = await reserveSmsCredit(tenantId, referenceId);
+    return reservation.ok
+      ? { ok: true, referenceId }
+      : { ok: false, referenceId, error: reservation.error };
+  }
+  for (let generation = 0; generation < SMS_BILLING_MAX_GENERATIONS; generation++) {
+    const referenceId = smsBillingReference(deliveryKey, generation);
+    const reservation = await reserveSmsCredit(tenantId, referenceId);
+    if (!reservation.ok) return { ok: false, referenceId, error: reservation.error };
+    const idempotent = (reservation.data as { idempotent?: boolean } | null)?.idempotent === true;
+    if (!idempotent) return { ok: true, referenceId };
+    if (!(await smsCreditWasRefunded(tenantId, referenceId))) return { ok: true, referenceId };
+  }
+  console.warn("SMS delivery exceeded deterministic billing generations", { deliveryKey });
+  return reserveSmsCreditForDelivery(tenantId, null);
+}
+
+/** Log of a previous send of this delivery that the provider already accepted. */
+async function findAcceptedSmsForDeliveryKey(deliveryKey: string): Promise<string | null> {
+  const { data, error } = await supabaseAdmin
+    .from("sms_send_logs")
+    .select("id")
+    .eq("idempotency_key", deliveryKey)
+    .in("status", ["sent", "delivered", "enviado", "entregue"])
+    .limit(1);
+  if (error) throw new Error(error.message);
+  return data?.[0]?.id ?? null;
+}
+
 /** Envia um SMS, registra log e retorna o resultado. Server-only. */
 export async function sendSmsInternal(args: {
   to: string;
@@ -607,6 +713,20 @@ export async function sendSmsInternal(args: {
       tenant_id: args.tenantId ?? null,
     });
     return { ok: false, error: msg };
+  }
+
+  // A retried delivery whose provider call was already accepted (e.g. the
+  // worker failed after sending) must not reach the provider or billing again.
+  if (args.deliveryKey) {
+    const acceptedLogId = await findAcceptedSmsForDeliveryKey(args.deliveryKey);
+    if (acceptedLogId) {
+      return {
+        ok: true as const,
+        status: 200,
+        response: JSON.stringify({ already_sent: true, sms_log_id: acceptedLogId }),
+        alreadySent: true as const,
+      };
+    }
   }
 
   const billingTenantId = await resolveBillingTenantId({
@@ -667,10 +787,11 @@ export async function sendSmsInternal(args: {
     preparedContent = prepared.content;
     trackedDispatchIds = prepared.links.map((link) => link.dispatchId);
   }
-  const billingReferenceId = crypto.randomUUID();
+  let billingReferenceId: string = crypto.randomUUID();
   let creditReserved = false;
   if (billingTenantId) {
-    const reservation = await reserveSmsCredit(billingTenantId, billingReferenceId);
+    const reservation = await reserveSmsCreditForDelivery(billingTenantId, args.deliveryKey);
+    billingReferenceId = reservation.referenceId;
     if (!reservation.ok) {
       await logSend({
         to: normalized,
@@ -747,6 +868,7 @@ export async function sendSmsInternal(args: {
         error: errorSummary ?? `HTTP ${r.status}`,
         temporary: isTemporary,
         body: JSON.stringify(r.body ?? null),
+        errorKind: r.errorKind ?? null,
       };
 }
 
@@ -934,13 +1056,19 @@ export const sendBulkSms = createServerFn({ method: "POST" })
     }
 
     const trigger = `campanha:${data.campaignName}:${data.route}`;
-    const targets: Array<{ phone: string; playerId?: string }> = [
+    const inputTargets: Array<{ phone: string; playerId?: string }> = [
       ...data.recipients,
       ...data.phones.map((p) => ({ phone: p })),
     ];
-    if (targets.length === 0) {
+    if (inputTargets.length === 0) {
       return { total: 0, sent: 0, failed: 0, results: [] };
     }
+
+    // ENV-06: resolve por telefone normalizado em lotes; quem não resolve não
+    // bloqueia a campanha — é registrado com o motivo e aparece no relatório.
+    const resolution = await resolveCampaignTargetsForSend(tenantId, inputTargets);
+    const targets = resolution.resolved;
+    const unresolvedSummary = campaignUnresolvedSummary(resolution);
 
     // Envios grandes seriam interrompidos pelo timeout do worker (~30s)
     // e deixavam a campanha pela metade. A partir de 50 destinatários,
@@ -949,12 +1077,6 @@ export const sendBulkSms = createServerFn({ method: "POST" })
     // acompanha o progresso na aba Campanhas.
     const QUEUE_THRESHOLD = 50;
     if (targets.length > QUEUE_THRESHOLD) {
-      const resolved = await resolveRecipientsForTenant(
-        tenantId,
-        targets.filter((t) => !t.playerId).map((t) => t.phone),
-        targets.filter((t) => t.playerId) as Array<{ phone: string; playerId?: string }>,
-      );
-      requireRegisteredCampaignRecipients(resolved);
       const { data: inserted, error: insErr } = await (context.supabase as any)
         .from("sms_campaigns")
         .insert({
@@ -962,8 +1084,8 @@ export const sendBulkSms = createServerFn({ method: "POST" })
           name: data.campaignName,
           content: data.content,
           route: data.route,
-          recipients: resolved as unknown as Json,
-          total_count: resolved.length,
+          recipients: targets as unknown as Json,
+          total_count: targets.length,
           scheduled_at: new Date().toISOString(),
           status: "agendada",
           rate_per_minute: data.ratePerMinute,
@@ -981,67 +1103,28 @@ export const sendBulkSms = createServerFn({ method: "POST" })
         .select("id")
         .single();
       if (insErr) throw new Error(insErr.message);
+      if (resolution.unresolved.length > 0)
+        await persistCampaignUnresolved(campaignDb(), inserted.id, resolution.unresolved);
       console.info("Bulk SMS enfileirado como campanha", {
         campaignName: data.campaignName,
-        total: resolved.length,
+        total: targets.length,
+        unresolved: resolution.unresolved.length,
         campaignId: inserted.id,
       });
       return {
-        total: resolved.length,
+        total: targets.length,
         sent: 0,
         failed: 0,
         pending: 0,
         results: [],
         queued: true as const,
         campaignId: inserted.id,
+        ...unresolvedSummary,
       };
     }
 
-    // Auto-match telefone → player para qualquer target sem playerId.
-    // Normaliza para apenas dígitos com prefixo "55" (mesmo formato gravado
-    // em public.players.telefone), e também tenta sem o "55" caso o CRM
-    // guarde no formato antigo.
-    const normalizeDigits = (raw: string): string[] => {
-      const d = raw.replace(/\D/g, "");
-      if (!d) return [];
-      const withCountry = d.startsWith("55") ? d : `55${d}`;
-      const noCountry = withCountry.slice(2);
-      return Array.from(new Set([withCountry, noCountry, d]));
-    };
-
-    const phoneLookup = new Map<string, string>(); // digits → playerId
-    const unmatchedDigits = new Set<string>();
-    for (const t of targets) {
-      if (t.playerId) continue;
-      for (const d of normalizeDigits(t.phone)) unmatchedDigits.add(d);
-    }
-    if (unmatchedDigits.size > 0) {
-      const { data: matches } = await supabaseAdmin
-        .from("players")
-        .select("id, telefone")
-        .eq("tenant_id", tenantId)
-        .range(0, 49999);
-      (matches ?? []).forEach((m) => {
-        const d = (m.telefone ?? "").replace(/\D/g, "");
-        if (d && unmatchedDigits.has(d)) phoneLookup.set(d, m.id);
-      });
-    }
-    for (const t of targets) {
-      if (t.playerId) continue;
-      for (const d of normalizeDigits(t.phone)) {
-        const hit = phoneLookup.get(d);
-        if (hit) {
-          t.playerId = hit;
-          break;
-        }
-      }
-    }
-    requireRegisteredCampaignRecipients(targets);
-
     // Carrega variáveis dos players envolvidos (uma query só)
-    const playerIds = Array.from(
-      new Set(targets.map((t) => t.playerId).filter((id): id is string => typeof id === "string")),
-    );
+    const playerIds = Array.from(new Set(targets.map((t) => t.playerId)));
     const varsByPlayer = new Map<string, Record<string, string>>();
     if (playerIds.length > 0) {
       const { data: players } = await supabaseAdmin
@@ -1089,31 +1172,44 @@ export const sendBulkSms = createServerFn({ method: "POST" })
         immediateCampaignError?.message ?? "Não foi possível registrar a campanha SMS.",
       );
     }
+    if (resolution.unresolved.length > 0)
+      await persistCampaignUnresolved(campaignDb(), immediateCampaign.id, resolution.unresolved);
 
     console.info("Bulk SMS campaign started", {
       campaignName: data.campaignName,
       route: data.route,
       total: targets.length,
+      unresolved: resolution.unresolved.length,
     });
-    const results: { phone: string; ok: boolean; error?: string; temporary?: boolean }[] = [];
+    const results: {
+      phone: string;
+      playerId: string;
+      ok: boolean;
+      error?: string;
+      temporary?: boolean;
+    }[] = [];
     const concurrency = 5;
     for (let i = 0; i < targets.length; i += concurrency) {
       const batch = targets.slice(i, i + concurrency);
       const batchResults = await Promise.all(
         batch.map(async (t) => {
-          const variables = t.playerId ? (varsByPlayer.get(t.playerId) ?? null) : null;
+          const variables = varsByPlayer.get(t.playerId) ?? null;
           const r = await sendSmsInternal({
             to: t.phone,
             content: data.content,
-            playerId: t.playerId ?? null,
+            playerId: t.playerId,
             triggerName: trigger,
             variables,
             tenantId,
             linkTrackingEnabled: true,
             linkTrackingOrigin: { sourceType: "campaign", sourceId: immediateCampaign.id },
+            // Mesma chave que o worker usaria: uma nova tentativa deste
+            // destinatário nunca chega de novo ao provedor nem à cobrança.
+            deliveryKey: await campaignDeliveryKey(immediateCampaign.id, t.playerId),
           });
           return {
             phone: t.phone,
+            playerId: t.playerId,
             ok: r.ok,
             error: r.ok ? undefined : (r as { error?: string }).error,
             temporary: r.ok ? false : (r as { temporary?: boolean }).temporary === true,
@@ -1133,12 +1229,25 @@ export const sendBulkSms = createServerFn({ method: "POST" })
       failed,
       pending,
     });
+    // Falhas temporárias ficam no fim da lista, depois do cursor: o worker de
+    // campanhas retoma só elas (com a mesma deliveryKey), sem reenviar as demais.
+    const finished = results.filter((r) => r.ok || !r.temporary);
+    const retry = results.filter((r) => !r.ok && r.temporary);
     await (context.supabase as any)
       .from("sms_campaigns")
       .update({
         status: pending > 0 ? "enviando" : failed === results.length ? "falhou" : "enviado",
         sent_count: sent,
         failed_count: failed,
+        ...(pending > 0
+          ? {
+              recipients: [...finished, ...retry].map((r) => ({
+                phone: r.phone,
+                playerId: r.playerId,
+              })) as unknown as Json,
+              sent_cursor: finished.length,
+            }
+          : {}),
       })
       .eq("id", immediateCampaign.id)
       .eq("tenant_id", tenantId);
@@ -1147,8 +1256,9 @@ export const sendBulkSms = createServerFn({ method: "POST" })
       sent,
       failed,
       pending,
-      results,
+      results: results.map(({ playerId: _playerId, ...rest }) => rest),
       campaignId: immediateCampaign.id,
+      ...unresolvedSummary,
     };
   });
 
@@ -1816,52 +1926,37 @@ const ScheduleBulkSchema = z.object({
   enabledFunnelSteps: z.array(z.string().max(80)).max(10).optional(),
 });
 
-/** Match telefone → playerId dentro do tenant, mesmo shape usado em sendBulkSms. */
-async function resolveRecipientsForTenant(
-  tenantId: string,
-  phones: string[],
-  recipients: Array<{ phone: string; playerId?: string }>,
-): Promise<Array<{ phone: string; playerId?: string }>> {
-  const targets: Array<{ phone: string; playerId?: string }> = [
-    ...recipients,
-    ...phones.map((p) => ({ phone: p })),
-  ];
-  const normalizeDigits = (raw: string): string[] => {
-    const d = raw.replace(/\D/g, "");
-    if (!d) return [];
-    const withCountry = d.startsWith("55") ? d : `55${d}`;
-    const noCountry = withCountry.slice(2);
-    return Array.from(new Set([withCountry, noCountry, d]));
-  };
-  const unmatched = new Set<string>();
-  for (const t of targets) {
-    if (t.playerId) continue;
-    for (const d of normalizeDigits(t.phone)) unmatched.add(d);
-  }
-  if (unmatched.size > 0) {
-    const { data: matches } = await supabaseAdmin
-      .from("players")
-      .select("id, telefone")
-      .eq("tenant_id", tenantId)
-      .range(0, 49999);
-    const lookup = new Map<string, string>();
-    (matches ?? []).forEach((m) => {
-      const d = (m.telefone ?? "").replace(/\D/g, "");
-      if (d) lookup.set(d, m.id);
-    });
-    for (const t of targets) {
-      if (t.playerId) continue;
-      for (const d of normalizeDigits(t.phone)) {
-        const hit = lookup.get(d);
-        if (hit) {
-          t.playerId = hit;
-          break;
-        }
-      }
-    }
-  }
-  return targets;
-}
+/**
+ * ENV-06 — composer preview: how many of the chosen recipients will actually
+ * receive the campaign and why the others will not. Same resolver used when the
+ * campaign is created and by the worker.
+ */
+export const previewSmsCampaignRecipients = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) =>
+    z
+      .object({
+        phones: z.array(z.string().min(1).max(40)).max(20000).optional().default([]),
+        recipients: z
+          .array(z.object({ phone: z.string().min(1).max(40), playerId: dbUuid().optional() }))
+          .max(20000)
+          .optional()
+          .default([]),
+      })
+      .parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const tenantId = await resolveCurrentTenantId(context.supabase);
+    const resolution = await resolveCampaignRecipients(campaignDb(), tenantId, [
+      ...data.recipients,
+      ...data.phones.map((phone) => ({ phone })),
+    ]);
+    return {
+      total: data.recipients.length + data.phones.length,
+      resolved: resolution.resolved.length,
+      ...campaignUnresolvedSummary(resolution),
+    };
+  });
 
 export const scheduleBulkSms = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -1899,9 +1994,13 @@ export const scheduleBulkSms = createServerFn({ method: "POST" })
       };
     }
 
-    const targets = await resolveRecipientsForTenant(tenantId, data.phones, data.recipients);
-    if (targets.length === 0) throw new Error("Sem destinatários válidos");
-    requireRegisteredCampaignRecipients(targets);
+    if (data.phones.length + data.recipients.length === 0)
+      throw new Error("Sem destinatários válidos");
+    const resolution = await resolveCampaignTargetsForSend(tenantId, [
+      ...data.recipients,
+      ...data.phones.map((phone) => ({ phone })),
+    ]);
+    const targets = resolution.resolved;
 
     const { data: inserted, error } = await (context.supabase as any)
       .from("sms_campaigns")
@@ -1929,7 +2028,9 @@ export const scheduleBulkSms = createServerFn({ method: "POST" })
       .select("id, name, scheduled_at, total_count, status")
       .single();
     if (error) throw new Error(error.message);
-    return inserted;
+    if (resolution.unresolved.length > 0)
+      await persistCampaignUnresolved(campaignDb(), inserted.id, resolution.unresolved);
+    return { ...inserted, ...campaignUnresolvedSummary(resolution) };
   });
 
 export const listScheduledSmsCampaigns = createServerFn({ method: "GET" })
@@ -1937,17 +2038,37 @@ export const listScheduledSmsCampaigns = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const tenantId = await resolveCurrentTenantId(context.supabase);
     const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
-    const { data, error } = await context.supabase
-      .from("sms_campaigns")
-      .select(
-        "id, name, scheduled_at, status, total_count, sent_count, deduplicated_count, failed_count, last_error, created_at, updated_at",
-      )
-      .eq("tenant_id", tenantId)
-      .gte("created_at", since)
-      .order("scheduled_at", { ascending: true })
-      .limit(200);
+    const baseColumns =
+      "id, name, scheduled_at, status, total_count, sent_count, deduplicated_count, failed_count, last_error, created_at, updated_at";
+    const list = (columns: string) =>
+      (context.supabase as any)
+        .from("sms_campaigns")
+        .select(columns)
+        .eq("tenant_id", tenantId)
+        .gte("created_at", since)
+        .order("scheduled_at", { ascending: true })
+        .limit(200);
+    // `unresolved_count` (ENV-06) arrives with migration 20261015113000; until
+    // it is applied the list keeps working without the badge.
+    let { data, error } = await list(`${baseColumns}, unresolved_count`);
+    if (error && isMissingColumnError(error)) ({ data, error } = await list(baseColumns));
     if (error) throw new Error(error.message);
-    return { campaigns: data ?? [] };
+    return {
+      campaigns: ((data ?? []) as Array<Record<string, unknown>>).map((row) => ({
+        id: String(row.id),
+        name: (row.name as string | null) ?? null,
+        scheduled_at: String(row.scheduled_at),
+        status: String(row.status),
+        total_count: Number(row.total_count ?? 0),
+        sent_count: Number(row.sent_count ?? 0),
+        deduplicated_count: Number(row.deduplicated_count ?? 0),
+        failed_count: Number(row.failed_count ?? 0),
+        last_error: (row.last_error as string | null) ?? null,
+        created_at: String(row.created_at),
+        updated_at: String(row.updated_at),
+        unresolved_count: Number(row.unresolved_count ?? 0),
+      })),
+    };
   });
 
 export const cancelScheduledSmsCampaign = createServerFn({ method: "POST" })

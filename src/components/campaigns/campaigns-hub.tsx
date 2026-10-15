@@ -37,6 +37,8 @@ type Campaign = {
   sent_count: number | null;
   deduplicated_count?: number | null;
   failed_count: number | null;
+  /** ENV-06: recipients skipped because they did not resolve to a player. */
+  unresolved_count?: number | null;
   channel: "sms" | "email" | "voice";
   cancellable?: boolean;
 };
@@ -410,6 +412,15 @@ export function CampaignsHub() {
                     <Badge variant="outline" className={operation.tone}>
                       {operation.label}
                     </Badge>
+                    {Number(campaign.unresolved_count ?? 0) > 0 ? (
+                      <Badge
+                        variant="outline"
+                        className="shrink-0 border-amber-500/40 text-amber-500"
+                        title="Destinatários sem cadastro, com telefone inválido ou sem consentimento. Veja o motivo no relatório."
+                      >
+                        {num(Number(campaign.unresolved_count))} não enviados
+                      </Badge>
+                    ) : null}
                   </div>
                   <p className="mt-1 text-xs text-muted-foreground">
                     {campaign.channel === "sms"

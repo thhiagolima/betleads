@@ -1,6 +1,8 @@
 // Dispatcher dos fluxos de SMS. Avança uma etapa por execução, respeita
 // delay_days, exit conditions e limite diário global.
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { channelBudget } from "./rate-limit/channel-budget.server";
+import { sleep } from "./rate-limit/pool";
 import { sendSmsInternal } from "./sms.functions";
 import { buildPlayerVariables, renderTemplate } from "./template-vars.server";
 import { deferIfOutsideWindow } from "./send-window.server";
@@ -23,6 +25,18 @@ import {
   startJobRun,
   type JobRunHandle,
 } from "./observability/job-monitor.server";
+import { SMS_CAMPAIGN_RUN_BUDGET_MS, SMS_CAMPAIGN_TICK_SECONDS } from "./campaign-recipients";
+import {
+  findAcceptedDeliveryKeys,
+  persistCampaignUnresolved,
+  resolveCampaignRecipients,
+  type CampaignDb,
+} from "./campaign-recipients.server";
+import {
+  processSmsCampaignTick,
+  type CampaignDispatchDeps,
+  type SmsCampaignRow,
+} from "./sms-campaign-dispatch.server";
 
 const SMS_CAMPAIGN_JOB = "sms_campaign_dispatch";
 
@@ -711,47 +725,118 @@ export async function runSmsDispatcher({ limit = 30 }: { limit?: number } = {}) 
 
 // ============================================================
 // Dispatcher de CAMPANHAS de SMS agendadas (envio em massa programado).
-// Reserva campanhas com scheduled_at <= now via claim_due_sms_campaigns,
-// envia cada destinatário reutilizando sendSmsInternal, e atualiza
-// contadores/status. Respeita janela de envio; se fora da janela, apenas
-// não roda nesse tick (as campanhas ficam agendadas para o próximo tick
-// dentro da janela).
+// Reserva campanhas com scheduled_at <= now via claim_due_sms_campaigns e
+// processa cada uma com processSmsCampaignTick (sms-campaign-dispatch.server):
+// destinatários sem cadastro são pulados e reportados (ENV-06), a cota por
+// tick segue o ritmo configurado na cadência real do cron (ENV-07) e o cursor
+// só avança depois do envio registrado. Fora da janela de envio, não roda.
 // ============================================================
 
-type CampaignRow = {
-  id: string;
-  tenant_id: string;
-  name: string;
-  content: string;
-  route: string;
-  recipients: unknown;
-  total_count: number;
-  sent_count: number;
-  deduplicated_count: number;
-  failed_count: number;
-  scheduled_at: string;
-  sent_cursor: number;
-  last_error: string | null;
-  rate_per_minute: number | null;
-  track_links?: boolean | null;
-};
+/**
+ * ENV-07/ENV-04 — ponto único do rate limit das campanhas de SMS.
+ *
+ * Retorna quantos envios (0..want) esta campanha pode fazer agora:
+ * 1. budget por canal/tenant (`channel_rate_limits`, token bucket no banco,
+ *    padrão SMS 15/s global e 5/s por tenant, burst 15). Espera no máximo
+ *    CAMPAIGN_BUDGET_MAX_WAIT_MS acumulando tokens e devolve o que conseguiu:
+ *    uma concessão parcial NÃO encerra o tick — processSmsCampaignTick envia o
+ *    concedido e volta a pedir até o prazo da execução (45 s) ou a cota, então
+ *    o próprio loop dita o ritmo (~5/s sustentado por tenant ≈ 225–240 por
+ *    execução).
+ * 2. teto global legado (`dispatch_rate_state`), que mantém o backoff após
+ *    429 do provedor.
+ * Se o limitador novo ainda não existir no banco (migration pendente), cai no
+ * comportamento anterior em vez de bloquear todas as campanhas.
+ */
+const CAMPAIGN_BUDGET_MAX_WAIT_MS = 1_500;
 
-type CampaignTarget = { phone: string; playerId?: string | null };
-
-function parseCampaignTargets(raw: unknown): CampaignTarget[] {
-  if (!Array.isArray(raw)) return [];
-  const out: CampaignTarget[] = [];
-  for (const r of raw) {
-    if (r && typeof r === "object" && typeof (r as { phone?: unknown }).phone === "string") {
-      const phone = (r as { phone: string }).phone;
-      const pid = (r as { playerId?: unknown }).playerId;
-      out.push({
-        phone,
-        playerId: typeof pid === "string" ? pid : null,
-      });
+export async function acquireCampaignSendBudget(tenantId: string, want: number): Promise<number> {
+  if (want <= 0) return 0;
+  const deadline = Date.now() + CAMPAIGN_BUDGET_MAX_WAIT_MS;
+  let granted = 0;
+  while (granted < want) {
+    const grant = await channelBudget.consume(tenantId, "sms", want - granted);
+    if (grant.limitedBy === "error") {
+      // Limitador indisponível (ex.: migration ainda não aplicada).
+      return granted + (await consumeBudget("sms", want - granted));
     }
+    granted += grant.granted;
+    if (granted >= want) break;
+    const waitMs = Math.max(200, grant.retryAfterMs || 1000);
+    if (Date.now() + waitMs > deadline) break;
+    await sleep(waitMs);
   }
-  return out;
+  if (granted <= 0) return 0;
+  return Math.min(granted, await consumeBudget("sms", granted));
+}
+
+const campaignDb = supabaseAdmin as unknown as CampaignDb;
+
+function campaignDeps(): CampaignDispatchDeps {
+  return {
+    now: () => Date.now(),
+    resolveRecipients: (tenantId, inputs) =>
+      resolveCampaignRecipients(campaignDb, tenantId, inputs),
+    async updateCampaign(campaign, patch) {
+      let query = campaignDb.from("sms_campaigns").update(patch).eq("id", campaign.id);
+      // Só grava enquanto este worker detém o lock da campanha.
+      if (campaign.locked_by) query = query.eq("locked_by", campaign.locked_by);
+      const { data, error } = await query.select("id");
+      if (error) {
+        console.error("[sms-campaigns] falha ao atualizar campanha", {
+          campaignId: campaign.id,
+          error: error.message,
+        });
+        return false;
+      }
+      return Array.isArray(data) && data.length > 0;
+    },
+    async persistUnresolved(campaignId, unresolved) {
+      await persistCampaignUnresolved(campaignDb, campaignId, unresolved);
+    },
+    acquireSendBudget: acquireCampaignSendBudget,
+    async checkContactLimits(tenantId, playerIds) {
+      const decisions = await Promise.all(
+        playerIds.map(async (playerId) => {
+          const r = await checkContactFrequencyLimit(tenantId, playerId);
+          return [playerId, { allowed: r.allowed, retryAt: r.retryAt }] as const;
+        }),
+      );
+      return new Map(decisions);
+    },
+    findAcceptedDeliveryKeys: (keys) => findAcceptedDeliveryKeys(campaignDb, keys),
+    async loadPlayerVariables(playerIds) {
+      const vars = new Map<string, Record<string, string>>();
+      for (let i = 0; i < playerIds.length; i += 300) {
+        const { data: players } = await supabaseAdmin
+          .from("players")
+          .select(
+            "id, nome, telefone, saldo_carteira, ultimo_login, ultimo_jogo, ultimo_deposito, total_depositado, total_sacado, vip, status, expert, risco",
+          )
+          .in("id", playerIds.slice(i, i + 300));
+        (players ?? []).forEach((p) => vars.set(p.id, buildPlayerVariables(p)));
+      }
+      return vars;
+    },
+    async send({ campaign, target, deliveryKey, variables }) {
+      const r = await sendSmsInternal({
+        to: target.phone,
+        content: campaign.content,
+        playerId: target.playerId,
+        triggerName: `campanha:${campaign.name}:${campaign.route}`,
+        variables,
+        tenantId: campaign.tenant_id,
+        linkTrackingEnabled: campaign.track_links !== false,
+        linkTrackingOrigin: { sourceType: "campaign", sourceId: campaign.id },
+        deliveryKey,
+      });
+      return {
+        ok: r.ok,
+        alreadySent: "alreadySent" in r && r.alreadySent === true,
+        error: r.ok ? undefined : (r as { error?: string }).error,
+      };
+    },
+  };
 }
 
 export async function runScheduledSmsCampaigns({ limit = 20 }: { limit?: number } = {}) {
@@ -774,7 +859,7 @@ export async function runScheduledSmsCampaigns({ limit = 20 }: { limit?: number 
     });
     return { processed: 0, error: claimErr.message };
   }
-  const campaigns = (claimed ?? []) as CampaignRow[];
+  const campaigns = (claimed ?? []) as unknown as SmsCampaignRow[];
   if (campaigns.length === 0) {
     void pingHeartbeat(SMS_CAMPAIGN_JOB, true);
     return { processed: 0 };
@@ -793,7 +878,7 @@ export async function runScheduledSmsCampaigns({ limit = 20 }: { limit?: number 
       claimed: campaigns.length,
       sent: result.sent,
       errors: result.failed,
-      stop_reason: result.failed > 0 ? "errors" : "ok",
+      stop_reason: result.failed > 0 ? "errors" : result.stop_reason,
     });
     return result;
   } catch (error) {
@@ -802,300 +887,50 @@ export async function runScheduledSmsCampaigns({ limit = 20 }: { limit?: number 
   }
 }
 
-async function dispatchClaimedSmsCampaigns(campaigns: CampaignRow[], run: JobRunHandle) {
-  const { sendSmsInternal } = await import("./sms.functions");
-
-  // O worker é chamado ~12x por minuto (a cada 5s). O lote de cada rodada é
-  // derivado do ritmo escolhido na campanha (`rate_per_minute`), com um teto
-  // por rodada para não estourar o tempo de execução do worker.
-  const ROUNDS_PER_MINUTE = 12;
-  const MAX_PER_ROUND = 700;
-  const MIN_PER_ROUND = 50;
-  const DEFAULT_RATE = 1000;
-
-  function concurrencyForRate(rate: number): number {
-    if (rate >= 4000) return 80;
-    if (rate >= 2500) return 60;
-    if (rate >= 1000) return 25;
-    if (rate >= 300) return 10;
-    return 5;
-  }
-
-  // Janela de deduplicação: se o mesmo telefone já recebeu o MESMO conteúdo
-  // com sucesso nas últimas 6h, pula. Última linha de defesa contra
-  // duplicações causadas por worker abortado antes de gravar o cursor.
-  const DEDUPE_WINDOW_MS = 6 * 3600_000;
-
+async function dispatchClaimedSmsCampaigns(campaigns: SmsCampaignRow[], run: JobRunHandle) {
+  // Um único orçamento de tempo por execução (cron 1×/min), compartilhado pelas
+  // campanhas reservadas; as que não couberem só têm o lock liberado.
+  const deadline = Date.now() + SMS_CAMPAIGN_RUN_BUDGET_MS;
+  const deps = campaignDeps();
   let totalSent = 0;
   let totalFailed = 0;
+  let totalDeduplicated = 0;
+  let stopReason = "ok";
   for (const c of campaigns) {
-    const allTargets = parseCampaignTargets(c.recipients);
-    if (allTargets.length === 0) {
-      await supabaseAdmin
-        .from("sms_campaigns")
-        .update({
-          status: "falhou",
-          last_error: "Sem destinatários",
-          locked_at: null,
-          locked_by: null,
-        })
-        .eq("id", c.id);
+    if (Date.now() >= deadline) {
+      stopReason = "deadline";
+      await deps.updateCampaign(c, { status: "enviando", locked_at: null, locked_by: null });
       continue;
     }
-
-    // Campaigns created before recipient resolution was introduced may retain
-    // only a phone number. Resolve them at dispatch time as a final attribution
-    // safeguard so Short.io clicks can be joined to webhook player IDs.
-    const unresolvedTargets = allTargets.filter((target) => !target.playerId);
-    if (unresolvedTargets.length > 0) {
-      const { data: tenantPlayers, error: playerLookupError } = await supabaseAdmin
-        .from("players")
-        .select("id,telefone")
-        .eq("tenant_id", c.tenant_id)
-        .range(0, 49_999);
-      if (playerLookupError) {
-        console.error("[sms-campaigns] falha ao resolver destinatarios", playerLookupError);
-      } else {
-        const playersByPhone = new Map<string, string>();
-        for (const player of tenantPlayers ?? []) {
-          const digits = String(player.telefone ?? "").replace(/\D/g, "");
-          if (!digits) continue;
-          const withCountry = digits.startsWith("55") ? digits : `55${digits}`;
-          playersByPhone.set(digits, player.id);
-          playersByPhone.set(withCountry, player.id);
-          playersByPhone.set(withCountry.slice(2), player.id);
-        }
-        for (const target of unresolvedTargets) {
-          const digits = target.phone.replace(/\D/g, "");
-          const withCountry = digits.startsWith("55") ? digits : `55${digits}`;
-          target.playerId =
-            playersByPhone.get(digits) ??
-            playersByPhone.get(withCountry) ??
-            playersByPhone.get(withCountry.slice(2)) ??
-            null;
-        }
-      }
-    }
-
-    // Retoma de onde parou no último tick (0 se primeira execução).
-    const unresolvedAfterLookup = allTargets.filter((target) => !target.playerId);
-    if (unresolvedAfterLookup.length > 0) {
-      // A campaign conversion can only be measured when the recipient is a
-      // known player. Do not send a trackable campaign that would create an
-      // unprovable click/conversion chain.
-      await supabaseAdmin
-        .from("sms_campaigns")
-        .update({
-          status: "falhou",
-          last_error: `${unresolvedAfterLookup.length} destinatário(s) sem player vinculado; envio bloqueado para preservar rastreabilidade.`,
-          locked_at: null,
-          locked_by: null,
-        })
-        .eq("id", c.id);
-      continue;
-    }
-
-    if (unresolvedTargets.length > 0) {
-      const { error: persistRecipientsError } = await supabaseAdmin
-        .from("sms_campaigns")
-        .update({ recipients: allTargets as never })
-        .eq("id", c.id);
-      if (persistRecipientsError) {
-        console.error("[sms-campaigns] falha ao persistir players resolvidos", {
-          campaignId: c.id,
-          error: persistRecipientsError.message,
-        });
-      }
-    }
-
-    const cursor = Math.max(0, c.sent_cursor ?? 0);
-    const remaining = allTargets.length - cursor;
-    if (remaining <= 0) {
-      // Já foi tudo enviado; só finaliza.
-      await supabaseAdmin
-        .from("sms_campaigns")
-        .update({
-          status: (c.failed_count ?? 0) > 0 && (c.sent_count ?? 0) === 0 ? "falhou" : "enviado",
-          locked_at: null,
-          locked_by: null,
-        })
-        .eq("id", c.id);
-      continue;
-    }
-    const rate = Math.max(1, c.rate_per_minute ?? DEFAULT_RATE);
-    const perRound = Math.min(
-      MAX_PER_ROUND,
-      Math.max(MIN_PER_ROUND, Math.ceil(rate / ROUNDS_PER_MINUTE)),
-    );
-    // Teto global do canal (token bucket por minuto). Se não houver budget,
-    // libera o lock e tenta na próxima rodada.
-    const budget = await consumeBudget("sms", Math.min(perRound, remaining));
-    if (budget <= 0) {
-      await supabaseAdmin
-        .from("sms_campaigns")
-        .update({ status: "enviando", locked_at: null, locked_by: null })
-        .eq("id", c.id);
-      continue;
-    }
-    const chunkSize = Math.min(budget, remaining);
-    const candidateTargets = allTargets.slice(cursor, cursor + chunkSize);
-    // Mantém a ordem do cursor: ao encontrar um contato limitado, a campanha
-    // aguarda esse destinatário em vez de pulá-lo e perder o envio.
-    const targets = [] as CampaignTarget[];
-    let contactRetryAt: string | null = null;
-    for (const target of candidateTargets) {
-      const contact = await checkContactFrequencyLimit(c.tenant_id, target.playerId ?? null);
-      if (!contact.allowed) {
-        contactRetryAt = contact.retryAt;
-        break;
-      }
-      targets.push(target);
-    }
-    if (targets.length === 0) {
-      await supabaseAdmin
-        .from("sms_campaigns")
-        .update({
-          status: "enviando",
-          scheduled_at: contactRetryAt ?? new Date(Date.now() + 3600_000).toISOString(),
-          locked_at: null,
-          locked_by: null,
-        })
-        .eq("id", c.id);
-      continue;
-    }
-
-    // RESERVA OTIMISTA: avança o cursor ANTES de enviar. Se o worker morrer no
-    // meio do chunk, o próximo tick pula esses telefones — pior caso perde
-    // envios (reagendáveis), nunca duplica (irreversível/caro).
-    // Renova locked_at para segurar o lock durante o envio.
-    const reservedCursor = cursor + targets.length;
-    await supabaseAdmin
-      .from("sms_campaigns")
-      .update({
-        sent_cursor: reservedCursor,
-        locked_at: new Date().toISOString(),
-      })
-      .eq("id", c.id);
-
-    // Carrega variáveis dos players em uma única query.
-    const playerIds = Array.from(
-      new Set(
-        targets
-          .map((t) => t.playerId)
-          .filter((v): v is string => typeof v === "string" && v.length > 0),
-      ),
-    );
-    const varsByPlayer = new Map<string, Record<string, string>>();
-    if (playerIds.length > 0) {
-      const { data: players } = await supabaseAdmin
-        .from("players")
-        .select(
-          "id, nome, telefone, saldo_carteira, ultimo_login, ultimo_jogo, ultimo_deposito, total_depositado, total_sacado, vip, status, expert, risco",
-        )
-        .in("id", playerIds);
-      (players ?? []).forEach((p) => {
-        varsByPlayer.set(p.id, buildPlayerVariables(p));
+    try {
+      const r = await processSmsCampaignTick(c, deps, {
+        deadline,
+        tickSeconds: SMS_CAMPAIGN_TICK_SECONDS,
       });
-    }
-
-    let sent = 0;
-    let deduplicated = 0;
-    let failed = 0;
-    let lastError: string | null = null;
-    const trigger = `campanha:${c.name}:${c.route}`;
-    const concurrency = concurrencyForRate(rate);
-    const dedupeSince = new Date(Date.now() - DEDUPE_WINDOW_MS).toISOString();
-    // Dedup em UMA query por chunk (antes era 1 query por SMS, o que limitava
-    // muito o ritmo em lotes grandes).
-    const dedupedPhones = new Set<string>();
-    {
-      const phones = Array.from(new Set(targets.map((t) => t.phone)));
-      for (let i = 0; i < phones.length; i += 500) {
-        const slice = phones.slice(i, i + 500);
-        const { data: dups } = await supabaseAdmin
-          .from("sms_send_logs")
-          .select("to_phone")
-          .eq("tenant_id", c.tenant_id)
-          .eq("content", c.content)
-          .eq("status", "sent")
-          .gte("created_at", dedupeSince)
-          .in("to_phone", slice);
-        (dups ?? []).forEach((d) => {
-          if (d.to_phone) dedupedPhones.add(d.to_phone);
-        });
-      }
-    }
-    for (let i = 0; i < targets.length; i += concurrency) {
-      const batch = targets.slice(i, i + concurrency);
-      const results = await Promise.all(
-        batch.map(async (t) => {
-          const variables = t.playerId ? (varsByPlayer.get(t.playerId) ?? null) : null;
-          try {
-            // Dedup por (tenant, telefone, conteúdo) nas últimas 6h.
-            if (dedupedPhones.has(t.phone)) {
-              return { ok: true as const, deduped: true };
-            }
-            const r = await sendSmsInternal({
-              to: t.phone,
-              content: c.content,
-              playerId: t.playerId ?? null,
-              triggerName: trigger,
-              variables,
-              tenantId: c.tenant_id,
-              linkTrackingEnabled: c.track_links !== false,
-              linkTrackingOrigin: { sourceType: "campaign", sourceId: c.id },
-            });
-            return r;
-          } catch (e) {
-            return {
-              ok: false as const,
-              error: e instanceof Error ? e.message : String(e),
-            };
-          }
-        }),
-      );
-      for (const r of results) {
-        if (r.ok && "deduped" in r && r.deduped) deduplicated++;
-        else if (r.ok) sent++;
-        else {
-          failed++;
-          const err = (r as { error?: string }).error;
-          if (err) lastError = err;
-        }
-      }
-    }
-
-    totalSent += sent;
-    totalFailed += failed;
-    run.progress({ sent: totalSent, errors: totalFailed });
-
-    const newSent = (c.sent_count ?? 0) + sent;
-    const newDeduplicated = (c.deduplicated_count ?? 0) + deduplicated;
-    const newFailed = (c.failed_count ?? 0) + failed;
-    const isDone = reservedCursor >= allTargets.length;
-    const finalStatus = isDone
-      ? newSent + newDeduplicated === 0
-        ? "falhou"
-        : "enviado"
-      : "enviando";
-    await supabaseAdmin
-      .from("sms_campaigns")
-      .update({
-        status: finalStatus,
-        sent_count: newSent,
-        deduplicated_count: newDeduplicated,
-        failed_count: newFailed,
-        last_error: lastError ?? c.last_error ?? null,
-        // Libera lock para o próximo tick continuar (quando não terminou).
+      totalSent += r.sent;
+      totalFailed += r.failed;
+      totalDeduplicated += r.deduplicated;
+      if (r.stopReason === "deadline" || r.stopReason === "budget") stopReason = r.stopReason;
+    } catch (error) {
+      console.error("[sms-campaigns] falha ao processar campanha", {
+        campaignId: c.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await deps.updateCampaign(c, {
+        status: "enviando",
+        last_error: error instanceof Error ? error.message.slice(0, 500) : String(error),
         locked_at: null,
         locked_by: null,
-      })
-      .eq("id", c.id);
+      });
+    }
+    run.progress({ sent: totalSent, errors: totalFailed });
   }
 
   return {
     processed: campaigns.length,
     sent: totalSent,
     failed: totalFailed,
+    deduplicated: totalDeduplicated,
+    stop_reason: stopReason,
   };
 }

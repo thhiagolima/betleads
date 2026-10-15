@@ -1,14 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { from, handleCallCompletion } = vi.hoisted(() => ({
+const { from, rpc, handleCallCompletion } = vi.hoisted(() => ({
   from: vi.fn(),
+  rpc: vi.fn(),
   handleCallCompletion: vi.fn(),
 }));
 
 vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (options: unknown) => ({ options }),
 }));
-vi.mock("@/integrations/supabase/client.server", () => ({ supabaseAdmin: { from } }));
+vi.mock("@/integrations/supabase/client.server", () => ({ supabaseAdmin: { from, rpc } }));
 vi.mock("@/lib/call-flows.server", () => ({ handleCallCompletion }));
 
 import { Route } from "./events";
@@ -49,6 +50,8 @@ describe("Infobip voice event callback", () => {
   beforeEach(() => {
     process.env.INFOBIP_VOICE_CALLBACK_TOKEN = "callback-secret";
     from.mockReset();
+    rpc.mockReset();
+    rpc.mockResolvedValue({ data: true, error: null });
     handleCallCompletion.mockReset();
   });
 
@@ -147,6 +150,34 @@ describe("Infobip voice event callback", () => {
       provider_status: "answered",
     });
     expect(handleCallCompletion).not.toHaveBeenCalled();
+  });
+
+  it("releases the journey's voice concurrency permit on a final event only (I3)", async () => {
+    const send = (status: string) => {
+      from
+        .mockReturnValueOnce(
+          historyLookup({
+            id: "history-permit",
+            call_queue_id: null,
+            provider_call_id: "provider-call",
+            provider_response: { correlation_id: "c-1", channel_permit_id: "permit-1" },
+          }),
+        )
+        .mockReturnValueOnce(updateQuery());
+      return post({
+        request: new Request(
+          "https://betleads.io/api/public/infobip/voice/events?token=callback-secret",
+          { method: "POST", body: JSON.stringify({ callId: "provider-call", status }) },
+        ),
+      });
+    };
+    await send("ANSWERED");
+    expect(rpc).not.toHaveBeenCalled();
+    await send("COMPLETED");
+    expect(rpc).toHaveBeenCalledWith("release_channel_slot", { p_permit_id: "permit-1" });
+    // A failing release never fails the provider callback.
+    rpc.mockRejectedValueOnce(new Error("db down"));
+    expect((await send("FAILED")).status).toBe(200);
   });
 
   it("does not acknowledge a callback when its history update fails", async () => {

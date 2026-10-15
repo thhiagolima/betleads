@@ -1,11 +1,18 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { matchFinancialTrigger } from "./journeys.server";
 import {
+  CROSSING_TRIGGERS,
+  crossingEnabled,
+  crossingSpecFor,
+  crossingTimeFor,
   eventEntryEnabled,
   eventEntryTriggers,
+  isEventTrigger,
   journeyInWorkerScope,
+  lateEntryPath,
   matchJourneyScanPlayer,
   runJourneyScanner,
+  scannerRescanSeconds,
 } from "./journey-scanner.server";
 
 const journey = (overrides: Record<string, unknown> = {}) =>
@@ -38,6 +45,8 @@ afterEach(() => {
   delete process.env.JOURNEYS_CANARY_TENANT_IDS;
   delete process.env.JOURNEYS_CANARY_JOURNEY_IDS;
   delete process.env.JOURNEYS_ALLOW_ALL_TENANTS;
+  delete process.env.JOURNEYS_CROSSING_ENABLED;
+  delete process.env.JOURNEYS_SCANNER_RESCAN_SECONDS;
 });
 
 describe("journey scanner eligibility", () => {
@@ -160,5 +169,104 @@ describe("event-driven journey entry (ENV-09)", () => {
     expect(
       journeyInWorkerScope(journey, { tenantIds: [], journeyIds: [], allowAll: false, allowed: false }),
     ).toBe(false);
+  });
+});
+
+describe("threshold crossing (ENV-09 part 2)", () => {
+  it("has its own off switch and follows the scanner kill switch", () => {
+    expect(crossingEnabled({ JOURNEYS_SCANNER_ENABLED: "true" } as NodeJS.ProcessEnv)).toBe(true);
+    expect(crossingEnabled({} as NodeJS.ProcessEnv)).toBe(false);
+    expect(
+      crossingEnabled({
+        JOURNEYS_SCANNER_ENABLED: "true",
+        JOURNEYS_CROSSING_ENABLED: "false",
+      } as NodeJS.ProcessEnv),
+    ).toBe(false);
+  });
+
+  it("derives the time field and threshold of each time-based trigger", () => {
+    expect(
+      crossingSpecFor({
+        trigger_type: "inactivity",
+        trigger_config: { field: "ultimo_deposito", hours: 48 },
+      }),
+    ).toEqual({ fields: ["ultimo_deposito"], hours: 48 });
+    expect(crossingSpecFor({ trigger_type: "inactivity", trigger_config: { hours: 0 } })).toBeNull();
+    expect(
+      crossingSpecFor({ trigger_type: "inactivity", trigger_config: { field: "saldo", hours: 5 } }),
+    ).toBeNull();
+    expect(crossingSpecFor({ trigger_type: "sem_login_7_14", trigger_config: {} })).toEqual({
+      fields: ["ultimo_login", "ultimo_jogo", "ultimo_deposito"],
+      hours: 168,
+    });
+    expect(crossingSpecFor({ trigger_type: "vip_esfriando", trigger_config: {} })?.fields).toEqual([
+      "ultimo_jogo",
+    ]);
+    expect(crossingSpecFor({ trigger_type: "primeiro_deposito", trigger_config: {} })).toBeNull();
+    for (const trigger of CROSSING_TRIGGERS) expect(isEventTrigger(trigger)).toBe(false);
+  });
+
+  it("crosses sem_login segments at greatest(activity) + min days, matching the matcher", () => {
+    const day = 86400_000;
+    const lastActivity = Date.now() - 7 * day - 60_000;
+    const p = player({
+      ftd_em: "2026-01-01T00:00:00.000Z",
+      ultimo_login: new Date(lastActivity - day).toISOString(),
+      ultimo_deposito: new Date(lastActivity).toISOString(),
+    });
+    const j = journey({ trigger_type: "sem_login_7_14" });
+    expect(crossingTimeFor(j, p)).toBe(lastActivity + 7 * day);
+    expect(matchJourneyScanPlayer(j, p, new Map()).matches).toBe(true);
+  });
+});
+
+describe("full scanner as safety net", () => {
+  it("makes the rescan interval configurable with the old default", () => {
+    expect(scannerRescanSeconds({} as NodeJS.ProcessEnv)).toBe(300);
+    expect(
+      scannerRescanSeconds({ JOURNEYS_SCANNER_RESCAN_SECONDS: "3600" } as NodeJS.ProcessEnv),
+    ).toBe(3600);
+    expect(
+      scannerRescanSeconds({ JOURNEYS_SCANNER_RESCAN_SECONDS: "5" } as NodeJS.ProcessEnv),
+    ).toBe(60);
+    expect(
+      scannerRescanSeconds({ JOURNEYS_SCANNER_RESCAN_SECONDS: "abc" } as NodeJS.ProcessEnv),
+    ).toBe(300);
+  });
+
+  it("flags scanner inserts that a real-time path should have made", () => {
+    const now = Date.parse("2026-10-15T12:00:00.000Z");
+    const ctx = { eventEntry: true, crossing: true, crossingSince: now - 3600_000, now };
+    const registration = journey();
+    expect(lateEntryPath(registration, player(), new Date(now - 3600_000).toISOString(), ctx)).toBe(
+      "event",
+    );
+    // History (backfill) and very recent events are not late.
+    expect(lateEntryPath(registration, player(), "2026-01-01T00:00:00.000Z", ctx)).toBeNull();
+    expect(lateEntryPath(registration, player(), new Date(now - 60_000).toISOString(), ctx)).toBeNull();
+    expect(
+      lateEntryPath(registration, player(), new Date(now - 3600_000).toISOString(), {
+        ...ctx,
+        eventEntry: false,
+      }),
+    ).toBeNull();
+
+    const inactivity = journey({
+      trigger_type: "inactivity",
+      trigger_config: { field: "ultimo_deposito", hours: 48 },
+    });
+    const crossedAt = (ms: number) =>
+      player({ ultimo_deposito: new Date(ms - 48 * 3600_000).toISOString() });
+    expect(lateEntryPath(inactivity, crossedAt(now - 30 * 60_000), "x", ctx)).toBe("crossing");
+    // Crossed before the crossing job covered the journey: backlog, not late.
+    expect(lateEntryPath(inactivity, crossedAt(now - 2 * 3600_000), "x", ctx)).toBeNull();
+    expect(lateEntryPath(inactivity, crossedAt(now - 60_000), "x", ctx)).toBeNull();
+    expect(
+      lateEntryPath(inactivity, crossedAt(now - 30 * 60_000), "x", { ...ctx, crossingSince: null }),
+    ).toBeNull();
+  });
+
+  it("enters cashback journeys on the cashback webhook", () => {
+    expect(eventEntryTriggers("cashback-pago")).toEqual(["cashback_pago"]);
   });
 });

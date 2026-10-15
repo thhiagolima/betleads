@@ -5,6 +5,15 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { resolveOperationalTenantId } from "./tenant-access.server";
 import { canAccessConversionDrilldown, uniqueDeliveryCount } from "./conversion-report";
+import {
+  buildUnresolvedRecipientsCsv,
+  countUnresolvedByReason,
+  maskPhone,
+  parseUnresolvedRecipients,
+  type UnresolvedReason,
+  type UnresolvedRecipient,
+} from "./campaign-recipients";
+import { isMissingColumnError } from "./campaign-recipients.server";
 
 const inputSchema = z.object({
   sourceType: z.enum(["campaign", "journey"]),
@@ -45,6 +54,42 @@ const campaignDetailsSchema = z.object({
 const journeyDetailsSchema = z.object({ journeyId: z.string().uuid() });
 
 const csvCell = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+
+/**
+ * ENV-06 — recipients of an SMS campaign that were not sent (no player, invalid
+ * phone, revoked consent). Reads through the caller's RLS-scoped client and
+ * tolerates the columns not being deployed yet.
+ */
+async function loadCampaignUnresolved(
+  db: any,
+  tenantId: string,
+  campaignId: string,
+): Promise<{
+  total: number;
+  byReason: Record<UnresolvedReason, number>;
+  sample: UnresolvedRecipient[];
+  all: UnresolvedRecipient[];
+  available: boolean;
+}> {
+  const { data, error } = await db
+    .from("sms_campaigns")
+    .select("unresolved_count,unresolved_recipients")
+    .eq("tenant_id", tenantId)
+    .eq("id", campaignId)
+    .maybeSingle();
+  if (error) {
+    if (!isMissingColumnError(error)) throw new Error(error.message);
+    return { total: 0, byReason: countUnresolvedByReason([]), sample: [], all: [], available: false };
+  }
+  const all = parseUnresolvedRecipients(data?.unresolved_recipients);
+  return {
+    total: Math.max(Number(data?.unresolved_count ?? 0), all.length),
+    byReason: countUnresolvedByReason(all),
+    sample: all.slice(0, 50),
+    all,
+    available: true,
+  };
+}
 
 export const getJourneyReportDetails = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -494,9 +539,23 @@ export const getCampaignReportDetails = createServerFn({ method: "GET" })
       };
     });
 
+    const unresolved = sms?.id
+      ? await loadCampaignUnresolved(db, tenantId, sms.id)
+      : { total: 0, byReason: countUnresolvedByReason([]), sample: [], all: [], available: false };
+
     return {
       campaign,
       voice: voiceDetails,
+      unresolved: {
+        total: unresolved.total,
+        byReason: unresolved.byReason,
+        available: unresolved.available,
+        // UI only receives masked phones; the full list is in the CSV export.
+        sample: unresolved.sample.map((row) => ({
+          phone: maskPhone(row.phone),
+          reason: row.reason,
+        })),
+      },
       recipients,
       recipientsShown: recipients.length,
       trackedDeliveries: deliveryMap.size,
@@ -545,6 +604,21 @@ export const exportCampaignRecipientsCsv = createServerFn({ method: "POST" })
       ),
     ].join("\n");
     return { csv };
+  });
+
+/** ENV-06 — full list of not-sent recipients (same permission as the recipients CSV). */
+export const exportCampaignUnresolvedCsv = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((value: unknown) => z.object({ campaignId: z.string().uuid() }).parse(value))
+  .handler(async ({ data, context }) => {
+    const tenantId = await resolveOperationalTenantId(context.supabase);
+    await requireConversionReportAdmin(context, tenantId);
+    const unresolved = await loadCampaignUnresolved(
+      context.supabase as any,
+      tenantId,
+      data.campaignId,
+    );
+    return { csv: buildUnresolvedRecipientsCsv(unresolved.all) };
   });
 
 export const getConversionDataHealth = createServerFn({ method: "GET" })

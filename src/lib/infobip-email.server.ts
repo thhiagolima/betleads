@@ -1,6 +1,8 @@
 // Infobip Email HTTP API v3 adapter.
 // Adaptador único de e-mail do CRM.
 
+import { transportErrorKind, type ProviderErrorKind } from "./rate-limit/transport-errors";
+
 export type InfobipEmailInput = {
   to: string;
   from: string;
@@ -17,6 +19,10 @@ export type InfobipEmailResult = {
   body: unknown;
   idempotencyKey: string;
   temporary?: boolean;
+  /** True when this idempotency key was already accepted earlier; the provider was not called. */
+  alreadySent?: boolean;
+  /** Set when there is no provider response (B1): whether the e-mail may have been accepted. */
+  errorKind?: ProviderErrorKind | null;
 };
 
 function endpoint(): string | null {
@@ -55,6 +61,7 @@ export async function callInfobipEmail(input: InfobipEmailInput): Promise<Infobi
       body: { error: "INFOBIP_BASE_URL ou INFOBIP_API_KEY não configurado" },
       idempotencyKey,
       temporary: false,
+      errorKind: "misconfigured",
     };
   }
 
@@ -98,6 +105,7 @@ export async function callInfobipEmail(input: InfobipEmailInput): Promise<Infobi
       body: { error: error instanceof Error ? error.message : String(error) },
       idempotencyKey,
       temporary: true,
+      errorKind: transportErrorKind(error),
     };
   }
 }

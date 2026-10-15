@@ -3,7 +3,14 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { AlertTriangle, ArrowLeft, ChevronLeft, ChevronRight, Download, X } from "lucide-react";
 import {
+  UNRESOLVED_REASON_HINT,
+  UNRESOLVED_REASON_LABEL,
+  UNRESOLVED_REASONS,
+  type UnresolvedReason,
+} from "@/lib/campaign-recipients";
+import {
   exportCampaignRecipientsCsv,
+  exportCampaignUnresolvedCsv,
   getCampaignReportDetails,
   getConversionDrilldown,
   getConversionDataHealth,
@@ -420,6 +427,14 @@ function CampaignReport({
             </section>
           ) : null}
 
+          {details?.unresolved && details.unresolved.total > 0 ? (
+            <UnresolvedRecipientsCard
+              sourceId={sourceId}
+              unresolved={details.unresolved}
+              canExport={Boolean(data.canViewSensitive)}
+            />
+          ) : null}
+
           <section className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
             <Metric label="Enviados" value={number(data.sent)} />
             <Metric label="Deduplicados" value={number(data.deduplicated)} />
@@ -621,6 +636,94 @@ function CampaignReport({
         </div>
       </main>
     </div>
+  );
+}
+
+type CampaignUnresolved = NonNullable<
+  Awaited<ReturnType<typeof getCampaignReportDetails>>["unresolved"]
+>;
+
+/** ENV-06 — recipients that the campaign skipped, with the reason. */
+function UnresolvedRecipientsCard({
+  sourceId,
+  unresolved,
+  canExport,
+}: {
+  sourceId: string;
+  unresolved: CampaignUnresolved;
+  canExport: boolean;
+}) {
+  const [exporting, setExporting] = useState(false);
+  const reasons = UNRESOLVED_REASONS.filter((reason) => unresolved.byReason[reason] > 0);
+  return (
+    <section
+      className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4"
+      aria-labelledby="unresolved-recipients-title"
+    >
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h2 id="unresolved-recipients-title" className="text-sm font-semibold">
+            Não enviados ({number(unresolved.total)})
+          </h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Estes destinatários ficaram fora da campanha; os demais receberam normalmente.
+          </p>
+        </div>
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={!canExport || exporting}
+          title={canExport ? undefined : "Disponível para administradores da operação"}
+          onClick={async () => {
+            setExporting(true);
+            try {
+              await downloadUnresolved(sourceId);
+            } finally {
+              setExporting(false);
+            }
+          }}
+        >
+          <Download className="mr-1.5 size-4" />
+          {exporting ? "Gerando…" : "Baixar CSV"}
+        </Button>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-3">
+        {reasons.map((reason) => (
+          <div key={reason} className="rounded-xl bg-card/60 p-3">
+            <p className="text-sm font-semibold">
+              <span className="mr-2 text-amber-300">{number(unresolved.byReason[reason])}</span>
+              {UNRESOLVED_REASON_LABEL[reason]}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">{UNRESOLVED_REASON_HINT[reason]}</p>
+          </div>
+        ))}
+      </div>
+      {unresolved.sample.length > 0 ? (
+        <details className="mt-3 text-xs">
+          <summary className="cursor-pointer text-sky-300">
+            Ver os primeiros {number(unresolved.sample.length)}
+          </summary>
+          <ul className="mt-2 grid gap-1 sm:grid-cols-2 lg:grid-cols-3">
+            {unresolved.sample.map((row, index) => (
+              <li
+                key={`${row.phone}-${row.reason}-${index}`}
+                className="flex justify-between gap-2 rounded-lg bg-card/60 px-3 py-1.5"
+              >
+                <span className="font-mono tabular-nums">{row.phone}</span>
+                <span className="text-muted-foreground">
+                  {UNRESOLVED_REASON_LABEL[row.reason as UnresolvedReason] ?? row.reason}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {unresolved.total > unresolved.sample.length ? (
+            <p className="mt-2 text-muted-foreground">
+              O CSV traz a lista completa, com o telefone sem máscara.
+            </p>
+          ) : null}
+        </details>
+      ) : null}
+    </section>
   );
 }
 
@@ -1123,6 +1226,16 @@ function voiceResultLabel(result: string | null) {
     failed: "Falhou",
   };
   return labels[result] ?? result;
+}
+
+async function downloadUnresolved(sourceId: string) {
+  const result = await exportCampaignUnresolvedCsv({ data: { campaignId: sourceId } });
+  const url = URL.createObjectURL(new Blob([result.csv], { type: "text/csv;charset=utf-8" }));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `nao-enviados-${sourceId}.csv`;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
 async function downloadRecipients(sourceId: string) {

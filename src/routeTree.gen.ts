@@ -58,6 +58,7 @@ import { Route as ApiPublicEmailCampaignsTickRouteImport } from './routes/api/pu
 import { Route as ApiPublicEmailFlowsTickRouteImport } from './routes/api/public/email-flows/tick'
 import { Route as ApiPublicHooksCashbackCatchupRouteImport } from './routes/api/public/hooks/cashback-catchup'
 import { Route as ApiPublicHooksDispatchRouteImport } from './routes/api/public/hooks/dispatch'
+import { Route as ApiPublicHooksJourneyCrossingRouteImport } from './routes/api/public/hooks/journey-crossing'
 import { Route as ApiPublicHooksJourneyScanRouteImport } from './routes/api/public/hooks/journey-scan'
 import { Route as ApiPublicHooksMorningCheckRouteImport } from './routes/api/public/hooks/morning-check'
 import { Route as ApiPublicHooksOrchestrateRouteImport } from './routes/api/public/hooks/orchestrate'
@@ -328,6 +329,12 @@ const ApiPublicHooksDispatchRoute = ApiPublicHooksDispatchRouteImport.update({
   path: '/api/public/hooks/dispatch',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicHooksJourneyCrossingRoute =
+  ApiPublicHooksJourneyCrossingRouteImport.update({
+    id: '/api/public/hooks/journey-crossing',
+    path: '/api/public/hooks/journey-crossing',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicHooksJourneyScanRoute =
   ApiPublicHooksJourneyScanRouteImport.update({
     id: '/api/public/hooks/journey-scan',
@@ -477,6 +484,7 @@ export interface FileRoutesByFullPath {
   '/api/public/email-flows/tick': typeof ApiPublicEmailFlowsTickRoute
   '/api/public/hooks/cashback-catchup': typeof ApiPublicHooksCashbackCatchupRoute
   '/api/public/hooks/dispatch': typeof ApiPublicHooksDispatchRoute
+  '/api/public/hooks/journey-crossing': typeof ApiPublicHooksJourneyCrossingRoute
   '/api/public/hooks/journey-scan': typeof ApiPublicHooksJourneyScanRoute
   '/api/public/hooks/morning-check': typeof ApiPublicHooksMorningCheckRoute
   '/api/public/hooks/orchestrate': typeof ApiPublicHooksOrchestrateRoute
@@ -545,6 +553,7 @@ export interface FileRoutesByTo {
   '/api/public/email-flows/tick': typeof ApiPublicEmailFlowsTickRoute
   '/api/public/hooks/cashback-catchup': typeof ApiPublicHooksCashbackCatchupRoute
   '/api/public/hooks/dispatch': typeof ApiPublicHooksDispatchRoute
+  '/api/public/hooks/journey-crossing': typeof ApiPublicHooksJourneyCrossingRoute
   '/api/public/hooks/journey-scan': typeof ApiPublicHooksJourneyScanRoute
   '/api/public/hooks/morning-check': typeof ApiPublicHooksMorningCheckRoute
   '/api/public/hooks/orchestrate': typeof ApiPublicHooksOrchestrateRoute
@@ -614,6 +623,7 @@ export interface FileRoutesById {
   '/api/public/email-flows/tick': typeof ApiPublicEmailFlowsTickRoute
   '/api/public/hooks/cashback-catchup': typeof ApiPublicHooksCashbackCatchupRoute
   '/api/public/hooks/dispatch': typeof ApiPublicHooksDispatchRoute
+  '/api/public/hooks/journey-crossing': typeof ApiPublicHooksJourneyCrossingRoute
   '/api/public/hooks/journey-scan': typeof ApiPublicHooksJourneyScanRoute
   '/api/public/hooks/morning-check': typeof ApiPublicHooksMorningCheckRoute
   '/api/public/hooks/orchestrate': typeof ApiPublicHooksOrchestrateRoute
@@ -684,6 +694,7 @@ export interface FileRouteTypes {
     | '/api/public/email-flows/tick'
     | '/api/public/hooks/cashback-catchup'
     | '/api/public/hooks/dispatch'
+    | '/api/public/hooks/journey-crossing'
     | '/api/public/hooks/journey-scan'
     | '/api/public/hooks/morning-check'
     | '/api/public/hooks/orchestrate'
@@ -752,6 +763,7 @@ export interface FileRouteTypes {
     | '/api/public/email-flows/tick'
     | '/api/public/hooks/cashback-catchup'
     | '/api/public/hooks/dispatch'
+    | '/api/public/hooks/journey-crossing'
     | '/api/public/hooks/journey-scan'
     | '/api/public/hooks/morning-check'
     | '/api/public/hooks/orchestrate'
@@ -820,6 +832,7 @@ export interface FileRouteTypes {
     | '/api/public/email-flows/tick'
     | '/api/public/hooks/cashback-catchup'
     | '/api/public/hooks/dispatch'
+    | '/api/public/hooks/journey-crossing'
     | '/api/public/hooks/journey-scan'
     | '/api/public/hooks/morning-check'
     | '/api/public/hooks/orchestrate'
@@ -878,6 +891,7 @@ export interface RootRouteChildren {
   ApiPublicEmailFlowsTickRoute: typeof ApiPublicEmailFlowsTickRoute
   ApiPublicHooksCashbackCatchupRoute: typeof ApiPublicHooksCashbackCatchupRoute
   ApiPublicHooksDispatchRoute: typeof ApiPublicHooksDispatchRoute
+  ApiPublicHooksJourneyCrossingRoute: typeof ApiPublicHooksJourneyCrossingRoute
   ApiPublicHooksJourneyScanRoute: typeof ApiPublicHooksJourneyScanRoute
   ApiPublicHooksMorningCheckRoute: typeof ApiPublicHooksMorningCheckRoute
   ApiPublicHooksOrchestrateRoute: typeof ApiPublicHooksOrchestrateRoute
@@ -1242,6 +1256,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicHooksDispatchRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/hooks/journey-crossing': {
+      id: '/api/public/hooks/journey-crossing'
+      path: '/api/public/hooks/journey-crossing'
+      fullPath: '/api/public/hooks/journey-crossing'
+      preLoaderRoute: typeof ApiPublicHooksJourneyCrossingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/hooks/journey-scan': {
       id: '/api/public/hooks/journey-scan'
       path: '/api/public/hooks/journey-scan'
@@ -1480,6 +1501,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicEmailFlowsTickRoute: ApiPublicEmailFlowsTickRoute,
   ApiPublicHooksCashbackCatchupRoute: ApiPublicHooksCashbackCatchupRoute,
   ApiPublicHooksDispatchRoute: ApiPublicHooksDispatchRoute,
+  ApiPublicHooksJourneyCrossingRoute: ApiPublicHooksJourneyCrossingRoute,
   ApiPublicHooksJourneyScanRoute: ApiPublicHooksJourneyScanRoute,
   ApiPublicHooksMorningCheckRoute: ApiPublicHooksMorningCheckRoute,
   ApiPublicHooksOrchestrateRoute: ApiPublicHooksOrchestrateRoute,

@@ -1,0 +1,513 @@
+// ENV-01 / ENV-04 — runJourneyDispatcher against an in-memory fake of the
+// supabase-js surface: slot exclusion, lease fencing, per-item rate limiting
+// and provider-error accounting (defer/pause never consume an attempt).
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+type Row = Record<string, unknown>;
+
+const fake = vi.hoisted(() => {
+  const tables: Record<string, Row[]> = {};
+  const rpcCalls: Array<{ name: string; args: Row }> = [];
+  const rpcs: Record<string, (args: Row) => unknown> = {};
+
+  class Query {
+    private filters: Array<(row: Row) => boolean> = [];
+    private mode: "select" | "update" | "insert" | "upsert" = "select";
+    private payload: Row | null = null;
+    private returning = false;
+    private countOnly = false;
+    constructor(private table: string) {
+      tables[table] ??= [];
+    }
+    select(_columns?: string, options?: { count?: string; head?: boolean }) {
+      if (this.mode !== "select") this.returning = true;
+      if (options?.head) this.countOnly = true;
+      return this;
+    }
+    eq(column: string, value: unknown) {
+      this.filters.push((row) => row[column] === value);
+      return this;
+    }
+    in(column: string, values: unknown[]) {
+      this.filters.push((row) => values.includes(row[column]));
+      return this;
+    }
+    lte() {
+      return this;
+    }
+    order() {
+      return this;
+    }
+    limit() {
+      return this;
+    }
+    update(patch: Row) {
+      this.mode = "update";
+      this.payload = patch;
+      return this;
+    }
+    insert(row: Row) {
+      this.mode = "insert";
+      this.payload = row;
+      return this;
+    }
+    upsert(row: Row) {
+      this.mode = "upsert";
+      this.payload = row;
+      return this;
+    }
+    maybeSingle() {
+      return this.execute().then(({ data, error }) => ({
+        data: Array.isArray(data) ? (data[0] ?? null) : data,
+        error,
+      }));
+    }
+    single() {
+      return this.maybeSingle();
+    }
+    then<T>(resolve: (value: { data: unknown; error: null; count?: number }) => T) {
+      return this.execute().then(resolve);
+    }
+    private async execute(): Promise<{ data: unknown; error: null; count?: number }> {
+      const rows = tables[this.table];
+      if (this.mode === "insert" || this.mode === "upsert") {
+        rows.push({ ...(this.payload as Row) });
+        return { data: null, error: null };
+      }
+      const matched = rows.filter((row) => this.filters.every((filter) => filter(row)));
+      if (this.mode === "update") {
+        for (const row of matched) Object.assign(row, this.payload);
+        return { data: this.returning ? matched.map((r) => ({ ...r })) : null, error: null };
+      }
+      if (this.countOnly) return { data: null, error: null, count: matched.length };
+      return { data: matched.map((r) => ({ ...r })), error: null };
+    }
+  }
+
+  return {
+    tables,
+    rpcCalls,
+    rpcs,
+    client: {
+      from: (table: string) => new Query(table),
+      rpc: async (name: string, args: Row = {}) => {
+        rpcCalls.push({ name, args });
+        const handler = rpcs[name];
+        return { data: handler ? handler(args) : null, error: null };
+      },
+      storage: { from: () => ({ createSignedUrl: async () => ({ data: null, error: null }) }) },
+    },
+    reset() {
+      for (const key of Object.keys(tables)) delete tables[key];
+      rpcCalls.length = 0;
+      for (const key of Object.keys(rpcs)) delete rpcs[key];
+    },
+  };
+});
+
+const monitor = vi.hoisted(() => {
+  const finish = vi.fn(async (_result?: Record<string, unknown>) => undefined);
+  return {
+    finish,
+    startJobRun: vi.fn(async () => ({
+      job: "journey_dispatch",
+      id: 1,
+      progress: vi.fn(),
+      finish,
+      fail: vi.fn(async () => undefined),
+    })),
+  };
+});
+
+const sms = vi.hoisted(() => ({ sendSmsInternal: vi.fn() }));
+const voice = vi.hoisted(() => ({ callInfobipVoice: vi.fn() }));
+const sentry = vi.hoisted(() => ({ captureServerException: vi.fn() }));
+
+vi.mock("@/integrations/supabase/client.server", () => ({ supabaseAdmin: fake.client }));
+vi.mock("./observability/job-monitor.server", () => ({ startJobRun: monitor.startJobRun }));
+vi.mock("./observability/sentry.server", () => ({
+  captureServerException: sentry.captureServerException,
+}));
+vi.mock("./sms.functions", () => ({ sendSmsInternal: sms.sendSmsInternal }));
+vi.mock("./email-send.server", () => ({ sendInfobipEmail: vi.fn(), resolveSender: vi.fn() }));
+vi.mock("./infobip-voice.server", () => ({
+  callInfobipVoice: voice.callInfobipVoice,
+  normalizeE164BR: (v: string) => v,
+}));
+vi.mock("./consent.server", () => ({
+  isChannelRevoked: vi.fn(async () => false),
+  evaluateVoiceContactPolicy: vi.fn(async () => ({ allowed: true })),
+}));
+vi.mock("./triggers.server", () => ({ detectTriggersForPlayer: () => [] }));
+vi.mock("./template-vars.server", () => ({
+  buildPlayerVariables: () => ({}),
+  renderTemplate: (template: string) => template,
+}));
+
+import { runJourneyDispatcher } from "./journeys.server";
+import { MAX_NO_COST_DEFERS } from "./rate-limit/provider-errors.server";
+
+const TENANT = "11111111-1111-4111-8111-111111111111";
+const JOURNEY = "33333333-3333-4333-8333-333333333333";
+const PLAYER = "44444444-4444-4444-8444-444444444444";
+
+function seed(enrollmentIds: string[]) {
+  fake.tables.journeys = [
+    {
+      id: JOURNEY,
+      tenant_id: TENANT,
+      status: "active",
+      trigger_type: "manual",
+      trigger_config: {},
+      exit_rules: {},
+      entry_rules: {},
+      daily_limit: 100,
+      cooldown_hours: 0,
+    },
+  ];
+  fake.tables.journey_steps = [
+    { id: "step-0", journey_id: JOURNEY, position: 0, step_type: "sms", is_enabled: true, config: { content: "oi" } },
+  ];
+  fake.tables.players = [{ id: PLAYER, tenant_id: TENANT, telefone: "+5511999999999" }];
+  fake.tables.journey_enrollments = enrollmentIds.map((id) => ({
+    id,
+    tenant_id: TENANT,
+    journey_id: JOURNEY,
+    player_id: PLAYER,
+    status: "active",
+    current_position: 0,
+    entered_at: new Date(0).toISOString(),
+    attempts: 1,
+    loop_iteration: 0,
+    claimed_at: null,
+    claimed_by: null,
+  }));
+  fake.tables.journey_step_executions = [];
+  fake.tables.journey_events = [];
+  fake.tables.dispatch_pause_state = [];
+
+  fake.rpcs.acquire_journey_dispatcher_slot = () => 0;
+  seedClaimAgain();
+  fake.rpcs.consume_channel_budget = () => [{ granted: 1, retry_after_ms: 0, limited_by: null }];
+  let execution = 0;
+  fake.rpcs.reserve_journey_delivery_with_contact_limits = (args) => {
+    execution++;
+    fake.tables.journey_step_executions.push({
+      id: `exec-${execution}`,
+      enrollment_id: args.p_enrollment_id,
+      status: "claimed",
+    });
+    return [{ execution_id: `exec-${execution}`, idempotency_key: `key-${execution}`, retry_at: null, blocked_reason: null }];
+  };
+}
+
+/** The next run claims every enrollment once (without step_type, like the old RPC). */
+function seedClaimAgain() {
+  let claimed = false;
+  fake.rpcs.claim_journey_enrollments_leased = (args) => {
+    if (claimed) return [];
+    claimed = true;
+    const rows = fake.tables.journey_enrollments.slice(0, Number(args.p_limit));
+    for (const row of rows) {
+      row.claimed_at = new Date().toISOString();
+      row.claimed_by = args.p_worker_id;
+    }
+    return rows.map((row) => ({ id: row.id, tenant_id: row.tenant_id }));
+  };
+}
+
+const enrollment = (id: string) => fake.tables.journey_enrollments.find((row) => row.id === id)!;
+const rpcNames = () => fake.rpcCalls.map((call) => call.name);
+
+beforeEach(() => {
+  fake.reset();
+  monitor.finish.mockClear();
+  sms.sendSmsInternal.mockReset();
+  voice.callInfobipVoice.mockReset();
+  vi.stubEnv("JOURNEYS_DISPATCH_ENABLED", "true");
+  vi.stubEnv("JOURNEYS_ALLOW_ALL_TENANTS", "true");
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+describe("runJourneyDispatcher", () => {
+  it("exits fast with stop_reason busy when every worker slot is held", async () => {
+    seed(["e1"]);
+    fake.rpcs.acquire_journey_dispatcher_slot = () => null;
+    const result = await runJourneyDispatcher(1000);
+    expect(result).toMatchObject({ busy: true, claimed: 0 });
+    expect(monitor.finish).toHaveBeenCalledWith({ stop_reason: "busy" });
+    expect(rpcNames()).toEqual(["acquire_journey_dispatcher_slot"]);
+  });
+
+  it("sends, advances the item, clears the lease and releases the slot", async () => {
+    seed(["e1"]);
+    sms.sendSmsInternal.mockResolvedValue({ ok: true, status: 200, response: "{}" });
+    const result = await runJourneyDispatcher(1000);
+    expect(result).toMatchObject({ claimed: 1, processed: 1, failed: 0, stopReason: "queue_empty" });
+    expect(enrollment("e1")).toMatchObject({
+      current_position: 1,
+      attempts: 0,
+      claimed_by: null,
+      claimed_at: null,
+      lease_expires_at: null,
+    });
+    const claim = fake.rpcCalls.find((c) => c.name === "claim_journey_enrollments_leased")!;
+    expect(String(claim.args.p_worker_id)).toMatch(/^journey-dispatcher:/);
+    expect(claim.args.p_lease_seconds).toBe(120);
+    expect(rpcNames()).toContain("consume_channel_budget");
+    const release = fake.rpcCalls.find((c) => c.name === "release_journey_dispatcher_slot")!;
+    expect(release.args).toEqual({ p_slot: 0, p_holder: claim.args.p_worker_id });
+  });
+
+  it("provider 5xx/timeout defers the item without consuming an attempt", async () => {
+    seed(["e1"]);
+    sms.sendSmsInternal.mockResolvedValue({
+      ok: false,
+      status: 503,
+      error: "HTTP 503",
+      temporary: true,
+      body: "{}",
+    });
+    const before = Date.now();
+    const result = await runJourneyDispatcher(1000);
+    expect(result).toMatchObject({ processed: 0, failed: 0, rescheduled: 1 });
+    const row = enrollment("e1");
+    expect(row).toMatchObject({ status: "waiting", attempts: 1, claimed_by: null });
+    expect(Date.parse(String(row.next_run_at))).toBeGreaterThanOrEqual(before + 59_000);
+    expect(fake.tables.journey_step_executions[0].status).toBe("retrying");
+    expect(fake.tables.journey_events.at(-1)).toMatchObject({
+      event_type: "step_deferred",
+      detail: expect.objectContaining({ reason: "provider_unavailable", attempt_consumed: false }),
+    });
+    expect(fake.tables.dispatch_pause_state).toHaveLength(0);
+  });
+
+  it("402 (no credit) defers 15 min without pausing the channel or consuming an attempt (I4)", async () => {
+    seed(["e1"]);
+    sms.sendSmsInternal.mockResolvedValue({ ok: false, status: 402, error: "Saldo insuficiente" });
+    const before = Date.now();
+    const result = await runJourneyDispatcher(1000);
+    expect(result).toMatchObject({ failed: 0, rescheduled: 1 });
+    const row = enrollment("e1");
+    expect(row).toMatchObject({ status: "waiting", attempts: 1 });
+    expect(Date.parse(String(row.next_run_at))).toBeGreaterThanOrEqual(before + 15 * 60_000 - 1_000);
+    expect(fake.tables.dispatch_pause_state).toHaveLength(0);
+    expect(fake.tables.journey_events.at(-1)).toMatchObject({
+      event_type: "step_deferred",
+      detail: expect.objectContaining({ reason: "insufficient_credit", attempt_consumed: false }),
+    });
+  });
+
+  it("caps consecutive no-cost defers: the 11th 429 in a row consumes an attempt", async () => {
+    seed(["e1"]);
+    sms.sendSmsInternal.mockResolvedValue({ ok: false, status: 429, error: "HTTP 429", temporary: true });
+    enrollment("e1").metadata = {
+      trigger: "manual",
+      provider_deferrals: { step_position: 0, loop_iteration: 0, count: MAX_NO_COST_DEFERS },
+    };
+    const result = await runJourneyDispatcher(1000);
+    expect(result).toMatchObject({ failed: 1, rescheduled: 0 });
+    expect(enrollment("e1")).toMatchObject({ status: "waiting", attempts: 2 });
+    expect(fake.tables.journey_step_executions[0].status).toBe("failed");
+    expect(fake.tables.journey_events.at(-1)).toMatchObject({ event_type: "retry_scheduled" });
+  });
+
+  it("counts no-cost defers per step and keeps the rest of the metadata", async () => {
+    seed(["e1"]);
+    sms.sendSmsInternal.mockResolvedValue({ ok: false, status: 503, error: "HTTP 503", temporary: true });
+    enrollment("e1").metadata = {
+      trigger: "manual",
+      // count from an older step: resets for the current one
+      provider_deferrals: { step_position: 7, loop_iteration: 0, count: 9 },
+    };
+    await runJourneyDispatcher(1000);
+    expect(enrollment("e1")).toMatchObject({
+      attempts: 1,
+      metadata: {
+        trigger: "manual",
+        provider_deferrals: { step_position: 0, loop_iteration: 0, count: 1 },
+      },
+    });
+  });
+
+  it("timeout after sending: execution stays claimed (in_flight), attempt consumed, no resend for 15 min (B1)", async () => {
+    seed(["e1"]);
+    // Same rule as reserve_journey_delivery (20261015111000): a `claimed`
+    // execution of this step younger than 15 min answers `in_flight`.
+    let execution = 0;
+    fake.rpcs.reserve_journey_delivery_with_contact_limits = (args) => {
+      const live = fake.tables.journey_step_executions.find(
+        (e) => e.enrollment_id === args.p_enrollment_id && e.status === "claimed",
+      );
+      if (live) return [{ execution_id: null, idempotency_key: null, retry_at: new Date(Date.now() + 120_000).toISOString(), blocked_reason: "in_flight" }];
+      execution++;
+      fake.tables.journey_step_executions.push({ id: `exec-${execution}`, enrollment_id: args.p_enrollment_id, status: "claimed" });
+      return [{ execution_id: `exec-${execution}`, idempotency_key: "key-1", retry_at: null, blocked_reason: null }];
+    };
+    sms.sendSmsInternal.mockResolvedValue({
+      ok: false,
+      status: 0,
+      error: "Short Brasil não respondeu em 8s",
+      temporary: true,
+      errorKind: "outcome_unknown",
+      body: "{}",
+    });
+    const before = Date.now();
+    const result = await runJourneyDispatcher(1000);
+    expect(result).toMatchObject({ processed: 0, failed: 0, rescheduled: 1, outcomeUnknown: 1 });
+    const row = enrollment("e1");
+    expect(row).toMatchObject({ status: "waiting", attempts: 2, claimed_by: null });
+    expect(Date.parse(String(row.next_run_at))).toBeGreaterThanOrEqual(before + 15 * 60_000 - 1_000);
+    expect(fake.tables.journey_step_executions).toEqual([
+      expect.objectContaining({ id: "exec-1", status: "claimed", error: expect.stringContaining("outcome_unknown") }),
+    ]);
+    expect(fake.tables.journey_events.at(-1)).toMatchObject({
+      event_type: "step_outcome_unknown",
+      detail: expect.objectContaining({ attempt_consumed: true, attempts: 2 }),
+    });
+
+    // Even if the item becomes due early (e.g. manual requeue), the claimed
+    // execution makes the reservation answer in_flight: nothing is resent.
+    row.next_run_at = new Date().toISOString();
+    seedClaimAgain();
+    sms.sendSmsInternal.mockClear();
+    await runJourneyDispatcher(1000);
+    expect(sms.sendSmsInternal).not.toHaveBeenCalled();
+    expect(fake.tables.journey_step_executions).toHaveLength(1);
+    expect(fake.tables.journey_events.at(-1)).toMatchObject({
+      event_type: "step_deferred",
+      detail: expect.objectContaining({ reason: "in_flight" }),
+    });
+  });
+
+  it("outcome unknown on the last attempt fails the enrollment (never infinite)", async () => {
+    seed(["e1"]);
+    enrollment("e1").attempts = 2; // max_attempts defaults to 3
+    sms.sendSmsInternal.mockResolvedValue({ ok: false, status: 0, error: "socket hang up", errorKind: "outcome_unknown" });
+    const result = await runJourneyDispatcher(1000);
+    expect(result).toMatchObject({ failed: 1, outcomeUnknown: 1 });
+    expect(enrollment("e1")).toMatchObject({ status: "failed", attempts: 3 });
+    expect(fake.tables.journey_step_executions[0].status).toBe("failed");
+  });
+
+  it("missing provider credentials fail the item and are reported (no defer loop)", async () => {
+    seed(["e1"]);
+    sentry.captureServerException.mockClear();
+    sms.sendSmsInternal.mockResolvedValue({
+      ok: false,
+      status: 0,
+      error: "SHORTCODE_SMS_TOKEN nao configurado",
+      temporary: true,
+      errorKind: "misconfigured",
+    });
+    const result = await runJourneyDispatcher(1000);
+    expect(result).toMatchObject({ failed: 1, rescheduled: 0, outcomeUnknown: 0 });
+    expect(enrollment("e1")).toMatchObject({ status: "waiting", attempts: 2 });
+    expect(fake.tables.journey_step_executions[0].status).toBe("failed");
+    expect(sentry.captureServerException).toHaveBeenCalledTimes(1);
+  });
+
+  it("admits the budget BEFORE the pre-checks and does not count denied items toward the batch (I2)", async () => {
+    seed(["e1", "e2", "e3"]);
+    const claims: Row[] = [];
+    let served = false;
+    fake.rpcs.claim_journey_enrollments_leased = (args) => {
+      claims.push(args);
+      if (served) return [];
+      served = true;
+      return fake.tables.journey_enrollments.map((row) => {
+        row.claimed_at = new Date().toISOString();
+        row.claimed_by = args.p_worker_id;
+        return { id: row.id, tenant_id: row.tenant_id, step_type: "sms" };
+      });
+    };
+    // retry > acquire's 2 s max wait: denied at once, (tenant, sms) excluded for 2.5 s.
+    fake.rpcs.consume_channel_budget = () => [{ granted: 0, retry_after_ms: 2_500, limited_by: "tenant" }];
+    vi.stubEnv("JOURNEYS_DISPATCH_BATCH_SIZE", "3");
+    vi.stubEnv("JOURNEYS_DISPATCH_CONCURRENCY", "1");
+    const fromSpy = vi.spyOn(fake.client, "from");
+    const result = await runJourneyDispatcher(1000);
+    // No pre-check read (journeys, players, steps, enrollment row) for denied items.
+    const tablesRead = new Set(fromSpy.mock.calls.map((c) => c[0]));
+    fromSpy.mockRestore();
+    expect(tablesRead.has("journeys")).toBe(false);
+    expect(tablesRead.has("players")).toBe(false);
+    expect(result).toMatchObject({ rateLimited: 3, processed: 0, failed: 0 });
+    // Only one budget call: the other two hit the exhausted (tenant, sms) cache.
+    expect(rpcNames().filter((n) => n === "consume_channel_budget")).toHaveLength(1);
+    // Denied items were given back: the run claimed again, excluding the pair.
+    expect(claims.length).toBeGreaterThanOrEqual(2);
+    expect(claims[1].p_exclude).toEqual([`${TENANT}:sms`]);
+    for (const id of ["e1", "e2", "e3"]) {
+      expect(enrollment(id)).toMatchObject({ attempts: 1, claimed_by: null, current_position: 0 });
+    }
+  }, 10_000);
+
+  it("voice: stores the concurrency permit on call_history so the end-of-call callback frees it (I3)", async () => {
+    seed(["e1"]);
+    fake.tables.journey_steps = [
+      { id: "step-0", journey_id: JOURNEY, position: 0, step_type: "voice", is_enabled: true, config: { asset_id: "a1" } },
+    ];
+    fake.tables.journey_voice_assets = [{ id: "a1", tenant_id: TENANT, storage_path: "x.mp3" }];
+    fake.rpcs.acquire_channel_slot = () => [{ permit_id: "permit-9", retry_after_ms: 0, limited_by: null }];
+    const signed = vi
+      .spyOn(fake.client.storage, "from")
+      .mockReturnValue({
+        createSignedUrl: async () => ({ data: { signedUrl: "https://a/x.mp3" }, error: null }),
+      } as never);
+    voice.callInfobipVoice.mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: { callId: "call-1" },
+      idempotencyKey: "key-1",
+      providerCallId: "call-1",
+    });
+    const result = await runJourneyDispatcher(1000);
+    signed.mockRestore();
+    expect(result).toMatchObject({ processed: 1, failed: 0 });
+    expect(fake.tables.call_history).toEqual([
+      expect.objectContaining({
+        provider_response: expect.objectContaining({ correlation_id: "key-1", channel_permit_id: "permit-9" }),
+      }),
+    ]);
+    // The permit is kept for the ongoing call (not released by the worker).
+    expect(rpcNames()).not.toContain("release_channel_slot");
+  });
+
+  it("permanent provider errors still consume attempts", async () => {
+    seed(["e1"]);
+    sms.sendSmsInternal.mockResolvedValue({ ok: false, status: 400, error: "numero invalido" });
+    const result = await runJourneyDispatcher(1000);
+    expect(result).toMatchObject({ failed: 1, rescheduled: 0 });
+    expect(enrollment("e1")).toMatchObject({ status: "waiting", attempts: 2 });
+    expect(fake.tables.journey_step_executions[0].status).toBe("failed");
+  });
+
+  it("a denied rate-limit admission defers without reserving or sending", async () => {
+    seed(["e1"]);
+    fake.rpcs.consume_channel_budget = () => [{ granted: 0, retry_after_ms: 30_000, limited_by: "global" }];
+    const result = await runJourneyDispatcher(1000);
+    expect(result).toMatchObject({ rateLimited: 1, failed: 0 });
+    expect(rpcNames()).not.toContain("reserve_journey_delivery_with_contact_limits");
+    expect(sms.sendSmsInternal).not.toHaveBeenCalled();
+    expect(enrollment("e1")).toMatchObject({ attempts: 1, claimed_by: null });
+  });
+
+  it("does not overwrite an item whose lease was taken over (fenced release)", async () => {
+    seed(["e1"]);
+    sms.sendSmsInternal.mockImplementation(async () => {
+      // Lease expired while sending and another worker reclaimed the item.
+      enrollment("e1").claimed_by = "journey-dispatcher:other";
+      return { ok: true, status: 200, response: "{}" };
+    });
+    const result = await runJourneyDispatcher(1000);
+    expect(result).toMatchObject({ leaseLost: 1 });
+    expect(enrollment("e1")).toMatchObject({
+      current_position: 0,
+      claimed_by: "journey-dispatcher:other",
+    });
+  });
+});

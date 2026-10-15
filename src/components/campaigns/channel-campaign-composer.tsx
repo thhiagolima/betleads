@@ -70,8 +70,16 @@ import {
 import { SYSTEM_SMS_AUDIENCES, type SmsAudienceCriteria } from "@/lib/sms-audience-criteria";
 import { listSmsAudiences } from "@/lib/sms-audience-crud.functions";
 import { listSmsTemplates } from "@/lib/sms-templates.functions";
-import { scheduleBulkSms, sendBulkSms } from "@/lib/sms.functions";
+import {
+  previewSmsCampaignRecipients,
+  scheduleBulkSms,
+  sendBulkSms,
+} from "@/lib/sms.functions";
 import { estimateSms } from "@/lib/link-tracking-preview";
+import {
+  UNRESOLVED_REASONS,
+  type UnresolvedReason,
+} from "@/lib/campaign-recipients";
 
 type Channel = "sms" | "email" | "voice";
 type AudienceOption = { id: string; name: string; criteria: SmsAudienceCriteria; system?: boolean };
@@ -126,6 +134,7 @@ export function ChannelCampaignComposer({
   const listAssets = useServerFn(listJourneyVoiceAssets);
   const sendSms = useServerFn(sendBulkSms);
   const scheduleSms = useServerFn(scheduleBulkSms);
+  const previewSmsRecipients = useServerFn(previewSmsCampaignRecipients);
   const saveEmail = useServerFn(saveEmailCampaign);
   const sendEmail = useServerFn(sendEmailCampaignNow);
   const dispatchVoice = useServerFn(bulkDispatchCalls);
@@ -326,9 +335,27 @@ export function ChannelCampaignComposer({
         : (activeScript?.content ?? "");
   const invalidVariables = unknownMessageVariables(previewContent, channel);
   const recipients = audience?.eligibleTotal ?? 0;
+  // ENV-06: a campanha de SMS só envia a quem corresponde a um jogador
+  // cadastrado; os demais são reportados. A prévia usa o mesmo resolvedor do envio.
+  const smsPhones = audience?.eligibleIdentifiers ?? [];
+  const smsRecipientPreview = useQuery({
+    queryKey: [
+      "sms-campaign-recipient-preview",
+      audienceId,
+      smsPhones.length,
+      smsPhones[0] ?? "",
+      smsPhones[smsPhones.length - 1] ?? "",
+    ],
+    queryFn: () => previewSmsRecipients({ data: { phones: smsPhones } }),
+    enabled: open && channel === "sms" && smsPhones.length > 0,
+    staleTime: 60_000,
+    retry: false,
+  });
+  const smsPreview = channel === "sms" ? smsRecipientPreview.data : undefined;
+  const sendableRecipients = smsPreview ? smsPreview.resolved : recipients;
   const smsEstimate = estimateSms(smsContent);
   const parts = smsEstimate.parts;
-  const cost = channel === "sms" ? recipients * parts : recipients;
+  const cost = channel === "sms" ? sendableRecipients * parts : recipients;
   const channelLimitError =
     channel === "voice" && recipients > 200
       ? "Voz aceita até 200 destinatários por campanha."
@@ -347,6 +374,9 @@ export function ChannelCampaignComposer({
       ? [`Variáveis não reconhecidas: ${invalidVariables.join(", ")}`]
       : []),
     channelLimitError,
+    smsPreview && recipients > 0 && smsPreview.resolved === 0
+      ? "Nenhum destinatário deste público corresponde a um jogador cadastrado."
+      : null,
     !riskConfirmed ? "Confirme a revisão de risco antes de enviar." : null,
   ].filter((issue): issue is string => Boolean(issue));
 
@@ -559,11 +589,19 @@ export function ChannelCampaignComposer({
       submitted.current = true;
       return completed;
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
+      const unresolvedCount = Number(
+        (result as { unresolvedCount?: number } | null | undefined)?.unresolvedCount ?? 0,
+      );
       toast.success(
         when === "schedule"
           ? "Campanha agendada com revisão registrada"
           : "Campanha enviada para processamento",
+        unresolvedCount > 0
+          ? {
+              description: `${num(unresolvedCount)} destinatário(s) não receberão. Veja “Não enviados” no relatório da campanha.`,
+            }
+          : undefined,
       );
       onCreated();
       onOpenChange(false);
@@ -695,6 +733,13 @@ export function ChannelCampaignComposer({
                   contato ou consentimento.
                 </p>
               )}
+              {channel === "sms" && smsPhones.length > 0 ? (
+                <UnresolvedRecipientsNotice
+                  loading={smsRecipientPreview.isFetching && !smsPreview}
+                  failed={smsRecipientPreview.isError}
+                  preview={smsPreview}
+                />
+              ) : null}
             </div>
             {channel !== "voice" ? (
               <div className="rounded-lg border border-primary/25 bg-primary/5 p-3">
@@ -995,7 +1040,12 @@ export function ChannelCampaignComposer({
             <CardContent className="space-y-3 text-sm">
               <Badge variant="outline">{channelMeta[channel].label}</Badge>
               <p>
-                <strong>{num(recipients)}</strong> destinatário(s)
+                <strong>{num(sendableRecipients)}</strong> destinatário(s)
+                {smsPreview && smsPreview.unresolvedCount > 0 ? (
+                  <span className="block text-xs text-amber-600 dark:text-amber-400">
+                    {num(smsPreview.unresolvedCount)} não receberão
+                  </span>
+                ) : null}
               </p>
               <p>
                 <strong>
@@ -1083,5 +1133,69 @@ export function ChannelCampaignComposer({
         }}
       />
     </Dialog>
+  );
+}
+
+type SmsRecipientPreview = {
+  total: number;
+  resolved: number;
+  unresolvedCount: number;
+  unresolvedByReason: Record<UnresolvedReason, number>;
+  duplicates: number;
+};
+
+const UNRESOLVED_NOTICE_TEXT: Record<UnresolvedReason, string> = {
+  sem_cadastro: "sem cadastro não receberão",
+  telefone_invalido: "com telefone inválido não receberão",
+  sem_consentimento: "sem consentimento para SMS não receberão",
+};
+
+/** ENV-06 — avisa, antes do envio/agendamento, quem ficará fora da campanha. */
+function UnresolvedRecipientsNotice({
+  loading,
+  failed,
+  preview,
+}: {
+  loading: boolean;
+  failed: boolean;
+  preview: SmsRecipientPreview | undefined;
+}) {
+  if (loading)
+    return (
+      <p className="text-xs text-muted-foreground" aria-live="polite">
+        Verificando cadastro dos destinatários…
+      </p>
+    );
+  if (failed)
+    return (
+      <p className="text-xs text-muted-foreground" aria-live="polite">
+        Não foi possível verificar os cadastros agora; a verificação será refeita no envio.
+      </p>
+    );
+  if (!preview || preview.unresolvedCount === 0) return null;
+  const reasons = UNRESOLVED_REASONS.filter((reason) => preview.unresolvedByReason[reason] > 0);
+  return (
+    <div
+      className="rounded-lg border border-amber-500/35 bg-amber-500/5 px-3 py-2 text-sm"
+      role="status"
+      aria-live="polite"
+    >
+      <ul className="space-y-0.5 font-medium">
+        {reasons.map((reason) => (
+          <li key={reason}>
+            {num(preview.unresolvedByReason[reason])} destinatário(s){" "}
+            {UNRESOLVED_NOTICE_TEXT[reason]}
+          </li>
+        ))}
+      </ul>
+      <p className="mt-1 text-xs text-muted-foreground">
+        {preview.resolved > 0
+          ? `Os outros ${num(preview.resolved)} recebem normalmente. A lista fica no relatório da campanha, em “Não enviados”.`
+          : "Nenhum destinatário corresponde a um jogador cadastrado."}
+        {preview.duplicates > 0
+          ? ` ${num(preview.duplicates)} repetido(s) recebem uma única vez.`
+          : ""}
+      </p>
+    </div>
   );
 }

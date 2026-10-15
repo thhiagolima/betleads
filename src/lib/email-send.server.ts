@@ -57,10 +57,57 @@ export function shieldDarkEmailHtml(html: string): string {
   return html || "";
 }
 
+/**
+ * Previous send of this idempotency key that the provider accepted. Every
+ * sender logs the key in email_send_logs.provider_response; a row counts as
+ * accepted once it was marked sent (a later bounce keeps sent_at).
+ */
+async function findAcceptedEmail(idempotencyKey: string, tenantId: string | null) {
+  let query = supabaseAdmin
+    .from("email_send_logs")
+    .select("id")
+    .eq("provider_response->>idempotency_key", idempotencyKey)
+    .or("status.in.(sent,delivered),sent_at.not.is.null");
+  if (tenantId) query = query.eq("tenant_id", tenantId);
+  const { data, error } = await query.limit(1);
+  if (error) throw new Error(error.message);
+  return data?.[0]?.id ?? null;
+}
+
 /** Único caminho de envio de e-mail: Infobip. */
 export async function sendInfobipEmail(input: SendEmailInput): Promise<SendEmailResult> {
   const idempotencyKey = input.idempotencyKey || crypto.randomUUID();
   const tenantId = input.tenantId ?? input.linkTracking?.tenantId ?? null;
+  // A caller-supplied key identifies one logical delivery: if it was already
+  // accepted (e.g. the worker failed after sending), never send it again.
+  if (input.idempotencyKey) {
+    let acceptedId: string | null;
+    try {
+      acceptedId = await findAcceptedEmail(idempotencyKey, tenantId);
+    } catch (error) {
+      return {
+        ok: false,
+        status: 0,
+        body: {
+          error: `Falha ao verificar envio anterior: ${error instanceof Error ? error.message : String(error)}`,
+        },
+        idempotencyKey,
+        temporary: true,
+        // Local pre-check failed: the provider was never called.
+        errorKind: "not_sent",
+      };
+    }
+    if (acceptedId) {
+      return {
+        ok: true,
+        status: 200,
+        body: { already_sent: true, email_log_id: acceptedId },
+        idempotencyKey,
+        temporary: false,
+        alreadySent: true,
+      };
+    }
+  }
   try {
     const centralStatus = tenantId
       ? await getChannelConsentStatus(tenantId, "email", input.to)

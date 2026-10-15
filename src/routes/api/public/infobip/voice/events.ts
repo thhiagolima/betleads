@@ -77,6 +77,28 @@ function errorOf(payload: Record<string, unknown>): string | null {
   return typeof error === "string" && error.trim() ? error.slice(0, 1000) : null;
 }
 
+/**
+ * The journey dispatcher keeps a voice concurrency permit while the call is
+ * ongoing (channel_concurrency_permits, see channel-budget.server.ts) and
+ * stores its id on call_history. A final event frees it; without this the
+ * permit only expires after concurrency_hold_seconds. Idempotent (a repeated
+ * final event deletes nothing) and best effort: never fails the callback.
+ */
+async function releaseVoicePermit(providerResponse: Record<string, unknown>): Promise<void> {
+  const permitId = providerResponse.channel_permit_id;
+  if (typeof permitId !== "string" || !permitId) return;
+  try {
+    const { error } = await (
+      supabaseAdmin as unknown as {
+        rpc: (fn: string, args: Record<string, unknown>) => Promise<{ error: { message: string } | null }>;
+      }
+    ).rpc("release_channel_slot", { p_permit_id: permitId });
+    if (error) console.error("[infobip voice events] release_channel_slot failed", error.message);
+  } catch (error) {
+    console.error("[infobip voice events] release_channel_slot failed", error);
+  }
+}
+
 export const Route = createFileRoute("/api/public/infobip/voice/events")({
   server: {
     handlers: {
@@ -156,6 +178,7 @@ export const Route = createFileRoute("/api/public/infobip/voice/events")({
           if (queueUpdateError) throw queueUpdateError;
         }
         if (result && result !== "answered") {
+          await releaseVoicePermit(previous);
           await handleCallCompletion({
             providerCallId: callId ?? history?.provider_call_id ?? correlation ?? "",
             status: result,

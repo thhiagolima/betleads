@@ -46,7 +46,13 @@ export const Route = createFileRoute("/api/public/hooks/dispatch")({
               tickFlows(200),
             ]);
             result = { queue, flows };
-          } else if (channel === "journey") result = await runJourneyDispatcher(1000);
+          } else if (channel === "journey") {
+            // ENV-01: the run claims new work for JOURNEYS_DISPATCH_TIME_BUDGET_SECONDS
+            // (default 45 s, below the 55 s pg_net timeout), then waits only for
+            // in-flight items. An overlapping tick returns { busy: true }
+            // immediately. The batch cap comes from JOURNEYS_DISPATCH_BATCH_SIZE.
+            result = await runJourneyDispatcher(1000);
+          }
           else if (channel === "whatsapp") result = await runWhatsappDispatcher({ limit: 50 });
           else return Response.json({ ok: false, error: "channel inválido" }, { status: 400 });
           return Response.json({ ok: true, channel, result });
