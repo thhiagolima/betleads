@@ -33,7 +33,7 @@ alter table public.webhook_logs
   add column if not exists last_replay_error text;
 
 comment on column public.webhook_logs.replay_attempts is
-  'Quantas vezes o replay reivindicou esta linha. Ao atingir o máximo (5) a linha vai para a DLQ.';
+  'Quantas vezes o replay reivindicou esta linha. Ao atingir o máximo (8 por padrão) a linha vai para a DLQ.';
 comment on column public.webhook_logs.next_replay_at is
   'Quando a linha volta a ser elegível ao replay. Funciona como lease + backoff exponencial.';
 comment on column public.webhook_logs.dead_lettered_at is
@@ -203,18 +203,9 @@ comment on function public.claim_webhook_logs_for_replay(
 ) is
   'CON-03: claim atômico, justo por tenant e com lease/backoff do lote de replay de webhook_logs; DLQ após p_max_attempts.';
 
--- Recuperação pontual (NÃO executada aqui; rodar manualmente se desejado):
--- logs marcados 'duplicado' cujo recibo ficou preso em 'processing' são
--- eventos perdidos pelo bug do CON-04 (447 linhas em 2026-10-14). Como o
--- recibo está vencido (> 10 min), o replay consegue reivindicá-lo:
---   update public.webhook_logs w
---      set status = 'recebido', next_replay_at = now()
---     from public.webhook_event_receipts r
---    where w.status = 'duplicado'
---      and r.tenant_id = w.tenant_id
---      and r.status in ('processing', 'failed')
---      and r.provider_event_id = coalesce(w.payload->>'eventId', w.payload->>'event_id',
---            w.payload->'data'->>'eventId', w.payload->'data'->>'event_id');
+-- Recuperação dos eventos perdidos pelo CON-04: NÃO reenfileirar por aqui.
+-- Em 15/10/2026 os eventos já tinham sido reprocessados; ver
+-- docs/RECUPERACAO_EVENTOS_PERDIDOS_2026-10-15.md (dry-run e efeitos colaterais).
 
 notify pgrst, 'reload schema';
 

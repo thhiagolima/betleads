@@ -28,6 +28,7 @@ docs/*
 !docs/BASELINE_BANCO_2026-10-14.md
 !docs/CON-08_RLS_REVISAO_SEGURANCA.md
 !docs/RUNBOOK_OBSERVABILIDADE.md
+!docs/RECUPERACAO_EVENTOS_PERDIDOS_2026-10-15.md
 supabase/.temp/
 
 node_modules
