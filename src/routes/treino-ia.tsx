@@ -12,6 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { Trash2, Plus, GraduationCap, ThumbsDown, ThumbsUp, Download } from "lucide-react";
 import { PageHeader } from "@/components/ui-premium";
+import { requestConfirmation } from "@/components/system-dialog-host";
 
 export const Route = createFileRoute("/treino-ia")({
   component: TreinoIA,
@@ -171,7 +172,20 @@ function ExemplosTab() {
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <Switch checked={it.ativo} onCheckedChange={() => toggle(it)} />
-                  <Button size="icon" variant="ghost" onClick={() => remove(it)}>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    aria-label="Excluir exemplo"
+                    onClick={async () => {
+                      const confirmed = await requestConfirmation({
+                        title: "Excluir este exemplo?",
+                        description: `O exemplo "${it.pergunta}" será apagado e deixa de orientar as respostas da IA. Para só pausar, use a chave ao lado.`,
+                        confirmLabel: "Excluir exemplo",
+                        destructive: true,
+                      });
+                      if (confirmed) void remove(it);
+                    }}
+                  >
                     <Trash2 className="h-3.5 w-3.5 text-rose-400" />
                   </Button>
                 </div>
@@ -280,7 +294,20 @@ function IntentsTab() {
                 <code className="text-emerald-400">{s.canonico}</code>
                 <div className="ml-auto flex items-center gap-1">
                   <Switch checked={s.ativo} onCheckedChange={() => toggleSyn(s)} />
-                  <Button size="icon" variant="ghost" onClick={() => delSyn(s)}>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    aria-label={`Excluir sinônimo ${s.termo}`}
+                    onClick={async () => {
+                      const confirmed = await requestConfirmation({
+                        title: "Excluir este sinônimo?",
+                        description: `"${s.termo}" deixa de ser reconhecido como "${s.canonico}". Para só pausar, use a chave ao lado.`,
+                        confirmLabel: "Excluir sinônimo",
+                        destructive: true,
+                      });
+                      if (confirmed) void delSyn(s);
+                    }}
+                  >
                     <Trash2 className="h-3 w-3 text-rose-400" />
                   </Button>
                 </div>

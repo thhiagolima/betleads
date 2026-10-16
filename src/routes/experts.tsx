@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { Trash2, UserCog } from "lucide-react";
 import { PageHeader } from "@/components/ui-premium";
+import { requestConfirmation } from "@/components/system-dialog-host";
 
 type Expert = {
   id: string;
@@ -139,7 +140,16 @@ function ExpertsPage() {
                   <Button
                     size="icon"
                     variant="ghost"
-                    onClick={() => remove(e.id)}
+                    aria-label={`Excluir expert ${e.nome}`}
+                    onClick={async () => {
+                      const confirmed = await requestConfirmation({
+                        title: `Excluir o expert ${e.nome}?`,
+                        description: `O ID de afiliado ${e.affiliate_id} deixa de ser atribuído a ${e.nome} nos novos cadastros. Esta ação não pode ser desfeita.`,
+                        confirmLabel: "Excluir expert",
+                        destructive: true,
+                      });
+                      if (confirmed) void remove(e.id);
+                    }}
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
