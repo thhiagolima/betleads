@@ -10,6 +10,7 @@ import {
   journeyStepPositionRanges,
   uniqueDeliveryCount,
 } from "./conversion-report";
+import { smsVariants } from "./journey-policy";
 import {
   buildUnresolvedRecipientsCsv,
   countUnresolvedByReason,
@@ -1046,10 +1047,9 @@ export const getConversionReport = createServerFn({ method: "GET" })
       data.sourceType === "journey"
         ? db
             .from("journey_steps")
-            .select("id,position,step_type")
+            .select("id,position,step_type,label,config,is_enabled")
             .eq("tenant_id", tenantId)
             .eq("journey_id", data.sourceId)
-            .eq("is_enabled", true)
             .order("position")
         : Promise.resolve({ data: [], error: null }),
     ]);
@@ -1058,6 +1058,29 @@ export const getConversionReport = createServerFn({ method: "GET" })
     if (journeyStepsResult.error) throw new Error(journeyStepsResult.error.message);
     const dispatches = dispatchResult.data ?? [];
     const attributions = attributionResult.data ?? [];
+    const journeySteps: any[] = journeyStepsResult.data ?? [];
+    // Copy rotation: the dispatcher stores the drawn copy in the execution's
+    // provider_response; the dispatch shares the execution key (+ ":n").
+    const rotatesCopies = journeySteps.some(
+      (step) => step.step_type === "sms" && smsVariants(step.config ?? {}).length > 1,
+    );
+    const variantByDelivery = new Map<string, number>();
+    if (rotatesCopies && dispatches.length) {
+      const executionsResult = await selectAllPages<any>("journey_step_executions", () =>
+        db
+          .from("journey_step_executions")
+          .select("id,idempotency_key,variant:provider_response->>variant_index")
+          .eq("tenant_id", tenantId)
+          .eq("journey_id", data.sourceId)
+          .in("status", ["sent", "delivered"]),
+      );
+      if (executionsResult.error) throw new Error(executionsResult.error.message);
+      for (const row of executionsResult.data ?? []) {
+        const variant = Number(row.variant);
+        if (row.idempotency_key && row.variant !== null && Number.isInteger(variant))
+          variantByDelivery.set(String(row.idempotency_key), variant);
+      }
+    }
     const linkIds = dispatches.map((item: any) => item.tracked_link_id).filter(Boolean);
     const [
       { data: snapshots, error: snapshotError },
@@ -1165,12 +1188,23 @@ export const getConversionReport = createServerFn({ method: "GET" })
       canViewSensitive,
       ...(() => {
         const result = buildJourneyStepConversions({
-          steps: journeyStepsResult.data ?? [],
+          steps: journeySteps,
           dispatches,
           attributions,
           confirmedDispatchIds,
+          variantByDelivery,
         });
-        return { byStep: result.steps, unassignedStep: result.unassigned };
+        return {
+          byStep: result.steps,
+          retiredSteps: result.retired,
+          unassignedStep: result.unassigned,
+          // Copy texts shown next to each copy's result (index = variant).
+          stepCopies: Object.fromEntries(
+            journeySteps
+              .filter((step) => step.step_type === "sms")
+              .map((step) => [String(step.id), smsVariants(step.config ?? {})]),
+          ) as Record<string, string[]>,
+        };
       })(),
       truncated: Boolean(dispatchResult.truncated || attributionResult.truncated),
       historical: dispatches.length === 0 && attributions.length === 0,

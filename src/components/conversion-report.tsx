@@ -862,8 +862,13 @@ function JourneyReport({
       clicked: Number(conversion?.clicked ?? 0),
       deposits: Number(conversion?.deposits ?? 0),
       recovered: Number(conversion?.recovered ?? 0),
+      variants: conversion?.variants ?? [],
+      withoutVariant: conversion?.withoutVariant,
+      copies: data.stepCopies?.[step.id] ?? [],
     };
   });
+  const retiredSteps = data.retiredSteps ?? [];
+  const rotatesCopies = stepRows.some((step) => step.copies.length > 1);
   const sent7d = stepRows.reduce((sum, step) => sum + Number(step.sent7d ?? 0), 0);
   const failed = stepRows.reduce((sum, step) => sum + Number(step.failed ?? 0), 0);
   // Keep the headline consistent with the stages: only direct, tracked
@@ -894,7 +899,8 @@ function JourneyReport({
               </h1>
             </div>
             <p className="text-xs text-sky-400">
-              Resultado de cada etapa · atribuição por último clique em até 7 dias
+              {rotatesCopies ? "Resultado de cada copy" : "Resultado de cada etapa"} · atribuição
+              por último clique em até 7 dias
             </p>
           </div>
           <Button variant="ghost" size="icon" asChild>
@@ -962,7 +968,11 @@ function JourneyReport({
             <Metric label="Entraram (7 dias)" value={number(details?.metrics?.entered7d ?? 0)} />
             <Metric label="Em andamento" value={number(details?.metrics?.inProgress ?? 0)} />
             <Metric label="Enviados 7d" value={number(sent7d)} />
-            <Metric label="Enviados rastreados" value={number(data.trackedSent)} />
+            <Metric
+              label="Enviados rastreados"
+              value={number(data.trackedSent)}
+              hint="Desde o início, com link rastreado — inclui etapas hoje desativadas"
+            />
             <Metric label="Clicaram" value={data.clicked === null ? "—" : number(data.clicked)} />
             <Metric label="Depósitos atribuídos" value={number(deposits)} />
             <Metric label="Recuperado atribuído" value={money(recovered)} accent />
@@ -1011,13 +1021,57 @@ function JourneyReport({
                           accent
                         />
                       </div>
+                      {step.copies.length > 1 || step.variants.length ? (
+                        <JourneyCopyTable
+                          copies={step.copies}
+                          variants={step.variants}
+                          withoutVariant={step.withoutVariant}
+                        />
+                      ) : null}
                     </div>
                   ))}
+                  {retiredSteps.length ? (
+                    <div className="space-y-2 bg-muted/20 p-4">
+                      <p className="text-xs font-semibold uppercase text-muted-foreground">
+                        Etapas desativadas — histórico
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Etapas que enviaram mensagens e depois foram desligadas. O resultado delas
+                        continua contando no total da jornada.
+                      </p>
+                      <div className="overflow-x-auto">
+                        <table className="w-full min-w-[520px] text-sm">
+                          <thead className="text-xs text-muted-foreground">
+                            <tr className="text-left">
+                              <th className="py-1.5 pr-3 font-medium">Etapa</th>
+                              <th className="py-1.5 pr-3 text-right font-medium">Enviados</th>
+                              <th className="py-1.5 pr-3 text-right font-medium">Clicaram</th>
+                              <th className="py-1.5 pr-3 text-right font-medium">Depósitos</th>
+                              <th className="py-1.5 text-right font-medium">Recuperado</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-border/50">
+                            {retiredSteps.map((step) => (
+                              <tr key={step.stepId} className="text-muted-foreground">
+                                <td className="py-1.5 pr-3">
+                                  {step.label || `Etapa na posição ${step.stepPosition}`}
+                                </td>
+                                <td className="py-1.5 pr-3 text-right">{number(step.sent)}</td>
+                                <td className="py-1.5 pr-3 text-right">{number(step.clicked)}</td>
+                                <td className="py-1.5 pr-3 text-right">{number(step.deposits)}</td>
+                                <td className="py-1.5 text-right">{money(step.recovered)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ) : null}
                   {unassigned.deposits > 0 ? (
                     <p className="px-4 py-3 text-xs text-muted-foreground">
                       Sem degrau identificado: {number(unassigned.deposits)} depósito(s) ·{" "}
-                      {money(unassigned.recovered)} — o envio de origem não corresponde a uma etapa
-                      atual da jornada.
+                      {money(unassigned.recovered)} — o envio de origem não corresponde a nenhuma
+                      etapa da jornada.
                     </p>
                   ) : null}
                 </div>
@@ -1091,6 +1145,78 @@ function JourneyReport({
           </section>
         </div>
       </main>
+    </div>
+  );
+}
+
+function JourneyCopyTable({
+  copies,
+  variants,
+  withoutVariant,
+}: {
+  copies: string[];
+  variants: Array<{
+    variant: number;
+    sent: number;
+    clicked: number;
+    deposits: number;
+    recovered: number;
+  }>;
+  withoutVariant?: { sent: number; clicked: number; deposits: number; recovered: number };
+}) {
+  const byIndex = new Map(variants.map((row) => [row.variant, row]));
+  const indexes = [
+    ...new Set([...copies.map((_, index) => index), ...variants.map((row) => row.variant)]),
+  ].sort((a, b) => a - b);
+  const empty = { sent: 0, clicked: 0, deposits: 0, recovered: 0 };
+  const rows = indexes.map((index) => ({
+    key: String(index),
+    name: `Copy ${index + 1}`,
+    text: copies[index] ?? "Copy removida",
+    ...(byIndex.get(index) ?? empty),
+  }));
+  if (withoutVariant && (withoutVariant.sent > 0 || withoutVariant.deposits > 0))
+    rows.push({
+      key: "none",
+      name: "Sem copy registrada",
+      text: "Envios anteriores à rotação de copys",
+      ...withoutVariant,
+    });
+  const rate = (row: { sent: number; clicked: number }) =>
+    row.sent ? `${((row.clicked / row.sent) * 100).toFixed(1).replace(".", ",")}%` : "—";
+  return (
+    <div className="overflow-x-auto rounded-lg border border-border/60">
+      <table className="w-full min-w-[640px] text-sm">
+        <thead className="bg-muted/30 text-xs text-muted-foreground">
+          <tr className="text-left">
+            <th className="px-3 py-2 font-medium">Copy (rotação)</th>
+            <th className="px-3 py-2 text-right font-medium">Enviados</th>
+            <th className="px-3 py-2 text-right font-medium">Clicaram</th>
+            <th className="px-3 py-2 text-right font-medium">Taxa de clique</th>
+            <th className="px-3 py-2 text-right font-medium">Depósitos</th>
+            <th className="px-3 py-2 text-right font-medium">Recuperado</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border/50">
+          {rows.map((row) => (
+            <tr key={row.key}>
+              <td className="max-w-[320px] px-3 py-2">
+                <div className="font-medium">{row.name}</div>
+                <div className="truncate text-xs text-muted-foreground" title={row.text}>
+                  {row.text}
+                </div>
+              </td>
+              <td className="px-3 py-2 text-right">{number(row.sent)}</td>
+              <td className="px-3 py-2 text-right">{number(row.clicked)}</td>
+              <td className="px-3 py-2 text-right">{rate(row)}</td>
+              <td className="px-3 py-2 text-right">{number(row.deposits)}</td>
+              <td className="px-3 py-2 text-right font-semibold text-emerald-400">
+                {money(row.recovered)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
