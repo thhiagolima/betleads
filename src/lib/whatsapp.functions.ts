@@ -3,7 +3,7 @@ import { dbUuid } from "@/lib/zod-helpers";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { resolveCurrentTenantId, resolveOperationalTenantId } from "./tenant-access.server";
-import { isDemoBlockedError } from "./demo-tenant";
+import { DemoTenantBlockedError, isDemoBlockedError } from "./demo-tenant";
 import {
   markTrackedDispatchesFailed,
   markTrackedDispatchesSent,
@@ -21,6 +21,17 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 /** Non-fatal Evolution catches must never swallow a demo-tenant block. */
 function rethrowIfDemoBlocked(error: unknown) {
   if (isDemoBlockedError(error)) throw error;
+}
+
+/** False when the transport guard refuses this instance (demo/unknown tenant). */
+async function evolutionInstanceAllowed(instance: string): Promise<boolean> {
+  try {
+    await assertEvolutionInstanceCanCall(instance);
+    return true;
+  } catch (error) {
+    if (isDemoBlockedError(error)) return false;
+    throw error;
+  }
 }
 
 // Diagnostic — hits Evolution with the same wrapper the rest of the app uses.
@@ -434,7 +445,10 @@ export async function syncWhatsappSessionsFor(context: { supabase: any }) {
   //   4) Empty array or any error from fetchInstances is non-fatal — keep going.
   const evolutionNames = new Set<string>();
   try {
-    const raw: any = await evolutionFetch("/instance/fetchInstances");
+    // The bare listing is only exempt from the transport guard for the
+    // super-admin diagnosis; here it runs for the caller's tenant.
+    const tenantId = await resolveCurrentTenantId(context.supabase);
+    const raw: any = await evolutionFetch("/instance/fetchInstances", { tenantId });
     const list: any[] = Array.isArray(raw)
       ? raw
       : Array.isArray(raw?.instances)
@@ -447,6 +461,7 @@ export async function syncWhatsappSessionsFor(context: { supabase: any }) {
       if (typeof n === "string" && n.length > 0) evolutionNames.add(n);
     }
   } catch (e: any) {
+    rethrowIfDemoBlocked(e);
     // Non-fatal: API inconsistent. Continue with per-instance probing.
     console.warn("[whatsapp] fetchInstances failed (ignored):", e?.message);
   }
@@ -1755,10 +1770,15 @@ export async function refreshGroupNamesFor(context: { supabase: any }) {
   if (!url || !apikey) return { updated: 0 };
 
   let updated = 0;
+  let skipped = 0;
   for (const s of sessions ?? []) {
     // Every Evolution call below targets this instance; checked once, outside
-    // the per-call try/catch so a demo block is never swallowed.
-    await assertEvolutionInstanceCanCall(s.instance_name);
+    // the per-call try/catch. A super admin sees every tenant's sessions, so
+    // a demo/orphan session is skipped instead of aborting the whole refresh.
+    if (!(await evolutionInstanceAllowed(s.instance_name))) {
+      skipped++;
+      continue;
+    }
     const { data: groups } = await context.supabase
       .from("whatsapp_chats")
       .select("id, remote_jid, name, profile_pic_url")
@@ -1811,7 +1831,11 @@ export async function refreshGroupNamesFor(context: { supabase: any }) {
       }
     }
   }
-  return { updated };
+  // Nothing could be refreshed because every session was blocked: report it.
+  if (skipped > 0 && skipped === (sessions ?? []).length) {
+    throw new DemoTenantBlockedError("DEMO_SEND_BLOCKED");
+  }
+  return { updated, skipped };
 }
 
 // "Cura" chats 1:1 que ficaram com nome igual ao número e/ou sem foto de perfil.
@@ -1832,10 +1856,15 @@ export async function refreshContactNamesFor(context: { supabase: any }) {
   if (!url || !apikey) return { updated: 0 };
 
   let updated = 0;
+  let skipped = 0;
   for (const s of sessions ?? []) {
     // Every Evolution call below targets this instance; checked once, outside
-    // the per-call try/catch so a demo block is never swallowed.
-    await assertEvolutionInstanceCanCall(s.instance_name);
+    // the per-call try/catch. A super admin sees every tenant's sessions, so
+    // a demo/orphan session is skipped instead of aborting the whole refresh.
+    if (!(await evolutionInstanceAllowed(s.instance_name))) {
+      skipped++;
+      continue;
+    }
     const { data: chats } = await context.supabase
       .from("whatsapp_chats")
       .select("id, remote_jid, phone, name, profile_pic_url")
@@ -1893,7 +1922,11 @@ export async function refreshContactNamesFor(context: { supabase: any }) {
       }
     }
   }
-  return { updated };
+  // Nothing could be refreshed because every session was blocked: report it.
+  if (skipped > 0 && skipped === (sessions ?? []).length) {
+    throw new DemoTenantBlockedError("DEMO_SEND_BLOCKED");
+  }
+  return { updated, skipped };
 }
 
 // ============================================================
