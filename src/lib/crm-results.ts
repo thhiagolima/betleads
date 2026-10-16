@@ -1,5 +1,6 @@
 // Central de Resultados (F2): pure aggregation of crm_results_daily rows.
-// Direct and influenced recovery are separate levels and are never summed.
+// Direct (click) and influenced (recovered) are separate levels, never summed.
+// The click conversion is the headline measure (client, 16/10).
 
 export type CrmResultRow = {
   metric_date: string;
@@ -14,6 +15,8 @@ export type CrmResultRow = {
   recipients: number;
   human_clicks: number;
   direct_conversions: number;
+  /** Distinct players with a deposit attributed to a click (rule_version 2). */
+  direct_players?: number;
   direct_revenue: number;
   influenced_players: number;
   influenced_deposits: number;
@@ -27,6 +30,7 @@ export type CrmMetrics = {
   recipients: number;
   humanClicks: number;
   directConversions: number;
+  directPlayers: number;
   directRevenue: number;
   influencedPlayers: number;
   influencedDeposits: number;
@@ -34,6 +38,16 @@ export type CrmMetrics = {
 };
 
 export type CrmMetricsWithRatios = CrmMetrics & {
+  /** Clicked SMS / SMS sent. */
+  clickRate: number | null;
+  /** Converted players / clicked SMS. */
+  conversionRate: number | null;
+  /** Cost per converted player; null when nobody converted. */
+  costPerConversion: number | null;
+  /** Click revenue / cost; null without cost. */
+  clickRoi: number | null;
+  /** Fewer than MIN_CONVERSIONS converted players: ratios are not reliable. */
+  smallSample: boolean;
   /** Cost per influenced player; null when nobody was recovered. */
   costPerRecovered: number | null;
   /** Influenced revenue / cost; null without cost. */
@@ -41,6 +55,9 @@ export type CrmMetricsWithRatios = CrmMetrics & {
   /** Influenced players / recipients. */
   recoveryRate: number | null;
 };
+
+/** Below this many converted players a return is shown as "amostra pequena". */
+export const MIN_CONVERSIONS = 5;
 
 export const PLAYER_STATE_LABELS: Record<string, string> = {
   sem_ftd: "Sem 1º depósito",
@@ -62,6 +79,7 @@ const empty = (): CrmMetrics => ({
   recipients: 0,
   humanClicks: 0,
   directConversions: 0,
+  directPlayers: 0,
   directRevenue: 0,
   influencedPlayers: 0,
   influencedDeposits: 0,
@@ -75,6 +93,7 @@ function add(target: CrmMetrics, row: CrmResultRow) {
   target.recipients += Number(row.recipients) || 0;
   target.humanClicks += Number(row.human_clicks) || 0;
   target.directConversions += Number(row.direct_conversions) || 0;
+  target.directPlayers += Number(row.direct_players) || 0;
   target.directRevenue += Number(row.direct_revenue) || 0;
   target.influencedPlayers += Number(row.influenced_players) || 0;
   target.influencedDeposits += Number(row.influenced_deposits) || 0;
@@ -84,6 +103,11 @@ function add(target: CrmMetrics, row: CrmResultRow) {
 export function withRatios(metrics: CrmMetrics): CrmMetricsWithRatios {
   return {
     ...metrics,
+    clickRate: metrics.sent > 0 ? metrics.humanClicks / metrics.sent : null,
+    conversionRate: metrics.humanClicks > 0 ? metrics.directPlayers / metrics.humanClicks : null,
+    costPerConversion: metrics.directPlayers > 0 ? metrics.cost / metrics.directPlayers : null,
+    clickRoi: metrics.cost > 0 ? metrics.directRevenue / metrics.cost : null,
+    smallSample: metrics.directPlayers < MIN_CONVERSIONS,
     costPerRecovered:
       metrics.influencedPlayers > 0 ? metrics.cost / metrics.influencedPlayers : null,
     roi: metrics.cost > 0 ? metrics.influencedRevenue / metrics.cost : null,
@@ -185,7 +209,12 @@ export function aggregateCrmResults(
           .map(([position, metrics]) => ({ position, ...withRatios(metrics) }))
           .sort((a, b) => a.position - b.position),
       }))
-      .sort((a, b) => b.influencedRevenue - a.influencedRevenue || b.cost - a.cost),
+      .sort(
+        (a, b) =>
+          b.directRevenue - a.directRevenue ||
+          b.influencedRevenue - a.influencedRevenue ||
+          b.cost - a.cost,
+      ),
     states: [...states.entries()]
       .map(([state, metrics]) => ({
         state,
@@ -194,6 +223,52 @@ export function aggregateCrmResults(
       }))
       .sort((a, b) => b.sent - a.sent),
   };
+}
+
+export type JourneyStepInfo = {
+  position: number;
+  step_type: string;
+  is_enabled: boolean;
+  config: unknown;
+};
+
+const CHANNEL_LABEL: Record<string, string> = {
+  email: "e-mail",
+  whatsapp: "WhatsApp",
+  voice: "voz",
+  call: "voz",
+};
+
+function delayLabel(seconds: number) {
+  if (seconds <= 0) return "na entrada";
+  const hours = seconds / 3600;
+  if (hours < 24) return `+${Math.round(hours)} h`;
+  const days = hours / 24;
+  return `+${Number.isInteger(days) ? days : days.toFixed(1).replace(".", ",")} dia${days === 1 ? "" : "s"}`;
+}
+
+/**
+ * Readable names for a journey's sending steps: "1ª mensagem · na entrada",
+ * "2ª mensagem · +2 dias". Waits do not get a number, so the messages are
+ * counted 1, 2, 3 instead of the raw positions 0, 2, 4.
+ */
+export function stepLabels(steps: JourneyStepInfo[]): Record<number, string> {
+  const labels: Record<number, string> = {};
+  let elapsed = 0;
+  let message = 0;
+  for (const step of [...steps].sort((a, b) => a.position - b.position)) {
+    if (!step.is_enabled || step.step_type === "end") continue;
+    if (step.step_type === "wait") {
+      const config = (step.config ?? {}) as { delay_seconds?: unknown };
+      elapsed += Number(config.delay_seconds ?? 0) || 0;
+      continue;
+    }
+    message += 1;
+    const channel = CHANNEL_LABEL[step.step_type];
+    labels[step.position] =
+      `${message}ª mensagem · ${delayLabel(elapsed)}${channel ? ` · ${channel}` : ""}`;
+  }
+  return labels;
 }
 
 export type HoldoutGroup = { players: number; returned: number; revenue: number };

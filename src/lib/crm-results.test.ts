@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { aggregateCrmResults, compareHoldout, type CrmResultRow } from "./crm-results";
+import { aggregateCrmResults, compareHoldout, stepLabels, type CrmResultRow } from "./crm-results";
 
 const row = (overrides: Partial<CrmResultRow>): CrmResultRow => ({
   metric_date: "2026-10-10",
@@ -69,15 +69,44 @@ describe("aggregateCrmResults", () => {
     expect(result.totals.roi).toBeCloseTo(450 / 138);
   });
 
-  it("ranks origins by recovered revenue, with names and journey steps", () => {
-    expect(result.sources.map((source) => source.name)).toEqual(["Esfriando 2d", "Promo X"]);
-    const journey = result.sources[0];
+  it("ranks origins by click revenue first, with names and journey steps", () => {
+    expect(result.sources.map((source) => source.name)).toEqual(["Promo X", "Esfriando 2d"]);
+    const journey = result.sources[1];
     expect(journey.steps.map((step) => [step.position, step.sent])).toEqual([
       [0, 100],
       [2, 50],
     ]);
     expect(journey.costPerRecovered).toBeCloseTo(18 / 5);
-    expect(result.sources[1]).toMatchObject({ costOnActive: 120, costPerRecovered: null, roi: 0 });
+    expect(result.sources[0]).toMatchObject({ costOnActive: 120, costPerRecovered: null, roi: 0 });
+  });
+
+  it("names sending steps by order and delay, skipping waits", () => {
+    expect(
+      stepLabels([
+        { position: 0, step_type: "sms", is_enabled: true, config: {} },
+        { position: 1, step_type: "wait", is_enabled: true, config: { delay_seconds: 172800 } },
+        { position: 2, step_type: "sms", is_enabled: true, config: {} },
+        { position: 3, step_type: "wait", is_enabled: true, config: { delay_seconds: 18000 } },
+        { position: 4, step_type: "email", is_enabled: true, config: {} },
+        { position: 5, step_type: "sms", is_enabled: false, config: {} },
+      ]),
+    ).toEqual({
+      0: "1ª mensagem · na entrada",
+      2: "2ª mensagem · +2 dias",
+      4: "3ª mensagem · +2,2 dias · e-mail",
+    });
+  });
+
+  it("measures the click conversion in players, flagging small samples", () => {
+    const click = aggregateCrmResults([
+      row({ sent: 1000, cost: 59, human_clicks: 20, direct_conversions: 9, direct_players: 6 }),
+      row({ source_key: "j2", source_id: "j2", sent: 10, cost: 1, direct_players: 1 }),
+    ]);
+    expect(click.sources[0]).toMatchObject({ directPlayers: 6, smallSample: false });
+    expect(click.sources[0].clickRate).toBeCloseTo(0.02);
+    expect(click.sources[0].conversionRate).toBeCloseTo(0.3);
+    expect(click.sources[0].costPerConversion).toBeCloseTo(59 / 6);
+    expect(click.sources[1].smallSample).toBe(true);
   });
 
   it("builds a daily series in date order", () => {

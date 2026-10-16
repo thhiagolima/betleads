@@ -55,6 +55,13 @@ describe("crmResultsCsv", () => {
     expect(lines[1].split(",")[8]).toBe('"1.90"');
   });
 
+  it("has one cell per header column on every line", () => {
+    const cells = (line: string) => line.match(/"(?:[^"]|"")*"/g)?.length ?? 0;
+    const width = cells(lines[0]);
+    expect(lines.every((line) => cells(line) === width)).toBe(true);
+    expect(lines[0]).toContain('"jogadores_convertidos_clique"');
+  });
+
   it("escapes quotes in names", () => {
     expect(lines.some((line) => line.includes('"Promo ""VIP"""'))).toBe(true);
   });

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link } from "@tanstack/react-router";
@@ -32,35 +32,131 @@ const money = (value: number | null) => (value == null ? "—" : brl(value));
 
 type Row = Awaited<ReturnType<typeof getTenantComparison>>["rows"][number];
 
-const METRICS: Array<{ label: string; hint?: string; value: (row: Row) => string }> = [
-  { label: "SMS enviados", value: (row) => num(row.sent) },
-  { label: "Custo", value: (row) => brl(row.cost) },
+const pctFine = (value: number | null) =>
+  value == null
+    ? "—"
+    : `${(value * 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+
+type Metric = {
+  label: string;
+  hint?: string;
+  raw: (row: Row) => number | null;
+  format: (value: number | null) => string;
+  /** Which end is better; the best house in the row is highlighted. */
+  better?: "high" | "low";
+};
+
+const count = (value: number | null) => (value == null ? "—" : num(value));
+const currency = (value: number | null) => money(value);
+
+const GROUPS: Array<{ title: string; metrics: Metric[] }> = [
   {
-    label: "Jogadores recuperados",
-    hint: "Influenciados: voltaram a depositar até 72 h após um SMS.",
-    value: (row) => num(row.influencedPlayers),
+    title: "Conversão por clique",
+    metrics: [
+      { label: "SMS enviados", raw: (row) => row.sent, format: count },
+      { label: "Custo em SMS", raw: (row) => row.cost, format: currency },
+      {
+        label: "Taxa de clique",
+        hint: "SMS clicados ÷ SMS enviados.",
+        raw: (row) => row.clickRate,
+        format: pctFine,
+        better: "high",
+      },
+      {
+        label: "Jogadores convertidos",
+        hint: "Depositaram até 7 dias depois de clicar.",
+        raw: (row) => row.directPlayers,
+        format: count,
+        better: "high",
+      },
+      {
+        label: "Conversão do clique",
+        hint: "Jogadores convertidos ÷ SMS clicados.",
+        raw: (row) => row.conversionRate,
+        format: pct,
+        better: "high",
+      },
+      {
+        label: "Valor convertido",
+        raw: (row) => row.directRevenue,
+        format: currency,
+        better: "high",
+      },
+      {
+        label: "Custo por jogador convertido",
+        raw: (row) => row.costPerConversion,
+        format: currency,
+        better: "low",
+      },
+      {
+        label: "Retorno",
+        hint: "Valor convertido ÷ custo.",
+        raw: (row) => row.clickRoi,
+        format: ratio,
+        better: "high",
+      },
+    ],
   },
-  { label: "Receita influenciada", value: (row) => brl(row.influencedRevenue) },
-  { label: "Custo por recuperado", value: (row) => money(row.costPerRecovered) },
-  { label: "Retorno (receita ÷ custo)", value: (row) => ratio(row.roi) },
-  { label: "Receita direta (clique)", value: (row) => brl(row.directRevenue) },
   {
-    label: "Custo gasto com ativos",
-    hint: "Parte do custo enviada a quem já depositou nas últimas 48 h.",
-    value: (row) => pct(row.costOnActiveShare),
+    title: "Visão ampla: recuperados",
+    metrics: [
+      {
+        label: "Jogadores recuperados",
+        hint: "Parados há 2+ dias que voltaram até 3 dias após um SMS, com ou sem clique.",
+        raw: (row) => row.influencedPlayers,
+        format: count,
+        better: "high",
+      },
+      { label: "Valor recuperado", raw: (row) => row.influencedRevenue, format: currency },
+      {
+        label: "Custo por recuperado",
+        raw: (row) => row.costPerRecovered,
+        format: currency,
+        better: "low",
+      },
+      {
+        label: "Custo gasto com ativos",
+        hint: "Parte do custo enviada a quem depositou nas últimas 48 h.",
+        raw: (row) => row.costOnActiveShare,
+        format: pct,
+        better: "low",
+      },
+    ],
   },
-  { label: "Base ativa (48 h)", value: (row) => num(row.base.ativo) },
-  { label: "Esfriando (2–7 dias)", value: (row) => num(row.base.esfriando) },
-  { label: "Dormindo (7–30 dias)", value: (row) => num(row.base.dormindo) },
-  { label: "Perdidos (30+ dias)", value: (row) => num(row.base.perdido) },
-  { label: "Cadastros no período", value: (row) => num(row.signups) },
-  { label: "Cadastro → 1º depósito", value: (row) => pct(row.signupToFtd) },
   {
-    label: "2º depósito em 7 dias",
-    hint: "Última coorte semanal já fechada.",
-    value: (row) => pct(row.secondDeposit7d),
+    title: "Base de jogadores (agora)",
+    metrics: [
+      { label: "Ativos (48 h)", raw: (row) => row.base.ativo, format: count },
+      { label: "Esfriando (2–7 dias)", raw: (row) => row.base.esfriando, format: count },
+      { label: "Dormindo (7–30 dias)", raw: (row) => row.base.dormindo, format: count },
+      { label: "Perdidos (30+ dias)", raw: (row) => row.base.perdido, format: count },
+      { label: "Cadastros no período", raw: (row) => row.signups, format: count },
+      {
+        label: "Cadastro → 1º depósito",
+        raw: (row) => row.signupToFtd,
+        format: pct,
+        better: "high",
+      },
+      {
+        label: "2º depósito em 7 dias",
+        hint: "Última coorte semanal já fechada.",
+        raw: (row) => row.secondDeposit7d,
+        format: pct,
+        better: "high",
+      },
+    ],
   },
 ];
+
+/** Index of the best house for a metric, or -1 when there is no clear best. */
+function bestIndex(metric: Metric, rows: Row[]) {
+  if (!metric.better) return -1;
+  const values = rows.map(metric.raw);
+  const present = values.filter((value): value is number => value != null);
+  if (present.length < 2 || new Set(present).size === 1) return -1;
+  const target = metric.better === "high" ? Math.max(...present) : Math.min(...present);
+  return values.indexOf(target);
+}
 
 export function TenantComparison() {
   const [days, setDays] = useState<(typeof PERIODS)[number]>(30);
@@ -116,8 +212,8 @@ export function TenantComparison() {
           <CardHeader>
             <CardTitle className="text-base">Últimos {query.data.days} dias</CardTitle>
             <CardDescription>
-              Recuperado = jogador parado há 48 h ou mais que voltou a depositar até 72 h após um
-              SMS. A situação da base é a de agora, não a do período.
+              Conversão por clique primeiro. Em verde, a melhor casa em cada linha. A base de
+              jogadores é a de agora, não a do período.
             </CardDescription>
           </CardHeader>
           <CardContent className="overflow-x-auto">
@@ -133,20 +229,43 @@ export function TenantComparison() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {METRICS.map((metric) => (
-                  <TableRow key={metric.label}>
-                    <TableCell>
-                      <div className="font-medium">{metric.label}</div>
-                      {metric.hint && (
-                        <div className="text-xs text-muted-foreground">{metric.hint}</div>
-                      )}
-                    </TableCell>
-                    {query.data.rows.map((row) => (
-                      <TableCell key={row.tenant} className="text-right tabular-nums">
-                        {metric.value(row)}
+                {GROUPS.map((group) => (
+                  <Fragment key={group.title}>
+                    <TableRow className="bg-muted/30 hover:bg-muted/30">
+                      <TableCell
+                        colSpan={query.data.rows.length + 1}
+                        className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                      >
+                        {group.title}
                       </TableCell>
-                    ))}
-                  </TableRow>
+                    </TableRow>
+                    {group.metrics.map((metric) => {
+                      const best = bestIndex(metric, query.data.rows);
+                      return (
+                        <TableRow key={metric.label}>
+                          <TableCell>
+                            <div className="font-medium">{metric.label}</div>
+                            {metric.hint && (
+                              <div className="text-xs text-muted-foreground">{metric.hint}</div>
+                            )}
+                          </TableCell>
+                          {query.data.rows.map((row, index) => (
+                            <TableCell
+                              key={row.tenant}
+                              className={`text-right tabular-nums ${
+                                index === best
+                                  ? "font-semibold text-emerald-600 dark:text-emerald-400"
+                                  : ""
+                              }`}
+                            >
+                              {metric.format(metric.raw(row))}
+                              {index === best && <span className="sr-only"> (melhor)</span>}
+                            </TableCell>
+                          ))}
+                        </TableRow>
+                      );
+                    })}
+                  </Fragment>
                 ))}
               </TableBody>
             </Table>

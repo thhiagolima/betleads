@@ -16,6 +16,7 @@ const row = (overrides: Partial<CrmResultRow>): CrmResultRow => ({
   recipients: 0,
   human_clicks: 0,
   direct_conversions: 0,
+  direct_players: 0,
   direct_revenue: 0,
   influenced_players: 0,
   influenced_deposits: 0,
@@ -23,56 +24,79 @@ const row = (overrides: Partial<CrmResultRow>): CrmResultRow => ({
   ...overrides,
 });
 
+const journey = (key: string, overrides: Partial<CrmResultRow>) =>
+  row({ source_key: key, source_id: key, ...overrides });
+
 const results = aggregateCrmResults(
   [
     // Cheap, efficient journey with a dead step.
-    row({
-      source_key: "esf",
-      source_id: "esf",
-      cost: 30,
-      influenced_players: 30,
-      influenced_revenue: 900,
-    }),
-    row({ source_key: "esf", source_id: "esf", step_position: 4, cost: 60 }),
+    journey("esf", { sent: 1500, cost: 30, human_clicks: 60, direct_players: 30 }),
+    journey("esf", { step_position: 4, cost: 60 }),
     // Typical journeys.
-    row({ source_key: "dor", source_id: "dor", cost: 300, influenced_players: 10 }),
-    row({ source_key: "trinta", source_id: "trinta", cost: 330, influenced_players: 10 }),
-    // Expensive journey.
-    row({ source_key: "caro", source_id: "caro", cost: 3000, influenced_players: 10 }),
-    // Mass campaign to active players that recovers nobody.
+    journey("dor", { sent: 1500, cost: 300, human_clicks: 50, direct_players: 10 }),
+    journey("trinta", { sent: 1500, cost: 330, human_clicks: 55, direct_players: 10 }),
+    // Expensive journey with a weak link.
+    journey("caro", { sent: 1500, cost: 3000, human_clicks: 3, direct_players: 10 }),
+    // Brings players back, but nobody converts through the link.
+    journey("semlink", { cost: 80, influenced_players: 4 }),
+    // Mass campaign to active players that converts nobody.
     row({
       source_type: "campaign",
       source_key: "Promo",
       source_id: null,
+      step_position: -1,
       player_state: "ativo",
       cost: 1500,
     }),
   ],
-  { esf: "Esfriando", dor: "Dormindo", trinta: "30 dias", caro: "Caro" },
+  {
+    esf: "Esfriando",
+    dor: "Dormindo",
+    trinta: "30 dias",
+    caro: "Caro",
+    semlink: "Sem link",
+  },
 );
 
 describe("buildRecommendations", () => {
   const items = buildRecommendations(results);
   const titles = items.map((item) => item.title);
 
-  it("flags a source that spends without recovering anyone, first", () => {
+  it("flags a source that spends without any conversion, first", () => {
     expect(items[0].severity).toBe("acao");
     expect(items[0].title).toContain("Promo");
-    expect(items[0].title).toContain("sem recuperar ninguém");
+    expect(items[0].title).toContain("sem nenhuma conversão");
+  });
+
+  it("flags a source that brings players back but converts nobody through the link", () => {
+    expect(titles).toContain("Sem link não converteu ninguém pelo link");
   });
 
   it("flags a dead journey step", () => {
-    expect(titles).toContain("Etapa 5 de Esfriando não recuperou ninguém");
+    expect(titles).toContain("Etapa 5 de Esfriando não converteu ninguém");
   });
 
   it("flags spend on already active players", () => {
     expect(titles.some((title) => title.startsWith("100% do custo de Promo"))).toBe(true);
   });
 
-  it("points out the most efficient and the expensive sources against the median", () => {
-    expect(titles).toContain("Esfriando é a forma mais barata de recuperar jogadores");
-    expect(titles).toContain("Caro recupera, mas caro");
+  it("compares cost per converted player against the median", () => {
+    expect(titles).toContain("Esfriando é a forma mais barata de converter");
+    expect(titles).toContain("Caro converte, mas caro");
     expect(titles.some((title) => title.startsWith("Dormindo"))).toBe(false);
+  });
+
+  it("flags a click rate far below the median", () => {
+    expect(titles).toContain("Pouca gente clica no link de Caro");
+  });
+
+  it("does not compare sources with fewer than 5 converted players", () => {
+    const small = aggregateCrmResults([
+      journey("a", { cost: 10, direct_players: 4 }),
+      journey("b", { cost: 100, direct_players: 4 }),
+      journey("c", { cost: 1000, direct_players: 4 }),
+    ]);
+    expect(buildRecommendations(small).some((item) => item.title.includes("converte"))).toBe(false);
   });
 
   it("reads holdout results", () => {

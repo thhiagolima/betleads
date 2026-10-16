@@ -16,14 +16,19 @@ const HEADER = [
   "destinatarios",
   "custo",
   "custo_em_ativos",
+  "sms_clicados",
+  "taxa_de_clique",
+  "jogadores_convertidos_clique",
+  "conversao_do_clique",
+  "receita_clique",
+  "custo_por_convertido",
+  "retorno_clique",
   "recuperados",
   "depositos_influenciados",
   "receita_influenciada",
   "custo_por_recuperado",
-  "retorno",
-  "cliques_humanos",
-  "conversoes_diretas",
-  "receita_direta",
+  "retorno_recuperados",
+  "depositos_apos_clique",
 ];
 
 const metricCells = (metrics: CrmMetricsWithRatios) => [
@@ -33,15 +38,22 @@ const metricCells = (metrics: CrmMetricsWithRatios) => [
   amount(metrics.cost),
 ];
 
+const rate = (value: number | null) => (value == null ? "" : value.toFixed(4));
+
 const resultCells = (metrics: CrmMetricsWithRatios) => [
+  metrics.humanClicks,
+  rate(metrics.clickRate),
+  metrics.directPlayers,
+  rate(metrics.conversionRate),
+  amount(metrics.directRevenue),
+  amount(metrics.costPerConversion),
+  metrics.clickRoi == null ? "" : metrics.clickRoi.toFixed(2),
   metrics.influencedPlayers,
   metrics.influencedDeposits,
   amount(metrics.influencedRevenue),
   amount(metrics.costPerRecovered),
   metrics.roi == null ? "" : metrics.roi.toFixed(2),
-  metrics.humanClicks,
   metrics.directConversions,
-  amount(metrics.directRevenue),
 ];
 
 export function crmResultsCsv(
