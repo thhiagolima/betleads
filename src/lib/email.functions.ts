@@ -847,6 +847,7 @@ export async function runCampaignSend(campaignId: string) {
     .from("email_templates")
     .select("*")
     .eq("id", camp.template_id)
+    .eq("tenant_id", camp.tenant_id)
     .maybeSingle();
   if (tErr || !liveTpl) throw new Error("Template da campanha não encontrado.");
   if (liveTpl.lifecycle_status !== "published") {
