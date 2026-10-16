@@ -80,7 +80,9 @@ export function qualifiesForInactivity(
   // already past `hours_max` belongs to the next band, not this one.
   const hoursMax = Number(config.hours_max);
   const withinUpperBound =
-    !Number.isFinite(hoursMax) || hoursMax <= hours || timestamp > now.getTime() - hoursMax * 3600_000;
+    !Number.isFinite(hoursMax) ||
+    hoursMax <= hours ||
+    timestamp > now.getTime() - hoursMax * 3600_000;
   return (
     Number.isFinite(timestamp) &&
     timestamp <= now.getTime() - hours * 3600_000 &&
@@ -129,7 +131,9 @@ export function pixExpiryHours(triggerConfig: Record<string, unknown> | null | u
 /** Message variations of an SMS step; a step without `variants` has one. */
 export function smsVariants(config: Record<string, unknown>): string[] {
   const variants = Array.isArray(config.variants)
-    ? config.variants.filter((item): item is string => typeof item === "string" && item.trim() !== "")
+    ? config.variants.filter(
+        (item): item is string => typeof item === "string" && item.trim() !== "",
+      )
     : [];
   return variants.length ? variants : [String(config.content ?? "")];
 }
@@ -187,4 +191,46 @@ export function triggerOccurrence(
     return String(player.ultimo_jogo ?? "missing");
   if (trigger === "cashback_pago") return String(player.last_cashback_paid_at ?? "missing");
   return String(player.updated_at ?? player.created_at ?? "missing");
+}
+
+export type JourneyEntryScope = "new_only" | "include_base";
+
+/** Triggers that describe a single event: re-sending for past events makes no sense (E-02). */
+const EVENT_TRIGGERS = new Set([
+  "pix_gerado_nao_pago",
+  "saque_pago",
+  "cashback_pago",
+  "primeiro_deposito",
+  "cadastrados_sem_deposito",
+  "lead_cadastrado",
+]);
+
+/** Level journeys only take players at the moment they change level. */
+export function activationAsksEntryScope(triggerType: string) {
+  return triggerType !== "nivel_alterado" && triggerType !== "manual";
+}
+
+export function defaultEntryScope(triggerType: string): JourneyEntryScope {
+  return EVENT_TRIGGERS.has(triggerType) ? "new_only" : "include_base";
+}
+
+/**
+ * Trigger config to publish with (E-02). "new_only" starts the journey now
+ * (`start_after`). "include_base" lifts a previous `start_after` only for
+ * state triggers (inactivity bands); on event triggers it is kept, because
+ * removing it would replay past PIX, withdrawals or sign-ups.
+ */
+export function activationTriggerConfig(
+  triggerType: string,
+  triggerConfig: Record<string, unknown> | null | undefined,
+  scope: JourneyEntryScope | undefined,
+  now = new Date(),
+): Record<string, unknown> {
+  const config = { ...(triggerConfig ?? {}) };
+  if (scope === "new_only") return { ...config, start_after: now.toISOString() };
+  if (scope === "include_base" && !EVENT_TRIGGERS.has(triggerType)) {
+    const { start_after: _startAfter, ...rest } = config;
+    return rest;
+  }
+  return config;
 }

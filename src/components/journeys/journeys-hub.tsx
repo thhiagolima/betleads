@@ -32,6 +32,11 @@ import {
   setJourneyStatus,
 } from "@/lib/journeys.functions";
 import { EXPRESS_JOURNEY_HINT } from "@/lib/journey-express";
+import {
+  activationAsksEntryScope,
+  defaultEntryScope,
+  type JourneyEntryScope,
+} from "@/lib/journey-policy";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -151,14 +156,46 @@ export function JourneysHub() {
     queryFn: () => legacyFn(),
     enabled: Boolean(journeys.data) && view === "journeys",
   });
+  const [pauseCandidate, setPauseCandidate] = useState<{
+    id: string;
+    name: string;
+    inProgress: number;
+  } | null>(null);
+  const [closeOnPause, setCloseOnPause] = useState(false);
+  const [publishCandidate, setPublishCandidate] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  const [entryScope, setEntryScope] = useState<JourneyEntryScope>("new_only");
   const status = useMutation({
-    mutationFn: (input: { id: string; status: Journey["status"] }) => changeStatus({ data: input }),
-    onSuccess: async (_, variables) => {
+    mutationFn: (input: {
+      id: string;
+      status: Journey["status"];
+      entryScope?: JourneyEntryScope;
+      closeEnrollments?: boolean;
+    }) => changeStatus({ data: input }),
+    onSuccess: async (result, variables) => {
       await queryClient.invalidateQueries({ queryKey: ["journeys"] });
-      toast.success(variables.status === "active" ? "Jornada publicada" : "Jornada desligada");
+      setPauseCandidate(null);
+      setPublishCandidate(null);
+      toast.success(
+        variables.status === "active"
+          ? "Jornada publicada"
+          : result.closed
+            ? `Jornada desligada · ${result.closed} jogador(es) saíram da jornada`
+            : "Jornada desligada",
+      );
     },
     onError: (error: Error) => toast.error(error.message),
   });
+  const requestPublish = (journey: { id: string; name: string; trigger_type: string }) => {
+    if (!activationAsksEntryScope(journey.trigger_type)) {
+      status.mutate({ id: journey.id, status: "active" });
+      return;
+    }
+    setEntryScope(defaultEntryScope(journey.trigger_type));
+    setPublishCandidate({ id: journey.id, name: journey.name });
+  };
   const express = useMutation({
     mutationFn: (input: { id: string; express: boolean }) => changeExpress({ data: input }),
     onSuccess: async (result) => {
@@ -623,7 +660,10 @@ export function JourneysHub() {
                           size="sm"
                           variant="ghost"
                           disabled={status.isPending}
-                          onClick={() => status.mutate({ id: journey.id, status: "paused" })}
+                          onClick={() => {
+                            setCloseOnPause(false);
+                            setPauseCandidate({ id: journey.id, name: journey.name, inProgress });
+                          }}
                         >
                           <Pause className="mr-1 h-4 w-4" /> Desligar
                         </Button>
@@ -631,7 +671,7 @@ export function JourneysHub() {
                         <Button
                           size="sm"
                           disabled={status.isPending || journey.status === "archived"}
-                          onClick={() => status.mutate({ id: journey.id, status: "active" })}
+                          onClick={() => requestPublish(journey)}
                         >
                           <Play className="mr-1 h-4 w-4" /> Publicar
                         </Button>
@@ -784,6 +824,141 @@ export function JourneysHub() {
               }
             >
               <Zap className="mr-1 h-4 w-4" aria-hidden="true" /> Ligar envio imediato
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={pauseCandidate !== null}
+        onOpenChange={(open) => !open && setPauseCandidate(null)}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Desligar “{pauseCandidate?.name}”</DialogTitle>
+            <DialogDescription>
+              {pauseCandidate?.inProgress
+                ? `${pauseCandidate.inProgress.toLocaleString("pt-BR")} jogador(es) estão nesta jornada agora. Nenhuma mensagem sai enquanto ela estiver desligada.`
+                : "Ninguém está nesta jornada agora."}
+            </DialogDescription>
+          </DialogHeader>
+          {Boolean(pauseCandidate?.inProgress) && (
+            <fieldset className="space-y-3 text-sm">
+              <legend className="sr-only">O que fazer com quem está na jornada</legend>
+              <label className="flex cursor-pointer gap-3 rounded-lg border p-3">
+                <input
+                  type="radio"
+                  name="pause-mode"
+                  checked={!closeOnPause}
+                  onChange={() => setCloseOnPause(false)}
+                />
+                <span>
+                  <span className="font-medium">Manter os jogadores</span>
+                  <span className="block text-muted-foreground">
+                    Ao republicar, cada um continua de onde parou. Etapas atrasadas respeitam o
+                    limite de mensagens por pessoa.
+                  </span>
+                </span>
+              </label>
+              <label className="flex cursor-pointer gap-3 rounded-lg border p-3">
+                <input
+                  type="radio"
+                  name="pause-mode"
+                  checked={closeOnPause}
+                  onChange={() => setCloseOnPause(true)}
+                />
+                <span>
+                  <span className="font-medium">Encerrar a participação de todos</span>
+                  <span className="block text-muted-foreground">
+                    Todos saem da jornada agora. Ao republicar, só entra quem cumprir o gatilho de
+                    novo.
+                  </span>
+                </span>
+              </label>
+            </fieldset>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={status.isPending}
+              onClick={() => setPauseCandidate(null)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant={closeOnPause ? "destructive" : "default"}
+              disabled={status.isPending || !pauseCandidate}
+              onClick={() =>
+                pauseCandidate &&
+                status.mutate({
+                  id: pauseCandidate.id,
+                  status: "paused",
+                  closeEnrollments: closeOnPause,
+                })
+              }
+            >
+              <Pause className="mr-1 h-4 w-4" aria-hidden="true" />
+              {closeOnPause ? "Desligar e encerrar" : "Desligar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={publishCandidate !== null}
+        onOpenChange={(open) => !open && setPublishCandidate(null)}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Publicar “{publishCandidate?.name}”</DialogTitle>
+            <DialogDescription>Quem pode entrar nesta jornada?</DialogDescription>
+          </DialogHeader>
+          <fieldset className="space-y-3 text-sm">
+            <legend className="sr-only">Quem pode entrar</legend>
+            <label className="flex cursor-pointer gap-3 rounded-lg border p-3">
+              <input
+                type="radio"
+                name="entry-scope"
+                checked={entryScope === "new_only"}
+                onChange={() => setEntryScope("new_only")}
+              />
+              <span>
+                <span className="font-medium">Só casos novos, a partir de agora</span>
+                <span className="block text-muted-foreground">
+                  Ninguém da base atual entra. Quem já estava na jornada sai na próxima verificação.
+                </span>
+              </span>
+            </label>
+            <label className="flex cursor-pointer gap-3 rounded-lg border p-3">
+              <input
+                type="radio"
+                name="entry-scope"
+                checked={entryScope === "include_base"}
+                onChange={() => setEntryScope("include_base")}
+              />
+              <span>
+                <span className="font-medium">Incluir a base atual</span>
+                <span className="block text-muted-foreground">
+                  Jogadores que já cumprem o gatilho entram nos próximos minutos e recebem o
+                  primeiro passo, dentro do limite de mensagens por pessoa.
+                </span>
+              </span>
+            </label>
+          </fieldset>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={status.isPending}
+              onClick={() => setPublishCandidate(null)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              disabled={status.isPending || !publishCandidate}
+              onClick={() =>
+                publishCandidate &&
+                status.mutate({ id: publishCandidate.id, status: "active", entryScope })
+              }
+            >
+              <Play className="mr-1 h-4 w-4" aria-hidden="true" /> Publicar
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  activationAsksEntryScope,
+  activationTriggerConfig,
+  defaultEntryScope,
   inactivityUpperBoundHours,
   journeyEntryKey,
   nextJourneyWindowOpen,
@@ -12,20 +15,54 @@ import {
 
 describe("journey policy", () => {
   it("applies the Sao Paulo window", () => {
-    expect(nextJourneyWindowOpen({ window_start: "08:00", window_end: "22:00" }, new Date("2026-10-07T15:00:00Z"))).toBeNull();
-    expect(nextJourneyWindowOpen({ window_start: "08:00", window_end: "22:00" }, new Date("2026-10-08T02:00:00Z"))).toBe("2026-10-08T11:00:00.000Z");
+    expect(
+      nextJourneyWindowOpen(
+        { window_start: "08:00", window_end: "22:00" },
+        new Date("2026-10-07T15:00:00Z"),
+      ),
+    ).toBeNull();
+    expect(
+      nextJourneyWindowOpen(
+        { window_start: "08:00", window_end: "22:00" },
+        new Date("2026-10-08T02:00:00Z"),
+      ),
+    ).toBe("2026-10-08T11:00:00.000Z");
   });
   it("applies weekdays in Sao Paulo", () => {
-    expect(nextJourneyWindowOpen({ window_start: "08:00", window_end: "22:00", weekdays: [1] }, new Date("2026-10-09T23:00:00Z"))).toBe("2026-10-12T11:00:00.000Z");
+    expect(
+      nextJourneyWindowOpen(
+        { window_start: "08:00", window_end: "22:00", weekdays: [1] },
+        new Date("2026-10-09T23:00:00Z"),
+      ),
+    ).toBe("2026-10-12T11:00:00.000Z");
   });
   it("evaluates inactivity and re-entry", () => {
     const now = new Date("2026-10-07T12:00:00Z");
-    expect(qualifiesForInactivity({ ultimo_login: "2026-10-05T11:00:00Z" }, { field: "ultimo_login", hours: 24 }, now)).toBe(true);
+    expect(
+      qualifiesForInactivity(
+        { ultimo_login: "2026-10-05T11:00:00Z" },
+        { field: "ultimo_login", hours: 24 },
+        now,
+      ),
+    ).toBe(true);
     expect(journeyEntryKey("login", { reentry: "once" }, "evt-1", now)).toBe("once");
-    expect(journeyEntryKey("login", { reentry: "per_occurrence" }, "evt-1", now)).toBe("login:evt-1");
-    expect(journeyEntryKey("login", { reentry: "after_cooldown", reentry_cooldown_hours: 24 }, "evt-1", now)).toMatch(/^login:cooldown:/);
-    expect(triggerOccurrence("lead_cadastrado", { created_at: "created", updated_at: "updated" })).toBe("created");
-    expect(triggerOccurrence("inactivity", { ultimo_jogo: "game" }, { field: "ultimo_jogo" })).toBe("game");
+    expect(journeyEntryKey("login", { reentry: "per_occurrence" }, "evt-1", now)).toBe(
+      "login:evt-1",
+    );
+    expect(
+      journeyEntryKey(
+        "login",
+        { reentry: "after_cooldown", reentry_cooldown_hours: 24 },
+        "evt-1",
+        now,
+      ),
+    ).toMatch(/^login:cooldown:/);
+    expect(
+      triggerOccurrence("lead_cadastrado", { created_at: "created", updated_at: "updated" }),
+    ).toBe("created");
+    expect(triggerOccurrence("inactivity", { ultimo_jogo: "game" }, { field: "ultimo_jogo" })).toBe(
+      "game",
+    );
   });
 });
 
@@ -34,8 +71,15 @@ describe("inactivity band upper bound (E-03)", () => {
   const hoursAgo = (h: number) => new Date(now.getTime() - h * 3600_000).toISOString();
 
   it("uses the journey exit threshold as the entry upper bound", () => {
-    expect(inactivityUpperBoundHours({ field: "ultimo_deposito", hours: 48 }, { inactivity_over_hours: 168 })).toBe(168);
-    expect(inactivityUpperBoundHours({ hours: 48, hours_max: 100 }, { inactivity_over_hours: 168 })).toBe(100);
+    expect(
+      inactivityUpperBoundHours(
+        { field: "ultimo_deposito", hours: 48 },
+        { inactivity_over_hours: 168 },
+      ),
+    ).toBe(168);
+    expect(
+      inactivityUpperBoundHours({ hours: 48, hours_max: 100 }, { inactivity_over_hours: 168 }),
+    ).toBe(100);
     expect(inactivityUpperBoundHours({ hours: 720 }, { deposit: true })).toBeNull();
     expect(inactivityUpperBoundHours({ hours: 48 }, { inactivity_over_hours: "x" })).toBeNull();
   });
@@ -45,9 +89,17 @@ describe("inactivity band upper bound (E-03)", () => {
     expect(qualifiesForInactivity({ ultimo_deposito: hoursAgo(72) }, esfriando, now)).toBe(true);
     expect(qualifiesForInactivity({ ultimo_deposito: hoursAgo(24) }, esfriando, now)).toBe(false);
     expect(qualifiesForInactivity({ ultimo_deposito: hoursAgo(168) }, esfriando, now)).toBe(false);
-    expect(qualifiesForInactivity({ ultimo_deposito: hoursAgo(40 * 24) }, esfriando, now)).toBe(false);
+    expect(qualifiesForInactivity({ ultimo_deposito: hoursAgo(40 * 24) }, esfriando, now)).toBe(
+      false,
+    );
     // Without an upper bound (30 dias) every older player still qualifies.
-    expect(qualifiesForInactivity({ ultimo_deposito: hoursAgo(40 * 24) }, { field: "ultimo_deposito", hours: 720 }, now)).toBe(true);
+    expect(
+      qualifiesForInactivity(
+        { ultimo_deposito: hoursAgo(40 * 24) },
+        { field: "ultimo_deposito", hours: 720 },
+        now,
+      ),
+    ).toBe(true);
   });
 });
 
@@ -77,14 +129,57 @@ describe("sms variants (D-8)", () => {
   });
 
   it("spreads across variants for different seeds", () => {
-    const picked = new Set(Array.from({ length: 40 }, (_, i) => pickSmsVariant(variants, `seed-${i}`, [])));
+    const picked = new Set(
+      Array.from({ length: 40 }, (_, i) => pickSmsVariant(variants, `seed-${i}`, [])),
+    );
     expect(picked.size).toBe(variants.length);
   });
 
   it("avoids variants already used today until all were used", () => {
     expect(pickSmsVariant(variants, "seed-1", [0, 1, 2])).toBe(3);
-    for (let i = 0; i < 20; i++) expect([1, 3]).toContain(pickSmsVariant(variants, `s${i}`, [0, 2]));
+    for (let i = 0; i < 20; i++)
+      expect([1, 3]).toContain(pickSmsVariant(variants, `s${i}`, [0, 2]));
     const all = pickSmsVariant(variants, "seed-1", [0, 1, 2, 3]);
     expect(all).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe("activation entry scope (E-02)", () => {
+  const now = new Date("2026-10-16T12:00:00Z");
+
+  it("defaults to new cases for event triggers and to the base for inactivity", () => {
+    expect(defaultEntryScope("saque_pago")).toBe("new_only");
+    expect(defaultEntryScope("pix_gerado_nao_pago")).toBe("new_only");
+    expect(defaultEntryScope("cadastrados_sem_deposito")).toBe("new_only");
+    expect(defaultEntryScope("inactivity")).toBe("include_base");
+  });
+
+  it("does not ask for level or manual journeys", () => {
+    expect(activationAsksEntryScope("nivel_alterado")).toBe(false);
+    expect(activationAsksEntryScope("manual")).toBe(false);
+    expect(activationAsksEntryScope("inactivity")).toBe(true);
+  });
+
+  it("new cases only starts the journey now", () => {
+    expect(
+      activationTriggerConfig(
+        "inactivity",
+        { field: "ultimo_deposito", hours: 48 },
+        "new_only",
+        now,
+      ),
+    ).toEqual({ field: "ultimo_deposito", hours: 48, start_after: "2026-10-16T12:00:00.000Z" });
+  });
+
+  it("including the base lifts start_after only on state triggers", () => {
+    const config = { start_after: "2026-10-15T10:00:00.000Z", hours: 48 };
+    expect(activationTriggerConfig("inactivity", config, "include_base", now)).toEqual({
+      hours: 48,
+    });
+    expect(activationTriggerConfig("saque_pago", config, "include_base", now)).toEqual(config);
+    expect(activationTriggerConfig("pix_gerado_nao_pago", config, "include_base", now)).toEqual(
+      config,
+    );
+    expect(activationTriggerConfig("inactivity", config, undefined, now)).toEqual(config);
   });
 });

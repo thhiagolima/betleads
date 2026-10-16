@@ -5,7 +5,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { resolveOperationalTenantId } from "./tenant-access.server";
 import { journeyInputSchema, journeyStatusSchema } from "./journeys.shared";
-import { journeyEntryKey } from "./journey-policy";
+import { activationTriggerConfig, journeyEntryKey } from "./journey-policy";
 import { conversionFunnelSnapshot } from "./conversion-funnel";
 import { toggleJourneyExpress } from "./journey-express";
 
@@ -617,14 +617,25 @@ export const saveJourney = createServerFn({ method: "POST" })
 export const setJourneyStatus = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((value: unknown) =>
-    z.object({ id: z.string().uuid(), status: journeyStatusSchema }).parse(value),
+    z
+      .object({
+        id: z.string().uuid(),
+        status: journeyStatusSchema,
+        // E-02: on publish, who may enter. Omitted keeps the trigger config.
+        entryScope: z.enum(["new_only", "include_base"]).optional(),
+        // S-03: on pause, end the open enrollments instead of keeping them.
+        closeEnrollments: z.boolean().optional(),
+      })
+      .parse(value),
   )
   .handler(async ({ data, context }) => {
     const tenantId = await tenant(context);
     await requireJourneyPublisher(context.userId, tenantId);
     const { data: journey, error: journeyError } = await db
       .from("journeys")
-      .select("id,version,status,conversion_objective,conversion_funnel_snapshot")
+      .select(
+        "id,version,status,conversion_objective,conversion_funnel_snapshot,trigger_type,trigger_config",
+      )
       .eq("id", data.id)
       .eq("tenant_id", tenantId)
       .maybeSingle();
@@ -675,6 +686,11 @@ export const setJourneyStatus = createServerFn({ method: "POST" })
             conversion_funnel_snapshot:
               journey.conversion_funnel_snapshot ??
               conversionFunnelSnapshot(journey.conversion_objective ?? "journey", "journey"),
+            trigger_config: activationTriggerConfig(
+              journey.trigger_type,
+              journey.trigger_config,
+              data.entryScope,
+            ),
           }
         : data.status === "paused"
           ? { paused_at: now }
@@ -692,9 +708,39 @@ export const setJourneyStatus = createServerFn({ method: "POST" })
       journey_id: data.id,
       event_type: "status_changed",
       actor_user_id: context.userId,
-      detail: { from: journey.status, to: data.status, version: journey.version },
+      detail: {
+        from: journey.status,
+        to: data.status,
+        version: journey.version,
+        ...(data.entryScope ? { entry_scope: data.entryScope } : {}),
+      },
     });
-    return { ok: true };
+    let closed = 0;
+    if (data.status === "paused" && data.closeEnrollments) {
+      const { data: exited, error: closeError } = await db
+        .from("journey_enrollments")
+        .update({
+          status: "exited",
+          exited_at: now,
+          exit_reason: "journey_paused_closed",
+          claimed_at: null,
+          claimed_by: null,
+        })
+        .eq("journey_id", data.id)
+        .eq("tenant_id", tenantId)
+        .in("status", ["active", "waiting", "paused_by_priority"])
+        .select("id");
+      if (closeError) throw new Error("Jornada desligada, mas as matrículas não foram encerradas.");
+      closed = (exited ?? []).length;
+      await db.from("journey_events").insert({
+        tenant_id: tenantId,
+        journey_id: data.id,
+        event_type: "enrollments_closed_on_pause",
+        actor_user_id: context.userId,
+        detail: { count: closed },
+      });
+    }
+    return { ok: true, closed };
   });
 
 /**
