@@ -8,10 +8,14 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { sendInfobipEmail, resolveSender } from "./email-send.server";
 import { checkContactFrequencyLimit } from "./contact-frequency.server";
-import { loadPlayersForSegment, countPlayersForSegment } from "./email-segments.server";
+import {
+  countPlayersForSegment,
+  loadPlayersByIds,
+  loadPlayersForSegment,
+} from "./email-segments.server";
 import { buildPlayerVariables } from "./template-vars.server";
 import { renderTemplate } from "./template-vars.server";
-import { resolveOperationalTenantId } from "./tenant-access.server";
+import { resolveCurrentTenantId, resolveOperationalTenantId } from "./tenant-access.server";
 import { bindTrackedDispatchesToMessageLog } from "./shortio.server";
 import { conversionFunnelSnapshot, type ConversionObjective } from "./conversion-funnel";
 
@@ -768,7 +772,8 @@ export const previewSegmentCount = createServerFn({ method: "POST" })
       const total = (rows ?? []).filter((p: any) => p.email && p.email.trim()).length;
       return { total };
     }
-    const total = await countPlayersForSegment(data.segmento || "Todos");
+    const tenantId = await resolveCurrentTenantId(context.supabase);
+    const total = await countPlayersForSegment(tenantId, data.segmento || "Todos");
     return { total };
   });
 
@@ -879,15 +884,11 @@ export async function runCampaignSend(campaignId: string) {
     if (!Array.isArray(af.target_player_ids) || af.target_player_ids.length === 0) {
       throw new Error("Selecione pelo menos um lead antes de enviar.");
     }
-    const { data: rows, error: pErr } = await supabaseAdmin
-      .from("players")
-      .select("*")
-      .in("id", af.target_player_ids);
-    if (pErr) throw new Error(pErr.message);
-    players = (rows ?? []).filter((p: any) => p.email && p.email.trim());
+    const rows = await loadPlayersByIds(camp.tenant_id, af.target_player_ids);
+    players = rows.filter((p: any) => p.email && p.email.trim());
   } else {
     const segmento = af.segmento || "Todos";
-    players = await loadPlayersForSegment(segmento);
+    players = await loadPlayersForSegment(camp.tenant_id, segmento);
   }
 
   // Inclui emails avulsos (sem player vinculado), dedup contra a base.
