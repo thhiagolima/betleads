@@ -1,8 +1,10 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { requestedTenantFrom, resolveInsightsTenant, tenantScopedReader } from "./tenant-scope.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type, x-active-tenant",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -213,13 +215,13 @@ function extractAudienceTerm(question: string, knownExperts: string[]): { term: 
 }
 
 async function resolveAudience(
-  sb: any,
+  db: any,
   question: string,
 ): Promise<ParsedQuery["audience"]> {
   // carrega experts cadastrados
   let knownExperts: string[] = [];
   try {
-    const { data } = await sb.from("experts").select("nome");
+    const { data } = await db.from("experts").select("nome");
     knownExperts = [...new Set((data ?? []).map((e: any) => String(e.nome).trim()).filter(Boolean))];
   } catch (e) { console.warn("[ai] experts load falhou", e); }
 
@@ -243,7 +245,7 @@ async function resolveAudience(
     // pagina pra suportar muitos players (cap em 20k)
     const pageSize = 1000;
     for (let from = 0; from < 20000; from += pageSize) {
-      const { data, error } = await sb
+      const { data, error } = await db
         .from("players")
         .select("id")
         .or(orFilter)
@@ -384,7 +386,7 @@ function detectAlerts(p: any): any[] {
 
 // Enriquece players com dep_30d/dep_30_60d para classificação mais precisa,
 // roda classify/playerScore/detectAlerts e devolve novo array.
-async function enrichPlayers(sb: any, players: any[]): Promise<any[]> {
+async function enrichPlayers(db: any, players: any[]): Promise<any[]> {
   if (!players.length) return players;
   const ids = players.map((p) => p.id).filter(Boolean);
   const iso30 = new Date(Date.now() - 30 * 86400000).toISOString();
@@ -392,7 +394,7 @@ async function enrichPlayers(sb: any, players: any[]): Promise<any[]> {
   const dep30 = new Map<string, number>();
   const dep3060 = new Map<string, number>();
   try {
-    const { data } = await sb
+    const { data } = await db
       .from("deposits")
       .select("player_id,valor,created_at")
       .in("player_id", ids)
@@ -420,14 +422,14 @@ async function enrichPlayers(sb: any, players: any[]): Promise<any[]> {
   });
 }
 
-async function playersByIds(sb: any, ids: string[]) {
+async function playersByIds(db: any, ids: string[]) {
   if (!ids.length) return new Map<string, any>();
-  const { data, error } = await sb.from("players").select(PLAYER_COLS).in("id", ids);
+  const { data, error } = await db.from("players").select(PLAYER_COLS).in("id", ids);
   if (error) console.error("[players in ids] error", error);
   return new Map((data ?? []).map((p: any) => [p.id, p]));
 }
 
-async function fetchByIntent(sb: any, parsed: ParsedQuery) {
+async function fetchByIntent(db: any, parsed: ParsedQuery) {
   const { intent, limit, period, sort, filters } = parsed;
   const isoToday = periodStartIso("today")!;
   const iso7d = new Date(Date.now() - 7 * 86400000).toISOString();
@@ -450,7 +452,7 @@ async function fetchByIntent(sb: any, parsed: ParsedQuery) {
     case "saque_hoje": {
       const table = intent === "deposito_hoje" ? "deposits" : "withdrawals";
       const sinceIso = periodIso ?? isoToday;
-      let q = sb.from(table).select("player_id,valor,created_at")
+      let q = db.from(table).select("player_id,valor,created_at")
         .gte("created_at", sinceIso).order("valor", { ascending: false }).limit(5000);
       if (table === "deposits") q.eq("status", "aprovado");
       q = applyAudByPlayerId(q);
@@ -472,7 +474,7 @@ async function fetchByIntent(sb: any, parsed: ParsedQuery) {
         ? ranked.filter(([, v]) => v.sum >= filters.min_deposit!)
         : ranked;
       const ids = filteredRanked.slice(0, limit).map(([id]) => id);
-      const pmap = await playersByIds(sb, ids);
+      const pmap = await playersByIds(db, ids);
       const verb = table === "deposits" ? "Depositou" : "Sacou";
       return ids.filter((id) => pmap.has(id)).map((id) => {
         const a = agg.get(id)!;
@@ -485,13 +487,13 @@ async function fetchByIntent(sb: any, parsed: ParsedQuery) {
     }
     case "ftd_hoje": {
       const { data, error } = await applyAudPlayers(
-        sb.from("players").select(PLAYER_COLS).gte("ftd_em", isoToday)
+        db.from("players").select(PLAYER_COLS).gte("ftd_em", isoToday)
       ).order("ftd_em", { ascending: false }).limit(limit);
       if (error) throw new Error(`players: ${error.message}`);
       return (data ?? []).map((p: any) => mapPlayer(p, "FTD hoje"));
     }
     case "top_depositantes": {
-      let q = sb.from("players").select(PLAYER_COLS);
+      let q = db.from("players").select(PLAYER_COLS);
       if (filters.vip) q = q.eq("vip", true);
       if (filters.min_deposit) q = q.gte("total_depositado", filters.min_deposit);
       if (audIds) q = q.in("id", audIds);
@@ -504,7 +506,7 @@ async function fetchByIntent(sb: any, parsed: ParsedQuery) {
     case "sem_jogar_7d": {
       const sinceIso = inactIso ?? iso7d;
       const { data, error } = await applyAudPlayers(
-        sb.from("players").select(PLAYER_COLS)
+        db.from("players").select(PLAYER_COLS)
           .lt("ultimo_jogo", sinceIso).gt("total_depositado", 0)
       ).order("total_depositado", { ascending: false }).limit(limit);
       if (error) throw new Error(`players: ${error.message}`);
@@ -512,13 +514,13 @@ async function fetchByIntent(sb: any, parsed: ParsedQuery) {
     }
     case "cadastrou_sem_depositar": {
       const { data, error } = await applyAudPlayers(
-        sb.from("players").select(PLAYER_COLS).is("ftd_em", null)
+        db.from("players").select(PLAYER_COLS).is("ftd_em", null)
       ).order("created_at", { ascending: false }).limit(limit);
       if (error) throw new Error(`players: ${error.message}`);
       return (data ?? []).map((p: any) => mapPlayer(p, "Cadastrou e não depositou"));
     }
     case "vip": {
-      let q = sb.from("players").select(PLAYER_COLS).eq("vip", true);
+      let q = db.from("players").select(PLAYER_COLS).eq("vip", true);
       if (filters.min_deposit) q = q.gte("total_depositado", filters.min_deposit);
       if (audIds) q = q.in("id", audIds);
       const { data, error } = await q.order("total_depositado", { ascending: false }).limit(limit);
@@ -528,7 +530,7 @@ async function fetchByIntent(sb: any, parsed: ParsedQuery) {
     case "risco_abandono": {
       const sinceIso = inactIso ?? iso7d;
       const { data, error } = await applyAudPlayers(
-        sb.from("players").select(PLAYER_COLS)
+        db.from("players").select(PLAYER_COLS)
           .gt("total_depositado", 0).lt("ultimo_login", sinceIso)
       ).order("total_depositado", { ascending: false }).limit(limit);
       if (error) throw new Error(`players: ${error.message}`);
@@ -536,9 +538,9 @@ async function fetchByIntent(sb: any, parsed: ParsedQuery) {
     }
     case "maiores_perdas_hoje": {
       const sinceIso = periodIso ?? isoToday;
-      const depQ = sb.from("deposits").select("player_id,valor")
+      const depQ = db.from("deposits").select("player_id,valor")
         .gte("created_at", sinceIso).eq("status", "aprovado").limit(5000);
-      const wdQ = sb.from("withdrawals").select("player_id,valor")
+      const wdQ = db.from("withdrawals").select("player_id,valor")
         .gte("created_at", sinceIso).limit(5000);
       if (SMALL) { depQ.in("player_id", audIds!); wdQ.in("player_id", audIds!); }
       const [dep, wd] = await Promise.all([
@@ -560,21 +562,21 @@ async function fetchByIntent(sb: any, parsed: ParsedQuery) {
       const ranked = [...m.entries()]
         .map(([id, v]) => ({ id, perda: v.dep - v.wd }))
         .sort((a, b) => b.perda - a.perda).slice(0, limit);
-      const pmap = await playersByIds(sb, ranked.map((r) => r.id));
+      const pmap = await playersByIds(db, ranked.map((r) => r.id));
       return ranked.filter((r) => pmap.has(r.id))
         .map((r) => mapPlayer(pmap.get(r.id), `Perdeu R$ ${r.perda.toFixed(2)} hoje`));
     }
     case "novos_cadastros_7d": {
       const sinceIso = periodIso ?? iso7d;
       const { data, error } = await applyAudPlayers(
-        sb.from("players").select(PLAYER_COLS).gte("created_at", sinceIso)
+        db.from("players").select(PLAYER_COLS).gte("created_at", sinceIso)
       ).order("created_at", { ascending: false }).limit(limit);
       if (error) throw new Error(`players: ${error.message}`);
       return (data ?? []).map((p: any) => mapPlayer(p, "Cadastrado nos últimos 7 dias"));
     }
     case "virando_vip": {
       const { data, error } = await applyAudPlayers(
-        sb.from("players").select(PLAYER_COLS)
+        db.from("players").select(PLAYER_COLS)
           .eq("vip", false).gte("total_depositado", 800).lt("total_depositado", 1000)
       ).order("total_depositado", { ascending: false }).limit(limit);
       if (error) throw new Error(`players: ${error.message}`);
@@ -583,7 +585,7 @@ async function fetchByIntent(sb: any, parsed: ParsedQuery) {
     case "vip_inativo": {
       const iso2d = inactIso ?? new Date(Date.now() - 2 * 86400000).toISOString();
       const { data, error } = await applyAudPlayers(
-        sb.from("players").select(PLAYER_COLS)
+        db.from("players").select(PLAYER_COLS)
           .eq("vip", true).lt("ultimo_jogo", iso2d)
       ).order("total_depositado", { ascending: false }).limit(limit);
       if (error) throw new Error(`players: ${error.message}`);
@@ -592,7 +594,7 @@ async function fetchByIntent(sb: any, parsed: ParsedQuery) {
     case "lead_quente": {
       const iso3d = new Date(Date.now() - 3 * 86400000).toISOString();
       const { data, error } = await applyAudPlayers(
-        sb.from("players").select(PLAYER_COLS)
+        db.from("players").select(PLAYER_COLS)
           .gte("ultimo_login", iso3d).gt("total_depositado", 0).lt("total_depositado", 1000)
       ).order("ultimo_deposito", { ascending: false }).limit(limit);
       if (error) throw new Error(`players: ${error.message}`);
@@ -601,7 +603,7 @@ async function fetchByIntent(sb: any, parsed: ParsedQuery) {
     case "lead_frio": {
       const iso15d = new Date(Date.now() - 15 * 86400000).toISOString();
       const { data, error } = await applyAudPlayers(
-        sb.from("players").select(PLAYER_COLS)
+        db.from("players").select(PLAYER_COLS)
           .lt("ultimo_login", iso15d).lt("total_depositado", 150)
       ).order("created_at", { ascending: false }).limit(limit);
       if (error) throw new Error(`players: ${error.message}`);
@@ -611,7 +613,7 @@ async function fetchByIntent(sb: any, parsed: ParsedQuery) {
     case "melhores_players": {
       const iso3d = new Date(Date.now() - 3 * 86400000).toISOString();
       const { data, error } = await applyAudPlayers(
-        sb.from("players").select(PLAYER_COLS)
+        db.from("players").select(PLAYER_COLS)
           .gte("ultimo_login", iso3d).gt("total_depositado", 100)
       ).order("total_depositado", { ascending: false }).limit(limit);
       if (error) throw new Error(`players: ${error.message}`);
@@ -620,7 +622,7 @@ async function fetchByIntent(sb: any, parsed: ParsedQuery) {
     }
     case "cresceu_semana": {
       const iso7 = periodIso ?? new Date(Date.now() - 7 * 86400000).toISOString();
-      let q2 = sb.from("deposits").select("player_id,valor,created_at")
+      let q2 = db.from("deposits").select("player_id,valor,created_at")
         .gte("created_at", iso7).eq("status", "aprovado").limit(5000);
       q2 = applyAudByPlayerId(q2);
       const { data, error } = await q2;
@@ -632,12 +634,12 @@ async function fetchByIntent(sb: any, parsed: ParsedQuery) {
         agg.set(d.player_id, (agg.get(d.player_id) ?? 0) + Number(d.valor ?? 0));
       }
       const ids = [...agg.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit).map(([id]) => id);
-      const pmap = await playersByIds(sb, ids);
+      const pmap = await playersByIds(db, ids);
       return ids.filter((id) => pmap.has(id)).map((id) =>
         mapPlayer(pmap.get(id), `Depositou ${(agg.get(id) ?? 0).toFixed(2)} nos últimos 7 dias`));
     }
     case "players_with_balance": {
-      let q = sb.from("players").select(PLAYER_COLS).gt("saldo_carteira", 0);
+      let q = db.from("players").select(PLAYER_COLS).gt("saldo_carteira", 0);
       if (filters.vip) q = q.eq("vip", true);
       if (audIds) q = q.in("id", audIds);
       const { data, error } = await q
@@ -648,7 +650,7 @@ async function fetchByIntent(sb: any, parsed: ParsedQuery) {
         mapPlayer(p, `Saldo atual ${brl(Number(p.saldo_carteira ?? 0))}`));
     }
     default: {
-      let q = sb.from("players").select(PLAYER_COLS);
+      let q = db.from("players").select(PLAYER_COLS);
       if (filters.vip) q = q.eq("vip", true);
       if (filters.never_deposited) q = q.is("ftd_em", null);
       if (filters.min_deposit) q = q.gte("total_depositado", filters.min_deposit);
@@ -773,9 +775,9 @@ function jaccard(a: string, b: string): number {
   return inter / (A.size + B.size - inter);
 }
 
-async function applySynonyms(sb: any, question: string): Promise<string> {
+async function applySynonyms(db: any, question: string): Promise<string> {
   try {
-    const { data } = await sb.from("ai_synonyms").select("termo,canonico,tipo").eq("ativo", true);
+    const { data } = await db.from("ai_synonyms").select("termo,canonico,tipo").eq("ativo", true);
     if (!data?.length) return question;
     let out = question;
     for (const s of data) {
@@ -792,9 +794,9 @@ async function applySynonyms(sb: any, question: string): Promise<string> {
   }
 }
 
-async function findTrainingMatches(sb: any, question: string) {
+async function findTrainingMatches(db: any, question: string) {
   try {
-    const { data } = await sb.from("ai_training_examples")
+    const { data } = await db.from("ai_training_examples")
       .select("id,pergunta,resposta_ideal,intent,filtros,fonte,tags")
       .eq("ativo", true).limit(200);
     if (!data?.length) return { override: null, similar: [] as any[] };
@@ -827,9 +829,10 @@ Deno.serve(async (req) => {
   const openaiKey = Deno.env.get("OPENAI_API_KEY");
   const sb = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
 
-  // Require authenticated admin user. The function uses the service role key,
-  // so we must validate the caller's JWT and role here to avoid exposing all
-  // player data publicly.
+  // Require an authenticated user. The function uses the service role key,
+  // so we must validate the caller's JWT here; the tenant and role check
+  // happens right after the body is read.
+  let userId = "";
   try {
     const authHeader = req.headers.get("Authorization") ?? "";
     const token = authHeader.replace(/^Bearer\s+/i, "");
@@ -844,15 +847,7 @@ Deno.serve(async (req) => {
         status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    const { data: isAdmin, error: roleErr } = await sb.rpc("has_role", {
-      _user_id: userData.user.id,
-      _role: "admin",
-    });
-    if (roleErr || !isAdmin) {
-      return new Response(JSON.stringify({ error: "Forbidden" }), {
-        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    userId = userData.user.id;
   } catch (e) {
     console.error("[auth] erro", e);
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
@@ -861,8 +856,9 @@ Deno.serve(async (req) => {
   }
 
   let question = "";
+  let body: any = null;
   try {
-    const body = await req.json();
+    body = await req.json();
     question = String(body?.question ?? body?.pergunta ?? "").trim();
   } catch (e) {
     console.error("[body] invalid JSON", e);
@@ -870,6 +866,31 @@ Deno.serve(async (req) => {
       status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
+
+  // Tenant ativo + papel NESSE tenant (admin/gestor, ou super admin). O antigo
+  // has_role(uid,'admin') aceitava admin de qualquer casa e devolvia dados de todas.
+  const { data: roleRows, error: roleErr } = await sb
+    .from("user_roles")
+    .select("role,tenant_id")
+    .eq("user_id", userId);
+  if (roleErr) {
+    console.error("[auth] roles", roleErr.message);
+    return new Response(JSON.stringify({ error: "Forbidden" }), {
+      status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+  const decision = resolveInsightsTenant(
+    roleRows ?? [],
+    requestedTenantFrom(body, req.headers.get("x-active-tenant")),
+  );
+  if (!decision.ok) {
+    return new Response(JSON.stringify({ error: decision.error }), {
+      status: decision.status, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+  const tenantId = decision.tenantId;
+  // Toda leitura passa por `db`, que aplica .eq("tenant_id", tenantId) em cada select.
+  const db = tenantScopedReader(sb, tenantId);
   if (!question) {
     return new Response(JSON.stringify({ error: "Pergunta vazia" }), {
       status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -879,9 +900,9 @@ Deno.serve(async (req) => {
   console.log("[ai] pergunta:", question);
 
   // 0) normalização via sinônimos + busca de exemplos de treino
-  const questionNorm = await applySynonyms(sb, question);
+  const questionNorm = await applySynonyms(db, question);
   if (questionNorm !== question) console.log("[ai] sinonimos aplicados:", questionNorm);
-  const training = await findTrainingMatches(sb, questionNorm);
+  const training = await findTrainingMatches(db, questionNorm);
   if (training.override) {
     console.log("[ai][override] exemplo match >=0.85:", training.override.id);
   }
@@ -892,13 +913,13 @@ Deno.serve(async (req) => {
   let parsed: ParsedQuery | null = null;
   try {
     const baseParsed = parseQuery(question);
-    const audience = await resolveAudience(sb, question);
+    const audience = await resolveAudience(db, question);
     parsed = { ...baseParsed, audience: audience ?? null };
     intent = parsed.intent;
     console.log("[ai] parsed:", JSON.stringify(parsed));
-    players = await fetchByIntent(sb, parsed);
+    players = await fetchByIntent(db, parsed);
     console.log(`[ai] players encontrados: ${players.length}`);
-    players = await enrichPlayers(sb, players);
+    players = await enrichPlayers(db, players);
     console.log("[ai] players enriquecidos com classificação/score/alertas");
     auditLog(question, intent, players);
     // pós-ordenação por score quando solicitado
@@ -908,7 +929,7 @@ Deno.serve(async (req) => {
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("[ai] erro supabase:", msg);
-    await sb.from("ai_logs").insert({ pergunta: question, resposta: msg, modelo: "n/a", status: "error" });
+    await sb.from("ai_logs").insert({ tenant_id: tenantId, pergunta: question, resposta: msg, modelo: "n/a", status: "error" });
     return new Response(JSON.stringify({
       answer: { summary: "Não consegui consultar os dados agora. Tente novamente em instantes.",
                 criterio: "", players: [], insights: [], metrics: [] },
@@ -927,7 +948,7 @@ Deno.serve(async (req) => {
       insights: fb.insights,
       metrics: fb.metrics,
     };
-    const ins = await sb.from("ai_logs").insert({
+    const ins = await sb.from("ai_logs").insert({ tenant_id: tenantId,
       pergunta: question, resposta: JSON.stringify(answer).slice(0, 4000),
       modelo: "override", status: "success",
       intent_detectada: intent, origem_resposta: "override",
@@ -943,7 +964,7 @@ Deno.serve(async (req) => {
   if (!openaiKey) {
     console.warn("[ai] OPENAI_API_KEY ausente, retornando fallback");
     const answer = buildFallback(question, players, parsed);
-    const ins = await sb.from("ai_logs").insert({
+    const ins = await sb.from("ai_logs").insert({ tenant_id: tenantId,
       pergunta: question, resposta: JSON.stringify(answer).slice(0, 4000),
       modelo: "fallback", status: "success",
       intent_detectada: intent, origem_resposta: "intent",
@@ -1006,7 +1027,7 @@ Deno.serve(async (req) => {
       const errText = await openaiRes.text();
       console.error("[ai] OpenAI status", openaiRes.status, errText.slice(0, 500));
       const answer = buildFallback(question, players, parsed);
-      await sb.from("ai_logs").insert({
+      await sb.from("ai_logs").insert({ tenant_id: tenantId,
         pergunta: question, resposta: `OpenAI ${openaiRes.status}: ${errText.slice(0, 1500)}`,
         modelo: "gpt-4o-mini", status: "error",
       });
@@ -1035,7 +1056,7 @@ Deno.serve(async (req) => {
     answer.insights = Array.isArray(answer.insights) ? answer.insights : [];
     answer.metrics = Array.isArray(answer.metrics) ? answer.metrics : [];
 
-    const ins = await sb.from("ai_logs").insert({
+    const ins = await sb.from("ai_logs").insert({ tenant_id: tenantId,
       pergunta: question, resposta: JSON.stringify(answer).slice(0, 4000),
       modelo: "gpt-4o-mini", status: "success",
       intent_detectada: intent, origem_resposta: "llm",
@@ -1050,7 +1071,7 @@ Deno.serve(async (req) => {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("[ai] exceção OpenAI:", msg);
     const answer = buildFallback(question, players, parsed);
-    await sb.from("ai_logs").insert({
+    await sb.from("ai_logs").insert({ tenant_id: tenantId,
       pergunta: question, resposta: msg, modelo: "gpt-4o-mini", status: "error",
     });
     return new Response(JSON.stringify({ answer, intent, fallback: true, warning: msg }), {
