@@ -19,6 +19,7 @@ import {
 import { getCrmResults, getCrmRetention } from "@/lib/crm-results.functions";
 import { getComparisonAccess } from "@/lib/tenant-comparison.functions";
 import { buildRecommendations } from "@/lib/crm-recommendations";
+import { crmResultsCsv } from "@/lib/crm-results-csv";
 import { PLAYER_STATE_LABELS, RECOVERABLE_STATES, type CrmSource } from "@/lib/crm-results";
 import { brl, num } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
@@ -80,6 +81,11 @@ export function CentralResults() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2" role="group" aria-label="Período">
+          {query.data && (
+            <Button size="sm" variant="outline" onClick={() => downloadCsv(query.data)}>
+              Exportar CSV
+            </Button>
+          )}
           {access.data?.allowed && (
             <Button size="sm" variant="outline" asChild>
               <Link to="/resultados/comparar">Comparar casas</Link>
@@ -118,6 +124,17 @@ export function CentralResults() {
 }
 
 type Data = Awaited<ReturnType<typeof getCrmResults>>;
+
+function downloadCsv(data: Data) {
+  const url = URL.createObjectURL(
+    new Blob([crmResultsCsv(data, data)], { type: "text/csv;charset=utf-8" }),
+  );
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `resultados-crm-${data.from}-a-${data.to}.csv`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
 
 function Results({ data }: { data: Data }) {
   const { totals } = data;
