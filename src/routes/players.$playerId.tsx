@@ -28,6 +28,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { brl, num, timeAgo } from "@/lib/format";
 import { getPlayerDetail, type PlayerDetail } from "@/lib/player-detail.functions";
 import { getPlayerLinkHistory } from "@/lib/shortio.functions";
+import { PlayerJourneysCard } from "@/components/players/player-journeys-card";
 
 export const Route = createFileRoute("/players/$playerId")({
   component: PlayerDetailPage,
@@ -167,6 +168,8 @@ function PlayerDetailPage() {
           valueClass={data.metrics.lucro >= 0 ? "text-emerald-400" : "text-rose-400"}
         />
       </section>
+
+      <PlayerJourneysCard playerId={playerId} />
 
       <Card className="border-border/50 bg-card/70">
         <CardContent className="p-5">
