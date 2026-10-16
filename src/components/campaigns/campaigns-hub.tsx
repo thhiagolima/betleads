@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { ChannelCampaignComposer } from "@/components/campaigns/channel-campaign-composer";
 import { ChannelObservabilityPanel } from "@/components/campaigns/channel-observability-panel";
 import { IndividualSmsDialog } from "@/components/campaigns/individual-sms-dialog";
+import { requestConfirmation } from "@/components/system-dialog-host";
 import { MetricCard } from "@/components/ui-premium/metric-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -285,9 +286,17 @@ export function CampaignsHub() {
                   <Button
                     size="icon"
                     variant="ghost"
-                    aria-label="Excluir rascunho"
+                    aria-label={`Excluir rascunho ${draft.name || "sem nome"}`}
                     disabled={removeDraft.isPending}
-                    onClick={() => removeDraft.mutate(draft.id)}
+                    onClick={async () => {
+                      const confirmed = await requestConfirmation({
+                        title: "Excluir rascunho?",
+                        description: `O rascunho "${draft.name || "Campanha sem nome"}" será apagado e não poderá ser recuperado.`,
+                        confirmLabel: "Excluir rascunho",
+                        destructive: true,
+                      });
+                      if (confirmed) removeDraft.mutate(draft.id);
+                    }}
                   >
                     <Trash2 className="size-4" />
                   </Button>
@@ -454,9 +463,18 @@ export function CampaignsHub() {
                       size="sm"
                       variant="ghost"
                       disabled={cancel.isPending}
-                      onClick={() => cancel.mutate(campaign.id)}
+                      onClick={async () => {
+                        const confirmed = await requestConfirmation({
+                          title: "Cancelar o envio desta campanha?",
+                          description: `Os envios ainda não feitos de "${campaign.name}" serão cancelados e a campanha não poderá ser retomada. O que já foi enviado não é desfeito.`,
+                          confirmLabel: "Cancelar envio",
+                          cancelLabel: "Manter campanha",
+                          destructive: true,
+                        });
+                        if (confirmed) cancel.mutate(campaign.id);
+                      }}
                     >
-                      Cancelar
+                      Cancelar envio
                     </Button>
                   ) : (
                     <Button size="sm" variant="ghost" asChild>

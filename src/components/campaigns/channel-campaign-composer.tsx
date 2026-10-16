@@ -73,6 +73,13 @@ import { listSmsTemplates } from "@/lib/sms-templates.functions";
 import { previewSmsCampaignRecipients, scheduleBulkSms, sendBulkSms } from "@/lib/sms.functions";
 import { estimateSms } from "@/lib/link-tracking-preview";
 import { UNRESOLVED_REASONS, type UnresolvedReason } from "@/lib/campaign-recipients";
+import { requestConfirmation, requestTextInput } from "@/components/system-dialog-host";
+import {
+  campaignRiskSignature,
+  campaignSendLabel,
+  requiresTypedConfirmation,
+  typedCountMatches,
+} from "./campaign-send-confirmation";
 
 type Channel = "sms" | "email" | "voice";
 type AudienceOption = { id: string; name: string; criteria: SmsAudienceCriteria; system?: boolean };
@@ -373,6 +380,26 @@ export function ChannelCampaignComposer({
     !riskConfirmed ? "Confirme a revisão de risco antes de enviar." : null,
   ].filter((issue): issue is string => Boolean(issue));
 
+  // UX-03: a revisão de risco vale só para o que foi revisado. Qualquer mudança
+  // de canal, público, quantidade, custo, conteúdo ou horário exige marcar de novo.
+  const riskSignature = campaignRiskSignature({
+    channel,
+    audienceId,
+    recipients,
+    sendableRecipients,
+    cost,
+    smsContent,
+    smsTemplateId,
+    emailTemplateId,
+    voiceMode,
+    voiceSourceId,
+    when,
+    scheduledAt,
+  });
+  useEffect(() => {
+    setRiskConfirmed(false);
+  }, [riskSignature]);
+
   const draftPayload = useMemo<CampaignDraftPayload>(
     () => ({
       channel,
@@ -602,18 +629,49 @@ export function ChannelCampaignComposer({
     onError: (error: Error) => toast.error(tenantSafeChannelError(error)),
   });
 
+  // O X, o clique fora e o botão Cancelar passam pela mesma verificação.
+  const requestClose = async () => {
+    if (draftState === "dirty" || draftState === "saving") {
+      const leave = await requestConfirmation({
+        title: "Fechar o composer?",
+        description:
+          "Ainda há alterações sendo salvas. Se fechar agora, as últimas mudanças podem não entrar no rascunho.",
+        confirmLabel: "Fechar mesmo assim",
+        cancelLabel: "Continuar editando",
+        destructive: true,
+      });
+      if (!leave) return;
+    }
+    onOpenChange(false);
+  };
+
+  const confirmAndSubmit = async () => {
+    setSubmitAttempted(true);
+    if (validationIssues.length === 0 && requiresTypedConfirmation(sendableRecipients)) {
+      const count = sendableRecipients;
+      const typed = await requestTextInput({
+        title: when === "schedule" ? "Confirmar agendamento em massa" : "Confirmar envio em massa",
+        description: `${campaignSendLabel({ channel, when, recipients: count, cost })}. Para confirmar, digite a quantidade de destinatários. Depois de iniciado, o envio não pode ser desfeito.`,
+        label: `Digite ${num(count)} para confirmar`,
+        placeholder: num(count),
+        confirmLabel: when === "schedule" ? "Agendar" : "Enviar",
+      });
+      if (typed === null) return;
+      if (!typedCountMatches(typed, count)) {
+        toast.error("O número digitado não confere. Nada foi enviado.");
+        return;
+      }
+    }
+    submit.mutate();
+  };
+
   const MetaIcon = channelMeta[channel].icon;
   return (
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        if (!next && (draftState === "dirty" || draftState === "saving")) {
-          const leave = window.confirm(
-            "Ainda há alterações sendo salvas. Deseja fechar e continuar depois pelo rascunho?",
-          );
-          if (!leave) return;
-        }
-        onOpenChange(next);
+        if (!next) void requestClose();
+        else onOpenChange(next);
       }}
     >
       <DialogContent className="max-h-[94vh] w-[calc(100vw-1rem)] max-w-3xl overflow-y-auto sm:w-full">
@@ -653,7 +711,6 @@ export function ChannelCampaignComposer({
                         setAudienceCriteria(selected.criteria);
                         audienceMutation.mutate({ criteria: selected.criteria, channel: item });
                       }
-                      setRiskConfirmed(false);
                     }}
                   >
                     <Icon className="mr-2 size-4" />
@@ -1067,7 +1124,7 @@ export function ChannelCampaignComposer({
           </Card>
         </div>
         <DialogFooter className="flex-col-reverse gap-2 sm:flex-row">
-          <Button className="w-full sm:w-auto" variant="ghost" onClick={() => onOpenChange(false)}>
+          <Button className="w-full sm:w-auto" variant="ghost" onClick={() => void requestClose()}>
             Cancelar
           </Button>
           <Button
@@ -1079,17 +1136,12 @@ export function ChannelCampaignComposer({
               draftState === "saving" ||
               draftState === "error"
             }
-            onClick={() => {
-              setSubmitAttempted(true);
-              submit.mutate();
-            }}
+            onClick={() => void confirmAndSubmit()}
             aria-describedby={validationIssues.length ? fieldIds.validation : undefined}
           >
             {submit.isPending
               ? "Processando..."
-              : when === "schedule"
-                ? "Confirmar agendamento"
-                : "Confirmar e enviar"}
+              : campaignSendLabel({ channel, when, recipients: sendableRecipients, cost })}
           </Button>
         </DialogFooter>
       </DialogContent>

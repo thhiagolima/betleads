@@ -65,6 +65,7 @@ import {
   adminSetTenantSmsPricing,
 } from "@/lib/sms-credits.functions";
 import { brl, num } from "@/lib/format";
+import { requestConfirmation } from "@/components/system-dialog-host";
 import { MetricCard as DashboardMetricCard } from "@/components/ui-premium/metric-card";
 
 export const Route = createFileRoute("/tenants")({
@@ -721,8 +722,23 @@ function RemoveUserButton({ tenantId, user }: { tenantId: string; user: TenantUs
     onError: (error: Error) => toast.error(error.message),
   });
 
+  const label = user.email ?? "este usuário";
   return (
-    <Button size="sm" variant="ghost" disabled={mut.isPending} onClick={() => mut.mutate()}>
+    <Button
+      size="sm"
+      variant="ghost"
+      disabled={mut.isPending}
+      aria-label={`Remover ${label} da conta`}
+      onClick={async () => {
+        const confirmed = await requestConfirmation({
+          title: "Remover usuário da conta?",
+          description: `${label} perde o acesso a esta conta imediatamente. O login continua existindo e a pessoa pode ser convidada de novo depois.`,
+          confirmLabel: "Remover usuário",
+          destructive: true,
+        });
+        if (confirmed) mut.mutate();
+      }}
+    >
       <Trash2 className="h-4 w-4 text-destructive" />
     </Button>
   );

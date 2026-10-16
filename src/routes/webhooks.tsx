@@ -38,6 +38,7 @@ import {
   setMyWebhookHmacEnforcement,
 } from "@/lib/webhooks.functions";
 import { cn } from "@/lib/utils";
+import { requestConfirmation } from "@/components/system-dialog-host";
 
 export const Route = createFileRoute("/webhooks")({
   component: WebhooksPage,
@@ -133,6 +134,36 @@ function WebhooksPage() {
     onError: (error: Error) => toast.error(error.message),
   });
 
+  // UX-02: as duas ações mudam o que a casa precisa enviar; uma chave errada
+  // ou ausente faz depósitos e cadastros pararem de entrar.
+  async function confirmRotate() {
+    if (tokenInfo?.hmacConfigured) {
+      const confirmed = await requestConfirmation({
+        title: "Rotacionar a chave HMAC?",
+        description: `A chave atual deixa de valer imediatamente e uma nova é gerada; ela aparece uma única vez, então copie-a. ${
+          tokenInfo.hmacEnforced
+            ? "A exigência de assinatura será desativada até você ativá-la de novo, e os webhooks passam a entrar sem verificação nesse intervalo. "
+            : ""
+        }Atualize a nova chave na plataforma da casa antes de exigir assinatura.`,
+        confirmLabel: "Rotacionar chave",
+        destructive: true,
+      });
+      if (!confirmed) return;
+    }
+    provision.mutate();
+  }
+
+  async function confirmEnforce() {
+    const confirmed = await requestConfirmation({
+      title: "Exigir assinatura HMAC?",
+      description:
+        "A partir de agora, todo webhook sem assinatura válida (cabeçalho x-webhook-signature) será rejeitado. Se a casa ainda não assina os envios com a chave atual, depósitos, cadastros e os demais eventos deixam de ser registrados até ela configurar a chave. Confirme com a casa antes de ativar.",
+      confirmLabel: "Exigir assinatura",
+      destructive: true,
+    });
+    if (confirmed) enforceHmac.mutate(true);
+  }
+
   function copy(text: string) {
     navigator.clipboard.writeText(text);
     setCopiedUrl(text);
@@ -202,7 +233,7 @@ function WebhooksPage() {
           <span className="text-muted-foreground">
             {tokenInfo?.hmacConfigured ? "Chave provisionada." : "Nenhuma chave provisionada."}
           </span>
-          <Button size="sm" variant="outline" disabled={provision.isPending} onClick={() => provision.mutate()}>
+          <Button size="sm" variant="outline" disabled={provision.isPending} onClick={() => void confirmRotate()}>
             {provision.isPending ? "Gerando..." : tokenInfo?.hmacConfigured ? "Rotacionar chave" : "Gerar chave"}
           </Button>
           {tokenInfo?.hmacEnforced ? (
@@ -210,7 +241,7 @@ function WebhooksPage() {
               Permitir transição
             </Button>
           ) : (
-            <Button size="sm" disabled={!tokenInfo?.hmacConfigured || enforceHmac.isPending} onClick={() => enforceHmac.mutate(true)}>
+            <Button size="sm" disabled={!tokenInfo?.hmacConfigured || enforceHmac.isPending} onClick={() => void confirmEnforce()}>
               Exigir assinatura
             </Button>
           )}
