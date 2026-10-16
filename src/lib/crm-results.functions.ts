@@ -11,6 +11,8 @@ const ACCEPTED_SMS = ["sent", "delivered", "enviado", "entregue"];
 
 const inputSchema = z.object({
   days: z.number().int().min(1).max(180).default(30),
+  // Days between today and the last day of the period: 1 = ends yesterday.
+  endOffset: z.number().int().min(0).max(1).default(0),
 });
 
 /** BRT calendar date (YYYY-MM-DD) `offset` days before today. */
@@ -18,6 +20,22 @@ function brtDate(offset = 0) {
   return new Date(Date.now() - offset * 86_400_000).toLocaleDateString("en-CA", {
     timeZone: "America/Sao_Paulo",
   });
+}
+
+/**
+ * BRT days of the period: `days` days ending `endOffset` days before today.
+ * The instants cover whole days, never past now.
+ */
+function periodBounds(days: number, endOffset: number) {
+  const from = brtDate(endOffset + days - 1);
+  const to = brtDate(endOffset);
+  const dayAfter = new Date(new Date(`${to}T00:00:00-03:00`).getTime() + 86_400_000);
+  return {
+    from,
+    to,
+    fromInstant: new Date(`${from}T00:00:00-03:00`).toISOString(),
+    toInstant: new Date(Math.min(Date.now(), dayAfter.getTime() - 1)).toISOString(),
+  };
 }
 
 /**
@@ -30,8 +48,7 @@ export const getCrmResults = createServerFn({ method: "GET" })
   .handler(async ({ data, context }) => {
     const tenantId = await resolveOperationalTenantId(context.supabase);
     const db = context.supabase as any;
-    const from = brtDate(data.days - 1);
-    const to = brtDate(0);
+    const { from, to, fromInstant, toInstant } = periodBounds(data.days, data.endOffset);
 
     // PostgREST caps every response at 1,000 rows: page explicitly.
     const rows: CrmResultRow[] = [];
@@ -74,7 +91,6 @@ export const getCrmResults = createServerFn({ method: "GET" })
     }
 
     // Data health: freshness and a reconciliation of sends with the raw log.
-    const fromInstant = new Date(`${from}T00:00:00-03:00`).toISOString();
     const [{ data: latest }, { count: rawSent }, { data: checks }] = await Promise.all([
       db
         .from("crm_results_daily")
@@ -88,7 +104,8 @@ export const getCrmResults = createServerFn({ method: "GET" })
         .select("id", { count: "exact", head: true })
         .eq("tenant_id", tenantId)
         .in("status", ACCEPTED_SMS)
-        .gte("created_at", fromInstant),
+        .gte("created_at", fromInstant)
+        .lte("created_at", toInstant),
       db
         .from("crm_results_health")
         .select("metric_date,check_name,expected,actual,ok,checked_at")
@@ -102,7 +119,7 @@ export const getCrmResults = createServerFn({ method: "GET" })
     const { data: holdoutRows } = await db.rpc("journey_holdout_results", {
       _tenant: tenantId,
       _from: fromInstant,
-      _to: new Date().toISOString(),
+      _to: toInstant,
       _window_days: 7,
     });
     const groups = new Map<
@@ -140,13 +157,69 @@ export const getCrmResults = createServerFn({ method: "GET" })
       ...compareHoldout(entry.treated, entry.control),
     }));
 
+    // Journeys with a control group and how far each test is: entries so far in
+    // each group, and when the first 7-day window closes.
+    const { data: holdoutJourneys } = await db
+      .from("journeys")
+      .select("id,name,status,holdout_percent")
+      .eq("tenant_id", tenantId)
+      .gt("holdout_percent", 0)
+      .order("name");
+    const holdoutSetup = await Promise.all(
+      (
+        (holdoutJourneys ?? []) as Array<{
+          id: string;
+          name: string;
+          status: string;
+          holdout_percent: number;
+        }>
+      ).map(async (journey) => {
+        const count = (isHoldout: boolean) =>
+          db
+            .from("journey_enrollments")
+            .select("id", { count: "exact", head: true })
+            .eq("tenant_id", tenantId)
+            .eq("journey_id", journey.id)
+            .eq("is_holdout", isHoldout)
+            .gte("entered_at", fromInstant)
+            .lte("entered_at", toInstant);
+        const [{ count: control }, { count: treated }, { data: first }] = await Promise.all([
+          count(true),
+          count(false),
+          db
+            .from("journey_enrollments")
+            .select("entered_at")
+            .eq("tenant_id", tenantId)
+            .eq("journey_id", journey.id)
+            .eq("is_holdout", true)
+            .order("entered_at")
+            .limit(1)
+            .maybeSingle(),
+        ]);
+        const firstEntry = (first as { entered_at?: string } | null)?.entered_at ?? null;
+        return {
+          journeyId: journey.id,
+          name: journey.name,
+          status: journey.status,
+          percent: Number(journey.holdout_percent),
+          control: control ?? 0,
+          treated: treated ?? 0,
+          firstResultAt: firstEntry
+            ? new Date(new Date(firstEntry).getTime() + 7 * 86_400_000).toISOString()
+            : null,
+        };
+      }),
+    );
+
     const result = aggregateCrmResults(rows, names);
     return {
       from,
       to,
       days: data.days,
+      endOffset: data.endOffset,
       ...result,
       holdout,
+      holdoutSetup,
       health: {
         updatedAt: (latest as { updated_at?: string } | null)?.updated_at ?? null,
         tableSent: result.totals.sent,
@@ -173,14 +246,13 @@ export const getCrmRetention = createServerFn({ method: "GET" })
   .handler(async ({ data, context }) => {
     const tenantId = await resolveOperationalTenantId(context.supabase);
     const db = context.supabase as any;
-    const from = brtDate(data.days - 1);
-    const fromInstant = new Date(`${from}T00:00:00-03:00`).toISOString();
+    const { from, to, fromInstant, toInstant } = periodBounds(data.days, data.endOffset);
     const [cohorts, funnel, lifecycle, lifecycleDaily] = await Promise.all([
       db.rpc("crm_retention_cohorts", { _tenant: tenantId, _weeks: 12 }),
       db.rpc("crm_acquisition_funnel", {
         _tenant: tenantId,
         _from: fromInstant,
-        _to: new Date().toISOString(),
+        _to: toInstant,
       }),
       db.rpc("crm_lifecycle_snapshot", { _tenant: tenantId }),
       db
@@ -188,6 +260,7 @@ export const getCrmRetention = createServerFn({ method: "GET" })
         .select("metric_date,state,players")
         .eq("tenant_id", tenantId)
         .gte("metric_date", from)
+        .lte("metric_date", to)
         .order("metric_date")
         .limit(1000),
     ]);

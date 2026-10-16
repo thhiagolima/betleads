@@ -20,7 +20,14 @@ import { getCrmResults, getCrmRetention } from "@/lib/crm-results.functions";
 import { getComparisonAccess } from "@/lib/tenant-comparison.functions";
 import { buildRecommendations } from "@/lib/crm-recommendations";
 import { crmResultsCsv } from "@/lib/crm-results-csv";
-import { PLAYER_STATE_LABELS, RECOVERABLE_STATES, type CrmSource } from "@/lib/crm-results";
+import {
+  PLAYER_STATE_LABELS,
+  RECOVERABLE_STATES,
+  HOLDOUT_MIN_PLAYERS,
+  HOLDOUT_MIN_RETURNS,
+  type CrmMetricsWithRatios,
+  type CrmSource,
+} from "@/lib/crm-results";
 import { brl, num } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,7 +43,14 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-const PERIODS = [7, 30, 90] as const;
+const PERIODS = [
+  { key: "today", label: "Hoje", days: 1, endOffset: 0 },
+  { key: "yesterday", label: "Ontem", days: 1, endOffset: 1 },
+  { key: "7", label: "7 dias", days: 7, endOffset: 0 },
+  { key: "30", label: "30 dias", days: 30, endOffset: 0 },
+  { key: "90", label: "90 dias", days: 90, endOffset: 0 },
+] as const;
+type Period = (typeof PERIODS)[number];
 
 const pct = (value: number | null) =>
   value == null
@@ -55,11 +69,11 @@ const STEP_LABEL = (position: number) => (position < 0 ? "Sem etapa" : `Etapa ${
 const isWaste = (source: CrmSource) => source.cost >= 50 && source.influencedPlayers === 0;
 
 export function CentralResults() {
-  const [days, setDays] = useState<(typeof PERIODS)[number]>(30);
+  const [period, setPeriod] = useState<Period>(PERIODS[3]);
   const load = useServerFn(getCrmResults);
   const query = useQuery({
-    queryKey: ["crm-results", days],
-    queryFn: () => load({ data: { days } }),
+    queryKey: ["crm-results", period.key],
+    queryFn: () => load({ data: { days: period.days, endOffset: period.endOffset } }),
     staleTime: 60_000,
   });
   const loadAccess = useServerFn(getComparisonAccess);
@@ -77,7 +91,11 @@ export function CentralResults() {
           <p className="text-sm text-muted-foreground">
             Onde jornadas e campanhas recuperam jogadores, e quanto custa cada recuperação.
             {query.data &&
-              ` ${dayLabel(query.data.from)} a ${dayLabel(query.data.to)} · horário de Brasília`}
+              ` ${
+                query.data.from === query.data.to
+                  ? dayLabel(query.data.from)
+                  : `${dayLabel(query.data.from)} a ${dayLabel(query.data.to)}`
+              } · horário de Brasília`}
           </p>
         </div>
         <div className="flex flex-wrap gap-2" role="group" aria-label="Período">
@@ -93,12 +111,12 @@ export function CentralResults() {
           )}
           {PERIODS.map((value) => (
             <Button
-              key={value}
+              key={value.key}
               size="sm"
-              variant={days === value ? "default" : "outline"}
-              onClick={() => setDays(value)}
+              variant={period.key === value.key ? "default" : "outline"}
+              onClick={() => setPeriod(value)}
             >
-              {value} dias
+              {value.label}
             </Button>
           ))}
         </div>
@@ -176,10 +194,10 @@ function Results({ data }: { data: Data }) {
         <Holdout data={data} />
       </TabsContent>
       <TabsContent value="retention">
-        <Retention days={data.days} />
+        <Retention days={data.days} endOffset={data.endOffset} />
       </TabsContent>
       <TabsContent value="acquisition">
-        <Acquisition days={data.days} />
+        <Acquisition days={data.days} endOffset={data.endOffset} />
       </TabsContent>
       <TabsContent value="health">
         <Health data={data} />
@@ -188,12 +206,28 @@ function Results({ data }: { data: Data }) {
   );
 }
 
-function Kpi({ label, value, detail }: { label: string; value: string; detail?: string }) {
+function Kpi({
+  label,
+  value,
+  detail,
+  highlight = false,
+}: {
+  label: string;
+  value: string;
+  detail?: string;
+  highlight?: boolean;
+}) {
   return (
-    <Card>
+    <Card className={highlight ? "border-emerald-500/40 bg-emerald-500/[0.06]" : undefined}>
       <CardContent className="space-y-1 p-4">
         <p className="text-sm text-muted-foreground">{label}</p>
-        <p className="text-2xl font-semibold tabular-nums">{value}</p>
+        <p
+          className={`text-2xl font-semibold tabular-nums ${
+            highlight ? "text-emerald-600 dark:text-emerald-400" : ""
+          }`}
+        >
+          {value}
+        </p>
         {detail && <p className="text-xs text-muted-foreground">{detail}</p>}
       </CardContent>
     </Card>
@@ -209,32 +243,69 @@ function Overview({ data }: { data: Data }) {
   const waste = sources.filter(isWaste);
   const wasteCost = waste.reduce((sum, source) => sum + source.cost, 0);
   const activeShare = totals.cost > 0 ? totals.costOnActive / totals.cost : null;
+  const clickRoi = totals.cost > 0 ? totals.directRevenue / totals.cost : null;
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <Kpi
-          label="Recuperado (influenciado)"
-          value={brl(totals.influencedRevenue)}
-          detail={`${num(totals.influencedPlayers)} retorno(s) de jogadores parados`}
-        />
-        <Kpi
-          label="Recuperado (clique no link)"
-          value={brl(totals.directRevenue)}
-          detail={`${num(totals.directConversions)} depósito(s) após clique`}
-        />
-        <Kpi
-          label="Custo em SMS"
-          value={brl(totals.cost)}
-          detail={`${num(totals.sent)} mensagens cobradas`}
-        />
-        <Kpi
-          label="Custo por recuperado"
-          value={money(totals.costPerRecovered)}
-          detail="custo ÷ retornos influenciados"
-        />
-        <Kpi label="Retorno" value={ratio(totals.roi)} detail="recuperado ÷ custo" />
-      </div>
+      <section aria-labelledby="recovery-title" className="space-y-3">
+        <div>
+          <h2 id="recovery-title" className="text-base font-semibold">
+            Recuperação
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Jogadores parados há 2+ dias que voltaram a depositar até 3 dias depois de um SMS.
+          </p>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <Kpi
+            highlight
+            label="Valor recuperado"
+            value={brl(totals.influencedRevenue)}
+            detail={`${num(totals.influencedPlayers)} jogador(es) recuperado(s)`}
+          />
+          <Kpi
+            label="Custo em SMS"
+            value={brl(totals.cost)}
+            detail={`${num(totals.sent)} mensagens cobradas`}
+          />
+          <Kpi
+            label="Custo por recuperado"
+            value={money(totals.costPerRecovered)}
+            detail="custo ÷ jogadores recuperados"
+          />
+          <Kpi
+            label="Retorno"
+            value={ratio(totals.roi)}
+            detail={`valor recuperado ÷ custo · ${ratio(clickRoi)} contando só cliques`}
+          />
+        </div>
+      </section>
+
+      <Card className="bg-muted/20">
+        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="space-y-0.5">
+            <p className="text-sm font-medium">Confirmados por clique</p>
+            <p className="text-xs text-muted-foreground">
+              Clicaram no link e depositaram em até 7 dias. É a prova mais rígida, mas deixa de fora
+              quem leu o SMS e abriu o app direto. Boa parte já está nos recuperados: não some.
+            </p>
+          </div>
+          <div className="flex shrink-0 gap-6 tabular-nums">
+            <div>
+              <p className="text-lg font-semibold">{num(totals.directConversions)}</p>
+              <p className="text-xs text-muted-foreground">depósitos</p>
+            </div>
+            <div>
+              <p className="text-lg font-semibold">{brl(totals.directRevenue)}</p>
+              <p className="text-xs text-muted-foreground">valor</p>
+            </div>
+            <div>
+              <p className="text-lg font-semibold">{num(totals.humanClicks)}</p>
+              <p className="text-xs text-muted-foreground">cliques</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <RecoveryNote />
 
@@ -263,8 +334,8 @@ function Overview({ data }: { data: Data }) {
                     name === "cost"
                       ? "Custo"
                       : name === "influencedRevenue"
-                        ? "Recuperado (influenciado)"
-                        : "Recuperado (clique)",
+                        ? "Recuperado"
+                        : "Confirmado por clique",
                   ]}
                 />
                 <Legend
@@ -272,8 +343,8 @@ function Overview({ data }: { data: Data }) {
                     name === "cost"
                       ? "Custo"
                       : name === "influencedRevenue"
-                        ? "Recuperado (influenciado)"
-                        : "Recuperado (clique)"
+                        ? "Recuperado"
+                        : "Confirmado por clique"
                   }
                 />
                 <Bar dataKey="cost" fill="oklch(0.75 0.15 75)" radius={[4, 4, 0, 0]} />
@@ -390,6 +461,7 @@ function SourceName({ source }: { source: CrmSource }) {
 
 function Sources({ sources }: { sources: CrmSource[] }) {
   const [open, setOpen] = useState<string | null>(null);
+  const maxRecovered = Math.max(0, ...sources.map((source) => source.influencedRevenue));
   return (
     <Card>
       <CardHeader>
@@ -406,11 +478,10 @@ function Sources({ sources }: { sources: CrmSource[] }) {
               <TableHead>Origem</TableHead>
               <TableHead className="text-right">Envios</TableHead>
               <TableHead className="text-right">Custo</TableHead>
-              <TableHead className="text-right">Cliques</TableHead>
-              <TableHead className="text-right">Clique → depósito</TableHead>
-              <TableHead className="text-right">Recuperados</TableHead>
+              <TableHead className="min-w-40">Recuperados</TableHead>
               <TableHead className="text-right">Custo / recuperado</TableHead>
               <TableHead className="text-right">Retorno</TableHead>
+              <TableHead className="text-right">Confirmados por clique</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -442,21 +513,7 @@ function Sources({ sources }: { sources: CrmSource[] }) {
                     <TableCell>
                       <SourceName source={source} />
                     </TableCell>
-                    <TableCell className="text-right tabular-nums">{num(source.sent)}</TableCell>
-                    <TableCell className="text-right tabular-nums">{brl(source.cost)}</TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {num(source.humanClicks)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {num(source.directConversions)} · {brl(source.directRevenue)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {num(source.influencedPlayers)} · {brl(source.influencedRevenue)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {money(source.costPerRecovered)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">{ratio(source.roi)}</TableCell>
+                    <MetricCells metrics={source} maxRecovered={maxRecovered} />
                   </TableRow>
                   {expanded &&
                     source.steps.map((step) => (
@@ -465,21 +522,7 @@ function Sources({ sources }: { sources: CrmSource[] }) {
                         <TableCell className="pl-6 text-muted-foreground">
                           {STEP_LABEL(step.position)}
                         </TableCell>
-                        <TableCell className="text-right tabular-nums">{num(step.sent)}</TableCell>
-                        <TableCell className="text-right tabular-nums">{brl(step.cost)}</TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {num(step.humanClicks)}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {num(step.directConversions)} · {brl(step.directRevenue)}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {num(step.influencedPlayers)} · {brl(step.influencedRevenue)}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {money(step.costPerRecovered)}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">{ratio(step.roi)}</TableCell>
+                        <MetricCells metrics={step} maxRecovered={maxRecovered} compact />
                       </TableRow>
                     ))}
                 </Fragment>
@@ -495,40 +538,122 @@ function Sources({ sources }: { sources: CrmSource[] }) {
   );
 }
 
-/** How to read "recuperado": shown wherever the number appears. */
+/** Return multiple coloured by whether it pays back: green ≥ 1x, red below. */
+function RoiValue({ roi, cost }: { roi: number | null; cost: number }) {
+  if (roi == null || (roi === 0 && cost > 0)) {
+    return <span className="text-muted-foreground">—</span>;
+  }
+  return (
+    <span
+      className={`font-medium ${
+        roi >= 1 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"
+      }`}
+    >
+      {ratio(roi)}
+    </span>
+  );
+}
+
+function MetricCells({
+  metrics,
+  maxRecovered,
+  compact = false,
+}: {
+  metrics: CrmMetricsWithRatios;
+  maxRecovered: number;
+  compact?: boolean;
+}) {
+  const share = maxRecovered > 0 ? metrics.influencedRevenue / maxRecovered : 0;
+  const none = metrics.influencedPlayers === 0;
+  return (
+    <>
+      <TableCell className="text-right tabular-nums">{num(metrics.sent)}</TableCell>
+      <TableCell className="text-right tabular-nums">{brl(metrics.cost)}</TableCell>
+      <TableCell className="tabular-nums">
+        {none ? (
+          <span className="text-muted-foreground">nenhum</span>
+        ) : (
+          <div className="space-y-1">
+            <div className="flex items-baseline justify-between gap-3">
+              <span className={compact ? "font-medium" : "font-semibold"}>
+                {num(metrics.influencedPlayers)}
+              </span>
+              <span className="text-muted-foreground">{brl(metrics.influencedRevenue)}</span>
+            </div>
+            <div className="h-1 rounded-full bg-muted" aria-hidden="true">
+              <div
+                className="h-1 rounded-full bg-emerald-500/70"
+                style={{ width: `${Math.max(2, share * 100)}%` }}
+              />
+            </div>
+          </div>
+        )}
+      </TableCell>
+      <TableCell className="text-right tabular-nums">
+        {metrics.costPerRecovered == null ? (
+          <span className="text-muted-foreground">—</span>
+        ) : (
+          money(metrics.costPerRecovered)
+        )}
+      </TableCell>
+      <TableCell className="text-right tabular-nums">
+        <RoiValue roi={metrics.roi} cost={metrics.cost} />
+      </TableCell>
+      <TableCell className="text-right tabular-nums">
+        {metrics.directConversions > 0 ? (
+          <>
+            {num(metrics.directConversions)} · {brl(metrics.directRevenue)}
+          </>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        )}
+        <div className="text-xs text-muted-foreground">{num(metrics.humanClicks)} clique(s)</div>
+      </TableCell>
+    </>
+  );
+}
+
+/** How to read "recuperado": shown wherever the number appears, folded by default. */
 function RecoveryNote() {
   return (
-    <div className="flex items-start gap-2 text-xs text-muted-foreground">
-      <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-      <div className="space-y-1">
-        <p className="font-medium text-foreground">Como ler os números</p>
-        <ul className="list-disc space-y-1 pl-4">
-          <li>
-            <strong>Recuperados</strong>: jogador parado há 2+ dias (ou sem 1º depósito) que
-            depositou até 3 dias depois de um SMS. O crédito vai só para o último SMS antes do
-            depósito, então nenhuma origem divide ou repete o mesmo retorno.
-          </li>
-          <li>
-            O valor é só o <strong>depósito de retorno</strong>, não tudo o que o jogador depositou
-            depois.
-          </li>
-          <li>
-            Conta <strong>retornos, não pessoas</strong>: quem parou e voltou duas vezes no período
-            conta duas.
-          </li>
-          <li>
-            <strong>Clique → depósito</strong> é outra medida, mais rígida: clicou no link e
-            depositou em até 7 dias. Boa parte desses já está nos recuperados, por isso as colunas
-            não se somam.
-          </li>
-          <li>
-            Voltar depois do SMS não prova que voltou <strong>por causa</strong> do SMS; parte
-            voltaria de qualquer jeito. O efeito real aparece na aba “Teste de controle”, que
-            compara com quem não recebeu nada.
-          </li>
-        </ul>
-      </div>
-    </div>
+    <details className="group text-xs text-muted-foreground">
+      <summary className="flex cursor-pointer list-none items-center gap-2 font-medium text-foreground [&::-webkit-details-marker]:hidden">
+        <Info className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        Como ler os números
+        <ChevronRight
+          className="h-3.5 w-3.5 transition-transform group-open:rotate-90"
+          aria-hidden="true"
+        />
+      </summary>
+      <ul className="mt-2 list-disc space-y-1 pl-9">
+        <li>
+          <strong>Recuperados</strong>: jogador parado há 2+ dias (ou sem 1º depósito) que depositou
+          até 3 dias depois de um SMS. O crédito vai só para o último SMS antes do depósito, então
+          nenhuma origem divide ou repete o mesmo retorno.
+        </li>
+        <li>
+          O valor é só o <strong>depósito de retorno</strong>, não tudo o que o jogador depositou
+          depois.
+        </li>
+        <li>
+          Conta <strong>retornos, não pessoas</strong>: quem parou e voltou duas vezes no período
+          conta duas.
+        </li>
+        <li>
+          <strong>Retorno</strong> = valor recuperado ÷ custo. Verde quando paga o envio (1x ou
+          mais), vermelho quando não paga.
+        </li>
+        <li>
+          <strong>Confirmados por clique</strong> é outra medida, mais rígida: clicou no link e
+          depositou em até 7 dias. Boa parte já está nos recuperados, por isso não se somam.
+        </li>
+        <li>
+          Voltar depois do SMS não prova que voltou <strong>por causa</strong> do SMS; parte
+          voltaria de qualquer jeito. O efeito real aparece na aba “Teste de controle”, que compara
+          com quem não recebeu nada.
+        </li>
+      </ul>
+    </details>
   );
 }
 
@@ -652,95 +777,213 @@ function HealthLine({ ok, label, value }: { ok: boolean; label: string; value: s
 }
 
 function Holdout({ data }: { data: Data }) {
+  const withResults = new Set(data.holdout.map((row) => row.journeyId));
+  const pending = data.holdoutSetup.filter((journey) => !withResults.has(journey.journeyId));
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Teste de controle</CardTitle>
-        <CardDescription>
-          Em jornadas com grupo de controle, uma parte sorteada dos jogadores não recebe mensagens.
-          A diferença na volta em até 7 dias entre os dois grupos é o efeito real da jornada.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="overflow-x-auto p-0">
-        {data.holdout.length === 0 ? (
-          <p className="p-6 text-sm text-muted-foreground">
-            Nenhuma jornada com grupo de controle neste período. Ative em Jornadas → editar → Grupo
-            de controle; os primeiros resultados aparecem 7 dias depois das primeiras entradas.
-          </p>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Jornada</TableHead>
-                <TableHead className="text-right">Receberam</TableHead>
-                <TableHead className="text-right">Controle</TableHead>
-                <TableHead className="text-right">Diferença (lift)</TableHead>
-                <TableHead className="text-right">Jogadores a mais</TableHead>
-                <TableHead className="text-right">Receita a mais</TableHead>
-                <TableHead>Leitura</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data.holdout.map((row) => (
-                <TableRow key={row.journeyId}>
-                  <TableCell className="font-medium">{row.name}</TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {pct(row.treatedRate)} de {num(row.treated.players)}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {pct(row.controlRate)} de {num(row.control.players)}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {row.lift == null
-                      ? "—"
-                      : `${row.lift >= 0 ? "+" : ""}${pct(row.lift)} (${pct(row.ciLow)} a ${pct(row.ciHigh)})`}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {row.incrementalPlayers == null ? "—" : num(Math.round(row.incrementalPlayers))}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {money(row.incrementalRevenue)}
-                  </TableCell>
-                  <TableCell>
-                    {!row.sufficient ? (
-                      <Badge variant="outline">amostra insuficiente</Badge>
-                    ) : row.significant && (row.lift ?? 0) > 0 ? (
-                      <Badge
-                        variant="outline"
-                        className="border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                      >
-                        traz jogadores de volta
-                      </Badge>
-                    ) : row.significant ? (
-                      <Badge
-                        variant="outline"
-                        className="border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-400"
-                      >
-                        pior que não enviar
-                      </Badge>
-                    ) : (
-                      <Badge variant="outline">sem diferença comprovada</Badge>
-                    )}
-                  </TableCell>
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Teste de controle</CardTitle>
+          <CardDescription>
+            Uma parte sorteada dos jogadores que entram na jornada não recebe mensagens. Comparar a
+            volta dos dois grupos em até 7 dias mostra o efeito real da jornada, sem contar quem
+            voltaria de qualquer jeito.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 text-sm sm:grid-cols-3">
+          {[
+            ["1", "Sorteio", "Na entrada, cada jogador cai no grupo que recebe ou no controle."],
+            ["2", "7 dias", "Os dois grupos são acompanhados por 7 dias depois da entrada."],
+            ["3", "Resultado", "A diferença na volta entre os grupos é o que a jornada causou."],
+          ].map(([step, title, text]) => (
+            <div key={step} className="flex gap-3 rounded-lg border p-3">
+              <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary">
+                {step}
+              </span>
+              <div>
+                <p className="font-medium">{title}</p>
+                <p className="text-xs text-muted-foreground">{text}</p>
+              </div>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+
+      {data.holdout.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Resultados</CardTitle>
+          </CardHeader>
+          <CardContent className="overflow-x-auto p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Jornada</TableHead>
+                  <TableHead className="text-right">Receberam: voltaram</TableHead>
+                  <TableHead className="text-right">Controle: voltaram</TableHead>
+                  <TableHead className="text-right">Diferença</TableHead>
+                  <TableHead className="text-right">Jogadores a mais</TableHead>
+                  <TableHead className="text-right">Valor a mais</TableHead>
+                  <TableHead>Leitura</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-        <p className="px-6 py-3 text-xs text-muted-foreground">
-          Intervalo de 95%. “Amostra insuficiente” abaixo de 100 jogadores por grupo ou 10 retornos.
-          Jogadores do controle ainda podem receber campanhas, o que tende a subestimar o efeito.
-        </p>
-      </CardContent>
-    </Card>
+              </TableHeader>
+              <TableBody>
+                {data.holdout.map((row) => (
+                  <TableRow key={row.journeyId}>
+                    <TableCell className="font-medium">{row.name}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {pct(row.treatedRate)}
+                      <div className="text-xs text-muted-foreground">
+                        de {num(row.treated.players)}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {pct(row.controlRate)}
+                      <div className="text-xs text-muted-foreground">
+                        de {num(row.control.players)}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {row.lift == null ? (
+                        "—"
+                      ) : (
+                        <>
+                          <span
+                            className={
+                              !row.significant
+                                ? ""
+                                : row.lift > 0
+                                  ? "font-medium text-emerald-600 dark:text-emerald-400"
+                                  : "font-medium text-red-600 dark:text-red-400"
+                            }
+                          >
+                            {row.lift >= 0 ? "+" : ""}
+                            {pct(row.lift)}
+                          </span>
+                          <div className="text-xs text-muted-foreground">
+                            {pct(row.ciLow)} a {pct(row.ciHigh)}
+                          </div>
+                        </>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {row.incrementalPlayers == null
+                        ? "—"
+                        : num(Math.round(row.incrementalPlayers))}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {money(row.incrementalRevenue)}
+                    </TableCell>
+                    <TableCell>
+                      {!row.sufficient ? (
+                        <Badge variant="outline">amostra insuficiente</Badge>
+                      ) : row.significant && (row.lift ?? 0) > 0 ? (
+                        <Badge
+                          variant="outline"
+                          className="border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                        >
+                          traz jogadores de volta
+                        </Badge>
+                      ) : row.significant ? (
+                        <Badge
+                          variant="outline"
+                          className="border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-400"
+                        >
+                          pior que não enviar
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline">sem diferença comprovada</Badge>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+
+      {pending.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Testes em andamento</CardTitle>
+            <CardDescription>
+              Ainda sem resultado: nenhum jogador destas jornadas completou os 7 dias. Para uma
+              leitura confiável, cada grupo precisa de pelo menos {HOLDOUT_MIN_PLAYERS} jogadores.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {pending.map((journey) => {
+              const progress = Math.min(1, journey.control / HOLDOUT_MIN_PLAYERS);
+              return (
+                <div key={journey.journeyId} className="space-y-3 rounded-lg border p-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="font-medium leading-tight">{journey.name}</p>
+                    <Badge variant="outline" className="shrink-0 text-[10px]">
+                      controle {journey.percent}%
+                    </Badge>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-sm tabular-nums">
+                    <div>
+                      <p className="text-lg font-semibold">{num(journey.treated)}</p>
+                      <p className="text-xs text-muted-foreground">recebem mensagens</p>
+                    </div>
+                    <div>
+                      <p className="text-lg font-semibold">{num(journey.control)}</p>
+                      <p className="text-xs text-muted-foreground">no controle</p>
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <div className="h-1.5 rounded-full bg-muted" aria-hidden="true">
+                      <div
+                        className="h-1.5 rounded-full bg-primary"
+                        style={{ width: `${Math.max(2, progress * 100)}%` }}
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Amostra do controle: {num(journey.control)} de {HOLDOUT_MIN_PLAYERS}
+                      {journey.firstResultAt
+                        ? ` · primeiro resultado em ${new Date(journey.firstResultAt).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}`
+                        : " · aguardando a primeira entrada"}
+                      {journey.status !== "active" ? " · jornada desligada" : ""}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </CardContent>
+        </Card>
+      )}
+
+      {data.holdout.length === 0 && pending.length === 0 && (
+        <Card>
+          <CardContent className="flex flex-col items-center gap-2 p-8 text-center text-sm">
+            <p className="font-medium">Nenhuma jornada com grupo de controle</p>
+            <p className="max-w-md text-muted-foreground">
+              Ative em Jornadas → editar → Grupo de controle. Os primeiros resultados aparecem 7
+              dias depois das primeiras entradas.
+            </p>
+            <Button size="sm" variant="outline" asChild>
+              <Link to="/jornadas">Ir para Jornadas</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      <p className="text-xs text-muted-foreground">
+        Intervalo de 95%. “Amostra insuficiente” abaixo de {HOLDOUT_MIN_PLAYERS} jogadores por grupo
+        ou {HOLDOUT_MIN_RETURNS} retornos. Jogadores do controle ficam fora das campanhas em massa,
+        mas ainda recebem envios individuais.
+      </p>
+    </div>
   );
 }
 
-function useRetention(days: number) {
+function useRetention(days: number, endOffset: number) {
   const load = useServerFn(getCrmRetention);
   return useQuery({
-    queryKey: ["crm-retention", days],
-    queryFn: () => load({ data: { days } }),
+    queryKey: ["crm-retention", days, endOffset],
+    queryFn: () => load({ data: { days, endOffset } }),
     staleTime: 5 * 60_000,
   });
 }
@@ -791,8 +1034,8 @@ function Bars({ items, total }: { items: Array<{ label: string; value: number }>
   );
 }
 
-function Retention({ days }: { days: number }) {
-  const query = useRetention(days);
+function Retention({ days, endOffset }: { days: number; endOffset: number }) {
+  const query = useRetention(days, endOffset);
   if (query.isLoading) return <Skeleton className="h-64 rounded-xl" />;
   if (query.isError || !query.data) return <LoadFailed what="a retenção" />;
   const { lifecycle, cohorts } = query.data;
@@ -917,8 +1160,8 @@ function Retention({ days }: { days: number }) {
   );
 }
 
-function Acquisition({ days }: { days: number }) {
-  const query = useRetention(days);
+function Acquisition({ days, endOffset }: { days: number; endOffset: number }) {
+  const query = useRetention(days, endOffset);
   if (query.isLoading) return <Skeleton className="h-64 rounded-xl" />;
   if (query.isError || !query.data) return <LoadFailed what="a aquisição" />;
   const { total, byOrigin } = query.data.funnel;
@@ -936,8 +1179,9 @@ function Acquisition({ days }: { days: number }) {
         <CardHeader>
           <CardTitle className="text-base">Funil dos cadastros do período</CardTitle>
           <CardDescription>
-            Quem se cadastrou nos últimos {num(days)} dias e até onde chegou. Mediana do cadastro ao
-            1º depósito: {hours(total.medianHoursToFtd)}.
+            Quem se cadastrou{" "}
+            {days === 1 ? (endOffset === 1 ? "ontem" : "hoje") : `nos últimos ${num(days)} dias`} e
+            até onde chegou. Mediana do cadastro ao 1º depósito: {hours(total.medianHoursToFtd)}.
           </CardDescription>
         </CardHeader>
         <CardContent>
