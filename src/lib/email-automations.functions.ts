@@ -354,14 +354,17 @@ export const triggerEmailFlowTest = createServerFn({ method: "POST" })
 
     let email = data.email ?? null;
     const player_id = data.player_id ?? null;
-    if (player_id && !email) {
+    // O player_id sempre é conferido contra a casa, mesmo com e-mail direto:
+    // o dispatcher renderiza os dados desse player no e-mail.
+    if (player_id) {
       const { data: p } = await supabaseAdmin
         .from("players")
         .select("email")
         .eq("id", player_id)
         .eq("tenant_id", tenantId)
         .maybeSingle();
-      email = p?.email ?? null;
+      if (!p) throw new Error("Player não encontrado");
+      email = email ?? p.email ?? null;
     }
     if (!email) throw new Error("Informe um player com email ou um email direto");
 
