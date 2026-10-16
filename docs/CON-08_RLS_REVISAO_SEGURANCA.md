@@ -1,5 +1,7 @@
 # CON-08 — RLS avaliado uma vez por query: revisão de segurança
 
+> **Nota 16/10/2026:** o aviso "Nada foi aplicado em produção" abaixo reflete o momento da redação e conflita com outros documentos. O estado de aplicação em produção está em verificação (F0-10); ver AUDITORIA_COMPLETA_SISTEMA_2026-10-16.md §7.3 (itens 1 e 2).
+
 Data: 15/10/2026. Origem: `ESCOPO_ESCALA_TRACKING_ATRIBUICAO_2026-10-14.md` (Fase B, CON-08) e `BASELINE_BANCO_2026-10-14.md` (seções 4.1, 5, 6.1, 7.1).
 
 > **Nada foi aplicado em produção.** O inventário foi lido com uma sessão `default_transaction_read_only = on` e `statement_timeout = 15s`. A migration `supabase/migrations/20261015090000_consolidate_tenant_rls.sql` está pronta, mas não foi executada.
