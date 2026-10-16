@@ -14,22 +14,11 @@ lerna-debug.log*
 .lovable/
 mem/
 base/
-docs/*
-!docs/docker-deployment.md
-!docs/OPERACAO_SEGURA.md
-!docs/ESCOPO_REAUDITORIA_CANAIS_2026-10-06.md
-!docs/MATRIZ_ACEITE_CANAIS.md
-!docs/ESCOPO_FUNIL_CONVERSAO_CAMPANHAS_JORNADAS_2026-10-08.md
-!docs/LEVANTAMENTO_DOCUMENTACAO_SISTEMA_2026-10-09.md
-!docs/ESCOPO_RESOLUCAO_LEVANTAMENTO_2026-10-10.md
-!docs/ESCOPO_FILA_ASSINCRONA_JORNADAS_2026-10-14.md
-!docs/AUDITORIA_TRACKING_ATRIBUICAO_ESCALA_2026-10-14.md
-!docs/ESCOPO_ESCALA_TRACKING_ATRIBUICAO_2026-10-14.md
-!docs/BASELINE_BANCO_2026-10-14.md
-!docs/CON-08_RLS_REVISAO_SEGURANCA.md
-!docs/SEC-01_CORRECAO_PERMISSOES.md
-!docs/RUNBOOK_OBSERVABILIDADE.md
-!docs/RECUPERACAO_EVENTOS_PERDIDOS_2026-10-15.md
+# docs/ is versioned by default. Anything with secrets, credentials or
+# personal data (player PII, personal e-mails/phones) goes in docs/private/.
+docs/private/
+# Word lock files
+docs/~$*
 supabase/.temp/
 
 node_modules

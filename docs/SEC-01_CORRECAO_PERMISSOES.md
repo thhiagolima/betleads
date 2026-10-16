@@ -1,5 +1,7 @@
 # SEC-01 — Correção intencional de permissões (achados F1–F6 do CON-08)
 
+> **Nota 16/10/2026:** o aviso "Nada foi aplicado em produção" abaixo reflete o momento da redação e conflita com outros documentos. O estado de aplicação em produção está em verificação (F0-10); ver AUDITORIA_COMPLETA_SISTEMA_2026-10-16.md §7.3 (itens 1 e 2).
+
 Data: 15/10/2026. Origem: `docs/CON-08_RLS_REVISAO_SEGURANCA.md`, seção 4. Versão 2: aplica as decisões aprovadas em 15/10 (seção 7).
 
 > **Nada foi aplicado em produção.** A produção foi lida só com `default_transaction_read_only = on` e `statement_timeout = 15s`, e só para contar linhas, listar colunas, ACLs de tabelas e de funções e o corpo das funções. Nenhum valor de tabela de credencial foi lido.
