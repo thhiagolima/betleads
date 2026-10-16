@@ -244,64 +244,103 @@ function Overview({ data }: { data: Data }) {
   const wasteCost = waste.reduce((sum, source) => sum + source.cost, 0);
   const activeShare = totals.cost > 0 ? totals.costOnActive / totals.cost : null;
   const clickRoi = totals.cost > 0 ? totals.directRevenue / totals.cost : null;
+  const costPerConversion =
+    totals.directConversions > 0 ? totals.cost / totals.directConversions : null;
+  const funnel = [
+    { label: "SMS cobrados", value: num(totals.sent), rate: null },
+    {
+      label: "Cliques",
+      value: num(totals.humanClicks),
+      rate: totals.sent > 0 ? `${pct(totals.humanClicks / totals.sent)} dos SMS` : null,
+    },
+    {
+      label: "Depósitos",
+      value: num(totals.directConversions),
+      rate:
+        totals.humanClicks > 0
+          ? `${pct(totals.directConversions / totals.humanClicks)} dos cliques`
+          : null,
+    },
+  ];
 
   return (
     <div className="space-y-4">
-      <section aria-labelledby="recovery-title" className="space-y-3">
+      <section aria-labelledby="click-title" className="space-y-3">
         <div>
-          <h2 id="recovery-title" className="text-base font-semibold">
-            Recuperação
+          <h2 id="click-title" className="text-base font-semibold">
+            Conversão por clique
           </h2>
           <p className="text-sm text-muted-foreground">
-            Jogadores parados há 2+ dias que voltaram a depositar até 3 dias depois de um SMS.
+            Jogadores que clicaram no link do SMS e depositaram em até 7 dias.
           </p>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Kpi
-            highlight
-            label="Valor recuperado"
-            value={brl(totals.influencedRevenue)}
-            detail={`${num(totals.influencedPlayers)} jogador(es) recuperado(s)`}
-          />
+        <Card className="border-emerald-500/40 bg-emerald-500/[0.06]">
+          <CardContent className="flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:justify-between">
+            <ol
+              className="flex flex-wrap items-center gap-x-3 gap-y-2"
+              aria-label="Funil do clique"
+            >
+              {funnel.map((step, index) => (
+                <li key={step.label} className="flex items-center gap-3">
+                  {index > 0 && (
+                    <ChevronRight className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+                  )}
+                  <div>
+                    <p className="text-xs text-muted-foreground">{step.label}</p>
+                    <p className="text-xl font-semibold tabular-nums">{step.value}</p>
+                    {step.rate && <p className="text-xs text-muted-foreground">{step.rate}</p>}
+                  </div>
+                </li>
+              ))}
+            </ol>
+            <div className="lg:text-right">
+              <p className="text-sm text-muted-foreground">Valor convertido</p>
+              <p className="text-3xl font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
+                {brl(totals.directRevenue)}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+        <div className="grid gap-3 sm:grid-cols-3">
           <Kpi
             label="Custo em SMS"
             value={brl(totals.cost)}
             detail={`${num(totals.sent)} mensagens cobradas`}
           />
           <Kpi
-            label="Custo por recuperado"
-            value={money(totals.costPerRecovered)}
-            detail="custo ÷ jogadores recuperados"
+            label="Custo por depósito"
+            value={money(costPerConversion)}
+            detail="custo ÷ depósitos após clique"
           />
-          <Kpi
-            label="Retorno"
-            value={ratio(totals.roi)}
-            detail={`valor recuperado ÷ custo · ${ratio(clickRoi)} contando só cliques`}
-          />
+          <Kpi label="Retorno" value={ratio(clickRoi)} detail="valor convertido ÷ custo" />
         </div>
       </section>
 
       <Card className="bg-muted/20">
-        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <CardContent className="flex flex-col gap-3 p-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="space-y-0.5">
-            <p className="text-sm font-medium">Confirmados por clique</p>
+            <p className="text-sm font-medium">Visão ampla: jogadores recuperados</p>
             <p className="text-xs text-muted-foreground">
-              Clicaram no link e depositaram em até 7 dias. É a prova mais rígida, mas deixa de fora
-              quem leu o SMS e abriu o app direto. Boa parte já está nos recuperados: não some.
+              Parados há 2+ dias que voltaram a depositar até 3 dias depois de um SMS, com ou sem
+              clique. Inclui boa parte das conversões por clique: não some os dois.
             </p>
           </div>
-          <div className="flex shrink-0 gap-6 tabular-nums">
+          <div className="flex shrink-0 flex-wrap gap-6 tabular-nums">
             <div>
-              <p className="text-lg font-semibold">{num(totals.directConversions)}</p>
-              <p className="text-xs text-muted-foreground">depósitos</p>
+              <p className="text-lg font-semibold">{num(totals.influencedPlayers)}</p>
+              <p className="text-xs text-muted-foreground">recuperados</p>
             </div>
             <div>
-              <p className="text-lg font-semibold">{brl(totals.directRevenue)}</p>
+              <p className="text-lg font-semibold">{brl(totals.influencedRevenue)}</p>
               <p className="text-xs text-muted-foreground">valor</p>
             </div>
             <div>
-              <p className="text-lg font-semibold">{num(totals.humanClicks)}</p>
-              <p className="text-xs text-muted-foreground">cliques</p>
+              <p className="text-lg font-semibold">{money(totals.costPerRecovered)}</p>
+              <p className="text-xs text-muted-foreground">por recuperado</p>
+            </div>
+            <div>
+              <p className="text-lg font-semibold">{ratio(totals.roi)}</p>
+              <p className="text-xs text-muted-foreground">retorno</p>
             </div>
           </div>
         </CardContent>
@@ -335,7 +374,7 @@ function Overview({ data }: { data: Data }) {
                       ? "Custo"
                       : name === "influencedRevenue"
                         ? "Recuperado"
-                        : "Confirmado por clique",
+                        : "Conversão por clique",
                   ]}
                 />
                 <Legend
@@ -344,7 +383,7 @@ function Overview({ data }: { data: Data }) {
                       ? "Custo"
                       : name === "influencedRevenue"
                         ? "Recuperado"
-                        : "Confirmado por clique"
+                        : "Conversão por clique"
                   }
                 />
                 <Bar dataKey="cost" fill="oklch(0.75 0.15 75)" radius={[4, 4, 0, 0]} />
@@ -481,7 +520,7 @@ function Sources({ sources }: { sources: CrmSource[] }) {
               <TableHead className="min-w-40">Recuperados</TableHead>
               <TableHead className="text-right">Custo / recuperado</TableHead>
               <TableHead className="text-right">Retorno</TableHead>
-              <TableHead className="text-right">Confirmados por clique</TableHead>
+              <TableHead className="text-right">Conversão por clique</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -644,7 +683,7 @@ function RecoveryNote() {
           mais), vermelho quando não paga.
         </li>
         <li>
-          <strong>Confirmados por clique</strong> é outra medida, mais rígida: clicou no link e
+          <strong>Conversão por clique</strong> é a medida principal e mais rígida: clicou no link e
           depositou em até 7 dias. Boa parte já está nos recuperados, por isso não se somam.
         </li>
         <li>
