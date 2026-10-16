@@ -69,221 +69,229 @@ export const createWhatsappSession = createServerFn({ method: "POST" })
       })
       .parse(input),
   )
-  .handler(async ({ data, context }) => {
-    // SOURCE OF TRUTH = Evolution. Any non-2xx is a hard failure — never
-    // mask it as "maybe already exists" and never save locally.
-    // The whatsapp_sessions row does not exist yet, so the transport guard
-    // needs the tenant explicitly (the row is created in this same tenant).
-    const tenantId = await resolveCurrentTenantId(context.supabase);
-    let createResp: any;
-    try {
-      createResp = await evolutionFetch("/instance/create", {
-        method: "POST",
-        body: {
-          instanceName: data.instance_name,
-          qrcode: true,
-          integration: "WHATSAPP-BAILEYS",
-        },
-        tenantId,
-      });
-    } catch (e: any) {
-      rethrowIfDemoBlocked(e);
-      throw new Error(
-        `Evolution recusou a criação: ${e?.message ?? "erro desconhecido"}. Nada foi salvo no BETLEADS.`,
-      );
-    }
+  .handler(async ({ data, context }) => createWhatsappSessionFor(data, context));
 
-    // Evolution v2 returns the QR code directly in the create response.
-    const createBase64 =
-      createResp?.qrcode?.base64 ?? createResp?.qrcode?.code ?? createResp?.base64 ?? null;
-    const createdQr = createBase64
-      ? createBase64.startsWith("data:")
-        ? createBase64
-        : `data:image/png;base64,${createBase64}`
-      : null;
+// Body of `createWhatsappSession`, exported so the demo guard wiring is unit-testable.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function createWhatsappSessionFor(data: { name: string; instance_name: string; phone_number?: string | null }, context: { supabase: any }) {
+  // SOURCE OF TRUTH = Evolution. Any non-2xx is a hard failure — never
+  // mask it as "maybe already exists" and never save locally.
+  // The whatsapp_sessions row does not exist yet, so the transport guard
+  // needs the tenant explicitly (the row is created in this same tenant).
+  const tenantId = await resolveCurrentTenantId(context.supabase);
+  let createResp: any;
+  try {
+    createResp = await evolutionFetch("/instance/create", {
+      method: "POST",
+      body: {
+        instanceName: data.instance_name,
+        qrcode: true,
+        integration: "WHATSAPP-BAILEYS",
+      },
+      tenantId,
+    });
+  } catch (e: any) {
+    rethrowIfDemoBlocked(e);
+    throw new Error(
+      `Evolution recusou a criação: ${e?.message ?? "erro desconhecido"}. Nada foi salvo no BETLEADS.`,
+    );
+  }
 
-    // 2) Only now persist locally.
-    const { data: inserted, error } = await context.supabase
-      .from("whatsapp_sessions")
-      .insert({
-        name: data.name,
-        instance_name: data.instance_name,
-        phone_number: data.phone_number ?? null,
-        status: createdQr ? "qrcode" : "disconnected",
-        qr_code: createdQr,
-      })
-      .select()
-      .single();
-    if (error) throw new Error(error.message);
+  // Evolution v2 returns the QR code directly in the create response.
+  const createBase64 =
+    createResp?.qrcode?.base64 ?? createResp?.qrcode?.code ?? createResp?.base64 ?? null;
+  const createdQr = createBase64
+    ? createBase64.startsWith("data:")
+      ? createBase64
+      : `data:image/png;base64,${createBase64}`
+    : null;
 
-    // 3) Registra webhook na Evolution para essa instância (não-fatal). O
-    // segredo vai em header (EVOLUTION_WEBHOOK_SECRET), nunca na URL.
-    try {
-      const { evolutionWebhookSetBody } = await import("./whatsapp-evolution-auth.server");
-      await evolutionFetch(`/webhook/set/${encodeURIComponent(data.instance_name)}`, {
-        method: "POST",
-        body: evolutionWebhookSetBody([
-          "MESSAGES_UPSERT",
-          "MESSAGES_UPDATE",
-          "SEND_MESSAGE",
-          "CONNECTION_UPDATE",
-        ]),
-      });
-    } catch (e: any) {
-      console.warn("[whatsapp] webhook/set after create failed (ignored):", e?.message);
-    }
+  // 2) Only now persist locally.
+  const { data: inserted, error } = await context.supabase
+    .from("whatsapp_sessions")
+    .insert({
+      name: data.name,
+      instance_name: data.instance_name,
+      phone_number: data.phone_number ?? null,
+      status: createdQr ? "qrcode" : "disconnected",
+      qr_code: createdQr,
+    })
+    .select()
+    .single();
+  if (error) throw new Error(error.message);
 
-    return { session: inserted };
-  });
+  // 3) Registra webhook na Evolution para essa instância (não-fatal). O
+  // segredo vai em header (EVOLUTION_WEBHOOK_SECRET), nunca na URL.
+  try {
+    const { evolutionWebhookSetBody } = await import("./whatsapp-evolution-auth.server");
+    await evolutionFetch(`/webhook/set/${encodeURIComponent(data.instance_name)}`, {
+      method: "POST",
+      body: evolutionWebhookSetBody([
+        "MESSAGES_UPSERT",
+        "MESSAGES_UPDATE",
+        "SEND_MESSAGE",
+        "CONNECTION_UPDATE",
+      ]),
+    });
+  } catch (e: any) {
+    console.warn("[whatsapp] webhook/set after create failed (ignored):", e?.message);
+  }
+
+  return { session: inserted };
+}
 
 export const connectWhatsappSession = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) => z.object({ id: dbUuid() }).parse(input))
-  .handler(async ({ data, context }) => {
-    const { data: session, error: selErr } = await context.supabase
-      .from("whatsapp_sessions")
-      .select("*")
-      .eq("id", data.id)
-      .single();
-    if (selErr || !session) throw new Error("Sessão não encontrada");
+  .handler(async ({ data, context }) => connectWhatsappSessionFor(data, context));
 
-    // Aplica proxy vinculado (se houver) ANTES de iniciar o connect. A senha
-    // é lida via supabaseAdmin (server-only) e nunca trafega pelo browser.
-    if ((session as any).proxy_id) {
-      try {
-        const { data: proxy } = await supabaseAdmin
-          .from("whatsapp_proxies")
-          .select("protocol, host, port, username, password_encrypted, status")
-          .eq("id", (session as any).proxy_id)
-          .single();
-        if (proxy && proxy.status === "active") {
-          await setEvolutionProxy(session.instance_name, {
-            protocol: proxy.protocol,
-            host: proxy.host,
-            port: proxy.port,
-            username: proxy.username,
-            password: proxy.password_encrypted,
-          });
-          await supabaseAdmin.from("whatsapp_proxy_logs").insert({
-            proxy_id: (session as any).proxy_id,
-            session_id: session.id,
-            event: "sent_to_evolution",
-            detail: { instance: session.instance_name },
-          });
-        } else if (proxy && proxy.status !== "active") {
-          // Proxy inativo — desabilita na Evolution para evitar usar config velha.
-          await setEvolutionProxy(session.instance_name, null).catch(rethrowIfDemoBlocked);
-        }
-      } catch (e: any) {
-        rethrowIfDemoBlocked(e);
+// Body of `connectWhatsappSession`, exported so the demo guard wiring is unit-testable.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function connectWhatsappSessionFor(data: { id: string }, context: { supabase: any }) {
+  const { data: session, error: selErr } = await context.supabase
+    .from("whatsapp_sessions")
+    .select("*")
+    .eq("id", data.id)
+    .single();
+  if (selErr || !session) throw new Error("Sessão não encontrada");
+
+  // Aplica proxy vinculado (se houver) ANTES de iniciar o connect. A senha
+  // é lida via supabaseAdmin (server-only) e nunca trafega pelo browser.
+  if ((session as any).proxy_id) {
+    try {
+      const { data: proxy } = await supabaseAdmin
+        .from("whatsapp_proxies")
+        .select("protocol, host, port, username, password_encrypted, status")
+        .eq("id", (session as any).proxy_id)
+        .single();
+      if (proxy && proxy.status === "active") {
+        await setEvolutionProxy(session.instance_name, {
+          protocol: proxy.protocol,
+          host: proxy.host,
+          port: proxy.port,
+          username: proxy.username,
+          password: proxy.password_encrypted,
+        });
         await supabaseAdmin.from("whatsapp_proxy_logs").insert({
           proxy_id: (session as any).proxy_id,
           session_id: session.id,
-          event: "connect_failed",
-          detail: { error: e?.message ?? String(e) },
+          event: "sent_to_evolution",
+          detail: { instance: session.instance_name },
         });
-        throw new Error(`Falha ao aplicar proxy na sessão: ${e?.message ?? "erro desconhecido"}`);
+      } else if (proxy && proxy.status !== "active") {
+        // Proxy inativo — desabilita na Evolution para evitar usar config velha.
+        await setEvolutionProxy(session.instance_name, null).catch(rethrowIfDemoBlocked);
       }
-    } else {
-      // Sem proxy vinculado — garante que a Evolution não use proxy antigo.
-      await setEvolutionProxy(session.instance_name, null).catch(rethrowIfDemoBlocked);
-    }
-
-    // Evolution API v2.2.3 — multi-endpoint strategy for QR / connect.
-    // Tries the endpoints that are known to exist in this version, in order:
-    //   1) GET  /instance/connect/{name}        (returns { base64, code, pairingCode })
-    //   2) POST /instance/restart/{name}        (forces a fresh QR cycle)
-    //   3) GET  /instance/fetchInstances?instanceName={name}  (some builds embed qrcode here)
-    // If none of them produce a base64, we fall back to connectionState only.
-    let qrImage: string | null = null;
-    let state: string | undefined;
-
-    const extractQr = (r: any): string | null => {
-      const b64 =
-        r?.qrcode?.base64 ??
-        r?.qrcode?.code ??
-        r?.base64 ??
-        r?.instance?.qrcode?.base64 ??
-        (typeof r?.code === "string" ? r.code : null);
-      if (!b64) return null;
-      return b64.startsWith("data:") ? b64 : `data:image/png;base64,${b64}`;
-    };
-
-    const name = encodeURIComponent(session.instance_name);
-
-    // 0) Ensure websocket is enabled for this instance — Evolution v2 only emits
-    // qrcode.updated / connection.update over socket.io when the instance has
-    // websocket explicitly enabled. Non-fatal: some builds auto-enable it.
-    try {
-      await evolutionFetch(`/websocket/set/${name}`, {
-        method: "POST",
-        body: {
-          enabled: true,
-          events: ["QRCODE_UPDATED", "CONNECTION_UPDATE", "qrcode.updated", "connection.update"],
-        },
-      });
     } catch (e: any) {
       rethrowIfDemoBlocked(e);
-      console.warn("[whatsapp] /websocket/set failed (ignored):", e?.message);
+      await supabaseAdmin.from("whatsapp_proxy_logs").insert({
+        proxy_id: (session as any).proxy_id,
+        session_id: session.id,
+        event: "connect_failed",
+        detail: { error: e?.message ?? String(e) },
+      });
+      throw new Error(`Falha ao aplicar proxy na sessão: ${e?.message ?? "erro desconhecido"}`);
     }
+  } else {
+    // Sem proxy vinculado — garante que a Evolution não use proxy antigo.
+    await setEvolutionProxy(session.instance_name, null).catch(rethrowIfDemoBlocked);
+  }
 
-    // 1) /instance/connect/{name}
+  // Evolution API v2.2.3 — multi-endpoint strategy for QR / connect.
+  // Tries the endpoints that are known to exist in this version, in order:
+  //   1) GET  /instance/connect/{name}        (returns { base64, code, pairingCode })
+  //   2) POST /instance/restart/{name}        (forces a fresh QR cycle)
+  //   3) GET  /instance/fetchInstances?instanceName={name}  (some builds embed qrcode here)
+  // If none of them produce a base64, we fall back to connectionState only.
+  let qrImage: string | null = null;
+  let state: string | undefined;
+
+  const extractQr = (r: any): string | null => {
+    const b64 =
+      r?.qrcode?.base64 ??
+      r?.qrcode?.code ??
+      r?.base64 ??
+      r?.instance?.qrcode?.base64 ??
+      (typeof r?.code === "string" ? r.code : null);
+    if (!b64) return null;
+    return b64.startsWith("data:") ? b64 : `data:image/png;base64,${b64}`;
+  };
+
+  const name = encodeURIComponent(session.instance_name);
+
+  // 0) Ensure websocket is enabled for this instance — Evolution v2 only emits
+  // qrcode.updated / connection.update over socket.io when the instance has
+  // websocket explicitly enabled. Non-fatal: some builds auto-enable it.
+  try {
+    await evolutionFetch(`/websocket/set/${name}`, {
+      method: "POST",
+      body: {
+        enabled: true,
+        events: ["QRCODE_UPDATED", "CONNECTION_UPDATE", "qrcode.updated", "connection.update"],
+      },
+    });
+  } catch (e: any) {
+    rethrowIfDemoBlocked(e);
+    console.warn("[whatsapp] /websocket/set failed (ignored):", e?.message);
+  }
+
+  // 1) /instance/connect/{name}
+  try {
+    const r = await evolutionFetch(`/instance/connect/${name}`);
+    qrImage = extractQr(r);
+    state = mapEvolutionState(r?.instance?.state);
+  } catch (e: any) {
+    rethrowIfDemoBlocked(e);
+    console.warn("[whatsapp] /instance/connect failed:", e?.message);
+  }
+
+  // 2) /instance/restart/{name}
+  if (!qrImage) {
     try {
-      const r = await evolutionFetch(`/instance/connect/${name}`);
+      const r = await evolutionFetch(`/instance/restart/${name}`, { method: "POST" });
       qrImage = extractQr(r);
+    } catch (e: any) {
+      console.warn("[whatsapp] /instance/restart failed:", e?.message);
+    }
+  }
+
+  // 3) /instance/fetchInstances?instanceName={name}
+  if (!qrImage) {
+    try {
+      const r: any = await evolutionFetch(`/instance/fetchInstances?instanceName=${name}`);
+      const item = Array.isArray(r) ? r[0] : Array.isArray(r?.instances) ? r.instances[0] : r;
+      qrImage = extractQr(item);
+      if (!state) state = mapEvolutionState(item?.instance?.state ?? item?.connectionStatus);
+    } catch (e: any) {
+      console.warn("[whatsapp] /instance/fetchInstances failed:", e?.message);
+    }
+  }
+
+  // 4) Fallback: just read connectionState
+  if (!state) {
+    try {
+      const r = await evolutionFetch(`/instance/connectionState/${name}`);
       state = mapEvolutionState(r?.instance?.state);
     } catch (e: any) {
-      rethrowIfDemoBlocked(e);
-      console.warn("[whatsapp] /instance/connect failed:", e?.message);
+      console.warn("[whatsapp] /instance/connectionState failed:", e?.message);
     }
+  }
 
-    // 2) /instance/restart/{name}
-    if (!qrImage) {
-      try {
-        const r = await evolutionFetch(`/instance/restart/${name}`, { method: "POST" });
-        qrImage = extractQr(r);
-      } catch (e: any) {
-        console.warn("[whatsapp] /instance/restart failed:", e?.message);
-      }
-    }
+  const newStatus =
+    state === "connected" ? "connected" : qrImage ? "qrcode" : (state ?? "connecting");
 
-    // 3) /instance/fetchInstances?instanceName={name}
-    if (!qrImage) {
-      try {
-        const r: any = await evolutionFetch(`/instance/fetchInstances?instanceName=${name}`);
-        const item = Array.isArray(r) ? r[0] : Array.isArray(r?.instances) ? r.instances[0] : r;
-        qrImage = extractQr(item);
-        if (!state) state = mapEvolutionState(item?.instance?.state ?? item?.connectionStatus);
-      } catch (e: any) {
-        console.warn("[whatsapp] /instance/fetchInstances failed:", e?.message);
-      }
-    }
+  await context.supabase
+    .from("whatsapp_sessions")
+    .update({
+      qr_code: qrImage ?? session.qr_code,
+      status: newStatus,
+      last_connected_at:
+        newStatus === "connected" ? new Date().toISOString() : session.last_connected_at,
+    })
+    .eq("id", data.id);
 
-    // 4) Fallback: just read connectionState
-    if (!state) {
-      try {
-        const r = await evolutionFetch(`/instance/connectionState/${name}`);
-        state = mapEvolutionState(r?.instance?.state);
-      } catch (e: any) {
-        console.warn("[whatsapp] /instance/connectionState failed:", e?.message);
-      }
-    }
-
-    const newStatus =
-      state === "connected" ? "connected" : qrImage ? "qrcode" : (state ?? "connecting");
-
-    await context.supabase
-      .from("whatsapp_sessions")
-      .update({
-        qr_code: qrImage ?? session.qr_code,
-        status: newStatus,
-        last_connected_at:
-          newStatus === "connected" ? new Date().toISOString() : session.last_connected_at,
-      })
-      .eq("id", data.id);
-
-    return { qr_code: qrImage ?? session.qr_code, status: newStatus };
-  });
+  return { qr_code: qrImage ?? session.qr_code, status: newStatus };
+}
 
 export const getWhatsappSessionStatus = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -412,75 +420,79 @@ export const clearWhatsappSessionHistory = createServerFn({ method: "POST" })
 
 export const syncWhatsappSessions = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    // NOTE: /instance/fetchInstances is unreliable in current Evolution
-    // versions (returns [] even when instances exist). We MUST NOT depend on
-    // it as the source of truth. Strategy:
-    //   1) Try fetchInstances ONLY to discover instances we don't know about locally (additive).
-    //   2) Probe each local session via /instance/connectionState/{name} to refresh its real state.
-    //   3) Never mark a local session as orphan based on fetchInstances being empty.
-    //   4) Empty array or any error from fetchInstances is non-fatal — keep going.
-    const evolutionNames = new Set<string>();
+  .handler(async ({ context }) => syncWhatsappSessionsFor(context));
+
+// Body of `syncWhatsappSessions`, exported so the demo guard wiring is unit-testable.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function syncWhatsappSessionsFor(context: { supabase: any }) {
+  // NOTE: /instance/fetchInstances is unreliable in current Evolution
+  // versions (returns [] even when instances exist). We MUST NOT depend on
+  // it as the source of truth. Strategy:
+  //   1) Try fetchInstances ONLY to discover instances we don't know about locally (additive).
+  //   2) Probe each local session via /instance/connectionState/{name} to refresh its real state.
+  //   3) Never mark a local session as orphan based on fetchInstances being empty.
+  //   4) Empty array or any error from fetchInstances is non-fatal — keep going.
+  const evolutionNames = new Set<string>();
+  try {
+    const raw: any = await evolutionFetch("/instance/fetchInstances");
+    const list: any[] = Array.isArray(raw)
+      ? raw
+      : Array.isArray(raw?.instances)
+        ? raw.instances
+        : Array.isArray(raw?.data)
+          ? raw.data
+          : [];
+    for (const it of list) {
+      const n = it?.instance?.instanceName ?? it?.instanceName ?? it?.name ?? it?.instance?.name;
+      if (typeof n === "string" && n.length > 0) evolutionNames.add(n);
+    }
+  } catch (e: any) {
+    // Non-fatal: API inconsistent. Continue with per-instance probing.
+    console.warn("[whatsapp] fetchInstances failed (ignored):", e?.message);
+  }
+
+  const { data: locals, error: selErr } = await context.supabase
+    .from("whatsapp_sessions")
+    .select("id, instance_name, status");
+  if (selErr) throw new Error(selErr.message);
+
+  // Probe each local session for its real state. Keep local row regardless.
+  let refreshed = 0;
+  for (const s of locals ?? []) {
     try {
-      const raw: any = await evolutionFetch("/instance/fetchInstances");
-      const list: any[] = Array.isArray(raw)
-        ? raw
-        : Array.isArray(raw?.instances)
-          ? raw.instances
-          : Array.isArray(raw?.data)
-            ? raw.data
-            : [];
-      for (const it of list) {
-        const n = it?.instance?.instanceName ?? it?.instanceName ?? it?.name ?? it?.instance?.name;
-        if (typeof n === "string" && n.length > 0) evolutionNames.add(n);
+      const resp: any = await evolutionFetch(
+        `/instance/connectionState/${encodeURIComponent(s.instance_name)}`,
+      );
+      const status = mapEvolutionState(resp?.instance?.state);
+      const updates: {
+        status: string;
+        last_connected_at?: string;
+        qr_code?: string | null;
+      } = { status };
+      if (status === "connected") {
+        updates.last_connected_at = new Date().toISOString();
+        updates.qr_code = null;
       }
+      await context.supabase.from("whatsapp_sessions").update(updates).eq("id", s.id);
+      refreshed++;
     } catch (e: any) {
-      // Non-fatal: API inconsistent. Continue with per-instance probing.
-      console.warn("[whatsapp] fetchInstances failed (ignored):", e?.message);
+      // Instance may not exist on Evolution OR endpoint flaky — do not mark as orphan,
+      // just leave the local row untouched.
+      console.warn(
+        `[whatsapp] connectionState failed for ${s.instance_name} (ignored):`,
+        e?.message,
+      );
     }
+  }
 
-    const { data: locals, error: selErr } = await context.supabase
-      .from("whatsapp_sessions")
-      .select("id, instance_name, status");
-    if (selErr) throw new Error(selErr.message);
-
-    // Probe each local session for its real state. Keep local row regardless.
-    let refreshed = 0;
-    for (const s of locals ?? []) {
-      try {
-        const resp: any = await evolutionFetch(
-          `/instance/connectionState/${encodeURIComponent(s.instance_name)}`,
-        );
-        const status = mapEvolutionState(resp?.instance?.state);
-        const updates: {
-          status: string;
-          last_connected_at?: string;
-          qr_code?: string | null;
-        } = { status };
-        if (status === "connected") {
-          updates.last_connected_at = new Date().toISOString();
-          updates.qr_code = null;
-        }
-        await context.supabase.from("whatsapp_sessions").update(updates).eq("id", s.id);
-        refreshed++;
-      } catch (e: any) {
-        // Instance may not exist on Evolution OR endpoint flaky — do not mark as orphan,
-        // just leave the local row untouched.
-        console.warn(
-          `[whatsapp] connectionState failed for ${s.instance_name} (ignored):`,
-          e?.message,
-        );
-      }
-    }
-
-    // IMPORTANT: never insert sessions from Evolution's fetchInstances.
-    // Evolution is shared across tenants and has no tenant scoping, so an
-    // additive insert here would (a) resurrect sessions deleted locally and
-    // (b) leak instances from other tenants into the current tenant_id.
-    // The DB is the source of truth for tenant ownership; createWhatsappSession
-    // is the only path that may create a row.
-    return { evolution_count: evolutionNames.size, added: 0, refreshed, marked: 0, removed: 0 };
-  });
+  // IMPORTANT: never insert sessions from Evolution's fetchInstances.
+  // Evolution is shared across tenants and has no tenant scoping, so an
+  // additive insert here would (a) resurrect sessions deleted locally and
+  // (b) leak instances from other tenants into the current tenant_id.
+  // The DB is the source of truth for tenant ownership; createWhatsappSession
+  // is the only path that may create a row.
+  return { evolution_count: evolutionNames.size, added: 0, refreshed, marked: 0, removed: 0 };
+}
 
 // ============================================================
 // INBOX (chats + messages)
@@ -1369,153 +1381,157 @@ export const sendToLeadFromSession = createServerFn({ method: "POST" })
       })
       .parse(input),
   )
-  .handler(async ({ data, context }) => {
-    const digits = data.phone.replace(/\D/g, "");
-    if (!digits) throw new Error("Telefone inválido");
-    const { data: session, error: sErr } = await context.supabase
-      .from("whatsapp_sessions")
-      .select("id, instance_name, status, name")
-      .eq("id", data.session_id)
-      .single();
-    if (sErr || !session) throw new Error("Sessão não encontrada");
-    if (session.status !== "connected") {
-      throw new Error(`Sessão "${session.name}" não está conectada`);
-    }
+  .handler(async ({ data, context }) => sendToLeadFromSessionFor(data, context));
 
-    // Resolve qual variante do número existe no WhatsApp (fallback do 9º dígito BR).
-    let resolved: Awaited<ReturnType<typeof resolveWhatsappNumber>>;
-    try {
-      resolved = await resolveWhatsappNumber(session.instance_name, digits);
-    } catch (e: any) {
-      if (isEvolutionConnectionClosed(e)) {
-        await markWhatsappSessionDisconnected(
-          context.supabase,
-          session.id,
-          "resolve_number_connection_closed",
-        );
-        throw new Error(
-          `Sessão "${session.name}" caiu na Evolution. Reconecte em WhatsApp → Sessões antes de enviar.`,
-        );
-      }
-      throw e;
-    }
-    if (!resolved) {
+// Body of `sendToLeadFromSession`, exported so the demo guard wiring is unit-testable.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function sendToLeadFromSessionFor(data: { session_id: string; phone: string; text: string }, context: { supabase: any }) {
+  const digits = data.phone.replace(/\D/g, "");
+  if (!digits) throw new Error("Telefone inválido");
+  const { data: session, error: sErr } = await context.supabase
+    .from("whatsapp_sessions")
+    .select("id, instance_name, status, name")
+    .eq("id", data.session_id)
+    .single();
+  if (sErr || !session) throw new Error("Sessão não encontrada");
+  if (session.status !== "connected") {
+    throw new Error(`Sessão "${session.name}" não está conectada`);
+  }
+
+  // Resolve qual variante do número existe no WhatsApp (fallback do 9º dígito BR).
+  let resolved: Awaited<ReturnType<typeof resolveWhatsappNumber>>;
+  try {
+    resolved = await resolveWhatsappNumber(session.instance_name, digits);
+  } catch (e: any) {
+    if (isEvolutionConnectionClosed(e)) {
+      await markWhatsappSessionDisconnected(
+        context.supabase,
+        session.id,
+        "resolve_number_connection_closed",
+      );
       throw new Error(
-        `Este número não tem WhatsApp ativo (testado: ${brazilianPhoneVariants(digits).join(", ")}).`,
+        `Sessão "${session.name}" caiu na Evolution. Reconecte em WhatsApp → Sessões antes de enviar.`,
       );
     }
-    const sendNumber = resolved.number;
-    const remoteJid = resolved.jid;
+    throw e;
+  }
+  if (!resolved) {
+    throw new Error(
+      `Este número não tem WhatsApp ativo (testado: ${brazilianPhoneVariants(digits).join(", ")}).`,
+    );
+  }
+  const sendNumber = resolved.number;
+  const remoteJid = resolved.jid;
 
-    // Acha ou cria o chat dentro desta sessão.
-    let chatId: string;
-    const { data: existing } = await context.supabase
+  // Acha ou cria o chat dentro desta sessão.
+  let chatId: string;
+  const { data: existing } = await context.supabase
+    .from("whatsapp_chats")
+    .select("id")
+    .eq("session_id", session.id)
+    .eq("remote_jid", remoteJid)
+    .maybeSingle();
+  if (existing) {
+    chatId = existing.id;
+  } else {
+    const ins = await context.supabase
       .from("whatsapp_chats")
-      .select("id")
-      .eq("session_id", session.id)
-      .eq("remote_jid", remoteJid)
-      .maybeSingle();
-    if (existing) {
-      chatId = existing.id;
-    } else {
-      const ins = await context.supabase
-        .from("whatsapp_chats")
-        .insert({
-          session_id: session.id,
-          remote_jid: remoteJid,
-          phone: sendNumber,
-          is_group: false,
-          name: sendNumber,
-          last_message: data.text,
-          last_message_at: new Date().toISOString(),
-        })
-        .select("id")
-        .single();
-      if (ins.error || !ins.data) {
-        throw new Error(ins.error?.message ?? "Falha ao criar conversa");
-      }
-      chatId = ins.data.id;
-    }
-
-    // Envia via Evolution.
-    const endpoint = `/message/sendText/${encodeURIComponent(session.instance_name)}`;
-    const payload = { number: sendNumber, text: data.text };
-    let resp: any;
-    try {
-      resp = await evolutionFetch(endpoint, { method: "POST", body: payload });
-    } catch (e: any) {
-      rethrowIfDemoBlocked(e);
-      if (isEvolutionConnectionClosed(e)) {
-        await markWhatsappSessionDisconnected(
-          context.supabase,
-          session.id,
-          "send_to_lead_connection_closed",
-        );
-        throw new Error(
-          `Sessão "${session.name}" caiu na Evolution. Reconecte em WhatsApp → Sessões antes de enviar.`,
-        );
-      }
-      const raw = (e?.rawBody ?? e?.message ?? "").toString().slice(0, 300);
-      if (raw.includes('"exists":false')) {
-        throw new Error("Este número não tem WhatsApp ativo.");
-      }
-      throw new Error(`Evolution recusou envio (status=${e?.status ?? 0}). raw=${raw}`);
-    }
-    const msgId =
-      resp?.key?.id ?? resp?.message?.key?.id ?? resp?.data?.key?.id ?? resp?.messageId ?? null;
-    const ts = new Date().toISOString();
-    await context.supabase.from("whatsapp_messages").insert({
-      chat_id: chatId,
-      session_id: session.id,
-      evolution_message_id: msgId,
-      remote_jid: remoteJid,
-      from_me: true,
-      message_type: "text",
-      text: data.text,
-      raw: resp,
-      message_timestamp: ts,
-    });
-    await context.supabase
-      .from("whatsapp_chats")
-      .update({ last_message: data.text, last_message_at: ts })
-      .eq("id", chatId);
-
-    // Cria/atualiza o vínculo permanente lead -> sessão
-    const { data: existingAssign } = await context.supabase
-      .from("lead_whatsapp_assignments")
-      .select("id, session_id, previous_session_ids, status")
-      .eq("phone_e164", digits)
-      .maybeSingle();
-    if (!existingAssign) {
-      await context.supabase.from("lead_whatsapp_assignments").insert({
-        phone_e164: digits,
+      .insert({
         session_id: session.id,
-        status: "active",
-      });
-    } else if (existingAssign.session_id !== session.id || existingAssign.status !== "active") {
-      const prev: string[] = Array.isArray(existingAssign.previous_session_ids)
-        ? (existingAssign.previous_session_ids as string[])
-        : [];
-      if (existingAssign.session_id !== session.id && !prev.includes(existingAssign.session_id)) {
-        prev.push(existingAssign.session_id);
-      }
-      await context.supabase
-        .from("lead_whatsapp_assignments")
-        .update({
-          session_id: session.id,
-          previous_session_ids: prev,
-          status: "active",
-        })
-        .eq("id", existingAssign.id);
+        remote_jid: remoteJid,
+        phone: sendNumber,
+        is_group: false,
+        name: sendNumber,
+        last_message: data.text,
+        last_message_at: new Date().toISOString(),
+      })
+      .select("id")
+      .single();
+    if (ins.error || !ins.data) {
+      throw new Error(ins.error?.message ?? "Falha ao criar conversa");
     }
+    chatId = ins.data.id;
+  }
 
-    return {
-      ok: true,
-      chat_id: chatId,
-      session_id: session.id,
-      session_name: session.name,
-    };
+  // Envia via Evolution.
+  const endpoint = `/message/sendText/${encodeURIComponent(session.instance_name)}`;
+  const payload = { number: sendNumber, text: data.text };
+  let resp: any;
+  try {
+    resp = await evolutionFetch(endpoint, { method: "POST", body: payload });
+  } catch (e: any) {
+    rethrowIfDemoBlocked(e);
+    if (isEvolutionConnectionClosed(e)) {
+      await markWhatsappSessionDisconnected(
+        context.supabase,
+        session.id,
+        "send_to_lead_connection_closed",
+      );
+      throw new Error(
+        `Sessão "${session.name}" caiu na Evolution. Reconecte em WhatsApp → Sessões antes de enviar.`,
+      );
+    }
+    const raw = (e?.rawBody ?? e?.message ?? "").toString().slice(0, 300);
+    if (raw.includes('"exists":false')) {
+      throw new Error("Este número não tem WhatsApp ativo.");
+    }
+    throw new Error(`Evolution recusou envio (status=${e?.status ?? 0}). raw=${raw}`);
+  }
+  const msgId =
+    resp?.key?.id ?? resp?.message?.key?.id ?? resp?.data?.key?.id ?? resp?.messageId ?? null;
+  const ts = new Date().toISOString();
+  await context.supabase.from("whatsapp_messages").insert({
+    chat_id: chatId,
+    session_id: session.id,
+    evolution_message_id: msgId,
+    remote_jid: remoteJid,
+    from_me: true,
+    message_type: "text",
+    text: data.text,
+    raw: resp,
+    message_timestamp: ts,
   });
+  await context.supabase
+    .from("whatsapp_chats")
+    .update({ last_message: data.text, last_message_at: ts })
+    .eq("id", chatId);
+
+  // Cria/atualiza o vínculo permanente lead -> sessão
+  const { data: existingAssign } = await context.supabase
+    .from("lead_whatsapp_assignments")
+    .select("id, session_id, previous_session_ids, status")
+    .eq("phone_e164", digits)
+    .maybeSingle();
+  if (!existingAssign) {
+    await context.supabase.from("lead_whatsapp_assignments").insert({
+      phone_e164: digits,
+      session_id: session.id,
+      status: "active",
+    });
+  } else if (existingAssign.session_id !== session.id || existingAssign.status !== "active") {
+    const prev: string[] = Array.isArray(existingAssign.previous_session_ids)
+      ? (existingAssign.previous_session_ids as string[])
+      : [];
+    if (existingAssign.session_id !== session.id && !prev.includes(existingAssign.session_id)) {
+      prev.push(existingAssign.session_id);
+    }
+    await context.supabase
+      .from("lead_whatsapp_assignments")
+      .update({
+        session_id: session.id,
+        previous_session_ids: prev,
+        status: "active",
+      })
+      .eq("id", existingAssign.id);
+  }
+
+  return {
+    ok: true,
+    chat_id: chatId,
+    session_id: session.id,
+    session_name: session.name,
+  };
+}
 
 // ============================================================
 // LEAD ↔ SESSÃO — vínculo permanente e realocação
@@ -1725,152 +1741,160 @@ export const getOrAssignSessionForLead = createServerFn({ method: "POST" })
 // atualiza quando o Evolution devolve um subject válido e diferente.
 export const refreshGroupNames = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    const { data: sessions, error: sErr } = await context.supabase
-      .from("whatsapp_sessions")
-      .select("id, instance_name");
-    if (sErr) throw new Error(sErr.message);
-    const url = process.env.EVOLUTION_API_URL?.trim().replace(/\/$/, "");
-    const apikey = process.env.EVOLUTION_API_KEY?.trim().replace(/^['"]|['"]$/g, "");
-    if (!url || !apikey) return { updated: 0 };
+  .handler(async ({ context }) => refreshGroupNamesFor(context));
 
-    let updated = 0;
-    for (const s of sessions ?? []) {
-      // Every Evolution call below targets this instance; checked once, outside
-      // the per-call try/catch so a demo block is never swallowed.
-      await assertEvolutionInstanceCanCall(s.instance_name);
-      const { data: groups } = await context.supabase
-        .from("whatsapp_chats")
-        .select("id, remote_jid, name, profile_pic_url")
-        .eq("session_id", s.id)
-        .eq("is_group", true);
-      for (const g of groups ?? []) {
-        const patch: { name?: string; profile_pic_url?: string } = {};
+// Body of `refreshGroupNames`, exported so the demo guard wiring is unit-testable.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function refreshGroupNamesFor(context: { supabase: any }) {
+  const { data: sessions, error: sErr } = await context.supabase
+    .from("whatsapp_sessions")
+    .select("id, instance_name");
+  if (sErr) throw new Error(sErr.message);
+  const url = process.env.EVOLUTION_API_URL?.trim().replace(/\/$/, "");
+  const apikey = process.env.EVOLUTION_API_KEY?.trim().replace(/^['"]|['"]$/g, "");
+  if (!url || !apikey) return { updated: 0 };
+
+  let updated = 0;
+  for (const s of sessions ?? []) {
+    // Every Evolution call below targets this instance; checked once, outside
+    // the per-call try/catch so a demo block is never swallowed.
+    await assertEvolutionInstanceCanCall(s.instance_name);
+    const { data: groups } = await context.supabase
+      .from("whatsapp_chats")
+      .select("id, remote_jid, name, profile_pic_url")
+      .eq("session_id", s.id)
+      .eq("is_group", true);
+    for (const g of groups ?? []) {
+      const patch: { name?: string; profile_pic_url?: string } = {};
+      try {
+        const res = await fetch(
+          `${url}/group/findGroupInfos/${encodeURIComponent(s.instance_name)}?groupJid=${encodeURIComponent(g.remote_jid)}`,
+          { method: "GET", headers: { apikey } },
+        );
+        if (res.ok) {
+          const json: any = await res.json().catch(() => null);
+          const subject: string | undefined =
+            json?.subject ?? json?.data?.subject ?? json?.[0]?.subject;
+          const pic: string | undefined =
+            json?.pictureUrl ?? json?.profilePictureUrl ?? json?.data?.pictureUrl;
+          if (typeof subject === "string" && subject.trim() && subject.trim() !== g.name) {
+            patch.name = subject.trim();
+          }
+          if (typeof pic === "string" && pic.startsWith("http") && pic !== g.profile_pic_url) {
+            patch.profile_pic_url = pic;
+          }
+        }
+      } catch {}
+      // Fallback foto: fetchProfilePictureUrl
+      if (!patch.profile_pic_url && !g.profile_pic_url) {
         try {
-          const res = await fetch(
-            `${url}/group/findGroupInfos/${encodeURIComponent(s.instance_name)}?groupJid=${encodeURIComponent(g.remote_jid)}`,
-            { method: "GET", headers: { apikey } },
+          const r = await fetch(
+            `${url}/chat/fetchProfilePictureUrl/${encodeURIComponent(s.instance_name)}`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json", apikey },
+              body: JSON.stringify({ number: g.remote_jid }),
+            },
           );
-          if (res.ok) {
-            const json: any = await res.json().catch(() => null);
-            const subject: string | undefined =
-              json?.subject ?? json?.data?.subject ?? json?.[0]?.subject;
-            const pic: string | undefined =
-              json?.pictureUrl ?? json?.profilePictureUrl ?? json?.data?.pictureUrl;
-            if (typeof subject === "string" && subject.trim() && subject.trim() !== g.name) {
-              patch.name = subject.trim();
-            }
-            if (typeof pic === "string" && pic.startsWith("http") && pic !== g.profile_pic_url) {
+          if (r.ok) {
+            const j: any = await r.json().catch(() => null);
+            const pic: string | undefined = j?.profilePictureUrl ?? j?.url;
+            if (typeof pic === "string" && pic.startsWith("http")) {
               patch.profile_pic_url = pic;
             }
           }
         } catch {}
-        // Fallback foto: fetchProfilePictureUrl
-        if (!patch.profile_pic_url && !g.profile_pic_url) {
-          try {
-            const r = await fetch(
-              `${url}/chat/fetchProfilePictureUrl/${encodeURIComponent(s.instance_name)}`,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json", apikey },
-                body: JSON.stringify({ number: g.remote_jid }),
-              },
-            );
-            if (r.ok) {
-              const j: any = await r.json().catch(() => null);
-              const pic: string | undefined = j?.profilePictureUrl ?? j?.url;
-              if (typeof pic === "string" && pic.startsWith("http")) {
-                patch.profile_pic_url = pic;
-              }
-            }
-          } catch {}
-        }
-        if (Object.keys(patch).length > 0) {
-          await context.supabase.from("whatsapp_chats").update(patch).eq("id", g.id);
-          updated++;
-        }
+      }
+      if (Object.keys(patch).length > 0) {
+        await context.supabase.from("whatsapp_chats").update(patch).eq("id", g.id);
+        updated++;
       }
     }
-    return { updated };
-  });
+  }
+  return { updated };
+}
 
 // "Cura" chats 1:1 que ficaram com nome igual ao número e/ou sem foto de perfil.
 // Idempotente — só atualiza quando a Evolution devolve dado válido e diferente.
 export const refreshContactNames = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    const { data: sessions, error: sErr } = await context.supabase
-      .from("whatsapp_sessions")
-      .select("id, instance_name");
-    if (sErr) throw new Error(sErr.message);
-    const url = process.env.EVOLUTION_API_URL?.trim().replace(/\/$/, "");
-    const apikey = process.env.EVOLUTION_API_KEY?.trim().replace(/^['"]|['"]$/g, "");
-    if (!url || !apikey) return { updated: 0 };
+  .handler(async ({ context }) => refreshContactNamesFor(context));
 
-    let updated = 0;
-    for (const s of sessions ?? []) {
-      // Every Evolution call below targets this instance; checked once, outside
-      // the per-call try/catch so a demo block is never swallowed.
-      await assertEvolutionInstanceCanCall(s.instance_name);
-      const { data: chats } = await context.supabase
-        .from("whatsapp_chats")
-        .select("id, remote_jid, phone, name, profile_pic_url")
-        .eq("session_id", s.id)
-        .eq("is_group", false);
-      for (const c of chats ?? []) {
-        const patch: { name?: string; profile_pic_url?: string } = {};
-        const nameLooksWrong = !c.name || c.name === c.phone || c.name === c.remote_jid;
-        // Nome via findContacts
-        if (nameLooksWrong) {
-          try {
-            const r = await fetch(
-              `${url}/chat/findContacts/${encodeURIComponent(s.instance_name)}`,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json", apikey },
-                body: JSON.stringify({ where: { id: c.remote_jid } }),
-              },
-            );
-            if (r.ok) {
-              const j: any = await r.json().catch(() => null);
-              const arr: any[] = Array.isArray(j) ? j : Array.isArray(j?.data) ? j.data : [];
-              const first = arr[0];
-              const cand: string | undefined =
-                first?.name ?? first?.pushName ?? first?.notify ?? first?.verifiedName;
-              if (typeof cand === "string" && cand.trim() && cand.trim() !== c.name) {
-                patch.name = cand.trim();
-              }
+// Body of `refreshContactNames`, exported so the demo guard wiring is unit-testable.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function refreshContactNamesFor(context: { supabase: any }) {
+  const { data: sessions, error: sErr } = await context.supabase
+    .from("whatsapp_sessions")
+    .select("id, instance_name");
+  if (sErr) throw new Error(sErr.message);
+  const url = process.env.EVOLUTION_API_URL?.trim().replace(/\/$/, "");
+  const apikey = process.env.EVOLUTION_API_KEY?.trim().replace(/^['"]|['"]$/g, "");
+  if (!url || !apikey) return { updated: 0 };
+
+  let updated = 0;
+  for (const s of sessions ?? []) {
+    // Every Evolution call below targets this instance; checked once, outside
+    // the per-call try/catch so a demo block is never swallowed.
+    await assertEvolutionInstanceCanCall(s.instance_name);
+    const { data: chats } = await context.supabase
+      .from("whatsapp_chats")
+      .select("id, remote_jid, phone, name, profile_pic_url")
+      .eq("session_id", s.id)
+      .eq("is_group", false);
+    for (const c of chats ?? []) {
+      const patch: { name?: string; profile_pic_url?: string } = {};
+      const nameLooksWrong = !c.name || c.name === c.phone || c.name === c.remote_jid;
+      // Nome via findContacts
+      if (nameLooksWrong) {
+        try {
+          const r = await fetch(
+            `${url}/chat/findContacts/${encodeURIComponent(s.instance_name)}`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json", apikey },
+              body: JSON.stringify({ where: { id: c.remote_jid } }),
+            },
+          );
+          if (r.ok) {
+            const j: any = await r.json().catch(() => null);
+            const arr: any[] = Array.isArray(j) ? j : Array.isArray(j?.data) ? j.data : [];
+            const first = arr[0];
+            const cand: string | undefined =
+              first?.name ?? first?.pushName ?? first?.notify ?? first?.verifiedName;
+            if (typeof cand === "string" && cand.trim() && cand.trim() !== c.name) {
+              patch.name = cand.trim();
             }
-          } catch {}
-        }
-        // Foto de perfil
-        if (!c.profile_pic_url) {
-          try {
-            const r = await fetch(
-              `${url}/chat/fetchProfilePictureUrl/${encodeURIComponent(s.instance_name)}`,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json", apikey },
-                body: JSON.stringify({ number: c.remote_jid }),
-              },
-            );
-            if (r.ok) {
-              const j: any = await r.json().catch(() => null);
-              const pic: string | undefined = j?.profilePictureUrl ?? j?.url;
-              if (typeof pic === "string" && pic.startsWith("http")) {
-                patch.profile_pic_url = pic;
-              }
+          }
+        } catch {}
+      }
+      // Foto de perfil
+      if (!c.profile_pic_url) {
+        try {
+          const r = await fetch(
+            `${url}/chat/fetchProfilePictureUrl/${encodeURIComponent(s.instance_name)}`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json", apikey },
+              body: JSON.stringify({ number: c.remote_jid }),
+            },
+          );
+          if (r.ok) {
+            const j: any = await r.json().catch(() => null);
+            const pic: string | undefined = j?.profilePictureUrl ?? j?.url;
+            if (typeof pic === "string" && pic.startsWith("http")) {
+              patch.profile_pic_url = pic;
             }
-          } catch {}
-        }
-        if (Object.keys(patch).length > 0) {
-          await context.supabase.from("whatsapp_chats").update(patch).eq("id", c.id);
-          updated++;
-        }
+          }
+        } catch {}
+      }
+      if (Object.keys(patch).length > 0) {
+        await context.supabase.from("whatsapp_chats").update(patch).eq("id", c.id);
+        updated++;
       }
     }
-    return { updated };
-  });
+  }
+  return { updated };
+}
 
 // ============================================================
 // FILA DE DISPARO — diagnóstico + destravamento + backfill de alertas
