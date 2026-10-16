@@ -15,7 +15,12 @@ import {
 } from "./email-segments.server";
 import { buildPlayerVariables } from "./template-vars.server";
 import { renderTemplate } from "./template-vars.server";
-import { resolveCurrentTenantId, resolveOperationalTenantId } from "./tenant-access.server";
+import {
+  assertTenantNotDemoForSend,
+  resolveCurrentTenantId,
+  resolveOperationalTenantId,
+} from "./tenant-access.server";
+import { isDemoBlockedError } from "./demo-tenant";
 import { bindTrackedDispatchesToMessageLog } from "./shortio.server";
 import { conversionFunnelSnapshot, type ConversionObjective } from "./conversion-funnel";
 
@@ -840,6 +845,9 @@ export async function runCampaignSend(campaignId: string) {
     .eq("id", campaignId)
     .maybeSingle();
   if (cErr || !camp) throw new Error("Campanha não encontrada");
+  // Demo guard once, before any write (campaign status/stats, frequency-cap
+  // 'pending' rows, email_send_logs): a demo campaign never starts.
+  await assertTenantNotDemoForSend(camp.tenant_id);
 
   if (!camp.template_id) throw new Error("Selecione um template antes de enviar.");
 
@@ -1030,6 +1038,8 @@ export async function runCampaignSend(campaignId: string) {
         console.error("campaign send failed", { to: p.email, snippet: errSnippet });
       }
     } catch (err) {
+      // Second net: a demo block is not a delivery failure and is never logged.
+      if (isDemoBlockedError(err)) throw err;
       falhas++;
       console.error("campaign send error", err);
       await supabaseAdmin.from("email_send_logs").insert({

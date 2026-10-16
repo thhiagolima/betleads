@@ -38,6 +38,7 @@ import {
   syncShortioMetrics,
 } from "./shortio.server";
 import { callElevenLabs, DEFAULT_VOICE_SETTINGS } from "./calls.server";
+import { runCampaignSend } from "./email.functions";
 
 const NORMAL = "00000000-0000-4000-8000-000000000001";
 const DEMO = "00000000-0000-4000-8000-000000000002";
@@ -279,8 +280,8 @@ describe("e-mail (sendInfobipEmail)", () => {
   });
 
   it("control: a normal tenant reaches fetch", async () => {
-    const dbg = await sendInfobipEmail(emailInput(NORMAL));
-    process.stdout.write("DBG " + JSON.stringify(dbg) + "\n");
+    const r = await sendInfobipEmail(emailInput(NORMAL));
+    expect(r.ok).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
@@ -524,11 +525,143 @@ describe("transport guard: tenant flagged demo after the top-level check", () =>
     vi.stubEnv("SHORTCODE_SMS_TOKEN", "");
     const ledger = flipToDemoOnReserve();
     const { outcomes, httpCalls } = await sendSmsBatch([batchItem(NORMAL, 1)]);
+    // httpCalls counts chunk attempts (incremented before postBulk), not
+    // requests that reached the network: fetch stayed at 0.
     expect(fetchMock).toHaveBeenCalledTimes(0);
     expect(httpCalls).toBe(1);
     expect(outcomes[0]).toMatchObject({ ok: false, status: "failed", retryable: false });
     expect(outcomes[0].error).toContain("DEMO_SEND_BLOCKED");
     expect(ledger.charged()).toBe(0);
     expect(fake.db.rows("sms_send_logs").map((l) => l.status)).toEqual(["error"]);
+  });
+});
+
+describe("tenant lookup failure is fail-closed (no provider request)", () => {
+  // The `tenants` select errors once: the guard must propagate it, never pass.
+  const failTenantLookup = () => fake.db.failNext("tenants", "select", "connection reset");
+
+  it("e-mail", async () => {
+    failTenantLookup();
+    await expect(sendInfobipEmail(emailInput(NORMAL))).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(0);
+    expectNothingRecorded();
+  });
+
+  it("external webhook", async () => {
+    failTenantLookup();
+    await expect(
+      sendExternalTriggerEvent({
+        integration: integration(NORMAL),
+        trigger: "recuperacao_vip",
+        lead: { id: null, telefone: "5511999999999", nome: "Lead" },
+        isTest: true,
+      }),
+    ).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(0);
+    expect(fake.db.rows("whatsapp_external_events")).toEqual([]);
+  });
+
+  it("Short.io single, bulk and stats", async () => {
+    const link = {
+      tenantId: NORMAL,
+      originalUrl: "https://app.example/a",
+      domain: "go.example",
+      ttlDays: null,
+      sourceType: "campaign",
+    };
+    failTenantLookup();
+    await expect(createShortioLink(link)).rejects.toThrow();
+    failTenantLookup();
+    await expect(
+      createShortioLinksBulk({ ...link, originalUrls: [link.originalUrl] }),
+    ).rejects.toThrow();
+    fake.db.rows("tracked_links").push({
+      id: "tl-normal",
+      tenant_id: NORMAL,
+      shortio_link_id: "lnk_n",
+      status: "active",
+    });
+    failTenantLookup();
+    await expect(syncShortioMetrics(100, NORMAL)).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(0);
+  });
+
+  it("ElevenLabs", async () => {
+    failTenantLookup();
+    await expect(
+      callElevenLabs({
+        tenantId: NORMAL,
+        text: "Olá",
+        voiceId: "voice-1",
+        voiceSettings: DEFAULT_VOICE_SETTINGS,
+      }),
+    ).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(0);
+  });
+
+  it("SMS", async () => {
+    failTenantLookup();
+    await expect(
+      sendSmsInternal({ to: "+5511999999999", content: "Oi", tenantId: NORMAL }),
+    ).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(0);
+    expectNothingRecorded();
+  });
+});
+
+describe("e-mail campaign send (runCampaignSend)", () => {
+  const CAMPAIGN = "44444444-4444-4444-8444-000000000001";
+  const TEMPLATE = "55555555-5555-4555-8555-000000000001";
+  const NORMAL_PLAYER = "33333333-3333-4333-8333-000000000002";
+
+  function campaignFor(tenantId: string, playerId: string, frequencyAllowed: boolean) {
+    fake.db.rows("email_campaigns").push({
+      id: CAMPAIGN,
+      tenant_id: tenantId,
+      template_id: TEMPLATE,
+      audience_filter: { audience_mode: "leads", target_player_ids: [playerId] },
+      track_links: false,
+    });
+    fake.db.rows("email_templates").push({
+      id: TEMPLATE,
+      tenant_id: tenantId,
+      lifecycle_status: "published",
+      subject: "Oi",
+      body_html: "<p>Oi</p>",
+    });
+    fake.db.rows("email_senders").push({
+      tenant_id: tenantId,
+      is_default: true,
+      from_email: "crm@example.com",
+      from_name: "CRM",
+      reply_to: null,
+    });
+    fake.db.onRpc("check_contact_frequency_limit", () => ({
+      data: [{ allowed: frequencyAllowed, retry_at: null, blocked_reason: "cap" }],
+      error: null,
+    }));
+  }
+
+  it("demo tenant: rejected before any write (no pending/error logs, no stats), no fetch", async () => {
+    fake.db.rows("players").find((p) => p.id === PLAYER)!.email = "lead@example.com";
+    // Frequency cap reached: without the guard this writes 'pending' rows.
+    campaignFor(DEMO, PLAYER, false);
+    await expect(runCampaignSend(CAMPAIGN)).rejects.toMatchObject({ code: "DEMO_SEND_BLOCKED" });
+    expect(fetchMock).toHaveBeenCalledTimes(0);
+    expect(fake.db.calls.filter((c) => c.op !== "select")).toEqual([]);
+    expect(fake.db.rows("email_send_logs")).toEqual([]);
+  });
+
+  it("tenant turning demo mid-campaign: the per-recipient catch logs nothing", async () => {
+    fake.db.rows("players").push({ id: NORMAL_PLAYER, tenant_id: NORMAL, email: "n@example.com" });
+    campaignFor(NORMAL, NORMAL_PLAYER, true);
+    fake.db.onRpc("check_contact_frequency_limit", () => {
+      fake.db.rows("tenants").find((t) => t.id === NORMAL)!.is_demo = true;
+      __resetDemoTenantCacheForTests();
+      return { data: [{ allowed: true, retry_at: null, blocked_reason: null }], error: null };
+    });
+    await expect(runCampaignSend(CAMPAIGN)).rejects.toMatchObject({ code: "DEMO_SEND_BLOCKED" });
+    expect(fetchMock).toHaveBeenCalledTimes(0);
+    expect(fake.db.rows("email_send_logs")).toEqual([]);
   });
 });

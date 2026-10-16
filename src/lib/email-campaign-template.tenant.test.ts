@@ -23,6 +23,11 @@ vi.mock("@/integrations/supabase/client.server", () => {
   }
   return { supabaseAdmin: { from } };
 });
+// The demo send guard has its own coverage (demo-send-guard.channels.test.ts).
+vi.mock("./tenant-access.server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./tenant-access.server")>()),
+  assertTenantNotDemoForSend: vi.fn(async () => undefined),
+}));
 vi.mock("./email-send.server", () => ({
   resolveSender: vi.fn(async () => ({ fromEmail: "a@a.com", fromName: "A", replyTo: null })),
   sendInfobipEmail: vi.fn(async () => ({ ok: true, status: 200, body: {} })),

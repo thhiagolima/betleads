@@ -8,6 +8,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import {
   assertTenantCanOperate,
+  assertTenantNotDemoForSend,
   demoSendBlockedReason,
   requireActiveTenantAdmin,
   resolveCurrentTenantId,
@@ -1107,6 +1108,8 @@ export const sendBulkSms = createServerFn({ method: "POST" })
     if (!tenantId) throw new Error("tenant não encontrado para o usuário");
 
     await assertTenantCanOperate(tenantId);
+    // Demo guard once, before the campaign row, stats or any per-recipient send.
+    await assertTenantNotDemoForSend(tenantId);
     let templateSnapshot: Json | null = null;
     if (data.templateId) {
       const { data: template, error } = await (context.supabase as any)
@@ -2061,6 +2064,8 @@ export const scheduleBulkSms = createServerFn({ method: "POST" })
     if (!tenantId) throw new Error("tenant não encontrado para o usuário");
 
     await assertTenantCanOperate(tenantId);
+    // Demo guard once, before the campaign row, stats or any per-recipient send.
+    await assertTenantNotDemoForSend(tenantId);
     let templateSnapshot: Json | null = null;
     if (data.templateId) {
       const { data: template, error } = await (context.supabase as any)

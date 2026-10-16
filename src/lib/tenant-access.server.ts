@@ -161,19 +161,21 @@ export async function assertTenantCanSendExternally(tenantId: string | null | un
  * checked the tenant's billing status before (e-mail, external webhook,
  * Short.io, ElevenLabs): throws only `DemoTenantBlockedError`
  * (`DEMO_SEND_BLOCKED`, fail-closed for null/undefined/unknown/demo) and
- * leaves suspended/canceled tenants to each channel's existing rules.
+ * leaves suspended/canceled tenants to each channel's existing rules. A
+ * failed tenant lookup throws its own error (also blocking the send).
  */
 export async function assertTenantNotDemoForSend(tenantId: string | null | undefined) {
-  try {
-    await assertTenantCanSendExternally(tenantId);
-  } catch (error) {
-    if (isDemoBlockedError(error)) throw error;
-  }
+  if (!tenantId) throw new DemoTenantBlockedError("DEMO_SEND_BLOCKED");
+  // Decided on the row itself, never by catching errors: a failed lookup
+  // propagates, so the send is refused (fail-closed).
+  const tenant = await getCachedTenantStatus(tenantId);
+  if (!tenant || tenant.is_demo) throw new DemoTenantBlockedError("DEMO_SEND_BLOCKED");
 }
 
 /**
  * `assertTenantNotDemoForSend` for senders whose contract is a result object:
- * the `DEMO_SEND_BLOCKED` message when the tenant is refused, else null.
+ * the `DEMO_SEND_BLOCKED` message when the tenant is refused, else null. A
+ * lookup error is rethrown (the send never happens).
  */
 export async function demoSendBlockedReason(
   tenantId: string | null | undefined,

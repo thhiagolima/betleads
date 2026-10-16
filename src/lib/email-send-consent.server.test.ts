@@ -17,6 +17,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/integrations/supabase/client.server", () => ({ supabaseAdmin: {} }));
+// The demo send guard has its own coverage (demo-send-guard.channels.test.ts).
+vi.mock("./tenant-access.server", () => ({
+  assertTenantNotDemoForSend: vi.fn(async () => undefined),
+}));
 vi.mock("./consent.server", () => ({ getChannelConsentStatus: mocks.consent }));
 vi.mock("./email-deliverability.server", () => ({
   augmentEmailHtml: vi.fn(async (html: string) => ({ html, unsubscribeUrl: null })),
