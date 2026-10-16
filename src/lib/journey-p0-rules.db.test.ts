@@ -16,6 +16,7 @@ const EXPRESS = read("20261015122000_express_journeys.sql");
 const P0 = read("20261015200000_journey_p0_rules.sql");
 const P1_EXITS = read("20261016090000_journey_p1_exits.sql");
 const END_DATE = read("20261016100000_journey_end_date.sql");
+const SAQUE_BUDGET = read("20261016110000_journey_independent_saque_budget.sql");
 
 const SCHEMA = `
 create role anon nologin;
@@ -81,7 +82,8 @@ create table public.journey_events (
 create table public.journey_contact_limits (
   tenant_id uuid primary key, max_messages_24h integer, max_messages_7d integer);
 create table public.sms_send_logs (
-  tenant_id uuid, player_id uuid, status text, created_at timestamptz not null default now());
+  tenant_id uuid, player_id uuid, status text, trigger_name text,
+  created_at timestamptz not null default now());
 create table public.email_send_logs (
   tenant_id uuid, player_id uuid, status text, created_at timestamptz not null default now());
 create table public.dispatch_pause_state (
@@ -163,6 +165,8 @@ beforeAll(async () => {
   await db.exec(`begin; ${P1_EXITS}; commit;`);
   await db.exec(`begin; ${END_DATE}; commit;`);
   await db.exec(`begin; ${END_DATE}; commit;`);
+  await db.exec(`begin; ${SAQUE_BUDGET}; commit;`);
+  await db.exec(`begin; ${SAQUE_BUDGET}; commit;`);
 }, 60_000);
 
 afterAll(async () => {
@@ -429,5 +433,42 @@ describe("journey end date (D-4)", () => {
       [row.id],
     );
     expect(after).toEqual({ status: "exited", exit_reason: "journey_ended" });
+  });
+});
+
+describe("independent saque budget (D-2)", () => {
+  async function smsLog(trigger: string, minutesAgo: number) {
+    await db.query(
+      `insert into sms_send_logs (tenant_id, player_id, status, trigger_name, created_at)
+       values ($1, $2, 'sent', $3, now() - make_interval(mins => $4))`,
+      [T1, P1, trigger, minutesAgo],
+    );
+  }
+
+  beforeEach(async () => {
+    await db.query(
+      `insert into journey_contact_limits (tenant_id, max_messages_24h, max_messages_7d) values ($1, 2, 14)`,
+      [T1],
+    );
+  });
+
+  it("saque SMS do not consume the standard daily slots", async () => {
+    await smsLog(`journey:${SAQUE}`, 30);
+    await smsLog(`journey:${SAQUE}`, 20);
+    await smsLog(`journey:${SAQUE}`, 10);
+    const [enrollment] = await insertEnrollment(PIX, "pix_gerado_nao_pago:pix-1");
+    const result = await reserve(PIX, enrollment.id);
+    expect(result.blocked_reason).toBeNull();
+  });
+
+  it("standard SMS still hit the limit, retried when the oldest leaves the window", async () => {
+    await smsLog("campanha:x", 600);
+    await smsLog(`journey:${ESFRIANDO}`, 60);
+    const [enrollment] = await insertEnrollment(PIX, "pix_gerado_nao_pago:pix-1");
+    const result = await reserve(PIX, enrollment.id);
+    expect(result.blocked_reason).toBe("global_limit_24h");
+    const hoursUntilRetry = (Date.parse(String(result.retry_at)) - Date.now()) / 3_600_000;
+    expect(hoursUntilRetry).toBeGreaterThan(13.9);
+    expect(hoursUntilRetry).toBeLessThan(14.1);
   });
 });
