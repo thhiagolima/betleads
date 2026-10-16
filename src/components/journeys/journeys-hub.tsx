@@ -34,6 +34,7 @@ import {
 } from "@/lib/journeys.functions";
 import { EXPRESS_JOURNEY_HINT } from "@/lib/journey-express";
 import { JourneyMapCard } from "@/components/journeys/journey-map-card";
+import { requestConfirmation } from "@/components/system-dialog-host";
 import {
   activationAsksEntryScope,
   defaultEntryScope,
@@ -708,13 +709,14 @@ export function JourneysHub() {
                         aria-label={`Excluir a jornada ${journey.name}`}
                         title="Excluir"
                         disabled={remove.isPending}
-                        onClick={() => {
-                          if (
-                            window.confirm(
-                              `Excluir a jornada “${journey.name}”? Esta ação não pode ser desfeita.`,
-                            )
-                          )
-                            remove.mutate(journey.id);
+                        onClick={async () => {
+                          const confirmed = await requestConfirmation({
+                            title: "Excluir jornada?",
+                            description: `A jornada “${journey.name}” será excluída. Esta ação não pode ser desfeita.`,
+                            confirmLabel: "Excluir jornada",
+                            destructive: true,
+                          });
+                          if (confirmed) remove.mutate(journey.id);
                         }}
                       >
                         <Trash2 className="h-4 w-4" aria-hidden="true" />
