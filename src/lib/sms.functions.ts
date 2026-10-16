@@ -8,6 +8,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import {
   assertTenantCanOperate,
+  requireActiveTenantAdmin,
   resolveCurrentTenantId,
   resolveOperationalTenantId,
 } from "@/lib/tenant-access.server";
@@ -1742,13 +1743,8 @@ function brtDayWindow(dateIso: string): { start: string; end: string } {
   return { start, end };
 }
 
-async function requireAdmin(userId: string) {
-  const { data: isAdmin } = await supabaseAdmin.rpc("has_role", {
-    _user_id: userId,
-    _role: "admin",
-  });
-  if (!isAdmin) throw new Error("Apenas administradores podem reenviar SMS");
-}
+// Admin DA CASA ativa (ou super admin), não admin de qualquer casa.
+const RESEND_ADMIN_ONLY = "Apenas administradores podem reenviar SMS";
 
 /** Conta as falhas do dia separadas por causa, para o diálogo de reenvio. */
 export const getFailedSmsBreakdown = createServerFn({ method: "POST" })
@@ -1757,8 +1753,7 @@ export const getFailedSmsBreakdown = createServerFn({ method: "POST" })
     z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }).parse(input),
   )
   .handler(async ({ data, context }) => {
-    await requireAdmin(context.userId);
-    const tenantId = await resolveCurrentTenantId(context.supabase);
+    const tenantId = await requireActiveTenantAdmin(context.supabase, RESEND_ADMIN_ONLY);
     const { start, end } = brtDayWindow(data.date);
 
     const { count: rateLimited } = await supabaseAdmin
@@ -1800,8 +1795,8 @@ export const resendFailedSms = createServerFn({ method: "POST" })
       .parse(input),
   )
   .handler(async ({ data, context }) => {
-    await requireAdmin(context.userId);
-    const tenantId = await resolveOperationalTenantId(context.supabase);
+    const tenantId = await requireActiveTenantAdmin(context.supabase, RESEND_ADMIN_ONLY);
+    await assertTenantCanOperate(tenantId);
     const { start, end } = brtDayWindow(data.date);
 
     type Row = {

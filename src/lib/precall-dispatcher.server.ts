@@ -50,10 +50,12 @@ export async function runPrecallDispatcher(): Promise<{
     }
 
     // Sessão precisa estar conectada
+    // session_id veio do usuário: só vale sessão da própria casa.
     const { data: session } = await supabaseAdmin
       .from("whatsapp_sessions")
       .select("id, instance_name, name, status")
       .eq("id", camp.session_id)
+      .eq("tenant_id", camp.tenant_id)
       .maybeSingle();
     if (!session || session.status !== "connected") continue;
 
@@ -200,12 +202,19 @@ export async function runPrecallDispatcher(): Promise<{
  * Chamado pelo webhook Evolution quando uma mensagem inbound chega.
  * Marca o lead como 'ligar_agora' se houver pré-call enviado nas últimas 48h.
  */
-export async function detectPrecallResponse(phone: string, text: string | null): Promise<void> {
-  if (!phone) return;
+export async function detectPrecallResponse(
+  phone: string,
+  text: string | null,
+  tenantId: string,
+): Promise<void> {
+  // Só a casa dona da sessão que recebeu a resposta: o mesmo telefone pode
+  // ser lead de outras casas.
+  if (!phone || !tenantId) return;
   const cutoff = new Date(Date.now() - 48 * 3600 * 1000).toISOString();
   const { data: leads } = await supabaseAdmin
     .from("precall_leads")
     .select("id, campaign_id")
+    .eq("tenant_id", tenantId)
     .eq("telefone_e164", phone)
     .eq("status", "enviado")
     .gte("sent_at", cutoff)

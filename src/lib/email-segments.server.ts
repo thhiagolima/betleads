@@ -2,22 +2,27 @@
 // Compartilhado pelos envios em massa de Email Marketing.
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import {
-  applyActiveWithin,
-  applyInactiveAtLeast,
-  applyInactivityWindow,
-} from "./player-activity";
+import { applyActiveWithin, applyInactiveAtLeast, applyInactivityWindow } from "./player-activity";
 
 const DAY = 86400000;
 const ago = (n: number) => new Date(Date.now() - n * DAY).toISOString();
 
+function requireTenant(tenantId: string) {
+  if (!tenantId) throw new Error("tenant obrigatório para resolver a audiência de e-mail");
+}
+
+// Roda com service role, então o filtro por tenant é a única barreira entre
+// casas: nunca remover o `.eq("tenant_id", ...)` destas consultas.
 export async function loadPlayersForSegment(
+  tenantId: string,
   segmento: string,
   limit = 5000,
 ): Promise<any[]> {
+  requireTenant(tenantId);
   let q = supabaseAdmin
     .from("players")
     .select("*")
+    .eq("tenant_id", tenantId)
     .not("email", "is", null)
     .neq("email", "");
 
@@ -81,7 +86,19 @@ export async function loadPlayersForSegment(
   return data ?? [];
 }
 
-export async function countPlayersForSegment(segmento: string): Promise<number> {
-  const list = await loadPlayersForSegment(segmento, 5000);
+export async function countPlayersForSegment(tenantId: string, segmento: string): Promise<number> {
+  const list = await loadPlayersForSegment(tenantId, segmento, 5000);
   return list.length;
+}
+
+/** Leads escolhidos à mão: ids de outra casa são descartados silenciosamente. */
+export async function loadPlayersByIds(tenantId: string, ids: string[]): Promise<any[]> {
+  requireTenant(tenantId);
+  const { data, error } = await supabaseAdmin
+    .from("players")
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .in("id", ids);
+  if (error) throw new Error(error.message);
+  return data ?? [];
 }

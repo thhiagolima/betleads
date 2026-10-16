@@ -11,6 +11,46 @@ export function getServiceClient(): SupabaseClient | null {
   });
 }
 
+// Casa de onde os CRMs Expert recebem os eventos espelhados, salvo quando o
+// tenant Expert declara outra em metadata.source_tenant_id.
+const DEFAULT_EXPERT_SOURCE_TENANT_ID = "00000000-0000-0000-0000-000000000001";
+
+type ExpertTenantRow = { id: string; metadata: unknown };
+
+/**
+ * Tenants CRM Expert que devem receber o evento. Cada casa tem o próprio
+ * token de webhook e controla o payload, então só a casa de origem do Expert
+ * pode alimentá-lo; senão qualquer casa injetaria leads num Expert apenas
+ * enviando o affiliate id dele.
+ */
+export function expertMirrorTargets(
+  experts: ExpertTenantRow[],
+  sourceTenantId: string,
+  affiliateId: string | null,
+): string[] {
+  if (!affiliateId) return [];
+  return experts
+    .filter((t) => {
+      if (t.id === sourceTenantId) return false;
+      const meta = (t.metadata ?? {}) as {
+        expert_affiliate_ids?: unknown;
+        source_tenant_id?: unknown;
+      };
+      const source =
+        typeof meta.source_tenant_id === "string" && meta.source_tenant_id
+          ? meta.source_tenant_id
+          : DEFAULT_EXPERT_SOURCE_TENANT_ID;
+      if (source !== sourceTenantId) return false;
+      const ids = Array.isArray(meta.expert_affiliate_ids)
+        ? meta.expert_affiliate_ids
+            .map((v) => (typeof v === "string" ? v.trim() : ""))
+            .filter((v) => v.length > 0)
+        : [];
+      return ids.includes(affiliateId);
+    })
+    .map((t) => t.id);
+}
+
 export async function processWebhookEvent(
   sb: SupabaseClient,
   tenantId: string,
@@ -997,21 +1037,14 @@ export async function processWebhookEvent(
             .from("tenants")
             .select("id, metadata, crm_model")
             .eq("crm_model", "CRM_EXPERT");
-          for (const t of experts ?? []) {
-            if (t.id === tenantId) continue;
-            const rawIds =
-              ((t.metadata as { expert_affiliate_ids?: unknown } | null)
-                ?.expert_affiliate_ids as unknown) ?? [];
-            const ids = Array.isArray(rawIds)
-              ? rawIds
-                  .map((v) => (typeof v === "string" ? v.trim() : ""))
-                  .filter((v) => v.length > 0)
-              : [];
-            if (ids.includes(affId)) {
-              await processWebhookEvent(sb, t.id as string, evento, payload, {
-                mirror: false,
-              });
-            }
+          for (const targetId of expertMirrorTargets(
+            (experts ?? []) as ExpertTenantRow[],
+            tenantId,
+            affId,
+          )) {
+            await processWebhookEvent(sb, targetId, evento, payload, {
+              mirror: false,
+            });
           }
         }
       } catch (mirrorErr) {

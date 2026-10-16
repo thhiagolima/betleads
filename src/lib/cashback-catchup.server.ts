@@ -69,14 +69,21 @@ export async function runCashbackCatchup(
 
   // Contato: usa o do pagamento e, na falta, o do lead.
   const playerIds = Array.from(new Set(rows.map((r) => r.player_id as string)));
-  const contatos = new Map<string, { telefone: string | null; email: string | null }>();
+  const contatos = new Map<
+    string,
+    { tenant_id: string; telefone: string | null; email: string | null }
+  >();
   for (let i = 0; i < playerIds.length; i += 500) {
     const { data: ps } = await supabaseAdmin
       .from("players")
-      .select("id, telefone, email")
+      .select("id, tenant_id, telefone, email")
       .in("id", playerIds.slice(i, i + 500));
     (ps ?? []).forEach((p) => {
-      contatos.set(p.id, { telefone: p.telefone ?? null, email: p.email ?? null });
+      contatos.set(p.id, {
+        tenant_id: p.tenant_id,
+        telefone: p.telefone ?? null,
+        email: p.email ?? null,
+      });
     });
   }
 
@@ -89,6 +96,8 @@ export async function runCashbackCatchup(
     const playerId = cb.player_id as string;
     if (!allowedTenants.has(tenantId)) continue;
     const contato = contatos.get(playerId);
+    // Varredura de todas as casas: o player do pagamento precisa ser da mesma casa.
+    if (!contato || contato.tenant_id !== tenantId) continue;
     const phone = (cb.telefone ?? contato?.telefone ?? "").replace(/\D/g, "");
     const email = cb.email ?? contato?.email ?? null;
 

@@ -165,15 +165,18 @@ function jidToPhone(jid: string | null | undefined): string | null {
 // Atualiza/cria o vínculo lead->sessão (somente 1:1). Idempotente.
 // Regra de ouro: NUNCA muda a sessão de um assignment 'active' automaticamente.
 // Mudança de sessão só acontece via realocação explícita (reassignOrphanedLeads).
-async function upsertLeadAssignment(phone: string, sessionId: string) {
-  if (!phone) return;
+// O vínculo é da casa dona da sessão: o mesmo telefone pode ser lead de outra.
+async function upsertLeadAssignment(phone: string, sessionId: string, tenantId: string) {
+  if (!phone || !tenantId) return;
   const { data: existing } = await supabaseAdmin
     .from("lead_whatsapp_assignments")
     .select("id, session_id, status, previous_session_ids")
+    .eq("tenant_id", tenantId)
     .eq("phone_e164", phone)
     .maybeSingle();
   if (!existing) {
     await supabaseAdmin.from("lead_whatsapp_assignments").insert({
+      tenant_id: tenantId,
       phone_e164: phone,
       session_id: sessionId,
       status: "active",
@@ -481,13 +484,13 @@ async function handleMessageUpsert(payload: any, instanceName: string) {
 
     // Vínculo permanente lead->sessão (apenas 1:1)
     if (!isGroup && phone) {
-      await upsertLeadAssignment(phone, session.id);
+      await upsertLeadAssignment(phone, session.id, session.tenant_id);
     }
 
     // Pré-ligação: se for resposta inbound 1:1, marca lead como "ligar_agora"
     if (!isGroup && !fromMe && phone) {
       try {
-        await detectPrecallResponse(phone, meta.text);
+        await detectPrecallResponse(phone, meta.text, session.tenant_id);
       } catch (e: any) {
         console.warn("[evo-webhook] precall response detection failed:", e?.message);
       }

@@ -41,8 +41,11 @@ function IAPage() {
 
   const mutation = useMutation({
     mutationFn: async (question: string) => {
+      // A função valida que o usuário é admin/gestor desta casa e só lê dados dela.
+      // O client também manda X-Active-Tenant; o corpo deixa a casa explícita.
+      const tenantId = window.localStorage.getItem("betleads:active-tenant");
       const { data, error } = await supabase.functions.invoke("ai-player-insights", {
-        body: { question },
+        body: tenantId ? { question, tenant_id: tenantId } : { question },
       });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);

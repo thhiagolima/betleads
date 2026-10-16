@@ -53,6 +53,24 @@ export async function resolveOperationalTenantForRequest(
   return activeTenantId;
 }
 
+/**
+ * Admin-only actions of the active tenant. `is_tenant_admin` reads auth.uid(),
+ * so it must run on the user's own client; it is true for an admin of that
+ * tenant or a super admin. Never use the global has_role(uid, 'admin') here:
+ * it says nothing about WHICH tenant the user administers.
+ */
+export async function requireTenantAdmin(supabase: RpcClient, tenantId: string, message: string) {
+  const { data, error } = await supabase.rpc("is_tenant_admin", { _tenant: tenantId });
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error(message);
+  return tenantId;
+}
+
+export async function requireActiveTenantAdmin(supabase: RpcClient, message: string) {
+  const tenantId = await resolveCurrentTenantId(supabase);
+  return requireTenantAdmin(supabase, tenantId, message);
+}
+
 export async function getTenantStatus(tenantId: string) {
   const { data, error } = await supabaseAdmin
     .from("tenants")

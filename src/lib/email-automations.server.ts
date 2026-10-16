@@ -71,6 +71,7 @@ type Lead = {
 };
 
 async function logEvent(
+  tenant_id: string,
   flow_id: string,
   flow_lead_id: string | null,
   player_id: string | null,
@@ -78,6 +79,7 @@ async function logEvent(
   detail: Record<string, unknown> = {},
 ) {
   await supabaseAdmin.from("email_flow_logs").insert({
+    tenant_id,
     flow_id,
     flow_lead_id,
     player_id,
@@ -89,6 +91,7 @@ async function logEvent(
 /** Checa se alguma condicao de saida esta satisfeita pelo player. */
 async function shouldExit(
   exitConditions: Record<string, boolean>,
+  tenant_id: string,
   player_id: string | null,
   entered_at: string,
 ): Promise<string | null> {
@@ -97,6 +100,7 @@ async function shouldExit(
     .from("players")
     .select("ultimo_login, ultimo_jogo, ultimo_deposito, ftd_em, total_depositado, status")
     .eq("id", player_id)
+    .eq("tenant_id", tenant_id)
     .maybeSingle();
   if (!p) return null;
   const since = new Date(entered_at).getTime();
@@ -211,6 +215,7 @@ async function planLead(lead: Lead): Promise<SendPlan | null> {
     .from("email_flows")
     .select("id, active, exit_conditions, daily_limit")
     .eq("id", lead.flow_id)
+    .eq("tenant_id", lead.tenant_id)
     .maybeSingle();
   if (!flow || !flow.active) {
     await supabaseAdmin
@@ -239,7 +244,7 @@ async function planLead(lead: Lead): Promise<SendPlan | null> {
           locked_by: null,
         })
         .eq("id", lead.id);
-      await logEvent(lead.flow_id, lead.id, lead.player_id, "completed", {});
+      await logEvent(lead.tenant_id, lead.flow_id, lead.id, lead.player_id, "completed", {});
       return null;
     }
     const block = blocks[idx];
@@ -252,6 +257,7 @@ async function planLead(lead: Lead): Promise<SendPlan | null> {
       .maybeSingle();
     const reason = await shouldExit(
       exitConditions,
+      lead.tenant_id,
       lead.player_id,
       leadRow?.entered_at ?? new Date().toISOString(),
     );
@@ -260,7 +266,7 @@ async function planLead(lead: Lead): Promise<SendPlan | null> {
         .from("email_flow_leads")
         .update({ status: "exited", exit_reason: reason, locked_at: null, locked_by: null })
         .eq("id", lead.id);
-      await logEvent(lead.flow_id, lead.id, lead.player_id, "exited", { reason });
+      await logEvent(lead.tenant_id, lead.flow_id, lead.id, lead.player_id, "exited", { reason });
       return null;
     }
 
@@ -279,7 +285,7 @@ async function planLead(lead: Lead): Promise<SendPlan | null> {
           locked_by: null,
         })
         .eq("id", lead.id);
-      await logEvent(lead.flow_id, lead.id, lead.player_id, "completed", {
+      await logEvent(lead.tenant_id, lead.flow_id, lead.id, lead.player_id, "completed", {
         block: block.block_type,
       });
       return null;
@@ -300,7 +306,7 @@ async function planLead(lead: Lead): Promise<SendPlan | null> {
     }
     if (block.block_type === "tag" || block.block_type === "condition") {
       // sem ramificacao no MVP; loga e segue
-      await logEvent(lead.flow_id, lead.id, lead.player_id, block.block_type, {
+      await logEvent(lead.tenant_id, lead.flow_id, lead.id, lead.player_id, block.block_type, {
         label: block.label,
       });
       idx++;
@@ -313,11 +319,18 @@ async function planLead(lead: Lead): Promise<SendPlan | null> {
       if (block.send_at_hour != null) {
         const sched = computeBlockSchedule(block);
         if (sched.skip) {
-          await logEvent(lead.flow_id, lead.id, lead.player_id, "skipped_past_window", {
-            block_index: idx,
-            send_at_hour: block.send_at_hour,
-            send_at_minute: block.send_at_minute ?? 0,
-          });
+          await logEvent(
+            lead.tenant_id,
+            lead.flow_id,
+            lead.id,
+            lead.player_id,
+            "skipped_past_window",
+            {
+              block_index: idx,
+              send_at_hour: block.send_at_hour,
+              send_at_minute: block.send_at_minute ?? 0,
+            },
+          );
           // avança para o próximo bloco SEM disparar
           await supabaseAdmin
             .from("email_flow_leads")
@@ -351,14 +364,21 @@ async function planLead(lead: Lead): Promise<SendPlan | null> {
           .from("email_flow_leads")
           .update({ status: "running", next_run_at: defer, locked_at: null, locked_by: null })
           .eq("id", lead.id);
-        await logEvent(lead.flow_id, lead.id, lead.player_id, "deferred_quiet_hours", {
-          next_run_at: defer,
-        });
+        await logEvent(
+          lead.tenant_id,
+          lead.flow_id,
+          lead.id,
+          lead.player_id,
+          "deferred_quiet_hours",
+          {
+            next_run_at: defer,
+          },
+        );
         return null;
       }
       const tplId = pickTemplate(block.template_ids ?? [], lastTemplateId);
       if (!tplId) {
-        await logEvent(lead.flow_id, lead.id, lead.player_id, "failed", {
+        await logEvent(lead.tenant_id, lead.flow_id, lead.id, lead.player_id, "failed", {
           reason: "no_template_in_block",
           block_index: idx,
         });
@@ -377,9 +397,10 @@ async function planLead(lead: Lead): Promise<SendPlan | null> {
         .from("email_templates")
         .select("subject, body_html, preheader")
         .eq("id", tplId)
+        .eq("tenant_id", lead.tenant_id)
         .maybeSingle();
       if (!tpl) {
-        await logEvent(lead.flow_id, lead.id, lead.player_id, "failed", {
+        await logEvent(lead.tenant_id, lead.flow_id, lead.id, lead.player_id, "failed", {
           reason: "template_missing",
           tplId,
         });
@@ -396,7 +417,9 @@ async function planLead(lead: Lead): Promise<SendPlan | null> {
       }
       const sender = await resolveSender(block.smtp_config_id, block.tenant_id);
       if (!sender) {
-        await logEvent(lead.flow_id, lead.id, lead.player_id, "failed", { reason: "no_sender" });
+        await logEvent(lead.tenant_id, lead.flow_id, lead.id, lead.player_id, "failed", {
+          reason: "no_sender",
+        });
         await supabaseAdmin
           .from("email_flow_leads")
           .update({ status: "failed", exit_reason: "no_sender", locked_at: null, locked_by: null })
@@ -411,6 +434,7 @@ async function planLead(lead: Lead): Promise<SendPlan | null> {
           .from("players")
           .select("*")
           .eq("id", lead.player_id)
+          .eq("tenant_id", lead.tenant_id)
           .maybeSingle();
         if (p) vars = buildPlayerVariables(p) as Record<string, string>;
       }
@@ -631,7 +655,7 @@ export async function runEmailFlowDispatcher({
         return await planLead(l);
       } catch (e) {
         console.error("[email-flow dispatcher] plan erro", l.id, e);
-        await logEvent(l.flow_id, l.id, l.player_id, "failed", {
+        await logEvent(l.tenant_id, l.flow_id, l.id, l.player_id, "failed", {
           error: e instanceof Error ? e.message : String(e),
         });
         return null;
@@ -719,17 +743,25 @@ export async function runEmailFlowDispatcher({
     const { data: recentDup } = await supabaseAdmin
       .from("email_send_logs")
       .select("id")
+      .eq("tenant_id", plan.lead.tenant_id)
       .eq("to_email", plan.lead.email)
       .eq("subject", plan.subject)
       .eq("status", "sent")
       .gte("created_at", dedupeSince)
       .limit(1);
     if (recentDup && recentDup.length > 0) {
-      await logEvent(plan.lead.flow_id, plan.lead.id, plan.lead.player_id, "skipped_duplicate", {
-        template_id: plan.tplId,
-        subject: plan.subject,
-        reason: "same_subject_sent_recently",
-      });
+      await logEvent(
+        plan.lead.tenant_id,
+        plan.lead.flow_id,
+        plan.lead.id,
+        plan.lead.player_id,
+        "skipped_duplicate",
+        {
+          template_id: plan.tplId,
+          subject: plan.subject,
+          reason: "same_subject_sent_recently",
+        },
+      );
       await applySendSuccess(plan, null);
       processed.push(plan.lead.id);
       return;
@@ -776,6 +808,7 @@ export async function runEmailFlowDispatcher({
     });
 
     await logEvent(
+      plan.lead.tenant_id,
       plan.lead.flow_id,
       plan.lead.id,
       plan.lead.player_id,

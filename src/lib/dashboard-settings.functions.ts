@@ -2,7 +2,7 @@
 // timestamp a partir do qual as 4 dashboards contam.
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { resolveCurrentTenantId } from "@/lib/tenant-access.server";
+import { requireActiveTenantAdmin, resolveCurrentTenantId } from "@/lib/tenant-access.server";
 
 const EPOCH = "1970-01-01T00:00:00Z";
 
@@ -22,14 +22,12 @@ export const getDashboardResetAt = createServerFn({ method: "GET" })
 export const resetDashboards = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<{ reset_at: string }> => {
-    const tenantId = await resolveCurrentTenantId(context.supabase);
+    // Admin DA CASA ativa (ou super admin), não admin de qualquer casa.
+    const tenantId = await requireActiveTenantAdmin(
+      context.supabase,
+      "Apenas administradores podem zerar as dashboards",
+    );
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    // Verifica admin
-    const { data: isAdmin } = await supabaseAdmin.rpc("has_role", {
-      _user_id: context.userId,
-      _role: "admin",
-    });
-    if (!isAdmin) throw new Error("Apenas administradores podem zerar as dashboards");
     const now = new Date().toISOString();
     const { error } = await supabaseAdmin
       .from("dashboard_settings")

@@ -93,10 +93,13 @@ async function getPlayerAggregates(playerId: string): Promise<Partial<PlayerLike
   };
 }
 
-async function pickBestSession(): Promise<{ id: string; name: string } | null> {
+// Sessões e vínculos são sempre da casa do lead: sem o filtro, o cron enviava
+// mensagens de uma casa pelo número de WhatsApp de outra.
+async function pickBestSession(tenantId: string): Promise<{ id: string; name: string } | null> {
   const { data } = await supabaseAdmin
     .from("whatsapp_sessions")
     .select("id, name, instance_name, status, messages_sent_today, daily_limit, is_active")
+    .eq("tenant_id", tenantId)
     .eq("status", "connected")
     .eq("is_active", true)
     .order("messages_sent_today", { ascending: true, nullsFirst: true });
@@ -106,10 +109,11 @@ async function pickBestSession(): Promise<{ id: string; name: string } | null> {
   return candidate ? { id: candidate.id, name: candidate.name } : null;
 }
 
-async function getOrAssignSession(phone: string, playerId: string | null) {
+async function getOrAssignSession(phone: string, playerId: string | null, tenantId: string) {
   const { data: existing } = await supabaseAdmin
     .from("lead_whatsapp_assignments")
     .select("id, session_id, status, previous_session_ids")
+    .eq("tenant_id", tenantId)
     .eq("phone_e164", phone)
     .maybeSingle();
 
@@ -118,18 +122,20 @@ async function getOrAssignSession(phone: string, playerId: string | null) {
       .from("whatsapp_sessions")
       .select("id, name, instance_name, status, is_active")
       .eq("id", existing.session_id)
+      .eq("tenant_id", tenantId)
       .maybeSingle();
     if (sess && sess.status === "connected" && sess.is_active) {
       return sess as SessionRow;
     }
   }
 
-  const best = await pickBestSession();
+  const best = await pickBestSession(tenantId);
   if (!best) return null;
   const { data: bestFull } = await supabaseAdmin
     .from("whatsapp_sessions")
     .select("id, name, instance_name, status")
     .eq("id", best.id)
+    .eq("tenant_id", tenantId)
     .single();
 
   if (existing) {
@@ -147,9 +153,15 @@ async function getOrAssignSession(phone: string, playerId: string | null) {
       })
       .eq("id", existing.id);
   } else {
-    await supabaseAdmin
-      .from("lead_whatsapp_assignments")
-      .insert({ phone_e164: phone, session_id: best.id, status: "active", player_id: playerId });
+    // phone_e164 ainda é UNIQUE global: se outra casa já tem o número, o insert
+    // falha e o lead segue sem vínculo fixo, mas pela sessão da própria casa.
+    await supabaseAdmin.from("lead_whatsapp_assignments").insert({
+      tenant_id: tenantId,
+      phone_e164: phone,
+      session_id: best.id,
+      status: "active",
+      player_id: playerId,
+    });
   }
   return bestFull as SessionRow;
 }
@@ -170,7 +182,7 @@ export async function evaluateAllPlayers(opts: { limit?: number; tenantId?: stri
   let activeFlowsQuery = supabaseAdmin
     .from("flows")
     .select(
-      "id, name, active, delay_min_seconds, delay_max_seconds, cooldown_hours, trigger_type, activated_at",
+      "id, tenant_id, name, active, delay_min_seconds, delay_max_seconds, cooldown_hours, trigger_type, activated_at",
     )
     .eq("active", true)
     .not("trigger_type", "is", null);
@@ -236,18 +248,21 @@ export async function evaluateAllPlayers(opts: { limit?: number; tenantId?: stri
       if (integration.disable_internal) continue;
     }
 
-    if (!activeFlows || activeFlows.length === 0) continue;
+    // Sem tenantId o cron avalia todas as casas de uma vez: cada player só pode
+    // entrar nos fluxos da própria casa.
+    const tenantFlows = (activeFlows ?? []).filter((f) => f.tenant_id === p.tenant_id);
+    if (tenantFlows.length === 0) continue;
 
     // Prioridade: cada player só entra no fluxo do gatilho de MAIOR
     // prioridade que ele dispara. Antes, o loop enfileirava o mesmo player
     // em fluxos de gatilhos diferentes no mesmo tick — causa de duplas
     // mensagens de abertura no WhatsApp.
-    const triggersWithFlow = triggers.filter((t) => activeFlows.some((f) => f.trigger_type === t));
+    const triggersWithFlow = triggers.filter((t) => tenantFlows.some((f) => f.trigger_type === t));
     const chosen = pickHighestPriority(triggersWithFlow);
     if (!chosen) continue;
     const chosenRank = priorityRank(chosen);
     const lowerPriorityTriggers = new Set(
-      activeFlows
+      tenantFlows
         .map((f) => f.trigger_type as TriggerType)
         .filter((t) => priorityRank(t) <= chosenRank && t !== chosen),
     );
@@ -255,7 +270,7 @@ export async function evaluateAllPlayers(opts: { limit?: number; tenantId?: stri
     // Guarda cross-trigger no próprio WhatsApp: se já existe flow_lead
     // ativo desse player em um fluxo de prioridade >= ao chosen, pula.
     if (lowerPriorityTriggers.size > 0) {
-      const blockingFlowIds = activeFlows
+      const blockingFlowIds = tenantFlows
         .filter((f) => lowerPriorityTriggers.has(f.trigger_type as TriggerType))
         .map((f) => f.id);
       if (blockingFlowIds.length > 0) {
@@ -267,6 +282,7 @@ export async function evaluateAllPlayers(opts: { limit?: number; tenantId?: stri
           .in("status", ["pending", "running"]);
         if ((blockedCount ?? 0) > 0) {
           await supabaseAdmin.from("flow_logs").insert({
+            tenant_id: p.tenant_id,
             flow_id: null,
             player_id: p.id,
             event: "skipped_lower_priority",
@@ -277,7 +293,7 @@ export async function evaluateAllPlayers(opts: { limit?: number; tenantId?: stri
       }
     }
 
-    for (const flow of activeFlows) {
+    for (const flow of tenantFlows) {
       if (flow.trigger_type !== chosen) continue;
 
       // Regra de "lead morto": cada fluxo é uma campanha sequencial; um player só
@@ -315,6 +331,7 @@ export async function evaluateAllPlayers(opts: { limit?: number; tenantId?: stri
         const withinGrace = Date.now() < graceExpiresAt;
         if (!isNewEvent && withinGrace) {
           await supabaseAdmin.from("flow_logs").insert({
+            tenant_id: p.tenant_id,
             flow_id: flow.id,
             player_id: p.id,
             event: "skipped_grace_period",
@@ -335,6 +352,7 @@ export async function evaluateAllPlayers(opts: { limit?: number; tenantId?: stri
       const { data: inserted, error: insErr } = await supabaseAdmin
         .from("flow_leads")
         .insert({
+          tenant_id: p.tenant_id,
           flow_id: flow.id,
           player_id: p.id,
           phone_e164: phone,
@@ -347,6 +365,7 @@ export async function evaluateAllPlayers(opts: { limit?: number; tenantId?: stri
       if (insErr) continue; // provavelmente unique violation, ignora
 
       await supabaseAdmin.from("lead_alerts").insert({
+        tenant_id: p.tenant_id,
         player_id: p.id,
         trigger_type: flow.trigger_type,
         rule_id: null,
@@ -354,6 +373,7 @@ export async function evaluateAllPlayers(opts: { limit?: number; tenantId?: stri
         payload: { aggregates },
       });
       await supabaseAdmin.from("flow_logs").insert({
+        tenant_id: p.tenant_id,
         flow_id: flow.id,
         flow_lead_id: inserted?.id ?? null,
         player_id: p.id,
@@ -371,7 +391,7 @@ export async function evaluateAllPlayers(opts: { limit?: number; tenantId?: stri
 // EXIT CONDITIONS
 // ---------------------------------------------------------------
 async function shouldExit(
-  flowLead: { player_id: string | null; phone_e164: string; started_at: string },
+  flowLead: { tenant_id: string; player_id: string | null; phone_e164: string; started_at: string },
   exit: any,
 ): Promise<string | null> {
   const since = flowLead.started_at;
@@ -382,6 +402,7 @@ async function shouldExit(
       .from("players")
       .select("ultimo_login, ultimo_jogo, ultimo_deposito")
       .eq("id", flowLead.player_id)
+      .eq("tenant_id", flowLead.tenant_id)
       .maybeSingle();
     const lastAct = Math.max(
       p?.ultimo_login ? new Date(p.ultimo_login).getTime() : 0,
@@ -408,6 +429,7 @@ async function shouldExit(
       .from("players")
       .select("ftd_em")
       .eq("id", flowLead.player_id)
+      .eq("tenant_id", flowLead.tenant_id)
       .maybeSingle();
     if (p?.ftd_em && p.ftd_em > since) return "first_deposit";
   }
@@ -426,6 +448,7 @@ async function shouldExit(
     const { data: m } = await supabaseAdmin
       .from("whatsapp_messages")
       .select("id, remote_jid")
+      .eq("tenant_id", flowLead.tenant_id)
       .ilike("remote_jid", `${flowLead.phone_e164}%`)
       .eq("from_me", false)
       .gte("message_timestamp", since)
@@ -571,19 +594,23 @@ export async function runDispatcher(
         .eq("id", lead.id);
       continue;
     }
+    // O fluxo foi criado pela casa (RLS); flow_leads antigos podem ter caído na
+    // casa principal pelo default da coluna, então o tenant vem do fluxo.
+    const tenantId = flow.tenant_id as string;
 
     // Exit conditions ANTES de enviar
     const baseExit = (flow.exit_conditions ?? {}) as Record<string, boolean>;
     const exitCfg = antiban.smart_suppression_enabled
       ? baseExit
       : { ...baseExit, whatsapp_reply: false };
-    const reason = await shouldExit(lead, exitCfg);
+    const reason = await shouldExit({ ...lead, tenant_id: tenantId }, exitCfg);
     if (reason) {
       await supabaseAdmin
         .from("flow_leads")
         .update({ status: "exited", exit_reason: reason, completed_at: nowIso })
         .eq("id", lead.id);
       await supabaseAdmin.from("flow_logs").insert({
+        tenant_id: tenantId,
         flow_id: flow.id,
         flow_lead_id: lead.id,
         player_id: lead.player_id,
@@ -626,7 +653,7 @@ export async function runDispatcher(
     const block = blocks[idx];
 
     // Resolve sessão
-    const session = await getOrAssignSession(lead.phone_e164, lead.player_id);
+    const session = await getOrAssignSession(lead.phone_e164, lead.player_id, tenantId);
     if (!session) {
       // Posterga 30 min
       await supabaseAdmin
@@ -634,6 +661,7 @@ export async function runDispatcher(
         .update({ next_run_at: new Date(Date.now() + 30 * 60_000).toISOString() })
         .eq("id", lead.id);
       await supabaseAdmin.from("flow_logs").insert({
+        tenant_id: tenantId,
         flow_id: flow.id,
         flow_lead_id: lead.id,
         player_id: lead.player_id,
@@ -656,6 +684,7 @@ export async function runDispatcher(
         .update({ next_run_at: new Date(Date.now() + 60 * 60_000).toISOString() })
         .eq("id", lead.id);
       await supabaseAdmin.from("flow_logs").insert({
+        tenant_id: tenantId,
         flow_id: flow.id,
         flow_lead_id: lead.id,
         player_id: lead.player_id,
@@ -693,6 +722,7 @@ export async function runDispatcher(
             "nome, telefone, saldo_carteira, ultimo_login, ultimo_jogo, ultimo_deposito, total_depositado, total_sacado, vip, status, expert, risco",
           )
           .eq("id", lead.player_id)
+          .eq("tenant_id", tenantId)
           .maybeSingle();
         if (player) {
           const vars = buildPlayerVariables(player);
@@ -708,7 +738,7 @@ export async function runDispatcher(
         { phone_e164: lead.phone_e164, player_id: lead.player_id },
         session,
         {
-          tenantId: lead.tenant_id ?? flow.tenant_id,
+          tenantId,
           sourceType: "sms_flow",
           sourceId: flow.id,
           recipientPlayerId: lead.player_id,
@@ -743,6 +773,7 @@ export async function runDispatcher(
       }
 
       await supabaseAdmin.from("flow_logs").insert({
+        tenant_id: tenantId,
         flow_id: flow.id,
         flow_lead_id: lead.id,
         player_id: lead.player_id,
@@ -768,6 +799,7 @@ export async function runDispatcher(
         })
         .eq("id", lead.id);
       await supabaseAdmin.from("flow_logs").insert({
+        tenant_id: tenantId,
         flow_id: flow.id,
         flow_lead_id: lead.id,
         player_id: lead.player_id,
