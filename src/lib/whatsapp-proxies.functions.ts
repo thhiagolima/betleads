@@ -3,7 +3,6 @@ import { dbUuid } from "@/lib/zod-helpers";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { testProxyHandshake } from "./whatsapp-proxy.server";
 
 const protocolEnum = z.enum(["http", "https", "socks4", "socks5"]);
 
@@ -139,58 +138,9 @@ export const testWhatsappProxy = createServerFn({ method: "POST" })
       .parse(input),
   )
   .handler(async ({ data, context }) => {
-    let target: {
-      protocol: string;
-      host: string;
-      port: number;
-      username?: string | null;
-      password?: string | null;
-    };
-    if (data.id) {
-      const { data: allowed } = await context.supabase
-        .from("whatsapp_proxies")
-        .select("id")
-        .eq("id", data.id)
-        .maybeSingle();
-      if (!allowed) throw new Error("Proxy não encontrado nesta tenant");
-      const { data: row, error } = await supabaseAdmin
-        .from("whatsapp_proxies")
-        .select("protocol, host, port, username, password_encrypted")
-        .eq("id", data.id)
-        .single();
-      if (error || !row) throw new Error("Proxy não encontrado");
-      target = {
-        protocol: row.protocol,
-        host: row.host,
-        port: row.port,
-        username: row.username,
-        password: row.password_encrypted,
-      };
-    } else {
-      target = data.inline!;
-    }
-
-    const started = Date.now();
-    const result = await testProxyHandshake(target);
-    const latency_ms = Date.now() - started;
-
-    if (data.id) {
-      await supabaseAdmin
-        .from("whatsapp_proxies")
-        .update({
-          last_tested_at: new Date().toISOString(),
-          last_test_ok: result.ok,
-          last_test_error: result.ok ? null : (result.error ?? null),
-        })
-        .eq("id", data.id);
-      await supabaseAdmin.from("whatsapp_proxy_logs").insert({
-        proxy_id: data.id,
-        event: result.ok ? "test_ok" : "test_failed",
-        detail: { latency_ms, stage: result.stage, error: result.error ?? null },
-      });
-    }
-    void context;
-    return { ok: result.ok, latency_ms, stage: result.stage, error: result.error ?? null };
+    // Opens a raw TCP socket: super admin only, public hosts only (SEC-17).
+    const { runWhatsappProxyTest } = await import("./whatsapp-proxy-test.server");
+    return runWhatsappProxyTest(context.supabase, context.userId, data);
   });
 
 export const assignProxyToSession = createServerFn({ method: "POST" })
