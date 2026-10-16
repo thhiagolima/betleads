@@ -194,8 +194,8 @@ export function BulkCallTab() {
     const count = allTargets.length;
     const source =
       audioMode === "tts"
-        ? `script "${scripts.find((s: any) => s.id === scriptId)?.name ?? "selecionado"}"`
-        : `áudio "${assets.find((asset: any) => asset.id === assetId)?.name ?? "selecionado"}"`;
+        ? `script "${scripts.find((s: { id: string }) => s.id === scriptId)?.name ?? "selecionado"}"`
+        : `áudio "${assets.find((asset: { id: string }) => asset.id === assetId)?.name ?? "selecionado"}"`;
     const plural = count === 1 ? "ligação" : "ligações";
     const confirmed = await requestConfirmation({
       title: `Disparar ${num(count)} ${plural}?`,
