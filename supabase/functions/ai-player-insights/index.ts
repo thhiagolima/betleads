@@ -1,5 +1,10 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { requestedTenantFrom, resolveInsightsTenant, tenantScopedReader } from "./tenant-scope.ts";
+import {
+  requestedTenantFrom,
+  resolveAiDemoBlock,
+  resolveInsightsTenant,
+  tenantScopedReader,
+} from "./tenant-scope.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -889,6 +894,25 @@ Deno.serve(async (req) => {
     });
   }
   const tenantId = decision.tenantId;
+
+  // Task 6 — AI is blocked (not faked) for a demo tenant. Checked right after
+  // the tenant is resolved and before any data read or OpenAI call; a failed
+  // lookup or a missing row is treated as demo (fail-closed).
+  const { data: tenantRow, error: tenantRowErr } = await sb
+    .from("tenants")
+    .select("is_demo")
+    .eq("id", tenantId)
+    .maybeSingle();
+  if (tenantRowErr) console.error("[ai][demo-check] erro", tenantRowErr.message);
+  const demoBlock = resolveAiDemoBlock(
+    tenantRowErr || !tenantRow ? null : { isDemo: !!tenantRow.is_demo },
+  );
+  if (!demoBlock.ok) {
+    return new Response(JSON.stringify({ error: demoBlock.error }), {
+      status: demoBlock.status, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
   // Toda leitura passa por `db`, que aplica .eq("tenant_id", tenantId) em cada select.
   const db = tenantScopedReader(sb, tenantId);
   if (!question) {

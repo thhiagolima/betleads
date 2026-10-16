@@ -71,3 +71,23 @@ export function tenantScopedReader(sb: AnyClient, tenantId: string) {
     },
   };
 }
+
+/**
+ * Result of looking up the resolved tenant's `is_demo` flag: `null` means the
+ * lookup errored or the row was not found (fail-closed), never "allowed".
+ */
+export type DemoLookupResult = { isDemo: boolean } | null;
+
+export type DemoBlockDecision = { ok: true } | { ok: false; status: 403; error: "DEMO_SEND_BLOCKED" };
+
+/**
+ * Task 6 — AI is blocked (not faked) for a demo tenant. Fail-closed: a
+ * missing row or a failed lookup is treated the same as `isDemo: true`. Only
+ * an explicit `isDemo: false` lets the request reach OpenAI.
+ */
+export function resolveAiDemoBlock(lookup: DemoLookupResult): DemoBlockDecision {
+  if (!lookup || lookup.isDemo) {
+    return { ok: false, status: 403, error: "DEMO_SEND_BLOCKED" };
+  }
+  return { ok: true };
+}

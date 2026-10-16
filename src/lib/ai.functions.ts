@@ -4,7 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import { generateText } from "ai";
 import { createLovableAiGatewayProvider } from "./ai-gateway";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { resolveCurrentTenantId } from "./tenant-access.server";
+import { assertTenantNotDemoForSend, resolveCurrentTenantId } from "./tenant-access.server";
 
 function getSupabase() {
   const url = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL!;
@@ -57,21 +57,27 @@ async function buildContext(sb: ReturnType<typeof getSupabase>) {
   };
 }
 
-export const askAi = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((input: { pergunta: string }) =>
-    z.object({ pergunta: z.string().min(1).max(500) }).parse(input),
-  )
-  .handler(async ({ data, context }) => {
-    const apiKey = process.env.LOVABLE_API_KEY;
-    if (!apiKey) {
-      return { resposta: "LOVABLE_API_KEY não configurada.", error: true };
-    }
-    // Use o client autenticado (RLS aplicada) — garante isolamento por tenant.
-    const ctx = await buildContext(context.supabase as any);
-    const gateway = createLovableAiGatewayProvider(apiKey);
+/**
+ * Plain handler body, extracted so tests can call it directly with a fake
+ * `context.supabase`. The demo guard runs right after the tenant is
+ * resolved, before the gateway provider is created or `generateText` is
+ * called — nothing reaches Lovable AI and no `ai_logs` row is written for a
+ * demo tenant.
+ */
+export async function askAiFor(data: { pergunta: string }, context: { supabase: any }) {
+  const apiKey = process.env.LOVABLE_API_KEY;
+  if (!apiKey) {
+    return { resposta: "LOVABLE_API_KEY não configurada.", error: true };
+  }
 
-    const system = `Você é a inteligência analítica da BETLEADS, plataforma de monitoramento de players de uma casa de aposta.
+  const tenantId = await resolveCurrentTenantId(context.supabase);
+  await assertTenantNotDemoForSend(tenantId);
+
+  // Use o client autenticado (RLS aplicada) — garante isolamento por tenant.
+  const ctx = await buildContext(context.supabase as any);
+  const gateway = createLovableAiGatewayProvider(apiKey);
+
+  const system = `Você é a inteligência analítica da BETLEADS, plataforma de monitoramento de players de uma casa de aposta.
 Responda em português brasileiro, de forma direta e prática.
 Use markdown para organizar a resposta: títulos, listas e tabelas quando fizer sentido.
 SEMPRE base sua resposta nos dados JSON fornecidos abaixo (não invente).
@@ -81,32 +87,38 @@ Se não houver dados suficientes, diga claramente.
 DADOS (data de referência: ${ctx.hoje}):
 ${JSON.stringify(ctx).slice(0, 60000)}`;
 
-    try {
-      const { text } = await generateText({
-        model: gateway("google/gemini-3-flash-preview"),
-        system,
-        prompt: data.pergunta,
-      });
+  try {
+    const { text } = await generateText({
+      model: gateway("google/gemini-3-flash-preview"),
+      system,
+      prompt: data.pergunta,
+    });
 
-      // log — service role: sem tenant_id explícito a linha cairia na casa principal.
-      const tenantId = await resolveCurrentTenantId(context.supabase);
-      await getSupabase().from("ai_logs").insert({
-        tenant_id: tenantId,
-        pergunta: data.pergunta,
-        resposta: text,
-        modelo: "google/gemini-3-flash-preview",
-      });
+    // log — service role: sem tenant_id explícito a linha cairia na casa principal.
+    await getSupabase().from("ai_logs").insert({
+      tenant_id: tenantId,
+      pergunta: data.pergunta,
+      resposta: text,
+      modelo: "google/gemini-3-flash-preview",
+    });
 
-      return { resposta: text, error: false };
-    } catch (e: any) {
-      const msg = String(e?.message ?? e);
-      if (msg.includes("429"))
-        return { resposta: "Limite de uso atingido. Tente novamente em instantes.", error: true };
-      if (msg.includes("402"))
-        return {
-          resposta: "Créditos de IA esgotados. Adicione créditos no workspace.",
-          error: true,
-        };
-      return { resposta: `Erro ao consultar a IA: ${msg}`, error: true };
-    }
-  });
+    return { resposta: text, error: false };
+  } catch (e: any) {
+    const msg = String(e?.message ?? e);
+    if (msg.includes("429"))
+      return { resposta: "Limite de uso atingido. Tente novamente em instantes.", error: true };
+    if (msg.includes("402"))
+      return {
+        resposta: "Créditos de IA esgotados. Adicione créditos no workspace.",
+        error: true,
+      };
+    return { resposta: `Erro ao consultar a IA: ${msg}`, error: true };
+  }
+}
+
+export const askAi = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: { pergunta: string }) =>
+    z.object({ pergunta: z.string().min(1).max(500) }).parse(input),
+  )
+  .handler(async ({ data, context }) => askAiFor(data, context));

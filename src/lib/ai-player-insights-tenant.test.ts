@@ -7,6 +7,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   requestedTenantFrom,
+  resolveAiDemoBlock,
   resolveInsightsTenant,
   tenantScopedReader,
 } from "../../supabase/functions/ai-player-insights/tenant-scope";
@@ -63,6 +64,24 @@ describe("resolveInsightsTenant", () => {
   });
 });
 
+describe("resolveAiDemoBlock", () => {
+  it("blocks when the tenant is flagged demo", () => {
+    expect(resolveAiDemoBlock({ isDemo: true })).toEqual({
+      ok: false,
+      status: 403,
+      error: "DEMO_SEND_BLOCKED",
+    });
+  });
+
+  it("blocks fail-closed when the lookup found no row or errored (null)", () => {
+    expect(resolveAiDemoBlock(null)).toEqual({ ok: false, status: 403, error: "DEMO_SEND_BLOCKED" });
+  });
+
+  it("allows a confirmed non-demo tenant", () => {
+    expect(resolveAiDemoBlock({ isDemo: false })).toEqual({ ok: true });
+  });
+});
+
 describe("requestedTenantFrom", () => {
   it("prefers the body, then the X-Active-Tenant header", () => {
     expect(requestedTenantFrom({ tenant_id: A }, B)).toBe(A);
@@ -113,10 +132,19 @@ describe("ai-player-insights/index.ts wiring", () => {
     expect(src).not.toMatch(/rpc\(\s*["']has_role["']/);
   });
 
-  it("only touches the raw service-role client to write ai_logs", () => {
+  it("only touches the raw service-role client for ai_logs, user_roles and the demo check", () => {
     const rawTables = [...src.matchAll(/\bsb\s*\.from\(\s*["'`]?([\w$]+)/g)].map((m) => m[1]);
     expect(rawTables.length).toBeGreaterThan(0);
-    expect(new Set(rawTables)).toEqual(new Set(["ai_logs", "user_roles"]));
+    expect(new Set(rawTables)).toEqual(new Set(["ai_logs", "user_roles", "tenants"]));
+  });
+
+  it("checks the demo flag right after the tenant is resolved and before any OpenAI call", () => {
+    const tenantCheckIdx = src.indexOf('.from("tenants")');
+    const openAiCallIdx = src.indexOf("api.openai.com");
+    const tenantResolvedIdx = src.indexOf("const tenantId = decision.tenantId;");
+    expect(tenantCheckIdx).toBeGreaterThan(-1);
+    expect(tenantCheckIdx).toBeGreaterThan(tenantResolvedIdx);
+    expect(tenantCheckIdx).toBeLessThan(openAiCallIdx);
   });
 
   it("writes tenant_id on every ai_logs insert", () => {

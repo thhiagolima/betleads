@@ -4,6 +4,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
+import { assertTenantNotDemoForSend, resolveCurrentTenantId } from "./tenant-access.server";
 
 const InputSchema = z.object({
   gatilho: z.string().min(1).max(200),
@@ -14,21 +15,30 @@ const InputSchema = z.object({
   modelo: z.string().max(40).default("simples"),
 });
 
-export const generateEmailContent = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => InputSchema.parse(d))
-  .handler(async ({ data }) => {
-    const apiKey = process.env.LOVABLE_API_KEY;
-    if (!apiKey) {
-      throw new Error("LOVABLE_API_KEY não configurado.");
-    }
+/**
+ * Plain handler body, extracted so tests can call it directly with a fake
+ * `context.supabase`. The demo guard runs right after the tenant is
+ * resolved, before the fetch to the AI gateway — nothing reaches Lovable AI
+ * for a demo tenant.
+ */
+export async function generateEmailContentFor(
+  data: z.infer<typeof InputSchema>,
+  context: { supabase: any },
+) {
+  const apiKey = process.env.LOVABLE_API_KEY;
+  if (!apiKey) {
+    throw new Error("LOVABLE_API_KEY não configurado.");
+  }
 
-    const sys = `Você é um copywriter especialista em email marketing para iGaming (cassino / apostas) no Brasil.
+  const tenantId = await resolveCurrentTenantId(context.supabase);
+  await assertTenantNotDemoForSend(tenantId);
+
+  const sys = `Você é um copywriter especialista em email marketing para iGaming (cassino / apostas) no Brasil.
 Gere copies CURTAS, em português brasileiro, com tom apropriado.
 Use variáveis literais entre chaves quando útil: {primeiro_nome}, {saldo}, {ultimo_login}.
 Nunca prometa ganhos garantidos. Sem emojis em excesso (máximo 1 no assunto).`;
 
-    const user = `Gere o conteúdo de um email com base em:
+  const user = `Gere o conteúdo de um email com base em:
 - Objetivo / gatilho: ${data.gatilho}
 - Benefício / oferta: ${data.beneficio || "(não informado)"}
 - Tom: ${data.tom}
@@ -38,68 +48,73 @@ Nunca prometa ganhos garantidos. Sem emojis em excesso (máximo 1 no assunto).`;
 
 Responda chamando a função "email_copy" com os campos.`;
 
-    const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
-        messages: [
-          { role: "system", content: sys },
-          { role: "user", content: user },
-        ],
-        tools: [
-          {
-            type: "function",
-            function: {
-              name: "email_copy",
-              description: "Retorna copy estruturada do email.",
-              parameters: {
-                type: "object",
-                properties: {
-                  assunto: { type: "string", description: "Assunto curto, máx 70 chars." },
-                  preheader: { type: "string", description: "Pré-header, máx 110 chars." },
-                  titulo: { type: "string", description: "Título principal dentro do email." },
-                  texto: { type: "string", description: "Corpo do email, 2-3 frases." },
-                  cta: { type: "string", description: "Texto do botão, 2-5 palavras." },
-                },
-                required: ["assunto", "preheader", "titulo", "texto", "cta"],
-                additionalProperties: false,
+  const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "google/gemini-3-flash-preview",
+      messages: [
+        { role: "system", content: sys },
+        { role: "user", content: user },
+      ],
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "email_copy",
+            description: "Retorna copy estruturada do email.",
+            parameters: {
+              type: "object",
+              properties: {
+                assunto: { type: "string", description: "Assunto curto, máx 70 chars." },
+                preheader: { type: "string", description: "Pré-header, máx 110 chars." },
+                titulo: { type: "string", description: "Título principal dentro do email." },
+                texto: { type: "string", description: "Corpo do email, 2-3 frases." },
+                cta: { type: "string", description: "Texto do botão, 2-5 palavras." },
               },
+              required: ["assunto", "preheader", "titulo", "texto", "cta"],
+              additionalProperties: false,
             },
           },
-        ],
-        tool_choice: { type: "function", function: { name: "email_copy" } },
-      }),
-    });
-
-    if (resp.status === 429) {
-      throw new Error("Limite de requisições atingido. Tente novamente em alguns segundos.");
-    }
-    if (resp.status === 402) {
-      throw new Error("Créditos de IA esgotados. Adicione créditos em Settings → Workspace → Usage.");
-    }
-    if (!resp.ok) {
-      const t = await resp.text();
-      throw new Error(`Erro na IA (${resp.status}): ${t.slice(0, 200)}`);
-    }
-
-    const json: any = await resp.json();
-    const call = json?.choices?.[0]?.message?.tool_calls?.[0];
-    if (!call) throw new Error("IA não retornou estrutura esperada.");
-    let args: any;
-    try {
-      args = JSON.parse(call.function?.arguments ?? "{}");
-    } catch {
-      throw new Error("IA retornou JSON inválido.");
-    }
-    return {
-      assunto: String(args.assunto ?? ""),
-      preheader: String(args.preheader ?? ""),
-      titulo: String(args.titulo ?? ""),
-      texto: String(args.texto ?? ""),
-      cta: String(args.cta ?? "Acessar"),
-    };
+        },
+      ],
+      tool_choice: { type: "function", function: { name: "email_copy" } },
+    }),
   });
+
+  if (resp.status === 429) {
+    throw new Error("Limite de requisições atingido. Tente novamente em alguns segundos.");
+  }
+  if (resp.status === 402) {
+    throw new Error("Créditos de IA esgotados. Adicione créditos em Settings → Workspace → Usage.");
+  }
+  if (!resp.ok) {
+    const t = await resp.text();
+    throw new Error(`Erro na IA (${resp.status}): ${t.slice(0, 200)}`);
+  }
+
+  const json: any = await resp.json();
+  const call = json?.choices?.[0]?.message?.tool_calls?.[0];
+  if (!call) throw new Error("IA não retornou estrutura esperada.");
+  let args: any;
+  try {
+    args = JSON.parse(call.function?.arguments ?? "{}");
+  } catch {
+    throw new Error("IA retornou JSON inválido.");
+  }
+  return {
+    assunto: String(args.assunto ?? ""),
+    preheader: String(args.preheader ?? ""),
+    titulo: String(args.titulo ?? ""),
+    texto: String(args.texto ?? ""),
+    cta: String(args.cta ?? "Acessar"),
+  };
+}
+
+export const generateEmailContent = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => InputSchema.parse(d))
+  .handler(async ({ data, context }) => generateEmailContentFor(data, context));
