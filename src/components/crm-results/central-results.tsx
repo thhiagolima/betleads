@@ -236,13 +236,7 @@ function Overview({ data }: { data: Data }) {
         <Kpi label="Retorno" value={ratio(totals.roi)} detail="recuperado ÷ custo" />
       </div>
 
-      <p className="flex items-start gap-2 text-xs text-muted-foreground">
-        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-        Influenciado: jogador parado há 2+ dias (ou sem 1º depósito) que depositou até 3 dias depois
-        de um SMS, creditado só ao último SMS. Clique: depósito até 7 dias depois de clicar no link.
-        São medidas diferentes e não se somam; nenhuma prova sozinha que o jogador não voltaria sem
-        a mensagem.
-      </p>
+      <RecoveryNote />
 
       <div className="grid gap-4 lg:grid-cols-[1.6fr_1fr]">
         <Card>
@@ -493,8 +487,48 @@ function Sources({ sources }: { sources: CrmSource[] }) {
             })}
           </TableBody>
         </Table>
+        <div className="border-t p-4">
+          <RecoveryNote />
+        </div>
       </CardContent>
     </Card>
+  );
+}
+
+/** How to read "recuperado": shown wherever the number appears. */
+function RecoveryNote() {
+  return (
+    <div className="flex items-start gap-2 text-xs text-muted-foreground">
+      <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      <div className="space-y-1">
+        <p className="font-medium text-foreground">Como ler os números</p>
+        <ul className="list-disc space-y-1 pl-4">
+          <li>
+            <strong>Recuperados</strong>: jogador parado há 2+ dias (ou sem 1º depósito) que
+            depositou até 3 dias depois de um SMS. O crédito vai só para o último SMS antes do
+            depósito, então nenhuma origem divide ou repete o mesmo retorno.
+          </li>
+          <li>
+            O valor é só o <strong>depósito de retorno</strong>, não tudo o que o jogador depositou
+            depois.
+          </li>
+          <li>
+            Conta <strong>retornos, não pessoas</strong>: quem parou e voltou duas vezes no período
+            conta duas.
+          </li>
+          <li>
+            <strong>Clique → depósito</strong> é outra medida, mais rígida: clicou no link e
+            depositou em até 7 dias. Boa parte desses já está nos recuperados, por isso as colunas
+            não se somam.
+          </li>
+          <li>
+            Voltar depois do SMS não prova que voltou <strong>por causa</strong> do SMS; parte
+            voltaria de qualquer jeito. O efeito real aparece na aba “Teste de controle”, que
+            compara com quem não recebeu nada.
+          </li>
+        </ul>
+      </div>
+    </div>
   );
 }
 
