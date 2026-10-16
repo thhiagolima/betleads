@@ -17,6 +17,7 @@ import {
 } from "recharts";
 
 import { getCrmResults, getCrmRetention } from "@/lib/crm-results.functions";
+import { buildRecommendations } from "@/lib/crm-recommendations";
 import { PLAYER_STATE_LABELS, RECOVERABLE_STATES, type CrmSource } from "@/lib/crm-results";
 import { brl, num } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
@@ -122,6 +123,7 @@ function Results({ data }: { data: Data }) {
     <Tabs defaultValue="overview" className="space-y-4">
       <TabsList className="flex h-auto flex-wrap justify-start">
         <TabsTrigger value="overview">Visão geral</TabsTrigger>
+        <TabsTrigger value="recommendations">Recomendações</TabsTrigger>
         <TabsTrigger value="sources">Onde recupera</TabsTrigger>
         <TabsTrigger value="states">Situação do jogador</TabsTrigger>
         <TabsTrigger value="holdout">Teste de controle</TabsTrigger>
@@ -131,6 +133,9 @@ function Results({ data }: { data: Data }) {
       </TabsList>
       <TabsContent value="overview">
         <Overview data={data} />
+      </TabsContent>
+      <TabsContent value="recommendations">
+        <Recommendations data={data} />
       </TabsContent>
       <TabsContent value="sources">
         <Sources sources={data.sources} />
@@ -964,5 +969,56 @@ function ConsistencyChecks({ checks }: { checks: Data["health"]["checks"] }) {
         </p>
       )}
     </>
+  );
+}
+
+const SEVERITY_STYLE = {
+  acao: {
+    label: "Ação",
+    className: "border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-400",
+  },
+  atencao: {
+    label: "Atenção",
+    className: "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  },
+  oportunidade: {
+    label: "Oportunidade",
+    className: "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+  },
+} as const;
+
+function Recommendations({ data }: { data: Data }) {
+  const items = buildRecommendations(data, data.holdout);
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Recomendações</CardTitle>
+        <CardDescription>
+          Regras aplicadas aos resultados do período. Cada uma traz o número que a justifica.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {items.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            Nada a recomendar neste período: nenhuma origem gasta sem recuperar e não há dados
+            suficientes para comparar eficiência.
+          </p>
+        ) : (
+          <ul className="space-y-3">
+            {items.map((item) => (
+              <li key={item.title} className="rounded-lg border p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline" className={SEVERITY_STYLE[item.severity].className}>
+                    {SEVERITY_STYLE[item.severity].label}
+                  </Badge>
+                  <span className="font-medium">{item.title}</span>
+                </div>
+                <p className="mt-1 text-sm text-muted-foreground">{item.detail}</p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
   );
 }
