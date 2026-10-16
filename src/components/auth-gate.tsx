@@ -182,7 +182,15 @@ function InitialPasswordScreen({
     setLoading(true);
     try {
       await changePassword({ data: { password } });
-      const { data, error } = await supabase.auth.refreshSession();
+      // A troca de senha pela chave administrativa revoga todas as sessões do
+      // usuário, então o refresh token atual deixa de existir. Entrar de novo
+      // com a senha recém-criada gera uma sessão nova com o app_metadata atualizado.
+      const email = session.user.email;
+      if (!email) {
+        await supabase.auth.signOut({ scope: "local" }).catch(() => {});
+        throw new Error("Senha criada. Entre novamente com a nova senha.");
+      }
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
       if (!data.session) throw new Error("Não foi possível atualizar sua sessão.");
       onPasswordChanged(data.session);
