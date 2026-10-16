@@ -223,18 +223,18 @@ Atualize a cada PR. Estados: `Pendente` · `Em andamento` · `Implementado` · `
 
 | Fase | Itens | Pendente | Em andamento | Implementado | Homologado | Aceito |
 |---|---:|---:|---:|---:|---:|---:|
-| F0 Contenção | 16 | 4 | 0 | 12 | 0 | 0 |
+| F0 Contenção | 16 | 1 | 0 | 12 | 0 | 3 |
 | F1 Envio e conformidade | 32 | 32 | 0 | 0 | 0 | 0 |
 | F2 Ambientes e operação | 17 | 17 | 0 | 0 | 0 | 0 |
 | F3 Aceite e governança | 13 | 12 | 0 | 1 | 0 | 0 |
 | F4 UX e acessibilidade | 20 | 16 | 0 | 4 | 0 | 0 |
 | F5 Dívida técnica | 16 | 16 | 0 | 0 | 0 | 0 |
 
-Itens que não aparecem na tabela abaixo estão `Pendente`. Todos os itens `Implementado` estão integrados na branch `fix/audit-phase0-integration` (820 testes, typecheck, build ok); nenhum foi publicado em produção.
+Itens que não aparecem na tabela abaixo estão `Pendente`. Todos os itens `Implementado` estão integrados na branch `fix/audit-phase0-integration` (820 testes, typecheck, build ok); nenhum código foi publicado em produção. Migrations `20261017100000` e `20261017110000` **aplicadas em produção em 16/10/2026** e registradas em `schema_migrations` (a primeira não alterou linhas: as 7 tabelas estavam vazias; a segunda: 0 supressões e 1 token, nada a deduplicar).
 
 | ID | Estado | PR/commit | Evidência | Data |
 |---|---|---|---|---|
-| F0-01 | Pendente | | | |
+| F0-01 | Aceito | n/a | Produção 16/10: `POST/OPTIONS /functions/v1/ai-player-insights` → 404, igual a função inexistente. A edge function nunca foi publicada neste projeto; não há o que desligar. Publicar a versão corrigida (F0-02) é decisão separada. | 16/10/2026 |
 | F0-02 | Implementado | `fix/f0-tenant-isolation` 603e83e | tenant-scope.ts + 12 testes; **falta deploy da edge function** | 16/10/2026 |
 | F0-03 | Implementado | `fix/f0-tenant-isolation` 3ca6ef8 | email-segments.server.test.ts | 16/10/2026 |
 | F0-04 | Implementado | `fix/f0-tenant-isolation` b31e880…a74a204 | 10 vazamentos extras corrigidos + migration 20261017100000 (aplicar em produção) | 16/10/2026 |
@@ -243,13 +243,13 @@ Itens que não aparecem na tabela abaixo estão `Pendente`. Todos os itens `Impl
 | F0-07 | Implementado | `fix/f0-whatsapp-security` 1b67224, 7761717 | ssrf-guard 100 casos | 16/10/2026 |
 | F0-08 | Implementado | `fix/f0-tenant-isolation` 0226b39 | tenant-admin-guard.test.ts | 16/10/2026 |
 | F0-09 | Implementado | `fix/f0-whatsapp-security` 9c599c8 | whatsapp-admin.server.test.ts | 16/10/2026 |
-| F0-10 | Pendente | | | |
+| F0-10 | Aceito | n/a | Produção 16/10 (somente leitura): `20261015090000` (CON-08) e `20261015100000` (SEC-01) em `schema_migrations`; policies `user_roles_select_own`/`user_roles_super_admin_write` e `tenant_sms_credit_balances_*` presentes; `accessible_tenant_ids`, `managed_tenant_ids`, `is_tenant_admin` existem; 151 policies em `public`. | 16/10/2026 |
 | F0-11 | Pendente | | | |
 | F0-12 | Implementado | `fix/f0-consent-optout` 2f002a5 + integração (u.$token) | PGlite sobre migrations reais; migration 20261017110000 (aplicar em produção) | 16/10/2026 |
 | F0-13 | Implementado | `fix/f0-consent-optout` 1b52a7a | email-send-consent + consent-fail-closed | 16/10/2026 |
 | F0-14 | Implementado | `fix/f0-consent-optout` 2f002a5 | PGlite + unitário | 16/10/2026 |
 | F0-15 | Implementado | `fix/f0-consent-optout` 85fd486 | texto revisado; F1-01 desenhado | 16/10/2026 |
-| F0-16 | Pendente | | | |
+| F0-16 | Aceito | n/a | Produção 16/10: `ai_logs` = 0 linhas e a edge function não está publicada (sem uso da tela Inteligência); `email_campaigns` = 0 linhas e nenhum e-mail de campanha para jogador de outra casa. Sem evidência de exposição; nada a comunicar à ANPD por estes dois vetores. | 16/10/2026 |
 | F3-01 | Implementado | branch `docs/f3-versioning` (2637709, a5898f5, 547b61a) | `.gitignore` invertido (só `docs/private/` ignorado); todos os docs de `docs/` no git, sem segredo nem PII; `FLUXO_CRM.md` convertido; `docs/INDEX.md` e `README.md` criados | 16/10/2026 |
 | F3-02 | Pendente | | Parcial no F3-01: cabeçalhos de CON-08, SEC-01 e STATUS_P0 receberam nota; estrutura de pastas proposta no INDEX | |
 | F4-01 | Implementado | `fix/f4-risk-confirmations` 93929c2, 479a32b | campaign-send-confirmation.test.ts (18) | 16/10/2026 |
