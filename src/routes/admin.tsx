@@ -45,6 +45,7 @@ import {
 } from "@/components/ui/table";
 import { toast } from "sonner";
 import { useIsSuperAdmin } from "@/hooks/use-is-super-admin";
+import { requestConfirmation } from "@/components/system-dialog-host";
 import {
   adminCreateUser,
   adminDeleteUser,
@@ -334,7 +335,11 @@ function UsersTab() {
                       <div className="flex justify-end gap-1">
                         <ImpersonateButton userId={u.user_id} email={u.email ?? ""} />
                         <ManageAccessButton userId={u.user_id} email={u.email ?? ""} />
-                        <ToggleActiveButton userId={u.user_id} banned={!!banned} />
+                        <ToggleActiveButton
+                          userId={u.user_id}
+                          email={u.email ?? ""}
+                          banned={!!banned}
+                        />
                         <DeleteUserButton userId={u.user_id} email={u.email ?? ""} />
                       </div>
                     </TableCell>
@@ -484,7 +489,17 @@ function ManageAccessButton({ userId, email }: { userId: string; email: string }
                     size="sm"
                     variant="ghost"
                     disabled={membership.role === "admin" || removeMut.isPending}
-                    onClick={() => removeMut.mutate(membership.tenant_id!)}
+                    aria-label={`Remover acesso a ${membership.tenant?.nome ?? "esta conta"}`}
+                    onClick={async () => {
+                      const tenantName = membership.tenant?.nome ?? "esta conta";
+                      const confirmed = await requestConfirmation({
+                        title: "Remover acesso à conta?",
+                        description: `${email} deixa de acessar ${tenantName} imediatamente. Para devolver o acesso, será preciso adicionar o vínculo de novo.`,
+                        confirmLabel: "Remover acesso",
+                        destructive: true,
+                      });
+                      if (confirmed) removeMut.mutate(membership.tenant_id!);
+                    }}
                   >
                     <Trash2 className="h-4 w-4 text-destructive" />
                   </Button>
@@ -633,7 +648,15 @@ function ImpersonateButton({ userId, email }: { userId: string; email: string })
   );
 }
 
-function ToggleActiveButton({ userId, banned }: { userId: string; banned: boolean }) {
+function ToggleActiveButton({
+  userId,
+  email,
+  banned,
+}: {
+  userId: string;
+  email: string;
+  banned: boolean;
+}) {
   const qc = useQueryClient();
   const fn = useServerFn(adminSetUserActive);
   const mut = useMutation({
@@ -649,7 +672,20 @@ function ToggleActiveButton({ userId, banned }: { userId: string; banned: boolea
       size="sm"
       variant="ghost"
       title={banned ? "Reativar" : "Desativar"}
-      onClick={() => mut.mutate()}
+      aria-label={banned ? `Reativar ${email || "usuário"}` : `Desativar ${email || "usuário"}`}
+      onClick={async () => {
+        if (!banned) {
+          const confirmed = await requestConfirmation({
+            title: `Desativar ${email || "este usuário"}?`,
+            description:
+              "A pessoa não consegue mais entrar no sistema, em nenhuma conta, até ser reativada. Os dados e os vínculos são mantidos.",
+            confirmLabel: "Desativar usuário",
+            destructive: true,
+          });
+          if (!confirmed) return;
+        }
+        mut.mutate();
+      }}
       disabled={mut.isPending}
     >
       {banned ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> : <Ban className="h-4 w-4" />}
