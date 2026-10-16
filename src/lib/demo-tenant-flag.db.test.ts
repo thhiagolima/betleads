@@ -21,6 +21,12 @@ const UNKNOWN_TENANT = "00000000-0000-4000-8000-00000000ffff";
 const DEMO_USER = "00000000-0000-4000-8000-0000000000d1";
 const NORMAL_USER = "00000000-0000-4000-8000-0000000000a1";
 
+// Users that start out normal (no is_demo_user flag), already hold a
+// user_roles row, and then get flagged as demo users via auth.users.
+const ADMIN_THEN_DEMO_USER = "00000000-0000-4000-8000-0000000000b1";
+const GESTOR_THEN_DEMO_USER = "00000000-0000-4000-8000-0000000000b2";
+const UNRELATED_UPDATE_USER = "00000000-0000-4000-8000-0000000000b3";
+
 const SCHEMA = `
   DO $$ BEGIN
     CREATE ROLE anon NOLOGIN;
@@ -62,11 +68,21 @@ async function seed() {
       ('${NORMAL_TENANT}', 'Casa Normal');
     INSERT INTO auth.users (id, raw_app_meta_data) VALUES
       ('${DEMO_USER}', '{"is_demo_user": true}'::jsonb),
-      ('${NORMAL_USER}', '{}'::jsonb);
+      ('${NORMAL_USER}', '{}'::jsonb),
+      ('${ADMIN_THEN_DEMO_USER}', '{}'::jsonb),
+      ('${GESTOR_THEN_DEMO_USER}', '{}'::jsonb),
+      ('${UNRELATED_UPDATE_USER}', '{}'::jsonb);
   `);
   // is_demo starts false; flip the demo tenant on as the migration-equivalent
   // service_role connection (no claims, current_user = postgres) would.
   await db.exec(`UPDATE public.tenants SET is_demo = true WHERE id = '${DEMO_TENANT}'`);
+  // Pre-existing roles, granted while each user was still normal.
+  await db.exec(`
+    INSERT INTO public.user_roles (id, user_id, tenant_id, role) VALUES
+      ('00000000-0000-4000-8000-0000000000c1', '${ADMIN_THEN_DEMO_USER}', '${NORMAL_TENANT}', 'admin'),
+      ('00000000-0000-4000-8000-0000000000c2', '${GESTOR_THEN_DEMO_USER}', '${DEMO_TENANT}', 'gestor'),
+      ('00000000-0000-4000-8000-0000000000c3', '${UNRELATED_UPDATE_USER}', '${NORMAL_TENANT}', 'admin');
+  `);
 }
 
 /** Runs `sql` inside a rolled-back transaction, impersonating `role` with the
@@ -192,6 +208,26 @@ describe("trg_tenants_protect_is_demo", () => {
       ),
     ).resolves.toBeDefined();
   });
+
+  it("treats an empty-string role claim as absent and blocks role=authenticated", async () => {
+    await expect(
+      asRole(
+        "authenticated",
+        { role: "" },
+        `update public.tenants set is_demo = true where id = '${NORMAL_TENANT}'`,
+      ),
+    ).rejects.toThrow(/DEMO_FLAG_PROTECTED/);
+  });
+
+  it("treats an empty-string role claim as absent and allows a no-claims-equivalent superuser", async () => {
+    await expect(
+      asRole(
+        "postgres",
+        { role: "" },
+        `update public.tenants set is_demo = true where id = '${NORMAL_TENANT}'`,
+      ),
+    ).resolves.toBeDefined();
+  });
 });
 
 describe("trg_user_roles_demo_user_guard", () => {
@@ -231,5 +267,43 @@ describe("trg_user_roles_demo_user_guard", () => {
     );
     const { rows } = await db.query(`select role from public.user_roles where id = '${id}'`);
     expect(rows[0]).toEqual({ role: "admin" });
+  });
+});
+
+describe("trg_auth_users_demo_user_guard", () => {
+  it("rejects flipping is_demo_user=true when an existing role would now violate the rule", async () => {
+    await expect(
+      db.query(
+        `update auth.users
+         set raw_app_meta_data = raw_app_meta_data || '{"is_demo_user": true}'::jsonb
+         where id = '${ADMIN_THEN_DEMO_USER}'`,
+      ),
+    ).rejects.toThrow(/DEMO_USER_ROLE_BLOCKED/);
+  });
+
+  it("allows flipping is_demo_user=true when the existing role already satisfies the rule", async () => {
+    await db.query(
+      `update auth.users
+       set raw_app_meta_data = raw_app_meta_data || '{"is_demo_user": true}'::jsonb
+       where id = '${GESTOR_THEN_DEMO_USER}'`,
+    );
+    const { rows } = await db.query<{ v: boolean }>(
+      `select (raw_app_meta_data ->> 'is_demo_user')::boolean as v
+       from auth.users where id = '${GESTOR_THEN_DEMO_USER}'`,
+    );
+    expect(rows[0].v).toBe(true);
+  });
+
+  it("does not fire on an unrelated metadata update that leaves is_demo_user unset", async () => {
+    await db.query(
+      `update auth.users
+       set raw_app_meta_data = raw_app_meta_data || '{"locale": "pt-BR"}'::jsonb
+       where id = '${UNRELATED_UPDATE_USER}'`,
+    );
+    const { rows } = await db.query<{ v: string }>(
+      `select raw_app_meta_data ->> 'locale' as v
+       from auth.users where id = '${UNRELATED_UPDATE_USER}'`,
+    );
+    expect(rows[0].v).toBe("pt-BR");
   });
 });

@@ -89,9 +89,25 @@ CREATE TRIGGER trg_tenants_protect_is_demo
   WHEN (OLD.is_demo IS DISTINCT FROM NEW.is_demo)
   EXECUTE FUNCTION public.protect_tenants_is_demo();
 
+-- Shared rule for both demo-user guards below: a (tenant_id, role) pair is a
+-- violation for a demo user unless the tenant is a demo tenant and the role
+-- is gestor/member. Kept as one function so the user_roles-side guard and
+-- the auth.users-side guard can never drift apart.
+CREATE OR REPLACE FUNCTION public.demo_user_role_violation(_tenant_id uuid, _role text)
+RETURNS boolean
+LANGUAGE sql
+STABLE SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+  SELECT _tenant_id IS NULL
+    OR NOT public.is_demo_tenant(_tenant_id)
+    OR _role NOT IN ('gestor', 'member')
+$$;
+
 -- Keeps demo users (auth.users.raw_app_meta_data ->> 'is_demo_user' = 'true')
 -- confined to the demo tenant(s), as gestor or member only. Normal users are
--- untouched.
+-- untouched. Fires on every user_roles insert/update, so a role granted
+-- after the user becomes a demo user is also validated.
 CREATE OR REPLACE FUNCTION public.guard_user_roles_demo_user()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -106,12 +122,8 @@ BEGIN
   FROM auth.users
   WHERE id = NEW.user_id;
 
-  IF v_is_demo_user THEN
-    IF NEW.tenant_id IS NULL
-      OR NOT public.is_demo_tenant(NEW.tenant_id)
-      OR NEW.role NOT IN ('gestor', 'member') THEN
-      RAISE EXCEPTION 'DEMO_USER_ROLE_BLOCKED: demo users may only hold gestor/member roles in a demo tenant';
-    END IF;
+  IF v_is_demo_user AND public.demo_user_role_violation(NEW.tenant_id, NEW.role) THEN
+    RAISE EXCEPTION 'DEMO_USER_ROLE_BLOCKED: demo users may only hold gestor/member roles in a demo tenant';
   END IF;
 
   RETURN NEW;
@@ -123,3 +135,39 @@ CREATE TRIGGER trg_user_roles_demo_user_guard
   BEFORE INSERT OR UPDATE ON public.user_roles
   FOR EACH ROW
   EXECUTE FUNCTION public.guard_user_roles_demo_user();
+
+-- The user_roles-side guard only re-checks a role when that role row itself
+-- is written. If raw_app_meta_data.is_demo_user flips to true afterwards
+-- (e.g. via the Supabase admin API) on a user who already holds a role that
+-- would now violate the rule (admin/super_admin, a non-demo tenant, or no
+-- tenant), that pre-existing row would otherwise never be re-validated.
+-- This trigger closes that gap by re-checking every existing user_roles row
+-- for the user whenever raw_app_meta_data is inserted/updated and the
+-- resulting is_demo_user is true.
+CREATE OR REPLACE FUNCTION public.guard_auth_users_demo_user_roles()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+BEGIN
+  IF (NEW.raw_app_meta_data ->> 'is_demo_user') = 'true' THEN
+    IF EXISTS (
+      SELECT 1
+      FROM public.user_roles ur
+      WHERE ur.user_id = NEW.id
+        AND public.demo_user_role_violation(ur.tenant_id, ur.role)
+    ) THEN
+      RAISE EXCEPTION 'DEMO_USER_ROLE_BLOCKED: demo users may only hold gestor/member roles in a demo tenant';
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_auth_users_demo_user_guard ON auth.users;
+CREATE TRIGGER trg_auth_users_demo_user_guard
+  BEFORE INSERT OR UPDATE OF raw_app_meta_data ON auth.users
+  FOR EACH ROW
+  EXECUTE FUNCTION public.guard_auth_users_demo_user_roles();
