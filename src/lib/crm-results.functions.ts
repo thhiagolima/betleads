@@ -161,7 +161,7 @@ export const getCrmRetention = createServerFn({ method: "GET" })
     const db = context.supabase as any;
     const from = brtDate(data.days - 1);
     const fromInstant = new Date(`${from}T00:00:00-03:00`).toISOString();
-    const [cohorts, funnel, lifecycle] = await Promise.all([
+    const [cohorts, funnel, lifecycle, lifecycleDaily] = await Promise.all([
       db.rpc("crm_retention_cohorts", { _tenant: tenantId, _weeks: 12 }),
       db.rpc("crm_acquisition_funnel", {
         _tenant: tenantId,
@@ -169,6 +169,13 @@ export const getCrmRetention = createServerFn({ method: "GET" })
         _to: new Date().toISOString(),
       }),
       db.rpc("crm_lifecycle_snapshot", { _tenant: tenantId }),
+      db
+        .from("player_lifecycle_daily")
+        .select("metric_date,state,players")
+        .eq("tenant_id", tenantId)
+        .gte("metric_date", from)
+        .order("metric_date")
+        .limit(1000),
     ]);
     for (const result of [cohorts, funnel, lifecycle])
       if (result.error) throw new Error("Não foi possível carregar retenção e aquisição.");
@@ -202,5 +209,19 @@ export const getCrmRetention = createServerFn({ method: "GET" })
         state: String(row.state),
         players: Number(row.players ?? 0),
       })),
+      // One point per day with the players in each state at the end of the day.
+      lifecycleDaily: Object.values(
+        (
+          (lifecycleDaily.data ?? []) as Array<{
+            metric_date: string;
+            state: string;
+            players: number;
+          }>
+        ).reduce<Record<string, Record<string, number | string>>>((days, row) => {
+          days[row.metric_date] ??= { date: row.metric_date };
+          days[row.metric_date][row.state] = Number(row.players ?? 0);
+          return days;
+        }, {}),
+      ) as Array<{ date: string } & Record<string, number | string>>,
     };
   });

@@ -9,6 +9,7 @@ import {
   ComposedChart,
   Legend,
   Line,
+  LineChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -747,6 +748,47 @@ function Retention({ days }: { days: number }) {
           />
         </CardContent>
       </Card>
+      {query.data.lifecycleDaily.length > 1 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Evolução da base</CardTitle>
+            <CardDescription>
+              Jogadores em cada situação ao fim de cada dia. Ativos que viram “esfriando” são os que
+              o CRM precisa trazer de volta.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="h-72">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart
+                data={query.data.lifecycleDaily.map((day) => ({
+                  ...day,
+                  label: dayLabel(day.date),
+                }))}
+              >
+                <CartesianGrid strokeOpacity={0.15} vertical={false} />
+                <XAxis dataKey="label" fontSize={12} tickLine={false} axisLine={false} />
+                <YAxis fontSize={12} tickLine={false} axisLine={false} width={60} />
+                <Tooltip
+                  formatter={(value: number, name: string) => [
+                    num(Number(value)),
+                    PLAYER_STATE_LABELS[name] ?? name,
+                  ]}
+                />
+                <Legend formatter={(name: string) => PLAYER_STATE_LABELS[name] ?? name} />
+                <Line dataKey="ativo" stroke="oklch(0.72 0.18 150)" strokeWidth={2} dot={false} />
+                <Line
+                  dataKey="esfriando"
+                  stroke="oklch(0.75 0.15 75)"
+                  strokeWidth={2}
+                  dot={false}
+                />
+                <Line dataKey="dormindo" stroke="oklch(0.65 0.2 30)" strokeWidth={2} dot={false} />
+                <Line dataKey="perdido" stroke="oklch(0.6 0.03 260)" strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      )}
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Retenção dos novos depositantes</CardTitle>
