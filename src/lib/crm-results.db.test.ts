@@ -13,6 +13,10 @@ const MIGRATION = readFileSync(
   resolve(root, "supabase/migrations/20261016130000_crm_results_daily.sql"),
   "utf8",
 );
+const CAMPAIGN_ID_MIGRATION = readFileSync(
+  resolve(root, "supabase/migrations/20261016170000_sms_log_campaign_id.sql"),
+  "utf8",
+);
 
 const SCHEMA = `
 create role anon nologin;
@@ -29,7 +33,8 @@ create table public.sms_send_logs (
   trigger_name text, idempotency_key text, created_at timestamptz);
 create table public.journey_step_executions (
   id uuid primary key default gen_random_uuid(), idempotency_key uuid, step_position integer);
-create table public.sms_campaigns (id uuid primary key, tenant_id uuid, name text, created_at timestamptz);
+create table public.sms_campaigns (
+  id uuid primary key, tenant_id uuid, name text, created_at timestamptz, status text default 'enviado');
 create table public.link_dispatches (
   id uuid primary key, tenant_id uuid, source_type text, source_id text,
   journey_step_position integer, recipient_player_id uuid, sent_at timestamptz,
@@ -95,6 +100,8 @@ beforeAll(async () => {
   // Applied twice: the migration must be idempotent.
   await db.exec(`begin; ${MIGRATION}; commit;`);
   await db.exec(`begin; ${MIGRATION}; commit;`);
+  await db.exec(`begin; ${CAMPAIGN_ID_MIGRATION}; commit;`);
+  await db.exec(`begin; ${CAMPAIGN_ID_MIGRATION}; commit;`);
   await db.exec(`
     insert into tenants values ('${T}');
     insert into players values ('${A}', '${T}', '2026-09-01'), ('${B}', '${T}', '2026-09-01'),
@@ -191,5 +198,28 @@ describe("crm_results_daily (golden day)", () => {
     const before = strip(await rows());
     await db.query(`select refresh_crm_results_day($1, $2::date)`, [T, DAY]);
     expect(strip(await rows())).toEqual(before);
+  });
+});
+
+describe("campaign id on SMS logs", () => {
+  const LATER = "00000000-0000-4000-8000-0000000000c2";
+
+  it("stores the campaign id at insert and picks the campaign that existed at send time", async () => {
+    await db.exec(`
+      insert into sms_campaigns values ('${LATER}', '${T}', 'Promo X', '2026-10-12', 'enviado');
+      insert into sms_send_logs (tenant_id, player_id, status, trigger_name, idempotency_key, created_at) values
+        ('${T}', '${B}', 'sent', 'campanha:Promo X:iGaming', 'k-later', '2026-10-13T10:00:00-03:00');
+    `);
+    const { rows } = await db.query<{ idempotency_key: string; campaign_id: string }>(
+      `select idempotency_key, campaign_id from sms_send_logs where trigger_name like 'campanha:%' order by created_at`,
+    );
+    expect(rows.find((row) => row.idempotency_key === "k-b1")?.campaign_id).toBe(CAMPAIGN);
+    expect(rows.find((row) => row.idempotency_key === "k-later")?.campaign_id).toBe(LATER);
+  });
+
+  it("keeps crediting the day's results to the right campaign", async () => {
+    await db.query(`select refresh_crm_results_day($1, $2::date)`, [T, DAY]);
+    const row = (await rows()).find((r) => r.source_type === "campaign");
+    expect(row).toMatchObject({ source_key: "Promo X", source_id: CAMPAIGN, sent: 1 });
   });
 });
