@@ -487,7 +487,7 @@ async function handleMessageUpsert(payload: any, instanceName: string) {
     // Pré-ligação: se for resposta inbound 1:1, marca lead como "ligar_agora"
     if (!isGroup && !fromMe && phone) {
       try {
-        await detectPrecallResponse(phone, meta.text);
+        await detectPrecallResponse(phone, meta.text, session.tenant_id);
       } catch (e: any) {
         console.warn("[evo-webhook] precall response detection failed:", e?.message);
       }

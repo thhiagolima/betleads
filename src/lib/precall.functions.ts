@@ -32,6 +32,15 @@ export const createPrecallCampaign = createServerFn({ method: "POST" })
 
     const tenantId = await resolveOperationalTenantId(context.supabase);
 
+    // A sessão de WhatsApp precisa ser desta casa: o dispatcher envia por ela.
+    const { data: ownSession } = await supabaseAdmin
+      .from("whatsapp_sessions")
+      .select("id")
+      .eq("id", data.session_id)
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+    if (!ownSession) throw new Error("Sessão de WhatsApp não encontrada nesta conta");
+
     // 1) cria campanha
     const { data: camp, error: cErr } = await supabaseAdmin
       .from("precall_campaigns")
