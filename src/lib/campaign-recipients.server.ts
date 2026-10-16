@@ -34,12 +34,15 @@ async function forEachChunk<T>(
 ): Promise<void> {
   const parts = chunk(items, size);
   let next = 0;
-  const workers = Array.from({ length: Math.min(RESOLUTION_PARALLELISM, parts.length) }, async () => {
-    while (next < parts.length) {
-      const part = parts[next++];
-      await fn(part);
-    }
-  });
+  const workers = Array.from(
+    { length: Math.min(RESOLUTION_PARALLELISM, parts.length) },
+    async () => {
+      while (next < parts.length) {
+        const part = parts[next++];
+        await fn(part);
+      }
+    },
+  );
   await Promise.all(workers);
 }
 
@@ -57,13 +60,16 @@ export type CampaignRecipientInput = { phone: string; playerId?: string | null }
  *   `trg_players_normalize_phone` trigger stores as E.164 (`+55...`).
  * - When several players share a phone, the most recently updated wins (deterministic).
  * - `sem_consentimento`: an SMS consent explicitly revoked (`channel_consents`).
+ * - `grupo_controle`: the player is in an open journey control group (F3); a
+ *   mass campaign would contaminate the measurement. Individual sends (one
+ *   recipient) are not affected.
  * - The same player listed twice is sent once (`duplicates`).
  */
 export async function resolveCampaignRecipients(
   db: CampaignDb,
   tenantId: string,
   inputs: readonly CampaignRecipientInput[],
-  options: { chunkSize?: number; checkConsent?: boolean } = {},
+  options: { chunkSize?: number; checkConsent?: boolean; excludeHoldout?: boolean } = {},
 ): Promise<RecipientResolution> {
   const chunkSize = Math.max(1, options.chunkSize ?? RESOLUTION_CHUNK_SIZE);
   const rows = inputs.map((input) => ({
@@ -147,9 +153,7 @@ export async function resolveCampaignRecipients(
   if (options.checkConsent !== false) {
     const subjects = Array.from(
       new Set(
-        classified
-          .filter((c) => c.kind === "resolved")
-          .map((c) => smsConsentSubject(c.phone)),
+        classified.filter((c) => c.kind === "resolved").map((c) => smsConsentSubject(c.phone)),
       ),
     );
     const revoked = new Set<string>();
@@ -169,6 +173,40 @@ export async function resolveCampaignRecipients(
         const c = classified[i];
         if (c.kind === "resolved" && revoked.has(smsConsentSubject(c.phone))) {
           classified[i] = { kind: "unresolved", phone: c.phone, reason: "sem_consentimento" };
+        }
+      }
+    }
+  }
+
+  // 4b. Journey control groups stay out of mass campaigns (one recipient = an
+  // individual send, a deliberate operator choice).
+  if (options.excludeHoldout ?? inputs.length > 1) {
+    const playerIds = Array.from(
+      new Set(
+        classified
+          .filter((c): c is Extract<Classified, { kind: "resolved" }> => c.kind === "resolved")
+          .map((c) => c.playerId),
+      ),
+    );
+    const holdout = new Set<string>();
+    await forEachChunk(playerIds, chunkSize, async (part) => {
+      const { data, error } = await db
+        .from("journey_enrollments")
+        .select("player_id")
+        .eq("tenant_id", tenantId)
+        .eq("is_holdout", true)
+        .in("status", ["active", "waiting", "paused_by_priority"])
+        .in("player_id", part);
+      // The column ships with a migration; until then nobody is excluded.
+      if (error && isMissingColumnError(error)) return;
+      if (error) throw new Error(`Falha ao validar grupo de controle: ${error.message}`);
+      for (const row of (data ?? []) as Array<{ player_id: string }>) holdout.add(row.player_id);
+    });
+    if (holdout.size > 0) {
+      for (let i = 0; i < classified.length; i++) {
+        const c = classified[i];
+        if (c.kind === "resolved" && holdout.has(c.playerId)) {
+          classified[i] = { kind: "unresolved", phone: c.phone, reason: "grupo_controle" };
         }
       }
     }

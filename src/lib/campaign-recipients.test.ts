@@ -64,7 +64,12 @@ describe("unresolved recipients presentation", () => {
 
   it("counts and describes by reason", () => {
     const counts = countUnresolvedByReason(rows);
-    expect(counts).toEqual({ sem_cadastro: 2, telefone_invalido: 1, sem_consentimento: 0 });
+    expect(counts).toEqual({
+      sem_cadastro: 2,
+      telefone_invalido: 1,
+      sem_consentimento: 0,
+      grupo_controle: 0,
+    });
     expect(describeUnresolvedCounts(counts)).toBe("2 sem cadastro, 1 telefone inválido");
     expect(noRecipientResolvedMessage(rows)).toContain("(2 sem cadastro, 1 telefone inválido)");
   });
@@ -74,7 +79,12 @@ describe("unresolved recipients presentation", () => {
     expect(csv.split("\n")[0]).toBe("telefone,motivo,descricao");
     expect(csv).toContain('"+5511999990001","sem_cadastro","Sem cadastro"');
     expect(
-      parseUnresolvedRecipients([...rows, { phone: 1, reason: "x" }, null, { reason: "sem_cadastro" }]),
+      parseUnresolvedRecipients([
+        ...rows,
+        { phone: 1, reason: "x" },
+        null,
+        { reason: "sem_cadastro" },
+      ]),
     ).toEqual(rows);
     expect(parseUnresolvedRecipients({})).toEqual([]);
   });

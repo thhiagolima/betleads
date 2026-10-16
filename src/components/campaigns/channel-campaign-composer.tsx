@@ -70,16 +70,9 @@ import {
 import { SYSTEM_SMS_AUDIENCES, type SmsAudienceCriteria } from "@/lib/sms-audience-criteria";
 import { listSmsAudiences } from "@/lib/sms-audience-crud.functions";
 import { listSmsTemplates } from "@/lib/sms-templates.functions";
-import {
-  previewSmsCampaignRecipients,
-  scheduleBulkSms,
-  sendBulkSms,
-} from "@/lib/sms.functions";
+import { previewSmsCampaignRecipients, scheduleBulkSms, sendBulkSms } from "@/lib/sms.functions";
 import { estimateSms } from "@/lib/link-tracking-preview";
-import {
-  UNRESOLVED_REASONS,
-  type UnresolvedReason,
-} from "@/lib/campaign-recipients";
+import { UNRESOLVED_REASONS, type UnresolvedReason } from "@/lib/campaign-recipients";
 
 type Channel = "sms" | "email" | "voice";
 type AudienceOption = { id: string; name: string; criteria: SmsAudienceCriteria; system?: boolean };
@@ -1148,6 +1141,7 @@ const UNRESOLVED_NOTICE_TEXT: Record<UnresolvedReason, string> = {
   sem_cadastro: "sem cadastro não receberão",
   telefone_invalido: "com telefone inválido não receberão",
   sem_consentimento: "sem consentimento para SMS não receberão",
+  grupo_controle: "no grupo de controle de uma jornada não receberão",
 };
 
 /** ENV-06 — avisa, antes do envio/agendamento, quem ficará fora da campanha. */

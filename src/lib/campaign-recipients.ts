@@ -4,24 +4,29 @@
 import { normalizeBrazilianPhone } from "./phone-normalization";
 
 /** Why a campaign recipient will not receive the message. */
-export type UnresolvedReason = "sem_cadastro" | "telefone_invalido" | "sem_consentimento";
+export type UnresolvedReason =
+  "sem_cadastro" | "telefone_invalido" | "sem_consentimento" | "grupo_controle";
 
 export const UNRESOLVED_REASONS: readonly UnresolvedReason[] = [
   "sem_cadastro",
   "telefone_invalido",
   "sem_consentimento",
+  "grupo_controle",
 ] as const;
 
 export const UNRESOLVED_REASON_LABEL: Record<UnresolvedReason, string> = {
   sem_cadastro: "Sem cadastro",
   telefone_invalido: "Telefone inválido",
   sem_consentimento: "Sem consentimento",
+  grupo_controle: "Grupo de controle",
 };
 
 export const UNRESOLVED_REASON_HINT: Record<UnresolvedReason, string> = {
   sem_cadastro: "O telefone não corresponde a nenhum jogador cadastrado nesta operação.",
   telefone_invalido: "O número não é um celular ou fixo brasileiro válido (DDD + número).",
   sem_consentimento: "O destinatário revogou o consentimento para SMS.",
+  grupo_controle:
+    "O jogador está no grupo de controle de uma jornada e não recebe campanhas em massa enquanto o teste estiver aberto.",
 };
 
 export type UnresolvedRecipient = { phone: string; reason: UnresolvedReason };
@@ -64,6 +69,7 @@ export function countUnresolvedByReason(
     sem_cadastro: 0,
     telefone_invalido: 0,
     sem_consentimento: 0,
+    grupo_controle: 0,
   };
   for (const item of unresolved) counts[item.reason] += 1;
   return counts;
@@ -77,7 +83,9 @@ export function describeUnresolvedCounts(counts: Record<UnresolvedReason, number
 }
 
 /** Error shown when a campaign would have no recipient at all (the only blocking case). */
-export function noRecipientResolvedMessage(unresolved: ReadonlyArray<{ reason: UnresolvedReason }>) {
+export function noRecipientResolvedMessage(
+  unresolved: ReadonlyArray<{ reason: UnresolvedReason }>,
+) {
   const detail = describeUnresolvedCounts(countUnresolvedByReason(unresolved));
   return `Nenhum destinatário corresponde a um jogador cadastrado desta operação${detail ? ` (${detail})` : ""}. A campanha não foi criada.`;
 }

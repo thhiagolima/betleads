@@ -148,3 +148,31 @@ describe("resolveCampaignRecipients (ENV-06)", () => {
     expect([...keys].sort()).toEqual(["k1", "k3"]);
   });
 });
+
+describe("journey control group in campaigns (F3)", () => {
+  const players = [1, 2, 3].map((i) => ({
+    id: pid(i),
+    tenant_id: TENANT,
+    telefone: `+55119999900${i}0`,
+    updated_at: "2026-10-01T00:00:00Z",
+  }));
+  const enrollments = [
+    { tenant_id: TENANT, player_id: pid(2), is_holdout: true, status: "waiting" },
+    { tenant_id: TENANT, player_id: pid(3), is_holdout: true, status: "exited" },
+    { tenant_id: TENANT, player_id: pid(1), is_holdout: false, status: "active" },
+  ];
+  const inputs = players.map((player) => ({ phone: player.telefone }));
+
+  it("keeps open control-group players out of a mass campaign", async () => {
+    const db = fakeDb({ players, channel_consents: [], journey_enrollments: enrollments });
+    const result = await resolveCampaignRecipients(db as never, TENANT, inputs);
+    expect(result.resolved.map((r) => r.playerId)).toEqual([pid(1), pid(3)]);
+    expect(result.unresolved).toEqual([{ phone: players[1].telefone, reason: "grupo_controle" }]);
+  });
+
+  it("still sends an individual message to a control-group player", async () => {
+    const db = fakeDb({ players, channel_consents: [], journey_enrollments: enrollments });
+    const result = await resolveCampaignRecipients(db as never, TENANT, [inputs[1]]);
+    expect(result.resolved.map((r) => r.playerId)).toEqual([pid(2)]);
+  });
+});
