@@ -419,6 +419,7 @@ async function enroll(
         .maybeSingle();
       if (error) return { ok: false, error: error.message };
       await supabaseAdmin.from("flow_logs").insert({
+        tenant_id: tenantId,
         flow_id: flowId,
         flow_lead_id: inserted?.id ?? null,
         player_id: player.id,
