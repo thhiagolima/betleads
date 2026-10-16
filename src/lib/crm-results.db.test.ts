@@ -17,6 +17,10 @@ const HEALTH_MIGRATION = readFileSync(
   resolve(root, "supabase/migrations/20261016190000_crm_results_health.sql"),
   "utf8",
 );
+const PRICE_MIGRATION = readFileSync(
+  resolve(root, "supabase/migrations/20261016200000_sms_price_0059.sql"),
+  "utf8",
+);
 const CAMPAIGN_ID_MIGRATION = readFileSync(
   resolve(root, "supabase/migrations/20261016170000_sms_log_campaign_id.sql"),
   "utf8",
@@ -26,7 +30,7 @@ const SCHEMA = `
 create role anon nologin;
 create role authenticated nologin;
 create role service_role nologin;
-create table public.tenants (id uuid primary key);
+create table public.tenants (id uuid primary key, slug text);
 create function public.has_tenant_access(_tenant uuid) returns boolean language sql as $$ select true $$;
 create table public.players (id uuid primary key, tenant_id uuid, ftd_em timestamptz);
 create table public.deposits (
@@ -49,9 +53,14 @@ create table public.click_events (
 create table public.conversion_attributions (
   id uuid primary key default gen_random_uuid(), tenant_id uuid, link_dispatch_id uuid,
   classification text, event_type text, monetary_value numeric, occurred_at timestamptz);
-create table public.tenant_sms_pricing (tenant_id uuid primary key, sale_price_per_sms numeric);
-create table public.sms_credit_settings (id boolean primary key default true, default_sale_price_per_sms numeric);
-insert into public.sms_credit_settings values (true, 0.12);
+create table public.tenant_sms_pricing (
+  tenant_id uuid primary key, sale_price_per_sms numeric, provider_cost_per_sms numeric,
+  updated_at timestamptz default now());
+create table public.sms_credit_settings (
+  id boolean primary key default true, default_sale_price_per_sms numeric,
+  provider_cost_per_sms numeric, updated_at timestamptz);
+insert into public.sms_credit_settings (id, default_sale_price_per_sms, provider_cost_per_sms)
+values (true, 0.12, 0.05);
 create table public.sms_credit_ledger (
   tenant_id uuid, delta_credits integer, entry_type text, unit_sale_price numeric, created_at timestamptz);
 `;
@@ -110,6 +119,14 @@ beforeAll(async () => {
   await db.exec(`begin; ${CAMPAIGN_ID_MIGRATION}; commit;`);
   await db.exec(`begin; ${HEALTH_MIGRATION}; commit;`);
   await db.exec(`begin; ${HEALTH_MIGRATION}; commit;`);
+  await db.exec(`
+    insert into tenants (id, slug) values
+      ('00000000-0000-4000-8000-0000000000b1', 'pixpgf'),
+      ('00000000-0000-4000-8000-0000000000b2', 'pixreals'),
+      ('00000000-0000-4000-8000-0000000000b3', 'forrandobet');
+  `);
+  await db.exec(`begin; ${PRICE_MIGRATION}; commit;`);
+  await db.exec(`begin; ${PRICE_MIGRATION}; commit;`);
   await db.exec(`
     insert into tenants values ('${T}');
     insert into players values ('${A}', '${T}', '2026-09-01'), ('${B}', '${T}', '2026-09-01'),
@@ -272,5 +289,35 @@ describe("daily consistency checks (Q-01)", () => {
     expect(byName.cost).toMatchObject({ ok: false });
     expect(Number(byName.cost.expected)).toBeCloseTo(1.08);
     expect(failed).toBe(1);
+  });
+
+  it("reconciles credits charged at an older unit price with the current price", async () => {
+    await db.exec(`
+      delete from sms_credit_ledger;
+      insert into tenant_sms_pricing (tenant_id, sale_price_per_sms) values ('${T}', 0.059);
+      insert into sms_credit_ledger values ('${T}', -4, 'sms_reservation', 0.12, '${at("10:00")}');
+    `);
+    const { failed, byName } = await checks();
+    expect(Number(byName.cost.expected)).toBeCloseTo(0.236);
+    expect(byName.cost).toMatchObject({ ok: true });
+    expect(failed).toBe(0);
+  });
+});
+
+describe("SMS price R$ 0,059", () => {
+  it("is the provider cost and the sale price of the three houses only", async () => {
+    const { rows: settings } = await db.query<{ cost: string; sale: string }>(
+      `select provider_cost_per_sms cost, default_sale_price_per_sms sale from sms_credit_settings`,
+    );
+    expect(settings[0]).toMatchObject({ cost: "0.059", sale: "0.12" });
+    const { rows } = await db.query<{ slug: string; sale: string }>(
+      `select t.slug, p.sale_price_per_sms sale from tenants t
+         join tenant_sms_pricing p on p.tenant_id = t.id where t.slug is not null order by 1`,
+    );
+    expect(rows).toEqual([
+      { slug: "forrandobet", sale: "0.059" },
+      { slug: "pixpgf", sale: "0.059" },
+      { slug: "pixreals", sale: "0.059" },
+    ]);
   });
 });

@@ -832,7 +832,9 @@ export async function sendSmsInternal(args: {
   // Account-level refusal (101/505, HTTP 401/402/403): not the lead's fault.
   // Opens the SMS circuit breaker; workers defer without consuming attempts.
   const accountReason =
-    !r.ok && r.errorKind === null && r.status > 0 ? smsProviderAccountReason(r.status, r.body) : null;
+    !r.ok && r.errorKind === null && r.status > 0
+      ? smsProviderAccountReason(r.status, r.body)
+      : null;
   if (accountReason) {
     await reportSmsProviderAccountFailure({
       reason: accountReason,
@@ -894,9 +896,9 @@ export async function sendSmsInternal(args: {
         // provider_account is retryable later (nothing was sent, credit refunded).
         temporary: isTemporary || accountReason !== null,
         body: JSON.stringify(r.body ?? null),
-        errorKind: (accountReason ? "provider_account" : (r.errorKind ?? null)) as
-          | ProviderErrorKind
-          | null,
+        errorKind: (accountReason
+          ? "provider_account"
+          : (r.errorKind ?? null)) as ProviderErrorKind | null,
       };
 }
 
@@ -1312,7 +1314,6 @@ export const sendBulkSms = createServerFn({ method: "POST" })
 // flow_leads e deposits. Retorna shape pronto para o componente.
 // ============================================================
 
-const SMS_COST_BRL = 0.08; // custo medio estimado por SMS
 const CONVERSION_WINDOW_HOURS = 72;
 
 function dayKey(d: Date): string {
@@ -1686,7 +1687,12 @@ export const getSmsDashboard = createServerFn({ method: "POST" })
       }
     }
 
-    const totalCost = sentTotal * SMS_COST_BRL;
+    // Same price the house pays per credit (and the Central uses as cost).
+    const { data: pricing } = await (supabaseAdmin as any).rpc("sms_effective_pricing", {
+      _tenant: tenantId,
+    });
+    const smsPrice = Number(pricing?.sale_price_per_sms) || 0.12;
+    const totalCost = sentTotal * smsPrice;
     const roi_brl = Math.max(0, convertedRevenue - totalCost);
 
     const series = denseSeries(rangeDays, buckets, endDate);
