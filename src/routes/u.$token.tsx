@@ -40,13 +40,16 @@ export const confirmUnsubscribe = createServerFn({ method: "POST" })
       .eq("token", data.token)
       .maybeSingle();
     if (!row) return { ok: false as const, reason: "not_found" as const };
+    // Suprime antes de marcar o token: se a supressão falhar, o link continua
+    // válido para uma nova tentativa em vez de mostrar "concluído" sem efeito.
+    await suppressEmail(row.email as string, "unsubscribe", (row.tenant_id as string | null) ?? null, "user clicked unsubscribe link");
     if (!row.used_at) {
-      await supabaseAdmin
+      const { error } = await supabaseAdmin
         .from("email_unsubscribe_tokens")
         .update({ used_at: new Date().toISOString() })
         .eq("token", data.token);
+      if (error) throw new Error(`Falha ao registrar o descadastro: ${error.message}`);
     }
-    await suppressEmail(row.email as string, "unsubscribe", (row.tenant_id as string | null) ?? null, "user clicked unsubscribe link");
     return { ok: true as const };
   });
 
