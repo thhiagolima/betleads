@@ -16,78 +16,24 @@ import {
 } from "./evolution.server";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 
-async function fingerprintKey(key: string): Promise<string> {
-  try {
-    const buf = new TextEncoder().encode(key);
-    const hash = await crypto.subtle.digest("SHA-256", buf);
-    return Array.from(new Uint8Array(hash))
-      .slice(0, 4)
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
-  } catch {
-    return "n/a";
-  }
-}
-
-// Diagnostic — hits Evolution directly with the SAME wrapper the rest of the
-// app uses and returns the raw HTTP status + body. Used by the WhatsApp page
-// to compare the BETLEADS request vs. the working VPS curl.
+// Diagnostic — hits Evolution with the same wrapper the rest of the app uses.
+// Platform operation: super admin only; never returns the instance list.
 export const diagnoseEvolution = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async () => {
-    const url = process.env.EVOLUTION_API_URL?.trim().replace(/\/$/, "");
-    const rawKey = process.env.EVOLUTION_API_KEY ?? "";
-    const key = rawKey.trim().replace(/^['"]|['"]$/g, "");
-    if (!url || !key) {
-      return { ok: false, error: "EVOLUTION_API_URL / EVOLUTION_API_KEY not configured" };
-    }
-    const target = `${url}/instance/fetchInstances`;
-    const apikeyFingerprint = await fingerprintKey(key);
-    try {
-      const data = await evolutionFetch("/instance/fetchInstances");
-      return {
-        ok: true,
-        url: target,
-        method: "GET",
-        apikeyFingerprint,
-        apikeyLength: key.length,
-        responseStatus: 200,
-        responseBody: JSON.stringify(data).slice(0, 1000),
-      };
-    } catch (e: any) {
-      return {
-        ok: false,
-        url: target,
-        method: "GET",
-        apikeyFingerprint,
-        apikeyLength: key.length,
-        responseStatus: e?.status ?? 0,
-        responseBody: (e?.rawBody ?? e?.message ?? String(e)).slice(0, 1000),
-      };
-    }
+  .handler(async ({ context }) => {
+    const { diagnoseEvolutionFor } = await import("./whatsapp-admin.server");
+    return diagnoseEvolutionFor(context.userId);
   });
 
-// Returns the Evolution base URL + apikey to the authenticated browser session
-// so the frontend can open a socket.io connection and receive `qrcode.updated`
-// / `connection.update` events in real time (Evolution API v2.x).
-// Only authenticated users get this — gated by requireSupabaseAuth.
+// Returns the Evolution base URL + apikey so the browser can open a socket.io
+// connection for `qrcode.updated` / `connection.update` (Evolution v2.x).
+// The global apikey controls EVERY instance: super admin only (SEC-29 —
+// residual risk: it still reaches the super admin's browser).
 export const getEvolutionRealtimeConfig = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    // Restrito a super admin — o apikey global do Evolution dá controle
-    // sobre TODAS as instâncias WhatsApp, então jamais expor a tenants.
-    const { data: isSuper, error: roleErr } = await supabaseAdmin.rpc("is_super_admin", {
-      _user_id: context.userId,
-    });
-    if (roleErr) throw new Error(roleErr.message);
-    if (!isSuper) throw new Error("Apenas o super admin pode acessar esta configuração");
-    const url = process.env.EVOLUTION_API_URL;
-    const key = process.env.EVOLUTION_API_KEY;
-    if (!url || !key) throw new Error("Evolution não configurada");
-    return {
-      url: url.trim().replace(/\/$/, ""),
-      apikey: key.trim().replace(/^['"]|['"]$/g, ""),
-    };
+    const { evolutionRealtimeConfigFor } = await import("./whatsapp-admin.server");
+    return evolutionRealtimeConfigFor(context.userId);
   });
 
 export const listWhatsappSessions = createServerFn({ method: "GET" })
@@ -158,22 +104,18 @@ export const createWhatsappSession = createServerFn({ method: "POST" })
       .single();
     if (error) throw new Error(error.message);
 
-    // 3) Registra webhook na Evolution para essa instância (não-fatal).
+    // 3) Registra webhook na Evolution para essa instância (não-fatal). O
+    // segredo vai em header (EVOLUTION_WEBHOOK_SECRET), nunca na URL.
     try {
+      const { evolutionWebhookSetBody } = await import("./whatsapp-evolution-auth.server");
       await evolutionFetch(`/webhook/set/${encodeURIComponent(data.instance_name)}`, {
         method: "POST",
-        body: {
-          webhook: {
-            enabled: true,
-            url: webhookUrl(),
-            byEvents: false,
-            base64: false,
-            events: ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "SEND_MESSAGE", "CONNECTION_UPDATE"],
-          },
-          enabled: true,
-          url: webhookUrl(),
-          events: ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "SEND_MESSAGE", "CONNECTION_UPDATE"],
-        },
+        body: evolutionWebhookSetBody([
+          "MESSAGES_UPSERT",
+          "MESSAGES_UPDATE",
+          "SEND_MESSAGE",
+          "CONNECTION_UPDATE",
+        ]),
       });
     } catch (e: any) {
       console.warn("[whatsapp] webhook/set after create failed (ignored):", e?.message);
@@ -410,56 +352,9 @@ export const deleteWhatsappSession = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) => z.object({ id: dbUuid(), force: z.boolean().optional() }).parse(input))
   .handler(async ({ data, context }) => {
-    const { data: session } = await context.supabase
-      .from("whatsapp_sessions")
-      .select("instance_name")
-      .eq("id", data.id)
-      .single();
-
-    if (!data.force) {
-      // Bloqueia exclusão se ainda houver leads vinculados — força realocação primeiro.
-      // Conta via admin para enxergar registros com tenant_id legado (não filtrados por RLS).
-      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-      const { count: assignedCount } = await supabaseAdmin
-        .from("lead_whatsapp_assignments")
-        .select("id", { count: "exact", head: true })
-        .eq("session_id", data.id);
-      if ((assignedCount ?? 0) > 0) {
-        throw new Error(
-          `Esta sessão tem ${assignedCount} lead(s) vinculado(s). Realoque para outra sessão antes de excluir.`,
-        );
-      }
-    } else {
-      // Force: remove vínculos de leads e limpa histórico antes de excluir.
-      // Usa admin para limpar TAMBÉM linhas com tenant_id legado (00000000…),
-      // que o RLS do usuário esconde e que deixam a FK
-      // lead_whatsapp_assignments_session_id_fkey segurando o DELETE da sessão.
-      // Escopo: session_id = data.id — o usuário já provou ser dono dela ao
-      // conseguir lê-la via context.supabase logo acima.
-      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-      const { error: assignErr } = await supabaseAdmin
-        .from("lead_whatsapp_assignments")
-        .delete()
-        .eq("session_id", data.id);
-      if (assignErr) throw new Error(assignErr.message);
-      await supabaseAdmin.from("whatsapp_messages").delete().eq("session_id", data.id);
-      await supabaseAdmin.from("whatsapp_chats").delete().eq("session_id", data.id);
-    }
-
-    if (session) {
-      try {
-        await evolutionFetch(`/instance/delete/${encodeURIComponent(session.instance_name)}`, {
-          method: "DELETE",
-        });
-      } catch (e: any) {
-        console.warn("[whatsapp] delete instance failed:", e.message);
-      }
-    }
-
-    const { error } = await context.supabase.from("whatsapp_sessions").delete().eq("id", data.id);
-    if (error) throw new Error(error.message);
-
-    return { ok: true };
+    // Ownership is proven via RLS before any service-role delete (SEC-15).
+    const { deleteWhatsappSessionFor } = await import("./whatsapp-admin.server");
+    return deleteWhatsappSessionFor(context.supabase, data);
   });
 
 export const renameWhatsappSession = createServerFn({ method: "POST" })
@@ -576,19 +471,6 @@ export const syncWhatsappSessions = createServerFn({ method: "POST" })
 // INBOX (chats + messages)
 // ============================================================
 
-function projectPublicUrl(): string {
-  const url = process.env.PUBLIC_APP_URL ?? process.env.APP_URL;
-  if (!url) {
-    throw new Error("PUBLIC_APP_URL is required to register Evolution webhooks");
-  }
-  return url.replace(/\/+$/, "");
-}
-
-function webhookUrl(): string {
-  const token = process.env.EVOLUTION_WEBHOOK_SECRET ?? process.env.EVOLUTION_API_KEY ?? "";
-  return `${projectPublicUrl()}/api/public/evolution-webhook?token=${encodeURIComponent(token)}`;
-}
-
 function evolutionNumber(remoteJid: string): string {
   if (remoteJid.endsWith("@g.us")) return remoteJid;
   const bare = remoteJid.split("@")[0] ?? remoteJid;
@@ -693,36 +575,14 @@ async function resolveWhatsappNumber(
 }
 
 // Registra (ou re-registra) o webhook desta instância na Evolution.
+// Platform operation: super admin only. The secret is sent as a header and is
+// never returned (SEC-13).
 export const configureEvolutionWebhook = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) => z.object({ instance_name: z.string().min(1) }).parse(input))
-  .handler(async ({ data }) => {
-    const url = webhookUrl();
-    const events = [
-      "MESSAGES_UPSERT",
-      "MESSAGES_UPDATE",
-      "SEND_MESSAGE",
-      "CONNECTION_UPDATE",
-      "CHATS_UPSERT",
-      "CONTACTS_UPSERT",
-    ];
-    // Evolution v2: POST /webhook/set/{instance}
-    try {
-      await evolutionFetch(`/webhook/set/${encodeURIComponent(data.instance_name)}`, {
-        method: "POST",
-        body: {
-          webhook: { enabled: true, url, byEvents: false, base64: false, events },
-          // Alguns builds aceitam o formato "flat":
-          enabled: true,
-          url,
-          events,
-        },
-      });
-    } catch (e: any) {
-      console.warn("[whatsapp] webhook/set failed:", e?.message);
-      throw new Error(`Falha ao configurar webhook: ${e?.message}`);
-    }
-    return { ok: true, url };
+  .handler(async ({ data, context }) => {
+    const { configureEvolutionWebhookFor } = await import("./whatsapp-admin.server");
+    return configureEvolutionWebhookFor(context.userId, data.instance_name);
   });
 
 export const listInboxChats = createServerFn({ method: "GET" })

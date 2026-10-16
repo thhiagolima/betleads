@@ -9,13 +9,6 @@ const saveSchema = z.object({
   disable_internal: z.boolean().optional(),
 });
 
-async function resolveTenantId(supabase: any): Promise<string> {
-  const { data, error } = await supabase.rpc("current_tenant_id");
-  if (error) throw new Error(error.message);
-  if (!data) throw new Error("Conta não identificada");
-  return data as string;
-}
-
 export const getWhatsappExternalIntegration = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
@@ -28,27 +21,13 @@ export const getWhatsappExternalIntegration = createServerFn({ method: "GET" })
     return { integration: data ?? null };
   });
 
+// Admin/gestor (or super admin) only; URL must be public https (SEC-12).
 export const saveWhatsappExternalIntegration = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) => saveSchema.parse(input))
   .handler(async ({ data, context }) => {
-    const tenantId = await resolveTenantId(context.supabase);
-    const { data: row, error } = await context.supabase
-      .from("whatsapp_external_integrations")
-      .upsert(
-        {
-          tenant_id: tenantId,
-          url: data.url,
-          active: data.active,
-          triggers: data.triggers,
-          disable_internal: data.disable_internal ?? true,
-        },
-        { onConflict: "tenant_id" },
-      )
-      .select("*")
-      .single();
-    if (error) throw new Error(error.message);
-    return { integration: row };
+    const { saveExternalIntegrationFor } = await import("./whatsapp-external.server");
+    return saveExternalIntegrationFor(context.supabase, context.userId, data);
   });
 
 export const listWhatsappExternalEvents = createServerFn({ method: "GET" })
@@ -66,17 +45,12 @@ export const listWhatsappExternalEvents = createServerFn({ method: "GET" })
 export const testWhatsappExternalWebhook = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data: integration, error } = await context.supabase
-      .from("whatsapp_external_integrations")
-      .select("id, tenant_id, url, active, triggers, disable_internal")
-      .limit(1)
-      .maybeSingle();
-    if (error) throw new Error(error.message);
-    if (!integration) throw new Error("Configure a URL do webhook primeiro");
-
-    const { sendExternalTriggerEvent } = await import("./whatsapp-external.server");
+    const { loadManagedExternalIntegration, sendExternalTriggerEvent } = await import(
+      "./whatsapp-external.server"
+    );
+    const integration = await loadManagedExternalIntegration(context.supabase, context.userId);
     const res = await sendExternalTriggerEvent({
-      integration: integration as any,
+      integration,
       trigger: "recuperacao_vip",
       isTest: true,
       lead: {
@@ -105,16 +79,11 @@ export const testWhatsappExternalWebhook = createServerFn({ method: "POST" })
 export const sendAllWhatsappExternalEvents = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data: integration, error } = await context.supabase
-      .from("whatsapp_external_integrations")
-      .select("id, tenant_id, url, active, triggers, disable_internal")
-      .limit(1)
-      .maybeSingle();
-    if (error) throw new Error(error.message);
-    if (!integration) throw new Error("Configure a URL do webhook primeiro");
-
-    const { sendAllTriggerSamples } = await import("./whatsapp-external.server");
-    const results = await sendAllTriggerSamples(integration as any);
+    const { loadManagedExternalIntegration, sendAllTriggerSamples } = await import(
+      "./whatsapp-external.server"
+    );
+    const integration = await loadManagedExternalIntegration(context.supabase, context.userId);
+    const results = await sendAllTriggerSamples(integration);
     return {
       total: results.length,
       ok: results.filter((r) => r.ok).length,

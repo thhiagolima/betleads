@@ -1,8 +1,109 @@
 // Integração externa de WhatsApp: em vez de enviar mensagem pela Evolution,
 // o BetLeads encaminha o evento de gatilho para o webhook de um CRM terceiro.
+//
+// Segurança (SEC-12): a URL é escolhida pelo cliente, então só admin/gestor
+// da casa (ou super admin) pode configurá-la ou dispará-la; o destino passa
+// pelo guard de SSRF (https, sem IP interno após DNS), redirects não são
+// seguidos e o corpo da resposta nunca é persistido.
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { TRIGGER_NAMES, type TriggerType } from "./triggers.server";
 import { priorityRank } from "./priorities";
+import {
+  assertSafeOutboundUrl,
+  safeOutboundFetch,
+  UnsafeOutboundUrlError,
+} from "./ssrf-guard.server";
+
+const OUTBOUND_TIMEOUT_MS = 10_000;
+const MAX_ERROR_LENGTH = 200;
+const MANAGER_ROLES = new Set(["admin", "gestor"]);
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- user-scoped Supabase client (RLS) or a test double.
+type UserDb = { from: (table: string) => any; rpc: (...args: any[]) => PromiseLike<any> };
+
+function shortError(message: unknown): string {
+  return String(message ?? "erro").slice(0, MAX_ERROR_LENGTH);
+}
+
+/**
+ * Resolves the caller's active tenant and requires admin/gestor there (or
+ * global super admin). Returns the tenant id.
+ */
+export async function assertExternalIntegrationManager(
+  supabase: UserDb,
+  userId: string,
+): Promise<string> {
+  const { data: tenantId, error: tenantError } = await supabase.rpc("current_tenant_id");
+  if (tenantError) throw new Error(tenantError.message);
+  if (!tenantId) throw new Error("Conta não identificada");
+
+  const { data: isSuper, error: superError } = await supabaseAdmin.rpc("is_super_admin", {
+    _user_id: userId,
+  });
+  if (superError) throw new Error("Não foi possível validar a permissão.");
+  if (isSuper) return String(tenantId);
+
+  const { data: roles, error: roleError } = await supabaseAdmin
+    .from("user_roles")
+    .select("role")
+    .eq("tenant_id", String(tenantId))
+    .eq("user_id", userId);
+  if (roleError) throw new Error("Não foi possível validar a permissão.");
+  const allowed = ((roles ?? []) as Array<{ role: string }>).some((r) => MANAGER_ROLES.has(r.role));
+  if (!allowed) {
+    throw new Error("Acesso restrito a administradores e gestores da casa.");
+  }
+  return String(tenantId);
+}
+
+export type ExternalIntegrationInput = {
+  url: string;
+  active: boolean;
+  triggers: string[];
+  disable_internal?: boolean;
+};
+
+export async function saveExternalIntegrationFor(
+  supabase: UserDb,
+  userId: string,
+  input: ExternalIntegrationInput,
+) {
+  const tenantId = await assertExternalIntegrationManager(supabase, userId);
+  const { url } = await assertSafeOutboundUrl(input.url);
+  const { data: row, error } = await supabase
+    .from("whatsapp_external_integrations")
+    .upsert(
+      {
+        tenant_id: tenantId,
+        url: url.toString(),
+        active: input.active,
+        triggers: input.triggers,
+        disable_internal: input.disable_internal ?? true,
+      },
+      { onConflict: "tenant_id" },
+    )
+    .select("*")
+    .single();
+  if (error) throw new Error(error.message);
+  return { integration: row };
+}
+
+/** Integration of the caller's tenant, for manual test / send-all actions. */
+export async function loadManagedExternalIntegration(
+  supabase: UserDb,
+  userId: string,
+): Promise<ExternalIntegration> {
+  const tenantId = await assertExternalIntegrationManager(supabase, userId);
+  const { data: integration, error } = await supabase
+    .from("whatsapp_external_integrations")
+    .select("id, tenant_id, url, active, triggers, disable_internal")
+    .eq("tenant_id", tenantId)
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!integration) throw new Error("Configure a URL do webhook primeiro");
+  return integration as ExternalIntegration;
+}
 
 export type ExternalIntegration = {
   id: string;
@@ -97,23 +198,45 @@ async function postWithRetry(url: string, payload: unknown) {
   let lastErr: string | null = null;
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const body = (await res.text().catch(() => "")).slice(0, 800);
-      if (res.ok) return { ok: true, status: res.status, body, attempts: attempt, error: null };
+      // Re-validated on every attempt (DNS may change between attempts).
+      const res = await safeOutboundFetch(
+        url,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+        { timeoutMs: OUTBOUND_TIMEOUT_MS },
+      );
+      // The body is drained but never stored or returned (it may echo PII).
+      await res.body?.cancel().catch(() => {});
+      if (res.ok) return { ok: true, status: res.status, attempts: attempt, error: null };
+      if (res.status >= 300 && res.status < 400) {
+        return {
+          ok: false,
+          status: res.status,
+          attempts: attempt,
+          error: `HTTP ${res.status} (redirect não é seguido)`,
+        };
+      }
       lastErr = `HTTP ${res.status}`;
       if (res.status < 500 && res.status !== 429) {
-        return { ok: false, status: res.status, body, attempts: attempt, error: lastErr };
+        return { ok: false, status: res.status, attempts: attempt, error: lastErr };
       }
-    } catch (e: any) {
-      lastErr = e?.message ?? "network error";
+    } catch (e) {
+      if (e instanceof UnsafeOutboundUrlError) {
+        return {
+          ok: false,
+          status: null as number | null,
+          attempts: attempt,
+          error: shortError(`Destino bloqueado: ${e.message}`),
+        };
+      }
+      lastErr = shortError((e as Error)?.message ?? "network error");
     }
     await new Promise((r) => setTimeout(r, attempt * 800));
   }
-  return { ok: false, status: null as number | null, body: "", attempts: 3, error: lastErr };
+  return { ok: false, status: null as number | null, attempts: 3, error: shortError(lastErr) };
 }
 
 // Envia um evento de gatilho para o webhook externo.
@@ -154,8 +277,8 @@ export async function sendExternalTriggerEvent(opts: {
     .update({
       status: result.ok ? "sent" : "failed",
       http_status: result.status,
-      response_body: result.body || null,
-      error: result.error,
+      response_body: null,
+      error: result.error ? shortError(result.error) : null,
       attempts: result.attempts,
     })
     .eq("id", reserved.id);
@@ -165,7 +288,7 @@ export async function sendExternalTriggerEvent(opts: {
     .update(
       result.ok
         ? { last_success_at: new Date().toISOString(), last_error: null }
-        : { last_error: result.error },
+        : { last_error: shortError(result.error) },
     )
     .eq("id", integration.id);
 
