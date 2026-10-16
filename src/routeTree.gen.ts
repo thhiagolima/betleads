@@ -44,6 +44,7 @@ import { Route as JornadasNovaRouteImport } from './routes/jornadas.nova'
 import { Route as LinksConfiguracoesRouteImport } from './routes/links.configuracoes'
 import { Route as PlayersPlayerIdRouteImport } from './routes/players.$playerId'
 import { Route as RelatoriosConversaoRouteImport } from './routes/relatorios.conversao'
+import { Route as ResultadosCompararRouteImport } from './routes/resultados_.comparar'
 import { Route as SmsTemplatesRouteImport } from './routes/sms.templates'
 import { Route as UTokenRouteImport } from './routes/u.$token'
 import { Route as ApiPublicEvolutionWebhookRouteImport } from './routes/api/public/evolution-webhook'
@@ -251,6 +252,11 @@ const PlayersPlayerIdRoute = PlayersPlayerIdRouteImport.update({
 const RelatoriosConversaoRoute = RelatoriosConversaoRouteImport.update({
   id: '/relatorios/conversao',
   path: '/relatorios/conversao',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ResultadosCompararRoute = ResultadosCompararRouteImport.update({
+  id: '/resultados_/comparar',
+  path: '/resultados/comparar',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SmsTemplatesRoute = SmsTemplatesRouteImport.update({
@@ -476,6 +482,7 @@ export interface FileRoutesByFullPath {
   '/links/configuracoes': typeof LinksConfiguracoesRoute
   '/players/$playerId': typeof PlayersPlayerIdRoute
   '/relatorios/conversao': typeof RelatoriosConversaoRoute
+  '/resultados/comparar': typeof ResultadosCompararRoute
   '/sms/templates': typeof SmsTemplatesRoute
   '/u/$token': typeof UTokenRoute
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
@@ -546,6 +553,7 @@ export interface FileRoutesByTo {
   '/links/configuracoes': typeof LinksConfiguracoesRoute
   '/players/$playerId': typeof PlayersPlayerIdRoute
   '/relatorios/conversao': typeof RelatoriosConversaoRoute
+  '/resultados/comparar': typeof ResultadosCompararRoute
   '/sms/templates': typeof SmsTemplatesRoute
   '/u/$token': typeof UTokenRoute
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
@@ -617,6 +625,7 @@ export interface FileRoutesById {
   '/links/configuracoes': typeof LinksConfiguracoesRoute
   '/players/$playerId': typeof PlayersPlayerIdRoute
   '/relatorios/conversao': typeof RelatoriosConversaoRoute
+  '/resultados_/comparar': typeof ResultadosCompararRoute
   '/sms/templates': typeof SmsTemplatesRoute
   '/u/$token': typeof UTokenRoute
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
@@ -689,6 +698,7 @@ export interface FileRouteTypes {
     | '/links/configuracoes'
     | '/players/$playerId'
     | '/relatorios/conversao'
+    | '/resultados/comparar'
     | '/sms/templates'
     | '/u/$token'
     | '/api/public/evolution-webhook'
@@ -759,6 +769,7 @@ export interface FileRouteTypes {
     | '/links/configuracoes'
     | '/players/$playerId'
     | '/relatorios/conversao'
+    | '/resultados/comparar'
     | '/sms/templates'
     | '/u/$token'
     | '/api/public/evolution-webhook'
@@ -829,6 +840,7 @@ export interface FileRouteTypes {
     | '/links/configuracoes'
     | '/players/$playerId'
     | '/relatorios/conversao'
+    | '/resultados_/comparar'
     | '/sms/templates'
     | '/u/$token'
     | '/api/public/evolution-webhook'
@@ -892,6 +904,7 @@ export interface RootRouteChildren {
   WebhooksRoute: typeof WebhooksRoute
   WhatsappRoute: typeof WhatsappRoute
   RelatoriosConversaoRoute: typeof RelatoriosConversaoRoute
+  ResultadosCompararRoute: typeof ResultadosCompararRoute
   UTokenRoute: typeof UTokenRoute
   ApiPublicEvolutionWebhookRoute: typeof ApiPublicEvolutionWebhookRoute
   ApiPublicHealthRoute: typeof ApiPublicHealthRoute
@@ -1169,6 +1182,13 @@ declare module '@tanstack/react-router' {
       path: '/relatorios/conversao'
       fullPath: '/relatorios/conversao'
       preLoaderRoute: typeof RelatoriosConversaoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/resultados_/comparar': {
+      id: '/resultados_/comparar'
+      path: '/resultados/comparar'
+      fullPath: '/resultados/comparar'
+      preLoaderRoute: typeof ResultadosCompararRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/sms/templates': {
@@ -1510,6 +1530,7 @@ const rootRouteChildren: RootRouteChildren = {
   WebhooksRoute: WebhooksRoute,
   WhatsappRoute: WhatsappRoute,
   RelatoriosConversaoRoute: RelatoriosConversaoRoute,
+  ResultadosCompararRoute: ResultadosCompararRoute,
   UTokenRoute: UTokenRoute,
   ApiPublicEvolutionWebhookRoute: ApiPublicEvolutionWebhookRoute,
   ApiPublicHealthRoute: ApiPublicHealthRoute,

@@ -17,6 +17,7 @@ import {
 } from "recharts";
 
 import { getCrmResults, getCrmRetention } from "@/lib/crm-results.functions";
+import { getComparisonAccess } from "@/lib/tenant-comparison.functions";
 import { buildRecommendations } from "@/lib/crm-recommendations";
 import { PLAYER_STATE_LABELS, RECOVERABLE_STATES, type CrmSource } from "@/lib/crm-results";
 import { brl, num } from "@/lib/format";
@@ -60,6 +61,12 @@ export function CentralResults() {
     queryFn: () => load({ data: { days } }),
     staleTime: 60_000,
   });
+  const loadAccess = useServerFn(getComparisonAccess);
+  const access = useQuery({
+    queryKey: ["tenant-comparison-access"],
+    queryFn: () => loadAccess(),
+    staleTime: 5 * 60_000,
+  });
 
   return (
     <main className="mx-auto max-w-7xl space-y-6 p-4 sm:p-6">
@@ -72,7 +79,12 @@ export function CentralResults() {
               ` ${dayLabel(query.data.from)} a ${dayLabel(query.data.to)} · horário de Brasília`}
           </p>
         </div>
-        <div className="flex gap-2" role="group" aria-label="Período">
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Período">
+          {access.data?.allowed && (
+            <Button size="sm" variant="outline" asChild>
+              <Link to="/resultados/comparar">Comparar casas</Link>
+            </Button>
+          )}
           {PERIODS.map((value) => (
             <Button
               key={value}
