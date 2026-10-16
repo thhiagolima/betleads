@@ -15,8 +15,8 @@ import {
   YAxis,
 } from "recharts";
 
-import { getCrmResults } from "@/lib/crm-results.functions";
-import { RECOVERABLE_STATES, type CrmSource } from "@/lib/crm-results";
+import { getCrmResults, getCrmRetention } from "@/lib/crm-results.functions";
+import { PLAYER_STATE_LABELS, RECOVERABLE_STATES, type CrmSource } from "@/lib/crm-results";
 import { brl, num } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -124,6 +124,8 @@ function Results({ data }: { data: Data }) {
         <TabsTrigger value="sources">Onde recupera</TabsTrigger>
         <TabsTrigger value="states">Situação do jogador</TabsTrigger>
         <TabsTrigger value="holdout">Teste de controle</TabsTrigger>
+        <TabsTrigger value="retention">Retenção</TabsTrigger>
+        <TabsTrigger value="acquisition">Aquisição</TabsTrigger>
         <TabsTrigger value="health">Saúde dos dados</TabsTrigger>
       </TabsList>
       <TabsContent value="overview">
@@ -137,6 +139,12 @@ function Results({ data }: { data: Data }) {
       </TabsContent>
       <TabsContent value="holdout">
         <Holdout data={data} />
+      </TabsContent>
+      <TabsContent value="retention">
+        <Retention days={data.days} />
+      </TabsContent>
+      <TabsContent value="acquisition">
+        <Acquisition days={data.days} />
       </TabsContent>
       <TabsContent value="health">
         <Health data={data} />
@@ -655,5 +663,220 @@ function Holdout({ data }: { data: Data }) {
         </p>
       </CardContent>
     </Card>
+  );
+}
+
+function useRetention(days: number) {
+  const load = useServerFn(getCrmRetention);
+  return useQuery({
+    queryKey: ["crm-retention", days],
+    queryFn: () => load({ data: { days } }),
+    staleTime: 5 * 60_000,
+  });
+}
+
+const LIFECYCLE_ORDER = ["ativo", "esfriando", "dormindo", "perdido", "sem_ftd", "sem_historico"];
+const percentOf = (value: number, total: number) => (total > 0 ? pct(value / total) : "—");
+const pctValue = (value: number | null) =>
+  value == null
+    ? "—"
+    : `${value.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
+const hours = (value: number | null) =>
+  value == null
+    ? "—"
+    : value < 24
+      ? `${value.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} h`
+      : `${(value / 24).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} dias`;
+
+function LoadFailed({ what }: { what: string }) {
+  return (
+    <Card>
+      <CardContent className="p-6 text-sm text-muted-foreground">
+        Não foi possível carregar {what}.
+      </CardContent>
+    </Card>
+  );
+}
+
+function Bars({ items, total }: { items: Array<{ label: string; value: number }>; total: number }) {
+  return (
+    <div className="space-y-3">
+      {items.map((item) => (
+        <div key={item.label} className="space-y-1">
+          <div className="flex justify-between text-sm">
+            <span>{item.label}</span>
+            <span className="tabular-nums text-muted-foreground">
+              {num(item.value)} · {percentOf(item.value, total)}
+            </span>
+          </div>
+          <div className="h-2 rounded-full bg-muted/40">
+            <div
+              className="h-full rounded-full bg-primary"
+              style={{ width: `${total ? (item.value / total) * 100 : 0}%` }}
+            />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Retention({ days }: { days: number }) {
+  const query = useRetention(days);
+  if (query.isLoading) return <Skeleton className="h-64 rounded-xl" />;
+  if (query.isError || !query.data) return <LoadFailed what="a retenção" />;
+  const { lifecycle, cohorts } = query.data;
+  const totalPlayers = lifecycle.reduce((sum, row) => sum + row.players, 0);
+  const ordered = [...lifecycle].sort(
+    (a, b) => LIFECYCLE_ORDER.indexOf(a.state) - LIFECYCLE_ORDER.indexOf(b.state),
+  );
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Onde a base está agora</CardTitle>
+          <CardDescription>Pelo tempo desde o último depósito de cada jogador.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Bars
+            total={totalPlayers}
+            items={ordered.map((row) => ({
+              label: PLAYER_STATE_LABELS[row.state] ?? row.state,
+              value: row.players,
+            }))}
+          />
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Retenção dos novos depositantes</CardTitle>
+          <CardDescription>
+            Jogadores agrupados pela semana do 1º depósito. A taxa só aparece depois que a janela se
+            fecha para todos do grupo.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="overflow-x-auto p-0">
+          {cohorts.length === 0 ? (
+            <p className="p-6 text-sm text-muted-foreground">Sem primeiros depósitos no período.</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Semana do 1º depósito</TableHead>
+                  <TableHead className="text-right">Jogadores</TableHead>
+                  <TableHead className="text-right">2º depósito em 7 dias</TableHead>
+                  <TableHead className="text-right">em 14 dias</TableHead>
+                  <TableHead className="text-right">em 30 dias</TableHead>
+                  <TableHead className="text-right">Tempo até o 2º (mediana)</TableHead>
+                  <TableHead className="text-right">Depositado em 30 dias</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {cohorts.map((row) => (
+                  <TableRow key={row.week}>
+                    <TableCell>{dayLabel(row.week)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{num(row.size)}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {pctValue(row.second7d)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {pctValue(row.second14d)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {pctValue(row.second30d)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {hours(row.medianHoursToSecond)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {money(row.revenue30d)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+          <p className="px-6 py-3 text-xs text-muted-foreground">
+            O histórico de depósitos começa em 02/09/2026; jogadores que já depositavam antes disso
+            não entram como novos.
+          </p>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function Acquisition({ days }: { days: number }) {
+  const query = useRetention(days);
+  if (query.isLoading) return <Skeleton className="h-64 rounded-xl" />;
+  if (query.isError || !query.data) return <LoadFailed what="a aquisição" />;
+  const { total, byOrigin } = query.data.funnel;
+  if (!total || total.signups === 0)
+    return (
+      <Card>
+        <CardContent className="p-6 text-sm text-muted-foreground">
+          Nenhum cadastro neste período.
+        </CardContent>
+      </Card>
+    );
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Funil dos cadastros do período</CardTitle>
+          <CardDescription>
+            Quem se cadastrou nos últimos {num(days)} dias e até onde chegou. Mediana do cadastro ao
+            1º depósito: {hours(total.medianHoursToFtd)}.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Bars
+            total={total.signups}
+            items={[
+              { label: "Cadastros", value: total.signups },
+              { label: "1º depósito", value: total.firstDeposit },
+              { label: "2º depósito", value: total.secondDeposit },
+              { label: "3 ou mais depósitos", value: total.thirdPlus },
+            ]}
+          />
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Por origem do cadastro</CardTitle>
+          <CardDescription>Origem informada no cadastro (utm_source).</CardDescription>
+        </CardHeader>
+        <CardContent className="overflow-x-auto p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Origem</TableHead>
+                <TableHead className="text-right">Cadastros</TableHead>
+                <TableHead className="text-right">1º depósito</TableHead>
+                <TableHead className="text-right">2º depósito</TableHead>
+                <TableHead className="text-right">Tempo até o 1º (mediana)</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {byOrigin.slice(0, 15).map((row) => (
+                <TableRow key={row.origin}>
+                  <TableCell>{row.origin}</TableCell>
+                  <TableCell className="text-right tabular-nums">{num(row.signups)}</TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {num(row.firstDeposit)} · {percentOf(row.firstDeposit, row.signups)}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {num(row.secondDeposit)} · {percentOf(row.secondDeposit, row.signups)}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {hours(row.medianHoursToFtd)}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    </div>
   );
 }

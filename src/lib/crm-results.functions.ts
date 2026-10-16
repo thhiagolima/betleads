@@ -148,3 +148,59 @@ export const getCrmResults = createServerFn({ method: "GET" })
       },
     };
   });
+
+/**
+ * Central de Resultados F4: weekly retention cohorts, the acquisition funnel of
+ * the period's sign-ups and where the base is now.
+ */
+export const getCrmRetention = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((value: unknown) => inputSchema.parse(value ?? {}))
+  .handler(async ({ data, context }) => {
+    const tenantId = await resolveOperationalTenantId(context.supabase);
+    const db = context.supabase as any;
+    const from = brtDate(data.days - 1);
+    const fromInstant = new Date(`${from}T00:00:00-03:00`).toISOString();
+    const [cohorts, funnel, lifecycle] = await Promise.all([
+      db.rpc("crm_retention_cohorts", { _tenant: tenantId, _weeks: 12 }),
+      db.rpc("crm_acquisition_funnel", {
+        _tenant: tenantId,
+        _from: fromInstant,
+        _to: new Date().toISOString(),
+      }),
+      db.rpc("crm_lifecycle_snapshot", { _tenant: tenantId }),
+    ]);
+    for (const result of [cohorts, funnel, lifecycle])
+      if (result.error) throw new Error("Não foi possível carregar retenção e aquisição.");
+    const toNumber = (value: unknown) => (value == null ? null : Number(value));
+    const funnelRows = ((funnel.data ?? []) as Array<Record<string, unknown>>).map((row) => ({
+      origin: String(row.origin),
+      signups: Number(row.signups ?? 0),
+      firstDeposit: Number(row.first_deposit ?? 0),
+      secondDeposit: Number(row.second_deposit ?? 0),
+      thirdPlus: Number(row.third_plus ?? 0),
+      medianHoursToFtd: toNumber(row.median_hours_to_ftd),
+    }));
+    return {
+      from,
+      cohorts: ((cohorts.data ?? []) as Array<Record<string, unknown>>).map((row) => ({
+        week: String(row.cohort_week),
+        size: Number(row.cohort_size ?? 0),
+        second7d: toNumber(row.second_7d_pct),
+        second14d: toNumber(row.second_14d_pct),
+        second30d: toNumber(row.second_30d_pct),
+        medianHoursToSecond: toNumber(row.median_hours_to_second),
+        revenue30d: toNumber(row.revenue_30d),
+      })),
+      funnel: {
+        total: funnelRows.find((row) => row.origin === "__total__") ?? null,
+        byOrigin: funnelRows
+          .filter((row) => row.origin !== "__total__")
+          .sort((a, b) => b.signups - a.signups),
+      },
+      lifecycle: ((lifecycle.data ?? []) as Array<Record<string, unknown>>).map((row) => ({
+        state: String(row.state),
+        players: Number(row.players ?? 0),
+      })),
+    };
+  });
