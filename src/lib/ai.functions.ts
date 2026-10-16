@@ -4,6 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import { generateText } from "ai";
 import { createLovableAiGatewayProvider } from "./ai-gateway";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { resolveCurrentTenantId } from "./tenant-access.server";
 
 function getSupabase() {
   const url = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL!;
@@ -87,8 +88,10 @@ ${JSON.stringify(ctx).slice(0, 60000)}`;
         prompt: data.pergunta,
       });
 
-      // log
+      // log — service role: sem tenant_id explícito a linha cairia na casa principal.
+      const tenantId = await resolveCurrentTenantId(context.supabase);
       await getSupabase().from("ai_logs").insert({
+        tenant_id: tenantId,
         pergunta: data.pergunta,
         resposta: text,
         modelo: "google/gemini-3-flash-preview",

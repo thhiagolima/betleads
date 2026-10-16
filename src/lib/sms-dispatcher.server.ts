@@ -646,6 +646,7 @@ async function runSmsFlowBatch({
     const { data: recentDup } = await supabaseAdmin
       .from("sms_send_logs")
       .select("id")
+      .eq("tenant_id", item.lead.tenant_id)
       .eq("to_phone", item.lead.phone_e164)
       .eq("content", item.content)
       .eq("status", "sent")
