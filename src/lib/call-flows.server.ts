@@ -18,6 +18,22 @@ import { evaluateVoiceContactPolicy } from "./consent.server";
 
 type Json = Record<string, unknown>;
 
+// Inserts via service role sem tenant_id caem na casa principal (default da
+// coluna). O tenant de um fluxo nunca muda, então fica em cache por processo.
+const flowTenantCache = new Map<string, string>();
+async function flowTenantId(flowId: string): Promise<string | null> {
+  const cached = flowTenantCache.get(flowId);
+  if (cached) return cached;
+  const { data } = await supabaseAdmin
+    .from("call_flows")
+    .select("tenant_id")
+    .eq("id", flowId)
+    .maybeSingle();
+  const tenantId = (data?.tenant_id as string | undefined) ?? null;
+  if (tenantId) flowTenantCache.set(flowId, tenantId);
+  return tenantId;
+}
+
 async function logEvent(
   progressId: string | null,
   flowId: string,
@@ -27,7 +43,10 @@ async function logEvent(
   detail: Json = {},
 ) {
   try {
+    const tenantId = await flowTenantId(flowId);
+    if (!tenantId) throw new Error(`fluxo ${flowId} sem tenant`);
     await supabaseAdmin.from("call_flow_history").insert({
+      tenant_id: tenantId,
       progress_id: progressId,
       flow_id: flowId,
       player_id: playerId,
@@ -47,10 +66,11 @@ export async function enrollPlayerInFlow(
 ): Promise<{ ok: boolean; progressId?: string; skipped?: string }> {
   const { data: flow } = await supabaseAdmin
     .from("call_flows")
-    .select("id, is_active")
+    .select("id, is_active, tenant_id")
     .eq("id", flowId)
     .maybeSingle();
   if (!flow || !flow.is_active) return { ok: false, skipped: "flow_inactive" };
+  const tenantId = flow.tenant_id as string;
 
   const { data: existing } = await supabaseAdmin
     .from("call_flow_progress")
@@ -65,14 +85,17 @@ export async function enrollPlayerInFlow(
     .from("players")
     .select("id, telefone")
     .eq("id", playerId)
+    .eq("tenant_id", tenantId)
     .maybeSingle();
+  if (!player) return { ok: false, skipped: "player_not_in_tenant" };
 
   const { data: inserted, error } = await supabaseAdmin
     .from("call_flow_progress")
     .insert({
+      tenant_id: tenantId,
       flow_id: flowId,
       player_id: playerId,
-      phone_e164: player?.telefone ?? null,
+      phone_e164: player.telefone ?? null,
       current_block_index: 0,
       attempts_on_block: 0,
       status: "active",
@@ -158,11 +181,15 @@ async function executeCallBlock(progress: any, block: any, player: any): Promise
   const scriptId: string | null = block.script_id ?? null;
 
   if (scriptId) {
-    const { data: s } = await supabaseAdmin
-      .from("call_scripts")
-      .select("content")
-      .eq("id", scriptId)
-      .maybeSingle();
+    const scriptTenantId = await flowTenantId(progress.flow_id);
+    const { data: s } = scriptTenantId
+      ? await supabaseAdmin
+          .from("call_scripts")
+          .select("content")
+          .eq("id", scriptId)
+          .eq("tenant_id", scriptTenantId)
+          .maybeSingle()
+      : { data: null };
     if (s) {
       scriptContent = (s.content as string) ?? "";
     }

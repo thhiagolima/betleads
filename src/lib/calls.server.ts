@@ -335,6 +335,7 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
           .from("call_scripts")
           .select("content")
           .eq("id", item.script_id)
+          .eq("tenant_id", item.tenant_id)
           .maybeSingle();
         if (!script?.content) throw new Error("Script de voz não encontrado.");
         renderedText = renderCallScript(script.content, player ?? FAKE_LEAD);
