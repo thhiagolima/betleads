@@ -138,29 +138,6 @@ export const compareConversionSources = createServerFn({ method: "POST" })
     return { ...range, rows };
   });
 
-export const getExecutiveConversionReport = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((value: unknown) => rangeSchema.parse(value))
-  .handler(async ({ data, context }) => {
-    const tenantId = await resolveOperationalTenantId(context.supabase);
-    const db = context.supabase as any;
-    const range = defaultRange(data.from, data.to);
-    const rows = await loadSourceRows(db, tenantId, range.from, range.to);
-    return {
-      ...range,
-      rows,
-      totals: rows.reduce(
-        (total, row) => ({
-          sent: total.sent + row.sent,
-          conversions: total.conversions + row.conversions,
-          directRevenue: total.directRevenue + row.directRevenue,
-          assistedRevenue: total.assistedRevenue + row.assistedRevenue,
-        }),
-        { sent: 0, conversions: 0, directRevenue: 0, assistedRevenue: 0 },
-      ),
-    };
-  });
-
 const experimentSchema = sourceSchema.extend({
   name: z.string().trim().min(1).max(120),
   dimension: z.enum(["template", "cta", "channel", "journey_step"]),

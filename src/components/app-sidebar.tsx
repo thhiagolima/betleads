@@ -59,7 +59,6 @@ const crmItems: NavItem[] = [
 
 const engagementItems: NavItem[] = [
   { title: "Campanhas", url: "/campanhas", icon: Megaphone },
-  { title: "Conversão", url: "/relatorios/conversao", icon: BarChart3 },
   {
     title: "Automações",
     url: "/automacoes",

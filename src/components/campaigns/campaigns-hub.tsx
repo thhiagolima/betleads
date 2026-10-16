@@ -206,9 +206,9 @@ export function CampaignsHub() {
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" asChild>
-            <Link to="/relatorios/conversao">
+            <Link to="/resultados">
               <BarChart3 className="mr-2 h-4 w-4" />
-              Conversão
+              Resultados
             </Link>
           </Button>
           <Button variant="outline" asChild>

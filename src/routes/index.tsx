@@ -274,7 +274,7 @@ function InfoRow({
   tone?: "blue" | "green" | "orange" | "red" | "purple";
   trend?: string;
   /** Destination of the row; only navigable rows show an arrow. */
-  to?: "/jornadas" | "/relatorios/conversao";
+  to?: "/jornadas" | "/resultados";
 }) {
   const toneClass = {
     blue: "bg-blue-500/15 text-blue-400",
@@ -579,7 +579,7 @@ function Dashboard() {
             </p>
           </div>
           <Button asChild variant="outline" className="h-12 rounded-xl px-6 font-semibold">
-            <Link to="/relatorios/conversao">Ver relatórios completos</Link>
+            <Link to="/resultados">Ver resultados do CRM</Link>
           </Button>
         </CardContent>
       </Card>
@@ -855,7 +855,7 @@ function Dashboard() {
               value={brl(data.recoveredAmount)}
               detail="depósitos após clique em link"
               tone="green"
-              to="/relatorios/conversao"
+              to="/resultados"
             />
             <InfoRow
               icon={Users}
@@ -901,7 +901,7 @@ function Dashboard() {
               value={data.messageRoi > 0 ? fmtRoi(data.messageRoi) : "—"}
               detail="recuperado ÷ gasto em SMS"
               tone="green"
-              to="/relatorios/conversao"
+              to="/resultados"
             />
           </div>
         </ShellCard>
