@@ -13,6 +13,7 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
+  Target,
   Trophy,
   Users,
   Webhook,
@@ -45,6 +46,7 @@ type NavItem = {
 
 const overviewItems: NavItem[] = [
   { title: "Início", url: "/", icon: LayoutDashboard },
+  { title: "Resultados do CRM", url: "/resultados", icon: Target },
   { title: "Aquisição e LTV", url: "/midia-ltv", icon: BarChart3 },
 ];
 

@@ -29,6 +29,7 @@ import { Route as MidiaLtvRouteImport } from './routes/midia-ltv'
 import { Route as PlayersRouteImport } from './routes/players'
 import { Route as PublicosRouteImport } from './routes/publicos'
 import { Route as RegrasRouteImport } from './routes/regras'
+import { Route as ResultadosRouteImport } from './routes/resultados'
 import { Route as SmsRouteImport } from './routes/sms'
 import { Route as TenantsRouteImport } from './routes/tenants'
 import { Route as TreinoIaRouteImport } from './routes/treino-ia'
@@ -175,6 +176,11 @@ const PublicosRoute = PublicosRouteImport.update({
 const RegrasRoute = RegrasRouteImport.update({
   id: '/regras',
   path: '/regras',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ResultadosRoute = ResultadosRouteImport.update({
+  id: '/resultados',
+  path: '/resultados',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SmsRoute = SmsRouteImport.update({
@@ -455,6 +461,7 @@ export interface FileRoutesByFullPath {
   '/players': typeof PlayersRouteWithChildren
   '/publicos': typeof PublicosRoute
   '/regras': typeof RegrasRoute
+  '/resultados': typeof ResultadosRoute
   '/sms': typeof SmsRouteWithChildren
   '/tenants': typeof TenantsRoute
   '/treino-ia': typeof TreinoIaRoute
@@ -524,6 +531,7 @@ export interface FileRoutesByTo {
   '/players': typeof PlayersRouteWithChildren
   '/publicos': typeof PublicosRoute
   '/regras': typeof RegrasRoute
+  '/resultados': typeof ResultadosRoute
   '/sms': typeof SmsRouteWithChildren
   '/tenants': typeof TenantsRoute
   '/treino-ia': typeof TreinoIaRoute
@@ -594,6 +602,7 @@ export interface FileRoutesById {
   '/players': typeof PlayersRouteWithChildren
   '/publicos': typeof PublicosRoute
   '/regras': typeof RegrasRoute
+  '/resultados': typeof ResultadosRoute
   '/sms': typeof SmsRouteWithChildren
   '/tenants': typeof TenantsRoute
   '/treino-ia': typeof TreinoIaRoute
@@ -665,6 +674,7 @@ export interface FileRouteTypes {
     | '/players'
     | '/publicos'
     | '/regras'
+    | '/resultados'
     | '/sms'
     | '/tenants'
     | '/treino-ia'
@@ -734,6 +744,7 @@ export interface FileRouteTypes {
     | '/players'
     | '/publicos'
     | '/regras'
+    | '/resultados'
     | '/sms'
     | '/tenants'
     | '/treino-ia'
@@ -803,6 +814,7 @@ export interface FileRouteTypes {
     | '/players'
     | '/publicos'
     | '/regras'
+    | '/resultados'
     | '/sms'
     | '/tenants'
     | '/treino-ia'
@@ -873,6 +885,7 @@ export interface RootRouteChildren {
   PlayersRoute: typeof PlayersRouteWithChildren
   PublicosRoute: typeof PublicosRoute
   RegrasRoute: typeof RegrasRoute
+  ResultadosRoute: typeof ResultadosRoute
   SmsRoute: typeof SmsRouteWithChildren
   TenantsRoute: typeof TenantsRoute
   TreinoIaRoute: typeof TreinoIaRoute
@@ -1051,6 +1064,13 @@ declare module '@tanstack/react-router' {
       path: '/regras'
       fullPath: '/regras'
       preLoaderRoute: typeof RegrasRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/resultados': {
+      id: '/resultados'
+      path: '/resultados'
+      fullPath: '/resultados'
+      preLoaderRoute: typeof ResultadosRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/sms': {
@@ -1483,6 +1503,7 @@ const rootRouteChildren: RootRouteChildren = {
   PlayersRoute: PlayersRouteWithChildren,
   PublicosRoute: PublicosRoute,
   RegrasRoute: RegrasRoute,
+  ResultadosRoute: ResultadosRoute,
   SmsRoute: SmsRouteWithChildren,
   TenantsRoute: TenantsRoute,
   TreinoIaRoute: TreinoIaRoute,
