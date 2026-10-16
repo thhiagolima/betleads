@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- Short.io tables are introduced by a migration pending generated client types. */
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { resolveOperationalTenantId } from "./tenant-access.server";
+import { requireTenantAdmin, resolveOperationalTenantId } from "./tenant-access.server";
 import { z } from "zod";
 
 export const getLinkTrackingOverview = createServerFn({ method: "GET" })
@@ -99,18 +99,19 @@ export const getPlayerLinkHistory = createServerFn({ method: "GET" })
     }));
   });
 
-async function requireTenantAdmin(context: any) {
+async function requireShortioAdmin(context: any) {
   const tenantId = await resolveOperationalTenantId(context.supabase);
-  const { data, error } = await context.supabase.rpc("is_tenant_admin", { _tenant: tenantId });
-  if (error) throw new Error(error.message);
-  if (!data) throw new Error("Apenas administradores da conta podem configurar a Short.io.");
-  return tenantId;
+  return requireTenantAdmin(
+    context.supabase,
+    tenantId,
+    "Apenas administradores da conta podem configurar a Short.io.",
+  );
 }
 
 export const getShortioSettings = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const tenantId = await requireTenantAdmin(context);
+    const tenantId = await requireShortioAdmin(context);
     const db = context.supabase as any;
     const [{ data, error }, { data: lastSync }] = await Promise.all([
       db
@@ -153,7 +154,7 @@ export const saveShortioSettings = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((v: unknown) => settingsInput.parse(v))
   .handler(async ({ data, context }) => {
-    const tenantId = await requireTenantAdmin(context);
+    const tenantId = await requireShortioAdmin(context);
     const domain =
       data.domain
         ?.replace(/^https?:\/\//, "")
