@@ -1,36 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { detectPrecallResponse } from "@/lib/precall-dispatcher.server";
+import { isAuthorizedEvolutionWebhook } from "@/lib/whatsapp-evolution-auth.server";
 
 // Evolution API webhook receiver.
-// Prefer Authorization: Bearer <EVOLUTION_WEBHOOK_SECRET> or X-Webhook-Secret.
-// The query token fallback is kept only for providers that cannot send headers.
-
-function webhookSecret(): string {
-  return (process.env.EVOLUTION_WEBHOOK_SECRET || process.env.EVOLUTION_API_KEY || "")
-    .trim()
-    .replace(/^['"]|['"]$/g, "");
-}
-
-function requestWebhookToken(request: Request, url: URL): string {
-  const auth = request.headers.get("authorization") ?? "";
-  const bearer = /^Bearer\s+(.+)$/i.exec(auth)?.[1]?.trim();
-  return (
-    bearer ||
-    request.headers.get("x-webhook-secret")?.trim() ||
-    url.searchParams.get("token")?.trim() ||
-    ""
-  );
-}
-
-function safeEqual(a: string, b: string): boolean {
-  if (!a || !b || a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) {
-    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return diff === 0;
-}
+// Authenticated ONLY by EVOLUTION_WEBHOOK_SECRET sent in the x-webhook-secret
+// header (registered via the `headers` field of /webhook/set) or as
+// `Authorization: Bearer`. The legacy ?token= query parameter and the global
+// EVOLUTION_API_KEY fallback were removed (SEC-13): instances registered with
+// the old URL must be re-registered (configureEvolutionWebhook).
 
 interface Extracted {
   text: string | null;
@@ -552,10 +530,7 @@ export const Route = createFileRoute("/api/public/evolution-webhook")({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        const url = new URL(request.url);
-        const expected = webhookSecret();
-        const token = requestWebhookToken(request, url);
-        if (!safeEqual(token, expected)) {
+        if (!isAuthorizedEvolutionWebhook(request)) {
           return new Response("Unauthorized", { status: 401 });
         }
         let body: any;
