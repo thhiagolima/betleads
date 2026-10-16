@@ -80,9 +80,7 @@ export type SendOutcome = {
  *   ONE recipient (the half-open probe).
  */
 export type ProviderGateDecision =
-  | { mode: "closed" }
-  | { mode: "probe" }
-  | { mode: "open"; message: string };
+  { mode: "closed" } | { mode: "probe" } | { mode: "open"; message: string };
 
 export type CampaignSendItem = {
   target: CampaignTarget & { playerId: string };
@@ -90,23 +88,14 @@ export type CampaignSendItem = {
   variables: Record<string, string> | null;
 };
 
-export type ContactDecision = { allowed: boolean; retryAt: string | null };
-
 export type CampaignDispatchDeps = {
   now: () => number;
-  resolveRecipients: (
-    tenantId: string,
-    inputs: CampaignTarget[],
-  ) => Promise<RecipientResolution>;
+  resolveRecipients: (tenantId: string, inputs: CampaignTarget[]) => Promise<RecipientResolution>;
   /** Writes guarded by the campaign lock; false = lock lost / write failed (stop). */
   updateCampaign: (campaign: SmsCampaignRow, patch: Record<string, unknown>) => Promise<boolean>;
   persistUnresolved: (campaignId: string, unresolved: UnresolvedRecipient[]) => Promise<void>;
   /** Rate-limit integration point: returns how many sends may happen now (0..want). */
   acquireSendBudget: (tenantId: string, want: number) => Promise<number>;
-  checkContactLimits: (
-    tenantId: string,
-    playerIds: string[],
-  ) => Promise<Map<string, ContactDecision>>;
   findAcceptedDeliveryKeys: (keys: string[]) => Promise<Set<string>>;
   loadPlayerVariables: (playerIds: string[]) => Promise<Map<string, Record<string, string>>>;
   send: (args: {
@@ -121,7 +110,10 @@ export type CampaignDispatchDeps = {
    * sent or charged: the batch is retried in a later tick (cursor not moved).
    * When absent, `send` is called per recipient.
    */
-  sendBatch?: (args: { campaign: SmsCampaignRow; items: CampaignSendItem[] }) => Promise<SendOutcome[]>;
+  sendBatch?: (args: {
+    campaign: SmsCampaignRow;
+    items: CampaignSendItem[];
+  }) => Promise<SendOutcome[]>;
   /** SMS provider breaker; absent = always closed. */
   providerGate?: () => Promise<ProviderGateDecision>;
 };
@@ -138,7 +130,6 @@ export type CampaignTickResult = {
     | "quota"
     | "deadline"
     | "budget"
-    | "contact_limit"
     | "lock_lost"
     | "resolution_error"
     | "no_recipients"
@@ -275,7 +266,6 @@ export async function processSmsCampaignTick(
   let cursor = Math.max(0, c.sent_cursor ?? 0);
   let processedSendable = 0;
   let lastError: string | null = null;
-  let retryAt: string | null = null;
   let lastBatchMs = 0;
   const seenKeys = new Set<string>();
   let stop: CampaignTickResult["stopReason"] | null = null;
@@ -325,7 +315,9 @@ export async function processSmsCampaignTick(
       .filter((it): it is Extract<BatchItem, { kind: "send" }> => it.kind === "send")
       .map((it) => it.key)
       .filter((k) => !seenKeys.has(k));
-    const accepted = keysToCheck.length ? await deps.findAcceptedDeliveryKeys(keysToCheck) : new Set<string>();
+    const accepted = keysToCheck.length
+      ? await deps.findAcceptedDeliveryKeys(keysToCheck)
+      : new Set<string>();
     // seenKeys only learns keys of items that were actually processed (below):
     // a recipient cut off by the budget is sent in the next round, not
     // mistaken for a duplicate.
@@ -339,32 +331,9 @@ export async function processSmsCampaignTick(
       windowKeys.add(it.key);
     }
 
-    // Contact frequency, checked for the whole batch at once. The cursor keeps
-    // its order: the batch is cut before the first limited recipient, who is
-    // retried later instead of being skipped.
-    const toCheck = Array.from(
-      new Set(
-        items
-          .filter((it): it is Extract<BatchItem, { kind: "send" }> => it.kind === "send")
-          .map((it) => it.target.playerId),
-      ),
-    );
-    const decisions = toCheck.length
-      ? await deps.checkContactLimits(c.tenant_id, toCheck)
-      : new Map<string, ContactDecision>();
-    let cut = items.length;
-    for (let i = 0; i < items.length; i++) {
-      const it = items[i];
-      if (it.kind !== "send") continue;
-      const decision = decisions.get(it.target.playerId);
-      if (decision && !decision.allowed) {
-        cut = i;
-        retryAt = decision.retryAt;
-        stop = "contact_limit";
-        break;
-      }
-    }
-    let batch = items.slice(0, cut);
+    // Campaigns are not frequency-capped: the per-player contact limit
+    // (journey_contact_limits) applies to journeys only.
+    let batch = items;
 
     // Provider/tenant budget for the sends actually going out. A partial grant
     // does NOT end the tick (I1): the granted part is sent and the loop asks
@@ -373,7 +342,10 @@ export async function processSmsCampaignTick(
     // MAX_ZERO_GRANTS empty grants in a row (channel paused/contended) stop it.
     const sendCount = batch.filter((it) => it.kind === "send").length;
     if (sendCount > 0) {
-      const granted = Math.max(0, Math.min(sendCount, await deps.acquireSendBudget(c.tenant_id, sendCount)));
+      const granted = Math.max(
+        0,
+        Math.min(sendCount, await deps.acquireSendBudget(c.tenant_id, sendCount)),
+      );
       if (granted < sendCount) {
         let seen = 0;
         let end = batch.length;
@@ -386,12 +358,6 @@ export async function processSmsCampaignTick(
           seen++;
         }
         batch = batch.slice(0, end);
-        // The contact-limited recipient (if any) lies beyond the cut: it is
-        // re-evaluated when the loop gets there.
-        if (stop === "contact_limit") {
-          stop = null;
-          retryAt = null;
-        }
         if (granted === 0 && ++zeroGrants >= MAX_ZERO_GRANTS) stop = "budget";
       }
       if (granted > 0) zeroGrants = 0;
@@ -444,10 +410,10 @@ export async function processSmsCampaignTick(
     // recipient (cursor order preserved): everything before it is counted and
     // checkpointed; from it onwards is re-processed next tick (accepted items
     // after the cut are deduped by their delivery key, never resent).
-    const firstRetryable = deferredError !== null ? 0 : outcomes.findIndex((o) => !o?.ok && o?.retryable);
+    const firstRetryable =
+      deferredError !== null ? 0 : outcomes.findIndex((o) => !o?.ok && o?.retryable);
     if (firstRetryable >= 0) {
-      lastError =
-        deferredError ?? outcomes[firstRetryable]?.error ?? "Provedor SMS indisponível";
+      lastError = deferredError ?? outcomes[firstRetryable]?.error ?? "Provedor SMS indisponível";
       stop = "provider_unavailable";
       const cutKey = sends[firstRetryable]?.key;
       const cutAt = batch.findIndex((it) => it.kind === "send" && it.key === cutKey);
@@ -502,9 +468,6 @@ export async function processSmsCampaignTick(
     locked_at: null,
     locked_by: null,
   };
-  if (!isDone && result.stopReason === "contact_limit") {
-    patch.scheduled_at = retryAt ?? new Date(deps.now() + 3600_000).toISOString();
-  }
   if (result.stopReason === "provider_unavailable") patch.last_error = lastError;
   await deps.updateCampaign(c, patch);
   return result;

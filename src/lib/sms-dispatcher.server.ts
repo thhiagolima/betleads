@@ -12,7 +12,6 @@ import {
 } from "./sms-bulk.server";
 import { buildPlayerVariables, renderTemplate } from "./template-vars.server";
 import { deferIfOutsideWindow } from "./send-window.server";
-import { checkContactFrequencyLimit } from "./contact-frequency.server";
 import { brtDayStart } from "./tz";
 import {
   consumeBudget,
@@ -26,11 +25,7 @@ import {
   isInsufficientFunds,
   pauseChannelForInsufficientFunds,
 } from "./dispatch-pause-insufficient.server";
-import {
-  pingHeartbeat,
-  startJobRun,
-  type JobRunHandle,
-} from "./observability/job-monitor.server";
+import { pingHeartbeat, startJobRun, type JobRunHandle } from "./observability/job-monitor.server";
 import { SMS_CAMPAIGN_RUN_BUDGET_MS, SMS_CAMPAIGN_TICK_SECONDS } from "./campaign-recipients";
 import {
   findAcceptedDeliveryKeys,
@@ -710,7 +705,10 @@ async function runSmsFlowBatch({
       // Account refused (101/505, 401/402/403): not the lead's fault. Same
       // step, attempts unchanged, back when the breaker allows a new try.
       providerDown = true;
-      lastProviderError = `provider_account: ${(r as { error?: string }).error ?? ""}`.slice(0, 800);
+      lastProviderError = `provider_account: ${(r as { error?: string }).error ?? ""}`.slice(
+        0,
+        800,
+      );
       await holdLead(item.lead.id, breakerRetryAt(cachedSmsBreaker(), PROVIDER_ACCOUNT_DEFER_MS));
       rescheduled++;
     } else {
@@ -803,7 +801,13 @@ async function runSmsFlowBatch({
     provider: "short-brasil",
     last_provider_error: lastProviderError,
   });
-  return { processed, errors, rescheduled, rate_limited: rateLimited, providerUnavailable: providerDown };
+  return {
+    processed,
+    errors,
+    rescheduled,
+    rate_limited: rateLimited,
+    providerUnavailable: providerDown,
+  };
 }
 
 // ============================================================
@@ -878,15 +882,6 @@ function campaignDeps(): CampaignDispatchDeps {
       await persistCampaignUnresolved(campaignDb, campaignId, unresolved);
     },
     acquireSendBudget: acquireCampaignSendBudget,
-    async checkContactLimits(tenantId, playerIds) {
-      const decisions = await Promise.all(
-        playerIds.map(async (playerId) => {
-          const r = await checkContactFrequencyLimit(tenantId, playerId);
-          return [playerId, { allowed: r.allowed, retryAt: r.retryAt }] as const;
-        }),
-      );
-      return new Map(decisions);
-    },
     findAcceptedDeliveryKeys: (keys) => findAcceptedDeliveryKeys(campaignDb, keys),
     async loadPlayerVariables(playerIds) {
       const vars = new Map<string, Record<string, string>>();
