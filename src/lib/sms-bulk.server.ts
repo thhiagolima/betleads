@@ -29,7 +29,8 @@
 //                                     is safe
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import type { Json } from "@/integrations/supabase/types";
-import { assertTenantCanOperate } from "./tenant-access.server";
+import { assertTenantCanOperate, assertTenantNotDemoForSend } from "./tenant-access.server";
+import { isDemoBlockedError } from "./demo-tenant";
 import { captureServerException } from "./observability/sentry.server";
 import { normalizeConsentSubject } from "./consent.server";
 import { requireBrazilianPhone } from "./phone-normalization";
@@ -224,11 +225,17 @@ type ProviderCall =
   | { kind: "response"; status: number; body: unknown }
   | { kind: "transport"; errorKind: "not_sent" | "outcome_unknown"; error: string; attempts: number };
 
-async function postBulk(payload: unknown): Promise<ProviderCall> {
+/**
+ * One Short Brasil bulk request. `tenantIds` are the tenants of every item in
+ * the payload (a chunk may mix tenants); each passes the demo send guard right
+ * before the request, and a DemoTenantBlockedError propagates (nothing sent).
+ */
+async function postBulk(tenantIds: readonly string[], payload: unknown): Promise<ProviderCall> {
   const { usuario, chave } = shortBrasilCredentials();
   let attempt = 0;
   while (true) {
     attempt++;
+    await assertBatchTenantsCanSend(tenantIds);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), SMS_BULK_REQUEST_TIMEOUT_MS);
     try {
@@ -335,8 +342,6 @@ async function sendChunk(chunk: Prepared[]): Promise<{
       parceiroId: p.item.deliveryKey,
     })),
   };
-  const sendStartedAt = new Date();
-  const call = await postBulk(payload);
 
   const refund = async (items: Prepared[], reason: string) =>
     runLimited(items, CREDIT_CONCURRENCY, async (p) => {
@@ -391,6 +396,17 @@ async function sendChunk(chunk: Prepared[]): Promise<{
       })),
     };
   };
+
+  const sendStartedAt = new Date();
+  let call: ProviderCall;
+  try {
+    call = await postBulk(chunk.map((p) => p.item.tenantId), payload);
+  } catch (error) {
+    if (!isDemoBlockedError(error)) throw error;
+    // Only reachable if a tenant turned demo after sendSmsBatch's own guard:
+    // nothing left, so the write-ahead rows and credits are released as failed.
+    return wholeChunkFailed(error.message, false, null);
+  }
 
   if (call.kind === "transport") {
     if (call.errorKind === "outcome_unknown") return unknown(call.error, "outcome_unknown");
@@ -523,6 +539,18 @@ async function sendChunk(chunk: Prepared[]): Promise<{
   };
 }
 
+/**
+ * Demo send guard for every distinct tenant of a batch. Throws only the
+ * DemoTenantBlockedError (DEMO_SEND_BLOCKED, fail-closed for an empty or
+ * unknown tenant); other tenant states (suspended/canceled) are left to the
+ * existing checks so their behaviour is unchanged.
+ */
+async function assertBatchTenantsCanSend(tenantIds: Iterable<string>) {
+  const ids = Array.from(new Set(tenantIds));
+  if (ids.length === 0) await assertTenantNotDemoForSend(null);
+  for (const tenantId of ids) await assertTenantNotDemoForSend(tenantId);
+}
+
 /** Thrown before anything is charged or sent: the caller must retry the whole batch later. */
 export class SmsBatchDeferredError extends Error {
   constructor(message: string) {
@@ -535,6 +563,8 @@ export class SmsBatchDeferredError extends Error {
  * Sends a batch of personalised SMS. Outcomes come back in input order.
  * Throws SmsBatchDeferredError (nothing charged or sent) when the tenant is
  * blocked or link tracking is in 'block' mode and links could not be prepared.
+ * Throws DemoTenantBlockedError (DEMO_SEND_BLOCKED, nothing written) when any
+ * item belongs to a demo or unknown tenant.
  */
 export async function sendSmsBatch(items: SmsBatchItem[]): Promise<SmsBatchResult> {
   const outcomes: Array<SmsBatchOutcome | undefined> = new Array(items.length);
@@ -544,6 +574,11 @@ export async function sendSmsBatch(items: SmsBatchItem[]): Promise<SmsBatchResul
     httpCalls,
   });
   if (items.length === 0) return result([], 0);
+
+  // Demo guard for the whole batch, before any transport choice, log, credit
+  // or link: one demo (or unknown) tenant rejects the batch with
+  // DemoTenantBlockedError and no per-recipient row is written.
+  await assertBatchTenantsCanSend(items.map((i) => i.tenantId));
 
   const transport = smsBulkTransport();
   if (transport === "misconfigured") {

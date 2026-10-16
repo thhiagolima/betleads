@@ -8,6 +8,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import {
   assertTenantCanOperate,
+  demoSendBlockedReason,
   requireActiveTenantAdmin,
   resolveCurrentTenantId,
   resolveOperationalTenantId,
@@ -187,11 +188,26 @@ function shortcodeResponseFailed(body: unknown): boolean {
 }
 
 async function callShortBrasil(
+  tenantId: string | null,
   to: string,
   content: string,
   variables?: Record<string, string | number> | null,
   idempotencyKey: string = crypto.randomUUID(),
 ) {
+  // Demo guard right before the provider request (fail-closed). Returned as a
+  // non-temporary failure so the caller refunds/logs the usual way and no
+  // retry loop ever resends it.
+  const blocked = await demoSendBlockedReason(tenantId);
+  if (blocked) {
+    return {
+      ok: false as const,
+      status: 0,
+      body: { error: blocked },
+      idempotencyKey: "",
+      errorKind: null as ProviderErrorKind | null,
+      demoBlocked: true as const,
+    };
+  }
   const token = shortcodeToken();
   const { usuario, chave } = shortBrasilCredentials();
   if (!token && (!usuario || !chave)) {
@@ -311,6 +327,7 @@ async function callShortBrasil(
  * Mantemos o nome exportado antigo para compatibilidade interna.
  */
 export async function callShortBrasilSmsBulk(args: {
+  tenantId: string;
   content: string;
   recipients: string[]; // ja normalizados E.164
   variables?: Record<string, string | number> | null;
@@ -322,6 +339,10 @@ export async function callShortBrasilSmsBulk(args: {
   dispatchId: string | null;
   temporary?: boolean;
 }> {
+  const blocked = await demoSendBlockedReason(args.tenantId);
+  if (blocked) {
+    return { ok: false, status: 0, body: { error: blocked }, idempotencyKey: "", dispatchId: null };
+  }
   const token = shortcodeToken();
   const { usuario, chave } = shortBrasilCredentials();
   if (!token && (!usuario || !chave)) {
@@ -704,6 +725,19 @@ export async function sendSmsInternal(args: {
   /** Stable identity supplied by a queue/worker when retrying one delivery. */
   deliveryKey?: string | null;
 }) {
+  // Demo guard first: before the phone check, billing, link tracking or any
+  // sms_send_logs / sms_credit_ledger / link_dispatches write. Fail-closed: a
+  // send whose tenant cannot be resolved (no tenantId and no playerId, or an
+  // unknown player) is blocked too.
+  const billingTenantId = await resolveBillingTenantId({
+    tenantId: args.tenantId,
+    playerId: args.playerId,
+  });
+  const demoBlocked = await demoSendBlockedReason(billingTenantId);
+  if (demoBlocked) {
+    return { ok: false as const, status: 0, error: demoBlocked, temporary: false };
+  }
+
   let normalized: string;
   try {
     normalized = normalizeE164BR(args.to);
@@ -741,10 +775,6 @@ export async function sendSmsInternal(args: {
     }
   }
 
-  const billingTenantId = await resolveBillingTenantId({
-    tenantId: args.tenantId,
-    playerId: args.playerId,
-  });
   if (billingTenantId) {
     await assertTenantCanOperate(billingTenantId);
     if (await isChannelRevoked(billingTenantId, "sms", normalized)) {
@@ -826,10 +856,19 @@ export async function sendSmsInternal(args: {
   }
 
   const sendStartedAt = new Date();
-  const r = await callShortBrasil(normalized, preparedContent, undefined, deliveryKey);
+  const r = await callShortBrasil(
+    billingTenantId,
+    normalized,
+    preparedContent,
+    undefined,
+    deliveryKey,
+  );
   const providerMessageId = r.ok ? extractProviderMessageId(r.body) : null;
   const errorSummary = r.ok ? null : summarizeProviderError(r.status, r.body);
-  const isTemporary = !r.ok && (r.status === 0 || r.status === 429 || r.status >= 500);
+  // A demo block from the transport guard is final: never "pending"/retried.
+  const demoBlockedAtTransport = "demoBlocked" in r && r.demoBlocked === true;
+  const isTemporary =
+    !r.ok && !demoBlockedAtTransport && (r.status === 0 || r.status === 429 || r.status >= 500);
   // Account-level refusal (101/505, HTTP 401/402/403): not the lead's fault.
   // Opens the SMS circuit breaker; workers defer without consuming attempts.
   const accountReason =

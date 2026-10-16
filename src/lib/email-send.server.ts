@@ -2,6 +2,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { augmentEmailHtml, isSuppressed } from "./email-deliverability.server";
 import { callInfobipEmail } from "./infobip-email.server";
 import { getChannelConsentStatus } from "./consent.server";
+import { assertTenantNotDemoForSend } from "./tenant-access.server";
 import {
   markTrackedDispatchesFailed,
   markTrackedDispatchesSent,
@@ -74,10 +75,18 @@ async function findAcceptedEmail(idempotencyKey: string, tenantId: string | null
   return data?.[0]?.id ?? null;
 }
 
-/** Único caminho de envio de e-mail: Infobip. */
+/**
+ * Único caminho de envio de e-mail: Infobip.
+ *
+ * Throws DemoTenantBlockedError (DEMO_SEND_BLOCKED) for a demo, unknown or
+ * missing tenant before any lookup, link dispatch or provider call. It throws
+ * rather than returning a failed result because every caller writes
+ * email_send_logs from the returned result.
+ */
 export async function sendInfobipEmail(input: SendEmailInput): Promise<SendEmailResult> {
   const idempotencyKey = input.idempotencyKey || crypto.randomUUID();
   const tenantId = input.tenantId ?? input.linkTracking?.tenantId ?? null;
+  await assertTenantNotDemoForSend(tenantId);
   // A caller-supplied key identifies one logical delivery: if it was already
   // accepted (e.g. the worker failed after sending), never send it again.
   if (input.idempotencyKey) {
@@ -158,6 +167,8 @@ export async function sendInfobipEmail(input: SendEmailInput): Promise<SendEmail
       })
     : null;
   const trackedDispatchIds = prepared?.links.map((link) => link.dispatchId) ?? [];
+  // Second guard immediately before the provider request.
+  await assertTenantNotDemoForSend(tenantId);
   const result = await callInfobipEmail({
     ...input,
     html: shieldDarkEmailHtml(

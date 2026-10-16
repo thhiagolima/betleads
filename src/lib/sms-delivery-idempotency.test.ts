@@ -81,6 +81,10 @@ vi.mock("@/integrations/supabase/client.server", () => {
 
 vi.mock("@/lib/tenant-access.server", () => ({
   assertTenantCanOperate: vi.fn(async () => undefined),
+  // The demo send guard has its own coverage (demo-send-guard.channels.test.ts).
+  assertTenantCanSendExternally: vi.fn(async () => undefined),
+  assertTenantNotDemoForSend: vi.fn(async () => undefined),
+  demoSendBlockedReason: vi.fn(async () => null),
   resolveCurrentTenantId: vi.fn(),
   resolveOperationalTenantId: vi.fn(),
 }));

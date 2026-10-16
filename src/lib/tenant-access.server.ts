@@ -1,5 +1,5 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { DemoTenantBlockedError } from "@/lib/demo-tenant";
+import { DemoTenantBlockedError, isDemoBlockedError } from "@/lib/demo-tenant";
 
 type DbError = { message: string };
 type DbResult<T = unknown> = { data: T | null; error: DbError | null };
@@ -153,6 +153,37 @@ export async function assertTenantCanSendExternally(tenantId: string | null | un
   if (tenant.is_demo) throw new DemoTenantBlockedError("DEMO_SEND_BLOCKED");
   if (tenant.status && blockedOperationalStatuses.has(tenant.status)) {
     throw new Error("Tenant bloqueado para operacoes. Regularize a conta antes de continuar.");
+  }
+}
+
+/**
+ * The demo half of `assertTenantCanSendExternally`, for channels that never
+ * checked the tenant's billing status before (e-mail, external webhook,
+ * Short.io, ElevenLabs): throws only `DemoTenantBlockedError`
+ * (`DEMO_SEND_BLOCKED`, fail-closed for null/undefined/unknown/demo) and
+ * leaves suspended/canceled tenants to each channel's existing rules.
+ */
+export async function assertTenantNotDemoForSend(tenantId: string | null | undefined) {
+  try {
+    await assertTenantCanSendExternally(tenantId);
+  } catch (error) {
+    if (isDemoBlockedError(error)) throw error;
+  }
+}
+
+/**
+ * `assertTenantNotDemoForSend` for senders whose contract is a result object:
+ * the `DEMO_SEND_BLOCKED` message when the tenant is refused, else null.
+ */
+export async function demoSendBlockedReason(
+  tenantId: string | null | undefined,
+): Promise<string | null> {
+  try {
+    await assertTenantNotDemoForSend(tenantId);
+    return null;
+  } catch (error) {
+    if (isDemoBlockedError(error)) return error.message;
+    throw error;
   }
 }
 

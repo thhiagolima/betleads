@@ -6,6 +6,7 @@ import { createHash } from "crypto";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { evaluateVoiceContactPolicy } from "./consent.server";
 import { callInfobipVoice, normalizeE164BR } from "./infobip-voice.server";
+import { assertTenantNotDemoForSend } from "./tenant-access.server";
 
 // ============================================================
 // Tipos
@@ -164,13 +165,19 @@ export function defaultModelId(): string {
   return process.env.ELEVENLABS_MODEL_ID || "eleven_multilingual_v2";
 }
 
+/**
+ * Text-to-speech through ElevenLabs. Throws DemoTenantBlockedError
+ * (DEMO_SEND_BLOCKED) for a demo/unknown/missing tenant before the request.
+ */
 export async function callElevenLabs(params: {
+  tenantId: string;
   text: string;
   voiceId: string;
   voiceSettings: VoiceSettings;
 }): Promise<ArrayBuffer> {
   const apiKey = requireElevenLabsKey();
   const url = `https://api.elevenlabs.io/v1/text-to-speech/${params.voiceId}?output_format=mp3_44100_128`;
+  await assertTenantNotDemoForSend(params.tenantId);
   const res = await fetch(url, {
     method: "POST",
     headers: {

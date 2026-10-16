@@ -2,6 +2,7 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { buildFirstPartyClickUrl } from "./click-tracking.server";
 import { channelBudget } from "./rate-limit/channel-budget.server";
+import { assertTenantNotDemoForSend, demoSendBlockedReason } from "./tenant-access.server";
 
 const SHORTIO_API_URL = "https://api.short.io/links";
 const SHORTIO_BULK_API_URL = "https://api.short.io/links/bulk";
@@ -263,7 +264,12 @@ export function withDeliveryContext(raw: string, context: LinkTrackingContext) {
   return url.toString();
 }
 
-async function createShortioLink(input: {
+/**
+ * Creates one Short.io link. Throws DemoTenantBlockedError (DEMO_SEND_BLOCKED)
+ * for a demo/unknown/missing tenant, checked right before each request.
+ */
+export async function createShortioLink(input: {
+  tenantId: string;
   originalUrl: string;
   domain: string;
   ttlDays: number | null;
@@ -284,6 +290,8 @@ async function createShortioLink(input: {
 
   let lastError = "";
   for (let attempt = 1; attempt <= 3; attempt++) {
+    // Outside the try: a demo block must not be retried as a network error.
+    await assertTenantNotDemoForSend(input.tenantId);
     try {
       const response = await fetch(SHORTIO_API_URL, {
         method: "POST",
@@ -335,6 +343,7 @@ async function getOrCreateTrackedLink(args: {
   if (!args.settings.domain) throw new Error("SHORTIO_DOMAIN não configurado para este tenant");
 
   const created = await createShortioLink({
+    tenantId: args.tenantId,
     originalUrl: args.originalUrl,
     domain: args.settings.domain,
     ttlDays: args.settings.default_ttl_days,
@@ -463,6 +472,8 @@ export async function prepareTrackedText(
     !settings.enabled_channels.includes(context.channel)
   )
     return { content, links: [], trackingEnabled: false };
+  // No tracked link or link_dispatches row is ever prepared for a demo tenant.
+  await assertTenantNotDemoForSend(context.tenantId);
 
   const experiment = await experimentForContext(context);
   const dispatchContext: LinkTrackingContext = experiment
@@ -540,6 +551,7 @@ export async function prepareTrackedEmailHtml(
     !settings.enabled_channels.includes("email")
   )
     return { content: html, links: [], trackingEnabled: false };
+  await assertTenantNotDemoForSend(context.tenantId);
   const baseContext: LinkTrackingContext = { ...context, channel: "email" };
   const experiment = await experimentForContext(baseContext);
   const dispatchContext: LinkTrackingContext = experiment
@@ -703,6 +715,10 @@ export async function syncShortioMetrics(
       tenants: ids.length,
     };
   }
+  // Demo tenants' links are never pulled from Short.io (no run row either).
+  if (await demoSendBlockedReason(tenantId)) {
+    return { startedAt, processed: 0, failures: 0, total: 0, skipped: true };
+  }
   const staleBefore = new Date(Date.now() - 20 * 60_000).toISOString();
   // A killed HTTP request must not leave a tenant permanently represented as
   // "running". Preserve the audit row, but close it before the next attempt.
@@ -788,9 +804,11 @@ export async function syncShortioMetrics(
     1,
     Math.min(Number.isFinite(configuredConcurrency) ? configuredConcurrency : 15, 25),
   );
-  const fetchStatistics = async (shortioLinkId: string) => {
+  const fetchStatistics = async (linkTenantId: string, shortioLinkId: string) => {
     let response: Response | null = null;
     for (let attempt = 0; attempt < 3; attempt++) {
+      // Demo guard immediately before the request (counted as a link failure).
+      await assertTenantNotDemoForSend(linkTenantId);
       response = await fetch(
         `https://statistics.short.io/statistics/link/${encodeURIComponent(shortioLinkId)}/by_interval`,
         {
@@ -823,7 +841,7 @@ export async function syncShortioMetrics(
     await Promise.all(
       syncLinks.slice(offset, offset + concurrency).map(async (link: any) => {
         try {
-          const response = await fetchStatistics(link.shortio_link_id);
+          const response = await fetchStatistics(String(link.tenant_id), link.shortio_link_id);
           const payload = (await response.json()) as {
             clicksStatistics?: Array<{ x?: string; y?: number }>;
             // Kept for compatibility with older API responses.
@@ -979,6 +997,12 @@ export async function createShortioLinksBulk(input: {
     }));
   }
   const ttl = input.ttlDays ? new Date(Date.now() + input.ttlDays * 86400000).toISOString() : null;
+  // Never-throws contract: a demo/unknown tenant gets DEMO_SEND_BLOCKED on
+  // every link and no request is made.
+  const demoBlocked = await demoSendBlockedReason(input.tenantId);
+  if (demoBlocked) {
+    return urls.map((originalUrl) => ({ originalUrl, created: null, error: demoBlocked }));
+  }
   for (let offset = 0; offset < urls.length; offset += SHORTIO_BULK_MAX_LINKS) {
     const part = urls.slice(offset, offset + SHORTIO_BULK_MAX_LINKS);
     const payload = {
@@ -996,6 +1020,12 @@ export async function createShortioLinksBulk(input: {
     for (let attempt = 1; attempt <= 3; attempt++) {
       if (!(await acquireShortioCall(input.tenantId))) {
         lastError = "orçamento da API Short.io esgotado";
+        break;
+      }
+      // Demo guard immediately before the request.
+      const blockedNow = await demoSendBlockedReason(input.tenantId);
+      if (blockedNow) {
+        lastError = blockedNow;
         break;
       }
       try {
@@ -1169,6 +1199,15 @@ export async function prepareTrackedTextBatch(
       } else active.push(index);
     }
     if (active.length === 0) continue;
+
+    // Demo tenant: no link, no dispatch; its items come back as 'block' so
+    // the caller does not send them (other tenants are unaffected).
+    const demoBlocked = await demoSendBlockedReason(tenantId);
+    if (demoBlocked) {
+      for (const index of active)
+        results[index] = { ok: false, error: demoBlocked, fallbackMode: "block" };
+      continue;
+    }
 
     const fail = (index: number, error: unknown) => {
       if (results[index]) return;

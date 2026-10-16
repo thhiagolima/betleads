@@ -20,7 +20,11 @@ import {
 } from "./calls.server";
 import { callInfobipVoice, normalizeE164BR } from "./infobip-voice.server";
 import { evaluateVoiceContactPolicy } from "./consent.server";
-import { resolveOperationalTenantId } from "./tenant-access.server";
+import {
+  assertTenantNotDemoForSend,
+  resolveCurrentTenantId,
+  resolveOperationalTenantId,
+} from "./tenant-access.server";
 
 // ============================================================
 // Schemas
@@ -156,6 +160,8 @@ export const generateLeadVoiceAudio = createServerFn({ method: "POST" })
       .maybeSingle();
     if (sErr) throw new Error(sErr.message);
     if (!script) throw new Error("Script não encontrado");
+    // ElevenLabs runs for the script's tenant (RLS already scoped the row).
+    const tenantId = script.tenant_id as string;
 
     const lead = await loadLead(supabase, data.lead_id ?? null);
     const renderedText = renderCallScript(script.content as string, lead);
@@ -220,6 +226,8 @@ export const generateLeadVoiceAudio = createServerFn({ method: "POST" })
     }
 
     console.log(`[calls] cache MISS hash=${hash.slice(0, 10)} — gerando via ElevenLabs`);
+    // Demo guard before the 'generating' row is written (callElevenLabs checks again).
+    await assertTenantNotDemoForSend(tenantId);
 
     // Registro inicial
     const { data: pending, error: pErr } = await supabase
@@ -241,6 +249,7 @@ export const generateLeadVoiceAudio = createServerFn({ method: "POST" })
 
     try {
       const buf = await callElevenLabs({
+        tenantId,
         text: renderedText,
         voiceId,
         voiceSettings,
@@ -360,7 +369,9 @@ export const getCallAudioPreview = createServerFn({ method: "POST" })
       return { rendered_text: renderedText, audio_url: cached.audio_url, cache: true };
     }
 
-    const buf = await callElevenLabs({ text: renderedText, voiceId, voiceSettings });
+    // No script row is required here, so the tenant is the caller's active one.
+    const tenantId = await resolveCurrentTenantId(supabase);
+    const buf = await callElevenLabs({ tenantId, text: renderedText, voiceId, voiceSettings });
     const { path, signedUrl } = await uploadAudioToStorage(buf, hash);
 
     await supabase.from("call_audio_generations").insert({

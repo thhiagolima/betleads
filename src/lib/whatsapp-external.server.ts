@@ -8,6 +8,7 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { TRIGGER_NAMES, type TriggerType } from "./triggers.server";
 import { priorityRank } from "./priorities";
+import { demoSendBlockedReason } from "./tenant-access.server";
 import {
   assertSafeOutboundUrl,
   safeOutboundFetch,
@@ -194,9 +195,14 @@ function buildPayload(
   };
 }
 
-async function postWithRetry(url: string, payload: unknown) {
+async function postWithRetry(tenantId: string, url: string, payload: unknown) {
   let lastErr: string | null = null;
   for (let attempt = 1; attempt <= 3; attempt++) {
+    // Demo guard immediately before each outbound request (fail-closed).
+    const blocked = await demoSendBlockedReason(tenantId);
+    if (blocked) {
+      return { ok: false, status: null as number | null, attempts: attempt - 1, error: blocked };
+    }
     try {
       // Re-validated on every attempt (DNS may change between attempts).
       const res = await safeOutboundFetch(
@@ -249,6 +255,11 @@ export async function sendExternalTriggerEvent(opts: {
 }): Promise<{ sent: boolean; reason?: string; httpStatus?: number | null }> {
   const { integration, trigger, lead } = opts;
   const isTest = Boolean(opts.isTest);
+  // Demo guard before the event is reserved: a demo (or unknown) tenant gets
+  // a DEMO_SEND_BLOCKED result and nothing is written or sent. Returned, not
+  // thrown, so a multi-tenant automation loop keeps going.
+  const blocked = await demoSendBlockedReason(integration.tenant_id);
+  if (blocked) return { sent: false, reason: blocked, httpStatus: null };
   const payload = buildPayload(trigger, lead, integration.tenant_id);
 
   // Reserva antes de enviar — evita duplicidade em execuções concorrentes.
@@ -270,7 +281,7 @@ export async function sendExternalTriggerEvent(opts: {
     return { sent: false, reason: "already_sent" };
   }
 
-  const result = await postWithRetry(integration.url, payload);
+  const result = await postWithRetry(integration.tenant_id, integration.url, payload);
 
   await supabaseAdmin
     .from("whatsapp_external_events")

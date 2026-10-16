@@ -55,6 +55,8 @@ const lead = { id: null, telefone: "5511999999999", nome: "Lead" };
 beforeEach(() => {
   fake.admin.reset();
   fake.dns.clear();
+  // A regular (non-demo) tenant, so the demo send guard lets the webhook out.
+  fake.admin.rows("tenants").push({ id: TENANT, status: "active", is_demo: false });
   userDb = createFakeDb();
   userDb.onRpc("current_tenant_id", () => ({ data: TENANT, error: null }));
   fake.admin.onRpc("is_super_admin", (args) => ({

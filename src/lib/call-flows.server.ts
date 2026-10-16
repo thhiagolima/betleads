@@ -795,23 +795,26 @@ export async function handleCallCompletion(args: {
           continue;
         }
         try {
-          await sendSmsInternal({
+          const smsResult = await sendSmsInternal({
             to: phone,
             content: sms.template as string,
             playerId: progress.player_id,
             flowId: progress.flow_id,
             triggerName: `call_flow:${progress.flow_id}:block:${progress.current_block_index}`,
             variables: vars,
+            // The flow's tenant: without it a lead-only progress row would
+            // reach the SMS guard with no tenant and be blocked (fail-closed).
+            tenantId: progress.tenant_id,
           });
           await logEvent(
             progress.id,
             progress.flow_id,
             progress.player_id,
             progress.current_block_index,
-            "sms_sent",
-            {
-              condition: sms.condition,
-            },
+            smsResult.ok ? "sms_sent" : "sms_failed",
+            smsResult.ok
+              ? { condition: sms.condition }
+              : { condition: sms.condition, error: String(smsResult.error ?? "") },
           );
         } catch (e) {
           console.error("[call-flow] sms fail", e);
