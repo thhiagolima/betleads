@@ -4,6 +4,7 @@ import type { Json } from "@/integrations/supabase/types";
 import { ACCEPTED_SMS_STATUSES } from "@/lib/campaign-recipients.server";
 import {
   SECRET_KEYS,
+  describeCallbackBody,
   hasIdentity,
   parseSmsCallbackPayloads,
   type CallbackPayload,
@@ -136,7 +137,11 @@ function deliveredAtFor(status: string, payload: CallbackPayload): string | null
 let lastUnrecognizedLogAt = 0;
 
 /** Logs the shape (never the values) of a callback we could not read. */
-function logUnrecognizedShape(request: Request, payloads: CallbackPayload[]) {
+function logUnrecognizedShape(
+  request: Request,
+  payloads: CallbackPayload[],
+  bodyText: string,
+) {
   const now = Date.now();
   if (now - lastUnrecognizedLogAt < 60_000) return;
   lastUnrecognizedLogAt = now;
@@ -146,6 +151,7 @@ function logUnrecognizedShape(request: Request, payloads: CallbackPayload[]) {
     contentType: request.headers.get("content-type"),
     queryKeys: [...url.searchParams.keys()].filter((key) => !SECRET_KEYS.has(key)),
     payloadKeys: payloads.map((payload) => Object.keys(payload).slice(0, 20)),
+    body: describeCallbackBody(bodyText),
   });
 }
 
@@ -245,7 +251,10 @@ async function handleCallback(request: Request): Promise<Response> {
   let matched = 0;
   let unidentified = 0;
   try {
-    const payloads = await parseSmsCallbackPayloads(request);
+    let bodyText = "";
+    const payloads = await parseSmsCallbackPayloads(request, (text) => {
+      bodyText = text;
+    });
     for (const payload of payloads) {
       // Without any id there is nothing to match or keep: recording it only
       // created ~180k empty "callback-orphan" rows per day.
@@ -256,7 +265,7 @@ async function handleCallback(request: Request): Promise<Response> {
       processed++;
       if (await updateFromPayload(payload)) matched++;
     }
-    if (unidentified > 0) logUnrecognizedShape(request, payloads);
+    if (unidentified > 0) logUnrecognizedShape(request, payloads, bodyText);
   } catch (err) {
     console.error("sms-webhook handler error:", err);
   }

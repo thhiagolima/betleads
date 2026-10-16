@@ -87,3 +87,27 @@ describe("hasIdentity", () => {
     expect(hasIdentity({ id: "  " })).toBe(false);
   });
 });
+
+describe("describeCallbackBody", () => {
+  it("describes structure and masks digits and secrets", async () => {
+    const { describeCallbackBody } = await import("./sms-callback-parse");
+    const body = JSON.stringify({
+      token: "secret-token",
+      lote: [{ id: "00400001000080012017", parceiroId: "abc", celular: "11999887766" }],
+    });
+    const described = describeCallbackBody(body);
+    expect(described.length).toBe(body.length);
+    expect(described.shape).toEqual({
+      token: "string",
+      lote: { array: 1, first: { id: "string", parceiroId: "string", celular: "string" } },
+    });
+    expect(described.preview).not.toContain("secret-token");
+    expect(described.preview).not.toContain("11999887766");
+    expect(described.preview).toContain("parceiroId");
+  });
+
+  it("handles bodies that are not JSON", async () => {
+    const { describeCallbackBody } = await import("./sms-callback-parse");
+    expect(describeCallbackBody("id=1&parceiroId=x").shape).toBe("not_json");
+  });
+});

@@ -59,7 +59,10 @@ function itemsFromForm(text: string): CallbackPayload[] {
  * string is merged into each body item, and the body may be JSON, a JSON
  * array, form-urlencoded, `lote=<json>` or a raw query string.
  */
-export async function parseSmsCallbackPayloads(request: Request): Promise<CallbackPayload[]> {
+export async function parseSmsCallbackPayloads(
+  request: Request,
+  onBody?: (text: string) => void,
+): Promise<CallbackPayload[]> {
   const url = new URL(request.url);
   const fromQuery: CallbackPayload = {};
   url.searchParams.forEach((value, key) => {
@@ -69,6 +72,7 @@ export async function parseSmsCallbackPayloads(request: Request): Promise<Callba
   let items: CallbackPayload[] = [];
   if (request.method !== "GET") {
     const text = (await request.text()).trim();
+    onBody?.(text);
     if (text) {
       let parsed: CallbackPayload[] | null = null;
       if (/^[[{]/.test(text)) {
@@ -83,6 +87,37 @@ export async function parseSmsCallbackPayloads(request: Request): Promise<Callba
   }
   if (!items.length) items = [{}];
   return items.map((item) => withoutSecrets({ ...fromQuery, ...item }));
+}
+
+function shapeOf(value: unknown, depth = 0): unknown {
+  if (Array.isArray(value)) {
+    return depth > 2 ? `array(${value.length})` : { array: value.length, first: shapeOf(value[0], depth + 1) };
+  }
+  if (value && typeof value === "object") {
+    if (depth > 2) return "object";
+    const entries = Object.entries(value as Record<string, unknown>).slice(0, 15);
+    return Object.fromEntries(entries.map(([key, inner]) => [key, shapeOf(inner, depth + 1)]));
+  }
+  return value === null ? "null" : typeof value;
+}
+
+/**
+ * Diagnostic description of a callback body we could not read: structure
+ * (types and key names) plus a short preview with secrets removed and every
+ * run of 6+ digits masked (phones, ids). Never contains the webhook token.
+ */
+export function describeCallbackBody(text: string) {
+  let shape: unknown = "unparseable";
+  try {
+    shape = shapeOf(JSON.parse(text));
+  } catch {
+    shape = "not_json";
+  }
+  const preview = text
+    .slice(0, 300)
+    .replace(/("?(?:token|secret|webhook_secret)"?\s*[:=]\s*"?)[^"&,}\s]+/gi, "$1***")
+    .replace(/\d{6,}/g, (digits) => "#".repeat(Math.min(digits.length, 12)));
+  return { length: text.length, shape, preview };
 }
 
 const IDENTIFYING_KEYS = ["id", "message_id", "messageId", "parceiroId", "idempotency_key", "celular"];
