@@ -29,6 +29,8 @@ import {
 } from "@/components/ui/select";
 import { listCallScripts, listPlayersForCalls, bulkDispatchCalls } from "@/lib/calls.functions";
 import { listJourneyVoiceAssets } from "@/lib/journey-voice-assets.functions";
+import { requestConfirmation } from "@/components/system-dialog-host";
+import { num } from "@/lib/format";
 
 interface Target {
   key: string;
@@ -186,6 +188,23 @@ export function BulkCallTab() {
     Boolean(audioMode === "tts" ? scriptId : assetId) &&
     allTargets.length > 0 &&
     !bulkMut.isPending;
+
+  // UX-04: o disparo em massa sai na hora e não pode ser desfeito.
+  async function confirmDispatch() {
+    const count = allTargets.length;
+    const source =
+      audioMode === "tts"
+        ? `script "${scripts.find((s: any) => s.id === scriptId)?.name ?? "selecionado"}"`
+        : `áudio "${assets.find((asset: any) => asset.id === assetId)?.name ?? "selecionado"}"`;
+    const plural = count === 1 ? "ligação" : "ligações";
+    const confirmed = await requestConfirmation({
+      title: `Disparar ${num(count)} ${plural}?`,
+      description: `${num(count)} ${plural} com o ${source} começam a ser disparadas agora e não podem ser canceladas. O custo depende da duração de cada chamada e do contrato do provedor de voz. Fora da janela de envio configurada, as ligações ficam pendentes e saem no próximo horário permitido.`,
+      confirmLabel: `Disparar ${num(count)} ${plural}`,
+      destructive: true,
+    });
+    if (confirmed) bulkMut.mutate();
+  }
 
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -360,6 +379,7 @@ export function BulkCallTab() {
                         size="icon"
                         variant="ghost"
                         className="h-7 w-7"
+                        aria-label={`Remover ${t.nome} dos destinatários`}
                         onClick={() => removeTarget(t.key)}
                       >
                         <Trash2 className="h-3.5 w-3.5 text-destructive" />
@@ -383,7 +403,7 @@ export function BulkCallTab() {
             <Row label="Destinatários" value={String(allTargets.length)} />
             <Row label="Canal" value="Voz" />
             <Separator />
-            <Button className="w-full gap-2" onClick={() => bulkMut.mutate()} disabled={!canSend}>
+            <Button className="w-full gap-2" onClick={() => void confirmDispatch()} disabled={!canSend}>
               {bulkMut.isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
