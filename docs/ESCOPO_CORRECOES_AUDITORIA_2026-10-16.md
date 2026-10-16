@@ -25,20 +25,20 @@ Esforço: **P** até 1 dia · **M** de 2 a 4 dias · **G** 1 semana ou mais. As 
 | ID | Item | Achados | Critério de aceite | Esf. |
 |---|---|---|---|---|
 | F0-01 | **Desligar a edge function `ai-player-insights`** (ou bloquear a tela Inteligência) até o F0-02 | SEC-10, DEV-40 | Uma chamada à função devolve 503 ou a tela mostra "indisponível". Verificado em produção. | P |
-| F0-02 | Corrigir a edge function. Resolver o tenant ativo, autorizar com `is_tenant_admin(tenant)`, aplicar `.eq("tenant_id")` em todas as consultas, filtrar sinônimos e treino por tenant e gravar `tenant_id` em `ai_logs` | SEC-10, SEC-26 | Teste com duas casas: o admin de A não recebe nenhuma linha de B. Grep sem consulta a `players`/`deposits`/`withdrawals` sem tenant. | M |
-| F0-03 | **Filtrar por tenant as campanhas de e-mail.** Aplicar `tenant_id` em `loadPlayersForSegment` e no modo "leads" | DEV-62 | Teste com duas casas: a campanha "Todos" de A só resolve jogadores de A. | P |
-| F0-04 | Varredura do uso de `supabaseAdmin` em consultas a tabelas por tenant. Listar e corrigir todas as que não têm `tenant_id` | DEV-62, SEC-15, SEC-25 | Relatório anexado ao PR com zero ocorrências sem justificativa. | M |
-| F0-05 | **Atualizar o TanStack Start** para a versão 1.169.39 ou superior e rodar `npm audit fix` nas dependências de runtime | SEC-11, DEV-26 | `npm audit --omit=dev` sem crítica nem alta em runtime; build e testes verdes. | P |
-| F0-06 | Restringir `configureEvolutionWebhook`, `diagnoseEvolution`, `getEvolutionRealtimeConfig` e `testWhatsappProxy` a super admin; nunca devolver token nem chave; tornar `EVOLUTION_WEBHOOK_SECRET` obrigatório, aceito só por header. **Rotacionar** o segredo e a chave da Evolution | SEC-13, SEC-17, SEC-29 | Teste: um member recebe 403. Rotação registrada. O webhook antigo com `?token=` é recusado. | P |
-| F0-07 | Integração externa do WhatsApp: exigir admin/gestor, aceitar só https, bloquear IP privado ou link-local depois da resolução de DNS, usar `redirect:"manual"` e não persistir o corpo da resposta | SEC-12, DEV-70 | Teste com `http://169.254.169.254` e `http://localhost` recusados; um member recebe 403. | M |
-| F0-08 | `has_role('admin')` passa a respeitar o tenant: trocar por `is_tenant_admin(tenantId)` em `resetDashboards`, `requireAdmin` do SMS e nas políticas de storage | SEC-21, DEV-51 | Teste: um usuário admin em A e member em B recebe 403 em B. | P |
-| F0-09 | IDOR em `deleteWhatsappSession`: lançar erro se a sessão não for do tenant e incluir `tenant_id` nas exclusões | SEC-15 | Teste: apagar uma sessão de outra casa é recusado. | P |
+| F0-02 | Implementado | `fix/f0-tenant-isolation` 603e83e | tenant-scope.ts + 12 testes; **falta deploy da edge function** | 16/10/2026 |
+| F0-03 | Implementado | `fix/f0-tenant-isolation` 3ca6ef8 | email-segments.server.test.ts | 16/10/2026 |
+| F0-04 | Implementado | `fix/f0-tenant-isolation` b31e880…a74a204 | 10 vazamentos extras corrigidos + migration 20261017100000 (aplicar em produção) | 16/10/2026 |
+| F0-05 | Implementado | `fix/f0-tanstack-cve` 80ee03b, 1960bd4 | npm audit runtime 11 → 0; build e boot ok | 16/10/2026 |
+| F0-06 | Implementado | `fix/f0-whatsapp-security` 9293fea, 9c599c8, 664ed08 | **exige rotação de chaves e reconfiguração dos webhooks Evolution no deploy** | 16/10/2026 |
+| F0-07 | Implementado | `fix/f0-whatsapp-security` 1b67224, 7761717 | ssrf-guard 100 casos | 16/10/2026 |
+| F0-08 | Implementado | `fix/f0-tenant-isolation` 0226b39 | tenant-admin-guard.test.ts | 16/10/2026 |
+| F0-09 | Implementado | `fix/f0-whatsapp-security` 9c599c8 | whatsapp-admin.server.test.ts | 16/10/2026 |
 | F0-10 | **Verificar em produção (somente leitura)** se a SEC-01 e a CON-08 estão aplicadas, consultando `schema_migrations`. Se faltarem, aplicar seguindo o rollout da SEC-01 §9 | SEC-14 | Saída da consulta anexada; os cabeçalhos dos documentos foram atualizados. | P |
 | F0-11 | Verificar e **desligar o signup público** do Supabase Auth | SEC-31 | Print da configuração; um `signUp` com a chave publicável é recusado. | P |
-| F0-12 | **Opt-out de e-mail funcionando.** Corrigir o upsert de `suppressed_emails` (constraint ou RPC com `ON CONFLICT (lower(email))`), chave por `(tenant_id, email)`, comparação exata sem `ilike`, checagem do `{error}` | QA-01, QA-18, SEC-18 | Teste PGlite **sobre a migration real**: o descadastro grava, audita e bloqueia o envio seguinte; um descadastro em B não afeta A. | M |
-| F0-13 | **Consentimento fail-closed** em `email-send`, `isSuppressed`, `isSmsSuppressed` e `checkContactFrequencyLimit` | QA-03, QA-16 | Teste: com erro do banco, o envio é adiado e nunca enviado. | P |
-| F0-14 | Corrigir `isSmsSuppressed` para usar o formato da tabela | QA-04 | Teste com "+55…" e só dígitos. | P |
-| F0-15 | **Mitigação imediata do SAIR.** Enquanto o F1-01 não sai, tirar a promessa "responda SAIR" dos textos e da UI, ou manter uma lista de bloqueio manual operada pelo suporte | QA-02, RSK-01 | Os textos foram revisados, ou existe processo manual documentado. | P |
+| F0-12 | Implementado | `fix/f0-consent-optout` 2f002a5 + integração (u.$token) | PGlite sobre migrations reais; migration 20261017110000 (aplicar em produção) | 16/10/2026 |
+| F0-13 | Implementado | `fix/f0-consent-optout` 1b52a7a | email-send-consent + consent-fail-closed | 16/10/2026 |
+| F0-14 | Implementado | `fix/f0-consent-optout` 2f002a5 | PGlite + unitário | 16/10/2026 |
+| F0-15 | Implementado | `fix/f0-consent-optout` 85fd486 | texto revisado; F1-01 desenhado | 16/10/2026 |
 | F0-16 | Avaliar se houve exposição real: consultar logs de uso da tela Inteligência e de campanhas de e-mail "Todos" desde a criação | RSK-03 | Relatório para o DPO com a decisão sobre comunicação à ANPD. | P |
 
 **Saída da Fase 0:** nenhuma consulta por tenant via service_role sem filtro, CVE fechada, segredos rotacionados, opt-out de e-mail persistindo.
@@ -153,16 +153,16 @@ Esforço: **P** até 1 dia · **M** de 2 a 4 dias · **G** 1 semana ou mais. As 
 
 | ID | Item | Achados | Critério de aceite | Esf. |
 |---|---|---|---|---|
-| F4-01 | **Confirmações de risco:** resetar `riskConfirmed` a cada mudança, botão "Enviar para N · N créditos", digitar o número acima de 1000; mesmo padrão nas ligações em massa | UX-03, UX-04 | Teste de componente. | P |
-| F4-02 | Confirmação com consequência para rotacionar e exigir HMAC | UX-02 | Diálogo; bloqueio sem evento assinado. | M |
-| F4-03 | `requestConfirmation` em toda exclusão, remoção ou cancelamento, desfazer onde couber, fim do `window.confirm`; o Cancelar do composer passa a confirmar | UX-12, UX-50, §6.1 | Grep sem `window.confirm`. | P |
+| F4-01 | Implementado | `fix/f4-risk-confirmations` 93929c2, 479a32b | campaign-send-confirmation.test.ts (18) | 16/10/2026 |
+| F4-02 | Implementado | `fix/f4-risk-confirmations` a50a7c7 | confirmações; bloqueio sem evento assinado depende do servidor | 16/10/2026 |
+| F4-03 | Implementado | `fix/f4-risk-confirmations` 5aeb542, 6a4196b, e36d0fb, 1b1cebc | sem window.confirm em src | 16/10/2026 |
 | F4-04 | Remover ou ligar a dados reais a página Configurações | UX-01 | Nenhum controle sem efeito real. | M |
 | F4-05 | Componente `<QueryState>` (carregando, erro com retry, vazio, sem permissão) aplicado em todas as páginas; relatório de campanha com saída | UX-10, UX-13, UX-14 | Inventário de páginas com nota ≥ 3. | M |
 | F4-06 | Destinos de CTA válidos com `<Link>`; abas visíveis por canal (Visão geral, Biblioteca, Histórico); decisão sobre rotas órfãs | UX-05, UX-07, UX-22, UX-44 | Teste hash × aba. | M |
 | F4-07 | Remover código morto (WhatsApp se descomissionado, componentes legados de sms/email, módulos e server functions sem chamador, componentes shadcn sem uso) | UX-08, DEV-04..07 | Redução de linhas registrada; nenhum caminho legado de envio alcançável. | M |
 | F4-08 | Barra de ações na ficha do jogador | UX-09 | Fluxo "enviar SMS pela ficha" em menos de 3 cliques. | M |
 | F4-09 | Acessibilidade: `<Label htmlFor>` no editor de jornada e em todos os forms, `aria-label` em todo botão de ícone, sidebar mobile com `inert`/Esc, link "pular para o conteúdo", status não só por cor, teclado em linhas clicáveis, sidebar recolhida funcional; regras jsx-a11y no lint | UX-11, UX-17, UX-31..33 | axe sem violação séria nas 10 rotas principais. | M |
-| F4-10 | Páginas 404 e de erro em pt-BR; remover as referências à Lovable; `<title>` por rota | UX-18, UX-48 | Revisão visual. | P |
+| F4-10 | Implementado | `fix/f4-risk-confirmations` 9ca36a8 | 404/erro em pt-BR | 16/10/2026 |
 | F4-11 | Editor de jornada: espera em min/h/dias, reordenar, chave estável, desfazer, origem padrão vinda do tenant (sem o telefone fixo), guarda de alterações, aviso ao editar jornada ativa | UX-27, UX-28 | Teste de usabilidade. | M |
 | F4-12 | Arquitetura de informação: glossário (Jogador, E-mail, Jornada, Campanha, Conta), rótulos de rota numa fonte única, sidebar reorganizada, títulos do cabeçalho | UX-19..21, UX-39 | Grep de termos proibidos sem resultado. | M |
 | F4-13 | Analytics: Início vira "pulso" e a Central passa a fonte única de resultado do CRM; métricas com nome único e tooltip; período e aba da Central na URL; seletor de conta duplicado removido | UX-23, UX-45, UX-46 | Revisão com o negócio. | M |
@@ -223,39 +223,39 @@ Atualize a cada PR. Estados: `Pendente` · `Em andamento` · `Implementado` · `
 
 | Fase | Itens | Pendente | Em andamento | Implementado | Homologado | Aceito |
 |---|---:|---:|---:|---:|---:|---:|
-| F0 Contenção | 16 | 4 | 12 | 0 | 0 | 0 |
+| F0 Contenção | 16 | 4 | 0 | 12 | 0 | 0 |
 | F1 Envio e conformidade | 32 | 32 | 0 | 0 | 0 | 0 |
 | F2 Ambientes e operação | 17 | 17 | 0 | 0 | 0 | 0 |
 | F3 Aceite e governança | 13 | 12 | 0 | 1 | 0 | 0 |
-| F4 UX e acessibilidade | 20 | 16 | 4 | 0 | 0 | 0 |
+| F4 UX e acessibilidade | 20 | 16 | 0 | 4 | 0 | 0 |
 | F5 Dívida técnica | 16 | 16 | 0 | 0 | 0 | 0 |
 
-Itens que não aparecem na tabela abaixo estão `Pendente`.
+Itens que não aparecem na tabela abaixo estão `Pendente`. Todos os itens `Implementado` estão integrados na branch `fix/audit-phase0-integration` (820 testes, typecheck, build ok); nenhum foi publicado em produção.
 
 | ID | Estado | PR/commit | Evidência | Data |
 |---|---|---|---|---|
 | F0-01 | Pendente | | | |
-| F0-02 | Em andamento | | | 16/10/2026 |
-| F0-03 | Em andamento | | | 16/10/2026 |
-| F0-04 | Em andamento | | | 16/10/2026 |
-| F0-05 | Em andamento | | | 16/10/2026 |
-| F0-06 | Em andamento | | | 16/10/2026 |
-| F0-07 | Em andamento | | | 16/10/2026 |
-| F0-08 | Em andamento | | | 16/10/2026 |
-| F0-09 | Em andamento | | | 16/10/2026 |
+| F0-02 | Implementado | `fix/f0-tenant-isolation` 603e83e | tenant-scope.ts + 12 testes; **falta deploy da edge function** | 16/10/2026 |
+| F0-03 | Implementado | `fix/f0-tenant-isolation` 3ca6ef8 | email-segments.server.test.ts | 16/10/2026 |
+| F0-04 | Implementado | `fix/f0-tenant-isolation` b31e880…a74a204 | 10 vazamentos extras corrigidos + migration 20261017100000 (aplicar em produção) | 16/10/2026 |
+| F0-05 | Implementado | `fix/f0-tanstack-cve` 80ee03b, 1960bd4 | npm audit runtime 11 → 0; build e boot ok | 16/10/2026 |
+| F0-06 | Implementado | `fix/f0-whatsapp-security` 9293fea, 9c599c8, 664ed08 | **exige rotação de chaves e reconfiguração dos webhooks Evolution no deploy** | 16/10/2026 |
+| F0-07 | Implementado | `fix/f0-whatsapp-security` 1b67224, 7761717 | ssrf-guard 100 casos | 16/10/2026 |
+| F0-08 | Implementado | `fix/f0-tenant-isolation` 0226b39 | tenant-admin-guard.test.ts | 16/10/2026 |
+| F0-09 | Implementado | `fix/f0-whatsapp-security` 9c599c8 | whatsapp-admin.server.test.ts | 16/10/2026 |
 | F0-10 | Pendente | | | |
 | F0-11 | Pendente | | | |
-| F0-12 | Em andamento | | | 16/10/2026 |
-| F0-13 | Em andamento | | | 16/10/2026 |
-| F0-14 | Em andamento | | | 16/10/2026 |
-| F0-15 | Em andamento | | | 16/10/2026 |
+| F0-12 | Implementado | `fix/f0-consent-optout` 2f002a5 + integração (u.$token) | PGlite sobre migrations reais; migration 20261017110000 (aplicar em produção) | 16/10/2026 |
+| F0-13 | Implementado | `fix/f0-consent-optout` 1b52a7a | email-send-consent + consent-fail-closed | 16/10/2026 |
+| F0-14 | Implementado | `fix/f0-consent-optout` 2f002a5 | PGlite + unitário | 16/10/2026 |
+| F0-15 | Implementado | `fix/f0-consent-optout` 85fd486 | texto revisado; F1-01 desenhado | 16/10/2026 |
 | F0-16 | Pendente | | | |
 | F3-01 | Implementado | branch `docs/f3-versioning` (2637709, a5898f5, 547b61a) | `.gitignore` invertido (só `docs/private/` ignorado); todos os docs de `docs/` no git, sem segredo nem PII; `FLUXO_CRM.md` convertido; `docs/INDEX.md` e `README.md` criados | 16/10/2026 |
 | F3-02 | Pendente | | Parcial no F3-01: cabeçalhos de CON-08, SEC-01 e STATUS_P0 receberam nota; estrutura de pastas proposta no INDEX | |
-| F4-01 | Em andamento | | | 16/10/2026 |
-| F4-02 | Em andamento | | | 16/10/2026 |
-| F4-03 | Em andamento | | | 16/10/2026 |
-| F4-10 | Em andamento | | | 16/10/2026 |
+| F4-01 | Implementado | `fix/f4-risk-confirmations` 93929c2, 479a32b | campaign-send-confirmation.test.ts (18) | 16/10/2026 |
+| F4-02 | Implementado | `fix/f4-risk-confirmations` a50a7c7 | confirmações; bloqueio sem evento assinado depende do servidor | 16/10/2026 |
+| F4-03 | Implementado | `fix/f4-risk-confirmations` 5aeb542, 6a4196b, e36d0fb, 1b1cebc | sem window.confirm em src | 16/10/2026 |
+| F4-10 | Implementado | `fix/f4-risk-confirmations` 9ca36a8 | 404/erro em pt-BR | 16/10/2026 |
 
 ---
 
