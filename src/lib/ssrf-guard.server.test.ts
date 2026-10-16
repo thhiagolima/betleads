@@ -40,12 +40,17 @@ describe("isBlockedIp — IPv4", () => {
     expect(isBlockedIp(ip)).toBe(true);
   });
 
-  it.each(["8.8.8.8", "93.184.216.34", "100.63.255.255", "100.128.0.1", "172.15.0.1", "172.32.0.1", "1.1.1.1"])(
-    "allows public %s",
-    (ip) => {
-      expect(isBlockedIp(ip)).toBe(false);
-    },
-  );
+  it.each([
+    "8.8.8.8",
+    "93.184.216.34",
+    "100.63.255.255",
+    "100.128.0.1",
+    "172.15.0.1",
+    "172.32.0.1",
+    "1.1.1.1",
+  ])("allows public %s", (ip) => {
+    expect(isBlockedIp(ip)).toBe(false);
+  });
 });
 
 describe("isBlockedIp — IPv6", () => {
@@ -154,9 +159,9 @@ describe("assertSafeOutboundHost", () => {
       UnsafeOutboundUrlError,
     );
     const empty = vi.fn(async () => []);
-    await expect(assertSafeOutboundHost("nope.example.com", { lookup: empty })).rejects.toBeInstanceOf(
-      UnsafeOutboundUrlError,
-    );
+    await expect(
+      assertSafeOutboundHost("nope.example.com", { lookup: empty }),
+    ).rejects.toBeInstanceOf(UnsafeOutboundUrlError);
   });
 
   it("returns every validated address for public names", async () => {

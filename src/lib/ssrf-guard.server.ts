@@ -77,7 +77,7 @@ function parseIpv4(value: string): number | null {
 function isBlockedV4(addr: number): boolean {
   return BLOCKED_V4.some(([net, prefix]) => {
     const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
-    return ((addr & mask) >>> 0) === ((net & mask) >>> 0);
+    return (addr & mask) >>> 0 === (net & mask) >>> 0;
   });
 }
 
@@ -197,7 +197,9 @@ function canonicalHost(raw: string): string {
     throw new UnsafeOutboundUrlError("Host de destino inválido");
   }
   const bracketed =
-    trimmed.includes(":") && !trimmed.startsWith("[") ? `[${trimmed.replace(/%.*$/, "")}]` : trimmed;
+    trimmed.includes(":") && !trimmed.startsWith("[")
+      ? `[${trimmed.replace(/%.*$/, "")}]`
+      : trimmed;
   let hostname: string;
   try {
     hostname = new URL(`http://${bracketed}/`).hostname;
