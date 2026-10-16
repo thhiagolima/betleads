@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useMemo, useState } from "react";
@@ -37,9 +37,8 @@ import {
 } from "recharts";
 
 import { supabase } from "@/integrations/supabase/client";
-import type { Tables } from "@/integrations/supabase/types";
 import { brl, num, timeAgo } from "@/lib/format";
-import { brtDayEnd, brtDayStart } from "@/lib/tz";
+import { brtDayStart } from "@/lib/tz";
 import { getDashboardSummary } from "@/lib/dashboard.functions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -61,33 +60,6 @@ export const Route = createFileRoute("/")({
 
 type PeriodPreset = "today" | "yesterday" | "7d" | "30d" | "this_month" | "last_month";
 
-type TotalsRpc = {
-  deposits_period_sum?: number | string;
-  deposits_period_count?: number | string;
-  depositantes_period?: number | string;
-  sacado_total_since_reset?: number | string;
-  deposits_series_30d?: Array<{ day: string; value: number | string }>;
-  top_depositante_period?: { nome: string; total: number | string } | null;
-};
-
-type PlayerRow = {
-  id: string;
-  nome: string;
-  created_at: string;
-  ftd_em: string | null;
-  ultimo_login: string | null;
-  total_depositado: number | string | null;
-  total_sacado: number | string | null;
-};
-
-type MoneyRow = {
-  id?: string;
-  player_id: string | null;
-  valor: number | string | null;
-  created_at: string;
-  status?: string | null;
-};
-
 type LiveEvent = {
   id: string;
   tone: "blue" | "green" | "orange" | "purple";
@@ -96,20 +68,6 @@ type LiveEvent = {
   amount?: number;
   at: string;
 };
-
-type LooseRpcClient = {
-  rpc: <T = unknown>(
-    fn: string,
-    args: Record<string, unknown>,
-  ) => Promise<{ data: T | null; error: { message: string } | null }>;
-};
-
-const SMS_UNIT_COST = 0.196;
-const DEFAULT_SMS_CREDITS = 6500;
-
-function looseRpc(client: unknown) {
-  return client as LooseRpcClient;
-}
 
 function brtDayKeyLocal(d: Date) {
   return d
@@ -120,15 +78,6 @@ function brtDayKeyLocal(d: Date) {
       day: "2-digit",
     })
     .slice(0, 10);
-}
-
-function dayLabel(date: Date | string) {
-  const d = typeof date === "string" ? new Date(date) : date;
-  return d.toLocaleDateString("pt-BR", {
-    timeZone: "America/Sao_Paulo",
-    day: "2-digit",
-    month: "2-digit",
-  });
 }
 
 function fullDate(date: Date) {
@@ -156,11 +105,6 @@ function periodRange(preset: PeriodPreset): DateRange {
   return { from: new Date(Date.now() - 6 * 86400000), to: today };
 }
 
-function pctChange(current: number, previous: number) {
-  if (previous <= 0) return current > 0 ? 100 : 0;
-  return ((current - previous) / previous) * 100;
-}
-
 function fmtPct(value: number, digits = 1) {
   return `${value.toLocaleString("pt-BR", {
     minimumFractionDigits: digits,
@@ -168,421 +112,13 @@ function fmtPct(value: number, digits = 1) {
   })}%`;
 }
 
+function fmtRoi(value: number) {
+  return `${value.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}x`;
+}
+
 function comparisonLabel(value: number) {
   const direction = value > 0 ? "↑" : value < 0 ? "↓" : "→";
   return `${direction} ${fmtPct(Math.abs(value))} vs. período anterior`;
-}
-
-function sumMoney(rows: MoneyRow[]) {
-  return rows.reduce((acc, row) => acc + Number(row.valor ?? 0), 0);
-}
-
-function buildDaySeries(from: Date, to: Date) {
-  const days: Array<{ key: string; label: string; deposits: number; withdrawals: number }> = [];
-  const cursor = new Date(brtDayStart(from));
-  const end = brtDayStart(to).getTime();
-
-  while (cursor.getTime() <= end) {
-    days.push({
-      key: brtDayKeyLocal(cursor),
-      label: dayLabel(cursor),
-      deposits: 0,
-      withdrawals: 0,
-    });
-    cursor.setDate(cursor.getDate() + 1);
-  }
-
-  return days;
-}
-
-function playerName(id: string | null, names: Map<string, string>) {
-  if (!id) return "jogador";
-  return names.get(id) ?? "jogador";
-}
-
-const QUERY_PAGE_SIZE = 1000;
-
-/**
- * PostgREST limits a response to 1,000 rows by default. Dashboard charts and
- * derived metrics need the complete period, so read each page explicitly.
- */
-async function fetchAllRows<Row>(
-  fetchPage: (
-    from: number,
-    to: number,
-  ) => PromiseLike<{
-    data: Row[] | null;
-    error: { message: string } | null;
-  }>,
-) {
-  const rows: Row[] = [];
-
-  for (let from = 0; ; from += QUERY_PAGE_SIZE) {
-    const { data, error } = await fetchPage(from, from + QUERY_PAGE_SIZE - 1);
-    if (error) throw new Error(error.message);
-
-    const page = data ?? [];
-    rows.push(...page);
-    if (page.length < QUERY_PAGE_SIZE) return rows;
-  }
-}
-
-async function fetchDashboardLegacy(range: { from: Date; to: Date }, tenantId: string) {
-  const startDate = brtDayStart(range.from);
-  const endDate = brtDayEnd(range.to);
-  const iso = startDate.toISOString();
-  const isoEnd = endDate.toISOString();
-  const periodMs = brtDayStart(range.to).getTime() - brtDayStart(range.from).getTime();
-  const periodDays = Math.max(1, Math.round(periodMs / 86400000) + 1);
-  const prevEndDate = new Date(startDate.getTime() - 1);
-  const prevStartDate = new Date(prevEndDate.getTime() - (periodDays - 1) * 86400000);
-  const prevIso = brtDayStart(prevStartDate).toISOString();
-  const prevIsoEnd = brtDayEnd(prevEndDate).toISOString();
-  const T = tenantId;
-
-  const resetRes = await supabase
-    .from("dashboard_settings")
-    .select("reset_at")
-    .eq("tenant_id", T)
-    .eq("id", "global")
-    .maybeSingle();
-  const resetAt = (resetRes.data?.reset_at as string) ?? "1970-01-01T00:00:00Z";
-
-  const [
-    totalsAgg,
-    prevTotalsAgg,
-    playersPeriod,
-    prevPlayersPeriod,
-    ftdPeriod,
-    prevFtdPeriod,
-    allPlayersRows,
-    depositsPeriodRows,
-    previousDepositsPeriodRows,
-    withdrawalsPeriodRows,
-    smsLogsRows,
-    smsCreditSummaryRes,
-    followupsRows,
-    flowsRes,
-    recentPlayersRes,
-    recentDepositsRes,
-    recentWithdrawalsRes,
-    recentEventsRes,
-    pixGeneratedPeriod,
-    previousPixGeneratedPeriod,
-  ] = await Promise.all([
-    supabase.rpc("dashboard_totals", {
-      _tenant: T,
-      _from: iso,
-      _to: isoEnd,
-      _reset_at: resetAt,
-    }),
-    supabase.rpc("dashboard_totals", {
-      _tenant: T,
-      _from: prevIso,
-      _to: prevIsoEnd,
-      _reset_at: resetAt,
-    }),
-    supabase
-      .from("players")
-      .select("id", { count: "exact", head: true })
-      .eq("tenant_id", T)
-      .gte("created_at", iso)
-      .lte("created_at", isoEnd),
-    supabase
-      .from("players")
-      .select("id", { count: "exact", head: true })
-      .eq("tenant_id", T)
-      .gte("created_at", prevIso)
-      .lte("created_at", prevIsoEnd),
-    supabase
-      .from("players")
-      .select("id", { count: "exact", head: true })
-      .eq("tenant_id", T)
-      .not("ftd_em", "is", null)
-      .gte("ftd_em", iso)
-      .lte("ftd_em", isoEnd),
-    supabase
-      .from("players")
-      .select("id", { count: "exact", head: true })
-      .eq("tenant_id", T)
-      .not("ftd_em", "is", null)
-      .gte("ftd_em", prevIso)
-      .lte("ftd_em", prevIsoEnd),
-    fetchAllRows<PlayerRow>((from, to) =>
-      supabase
-        .from("players")
-        .select("id,nome,created_at,ftd_em,ultimo_login,total_depositado,total_sacado")
-        .eq("tenant_id", T)
-        .range(from, to),
-    ),
-    fetchAllRows<MoneyRow>((from, to) =>
-      supabase
-        .from("deposits")
-        .select("id,player_id,valor,created_at,status")
-        .eq("tenant_id", T)
-        .eq("status", "aprovado")
-        .gte("created_at", iso)
-        .lte("created_at", isoEnd)
-        .range(from, to),
-    ),
-    fetchAllRows<MoneyRow>((from, to) =>
-      supabase
-        .from("deposits")
-        .select("id,player_id,valor,created_at,status")
-        .eq("tenant_id", T)
-        .eq("status", "aprovado")
-        .gte("created_at", prevIso)
-        .lte("created_at", prevIsoEnd)
-        .range(from, to),
-    ),
-    fetchAllRows<MoneyRow>((from, to) =>
-      supabase
-        .from("withdrawals")
-        .select("id,player_id,valor,created_at,status")
-        .eq("tenant_id", T)
-        .eq("status", "aprovado")
-        .gte("created_at", iso)
-        .lte("created_at", isoEnd)
-        .range(from, to),
-    ),
-    fetchAllRows<
-      Pick<
-        Tables<"sms_send_logs">,
-        "id" | "player_id" | "created_at" | "status" | "delivery_status"
-      >
-    >((from, to) =>
-      supabase
-        .from("sms_send_logs")
-        .select("id,player_id,created_at,status,delivery_status")
-        .eq("tenant_id", T)
-        .gte("created_at", iso)
-        .lte("created_at", isoEnd)
-        .range(from, to),
-    ),
-    looseRpc(supabase).rpc("sms_credit_summary", { _tenant: T }),
-    fetchAllRows((from, to) =>
-      supabase
-        .from("lead_followups")
-        .select("id,player_id,created_at,acao")
-        .eq("tenant_id", T)
-        .lte("created_at", isoEnd)
-        .gte("created_at", new Date(startDate.getTime() - 30 * 86400000).toISOString())
-        .range(from, to),
-    ),
-    supabase.from("sms_flows").select("id,is_active").eq("tenant_id", T),
-    supabase
-      .from("players")
-      .select("id,nome,created_at")
-      .eq("tenant_id", T)
-      .order("created_at", { ascending: false })
-      .limit(12),
-    supabase
-      .from("deposits")
-      .select("id,player_id,valor,created_at")
-      .eq("tenant_id", T)
-      .eq("status", "aprovado")
-      .order("created_at", { ascending: false })
-      .limit(12),
-    supabase
-      .from("withdrawals")
-      .select("id,player_id,valor,created_at")
-      .eq("tenant_id", T)
-      .eq("status", "aprovado")
-      .order("created_at", { ascending: false })
-      .limit(12),
-    supabase
-      .from("events")
-      .select("id,player_id,valor,created_at,tipo")
-      .eq("tenant_id", T)
-      .order("created_at", { ascending: false })
-      .limit(20),
-    supabase
-      .from("deposits")
-      .select("id", { count: "exact", head: true })
-      .eq("tenant_id", T)
-      .gte("created_at", iso)
-      .lte("created_at", isoEnd),
-    supabase
-      .from("deposits")
-      .select("id", { count: "exact", head: true })
-      .eq("tenant_id", T)
-      .gte("created_at", prevIso)
-      .lte("created_at", prevIsoEnd),
-  ]);
-
-  const totals = (totalsAgg.data ?? {}) as TotalsRpc;
-  const prevTotals = (prevTotalsAgg.data ?? {}) as TotalsRpc;
-  const allPlayers = allPlayersRows;
-  const deposits = depositsPeriodRows;
-  const previousDeposits = previousDepositsPeriodRows;
-  const withdrawals = withdrawalsPeriodRows;
-  const smsLogs = smsLogsRows;
-  const smsCreditSummary = (smsCreditSummaryRes.data ?? {}) as {
-    balance_credits?: number | string;
-  };
-  const followups = followupsRows;
-  const flows = flowsRes.data ?? [];
-
-  const names = new Map<string, string>();
-  allPlayers.forEach((p) => names.set(p.id, p.nome));
-  (recentPlayersRes.data ?? []).forEach((p) => names.set(p.id, p.nome));
-
-  const depositAmount = Number(totals.deposits_period_sum ?? 0);
-  const previousDepositAmount = Number(prevTotals.deposits_period_sum ?? 0);
-  const depositCount = Number(totals.deposits_period_count ?? deposits.length);
-  const previousDepositCount = Number(prevTotals.deposits_period_count ?? 0);
-  const depositors = Number(totals.depositantes_period ?? 0);
-  const previousDepositors = Number(prevTotals.depositantes_period ?? 0);
-  const newPlayers = playersPeriod.count ?? 0;
-  const previousNewPlayers = prevPlayersPeriod.count ?? 0;
-  const ftd = ftdPeriod.count ?? 0;
-  const previousFtd = prevFtdPeriod.count ?? 0;
-  const withdrawalAmount = sumMoney(withdrawals);
-  const ticket = depositCount > 0 ? depositAmount / depositCount : 0;
-  const prevTicket = previousDepositCount > 0 ? previousDepositAmount / previousDepositCount : 0;
-  const conversion = newPlayers > 0 ? (ftd / newPlayers) * 100 : 0;
-  const prevConversion = previousNewPlayers > 0 ? (previousFtd / previousNewPlayers) * 100 : 0;
-
-  const playersById = new Map(allPlayers.map((p) => [p.id, p]));
-  const isRedeposit = (d: MoneyRow) => {
-    if (!d.player_id) return false;
-    const p = playersById.get(d.player_id);
-    if (!p?.ftd_em) return false;
-    return new Date(d.created_at).getTime() - new Date(p.ftd_em).getTime() > 60000;
-  };
-  const redeposits = deposits.filter(isRedeposit);
-  const previousRedepositAmount = sumMoney(previousDeposits.filter(isRedeposit));
-  const redepositAmount = sumMoney(redeposits);
-  const redepositCount = redeposits.length;
-  const redepositPlayers = new Set(redeposits.map((d) => d.player_id).filter(Boolean)).size;
-
-  const followupByPlayer = new Map<string, string>();
-  followups.forEach((f) => {
-    const previous = followupByPlayer.get(f.player_id);
-    if (!previous || f.created_at < previous) followupByPlayer.set(f.player_id, f.created_at);
-  });
-  const recoveredDeposits = deposits.filter((d) => {
-    if (!d.player_id) return false;
-    const firstFollowup = followupByPlayer.get(d.player_id);
-    return !!firstFollowup && firstFollowup <= d.created_at;
-  });
-  const recoveredAmount = sumMoney(recoveredDeposits);
-  const recoveredPlayers = new Set(recoveredDeposits.map((d) => d.player_id).filter(Boolean)).size;
-  const recoveredNew = recoveredDeposits
-    .filter((d) => d.player_id && (playersById.get(d.player_id)?.created_at ?? "") >= iso)
-    .reduce((acc, d) => acc + Number(d.valor ?? 0), 0);
-  const recoveredReactivated = recoveredDeposits
-    .filter((d) => d.player_id && !playersById.get(d.player_id)?.ftd_em)
-    .reduce((acc, d) => acc + Number(d.valor ?? 0), 0);
-  const recoveredReturning = Math.max(0, recoveredAmount - recoveredNew - recoveredReactivated);
-  const messageCost = smsLogs.length * SMS_UNIT_COST;
-  const messageRoi = messageCost > 0 ? recoveredAmount / messageCost : 0;
-
-  const daySeries = buildDaySeries(startDate, endDate);
-  const dayMap = new Map(daySeries.map((row) => [row.key, row]));
-  deposits.forEach((d) => {
-    const row = dayMap.get(brtDayKeyLocal(new Date(d.created_at)));
-    if (row) row.deposits += Number(d.valor ?? 0);
-  });
-  withdrawals.forEach((w) => {
-    const row = dayMap.get(brtDayKeyLocal(new Date(w.created_at)));
-    if (row) row.withdrawals += Number(w.valor ?? 0);
-  });
-
-  const eventRows = recentEventsRes.data ?? [];
-  const recentPixEvents = eventRows.filter((e) => {
-    const kind = String(e.tipo ?? "").toLowerCase();
-    return kind.includes("pix") || kind.includes("deposit");
-  });
-  const pixGenerated = pixGeneratedPeriod.count ?? depositCount;
-  const pixUnpaid = Math.max(0, pixGenerated - depositCount);
-  const pixPayRate = pixGenerated > 0 ? (depositCount / pixGenerated) * 100 : 0;
-
-  const liveEvents: LiveEvent[] = [
-    ...(recentPlayersRes.data ?? []).map((p) => ({
-      id: `player-${p.id}`,
-      tone: "blue" as const,
-      player: p.nome,
-      action: "criou conta",
-      at: p.created_at,
-    })),
-    ...(recentDepositsRes.data ?? []).map((d) => ({
-      id: `deposit-${d.id}`,
-      tone: "green" as const,
-      player: playerName(d.player_id, names),
-      action: "depositou",
-      amount: Number(d.valor ?? 0),
-      at: d.created_at,
-    })),
-    ...(recentWithdrawalsRes.data ?? []).map((w) => ({
-      id: `withdrawal-${w.id}`,
-      tone: "purple" as const,
-      player: playerName(w.player_id, names),
-      action: "sacou",
-      amount: Number(w.valor ?? 0),
-      at: w.created_at,
-    })),
-    ...recentPixEvents.slice(0, 8).map((e) => ({
-      id: `event-${e.id}`,
-      tone: "orange" as const,
-      player: playerName(e.player_id, names),
-      action: "gerou um PIX",
-      amount: Number(e.valor ?? 0),
-      at: e.created_at,
-    })),
-  ]
-    .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
-    .slice(0, 8);
-
-  const activeFlows = flows.filter((flow) => flow.is_active).length;
-  const totalFlows = flows.length;
-  const reactivationQueue = allPlayers.filter((p) => {
-    if (!p.ultimo_login) return false;
-    const lastLogin = new Date(p.ultimo_login).getTime();
-    return Date.now() - lastLogin > 7 * 86400000;
-  }).length;
-
-  return {
-    periodDays,
-    depositAmount,
-    depositGrowth: pctChange(depositAmount, previousDepositAmount),
-    depositCount,
-    depositors,
-    depositorsGrowth: pctChange(depositors, previousDepositors),
-    newPlayers,
-    newPlayersGrowth: pctChange(newPlayers, previousNewPlayers),
-    ftd,
-    ftdGrowth: pctChange(ftd, previousFtd),
-    conversion,
-    conversionGrowth: conversion - prevConversion,
-    ticket,
-    ticketGrowth: pctChange(ticket, prevTicket),
-    redepositAmount,
-    redepositCount,
-    redepositPlayers,
-    redepositGrowth: pctChange(redepositAmount, previousRedepositAmount),
-    recoveredAmount,
-    recoveredNew,
-    recoveredReactivated,
-    recoveredReturning,
-    recoveredPlayers,
-    messageCost,
-    messageRoi,
-    withdrawalAmount,
-    cashflowChart: daySeries,
-    pixGenerated,
-    pixGeneratedGrowth: pctChange(pixGenerated, previousPixGeneratedPeriod.count ?? 0),
-    pixPayRate,
-    pixUnpaid,
-    reactivationQueue,
-    activeFlows,
-    totalFlows,
-    smsSent: smsLogs.length,
-    smsCredits: Number(
-      smsCreditSummary.balance_credits ?? Math.max(0, DEFAULT_SMS_CREDITS - smsLogs.length),
-    ),
-    liveEvents,
-  };
 }
 
 function ShellCard({
@@ -729,7 +265,7 @@ function InfoRow({
   detail,
   tone = "blue",
   trend,
-  chevron = false,
+  to,
 }: {
   icon: ElementType;
   label: string;
@@ -737,7 +273,8 @@ function InfoRow({
   detail?: string;
   tone?: "blue" | "green" | "orange" | "red" | "purple";
   trend?: string;
-  chevron?: boolean;
+  /** Destination of the row; only navigable rows show an arrow. */
+  to?: "/jornadas" | "/relatorios/conversao";
 }) {
   const toneClass = {
     blue: "bg-blue-500/15 text-blue-400",
@@ -746,8 +283,8 @@ function InfoRow({
     red: "bg-red-500/15 text-red-400",
     purple: "bg-violet-500/15 text-violet-400",
   }[tone];
-  return (
-    <div className="flex items-center gap-4 py-3">
+  const content = (
+    <>
       <div className={`flex h-11 w-11 items-center justify-center rounded-xl ${toneClass}`}>
         <Icon className="h-5 w-5" />
       </div>
@@ -758,9 +295,16 @@ function InfoRow({
       <div className="flex items-center gap-3 text-right">
         <p className="text-lg font-bold text-foreground">{value}</p>
         {trend && <span className="text-sm font-semibold text-emerald-400">{trend}</span>}
-        {chevron && <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+        {to && <ChevronRight className="h-4 w-4 text-muted-foreground" />}
       </div>
-    </div>
+    </>
+  );
+  return to ? (
+    <Link to={to} className="-mx-2 flex items-center gap-4 rounded-xl px-2 py-3 hover:bg-muted/40">
+      {content}
+    </Link>
+  ) : (
+    <div className="flex items-center gap-4 py-3">{content}</div>
   );
 }
 
@@ -1018,13 +562,24 @@ function Dashboard() {
               <Target className="h-6 w-6" />
             </div>
             <p className="text-base text-foreground/90">
-              <strong className="text-emerald-400">Insight</strong> O CRM recuperou{" "}
-              {brl(data.recoveredAmount)} com {brl(data.messageCost)} de mensagem —{" "}
-              {data.messageRoi > 0 ? `${data.messageRoi.toFixed(1)}x` : "0x"} o que custou.
+              <strong className="text-emerald-400">Insight</strong>{" "}
+              {data.recoveredAmount > 0 ? (
+                <>
+                  Jornadas e campanhas trouxeram {num(data.recoveredPlayers)} jogador(es) de volta:{" "}
+                  {brl(data.recoveredAmount)} em depósitos após clique no link, com{" "}
+                  {brl(data.messageCost)} em SMS
+                  {data.messageRoi > 0 ? ` (retorno de ${fmtRoi(data.messageRoi)})` : ""}.
+                </>
+              ) : (
+                <>
+                  Ainda não há depósitos após clique em link no período. Foram{" "}
+                  {brl(data.messageCost)} em SMS.
+                </>
+              )}
             </p>
           </div>
-          <Button variant="outline" className="h-12 rounded-xl px-6 font-semibold">
-            Ver relatórios completos
+          <Button asChild variant="outline" className="h-12 rounded-xl px-6 font-semibold">
+            <Link to="/relatorios/conversao">Ver relatórios completos</Link>
           </Button>
         </CardContent>
       </Card>
@@ -1138,7 +693,7 @@ function Dashboard() {
         <KpiCard
           title="Recuperado pelo CRM"
           value={brl(data.recoveredAmount)}
-          detail={`${brl(data.recoveredNew)} novos · ${brl(data.recoveredReactivated)} reativados · ${brl(data.recoveredReturning)} de quem já jogava`}
+          detail={`${num(data.recoveredPlayers)} jogador(es) · depósito até 7 dias após clique no link`}
           icon={Target}
           tone="green"
           featured
@@ -1298,7 +853,9 @@ function Dashboard() {
               icon={Target}
               label="Recuperado pelo CRM"
               value={brl(data.recoveredAmount)}
+              detail="depósitos após clique em link"
               tone="green"
+              to="/relatorios/conversao"
             />
             <InfoRow
               icon={Users}
@@ -1308,8 +865,9 @@ function Dashboard() {
             />
             <InfoRow
               icon={CreditCard}
-              label="Gasto em mensagem"
+              label="Gasto em SMS"
               value={brl(data.messageCost)}
+              detail={`${num(data.smsSent)} SMS cobrados no período`}
               tone="orange"
             />
           </div>
@@ -1323,24 +881,27 @@ function Dashboard() {
           <div className="space-y-2">
             <InfoRow
               icon={Users}
-              label="Na fila da jornada"
+              label="Em jornada agora"
               value={num(data.reactivationQueue)}
+              detail="jogadores em alguma régua"
               tone="blue"
-              chevron
+              to="/jornadas"
             />
             <InfoRow
               icon={MessageSquare}
               label="Jornadas ativas"
               value={`${num(data.activeFlows)}/${num(data.totalFlows)}`}
+              detail={data.pausedFlows ? `${num(data.pausedFlows)} pausada(s)` : undefined}
               tone="blue"
-              chevron
+              to="/jornadas"
             />
             <InfoRow
               icon={TrendingUp}
               label="Retorno sobre o envio"
-              value={data.messageRoi > 0 ? `${data.messageRoi.toFixed(1)}x` : "0x"}
+              value={data.messageRoi > 0 ? fmtRoi(data.messageRoi) : "—"}
+              detail="recuperado ÷ gasto em SMS"
               tone="green"
-              chevron
+              to="/relatorios/conversao"
             />
           </div>
         </ShellCard>
@@ -1350,8 +911,9 @@ function Dashboard() {
 
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <LayoutDashboard className="h-4 w-4" />
-        Dados do período da sua operação. Recuperado pelo CRM considera depósitos feitos depois de
-        um followup registrado para o jogador.
+        Dados do período da sua operação. Recuperado pelo CRM considera depósitos feitos em até 7
+        dias depois de um clique humano em link de campanha ou jornada; gasto em SMS é o valor
+        cobrado em créditos.
       </div>
     </div>
   );

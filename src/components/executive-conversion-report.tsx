@@ -1,8 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { getExecutiveConversionReport } from "@/lib/conversion-p2.functions";
 
 const money = (value: number) =>
   value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+const count = (value: number) => value.toLocaleString("pt-BR");
+const rate = (part: number, total: number) =>
+  total
+    ? `${((part / total) * 100).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`
+    : "—";
 
 export function ExecutiveConversionReport() {
   const query = useQuery({
@@ -24,8 +30,16 @@ export function ExecutiveConversionReport() {
         </p>
       </div>
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Metric label="Envios rastreados" value={totals.sent.toLocaleString("pt-BR")} />
-        <Metric label="Conversões diretas" value={totals.conversions.toLocaleString("pt-BR")} />
+        <Metric
+          label="Mensagens com link"
+          value={count(totals.sent)}
+          hint={`${count(rows.length)} origens no período`}
+        />
+        <Metric
+          label="Conversões diretas"
+          value={count(totals.conversions)}
+          hint="Clique no link → depósito em até 7 dias"
+        />
         <Metric label="Receita direta" value={money(totals.directRevenue)} />
         <Metric
           label="Receita assistida"
@@ -61,15 +75,31 @@ export function ExecutiveConversionReport() {
                 {ordered.map((row) => (
                   <tr className="border-t" key={`${row.sourceType}:${row.sourceId}`}>
                     <td className="p-3">
-                      <span className="font-medium">{row.name}</span>
+                      {row.sourceType === "journey" ? (
+                        <Link
+                          to="/jornadas/$journeyId/relatorio"
+                          params={{ journeyId: row.sourceId }}
+                          className="font-medium hover:underline"
+                        >
+                          {row.name}
+                        </Link>
+                      ) : (
+                        <Link
+                          to="/campanhas/$campaignId/relatorio"
+                          params={{ campaignId: row.sourceId }}
+                          className="font-medium hover:underline"
+                        >
+                          {row.name}
+                        </Link>
+                      )}
                       <br />
-                      <span className="text-xs text-muted-foreground">{row.sourceId}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {row.sourceType === "journey" ? "Jornada" : "Campanha"}
+                      </span>
                     </td>
-                    <td className="p-3">{row.sent}</td>
-                    <td className="p-3">{row.conversions}</td>
-                    <td className="p-3">
-                      {row.sent ? `${((row.conversions / row.sent) * 100).toFixed(1)}%` : "—"}
-                    </td>
+                    <td className="p-3">{count(row.sent)}</td>
+                    <td className="p-3">{count(row.conversions)}</td>
+                    <td className="p-3">{rate(row.conversions, row.sent)}</td>
                     <td className="p-3">{money(row.directRevenue)}</td>
                     <td className="p-3 text-muted-foreground">{money(row.assistedRevenue)}</td>
                   </tr>

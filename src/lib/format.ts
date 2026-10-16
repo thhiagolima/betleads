@@ -2,7 +2,8 @@ export function brl(n: number | null | undefined) {
   return (n ?? 0).toLocaleString("pt-BR", {
     style: "currency",
     currency: "BRL",
-    minimumFractionDigits: 0,
+    // Money always has two decimals ("R$ 10.137,90", never "R$ 10.137,9").
+    minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
 }

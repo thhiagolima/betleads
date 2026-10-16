@@ -32,12 +32,14 @@ type DashboardRpc = {
   recoveredNew?: number | string;
   recoveredReactivated?: number | string;
   smsSent?: number;
+  messageCost?: number | string;
   smsCredits?: number;
   pixGenerated?: number;
   previousPixGenerated?: number;
   reactivationQueue?: number;
   activeFlows?: number;
   totalFlows?: number;
+  pausedFlows?: number;
   cashflowChart?: Array<{
     key: string;
     label: string;
@@ -70,7 +72,8 @@ type DashboardDb = {
   from: <T = unknown>(table: string) => DashboardQuery<T>;
 };
 
-const SMS_UNIT_COST = 0.196;
+// Only used if the database does not return the charged cost (older RPC).
+const FALLBACK_SMS_UNIT_PRICE = 0.12;
 const DASHBOARD_REQUEST_TIMEOUT_MS = 25_000;
 
 /**
@@ -167,7 +170,10 @@ export const getDashboardSummary = createServerFn({ method: "POST" })
           const recoveredNew = number(value.recoveredNew);
           const recoveredReactivated = number(value.recoveredReactivated);
           const smsSent = number(value.smsSent);
-          const messageCost = smsSent * SMS_UNIT_COST;
+          const messageCost =
+            value.messageCost == null
+              ? smsSent * FALLBACK_SMS_UNIT_PRICE
+              : number(value.messageCost);
 
           return {
             periodDays,
@@ -214,6 +220,7 @@ export const getDashboardSummary = createServerFn({ method: "POST" })
             reactivationQueue: number(value.reactivationQueue),
             activeFlows: number(value.activeFlows),
             totalFlows: number(value.totalFlows),
+            pausedFlows: number(value.pausedFlows),
             smsSent,
             smsCredits: number(value.smsCredits),
             liveEvents: (value.liveEvents ?? []).slice(0, 8).map((event) => ({

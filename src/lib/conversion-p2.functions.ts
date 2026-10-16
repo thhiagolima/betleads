@@ -37,88 +37,89 @@ function defaultRange(from?: string, to?: string) {
   };
 }
 
+type SourceRow = {
+  sourceType: "campaign" | "journey";
+  sourceId: string;
+  name: string;
+  sent: number;
+  delivered: number;
+  conversions: number;
+  directRevenue: number;
+  assistedRevenue: number;
+  channels: Record<"sms" | "email" | "whatsapp", number>;
+};
+
+/**
+ * Every origin of the period, aggregated in the database (D-02/D-03): the
+ * previous PostgREST queries were capped at 1,000 rows and hid the journeys.
+ */
+async function loadSourceRows(db: any, tenantId: string, from: string, to: string) {
+  const { data, error } = await db.rpc("conversion_report_sources", {
+    _tenant: tenantId,
+    _from: from,
+    _to: to,
+  });
+  if (error) throw new Error(error.message);
+  const raw = (data ?? []) as Array<Record<string, unknown>>;
+  const idsOf = (type: string) =>
+    raw.filter((row) => row.source_type === type).map((row) => String(row.source_id));
+  const journeyIds = idsOf("journey");
+  const campaignIds = idsOf("campaign");
+  const [journeys, smsCampaigns, emailCampaigns] = await Promise.all([
+    journeyIds.length
+      ? db.from("journeys").select("id,name").eq("tenant_id", tenantId).in("id", journeyIds)
+      : { data: [] },
+    campaignIds.length
+      ? db.from("sms_campaigns").select("id,name").eq("tenant_id", tenantId).in("id", campaignIds)
+      : { data: [] },
+    campaignIds.length
+      ? db.from("email_campaigns").select("id,name").eq("tenant_id", tenantId).in("id", campaignIds)
+      : { data: [] },
+  ]);
+  const names = new Map<string, string>();
+  for (const result of [journeys, smsCampaigns, emailCampaigns])
+    for (const row of (result.data ?? []) as Array<{ id: string; name: string }>)
+      names.set(row.id, row.name);
+  return raw.map((row): SourceRow => ({
+    sourceType: row.source_type as SourceRow["sourceType"],
+    sourceId: String(row.source_id),
+    name:
+      names.get(String(row.source_id)) ?? (row.source_type === "campaign" ? "Campanha" : "Jornada"),
+    sent: Number(row.sent ?? 0),
+    delivered: Number(row.delivered ?? 0),
+    conversions: Number(row.conversions ?? 0),
+    directRevenue: Number(row.direct_revenue ?? 0),
+    assistedRevenue: Number(row.assisted_revenue ?? 0),
+    channels: {
+      sms: Number(row.sms ?? 0),
+      email: Number(row.email ?? 0),
+      whatsapp: Number(row.whatsapp ?? 0),
+    },
+  }));
+}
+
 async function sourceMetric(
   db: any,
   tenantId: string,
   source: z.infer<typeof sourceSchema>,
   from: string,
   to: string,
-) {
-  const sourceNamePromise =
-    source.sourceType === "journey"
-      ? db
-          .from("journeys")
-          .select("name")
-          .eq("tenant_id", tenantId)
-          .eq("id", source.sourceId)
-          .maybeSingle()
-      : Promise.all([
-          db
-            .from("sms_campaigns")
-            .select("name")
-            .eq("tenant_id", tenantId)
-            .eq("id", source.sourceId)
-            .maybeSingle(),
-          db
-            .from("email_campaigns")
-            .select("name")
-            .eq("tenant_id", tenantId)
-            .eq("id", source.sourceId)
-            .maybeSingle(),
-        ]);
-  const [dispatches, attributions, sourceNameResult] = await Promise.all([
-    db
-      .from("link_dispatches")
-      .select("id,channel,send_status,delivery_status")
-      .eq("tenant_id", tenantId)
-      .eq("source_type", source.sourceType)
-      .eq("source_id", source.sourceId)
-      .gte("sent_at", from)
-      .lte("sent_at", to),
-    db
-      .from("conversion_attributions")
-      .select("event_type,monetary_value,classification,is_ftd")
-      .eq("tenant_id", tenantId)
-      .eq("source_type", source.sourceType)
-      .eq("source_id", source.sourceId)
-      .gte("occurred_at", from)
-      .lte("occurred_at", to),
-    sourceNamePromise,
-  ]);
-  if (dispatches.error) throw new Error(dispatches.error.message);
-  if (attributions.error) throw new Error(attributions.error.message);
-  const sends = dispatches.data ?? [];
-  const conversions = attributions.data ?? [];
-  const directDeposits = conversions.filter(
-    (row: any) => row.event_type === "deposit_approved" && row.classification === "direct",
+): Promise<SourceRow> {
+  const rows = await loadSourceRows(db, tenantId, from, to);
+  return (
+    rows.find(
+      (row) => row.sourceType === source.sourceType && row.sourceId === source.sourceId,
+    ) ?? {
+      ...source,
+      name: source.sourceType === "campaign" ? "Campanha" : "Jornada",
+      sent: 0,
+      delivered: 0,
+      conversions: 0,
+      directRevenue: 0,
+      assistedRevenue: 0,
+      channels: { sms: 0, email: 0, whatsapp: 0 },
+    }
   );
-  const assistedDeposits = conversions.filter(
-    (row: any) => row.event_type === "deposit_approved" && row.classification === "assisted",
-  );
-  const sourceName = Array.isArray(sourceNameResult)
-    ? sourceNameResult.find((result: any) => result.data?.name)?.data?.name
-    : sourceNameResult.data?.name;
-  return {
-    ...source,
-    name: sourceName ?? (source.sourceType === "campaign" ? "Campanha" : "Jornada"),
-    sent: sends.filter((row: any) => row.send_status === "sent").length,
-    delivered: sends.filter((row: any) => row.delivery_status === "delivered").length,
-    conversions: directDeposits.length,
-    directRevenue: directDeposits.reduce(
-      (sum: number, row: any) => sum + Number(row.monetary_value ?? 0),
-      0,
-    ),
-    assistedRevenue: assistedDeposits.reduce(
-      (sum: number, row: any) => sum + Number(row.monetary_value ?? 0),
-      0,
-    ),
-    channels: Object.fromEntries(
-      ["sms", "email", "whatsapp"].map((channel) => [
-        channel,
-        sends.filter((row: any) => row.channel === channel).length,
-      ]),
-    ),
-  };
 }
 
 export const compareConversionSources = createServerFn({ method: "POST" })
@@ -144,29 +145,7 @@ export const getExecutiveConversionReport = createServerFn({ method: "GET" })
     const tenantId = await resolveOperationalTenantId(context.supabase);
     const db = context.supabase as any;
     const range = defaultRange(data.from, data.to);
-    const { data: origins, error } = await db
-      .from("link_dispatches")
-      .select("source_type,source_id")
-      .eq("tenant_id", tenantId)
-      .in("source_type", ["campaign", "journey"])
-      .gte("sent_at", range.from)
-      .lte("sent_at", range.to)
-      .limit(10000);
-    if (error) throw new Error(error.message);
-    const unique = new Map<string, z.infer<typeof sourceSchema>>();
-    for (const origin of origins ?? []) {
-      const parsed = sourceSchema.safeParse({
-        sourceType: origin.source_type,
-        sourceId: origin.source_id,
-      });
-      if (parsed.success)
-        unique.set(`${parsed.data.sourceType}:${parsed.data.sourceId}`, parsed.data);
-    }
-    const rows = await Promise.all(
-      [...unique.values()].map((source) =>
-        sourceMetric(db, tenantId, source, range.from, range.to),
-      ),
-    );
+    const rows = await loadSourceRows(db, tenantId, range.from, range.to);
     return {
       ...range,
       rows,
