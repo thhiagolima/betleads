@@ -15,7 +15,8 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { saveJourney } from "@/lib/journeys.functions";
+import { listJourneys, saveJourney } from "@/lib/journeys.functions";
+import { journeyConflicts, type MapJourney } from "@/lib/journey-map";
 import { TRIGGER_NAMES } from "@/lib/triggers";
 import { listEmailTemplates } from "@/lib/email.functions";
 import { listSmsTemplates } from "@/lib/sms-templates.functions";
@@ -224,6 +225,12 @@ export function JourneyEditor({
       : null;
   const navigate = useNavigate();
   const save = useServerFn(saveJourney);
+  const listJourneysFn = useServerFn(listJourneys);
+  const otherJourneys = useQuery({
+    queryKey: ["journeys"],
+    queryFn: () => listJourneysFn(),
+    staleTime: 60_000,
+  });
   const templatesFn = useServerFn(listEmailTemplates);
   const smsTemplatesFn = useServerFn(listSmsTemplates);
   const voiceAssetsFn = useServerFn(listJourneyVoiceAssets);
@@ -652,6 +659,33 @@ export function JourneyEditor({
             Use uma família para definir como jornadas relacionadas se comportam para o mesmo
             jogador.
           </p>
+          {(() => {
+            const warnings = journeyConflicts(
+              {
+                id: id ?? "new",
+                name,
+                status: "draft",
+                trigger_type: trigger,
+                trigger_config: triggerConfig,
+                exit_rules: exitRules,
+                conflict_family: conflictFamily || null,
+                journey_priority: journeyPriority,
+              },
+              ((otherJourneys.data?.journeys ?? []) as MapJourney[]).filter(
+                (journey) => journey.id !== id,
+              ),
+            );
+            return warnings.length ? (
+              <ul
+                className="mt-3 space-y-1 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300"
+                role="status"
+              >
+                {warnings.map((warning) => (
+                  <li key={warning}>{warning}</li>
+                ))}
+              </ul>
+            ) : null;
+          })()}
           <div className="mt-3 grid gap-3 sm:grid-cols-3">
             <div className="block text-xs text-muted-foreground">
               <JourneyFieldTitle

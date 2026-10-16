@@ -29,9 +29,11 @@ import {
   saveJourneyContactLimits,
   retireLegacyJourney,
   setJourneyExpress,
+  getJourneyActivationEstimate,
   setJourneyStatus,
 } from "@/lib/journeys.functions";
 import { EXPRESS_JOURNEY_HINT } from "@/lib/journey-express";
+import { JourneyMapCard } from "@/components/journeys/journey-map-card";
 import {
   activationAsksEntryScope,
   defaultEntryScope,
@@ -67,6 +69,11 @@ type Journey = {
   daily_limit: number;
   express?: boolean;
   ends_at?: string | null;
+  trigger_config?: Record<string, unknown> | null;
+  exit_rules?: Record<string, unknown> | null;
+  conflict_family?: string | null;
+  journey_priority?: number | null;
+  holdout_percent?: number | null;
   journey_steps: Array<{
     id: string;
     position: number;
@@ -167,6 +174,13 @@ export function JourneysHub() {
     name: string;
   } | null>(null);
   const [entryScope, setEntryScope] = useState<JourneyEntryScope>("new_only");
+  const estimateFn = useServerFn(getJourneyActivationEstimate);
+  const estimate = useQuery({
+    queryKey: ["journey-activation-estimate", publishCandidate?.id],
+    queryFn: () => estimateFn({ data: { id: publishCandidate!.id } }),
+    enabled: Boolean(publishCandidate),
+    staleTime: 60_000,
+  });
   const status = useMutation({
     mutationFn: (input: {
       id: string;
@@ -513,6 +527,17 @@ export function JourneysHub() {
               )}
           </CardContent>
         </Card>
+      )}
+      {view === "journeys" && (
+        <JourneyMapCard
+          journeys={((journeys.data?.journeys ?? []) as Journey[]).map((journey) => ({
+            ...journey,
+            inProgress:
+              Number(journey.metrics?.byStatus?.active ?? 0) +
+              Number(journey.metrics?.byStatus?.waiting ?? 0) +
+              Number(journey.metrics?.byStatus?.paused_by_priority ?? 0),
+          }))}
+        />
       )}
       {view === "journeys" && (
         <Card className="overflow-hidden">
@@ -940,6 +965,22 @@ export function JourneysHub() {
                   Jogadores que já cumprem o gatilho entram nos próximos minutos e recebem o
                   primeiro passo, dentro do limite de mensagens por pessoa.
                 </span>
+                {estimate.isLoading ? (
+                  <span className="mt-1 block text-xs text-muted-foreground">
+                    Calculando o impacto…
+                  </span>
+                ) : estimate.data?.supported && estimate.data.eligible != null ? (
+                  <span className="mt-1 block text-xs font-medium">
+                    ≈ {estimate.data.eligible.toLocaleString("pt-BR")} jogador(es) entram agora · 1º
+                    envio ≈{" "}
+                    {(estimate.data.firstSendCost ?? 0).toLocaleString("pt-BR", {
+                      style: "currency",
+                      currency: "BRL",
+                    })}
+                    {estimate.data.eligible > 0 &&
+                      " · enquanto ficarem na régua diária, o custo se repete por dia"}
+                  </span>
+                ) : null}
               </span>
             </label>
           </fieldset>

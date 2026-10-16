@@ -85,7 +85,7 @@ export const listJourneys = createServerFn({ method: "GET" })
       db
         .from("journeys")
         .select(
-          "id,name,description,status,trigger_type,trigger_config,entry_rules,conflict_family,journey_priority,conflict_policy,express,daily_limit,cooldown_hours,ends_at,updated_at,journey_steps(id,position,step_type,config,is_enabled)",
+          "id,name,description,status,trigger_type,trigger_config,entry_rules,conflict_family,journey_priority,conflict_policy,express,daily_limit,cooldown_hours,ends_at,exit_rules,holdout_percent,updated_at,journey_steps(id,position,step_type,config,is_enabled)",
         )
         .eq("tenant_id", tenantId)
         .order("updated_at", { ascending: false }),
@@ -967,4 +967,40 @@ export const saveJourneyContactLimits = createServerFn({ method: "POST" })
     );
     if (error) throw new Error("Não foi possível salvar os limites de contato.");
     return { ok: true };
+  });
+
+/**
+ * P3: impact of publishing a journey "including the current base" — players
+ * that would enter now and the cost of their first message.
+ */
+export const getJourneyActivationEstimate = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((value: unknown) => z.object({ id: z.string().uuid() }).parse(value))
+  .handler(async ({ data, context }) => {
+    const tenantId = await tenant(context);
+    const userDb = context.supabase as any;
+    const { data: rows, error } = await userDb.rpc("journey_activation_estimate", {
+      _journey: data.id,
+    });
+    if (error) throw new Error("Não foi possível estimar o impacto da publicação.");
+    const row = (rows ?? [])[0] as
+      { eligible: number | string | null; supported: boolean } | undefined;
+    const [{ data: pricing }, { data: settings }] = await Promise.all([
+      supabaseAdmin
+        .from("tenant_sms_pricing")
+        .select("sale_price_per_sms")
+        .eq("tenant_id", tenantId)
+        .maybeSingle(),
+      supabaseAdmin.from("sms_credit_settings").select("default_sale_price_per_sms").maybeSingle(),
+    ]);
+    const price = Number(
+      pricing?.sale_price_per_sms ?? settings?.default_sale_price_per_sms ?? 0.12,
+    );
+    const eligible = row?.eligible == null ? null : Number(row.eligible);
+    return {
+      supported: Boolean(row?.supported),
+      eligible,
+      pricePerSms: price,
+      firstSendCost: eligible == null ? null : eligible * price,
+    };
   });
