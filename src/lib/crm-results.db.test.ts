@@ -13,6 +13,10 @@ const MIGRATION = readFileSync(
   resolve(root, "supabase/migrations/20261016130000_crm_results_daily.sql"),
   "utf8",
 );
+const HEALTH_MIGRATION = readFileSync(
+  resolve(root, "supabase/migrations/20261016190000_crm_results_health.sql"),
+  "utf8",
+);
 const CAMPAIGN_ID_MIGRATION = readFileSync(
   resolve(root, "supabase/migrations/20261016170000_sms_log_campaign_id.sql"),
   "utf8",
@@ -48,6 +52,8 @@ create table public.conversion_attributions (
 create table public.tenant_sms_pricing (tenant_id uuid primary key, sale_price_per_sms numeric);
 create table public.sms_credit_settings (id boolean primary key default true, default_sale_price_per_sms numeric);
 insert into public.sms_credit_settings values (true, 0.12);
+create table public.sms_credit_ledger (
+  tenant_id uuid, delta_credits integer, entry_type text, unit_sale_price numeric, created_at timestamptz);
 `;
 
 const T = "00000000-0000-4000-8000-000000000001";
@@ -102,6 +108,8 @@ beforeAll(async () => {
   await db.exec(`begin; ${MIGRATION}; commit;`);
   await db.exec(`begin; ${CAMPAIGN_ID_MIGRATION}; commit;`);
   await db.exec(`begin; ${CAMPAIGN_ID_MIGRATION}; commit;`);
+  await db.exec(`begin; ${HEALTH_MIGRATION}; commit;`);
+  await db.exec(`begin; ${HEALTH_MIGRATION}; commit;`);
   await db.exec(`
     insert into tenants values ('${T}');
     insert into players values ('${A}', '${T}', '2026-09-01'), ('${B}', '${T}', '2026-09-01'),
@@ -221,5 +229,48 @@ describe("campaign id on SMS logs", () => {
     await db.query(`select refresh_crm_results_day($1, $2::date)`, [T, DAY]);
     const row = (await rows()).find((r) => r.source_type === "campaign");
     expect(row).toMatchObject({ source_key: "Promo X", source_id: CAMPAIGN, sent: 1 });
+  });
+});
+
+describe("daily consistency checks (Q-01)", () => {
+  async function checks() {
+    await db.query(`select refresh_crm_results_day($1, $2::date)`, [T, DAY]);
+    const [{ failed }] = (
+      await db.query<{ failed: number }>(`select check_crm_results_day($1, $2::date) failed`, [
+        T,
+        DAY,
+      ])
+    ).rows;
+    const { rows } = await db.query<{
+      check_name: string;
+      expected: string;
+      actual: string;
+      ok: boolean;
+    }>(
+      `select check_name, expected, actual, ok from crm_results_health where tenant_id = $1 and metric_date = $2`,
+      [T, DAY],
+    );
+    return { failed, byName: Object.fromEntries(rows.map((row) => [row.check_name, row])) };
+  }
+
+  it("passes when the table matches the raw sends and attributions", async () => {
+    const { failed, byName } = await checks();
+    expect(failed).toBe(0);
+    expect(byName.sends).toMatchObject({ ok: true });
+    expect(Number(byName.sends.expected)).toBe(4);
+    expect(byName.direct).toMatchObject({ ok: true });
+    expect(byName.cost).toBeUndefined();
+  });
+
+  it("flags a cost that does not match the credit ledger", async () => {
+    await db.exec(`
+      insert into sms_credit_ledger values
+        ('${T}', -10, 'sms_reservation', 0.12, '${at("10:00")}'),
+        ('${T}', 1, 'sms_refund', 0.12, '${at("10:01")}');
+    `);
+    const { failed, byName } = await checks();
+    expect(byName.cost).toMatchObject({ ok: false });
+    expect(Number(byName.cost.expected)).toBeCloseTo(1.08);
+    expect(failed).toBe(1);
   });
 });

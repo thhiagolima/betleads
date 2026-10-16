@@ -548,6 +548,7 @@ function Health({ data }: { data: Data }) {
               : `${num(health.tableSent)} na tela · ${num(health.rawSent)} no registro (${pct(diff)} de diferença)`
           }
         />
+        <ConsistencyChecks checks={health.checks} />
         {health.truncated && (
           <HealthLine
             ok={false}
@@ -920,5 +921,48 @@ function Acquisition({ days }: { days: number }) {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+const CHECK_LABELS: Record<string, string> = {
+  sends: "Envios conferem com o registro de SMS",
+  cost: "Custo confere com os créditos cobrados",
+  direct: "Conversões por clique conferem com as atribuições",
+};
+
+function ConsistencyChecks({ checks }: { checks: Data["health"]["checks"] }) {
+  if (checks.length === 0)
+    return (
+      <HealthLine
+        ok={false}
+        label="Checagem diária de consistência"
+        value="ainda não rodou (roda todo dia às 03h40 para o dia anterior)"
+      />
+    );
+  const latestDate = checks[0].date;
+  const latest = checks.filter((check) => check.date === latestDate);
+  const failures = checks.filter((check) => !check.ok);
+  const format = (name: string, value: number) => (name === "cost" ? brl(value) : num(value));
+  return (
+    <>
+      {latest.map((check) => (
+        <HealthLine
+          key={check.name}
+          ok={check.ok}
+          label={`${CHECK_LABELS[check.name] ?? check.name} (${dayLabel(check.date)})`}
+          value={`tela ${format(check.name, check.actual)} · origem ${format(check.name, check.expected)}`}
+        />
+      ))}
+      {failures.length > 0 && (
+        <p className="text-xs text-amber-600 dark:text-amber-400">
+          {num(failures.length)} checagem(ns) com divergência nos últimos 14 dias:{" "}
+          {failures
+            .slice(0, 5)
+            .map((check) => `${CHECK_LABELS[check.name] ?? check.name} em ${dayLabel(check.date)}`)
+            .join("; ")}
+          .
+        </p>
+      )}
+    </>
   );
 }

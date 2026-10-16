@@ -75,7 +75,7 @@ export const getCrmResults = createServerFn({ method: "GET" })
 
     // Data health: freshness and a reconciliation of sends with the raw log.
     const fromInstant = new Date(`${from}T00:00:00-03:00`).toISOString();
-    const [{ data: latest }, { count: rawSent }] = await Promise.all([
+    const [{ data: latest }, { count: rawSent }, { data: checks }] = await Promise.all([
       db
         .from("crm_results_daily")
         .select("updated_at")
@@ -89,6 +89,13 @@ export const getCrmResults = createServerFn({ method: "GET" })
         .eq("tenant_id", tenantId)
         .in("status", ACCEPTED_SMS)
         .gte("created_at", fromInstant),
+      db
+        .from("crm_results_health")
+        .select("metric_date,check_name,expected,actual,ok,checked_at")
+        .eq("tenant_id", tenantId)
+        .gte("metric_date", brtDate(14))
+        .order("metric_date", { ascending: false })
+        .limit(60),
     ]);
 
     // F3: treated x control per journey (entries whose 7-day window closed).
@@ -145,6 +152,13 @@ export const getCrmResults = createServerFn({ method: "GET" })
         tableSent: result.totals.sent,
         rawSent: rawSent ?? null,
         truncated: rows.length >= PAGE * MAX_PAGES,
+        checks: ((checks ?? []) as Array<Record<string, unknown>>).map((row) => ({
+          date: String(row.metric_date),
+          name: String(row.check_name),
+          expected: Number(row.expected ?? 0),
+          actual: Number(row.actual ?? 0),
+          ok: Boolean(row.ok),
+        })),
       },
     };
   });
