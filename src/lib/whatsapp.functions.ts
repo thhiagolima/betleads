@@ -1076,7 +1076,10 @@ async function sendWhatsappMediaInternal(
   context: any,
   forcedKind?: "image" | "video" | "audio" | "document",
 ) {
-  const tenantId = await resolveOperationalTenantId(context.supabase);
+  // R10: this function never checked the tenant's operational/suspended
+  // status before; only resolve the tenant to guard the demo case, without
+  // introducing a new suspended-tenant block for everyone else.
+  const tenantId = await resolveCurrentTenantId(context.supabase);
   await assertTenantNotDemo(tenantId);
   const kind = forcedKind ?? data.kind;
   if (kind !== data.kind) throw new Error(`Tipo de mídia inválido: esperado ${forcedKind}.`);
@@ -1419,7 +1422,10 @@ export const sendToLeadFromSession = createServerFn({ method: "POST" })
 // Body of `sendToLeadFromSession`, exported so the demo guard wiring is unit-testable.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function sendToLeadFromSessionFor(data: { session_id: string; phone: string; text: string }, context: { supabase: any }) {
-  const tenantId = await resolveOperationalTenantId(context.supabase);
+  // R10: this function never checked the tenant's operational/suspended
+  // status before; only resolve the tenant to guard the demo case, without
+  // introducing a new suspended-tenant block for everyone else.
+  const tenantId = await resolveCurrentTenantId(context.supabase);
   await assertTenantNotDemo(tenantId);
   const digits = data.phone.replace(/\D/g, "");
   if (!digits) throw new Error("Telefone inválido");

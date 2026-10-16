@@ -23,6 +23,22 @@
 //   exported `addUserToTenantFor(ctx, data)` (mirroring the existing
 //   whatsapp.functions.ts `*For` convention) so the demo guard is directly
 //   unit-testable, matching the brief's required behavioral test.
+// - whatsapp-proxies.functions.ts: `createWhatsappProxy`, `updateWhatsappProxy`,
+//   `deleteWhatsappProxy` and `testWhatsappProxy` act on `whatsapp_proxies`,
+//   a global table with no `tenant_id` column (platform/admin-role resource,
+//   not tenant-scoped). They call the shared `guardCallerTenantNotDemo`
+//   helper instead of `assertTenantNotDemo` directly: per controller ruling
+//   R10, a super admin with no resolvable current tenant must still be
+//   allowed through (never newly blocked), while a demo caller (who always
+//   resolves to the demo tenant) stays blocked. `assignProxyToSession` is
+//   unaffected — it targets a real `whatsapp_sessions.tenant_id`, so it still
+//   calls `assertTenantNotDemo` directly.
+// - webhooks.functions.ts: `getMyWebhookLogs` and `getMyWebhookHealth` are
+//   intentionally NOT in this list. They are read-only (webhook delivery
+//   history/health), polled by the webhooks page, and must keep working
+//   under the demo tenant's "explore freely" requirement — only the
+//   credential/config-mutating actions and `getMyWebhookToken` (which
+//   reveals the tenant's webhook secret/token) are guarded.
 
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -87,7 +103,13 @@ function extractHandlerBody(source: string, constName: string): string {
   return source.slice(openBrace, closeBrace + 1);
 }
 
-type Entry = { file: string; name: string; kind: "function" | "handler" };
+type Entry = {
+  file: string;
+  name: string;
+  kind: "function" | "handler";
+  /** Defaults to "assertTenantNotDemo(" — override for an indirect guard. */
+  mustContain?: string;
+};
 
 const entries: Entry[] = [
   { file: "whatsapp.functions.ts", name: "createWhatsappSessionFor", kind: "function" },
@@ -99,10 +121,30 @@ const entries: Entry[] = [
   { file: "whatsapp.functions.ts", name: "sendToLeadFromSessionFor", kind: "function" },
   { file: "whatsapp-admin.server.ts", name: "configureEvolutionWebhookFor", kind: "function" },
   { file: "whatsapp-admin.server.ts", name: "deleteWhatsappSessionFor", kind: "function" },
-  { file: "whatsapp-proxies.functions.ts", name: "createWhatsappProxy", kind: "handler" },
-  { file: "whatsapp-proxies.functions.ts", name: "updateWhatsappProxy", kind: "handler" },
-  { file: "whatsapp-proxies.functions.ts", name: "deleteWhatsappProxy", kind: "handler" },
-  { file: "whatsapp-proxies.functions.ts", name: "testWhatsappProxy", kind: "handler" },
+  {
+    file: "whatsapp-proxies.functions.ts",
+    name: "createWhatsappProxy",
+    kind: "handler",
+    mustContain: "guardCallerTenantNotDemo(",
+  },
+  {
+    file: "whatsapp-proxies.functions.ts",
+    name: "updateWhatsappProxy",
+    kind: "handler",
+    mustContain: "guardCallerTenantNotDemo(",
+  },
+  {
+    file: "whatsapp-proxies.functions.ts",
+    name: "deleteWhatsappProxy",
+    kind: "handler",
+    mustContain: "guardCallerTenantNotDemo(",
+  },
+  {
+    file: "whatsapp-proxies.functions.ts",
+    name: "testWhatsappProxy",
+    kind: "handler",
+    mustContain: "guardCallerTenantNotDemo(",
+  },
   { file: "whatsapp-proxies.functions.ts", name: "assignProxyToSession", kind: "handler" },
   { file: "whatsapp-external.server.ts", name: "saveExternalIntegrationFor", kind: "function" },
   { file: "whatsapp-external.functions.ts", name: "testWhatsappExternalWebhook", kind: "handler" },
@@ -124,6 +166,14 @@ const entries: Entry[] = [
   { file: "tenants.functions.ts", name: "removeUserFromTenant", kind: "handler" },
 ];
 
+// Read-only webhook actions that must keep working for a demo tenant
+// ("explore freely"); asserted here as a negative so a future over-block
+// regression fails loudly, mirroring the positive list above.
+const unguardedReadOnlyEntries: Entry[] = [
+  { file: "webhooks.functions.ts", name: "getMyWebhookLogs", kind: "handler" },
+  { file: "webhooks.functions.ts", name: "getMyWebhookHealth", kind: "handler" },
+];
+
 describe("demo action guard — static coverage", () => {
   const sourceCache = new Map<string, string>();
   const source = (file: string) => {
@@ -131,13 +181,27 @@ describe("demo action guard — static coverage", () => {
     return sourceCache.get(file)!;
   };
 
-  it.each(entries)("$file :: $name calls assertTenantNotDemo(", ({ file, name, kind }) => {
-    const body =
-      kind === "function"
-        ? extractFunctionBody(source(file), name)
-        : extractHandlerBody(source(file), name);
-    expect(body).toContain("assertTenantNotDemo(");
-  });
+  it.each(entries)(
+    "$file :: $name calls its demo guard",
+    ({ file, name, kind, mustContain }) => {
+      const body =
+        kind === "function"
+          ? extractFunctionBody(source(file), name)
+          : extractHandlerBody(source(file), name);
+      expect(body).toContain(mustContain ?? "assertTenantNotDemo(");
+    },
+  );
+
+  it.each(unguardedReadOnlyEntries)(
+    "$file :: $name stays unguarded (read-only, demo tenant must keep working)",
+    ({ file, name, kind }) => {
+      const body =
+        kind === "function"
+          ? extractFunctionBody(source(file), name)
+          : extractHandlerBody(source(file), name);
+      expect(body).not.toContain("assertTenantNotDemo(");
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -156,6 +220,7 @@ import { createFakeDb } from "./sms-bulk.test-support";
 import { __resetDemoTenantCacheForTests } from "./tenant-access.server";
 import { saveExternalIntegrationFor } from "./whatsapp-external.server";
 import { addUserToTenantFor } from "./tenants.functions";
+import { guardCallerTenantNotDemo } from "./whatsapp-proxies.functions";
 
 const DEMO_TENANT = "00000000-0000-4000-8000-00000000d3d0";
 
@@ -209,5 +274,29 @@ describe("addUserToTenantFor — demo tenant", () => {
       }),
     ).rejects.toMatchObject({ code: "DEMO_ACTION_BLOCKED" });
     expect(fake.admin.rows("user_roles")).toHaveLength(0);
+  });
+});
+
+// R10: whatsapp_proxies has no tenant_id (global, admin-role-gated table),
+// so these actions guard the CALLER's own current tenant. A demo caller
+// always resolves to the demo tenant and stays blocked; a super admin with
+// no resolvable current tenant must be let through, not newly blocked.
+describe("guardCallerTenantNotDemo (whatsapp-proxies.functions.ts)", () => {
+  beforeEach(() => {
+    __resetDemoTenantCacheForTests();
+    fake.admin.reset();
+    fake.admin.rows("tenants").push({ id: DEMO_TENANT, status: "active", is_demo: true });
+  });
+
+  it("blocks a caller whose current tenant is demo", async () => {
+    const supabase = { rpc: async () => ({ data: DEMO_TENANT, error: null }) };
+    await expect(guardCallerTenantNotDemo(supabase)).rejects.toMatchObject({
+      code: "DEMO_ACTION_BLOCKED",
+    });
+  });
+
+  it("allows a super admin with no resolvable current tenant", async () => {
+    const supabase = { rpc: async () => ({ data: null, error: null }) };
+    await expect(guardCallerTenantNotDemo(supabase)).resolves.toBeUndefined();
   });
 });

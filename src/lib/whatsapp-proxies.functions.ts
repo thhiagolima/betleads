@@ -3,7 +3,27 @@ import { dbUuid } from "@/lib/zod-helpers";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { assertTenantNotDemo, resolveCurrentTenantId } from "./tenant-access.server";
+import { assertTenantNotDemo } from "./tenant-access.server";
+
+/**
+ * `whatsapp_proxies` is a global, admin-role-gated table with no `tenant_id`
+ * column, so these actions can only guard the caller's OWN current tenant.
+ * R10: a super admin with no resolvable current tenant must still be allowed
+ * through (never newly blocked) — a demo user always resolves to the demo
+ * tenant, so that case stays blocked regardless.
+ */
+export async function guardCallerTenantNotDemo(supabase: {
+  // Supabase generates a literal union of RPC names; this structural
+  // boundary intentionally accepts both that generated client and
+  // lightweight test doubles (same pattern as tenant-access.server.ts).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  rpc: (...args: any[]) => PromiseLike<{ data: unknown; error: { message: string } | null }>;
+}) {
+  const { data: tenantId, error } = await supabase.rpc("current_tenant_id");
+  if (error) throw new Error(error.message);
+  if (!tenantId) return;
+  await assertTenantNotDemo(String(tenantId));
+}
 
 const protocolEnum = z.enum(["http", "https", "socks4", "socks5"]);
 
@@ -40,8 +60,7 @@ export const createWhatsappProxy = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) => baseSchema.parse(input))
   .handler(async ({ data, context }) => {
-    const tenantId = await resolveCurrentTenantId(context.supabase);
-    await assertTenantNotDemo(tenantId);
+    await guardCallerTenantNotDemo(context.supabase);
     const { data: row, error } = await context.supabase
       .from("whatsapp_proxies")
       .insert({
@@ -65,8 +84,7 @@ export const updateWhatsappProxy = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) => baseSchema.partial().extend({ id: dbUuid() }).parse(input))
   .handler(async ({ data, context }) => {
-    const tenantId = await resolveCurrentTenantId(context.supabase);
-    await assertTenantNotDemo(tenantId);
+    await guardCallerTenantNotDemo(context.supabase);
     const patch: {
       name?: string;
       protocol?: "http" | "https" | "socks4" | "socks5";
@@ -103,8 +121,7 @@ export const deleteWhatsappProxy = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) => z.object({ id: dbUuid(), force: z.boolean().optional() }).parse(input))
   .handler(async ({ data, context }) => {
-    const tenantId = await resolveCurrentTenantId(context.supabase);
-    await assertTenantNotDemo(tenantId);
+    await guardCallerTenantNotDemo(context.supabase);
     const { count } = await context.supabase
       .from("whatsapp_sessions")
       .select("id", { count: "exact", head: true })
@@ -145,8 +162,7 @@ export const testWhatsappProxy = createServerFn({ method: "POST" })
       .parse(input),
   )
   .handler(async ({ data, context }) => {
-    const tenantId = await resolveCurrentTenantId(context.supabase);
-    await assertTenantNotDemo(tenantId);
+    await guardCallerTenantNotDemo(context.supabase);
     // Opens a raw TCP socket: super admin only, public hosts only (SEC-17).
     const { runWhatsappProxyTest } = await import("./whatsapp-proxy-test.server");
     return runWhatsappProxyTest(context.supabase, context.userId, data);

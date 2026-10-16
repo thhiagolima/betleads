@@ -4,6 +4,7 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { evolutionFetch } from "./evolution.server";
 import { assertSuperAdmin } from "./provider-governance.server";
+import { DemoTenantBlockedError } from "./demo-tenant";
 import { assertTenantNotDemo } from "./tenant-access.server";
 import { evolutionWebhookSetBody, evolutionWebhookUrl } from "./whatsapp-evolution-auth.server";
 
@@ -45,15 +46,18 @@ async function fingerprintKey(key: string): Promise<string> {
 export async function configureEvolutionWebhookFor(userId: string, instanceName: string) {
   await assertSuperAdmin(userId);
   // Super admin can target any instance, so the demo tenant is blocked here
-  // too: resolve the owning tenant of this instance (no row, no owner, or a
-  // demo tenant all fail closed via `assertTenantNotDemo`).
+  // too: resolve the owning tenant of this instance. No row/no owner fails
+  // closed directly (never queries with an empty/placeholder tenant id,
+  // which real Postgres would reject with a misleading error).
   const { data: owner, error: ownerError } = await supabaseAdmin
     .from("whatsapp_sessions")
     .select("tenant_id")
     .eq("instance_name", instanceName)
     .maybeSingle();
   if (ownerError) throw new Error(ownerError.message);
-  await assertTenantNotDemo((owner as { tenant_id?: string } | null)?.tenant_id ?? "");
+  const ownerTenantId = (owner as { tenant_id?: string } | null)?.tenant_id;
+  if (!ownerTenantId) throw new DemoTenantBlockedError("DEMO_ACTION_BLOCKED");
+  await assertTenantNotDemo(ownerTenantId);
   // Throws a clear error when EVOLUTION_WEBHOOK_SECRET is not configured.
   const body = evolutionWebhookSetBody(EVOLUTION_WEBHOOK_EVENTS);
   try {

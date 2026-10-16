@@ -140,8 +140,9 @@ export const getMyWebhookToken = createServerFn({ method: "GET" })
 export const getMyWebhookLogs = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
+    // Read-only: must keep working under the demo tenant's "explore freely"
+    // requirement (the webhooks page polls this and getMyWebhookHealth).
     const tenantId = await requireWebhookManager(context);
-    await assertTenantNotDemo(tenantId);
     const { data, error } = await supabaseAdmin
       .from("webhook_logs")
       .select("id, tenant_id, evento, status, created_at, payload")
@@ -155,8 +156,8 @@ export const getMyWebhookLogs = createServerFn({ method: "GET" })
 export const getMyWebhookHealth = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
+    // Read-only: same "explore freely" exemption as getMyWebhookLogs.
     const tenantId = await requireWebhookManager(context);
-    await assertTenantNotDemo(tenantId);
 
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const countStatus = async (status?: string) => {

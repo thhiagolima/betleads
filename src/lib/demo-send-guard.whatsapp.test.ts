@@ -311,7 +311,10 @@ describe("whatsapp.functions demo-block wiring", () => {
   });
 
   it("sendToLeadFromSession: number resolution propagates the block (no chat row)", async () => {
-    asCaller(DEMO);
+    // The caller is a normal (non-demo) tenant: the front action-guard
+    // (resolveCurrentTenantId) passes, so this genuinely exercises the deep
+    // instance-owner guard inside number resolution, not just the front one.
+    asCaller(NORMAL);
     const error = await sendToLeadFromSessionFor(
       { session_id: "s-demo", phone: "5511900000001", text: "Oi" },
       ctx(),
@@ -324,7 +327,17 @@ describe("whatsapp.functions demo-block wiring", () => {
     expect(row("whatsapp_sessions", "s-demo")?.status).toBe("connected");
   });
 
-  it("connectWhatsappSession: the proxy catch rethrows the block (no proxy log, no QR)", async () => {
+  it("sendToLeadFromSession: a non-demo caller sending through a demo-owned session is still blocked", async () => {
+    asCaller(NORMAL);
+    const error = await sendToLeadFromSessionFor(
+      { session_id: "s-demo", phone: "5511900000002", text: "Oi de novo" },
+      ctx(),
+    ).catch((e) => e);
+    expect(error).toMatchObject({ code: "DEMO_SEND_BLOCKED" });
+    expect(fetchMock).toHaveBeenCalledTimes(0);
+  });
+
+  it("connectWhatsappSession: the proxy catch rethrows the block for an instance owned by another (demo) tenant", async () => {
     fake.db.rows("whatsapp_proxies").push({
       id: "px-1",
       protocol: "http",
@@ -334,20 +347,44 @@ describe("whatsapp.functions demo-block wiring", () => {
       password_encrypted: null,
       status: "active",
     });
-    const session = row("whatsapp_sessions", "s-demo")!;
-    session.proxy_id = "px-1";
-    session.status = "disconnected";
-    const error = await connectWhatsappSessionFor({ id: "s-demo" }, ctx()).catch((e) => e);
+    // A normal-tenant session that reuses "inst-demo" (ambiguous/duplicate
+    // instance ownership): the front action-guard reads THIS row's own
+    // tenant_id (normal) and passes, but the deep instance-owner guard
+    // inside evolutionFetch resolves "inst-demo" to the demo tenant (the
+    // pre-existing s-demo row) and still blocks the proxy call.
+    fake.db.rows("whatsapp_sessions").push({
+      id: "s-normal-shared-instance",
+      instance_name: "inst-demo",
+      tenant_id: NORMAL,
+      name: "Normal (shared instance)",
+      status: "disconnected",
+      proxy_id: "px-1",
+    });
+    const error = await connectWhatsappSessionFor({ id: "s-normal-shared-instance" }, ctx()).catch(
+      (e) => e,
+    );
     expect(error).toBeInstanceOf(DemoTenantBlockedError);
     expect(fake.db.rows("whatsapp_proxy_logs")).toEqual([]);
-    expect(session.status).toBe("disconnected");
+    expect(row("whatsapp_sessions", "s-normal-shared-instance")?.status).toBe("disconnected");
     expect(fetchMock).toHaveBeenCalledTimes(0);
   });
 
-  it("connectWhatsappSession without proxy: blocked before any QR call", async () => {
-    const error = await connectWhatsappSessionFor({ id: "s-demo" }, ctx()).catch((e) => e);
+  it("connectWhatsappSession without proxy: blocked before any QR call for an instance owned by another (demo) tenant", async () => {
+    // Same shared-instance setup as above, without a proxy: the "no proxy
+    // linked" branch (setEvolutionProxy(..., null)) is the first Evolution
+    // call, and it is the one that hits the deep instance-owner guard.
+    fake.db.rows("whatsapp_sessions").push({
+      id: "s-normal-shared-instance-2",
+      instance_name: "inst-demo",
+      tenant_id: NORMAL,
+      name: "Normal (shared instance, no proxy)",
+      status: "disconnected",
+    });
+    const error = await connectWhatsappSessionFor({ id: "s-normal-shared-instance-2" }, ctx()).catch(
+      (e) => e,
+    );
     expect(error).toBeInstanceOf(DemoTenantBlockedError);
-    expect(row("whatsapp_sessions", "s-demo")?.status).toBe("connected");
+    expect(row("whatsapp_sessions", "s-normal-shared-instance-2")?.status).toBe("disconnected");
     expect(fetchMock).toHaveBeenCalledTimes(0);
   });
 
