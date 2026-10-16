@@ -223,17 +223,39 @@ Atualize a cada PR. Estados: `Pendente` · `Em andamento` · `Implementado` · `
 
 | Fase | Itens | Pendente | Em andamento | Implementado | Homologado | Aceito |
 |---|---:|---:|---:|---:|---:|---:|
-| F0 Contenção | 16 | 16 | 0 | 0 | 0 | 0 |
+| F0 Contenção | 16 | 4 | 12 | 0 | 0 | 0 |
 | F1 Envio e conformidade | 32 | 32 | 0 | 0 | 0 | 0 |
 | F2 Ambientes e operação | 17 | 17 | 0 | 0 | 0 | 0 |
-| F3 Aceite e governança | 13 | 13 | 0 | 0 | 0 | 0 |
-| F4 UX e acessibilidade | 20 | 20 | 0 | 0 | 0 | 0 |
+| F3 Aceite e governança | 13 | 12 | 0 | 1 | 0 | 0 |
+| F4 UX e acessibilidade | 20 | 16 | 4 | 0 | 0 | 0 |
 | F5 Dívida técnica | 16 | 16 | 0 | 0 | 0 | 0 |
+
+Itens que não aparecem na tabela abaixo estão `Pendente`.
 
 | ID | Estado | PR/commit | Evidência | Data |
 |---|---|---|---|---|
 | F0-01 | Pendente | | | |
-| … | | | | |
+| F0-02 | Em andamento | | | 16/10/2026 |
+| F0-03 | Em andamento | | | 16/10/2026 |
+| F0-04 | Em andamento | | | 16/10/2026 |
+| F0-05 | Em andamento | | | 16/10/2026 |
+| F0-06 | Em andamento | | | 16/10/2026 |
+| F0-07 | Em andamento | | | 16/10/2026 |
+| F0-08 | Em andamento | | | 16/10/2026 |
+| F0-09 | Em andamento | | | 16/10/2026 |
+| F0-10 | Pendente | | | |
+| F0-11 | Pendente | | | |
+| F0-12 | Em andamento | | | 16/10/2026 |
+| F0-13 | Em andamento | | | 16/10/2026 |
+| F0-14 | Em andamento | | | 16/10/2026 |
+| F0-15 | Em andamento | | | 16/10/2026 |
+| F0-16 | Pendente | | | |
+| F3-01 | Implementado | branch `docs/f3-versioning` (2637709, a5898f5, 547b61a) | `.gitignore` invertido (só `docs/private/` ignorado); todos os docs de `docs/` no git, sem segredo nem PII; `FLUXO_CRM.md` convertido; `docs/INDEX.md` e `README.md` criados | 16/10/2026 |
+| F3-02 | Pendente | | Parcial no F3-01: cabeçalhos de CON-08, SEC-01 e STATUS_P0 receberam nota; estrutura de pastas proposta no INDEX | |
+| F4-01 | Em andamento | | | 16/10/2026 |
+| F4-02 | Em andamento | | | 16/10/2026 |
+| F4-03 | Em andamento | | | 16/10/2026 |
+| F4-10 | Em andamento | | | 16/10/2026 |
 
 ---
 
