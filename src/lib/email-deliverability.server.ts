@@ -1,12 +1,14 @@
 // Helpers de deliverability — TODOS aditivos. Não alteram o motor de disparo.
 //
 // O que faz:
-// 1. `isSuppressed(email)` — true se o endereço está na suppression list.
+// 1. `isSuppressed(email, tenantId)` — true se o endereço está na suppression list
+//    da casa (ou global). Fail-closed: erro de consulta lança.
 // 2. `getOrCreateUnsubscribeToken(email, tenantId)` — gera/recupera token único.
 // 3. `augmentEmailHtml(html, { email, tenantId, baseUrl })` — injeta:
 //      - rodapé com link "Descadastrar" (token único por destinatário)
 //      - marcador invisível único por destinatário (anti-fingerprint em massa)
-// 4. `suppressEmail(email, reason, tenantId?)` — adiciona à suppression list.
+// 4. `suppressEmail(email, reason, tenantId?)` — adiciona à suppression list da casa
+//    e revoga o consentimento com auditoria. Lança em erro.
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { normalizeConsentSubject } from "./consent.server";
@@ -26,6 +28,17 @@ function norm(email: string): string {
   return (email || "").trim().toLowerCase();
 }
 
+/** Test-only: forget cached lookups so each test reads the database. */
+export function __resetSuppressionCacheForTests() {
+  suppressionCache.clear();
+}
+
+/**
+ * True if the address is suppressed for this tenant (or globally).
+ * Fail-closed (QA-03): a lookup error THROWS — callers must not send and should
+ * retry later. E-mails are stored normalized (migration 20261017110000), so the
+ * comparison is exact: no ilike, no `_`/`%` wildcards (QA-18).
+ */
 export async function isSuppressed(email: string, tenantId?: string | null): Promise<boolean> {
   const normalized = norm(email);
   const key = `${tenantId ?? "global"}:${normalized}`;
@@ -33,20 +46,22 @@ export async function isSuppressed(email: string, tenantId?: string | null): Pro
   const cached = suppressionCache.get(key);
   const now = Date.now();
   if (cached && now - cached.t < SUPPRESSION_TTL_MS) return cached.v;
-  try {
-    let query = supabaseAdmin.from("suppressed_emails").select("id").ilike("email", normalized);
-    if (tenantId) query = query.or(`tenant_id.eq.${tenantId},tenant_id.is.null`);
-    const { data } = await query.limit(1).maybeSingle();
-    const v = !!data;
-    suppressionCache.set(key, { v, t: now });
-    return v;
-  } catch (e) {
-    // Em caso de erro, NÃO bloqueia o envio (fail-open).
-    console.warn("isSuppressed lookup falhou — seguindo envio", e);
-    return false;
-  }
+  let query = supabaseAdmin.from("suppressed_emails").select("id").eq("email", normalized);
+  // Without a tenant every row counts (most conservative).
+  if (tenantId) query = query.or(`tenant_id.eq.${tenantId},tenant_id.is.null`);
+  const { data, error } = await query.limit(1);
+  if (error) throw new Error(`Falha ao consultar lista de supressao de e-mail: ${error.message}`);
+  const v = (data?.length ?? 0) > 0;
+  suppressionCache.set(key, { v, t: now });
+  return v;
 }
 
+/**
+ * Adds the address to the suppression list of the tenant (or the global list
+ * when tenantId is null) and, for a tenant, revokes the e-mail consent with an
+ * audit row. Throws on any database error so the caller can tell the user the
+ * opt-out did not go through (QA-01).
+ */
 export async function suppressEmail(
   email: string,
   reason: "unsubscribe" | "complaint" | "bounce_hard" | "manual" | "repeated_failures",
@@ -55,45 +70,58 @@ export async function suppressEmail(
 ): Promise<void> {
   const key = norm(email);
   if (!key) return;
-  try {
-    await supabaseAdmin
-      .from("suppressed_emails")
+  const { error: suppressError } = await supabaseAdmin
+    .from("suppressed_emails")
+    .upsert(
+      { email: key, reason, tenant_id: tenantId ?? null, notes: notes ?? null },
+      { onConflict: "tenant_id,email" },
+    );
+  if (suppressError)
+    throw new Error(`Falha ao gravar supressao de e-mail: ${suppressError.message}`);
+  if (tenantId) {
+    const db = supabaseAdmin as any;
+    const subject = normalizeConsentSubject("email", key);
+    const { data: previous, error: previousError } = await db
+      .from("channel_consents")
+      .select("status")
+      .eq("tenant_id", tenantId)
+      .eq("channel", "email")
+      .eq("subject", subject)
+      .maybeSingle();
+    if (previousError)
+      throw new Error(`Falha ao ler consentimento de e-mail: ${previousError.message}`);
+    const { data: consent, error: consentError } = await db
+      .from("channel_consents")
       .upsert(
-        { email: key, reason, tenant_id: tenantId ?? null, notes: notes ?? null },
-        { onConflict: "email" },
-      );
-    if (tenantId) {
-      const subject = normalizeConsentSubject("email", key);
-      const { data: consent } = await (supabaseAdmin as any)
-        .from("channel_consents")
-        .upsert(
-          {
-            tenant_id: tenantId,
-            channel: "email",
-            subject,
-            status: "revoked",
-            reason,
-            source: "unsubscribe",
-            occurred_at: new Date().toISOString(),
-          },
-          { onConflict: "tenant_id,channel,subject" },
-        )
-        .select("id")
-        .single();
-      await (supabaseAdmin as any).from("channel_consent_audit").insert({
-        tenant_id: tenantId,
-        consent_id: consent?.id ?? null,
-        channel: "email",
-        subject,
-        new_status: "revoked",
-        reason,
-        source: "unsubscribe",
-      });
-    }
-    suppressionCache.set(`${tenantId ?? "global"}:${key}`, { v: true, t: Date.now() });
-  } catch (e) {
-    console.error("suppressEmail falhou", e);
+        {
+          tenant_id: tenantId,
+          channel: "email",
+          subject,
+          status: "revoked",
+          reason,
+          source: "unsubscribe",
+          occurred_at: new Date().toISOString(),
+        },
+        { onConflict: "tenant_id,channel,subject" },
+      )
+      .select("id")
+      .single();
+    if (consentError)
+      throw new Error(`Falha ao revogar consentimento de e-mail: ${consentError.message}`);
+    const { error: auditError } = await db.from("channel_consent_audit").insert({
+      tenant_id: tenantId,
+      consent_id: consent?.id ?? null,
+      channel: "email",
+      subject,
+      previous_status: previous?.status ?? null,
+      new_status: "revoked",
+      reason,
+      source: "unsubscribe",
+    });
+    if (auditError)
+      throw new Error(`Falha ao auditar revogacao de e-mail: ${auditError.message}`);
   }
+  suppressionCache.set(`${tenantId ?? "global"}:${key}`, { v: true, t: Date.now() });
 }
 
 function randomToken(): string {
@@ -101,36 +129,35 @@ function randomToken(): string {
   return crypto.randomUUID().replace(/-/g, "");
 }
 
+async function findUnsubscribeToken(key: string, tenantId: string | null): Promise<string | null> {
+  let query = supabaseAdmin.from("email_unsubscribe_tokens").select("token").eq("email", key);
+  query = tenantId ? query.eq("tenant_id", tenantId) : query.is("tenant_id", null);
+  const { data, error } = await query.order("created_at", { ascending: true }).limit(1);
+  if (error) throw new Error(error.message);
+  return (data?.[0]?.token as string | undefined) ?? null;
+}
+
+/**
+ * Token of the unsubscribe link, one per (tenant, e-mail): the link opts the
+ * address out of THIS tenant only (SEC-18).
+ */
 export async function getOrCreateUnsubscribeToken(
   email: string,
   tenantId?: string | null,
 ): Promise<string | null> {
   const key = norm(email);
   if (!key) return null;
+  const tenant = tenantId ?? null;
   try {
-    const { data: existing } = await supabaseAdmin
-      .from("email_unsubscribe_tokens")
-      .select("token")
-      .ilike("email", key)
-      .limit(1)
-      .maybeSingle();
-    if (existing?.token) return existing.token as string;
+    const existing = await findUnsubscribeToken(key, tenant);
+    if (existing) return existing;
     const token = randomToken();
     const { data: inserted, error } = await supabaseAdmin
       .from("email_unsubscribe_tokens")
-      .insert({ token, email: key, tenant_id: tenantId ?? null })
+      .insert({ token, email: key, tenant_id: tenant })
       .select("token")
       .single();
-    if (error) {
-      // Conflito (outra requisição criou em paralelo) — relê.
-      const { data: again } = await supabaseAdmin
-        .from("email_unsubscribe_tokens")
-        .select("token")
-        .ilike("email", key)
-        .limit(1)
-        .maybeSingle();
-      return (again?.token as string) ?? null;
-    }
+    if (error) return await findUnsubscribeToken(key, tenant);
     return (inserted?.token as string) ?? null;
   } catch (e) {
     console.warn("getOrCreateUnsubscribeToken falhou", e);

@@ -587,8 +587,8 @@ function SmsCompactWorkspace({
                     : `Enviar · ${parts} crédito${parts === 1 ? "" : "s"}`}
                 </Button>
                 <p className="text-[11px] text-muted-foreground">
-                  Mensagens de divulgação precisam oferecer saída. Responder SAIR adiciona o número
-                  à lista de não perturbe.
+                  Mensagens de divulgação precisam oferecer saída. Respostas por SMS (como SAIR) ainda
+                  não bloqueiam o número sozinhas: registre o pedido em Consentimentos.
                 </p>
               </CardContent>
             </Card>
@@ -1226,8 +1226,8 @@ function SmsHomePanel() {
                   : `Enviar · ${parts} crédito${parts === 1 ? "" : "s"}`}
               </Button>
               <p className="text-xs leading-relaxed text-muted-foreground">
-                Toda mensagem de divulgação precisa de opt-in e saída fácil. Quem responder SAIR
-                deve entrar na lista de não perturbe.
+                Toda mensagem de divulgação precisa de opt-in e saída fácil. A resposta SAIR ainda
+                não é processada automaticamente: bloqueie o número em Consentimentos.
               </p>
             </CardContent>
           </Card>

@@ -70,9 +70,11 @@ export async function syncLegacySuppression(
       status === "revoked"
         ? await query.upsert(
             { email: normalized, tenant_id: tenantId, reason: "manual", source, notes: reason },
-            { onConflict: "email" },
+            // Unique (tenant_id, email) since 20261017110000; e-mail is stored
+            // normalized, so the delete compares exactly (no ilike wildcards).
+            { onConflict: "tenant_id,email" },
           )
-        : await query.delete().eq("tenant_id", tenantId).ilike("email", normalized);
+        : await query.delete().eq("tenant_id", tenantId).eq("email", normalized);
     if (error) throw new Error(`Falha ao sincronizar supressao de e-mail: ${error.message}`);
   }
 }
