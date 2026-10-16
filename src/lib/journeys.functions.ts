@@ -605,6 +605,7 @@ export const saveJourney = createServerFn({ method: "POST" })
         journey_priority: input.journey_priority,
         conflict_policy: input.conflict_policy,
         ends_at: input.ends_at ?? null,
+        holdout_percent: input.holdout_percent ?? 0,
       })
       .eq("id", journeyId)
       .eq("tenant_id", tenantId);

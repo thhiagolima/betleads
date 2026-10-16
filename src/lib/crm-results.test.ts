@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { aggregateCrmResults, type CrmResultRow } from "./crm-results";
+import { aggregateCrmResults, compareHoldout, type CrmResultRow } from "./crm-results";
 
 const row = (overrides: Partial<CrmResultRow>): CrmResultRow => ({
   metric_date: "2026-10-10",
@@ -101,5 +101,52 @@ describe("aggregateCrmResults", () => {
     const none = aggregateCrmResults([]);
     expect(none.totals).toMatchObject({ sent: 0, costPerRecovered: null, roi: null });
     expect(none.sources).toEqual([]);
+  });
+});
+
+describe("compareHoldout (F3)", () => {
+  it("computes lift, a 95% interval and incremental results", () => {
+    const result = compareHoldout(
+      { players: 1900, returned: 380, revenue: 38_000 },
+      { players: 100, returned: 10, revenue: 800 },
+    );
+    expect(result.treatedRate).toBeCloseTo(0.2);
+    expect(result.controlRate).toBeCloseTo(0.1);
+    expect(result.lift).toBeCloseTo(0.1);
+    expect(result.ciLow).toBeGreaterThan(0.03);
+    expect(result.ciHigh).toBeLessThan(0.17);
+    expect(result).toMatchObject({ sufficient: true, significant: true });
+    expect(result.incrementalPlayers).toBeCloseTo(190);
+    expect(result.incrementalRevenue).toBeCloseTo((20 - 8) * 1900);
+  });
+
+  it("does not call a small control group significant", () => {
+    const result = compareHoldout(
+      { players: 500, returned: 100, revenue: 0 },
+      { players: 20, returned: 1, revenue: 0 },
+    );
+    expect(result).toMatchObject({ sufficient: false, significant: false });
+  });
+
+  it("is not significant when the interval crosses zero", () => {
+    const result = compareHoldout(
+      { players: 950, returned: 100, revenue: 0 },
+      { players: 150, returned: 15, revenue: 0 },
+    );
+    expect(result.sufficient).toBe(true);
+    expect(result.significant).toBe(false);
+  });
+
+  it("handles a journey without control players", () => {
+    expect(
+      compareHoldout(
+        { players: 10, returned: 1, revenue: 0 },
+        { players: 0, returned: 0, revenue: 0 },
+      ),
+    ).toMatchObject({
+      controlRate: null,
+      lift: null,
+      sufficient: false,
+    });
   });
 });

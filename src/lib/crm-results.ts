@@ -195,3 +195,72 @@ export function aggregateCrmResults(
       .sort((a, b) => b.sent - a.sent),
   };
 }
+
+export type HoldoutGroup = { players: number; returned: number; revenue: number };
+
+export type HoldoutComparison = {
+  treatedRate: number | null;
+  controlRate: number | null;
+  /** Treated rate minus control rate (percentage points as a fraction). */
+  lift: number | null;
+  ciLow: number | null;
+  ciHigh: number | null;
+  /** The 95% interval excludes zero. */
+  significant: boolean;
+  /** Enough players and returns in both groups to read the result. */
+  sufficient: boolean;
+  /** Extra returns attributable to the journey: lift x treated players. */
+  incrementalPlayers: number | null;
+  /** Extra revenue: (revenue per treated - revenue per control) x treated players. */
+  incrementalRevenue: number | null;
+};
+
+/** Minimum per group before a holdout result is shown as readable (R-04). */
+export const HOLDOUT_MIN_PLAYERS = 100;
+export const HOLDOUT_MIN_RETURNS = 10;
+
+/**
+ * Two-proportion comparison of the 7-day return of players who received the
+ * journey (treated) against the control group, with a 95% normal interval.
+ */
+export function compareHoldout(treated: HoldoutGroup, control: HoldoutGroup): HoldoutComparison {
+  const rate = (group: HoldoutGroup) => (group.players > 0 ? group.returned / group.players : null);
+  const treatedRate = rate(treated);
+  const controlRate = rate(control);
+  const sufficient =
+    treated.players >= HOLDOUT_MIN_PLAYERS &&
+    control.players >= HOLDOUT_MIN_PLAYERS &&
+    treated.returned + control.returned >= HOLDOUT_MIN_RETURNS;
+  if (treatedRate == null || controlRate == null) {
+    return {
+      treatedRate,
+      controlRate,
+      lift: null,
+      ciLow: null,
+      ciHigh: null,
+      significant: false,
+      sufficient: false,
+      incrementalPlayers: null,
+      incrementalRevenue: null,
+    };
+  }
+  const lift = treatedRate - controlRate;
+  const se = Math.sqrt(
+    (treatedRate * (1 - treatedRate)) / treated.players +
+      (controlRate * (1 - controlRate)) / control.players,
+  );
+  const ciLow = lift - 1.96 * se;
+  const ciHigh = lift + 1.96 * se;
+  return {
+    treatedRate,
+    controlRate,
+    lift,
+    ciLow,
+    ciHigh,
+    significant: sufficient && (ciLow > 0 || ciHigh < 0),
+    sufficient,
+    incrementalPlayers: lift * treated.players,
+    incrementalRevenue:
+      (treated.revenue / treated.players - control.revenue / control.players) * treated.players,
+  };
+}

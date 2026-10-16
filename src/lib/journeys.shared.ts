@@ -94,6 +94,8 @@ export const journeyInputSchema = z.object({
   conflict_policy: z.enum(["coexist", "pause_lower_priority", "exclusive"]).default("coexist"),
   // D-4: optional end of the journey; loops keep running when absent.
   ends_at: z.string().datetime({ offset: true }).nullable().optional().default(null),
+  // F3: share of entering players kept as a control group (no messages).
+  holdout_percent: z.number().int().min(0).max(50).optional().default(0),
   conversion_objective: z
     .enum(["acquisition", "conversion", "reactivation", "journey"])
     .default("journey"),

@@ -83,6 +83,10 @@ const JOURNEY_HELP = {
     "Cooldown",
     "É o intervalo mínimo antes de outra jornada enviar no mesmo canal. Não altera a espera entre etapas desta própria jornada.",
   ],
+  holdout: [
+    "Grupo de controle",
+    "Uma parte sorteada dos jogadores que entram não recebe mensagens. Comparar quem recebeu com quem não recebeu mostra quanto a jornada realmente traz de volta. Esses jogadores ficam sem a régua.",
+  ],
   endsAt: [
     "Data de término",
     "Opcional. A partir dela a jornada não recebe novos jogadores e encerra os que ainda estão nela. Sem data, os loops continuam até o jogador mudar de categoria.",
@@ -187,6 +191,7 @@ export function JourneyEditor({
     daily_limit?: number;
     cooldown_hours?: number;
     ends_at?: string | null;
+    holdout_percent?: number;
     conflict_family?: string | null;
     journey_priority?: number;
     conflict_policy?: "coexist" | "pause_lower_priority" | "exclusive";
@@ -267,6 +272,7 @@ export function JourneyEditor({
   const [dailyLimit, setDailyLimit] = useState(initial?.daily_limit ?? 1000);
   const [cooldownHours, setCooldownHours] = useState(initial?.cooldown_hours ?? 72);
   const [endsAt, setEndsAt] = useState(() => toBrtInput(initial?.ends_at));
+  const [holdoutPercent, setHoldoutPercent] = useState(initial?.holdout_percent ?? 0);
   const [conflictFamily, setConflictFamily] = useState(initial?.conflict_family ?? "");
   const [journeyPriority, setJourneyPriority] = useState(initial?.journey_priority ?? 4);
   const [conflictPolicy, setConflictPolicy] = useState<
@@ -425,6 +431,7 @@ export function JourneyEditor({
             daily_limit: dailyLimit,
             cooldown_hours: cooldownHours,
             ends_at: fromBrtInput(endsAt),
+            holdout_percent: holdoutPercent,
             conflict_family: conflictFamily || null,
             journey_priority: journeyPriority,
             conflict_policy: conflictPolicy,
@@ -786,6 +793,31 @@ export function JourneyEditor({
                 value={cooldownHours}
                 onChange={(e) => setCooldownHours(Number(e.target.value))}
               />
+            </div>
+            <div className="mt-3 block text-xs text-muted-foreground">
+              <JourneyFieldTitle
+                helpId="holdout"
+                activeHelp={activeHelp}
+                setActiveHelp={setActiveHelp}
+                help={JOURNEY_HELP.holdout}
+              >
+                Grupo de controle
+              </JourneyFieldTitle>
+              <select
+                className="flex h-10 w-full rounded-md border bg-background px-3 text-sm"
+                value={holdoutPercent}
+                onChange={(e) => setHoldoutPercent(Number(e.target.value))}
+                aria-label="Grupo de controle"
+              >
+                <option value={0}>Desligado</option>
+                <option value={5}>5% não recebem mensagens</option>
+                <option value={10}>10% não recebem mensagens</option>
+              </select>
+              <p className="mt-1">
+                {holdoutPercent
+                  ? `${holdoutPercent}% dos jogadores que entrarem ficam sem mensagens, para medir o efeito real em Resultados do CRM.`
+                  : "Sem grupo de controle: a jornada não mede o efeito incremental."}
+              </p>
             </div>
             <div className="mt-3 block text-xs text-muted-foreground">
               <JourneyFieldTitle

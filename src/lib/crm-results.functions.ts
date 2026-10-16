@@ -2,7 +2,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { aggregateCrmResults, type CrmResultRow } from "./crm-results";
+import { aggregateCrmResults, compareHoldout, type CrmResultRow } from "./crm-results";
 import { resolveOperationalTenantId } from "./tenant-access.server";
 
 const PAGE = 1000;
@@ -91,12 +91,55 @@ export const getCrmResults = createServerFn({ method: "GET" })
         .gte("created_at", fromInstant),
     ]);
 
+    // F3: treated x control per journey (entries whose 7-day window closed).
+    const { data: holdoutRows } = await db.rpc("journey_holdout_results", {
+      _tenant: tenantId,
+      _from: fromInstant,
+      _to: new Date().toISOString(),
+      _window_days: 7,
+    });
+    const groups = new Map<
+      string,
+      Record<"treated" | "control", { players: number; returned: number; revenue: number }>
+    >();
+    for (const row of (holdoutRows ?? []) as Array<Record<string, unknown>>) {
+      const id = String(row.journey_id);
+      const entry = groups.get(id) ?? {
+        treated: { players: 0, returned: 0, revenue: 0 },
+        control: { players: 0, returned: 0, revenue: 0 },
+      };
+      entry[row.is_holdout ? "control" : "treated"] = {
+        players: Number(row.players ?? 0),
+        returned: Number(row.returned ?? 0),
+        revenue: Number(row.revenue ?? 0),
+      };
+      groups.set(id, entry);
+    }
+    const missing = [...groups.keys()].filter((id) => !names[id]);
+    if (missing.length) {
+      const { data: extra } = await db
+        .from("journeys")
+        .select("id,name")
+        .eq("tenant_id", tenantId)
+        .in("id", missing);
+      for (const journey of (extra ?? []) as Array<{ id: string; name: string }>)
+        names[journey.id] = journey.name;
+    }
+    const holdout = [...groups.entries()].map(([journeyId, entry]) => ({
+      journeyId,
+      name: names[journeyId] ?? "Jornada",
+      treated: entry.treated,
+      control: entry.control,
+      ...compareHoldout(entry.treated, entry.control),
+    }));
+
     const result = aggregateCrmResults(rows, names);
     return {
       from,
       to,
       days: data.days,
       ...result,
+      holdout,
       health: {
         updatedAt: (latest as { updated_at?: string } | null)?.updated_at ?? null,
         tableSent: result.totals.sent,

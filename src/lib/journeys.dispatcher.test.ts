@@ -71,8 +71,12 @@ const fake = vi.hoisted(() => {
     private async execute(): Promise<{ data: unknown; error: null; count?: number }> {
       const rows = tables[this.table];
       if (this.mode === "insert" || this.mode === "upsert") {
-        rows.push({ ...(this.payload as Row) });
-        return { data: null, error: null };
+        // Like PostgREST, `.insert(...).select()` returns the stored row.
+        const row: Row = this.returning
+          ? { id: `${this.table}-${rows.length + 1}`, ...(this.payload as Row) }
+          : { ...(this.payload as Row) };
+        rows.push(row);
+        return { data: this.returning ? [{ ...row }] : null, error: null };
       }
       const matched = rows.filter((row) => this.filters.every((filter) => filter(row)));
       if (this.mode === "update") {
@@ -121,7 +125,10 @@ const monitor = vi.hoisted(() => {
 
 const sms = vi.hoisted(() => ({ sendSmsInternal: vi.fn() }));
 const voice = vi.hoisted(() => ({ callInfobipVoice: vi.fn() }));
-const sentry = vi.hoisted(() => ({ captureServerException: vi.fn(), captureServerMessage: vi.fn() }));
+const sentry = vi.hoisted(() => ({
+  captureServerException: vi.fn(),
+  captureServerMessage: vi.fn(),
+}));
 const heartbeat = vi.hoisted(() => ({ pingHeartbeat: vi.fn(async () => undefined) }));
 
 vi.mock("@/integrations/supabase/client.server", () => ({ supabaseAdmin: fake.client }));
@@ -172,7 +179,14 @@ function seed(enrollmentIds: string[]) {
     },
   ];
   fake.tables.journey_steps = [
-    { id: "step-0", journey_id: JOURNEY, position: 0, step_type: "sms", is_enabled: true, config: { content: "oi" } },
+    {
+      id: "step-0",
+      journey_id: JOURNEY,
+      position: 0,
+      step_type: "sms",
+      is_enabled: true,
+      config: { content: "oi" },
+    },
   ];
   fake.tables.players = [{ id: PLAYER, tenant_id: TENANT, telefone: "+5511999999999" }];
   fake.tables.journey_enrollments = enrollmentIds.map((id) => ({
@@ -203,7 +217,14 @@ function seed(enrollmentIds: string[]) {
       enrollment_id: args.p_enrollment_id,
       status: "claimed",
     });
-    return [{ execution_id: `exec-${execution}`, idempotency_key: `key-${execution}`, retry_at: null, blocked_reason: null }];
+    return [
+      {
+        execution_id: `exec-${execution}`,
+        idempotency_key: `key-${execution}`,
+        retry_at: null,
+        blocked_reason: null,
+      },
+    ];
   };
 }
 
@@ -254,7 +275,12 @@ describe("runJourneyDispatcher", () => {
     seed(["e1"]);
     sms.sendSmsInternal.mockResolvedValue({ ok: true, status: 200, response: "{}" });
     const result = await runJourneyDispatcher(1000);
-    expect(result).toMatchObject({ claimed: 1, processed: 1, failed: 0, stopReason: "queue_empty" });
+    expect(result).toMatchObject({
+      claimed: 1,
+      processed: 1,
+      failed: 0,
+      stopReason: "queue_empty",
+    });
     expect(enrollment("e1")).toMatchObject({
       current_position: 1,
       attempts: 0,
@@ -301,7 +327,9 @@ describe("runJourneyDispatcher", () => {
     expect(result).toMatchObject({ failed: 0, rescheduled: 1 });
     const row = enrollment("e1");
     expect(row).toMatchObject({ status: "waiting", attempts: 1 });
-    expect(Date.parse(String(row.next_run_at))).toBeGreaterThanOrEqual(before + 15 * 60_000 - 1_000);
+    expect(Date.parse(String(row.next_run_at))).toBeGreaterThanOrEqual(
+      before + 15 * 60_000 - 1_000,
+    );
     expect(fake.tables.dispatch_pause_state).toHaveLength(0);
     expect(fake.tables.journey_events.at(-1)).toMatchObject({
       event_type: "step_deferred",
@@ -311,7 +339,12 @@ describe("runJourneyDispatcher", () => {
 
   it("caps consecutive no-cost defers: the 11th 429 in a row consumes an attempt", async () => {
     seed(["e1"]);
-    sms.sendSmsInternal.mockResolvedValue({ ok: false, status: 429, error: "HTTP 429", temporary: true });
+    sms.sendSmsInternal.mockResolvedValue({
+      ok: false,
+      status: 429,
+      error: "HTTP 429",
+      temporary: true,
+    });
     enrollment("e1").metadata = {
       trigger: "manual",
       provider_deferrals: { step_position: 0, loop_iteration: 0, count: MAX_NO_COST_DEFERS },
@@ -325,7 +358,12 @@ describe("runJourneyDispatcher", () => {
 
   it("counts no-cost defers per step and keeps the rest of the metadata", async () => {
     seed(["e1"]);
-    sms.sendSmsInternal.mockResolvedValue({ ok: false, status: 503, error: "HTTP 503", temporary: true });
+    sms.sendSmsInternal.mockResolvedValue({
+      ok: false,
+      status: 503,
+      error: "HTTP 503",
+      temporary: true,
+    });
     enrollment("e1").metadata = {
       trigger: "manual",
       // count from an older step: resets for the current one
@@ -350,10 +388,29 @@ describe("runJourneyDispatcher", () => {
       const live = fake.tables.journey_step_executions.find(
         (e) => e.enrollment_id === args.p_enrollment_id && e.status === "claimed",
       );
-      if (live) return [{ execution_id: null, idempotency_key: null, retry_at: new Date(Date.now() + 120_000).toISOString(), blocked_reason: "in_flight" }];
+      if (live)
+        return [
+          {
+            execution_id: null,
+            idempotency_key: null,
+            retry_at: new Date(Date.now() + 120_000).toISOString(),
+            blocked_reason: "in_flight",
+          },
+        ];
       execution++;
-      fake.tables.journey_step_executions.push({ id: `exec-${execution}`, enrollment_id: args.p_enrollment_id, status: "claimed" });
-      return [{ execution_id: `exec-${execution}`, idempotency_key: "key-1", retry_at: null, blocked_reason: null }];
+      fake.tables.journey_step_executions.push({
+        id: `exec-${execution}`,
+        enrollment_id: args.p_enrollment_id,
+        status: "claimed",
+      });
+      return [
+        {
+          execution_id: `exec-${execution}`,
+          idempotency_key: "key-1",
+          retry_at: null,
+          blocked_reason: null,
+        },
+      ];
     };
     sms.sendSmsInternal.mockResolvedValue({
       ok: false,
@@ -368,9 +425,15 @@ describe("runJourneyDispatcher", () => {
     expect(result).toMatchObject({ processed: 0, failed: 0, rescheduled: 1, outcomeUnknown: 1 });
     const row = enrollment("e1");
     expect(row).toMatchObject({ status: "waiting", attempts: 2, claimed_by: null });
-    expect(Date.parse(String(row.next_run_at))).toBeGreaterThanOrEqual(before + 15 * 60_000 - 1_000);
+    expect(Date.parse(String(row.next_run_at))).toBeGreaterThanOrEqual(
+      before + 15 * 60_000 - 1_000,
+    );
     expect(fake.tables.journey_step_executions).toEqual([
-      expect.objectContaining({ id: "exec-1", status: "claimed", error: expect.stringContaining("outcome_unknown") }),
+      expect.objectContaining({
+        id: "exec-1",
+        status: "claimed",
+        error: expect.stringContaining("outcome_unknown"),
+      }),
     ]);
     expect(fake.tables.journey_events.at(-1)).toMatchObject({
       event_type: "step_outcome_unknown",
@@ -394,7 +457,12 @@ describe("runJourneyDispatcher", () => {
   it("outcome unknown on the last attempt fails the enrollment (never infinite)", async () => {
     seed(["e1"]);
     enrollment("e1").attempts = 2; // max_attempts defaults to 3
-    sms.sendSmsInternal.mockResolvedValue({ ok: false, status: 0, error: "socket hang up", errorKind: "outcome_unknown" });
+    sms.sendSmsInternal.mockResolvedValue({
+      ok: false,
+      status: 0,
+      error: "socket hang up",
+      errorKind: "outcome_unknown",
+    });
     const result = await runJourneyDispatcher(1000);
     expect(result).toMatchObject({ failed: 1, outcomeUnknown: 1 });
     expect(enrollment("e1")).toMatchObject({ status: "failed", attempts: 3 });
@@ -433,7 +501,9 @@ describe("runJourneyDispatcher", () => {
       });
     };
     // retry > acquire's 2 s max wait: denied at once, (tenant, sms) excluded for 2.5 s.
-    fake.rpcs.consume_channel_budget = () => [{ granted: 0, retry_after_ms: 2_500, limited_by: "tenant" }];
+    fake.rpcs.consume_channel_budget = () => [
+      { granted: 0, retry_after_ms: 2_500, limited_by: "tenant" },
+    ];
     vi.stubEnv("JOURNEYS_DISPATCH_BATCH_SIZE", "3");
     vi.stubEnv("JOURNEYS_DISPATCH_CONCURRENCY", "1");
     const fromSpy = vi.spyOn(fake.client, "from");
@@ -457,15 +527,22 @@ describe("runJourneyDispatcher", () => {
   it("voice: stores the concurrency permit on call_history so the end-of-call callback frees it (I3)", async () => {
     seed(["e1"]);
     fake.tables.journey_steps = [
-      { id: "step-0", journey_id: JOURNEY, position: 0, step_type: "voice", is_enabled: true, config: { asset_id: "a1" } },
+      {
+        id: "step-0",
+        journey_id: JOURNEY,
+        position: 0,
+        step_type: "voice",
+        is_enabled: true,
+        config: { asset_id: "a1" },
+      },
     ];
     fake.tables.journey_voice_assets = [{ id: "a1", tenant_id: TENANT, storage_path: "x.mp3" }];
-    fake.rpcs.acquire_channel_slot = () => [{ permit_id: "permit-9", retry_after_ms: 0, limited_by: null }];
-    const signed = vi
-      .spyOn(fake.client.storage, "from")
-      .mockReturnValue({
-        createSignedUrl: async () => ({ data: { signedUrl: "https://a/x.mp3" }, error: null }),
-      } as never);
+    fake.rpcs.acquire_channel_slot = () => [
+      { permit_id: "permit-9", retry_after_ms: 0, limited_by: null },
+    ];
+    const signed = vi.spyOn(fake.client.storage, "from").mockReturnValue({
+      createSignedUrl: async () => ({ data: { signedUrl: "https://a/x.mp3" }, error: null }),
+    } as never);
     voice.callInfobipVoice.mockResolvedValue({
       ok: true,
       status: 200,
@@ -478,7 +555,10 @@ describe("runJourneyDispatcher", () => {
     expect(result).toMatchObject({ processed: 1, failed: 0 });
     expect(fake.tables.call_history).toEqual([
       expect.objectContaining({
-        provider_response: expect.objectContaining({ correlation_id: "key-1", channel_permit_id: "permit-9" }),
+        provider_response: expect.objectContaining({
+          correlation_id: "key-1",
+          channel_permit_id: "permit-9",
+        }),
       }),
     ]);
     // The permit is kept for the ongoing call (not released by the worker).
@@ -496,7 +576,9 @@ describe("runJourneyDispatcher", () => {
 
   it("a denied rate-limit admission defers without reserving or sending", async () => {
     seed(["e1"]);
-    fake.rpcs.consume_channel_budget = () => [{ granted: 0, retry_after_ms: 30_000, limited_by: "global" }];
+    fake.rpcs.consume_channel_budget = () => [
+      { granted: 0, retry_after_ms: 30_000, limited_by: "global" },
+    ];
     const result = await runJourneyDispatcher(1000);
     expect(result).toMatchObject({ rateLimited: 1, failed: 0 });
     expect(rpcNames()).not.toContain("reserve_journey_delivery_v2");
@@ -524,14 +606,25 @@ describe("runJourneyDispatcher per-player rules (journey P0)", () => {
   it("past the per-player daily cap the occurrence exits without a message (D-8)", async () => {
     seed(["e1"]);
     fake.rpcs.reserve_journey_delivery_v2 = () => [
-      { execution_id: null, idempotency_key: null, retry_at: null, blocked_reason: "journey_player_daily_cap" },
+      {
+        execution_id: null,
+        idempotency_key: null,
+        retry_at: null,
+        blocked_reason: "journey_player_daily_cap",
+      },
     ];
     await runJourneyDispatcher(1000);
     expect(sms.sendSmsInternal).not.toHaveBeenCalled();
-    expect(enrollment("e1")).toMatchObject({ status: "exited", exit_reason: "journey_player_daily_cap" });
+    expect(enrollment("e1")).toMatchObject({
+      status: "exited",
+      exit_reason: "journey_player_daily_cap",
+    });
     expect(fake.tables.journey_events).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ event_type: "exited", detail: expect.objectContaining({ reason: "journey_player_daily_cap" }) }),
+        expect.objectContaining({
+          event_type: "exited",
+          detail: expect.objectContaining({ reason: "journey_player_daily_cap" }),
+        }),
       ]),
     );
   });
@@ -540,7 +633,12 @@ describe("runJourneyDispatcher per-player rules (journey P0)", () => {
     seed(["e1"]);
     const retryAt = new Date(Date.now() + 10 * 60_000).toISOString();
     fake.rpcs.reserve_journey_delivery_v2 = () => [
-      { execution_id: null, idempotency_key: null, retry_at: retryAt, blocked_reason: "journey_player_min_interval" },
+      {
+        execution_id: null,
+        idempotency_key: null,
+        retry_at: retryAt,
+        blocked_reason: "journey_player_min_interval",
+      },
     ];
     await runJourneyDispatcher(1000);
     expect(sms.sendSmsInternal).not.toHaveBeenCalled();
@@ -565,6 +663,19 @@ describe("runJourneyDispatcher per-player rules (journey P0)", () => {
     const execution = fake.tables.journey_step_executions.find((row) => row.status === "sent");
     const response = execution?.provider_response as { variant_index?: number } | undefined;
     expect(response?.variant_index).toBeGreaterThanOrEqual(0);
+  });
+
+  it("a control-group player skips the send step without sending or reserving (F3)", async () => {
+    seed(["e1"]);
+    fake.tables.journey_enrollments[0].is_holdout = true;
+    sms.sendSmsInternal.mockResolvedValue({ ok: true, status: 200, response: "{}" });
+    await runJourneyDispatcher(1000);
+    expect(sms.sendSmsInternal).not.toHaveBeenCalled();
+    expect(rpcNames()).not.toContain("reserve_journey_delivery_v2");
+    expect(enrollment("e1")).toMatchObject({ current_position: 1, status: "active" });
+    expect(fake.tables.journey_step_executions).toEqual(
+      expect.arrayContaining([expect.objectContaining({ status: "skipped", provider: "holdout" })]),
+    );
   });
 
   it("runs the exit sweep on every dispatch (S-01, S-02)", async () => {
@@ -614,17 +725,22 @@ describe("runJourneyDispatcher with the SMS provider breaker (incident 15/10/202
     fake.rpcs.claim_journey_enrollments_leased = (args) => {
       claims.push(args);
       const exclude = (args.p_exclude as string[] | null) ?? [];
-      return fake.tables.journey_enrollments
-        // Only items still at the SMS step (position 0) are due for this fake.
-        .filter((row) => row.claimed_by == null && row.status !== "failed" && row.current_position === 0)
-        .filter((row) => !exclude.includes(`${row.tenant_id}:${stepType}`))
-        .filter((row) => !row.next_run_at || Date.parse(String(row.next_run_at)) <= Date.now())
-        .slice(0, Number(args.p_limit))
-        .map((row) => {
-          row.claimed_at = new Date().toISOString();
-          row.claimed_by = args.p_worker_id;
-          return { id: row.id, tenant_id: row.tenant_id, step_type: stepType };
-        });
+      return (
+        fake.tables.journey_enrollments
+          // Only items still at the SMS step (position 0) are due for this fake.
+          .filter(
+            (row) =>
+              row.claimed_by == null && row.status !== "failed" && row.current_position === 0,
+          )
+          .filter((row) => !exclude.includes(`${row.tenant_id}:${stepType}`))
+          .filter((row) => !row.next_run_at || Date.parse(String(row.next_run_at)) <= Date.now())
+          .slice(0, Number(args.p_limit))
+          .map((row) => {
+            row.claimed_at = new Date().toISOString();
+            row.claimed_by = args.p_worker_id;
+            return { id: row.id, tenant_id: row.tenant_id, step_type: stepType };
+          })
+      );
     };
     return claims;
   }
@@ -640,7 +756,12 @@ describe("runJourneyDispatcher with the SMS provider breaker (incident 15/10/202
     const result = await runJourneyDispatcher(1000);
     expect(result).toMatchObject({ failed: 0, processed: 0, providerSuspended: 1 });
     const row = enrollment("e1");
-    expect(row).toMatchObject({ status: "waiting", attempts: 1, current_position: 0, claimed_by: null });
+    expect(row).toMatchObject({
+      status: "waiting",
+      attempts: 1,
+      current_position: 0,
+      claimed_by: null,
+    });
     expect(Date.parse(String(row.next_run_at))).toBeGreaterThanOrEqual(before + 30_000);
     expect(fake.tables.journey_step_executions[0].status).toBe("retrying");
     expect(fake.tables.journey_events.at(-1)).toMatchObject({

@@ -123,6 +123,7 @@ function Results({ data }: { data: Data }) {
         <TabsTrigger value="overview">Visão geral</TabsTrigger>
         <TabsTrigger value="sources">Onde recupera</TabsTrigger>
         <TabsTrigger value="states">Situação do jogador</TabsTrigger>
+        <TabsTrigger value="holdout">Teste de controle</TabsTrigger>
         <TabsTrigger value="health">Saúde dos dados</TabsTrigger>
       </TabsList>
       <TabsContent value="overview">
@@ -133,6 +134,9 @@ function Results({ data }: { data: Data }) {
       </TabsContent>
       <TabsContent value="states">
         <States states={data.states} />
+      </TabsContent>
+      <TabsContent value="holdout">
+        <Holdout data={data} />
       </TabsContent>
       <TabsContent value="health">
         <Health data={data} />
@@ -566,5 +570,90 @@ function HealthLine({ ok, label, value }: { ok: boolean; label: string; value: s
         <p className="text-muted-foreground">{value}</p>
       </div>
     </div>
+  );
+}
+
+function Holdout({ data }: { data: Data }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Teste de controle</CardTitle>
+        <CardDescription>
+          Em jornadas com grupo de controle, uma parte sorteada dos jogadores não recebe mensagens.
+          A diferença na volta em até 7 dias entre os dois grupos é o efeito real da jornada.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="overflow-x-auto p-0">
+        {data.holdout.length === 0 ? (
+          <p className="p-6 text-sm text-muted-foreground">
+            Nenhuma jornada com grupo de controle neste período. Ative em Jornadas → editar → Grupo
+            de controle; os primeiros resultados aparecem 7 dias depois das primeiras entradas.
+          </p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Jornada</TableHead>
+                <TableHead className="text-right">Receberam</TableHead>
+                <TableHead className="text-right">Controle</TableHead>
+                <TableHead className="text-right">Diferença (lift)</TableHead>
+                <TableHead className="text-right">Jogadores a mais</TableHead>
+                <TableHead className="text-right">Receita a mais</TableHead>
+                <TableHead>Leitura</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {data.holdout.map((row) => (
+                <TableRow key={row.journeyId}>
+                  <TableCell className="font-medium">{row.name}</TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {pct(row.treatedRate)} de {num(row.treated.players)}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {pct(row.controlRate)} de {num(row.control.players)}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {row.lift == null
+                      ? "—"
+                      : `${row.lift >= 0 ? "+" : ""}${pct(row.lift)} (${pct(row.ciLow)} a ${pct(row.ciHigh)})`}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {row.incrementalPlayers == null ? "—" : num(Math.round(row.incrementalPlayers))}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {money(row.incrementalRevenue)}
+                  </TableCell>
+                  <TableCell>
+                    {!row.sufficient ? (
+                      <Badge variant="outline">amostra insuficiente</Badge>
+                    ) : row.significant && (row.lift ?? 0) > 0 ? (
+                      <Badge
+                        variant="outline"
+                        className="border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                      >
+                        traz jogadores de volta
+                      </Badge>
+                    ) : row.significant ? (
+                      <Badge
+                        variant="outline"
+                        className="border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-400"
+                      >
+                        pior que não enviar
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline">sem diferença comprovada</Badge>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+        <p className="px-6 py-3 text-xs text-muted-foreground">
+          Intervalo de 95%. “Amostra insuficiente” abaixo de 100 jogadores por grupo ou 10 retornos.
+          Jogadores do controle ainda podem receber campanhas, o que tende a subestimar o efeito.
+        </p>
+      </CardContent>
+    </Card>
   );
 }

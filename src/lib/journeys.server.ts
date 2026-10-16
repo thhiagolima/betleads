@@ -69,6 +69,7 @@ type EnrollmentRow = {
   attempts: number;
   loop_iteration: number;
   entry_key?: string;
+  is_holdout?: boolean;
 };
 type StepRow = {
   id: string;
@@ -663,6 +664,25 @@ async function executeEnrollment(
       });
       return;
     }
+  }
+
+  // F3: control group players go through the journey without any message
+  // (no send, no cost); waits, exits and loops still apply.
+  if (enrollment.is_holdout && SEND_CHANNELS.has(step.step_type)) {
+    const run = await execution(enrollment, step, step.step_type);
+    await finishExecution(run.id, { status: "skipped", provider: "holdout" });
+    await release(enrollment, ctx, {
+      status: "active",
+      current_position: step.position + 1,
+      next_run_at: new Date().toISOString(),
+      attempts: 0,
+    });
+    await event(enrollment, "step_skipped", {
+      channel: step.step_type,
+      step_position: step.position,
+      reason: "holdout",
+    });
+    return;
   }
 
   const player = await playerFor(enrollment);
@@ -1296,7 +1316,11 @@ async function handleItemFailure(row: ClaimedRow, ctx: DispatchContext, error: u
     .eq("id", row.id)
     .maybeSingle();
   if (!enrollmentRaw) {
-    await finishOwnExecution(ctx, row.id, { status: "failed", error: message, completed_at: nowIso() });
+    await finishOwnExecution(ctx, row.id, {
+      status: "failed",
+      error: message,
+      completed_at: nowIso(),
+    });
     return;
   }
   const enrollment = enrollmentRaw as EnrollmentRow & Record<string, unknown>;
@@ -1306,7 +1330,11 @@ async function handleItemFailure(row: ClaimedRow, ctx: DispatchContext, error: u
     // get the same answer. No attempt consumed, no failure, no defer cap: the
     // item waits for the breaker (sendSmsInternal already reported it).
     ctx.counters.providerSuspended++;
-    if (error instanceof ProviderSendError && error.channel === "sms" && ctx.sms.probeItem !== row.id) {
+    if (
+      error instanceof ProviderSendError &&
+      error.channel === "sms" &&
+      ctx.sms.probeItem !== row.id
+    ) {
       ctx.sms.mode = "open";
       ctx.sms.checkedAt = Date.now();
     }
@@ -1426,7 +1454,11 @@ async function handleItemFailure(row: ClaimedRow, ctx: DispatchContext, error: u
     Date.now() +
       Math.min(6 * 3600_000, policy.retryBaseSeconds * 1000 * 2 ** Math.max(0, attempts - 1)),
   ).toISOString();
-  await finishOwnExecution(ctx, row.id, { status: "failed", error: message, completed_at: nowIso() });
+  await finishOwnExecution(ctx, row.id, {
+    status: "failed",
+    error: message,
+    completed_at: nowIso(),
+  });
   await release(
     enrollment,
     ctx,
@@ -1668,7 +1700,8 @@ async function runJourneyDispatcherMonitored(limit: number, run: JobRunHandle) {
     const stopReason =
       outcome === "hard_deadline"
         ? "hard_deadline"
-        : ctx.sms.mode !== "closed" && (ctx.sms.mode === "open" || ctx.counters.providerSuspended > 0)
+        : ctx.sms.mode !== "closed" &&
+            (ctx.sms.mode === "open" || ctx.counters.providerSuspended > 0)
           ? "provider_unavailable"
           : claimingSource.claimed === 0
             ? "queue_empty"
