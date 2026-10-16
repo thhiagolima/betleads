@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { DemoTenantBlockedError } from "@/lib/demo-tenant";
 
 type DbError = { message: string };
 type DbResult<T = unknown> = { data: T | null; error: DbError | null };
@@ -12,9 +13,41 @@ type RpcClient = {
 type TenantStatusRow = {
   id: string;
   status: string | null;
+  is_demo: boolean | null;
 };
 
 const blockedOperationalStatuses = new Set(["suspended", "canceled"]);
+
+// In-memory cache for the guard lookups (send/action guards), 5s TTL. A miss
+// or an unknown tenant is never cached as "allowed" — only resolved rows are
+// cached, and only after they are read fresh from the DB.
+const TENANT_STATUS_CACHE_TTL_MS = 5000;
+type CachedTenantStatus = { tenant: TenantStatusRow | null; expiresAt: number };
+let tenantStatusCache = new Map<string, CachedTenantStatus>();
+
+/** Test-only: clears the guard cache so each test starts from a clean state. */
+export function __resetDemoTenantCacheForTests() {
+  tenantStatusCache = new Map();
+}
+
+async function getCachedTenantStatus(tenantId: string): Promise<TenantStatusRow | null> {
+  const cached = tenantStatusCache.get(tenantId);
+  if (cached && cached.expiresAt > Date.now()) return cached.tenant;
+
+  // `is_demo` is not yet in the generated Supabase types (Task 1 added the
+  // column via migration only); follow the established pattern in this
+  // codebase of casting to `any` for columns ahead of codegen.
+  const { data, error } = await (supabaseAdmin as any)
+    .from("tenants")
+    .select("id,status,is_demo")
+    .eq("id", tenantId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+
+  const tenant = (data as TenantStatusRow | null) ?? null;
+  tenantStatusCache.set(tenantId, { tenant, expiresAt: Date.now() + TENANT_STATUS_CACHE_TTL_MS });
+  return tenant;
+}
 
 export async function resolveCurrentTenantId(supabase: RpcClient) {
   const { data, error } = await supabase.rpc("current_tenant_id");
@@ -72,9 +105,9 @@ export async function requireActiveTenantAdmin(supabase: RpcClient, message: str
 }
 
 export async function getTenantStatus(tenantId: string) {
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await (supabaseAdmin as any)
     .from("tenants")
-    .select("id,status")
+    .select("id,status,is_demo")
     .eq("id", tenantId)
     .maybeSingle();
   if (error) throw new Error(error.message);
@@ -102,4 +135,42 @@ export async function resolveOperationalTenantId(supabase: RpcClient) {
   const tenantId = await resolveCurrentTenantId(supabase);
   await assertTenantCanOperate(tenantId);
   return tenantId;
+}
+
+/**
+ * Fail-closed guard placed immediately before any real network call to a
+ * provider (SMS, WhatsApp, email, voice, AI, link shortening, ...). A
+ * null/undefined tenant id, an unknown tenant, or a demo tenant are all
+ * refused with `DemoTenantBlockedError("DEMO_SEND_BLOCKED")` so nothing is
+ * ever sent/recorded as sent on their behalf. A suspended/canceled tenant
+ * keeps the existing `assertTenantCanOperate` message.
+ */
+export async function assertTenantCanSendExternally(tenantId: string | null | undefined) {
+  if (!tenantId) throw new DemoTenantBlockedError("DEMO_SEND_BLOCKED");
+
+  const tenant = await getCachedTenantStatus(tenantId);
+  if (!tenant) throw new DemoTenantBlockedError("DEMO_SEND_BLOCKED");
+  if (tenant.is_demo) throw new DemoTenantBlockedError("DEMO_SEND_BLOCKED");
+  if (tenant.status && blockedOperationalStatuses.has(tenant.status)) {
+    throw new Error("Tenant bloqueado para operacoes. Regularize a conta antes de continuar.");
+  }
+}
+
+/**
+ * Guard for non-send actions that must also be unavailable on a demo tenant
+ * (integration connections, team management, config changes, ...).
+ */
+export async function assertTenantNotDemo(tenantId: string) {
+  const tenant = await getCachedTenantStatus(tenantId);
+  if (!tenant || tenant.is_demo) throw new DemoTenantBlockedError("DEMO_ACTION_BLOCKED");
+}
+
+/** All tenant ids currently flagged `is_demo = true`. */
+export async function listDemoTenantIds(): Promise<string[]> {
+  const { data, error } = await (supabaseAdmin as any)
+    .from("tenants")
+    .select("id")
+    .eq("is_demo", true);
+  if (error) throw new Error(error.message);
+  return ((data as Array<{ id: string }> | null) ?? []).map((row) => row.id);
 }
