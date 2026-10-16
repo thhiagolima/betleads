@@ -169,8 +169,8 @@ describe("voice and e-mail delivery idempotency (ENV-02)", () => {
       "fetch",
       vi.fn().mockResolvedValue(new Response(JSON.stringify({ callId: "c" }), { status: 200 })),
     );
-    const a = await callInfobipVoice("+5511999999999", { type: "tts", text: "Oi" });
-    const b = await callInfobipVoice("+5511999999999", { type: "tts", text: "Oi" });
+    const a = await callInfobipVoice("+5511999999999", { type: "tts", text: "Oi" }, { tenantId: TENANT });
+    const b = await callInfobipVoice("+5511999999999", { type: "tts", text: "Oi" }, { tenantId: TENANT });
     expect(a.idempotencyKey).not.toBe(b.idempotencyKey);
     expect(state.queries).toHaveLength(0);
   });

@@ -7,6 +7,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { evaluateVoiceContactPolicy } from "./consent.server";
 import { callInfobipVoice, normalizeE164BR } from "./infobip-voice.server";
 import { assertTenantNotDemoForSend } from "./tenant-access.server";
+import { isDemoBlockedError } from "./demo-tenant";
 
 // ============================================================
 // Tipos
@@ -352,7 +353,7 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
         content = { type: "audio", audioUrl };
       }
 
-      const result = await callInfobipVoice(to, content);
+      const result = await callInfobipVoice(to, content, { tenantId: item.tenant_id });
       const body = (result.body ?? {}) as { non_json?: boolean };
       const transient =
         !result.ok &&
@@ -407,6 +408,9 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
       if (result.ok) dispatched++;
       else failed++;
     } catch (cause) {
+      // A demo block is not a dispatch failure and is never recorded: no
+      // call_history row, and the item is not marked failed/sent.
+      if (isDemoBlockedError(cause)) throw cause;
       failed++;
       await supabaseAdmin
         .from("call_queue")

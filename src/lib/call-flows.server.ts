@@ -281,7 +281,7 @@ async function executeCallBlock(progress: any, block: any, player: any): Promise
 
   // 3. A Infobip sintetiza o script com CML `say` quando a ligação é atendida.
   const content = { type: "tts" as const, text: renderedText, language: "pt" };
-  const result = await callInfobipVoice(to, content);
+  const result = await callInfobipVoice(to, content, { tenantId: progress.tenant_id });
   const isAuthError = result.status === 401 || result.status === 403;
   if (isAuthError) {
     console.warn(`[call-flow] auth_error ${result.status} — mantendo lead na fila, retry em 10min`);

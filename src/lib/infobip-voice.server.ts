@@ -1,6 +1,7 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { requireBrazilianPhone } from "./phone-normalization";
 import { transportErrorKind, type ProviderErrorKind } from "./rate-limit/transport-errors";
+import { assertTenantNotDemoForSend } from "./tenant-access.server";
 
 // Infobip Calls Markup Language (CML) adapter for outbound recorded calls.
 // Voz do CRM é atendida exclusivamente pela Infobip.
@@ -28,7 +29,7 @@ export type InfobipVoiceOptions = {
    * recorded in call_history with this correlation is never placed again.
    */
   idempotencyKey?: string | null;
-  tenantId?: string | null;
+  tenantId: string;
 };
 
 export type InfobipVoiceContent =
@@ -71,7 +72,7 @@ async function findExistingCall(
 export async function callInfobipVoice(
   to: string,
   content: InfobipVoiceContent,
-  options: InfobipVoiceOptions = {},
+  options: InfobipVoiceOptions,
 ): Promise<InfobipVoiceResult> {
   const baseUrl = process.env.INFOBIP_BASE_URL?.trim().replace(/\/$/, "");
   const apiKey = process.env.INFOBIP_API_KEY?.trim();
@@ -128,6 +129,10 @@ export async function callInfobipVoice(
       errorKind: "misconfigured",
     };
   }
+  // Fail-closed guard immediately before the provider request: a demo,
+  // unknown or missing tenant never reaches Infobip. Checked here rather than
+  // only in the top-level dispatcher so this also covers every call site.
+  await assertTenantNotDemoForSend(options.tenantId);
   try {
     const response = await fetch(`${baseUrl}/markuplanguage/1/create`, {
       method: "POST",

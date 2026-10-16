@@ -1,7 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// The demo send guard has its own coverage (demo-send-guard.voice.test.ts);
+// here it is a no-op so these adapter-level tests focus on the HTTP shape.
+vi.mock("./tenant-access.server", () => ({
+  assertTenantNotDemoForSend: vi.fn(async () => undefined),
+}));
+
 import { callInfobipEmail } from "./infobip-email.server";
 import { callInfobipVoice, normalizeE164BR } from "./infobip-voice.server";
+
+const TENANT = "00000000-0000-4000-8000-000000000001";
 
 const INFOBIP_ENV = [
   "INFOBIP_BASE_URL",
@@ -95,6 +103,7 @@ describe("Infobip provider adapters", () => {
     const result = await callInfobipVoice(
       "+5511999999999",
       { type: "audio", audioUrl: "https://assets.example.test/call.mp3" },
+      { tenantId: TENANT },
     );
 
     expect(result).toMatchObject({ ok: true, status: 200, providerCallId: "voice-provider-1" });
@@ -122,11 +131,15 @@ describe("Infobip provider adapters", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const script = "Olá, este é um lembrete reservado.";
-    const result = await callInfobipVoice("+5511999999999", {
-      type: "tts",
-      text: script,
-      language: "pt",
-    });
+    const result = await callInfobipVoice(
+      "+5511999999999",
+      {
+        type: "tts",
+        text: script,
+        language: "pt",
+      },
+      { tenantId: TENANT },
+    );
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(String(init.body));

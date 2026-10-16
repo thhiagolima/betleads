@@ -726,7 +726,7 @@ export const dispatchCallQueueItem = createServerFn({ method: "POST" })
     } else {
       content = { type: "audio", audioUrl: q.audio_url! };
     }
-    const result = await callInfobipVoice(to, content);
+    const result = await callInfobipVoice(to, content, { tenantId });
 
     // 5xx ou body não-JSON (HTML) = falha transitória do provedor.
     // Preservamos o item em audio_ready com provider_status='provider_unavailable'
