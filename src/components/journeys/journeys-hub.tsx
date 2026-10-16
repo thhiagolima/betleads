@@ -117,7 +117,9 @@ export function JourneysHub() {
   const saveContactLimitsFn = useServerFn(saveJourneyContactLimits);
   const [filter, setFilter] = useState<"all" | Journey["status"]>("all");
   const [search, setSearch] = useState("");
-  const [view, setView] = useState<"journeys" | "queue" | "conflicts" | "failures">("journeys");
+  const [view, setView] = useState<"journeys" | "map" | "queue" | "conflicts" | "failures">(
+    "journeys",
+  );
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
   const [dailyMessageLimit, setDailyMessageLimit] = useState("");
@@ -151,7 +153,7 @@ export function JourneysHub() {
   const operations = useQuery({
     queryKey: ["journey-operations"],
     queryFn: () => operationsFn(),
-    enabled: view !== "journeys",
+    enabled: view !== "journeys" && view !== "map",
   });
   const contactLimits = useQuery({
     queryKey: ["journey-contact-limits"],
@@ -403,6 +405,16 @@ export function JourneysHub() {
           </button>
           <button
             className={
+              view === "map"
+                ? "rounded-md bg-background px-3 py-2 font-medium shadow-sm"
+                : "px-3 py-2 text-muted-foreground"
+            }
+            onClick={() => setView("map")}
+          >
+            Mapa
+          </button>
+          <button
+            className={
               view === "queue"
                 ? "rounded-md bg-background px-3 py-2 font-medium shadow-sm"
                 : "px-3 py-2 text-muted-foreground"
@@ -455,7 +467,7 @@ export function JourneysHub() {
           </label>
         </div>
       </div>
-      {view !== "journeys" && (
+      {view !== "journeys" && view !== "map" && (
         <Card>
           <CardHeader>
             <CardTitle>
@@ -528,7 +540,7 @@ export function JourneysHub() {
           </CardContent>
         </Card>
       )}
-      {view === "journeys" && (
+      {view === "map" && (
         <JourneyMapCard
           journeys={((journeys.data?.journeys ?? []) as Journey[]).map((journey) => ({
             ...journey,
