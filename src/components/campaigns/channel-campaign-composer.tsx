@@ -72,6 +72,7 @@ import { listSmsAudiences } from "@/lib/sms-audience-crud.functions";
 import { listSmsTemplates } from "@/lib/sms-templates.functions";
 import { previewSmsCampaignRecipients, scheduleBulkSms, sendBulkSms } from "@/lib/sms.functions";
 import { estimateSms } from "@/lib/link-tracking-preview";
+import { fromBrtInput, toBrtInput } from "@/components/journeys/journey-editor-config";
 import { UNRESOLVED_REASONS, type UnresolvedReason } from "@/lib/campaign-recipients";
 import { requestConfirmation, requestTextInput } from "@/components/system-dialog-host";
 import {
@@ -297,7 +298,7 @@ export function ChannelCampaignComposer({
     setVoiceMode(payload.voiceMode === "script" ? "script" : "asset");
     setVoiceSourceId(draft.assetId ?? "");
     setWhen(draft.scheduledAt ? "schedule" : "now");
-    setScheduledAt(draft.scheduledAt ? draft.scheduledAt.slice(0, 16) : "");
+    setScheduledAt(toBrtInput(draft.scheduledAt));
     setRiskConfirmed(false);
     setDraftState("saved");
     hydratedDraftId.current = draft.id;
@@ -360,6 +361,9 @@ export function ChannelCampaignComposer({
     channel === "voice" && recipients > 200
       ? "Voz aceita até 200 destinatários por campanha."
       : null;
+  // The input is read in Brasília time, whatever the browser's timezone.
+  const scheduleIso = fromBrtInput(scheduledAt);
+  const scheduleTooSoon = !scheduleIso || Date.parse(scheduleIso) < Date.now() + 60_000;
   const validationIssues = [
     !name.trim() ? "Informe o nome da campanha." : null,
     !audience || recipients === 0 ? "Escolha um público com destinatários elegíveis." : null,
@@ -367,7 +371,7 @@ export function ChannelCampaignComposer({
     channel === "email" && !emailTemplateId ? "Selecione um template de e-mail." : null,
     channel === "voice" && !voiceSourceId ? "Selecione um script ou áudio da biblioteca." : null,
     when === "schedule" && !scheduledAt ? "Escolha a data e hora do agendamento." : null,
-    when === "schedule" && scheduledAt && new Date(scheduledAt).getTime() < Date.now() + 60_000
+    when === "schedule" && scheduledAt && scheduleTooSoon
       ? "O agendamento deve ter pelo menos um minuto de antecedência."
       : null,
     ...(invalidVariables.length
@@ -431,7 +435,7 @@ export function ChannelCampaignComposer({
         Json
       > | null,
       content: channel === "sms" ? smsContent : previewContent,
-      scheduledAt: when === "schedule" && scheduledAt ? new Date(scheduledAt).toISOString() : null,
+      scheduledAt: when === "schedule" ? fromBrtInput(scheduledAt) : null,
       trackLinks,
       payload: {
         smsTemplateId,
@@ -540,10 +544,10 @@ export function ChannelCampaignComposer({
       if (channelLimitError) throw new Error(channelLimitError);
       if (when === "schedule" && !scheduledAt)
         throw new Error("Escolha a data e hora do agendamento.");
-      if (when === "schedule" && new Date(scheduledAt).getTime() < Date.now() + 60_000)
+      if (when === "schedule" && scheduleTooSoon)
         throw new Error("O agendamento deve ter pelo menos um minuto de antecedência.");
       if (!riskConfirmed) throw new Error("Confirme a revisão de risco antes de enviar.");
-      const scheduleAt = when === "schedule" ? new Date(scheduledAt).toISOString() : undefined;
+      const scheduleAt = when === "schedule" ? (fromBrtInput(scheduledAt) ?? undefined) : undefined;
 
       if (channel === "sms") {
         if (!smsContent.trim()) throw new Error("Escreva ou selecione a mensagem de SMS.");
@@ -1029,12 +1033,14 @@ export function ChannelCampaignComposer({
                     value={scheduledAt}
                     onChange={(event) => setScheduledAt(event.target.value)}
                     aria-invalid={
-                      submitAttempted &&
-                      when === "schedule" &&
-                      (!scheduledAt || new Date(scheduledAt).getTime() < Date.now() + 60_000)
+                      submitAttempted && when === "schedule" && (!scheduledAt || scheduleTooSoon)
                     }
                     aria-describedby={fieldIds.validation}
+                    aria-label="Data e hora do agendamento, horário de Brasília"
                   />
+                  <p className="text-xs text-muted-foreground">
+                    Horário de Brasília (BRT), independente do fuso do seu computador.
+                  </p>
                   {channel === "voice" && (
                     <p className="text-xs text-muted-foreground">
                       O áudio fica preparado na fila; o despacho automático depende do gate
