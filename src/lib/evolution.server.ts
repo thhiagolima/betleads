@@ -1,5 +1,61 @@
 // Server-only HTTP wrapper for the Evolution API.
 // Never import from client code.
+import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { DemoTenantBlockedError, isDemoBlockedError } from "@/lib/demo-tenant";
+import { assertTenantNotDemoForSend } from "@/lib/tenant-access.server";
+
+// Paths that carry no instance and are allowed without a tenant: only the
+// super-admin diagnosis listing. Keep this list minimal and explicit.
+const EVOLUTION_TENANT_GUARD_EXEMPT_PATHS = new Set(["/instance/fetchInstances"]);
+
+/**
+ * Instance an Evolution path acts on: the segment after the action
+ * (`/message/sendText/{instance}`, `/instance/connect/{instance}`, ...), or the
+ * `instanceName` query param of `/instance/fetchInstances?instanceName=`.
+ * URL-decoded. Null when the path carries no (decodable) instance.
+ */
+function evolutionInstanceFromPath(path: string): string | null {
+  const [pathname, query = ""] = path.split("?", 2);
+  try {
+    const fromQuery = new URLSearchParams(query).get("instanceName");
+    if (fromQuery) return fromQuery;
+    const segment = pathname.split("/").filter(Boolean)[2];
+    return segment ? decodeURIComponent(segment) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fail-closed demo guard for any Evolution call on `instance`. With an
+ * explicit `tenantId` (the caller knows it, e.g. `/instance/create` before the
+ * `whatsapp_sessions` row exists) that tenant is checked; otherwise the tenant
+ * is the owner of the `whatsapp_sessions` row with this `instance_name`. No
+ * instance, no row, an unknown tenant or a demo tenant → `DEMO_SEND_BLOCKED`.
+ * A lookup error propagates (the call never happens).
+ */
+export async function assertEvolutionInstanceCanCall(
+  instance: string | null | undefined,
+  tenantId?: string | null,
+): Promise<void> {
+  if (tenantId) return assertTenantNotDemoForSend(tenantId);
+  if (!instance) throw new DemoTenantBlockedError("DEMO_SEND_BLOCKED");
+  const { data, error } = await supabaseAdmin
+    .from("whatsapp_sessions")
+    .select("tenant_id")
+    .eq("instance_name", instance)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  await assertTenantNotDemoForSend((data as { tenant_id?: string | null } | null)?.tenant_id);
+}
+
+async function assertEvolutionPathCanCall(path: string, tenantId?: string | null) {
+  const instance = evolutionInstanceFromPath(path);
+  if (!instance && !tenantId && EVOLUTION_TENANT_GUARD_EXEMPT_PATHS.has(path.split("?", 1)[0])) {
+    return;
+  }
+  await assertEvolutionInstanceCanCall(instance, tenantId);
+}
 
 function getConfig() {
   // Single source of truth — only these two secrets. No legacy/accented
@@ -17,7 +73,7 @@ function getConfig() {
 
 export async function evolutionFetch(
   path: string,
-  init: { method?: string; body?: unknown } = {},
+  init: { method?: string; body?: unknown; tenantId?: string } = {},
 ): Promise<any> {
   const { url, key } = getConfig();
   // Valida o secret antes de chamar fetch. Cloudflare Workers bloqueia IP cru/HTTP
@@ -39,6 +95,9 @@ export async function evolutionFetch(
         `Coloque a Evolution atrás de um domínio HTTPS (ex.: https://evolution.seudominio.com) e atualize o secret.`,
     );
   }
+  // Demo/unknown tenants never reach Evolution (no message, no QR, no real
+  // number). Right before the network call; fail-closed.
+  await assertEvolutionPathCanCall(path, init.tenantId);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
   try {
@@ -117,6 +176,8 @@ export async function evolutionFetch(
 }
 
 export function isEvolutionConnectionClosed(error: unknown): boolean {
+  // A demo block is never a dropped session: it must propagate as-is.
+  if (isDemoBlockedError(error)) return false;
   const raw = `${(error as any)?.rawBody ?? ""} ${(error as any)?.message ?? ""}`;
   return /Connection Closed|Precondition Required|statusCode"?:428/i.test(raw);
 }

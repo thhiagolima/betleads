@@ -2,19 +2,26 @@ import { createServerFn } from "@tanstack/react-start";
 import { dbUuid } from "@/lib/zod-helpers";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { resolveOperationalTenantId } from "./tenant-access.server";
+import { resolveCurrentTenantId, resolveOperationalTenantId } from "./tenant-access.server";
+import { isDemoBlockedError } from "./demo-tenant";
 import {
   markTrackedDispatchesFailed,
   markTrackedDispatchesSent,
   prepareTrackedText,
 } from "./shortio.server";
 import {
+  assertEvolutionInstanceCanCall,
   evolutionFetch,
   isEvolutionConnectionClosed,
   mapEvolutionState,
   setEvolutionProxy,
 } from "./evolution.server";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+
+/** Non-fatal Evolution catches must never swallow a demo-tenant block. */
+function rethrowIfDemoBlocked(error: unknown) {
+  if (isDemoBlockedError(error)) throw error;
+}
 
 // Diagnostic — hits Evolution with the same wrapper the rest of the app uses.
 // Platform operation: super admin only; never returns the instance list.
@@ -65,6 +72,9 @@ export const createWhatsappSession = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     // SOURCE OF TRUTH = Evolution. Any non-2xx is a hard failure — never
     // mask it as "maybe already exists" and never save locally.
+    // The whatsapp_sessions row does not exist yet, so the transport guard
+    // needs the tenant explicitly (the row is created in this same tenant).
+    const tenantId = await resolveCurrentTenantId(context.supabase);
     let createResp: any;
     try {
       createResp = await evolutionFetch("/instance/create", {
@@ -74,8 +84,10 @@ export const createWhatsappSession = createServerFn({ method: "POST" })
           qrcode: true,
           integration: "WHATSAPP-BAILEYS",
         },
+        tenantId,
       });
     } catch (e: any) {
+      rethrowIfDemoBlocked(e);
       throw new Error(
         `Evolution recusou a criação: ${e?.message ?? "erro desconhecido"}. Nada foi salvo no BETLEADS.`,
       );
@@ -160,9 +172,10 @@ export const connectWhatsappSession = createServerFn({ method: "POST" })
           });
         } else if (proxy && proxy.status !== "active") {
           // Proxy inativo — desabilita na Evolution para evitar usar config velha.
-          await setEvolutionProxy(session.instance_name, null).catch(() => {});
+          await setEvolutionProxy(session.instance_name, null).catch(rethrowIfDemoBlocked);
         }
       } catch (e: any) {
+        rethrowIfDemoBlocked(e);
         await supabaseAdmin.from("whatsapp_proxy_logs").insert({
           proxy_id: (session as any).proxy_id,
           session_id: session.id,
@@ -173,7 +186,7 @@ export const connectWhatsappSession = createServerFn({ method: "POST" })
       }
     } else {
       // Sem proxy vinculado — garante que a Evolution não use proxy antigo.
-      await setEvolutionProxy(session.instance_name, null).catch(() => {});
+      await setEvolutionProxy(session.instance_name, null).catch(rethrowIfDemoBlocked);
     }
 
     // Evolution API v2.2.3 — multi-endpoint strategy for QR / connect.
@@ -210,6 +223,7 @@ export const connectWhatsappSession = createServerFn({ method: "POST" })
         },
       });
     } catch (e: any) {
+      rethrowIfDemoBlocked(e);
       console.warn("[whatsapp] /websocket/set failed (ignored):", e?.message);
     }
 
@@ -219,6 +233,7 @@ export const connectWhatsappSession = createServerFn({ method: "POST" })
       qrImage = extractQr(r);
       state = mapEvolutionState(r?.instance?.state);
     } catch (e: any) {
+      rethrowIfDemoBlocked(e);
       console.warn("[whatsapp] /instance/connect failed:", e?.message);
     }
 
@@ -567,6 +582,7 @@ async function resolveWhatsappNumber(
     const jid = String(hit.jid ?? `${number}@s.whatsapp.net`);
     return { number, jid, tried };
   } catch (e: any) {
+    rethrowIfDemoBlocked(e);
     console.warn("[whatsapp] number-resolve falhou:", e?.message);
     if (isEvolutionConnectionClosed(e)) throw e;
     // Em caso de falha de checagem, segue tentando com o original.
@@ -954,6 +970,7 @@ export const sendWhatsappMessage = createServerFn({ method: "POST" })
       resp = await evolutionFetch(endpoint, { method: "POST", body: payload });
     } catch (e: any) {
       await markTrackedDispatchesFailed(prepared.links.map((link) => link.dispatchId));
+      rethrowIfDemoBlocked(e);
       if (isEvolutionConnectionClosed(e)) {
         await markWhatsappSessionDisconnected(
           context.supabase,
@@ -1427,6 +1444,7 @@ export const sendToLeadFromSession = createServerFn({ method: "POST" })
     try {
       resp = await evolutionFetch(endpoint, { method: "POST", body: payload });
     } catch (e: any) {
+      rethrowIfDemoBlocked(e);
       if (isEvolutionConnectionClosed(e)) {
         await markWhatsappSessionDisconnected(
           context.supabase,
@@ -1718,6 +1736,9 @@ export const refreshGroupNames = createServerFn({ method: "POST" })
 
     let updated = 0;
     for (const s of sessions ?? []) {
+      // Every Evolution call below targets this instance; checked once, outside
+      // the per-call try/catch so a demo block is never swallowed.
+      await assertEvolutionInstanceCanCall(s.instance_name);
       const { data: groups } = await context.supabase
         .from("whatsapp_chats")
         .select("id, remote_jid, name, profile_pic_url")
@@ -1788,6 +1809,9 @@ export const refreshContactNames = createServerFn({ method: "POST" })
 
     let updated = 0;
     for (const s of sessions ?? []) {
+      // Every Evolution call below targets this instance; checked once, outside
+      // the per-call try/catch so a demo block is never swallowed.
+      await assertEvolutionInstanceCanCall(s.instance_name);
       const { data: chats } = await context.supabase
         .from("whatsapp_chats")
         .select("id, remote_jid, phone, name, profile_pic_url")
