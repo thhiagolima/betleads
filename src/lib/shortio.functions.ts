@@ -1,7 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- Short.io tables are introduced by a migration pending generated client types. */
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { requireTenantAdmin, resolveOperationalTenantId } from "./tenant-access.server";
+import {
+  assertTenantNotDemo,
+  requireTenantAdmin,
+  resolveOperationalTenantId,
+} from "./tenant-access.server";
 import { z } from "zod";
 
 export const getLinkTrackingOverview = createServerFn({ method: "GET" })
@@ -155,6 +159,7 @@ export const saveShortioSettings = createServerFn({ method: "POST" })
   .inputValidator((v: unknown) => settingsInput.parse(v))
   .handler(async ({ data, context }) => {
     const tenantId = await requireShortioAdmin(context);
+    await assertTenantNotDemo(tenantId);
     const domain =
       data.domain
         ?.replace(/^https?:\/\//, "")

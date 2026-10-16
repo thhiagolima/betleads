@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { assertTenantNotDemo, resolveCurrentTenantId } from "./tenant-access.server";
 
 const saveSchema = z.object({
   url: z.string().trim().url().max(500),
@@ -45,6 +46,8 @@ export const listWhatsappExternalEvents = createServerFn({ method: "GET" })
 export const testWhatsappExternalWebhook = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
+    const tenantId = await resolveCurrentTenantId(context.supabase);
+    await assertTenantNotDemo(tenantId);
     const { loadManagedExternalIntegration, sendExternalTriggerEvent } = await import(
       "./whatsapp-external.server"
     );
@@ -79,6 +82,8 @@ export const testWhatsappExternalWebhook = createServerFn({ method: "POST" })
 export const sendAllWhatsappExternalEvents = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
+    const tenantId = await resolveCurrentTenantId(context.supabase);
+    await assertTenantNotDemo(tenantId);
     const { loadManagedExternalIntegration, sendAllTriggerSamples } = await import(
       "./whatsapp-external.server"
     );

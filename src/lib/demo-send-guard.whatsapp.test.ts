@@ -311,6 +311,7 @@ describe("whatsapp.functions demo-block wiring", () => {
   });
 
   it("sendToLeadFromSession: number resolution propagates the block (no chat row)", async () => {
+    asCaller(DEMO);
     const error = await sendToLeadFromSessionFor(
       { session_id: "s-demo", phone: "5511900000001", text: "Oi" },
       ctx(),

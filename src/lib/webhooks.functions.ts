@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { assertTenantNotDemo } from "@/lib/tenant-access.server";
 
 async function getWebhookAccess(context: { supabase: any }) {
   const { data: tenantId, error: tenantError } = await context.supabase.rpc("current_tenant_id");
@@ -36,6 +37,7 @@ export const rotateMyWebhookCredentials = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const tenantId = await requireWebhookManager(context);
+    await assertTenantNotDemo(tenantId);
     const webhook_token = randomHex(24);
     const webhook_secret = randomHex(32);
     const { error } = await (supabaseAdmin as any)
@@ -58,6 +60,7 @@ export const provisionMyWebhookHmacSecret = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const tenantId = await requireWebhookManager(context);
+    await assertTenantNotDemo(tenantId);
     const webhook_secret = randomHex(32);
     const { error } = await (supabaseAdmin as any)
       .from("tenants")
@@ -80,6 +83,7 @@ export const setMyWebhookHmacEnforcement = createServerFn({ method: "POST" })
   .inputValidator((value: unknown) => z.object({ enforce: z.boolean() }).parse(value))
   .handler(async ({ data, context }) => {
     const tenantId = await requireWebhookManager(context);
+    await assertTenantNotDemo(tenantId);
     if (data.enforce) {
       const { data: tenant, error: lookupError } = await (supabaseAdmin as any)
         .from("tenants")
@@ -112,6 +116,7 @@ export const getMyWebhookToken = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const currentTenantId = await requireWebhookManager(context);
+    await assertTenantNotDemo(currentTenantId);
     const { data, error } = await supabaseAdmin
       .from("tenants")
       .select("id, nome, legacy_webhook, webhook_token, webhook_secret, webhook_hmac_enforced")
@@ -136,6 +141,7 @@ export const getMyWebhookLogs = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const tenantId = await requireWebhookManager(context);
+    await assertTenantNotDemo(tenantId);
     const { data, error } = await supabaseAdmin
       .from("webhook_logs")
       .select("id, tenant_id, evento, status, created_at, payload")
@@ -150,6 +156,7 @@ export const getMyWebhookHealth = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const tenantId = await requireWebhookManager(context);
+    await assertTenantNotDemo(tenantId);
 
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const countStatus = async (status?: string) => {

@@ -8,7 +8,7 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { TRIGGER_NAMES, type TriggerType } from "./triggers.server";
 import { priorityRank } from "./priorities";
-import { demoSendBlockedReason } from "./tenant-access.server";
+import { assertTenantNotDemo, demoSendBlockedReason } from "./tenant-access.server";
 import {
   assertSafeOutboundUrl,
   safeOutboundFetch,
@@ -70,6 +70,7 @@ export async function saveExternalIntegrationFor(
   input: ExternalIntegrationInput,
 ) {
   const tenantId = await assertExternalIntegrationManager(supabase, userId);
+  await assertTenantNotDemo(tenantId);
   const { url } = await assertSafeOutboundUrl(input.url);
   const { data: row, error } = await supabase
     .from("whatsapp_external_integrations")

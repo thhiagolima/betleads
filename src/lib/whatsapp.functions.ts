@@ -2,7 +2,11 @@ import { createServerFn } from "@tanstack/react-start";
 import { dbUuid } from "@/lib/zod-helpers";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { resolveCurrentTenantId, resolveOperationalTenantId } from "./tenant-access.server";
+import {
+  assertTenantNotDemo,
+  resolveCurrentTenantId,
+  resolveOperationalTenantId,
+} from "./tenant-access.server";
 import { DemoTenantBlockedError, isDemoBlockedError } from "./demo-tenant";
 import {
   markTrackedDispatchesFailed,
@@ -90,6 +94,7 @@ export async function createWhatsappSessionFor(data: { name: string; instance_na
   // The whatsapp_sessions row does not exist yet, so the transport guard
   // needs the tenant explicitly (the row is created in this same tenant).
   const tenantId = await resolveCurrentTenantId(context.supabase);
+  await assertTenantNotDemo(tenantId);
   let createResp: any;
   try {
     createResp = await evolutionFetch("/instance/create", {
@@ -165,6 +170,7 @@ export async function connectWhatsappSessionFor(data: { id: string }, context: {
     .eq("id", data.id)
     .single();
   if (selErr || !session) throw new Error("Sessão não encontrada");
+  await assertTenantNotDemo((session as any).tenant_id);
 
   // Aplica proxy vinculado (se houver) ANTES de iniciar o connect. A senha
   // é lida via supabaseAdmin (server-only) e nunca trafega pelo browser.
@@ -349,10 +355,11 @@ export const disconnectWhatsappSession = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { data: session, error: selErr } = await context.supabase
       .from("whatsapp_sessions")
-      .select("instance_name")
+      .select("instance_name, tenant_id")
       .eq("id", data.id)
       .single();
     if (selErr || !session) throw new Error("Sessão não encontrada");
+    await assertTenantNotDemo((session as any).tenant_id);
 
     try {
       await evolutionFetch(`/instance/logout/${encodeURIComponent(session.instance_name)}`, {
@@ -402,6 +409,14 @@ export const renameWhatsappSession = createServerFn({ method: "POST" })
       .parse(input),
   )
   .handler(async ({ data, context }) => {
+    const { data: existing, error: selErr } = await context.supabase
+      .from("whatsapp_sessions")
+      .select("tenant_id")
+      .eq("id", data.id)
+      .single();
+    if (selErr || !existing) throw new Error("Sessão não encontrada");
+    await assertTenantNotDemo((existing as any).tenant_id);
+
     const { data: updated, error } = await context.supabase
       .from("whatsapp_sessions")
       .update({ name: data.name })
@@ -912,6 +927,7 @@ export const sendWhatsappMessage = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const tenantId = await resolveOperationalTenantId(context.supabase);
+    await assertTenantNotDemo(tenantId);
     const { data: chat, error } = await context.supabase
       .from("whatsapp_chats")
       .select("id, session_id, remote_jid, phone, is_group")
@@ -1060,6 +1076,8 @@ async function sendWhatsappMediaInternal(
   context: any,
   forcedKind?: "image" | "video" | "audio" | "document",
 ) {
+  const tenantId = await resolveOperationalTenantId(context.supabase);
+  await assertTenantNotDemo(tenantId);
   const kind = forcedKind ?? data.kind;
   if (kind !== data.kind) throw new Error(`Tipo de mídia inválido: esperado ${forcedKind}.`);
   const cleanBase64 = data.base64.replace(/^data:[^,]*base64,/i, "").replace(/\s+/g, "");
@@ -1401,6 +1419,8 @@ export const sendToLeadFromSession = createServerFn({ method: "POST" })
 // Body of `sendToLeadFromSession`, exported so the demo guard wiring is unit-testable.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function sendToLeadFromSessionFor(data: { session_id: string; phone: string; text: string }, context: { supabase: any }) {
+  const tenantId = await resolveOperationalTenantId(context.supabase);
+  await assertTenantNotDemo(tenantId);
   const digits = data.phone.replace(/\D/g, "");
   if (!digits) throw new Error("Telefone inválido");
   const { data: session, error: sErr } = await context.supabase

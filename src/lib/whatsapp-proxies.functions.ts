@@ -3,6 +3,7 @@ import { dbUuid } from "@/lib/zod-helpers";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { assertTenantNotDemo, resolveCurrentTenantId } from "./tenant-access.server";
 
 const protocolEnum = z.enum(["http", "https", "socks4", "socks5"]);
 
@@ -39,6 +40,8 @@ export const createWhatsappProxy = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) => baseSchema.parse(input))
   .handler(async ({ data, context }) => {
+    const tenantId = await resolveCurrentTenantId(context.supabase);
+    await assertTenantNotDemo(tenantId);
     const { data: row, error } = await context.supabase
       .from("whatsapp_proxies")
       .insert({
@@ -62,6 +65,8 @@ export const updateWhatsappProxy = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) => baseSchema.partial().extend({ id: dbUuid() }).parse(input))
   .handler(async ({ data, context }) => {
+    const tenantId = await resolveCurrentTenantId(context.supabase);
+    await assertTenantNotDemo(tenantId);
     const patch: {
       name?: string;
       protocol?: "http" | "https" | "socks4" | "socks5";
@@ -98,6 +103,8 @@ export const deleteWhatsappProxy = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) => z.object({ id: dbUuid(), force: z.boolean().optional() }).parse(input))
   .handler(async ({ data, context }) => {
+    const tenantId = await resolveCurrentTenantId(context.supabase);
+    await assertTenantNotDemo(tenantId);
     const { count } = await context.supabase
       .from("whatsapp_sessions")
       .select("id", { count: "exact", head: true })
@@ -138,6 +145,8 @@ export const testWhatsappProxy = createServerFn({ method: "POST" })
       .parse(input),
   )
   .handler(async ({ data, context }) => {
+    const tenantId = await resolveCurrentTenantId(context.supabase);
+    await assertTenantNotDemo(tenantId);
     // Opens a raw TCP socket: super admin only, public hosts only (SEC-17).
     const { runWhatsappProxyTest } = await import("./whatsapp-proxy-test.server");
     return runWhatsappProxyTest(context.supabase, context.userId, data);
@@ -157,7 +166,7 @@ export const assignProxyToSession = createServerFn({ method: "POST" })
     const [{ data: session }, { data: proxy }] = await Promise.all([
       context.supabase
         .from("whatsapp_sessions")
-        .select("id")
+        .select("id, tenant_id")
         .eq("id", data.session_id)
         .maybeSingle(),
       data.proxy_id
@@ -169,6 +178,7 @@ export const assignProxyToSession = createServerFn({ method: "POST" })
         : Promise.resolve({ data: { id: null } }),
     ]);
     if (!session || !proxy) throw new Error("Sessão ou proxy não encontrado nesta tenant");
+    await assertTenantNotDemo((session as any).tenant_id);
     const { error } = await context.supabase
       .from("whatsapp_sessions")
       .update({ proxy_id: data.proxy_id })

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import type { Json } from "@/integrations/supabase/types";
+import { assertTenantNotDemo } from "@/lib/tenant-access.server";
 import { dbUuid } from "@/lib/zod-helpers";
 
 type DbError = { message: string };
@@ -531,6 +532,7 @@ export const updateTenantSettings = createServerFn({ method: "POST" })
     const ctx = context as unknown as ServerContext;
     const superAdmin = await checkSuperAdmin(ctx.userId);
     await requireTenantManager(ctx, data.tenantId);
+    await assertTenantNotDemo(data.tenantId);
 
     const { data: before, error: beforeErr } = await db()
       .from<TenantRow>("tenants")
@@ -585,94 +587,100 @@ const addUserInput = z.object({
 export const addUserToTenant = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => addUserInput.parse(data))
-  .handler(async ({ data, context }) => {
-    const ctx = context as unknown as ServerContext;
-    await requireTenantManager(ctx, data.tenantId);
-    const actorIsSuperAdmin = await checkSuperAdmin(ctx.userId);
+  .handler(async ({ data, context }) => addUserToTenantFor(context as unknown as ServerContext, data));
 
-    if (!actorIsSuperAdmin && data.password) {
-      throw new Error("Convites de tenant devem ser enviados por email, sem senha manual");
-    }
-    if (!actorIsSuperAdmin && data.role === "admin") {
-      throw new Error("Apenas o super admin pode definir o admin do tenant");
-    }
+// Body of `addUserToTenant`, exported so the demo guard wiring is unit-testable.
+export async function addUserToTenantFor(
+  ctx: ServerContext,
+  data: z.infer<typeof addUserInput>,
+) {
+  await requireTenantManager(ctx, data.tenantId);
+  await assertTenantNotDemo(data.tenantId);
+  const actorIsSuperAdmin = await checkSuperAdmin(ctx.userId);
 
-    const email = data.email.trim().toLowerCase();
-    let user = await findAuthUserByEmail(email);
-    let created = false;
+  if (!actorIsSuperAdmin && data.password) {
+    throw new Error("Convites de tenant devem ser enviados por email, sem senha manual");
+  }
+  if (!actorIsSuperAdmin && data.role === "admin") {
+    throw new Error("Apenas o super admin pode definir o admin do tenant");
+  }
 
-    if (!user) {
-      const createRes = data.password
-        ? await supabaseAdmin.auth.admin.createUser({
-            email,
-            password: data.password,
-            email_confirm: true,
-            user_metadata: { invited_by: ctx.userId, tenant_id: data.tenantId },
-            app_metadata: { force_password_change: true },
-          })
-        : await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
-            data: { invited_by: ctx.userId, tenant_id: data.tenantId },
-          });
-      if (createRes.error) throw new Error(createRes.error.message);
-      if (!createRes.data.user) throw new Error("Falha ao criar usuário");
-      user = createRes.data.user;
-      created = true;
-    }
+  const email = data.email.trim().toLowerCase();
+  let user = await findAuthUserByEmail(email);
+  let created = false;
 
-    if (!actorIsSuperAdmin && (await checkSuperAdmin(user.id))) {
-      throw new Error("Não é permitido vincular um superadmin global por esta área");
-    }
+  if (!user) {
+    const createRes = data.password
+      ? await supabaseAdmin.auth.admin.createUser({
+          email,
+          password: data.password,
+          email_confirm: true,
+          user_metadata: { invited_by: ctx.userId, tenant_id: data.tenantId },
+          app_metadata: { force_password_change: true },
+        })
+      : await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
+          data: { invited_by: ctx.userId, tenant_id: data.tenantId },
+        });
+    if (createRes.error) throw new Error(createRes.error.message);
+    if (!createRes.data.user) throw new Error("Falha ao criar usuário");
+    user = createRes.data.user;
+    created = true;
+  }
 
-    const { data: existing, error: existingErr } = await db()
-      .from<TenantMemberRow>("user_roles")
-      .select("id,user_id,tenant_id,role,created_at")
-      .eq("tenant_id", data.tenantId)
-      .eq("user_id", user.id)
-      .maybeSingle();
-    if (existingErr) throw new Error(existingErr.message);
+  if (!actorIsSuperAdmin && (await checkSuperAdmin(user.id))) {
+    throw new Error("Não é permitido vincular um superadmin global por esta área");
+  }
 
-    if (existing) {
-      if (existing.role === data.role) return { ok: true, created, existing: true };
-      const { error } = await db()
-        .from("user_roles")
-        .update({ role: data.role })
-        .eq("id", existing.id);
-      if (error) throw new Error(error.message);
-      await auditTenant({
-        tenantId: data.tenantId,
-        actorUserId: ctx.userId,
-        action: "tenant_user.role_changed",
-        entityType: "user_role",
-        entityId: existing.id,
-        before: existing,
-        after: { ...existing, role: data.role, email },
-      });
-      return { ok: true, created, existing: true };
-    }
+  const { data: existing, error: existingErr } = await db()
+    .from<TenantMemberRow>("user_roles")
+    .select("id,user_id,tenant_id,role,created_at")
+    .eq("tenant_id", data.tenantId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (existingErr) throw new Error(existingErr.message);
 
-    const { data: membership, error } = await db()
-      .from<TenantMemberRow>("user_roles")
-      .insert({
-        user_id: user.id,
-        tenant_id: data.tenantId,
-        role: data.role,
-      })
-      .select("id,user_id,tenant_id,role,created_at")
-      .single();
+  if (existing) {
+    if (existing.role === data.role) return { ok: true, created, existing: true };
+    const { error } = await db()
+      .from("user_roles")
+      .update({ role: data.role })
+      .eq("id", existing.id);
     if (error) throw new Error(error.message);
-
     await auditTenant({
       tenantId: data.tenantId,
       actorUserId: ctx.userId,
-      action: "tenant_user.added",
+      action: "tenant_user.role_changed",
       entityType: "user_role",
-      entityId: membership?.id ?? user.id,
-      after: { ...membership, email },
-      metadata: { auth_user_created: created },
+      entityId: existing.id,
+      before: existing,
+      after: { ...existing, role: data.role, email },
     });
+    return { ok: true, created, existing: true };
+  }
 
-    return { ok: true, created, existing: false };
+  const { data: membership, error } = await db()
+    .from<TenantMemberRow>("user_roles")
+    .insert({
+      user_id: user.id,
+      tenant_id: data.tenantId,
+      role: data.role,
+    })
+    .select("id,user_id,tenant_id,role,created_at")
+    .single();
+  if (error) throw new Error(error.message);
+
+  await auditTenant({
+    tenantId: data.tenantId,
+    actorUserId: ctx.userId,
+    action: "tenant_user.added",
+    entityType: "user_role",
+    entityId: membership?.id ?? user.id,
+    after: { ...membership, email },
+    metadata: { auth_user_created: created },
   });
+
+  return { ok: true, created, existing: false };
+}
 
 const updateUserRoleInput = z.object({
   tenantId: dbUuid(),
@@ -686,6 +694,7 @@ export const updateTenantUserRole = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const ctx = context as unknown as ServerContext;
     await requireTenantManager(ctx, data.tenantId);
+    await assertTenantNotDemo(data.tenantId);
     const actorIsSuperAdmin = await checkSuperAdmin(ctx.userId);
 
     if (!actorIsSuperAdmin && data.role === "admin") {
@@ -745,6 +754,7 @@ export const removeUserFromTenant = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const ctx = context as unknown as ServerContext;
     await requireTenantManager(ctx, data.tenantId);
+    await assertTenantNotDemo(data.tenantId);
 
     const { data: memberships, error: listErr } = await db()
       .from<TenantMemberRow[]>("user_roles")

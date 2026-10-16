@@ -44,6 +44,14 @@ beforeEach(() => {
     data: superAdmins.has(String(args._user_id)),
     error: null,
   }));
+  // Demo-action guard (Task 7): every tenant used below must resolve to a
+  // known, non-demo row, or `assertTenantNotDemo` fails closed.
+  fake.admin
+    .rows("tenants")
+    .push(
+      { id: TENANT_A, status: "active", is_demo: false },
+      { id: TENANT_B, status: "active", is_demo: false },
+    );
   evo.mockReset();
   evo.mockResolvedValue([{ name: "casa-a", token: "instance-token" }]);
   vi.stubEnv("EVOLUTION_API_URL", "http://127.0.0.1:9");
@@ -65,6 +73,9 @@ describe("configureEvolutionWebhook (SEC-13)", () => {
   });
 
   it("registers the secret as a header, never in the URL, and never returns it", async () => {
+    fake.admin
+      .rows("whatsapp_sessions")
+      .push({ id: SESSION_A, tenant_id: TENANT_A, instance_name: "casa-a" });
     const res = await configureEvolutionWebhookFor("super-user", "casa-a");
     expect(JSON.stringify(res)).not.toContain(SECRET);
     expect(JSON.stringify(res)).not.toContain(GLOBAL_KEY);
@@ -83,6 +94,9 @@ describe("configureEvolutionWebhook (SEC-13)", () => {
   });
 
   it("does not fall back to EVOLUTION_API_KEY when the webhook secret is unset", async () => {
+    fake.admin
+      .rows("whatsapp_sessions")
+      .push({ id: SESSION_A, tenant_id: TENANT_A, instance_name: "casa-a" });
     vi.stubEnv("EVOLUTION_WEBHOOK_SECRET", "");
     await expect(configureEvolutionWebhookFor("super-user", "casa-a")).rejects.toThrow(
       /EVOLUTION_WEBHOOK_SECRET/,

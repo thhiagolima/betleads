@@ -4,6 +4,7 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { evolutionFetch } from "./evolution.server";
 import { assertSuperAdmin } from "./provider-governance.server";
+import { assertTenantNotDemo } from "./tenant-access.server";
 import { evolutionWebhookSetBody, evolutionWebhookUrl } from "./whatsapp-evolution-auth.server";
 
 /** Rows created before multi-tenancy carry this default tenant id. */
@@ -43,6 +44,16 @@ async function fingerprintKey(key: string): Promise<string> {
  */
 export async function configureEvolutionWebhookFor(userId: string, instanceName: string) {
   await assertSuperAdmin(userId);
+  // Super admin can target any instance, so the demo tenant is blocked here
+  // too: resolve the owning tenant of this instance (no row, no owner, or a
+  // demo tenant all fail closed via `assertTenantNotDemo`).
+  const { data: owner, error: ownerError } = await supabaseAdmin
+    .from("whatsapp_sessions")
+    .select("tenant_id")
+    .eq("instance_name", instanceName)
+    .maybeSingle();
+  if (ownerError) throw new Error(ownerError.message);
+  await assertTenantNotDemo((owner as { tenant_id?: string } | null)?.tenant_id ?? "");
   // Throws a clear error when EVOLUTION_WEBHOOK_SECRET is not configured.
   const body = evolutionWebhookSetBody(EVOLUTION_WEBHOOK_EVENTS);
   try {
@@ -130,6 +141,7 @@ export async function deleteWhatsappSessionFor(
     .maybeSingle();
   if (readError) throw new Error(readError.message);
   if (!session) throw new Error("Sessão não encontrada");
+  await assertTenantNotDemo(session.tenant_id as string);
 
   const tenantScope = Array.from(new Set([session.tenant_id as string, LEGACY_TENANT_ID]));
 

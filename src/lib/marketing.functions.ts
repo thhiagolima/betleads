@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import type { Json } from "@/integrations/supabase/types";
+import { assertTenantNotDemo } from "@/lib/tenant-access.server";
 
 const overviewSchema = z.object({
   days: z.number().int().min(1).max(90).default(7),
@@ -620,6 +621,7 @@ export const saveMarketingIntegration = createServerFn({ method: "POST" })
   .inputValidator((input) => saveIntegrationSchema.parse(input))
   .handler(async ({ data, context }) => {
     const tenantId = await resolveTenantId(context.supabase);
+    await assertTenantNotDemo(tenantId);
     const db = context.supabase as unknown as DbClient;
     const { data: row, error } = await db
       .from("marketing_integrations")

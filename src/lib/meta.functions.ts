@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { decryptMetaToken, encryptMetaToken, metaTokenHint } from "@/lib/meta-token.server";
+import { assertTenantNotDemo } from "@/lib/tenant-access.server";
 
 const syncSchema = z.object({
   days: z.number().int().min(1).max(90).default(7),
@@ -270,6 +271,7 @@ export const connectMetaSystemUserToken = createServerFn({ method: "POST" })
   .inputValidator((input) => systemTokenSchema.parse(input))
   .handler(async ({ data, context }) => {
     const tenantId = await resolveTenantId(context.supabase);
+    await assertTenantNotDemo(tenantId);
     const token = data.accessToken;
     const [metaUser, metaApp, permissions, adAccounts] = await Promise.all([
       fetchMetaJson<MetaUser>("/me", { access_token: token, fields: "id,name" }),
@@ -455,6 +457,7 @@ export const updateMetaAccountSelection = createServerFn({ method: "POST" })
   .inputValidator((input) => metaAccountSelectionSchema.parse(input))
   .handler(async ({ data, context }) => {
     const tenantId = await resolveTenantId(context.supabase);
+    await assertTenantNotDemo(tenantId);
     const { data: accounts, error: accountsError } = await (supabaseAdmin as any)
       .from("meta_ad_accounts")
       .select("id,connection_id,meta_connections!inner(status)")
@@ -515,6 +518,7 @@ export const validateMetaConnection = createServerFn({ method: "POST" })
   .inputValidator((input) => metaConnectionSchema.parse(input))
   .handler(async ({ data, context }) => {
     const tenantId = await resolveTenantId(context.supabase);
+    await assertTenantNotDemo(tenantId);
     const { data: connection, error: connectionError } = await (supabaseAdmin as any)
       .from("meta_connections")
       .select("id,encrypted_access_token,access_token,app_id,business_id,status")
@@ -589,6 +593,7 @@ export const disconnectMetaConnection = createServerFn({ method: "POST" })
   .inputValidator((input) => metaConnectionSchema.parse(input))
   .handler(async ({ data, context }) => {
     const tenantId = await resolveTenantId(context.supabase);
+    await assertTenantNotDemo(tenantId);
     const { data: connection, error: connectionError } = await (supabaseAdmin as any)
       .from("meta_connections")
       .select("id")

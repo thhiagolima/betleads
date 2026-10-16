@@ -4,7 +4,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import type { Json } from "@/integrations/supabase/types";
-import { assertTenantCanOpenBilling } from "@/lib/tenant-access.server";
+import { assertTenantCanOpenBilling, assertTenantNotDemo } from "@/lib/tenant-access.server";
 import { dbUuid } from "@/lib/zod-helpers";
 
 type ServerContext = {
@@ -206,6 +206,7 @@ export const createSmsCreditCheckout = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const ctx = context as ServerContext;
     const tenantId = await resolveTenantId(ctx, data.tenantId);
+    await assertTenantNotDemo(tenantId);
     await assertTenantCanOpenBilling(tenantId);
     const { data: result, error } = await looseDb(ctx.supabase).rpc("create_sms_credit_checkout", {
       _tenant: tenantId,
