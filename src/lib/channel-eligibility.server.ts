@@ -1,6 +1,10 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { isSuppressed } from "./email-deliverability.server";
-import { getChannelConsentStatus, isChannelRevoked } from "./consent.server";
+import {
+  getChannelConsentStatus,
+  isChannelRevoked,
+  normalizeConsentSubject,
+} from "./consent.server";
 import { normalizeBrazilianPhone } from "./phone-normalization";
 
 export type Channel = "sms" | "email" | "call" | "whatsapp";
@@ -29,21 +33,23 @@ export function normalizeEmail(raw: string | null | undefined): string | null {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null;
 }
 
-async function isSmsSuppressed(tenantId: string, phone: string): Promise<boolean> {
-  try {
-    const { data, error } = await supabaseAdmin
-      .from("sms_suppressions")
-      .select("id")
-      .eq("tenant_id", tenantId)
-      .eq("phone", phone)
-      .maybeSingle();
-    if (error) throw error;
-    return Boolean(data);
-  } catch {
-    // A tabela entra via migration. Enquanto ela ainda nao foi aplicada,
-    // preservamos o envio existente em vez de derrubar o orquestrador.
-    return false;
-  }
+/**
+ * sms_suppressions stores digits only (CHECK phone ~ '^[0-9]{10,20}$'), the
+ * same form normalizeConsentSubject gives ("5521980194445"), never "+55..."
+ * (QA-04). Fail-closed (QA-03): a lookup error throws, so the caller does not
+ * enroll/send and the run is retried.
+ */
+export async function isSmsSuppressed(tenantId: string, phone: string): Promise<boolean> {
+  const subject = normalizeConsentSubject("sms", phone);
+  if (!subject) return false;
+  const { data, error } = await supabaseAdmin
+    .from("sms_suppressions")
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .eq("phone", subject)
+    .maybeSingle();
+  if (error) throw new Error(`Falha ao consultar supressao de SMS: ${error.message}`);
+  return Boolean(data);
 }
 
 /** Fonte unica de elegibilidade para a entrada nos canais automatizados. */

@@ -83,13 +83,14 @@ export const saveChannelConsent = createServerFn({ method: "POST" })
     const tenantId = await resolveOperationalTenantId(context.supabase);
     const subject = normalizeConsentSubject(data.channel, data.subject);
     const db = context.supabase as any;
-    const { data: previous } = await db
+    const { data: previous, error: previousError } = await db
       .from("channel_consents")
       .select("id,status")
       .eq("tenant_id", tenantId)
       .eq("channel", data.channel)
       .eq("subject", subject)
       .maybeSingle();
+    if (previousError) throw new Error(previousError.message);
     const { data: saved, error } = await db
       .from("channel_consents")
       .upsert(
@@ -117,7 +118,7 @@ export const saveChannelConsent = createServerFn({ method: "POST" })
       data.source,
     );
     const { data: user } = await context.supabase.auth.getUser();
-    await (supabaseAdmin as any).from("channel_consent_audit").insert({
+    const { error: auditError } = await (supabaseAdmin as any).from("channel_consent_audit").insert({
       tenant_id: tenantId,
       consent_id: saved.id,
       channel: data.channel,
@@ -128,6 +129,7 @@ export const saveChannelConsent = createServerFn({ method: "POST" })
       source: data.source,
       actor_user_id: user.user?.id ?? null,
     });
+    if (auditError) throw new Error(`Falha ao auditar consentimento: ${auditError.message}`);
     return { id: saved.id };
   });
 
@@ -165,7 +167,7 @@ export const importChannelConsents = createServerFn({ method: "POST" })
       );
       imported++;
     }
-    await (supabaseAdmin as any).from("channel_consent_audit").insert(
+    const { error: auditError } = await (supabaseAdmin as any).from("channel_consent_audit").insert(
       data.rows.map((row) => ({
         tenant_id: tenantId,
         channel: row.channel,
@@ -175,5 +177,6 @@ export const importChannelConsents = createServerFn({ method: "POST" })
         source: `import:${row.source}`,
       })),
     );
+    if (auditError) throw new Error(`Falha ao auditar importacao: ${auditError.message}`);
     return { imported };
   });
