@@ -234,3 +234,15 @@ export function activationTriggerConfig(
   }
   return config;
 }
+
+/** Whether a player belongs to the journey's audience (entry and every step, E-06). */
+export function audienceMatches(
+  journey: { entry_rules?: Record<string, unknown> | null },
+  player: { status?: string | null; vip?: boolean | null },
+) {
+  const audience = String(journey.entry_rules?.audience ?? "all_active");
+  if (audience === "manual") return false;
+  if (audience === "all_active" && player.status !== "ativo") return false;
+  if (audience === "vip" && player.vip !== true) return false;
+  return true;
+}

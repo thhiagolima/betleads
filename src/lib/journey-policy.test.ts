@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   activationAsksEntryScope,
+  audienceMatches,
   activationTriggerConfig,
   defaultEntryScope,
   inactivityUpperBoundHours,
@@ -181,5 +182,22 @@ describe("activation entry scope (E-02)", () => {
       config,
     );
     expect(activationTriggerConfig("inactivity", config, undefined, now)).toEqual(config);
+  });
+});
+
+describe("audienceMatches (E-06)", () => {
+  it("follows the journey audience", () => {
+    expect(
+      audienceMatches({ entry_rules: { audience: "system:all-leads" } }, { status: "inativo" }),
+    ).toBe(true);
+    expect(
+      audienceMatches({ entry_rules: { audience: "all_active" } }, { status: "inativo" }),
+    ).toBe(false);
+    expect(
+      audienceMatches({ entry_rules: { audience: "vip" } }, { status: "ativo", vip: false }),
+    ).toBe(false);
+    expect(audienceMatches({ entry_rules: { audience: "manual" } }, { status: "ativo" })).toBe(
+      false,
+    );
   });
 });

@@ -559,7 +559,7 @@ export function JourneyEditor({
               if (nextTrigger === "nivel_alterado") {
                 setConflictFamily("progressao_niveis");
                 setConflictPolicy("exclusive");
-                setJourneyPriority(2);
+                setJourneyPriority(4);
                 setExitRules((current) => ({ ...current, level_changed: true }));
               }
             }}
@@ -619,7 +619,6 @@ export function JourneyEditor({
               { key: "first_deposit", label: "Fez primeiro depósito" },
               { key: "login", label: "Fez login" },
               { key: "voltou_jogar", label: "Voltou a jogar" },
-              { key: "level_changed", label: "Mudou de nível" },
             ].map((rule) => (
               <label key={rule.key} className="flex items-center gap-2">
                 <input
@@ -633,6 +632,12 @@ export function JourneyEditor({
               </label>
             ))}
           </div>
+          {trigger === "nivel_alterado" && (
+            <p className="mt-3 text-xs text-muted-foreground">
+              Jornadas de nível encerram sozinhas quando o jogador muda de nível, e ele entra na
+              jornada do novo nível a partir da primeira etapa.
+            </p>
+          )}
         </section>
         <section className="rounded-lg border p-4 text-sm">
           <JourneyFieldTitle

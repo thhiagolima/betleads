@@ -36,6 +36,7 @@ import {
 import { resolveDispatchWorkerConfig } from "./rate-limit/worker-config";
 import { brtDayStart } from "./tz";
 import {
+  audienceMatches,
   inactivityBandConfig,
   journeyEntryKey,
   nextJourneyWindowOpen,
@@ -147,116 +148,6 @@ export async function matchFinancialTrigger(
   const { data, error } = await query.maybeSingle();
   if (error || !data) return { matches: false, occurrence: "none" };
   return { matches: true, occurrence: String(data.id) };
-}
-
-async function enrollEligibleJourneyPlayers(limit = 500) {
-  const { data: journeys } = await db
-    .from("journeys")
-    .select("*")
-    .eq("status", "active")
-    .order("tenant_id", { ascending: true })
-    .order("name", { ascending: true })
-    .limit(500);
-  if (!journeys?.length) return 0;
-  const activeJourneys = journeys as Array<
-    JourneyRow & {
-      tenant_id: string;
-      trigger_type: string;
-      trigger_config: Record<string, unknown>;
-      version: number;
-      entry_rules: Record<string, unknown>;
-    }
-  >;
-  const tenantIds = [...new Set(activeJourneys.map((journey) => journey.tenant_id))];
-  const perTenantLimit = Math.max(1, Math.floor(limit / tenantIds.length));
-  const minute = Math.floor(Date.now() / 60_000);
-  const playerBatches = await Promise.all(
-    tenantIds.map(async (tenantId, tenantIndex) => {
-      const { count, error: countError } = await supabaseAdmin
-        .from("players")
-        .select("id", { count: "exact", head: true })
-        .eq("tenant_id", tenantId);
-      if (countError) throw new Error(countError.message);
-      const total = count ?? 0;
-      if (!total) return [];
-      const pageCount = Math.max(1, Math.ceil(total / perTenantLimit));
-      const page = (minute + tenantIndex) % pageCount;
-      const from = page * perTenantLimit;
-      const to = Math.min(total - 1, from + perTenantLimit - 1);
-      const { data, error } = await supabaseAdmin
-        .from("players")
-        .select("*")
-        .eq("tenant_id", tenantId)
-        .order("id", { ascending: true })
-        .range(from, to);
-      if (error) throw new Error(error.message);
-      return data ?? [];
-    }),
-  );
-  const players = playerBatches.flat();
-  let enrolled = 0;
-  for (const journey of activeJourneys) {
-    // Jornadas manuais só podem receber matrículas por uma API auditada. Até
-    // essa API existir, o worker nunca pode transformar uma entrada manual em
-    // uma varredura automática da base.
-    if (journey.trigger_type === "manual") continue;
-    for (const player of players ?? []) {
-      if (player.tenant_id !== journey.tenant_id) continue;
-      const audience = String(journey.entry_rules?.audience ?? "all_active");
-      if (audience === "all_active" && player.status !== "ativo") continue;
-      if (audience === "vip" && !player.vip) continue;
-      if (audience === "manual") continue;
-      const financialMatch = await matchFinancialTrigger(
-        journey,
-        player as Record<string, unknown>,
-      );
-      const matches = financialMatch
-        ? financialMatch.matches
-        : journey.trigger_type === "inactivity"
-          ? qualifiesForInactivity(player as Record<string, unknown>, journey.trigger_config ?? {})
-          : detectTriggersForPlayer(player as never).includes(journey.trigger_type as never);
-      if (!matches) continue;
-      if (journey.entry_rules?.reentry === "after_cooldown") {
-        const hours = Math.max(
-          1,
-          Number(journey.entry_rules.reentry_cooldown_hours ?? journey.cooldown_hours ?? 24),
-        );
-        const { data: previous } = await db
-          .from("journey_enrollments")
-          .select("created_at")
-          .eq("journey_id", journey.id)
-          .eq("player_id", player.id)
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        if (previous && Date.parse(previous.created_at) > Date.now() - hours * 3600_000) continue;
-      }
-      const occurrence =
-        financialMatch?.occurrence ??
-        triggerOccurrence(
-          journey.trigger_type,
-          player as Record<string, unknown>,
-          journey.trigger_config ?? {},
-        );
-      const { error } = await db.from("journey_enrollments").insert({
-        tenant_id: journey.tenant_id,
-        journey_id: journey.id,
-        journey_version: journey.version,
-        player_id: player.id,
-        entry_key: journeyEntryKey(
-          journey.trigger_type,
-          journey.entry_rules ?? {},
-          String(occurrence),
-        ),
-        metadata: {
-          trigger: journey.trigger_type,
-          deposited_before_entry: Number(player.total_depositado ?? 0),
-        },
-      });
-      if (!error) enrolled++;
-    }
-  }
-  return enrolled;
 }
 
 async function event(
@@ -436,6 +327,9 @@ async function stillMatchesJourneyEntry(
     return true;
   const player = await playerFor(enrollment);
   if (!player) return false;
+  // E-06: a player who left the journey's audience (e.g. no longer active or
+  // no longer VIP) stops receiving it.
+  if (!audienceMatches({ entry_rules: journey.entry_rules ?? {} }, player as never)) return false;
   const triggerConfig = journey.trigger_config ?? {};
   const eventMatch = await matchFinancialTrigger(
     {

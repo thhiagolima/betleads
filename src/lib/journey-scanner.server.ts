@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { startJobRun, type JobRunHandle } from "./observability/job-monitor.server";
 import { captureServerException } from "./observability/sentry.server";
 import {
+  audienceMatches,
   inactivityBandConfig,
   journeyEntryKey,
   pixExpiryHours,
@@ -83,14 +84,6 @@ export const PLAYER_MATCH_COLUMNS = [
   "last_cashback_paid_at",
 ].join(",");
 
-function audienceMatches(journey: Journey, player: Player) {
-  const audience = String(journey.entry_rules?.audience ?? "all_active");
-  if (audience === "manual") return false;
-  if (audience === "all_active" && player.status !== "ativo") return false;
-  if (audience === "vip" && player.vip !== true) return false;
-  return true;
-}
-
 function optionalStartAt(journey: Pick<Journey, "trigger_config">) {
   const value = String(journey.trigger_config?.start_after ?? "");
   const parsed = Date.parse(value);
@@ -122,7 +115,9 @@ async function financialOccurrences(journey: Journey, players: Player[]) {
     if (startAt != null) query = query.gte("created_at", new Date(startAt).toISOString());
     // D-6: a pending PIX older than the expiry no longer drives the journey.
     const expiryHours =
-      journey.trigger_type === "pix_gerado_nao_pago" ? pixExpiryHours(journey.trigger_config) : null;
+      journey.trigger_type === "pix_gerado_nao_pago"
+        ? pixExpiryHours(journey.trigger_config)
+        : null;
     if (expiryHours != null)
       query = query.gte("created_at", new Date(Date.now() - expiryHours * 3600_000).toISOString());
     const { data, error } = await query;
