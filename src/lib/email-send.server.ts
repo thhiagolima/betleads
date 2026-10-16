@@ -130,8 +130,24 @@ export async function sendInfobipEmail(input: SendEmailInput): Promise<SendEmail
         temporary: false,
       };
     }
-  } catch {
-    /* fail open */
+  } catch (error) {
+    // Fail-closed (QA-03): without a consent answer the e-mail is NOT sent.
+    // temporary + not_sent: the provider was never called, so every caller
+    // re-queues the item (campaign/flow log "pending", journey retry policy).
+    console.warn("[email-send] consent check failed; send deferred", {
+      tenantId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return {
+      ok: false,
+      status: 0,
+      body: {
+        error: `consent_check_failed: ${error instanceof Error ? error.message : String(error)}`,
+      },
+      idempotencyKey,
+      temporary: true,
+      errorKind: "not_sent",
+    };
   }
 
   const { html: augmentedHtml } = await augmentEmailHtml(input.html, { email: input.to, tenantId });
