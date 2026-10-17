@@ -12,6 +12,8 @@ const state = vi.hoisted(() => ({
   tables: {} as Record<string, Row[]>,
   accesses: [] as Array<{ table: string; op: string; args: unknown[] }>,
   sends: 0,
+  // Tables whose reads fail (PostgREST error), to test fail-closed paths.
+  failingTables: new Set<string>(),
 }));
 
 vi.mock("@/integrations/supabase/client.server", () => {
@@ -25,18 +27,28 @@ vi.mock("@/integrations/supabase/client.server", () => {
   function from(table: string) {
     const filters: Array<(row: Row) => boolean> = [];
     let write: "update" | "insert" | "upsert" | null = null;
+    let patch: Row | null = null;
     const log = (op: string, args: unknown[]) => state.accesses.push({ table, op, args });
     const local = (c: string) => !c.includes(".");
     const run = () => (state.tables[table] ?? []).filter((r) => filters.every((f) => f(r)));
     const result = () => {
       if (write === "insert") return { data: { id: `${table}-new` }, error: null, count: 0 };
+      if (write === "update" && patch) for (const row of run()) Object.assign(row, patch);
       if (write) return { data: null, error: null, count: 0 };
+      if (state.failingTables.has(table)) {
+        return { data: null, error: { message: `${table} unavailable` }, count: null };
+      }
       const rows = run();
       return { data: rows, error: null, count: rows.length };
     };
     const builder: any = {
       select: (...a: unknown[]) => (log("select", a), builder),
-      update: (...a: unknown[]) => (log("update", a), (write = write ?? "update"), builder),
+      update: (...a: unknown[]) => (
+        log("update", a),
+        (write = write ?? "update"),
+        (patch = a[0] as Row),
+        builder
+      ),
       insert: (...a: unknown[]) => (log("insert", a), (write = "insert"), builder),
       upsert: (...a: unknown[]) => (
         log("upsert", a),
@@ -133,6 +145,7 @@ beforeEach(() => {
   __resetDemoTenantCacheForTests();
   state.accesses = [];
   state.sends = 0;
+  state.failingTables = new Set();
   state.tables = {
     tenants: [
       { id: DEMO, status: "active", is_demo: true, crm_model: null },
@@ -142,6 +155,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   delete process.env.SHORTIO_API_KEY;
 });
@@ -154,6 +168,15 @@ describe("orchestrate", () => {
     const tables = new Set(state.accesses.map((a) => a.table));
     expect([...tables]).toEqual(["tenants"]);
     expect(touched((a) => a.op === "update" || a.op === "insert")).toEqual([]);
+  });
+
+  it("fails closed when the tenant lookup errors: throws, touching nothing else", async () => {
+    state.failingTables.add("tenants");
+    await expect(orchestrate({ mode: "execute", tenantId: NORMAL })).rejects.toThrow(
+      /tenants unavailable/,
+    );
+    const tables = new Set(state.accesses.map((a) => a.table));
+    expect([...tables]).toEqual(["tenants"]);
   });
 });
 
@@ -271,6 +294,43 @@ describe("queue workers exclude demo tenants before reading their queues", () =>
     expect(inWindow).toEqual({ processed: 0, sent: 0 });
     expect(touched((a) => a.table === "flow_leads" && a.op === "update")).toEqual([]);
     expect(touched((a) => a.table === "flow_leads" && a.op === "not")).toHaveLength(1);
+  });
+
+  it("runDispatcher out of the operational window postpones only non-demo flow_leads", async () => {
+    // 03:00 in São Paulo, window 08:00-20:00 -> out of window.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-17T06:00:00Z"));
+    state.tables.antiban_settings = [
+      {
+        delay_min_seconds: 5,
+        delay_max_seconds: 10,
+        hourly_limit: 100,
+        daily_limit: 1000,
+        window_start: "08:00",
+        window_end: "20:00",
+        randomization_enabled: false,
+        smart_suppression_enabled: false,
+        auto_pause_enabled: false,
+        warmup_enabled: false,
+        warmup_initial_daily: 0,
+        warmup_days: 0,
+      },
+    ];
+    const due = "2026-10-17T05:00:00.000Z";
+    state.tables.flow_leads = [
+      { id: "fl-demo", tenant_id: DEMO, status: "pending", next_run_at: due },
+      { id: "fl-normal", tenant_id: NORMAL, status: "pending", next_run_at: due },
+    ];
+
+    const result = await runDispatcher();
+
+    expect(result).toMatchObject({ skipped: "out-of-window" });
+    const [demoLead, normalLead] = state.tables.flow_leads;
+    expect(demoLead.next_run_at).toBe(due);
+    expect(normalLead.next_run_at).not.toBe(due);
+    expect(touched((a) => a.table === "flow_leads" && a.op === "not")).toEqual([
+      { table: "flow_leads", op: "not", args: ["tenant_id", "in", `(${DEMO})`] },
+    ]);
   });
 
   it("evaluateAllPlayers never evaluates demo players", async () => {

@@ -7,7 +7,7 @@
 --
 -- Each function below is the LATEST definition (last migration, lexical
 -- order) copied verbatim; the only change is the demo filter on the claimed /
--- iterated set:
+-- iterated / updated / inserted / deleted set:
 --   * row queues:    AND NOT public.is_demo_tenant(<alias>.tenant_id)
 --                    (null/unknown tenant_id -> false, so legacy rows with a
 --                    null tenant_id stay claimable)
@@ -646,6 +646,7 @@ BEGIN
   WHERE id IN (
     SELECT id FROM public.journey_level_outbox
     WHERE processed_at < now() - interval '30 days'
+      AND NOT public.is_demo_tenant(tenant_id)
     ORDER BY processed_at
     LIMIT 1000
   );
@@ -682,6 +683,233 @@ $$;
 
 REVOKE ALL ON FUNCTION public.process_journey_level_outbox(integer) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.process_journey_level_outbox(integer) TO service_role;
+
+-- ---------------------------------------------------------------------------
+-- 3b. Journey maintenance RPCs the dispatcher/scanner run every tick across
+--     all tenants (lease recovery, priority resume, exit sweep, scan-job
+--     sync): none of them touches a demo tenant's rows.
+-- ---------------------------------------------------------------------------
+-- base: 20261015110000_journey_dispatch_leases_fairness_rate_limits.sql
+CREATE OR REPLACE FUNCTION public.recover_orphaned_journey_claims()
+RETURNS integer
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_count integer;
+BEGIN
+  UPDATE public.journey_step_executions x
+  SET status = 'retrying', error = coalesce(x.error, 'worker_claim_timeout'), completed_at = now()
+  WHERE x.status = 'claimed'
+    AND x.updated_at < now() - interval '10 minutes'
+    AND NOT EXISTS (
+      SELECT 1
+      FROM public.journey_enrollments e
+      WHERE e.id = x.enrollment_id
+        AND e.claimed_at IS NOT NULL
+        AND coalesce(e.lease_expires_at, e.claimed_at + interval '10 minutes') >= now()
+    )
+    AND NOT public.is_demo_tenant(x.tenant_id);
+  GET DIAGNOSTICS v_count = ROW_COUNT;
+
+  UPDATE public.journey_enrollments e
+  SET claimed_at = NULL,
+      claimed_by = NULL,
+      lease_expires_at = NULL,
+      status = 'waiting',
+      next_run_at = least(e.next_run_at, now())
+  WHERE e.claimed_at IS NOT NULL
+    AND coalesce(e.lease_expires_at, e.claimed_at + interval '10 minutes') < now()
+    AND e.status IN ('active', 'waiting')
+    AND NOT public.is_demo_tenant(e.tenant_id);
+  RETURN v_count;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.recover_orphaned_journey_claims() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.recover_orphaned_journey_claims() TO service_role;
+
+-- base: 20261008232000_add_journey_priority_arbitration.sql
+CREATE OR REPLACE FUNCTION public.resume_priority_paused_journeys(p_limit integer DEFAULT 100)
+RETURNS integer
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+AS $$
+DECLARE
+  v_resumed integer := 0;
+BEGIN
+  WITH candidates AS (
+    SELECT paused.id
+    FROM public.journey_enrollments paused
+    WHERE paused.status::text = 'paused_by_priority'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM public.journey_enrollments winner
+        WHERE winner.tenant_id = paused.tenant_id
+          AND winner.player_id = paused.player_id
+          AND winner.journey_id = paused.priority_paused_by_journey_id
+          AND winner.status::text IN ('active', 'waiting')
+      )
+      AND NOT public.is_demo_tenant(paused.tenant_id)
+    ORDER BY paused.priority_paused_at ASC
+    LIMIT GREATEST(1, LEAST(p_limit, 1000))
+    FOR UPDATE SKIP LOCKED
+  ), resumed AS (
+    UPDATE public.journey_enrollments enrollment
+    SET status = 'waiting',
+        next_run_at = now(),
+        priority_paused_at = NULL,
+        priority_pause_reason = NULL,
+        priority_paused_by_journey_id = NULL
+    FROM candidates
+    WHERE enrollment.id = candidates.id
+    RETURNING enrollment.id, enrollment.tenant_id, enrollment.journey_id
+  )
+  INSERT INTO public.journey_events (tenant_id, journey_id, enrollment_id, event_type, detail)
+  SELECT tenant_id, journey_id, id, 'priority_resumed', '{}'::jsonb
+  FROM resumed;
+
+  GET DIAGNOSTICS v_resumed = ROW_COUNT;
+  RETURN v_resumed;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.resume_priority_paused_journeys(integer) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.resume_priority_paused_journeys(integer) TO service_role;
+
+-- base: 20261016100000_journey_end_date.sql
+CREATE OR REPLACE FUNCTION public.sweep_journey_exits(p_limit integer DEFAULT 1000)
+RETURNS integer
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+AS $$
+DECLARE
+  v_count integer;
+BEGIN
+  WITH phone_journeys AS (
+    SELECT j.id FROM public.journeys j WHERE public.journey_requires_phone(j.id)
+  ),
+  evaluated AS (
+    SELECT e.id,
+      CASE
+        WHEN j.status::text = 'archived' THEN 'journey_archived'
+        WHEN j.ends_at IS NOT NULL AND j.ends_at <= now() THEN 'journey_ended'
+        WHEN coalesce(j.exit_rules->>'deposit', '') = 'true'
+             AND p.ultimo_deposito > e.entered_at THEN 'deposit'
+        WHEN coalesce(j.exit_rules->>'first_deposit', '') = 'true'
+             AND p.ftd_em > e.entered_at THEN 'first_deposit'
+        WHEN coalesce(j.exit_rules->>'login', '') = 'true'
+             AND greatest(p.ultimo_login, p.ultimo_jogo) > e.entered_at THEN 'login'
+        WHEN coalesce(j.exit_rules->>'voltou_jogar', '') = 'true'
+             AND p.ultimo_jogo > e.entered_at THEN 'voltou_jogar'
+        WHEN coalesce(j.exit_rules->>'inactivity_over_hours', '') ~ '^[0-9]+(\.[0-9]+)?$'
+             AND (CASE coalesce(j.trigger_config->>'field', 'ultimo_deposito')
+                    WHEN 'ultimo_login' THEN p.ultimo_login
+                    WHEN 'ultimo_jogo' THEN p.ultimo_jogo
+                    ELSE p.ultimo_deposito
+                  END) <= now() - make_interval(
+                    secs => ((j.exit_rules->>'inactivity_over_hours')::numeric * 3600)::double precision)
+          THEN 'inactivity_threshold'
+        WHEN e.journey_id IN (SELECT id FROM phone_journeys)
+             AND coalesce(regexp_replace(p.telefone, '\D', '', 'g'), '') = '' THEN 'no_contact'
+      END AS reason
+    FROM public.journey_enrollments e
+    JOIN public.journeys j ON j.id = e.journey_id
+    LEFT JOIN public.players p ON p.id = e.player_id
+    WHERE e.status IN ('active', 'waiting', 'paused_by_priority')
+      -- Never race a worker that holds the item.
+      AND (e.claimed_at IS NULL
+           OR coalesce(e.lease_expires_at, e.claimed_at + interval '10 minutes') < now())
+      AND NOT public.is_demo_tenant(e.tenant_id)
+  ),
+  picked AS (
+    SELECT ev.id, ev.reason
+    FROM evaluated ev
+    JOIN public.journey_enrollments e ON e.id = ev.id
+    WHERE ev.reason IS NOT NULL
+    LIMIT greatest(1, coalesce(p_limit, 1000))
+    FOR UPDATE OF e SKIP LOCKED
+  ),
+  exited AS (
+    UPDATE public.journey_enrollments e
+    SET status = 'exited', exited_at = now(), exit_reason = picked.reason,
+        claimed_at = NULL, claimed_by = NULL,
+        -- A player without contact may enter again once a phone arrives.
+        entry_key = CASE WHEN picked.reason = 'no_contact'
+                         THEN left(e.entry_key || ':no_contact:' || e.id::text, 160)
+                         ELSE e.entry_key END
+    FROM picked
+    WHERE e.id = picked.id AND e.status IN ('active', 'waiting', 'paused_by_priority')
+    RETURNING e.id, e.tenant_id, e.journey_id, picked.reason
+  ),
+  logged AS (
+    INSERT INTO public.journey_events (tenant_id, journey_id, enrollment_id, event_type, detail)
+    SELECT tenant_id, journey_id, id, 'exited',
+           jsonb_build_object('reason', reason, 'source', 'exit_sweep')
+    FROM exited
+    RETURNING 1
+  )
+  SELECT count(*) INTO v_count FROM logged;
+  RETURN v_count;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.sweep_journey_exits(integer) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.sweep_journey_exits(integer) TO service_role;
+
+-- base: 20261014123000_add_journey_async_scanner.sql
+CREATE OR REPLACE FUNCTION public.sync_journey_scan_jobs()
+RETURNS integer
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_count integer := 0;
+BEGIN
+  INSERT INTO public.journey_scan_jobs AS existing (
+    tenant_id, journey_id, journey_version, mode, status, next_run_at
+  )
+  SELECT journey.tenant_id, journey.id, journey.version, 'backfill', 'queued', now()
+  FROM public.journeys journey
+  WHERE journey.status = 'active'
+    AND journey.trigger_type NOT IN ('manual', 'nivel_alterado')
+    AND NOT public.is_demo_tenant(journey.tenant_id)
+  ON CONFLICT (journey_id, mode) DO UPDATE
+  SET tenant_id = EXCLUDED.tenant_id,
+      journey_version = EXCLUDED.journey_version,
+      status = CASE
+        WHEN existing.journey_version <> EXCLUDED.journey_version THEN 'queued'
+        WHEN existing.status = 'paused' THEN 'queued'
+        ELSE existing.status
+      END,
+      cursor_player_id = CASE
+        WHEN existing.journey_version <> EXCLUDED.journey_version THEN null
+        ELSE existing.cursor_player_id
+      END,
+      next_run_at = CASE
+        WHEN existing.journey_version <> EXCLUDED.journey_version THEN now()
+        ELSE existing.next_run_at
+      END;
+  GET DIAGNOSTICS v_count = ROW_COUNT;
+
+  UPDATE public.journey_scan_jobs job
+  SET status = 'paused', lease_owner = null, lease_expires_at = null
+  WHERE job.status <> 'paused'
+    AND NOT EXISTS (
+      SELECT 1 FROM public.journeys journey
+      WHERE journey.id = job.journey_id
+        AND journey.tenant_id = job.tenant_id
+        AND journey.status = 'active'
+        AND journey.trigger_type NOT IN ('manual', 'nivel_alterado')
+    )
+    AND NOT public.is_demo_tenant(job.tenant_id);
+
+  RETURN v_count;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.sync_journey_scan_jobs() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.sync_journey_scan_jobs() TO service_role;
 
 -- ---------------------------------------------------------------------------
 -- 4. Meta sync queue

@@ -33,7 +33,21 @@ const ROW_FILTERED = [
   "recover_stuck_email_leads",
   "recover_stuck_sms_campaigns",
   "recover_stuck_sms_leads",
+  // Journey maintenance RPCs the dispatcher/scanner call every tick.
+  "recover_orphaned_journey_claims",
+  "resume_priority_paused_journeys",
+  "sweep_journey_exits",
+  "sync_journey_scan_jobs",
 ];
+
+// Functions with more than one statement writing tenant rows: every one of
+// them must carry the filter (claim + retention DELETE, two UPDATEs, upsert +
+// pause UPDATE).
+const MIN_FILTERS: Record<string, number> = {
+  process_journey_level_outbox: 2,
+  recover_orphaned_journey_claims: 2,
+  sync_journey_scan_jobs: 2,
+};
 
 // Functions that iterate `public.tenants` directly: `is_demo` on the tenant row.
 const TENANT_LOOPS = [
@@ -75,6 +89,10 @@ describe("latest worker/cron function definitions skip demo tenants", () => {
   it.each(ROW_FILTERED)("%s filters with is_demo_tenant", (name) => {
     const { file, body } = latestDefinition(name);
     expect(body, `${name} (latest in ${file})`).toMatch(/is_demo_tenant/);
+    const count = body.match(/is_demo_tenant/g)?.length ?? 0;
+    expect(count, `${name}: is_demo_tenant occurrences`).toBeGreaterThanOrEqual(
+      MIN_FILTERS[name] ?? 1,
+    );
   });
 
   it.each(TENANT_LOOPS)("%s skips demo tenants in its tenant loop", (name) => {

@@ -459,11 +459,14 @@ export async function orchestrate(opts: OrchestrateOptions): Promise<Orchestrate
   // touching anything else.
   {
     // `is_demo` is not in the generated Supabase types yet.
-    const { data: tenantRow } = await (supabaseAdmin as any)
+    const { data: tenantRow, error: tenantError } = await (supabaseAdmin as any)
       .from("tenants")
       .select("crm_model,is_demo")
       .eq("id", tenantId)
       .maybeSingle();
+    // Fail closed: without the row we cannot tell a demo tenant apart, so
+    // never run as if it were a normal one.
+    if (tenantError) throw new Error(`orchestrate: tenant lookup failed: ${tenantError.message}`);
     if (tenantRow?.is_demo === true || (tenantRow?.crm_model as string | null) === "CRM_EXPERT") {
       return { run_id: null, totals: emptyTotals(), duration_ms: 0 };
     }
