@@ -4,7 +4,12 @@
 // not (each has rows across the player-linked tables), plus 300 bulk players
 // with one deposit each to measure the sample ratio.
 import type { PGlite } from "@electric-sql/pglite";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+
+// Fixtures are built for a ~50% sample (production default is ~1,000 players).
+vi.hoisted(() => {
+  process.env.DEMO_SAMPLE_CUTOFF = "8000";
+});
 
 import { FIRST_NAMES, LAST_NAMES, demoShortPath, inDemoSample, nameNeedle, remapId } from "./anonymize.mjs";
 import { CLONE_TABLES, REBUILT_TABLES } from "./clone-plan.mjs";

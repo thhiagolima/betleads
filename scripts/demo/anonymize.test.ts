@@ -1,5 +1,10 @@
 // Task 12 — pure anonymization helpers used by the demo clone script.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// Fixtures are built for a ~50% sample (production default is ~1,000 players).
+vi.hoisted(() => {
+  process.env.DEMO_SAMPLE_CUTOFF = "8000";
+});
 
 import {
   demoProviderId,
@@ -277,5 +282,24 @@ describe("inDemoSample (R14)", () => {
     expect(ids.filter((id) => inDemoSample(id))).toEqual(picked);
     for (const id of ids.slice(0, 50)) expect(inDemoSample(id.toUpperCase())).toBe(inDemoSample(id));
     expect(inDemoSample(null)).toBe(false);
+  });
+});
+
+describe("DEMO_SAMPLE_CUTOFF", () => {
+  it("defaults to ~1,000 of ~21k players and accepts only a 4-hex override", async () => {
+    vi.resetModules();
+    const saved = process.env.DEMO_SAMPLE_CUTOFF;
+    process.env.DEMO_SAMPLE_CUTOFF = "not-hex";
+    try {
+      const mod = await import("./anonymize.mjs");
+      expect(mod.DEMO_SAMPLE_CUTOFF).toBe("0c00");
+      const ids = Array.from({ length: 21396 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`);
+      const n = ids.filter((id) => mod.inDemoSample(id)).length;
+      expect(n).toBeGreaterThan(850);
+      expect(n).toBeLessThan(1150);
+    } finally {
+      process.env.DEMO_SAMPLE_CUTOFF = saved;
+      vi.resetModules();
+    }
   });
 });

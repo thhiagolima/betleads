@@ -8,7 +8,7 @@
 // Dry-run does EVERYTHING inside one transaction (including the PII scan),
 // prints source × demo counts per table and rolls back. --apply commits, after
 // uploading the Storage placeholders. Any PII scan hit rolls back and exits 1.
-// Only a deterministic ~50% sample of the players (and the rows hanging from
+// Only a deterministic sample of ~1,000 players (and the rows hanging from
 // them) is cloned (ruling R14); configuration is cloned whole and the daily
 // aggregates are recomputed for the demo.
 //
@@ -118,7 +118,7 @@ async function main() {
       log: (line) => console.log(line),
     });
     const width = Math.max(...result.counts.map((c) => c.table.length));
-    // mode: whole = cloned in full; sample = R14 half-of-the-players sample
+    // mode: whole = cloned in full; sample = R14 ~1,000-player sample
     // (expected = source rows in the sample); rebuilt = aggregate recomputed.
     console.log(`\n${"table".padEnd(width)}   source     demo  expected  mode`);
     for (const c of result.counts)

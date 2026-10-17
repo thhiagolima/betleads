@@ -5,6 +5,7 @@
 import {
   DEMO_DOMAIN,
   DEMO_NAMESPACE,
+  DEMO_SAMPLE_CUTOFF,
   DEMO_SAMPLE_SALT,
   UUID_PATTERN,
   genericRules,
@@ -144,7 +145,7 @@ $f$`,
        from unnest(string_to_array(t, ':')) with ordinality p(c, n)) end
 $f$`,
     `create or replace function pg_temp.demo_in_sample(t text) returns boolean language sql immutable as $f$
-  select case when t is null then false else left(md5(${lit(DEMO_SAMPLE_SALT)} || lower(t)), 1) < '8' end
+  select case when t is null then false else left(md5(${lit(DEMO_SAMPLE_SALT)} || lower(t)), 4) < ${lit(DEMO_SAMPLE_CUTOFF)} end
 $f$`,
     `create or replace function pg_temp.demo_empty_json(j jsonb) returns jsonb language sql immutable as $f$
   select case when j is null then null when jsonb_typeof(j) = 'array' then '[]'::jsonb else '{}'::jsonb end

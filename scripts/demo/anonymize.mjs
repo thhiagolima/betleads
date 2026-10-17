@@ -49,16 +49,22 @@ export function demoUuid(sourceId) {
 }
 
 /**
- * Ruling R14: the demo holds a deterministic ~50% sample of the source players.
- * A value (player id, or the phone / e-mail / event key of a row with no
- * player) is in the sample when the first hex digit of md5("demo-sample:" +
- * lower(value)) is 0–7. Stable across reruns; the SQL twin is
+ * Ruling R14 (resized by the user to ~1,000 players): the demo holds a
+ * deterministic sample of the source players. A value (player id, or the
+ * phone / e-mail / event key of a row with no player) is in the sample when
+ * the first 4 hex digits of md5("demo-sample:" + lower(value)) sort below
+ * DEMO_SAMPLE_CUTOFF. Stable across reruns; the SQL twin is
  * `pg_temp.demo_in_sample` (sql-rewrite.mjs).
  */
 export const DEMO_SAMPLE_SALT = "demo-sample:";
+/** md5 prefix cutoff: 0x0c00 / 0x10000 ≈ 4.7% — about 1,000 of the source's ~21k players (user, 2026-10-17). */
+// DEMO_SAMPLE_CUTOFF env override: the test fixtures are built for "8000" (~50%).
+export const DEMO_SAMPLE_CUTOFF = /^[0-9a-f]{4}$/.test(process.env.DEMO_SAMPLE_CUTOFF ?? "")
+  ? process.env.DEMO_SAMPLE_CUTOFF
+  : "0c00";
 export function inDemoSample(value) {
   if (value === null || value === undefined) return false;
-  return md5(`${DEMO_SAMPLE_SALT}${String(value).toLowerCase()}`)[0] < "8";
+  return md5(`${DEMO_SAMPLE_SALT}${String(value).toLowerCase()}`).slice(0, 4) < DEMO_SAMPLE_CUTOFF;
 }
 
 /** `table` names the column's table for readability; the derivation is per id (see demoUuid). */

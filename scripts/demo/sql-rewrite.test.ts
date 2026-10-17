@@ -1,7 +1,12 @@
 // Task 12 — the SQL rewrite functions must produce exactly what the JS
 // helpers produce (the clone mixes both: SQL for big tables, JS for configs).
 import { PGlite } from "@electric-sql/pglite";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+
+// Fixtures are built for a ~50% sample (production default is ~1,000 players).
+vi.hoisted(() => {
+  process.env.DEMO_SAMPLE_CUTOFF = "8000";
+});
 
 import {
   demoProviderId,

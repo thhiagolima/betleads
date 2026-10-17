@@ -3,7 +3,12 @@
 // tenant are snapshotted before, cloned + reset, and must be byte-identical
 // after; the refusals throw and leave everything untouched.
 import type { PGlite } from "@electric-sql/pglite";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+
+// Fixtures are built for a ~50% sample (production default is ~1,000 players).
+vi.hoisted(() => {
+  process.env.DEMO_SAMPLE_CUTOFF = "8000";
+});
 
 import { remapId } from "./anonymize.mjs";
 import { cloneTenantDemo } from "./clone-core.mjs";
