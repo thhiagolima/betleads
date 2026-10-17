@@ -142,6 +142,7 @@ import {
 } from "@/lib/sms-audience-criteria";
 import { num } from "@/lib/format";
 import { SendWindowCard } from "@/components/send-window-card";
+import { fromBrtInput, toBrtInput } from "@/components/journeys/journey-editor-config";
 
 export const Route = createFileRoute("/sms")({
   head: () => ({
@@ -593,8 +594,8 @@ function SmsCompactWorkspace({
                   </Button>
                 </DemoDisabledTooltip>
                 <p className="text-[11px] text-muted-foreground">
-                  Mensagens de divulgação precisam oferecer saída. Respostas por SMS (como SAIR) ainda
-                  não bloqueiam o número sozinhas: registre o pedido em Consentimentos.
+                  Mensagens de divulgação precisam oferecer saída. Respostas por SMS (como SAIR)
+                  ainda não bloqueiam o número sozinhas: registre o pedido em Consentimentos.
                 </p>
               </CardContent>
             </Card>
@@ -1974,14 +1975,11 @@ function EnvioMassa() {
   const [whenMode, setWhenMode] = useState<"agora" | "agendar">("agora");
   // Ritmo de entrega (SMS por minuto). Padrão rápido.
   const [ritmo, setRitmo] = useState<number>(5000);
-  const defaultScheduleDate = () => {
-    const d = new Date(Date.now() + 60 * 60_000);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  };
-  const defaultScheduleTime = () => {
-    const d = new Date(Date.now() + 60 * 60_000);
-    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-  };
+  // Defaults in Brasília time (now + 1h), whatever the browser's timezone.
+  const defaultScheduleDate = () =>
+    toBrtInput(new Date(Date.now() + 60 * 60_000).toISOString()).slice(0, 10);
+  const defaultScheduleTime = () =>
+    toBrtInput(new Date(Date.now() + 60 * 60_000).toISOString()).slice(11, 16);
   const [scheduleDate, setScheduleDate] = useState<string>(defaultScheduleDate);
   const [scheduleTime, setScheduleTime] = useState<string>(defaultScheduleTime);
   const [audienceOpen, setAudienceOpen] = useState(false);
@@ -2085,7 +2083,7 @@ function EnvioMassa() {
     }
     if (whenMode === "agendar") {
       if (!scheduleDate || !scheduleTime) return toast.error("Escolha data e hora");
-      const scheduledAt = new Date(`${scheduleDate}T${scheduleTime}:00`);
+      const scheduledAt = new Date(fromBrtInput(`${scheduleDate}T${scheduleTime}`) ?? NaN);
       if (!Number.isFinite(scheduledAt.getTime())) return toast.error("Data/hora inválida");
       if (scheduledAt.getTime() < Date.now() + 60_000) {
         return toast.error("O horário deve estar pelo menos 1 minuto no futuro");
@@ -2102,7 +2100,10 @@ function EnvioMassa() {
             ratePerMinute: ritmo,
           },
         });
-        toast.success(`Campanha agendada para ${scheduledAt.toLocaleString("pt-BR")}`, { id: tid });
+        toast.success(
+          `Campanha agendada para ${scheduledAt.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })} (BRT)`,
+          { id: tid },
+        );
         qcMassa.invalidateQueries({ queryKey: ["sms-scheduled-campaigns"] });
         novoRascunho();
       } catch (err) {
@@ -2758,13 +2759,15 @@ function LegacyNewSmsCampaignDialog({
         throw new Error("Preencha a campanha e monte o público");
       if (when === "schedule") {
         if (!scheduledAt) throw new Error("Escolha a data do disparo");
+        if (Date.parse(fromBrtInput(scheduledAt)!) < Date.now() + 60_000)
+          throw new Error("O agendamento deve ter pelo menos um minuto de antecedência.");
         return scheduleFn({
           data: {
             phones,
             content: message,
             campaignName: name,
             route: "iGaming",
-            scheduledAt: new Date(scheduledAt).toISOString(),
+            scheduledAt: fromBrtInput(scheduledAt)!,
             ratePerMinute: 1000,
           },
         });
@@ -2886,11 +2889,15 @@ function LegacyNewSmsCampaignDialog({
               </Button>
             </div>
             {when === "schedule" && (
-              <Input
-                type="datetime-local"
-                value={scheduledAt}
-                onChange={(event) => setScheduledAt(event.target.value)}
-              />
+              <>
+                <Input
+                  type="datetime-local"
+                  value={scheduledAt}
+                  onChange={(event) => setScheduledAt(event.target.value)}
+                  aria-label="Data e hora do agendamento, horário de Brasília"
+                />
+                <p className="text-xs text-muted-foreground">Horário de Brasília (BRT).</p>
+              </>
             )}
           </div>
         </div>

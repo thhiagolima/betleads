@@ -67,7 +67,7 @@ export const getTenantComparison = createServerFn({ method: "GET" })
           const { data: chunk, error } = await db
             .from("crm_results_daily")
             .select(
-              "metric_date,source_type,source_key,source_id,step_position,player_state,sent,failed,cost,recipients,human_clicks,direct_conversions,direct_revenue,influenced_players,influenced_deposits,influenced_revenue",
+              "metric_date,source_type,source_key,source_id,step_position,player_state,sent,failed,cost,recipients,human_clicks,direct_conversions,direct_players,direct_revenue,influenced_players,influenced_deposits,influenced_revenue",
             )
             .eq("tenant_id", tenant.id)
             .gte("metric_date", from)
@@ -106,6 +106,12 @@ export const getTenantComparison = createServerFn({ method: "GET" })
           .at(-1);
         return {
           tenant: tenant.nome,
+          clicks: totals.humanClicks,
+          clickRate: totals.clickRate,
+          directPlayers: totals.directPlayers,
+          conversionRate: totals.conversionRate,
+          costPerConversion: totals.costPerConversion,
+          clickRoi: totals.clickRoi,
           sent: totals.sent,
           cost: totals.cost,
           influencedPlayers: totals.influencedPlayers,

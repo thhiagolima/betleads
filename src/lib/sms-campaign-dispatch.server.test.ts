@@ -12,7 +12,10 @@ import {
 const pid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const phone = (n: number) => `+55119${String(n).padStart(8, "0")}`;
 
-function campaign(recipients: CampaignTarget[], over: Partial<SmsCampaignRow> = {}): SmsCampaignRow {
+function campaign(
+  recipients: CampaignTarget[],
+  over: Partial<SmsCampaignRow> = {},
+): SmsCampaignRow {
   return {
     id: "11111111-1111-4111-8111-111111111111",
     tenant_id: "00000000-0000-4000-8000-000000000001",
@@ -47,7 +50,6 @@ function world(opts: { clockStepMs?: number; budget?: (want: number) => number }
     patches: [] as Record<string, unknown>[],
     unresolved: null as unknown,
     failCursorWrite: false,
-    blockedPlayers: new Set<string>(),
   };
   const deps: CampaignDispatchDeps = {
     now: () => state.clock,
@@ -77,14 +79,6 @@ function world(opts: { clockStepMs?: number; budget?: (want: number) => number }
     },
     async acquireSendBudget(_tenant, want) {
       return opts.budget ? opts.budget(want) : want;
-    },
-    async checkContactLimits(_tenant, playerIds) {
-      return new Map(
-        playerIds.map((id) => [
-          id,
-          { allowed: !state.blockedPlayers.has(id), retryAt: "2026-10-15T13:00:00Z" },
-        ]),
-      );
     },
     async findAcceptedDeliveryKeys(keys) {
       return new Set(keys.filter((k) => state.accepted.has(k)));
@@ -181,7 +175,9 @@ describe("processSmsCampaignTick", () => {
     // Budget exhausted for good (paused/contended): stops after MAX_ZERO_GRANTS empty grants.
     let grants = 0;
     const capped = world({ budget: (want) => (grants++ === 0 ? Math.min(want, 30) : 0) });
-    const r2 = await processSmsCampaignTick(campaign(recipients), capped.deps, { deadline: 45_000 });
+    const r2 = await processSmsCampaignTick(campaign(recipients), capped.deps, {
+      deadline: 45_000,
+    });
     expect(r2.stopReason).toBe("budget");
     expect(r2.sent).toBe(30);
     expect(grants).toBe(1 + MAX_ZERO_GRANTS);
@@ -219,36 +215,6 @@ describe("processSmsCampaignTick", () => {
     expect(paced.state.events.at(-1)).toEqual({ type: "cursor", cursor: r.sent });
   }, 20_000); // simulated clock; CPU-bound key derivation is slow under the full parallel suite
 
-  it("a partial grant cut before a contact-limited recipient keeps going", async () => {
-    const recipients = Array.from({ length: 10 }, (_, i) => ({
-      phone: phone(i),
-      playerId: pid(i + 1),
-    }));
-    const w = world({ budget: (want) => Math.min(want, 2) });
-    w.state.blockedPlayers.add(pid(8));
-    const r = await processSmsCampaignTick(campaign(recipients), w.deps, { deadline: 45_000 });
-    expect(r.sent).toBe(7);
-    expect(r.stopReason).toBe("contact_limit");
-    expect(w.state.events.at(-1)).toEqual({ type: "cursor", cursor: 7 });
-  });
-
-  it("waits for a contact-limited recipient instead of skipping it", async () => {
-    const recipients = Array.from({ length: 10 }, (_, i) => ({
-      phone: phone(i),
-      playerId: pid(i + 1),
-    }));
-    const { state, deps } = world();
-    state.blockedPlayers.add(pid(4));
-    const r = await processSmsCampaignTick(campaign(recipients), deps, { deadline: 45_000 });
-    expect(r.sent).toBe(3);
-    expect(r.stopReason).toBe("contact_limit");
-    expect(lastPatch(state.patches)).toMatchObject({
-      status: "enviando",
-      scheduled_at: "2026-10-15T13:00:00Z",
-    });
-    expect(state.events.at(-1)).toEqual({ type: "cursor", cursor: 3 });
-  });
-
   it("advances the cursor only after the batch was sent; a crash re-sends nothing", async () => {
     const recipients = Array.from({ length: 150 }, (_, i) => ({
       phone: phone(i),
@@ -277,9 +243,7 @@ describe("processSmsCampaignTick", () => {
     state.events.forEach((event, index) => {
       if (event.type !== "cursor") return;
       const sentBefore = new Set(
-        state.events
-          .slice(0, index)
-          .flatMap((e) => (e.type === "send" ? [e.key] : [])),
+        state.events.slice(0, index).flatMap((e) => (e.type === "send" ? [e.key] : [])),
       );
       expect(sentBefore.size).toBeGreaterThanOrEqual(event.cursor);
     });
@@ -359,7 +323,12 @@ describe("processSmsCampaignTick with sendBatch (ENV-10 bulk)", () => {
     const w = batchWorld();
     w.setBehaviour(() => ({ ok: false, retryable: true, error: "Sem resposta do provedor" }));
     const r = await processSmsCampaignTick(campaign(recipients(30)), w.deps, { deadline: 45_000 });
-    expect(r).toMatchObject({ sent: 0, failed: 0, advanced: 0, stopReason: "provider_unavailable" });
+    expect(r).toMatchObject({
+      sent: 0,
+      failed: 0,
+      advanced: 0,
+      stopReason: "provider_unavailable",
+    });
     expect(w.state.patches.some((p) => "sent_cursor" in p)).toBe(false);
     expect(lastPatch(w.state.patches)).toMatchObject({
       status: "enviando",
@@ -406,8 +375,15 @@ describe("processSmsCampaignTick with sendBatch (ENV-10 bulk)", () => {
       return { ok: false, retryable: true, error: "Sem resposta do provedor" };
     });
     const r1 = await processSmsCampaignTick(c, w.deps, { deadline: 45_000 });
-    expect(r1).toMatchObject({ sent: 1, failed: 1, advanced: 2, stopReason: "provider_unavailable" });
-    expect(w.state.patches.filter((p) => "sent_cursor" in p).map((p) => p.sent_cursor)).toEqual([2]);
+    expect(r1).toMatchObject({
+      sent: 1,
+      failed: 1,
+      advanced: 2,
+      stopReason: "provider_unavailable",
+    });
+    expect(w.state.patches.filter((p) => "sent_cursor" in p).map((p) => p.sent_cursor)).toEqual([
+      2,
+    ]);
 
     // Next tick resumes at recipient 3: the retryable ones are sent now.
     w.setBehaviour((key) => {
@@ -427,16 +403,27 @@ describe("processSmsCampaignTick with sendBatch (ENV-10 bulk)", () => {
 describe("processSmsCampaignTick with the SMS provider breaker (incident 15/10/2026)", () => {
   const recipients = (n: number) =>
     Array.from({ length: n }, (_, i) => ({ phone: phone(i), playerId: pid(i + 1) }));
-  const SUSPENDED = "Envio de SMS suspenso: provedor recusou (sem saldo/autenticação) desde 11:38 — tentando novamente às 11:40";
+  const SUSPENDED =
+    "Envio de SMS suspenso: provedor recusou (sem saldo/autenticação) desde 11:38 — tentando novamente às 11:40";
 
   it("breaker open: stops before any send, cursor and counters untouched", async () => {
     const { state, deps } = world();
     deps.providerGate = async () => ({ mode: "open", message: SUSPENDED });
     const r = await processSmsCampaignTick(campaign(recipients(10)), deps, { deadline: 45_000 });
-    expect(r).toMatchObject({ sent: 0, failed: 0, advanced: 0, status: "enviando", stopReason: "provider_unavailable" });
+    expect(r).toMatchObject({
+      sent: 0,
+      failed: 0,
+      advanced: 0,
+      status: "enviando",
+      stopReason: "provider_unavailable",
+    });
     expect(state.sendCalls).toHaveLength(0);
     expect(state.patches.some((p) => "sent_cursor" in p)).toBe(false);
-    expect(lastPatch(state.patches)).toMatchObject({ status: "enviando", last_error: SUSPENDED, locked_by: null });
+    expect(lastPatch(state.patches)).toMatchObject({
+      status: "enviando",
+      last_error: SUSPENDED,
+      locked_by: null,
+    });
   });
 
   it("half-open probe: exactly one recipient is sent, then the tick stops while still open", async () => {
@@ -467,13 +454,21 @@ describe("processSmsCampaignTick with the SMS provider breaker (incident 15/10/2
     deps.send = async ({ deliveryKey }) => {
       state.sendCalls.push(deliveryKey);
       if (++n <= 2) return { ok: true };
-      return { ok: false, retryable: true, providerAccount: true, error: "Short Brasil: erro de autenticacao" };
+      return {
+        ok: false,
+        retryable: true,
+        providerAccount: true,
+        error: "Short Brasil: erro de autenticacao",
+      };
     };
     deps.providerGate = async () => ({ mode: "closed" });
     const c = campaign(recipients(5), { rate_per_minute: 5 });
     const r = await processSmsCampaignTick(c, deps, { deadline: 45_000 });
     expect(r).toMatchObject({ sent: 2, failed: 0, stopReason: "provider_unavailable" });
     expect(state.patches.filter((p) => "sent_cursor" in p).map((p) => p.sent_cursor)).toEqual([2]);
-    expect(lastPatch(state.patches)).toMatchObject({ status: "enviando", last_error: "Short Brasil: erro de autenticacao" });
+    expect(lastPatch(state.patches)).toMatchObject({
+      status: "enviando",
+      last_error: "Short Brasil: erro de autenticacao",
+    });
   });
 });

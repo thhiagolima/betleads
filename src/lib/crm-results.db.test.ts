@@ -21,6 +21,10 @@ const PRICE_MIGRATION = readFileSync(
   resolve(root, "supabase/migrations/20261016200000_sms_price_0059.sql"),
   "utf8",
 );
+const DIRECT_PLAYERS_MIGRATION = readFileSync(
+  resolve(root, "supabase/migrations/20261016210000_crm_direct_players.sql"),
+  "utf8",
+);
 const CAMPAIGN_ID_MIGRATION = readFileSync(
   resolve(root, "supabase/migrations/20261016170000_sms_log_campaign_id.sql"),
   "utf8",
@@ -93,6 +97,7 @@ type Row = {
   recipients: number;
   human_clicks: number;
   direct_conversions: number;
+  direct_players: number;
   direct_revenue: string;
   influenced_players: number;
   influenced_deposits: number;
@@ -127,6 +132,8 @@ beforeAll(async () => {
   `);
   await db.exec(`begin; ${PRICE_MIGRATION}; commit;`);
   await db.exec(`begin; ${PRICE_MIGRATION}; commit;`);
+  await db.exec(`begin; ${DIRECT_PLAYERS_MIGRATION}; commit;`);
+  await db.exec(`begin; ${DIRECT_PLAYERS_MIGRATION}; commit;`);
   await db.exec(`
     insert into tenants values ('${T}');
     insert into players values ('${A}', '${T}', '2026-09-01'), ('${B}', '${T}', '2026-09-01'),
@@ -319,5 +326,18 @@ describe("SMS price R$ 0,059", () => {
       { slug: "pixpgf", sale: "0.059" },
       { slug: "pixreals", sale: "0.059" },
     ]);
+  });
+});
+
+describe("click conversion counts players (B-01)", () => {
+  it("counts one player for one click followed by two deposits", async () => {
+    await db.exec(`
+      insert into conversion_attributions (tenant_id, link_dispatch_id, classification, event_type, monetary_value, occurred_at)
+      values ('${T}', '${LD1}', 'direct', 'deposit_approved', 40, '${at("16:00")}');
+    `);
+    await db.query(`select refresh_crm_results_day($1, $2::date)`, [T, DAY]);
+    const row = (await rows()).find((r) => r.source_key === J1);
+    expect(row).toMatchObject({ human_clicks: 1, direct_conversions: 2, direct_players: 1 });
+    expect(Number(row?.direct_revenue)).toBe(140);
   });
 });

@@ -206,6 +206,91 @@ describe("disabled journey steps", () => {
       confirmedDispatchIds: new Set(),
     });
     expect(result.steps.map((step) => step.stepId)).toEqual(["s0", "s3"]);
-    expect(result.unassigned).toEqual({ deposits: 1, recovered: 7 });
+    // A disabled step keeps its history instead of becoming "unassigned".
+    expect(result.retired).toHaveLength(1);
+    expect(result.retired[0]).toMatchObject({ stepId: "s1", sent: 1, deposits: 1, recovered: 7 });
+    expect(result.unassigned).toEqual({ deposits: 0, recovered: 0 });
+  });
+
+  it("hides disabled steps that never sent nor converted", () => {
+    const result = buildJourneyStepConversions({
+      steps: [
+        { id: "s0", position: 0, step_type: "sms" },
+        { id: "s1", position: 1, step_type: "sms", is_enabled: false },
+      ],
+      dispatches: [],
+      attributions: [],
+      confirmedDispatchIds: new Set(),
+    });
+    expect(result.retired).toEqual([]);
+  });
+
+  it("does not move a disabled step's sends to the enabled step at its position", () => {
+    const result = buildJourneyStepConversions({
+      steps: [
+        { id: "old", position: 0, step_type: "sms", is_enabled: false },
+        { id: "new", position: 0, step_type: "sms" },
+      ],
+      dispatches: [
+        { id: "d1", journey_step_id: "old", journey_step_position: 0, send_status: "sent" },
+        { id: "d2", journey_step_id: "gone", journey_step_position: 0, send_status: "sent" },
+      ],
+      attributions: [],
+      confirmedDispatchIds: new Set(),
+    });
+    expect(result.steps[0]).toMatchObject({ stepId: "new", sent: 1 });
+    expect(result.retired[0]).toMatchObject({ stepId: "old", sent: 1 });
+  });
+});
+
+describe("journey copy rotation", () => {
+  // "Saque pago": a single SMS step drawing one of its copies per withdrawal.
+  const steps = [{ id: "s0", position: 0, step_type: "sms" }];
+  const dispatches = [
+    { id: "d1", idempotency_key: "e1:0", send_status: "sent", journey_step_id: "s0" },
+    { id: "d1b", idempotency_key: "e1:1", send_status: "sent", journey_step_id: "s0" },
+    { id: "d2", idempotency_key: "e2:0", send_status: "sent", journey_step_id: "s0" },
+    { id: "d3", idempotency_key: "e3:0", send_status: "sent", journey_step_id: "s0" },
+    // Sent before the step rotated copies: no copy recorded.
+    { id: "d4", idempotency_key: "e4:0", send_status: "sent", journey_step_id: "s0" },
+  ];
+  const variantByDelivery = new Map([
+    ["e1", 0],
+    ["e2", 2],
+    ["e3", 2],
+  ]);
+  const deposit = (id: string, value: number) => ({
+    link_dispatch_id: id,
+    event_type: "deposit_approved",
+    classification: "direct",
+    monetary_value: value,
+  });
+
+  it("splits sends, clicks and deposits per copy", () => {
+    const result = buildJourneyStepConversions({
+      steps,
+      dispatches,
+      attributions: [deposit("d1b", 20), deposit("d2", 50), deposit("d3", 30), deposit("d4", 5)],
+      confirmedDispatchIds: new Set(["d2"]),
+      variantByDelivery,
+    });
+    const [step] = result.steps;
+    expect(step).toMatchObject({ sent: 4, clicked: 1, deposits: 4, recovered: 105 });
+    expect(step.variants).toEqual([
+      { variant: 0, sent: 1, delivered: 0, clicked: 0, deposits: 1, recovered: 20 },
+      { variant: 2, sent: 2, delivered: 0, clicked: 1, deposits: 2, recovered: 80 },
+    ]);
+    expect(step.withoutVariant).toMatchObject({ sent: 1, deposits: 1, recovered: 5 });
+  });
+
+  it("has no copy split when no copy was recorded", () => {
+    const result = buildJourneyStepConversions({
+      steps,
+      dispatches,
+      attributions: [],
+      confirmedDispatchIds: new Set(),
+    });
+    expect(result.steps[0].variants).toEqual([]);
+    expect(result.steps[0].withoutVariant.sent).toBe(4);
   });
 });

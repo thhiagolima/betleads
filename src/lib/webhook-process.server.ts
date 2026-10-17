@@ -128,7 +128,11 @@ export async function processWebhookEvent(
       string,
       unknown
     >;
-    const eventIso = resolveEventTimestamp(evento, payload, data);
+    // Casas como a Sorte da Bet enviam `{ event, time, user, tracking, amount,
+    // internal_id, ... }`: o player fica em `user`, mas a transação, o
+    // tracking e o instante do evento ficam no topo do payload.
+    const userEnvelope = isUserEnvelope(payload);
+    const eventIso = resolveEventTimestamp(evento, payload, data, userEnvelope);
     // Carrega o modelo de CRM do tenant uma única vez — usado para gatear
     // enrollments automáticos. CRM_EXPERT só aceita entrada via
     // `lead_cadastrado`; demais gatilhos (cashback, segmentos, alertas)
@@ -140,7 +144,7 @@ export async function processWebhookEvent(
       .maybeSingle();
     const tenantCrmModel = (tenantRow?.crm_model as string | null) ?? null;
     const isExpertTenant = tenantCrmModel === "CRM_EXPERT";
-    const tracking = asRecord(data.tracking);
+    const tracking = asRecord(data.tracking ?? (userEnvelope ? payload.tracking : undefined));
     const signupAttribution = asRecord(data.signupAttribution ?? data.signup_attribution);
     const subject = asRecord(payload.subject);
     const utm = resolveUtm(data, tracking, signupAttribution);
@@ -177,6 +181,7 @@ export async function processWebhookEvent(
         data.full_name,
         data.nome,
         data.name,
+        joinName(data.first_name ?? data.firstName, data.last_name ?? data.lastName),
         asRecord(data.profile).name,
         asRecord(data.user).name,
         asRecord(data.player).name,
@@ -207,9 +212,21 @@ export async function processWebhookEvent(
         signupAttribution.fbclid ? "fb" : undefined,
       ) ?? null;
     const metodo =
-      firstString(data.paymentMethod, data.methodCode, data.metodo, data.method) ?? null;
+      firstString(data.paymentMethod, data.methodCode, data.metodo, data.method) ??
+      (userEnvelope && stringFrom(payload.pix_copy_paste) ? "pix" : null);
+    // No envelope `user`, `data.id` é o player: a transação vem do topo.
+    // `internal_id` é o id da fatura na casa; `external_id`, o do PSP.
+    const envelopeTransactionId = userEnvelope
+      ? firstString(
+          payload.internal_id,
+          payload.transaction_id,
+          payload.transactionId,
+          payload.external_id,
+        )
+      : undefined;
     const transactionId =
       firstString(
+        envelopeTransactionId,
         data.transactionId,
         data.transaction_id,
         data.referenceId,
@@ -220,7 +237,8 @@ export async function processWebhookEvent(
         payload.deliveryId,
       ) ?? null;
     const providerEventId =
-      firstString(payload.eventId, payload.event_id, data.eventId, data.event_id) ?? null;
+      firstString(payload.eventId, payload.event_id, data.eventId, data.event_id) ??
+      (userEnvelope ? envelopeEventId(payload, data, envelopeTransactionId) : null);
     const providerStatus = firstString(data.status, payload.status) ?? null;
 
     if (providerEventId) {
@@ -369,6 +387,13 @@ export async function processWebhookEvent(
       // Depósitos e saques não podem mascarar filtros como “X dias sem login”.
       if (evento === "login") updates.ultimo_login = eventIso;
       if (evento === "jogo-iniciado") updates.ultimo_jogo = eventIso;
+      // O login do envelope `user` traz o saldo atual da carteira.
+      if (userEnvelope) {
+        const saldo = finiteNumber(payload.balance_brl);
+        const bonus = finiteNumber(payload.balance_bonus);
+        if (saldo !== null) updates.saldo_carteira = saldo;
+        if (bonus !== null) updates.saldo_bonus = bonus;
+      }
 
       if (financialEvent && valor) {
         if (!transactionId) {
@@ -666,7 +691,10 @@ export async function processWebhookEvent(
             const baseAttribution = {
               tenantId, playerId, eventType: conversionEvent, eventId: attributionEventId,
               occurredAt: eventIso, monetaryValue: conversionEvent === "deposit_approved" ? valor : null,
-              isFtd: conversionEvent === "deposit_approved" && data.isFtd === true,
+              isFtd:
+                conversionEvent === "deposit_approved" &&
+                (data.isFtd === true ||
+                  (userEnvelope && finiteNumber(payload.paid_deposits_count) === 1)),
             } as const;
             // The provider identifies the player, while BetLeads owns the
             // click proof. Do not trust query parameters echoed by the casino:
@@ -1181,6 +1209,59 @@ function isSignupEvent(evento: string, payload: Record<string, unknown>): boolea
   return evento === "cadastro" || stringFrom(payload.event) === "auth.signup.success";
 }
 
+function isUserEnvelope(payload: Record<string, unknown>): boolean {
+  return (
+    payload.data === undefined &&
+    payload.player === undefined &&
+    Object.keys(asRecord(payload.user)).length > 0
+  );
+}
+
+function finiteNumber(value: unknown): number | null {
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  if (typeof value === "string" && !value.trim()) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function joinName(first: unknown, last: unknown): string | undefined {
+  const parts = [stringFrom(first), stringFrom(last)].filter(Boolean);
+  return parts.length ? parts.join(" ") : undefined;
+}
+
+/**
+ * O envelope `user` não traz id de evento. Sem ele não há recibo e uma
+ * reentrega duplicaria eventos e sessões, então derivamos um id estável:
+ * por transação nos eventos financeiros, por player + instante nos demais.
+ */
+function envelopeEventId(
+  payload: Record<string, unknown>,
+  data: Record<string, unknown>,
+  transactionId: string | undefined,
+): string | null {
+  const event = stringFrom(payload.event);
+  if (!event) return null;
+  if (transactionId) return `${event}:${transactionId}`;
+  const userId = stringFrom(data.id);
+  const time = stringFrom(payload.time);
+  return userId && time ? `${event}:${userId}:${time}` : null;
+}
+
+const BRASILIA_OFFSET_MS = 3 * 3_600_000;
+const CLOCK_SKEW_TOLERANCE_MS = 5 * 60_000;
+
+/**
+ * A Sorte da Bet envia `time` em epoch ms com o relógio de Brasília lido como
+ * UTC (3 h atrás do instante real). Se a soma cair no futuro, a casa passou a
+ * enviar UTC de verdade e o valor é usado como veio.
+ */
+function envelopeTimeToIso(value: unknown): string | null {
+  const ms = finiteNumber(value);
+  if (ms === null || ms <= 0) return null;
+  const shifted = ms + BRASILIA_OFFSET_MS;
+  return new Date(shifted <= Date.now() + CLOCK_SKEW_TOLERANCE_MS ? shifted : ms).toISOString();
+}
+
 function resolveFinancialEvent(
   evento: string,
 ): { kind: "deposit" | "withdrawal"; status: "pendente" | "aprovado" | "falhou" } | null {
@@ -1534,7 +1615,15 @@ function resolveEventTimestamp(
   evento: string,
   payload: Record<string, unknown>,
   data: Record<string, unknown>,
+  userEnvelope = false,
 ): string {
+  if (userEnvelope) {
+    // `data` é o próprio usuário: o `created_at` dele só vale para o cadastro.
+    const signupAt = isSignupEvent(evento, payload) ? stringFrom(data.created_at) : undefined;
+    const signupMs = signupAt ? Date.parse(signupAt) : Number.NaN;
+    if (!Number.isNaN(signupMs)) return new Date(signupMs).toISOString();
+    return envelopeTimeToIso(payload.time) ?? new Date().toISOString();
+  }
   const candidates = [
     evento.includes("aprovado") || evento.includes("concluido") ? data.completedAt : undefined,
     data.completed_at,

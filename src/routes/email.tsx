@@ -147,6 +147,7 @@ import {
   type EmailTrigger,
 } from "@/lib/email-automations.shared";
 import { ArrowDown, ArrowUp, Clock, StopCircle, UserMinus, FlaskConical } from "lucide-react";
+import { fromBrtInput, toBrtInput } from "@/components/journeys/journey-editor-config";
 
 export const Route = createFileRoute("/email")({
   head: () => ({
@@ -288,11 +289,7 @@ const SAIDAS = ["Login", "Depósito", "Primeiro depósito", "Aposta", "Resposta"
 function EmailPage() {
   const navigate = useNavigate();
   const hash = useLocation({ select: (l) => l.hash });
-  const VALID = [
-    "dashboard",
-    "templates",
-    "historico",
-  ] as const;
+  const VALID = ["dashboard", "templates", "historico"] as const;
   const legacySettings = ["remetentes", "smtp", "configuracoes"].includes(hash);
   const current = legacySettings
     ? "dashboard"
@@ -430,7 +427,9 @@ function DashboardTab() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold">Visão geral</h2>
-          <p className="text-xs text-muted-foreground">Métricas operacionais atualizadas em tempo real</p>
+          <p className="text-xs text-muted-foreground">
+            Métricas operacionais atualizadas em tempo real
+          </p>
         </div>
         <DashboardDateRangePicker range={range} onChange={setRange} />
       </div>
@@ -2299,11 +2298,12 @@ function CampanhaDialog({
             <Label className="text-sm">Agendar envio</Label>
           </div>
           {agendar && (
-            <Field label="Agendar para">
+            <Field label="Agendar para (horário de Brasília)">
               <Input
                 type="datetime-local"
-                value={c.agendadoPara ?? ""}
-                onChange={(e) => up("agendadoPara", e.target.value)}
+                value={toBrtInput(c.agendadoPara)}
+                onChange={(e) => up("agendadoPara", fromBrtInput(e.target.value) ?? undefined)}
+                aria-label="Data e hora do agendamento, horário de Brasília"
               />
             </Field>
           )}

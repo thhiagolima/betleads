@@ -2,7 +2,13 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { aggregateCrmResults, compareHoldout, type CrmResultRow } from "./crm-results";
+import {
+  aggregateCrmResults,
+  compareHoldout,
+  stepLabels,
+  type CrmResultRow,
+  type JourneyStepInfo,
+} from "./crm-results";
 import { resolveOperationalTenantId } from "./tenant-access.server";
 
 const PAGE = 1000;
@@ -38,6 +44,32 @@ function periodBounds(days: number, endOffset: number) {
   };
 }
 
+const RESULT_COLUMNS =
+  "metric_date,source_type,source_key,source_id,step_position,player_state,sent,failed,cost,recipients,human_clicks,direct_conversions,direct_players,direct_revenue,influenced_players,influenced_deposits,influenced_revenue";
+
+/** crm_results_daily rows of one tenant between two BRT dates; PostgREST caps at 1,000 per page. */
+async function loadResultRows(db: any, tenantId: string, from: string, to: string) {
+  const rows: CrmResultRow[] = [];
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const { data: chunk, error } = await db
+      .from("crm_results_daily")
+      .select(RESULT_COLUMNS)
+      .eq("tenant_id", tenantId)
+      .gte("metric_date", from)
+      .lte("metric_date", to)
+      .order("metric_date")
+      .order("source_type")
+      .order("source_key")
+      .order("step_position")
+      .order("player_state")
+      .range(page * PAGE, page * PAGE + PAGE - 1);
+    if (error) throw new Error("Não foi possível carregar os resultados do CRM.");
+    rows.push(...((chunk ?? []) as CrmResultRow[]));
+    if (!chunk || chunk.length < PAGE) break;
+  }
+  return rows;
+}
+
 /**
  * Central de Resultados: results of the tenant's journeys and campaigns in the
  * last `days` days (BRT), read from crm_results_daily (refreshed every 10 min).
@@ -50,27 +82,12 @@ export const getCrmResults = createServerFn({ method: "GET" })
     const db = context.supabase as any;
     const { from, to, fromInstant, toInstant } = periodBounds(data.days, data.endOffset);
 
-    // PostgREST caps every response at 1,000 rows: page explicitly.
-    const rows: CrmResultRow[] = [];
-    for (let page = 0; page < MAX_PAGES; page += 1) {
-      const { data: chunk, error } = await db
-        .from("crm_results_daily")
-        .select(
-          "metric_date,source_type,source_key,source_id,step_position,player_state,sent,failed,cost,recipients,human_clicks,direct_conversions,direct_revenue,influenced_players,influenced_deposits,influenced_revenue",
-        )
-        .eq("tenant_id", tenantId)
-        .gte("metric_date", from)
-        .lte("metric_date", to)
-        .order("metric_date")
-        .order("source_type")
-        .order("source_key")
-        .order("step_position")
-        .order("player_state")
-        .range(page * PAGE, page * PAGE + PAGE - 1);
-      if (error) throw new Error("Não foi possível carregar os resultados do CRM.");
-      rows.push(...((chunk ?? []) as CrmResultRow[]));
-      if (!chunk || chunk.length < PAGE) break;
-    }
+    // Same-length period right before this one, for the variation on each KPI.
+    const previous = periodBounds(data.days, data.endOffset + data.days);
+    const [rows, previousRows] = await Promise.all([
+      loadResultRows(db, tenantId, from, to),
+      loadResultRows(db, tenantId, previous.from, previous.to),
+    ]);
 
     const journeyIds = [
       ...new Set(
@@ -80,14 +97,23 @@ export const getCrmResults = createServerFn({ method: "GET" })
       ),
     ];
     const names: Record<string, string> = {};
+    // Readable step names per journey: "2ª mensagem · +2 dias".
+    const steps: Record<string, Record<number, string>> = {};
     if (journeyIds.length) {
-      const { data: journeys } = await db
-        .from("journeys")
-        .select("id,name")
-        .eq("tenant_id", tenantId)
-        .in("id", journeyIds);
+      const [{ data: journeys }, { data: journeySteps }] = await Promise.all([
+        db.from("journeys").select("id,name").eq("tenant_id", tenantId).in("id", journeyIds),
+        db
+          .from("journey_steps")
+          .select("journey_id,position,step_type,is_enabled,config")
+          .eq("tenant_id", tenantId)
+          .in("journey_id", journeyIds),
+      ]);
       for (const journey of (journeys ?? []) as Array<{ id: string; name: string }>)
         names[journey.id] = journey.name;
+      const byJourney = new Map<string, JourneyStepInfo[]>();
+      for (const step of (journeySteps ?? []) as Array<JourneyStepInfo & { journey_id: string }>)
+        byJourney.set(step.journey_id, [...(byJourney.get(step.journey_id) ?? []), step]);
+      for (const [journeyId, list] of byJourney) steps[journeyId] = stepLabels(list);
     }
 
     // Data health: freshness and a reconciliation of sends with the raw log.
@@ -217,6 +243,12 @@ export const getCrmResults = createServerFn({ method: "GET" })
       to,
       days: data.days,
       endOffset: data.endOffset,
+      previous: {
+        from: previous.from,
+        to: previous.to,
+        totals: previousRows.length ? aggregateCrmResults(previousRows).totals : null,
+      },
+      stepNames: steps,
       ...result,
       holdout,
       holdoutSetup,
