@@ -69,6 +69,13 @@ export async function listAll(storageBucket, folder) {
 export function supabaseStorage(supabase) {
   return {
     async replace({ prefixes, objects }) {
+      // A bucket that does not exist holds no source file to stand in for
+      // (prod has no email-images bucket): skip it instead of failing.
+      const { data: buckets, error: bucketsError } = await supabase.storage.listBuckets();
+      if (bucketsError) throw new Error(`storage list buckets: ${bucketsError.message}`);
+      const existing = new Set((buckets ?? []).map((b) => b.name));
+      prefixes = prefixes.filter((p) => existing.has(p.bucket));
+      objects = objects.filter((o) => existing.has(o.bucket));
       for (const { bucket, folder } of prefixes) {
         const storageBucket = supabase.storage.from(bucket);
         const files = await listAll(storageBucket, folder);

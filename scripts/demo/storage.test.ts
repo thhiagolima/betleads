@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { supabaseStorage } from "./storage.mjs";
 
-function fakeSupabase(paths: string[]) {
+function fakeSupabase(paths: string[], buckets = ["call-audios", "email-images"]) {
   const objects = new Map(paths.map((p) => [p, true]));
   const uploads: string[] = [];
   const bucket = (name: string) => ({
@@ -32,7 +32,8 @@ function fakeSupabase(paths: string[]) {
       return { error: null };
     },
   });
-  return { client: { storage: { from: bucket } }, objects, uploads };
+  const listBuckets = async () => ({ data: buckets.map((name) => ({ name })), error: null });
+  return { client: { storage: { from: bucket, listBuckets } }, objects, uploads };
 }
 
 describe("supabaseStorage.replace", () => {
@@ -73,6 +74,21 @@ describe("supabaseStorage.replace", () => {
         "email-images/U/keep.png",
       ].sort(),
     );
+    expect(uploads).toEqual(["call-audios/T/demo/placeholder.mp3"]);
+  });
+
+  it("skips a bucket that does not exist (prod has no email-images)", async () => {
+    const { client, uploads } = fakeSupabase(["call-audios/T/demo/old.mp3"], ["call-audios"]);
+    await supabaseStorage(client).replace({
+      prefixes: [
+        { bucket: "call-audios", folder: "T/demo" },
+        { bucket: "email-images", folder: "T" },
+      ],
+      objects: [
+        { bucket: "call-audios", path: "T/demo/placeholder.mp3", bytes: Buffer.from("x"), contentType: "audio/mpeg" },
+        { bucket: "email-images", path: "T/placeholder.png", bytes: Buffer.from("x"), contentType: "image/png" },
+      ],
+    });
     expect(uploads).toEqual(["call-audios/T/demo/placeholder.mp3"]);
   });
 });
