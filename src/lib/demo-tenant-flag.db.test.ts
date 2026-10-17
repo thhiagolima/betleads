@@ -9,10 +9,13 @@ import { resolve } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-const MIGRATION = readFileSync(
-  resolve(__dirname, "../..", "supabase/migrations/20261018100000_demo_tenant_flag.sql"),
-  "utf8",
-);
+// The flag migration plus its hotfix (role is the app_role enum, not text).
+const MIGRATION = [
+  "20261018100000_demo_tenant_flag.sql",
+  "20261018130000_demo_user_guard_role_cast.sql",
+]
+  .map((file) => readFileSync(resolve(__dirname, "../..", "supabase/migrations", file), "utf8"))
+  .join("\n");
 
 const DEMO_TENANT = "00000000-0000-4000-8000-00000000d0d0";
 const NORMAL_TENANT = "00000000-0000-4000-8000-00000000a0a0";
@@ -45,11 +48,13 @@ const SCHEMA = `
     nome text NOT NULL
   );
 
+  -- Same type as production: an enum, so a text-only function signature fails.
+  CREATE TYPE public.app_role AS ENUM ('admin', 'user', 'super_admin', 'owner', 'member', 'gestor');
   CREATE TABLE public.user_roles (
     id uuid PRIMARY KEY,
     user_id uuid NOT NULL,
     tenant_id uuid,
-    role text NOT NULL,
+    role public.app_role NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now()
   );
 
