@@ -33,7 +33,7 @@ beforeAll(async () => {
   db = new PGlite();
   for (const sql of SCHEMA) await db.query(sql);
   await db.query(
-    `insert into public.tenants (id, nome, slug) values ($1, 'Sorte Alta', 'pixpgf'), ($2, 'Casa Demo', 'demo')`,
+    `insert into public.tenants (id, nome, slug) values ($1, 'Sorte Alta', 'pixpgf'), ($2, 'Casa Betleads', 'demo')`,
     [SOURCE, DEMO],
   );
   await db.query(
@@ -175,7 +175,7 @@ describe("scanTenant", () => {
       id: "7a2e3d4c-0000-4000-8000-0000000000a2",
       tenant_id: DEMO,
       to_phone: "+5511900123456",
-      content: "Oi Ana Lima, acesse https://demo.betleads.invalid/dm1a2b3c4d — Casa Demo, 2026-10-16 12:00, R$ 50,00",
+      content: "Oi Ana Lima, acesse https://demo.betleads.invalid/dm1a2b3c4d — Casa Betleads, 2026-10-16 12:00, R$ 50,00",
       status: "sent",
       provider: "shortcode",
       provider_message_id: "demo0123456789abcdef012345",

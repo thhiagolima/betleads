@@ -13,7 +13,7 @@
 import { createHash } from "node:crypto";
 
 export const DEMO_DOMAIN = "demo.betleads.invalid";
-export const DEMO_BRAND = "Casa Demo";
+export const DEMO_BRAND = "Casa Betleads";
 export const DEMO_SLUG = "demo";
 export const FAKE_PHONE_PREFIX = "+5511900";
 
@@ -391,7 +391,7 @@ export function genericRules({ hosts = [], brandNames = [] } = {}) {
       sql: DEMO_DOMAIN,
     });
   }
-  rules.push({ name: "brand-upper", pattern: "SORTE\\s+ALTA", flags: "g", js: "CASA DEMO", sql: "CASA DEMO" });
+  rules.push({ name: "brand-upper", pattern: "SORTE\\s+ALTA", flags: "g", js: "CASA BETLEADS", sql: "CASA BETLEADS" });
   for (const name of brandNames) {
     const trimmed = String(name ?? "").trim();
     if (trimmed.length < 4) continue;
@@ -405,8 +405,8 @@ export function genericRules({ hosts = [], brandNames = [] } = {}) {
   }
   rules.push(
     { name: "brand", pattern: "sorte\\s+alta", flags: "gi", js: DEMO_BRAND, sql: DEMO_BRAND },
-    { name: "brand-sep", pattern: "sorte[._-]alta", flags: "gi", js: "casa-demo", sql: "casa-demo" },
-    { name: "brand-joined", pattern: "sortealta", flags: "gi", js: "casademo", sql: "casademo" },
+    { name: "brand-sep", pattern: "sorte[._-]alta", flags: "gi", js: "casa-betleads", sql: "casa-betleads" },
+    { name: "brand-joined", pattern: "sortealta", flags: "gi", js: "casabetleads", sql: "casabetleads" },
     { name: "slug", pattern: "pixpgf", flags: "gi", js: DEMO_SLUG, sql: DEMO_SLUG },
   );
   return rules;

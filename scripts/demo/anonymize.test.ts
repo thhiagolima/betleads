@@ -210,7 +210,7 @@ describe("rewriteText", () => {
       `SORTE ALTA e Sorte Alta e SorteAlta (pixpgf) https://go.sortealta.link/AbC?btag=AFF1&utm_source=sms tenant ${SOURCE_TENANT} id ${maria.id}`,
       ctx,
     );
-    expect(out).toContain("CASA DEMO e Casa Demo e casademo (demo)");
+    expect(out).toContain("CASA BETLEADS e Casa Betleads e casabetleads (demo)");
     expect(out).toContain("https://demo.betleads.invalid/AbC?btag=demo&utm_source=sms");
     expect(out).toContain(`tenant ${DEMO_TENANT}`);
     expect(out).toContain(`id ${remapId("players", maria.id)}`);

@@ -338,7 +338,7 @@ describe("clone-tenant-demo", () => {
     expect(demo).toBe(remapId("tenants", SOURCE));
 
     const { rows: tenant } = await db.query<Record<string, unknown>>(`select * from public.tenants where id = $1`, [demo]);
-    expect(tenant[0]).toMatchObject({ nome: "Casa Demo", slug: "demo", is_demo: true, status: "active", plano: "pro" });
+    expect(tenant[0]).toMatchObject({ nome: "Casa Betleads", slug: "demo", is_demo: true, status: "active", plano: "pro" });
     expect(tenant[0].webhook_hmac_enforced).toBe(true);
 
     // Deposits: exactly those of the sampled players, values untouched.
@@ -381,10 +381,10 @@ describe("clone-tenant-demo", () => {
     const second = sms.find((s) => s.id === remapId("sms_send_logs", SMS_2))!;
     // No player_id on this log: the player (and the sample) is found by phone.
     expect(second.to_phone).toBe(pedro.telefone);
-    expect(second.content).toBe(`${pedro.nome!.split(" ")[0]}, seu bônus na CASA DEMO`);
+    expect(second.content).toBe(`${pedro.nome!.split(" ")[0]}, seu bônus na CASA BETLEADS`);
     expect(first.to_phone).toBe(maria.telefone);
     expect(first.content).toBe(
-      `Oi ${maria.nome!.split(" ")[0]}, acesse ${SHORT_URL()} - Casa Demo`,
+      `Oi ${maria.nome!.split(" ")[0]}, acesse ${SHORT_URL()} - Casa Betleads`,
     );
     expect(first.trigger_name).toBe(`journey:${remapId("journeys", JOURNEY)}`);
     expect(first.pr).toBe("{}");
@@ -431,7 +431,7 @@ describe("clone-tenant-demo", () => {
       [demo],
     );
     expect(steps[0].config.variants[0].content).toBe(
-      "Oi {{nome}}, a Casa Demo te espera: https://demo.betleads.invalid/promo?btag=demo",
+      "Oi {{nome}}, a Casa Betleads te espera: https://demo.betleads.invalid/promo?btag=demo",
     );
     expect(steps[0].config.test_phone).toBe(maria.telefone);
 
