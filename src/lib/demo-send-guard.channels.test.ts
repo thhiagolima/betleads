@@ -26,6 +26,7 @@ vi.mock("node:dns/promises", () => ({
 }));
 
 import { __resetDemoTenantCacheForTests, assertTenantNotDemoForSend } from "./tenant-access.server";
+import { DEMO_SEND_BLOCKED_TEXT } from "./demo-tenant";
 import { callShortBrasilSmsBulk, sendSmsInternal } from "./sms.functions";
 import { sendSmsBatch, type SmsBatchItem } from "./sms-bulk.server";
 import { sendInfobipEmail } from "./email-send.server";
@@ -162,14 +163,14 @@ describe("SMS single path (sendSmsInternal)", () => {
       playerId: PLAYER,
     });
     expect(r.ok).toBe(false);
-    expect((r as { error?: string }).error).toContain("DEMO_SEND_BLOCKED");
+    expect((r as { error?: string }).error).toBe(DEMO_SEND_BLOCKED_TEXT);
     expect(fetchMock).toHaveBeenCalledTimes(0);
     expectNothingRecorded();
   });
 
   it("blocks a demo tenant resolved only through the player (no tenantId)", async () => {
     const r = await sendSmsInternal({ to: "+5511900000001", content: "Oi", playerId: PLAYER });
-    expect((r as { error?: string }).error).toContain("DEMO_SEND_BLOCKED");
+    expect((r as { error?: string }).error).toBe(DEMO_SEND_BLOCKED_TEXT);
     expect(fetchMock).toHaveBeenCalledTimes(0);
     expectNothingRecorded();
   });
@@ -177,14 +178,14 @@ describe("SMS single path (sendSmsInternal)", () => {
   it("blocks when neither tenantId nor playerId is known (fail-closed)", async () => {
     const r = await sendSmsInternal({ to: "+5511900000001", content: "Oi" });
     expect(r.ok).toBe(false);
-    expect((r as { error?: string }).error).toContain("DEMO_SEND_BLOCKED");
+    expect((r as { error?: string }).error).toBe(DEMO_SEND_BLOCKED_TEXT);
     expect(fetchMock).toHaveBeenCalledTimes(0);
     expectNothingRecorded();
   });
 
   it("blocks a demo tenant even with an invalid phone (no error log row)", async () => {
     const r = await sendSmsInternal({ to: "123", content: "Oi", tenantId: DEMO });
-    expect((r as { error?: string }).error).toContain("DEMO_SEND_BLOCKED");
+    expect((r as { error?: string }).error).toBe(DEMO_SEND_BLOCKED_TEXT);
     expectNothingRecorded();
   });
 
@@ -203,7 +204,7 @@ describe("SMS low-level bulk transport (callShortBrasilSmsBulk)", () => {
       recipients: ["+5511900000001"],
     });
     expect(r.ok).toBe(false);
-    expect(JSON.stringify(r.body)).toContain("DEMO_SEND_BLOCKED");
+    expect((r.body as { error?: string }).error).toBe(DEMO_SEND_BLOCKED_TEXT);
     expect(fetchMock).toHaveBeenCalledTimes(0);
   });
 
@@ -297,7 +298,7 @@ describe("external WhatsApp webhook (sendExternalTriggerEvent)", () => {
       isTest: true,
     });
     expect(r.sent).toBe(false);
-    expect(r.reason).toContain("DEMO_SEND_BLOCKED");
+    expect(r.reason).toBe(DEMO_SEND_BLOCKED_TEXT);
     expect(fetchMock).toHaveBeenCalledTimes(0);
     expect(fake.db.rows("whatsapp_external_events")).toEqual([]);
     expectNothingRecorded();
@@ -348,7 +349,7 @@ describe("Short.io", () => {
     expect(out).toHaveLength(2);
     for (const link of out) {
       expect(link.created).toBeNull();
-      expect(link.error).toContain("DEMO_SEND_BLOCKED");
+      expect(link.error).toBe(DEMO_SEND_BLOCKED_TEXT);
     }
     expect(fetchMock).toHaveBeenCalledTimes(0);
     expectNothingRecorded();
@@ -462,7 +463,7 @@ describe("link preparation never writes link_dispatches for a demo tenant", () =
       { content: "Sem link", context: context(NORMAL) },
     ]);
     expect(out[0]).toMatchObject({ ok: false, fallbackMode: "block" });
-    expect((out[0] as { error: string }).error).toContain("DEMO_SEND_BLOCKED");
+    expect((out[0] as { error: string }).error).toBe(DEMO_SEND_BLOCKED_TEXT);
     expect(out[1]).toMatchObject({ ok: true, content: "Sem link" });
     expect(fetchMock).toHaveBeenCalledTimes(0);
     expect(fake.db.rows("link_dispatches")).toEqual([]);
@@ -515,7 +516,7 @@ describe("transport guard: tenant flagged demo after the top-level check", () =>
     const r = await sendSmsInternal({ to: "+5511999999999", content: "Oi", tenantId: NORMAL });
     expect(fetchMock).toHaveBeenCalledTimes(0);
     expect(r.ok).toBe(false);
-    expect((r as { error?: string }).error).toContain("DEMO_SEND_BLOCKED");
+    expect((r as { error?: string }).error).toContain(DEMO_SEND_BLOCKED_TEXT);
     expect((r as { temporary?: boolean }).temporary).toBe(false);
     expect(ledger.charged()).toBe(0);
     expect(fake.db.rows("sms_send_logs").map((l) => l.status)).toEqual(["error"]);
@@ -530,7 +531,7 @@ describe("transport guard: tenant flagged demo after the top-level check", () =>
     expect(fetchMock).toHaveBeenCalledTimes(0);
     expect(httpCalls).toBe(1);
     expect(outcomes[0]).toMatchObject({ ok: false, status: "failed", retryable: false });
-    expect(outcomes[0].error).toContain("DEMO_SEND_BLOCKED");
+    expect(outcomes[0].error).toBe(DEMO_SEND_BLOCKED_TEXT);
     expect(ledger.charged()).toBe(0);
     expect(fake.db.rows("sms_send_logs").map((l) => l.status)).toEqual(["error"]);
   });
