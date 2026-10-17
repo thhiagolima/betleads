@@ -49,22 +49,29 @@ async function getCachedTenantStatus(tenantId: string): Promise<TenantStatusRow 
   return tenant;
 }
 
+export type DemoTenantCheck = "demo" | "not_demo";
+
 /**
- * Fail-closed demo check for INBOUND traffic (house webhooks, Evolution
- * events, click redirects, unsubscribe tokens): true only for a tenant row
- * with `is_demo = true`. An unknown tenant is NOT demo here — inbound paths
- * keep their existing behavior for an unknown tenant (e.g. a 404 on an
- * invalid webhook token), this helper only decides the demo question. A
- * failed lookup is treated as demo-unsafe (`true`) so the caller
- * rejects/ignores the request instead of writing on an unverified tenant.
+ * Tri-state demo check for INBOUND traffic (house webhooks, Evolution
+ * events, click redirects, unsubscribe tokens): `"demo"` only for a tenant
+ * row with `is_demo = true`, `"not_demo"` otherwise — an unknown tenant is
+ * NOT demo here, since every inbound call site resolves `tenantId` from an
+ * already-validated foreign key (webhook token, whatsapp_sessions,
+ * link_dispatches, email_unsubscribe_tokens), so "unknown" never happens on
+ * the real path.
+ *
+ * R11: a lookup failure is never a definitive outcome — it is neither
+ * `"demo"` nor `"not_demo"`, so this throws instead of guessing. Each caller
+ * decides what "could not verify" means for its own route (503 for a
+ * webhook a provider retries, the existing error/retry state for a
+ * user-facing confirmation, a reported-but-neutral redirect for an
+ * unauthenticated click) — never silently falling through to "not demo"
+ * (which would write into an unverified tenant) nor silently answering
+ * "demo" as if it were certain.
  */
-export async function isDemoTenant(tenantId: string): Promise<boolean> {
-  try {
-    const tenant = await getCachedTenantStatus(tenantId);
-    return tenant?.is_demo === true;
-  } catch {
-    return true;
-  }
+export async function checkDemoTenant(tenantId: string): Promise<DemoTenantCheck> {
+  const tenant = await getCachedTenantStatus(tenantId);
+  return tenant?.is_demo === true ? "demo" : "not_demo";
 }
 
 export async function resolveCurrentTenantId(supabase: RpcClient) {

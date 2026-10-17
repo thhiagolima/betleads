@@ -2,8 +2,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { detectPrecallResponse } from "@/lib/precall-dispatcher.server";
 import { isAuthorizedEvolutionWebhook } from "@/lib/whatsapp-evolution-auth.server";
-import { isDemoTenant } from "@/lib/tenant-access.server";
-import { assertEvolutionInstanceCanCall } from "@/lib/evolution.server";
+import { checkDemoTenant } from "@/lib/tenant-access.server";
+import { assertEvolutionInstanceCanCall, instanceOwner } from "@/lib/evolution.server";
 
 // Evolution API webhook receiver.
 // Authenticated ONLY by EVOLUTION_WEBHOOK_SECRET sent in the x-webhook-secret
@@ -555,19 +555,25 @@ export const Route = createFileRoute("/api/public/evolution-webhook")({
 
         // Demo tenant: ignore before any write, including connection-update
         // handling. An unknown instance (no session row) is not demo and
-        // keeps its current behavior (each handler no-ops on its own).
+        // keeps its current behavior (each handler no-ops on its own). A
+        // lookup failure (session owner or demo status) is never treated as
+        // "not demo" (R11): it answers 503 so Evolution retries, instead of
+        // risking a write into an unverified tenant.
         if (instance) {
-          const { data: sessionRow } = await supabaseAdmin
-            .from("whatsapp_sessions")
-            .select("tenant_id")
-            .eq("instance_name", instance)
-            .maybeSingle();
-          const sessionTenantId = (sessionRow as { tenant_id?: string | null } | null)?.tenant_id;
-          if (sessionTenantId && (await isDemoTenant(sessionTenantId))) {
-            return new Response(JSON.stringify({ ignored: true }), {
-              status: 200,
-              headers: { "Content-Type": "application/json" },
-            });
+          try {
+            const owner = await instanceOwner(instance);
+            if (owner.found && owner.tenantId && (await checkDemoTenant(owner.tenantId)) === "demo") {
+              return new Response(JSON.stringify({ ignored: true }), {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+              });
+            }
+          } catch (error) {
+            console.error("[evo-webhook] demo tenant check failed:", error);
+            return new Response(
+              JSON.stringify({ ok: false, error: "webhook service temporarily unavailable" }),
+              { status: 503, headers: { "Content-Type": "application/json" } },
+            );
           }
         }
 

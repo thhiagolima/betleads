@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { getServiceClient, processWebhookEvent } from "@/lib/webhook-process.server";
 import { invalidateServerResultCache } from "@/lib/server-result-cache";
-import { isDemoTenant } from "@/lib/tenant-access.server";
 
 async function validSignature(secret: string, payload: string, provided: string | null) {
   if (!provided) return false;
@@ -53,12 +52,15 @@ export const Route = createFileRoute("/api/public/webhook/$token/$evento")({
 
         const { data: tenantRow, error: tenantLookupError } = await sb
           .from("tenants")
-          .select("id,webhook_secret,webhook_hmac_enforced")
+          .select("id,webhook_secret,webhook_hmac_enforced,is_demo")
           .eq("webhook_token", token)
           .maybeSingle();
         // Do not report an infrastructure/credential failure as an invalid token.
         // Providers won't retry a 404, while a 503 correctly marks the delivery as
         // temporary and makes the deployment configuration problem observable.
+        // This also covers the demo-tenant decision (R11): a lookup error never
+        // falls through to "not demo" — it is the same 503 as any other
+        // read failure on this row, not a silent default.
         if (tenantLookupError) {
           console.error("Webhook tenant lookup failed", {
             code: tenantLookupError.code,
@@ -74,9 +76,10 @@ export const Route = createFileRoute("/api/public/webhook/$token/$evento")({
           return Response.json({ ok: false, error: "token inválido" }, { status: 404 });
         }
         // Demo tenant: reject before any webhook_logs/webhook_event_receipts
-        // insert and before HMAC processing side effects. A lookup error is
-        // treated as demo-unsafe by isDemoTenant, so it is rejected too.
-        if (await isDemoTenant(tenantId)) {
+        // insert and before HMAC processing side effects. Read from the row
+        // already fetched above (no second query) — its error path already
+        // answers 503.
+        if (tenantRow.is_demo) {
           return Response.json(
             { ok: false, error: "ambiente de demonstração" },
             { status: 403 },

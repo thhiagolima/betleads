@@ -35,7 +35,7 @@ export const lookupUnsubscribe = createServerFn({ method: "POST" })
 export async function confirmUnsubscribeFor(data: { token: string }) {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { suppressEmail } = await import("@/lib/email-deliverability.server");
-  const { isDemoTenant } = await import("@/lib/tenant-access.server");
+  const { checkDemoTenant } = await import("@/lib/tenant-access.server");
   const { data: row } = await supabaseAdmin
     .from("email_unsubscribe_tokens")
     .select("email, tenant_id, used_at")
@@ -43,10 +43,12 @@ export async function confirmUnsubscribeFor(data: { token: string }) {
     .maybeSingle();
   if (!row) return { ok: false as const, reason: "not_found" as const };
   // Demo tenant: render the normal confirmation UI but write nothing — no
-  // suppression, token not marked used. A lookup error is demo-unsafe
-  // (isDemoTenant returns true), so it is also treated as a no-write success.
+  // suppression, token not marked used. R11: a lookup failure here is never
+  // treated as "not demo" (that would suppress/mark-used on an unverified
+  // tenant) — it propagates and surfaces as the route's existing error/
+  // retry state instead of the success page.
   const tenantId = (row.tenant_id as string | null) ?? null;
-  if (tenantId && (await isDemoTenant(tenantId))) {
+  if (tenantId && (await checkDemoTenant(tenantId)) === "demo") {
     return { ok: true as const };
   }
   // Suprime antes de marcar o token: se a supressão falhar, o link continua

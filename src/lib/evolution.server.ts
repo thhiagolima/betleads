@@ -63,7 +63,7 @@ function parseEvolutionPath(path: string): ParsedEvolutionPath | null {
 }
 
 /** `whatsapp_sessions` owner of `instance`; `found: false` when there is no row. */
-async function instanceOwner(instance: string) {
+export async function instanceOwner(instance: string) {
   const { data, error } = await supabaseAdmin
     .from("whatsapp_sessions")
     .select("tenant_id")

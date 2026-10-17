@@ -6,7 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createFakeDb } from "./sms-bulk.test-support";
 
 const fake = vi.hoisted(() => ({ db: null as unknown as ReturnType<typeof createFakeDb> }));
-const mocks = vi.hoisted(() => ({ suppressEmail: vi.fn(async () => undefined) }));
+const mocks = vi.hoisted(() => ({
+  suppressEmail: vi.fn(async () => undefined),
+  captureServerException: vi.fn(),
+}));
 
 vi.mock("@tanstack/react-router", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@tanstack/react-router")>();
@@ -36,6 +39,9 @@ vi.mock("@/lib/whatsapp-evolution-auth.server", () => ({
   isAuthorizedEvolutionWebhook: () => true,
 }));
 vi.mock("@/lib/email-deliverability.server", () => ({ suppressEmail: mocks.suppressEmail }));
+vi.mock("@/lib/observability/sentry.server", () => ({
+  captureServerException: mocks.captureServerException,
+}));
 
 import { __resetDemoTenantCacheForTests } from "./tenant-access.server";
 import { expertMirrorTargets, processWebhookEvent } from "./webhook-process.server";
@@ -59,6 +65,7 @@ beforeEach(() => {
   fake.db.reset();
   __resetDemoTenantCacheForTests();
   mocks.suppressEmail.mockClear();
+  mocks.captureServerException.mockClear();
   vi.stubEnv("SUPABASE_URL", "https://example.supabase.co");
   vi.stubEnv("SUPABASE_SECRET_KEY", "test-secret-key");
   vi.spyOn(console, "info").mockImplementation(() => undefined);
@@ -118,6 +125,22 @@ describe("house webhook rejects a demo tenant (403, no writes)", () => {
     const res = await post("tok-normal");
     expect(res.status).not.toBe(403);
     expect(fake.db.rows("webhook_logs").some((row: any) => row.tenant_id === NORMAL)).toBe(true);
+  });
+
+  // R11: a lookup failure is never a definitive demo/not-demo answer.
+  it("a tenant lookup failure answers 503 (not 403, not 200) and writes nothing", async () => {
+    fake.db.rows("tenants").push({
+      id: NORMAL,
+      webhook_token: "tok-err",
+      webhook_secret: null,
+      webhook_hmac_enforced: false,
+      status: "active",
+      is_demo: false,
+    });
+    fake.db.failNext("tenants", "select", "db unavailable");
+    const res = await post("tok-err");
+    expect(res.status).toBe(503);
+    expect(fake.db.rows("webhook_logs")).toEqual([]);
   });
 });
 
@@ -227,6 +250,34 @@ describe("Evolution webhook ignores a demo tenant's instance (200, no writes)", 
     expect(fake.db.rows("whatsapp_chats").length).toBe(1);
     expect(fake.db.rows("whatsapp_messages").length).toBe(1);
   });
+
+  // R11: a lookup failure is never treated as "not demo".
+  it("an instance-owner lookup failure answers 503 and writes nothing", async () => {
+    fake.db.rows("whatsapp_sessions").push({
+      id: "s-normal",
+      instance_name: "inst-normal",
+      tenant_id: NORMAL,
+    });
+    fake.db.failNext("whatsapp_sessions", "select", "db unavailable");
+    const res = await post(message("inst-normal"));
+    expect(res.status).toBe(503);
+    expect(fake.db.rows("whatsapp_chats")).toEqual([]);
+    expect(fake.db.rows("whatsapp_messages")).toEqual([]);
+  });
+
+  it("a demo-status lookup failure (session found) answers 503 and writes nothing", async () => {
+    fake.db.rows("whatsapp_sessions").push({
+      id: "s-normal",
+      instance_name: "inst-normal",
+      tenant_id: NORMAL,
+    });
+    fake.db.rows("tenants").push({ id: NORMAL, status: "active", is_demo: false });
+    fake.db.failNext("tenants", "select", "db unavailable");
+    const res = await post(message("inst-normal"));
+    expect(res.status).toBe(503);
+    expect(fake.db.rows("whatsapp_chats")).toEqual([]);
+    expect(fake.db.rows("whatsapp_messages")).toEqual([]);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -322,6 +373,20 @@ describe("click redirect never records a demo tenant's click", () => {
     expect(result).toMatchObject({ ok: true, destination: "https://casino.example/deposit?x=1" });
     expect(clickDb.events.length).toBe(1);
   });
+
+  // R11: a lookup failure is never a silent, unreported "demo" answer.
+  it("a tenant lookup failure still redirects neutrally, writes nothing, and is reported", async () => {
+    fake.db.failNext("tenants", "select", "db unavailable");
+    const signature = await signClickToken(token, secret);
+    const clickDb = fakeClickDb(NORMAL);
+    const result = await resolveAndRecordFirstPartyClick(
+      { token, signature, request: browserRequest() },
+      { db: clickDb.db, nowMs: () => Date.now() },
+    );
+    expect(result).toMatchObject({ ok: true, destination: DEMO_CLICK_REDIRECT_URL, outcome: "demo" });
+    expect(clickDb.events).toEqual([]);
+    expect(mocks.captureServerException).toHaveBeenCalledTimes(1);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -356,5 +421,20 @@ describe("unsubscribe confirmation writes nothing for a demo tenant", () => {
     expect(result).toEqual({ ok: true });
     expect(mocks.suppressEmail).toHaveBeenCalledTimes(1);
     expect(fake.db.rows("email_unsubscribe_tokens")[0].used_at).not.toBeNull();
+  });
+
+  // R11: a lookup failure is never treated as "not demo" — it must not
+  // suppress/mark-used on an unverified tenant, nor silently show success.
+  it("a tenant lookup failure rejects (shown as the route's error/retry state): no suppressEmail, no used_at", async () => {
+    fake.db.rows("email_unsubscribe_tokens").push({
+      token: "tok-err-unsub",
+      email: "c@c.com",
+      tenant_id: NORMAL,
+      used_at: null,
+    });
+    fake.db.failNext("tenants", "select", "db unavailable");
+    await expect(confirm("tok-err-unsub")).rejects.toThrow();
+    expect(mocks.suppressEmail).not.toHaveBeenCalled();
+    expect(fake.db.rows("email_unsubscribe_tokens")[0].used_at).toBeNull();
   });
 });

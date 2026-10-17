@@ -1,6 +1,6 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { captureServerException } from "@/lib/observability/sentry.server";
-import { isDemoTenant } from "@/lib/tenant-access.server";
+import { checkDemoTenant, type DemoTenantCheck } from "@/lib/tenant-access.server";
 
 // Neutral destination for a demo-tenant dispatch (Global Constraints).
 export const DEMO_CLICK_REDIRECT_URL = "https://demo.betleads.invalid";
@@ -462,7 +462,7 @@ type ClickDeps = {
   db?: any;
   nowMs?: () => number;
   recordBudgetMs?: number;
-  isDemoTenant?: (tenantId: string) => Promise<boolean>;
+  checkDemoTenant?: (tenantId: string) => Promise<DemoTenantCheck>;
 };
 
 async function recordClick(args: {
@@ -603,10 +603,22 @@ export async function resolveAndRecordFirstPartyClick(
 
   // Demo tenant: the dispatch is part of a frozen snapshot. No click_events
   // insert, no dispatch counters — redirect to a neutral page instead of the
-  // (possibly real) casino URL. A failed tenant lookup is demo-unsafe
-  // (isDemoTenant returns true), so it also redirects here without writing.
-  const checkDemo = deps.isDemoTenant ?? isDemoTenant;
-  if (await checkDemo(dispatch.tenant_id)) {
+  // (possibly real) casino URL. R11: a failed tenant lookup is never treated
+  // as a silent, unreported "demo" — the redirect still stays neutral and
+  // writes nothing (the safe side for an unauthenticated public route), but
+  // the failure is reported so it's observable instead of swallowed.
+  const checkDemo = deps.checkDemoTenant ?? checkDemoTenant;
+  let demoResult: DemoTenantCheck;
+  try {
+    demoResult = await checkDemo(dispatch.tenant_id);
+  } catch (error) {
+    captureServerException(error, {
+      job: "click-demo-tenant-check",
+      tags: { tenant_id: dispatch.tenant_id },
+    });
+    demoResult = "demo";
+  }
+  if (demoResult === "demo") {
     return {
       ok: true as const,
       destination: DEMO_CLICK_REDIRECT_URL,

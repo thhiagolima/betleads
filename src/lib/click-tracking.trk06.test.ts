@@ -280,7 +280,7 @@ describe("TRK-06 resolveAndRecordFirstPartyClick", () => {
   const run = (fake: ReturnType<typeof fakeDb>, request: Request, extra = {}) =>
     resolveAndRecordFirstPartyClick(
       { token, signature, request },
-      { db: fake.db, nowMs: () => clock.now, isDemoTenant: async () => false, ...extra },
+      { db: fake.db, nowMs: () => clock.now, checkDemoTenant: async () => "not_demo" as const, ...extra },
     );
 
   it("records a human click with its reason metadata and a bucket dedupe key", async () => {
@@ -404,7 +404,7 @@ describe("TRK-06 resolveAndRecordFirstPartyClick", () => {
     };
     const result = await resolveAndRecordFirstPartyClick(
       { token, signature, request: browserRequest() },
-      { db: failing, nowMs: () => NOW, isDemoTenant: async () => false },
+      { db: failing, nowMs: () => NOW, checkDemoTenant: async () => "not_demo" as const },
     );
     expect(result).toMatchObject({
       ok: true,
