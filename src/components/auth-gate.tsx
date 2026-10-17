@@ -142,7 +142,14 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (state.session.user.app_metadata.force_password_change === true) {
+  // Demo users (Task 13, spec §11) never change their own e-mail/password —
+  // the login is revoked/reissued by scripts/demo/create-demo-login.mjs
+  // instead. force_password_change is never set for them, but this guard
+  // keeps the screen hidden even if that ever changed.
+  if (
+    state.session.user.app_metadata.force_password_change === true &&
+    state.session.user.app_metadata.is_demo_user !== true
+  ) {
     return (
       <InitialPasswordScreen
         session={state.session}
