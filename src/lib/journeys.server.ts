@@ -35,6 +35,7 @@ import {
 } from "./sms-provider-breaker.server";
 import { resolveDispatchWorkerConfig } from "./rate-limit/worker-config";
 import { brtDayStart } from "./tz";
+import { listDemoTenantIds } from "./tenant-access.server";
 import {
   audienceMatches,
   inactivityBandConfig,
@@ -1455,11 +1456,18 @@ async function runJourneyDispatcherMonitored(limit: number, run: JobRunHandle) {
   let source: ClaimingSource<ClaimedRow> | null = null;
   let hardTimer: ReturnType<typeof setTimeout> | null = null;
   try {
-    const { count: queueBefore } = await db
+    // Demo tenants are never claimed (claim_journey_enrollments_leased skips
+    // them), so they are not counted as queued work either.
+    const demoTenantIds = await listDemoTenantIds();
+    let queueQuery = db
       .from("journey_enrollments")
       .select("id", { count: "exact", head: true })
       .in("status", ["active", "waiting"])
       .lte("next_run_at", new Date().toISOString());
+    if (demoTenantIds.length > 0) {
+      queueQuery = queueQuery.not("tenant_id", "in", `(${demoTenantIds.join(",")})`);
+    }
+    const { count: queueBefore } = await queueQuery;
     // Lease-based since 20261015110000: only expired leases are recovered.
     const { error: recoveryError } = await db.rpc("recover_orphaned_journey_claims");
     if (recoveryError) throw new Error(recoveryError.message);

@@ -455,13 +455,16 @@ export async function orchestrate(opts: OrchestrateOptions): Promise<Orchestrate
   // que é enfileirado diretamente no webhook de cadastro. O orquestrador
   // por segmentos/alertas (sem login, cashback, VIP, etc.) NÃO roda nesses
   // tenants para evitar entradas automáticas indesejadas.
+  // Demo tenants (frozen snapshot) are never orchestrated either: exit before
+  // touching anything else.
   {
-    const { data: tenantRow } = await supabaseAdmin
+    // `is_demo` is not in the generated Supabase types yet.
+    const { data: tenantRow } = await (supabaseAdmin as any)
       .from("tenants")
-      .select("crm_model")
+      .select("crm_model,is_demo")
       .eq("id", tenantId)
       .maybeSingle();
-    if ((tenantRow?.crm_model as string | null) === "CRM_EXPERT") {
+    if (tenantRow?.is_demo === true || (tenantRow?.crm_model as string | null) === "CRM_EXPERT") {
       return { run_id: null, totals: emptyTotals(), duration_ms: 0 };
     }
   }

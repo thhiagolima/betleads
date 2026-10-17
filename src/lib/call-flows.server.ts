@@ -15,6 +15,7 @@ import { sendSmsInternal } from "./sms.functions";
 import { buildPlayerVariables } from "./template-vars.server";
 import { deferIfOutsideWindow } from "./send-window.server";
 import { evaluateVoiceContactPolicy } from "./consent.server";
+import { listDemoTenantIds } from "./tenant-access.server";
 
 type Json = Record<string, unknown>;
 
@@ -489,12 +490,17 @@ export async function tickFlows(limit = 50): Promise<{ processed: number }> {
   }
 
   // Também processa "waiting" expirados (sem callback após 10min) — avança como no_answer
-  const { data: stuck } = await supabaseAdmin
+  // (claim_call_flow_progress already skips demo tenants; so does this read.)
+  const demoTenantIds = await listDemoTenantIds();
+  let stuckQuery = supabaseAdmin
     .from("call_flow_progress")
     .select("id")
     .eq("status", "waiting")
-    .lte("next_run_at", nowIso)
-    .limit(limit);
+    .lte("next_run_at", nowIso);
+  if (demoTenantIds.length > 0) {
+    stuckQuery = stuckQuery.not("tenant_id", "in", `(${demoTenantIds.join(",")})`);
+  }
+  const { data: stuck } = await stuckQuery.limit(limit);
   const stuckList = stuck ?? [];
   for (let i = 0; i < stuckList.length; i += BATCH_SIZE) {
     const batch = stuckList.slice(i, i + BATCH_SIZE);

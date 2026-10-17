@@ -6,7 +6,7 @@ import { createHash } from "crypto";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { evaluateVoiceContactPolicy } from "./consent.server";
 import { callInfobipVoice, normalizeE164BR } from "./infobip-voice.server";
-import { assertTenantNotDemoForSend } from "./tenant-access.server";
+import { assertTenantNotDemoForSend, listDemoTenantIds } from "./tenant-access.server";
 import { isDemoBlockedError } from "./demo-tenant";
 
 // ============================================================
@@ -280,6 +280,11 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
     .lte("scheduled_at", now)
     .order("scheduled_at", { ascending: true });
   if (callQueueId) query = query.eq("id", callQueueId);
+  // Demo tenants' queue items are never picked up.
+  const demoTenantIds = await listDemoTenantIds();
+  if (demoTenantIds.length > 0) {
+    query = query.not("tenant_id", "in", `(${demoTenantIds.join(",")})`);
+  }
   const { data: queue, error } = await query.limit(limit);
   if (error) throw new Error(error.message);
 

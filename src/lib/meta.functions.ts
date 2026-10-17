@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { decryptMetaToken, encryptMetaToken, metaTokenHint } from "@/lib/meta-token.server";
-import { assertTenantNotDemo } from "@/lib/tenant-access.server";
+import { assertTenantNotDemo, listDemoTenantIds } from "@/lib/tenant-access.server";
 
 const syncSchema = z.object({
   days: z.number().int().min(1).max(90).default(7),
@@ -919,9 +919,11 @@ async function enqueueScheduledMetaSyncs() {
     .select("tenant_id,meta_connections!inner(status)")
     .eq("selected", true)
     .eq("meta_connections.status", "connected");
+  // Demo tenants never get a scheduled sync (claim_meta_sync_jobs skips them too).
+  const demoTenantIds = new Set(await listDemoTenantIds());
   const tenantIds: string[] = Array.from(
     new Set<string>((accounts ?? []).map((account: { tenant_id: string }) => account.tenant_id)),
-  );
+  ).filter((tenantId) => !demoTenantIds.has(tenantId));
   const since = new Date(Date.now() - 23 * 60 * 60 * 1000).toISOString();
   let enqueued = 0;
   for (const tenantId of tenantIds) {

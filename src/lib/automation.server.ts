@@ -18,6 +18,7 @@ import {
   pickExternalTrigger,
   sendExternalTriggerEvent,
 } from "./whatsapp-external.server";
+import { listDemoTenantIds } from "./tenant-access.server";
 
 // ---------------------------------------------------------------
 // Helpers
@@ -193,7 +194,8 @@ export async function evaluateAllPlayers(opts: { limit?: number; tenantId?: stri
     return { evaluated: 0, enqueued: 0, reason: "no-active-flows" };
   }
 
-  // Players candidatos: ativos com telefone
+  // Players candidatos: ativos com telefone (nunca de tenants demo).
+  const demoTenantIds = await listDemoTenantIds();
   let playersQuery = supabaseAdmin
     .from("players")
     .select(
@@ -202,6 +204,9 @@ export async function evaluateAllPlayers(opts: { limit?: number; tenantId?: stri
     .eq("status", "ativo")
     .not("telefone", "is", null);
   if (opts.tenantId) playersQuery = playersQuery.eq("tenant_id", opts.tenantId);
+  if (demoTenantIds.length > 0) {
+    playersQuery = playersQuery.not("tenant_id", "in", `(${demoTenantIds.join(",")})`);
+  }
   const { data: players } = await playersQuery.limit(limit);
 
   let enqueued = 0;
@@ -469,6 +474,9 @@ export async function runDispatcher(
   const nowIso = new Date().toISOString();
   const antiban = await getAntibanSettings();
   const now = new Date();
+  // Demo tenants' flow_leads are never postponed nor picked up.
+  const demoTenantIds = await listDemoTenantIds();
+  const demoTenantList = `(${demoTenantIds.join(",")})`;
 
   // Janela operacional: fora dela, reagenda todos os leads prontos para o próximo
   // início da janela MAS sem mudar o status — mudar para "cooldown" impedia
@@ -482,6 +490,9 @@ export async function runDispatcher(
       .in("status", ["pending", "running", "cooldown"])
       .lte("next_run_at", nowIso);
     if (opts.tenantId) postponeQuery = postponeQuery.eq("tenant_id", opts.tenantId);
+    if (demoTenantIds.length > 0) {
+      postponeQuery = postponeQuery.not("tenant_id", "in", demoTenantList);
+    }
     await postponeQuery;
     return { processed: 0, sent: 0, skipped: "out-of-window" };
   }
@@ -506,6 +517,7 @@ export async function runDispatcher(
       .limit(1);
     if (opts.tenantId) dueQuery = dueQuery.eq("tenant_id", opts.tenantId);
   }
+  if (demoTenantIds.length > 0) dueQuery = dueQuery.not("tenant_id", "in", demoTenantList);
   const { data: due } = await dueQuery;
 
   if (!due || due.length === 0) return { processed: 0, sent: 0 };

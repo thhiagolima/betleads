@@ -27,6 +27,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { startJobRun, type JobRunHandle } from "./observability/job-monitor.server";
 import { captureServerException } from "./observability/sentry.server";
 import { resolveJourneyWorkerScope } from "./journey-worker-scope";
+import { listDemoTenantIds } from "./tenant-access.server";
 import {
   CROSSING_TRIGGERS,
   JOURNEY_SELECT_COLUMNS,
@@ -198,11 +199,17 @@ async function runMonitored(
     failed: 0,
   };
 
-  const { data: journeyRows, error: journeysError } = await db
+  // Demo tenants' journeys never enroll anyone.
+  const demoTenantIds = await listDemoTenantIds();
+  let journeysQuery = db
     .from("journeys")
     .select(JOURNEY_SELECT_COLUMNS)
     .eq("status", "active")
     .in("trigger_type", [...CROSSING_TRIGGERS]);
+  if (demoTenantIds.length > 0) {
+    journeysQuery = journeysQuery.not("tenant_id", "in", `(${demoTenantIds.join(",")})`);
+  }
+  const { data: journeyRows, error: journeysError } = await journeysQuery;
   if (journeysError) throw new Error(journeysError.message);
   const journeys = ((journeyRows ?? []) as Journey[]).filter(
     (journey) => journeyInWorkerScope(journey, scope) && crossingSpecFor(journey) != null,

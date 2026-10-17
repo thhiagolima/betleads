@@ -2,7 +2,11 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { buildFirstPartyClickUrl } from "./click-tracking.server";
 import { channelBudget } from "./rate-limit/channel-budget.server";
-import { assertTenantNotDemoForSend, demoSendBlockedReason } from "./tenant-access.server";
+import {
+  assertTenantNotDemoForSend,
+  demoSendBlockedReason,
+  listDemoTenantIds,
+} from "./tenant-access.server";
 
 const SHORTIO_API_URL = "https://api.short.io/links";
 const SHORTIO_BULK_API_URL = "https://api.short.io/links/bulk";
@@ -697,11 +701,13 @@ export async function syncShortioMetrics(
   // A execução global é registrada por tenant, preservando RLS e permitindo
   // identificar exatamente qual carteira de links falhou.
   if (!tenantId) {
-    const { data: tenants, error: tenantsError } = await db
-      .from("tracked_links")
-      .select("tenant_id")
-      .eq("status", "active")
-      .limit(10_000);
+    // Demo tenants are not even visited (their links are never synced).
+    const demoTenantIds = await listDemoTenantIds();
+    let tenantsQuery = db.from("tracked_links").select("tenant_id").eq("status", "active");
+    if (demoTenantIds.length > 0) {
+      tenantsQuery = tenantsQuery.not("tenant_id", "in", `(${demoTenantIds.join(",")})`);
+    }
+    const { data: tenants, error: tenantsError } = await tenantsQuery.limit(10_000);
     if (tenantsError) throw new Error(`Falha ao listar tenants Short.io: ${tenantsError.message}`);
     const ids: string[] = Array.from(
       new Set<string>((tenants ?? []).map((row: any) => String(row.tenant_id))),

@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { listDemoTenantIds } from "./tenant-access.server";
 
 /**
  * Rede de segurança do gatilho `cashback_pago`.
@@ -29,13 +30,17 @@ export async function runCashbackCatchup(
   const limit = opts.limit ?? 500;
   const since = opts.since ?? startOfBrtDayIso();
 
-  const { data: payments } = await supabaseAdmin
+  // Demo tenants' payments are never caught up into flows.
+  const demoTenantIds = await listDemoTenantIds();
+  let paymentsQuery = supabaseAdmin
     .from("cashback_payments")
     .select("id, tenant_id, player_id, paid_at, telefone, email")
     .gte("paid_at", since)
-    .not("player_id", "is", null)
-    .order("paid_at", { ascending: true })
-    .limit(limit);
+    .not("player_id", "is", null);
+  if (demoTenantIds.length > 0) {
+    paymentsQuery = paymentsQuery.not("tenant_id", "in", `(${demoTenantIds.join(",")})`);
+  }
+  const { data: payments } = await paymentsQuery.order("paid_at", { ascending: true }).limit(limit);
 
   const rows = payments ?? [];
   if (rows.length === 0) return { payments: 0, sms_enrolled: 0, email_enrolled: 0 };

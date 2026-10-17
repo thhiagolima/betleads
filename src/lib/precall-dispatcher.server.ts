@@ -5,16 +5,23 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { sendFlowBlock } from "./whatsapp-send.server";
 import { buildPlayerVariables, renderTemplate } from "./template-vars.server";
 import { randomDelaySeconds } from "./precall.server";
+import { listDemoTenantIds } from "./tenant-access.server";
 
 export async function runPrecallDispatcher(): Promise<{
   campaigns: number;
   sent: number;
   failed: number;
 }> {
-  const { data: campaigns } = await supabaseAdmin
+  // Demo tenants' campaigns are never picked up.
+  const demoTenantIds = await listDemoTenantIds();
+  let campaignsQuery = supabaseAdmin
     .from("precall_campaigns")
     .select("id, tenant_id, session_id, delay_min_seconds, delay_max_seconds, status")
     .eq("status", "rodando");
+  if (demoTenantIds.length > 0) {
+    campaignsQuery = campaignsQuery.not("tenant_id", "in", `(${demoTenantIds.join(",")})`);
+  }
+  const { data: campaigns } = await campaignsQuery;
 
   let sent = 0;
   let failed = 0;

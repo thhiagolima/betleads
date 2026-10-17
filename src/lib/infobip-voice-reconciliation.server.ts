@@ -1,8 +1,16 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { listDemoTenantIds } from "./tenant-access.server";
 
 const MIN_AGE_MS = 15 * 60_000;
 const MAX_AGE_MS = 3 * 24 * 60 * 60_000;
 const ALERT_AGE_MS = 24 * 60 * 60_000;
+
+/** PostgREST list for `.not("tenant_id", "in", ...)`; null when there is no
+ * demo tenant (no filter needed). Demo rows are never audited/rewritten. */
+async function demoTenantFilter(demoTenantIds?: string[]): Promise<string | null> {
+  const ids = demoTenantIds ?? (await listDemoTenantIds());
+  return ids.length > 0 ? `(${ids.join(",")})` : null;
+}
 
 /**
  * Audits calls for which the CML post-call notification has not reached us.
@@ -13,17 +21,18 @@ const ALERT_AGE_MS = 24 * 60 * 60_000;
  * and makes missing callbacks visible until a provider report integration is
  * explicitly enabled for the account.
  */
-export async function reconcilePendingInfobipVoiceCalls(limit = 500) {
+export async function reconcilePendingInfobipVoiceCalls(limit = 500, demoTenantIds?: string[]) {
   const now = Date.now();
-  const { data: rows, error } = await supabaseAdmin
+  const demoFilter = await demoTenantFilter(demoTenantIds);
+  let query = supabaseAdmin
     .from("call_history")
     .select("id, provider_call_id, created_at, provider_response")
     .eq("provider", "infobip")
     .in("status", ["pending", "answered"])
     .lte("created_at", new Date(now - MIN_AGE_MS).toISOString())
-    .gte("created_at", new Date(now - MAX_AGE_MS).toISOString())
-    .order("created_at", { ascending: true })
-    .limit(limit);
+    .gte("created_at", new Date(now - MAX_AGE_MS).toISOString());
+  if (demoFilter) query = query.not("tenant_id", "in", demoFilter);
+  const { data: rows, error } = await query.order("created_at", { ascending: true }).limit(limit);
   if (error) throw error;
 
   let alerted = 0;
@@ -99,16 +108,17 @@ async function auditCallbackRows(
 }
 
 /** Same daily safety net for Infobip Email callbacks. */
-export async function reconcilePendingInfobipEmails(limit = 500) {
+export async function reconcilePendingInfobipEmails(limit = 500, demoTenantIds?: string[]) {
   const now = Date.now();
-  const { data: rows, error } = await supabaseAdmin
+  const demoFilter = await demoTenantFilter(demoTenantIds);
+  let query = supabaseAdmin
     .from("email_send_logs")
     .select("id, created_at, provider_response")
     .in("status", ["pending", "sent"])
     .lte("created_at", new Date(now - MIN_AGE_MS).toISOString())
-    .gte("created_at", new Date(now - MAX_AGE_MS).toISOString())
-    .order("created_at", { ascending: true })
-    .limit(limit);
+    .gte("created_at", new Date(now - MAX_AGE_MS).toISOString());
+  if (demoFilter) query = query.not("tenant_id", "in", demoFilter);
+  const { data: rows, error } = await query.order("created_at", { ascending: true }).limit(limit);
   if (error) throw error;
   const result = await auditCallbackRows(rows, (id, providerResponse) =>
     supabaseAdmin
@@ -122,17 +132,18 @@ export async function reconcilePendingInfobipEmails(limit = 500) {
 }
 
 /** SMS is also callback-first; this exposes missing Short Brasil callbacks. */
-export async function reconcilePendingShortBrasilSms(limit = 500) {
+export async function reconcilePendingShortBrasilSms(limit = 500, demoTenantIds?: string[]) {
   const now = Date.now();
-  const { data: rows, error } = await supabaseAdmin
+  const demoFilter = await demoTenantFilter(demoTenantIds);
+  let query = supabaseAdmin
     .from("sms_send_logs")
     .select("id, created_at, provider_response")
     .eq("provider", "short-brasil")
     .in("delivery_status", ["pending", "sent"])
     .lte("created_at", new Date(now - MIN_AGE_MS).toISOString())
-    .gte("created_at", new Date(now - MAX_AGE_MS).toISOString())
-    .order("created_at", { ascending: true })
-    .limit(limit);
+    .gte("created_at", new Date(now - MAX_AGE_MS).toISOString());
+  if (demoFilter) query = query.not("tenant_id", "in", demoFilter);
+  const { data: rows, error } = await query.order("created_at", { ascending: true }).limit(limit);
   if (error) throw error;
   const result = await auditCallbackRows(rows, (id, providerResponse) =>
     supabaseAdmin
@@ -146,10 +157,11 @@ export async function reconcilePendingShortBrasilSms(limit = 500) {
 }
 
 export async function reconcileChannelCallbacks() {
+  const demoTenantIds = await listDemoTenantIds();
   const [voice, email, sms] = await Promise.all([
-    reconcilePendingInfobipVoiceCalls(),
-    reconcilePendingInfobipEmails(),
-    reconcilePendingShortBrasilSms(),
+    reconcilePendingInfobipVoiceCalls(500, demoTenantIds),
+    reconcilePendingInfobipEmails(500, demoTenantIds),
+    reconcilePendingShortBrasilSms(500, demoTenantIds),
   ]);
   return { voice, email, sms };
 }
