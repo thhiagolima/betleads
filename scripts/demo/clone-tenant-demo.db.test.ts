@@ -6,7 +6,7 @@
 import type { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { demoShortPath, inDemoSample, remapId } from "./anonymize.mjs";
+import { FIRST_NAMES, LAST_NAMES, demoShortPath, inDemoSample, nameNeedle, remapId } from "./anonymize.mjs";
 import { CLONE_TABLES, REBUILT_TABLES } from "./clone-plan.mjs";
 import { cloneTenantDemo } from "./clone-core.mjs";
 import { collectNeedles, scanTenant } from "./pii-scan.mjs";
@@ -37,6 +37,8 @@ const QUEUE_J = "6f1d2c3b-0000-4000-8000-0000000000d1";
 const CAMPAIGN = "6f1d2c3b-0000-4000-8000-0000000000e1";
 const STORAGE = "https://project.storage.test";
 const BULK = 300;
+/** Idempotency key shared by Maria's journey execution and her sms log (crm step join). */
+const IDEM_M = "6f1d2c3b-0000-4000-8000-0000000000f1";
 
 /** Every source id that belongs to José (must leave no trace in the demo). */
 const JOSE_IDS = [JOSE, ENR_J, EXE_J, SMS_J1, SMS_J2, LINK_J, DISPATCH_J, TOKEN_J, QUEUE_J];
@@ -107,9 +109,18 @@ async function seed() {
     [SOURCE, MARIA, PEDRO, CARLA, JOSE],
   );
   await db.query(
-    `insert into public.players (id, tenant_id, nome, origem)
-     select md5('bulk-player-' || i)::uuid, $1, 'Jogador ' || i, 'site' from generate_series(1, ${BULK}) i`,
-    [SOURCE],
+    // Fix round 2: the bulk players' REAL names are pairs from the fake-name
+    // pool itself (some with a middle name) and they have e-mails, so the
+    // clone's own fakes ("first mid last", first.last@example.com, partial
+    // rewrites) would collide with real-name needles unless every exposed
+    // pair is checked.
+    `insert into public.players (id, tenant_id, nome, email, origem)
+     select md5('bulk-player-' || i)::uuid, $1,
+            ($2::text[])[(i % 50) + 1] || case when i % 3 = 0 then ' ' || ($3::text[])[((i * 3) % 40) + 1] else '' end
+              || ' ' || ($3::text[])[((i * 7) % 40) + 1],
+            'bulk' || i || '@gmail.com', 'site'
+       from generate_series(1, ${BULK}) i`,
+    [SOURCE, FIRST_NAMES, LAST_NAMES],
   );
   await db.query(
     `insert into public.deposits (tenant_id, player_id, valor, status, external_id, event_id, raw_payload)
@@ -154,9 +165,10 @@ async function seed() {
     [SOURCE, JOURNEY, MARIA, PEDRO, ENR_M, JOSE, ENR_J],
   );
   await db.query(
-    `insert into public.journey_step_executions (id, tenant_id, journey_id, enrollment_id, step_id, step_position, status)
-     values ($2, $1, $3, $4, $5, 1, 'sent'), ($6, $1, $3, $7, $5, 1, 'sent')`,
-    [SOURCE, EXE_M, JOURNEY, ENR_M, STEP, EXE_J, ENR_J],
+    `insert into public.journey_step_executions (id, tenant_id, journey_id, enrollment_id, step_id, step_position,
+                                                 status, idempotency_key)
+     values ($2, $1, $3, $4, $5, 1, 'sent', $8), ($6, $1, $3, $7, $5, 1, 'sent', gen_random_uuid())`,
+    [SOURCE, EXE_M, JOURNEY, ENR_M, STEP, EXE_J, ENR_J, IDEM_M],
   );
   await db.query(
     `insert into public.journey_events (tenant_id, journey_id, enrollment_id, execution_id, event_type)
@@ -167,7 +179,7 @@ async function seed() {
     `insert into public.sms_send_logs (id, tenant_id, to_phone, content, status, provider, player_id,
                                        provider_message_id, idempotency_key, trigger_name, provider_response, last_callback)
      values ($2, $1, '+5521987654321', 'Oi Maria, acesse https://sortealta.link/AbC1 - Sorte Alta', 'sent', 'shortcode',
-             $3, 'sc-777', 'journey:' || $5 || ':5521987654321', 'journey:' || $5,
+             $3, 'sc-777', '${IDEM_M}', 'journey:' || $5,
              '{"to":"5521987654321","id":"sc-777","billing_reference_id":"bill-M"}',
              '{"status":"DELIVERED","msisdn":"5521987654321"}'),
             ($4, $1, '5511912345678', 'Pedro, seu bônus na SORTE ALTA', 'sent', 'shortcode',
@@ -347,7 +359,6 @@ describe("clone-tenant-demo", () => {
     // (Bulk players' fake names may legitimately use any first name of the pool.)
     for (const p of named) expect(p.nome).not.toMatch(/\b(maria|souza|pedro|alves|carla)\b/i);
     for (const p of players) {
-      expect(p.nome).not.toMatch(/^Jogador \d+$/);
       if (p.telefone) expect(p.telefone).toMatch(/^\+5511900\d{6}$/);
       if (p.email) expect(p.email).toMatch(/@example\.com$/);
     }
@@ -394,6 +405,8 @@ describe("clone-tenant-demo", () => {
       [demo],
     );
     expect(dispatches).toHaveLength(1);
+    // conversion_report_sources groups by the key minus its ":<url position>" suffix.
+    expect(dispatches[0].idempotency_key).toMatch(/^[0-9a-f]{16}:[0-9a-f-]{36}:0$/);
     expect(dispatches[0]).toMatchObject({
       tracking_token: remapId("link_dispatches", TOKEN),
       source_id: remapId("journeys", JOURNEY),
@@ -499,6 +512,40 @@ describe("clone-tenant-demo", () => {
       [demo],
     );
     expect(lifecycle[0].n).toBe(sampled.length);
+  }, 120_000);
+
+  it("fix round 2: journey sends keep their step in the rebuilt crm_results_daily", async () => {
+    const demo = (await demoId())!;
+    const stepSent = async (tenant: string) =>
+      (
+        await db.query<{ step_position: number; sent: number }>(
+          `select step_position, sum(sent)::int as sent from public.crm_results_daily
+            where tenant_id = $1 and source_type = 'journey' group by 1 order by 1`,
+          [tenant],
+        )
+      ).rows;
+    const source = await stepSent(SOURCE);
+    expect(source).toContainEqual({ step_position: 1, sent: 1 }); // Maria's send, joined by idempotency key
+    expect((await stepSent(demo)).find((r) => r.step_position === 1)).toEqual({ step_position: 1, sent: 1 });
+    // The two demo keys still match each other, and neither is the real key.
+    const { rows } = await db.query<{ x: string; s: string }>(
+      `select x.idempotency_key::text as x, s.idempotency_key as s
+         from public.journey_step_executions x, public.sms_send_logs s
+        where x.id = $1 and s.id = $2`,
+      [remapId("x", EXE_M), remapId("x", SMS_1)],
+    );
+    expect(rows[0].x).toBe(rows[0].s);
+    expect(rows[0].x).not.toBe(IDEM_M);
+  }, 120_000);
+
+  it("fix round 2: real names drawn from the fake pool never make the clone's own output a hit", async () => {
+    const { rows } = await db.query<{ nome: string }>(`select nome from public.players where tenant_id = $1`, [SOURCE]);
+    const realNeedles = new Set(rows.map((r) => nameNeedle(r.nome)).filter(Boolean));
+    expect(realNeedles.size).toBeGreaterThan(250); // the collision pool is real
+    const demo = (await demoId())!;
+    const hits = await scanTenant(db, demo, await collectNeedles(db, SOURCE), { sourceTenantId: SOURCE });
+    expect(hits.filter((h: { kind: string }) => h.kind === "name")).toEqual([]);
+    expect(hits).toEqual([]);
   }, 120_000);
 
   it("running again after editing the demo restores the identical state", async () => {

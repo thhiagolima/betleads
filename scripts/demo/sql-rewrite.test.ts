@@ -18,7 +18,7 @@ const SOURCE_TENANT = "03b73a96-aef7-414d-94fc-93a996f8256b";
 const DEMO_TENANT = "11111111-2222-4333-8444-555555555555";
 const HOSTS = ["sortealta.bet", "sortealta.link", "betleads.io", "wa.me"];
 const SHORT_HOSTS = ["sortealta.link"];
-const SECRET = "test-secret-1";
+const SECRET = "test-secret-0001-abcd";
 const LINK_ID = "6f1d2c3b-0000-4000-8000-0000000000c1";
 const SHORT_MAP = shortLinkMap([{ id: LINK_ID, short_url: "https://sortealta.link/AbC1" }]);
 
@@ -148,5 +148,32 @@ describe("pg_temp.demo_in_sample vs inDemoSample (R14)", () => {
     for (const r of rows) expect(r.out, r.v).toBe(inDemoSample(r.v));
     const { rows: nul } = await db.query<{ out: boolean }>("select pg_temp.demo_in_sample(null) as out");
     expect(nul[0].out).toBe(false);
+  });
+});
+
+describe("pg_temp.demo_key (fix round 2)", () => {
+  const key = async (t: string | null) =>
+    (await db.query<{ out: string | null }>("select pg_temp.demo_key($1) as out", [t])).rows[0].out;
+
+  it("is one structure-preserving mapping: equal keys stay equal, ':<n>' suffixes survive", async () => {
+    const uuid = "6f1d2c3b-0000-4000-8000-0000000000f1";
+    const mapped = (await key(uuid))!;
+    expect(mapped).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-a[0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(mapped).not.toBe(uuid);
+    expect(await key(uuid.toUpperCase())).toBe(mapped);
+    expect(await key(`${uuid}:0`)).toBe(`${mapped}:0`);
+    const real = `journey:${uuid}:5521987654321`;
+    const demo = (await key(real))!;
+    expect(demo).not.toContain("5521987654321");
+    expect(demo).not.toContain("journey");
+    expect(await key(`${real}:12`)).toBe(`${demo}:12`);
+    expect(await key(null)).toBeNull();
+  });
+
+  it("fails closed without the run secret", async () => {
+    await db.query(`select set_config('demo.secret', '', false)`);
+    await expect(db.query("select pg_temp.demo_pid('x')")).rejects.toThrow(/demo\.secret is not set/);
+    await expect(db.query("select pg_temp.demo_key('x')")).rejects.toThrow(/demo\.secret is not set/);
+    await db.query(`select set_config('demo.secret', $1, false)`, [SECRET]);
   });
 });

@@ -23,7 +23,8 @@ const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
  * written into a function body or a table.
  */
 export const setSecretSql = `select set_config('demo.secret', $1, true)`;
-const SECRET = `coalesce(current_setting('demo.secret', true), '')`;
+// Fail closed: every secret-keyed function raises when the secret is unset.
+const SECRET = `pg_temp.demo_secret()`;
 
 /**
  * One statement per entry (PGlite's query() runs a single statement).
@@ -57,12 +58,21 @@ export function rewriteFunctionsSql({ sourceTenantId, demoTenantId, hosts = [], 
 `
     : "";
   return [
+    `create or replace function pg_temp.demo_secret() returns text language plpgsql stable as $f$
+declare s text := current_setting('demo.secret', true);
+begin
+  if s is null or length(s) < 16 then
+    raise exception 'demo.secret is not set — refusing to derive demo values without the run secret';
+  end if;
+  return s;
+end
+$f$`,
     `drop table if exists pg_temp.demo_short_map`,
     `create temp table demo_short_map (key text primary key, dst text not null)`,
     `create or replace function pg_temp.demo_short_target(host text, path text) returns text language sql stable as $f$
   select coalesce(
     (select m.dst from pg_temp.demo_short_map m where m.key = lower(host) || '/' || path),
-    'https://${DEMO_DOMAIN}/dx' || left(md5(${SECRET} || ':short:' || lower(host) || '/' || path), 8))
+    'https://${DEMO_DOMAIN}/dx' || left(md5(${SECRET} || ':short:' || lower(host) || '/' || path), 12))
 $f$`,
     `create or replace function pg_temp.demo_uuid(u uuid) returns uuid language sql immutable as $f$
   select case
@@ -112,6 +122,26 @@ $f$`,
 $f$`,
     `create or replace function pg_temp.demo_hash(t text) returns text language sql stable as $f$
   select case when t is null then null else md5(${SECRET} || ':' || t) end
+$f$`,
+    // ONE mapping for every idempotency key (sms_send_logs, journey_step_executions,
+    // link_dispatches, sms_credit_ledger, …): applied component by component on
+    // ':' so equal real keys stay equal and "<key>:<n>" stays "<demo key>:<n>"
+    // (conversion_report_sources strips that suffix). 1–3 digit components (url
+    // positions) are kept; a uuid component becomes a secret-keyed uuid (so a
+    // uuid column and its ::text copy match); anything else (labels, phones,
+    // ids) a secret-keyed hash.
+    `create or replace function pg_temp.demo_key_part(c text) returns text language sql stable as $f$
+  select case
+    when c ~ '^[0-9]{1,3}$' or c = '' then c
+    when c ~* ${lit(`^${UUID_PATTERN}$`)} then
+      (select substr(h, 1, 8) || '-' || substr(h, 9, 4) || '-4' || substr(h, 14, 3) || '-a' || substr(h, 18, 3) || '-' || substr(h, 21, 12)
+         from (select md5(${SECRET} || ':idem:' || lower(c)) h) x)
+    else left(md5(${SECRET} || ':idem:' || c), 16) end
+$f$`,
+    `create or replace function pg_temp.demo_key(t text) returns text language sql stable as $f$
+  select case when t is null then null else
+    (select string_agg(pg_temp.demo_key_part(p.c), ':' order by p.n)
+       from unnest(string_to_array(t, ':')) with ordinality p(c, n)) end
 $f$`,
     `create or replace function pg_temp.demo_in_sample(t text) returns boolean language sql immutable as $f$
   select case when t is null then false else left(md5(${lit(DEMO_SAMPLE_SALT)} || lower(t)), 1) < '8' end

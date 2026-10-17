@@ -125,9 +125,9 @@ describe("clone-tenant-demo safety", () => {
           [remapId("tenants", SOURCE)],
         )
       ).rows;
-    await run({ sourceSlug: "pixpgf", targetSlug: "demo", secret: "secret-a" });
+    await run({ sourceSlug: "pixpgf", targetSlug: "demo", secret: "secret-a-0123456789" });
     const a = await read();
-    await run({ sourceSlug: "pixpgf", targetSlug: "demo", secret: "secret-b" });
+    await run({ sourceSlug: "pixpgf", targetSlug: "demo", secret: "secret-b-0123456789" });
     const b = await read();
     expect(b.map((r) => r.id)).toEqual(a.map((r) => r.id));
     for (let i = 0; i < a.length; i += 1) {
@@ -163,6 +163,8 @@ describe("clone-tenant-demo safety", () => {
     await expect(run({ sourceSlug: "terceira", targetSlug: "demo-3" })).rejects.toThrow(
       /not a demo tenant/,
     );
+    // Fix round 2: no run secret, no clone (fail closed).
+    await expect(run({ sourceSlug: "pixpgf", targetSlug: "demo", secret: "short" })).rejects.toThrow(/secret/);
     // Dry-run refuses the same way.
     await expect(run({ sourceSlug: "pixpgf", targetSlug: "outra", apply: false })).rejects.toThrow(
       /not a demo tenant/,

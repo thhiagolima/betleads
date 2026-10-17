@@ -449,6 +449,8 @@ export async function buildDemo(
 ) {
   const started = Date.now();
   const step = (message) => log(`[${((Date.now() - started) / 1000).toFixed(1)}s] ${message}`);
+  // Fail closed (fix round 2): never derive demo values without a real secret.
+  if (typeof secret !== "string" || secret.length < 16) throw new Error("buildDemo: a run secret of 16+ chars is required");
   const { source, demoTenantId } = await prepareTenants(client, sourceSlug, targetSlug);
   step(`source ${source.slug} (${source.id}) → demo ${targetSlug} (${demoTenantId})`);
 

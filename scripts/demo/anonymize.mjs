@@ -96,7 +96,7 @@ export function makeFaker(seed) {
   };
 }
 
-const FIRST_NAMES = [
+export const FIRST_NAMES = [
   "Ana", "Bruno", "Camila", "Diego", "Eduarda", "Felipe", "Gabriela", "Heitor", "Isabela",
   "Jonas", "Larissa", "Lucas", "Mariana", "Nicolas", "Olivia", "Pedro", "Rafaela", "Samuel",
   "Tatiane", "Vinicius", "Yasmin", "Arthur", "Beatriz", "Caio", "Daniela", "Enzo", "Fernanda",
@@ -104,7 +104,7 @@ const FIRST_NAMES = [
   "Sabrina", "Thiago", "Valentina", "Wesley", "Alice", "Benicio", "Clara", "Davi", "Elisa",
   "Fabio", "Giovana", "Henrique", "Ingrid", "Kaique",
 ];
-const LAST_NAMES = [
+export const LAST_NAMES = [
   "Almeida", "Barbosa", "Cardoso", "Dias", "Esteves", "Freitas", "Gomes", "Henriques", "Ibanez",
   "Jardim", "Lacerda", "Moraes", "Nogueira", "Otero", "Pacheco", "Queiroz", "Rezende", "Siqueira",
   "Teixeira", "Uchoa", "Vasconcelos", "Xavier", "Zanetti", "Amaral", "Brandao", "Castilho",
@@ -176,7 +176,7 @@ export function fakeExpert(value, secret = "", avoidNames = null) {
   for (let attempt = 0; attempt < 1000; attempt += 1) {
     const faker = makeFaker(`${secret}:expert:${value}#${attempt}`);
     const name = `${faker.pick(FIRST_NAMES)} ${faker.pick(LAST_NAMES)}`;
-    if (!avoidNames || !nameBigrams(name).some((b) => avoidNames.has(b))) return name;
+    if (!avoidNames || !exposedNamePairs(name).some((b) => avoidNames.has(b))) return name;
   }
   throw new Error("fakeExpert: no free name");
 }
@@ -207,6 +207,23 @@ export function nameWords(text) {
 export function nameBigrams(text) {
   const words = nameWords(text);
   return words.slice(1).map((w, i) => `${words[i]} ${w}`);
+}
+
+/**
+ * Every name bigram a fake identity can expose anywhere in the demo: all
+ * ordered pairs of its name words (a 3-word "First Mid Last" can surface as
+ * "first last" through partial rewrites, "last first" too) and the bigrams of
+ * its e-mail (first.last123@example.com tokenizes to "first last").
+ */
+export function exposedNamePairs(...texts) {
+  const out = new Set();
+  for (const text of texts) {
+    if (!text) continue;
+    const words = nameWords(text);
+    for (let i = 0; i < words.length; i += 1)
+      for (let j = 0; j < words.length; j += 1) if (i !== j) out.add(`${words[i]} ${words[j]}`);
+  }
+  return [...out];
 }
 
 /** Needle of a real name: its first two significant words, or null. */
@@ -280,7 +297,7 @@ export function fakePlayers(players, { avoidForms = new Set(), avoidNames = null
       if (attempt > 1000) throw new Error(`fakePlayers: no free identity for ${player.id}`);
       const fake = fakePlayer(player, attempt, { secret, avoidNames });
       // Never a fake name that is also a real name needle (the scan would flag it).
-      if (avoidNames && nameBigrams(fake.nome).some((b) => avoidNames.has(b))) continue;
+      if (avoidNames && exposedNamePairs(fake.nome, fake.email).some((b) => avoidNames.has(b))) continue;
       const keys = [
         fake.telefone && `t:${nationalDigits(fake.telefone)}`,
         fake.email && `e:${fake.email}`,
@@ -511,7 +528,7 @@ const IMG_SRC = /(<img\b[^>]*?\bsrc\s*=\s*)(["'])(.*?)\2/gi;
 
 /** Code of a tracked link in the demo: from its remapped (demo) id, not the real path. */
 export function demoShortPath(sourceLinkId) {
-  return `dm${md5(`short:${demoUuid(sourceLinkId)}`).slice(0, 8)}`;
+  return `dm${md5(`short:${demoUuid(sourceLinkId)}`).slice(0, 12)}`;
 }
 
 export const shortKey = (host, path) => `${String(host).toLowerCase().replace(/^www\./, "")}/${path}`;
@@ -541,7 +558,7 @@ export function shortLinkMap(links) {
 
 function shortTarget(ctx, host, path) {
   const key = shortKey(host, path);
-  return ctx.shortMap?.get(key) ?? `https://${DEMO_DOMAIN}/dx${md5(`${ctx.secret}:short:${key}`).slice(0, 8)}`;
+  return ctx.shortMap?.get(key) ?? `https://${DEMO_DOMAIN}/dx${md5(`${ctx.secret}:short:${key}`).slice(0, 12)}`;
 }
 
 /** Generic rules only (the part shared with SQL `pg_temp.demo_rw`). */

@@ -40,8 +40,8 @@ export const USER_COLUMNS = new Set([
 ]);
 
 const pid = (column) => `pg_temp.demo_pid(s.${column})`;
-const newKey = (column = "idempotency_key") =>
-  `case when s.${column} is null then null else 'demo:' || pg_temp.demo_uuid(s.id)::text end`;
+/** Idempotency / request keys: the one structure-preserving mapping (pg_temp.demo_key). */
+const newKey = (column = "idempotency_key") => `pg_temp.demo_key(s.${column})`;
 const playerPhone = (phoneColumn, playerColumn) =>
   `case when s.${phoneColumn} is null then null
         when pg_temp.demo_nat(s.${phoneColumn}) = '' then s.${phoneColumn}
@@ -62,7 +62,7 @@ const kept = (table, column) =>
 const keptOrNull = (table, column) => `(s.${column} is null or ${kept(table, column)})`;
 const phoneSample = (column) =>
   `case when s.${column} is null then pg_temp.demo_in_sample(s.id::text) else pg_temp.demo_phone_in_sample(s.${column}) end`;
-const SHORT_PATH = "'dm' || left(md5('short:' || pg_temp.demo_uuid(s.id)::text), 8)";
+const SHORT_PATH = "'dm' || left(md5('short:' || pg_temp.demo_uuid(s.id)::text), 12)";
 const UUID_TEXT = "'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'";
 
 /**
@@ -187,7 +187,8 @@ export const CLONE_TABLES = [
     set: {
       provider_message_id: pid("provider_message_id"),
       // uuid column: regenerated from the row id (spec §6), not the real key.
-      idempotency_key: "md5('idem:' || pg_temp.demo_uuid(s.id)::text)::uuid",
+      // Same mapping as the sms log key it joins (crm_results_daily step attribution).
+      idempotency_key: "pg_temp.demo_key(s.idempotency_key::text)::uuid",
     },
     keep: { provider_response: ["variant_index", "channel_permit_id"] },
     sample: kept("journey_enrollments", "enrollment_id"),

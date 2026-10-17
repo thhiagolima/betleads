@@ -1,17 +1,41 @@
 // Test support: a PGlite database with every migration in supabase/migrations
 // applied on top of minimal Supabase stand-ins (auth, storage, cron, net,
-// realtime). Used by the clone integration test so it exercises the real
+// realtime). Used by the clone integration tests so they exercise the real
 // columns, constraints and triggers. Migrations that only seed production
 // tenants (they raise when Sorte Alta & co. are missing) fail harmlessly and
 // are returned in `failed`.
-import { readdirSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+//
+// Applying ~all migrations costs several CPU-seconds; under the full parallel
+// suite that starved other PGlite test files into timeouts. So the migrated
+// data directory is built ONCE per migration set and cached as a tarball in
+// the OS temp dir (keyed by a hash of the stubs, the migrations and the
+// PGlite version); every later database is restored from it. A lock file
+// makes concurrent test files wait for a single builder.
+import { createHash } from "node:crypto";
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { PGlite } from "@electric-sql/pglite";
 import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
 
-const MIGRATIONS = resolve(dirname(fileURLToPath(import.meta.url)), "../../../supabase/migrations");
+const HERE = dirname(fileURLToPath(import.meta.url));
+const MIGRATIONS = resolve(HERE, "../../../supabase/migrations");
+const CACHE_DIR = join(tmpdir(), "betleads-demo-pglite");
+const LOCK_STALE_MS = 5 * 60 * 1000;
+const WAIT_MS = 4 * 60 * 1000;
 
 const STUBS = `
 DO $$ BEGIN
@@ -48,14 +72,31 @@ CREATE PUBLICATION supabase_realtime;
 SET check_function_bodies = off;
 `;
 
-export async function createMigratedDb() {
+function migrationFiles() {
+  return readdirSync(MIGRATIONS)
+    .filter((f) => f.endsWith(".sql"))
+    .sort()
+    .map((file) => ({ file, sql: readFileSync(resolve(MIGRATIONS, file), "utf8") }));
+}
+
+function cacheKey(files) {
+  const hash = createHash("sha256").update(STUBS).update(readFileSync(fileURLToPath(import.meta.url)));
+  for (const { file, sql } of files) hash.update(file).update("\0").update(sql).update("\0");
+  try {
+    hash.update(readFileSync(resolve(HERE, "../../../node_modules/@electric-sql/pglite/package.json")));
+  } catch {
+    // version unknown: the migration hash still keys the cache
+  }
+  return hash.digest("hex").slice(0, 24);
+}
+
+async function build(files) {
   const db = new PGlite({ extensions: { pgcrypto } });
   await db.exec(STUBS);
   const failed = [];
-  for (const file of readdirSync(MIGRATIONS).filter((f) => f.endsWith(".sql")).sort()) {
-    const sql = readFileSync(resolve(MIGRATIONS, file), "utf8").replace(/create extension[^;]*;/gi, "");
+  for (const { file, sql } of files) {
     try {
-      await db.exec(sql);
+      await db.exec(sql.replace(/create extension[^;]*;/gi, ""));
     } catch (error) {
       failed.push({ file, error: String(error?.message ?? error).slice(0, 200) });
       try {
@@ -67,4 +108,73 @@ export async function createMigratedDb() {
   }
   await db.exec("RESET check_function_bodies");
   return { db, failed };
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function restore(tarPath, metaPath) {
+  const blob = new Blob([readFileSync(tarPath)]);
+  const db = new PGlite({ extensions: { pgcrypto }, loadDataDir: blob });
+  await db.waitReady;
+  const { failed } = JSON.parse(readFileSync(metaPath, "utf8"));
+  return { db, failed };
+}
+
+/** A fresh, fully migrated PGlite database (restored from the shared cache when possible). */
+export async function createMigratedDb({ cache = process.env.DEMO_PGLITE_CACHE !== "0" } = {}) {
+  const files = migrationFiles();
+  if (!cache) return build(files);
+  mkdirSync(CACHE_DIR, { recursive: true });
+  const key = cacheKey(files);
+  const tarPath = join(CACHE_DIR, `${key}.tar.gz`);
+  const metaPath = join(CACHE_DIR, `${key}.json`);
+  const lockPath = join(CACHE_DIR, `${key}.lock`);
+
+  const deadline = Date.now() + WAIT_MS;
+  for (;;) {
+    if (existsSync(tarPath) && existsSync(metaPath)) {
+      try {
+        return await restore(tarPath, metaPath);
+      } catch {
+        // corrupt cache entry: rebuild below
+        try {
+          unlinkSync(tarPath);
+        } catch {
+          // already gone
+        }
+      }
+    }
+    let fd = null;
+    try {
+      fd = openSync(lockPath, "wx");
+    } catch {
+      // someone else is building — unless the lock is stale
+      try {
+        if (Date.now() - statSync(lockPath).mtimeMs > LOCK_STALE_MS) unlinkSync(lockPath);
+      } catch {
+        // lock vanished
+      }
+    }
+    if (fd !== null) {
+      try {
+        const built = await build(files);
+        const dump = await built.db.dumpDataDir("gzip");
+        const bytes = Buffer.from(await dump.arrayBuffer());
+        writeFileSync(`${tarPath}.tmp`, bytes);
+        writeFileSync(`${metaPath}.tmp`, JSON.stringify({ failed: built.failed }));
+        renameSync(`${metaPath}.tmp`, metaPath);
+        renameSync(`${tarPath}.tmp`, tarPath);
+        return built;
+      } finally {
+        closeSync(fd);
+        try {
+          unlinkSync(lockPath);
+        } catch {
+          // already removed
+        }
+      }
+    }
+    if (Date.now() > deadline) return build(files);
+    await sleep(250);
+  }
 }
