@@ -21,6 +21,11 @@ vi.mock("./email-deliverability.server", () => ({
   augmentEmailHtml: vi.fn(async (html: string) => ({ html, unsubscribeUrl: null })),
   isSuppressed: vi.fn(async () => false),
 }));
+// Pass-through, so a test can act at the moment a recipient is being prepared.
+vi.mock("./template-vars.server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./template-vars.server")>();
+  return { ...actual, buildPlayerVariables: vi.fn(actual.buildPlayerVariables) };
+});
 vi.mock("node:dns/promises", () => ({
   lookup: vi.fn(async () => [{ address: "93.184.216.34", family: 4 }]),
 }));
@@ -40,6 +45,7 @@ import {
 } from "./shortio.server";
 import { callElevenLabs, DEFAULT_VOICE_SETTINGS } from "./calls.server";
 import { runCampaignSend } from "./email.functions";
+import { buildPlayerVariables } from "./template-vars.server";
 
 const NORMAL = "00000000-0000-4000-8000-000000000001";
 const DEMO = "00000000-0000-4000-8000-000000000002";
@@ -656,10 +662,13 @@ describe("e-mail campaign send (runCampaignSend)", () => {
   it("tenant turning demo mid-campaign: the per-recipient catch logs nothing", async () => {
     fake.db.rows("players").push({ id: NORMAL_PLAYER, tenant_id: NORMAL, email: "n@example.com" });
     campaignFor(NORMAL, NORMAL_PLAYER, true);
-    fake.db.onRpc("check_contact_frequency_limit", () => {
+    // Flip the tenant to demo while the recipient is being prepared (after the
+    // campaign-level check, before the send guard).
+    const real = vi.mocked(buildPlayerVariables).getMockImplementation()!;
+    vi.mocked(buildPlayerVariables).mockImplementationOnce((p) => {
       fake.db.rows("tenants").find((t) => t.id === NORMAL)!.is_demo = true;
       __resetDemoTenantCacheForTests();
-      return { data: [{ allowed: true, retry_at: null, blocked_reason: null }], error: null };
+      return real(p);
     });
     await expect(runCampaignSend(CAMPAIGN)).rejects.toMatchObject({ code: "DEMO_SEND_BLOCKED" });
     expect(fetchMock).toHaveBeenCalledTimes(0);
