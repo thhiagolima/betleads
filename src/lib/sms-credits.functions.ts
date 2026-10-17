@@ -4,7 +4,11 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import type { Json } from "@/integrations/supabase/types";
-import { assertTenantCanOpenBilling, assertTenantNotDemo } from "@/lib/tenant-access.server";
+import {
+  assertTenantCanOpenBilling,
+  assertTenantNotDemo,
+  listDemoTenantIds,
+} from "@/lib/tenant-access.server";
 import { dbUuid } from "@/lib/zod-helpers";
 
 type ServerContext = {
@@ -217,40 +221,61 @@ export const createSmsCreditCheckout = createServerFn({ method: "POST" })
     return { checkout: result as Json };
   });
 
+/**
+ * Body of `adminSmsCreditConsole`, extracted so the demo-tenant filtering is
+ * directly unit-testable (mirrors the existing `*For` convention used for
+ * other demo-sensitive handlers in this codebase).
+ *
+ * This screen lists balances/orders ACROSS every tenant (unlike the
+ * per-tenant drill-down in tenants.tsx, where the demo tenant's own balance
+ * IS shown). The demo tenant is a clone of a real client (Task 12), so
+ * without this filter it would duplicate that client's credit totals here.
+ */
+export async function adminSmsCreditConsoleFor(ctx: ServerContext) {
+  await assertSuperAdmin(ctx.userId);
+  const sb = looseDb(ctx.supabase);
+
+  const [overviewRes, settingsRes, packagesRes, ordersRes, demoTenantIds] = await Promise.all([
+    sb.rpc("admin_sms_credit_overview"),
+    sb.from("sms_credit_settings").select("*").eq("id", true).maybeSingle(),
+    sb
+      .from("sms_credit_packages")
+      .select("id,name,credits,bonus_credits,price_cents,currency,is_active,sort_order")
+      .order("sort_order", { ascending: true }),
+    sb
+      .from("sms_credit_orders")
+      .select(
+        "id,tenant_id,credits,amount_cents,currency,status,checkout_provider,external_reference,created_at,paid_at,tenants:tenants(nome)",
+      )
+      .order("created_at", { ascending: false })
+      .limit(30),
+    listDemoTenantIds(),
+  ]);
+
+  if (overviewRes.error) throw new Error(overviewRes.error.message);
+  if (settingsRes.error) throw new Error(settingsRes.error.message);
+  if (packagesRes.error) throw new Error(packagesRes.error.message);
+  if (ordersRes.error) throw new Error(ordersRes.error.message);
+
+  const demoIds = new Set(demoTenantIds);
+  const overview = ((overviewRes.data ?? []) as Array<{ tenant_id: string }>).filter(
+    (row) => !demoIds.has(row.tenant_id),
+  );
+  const orders = ((ordersRes.data ?? []) as Array<{ tenant_id: string }>).filter(
+    (row) => !demoIds.has(row.tenant_id),
+  );
+
+  return {
+    overview,
+    settings: settingsRes.data ?? null,
+    packages: packagesRes.data ?? [],
+    orders,
+  };
+}
+
 export const adminSmsCreditConsole = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    await assertSuperAdmin(context.userId);
-    const sb = looseDb(context.supabase);
-
-    const [overviewRes, settingsRes, packagesRes, ordersRes] = await Promise.all([
-      sb.rpc("admin_sms_credit_overview"),
-      sb.from("sms_credit_settings").select("*").eq("id", true).maybeSingle(),
-      sb
-        .from("sms_credit_packages")
-        .select("id,name,credits,bonus_credits,price_cents,currency,is_active,sort_order")
-        .order("sort_order", { ascending: true }),
-      sb
-        .from("sms_credit_orders")
-        .select(
-          "id,tenant_id,credits,amount_cents,currency,status,checkout_provider,external_reference,created_at,paid_at,tenants:tenants(nome)",
-        )
-        .order("created_at", { ascending: false })
-        .limit(30),
-    ]);
-
-    if (overviewRes.error) throw new Error(overviewRes.error.message);
-    if (settingsRes.error) throw new Error(settingsRes.error.message);
-    if (packagesRes.error) throw new Error(packagesRes.error.message);
-    if (ordersRes.error) throw new Error(ordersRes.error.message);
-
-    return {
-      overview: overviewRes.data ?? [],
-      settings: settingsRes.data ?? null,
-      packages: packagesRes.data ?? [],
-      orders: ordersRes.data ?? [],
-    };
-  });
+  .handler(async ({ context }) => adminSmsCreditConsoleFor(context as ServerContext));
 
 const settingsInput = z.object({
   provider_cost_per_sms: z.number().min(0).max(1000),

@@ -81,6 +81,7 @@ type TenantRow = {
   crm_model?: "CRM_PLATAFORMA" | "CRM_EXPERT" | null;
   created_at: string;
   updated_at: string | null;
+  is_demo?: boolean | null;
 };
 
 type TenantUser = {
@@ -282,7 +283,12 @@ function TenantsPage() {
                         <div className="truncate font-semibold">{tenant.nome}</div>
                         <div className="truncate text-xs text-muted-foreground">{tenant.slug}</div>
                       </div>
-                      {statusBadge(tenant.status)}
+                      <div className="flex items-center gap-1">
+                        {tenant.is_demo && (
+                          <Badge className="bg-violet-500/15 text-violet-300">demo</Badge>
+                        )}
+                        {statusBadge(tenant.status)}
+                      </div>
                     </div>
                     <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
                       <span>{tenant.plano}</span>

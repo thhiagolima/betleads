@@ -50,6 +50,10 @@ type TenantRow = {
   metadata?: Json | null;
   created_at: string;
   updated_at: string | null;
+  // Not in the generated Supabase types yet (added via migration only, Task
+  // 1); follows the established `(supabaseAdmin as any)` / loose-row-type
+  // pattern used elsewhere for this column.
+  is_demo?: boolean | null;
 };
 
 type TenantMemberRow = {
@@ -127,7 +131,7 @@ async function getAccessibleTenants(ctx: ServerContext) {
   if (superAdmin) {
     const { data, error } = await db()
       .from<TenantRow[]>("tenants")
-      .select("id,nome,slug,status,plano,crm_model,limits,metadata,created_at,updated_at")
+      .select("id,nome,slug,status,plano,crm_model,limits,metadata,created_at,updated_at,is_demo")
       .order("nome", { ascending: true });
     if (error) throw new Error(error.message);
     return { superAdmin, tenants: data ?? [] };
@@ -145,7 +149,7 @@ async function getAccessibleTenants(ctx: ServerContext) {
 
   const { data, error } = await db()
     .from<TenantRow[]>("tenants")
-    .select("id,nome,slug,status,plano,crm_model,limits,metadata,created_at,updated_at")
+    .select("id,nome,slug,status,plano,crm_model,limits,metadata,created_at,updated_at,is_demo")
     .in("id", tenantIds)
     .order("nome", { ascending: true });
   if (error) throw new Error(error.message);
@@ -375,47 +379,50 @@ export const getTenantManagementConsole = createServerFn({ method: "POST" })
     };
   });
 
+/**
+ * Body of `getTenantSwitcher`, extracted so `is_demo` is directly
+ * unit-testable (mirrors the existing `*For` convention used elsewhere in
+ * this file for demo-sensitive handlers).
+ */
+export async function getTenantSwitcherFor(ctx: ServerContext) {
+  const superAdmin = await checkSuperAdmin(ctx.userId);
+  const { data: memberships, error: membershipErr } = await db()
+    .from<TenantMemberRow[]>("user_roles")
+    .select("id,user_id,tenant_id,role,created_at")
+    .eq("user_id", ctx.userId)
+    .not("tenant_id", "is", null);
+  if (membershipErr) throw new Error(membershipErr.message);
+
+  const roles = memberships ?? [];
+  const tenantIds = roles.map((membership) => membership.tenant_id);
+  const { data: tenants, error: tenantsErr } = await db()
+    .from<TenantRow[]>("tenants")
+    .select("id,nome,slug,status,plano,crm_model,limits,metadata,created_at,updated_at,is_demo")
+    .in(
+      "id",
+      superAdmin ? (await getAccessibleTenants(ctx)).tenants.map((tenant) => tenant.id) : tenantIds,
+    )
+    .order("nome", { ascending: true });
+  if (tenantsErr) throw new Error(tenantsErr.message);
+
+  const roleByTenant = new Map(roles.map((membership) => [membership.tenant_id, membership.role]));
+  const options = (tenants ?? []).map((tenant) => ({
+    id: tenant.id,
+    nome: tenant.nome,
+    slug: tenant.slug,
+    role: superAdmin ? "super_admin" : (roleByTenant.get(tenant.id) ?? "member"),
+    is_demo: tenant.is_demo === true,
+  }));
+  const activeTenantId = options.some((tenant) => tenant.id === ctx.activeTenantId)
+    ? ctx.activeTenantId
+    : (options[0]?.id ?? null);
+
+  return { activeTenantId, tenants: options };
+}
+
 export const getTenantSwitcher = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    const ctx = context as unknown as ServerContext;
-    const superAdmin = await checkSuperAdmin(ctx.userId);
-    const { data: memberships, error: membershipErr } = await db()
-      .from<TenantMemberRow[]>("user_roles")
-      .select("id,user_id,tenant_id,role,created_at")
-      .eq("user_id", ctx.userId)
-      .not("tenant_id", "is", null);
-    if (membershipErr) throw new Error(membershipErr.message);
-
-    const roles = memberships ?? [];
-    const tenantIds = roles.map((membership) => membership.tenant_id);
-    const { data: tenants, error: tenantsErr } = await db()
-      .from<TenantRow[]>("tenants")
-      .select("id,nome,slug,status,plano,crm_model,limits,metadata,created_at,updated_at")
-      .in(
-        "id",
-        superAdmin
-          ? (await getAccessibleTenants(ctx)).tenants.map((tenant) => tenant.id)
-          : tenantIds,
-      )
-      .order("nome", { ascending: true });
-    if (tenantsErr) throw new Error(tenantsErr.message);
-
-    const roleByTenant = new Map(
-      roles.map((membership) => [membership.tenant_id, membership.role]),
-    );
-    const options = (tenants ?? []).map((tenant) => ({
-      id: tenant.id,
-      nome: tenant.nome,
-      slug: tenant.slug,
-      role: superAdmin ? "super_admin" : (roleByTenant.get(tenant.id) ?? "member"),
-    }));
-    const activeTenantId = options.some((tenant) => tenant.id === ctx.activeTenantId)
-      ? ctx.activeTenantId
-      : (options[0]?.id ?? null);
-
-    return { activeTenantId, tenants: options };
-  });
+  .handler(async ({ context }) => getTenantSwitcherFor(context as unknown as ServerContext));
 
 export const getCurrentTenantAccessStatus = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
