@@ -51,12 +51,13 @@ async function loadDemoTenant(client, demoSlug) {
 }
 
 /** Creates one demo Auth user and grants it `gestor` in the demo tenant. */
-export async function createDemoLogin(client, { label, expiresAt, demoSlug = DEMO_SLUG } = {}) {
+// No expiry flag: nothing in the app or the database enforces an expiry date,
+// so a login is ended explicitly with --revoke (spec §11).
+export async function createDemoLogin(client, { label, demoSlug = DEMO_SLUG } = {}) {
   const tenant = await loadDemoTenant(client, demoSlug);
   const email = demoEmail(label);
   const password = randomPassword();
   const appMetadata = { is_demo_user: true };
-  if (expiresAt) appMetadata.demo_expires_at = expiresAt;
 
   const { data: created, error: createError } = await client.auth.admin.createUser({
     email,
@@ -77,15 +78,15 @@ export async function createDemoLogin(client, { label, expiresAt, demoSlug = DEM
     throw new Error(`failed to grant gestor role to ${email}: ${roleError.message}`);
   }
 
-  return { email, password, userId: user.id, tenantId: tenant.id, expiresAt: expiresAt ?? null };
+  return { email, password, userId: user.id, tenantId: tenant.id };
 }
 
-/** Creates `count` demo logins, all sharing `label`/`expiresAt`. */
-export async function createDemoLogins(client, { count = 1, label, expiresAt, demoSlug = DEMO_SLUG } = {}) {
+/** Creates `count` demo logins, all sharing `label`. */
+export async function createDemoLogins(client, { count = 1, label, demoSlug = DEMO_SLUG } = {}) {
   const n = Number(count);
   if (!Number.isInteger(n) || n < 1) throw new Error(`--count must be a positive integer, got '${count}'`);
   const results = [];
-  for (let i = 0; i < n; i += 1) results.push(await createDemoLogin(client, { label, expiresAt, demoSlug }));
+  for (let i = 0; i < n; i += 1) results.push(await createDemoLogin(client, { label, demoSlug }));
   return results;
 }
 

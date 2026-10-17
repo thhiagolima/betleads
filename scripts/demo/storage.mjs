@@ -38,16 +38,42 @@ export function placeholderLayout(demoTenantId, storageBaseUrl) {
   };
 }
 
+const PAGE = 100;
+
+/**
+ * Every object under `folder` (recursive, paginated). supabase-js lists one
+ * level at a time; entries without an `id` are sub-folders.
+ */
+export async function listAll(storageBucket, folder) {
+  const files = [];
+  const pending = [folder];
+  while (pending.length) {
+    const dir = pending.shift();
+    for (let offset = 0; ; offset += PAGE) {
+      const { data, error } = await storageBucket.list(dir, { limit: PAGE, offset, sortBy: { column: "name", order: "asc" } });
+      if (error) throw new Error(`storage list ${dir}: ${error.message}`);
+      const entries = data ?? [];
+      for (const entry of entries) {
+        const full = `${dir}/${entry.name}`;
+        if (entry.id) files.push(full);
+        else pending.push(full);
+      }
+      if (entries.length < PAGE) break;
+    }
+  }
+  // Defense in depth: never touch anything outside the demo prefix.
+  return files.filter((f) => f.startsWith(`${folder}/`));
+}
+
 /** Storage adapter over supabase-js (service role). */
 export function supabaseStorage(supabase) {
   return {
     async replace({ prefixes, objects }) {
       for (const { bucket, folder } of prefixes) {
-        const { data, error } = await supabase.storage.from(bucket).list(folder, { limit: 1000 });
-        if (error) throw new Error(`storage list ${bucket}/${folder}: ${error.message}`);
-        const files = (data ?? []).filter((f) => f.id).map((f) => `${folder}/${f.name}`);
-        if (files.length) {
-          const { error: removeError } = await supabase.storage.from(bucket).remove(files);
+        const storageBucket = supabase.storage.from(bucket);
+        const files = await listAll(storageBucket, folder);
+        for (let i = 0; i < files.length; i += PAGE) {
+          const { error: removeError } = await storageBucket.remove(files.slice(i, i + PAGE));
           if (removeError) throw new Error(`storage remove ${bucket}/${folder}: ${removeError.message}`);
         }
       }

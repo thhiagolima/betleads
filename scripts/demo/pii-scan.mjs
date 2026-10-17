@@ -6,7 +6,17 @@
 // extracted with regexes (digit runs, e-mails, id-like words, uuids) and
 // hash-joined against needle tables, so the cost grows with the amount of
 // text, not with the number of needles.
-import { UUID_PATTERN, nationalDigits, normalizeHosts, phoneForms } from "./anonymize.mjs";
+import {
+  DEMO_DOMAIN,
+  NAME_SPLIT,
+  NAME_STOPWORDS,
+  UUID_PATTERN,
+  nameNeedle,
+  nationalDigits,
+  normalizeHosts,
+  phoneForms,
+  shortKey,
+} from "./anonymize.mjs";
 
 const qi = (name) => `"${String(name).replace(/"/g, '""')}"`;
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -103,6 +113,32 @@ export async function collectNeedles(client, sourceTenantId, { excludeHosts = []
     ["call_queue", "provider_request_id"],
   ]);
   const shortioLinkIds = await pick([["tracked_links", "shortio_link_id"]]);
+  // Real short links: host/path, and the same path behind the demo host (what
+  // a host-only rewrite would leave behind).
+  const shortLinks = [];
+  if (has(columns, "tracked_links", "short_url")) {
+    const { rows } = await client.query(
+      `select short_url, ${has(columns, "tracked_links", "path") ? "path" : "null as path"}
+         from public.tracked_links where tenant_id = $1 and short_url is not null`,
+      [sourceTenantId],
+    );
+    for (const r of rows) {
+      try {
+        const url = new URL(String(r.short_url));
+        const path = url.pathname.replace(/^\/+/, "").split("/")[0];
+        if (path) shortLinks.push({ host: url.hostname, path });
+      } catch {
+        // not a URL
+      }
+      if (r.path) shortLinks.push({ host: null, path: String(r.path) });
+    }
+  }
+  // Real multi-word names (first two significant words).
+  const names = [
+    ...new Set(
+      (await pick([["players", "nome"]])).map(nameNeedle).filter(Boolean),
+    ),
+  ];
   const hosts = await collectHosts(client, columns, sourceTenantId);
   const { rows: tenantRows } = await client.query(
     `select nome, slug from public.tenants where id = $1`,
@@ -123,6 +159,8 @@ export async function collectNeedles(client, sourceTenantId, { excludeHosts = []
     externalIds,
     providerIds,
     shortioLinkIds,
+    shortLinks,
+    names,
     uuids: [sourceTenantId.toLowerCase()],
     domains: normalizeHosts(hosts, excludeHosts),
     brands,
@@ -193,6 +231,13 @@ export function needleRows(needles) {
       if (value.length >= 8 && value.length <= 13) add("digits", value);
     } else if (/^[A-Za-z0-9_-]{6,}$/.test(value)) add("token", value);
   }
+  for (const { host, path } of needles.shortLinks ?? []) {
+    if (host) {
+      add("url", shortKey(host, path));
+      add("url", shortKey(DEMO_DOMAIN, path));
+    } else if (path.length >= 4) add("exact", path);
+  }
+  for (const name of needles.names ?? []) add("name", name);
   for (const s of [...(needles.uuids ?? []), ...(needles.domains ?? []), ...(needles.brands ?? [])])
     if (String(s).trim().length >= 4) add("sub", s);
   return [...rows.values()];
@@ -206,6 +251,7 @@ const DIGIT_RUN_SEPARATED = "(?<![0-9A-Za-z_])([0-9][0-9 ().+-]{6,22}[0-9])(?![0
 const DIGIT_RUN = "(?<![0-9])([0-9]{8,13})(?![0-9])";
 const EMAIL = "([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,})";
 const TOKEN = "([A-Za-z0-9_-]{6,})";
+const URL_TOKEN = "([A-Za-z0-9.-]+\\.[A-Za-z]{2,}/[A-Za-z0-9_-]+)";
 
 /**
  * Scans every textual column of every table holding rows of `tenantId`.
@@ -226,6 +272,8 @@ export async function scanTenant(client, tenantId, needles, { tables, sourceTena
     );
   await client.query(`create index on pg_temp.demo_scan_needles (kind, needle)`);
   await client.query(`analyze pg_temp.demo_scan_needles`);
+  const kinds = new Set(rows.map((r) => r.kind));
+  const hasKind = (kind) => kinds.has(kind);
   const subs = rows.filter((r) => r.kind === "sub").map((r) => escapeRegex(r.needle));
   const subRegex = subs.length ? subs.join("|") : null;
 
@@ -270,6 +318,18 @@ export async function scanTenant(client, tenantId, needles, { tables, sourceTena
            join pg_temp.demo_scan_needles n on n.kind = 'token' and n.needle = lower(m[1])`,
         `select v.id, v.col, n.needle, n.kind from v
            join pg_temp.demo_scan_needles n on n.kind = 'exact' and n.needle = v.lval`,
+        hasKind("url") &&
+          `select v.id, v.col, n.needle, n.kind from v
+             cross join lateral regexp_matches(v.val, '${URL_TOKEN}', 'g') m
+             join pg_temp.demo_scan_needles n on n.kind = 'url' and n.needle = regexp_replace(lower(m[1]), '^www\\.', '')`,
+        hasKind("name") &&
+          `select v.id, v.col, n.needle, n.kind from v
+             cross join lateral (select array(
+               select w from unnest(regexp_split_to_array(v.lval, '${NAME_SPLIT}')) with ordinality u(w, o)
+                where length(w) >= 3 and w <> all (array[${NAME_STOPWORDS.map((w) => `'${w}'`).join(", ")}]::text[])
+                order by o) as a) ws
+             cross join lateral generate_series(1, cardinality(ws.a) - 1) g
+             join pg_temp.demo_scan_needles n on n.kind = 'name' and n.needle = ws.a[g] || ' ' || ws.a[g + 1]`,
         useUuids &&
           `select v.id, v.col, u.id::text, 'uuid' from v
              cross join lateral regexp_matches(v.val, '(${UUID_PATTERN})', 'gi') m

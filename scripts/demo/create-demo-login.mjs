@@ -6,7 +6,7 @@
 //
 // Refuses to run unless the `demo` tenant exists with is_demo = true.
 //
-//   node scripts/demo/create-demo-login.mjs --count 2 --label "prospect x" [--expires-at 2026-12-01T00:00:00Z]
+//   node scripts/demo/create-demo-login.mjs --count 2 --label "prospect x"
 //   node scripts/demo/create-demo-login.mjs --revoke demo+prospect-x-ab12cd34@betleads.io
 //
 // Needs SUPABASE_URL and SUPABASE_SECRET_KEY (or SUPABASE_SERVICE_ROLE_KEY)
@@ -57,8 +57,14 @@ async function buildClient() {
   return createClient(supabaseUrl, supabaseKey, { auth: { persistSession: false, autoRefreshToken: false } });
 }
 
+const KNOWN_OPTIONS = new Set(["count", "label", "revoke"]);
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  // Unknown options fail loudly (e.g. an old --expires-at: no expiry is
+  // enforced anywhere, so logins end with --revoke).
+  const unknown = Object.keys(args).filter((key) => !KNOWN_OPTIONS.has(key));
+  if (unknown.length) throw new Error(`unknown option(s): ${unknown.map((k) => `--${k}`).join(", ")}`);
   const client = await buildClient();
 
   if (args.revoke) {
@@ -71,14 +77,12 @@ async function main() {
   const results = await createDemoLogins(client, {
     count,
     label: args.label !== undefined ? String(args.label) : undefined,
-    expiresAt: args["expires-at"] !== undefined ? String(args["expires-at"]) : undefined,
   });
 
   console.log(`Created ${results.length} demo login(s):\n`);
   for (const r of results) {
     console.log(`  e-mail: ${r.email}`);
     console.log(`  senha:  ${r.password}`);
-    if (r.expiresAt) console.log(`  expira: ${r.expiresAt}`);
     console.log("");
   }
   console.log("Repasse e-mail e senha ao prospect agora — a senha não é mostrada de novo.");

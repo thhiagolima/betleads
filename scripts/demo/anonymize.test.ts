@@ -3,12 +3,17 @@ import { describe, expect, it } from "vitest";
 
 import {
   demoProviderId,
+  fakeAffiliate,
+  fakeExpert,
+  fakeLoosePhones,
   fakePlayer,
   fakePlayers,
   inDemoSample,
   isValidCpf,
   makeFaker,
   makeRewriteContext,
+  nameBigrams,
+  nameNeedle,
   phoneForms,
   remapId,
   rewriteText,
@@ -123,10 +128,48 @@ describe("remapId", () => {
 });
 
 describe("demoProviderId", () => {
-  it("is deterministic, prefixed and keeps nulls", () => {
-    expect(demoProviderId("tx-123")).toBe(demoProviderId("tx-123"));
-    expect(demoProviderId("tx-123")).toMatch(/^demo[0-9a-f]{24}$/);
+  it("is deterministic per secret, prefixed and keeps nulls", () => {
+    expect(demoProviderId("tx-123", "s1")).toBe(demoProviderId("tx-123", "s1"));
+    expect(demoProviderId("tx-123", "s1")).toMatch(/^demo[0-9a-f]{24}$/);
     expect(demoProviderId(null)).toBeNull();
+  });
+});
+
+describe("values derived from real values are keyed with the run secret (fix item 2)", () => {
+  it("changes affiliate codes, expert names and loose phones with the secret", () => {
+    expect(fakeAffiliate("AFF77", "s1")).toBe(fakeAffiliate("AFF77", "s1"));
+    expect(fakeAffiliate("AFF77", "s1")).not.toBe(fakeAffiliate("AFF77", "s2"));
+    const experts = ["a", "b", "c", "d"].map((s) => fakeExpert("Joao Expert", s));
+    expect(new Set(experts).size).toBeGreaterThan(1);
+    const p1 = fakeLoosePhones(["21987654321"], { secret: "s1" }).get("21987654321");
+    const p2 = fakeLoosePhones(["21987654321"], { secret: "s2" }).get("21987654321");
+    expect(p1).toMatch(/^\+5511900\d{6}$/);
+    expect(p1).not.toBe(p2);
+  });
+});
+
+describe("name needles (fix item 7)", () => {
+  it("uses the first two significant words of a multi-word name", () => {
+    expect(nameNeedle("Maria da Silva Souza")).toBe("maria silva");
+    expect(nameNeedle("José Lima")).toBe("josé lima");
+    expect(nameNeedle("Carla")).toBeNull();
+    expect(nameNeedle("Teste Teste")).toBeNull();
+    expect(nameBigrams("Oi Maria, da Silva!")).toEqual(["maria silva"]);
+  });
+
+  it("fake players and experts never reuse a real name needle", () => {
+    const players = Array.from({ length: 300 }, (_, i) => ({
+      ...maria,
+      id: `6f1d2c3b-0000-4000-8000-${String(i).padStart(12, "0")}`,
+      player_external_id: String(i),
+    }));
+    // Pretend the default fake names of these players are real names.
+    const avoidNames = new Set(players.map((p) => nameBigrams(fakePlayer(p).nome)[0]));
+    const out = fakePlayers(players, { avoidNames, secret: "s1" });
+    for (const fake of out.values()) {
+      for (const b of nameBigrams(fake.nome)) expect(avoidNames.has(b)).toBe(false);
+      for (const b of nameBigrams(fake.expert)) expect(avoidNames.has(b)).toBe(false);
+    }
   });
 });
 

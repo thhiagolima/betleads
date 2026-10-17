@@ -3,24 +3,42 @@
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { demoUuid, inDemoSample, makeRewriteContext, rewriteGeneric, scrubJson } from "./anonymize.mjs";
-import { rewriteFunctionsSql, scrubJsonSql } from "./sql-rewrite.mjs";
+import {
+  demoProviderId,
+  demoUuid,
+  inDemoSample,
+  makeRewriteContext,
+  rewriteGeneric,
+  scrubJson,
+  shortLinkMap,
+} from "./anonymize.mjs";
+import { rewriteFunctionsSql, scrubJsonSql, setSecretSql } from "./sql-rewrite.mjs";
 
 const SOURCE_TENANT = "03b73a96-aef7-414d-94fc-93a996f8256b";
 const DEMO_TENANT = "11111111-2222-4333-8444-555555555555";
 const HOSTS = ["sortealta.bet", "sortealta.link", "betleads.io", "wa.me"];
+const SHORT_HOSTS = ["sortealta.link"];
+const SECRET = "test-secret-1";
+const LINK_ID = "6f1d2c3b-0000-4000-8000-0000000000c1";
+const SHORT_MAP = shortLinkMap([{ id: LINK_ID, short_url: "https://sortealta.link/AbC1" }]);
 
 let db: PGlite;
 
 beforeAll(async () => {
   db = new PGlite();
+  // A session-level secret here (the clone sets it transaction-local).
+  await db.query(`select set_config('demo.secret', $1, false)`, [SECRET]);
+  expect(setSecretSql).toContain("set_config('demo.secret', $1, true)");
   for (const sql of rewriteFunctionsSql({
     sourceTenantId: SOURCE_TENANT,
     demoTenantId: DEMO_TENANT,
     hosts: HOSTS,
     brandNames: ["Sorte Alta Bet"],
+    shortHosts: SHORT_HOSTS,
   }))
     await db.query(sql);
+  for (const [key, dst] of SHORT_MAP)
+    await db.query(`insert into pg_temp.demo_short_map (key, dst) values ($1, $2)`, [key, dst]);
 });
 
 afterAll(async () => {
@@ -39,6 +57,8 @@ const SAMPLES = [
   "https://sortealta.bet/?ref={{player_id}}&x=%7B",
   "wa.me/5521987654321 e www.wa.me",
   "{\"k\": \"https://sortealta.bet/p?id=7\", \"campanha:Sorte Alta outubro:1\": 3}",
+  "Oi, acesse https://sortealta.link/AbC1 ou sortealta.link/ZzZ9?x=1 ou http://www.SORTEALTA.link/AbC1.",
+  "go.sortealta.link/AbC1 fica com o host trocado",
 ];
 
 describe("pg_temp.demo_rw vs rewriteGeneric", () => {
@@ -47,6 +67,17 @@ describe("pg_temp.demo_rw vs rewriteGeneric", () => {
     demoTenantId: DEMO_TENANT,
     hosts: HOSTS,
     brandNames: ["Sorte Alta Bet"],
+    shortHosts: SHORT_HOSTS,
+    shortMap: SHORT_MAP,
+    secret: SECRET,
+  });
+
+  it("replaces known short links by the code of their demo link and unknown ones by a secret code", () => {
+    const out = rewriteGeneric("https://sortealta.link/AbC1 e sortealta.link/ZzZ9", ctx);
+    expect(out).toBe(`${SHORT_MAP.get("sortealta.link/AbC1")} e ${out.split(" e ")[1]}`);
+    expect(out).not.toMatch(/AbC1|ZzZ9/);
+    const other = rewriteGeneric("sortealta.link/ZzZ9", { ...ctx, secret: "other" });
+    expect(other).not.toBe(out.split(" e ")[1]);
   });
 
   it.each(SAMPLES)("matches for %j", async (sample) => {
@@ -91,6 +122,14 @@ describe("scrubJsonSql vs scrubJson", () => {
       JSON.stringify(value),
     ]);
     expect(rows[0].out).toEqual(scrubJson(value, keep));
+  });
+});
+
+describe("pg_temp.demo_pid vs demoProviderId", () => {
+  it("is keyed with the run secret", async () => {
+    const { rows } = await db.query<{ out: string }>("select pg_temp.demo_pid('tx-123') as out");
+    expect(rows[0].out).toBe(demoProviderId("tx-123", SECRET));
+    expect(rows[0].out).not.toBe(demoProviderId("tx-123", ""));
   });
 });
 

@@ -139,11 +139,12 @@ describe("createDemoLogin", () => {
     expect(client._roles).toEqual([{ user_id: result.userId, tenant_id: DEMO_TENANT_ID, role: "gestor" }]);
   });
 
-  it("stores demo_expires_at in app_metadata when --expires-at is given", async () => {
+  it("stores no expiry field (nothing would enforce it)", async () => {
     const client = makeFakeClient();
-    const result = await createDemoLogin(client as never, { label: "x", expiresAt: "2026-12-01T00:00:00Z" });
+    const result = await createDemoLogin(client as never, { label: "x" });
     const user = client._users.get(result.userId);
-    expect(user?.app_metadata).toMatchObject({ is_demo_user: true, demo_expires_at: "2026-12-01T00:00:00Z" });
+    expect(user?.app_metadata).toEqual({ is_demo_user: true });
+    expect(result).not.toHaveProperty("expiresAt");
   });
 
   it("never grants admin/super_admin or another tenant's role", async () => {
@@ -157,7 +158,7 @@ describe("createDemoLogin", () => {
 });
 
 describe("createDemoLogins", () => {
-  it("creates `count` distinct logins sharing label/expiresAt", async () => {
+  it("creates `count` distinct logins sharing label", async () => {
     const client = makeFakeClient();
     const results = await createDemoLogins(client as never, { count: 3, label: "lote" });
     expect(results).toHaveLength(3);

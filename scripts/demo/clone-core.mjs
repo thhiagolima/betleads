@@ -31,10 +31,12 @@ import {
   makeRewriteContext,
   nationalDigits,
   phoneForms,
+  normalizeHosts,
   remapUuidIn,
   rewriteJson,
   rewriteText,
   scrubJson,
+  shortLinkMap,
   withPlayers,
 } from "./anonymize.mjs";
 import {
@@ -51,7 +53,7 @@ import {
   isTextual,
 } from "./clone-plan.mjs";
 import { collectNeedles, publicColumns, scanTenant } from "./pii-scan.mjs";
-import { lit, rewriteFunctionsSql } from "./sql-rewrite.mjs";
+import { lit, rewriteFunctionsSql, setSecretSql } from "./sql-rewrite.mjs";
 import { IMAGE_BUCKET, VOICE_BUCKET, placeholderLayout, readPlaceholders } from "./storage.mjs";
 
 const BATCH = 5000;
@@ -85,6 +87,8 @@ async function foreignKeys(client) {
 
 /** Source tenant + demo tenant row (created or refreshed). */
 async function prepareTenants(client, sourceSlug, targetSlug) {
+  if (String(sourceSlug).toLowerCase() === String(targetSlug).toLowerCase())
+    throw new Error("source and target are the same tenant");
   const { rows: sources } = await client.query(`select * from public.tenants where slug = $1`, [sourceSlug]);
   const source = sources[0];
   if (!source) throw new Error(`source tenant '${sourceSlug}' not found`);
@@ -95,6 +99,9 @@ async function prepareTenants(client, sourceSlug, targetSlug) {
     throw new Error(`tenant '${targetSlug}' exists and is not a demo tenant — refusing to overwrite it`);
   if (existing && existing.id === source.id) throw new Error("source and target are the same tenant");
   const demoTenantId = existing?.id ?? demoUuid(source.id);
+  const { rows: byId } = await client.query(`select is_demo from public.tenants where id = $1`, [demoTenantId]);
+  if (byId[0] && !byId[0].is_demo)
+    throw new Error(`tenant ${demoTenantId} exists and is not a demo tenant — refusing to overwrite it`);
   const values = [
     demoTenantId,
     DEMO_BRAND,
@@ -113,14 +120,19 @@ async function prepareTenants(client, sourceSlug, targetSlug) {
        nome = excluded.nome, slug = excluded.slug, status = 'active', plano = excluded.plano,
        crm_model = excluded.crm_model, webhook_token = excluded.webhook_token,
        webhook_secret = excluded.webhook_secret, webhook_hmac_enforced = true, metadata = '{}'::jsonb,
-       legacy_webhook = false, limits = excluded.limits, is_demo = true`,
+       legacy_webhook = false, limits = excluded.limits, is_demo = true
+     where public.tenants.is_demo`,
     values,
   );
+  // The guarded upsert writes nothing when the row is not a demo tenant.
+  const { rows: check } = await client.query(`select is_demo, slug from public.tenants where id = $1`, [demoTenantId]);
+  if (!check[0]?.is_demo || check[0].slug !== targetSlug)
+    throw new Error(`could not create/refresh demo tenant '${targetSlug}' — refusing to continue`);
   return { source, demoTenantId };
 }
 
 /** Fake identities (JS, deterministic) loaded into pg_temp tables for the SQL copy. */
-async function loadFakeIdentities(client, sourceTenantId, needles) {
+async function loadFakeIdentities(client, sourceTenantId, needles, secret) {
   const { rows: players } = await client.query(
     `select id::text as id, nome, telefone, email, cpf, data_nascimento::text as data_nascimento,
             player_external_id, affiliate_id, expert
@@ -128,7 +140,7 @@ async function loadFakeIdentities(client, sourceTenantId, needles) {
     [sourceTenantId],
   );
   const avoidForms = new Set([...needles.phones.flatMap(phoneForms), ...needles.cpfs]);
-  const fakes = fakePlayers(players, { avoidForms });
+  const fakes = fakePlayers(players, { avoidForms, avoidNames: new Set(needles.names ?? []), secret });
 
   const phoneMap = new Map();
   const emailMap = new Map();
@@ -147,7 +159,7 @@ async function loadFakeIdentities(client, sourceTenantId, needles) {
     if (player.email && fake.email) emailMap.set(String(player.email).toLowerCase(), fake.email);
   }
   const loose = needles.phones.map(nationalDigits).filter((nat) => nat && !phoneMap.has(nat));
-  for (const [nat, fake] of fakeLoosePhones(loose, { avoidForms, used })) phoneMap.set(nat, fake);
+  for (const [nat, fake] of fakeLoosePhones(loose, { avoidForms, used, secret })) phoneMap.set(nat, fake);
 
   await client.query(`drop table if exists pg_temp.demo_fake_players`);
   await client.query(
@@ -327,7 +339,8 @@ async function preloadJsText(client, spec, sourceTenantId, env) {
     if (!rows.length) break;
     last = rows[rows.length - 1].id;
     const out = rows.map((r) => {
-      const playerId = r._player ?? (r._phone ? env.identities.playerByNat.get(nationalDigits(r._phone)) : null);
+      const known = r._player && env.identities.playerCtx.has(r._player) ? r._player : null;
+      const playerId = known ?? (r._phone ? env.identities.playerByNat.get(nationalDigits(r._phone)) : null);
       const local = env.forPlayer(playerId);
       const row = { id: r.id };
       for (const c of columns) row[c] = rewriteText(r[c], local);
@@ -430,7 +443,10 @@ async function verify(client, { specs, rebuilt, fks, sourceTenantId, demoTenantI
  * Builds the demo inside the caller's open transaction. Returns counts, scan
  * hits and the Storage plan; never commits.
  */
-export async function buildDemo(client, { sourceSlug, targetSlug = DEMO_SLUG, storageBaseUrl = "", log = () => {} }) {
+export async function buildDemo(
+  client,
+  { sourceSlug, targetSlug = DEMO_SLUG, storageBaseUrl = "", log = () => {}, secret = randomBytes(32).toString("hex") },
+) {
   const started = Date.now();
   const step = (message) => log(`[${((Date.now() - started) / 1000).toFixed(1)}s] ${message}`);
   const { source, demoTenantId } = await prepareTenants(client, sourceSlug, targetSlug);
@@ -453,14 +469,35 @@ export async function buildDemo(client, { sourceSlug, targetSlug = DEMO_SLUG, st
 
   const needles = await collectNeedles(client, source.id, { excludeHosts: storageHost ? [storageHost] : [] });
   step(`needles: ${needles.phones.length} phones, ${needles.emails.length} e-mails, ${needles.domains.length} hosts`);
+  // Per-run secret: transaction-local setting, passed as a bind parameter.
+  await client.query(setSecretSql, [secret]);
+  const { rows: links } = columns.has("tracked_links")
+    ? await client.query(`select id::text as id, short_url from public.tracked_links where tenant_id = $1`, [source.id])
+    : { rows: [] };
+  const shortMap = shortLinkMap(links);
+  const shortHosts = normalizeHosts([
+    ...[...shortMap.keys()].map((key) => key.split("/")[0]),
+    ...(columns.has("shortio_settings")
+      ? (await client.query(`select domain from public.shortio_settings where tenant_id = $1`, [source.id])).rows.map(
+          (r) => r.domain,
+        )
+      : []),
+  ]);
   for (const sql of rewriteFunctionsSql({
     sourceTenantId: source.id,
     demoTenantId,
     hosts: needles.domains,
     brandNames: [source.nome],
+    shortHosts,
   }))
     await client.query(sql);
-  const identities = await loadFakeIdentities(client, source.id, needles);
+  await insertJsonRows(
+    client,
+    "pg_temp.demo_short_map",
+    ["key", "dst"],
+    [...shortMap].map(([key, dst]) => ({ key, dst })),
+  );
+  const identities = await loadFakeIdentities(client, source.id, needles, secret);
   step(`fake identities: ${identities.players.length} players, ${identities.phoneMap.size} phones`);
 
   const voiceExact = columns.has("journey_voice_assets")
@@ -479,6 +516,9 @@ export async function buildDemo(client, { sourceSlug, targetSlug = DEMO_SLUG, st
     imageUrl: layout.imageUrl,
     phoneMap: identities.phoneMap,
     emailMap: identities.emailMap,
+    shortHosts,
+    shortMap,
+    secret,
   });
   const env = makeEnv({ ctx, identities, layout, placeholders, fkTargets, cloned, demoTenantId });
 
@@ -552,7 +592,9 @@ export async function buildDemo(client, { sourceSlug, targetSlug = DEMO_SLUG, st
 
 /**
  * One transaction: build, scan, then COMMIT (apply) or ROLLBACK (dry-run or
- * any scan hit). `storage.replace(plan)` runs right before COMMIT.
+ * any scan hit). `storage.replace(plan)` runs only AFTER a successful COMMIT
+ * (a failed upload leaves committed rows pointing at missing placeholders,
+ * which a rerun fixes; it can never leave uploads without the rows).
  */
 export async function cloneTenantDemo(
   client,
@@ -569,9 +611,15 @@ export async function cloneTenantDemo(
       open = false;
       return { ...result, ok: result.hits.length === 0, applied: false };
     }
-    await storage.replace(result.storagePlan);
     await client.query("commit");
     open = false;
+    try {
+      await storage.replace(result.storagePlan);
+    } catch (error) {
+      throw new Error(
+        `demo data COMMITTED, but the Storage placeholders failed (${error?.message ?? error}); run --apply again`,
+      );
+    }
     return { ...result, ok: true, applied: true };
   } finally {
     if (open) await client.query("rollback").catch(() => {});

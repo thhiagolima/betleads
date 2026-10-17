@@ -31,7 +31,13 @@ export const LEASE_COLUMNS = new Set([
   "locked_at",
   "locked_by",
 ]);
-export const USER_COLUMNS = new Set(["created_by", "changed_by", "updated_by", "approved_by", "actor_user_id"]);
+export const USER_COLUMNS = new Set([
+  "created_by",
+  "changed_by",
+  "updated_by",
+  "approved_by",
+  "actor_user_id",
+]);
 
 const pid = (column) => `pg_temp.demo_pid(s.${column})`;
 const newKey = (column = "idempotency_key") =>
@@ -43,7 +49,8 @@ const playerPhone = (phoneColumn, playerColumn) =>
           (select fp.telefone from pg_temp.demo_fake_players fp where fp.src_id = s.${playerColumn} and fp.telefone is not null),
           (select ph.fake from pg_temp.demo_fake_phones ph where ph.nat = pg_temp.demo_nat(s.${phoneColumn})),
           '+5511900000000') end`;
-const placeholder = (column, urlKey) => `case when s.${column} is null then null else {{${urlKey}}} end`;
+const placeholder = (column, urlKey) =>
+  `case when s.${column} is null then null else {{${urlKey}}} end`;
 
 // --- R14 sample predicates (alias `s` = source row, $1 = source tenant) -----
 const inSample = (column) => `pg_temp.demo_in_sample(s.${column}::text)`;
@@ -55,6 +62,7 @@ const kept = (table, column) =>
 const keptOrNull = (table, column) => `(s.${column} is null or ${kept(table, column)})`;
 const phoneSample = (column) =>
   `case when s.${column} is null then pg_temp.demo_in_sample(s.id::text) else pg_temp.demo_phone_in_sample(s.${column}) end`;
+const SHORT_PATH = "'dm' || left(md5('short:' || pg_temp.demo_uuid(s.id)::text), 8)";
 const UUID_TEXT = "'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'";
 
 /**
@@ -102,6 +110,8 @@ export const CLONE_TABLES = [
       player_external_id: "f.player_external_id",
       affiliate_id: "f.affiliate_id",
       expert: "f.expert",
+      // Marketing click id: no screen reads it and it would point at a real click.
+      bl_click_id: "null",
     },
     sample: inSample("id"),
   },
@@ -121,26 +131,40 @@ export const CLONE_TABLES = [
     keep: { metadata: ["jogo", "event", "status", "trigger_name", "campaign"] },
     sample: playerSample("player_id"),
   },
-  { table: "sessions", set: { provider_event_id: pid("provider_event_id") }, sample: playerSample("player_id") },
+  {
+    table: "sessions",
+    set: { provider_event_id: pid("provider_event_id") },
+    sample: playerSample("player_id"),
+  },
   {
     table: "player_attributions",
-    set: Object.fromEntries(
-      [
-        "event_id",
-        "fbclid",
-        "gclid",
-        "gbraid",
-        "wbraid",
-        "ttclid",
-        "msclkid",
-        "trackgram_click_id",
-        "matched_ad_account_id",
-        "matched_campaign_id",
-        "matched_adset_id",
-        "matched_ad_id",
-      ].map((c) => [c, pid(c)]),
-    ),
-    keep: { raw_payload: ["normalized.depositos", "raw.depositos", "raw.primeiro_deposito", "raw.ultimo_deposito"] },
+    set: {
+      ...Object.fromEntries(
+        [
+          "event_id",
+          "fbclid",
+          "gclid",
+          "gbraid",
+          "wbraid",
+          "ttclid",
+          "msclkid",
+          "trackgram_click_id",
+          "matched_ad_account_id",
+          "matched_campaign_id",
+          "matched_adset_id",
+          "matched_ad_id",
+        ].map((c) => [c, pid(c)]),
+      ),
+      bl_click_id: "null",
+    },
+    keep: {
+      raw_payload: [
+        "normalized.depositos",
+        "raw.depositos",
+        "raw.primeiro_deposito",
+        "raw.ultimo_deposito",
+      ],
+    },
     sample: playerSample("player_id"),
   },
   { table: "journey_voice_assets", mode: "js" },
@@ -160,7 +184,11 @@ export const CLONE_TABLES = [
   },
   {
     table: "journey_step_executions",
-    set: { provider_message_id: pid("provider_message_id") },
+    set: {
+      provider_message_id: pid("provider_message_id"),
+      // uuid column: regenerated from the row id (spec §6), not the real key.
+      idempotency_key: "md5('idem:' || pg_temp.demo_uuid(s.id)::text)::uuid",
+    },
     keep: { provider_response: ["variant_index", "channel_permit_id"] },
     sample: kept("journey_enrollments", "enrollment_id"),
   },
@@ -239,8 +267,9 @@ export const CLONE_TABLES = [
     table: "email_send_logs",
     jsText: { columns: ["subject"], player: "player_id" },
     set: {
+      // Fallback keyed with the run secret: never a plain hash of the real address.
       to_email: `coalesce((select fp.email from pg_temp.demo_fake_players fp where fp.src_id = s.player_id and fp.email is not null),
-                          'contato+' || left(md5(lower(s.to_email)), 10) || '@example.com')`,
+                          'contato+' || left(pg_temp.demo_hash('email:' || lower(s.to_email)), 10) || '@example.com')`,
     },
     keep: { provider_response: ["status", "retry_at", "reason"] },
     sample: `case when s.player_id is not null then ${inSample("player_id")}
@@ -261,6 +290,11 @@ export const CLONE_TABLES = [
     set: {
       shortio_link_id: pid("shortio_link_id"),
       canonical_url_hash: "pg_temp.demo_sha(pg_temp.demo_uuid(s.id)::text)",
+      // Never the real Short.io code: a code derived from the demo link id
+      // (JS twin: demoShortPath). Free-text copies of the short link are
+      // mapped to the same URL through pg_temp.demo_short_map.
+      path: `case when s.path is null then null else ${SHORT_PATH} end`,
+      short_url: `'https://' || {{demoDomain}} || '/' || ${SHORT_PATH}`,
     },
     // Kept when a kept dispatch uses it, or when no dispatch uses it at all.
     sample: `exists (select 1 from public.link_dispatches d where d.tracked_link_id = pg_temp.demo_uuid(s.id))
@@ -281,6 +315,10 @@ export const CLONE_TABLES = [
   {
     table: "conversion_attributions",
     set: { event_id: pid("event_id") },
+    // evidence (conversion-attribution.server.ts): token_source (enum),
+    // dispatch_sent_at, supplied_touch_at (timestamps) — none identifying; no
+    // screen reads them today, kept for parity with the source.
+    keep: { evidence: ["token_source", "dispatch_sent_at", "supplied_touch_at"] },
     sample: `${inSample("player_id")} and ${kept("link_dispatches", "link_dispatch_id")}`,
   },
   {
@@ -312,7 +350,16 @@ export const CLONE_TABLES = [
   {
     table: "activation_runs",
     keep: {
-      totals: ["analyzed", "eligible", "enqueued", "skipped", "by_trigger", "by_channel", "blocked_reasons", "cursor_after_id"],
+      totals: [
+        "analyzed",
+        "eligible",
+        "enqueued",
+        "skipped",
+        "by_trigger",
+        "by_channel",
+        "blocked_reasons",
+        "cursor_after_id",
+      ],
     },
   },
   { table: "call_scripts", mode: "js" },
@@ -323,6 +370,7 @@ export const CLONE_TABLES = [
       phone_number: playerPhone("phone_number", "lead_id"),
       audio_url: placeholder("audio_url", "audioUrl"),
       provider_request_id: pid("provider_request_id"),
+      audio_generation_id: "null", // call_audio_generations is not cloned
     },
     keep: { provider_response: ["status"] },
     sample: `case when s.lead_id is not null then ${inSample("lead_id")} else ${phoneSample("phone_number")} end`,
@@ -392,7 +440,10 @@ export const NOT_CLONED = [
 
 /** Tables whose demo rows survive a reset (logins and audit trail). */
 export const KEEP_ON_RESET = (table) =>
-  table === "tenants" || table === "user_roles" || /audit/.test(table) || /^ops_backup_/.test(table);
+  table === "tenants" ||
+  table === "user_roles" ||
+  /audit/.test(table) ||
+  /^ops_backup_/.test(table);
 
 export const isTextual = (c) => c.type === "text" || c.type === "character varying";
 export const isTextArray = (c) => c.type === "ARRAY" && ["_text", "_varchar"].includes(c.udt);

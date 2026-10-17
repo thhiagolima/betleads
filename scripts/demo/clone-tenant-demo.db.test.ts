@@ -6,7 +6,7 @@
 import type { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { inDemoSample, remapId } from "./anonymize.mjs";
+import { demoShortPath, inDemoSample, remapId } from "./anonymize.mjs";
 import { CLONE_TABLES, REBUILT_TABLES } from "./clone-plan.mjs";
 import { cloneTenantDemo } from "./clone-core.mjs";
 import { collectNeedles, scanTenant } from "./pii-scan.mjs";
@@ -43,14 +43,26 @@ const JOSE_IDS = [JOSE, ENR_J, EXE_J, SMS_J1, SMS_J2, LINK_J, DISPATCH_J, TOKEN_
 
 let db: PGlite;
 const uploads: unknown[] = [];
+const SHORT_URL = () => `https://demo.betleads.invalid/${demoShortPath(LINK)}`;
 const storage = {
   async replace(plan: unknown) {
+    // Fix item 9: uploads happen only after COMMIT (the transaction-local
+    // secret is gone once the transaction ended).
+    const { rows } = await db.query<{ s: string | null }>(`select current_setting('demo.secret', true) as s`);
+    expect(rows[0].s ?? "").toBe("");
     uploads.push(plan);
   },
 };
 
 const run = (apply: boolean) =>
-  cloneTenantDemo(db, { sourceSlug: "pixpgf", targetSlug: "demo", apply, storage, storageBaseUrl: STORAGE });
+  cloneTenantDemo(db, {
+    sourceSlug: "pixpgf",
+    targetSlug: "demo",
+    apply,
+    storage,
+    storageBaseUrl: STORAGE,
+    secret: "fixed-test-secret", // reruns compare byte-identical snapshots
+  });
 
 type Count = { table: string; source: number; demo: number; expected: number | null; mode: string };
 
@@ -356,18 +368,21 @@ describe("clone-tenant-demo", () => {
     expect(second.content).toBe(`${pedro.nome!.split(" ")[0]}, seu bônus na CASA DEMO`);
     expect(first.to_phone).toBe(maria.telefone);
     expect(first.content).toBe(
-      `Oi ${maria.nome!.split(" ")[0]}, acesse https://demo.betleads.invalid/AbC1 - Casa Demo`,
+      `Oi ${maria.nome!.split(" ")[0]}, acesse ${SHORT_URL()} - Casa Demo`,
     );
     expect(first.trigger_name).toBe(`journey:${remapId("journeys", JOURNEY)}`);
     expect(first.pr).toBe("{}");
     expect(first.lc).toBe("{}");
 
     const { rows: links } = await db.query<Record<string, string>>(
-      `select id, short_url, original_url, shortio_link_id from public.tracked_links where tenant_id = $1`,
+      `select id, path, short_url, original_url, shortio_link_id from public.tracked_links where tenant_id = $1`,
       [demo],
     );
     expect(links.map((l) => l.id)).toEqual([remapId("tracked_links", LINK)]);
-    expect(links[0].short_url).toBe("https://demo.betleads.invalid/AbC1");
+    // Fix item 1: the real Short.io code never survives, not even behind the demo host.
+    expect(links[0].short_url).toBe(SHORT_URL());
+    expect(links[0].path).toBe(demoShortPath(LINK));
+    expect(JSON.stringify(links)).not.toContain("AbC1");
     expect(links[0].original_url).toBe(
       `https://demo.betleads.invalid/api/public/click/${remapId("link_dispatches", TOKEN)}?s=demo`,
     );
@@ -384,7 +399,7 @@ describe("clone-tenant-demo", () => {
       source_id: remapId("journeys", JOURNEY),
       message_log_id: remapId("sms_send_logs", SMS_1),
       original_url: "https://demo.betleads.invalid/promo?btag=demo&utm_source=sms",
-      sent_url: "https://demo.betleads.invalid/AbC1",
+      sent_url: SHORT_URL(),
     });
 
     const { rows: enrollments } = await db.query<Record<string, unknown>>(

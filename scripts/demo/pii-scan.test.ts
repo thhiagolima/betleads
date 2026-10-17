@@ -80,6 +80,8 @@ describe("collectNeedles", () => {
     expect(needles.externalIds).toEqual(expect.arrayContaining(["EXT884512", "AFF77SORTE"]));
     expect(needles.providerIds).toContain("msg-real-001");
     expect(needles.shortioLinkIds).toContain("lnk_RealShort01");
+    expect(needles.shortLinks).toContainEqual({ host: "sortealta.link", path: "Ab1" });
+    expect(needles.names).toContain("maria souza");
     expect(needles.uuids).toContain(SOURCE);
     expect(needles.domains).toEqual(expect.arrayContaining(["sortealta.link", "sortealta.bet"]));
     expect(needles.brands).toEqual(expect.arrayContaining(["sorte alta", "pixpgf"]));
@@ -126,6 +128,9 @@ describe("scanTenant", () => {
       ["e7", "visit Sorte Alta now"],
       ["e8", "https://promo.sortealta.bet/x"],
       ["e9", `tenant ${SOURCE}`],
+      // Fix round: a real short code left behind a rewritten host, and a full real name.
+      ["ea", "https://demo.betleads.invalid/Ab1 (host swapped, path real)"],
+      ["eb", "Falar com MARIA de Souza amanhã"],
     ];
     for (const [suffix, text] of cases)
       await demoRow("events", {
@@ -170,7 +175,7 @@ describe("scanTenant", () => {
       id: "7a2e3d4c-0000-4000-8000-0000000000a2",
       tenant_id: DEMO,
       to_phone: "+5511900123456",
-      content: "Oi Ana, acesse https://demo.betleads.invalid/Ab1 — Casa Demo, 2026-10-16 12:00, R$ 50,00",
+      content: "Oi Ana Lima, acesse https://demo.betleads.invalid/dm1a2b3c4d — Casa Demo, 2026-10-16 12:00, R$ 50,00",
       status: "sent",
       provider: "shortcode",
       provider_message_id: "demo0123456789abcdef012345",

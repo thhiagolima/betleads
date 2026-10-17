@@ -1,8 +1,11 @@
 // Pure anonymization helpers for the demo tenant clone (Task 12).
 //
-// Everything here is deterministic: the same source value always produces the
-// same fake value, which is what makes the clone idempotent (a reset rebuilds
-// exactly the same demo). No I/O.
+// Ids and identities seeded by source ROW ids are deterministic (a reset
+// rebuilds the same ids and the same fake players). Anything derived from a
+// real VALUE (provider ids, hashes, affiliate codes, expert names, loose
+// phones, unknown short links) is keyed with a per-run random `secret`
+// instead, so a fake value can never be checked against a guessed real one
+// (fix round, item 2). Tests pass a fixed secret. No I/O.
 //
 // The generic text rules (uuid remap, e-mails, query values, hosts, brand) are
 // exported as data so `sql-rewrite.mjs` builds the SQL twin of `rewriteText`
@@ -64,10 +67,10 @@ export function remapId(table, sourceId) {
   return demoUuid(sourceId);
 }
 
-/** Regenerated provider / idempotency id: same source value → same demo value. */
-export function demoProviderId(value) {
+/** Regenerated provider / idempotency id: same (secret, source value) → same demo value. */
+export function demoProviderId(value, secret = "") {
   if (value === null || value === undefined) return null;
-  return `demo${md5(`pid:${value}`).slice(0, 24)}`;
+  return `demo${md5(`${secret}:pid:${value}`).slice(0, 24)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -161,17 +164,56 @@ function shiftDate(isoDate, faker) {
   return date.toISOString().slice(0, 10);
 }
 
-/** Fake affiliate code, consistent across every player of the same source affiliate. */
-export function fakeAffiliate(value) {
+/** Fake affiliate code, consistent (within a run) across every player of the same source affiliate. */
+export function fakeAffiliate(value, secret = "") {
   if (value === null || value === undefined || value === "") return value ?? null;
-  return `AFDEMO${md5(`affiliate:${value}`).slice(0, 6).toUpperCase()}`;
+  return `AFDEMO${md5(`${secret}:affiliate:${value}`).slice(0, 8).toUpperCase()}`;
 }
 
-/** Fake expert name, consistent across every player of the same source expert. */
-export function fakeExpert(value) {
+/** Fake expert name, consistent (within a run) across every player of the same source expert. */
+export function fakeExpert(value, secret = "", avoidNames = null) {
   if (value === null || value === undefined || value === "") return value ?? null;
-  const faker = makeFaker(`expert:${value}`);
-  return `${faker.pick(FIRST_NAMES)} ${faker.pick(LAST_NAMES)}`;
+  for (let attempt = 0; attempt < 1000; attempt += 1) {
+    const faker = makeFaker(`${secret}:expert:${value}#${attempt}`);
+    const name = `${faker.pick(FIRST_NAMES)} ${faker.pick(LAST_NAMES)}`;
+    if (!avoidNames || !nameBigrams(name).some((b) => avoidNames.has(b))) return name;
+  }
+  throw new Error("fakeExpert: no free name");
+}
+
+// ---------------------------------------------------------------------------
+// Name needles (fix round, item 7): the first two significant words of a
+// real multi-word name are a scan needle; text is tokenized the same way in
+// SQL (pii-scan.mjs). Words: lower case, split on anything but a-z and the
+// Latin-1 accented letters, at least 3 letters, minus NAME_STOPWORDS.
+// ---------------------------------------------------------------------------
+
+export const NAME_SPLIT = "[^a-zà-öø-ÿ]+";
+export const NAME_STOPWORDS = ["das", "dos", "del", "von", "van"];
+/** Placeholder-ish words: a real name containing one is too generic to be a needle. */
+const NAME_JUNK = new Set([
+  "teste", "test", "cliente", "jogador", "usuario", "usuário", "nome", "sobrenome", "sem", "informado",
+  "null", "undefined", "demo", "casa", "sorte", "alta", "lead", "player",
+]);
+
+export function nameWords(text) {
+  return String(text ?? "")
+    .toLowerCase()
+    .split(new RegExp(NAME_SPLIT))
+    .filter((w) => w.length >= 3 && !NAME_STOPWORDS.includes(w));
+}
+
+/** Consecutive significant-word pairs of a text. */
+export function nameBigrams(text) {
+  const words = nameWords(text);
+  return words.slice(1).map((w, i) => `${words[i]} ${w}`);
+}
+
+/** Needle of a real name: its first two significant words, or null. */
+export function nameNeedle(name) {
+  const words = nameWords(name);
+  if (words.length < 2 || NAME_JUNK.has(words[0]) || NAME_JUNK.has(words[1])) return null;
+  return `${words[0]} ${words[1]}`;
 }
 
 /** Fake, non-routable phone (+55 11 900xx-xxxx). */
@@ -193,7 +235,7 @@ function fakeCpf(faker, sourceFormat) {
  * Fake identity for one source player, deterministic per (player id, attempt).
  * Empty source fields stay empty so coverage rates (with e-mail, with CPF…) are kept.
  */
-export function fakePlayer(source, attempt = 0) {
+export function fakePlayer(source, attempt = 0, { secret = "", avoidNames = null } = {}) {
   for (let extra = 0; ; extra += 1) {
     const faker = makeFaker(`player:${source.id}#${attempt}#${extra}`);
     const first = faker.pick(FIRST_NAMES);
@@ -210,8 +252,8 @@ export function fakePlayer(source, attempt = 0) {
       player_external_id: source.player_external_id
         ? `DEMO${faker.digits(8)}`
         : (source.player_external_id ?? null),
-      affiliate_id: fakeAffiliate(source.affiliate_id),
-      expert: fakeExpert(source.expert),
+      affiliate_id: fakeAffiliate(source.affiliate_id, secret),
+      expert: fakeExpert(source.expert, secret, avoidNames),
     };
     const sameAsSource =
       (fake.telefone && nationalDigits(fake.telefone) === nationalDigits(source.telefone)) ||
@@ -229,14 +271,16 @@ export function fakePlayer(source, attempt = 0) {
  * `avoidForms` (the real phones/CPFs the PII scan looks for), so the scan never
  * flags a fake value. Deterministic for the same input set.
  */
-export function fakePlayers(players, { avoidForms = new Set() } = {}) {
+export function fakePlayers(players, { avoidForms = new Set(), avoidNames = null, secret = "" } = {}) {
   const used = new Set();
   const out = new Map();
   const sorted = [...players].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   for (const player of sorted) {
     for (let attempt = 0; ; attempt += 1) {
       if (attempt > 1000) throw new Error(`fakePlayers: no free identity for ${player.id}`);
-      const fake = fakePlayer(player, attempt);
+      const fake = fakePlayer(player, attempt, { secret, avoidNames });
+      // Never a fake name that is also a real name needle (the scan would flag it).
+      if (avoidNames && nameBigrams(fake.nome).some((b) => avoidNames.has(b))) continue;
       const keys = [
         fake.telefone && `t:${nationalDigits(fake.telefone)}`,
         fake.email && `e:${fake.email}`,
@@ -255,12 +299,12 @@ export function fakePlayers(players, { avoidForms = new Set() } = {}) {
 }
 
 /** Fake phones for phones that belong to no player (staff tests, unresolved recipients…). */
-export function fakeLoosePhones(nationals, { avoidForms = new Set(), used = new Set() } = {}) {
+export function fakeLoosePhones(nationals, { avoidForms = new Set(), used = new Set(), secret = "" } = {}) {
   const out = new Map();
   for (const nat of [...new Set(nationals)].sort()) {
     for (let attempt = 0; ; attempt += 1) {
       if (attempt > 1000) throw new Error(`fakeLoosePhones: no free phone for ${nat}`);
-      const phone = fakePhone(nat, attempt);
+      const phone = fakePhone(`${secret}:${nat}`, attempt);
       const forms = phoneForms(phone);
       if (used.has(`t:${nationalDigits(phone)}`) || forms.some((f) => avoidForms.has(f))) continue;
       for (const f of forms) used.add(`t:${f}`);
@@ -412,9 +456,18 @@ export function makeRewriteContext({
   imageUrl = null,
   phoneMap = null,
   emailMap = null,
+  shortHosts = [],
+  shortMap = null,
+  secret = "",
 } = {}) {
   const normalizedHosts = normalizeHosts(hosts);
+  const normalizedShortHosts = normalizeHosts(shortHosts);
+  const shortPattern = shortLinkPattern(normalizedShortHosts);
   return {
+    secret,
+    shortHosts: normalizedShortHosts,
+    shortMap,
+    shortRegex: shortPattern ? new RegExp(shortPattern, "gi") : null,
     sourceTenantId: sourceTenantId?.toLowerCase() ?? null,
     demoTenantId: demoTenantId?.toLowerCase() ?? null,
     hosts: normalizedHosts,
@@ -449,10 +502,54 @@ const IMAGE_URL = /https?:\/\/[^\s"'<>()]+?\.(?:png|jpe?g|gif|webp|svg|bmp)(?:\?
 const DATA_IMAGE = /data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=\s]+/gi;
 const IMG_SRC = /(<img\b[^>]*?\bsrc\s*=\s*)(["'])(.*?)\2/gi;
 
+// ---------------------------------------------------------------------------
+// Short links (fix round, item 1): every short link of a short-link host is
+// replaced by https://demo.betleads.invalid/<code>. Known links (the source's
+// tracked_links) get the code derived from their remapped link id; unknown
+// ones a code keyed with the run secret. Never the real path.
+// ---------------------------------------------------------------------------
+
+/** Code of a tracked link in the demo: from its remapped (demo) id, not the real path. */
+export function demoShortPath(sourceLinkId) {
+  return `dm${md5(`short:${demoUuid(sourceLinkId)}`).slice(0, 8)}`;
+}
+
+export const shortKey = (host, path) => `${String(host).toLowerCase().replace(/^www\./, "")}/${path}`;
+
+/** Regex source (JS and PostgreSQL ARE) matching a short link of `hosts`; groups: host, path. */
+export function shortLinkPattern(hosts) {
+  if (!hosts?.length) return null;
+  return `(?<![A-Za-z0-9.-])(?:https?://)?(?:www\\.)?(${hosts.map(escapeRegex).join("|")})/([A-Za-z0-9_-]+)`;
+}
+
+/** Source short links → { key: `${host}/${path}`, dst } for the demo. */
+export function shortLinkMap(links) {
+  const out = new Map();
+  for (const { id, short_url: shortUrl } of links) {
+    let url;
+    try {
+      url = new URL(String(shortUrl));
+    } catch {
+      continue;
+    }
+    const path = url.pathname.replace(/^\/+/, "").split("/")[0];
+    if (!path) continue;
+    out.set(shortKey(url.hostname, path), `https://${DEMO_DOMAIN}/${demoShortPath(id)}`);
+  }
+  return out;
+}
+
+function shortTarget(ctx, host, path) {
+  const key = shortKey(host, path);
+  return ctx.shortMap?.get(key) ?? `https://${DEMO_DOMAIN}/dx${md5(`${ctx.secret}:short:${key}`).slice(0, 8)}`;
+}
+
 /** Generic rules only (the part shared with SQL `pg_temp.demo_rw`). */
 export function rewriteGeneric(text, ctx) {
   if (text === null || text === undefined) return text ?? null;
-  let out = String(text).replace(new RegExp(UUID_PATTERN, "gi"), (m) => remapUuidIn(ctx, m));
+  let out = String(text);
+  if (ctx.shortRegex) out = out.replace(ctx.shortRegex, (_m, host, path) => shortTarget(ctx, host, path));
+  out = out.replace(new RegExp(UUID_PATTERN, "gi"), (m) => remapUuidIn(ctx, m));
   for (const rule of ctx.rules) out = out.replace(rule.regex, rule.js);
   return out;
 }
