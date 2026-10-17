@@ -49,6 +49,24 @@ async function getCachedTenantStatus(tenantId: string): Promise<TenantStatusRow 
   return tenant;
 }
 
+/**
+ * Fail-closed demo check for INBOUND traffic (house webhooks, Evolution
+ * events, click redirects, unsubscribe tokens): true only for a tenant row
+ * with `is_demo = true`. An unknown tenant is NOT demo here — inbound paths
+ * keep their existing behavior for an unknown tenant (e.g. a 404 on an
+ * invalid webhook token), this helper only decides the demo question. A
+ * failed lookup is treated as demo-unsafe (`true`) so the caller
+ * rejects/ignores the request instead of writing on an unverified tenant.
+ */
+export async function isDemoTenant(tenantId: string): Promise<boolean> {
+  try {
+    const tenant = await getCachedTenantStatus(tenantId);
+    return tenant?.is_demo === true;
+  } catch {
+    return true;
+  }
+}
+
 export async function resolveCurrentTenantId(supabase: RpcClient) {
   const { data, error } = await supabase.rpc("current_tenant_id");
   if (error) throw new Error(error.message);

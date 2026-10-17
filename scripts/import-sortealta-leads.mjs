@@ -33,6 +33,18 @@ const supabase = createClient(supabaseUrl, supabaseKey, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
+const { data: tenantRow, error: tenantRowError } = await supabase
+  .from("tenants")
+  .select("id,is_demo")
+  .eq("id", tenantId)
+  .maybeSingle();
+if (tenantRowError) throw new Error(`Falha ao verificar tenant: ${tenantRowError.message}`);
+if (!tenantRow) throw new Error(`Tenant nao encontrado: ${tenantId}`);
+if (tenantRow.is_demo) {
+  console.error(`Tenant demo (${tenantId}): importacao bloqueada.`);
+  process.exit(1);
+}
+
 const rawRows = parseCsv(fs.readFileSync(csvPath, "utf8"));
 const rows = normalizeRows(rawRows);
 const existingPlayers = await fetchAllPlayers(tenantId);

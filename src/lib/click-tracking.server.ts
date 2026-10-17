@@ -1,5 +1,9 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { captureServerException } from "@/lib/observability/sentry.server";
+import { isDemoTenant } from "@/lib/tenant-access.server";
+
+// Neutral destination for a demo-tenant dispatch (Global Constraints).
+export const DEMO_CLICK_REDIRECT_URL = "https://demo.betleads.invalid";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -444,11 +448,22 @@ function shortHeader(request: Request, name: string, max = 32) {
   return request.headers.get(name)?.slice(0, max) ?? null;
 }
 
-export type ClickRecordOutcome = "recorded" | "duplicate" | "rate_limited" | "error" | "pending";
+export type ClickRecordOutcome =
+  | "recorded"
+  | "duplicate"
+  | "rate_limited"
+  | "error"
+  | "pending"
+  | "demo";
 
 type RecordResult = { outcome: ClickRecordOutcome; trackingError: string | null };
 
-type ClickDeps = { db?: any; nowMs?: () => number; recordBudgetMs?: number };
+type ClickDeps = {
+  db?: any;
+  nowMs?: () => number;
+  recordBudgetMs?: number;
+  isDemoTenant?: (tenantId: string) => Promise<boolean>;
+};
 
 async function recordClick(args: {
   db: any;
@@ -585,6 +600,21 @@ export async function resolveAndRecordFirstPartyClick(
     if (dispatch && throttled) rememberThrottledDispatch(args.token, dispatch, nowMs);
   }
   if (!dispatch) return { ok: false as const, status: 404, reason: "dispatch_not_found" };
+
+  // Demo tenant: the dispatch is part of a frozen snapshot. No click_events
+  // insert, no dispatch counters — redirect to a neutral page instead of the
+  // (possibly real) casino URL. A failed tenant lookup is demo-unsafe
+  // (isDemoTenant returns true), so it also redirects here without writing.
+  const checkDemo = deps.isDemoTenant ?? isDemoTenant;
+  if (await checkDemo(dispatch.tenant_id)) {
+    return {
+      ok: true as const,
+      destination: DEMO_CLICK_REDIRECT_URL,
+      duplicate: false,
+      outcome: "demo" as ClickRecordOutcome,
+      trackingError: null,
+    };
+  }
 
   let destination: URL;
   try {

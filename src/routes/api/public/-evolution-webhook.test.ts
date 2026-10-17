@@ -5,7 +5,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (options: unknown) => ({ options }),
 }));
-vi.mock("@/integrations/supabase/client.server", () => ({ supabaseAdmin: {} }));
+// The demo-tenant guard looks up whatsapp_sessions by instance_name before
+// any event handling; these tests use instances with no session row (not a
+// demo tenant), so the lookup must resolve to "no row" instead of throwing.
+vi.mock("@/integrations/supabase/client.server", () => ({
+  supabaseAdmin: {
+    from: () => ({
+      select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }),
+    }),
+  },
+}));
 vi.mock("@/lib/precall-dispatcher.server", () => ({ detectPrecallResponse: vi.fn() }));
 
 import { Route } from "./evolution-webhook";

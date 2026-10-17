@@ -1033,10 +1033,13 @@ export async function processWebhookEvent(
           }
         }
         if (affId) {
+          // A demo tenant is a frozen snapshot: it never receives mirrored
+          // events, even when its metadata declares the affiliate id.
           const { data: experts } = await sb
             .from("tenants")
-            .select("id, metadata, crm_model")
-            .eq("crm_model", "CRM_EXPERT");
+            .select("id, metadata, crm_model, is_demo")
+            .eq("crm_model", "CRM_EXPERT")
+            .eq("is_demo", false);
           for (const targetId of expertMirrorTargets(
             (experts ?? []) as ExpertTenantRow[],
             tenantId,

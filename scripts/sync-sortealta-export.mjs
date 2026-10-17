@@ -156,12 +156,16 @@ async function main() {
     throw new Error("SUPABASE_URL e SUPABASE_SECRET_KEY são obrigatórias");
   const supabase = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
   const [{ data: tenant, error: tenantError }, users, deposits, withdrawals] = await Promise.all([
-    supabase.from("tenants").select("id,nome,slug").eq("slug", TENANT_SLUG).single(),
+    supabase.from("tenants").select("id,nome,slug,is_demo").eq("slug", TENANT_SLUG).single(),
     Promise.resolve(readCsv("sortealta_usuarios_2026-10-01.csv")),
     Promise.resolve(readCsv("sortealta_depositos_2026-10-01.csv")),
     Promise.resolve(readCsv("sortealta_saques_2026-10-01.csv")),
   ]);
   if (tenantError) throw new Error(`Tenant ${TENANT_SLUG}: ${tenantError.message}`);
+  if (tenant.is_demo) {
+    console.error(`Tenant ${TENANT_SLUG} (${tenant.id}) e um tenant demo: sincronizacao bloqueada.`);
+    process.exit(1);
+  }
 
   const sourcePlayerIds = assertUniqueAndPresent(users, "user_id", "Usuários");
   const sourceDepositIds = assertUniqueAndPresent(deposits, "deposit_id", "Depósitos");

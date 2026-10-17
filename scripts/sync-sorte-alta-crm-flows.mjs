@@ -266,10 +266,14 @@ async function main() {
   const db = createClient(url, key, { auth: { persistSession: false } });
   const { data: tenant, error: tenantError } = await db
     .from("tenants")
-    .select("id,nome,slug")
+    .select("id,nome,slug,is_demo")
     .eq("slug", "pixpgf")
     .single();
   if (tenantError) throw tenantError;
+  if (tenant.is_demo) {
+    console.error(`Tenant pixpgf (${tenant.id}) e um tenant demo: sincronizacao bloqueada.`);
+    process.exit(1);
+  }
   const { data: existing, error: journeysError } = await db
     .from("journeys")
     .select("id,name,status,version,trigger_config")

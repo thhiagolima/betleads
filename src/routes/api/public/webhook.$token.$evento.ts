@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { getServiceClient, processWebhookEvent } from "@/lib/webhook-process.server";
 import { invalidateServerResultCache } from "@/lib/server-result-cache";
+import { isDemoTenant } from "@/lib/tenant-access.server";
 
 async function validSignature(secret: string, payload: string, provided: string | null) {
   if (!provided) return false;
@@ -71,6 +72,15 @@ export const Route = createFileRoute("/api/public/webhook/$token/$evento")({
         const tenantId = tenantRow?.id as string | undefined;
         if (!tenantRow || !tenantId) {
           return Response.json({ ok: false, error: "token inválido" }, { status: 404 });
+        }
+        // Demo tenant: reject before any webhook_logs/webhook_event_receipts
+        // insert and before HMAC processing side effects. A lookup error is
+        // treated as demo-unsafe by isDemoTenant, so it is rejected too.
+        if (await isDemoTenant(tenantId)) {
+          return Response.json(
+            { ok: false, error: "ambiente de demonstração" },
+            { status: 403 },
+          );
         }
         if (
           tenantRow.webhook_hmac_enforced &&

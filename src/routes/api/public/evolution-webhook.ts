@@ -2,6 +2,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { detectPrecallResponse } from "@/lib/precall-dispatcher.server";
 import { isAuthorizedEvolutionWebhook } from "@/lib/whatsapp-evolution-auth.server";
+import { isDemoTenant } from "@/lib/tenant-access.server";
+import { assertEvolutionInstanceCanCall } from "@/lib/evolution.server";
 
 // Evolution API webhook receiver.
 // Authenticated ONLY by EVOLUTION_WEBHOOK_SECRET sent in the x-webhook-secret
@@ -71,6 +73,7 @@ async function downloadAndUploadMedia(
   if (!url || !apikey) return null;
 
   try {
+    await assertEvolutionInstanceCanCall(instanceName);
     const res = await fetch(
       `${url}/chat/getBase64FromMediaMessage/${encodeURIComponent(instanceName)}`,
       {
@@ -180,6 +183,7 @@ async function fetchGroupSubject(
   const apikey = process.env.EVOLUTION_API_KEY?.trim().replace(/^['"]|['"]$/g, "");
   if (!url || !apikey) return null;
   try {
+    await assertEvolutionInstanceCanCall(instanceName);
     const res = await fetch(
       `${url}/group/findGroupInfos/${encodeURIComponent(instanceName)}?groupJid=${encodeURIComponent(groupJid)}`,
       { method: "GET", headers: { apikey } },
@@ -205,6 +209,7 @@ async function fetchProfilePicture(
   const apikey = process.env.EVOLUTION_API_KEY?.trim().replace(/^['"]|['"]$/g, "");
   if (!url || !apikey) return null;
   try {
+    await assertEvolutionInstanceCanCall(instanceName);
     const res = await fetch(
       `${url}/chat/fetchProfilePictureUrl/${encodeURIComponent(instanceName)}`,
       {
@@ -233,6 +238,7 @@ async function fetchContactName(
   const apikey = process.env.EVOLUTION_API_KEY?.trim().replace(/^['"]|['"]$/g, "");
   if (!url || !apikey) return null;
   try {
+    await assertEvolutionInstanceCanCall(instanceName);
     const res = await fetch(
       `${url}/chat/findContacts/${encodeURIComponent(instanceName)}`,
       {
@@ -546,6 +552,24 @@ export const Route = createFileRoute("/api/public/evolution-webhook")({
         const instance: string =
           body?.instance ?? body?.instanceName ?? body?.data?.instance ?? "";
         console.info("[evo-webhook]", event, "instance=", instance);
+
+        // Demo tenant: ignore before any write, including connection-update
+        // handling. An unknown instance (no session row) is not demo and
+        // keeps its current behavior (each handler no-ops on its own).
+        if (instance) {
+          const { data: sessionRow } = await supabaseAdmin
+            .from("whatsapp_sessions")
+            .select("tenant_id")
+            .eq("instance_name", instance)
+            .maybeSingle();
+          const sessionTenantId = (sessionRow as { tenant_id?: string | null } | null)?.tenant_id;
+          if (sessionTenantId && (await isDemoTenant(sessionTenantId))) {
+            return new Response(JSON.stringify({ ignored: true }), {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
+        }
 
         try {
           if (
