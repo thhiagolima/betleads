@@ -603,7 +603,10 @@ export async function cloneTenantDemo(
   { apply = false, storage = null, statementTimeoutMs = 60 * 60 * 1000, ...options },
 ) {
   if (apply && !storage) throw new Error("--apply needs a storage adapter for the placeholders");
-  await client.query("begin");
+  // One snapshot for the whole run: the source tenant keeps receiving data
+  // while the clone runs, and the copy, the expected counts and the scan must
+  // all see the same source rows.
+  await client.query("begin isolation level repeatable read");
   let open = true;
   try {
     await client.query(`set local statement_timeout = ${Number(statementTimeoutMs)}`);

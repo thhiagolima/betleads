@@ -64,6 +64,9 @@ const phoneSample = (column) =>
   `case when s.${column} is null then pg_temp.demo_in_sample(s.id::text) else pg_temp.demo_phone_in_sample(s.${column}) end`;
 const SHORT_PATH = "'dm' || left(md5('short:' || pg_temp.demo_uuid(s.id)::text), 12)";
 const UUID_TEXT = "'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'";
+/** Demo player of the (already copied) SMS log a link dispatch belongs to. */
+const SMS_LOG_PLAYER = `(case when s.message_log_type in ('sms', 'sms_send_logs') and s.message_log_id ~ ${UUID_TEXT}
+    then (select d.player_id from public.sms_send_logs d where d.id = pg_temp.demo_uuid(s.message_log_id::uuid)) end)`;
 
 /**
  * Columns that point at a player (FK or soft reference). The clone verifies
@@ -280,11 +283,23 @@ export const CLONE_TABLES = [
     // Before tracked_links (FKs are checked after the copy): a link follows
     // the dispatches that use it.
     table: "link_dispatches",
-    set: { recipient_hash: "pg_temp.demo_sha(s.recipient_hash)", idempotency_key: newKey() },
-    sample: `case when s.recipient_player_id is not null then ${inSample("recipient_player_id")}
-                  when s.message_log_type = 'sms' and s.message_log_id ~ ${UUID_TEXT}
+    set: {
+      recipient_hash: "pg_temp.demo_sha(s.recipient_hash)",
+      idempotency_key: newKey(),
+      // Legacy campaign dispatches (before the attributable-player check) have
+      // no player; the kept SMS log's player fills it in.
+      recipient_player_id: `coalesce(pg_temp.demo_uuid(s.recipient_player_id), ${SMS_LOG_PLAYER})`,
+    },
+    // link_dispatches_attributable_player_required (NOT VALID, so legacy source
+    // rows violate it): a campaign/journey dispatch whose player cannot be
+    // resolved is left out.
+    sample: `(case when s.recipient_player_id is not null then ${inSample("recipient_player_id")}
+                  when s.message_log_type in ('sms', 'sms_send_logs') and s.message_log_id ~ ${UUID_TEXT}
                     then exists (select 1 from public.sms_send_logs d where d.id = pg_temp.demo_uuid(s.message_log_id::uuid))
-                  else pg_temp.demo_in_sample(s.id::text) end`,
+                  else pg_temp.demo_in_sample(s.id::text) end)
+             and (coalesce(s.source_type, '') not in ('campaign', 'journey')
+                  or s.recipient_player_id is not null
+                  or ${SMS_LOG_PLAYER} is not null)`,
   },
   {
     table: "tracked_links",
