@@ -207,7 +207,8 @@ export const CLONE_TABLES = [
   { table: "sms_campaigns", mode: "js" },
   {
     table: "sms_send_logs",
-    jsText: { columns: ["content"], player: "player_id", phone: "to_phone" },
+    // trigger_name of manual sends can carry the recipient's phone.
+    jsText: { columns: ["content", "trigger_name"], player: "player_id", phone: "to_phone", maskDigits: ["trigger_name"] },
     set: {
       to_phone: playerPhone("to_phone", "player_id"),
       provider_message_id: pid("provider_message_id"),

@@ -26,6 +26,7 @@ import {
   DEMO_SLUG,
   demoUuid,
   fakeLoosePhones,
+  fakePhone,
   fakePlayers,
   inDemoSample,
   makeRewriteContext,
@@ -322,7 +323,7 @@ async function copyJsTable(client, spec, cols, sourceTenantId, env) {
 
 /** Free-text columns of a big table rewritten in JS batches into pg_temp.demo_js_<table>. */
 async function preloadJsText(client, spec, sourceTenantId, env) {
-  const { columns, player, phone } = spec.jsText;
+  const { columns, player, phone, maskDigits = [] } = spec.jsText;
   const temp = `demo_js_${spec.table}`;
   await client.query(`drop table if exists pg_temp.${temp}`);
   await client.query(`create temp table ${temp} (id uuid primary key, ${columns.map((c) => `${c} text`).join(", ")})`);
@@ -343,7 +344,13 @@ async function preloadJsText(client, spec, sourceTenantId, env) {
       const playerId = known ?? (r._phone ? env.identities.playerByNat.get(nationalDigits(r._phone)) : null);
       const local = env.forPlayer(playerId);
       const row = { id: r.id };
-      for (const c of columns) row[c] = rewriteText(r[c], local);
+      for (const c of columns) {
+        row[c] = rewriteText(r[c], local);
+        // Phone-like runs left in a label column (not the player's own phone)
+        // become fake, non-routable numbers — same input, same fake in a run.
+        if (maskDigits.includes(c) && row[c])
+          row[c] = row[c].replace(/\d{10,13}/g, (m) => fakePhone(`label:${env.secret}:${m}`).replace(/\D/g, ""));
+      }
       return row;
     });
     await insertJsonRows(client, `pg_temp.${temp}`, ["id", ...columns], out);
@@ -523,6 +530,7 @@ export async function buildDemo(
     secret,
   });
   const env = makeEnv({ ctx, identities, layout, placeholders, fkTargets, cloned, demoTenantId });
+  env.secret = secret;
 
   await client.query(`set local session_replication_role = replica`);
   for (const [table, cols] of columns) {

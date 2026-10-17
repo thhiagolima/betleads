@@ -212,7 +212,10 @@ export function needleRows(needles) {
     rows.set(`${kind}\u0000${value}`, { kind, needle: value });
   };
   for (const phone of needles.phones ?? []) {
-    for (const form of phoneForms(phone)) add("digits", form);
+    // Only forms with the area code (10+ digits): an 8–9 digit suffix matches
+    // generated ids by chance (13k phones over a 10^8 space) and alone does
+    // not identify anyone.
+    for (const form of phoneForms(phone)) if (form.length >= MIN_DIGIT_NEEDLE) add("digits", form);
     if (nationalDigits(phone).length >= 8) add("exact", phone);
   }
   for (const cpf of needles.cpfs ?? []) {
@@ -228,7 +231,7 @@ export function needleRows(needles) {
     if (value.length < 4) continue;
     add("exact", value);
     if (/^\d+$/.test(value)) {
-      if (value.length >= 8 && value.length <= 13) add("digits", value);
+      if (value.length >= MIN_DIGIT_NEEDLE && value.length <= 13) add("digits", value);
     } else if (/^[A-Za-z0-9_-]{6,}$/.test(value)) add("token", value);
   }
   for (const { host, path } of needles.shortLinks ?? []) {
@@ -259,6 +262,9 @@ const URL_TOKEN = "([A-Za-z0-9.-]+\\.[A-Za-z]{2,}/[A-Za-z0-9_-]+)";
  * or embedded in text — that belongs to a source-tenant row), `limit`.
  * Returns [{ table, column, id, needle, kind }].
  */
+/** Shortest digit run treated as an identifier inside text (exact matches are always checked). */
+export const MIN_DIGIT_NEEDLE = 10;
+
 export async function scanTenant(client, tenantId, needles, { tables, sourceTenantId, limit = 200 } = {}) {
   const columns = await publicColumns(client);
   await client.query(`drop table if exists pg_temp.demo_scan_needles`);
