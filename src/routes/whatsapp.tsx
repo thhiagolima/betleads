@@ -109,6 +109,9 @@ import { QRCodeSVG } from "qrcode.react";
 import { WhatsappInbox } from "@/components/whatsapp/inbox";
 import { PrecallTab } from "@/components/whatsapp/precall/precall-tab";
 import { ExternalIntegrationTab } from "@/components/whatsapp/external-integration-tab";
+import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
+import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
+import { DEMO_EMPTY_STATE_TEXT } from "@/lib/demo-tenant";
 import {
   listRules,
   updateRule,
@@ -583,6 +586,7 @@ function useUpdatedAgo(ts: number): string {
 // REAL SESSIONS (Evolution API)
 // ============================================================
 function RealSessoesTab() {
+  const isDemo = useIsDemoTenant();
   const qc = useQueryClient();
   const list = useServerFn(listWhatsappSessions);
   const createFn = useServerFn(createWhatsappSession);
@@ -974,7 +978,11 @@ function RealSessoesTab() {
       <div className="flex justify-between items-center">
         <p className="text-sm text-muted-foreground">Centralize sessões, automações e conversas do WhatsApp em tempo real.</p>
         <div className="flex gap-2">
-          <Button size="sm" onClick={() => setNewOpen(true)}><Plus className="h-4 w-4" /> Nova sessão</Button>
+          <DemoDisabledTooltip active={isDemo}>
+            <Button size="sm" onClick={() => setNewOpen(true)} disabled={isDemo}>
+              <Plus className="h-4 w-4" /> Nova sessão
+            </Button>
+          </DemoDisabledTooltip>
         </div>
       </div>
 
@@ -989,12 +997,16 @@ function RealSessoesTab() {
             <div className="space-y-1">
               <h3 className="text-base font-semibold">Nenhum WhatsApp conectado</h3>
               <p className="text-sm text-muted-foreground max-w-md mx-auto">
-                Conecte seu primeiro número para começar automações, campanhas e atendimento em tempo real.
+                {isDemo
+                  ? DEMO_EMPTY_STATE_TEXT
+                  : "Conecte seu primeiro número para começar automações, campanhas e atendimento em tempo real."}
               </p>
             </div>
-            <Button size="sm" onClick={() => setNewOpen(true)}>
-              <Plus className="h-4 w-4" /> Conectar WhatsApp
-            </Button>
+            <DemoDisabledTooltip active={isDemo}>
+              <Button size="sm" onClick={() => setNewOpen(true)} disabled={isDemo}>
+                <Plus className="h-4 w-4" /> Conectar WhatsApp
+              </Button>
+            </DemoDisabledTooltip>
           </CardContent>
         </Card>
       ) : (
@@ -1041,6 +1053,7 @@ function RealSessoesTab() {
                   </Label>
                   <Select
                     value={s.proxy_id ?? "__none__"}
+                    disabled={isDemo}
                     onValueChange={(v) =>
                       assignProxyMut.mutate({
                         session_id: s.id,
@@ -1048,9 +1061,11 @@ function RealSessoesTab() {
                       })
                     }
                   >
-                    <SelectTrigger className="h-8 text-xs">
-                      <SelectValue placeholder="Nenhum" />
-                    </SelectTrigger>
+                    <DemoDisabledTooltip active={isDemo}>
+                      <SelectTrigger className="h-8 text-xs">
+                        <SelectValue placeholder="Nenhum" />
+                      </SelectTrigger>
+                    </DemoDisabledTooltip>
                     <SelectContent>
                       <SelectItem value="__none__">Nenhum (conexão direta)</SelectItem>
                       {proxies
@@ -1067,9 +1082,17 @@ function RealSessoesTab() {
 
                 <div className="flex gap-1.5 flex-wrap">
                   {s.status !== "connected" ? (
-                    <Button size="sm" variant="outline" className="flex-1" onClick={() => connectMut.mutate(s.id)} disabled={connectMut.isPending}>
-                      <QrCode className="h-3.5 w-3.5" /> Reconectar sessão
-                    </Button>
+                    <DemoDisabledTooltip active={isDemo}>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="flex-1"
+                        onClick={() => connectMut.mutate(s.id)}
+                        disabled={isDemo || connectMut.isPending}
+                      >
+                        <QrCode className="h-3.5 w-3.5" /> Reconectar sessão
+                      </Button>
+                    </DemoDisabledTooltip>
                   ) : (
                     <Button size="sm" variant="outline" className="flex-1" onClick={() => disconnectMut.mutate(s.id)} disabled={disconnectMut.isPending}>
                       <Power className="h-3.5 w-3.5" /> Desconectar
@@ -1110,12 +1133,14 @@ function RealSessoesTab() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setNewOpen(false)}>Cancelar</Button>
-            <Button
-              onClick={() => createMut.mutate()}
-              disabled={!newName || instanceName.length < 2 || createMut.isPending}
-            >
-              {createMut.isPending ? "Criando…" : "Criar"}
-            </Button>
+            <DemoDisabledTooltip active={isDemo}>
+              <Button
+                onClick={() => createMut.mutate()}
+                disabled={isDemo || !newName || instanceName.length < 2 || createMut.isPending}
+              >
+                {createMut.isPending ? "Criando…" : "Criar"}
+              </Button>
+            </DemoDisabledTooltip>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1442,6 +1467,7 @@ const EMPTY_FLOW: FlowDraft = {
 };
 
 export function WhatsappAutomationFlowsPanel() {
+  const isDemo = useIsDemoTenant();
   const qc = useQueryClient();
   const listFlowsFn = useServerFn(listFlows);
   const deleteFlowFn = useServerFn(deleteFlow);
@@ -1480,10 +1506,11 @@ export function WhatsappAutomationFlowsPanel() {
       <div className="flex justify-between items-center">
         <p className="text-sm text-muted-foreground">Automações multi-bloco com templates aleatórios e condições de saída. Delays, cooldown e limites ficam na aba Antispam.</p>
         <div className="flex items-center gap-2">
+          <DemoDisabledTooltip active={isDemo}>
           <Button
             size="sm"
             variant="outline"
-            disabled={evaluating}
+            disabled={isDemo || evaluating}
             onClick={async () => {
               setEvaluating(true);
               try {
@@ -1501,9 +1528,12 @@ export function WhatsappAutomationFlowsPanel() {
           >
             {evaluating ? "Avaliando…" : "Avaliar agora"}
           </Button>
-          <Button size="sm" onClick={() => setCreating(true)}>
-            <Plus className="h-4 w-4" /> Novo fluxo
-          </Button>
+          </DemoDisabledTooltip>
+          <DemoDisabledTooltip active={isDemo}>
+            <Button size="sm" onClick={() => setCreating(true)} disabled={isDemo}>
+              <Plus className="h-4 w-4" /> Novo fluxo
+            </Button>
+          </DemoDisabledTooltip>
         </div>
       </div>
 
@@ -1511,7 +1541,9 @@ export function WhatsappAutomationFlowsPanel() {
         {isLoading && <Card><CardContent className="py-8 text-center text-sm text-muted-foreground">Carregando fluxos…</CardContent></Card>}
         {!isLoading && flows.length === 0 && (
           <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">
-            Nenhum fluxo criado ainda. Clique em "Novo fluxo" para criar a primeira automação.
+            {isDemo
+              ? DEMO_EMPTY_STATE_TEXT
+              : "Nenhum fluxo criado ainda. Clique em \"Novo fluxo\" para criar a primeira automação."}
           </CardContent></Card>
         )}
         {flows.map((f) => (
@@ -2562,6 +2594,7 @@ function ToggleRow({ label, desc, checked, onChange }: { label: string; desc: st
 // PROXIES TAB
 // ============================================================
 function ProxiesTab() {
+  const isDemo = useIsDemoTenant();
   const qc = useQueryClient();
   const listFn = useServerFn(listWhatsappProxies);
   const createFn = useServerFn(createWhatsappProxy);
@@ -2686,9 +2719,11 @@ function ProxiesTab() {
             Cadastre proxies e vincule a sessões. O proxy é aplicado automaticamente ao conectar.
           </p>
         </div>
-        <Button size="sm" onClick={openCreate}>
-          <Plus className="h-4 w-4" /> Novo proxy
-        </Button>
+        <DemoDisabledTooltip active={isDemo}>
+          <Button size="sm" onClick={openCreate} disabled={isDemo}>
+            <Plus className="h-4 w-4" /> Novo proxy
+          </Button>
+        </DemoDisabledTooltip>
       </div>
 
       {isLoading ? (
@@ -2702,12 +2737,16 @@ function ProxiesTab() {
             <div className="space-y-1">
               <h3 className="text-base font-semibold">Nenhum proxy cadastrado</h3>
               <p className="text-sm text-muted-foreground max-w-md mx-auto">
-                Cadastre seu primeiro proxy para vincular a sessões WhatsApp.
+                {isDemo
+                  ? DEMO_EMPTY_STATE_TEXT
+                  : "Cadastre seu primeiro proxy para vincular a sessões WhatsApp."}
               </p>
             </div>
-            <Button size="sm" onClick={openCreate}>
-              <Plus className="h-4 w-4" /> Cadastrar proxy
-            </Button>
+            <DemoDisabledTooltip active={isDemo}>
+              <Button size="sm" onClick={openCreate} disabled={isDemo}>
+                <Plus className="h-4 w-4" /> Cadastrar proxy
+              </Button>
+            </DemoDisabledTooltip>
           </CardContent>
         </Card>
       ) : (
@@ -2752,33 +2791,38 @@ function ProxiesTab() {
                   </div>
                 )}
                 <div className="flex gap-1.5 flex-wrap">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="flex-1"
-                    onClick={() => testMut.mutate(p.id)}
-                    disabled={testMut.isPending}
-                  >
-                    <Zap className="h-3.5 w-3.5" /> Testar
-                  </Button>
+                  <DemoDisabledTooltip active={isDemo}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="flex-1"
+                      onClick={() => testMut.mutate(p.id)}
+                      disabled={isDemo || testMut.isPending}
+                    >
+                      <Zap className="h-3.5 w-3.5" /> Testar
+                    </Button>
+                  </DemoDisabledTooltip>
                   <Button size="sm" variant="outline" onClick={() => openEdit(p)}>
                     <Pencil className="h-3.5 w-3.5" />
                   </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={async () => {
-                      if (!(await requestConfirmation({
-                        title: `Excluir proxy “${p.name}”?`,
-                        description: "O proxy será removido e deixará de estar disponível para novas sessões.",
-                        confirmLabel: "Excluir proxy",
-                        destructive: true,
-                      }))) return;
-                      deleteMut.mutate(p.id);
-                    }}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
+                  <DemoDisabledTooltip active={isDemo}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={isDemo}
+                      onClick={async () => {
+                        if (!(await requestConfirmation({
+                          title: `Excluir proxy "${p.name}"?`,
+                          description: "O proxy será removido e deixará de estar disponível para novas sessões.",
+                          confirmLabel: "Excluir proxy",
+                          destructive: true,
+                        }))) return;
+                        deleteMut.mutate(p.id);
+                      }}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </DemoDisabledTooltip>
                 </div>
               </CardContent>
             </Card>
@@ -2893,24 +2937,28 @@ function ProxiesTab() {
             </div>
           </div>
           <DialogFooter className="flex-wrap gap-2">
-            <Button
-              variant="outline"
-              onClick={() => testInlineMut.mutate()}
-              disabled={!form.host || !form.port || testInlineMut.isPending}
-            >
-              <Zap className="h-4 w-4" />
-              {testInlineMut.isPending ? "Testando…" : "Testar conexão"}
-            </Button>
+            <DemoDisabledTooltip active={isDemo}>
+              <Button
+                variant="outline"
+                onClick={() => testInlineMut.mutate()}
+                disabled={isDemo || !form.host || !form.port || testInlineMut.isPending}
+              >
+                <Zap className="h-4 w-4" />
+                {testInlineMut.isPending ? "Testando…" : "Testar conexão"}
+              </Button>
+            </DemoDisabledTooltip>
             <div className="flex-1" />
             <Button variant="outline" onClick={() => setOpen(false)}>
               Cancelar
             </Button>
-            <Button
-              onClick={() => saveMut.mutate()}
-              disabled={!form.name || !form.host || !form.port || saveMut.isPending}
-            >
-              {saveMut.isPending ? "Salvando…" : "Salvar"}
-            </Button>
+            <DemoDisabledTooltip active={isDemo}>
+              <Button
+                onClick={() => saveMut.mutate()}
+                disabled={isDemo || !form.name || !form.host || !form.port || saveMut.isPending}
+              >
+                {saveMut.isPending ? "Salvando…" : "Salvar"}
+              </Button>
+            </DemoDisabledTooltip>
           </DialogFooter>
         </DialogContent>
       </Dialog>

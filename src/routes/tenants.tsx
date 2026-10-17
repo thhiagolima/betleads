@@ -67,6 +67,8 @@ import {
 import { brl, num } from "@/lib/format";
 import { requestConfirmation } from "@/components/system-dialog-host";
 import { MetricCard as DashboardMetricCard } from "@/components/ui-premium/metric-card";
+import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
+import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 
 export const Route = createFileRoute("/tenants")({
   component: TenantsPage,
@@ -592,6 +594,7 @@ function UsersTab({
 }
 
 function AddUserDialog({ tenantId, isSuperAdmin }: { tenantId: string; isSuperAdmin: boolean }) {
+  const isDemo = useIsDemoTenant();
   const qc = useQueryClient();
   const fn = useServerFn(addUserToTenant);
   const [open, setOpen] = useState(false);
@@ -620,12 +623,14 @@ function AddUserDialog({ tenantId, isSuperAdmin }: { tenantId: string; isSuperAd
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button className="gap-2">
-          <UserPlus className="h-4 w-4" />
-          Adicionar usuário
-        </Button>
-      </DialogTrigger>
+      <DemoDisabledTooltip active={isDemo}>
+        <DialogTrigger asChild>
+          <Button className="gap-2" disabled={isDemo}>
+            <UserPlus className="h-4 w-4" />
+            Adicionar usuário
+          </Button>
+        </DialogTrigger>
+      </DemoDisabledTooltip>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Adicionar usuário ao tenant</DialogTitle>
@@ -686,6 +691,7 @@ function RoleSelect({
   isSuperAdmin: boolean;
   canManage: boolean;
 }) {
+  const isDemo = useIsDemoTenant();
   const qc = useQueryClient();
   const fn = useServerFn(updateTenantUserRole);
   const mut = useMutation({
@@ -701,12 +707,14 @@ function RoleSelect({
   return (
     <Select
       value={user.role}
-      disabled={!canManage || (!isSuperAdmin && user.role === "admin")}
+      disabled={isDemo || !canManage || (!isSuperAdmin && user.role === "admin")}
       onValueChange={(value) => mut.mutate(value as TenantUser["role"])}
     >
-      <SelectTrigger className="w-44">
-        <SelectValue />
-      </SelectTrigger>
+      <DemoDisabledTooltip active={isDemo}>
+        <SelectTrigger className="w-44">
+          <SelectValue />
+        </SelectTrigger>
+      </DemoDisabledTooltip>
       <SelectContent>
         <SelectItem value="member">Membro</SelectItem>
         {isSuperAdmin && <SelectItem value="admin">Admin</SelectItem>}
@@ -717,6 +725,7 @@ function RoleSelect({
 }
 
 function RemoveUserButton({ tenantId, user }: { tenantId: string; user: TenantUser }) {
+  const isDemo = useIsDemoTenant();
   const qc = useQueryClient();
   const fn = useServerFn(removeUserFromTenant);
   const mut = useMutation({
@@ -730,23 +739,25 @@ function RemoveUserButton({ tenantId, user }: { tenantId: string; user: TenantUs
 
   const label = user.email ?? "este usuário";
   return (
-    <Button
-      size="sm"
-      variant="ghost"
-      disabled={mut.isPending}
-      aria-label={`Remover ${label} da conta`}
-      onClick={async () => {
-        const confirmed = await requestConfirmation({
-          title: "Remover usuário da conta?",
-          description: `${label} perde o acesso a esta conta imediatamente. O login continua existindo e a pessoa pode ser convidada de novo depois.`,
-          confirmLabel: "Remover usuário",
-          destructive: true,
-        });
-        if (confirmed) mut.mutate();
-      }}
-    >
-      <Trash2 className="h-4 w-4 text-destructive" />
-    </Button>
+    <DemoDisabledTooltip active={isDemo}>
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={isDemo || mut.isPending}
+        aria-label={`Remover ${label} da conta`}
+        onClick={async () => {
+          const confirmed = await requestConfirmation({
+            title: "Remover usuário da conta?",
+            description: `${label} perde o acesso a esta conta imediatamente. O login continua existindo e a pessoa pode ser convidada de novo depois.`,
+            confirmLabel: "Remover usuário",
+            destructive: true,
+          });
+          if (confirmed) mut.mutate();
+        }}
+      >
+        <Trash2 className="h-4 w-4 text-destructive" />
+      </Button>
+    </DemoDisabledTooltip>
   );
 }
 
@@ -1146,6 +1157,7 @@ function AuditTab({ detail }: { detail: TenantDetail }) {
 }
 
 function SettingsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAdmin: boolean }) {
+  const isDemo = useIsDemoTenant();
   const qc = useQueryClient();
   const fn = useServerFn(updateTenantSettings);
   const tenant = detail.tenant;
@@ -1257,14 +1269,16 @@ function SettingsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAd
             </Select>
           </div>
         </div>
-        <Button
-          className="gap-2"
-          disabled={mut.isPending || !form.nome.trim()}
-          onClick={() => mut.mutate()}
-        >
-          <Save className="h-4 w-4" />
-          Salvar configuração
-        </Button>
+        <DemoDisabledTooltip active={isDemo}>
+          <Button
+            className="gap-2"
+            disabled={isDemo || mut.isPending || !form.nome.trim()}
+            onClick={() => mut.mutate()}
+          >
+            <Save className="h-4 w-4" />
+            Salvar configuração
+          </Button>
+        </DemoDisabledTooltip>
       </CardContent>
     </Card>
   );

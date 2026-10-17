@@ -8,6 +8,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Sparkles, Send, Loader2, User, Brain } from "lucide-react";
 import { AIResponse, type AIAnswer } from "@/components/ai-response";
 import { cn } from "@/lib/utils";
+import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
+import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
+import { DEMO_AI_UNAVAILABLE_TEXT } from "@/lib/demo-tenant";
 
 export const Route = createFileRoute("/inteligencia")({
   component: IAPage,
@@ -34,6 +37,7 @@ type Msg =
   | { role: "assistant"; content: string | AIAnswer };
 
 function IAPage() {
+  const isDemo = useIsDemoTenant();
   const [input, setInput] = useState("");
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [slow, setSlow] = useState(false);
@@ -80,7 +84,7 @@ function IAPage() {
 
   function send(text?: string) {
     const q = (text ?? input).trim();
-    if (!q || mutation.isPending) return;
+    if (!q || mutation.isPending || isDemo) return;
     setMsgs((m) => [...m, { role: "user", content: q }]);
     setInput("");
     mutation.mutate(q);
@@ -102,12 +106,15 @@ function IAPage() {
                 Inteligência BETLEADS
               </h2>
               <p className="mt-2 text-sm text-muted-foreground leading-relaxed">
-                Pergunte qualquer coisa sobre seus players. A IA consulta o banco em tempo real e
-                responde em português.
+                {isDemo
+                  ? DEMO_AI_UNAVAILABLE_TEXT
+                  : "Pergunte qualquer coisa sobre seus players. A IA consulta o banco em tempo real e responde em português."}
               </p>
-              <p className="mt-4 text-[11px] uppercase tracking-[0.16em] text-muted-foreground/70">
-                Use uma sugestão à direita para começar
-              </p>
+              {!isDemo && (
+                <p className="mt-4 text-[11px] uppercase tracking-[0.16em] text-muted-foreground/70">
+                  Use uma sugestão à direita para começar
+                </p>
+              )}
             </div>
           )}
           {msgs.map((m, i) => (
@@ -176,8 +183,9 @@ function IAPage() {
             <Textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Pergunte algo sobre seus players..."
+              placeholder={isDemo ? DEMO_AI_UNAVAILABLE_TEXT : "Pergunte algo sobre seus players..."}
               rows={1}
+              disabled={isDemo}
               className="bg-background/60 resize-none min-h-[44px] max-h-32"
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
@@ -186,15 +194,17 @@ function IAPage() {
                 }
               }}
             />
-            <Button
-              type="submit"
-              disabled={!input.trim() || mutation.isPending}
-              className={cn(
-                "h-11 px-4 bg-gradient-to-r from-primary to-accent text-primary-foreground glow-blue hover:opacity-90 transition-opacity",
-              )}
-            >
-              <Send className="h-4 w-4" />
-            </Button>
+            <DemoDisabledTooltip active={isDemo} text={DEMO_AI_UNAVAILABLE_TEXT}>
+              <Button
+                type="submit"
+                disabled={isDemo || !input.trim() || mutation.isPending}
+                className={cn(
+                  "h-11 px-4 bg-gradient-to-r from-primary to-accent text-primary-foreground glow-blue hover:opacity-90 transition-opacity",
+                )}
+              >
+                <Send className="h-4 w-4" />
+              </Button>
+            </DemoDisabledTooltip>
           </form>
         </div>
       </div>
@@ -211,7 +221,7 @@ function IAPage() {
             <button
               key={s}
               onClick={() => send(s)}
-              disabled={mutation.isPending}
+              disabled={isDemo || mutation.isPending}
               className="w-full text-left rounded-lg border border-border/40 bg-background/40 px-3 py-2 text-xs hover:border-primary/40 hover:bg-primary/5 hover:translate-x-0.5 transition-all duration-200 disabled:opacity-50 disabled:hover:translate-x-0"
             >
               {s}

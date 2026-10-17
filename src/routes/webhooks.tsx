@@ -39,6 +39,9 @@ import {
 } from "@/lib/webhooks.functions";
 import { cn } from "@/lib/utils";
 import { requestConfirmation } from "@/components/system-dialog-host";
+import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
+import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
+import { DEMO_EMPTY_STATE_TEXT } from "@/lib/demo-tenant";
 
 export const Route = createFileRoute("/webhooks")({
   component: WebhooksPage,
@@ -79,6 +82,7 @@ type WebhookHealth = {
 };
 
 function WebhooksPage() {
+  const isDemo = useIsDemoTenant();
   const fetchAccess = useServerFn(getMyWebhookAccess);
   const fetchToken = useServerFn(getMyWebhookToken);
   const fetchLogs = useServerFn(getMyWebhookLogs);
@@ -233,17 +237,23 @@ function WebhooksPage() {
           <span className="text-muted-foreground">
             {tokenInfo?.hmacConfigured ? "Chave provisionada." : "Nenhuma chave provisionada."}
           </span>
-          <Button size="sm" variant="outline" disabled={provision.isPending} onClick={() => void confirmRotate()}>
-            {provision.isPending ? "Gerando..." : tokenInfo?.hmacConfigured ? "Rotacionar chave" : "Gerar chave"}
-          </Button>
+          <DemoDisabledTooltip active={isDemo}>
+            <Button size="sm" variant="outline" disabled={isDemo || provision.isPending} onClick={() => void confirmRotate()}>
+              {provision.isPending ? "Gerando..." : tokenInfo?.hmacConfigured ? "Rotacionar chave" : "Gerar chave"}
+            </Button>
+          </DemoDisabledTooltip>
           {tokenInfo?.hmacEnforced ? (
-            <Button size="sm" variant="outline" disabled={enforceHmac.isPending} onClick={() => enforceHmac.mutate(false)}>
-              Permitir transição
-            </Button>
+            <DemoDisabledTooltip active={isDemo}>
+              <Button size="sm" variant="outline" disabled={isDemo || enforceHmac.isPending} onClick={() => enforceHmac.mutate(false)}>
+                Permitir transição
+              </Button>
+            </DemoDisabledTooltip>
           ) : (
-            <Button size="sm" disabled={!tokenInfo?.hmacConfigured || enforceHmac.isPending} onClick={() => void confirmEnforce()}>
-              Exigir assinatura
-            </Button>
+            <DemoDisabledTooltip active={isDemo}>
+              <Button size="sm" disabled={isDemo || !tokenInfo?.hmacConfigured || enforceHmac.isPending} onClick={() => void confirmEnforce()}>
+                Exigir assinatura
+              </Button>
+            </DemoDisabledTooltip>
           )}
         </div>
         {provisionedSecret ? (
@@ -454,7 +464,11 @@ function WebhooksPage() {
               <EmptyState
                 icon={<Terminal className="h-6 w-6" />}
                 title="Nenhum log ainda"
-                description="Os webhooks recebidos vão aparecer aqui em tempo real."
+                description={
+                  isDemo
+                    ? DEMO_EMPTY_STATE_TEXT
+                    : "Os webhooks recebidos vão aparecer aqui em tempo real."
+                }
                 className="py-8"
               />
             )}

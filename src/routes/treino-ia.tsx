@@ -13,6 +13,9 @@ import { toast } from "sonner";
 import { Trash2, Plus, GraduationCap, ThumbsDown, ThumbsUp, Download } from "lucide-react";
 import { PageHeader } from "@/components/ui-premium";
 import { requestConfirmation } from "@/components/system-dialog-host";
+import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
+import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
+import { DEMO_EMPTY_STATE_TEXT } from "@/lib/demo-tenant";
 
 export const Route = createFileRoute("/treino-ia")({
   component: TreinoIA,
@@ -62,6 +65,7 @@ function TreinoIA() {
 
 // =================== EXEMPLOS ===================
 function ExemplosTab() {
+  const isDemo = useIsDemoTenant();
   const [items, setItems] = useState<Example[]>([]);
   const [pergunta, setPergunta] = useState("");
   const [resposta, setResposta] = useState("");
@@ -130,8 +134,12 @@ function ExemplosTab() {
           </div>
           <Textarea value={resposta} onChange={(e) => setResposta(e.target.value)} rows={3} placeholder="Resposta ideal — pode usar markdown" />
           <div className="flex justify-between gap-2">
-            <Button variant="outline" size="sm" onClick={openImport}><Download className="h-3.5 w-3.5 mr-1.5" />Importar do histórico</Button>
-            <Button onClick={add}><Plus className="h-3.5 w-3.5 mr-1.5" />Salvar exemplo</Button>
+            <DemoDisabledTooltip active={isDemo}>
+              <Button variant="outline" size="sm" onClick={openImport} disabled={isDemo}><Download className="h-3.5 w-3.5 mr-1.5" />Importar do histórico</Button>
+            </DemoDisabledTooltip>
+            <DemoDisabledTooltip active={isDemo}>
+              <Button onClick={add} disabled={isDemo}><Plus className="h-3.5 w-3.5 mr-1.5" />Salvar exemplo</Button>
+            </DemoDisabledTooltip>
           </div>
         </CardContent>
       </Card>
@@ -171,28 +179,35 @@ function ExemplosTab() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <Switch checked={it.ativo} onCheckedChange={() => toggle(it)} />
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    aria-label="Excluir exemplo"
-                    onClick={async () => {
-                      const confirmed = await requestConfirmation({
-                        title: "Excluir este exemplo?",
-                        description: `O exemplo "${it.pergunta}" será apagado e deixa de orientar as respostas da IA. Para só pausar, use a chave ao lado.`,
-                        confirmLabel: "Excluir exemplo",
-                        destructive: true,
-                      });
-                      if (confirmed) void remove(it);
-                    }}
-                  >
-                    <Trash2 className="h-3.5 w-3.5 text-rose-400" />
-                  </Button>
+                  <Switch checked={it.ativo} disabled={isDemo} onCheckedChange={() => toggle(it)} />
+                  <DemoDisabledTooltip active={isDemo}>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      aria-label="Excluir exemplo"
+                      disabled={isDemo}
+                      onClick={async () => {
+                        const confirmed = await requestConfirmation({
+                          title: "Excluir este exemplo?",
+                          description: `O exemplo "${it.pergunta}" será apagado e deixa de orientar as respostas da IA. Para só pausar, use a chave ao lado.`,
+                          confirmLabel: "Excluir exemplo",
+                          destructive: true,
+                        });
+                        if (confirmed) void remove(it);
+                      }}
+                    >
+                      <Trash2 className="h-3.5 w-3.5 text-rose-400" />
+                    </Button>
+                  </DemoDisabledTooltip>
                 </div>
               </div>
             </div>
           ))}
-          {!items.length && <p className="text-xs text-muted-foreground">Nenhum exemplo ainda.</p>}
+          {!items.length && (
+            <p className="text-xs text-muted-foreground">
+              {isDemo ? DEMO_EMPTY_STATE_TEXT : "Nenhum exemplo ainda."}
+            </p>
+          )}
         </CardContent>
       </Card>
     </div>
@@ -201,6 +216,7 @@ function ExemplosTab() {
 
 // =================== INTENTS + SINÔNIMOS ===================
 function IntentsTab() {
+  const isDemo = useIsDemoTenant();
   const [intents, setIntents] = useState<Intent[]>([]);
   const [syns, setSyns] = useState<Synonym[]>([]);
   const [novoTermo, setNovoTermo] = useState("");
@@ -260,7 +276,7 @@ function IntentsTab() {
                     </p>
                   )}
                 </div>
-                <Switch checked={i.ativo} onCheckedChange={() => toggleIntent(i)} />
+                <Switch checked={i.ativo} disabled={isDemo} onCheckedChange={() => toggleIntent(i)} />
               </div>
             </div>
           ))}
@@ -283,7 +299,9 @@ function IntentsTab() {
                 <option value="periodo">período</option>
               </select>
             </div>
-            <Button size="sm" onClick={addSyn}><Plus className="h-3.5 w-3.5 mr-1" />Adicionar</Button>
+            <DemoDisabledTooltip active={isDemo}>
+              <Button size="sm" onClick={addSyn} disabled={isDemo}><Plus className="h-3.5 w-3.5 mr-1" />Adicionar</Button>
+            </DemoDisabledTooltip>
           </div>
           <div className="space-y-1 max-h-[440px] overflow-y-auto">
             {syns.map((s) => (
@@ -293,23 +311,26 @@ function IntentsTab() {
                 <span className="text-muted-foreground">→</span>
                 <code className="text-emerald-400">{s.canonico}</code>
                 <div className="ml-auto flex items-center gap-1">
-                  <Switch checked={s.ativo} onCheckedChange={() => toggleSyn(s)} />
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    aria-label={`Excluir sinônimo ${s.termo}`}
-                    onClick={async () => {
-                      const confirmed = await requestConfirmation({
-                        title: "Excluir este sinônimo?",
-                        description: `"${s.termo}" deixa de ser reconhecido como "${s.canonico}". Para só pausar, use a chave ao lado.`,
-                        confirmLabel: "Excluir sinônimo",
-                        destructive: true,
-                      });
-                      if (confirmed) void delSyn(s);
-                    }}
-                  >
-                    <Trash2 className="h-3 w-3 text-rose-400" />
-                  </Button>
+                  <Switch checked={s.ativo} disabled={isDemo} onCheckedChange={() => toggleSyn(s)} />
+                  <DemoDisabledTooltip active={isDemo}>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      aria-label={`Excluir sinônimo ${s.termo}`}
+                      disabled={isDemo}
+                      onClick={async () => {
+                        const confirmed = await requestConfirmation({
+                          title: "Excluir este sinônimo?",
+                          description: `"${s.termo}" deixa de ser reconhecido como "${s.canonico}". Para só pausar, use a chave ao lado.`,
+                          confirmLabel: "Excluir sinônimo",
+                          destructive: true,
+                        });
+                        if (confirmed) void delSyn(s);
+                      }}
+                    >
+                      <Trash2 className="h-3 w-3 text-rose-400" />
+                    </Button>
+                  </DemoDisabledTooltip>
                 </div>
               </div>
             ))}
@@ -322,6 +343,7 @@ function IntentsTab() {
 
 // =================== FEEDBACK ===================
 function FeedbackTab() {
+  const isDemo = useIsDemoTenant();
   const [items, setItems] = useState<Feedback[]>([]);
   const [stats, setStats] = useState({ total: 0, good: 0, bad: 0 });
 
@@ -380,14 +402,20 @@ function FeedbackTab() {
                   {f.motivo && <p className="text-muted-foreground mt-1">"{f.motivo}"</p>}
                 </div>
                 {f.rating === "bad" && (
-                  <Button size="sm" variant="outline" onClick={() => turnIntoExample(f)}>
-                    Criar exemplo
-                  </Button>
+                  <DemoDisabledTooltip active={isDemo}>
+                    <Button size="sm" variant="outline" onClick={() => turnIntoExample(f)} disabled={isDemo}>
+                      Criar exemplo
+                    </Button>
+                  </DemoDisabledTooltip>
                 )}
               </div>
             </div>
           ))}
-          {!items.length && <p className="text-xs text-muted-foreground">Nenhum feedback ainda. Use 👍/👎 nas respostas da IA.</p>}
+          {!items.length && (
+            <p className="text-xs text-muted-foreground">
+              {isDemo ? DEMO_EMPTY_STATE_TEXT : "Nenhum feedback ainda. Use 👍/👎 nas respostas da IA."}
+            </p>
+          )}
         </CardContent>
       </Card>
     </div>

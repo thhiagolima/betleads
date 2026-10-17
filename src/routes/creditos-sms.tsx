@@ -7,6 +7,9 @@ import { toast } from "sonner";
 
 import { createSmsCreditCheckout, getSmsCreditPortal } from "@/lib/sms-credits.functions";
 import { brl, num } from "@/lib/format";
+import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
+import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
+import { DEMO_EMPTY_STATE_TEXT } from "@/lib/demo-tenant";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -73,6 +76,7 @@ function statusBadge(status: string) {
 }
 
 function SmsCreditsPage() {
+  const isDemo = useIsDemoTenant();
   const qc = useQueryClient();
   const portalFn = useServerFn(getSmsCreditPortal);
   const checkoutFn = useServerFn(createSmsCreditCheckout);
@@ -200,14 +204,16 @@ function SmsCreditsPage() {
                     )}
                   </div>
                   <p className="mt-4 text-2xl font-bold">{cents(pkg.price_cents)}</p>
-                  <Button
-                    className="mt-4 w-full gap-2"
-                    onClick={() => checkout.mutate({ packageId: pkg.id })}
-                    disabled={checkout.isPending}
-                  >
-                    <Receipt className="h-4 w-4" />
-                    Gerar pedido
-                  </Button>
+                  <DemoDisabledTooltip active={isDemo}>
+                    <Button
+                      className="mt-4 w-full gap-2"
+                      onClick={() => checkout.mutate({ packageId: pkg.id })}
+                      disabled={isDemo || checkout.isPending}
+                    >
+                      <Receipt className="h-4 w-4" />
+                      Gerar pedido
+                    </Button>
+                  </DemoDisabledTooltip>
                 </CardContent>
               </Card>
             ))}
@@ -233,13 +239,15 @@ function SmsCreditsPage() {
                 onChange={(e) => setCustomCredits(e.target.value)}
               />
             </div>
-            <Button
-              className="w-full"
-              disabled={checkout.isPending || Number(customCredits) <= 0}
-              onClick={() => checkout.mutate({ credits: Number(customCredits) })}
-            >
-              Gerar pedido manual
-            </Button>
+            <DemoDisabledTooltip active={isDemo}>
+              <Button
+                className="w-full"
+                disabled={isDemo || checkout.isPending || Number(customCredits) <= 0}
+                onClick={() => checkout.mutate({ credits: Number(customCredits) })}
+              >
+                Gerar pedido manual
+              </Button>
+            </DemoDisabledTooltip>
             <p className="text-xs text-muted-foreground">
               O pedido fica pendente até confirmação do pagamento pelo superadmin ou por webhook de
               pagamento futuro.
@@ -279,7 +287,7 @@ function SmsCreditsPage() {
               {orders.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">
-                    Nenhum pedido criado ainda.
+                    {isDemo ? DEMO_EMPTY_STATE_TEXT : "Nenhum pedido criado ainda."}
                   </TableCell>
                 </TableRow>
               )}
@@ -324,7 +332,7 @@ function SmsCreditsPage() {
               {ledger.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">
-                    Nenhuma movimentação ainda.
+                    {isDemo ? DEMO_EMPTY_STATE_TEXT : "Nenhuma movimentação ainda."}
                   </TableCell>
                 </TableRow>
               )}

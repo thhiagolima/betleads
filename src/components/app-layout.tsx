@@ -2,6 +2,7 @@ import { useRouterState } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import { AppSidebar } from "@/components/app-sidebar";
+import { DemoBanner } from "@/components/demo-banner";
 import { ProviderAuthBanner } from "@/components/provider-auth-banner";
 import { TenantStatusGate } from "@/components/tenant-status-gate";
 import { SidebarToggle } from "@/components/ui/sidebar";
@@ -123,6 +124,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             <span className="hidden text-foreground/80 sm:inline">{rtMeta.label}</span>
           </div>
         </header>
+        <DemoBanner />
         <ProviderAuthBanner />
         <main
           aria-label={meta.title}

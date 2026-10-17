@@ -23,8 +23,12 @@ import {
 import { listWhatsappSessions } from "@/lib/whatsapp.functions";
 import { DEFAULT_PRECALL_VIP_TEMPLATES, PRECALL_FILTERS } from "./default-templates";
 import { MetricCard } from "@/components/ui-premium";
+import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
+import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
+import { DEMO_EMPTY_STATE_TEXT } from "@/lib/demo-tenant";
 
 export function PrecallTab() {
+  const isDemo = useIsDemoTenant();
   const list = useServerFn(listPrecallCampaigns);
   const { data, refetch } = useQuery({
     queryKey: ["precall-campaigns"],
@@ -43,12 +47,12 @@ export function PrecallTab() {
               Dispara um WhatsApp curto pedindo permissão pra ligar. Quem responder vira "ligar agora" pro gerente.
             </p>
           </div>
-          <NewCampaignDialog onCreated={() => refetch()} />
+          <NewCampaignDialog onCreated={() => refetch()} isDemo={isDemo} />
         </CardHeader>
         <CardContent>
           {(data?.campaigns ?? []).length === 0 ? (
             <p className="text-sm text-muted-foreground py-6 text-center">
-              Nenhuma campanha ainda. Clique em "Nova campanha" pra começar.
+              {isDemo ? DEMO_EMPTY_STATE_TEXT : "Nenhuma campanha ainda. Clique em \"Nova campanha\" pra começar."}
             </p>
           ) : (
             <Table>
@@ -73,7 +77,7 @@ export function PrecallTab() {
                     <TableCell className={c.respondidos > 0 ? "text-emerald-400 font-semibold" : ""}>{c.respondidos}</TableCell>
                     <TableCell>{c.ligacoes_feitas}</TableCell>
                     <TableCell className="text-right">
-                      <CampaignActions campaign={c} onChange={() => refetch()} onOpen={() => setOpenId(c.id)} />
+                      <CampaignActions campaign={c} onChange={() => refetch()} onOpen={() => setOpenId(c.id)} isDemo={isDemo} />
                     </TableCell>
                   </TableRow>
                 ))}
@@ -88,7 +92,17 @@ export function PrecallTab() {
   );
 }
 
-function CampaignActions({ campaign, onChange, onOpen }: { campaign: any; onChange: () => void; onOpen: () => void }) {
+function CampaignActions({
+  campaign,
+  onChange,
+  onOpen,
+  isDemo,
+}: {
+  campaign: any;
+  onChange: () => void;
+  onOpen: () => void;
+  isDemo: boolean;
+}) {
   const setStatus = useServerFn(setPrecallCampaignStatus);
   const m = useMutation({
     mutationFn: (status: "rodando" | "pausada" | "cancelada") => setStatus({ data: { id: campaign.id, status } }),
@@ -99,24 +113,30 @@ function CampaignActions({ campaign, onChange, onOpen }: { campaign: any; onChan
     <div className="flex justify-end gap-2">
       <Button size="sm" variant="ghost" onClick={onOpen}><Eye className="h-4 w-4" /></Button>
       {campaign.status === "rascunho" || campaign.status === "pausada" ? (
-        <Button size="sm" variant="default" onClick={() => m.mutate("rodando")} disabled={m.isPending}>
-          <Play className="h-4 w-4 mr-1" /> Iniciar
-        </Button>
+        <DemoDisabledTooltip active={isDemo}>
+          <Button size="sm" variant="default" onClick={() => m.mutate("rodando")} disabled={isDemo || m.isPending}>
+            <Play className="h-4 w-4 mr-1" /> Iniciar
+          </Button>
+        </DemoDisabledTooltip>
       ) : campaign.status === "rodando" ? (
-        <Button size="sm" variant="secondary" onClick={() => m.mutate("pausada")} disabled={m.isPending}>
-          <Pause className="h-4 w-4 mr-1" /> Pausar
-        </Button>
+        <DemoDisabledTooltip active={isDemo}>
+          <Button size="sm" variant="secondary" onClick={() => m.mutate("pausada")} disabled={isDemo || m.isPending}>
+            <Pause className="h-4 w-4 mr-1" /> Pausar
+          </Button>
+        </DemoDisabledTooltip>
       ) : null}
       {campaign.status !== "cancelada" && campaign.status !== "concluida" && (
-        <Button size="sm" variant="ghost" onClick={() => m.mutate("cancelada")} disabled={m.isPending}>
-          Cancelar
-        </Button>
+        <DemoDisabledTooltip active={isDemo}>
+          <Button size="sm" variant="ghost" onClick={() => m.mutate("cancelada")} disabled={isDemo || m.isPending}>
+            Cancelar
+          </Button>
+        </DemoDisabledTooltip>
       )}
     </div>
   );
 }
 
-function NewCampaignDialog({ onCreated }: { onCreated: () => void }) {
+function NewCampaignDialog({ onCreated, isDemo }: { onCreated: () => void; isDemo: boolean }) {
   const [open, setOpen] = useState(false);
   const [nome, setNome] = useState("Pré-call VIP sem login");
   const [filtro, setFiltro] = useState<string>("vip_sem_login");
@@ -167,9 +187,11 @@ function NewCampaignDialog({ onCreated }: { onCreated: () => void }) {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm"><Plus className="h-4 w-4 mr-1" /> Nova campanha</Button>
-      </DialogTrigger>
+      <DemoDisabledTooltip active={isDemo}>
+        <DialogTrigger asChild>
+          <Button size="sm" disabled={isDemo}><Plus className="h-4 w-4 mr-1" /> Nova campanha</Button>
+        </DialogTrigger>
+      </DemoDisabledTooltip>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader><DialogTitle>Nova campanha de pré-ligação</DialogTitle></DialogHeader>
         <div className="space-y-4">

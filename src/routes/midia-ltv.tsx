@@ -61,6 +61,9 @@ import { PageHeader } from "@/components/ui-premium/page-header";
 import { DataCard } from "@/components/ui-premium/data-card";
 import { EmptyState } from "@/components/ui-premium/empty-state";
 import { MetricCard } from "@/components/ui-premium/metric-card";
+import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
+import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
+import { DEMO_EMPTY_STATE_TEXT } from "@/lib/demo-tenant";
 import { getMarketingOverview, saveMarketingIntegration } from "@/lib/marketing.functions";
 import {
   connectMetaSystemUserToken,
@@ -700,6 +703,7 @@ function VisualizacaoSection({
   onSync: () => void;
   syncRuns: MetaSyncRun[];
 }) {
+  const isDemo = useIsDemoTenant();
   const [reportView, setReportView] = useState<
     "creatives" | "audiences" | "campaigns" | "evolution" | "diagnostics"
   >("creatives");
@@ -727,19 +731,21 @@ function VisualizacaoSection({
         <span className="rounded-full border border-border/70 px-3 py-1.5 text-sm font-medium text-muted-foreground">
           {periodText(data?.period ?? range)}
         </span>
-        <Button
-          variant="outline"
-          className="gap-2"
-          disabled={syncPending || accounts.length === 0}
-          onClick={onSync}
-        >
-          {syncPending ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <RefreshCw className="h-4 w-4" />
-          )}
-          {syncPending ? "sincronização na fila" : "Atualizar agora"}
-        </Button>
+        <DemoDisabledTooltip active={isDemo}>
+          <Button
+            variant="outline"
+            className="gap-2"
+            disabled={isDemo || syncPending || accounts.length === 0}
+            onClick={onSync}
+          >
+            {syncPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+            {syncPending ? "sincronização na fila" : "Atualizar agora"}
+          </Button>
+        </DemoDisabledTooltip>
       </div>
 
       {latestRun && (
@@ -1061,6 +1067,7 @@ function ConfiguracaoSection({
   onHouseUrlChange: (value: string) => void;
   onCopy: (value: string, label?: string) => void;
 }) {
+  const isDemo = useIsDemoTenant();
   return (
     <div className="space-y-5">
       <MetaConnectionWizard
@@ -1087,15 +1094,17 @@ function ConfiguracaoSection({
             Alternativa temporaria para conferir spend e criativos se a API propria travar por
             permissao ou revisao.
           </p>
-          <Button
-            variant="outline"
-            className="w-full gap-2"
-            disabled={savePending}
-            onClick={() => onSaveProvider("windsor")}
-          >
-            <ExternalLink className="h-4 w-4" />
-            Registrar estrategia Windsor
-          </Button>
+          <DemoDisabledTooltip active={isDemo}>
+            <Button
+              variant="outline"
+              className="w-full gap-2"
+              disabled={isDemo || savePending}
+              onClick={() => onSaveProvider("windsor")}
+            >
+              <ExternalLink className="h-4 w-4" />
+              Registrar estrategia Windsor
+            </Button>
+          </DemoDisabledTooltip>
         </DataCard>
 
         <DataCard
@@ -1107,15 +1116,17 @@ function ConfiguracaoSection({
           <p className="mb-4 text-sm text-muted-foreground">
             Serve para importar gasto por dia/anuncio enquanto a conexao automatica nao esta ligada.
           </p>
-          <Button
-            variant="outline"
-            className="w-full gap-2"
-            disabled={savePending}
-            onClick={() => onSaveProvider("csv")}
-          >
-            <BadgeCheck className="h-4 w-4" />
-            Ativar fallback CSV
-          </Button>
+          <DemoDisabledTooltip active={isDemo}>
+            <Button
+              variant="outline"
+              className="w-full gap-2"
+              disabled={isDemo || savePending}
+              onClick={() => onSaveProvider("csv")}
+            >
+              <BadgeCheck className="h-4 w-4" />
+              Ativar fallback CSV
+            </Button>
+          </DemoDisabledTooltip>
         </DataCard>
       </div>
 
@@ -1204,6 +1215,7 @@ function MetaConnectionWizard({
   onDisconnect: (connectionId: string) => Promise<unknown>;
   disconnectPending: boolean;
 }) {
+  const isDemo = useIsDemoTenant();
   const connections = useMemo(() => summary?.connections ?? [], [summary?.connections]);
   const activeConnectionIds = useMemo(
     () => new Set(connections.map((item) => item.id)),
@@ -1341,26 +1353,28 @@ function MetaConnectionWizard({
             value={token}
             onChange={(event) => setToken(event.target.value)}
           />
-          <Button
-            className="mt-3 gap-2"
-            disabled={connectPending || token.trim().length < 40}
-            onClick={async () => {
-              try {
-                await onConnect(token.trim());
-                setToken("");
-                setShowTokenForm(false);
-              } catch {
-                // A mensagem de erro é exibida pela mutation; mantenha o token para nova tentativa.
-              }
-            }}
-          >
-            {connectPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <ShieldCheck className="h-4 w-4" />
-            )}
-            Validar token e buscar contas
-          </Button>
+          <DemoDisabledTooltip active={isDemo}>
+            <Button
+              className="mt-3 gap-2"
+              disabled={isDemo || connectPending || token.trim().length < 40}
+              onClick={async () => {
+                try {
+                  await onConnect(token.trim());
+                  setToken("");
+                  setShowTokenForm(false);
+                } catch {
+                  // A mensagem de erro é exibida pela mutation; mantenha o token para nova tentativa.
+                }
+              }}
+            >
+              {connectPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <ShieldCheck className="h-4 w-4" />
+              )}
+              Validar token e buscar contas
+            </Button>
+          </DemoDisabledTooltip>
         </div>
       )}
 
@@ -1414,28 +1428,33 @@ function MetaConnectionWizard({
                   </p>
                 )}
                 <div className="mt-3 flex flex-wrap gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="gap-2"
-                    disabled={validatingConnectionId === connection.id}
-                    onClick={() => onValidate(connection.id)}
-                  >
-                    {validatingConnectionId === connection.id ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <RefreshCw className="h-3.5 w-3.5" />
-                    )}{" "}
-                    Testar acesso
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="gap-2 text-rose-400 hover:text-rose-300"
-                    onClick={() => setDisconnectId(connection.id)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" /> Desconectar
-                  </Button>
+                  <DemoDisabledTooltip active={isDemo}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-2"
+                      disabled={isDemo || validatingConnectionId === connection.id}
+                      onClick={() => onValidate(connection.id)}
+                    >
+                      {validatingConnectionId === connection.id ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-3.5 w-3.5" />
+                      )}{" "}
+                      Testar acesso
+                    </Button>
+                  </DemoDisabledTooltip>
+                  <DemoDisabledTooltip active={isDemo}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="gap-2 text-rose-400 hover:text-rose-300"
+                      disabled={isDemo}
+                      onClick={() => setDisconnectId(connection.id)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" /> Desconectar
+                    </Button>
+                  </DemoDisabledTooltip>
                 </div>
               </div>
             ))}
@@ -1509,12 +1528,14 @@ function MetaConnectionWizard({
               )}
             </div>
             <div className="mt-4 flex justify-end">
-              <Button
-                disabled={selectionPending || accounts.length === 0}
-                onClick={() => onSaveSelection(selectedIds)}
-              >
-                {selectionPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Salvar contas
-              </Button>
+              <DemoDisabledTooltip active={isDemo}>
+                <Button
+                  disabled={isDemo || selectionPending || accounts.length === 0}
+                  onClick={() => onSaveSelection(selectedIds)}
+                >
+                  {selectionPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Salvar contas
+                </Button>
+              </DemoDisabledTooltip>
             </div>
           </div>
         </div>
@@ -1725,6 +1746,7 @@ function MoneyMapCard({ rows }: { rows: MoneyRow[] }) {
 }
 
 function AudienceTable({ rows, isLoading }: { rows: AudienceRow[]; isLoading: boolean }) {
+  const isDemo = useIsDemoTenant();
   const totals = rows.reduce(
     (acc, row) => ({
       spend: acc.spend + row.spend,
@@ -1753,7 +1775,9 @@ function AudienceTable({ rows, isLoading }: { rows: AudienceRow[]; isLoading: bo
             )
           }
           title={isLoading ? "Carregando públicos" : "Sem públicos no período"}
-          description="Depois de sincronizar conjuntos de anúncio, eles aparecem aqui."
+          description={
+            isDemo ? DEMO_EMPTY_STATE_TEXT : "Depois de sincronizar conjuntos de anúncio, eles aparecem aqui."
+          }
         />
       ) : (
         <Table>
@@ -1820,6 +1844,7 @@ function CampaignTable({
   isLoading: boolean;
   orphanRevenue: number;
 }) {
+  const isDemo = useIsDemoTenant();
   const rows = campaigns.filter((row) => row.spend > 0 || row.players > 0);
   const totals = rows.reduce(
     (acc, row) => ({
@@ -1853,7 +1878,11 @@ function CampaignTable({
             )
           }
           title={isLoading ? "Carregando campanhas" : "Sem campanhas sincronizadas"}
-          description="Depois de sincronizar o Meta ou receber players com UTM, as campanhas aparecem aqui."
+          description={
+            isDemo
+              ? DEMO_EMPTY_STATE_TEXT
+              : "Depois de sincronizar o Meta ou receber players com UTM, as campanhas aparecem aqui."
+          }
         />
       ) : (
         <div className="space-y-3">
@@ -1951,6 +1980,7 @@ function OrphanAttributionTable({
   rows: OrphanAttributionRow[];
   isLoading: boolean;
 }) {
+  const isDemo = useIsDemoTenant();
   return (
     <DataCard
       title="UTMs sem midia vinculada"
@@ -1968,7 +1998,11 @@ function OrphanAttributionTable({
             )
           }
           title={isLoading ? "Conferindo atribuicoes" : "Nenhum orfao no periodo"}
-          description="Quando uma UTM chegar de uma campanha fora das BMs conectadas, ela aparece aqui sem gerar ROAS artificial."
+          description={
+            isDemo
+              ? DEMO_EMPTY_STATE_TEXT
+              : "Quando uma UTM chegar de uma campanha fora das BMs conectadas, ela aparece aqui sem gerar ROAS artificial."
+          }
         />
       ) : (
         <Table>
@@ -2012,6 +2046,7 @@ function OrphanAttributionTable({
 }
 
 function CreativeTable({ creatives, isLoading }: { creatives: CreativeRow[]; isLoading: boolean }) {
+  const isDemo = useIsDemoTenant();
   const rows = creatives.filter((row) => row.spend > 0 || row.players > 0).slice(0, 75);
   const totals = rows.reduce(
     (acc, row) => ({
@@ -2046,7 +2081,11 @@ function CreativeTable({ creatives, isLoading }: { creatives: CreativeRow[]; isL
             )
           }
           title={isLoading ? "Carregando criativos" : "Sem dados atribuidos"}
-          description="Depois que players chegarem com UTM ou gasto for importado, a leitura por criativo aparece aqui."
+          description={
+            isDemo
+              ? DEMO_EMPTY_STATE_TEXT
+              : "Depois que players chegarem com UTM ou gasto for importado, a leitura por criativo aparece aqui."
+          }
         />
       ) : (
         <div className="space-y-3">

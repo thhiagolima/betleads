@@ -64,6 +64,9 @@ import {
   cancelScheduledSmsCampaign,
 } from "@/lib/sms.functions";
 import { getFailedSmsBreakdown, resendFailedSms } from "@/lib/sms.functions";
+import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
+import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
+import { DEMO_SEND_BLOCKED_TEXT } from "@/lib/demo-tenant";
 import { listPlayersForCalls } from "@/lib/calls.functions";
 import {
   Select,
@@ -336,6 +339,7 @@ function SmsCompactWorkspace({
   tab: "saude" | "historico" | "campanhas" | "configuracoes";
   onTabChange: (tab: string) => void;
 }) {
+  const isDemo = useIsDemoTenant();
   const qc = useQueryClient();
   const dashboardFn = useServerFn(getSmsDashboard);
   const campaignsFn = useServerFn(listScheduledSmsCampaigns);
@@ -577,15 +581,17 @@ function SmsCompactWorkspace({
                     {parts} crédito{parts === 1 ? "" : "s"}
                   </strong>
                 </div>
-                <Button
-                  className="w-full"
-                  disabled={!canSend || send.isPending}
-                  onClick={() => send.mutate()}
-                >
-                  {send.isPending
-                    ? "Enviando…"
-                    : `Enviar · ${parts} crédito${parts === 1 ? "" : "s"}`}
-                </Button>
+                <DemoDisabledTooltip active={isDemo} text={DEMO_SEND_BLOCKED_TEXT}>
+                  <Button
+                    className="w-full"
+                    disabled={isDemo || !canSend || send.isPending}
+                    onClick={() => send.mutate()}
+                  >
+                    {send.isPending
+                      ? "Enviando…"
+                      : `Enviar · ${parts} crédito${parts === 1 ? "" : "s"}`}
+                  </Button>
+                </DemoDisabledTooltip>
                 <p className="text-[11px] text-muted-foreground">
                   Mensagens de divulgação precisam oferecer saída. Respostas por SMS (como SAIR) ainda
                   não bloqueiam o número sozinhas: registre o pedido em Consentimentos.

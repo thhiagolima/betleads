@@ -11,6 +11,9 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Send, Webhook, Loader2 } from "lucide-react";
 import { TRIGGER_NAMES } from "@/lib/triggers";
+import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
+import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
+import { DEMO_EMPTY_STATE_TEXT } from "@/lib/demo-tenant";
 import {
   getWhatsappExternalIntegration,
   saveWhatsappExternalIntegration,
@@ -22,6 +25,7 @@ import {
 const ALL_TRIGGERS = Object.keys(TRIGGER_NAMES) as (keyof typeof TRIGGER_NAMES)[];
 
 export function ExternalIntegrationTab() {
+  const isDemo = useIsDemoTenant();
   const qc = useQueryClient();
   const getFn = useServerFn(getWhatsappExternalIntegration);
   const saveFn = useServerFn(saveWhatsappExternalIntegration);
@@ -168,18 +172,24 @@ export function ExternalIntegrationTab() {
           </div>
 
           <div className="flex gap-2">
-            <Button onClick={handleSave} disabled={saving || !url.trim()}>
-              {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Salvar
-            </Button>
-            <Button variant="outline" onClick={handleTest} disabled={testing || !url.trim()}>
-              {testing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-              Enviar evento de teste
-            </Button>
-            <Button variant="secondary" onClick={handleSendAll} disabled={sendingAll || !url.trim()}>
-              {sendingAll ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-              Enviar todos os eventos
-            </Button>
+            <DemoDisabledTooltip active={isDemo}>
+              <Button onClick={handleSave} disabled={isDemo || saving || !url.trim()}>
+                {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Salvar
+              </Button>
+            </DemoDisabledTooltip>
+            <DemoDisabledTooltip active={isDemo}>
+              <Button variant="outline" onClick={handleTest} disabled={isDemo || testing || !url.trim()}>
+                {testing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                Enviar evento de teste
+              </Button>
+            </DemoDisabledTooltip>
+            <DemoDisabledTooltip active={isDemo}>
+              <Button variant="secondary" onClick={handleSendAll} disabled={isDemo || sendingAll || !url.trim()}>
+                {sendingAll ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                Enviar todos os eventos
+              </Button>
+            </DemoDisabledTooltip>
           </div>
         </CardContent>
       </Card>
@@ -220,7 +230,9 @@ export function ExternalIntegrationTab() {
         </CardHeader>
         <CardContent>
           {events.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nenhum evento enviado ainda.</p>
+            <p className="text-sm text-muted-foreground">
+              {isDemo ? DEMO_EMPTY_STATE_TEXT : "Nenhum evento enviado ainda."}
+            </p>
           ) : (
             <div className="space-y-2">
               {events.map((ev) => (

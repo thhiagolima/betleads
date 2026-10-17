@@ -8,9 +8,12 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { PageHeader } from "@/components/ui-premium";
 import { getShortioSettings, saveShortioSettings } from "@/lib/shortio.functions";
+import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
+import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 
 export const Route = createFileRoute("/links/configuracoes")({ component: LinkSettings });
 function LinkSettings() {
+  const isDemo = useIsDemoTenant();
   const q = useQuery({ queryKey: ["shortio-settings"], queryFn: () => getShortioSettings() });
   const [saving, setSaving] = useState(false);
   const data = q.data;
@@ -84,7 +87,9 @@ function LinkSettings() {
                 <option value="passthrough">Enviar URL original</option>
               </select>
             </div>
-            <Button disabled={saving}>{saving ? "Salvando…" : "Salvar"}</Button>
+            <DemoDisabledTooltip active={isDemo}>
+              <Button disabled={isDemo || saving}>{saving ? "Salvando…" : "Salvar"}</Button>
+            </DemoDisabledTooltip>
           </form>
         </CardContent>
       </Card>

@@ -69,3 +69,15 @@ export const DEMO_ENVIRONMENT_BANNER_TEXT =
 export const DEMO_SEND_BLOCKED_TEXT = "Ambiente de demonstração: nenhum envio é feito";
 export const DEMO_EMPTY_STATE_TEXT = "Nenhum dado neste ambiente de demonstração";
 export const DEMO_AI_UNAVAILABLE_TEXT = "Indisponível no ambiente de demonstração";
+export const DEMO_ACTION_BLOCKED_TEXT = demoTenantBlockedMessages.DEMO_ACTION_BLOCKED;
+
+/**
+ * Maps a blocked-error (in any shape `isDemoBlockedError` recognizes) to the
+ * UI copy to toast: the send copy for `DEMO_SEND_BLOCKED`, the action copy
+ * for `DEMO_ACTION_BLOCKED`/anything else recognized. Pure function so the
+ * global error handler's mapping is unit-testable without mounting React.
+ */
+export function demoBlockedErrorText(e: unknown): string {
+  const text = e instanceof Error ? e.message : typeof e === "string" ? e : "";
+  return text.includes("DEMO_SEND_BLOCKED") ? DEMO_SEND_BLOCKED_TEXT : DEMO_ACTION_BLOCKED_TEXT;
+}
