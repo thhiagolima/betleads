@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { resolveMetaApiVersion } from "@/lib/meta-api-version";
 import { decryptMetaToken, encryptMetaToken, metaTokenHint } from "@/lib/meta-token.server";
 import { assertTenantNotDemo, listDemoTenantIds } from "@/lib/tenant-access.server";
 
@@ -97,7 +98,7 @@ type MetaApp = { id: string; name?: string };
 type MetaUser = { id: string; name?: string };
 
 function metaApiVersion() {
-  return process.env.META_API_VERSION ?? "v23.0";
+  return resolveMetaApiVersion(process.env.META_API_VERSION);
 }
 
 function dateOnly(date: Date) {

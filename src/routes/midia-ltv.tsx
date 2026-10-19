@@ -3,18 +3,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import {
   AlertTriangle,
-  BadgeCheck,
   BarChart3,
   Calendar,
   CheckCircle2,
   Clipboard,
   Eye,
-  ExternalLink,
-  FileSpreadsheet,
   Image as ImageIcon,
   Link2,
   Loader2,
-  Radio,
   RefreshCw,
   Settings,
   ShieldCheck,
@@ -64,7 +60,7 @@ import { MetricCard } from "@/components/ui-premium/metric-card";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import { DEMO_EMPTY_STATE_TEXT } from "@/lib/demo-tenant";
-import { getMarketingOverview, saveMarketingIntegration } from "@/lib/marketing.functions";
+import { getMarketingOverview } from "@/lib/marketing.functions";
 import {
   connectMetaSystemUserToken,
   disconnectMetaConnection,
@@ -78,16 +74,13 @@ import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/midia-ltv")({
   head: () => ({
-    meta: [{ title: "Midia e LTV - BETLEADS" }],
+    meta: [{ title: "Aquisição e LTV - BETLEADS" }],
   }),
   component: MediaLtvPage,
 });
 
-type Platform = "meta" | "google" | "tiktok" | "kwai";
-type Provider = "meta" | "windsor" | "csv";
-
 type MarketingIntegration = {
-  provider: Provider;
+  provider: string;
   status: string;
 };
 
@@ -246,21 +239,10 @@ type MetaSyncRun = {
   created_at: string;
 };
 
-const platformLabels: Record<Platform, string> = {
-  meta: "Facebook / Instagram",
-  google: "Google Ads",
-  tiktok: "TikTok Ads",
-  kwai: "Kwai",
-};
-
-const utmByPlatform: Record<Platform, string> = {
-  meta: "utm_source={{site_source_name}}&utm_medium=paid&utm_campaign={{campaign.name}}&utm_content={{ad.name}}&utm_term={{adset.name}}&utm_id={{ad.id}}",
-  google:
-    "utm_source=google&utm_medium=paid&utm_campaign={campaignid}&utm_content={creative}&utm_term={adgroupid}&utm_id={creative}",
-  tiktok:
-    "__CAMPAIGN_NAME__=__CAMPAIGN_NAME__&utm_source=tiktok&utm_medium=paid&utm_campaign=__CAMPAIGN_NAME__&utm_content=__CID_NAME__&utm_id=__CID__",
-  kwai: "utm_source=kwai&utm_medium=paid&utm_campaign=__CAMPAIGN_NAME__&utm_content=__CREATIVE_NAME__&utm_id=__CREATIVE_ID__",
-};
+// Só a Meta tem gasto sincronizado. Google, TikTok e Kwai voltam quando houver
+// integração (AL5-04); antes disso o gerador prometeria uma medição que não existe.
+const META_UTM_PARAMS =
+  "utm_source={{site_source_name}}&utm_medium=paid&utm_campaign={{campaign.name}}&utm_content={{ad.name}}&utm_term={{adset.name}}&utm_id={{ad.id}}";
 
 type PeriodPreset = "today" | "yesterday" | "7d" | "30d" | "this_month" | "last_month";
 
@@ -371,7 +353,6 @@ function syncStatusLabel(status: MetaSyncRun["status"]) {
 function MediaLtvPage() {
   const qc = useQueryClient();
   const fetchOverview = useServerFn(getMarketingOverview);
-  const saveIntegration = useServerFn(saveMarketingIntegration);
   const connectMetaToken = useServerFn(connectMetaSystemUserToken);
   const fetchMetaSummary = useServerFn(getMetaConnectionSummary);
   const requestMetaSync = useServerFn(enqueueMetaSync);
@@ -382,8 +363,7 @@ function MediaLtvPage() {
   const [period, setPeriod] = useState<PeriodPreset>("7d");
   const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
   const [section, setSection] = useState<"visualizacao" | "configuracao">("visualizacao");
-  const [platform, setPlatform] = useState<Platform>("meta");
-  const [houseUrl, setHouseUrl] = useState("https://sua-casa.com/cadastro");
+  const [houseUrl, setHouseUrl] = useState("");
   const range = useMemo(() => {
     if (!customRange) return periodRange(period);
     const days = Math.max(
@@ -397,7 +377,7 @@ function MediaLtvPage() {
     return { ...customRange, days };
   }, [period, customRange]);
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ["marketing-overview", range.from, range.to],
     queryFn: async () =>
       (await fetchOverview({
@@ -421,37 +401,12 @@ function MediaLtvPage() {
     },
   });
 
-  const saveMutation = useMutation({
-    mutationFn: (provider: Provider) =>
-      saveIntegration({
-        data: {
-          provider,
-          status: provider === "csv" ? "configured" : "planned",
-          account_name:
-            provider === "meta"
-              ? "Meta Ads"
-              : provider === "windsor"
-                ? "Windsor.ai"
-                : "Importacao CSV",
-          external_account_id: provider,
-          currency: "BRL",
-          settings: {
-            attribution: "utm_content_utm_id",
-            source: provider,
-          },
-        },
-      }),
-    onSuccess: () => {
-      toast.success("Configuracao salva");
-      qc.invalidateQueries({ queryKey: ["marketing-overview"] });
-    },
-    onError: (e) => toast.error(e instanceof Error ? e.message : "Erro ao salvar"),
-  });
-
   const connectMetaTokenMutation = useMutation({
     mutationFn: (accessToken: string) => connectMetaToken({ data: { accessToken } }),
     onSuccess: (result) => {
-      toast.success(`${result.accounts.length} conta(s) Meta conectada(s)`);
+      toast.success(
+        `${result.accounts.length} conta(s) encontrada(s). Escolha quais acompanhar e salve.`,
+      );
       qc.invalidateQueries({ queryKey: ["meta-connection-summary"] });
       qc.invalidateQueries({ queryKey: ["marketing-overview"] });
     },
@@ -515,21 +470,23 @@ function MediaLtvPage() {
 
   const integrations = data?.integrations ?? [];
   const meta = integrations.find((i) => i.provider === "meta");
-  const windsor = integrations.find((i) => i.provider === "windsor");
-  const csv = integrations.find((i) => i.provider === "csv");
-  const utmParams = utmByPlatform[platform];
+  const utmParams = META_UTM_PARAMS;
   const fullUrl = useMemo(() => appendParams(houseUrl, utmParams), [houseUrl, utmParams]);
 
   async function copy(text: string, label = "Copiado") {
-    await navigator.clipboard.writeText(text);
-    toast.success(label);
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(label);
+    } catch {
+      toast.error("Não foi possível copiar. Selecione o texto e copie manualmente.");
+    }
   }
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Midia e LTV"
-        subtitle="Cada jogador carrega o criativo que o trouxe. Ai da para ver quem trouxe cadastro barato e quem trouxe dinheiro."
+        title="Aquisição e LTV"
+        subtitle="Cada jogador carrega o anúncio que o trouxe. Veja quem trouxe cadastro barato e quem trouxe dinheiro."
         icon={<BarChart3 className="h-5 w-5 text-primary-foreground" />}
         actions={
           <div className="flex items-center gap-2">
@@ -540,7 +497,7 @@ function MediaLtvPage() {
               onClick={() => setSection("visualizacao")}
             >
               <Eye className="h-3.5 w-3.5" />
-              Visualizacao
+              Visualização
             </Button>
             <Button
               variant={section === "configuracao" ? "default" : "outline"}
@@ -549,16 +506,31 @@ function MediaLtvPage() {
               onClick={() => setSection("configuracao")}
             >
               <Settings className="h-3.5 w-3.5" />
-              Configuracao
+              Configuração
             </Button>
           </div>
         }
       />
 
       {error && (
-        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-100">
-          As tabelas de midia ainda nao existem neste Supabase. Rode as migrations e atualize a
-          pagina.
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-100"
+        >
+          <span>
+            Não foi possível carregar os dados de mídia deste período.
+            {error instanceof Error && error.message ? ` (${error.message})` : ""}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            disabled={isFetching}
+            onClick={() => refetch()}
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5", isFetching && "animate-spin")} />
+            Tentar novamente
+          </Button>
         </div>
       )}
 
@@ -587,11 +559,7 @@ function MediaLtvPage() {
       ) : (
         <ConfiguracaoSection
           meta={meta}
-          windsor={windsor}
-          csv={csv}
           metaSummary={metaSummary}
-          savePending={saveMutation.isPending}
-          platform={platform}
           houseUrl={houseUrl}
           utmParams={utmParams}
           fullUrl={fullUrl}
@@ -603,8 +571,6 @@ function MediaLtvPage() {
           validatingConnectionId={validateMetaMutation.variables ?? null}
           onDisconnectMeta={(connectionId) => disconnectMetaMutation.mutateAsync(connectionId)}
           disconnectPending={disconnectMetaMutation.isPending}
-          onSaveProvider={(provider) => saveMutation.mutate(provider)}
-          onPlatformChange={setPlatform}
           onHouseUrlChange={setHouseUrl}
           onCopy={copy}
         />
@@ -848,17 +814,31 @@ function VisualizacaoSection({
             }
           />
         </div>
-        <span className="ml-1 text-sm text-muted-foreground">
-          só anúncios com rastreio da iFluxHub
-        </span>
       </div>
 
       <p className="text-sm text-muted-foreground">
-        gasto e FTD lidos de {num(selectedAccounts.length)} conta(s)
+        Gasto: Meta Ads, {num(selectedAccounts.length)} conta(s)
         {lastSync
-          ? ` · última leitura ${new Date(lastSync).toLocaleString("pt-BR")}`
-          : " · aguardando primeira leitura"}
+          ? `, última leitura em ${new Date(lastSync).toLocaleString("pt-BR")}`
+          : ", aguardando a primeira leitura"}
+        . Cadastros, FTD e depósitos: webhook da casa.
       </p>
+
+      {/* AL0-06: sai quando a AL1 do escopo de Aquisição e LTV for aceita. */}
+      <div
+        role="note"
+        className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100"
+      >
+        <p className="flex items-center gap-2 font-semibold">
+          <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+          Números em revisão
+        </p>
+        <p className="mt-1">
+          Estamos refazendo os cálculos desta tela. Em casas com muito volume os totais podem sair
+          incompletos, e o custo por FTD ainda considera todos os FTDs da casa, não só os que vieram
+          de anúncio. Use os valores como referência, não para decidir orçamento.
+        </p>
+      </div>
 
       {staleAccounts > 0 && (
         <div className="rounded-xl border border-red-500/40 bg-card/70 p-4 text-sm">
@@ -874,36 +854,23 @@ function VisualizacaoSection({
 
       {orphanRows.length > 0 && (
         <div className="rounded-lg border border-amber-500/20 bg-amber-500/15 px-4 py-3 text-sm text-amber-100">
-          <strong>{num(orphanRows.length)} criativos de conta de anúncio não conectada</strong> —{" "}
-          {brl(orphanRevenue)} de receita e {num(orphanFtd)} FTD, sem gasto importado. Conecte em
-          Integrações → Mídia paga.
+          <strong>
+            {num(orphanRows.length)} origens marcadas sem anúncio correspondente nas contas
+            conectadas
+          </strong>
+          : {brl(orphanRevenue)} de receita e {num(orphanFtd)} FTD sem gasto importado. Veja os
+          detalhes na aba Diagnóstico.
         </div>
       )}
 
-      <div className="rounded-lg bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-        <strong>Saúde da medição</strong> — FTD:{" "}
-        <strong className="text-foreground">pelo seu webhook</strong> — cadastro:{" "}
-        <strong className="text-foreground">pela conta</strong> · LTV por criativo:{" "}
-        <strong className="text-emerald-400">disponível.</strong>
-      </div>
-
-      <p className="text-sm text-muted-foreground">
-        pela conta de anúncio <strong className="text-foreground">{num(totals?.ftd)} FTD</strong> ·{" "}
-        <strong className="text-foreground">{num(totals?.players)} cadastros</strong> — pelo seu
-        webhook <strong className="text-foreground">{num(totals?.ftd)} FTD</strong> ·{" "}
-        <strong className="text-foreground">{num(totals?.markedPlayers)} cadastros</strong>. Os
-        cartões usam <strong className="text-foreground">o seu webhook</strong> para o FTD e{" "}
-        <strong className="text-foreground">a conta</strong> para o cadastro.
-      </p>
-
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <Kpi
-          title="Investido no periodo"
+          title="Investido no período"
           value={brl(totals?.spend)}
           detail={`${brl((totals?.spend ?? 0) / Math.max(1, range.days))} por dia, em média`}
         />
         <Kpi
-          title="ROAS no periodo"
+          title="ROAS no período"
           value={ratio(totals?.roas)}
           detail={`investiu ${brl(totals?.spend)} · voltou ${brl(totalReturn)}`}
           tone="info"
@@ -922,7 +889,7 @@ function VisualizacaoSection({
           detail={`${num(totals?.ftd)} primeiros depósitos no período`}
         />
         <Kpi
-          title="Redepósito no periodo"
+          title="Redepósito no período"
           value={brl(totals?.redepositRevenue)}
           detail="recompra somada no período"
           tone="success"
@@ -941,7 +908,7 @@ function VisualizacaoSection({
         <span className="px-2">=</span>
         <strong className="text-emerald-400">{ratio(totals?.roas)}</strong>
         <span className="float-right hidden text-muted-foreground lg:inline">
-          nos últimos {range.days} dias · só de quem chegou por anúncio marcado
+          no período · só de quem chegou por anúncio marcado
         </span>
       </div>
 
@@ -1024,11 +991,7 @@ function VisualizacaoSection({
 
 function ConfiguracaoSection({
   meta,
-  windsor,
-  csv,
   metaSummary,
-  savePending,
-  platform,
   houseUrl,
   utmParams,
   fullUrl,
@@ -1040,17 +1003,11 @@ function ConfiguracaoSection({
   validatingConnectionId,
   onDisconnectMeta,
   disconnectPending,
-  onSaveProvider,
-  onPlatformChange,
   onHouseUrlChange,
   onCopy,
 }: {
   meta: MarketingIntegration | undefined;
-  windsor: MarketingIntegration | undefined;
-  csv: MarketingIntegration | undefined;
   metaSummary: MetaSummary | undefined;
-  savePending: boolean;
-  platform: Platform;
   houseUrl: string;
   utmParams: string;
   fullUrl: string;
@@ -1062,12 +1019,9 @@ function ConfiguracaoSection({
   validatingConnectionId: string | null;
   onDisconnectMeta: (connectionId: string) => Promise<unknown>;
   disconnectPending: boolean;
-  onSaveProvider: (provider: Provider) => void;
-  onPlatformChange: (platform: Platform) => void;
   onHouseUrlChange: (value: string) => void;
   onCopy: (value: string, label?: string) => void;
 }) {
-  const isDemo = useIsDemoTenant();
   return (
     <div className="space-y-5">
       <MetaConnectionWizard
@@ -1083,109 +1037,28 @@ function ConfiguracaoSection({
         disconnectPending={disconnectPending}
       />
 
-      <div className="grid gap-4 xl:grid-cols-2">
-        <DataCard
-          title="Windsor.ai"
-          description="Atalho para validar dados antes da revisao Meta."
-          icon={<Radio className="h-4 w-4" />}
-          actions={<StatusBadge status={windsor?.status} />}
-        >
-          <p className="mb-4 text-sm text-muted-foreground">
-            Alternativa temporaria para conferir spend e criativos se a API propria travar por
-            permissao ou revisao.
-          </p>
-          <DemoDisabledTooltip active={isDemo}>
-            <Button
-              variant="outline"
-              className="w-full gap-2"
-              disabled={isDemo || savePending}
-              onClick={() => onSaveProvider("windsor")}
-            >
-              <ExternalLink className="h-4 w-4" />
-              Registrar estrategia Windsor
-            </Button>
-          </DemoDisabledTooltip>
-        </DataCard>
-
-        <DataCard
-          title="CSV"
-          description="Fallback manual para comecar hoje."
-          icon={<FileSpreadsheet className="h-4 w-4" />}
-          actions={<StatusBadge status={csv?.status} />}
-        >
-          <p className="mb-4 text-sm text-muted-foreground">
-            Serve para importar gasto por dia/anuncio enquanto a conexao automatica nao esta ligada.
-          </p>
-          <DemoDisabledTooltip active={isDemo}>
-            <Button
-              variant="outline"
-              className="w-full gap-2"
-              disabled={isDemo || savePending}
-              onClick={() => onSaveProvider("csv")}
-            >
-              <BadgeCheck className="h-4 w-4" />
-              Ativar fallback CSV
-            </Button>
-          </DemoDisabledTooltip>
-        </DataCard>
-      </div>
-
       <DataCard
-        title="Montar marcacao"
-        description="Copie os parametros para a plataforma de anuncios."
+        title="Montar marcação"
+        description="Copie os parâmetros para os anúncios do Facebook e Instagram."
         icon={<Link2 className="h-4 w-4" />}
       >
-        <div className="grid gap-3 lg:grid-cols-[1fr_300px]">
-          <div className="space-y-2">
-            <Label htmlFor="house-url">Link da casa</Label>
-            <Input
-              id="house-url"
-              value={houseUrl}
-              onChange={(e) => onHouseUrlChange(e.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label>Plataforma</Label>
-            <Tabs value={platform} onValueChange={(value) => onPlatformChange(value as Platform)}>
-              <TabsList className="grid w-full grid-cols-4">
-                {(Object.keys(platformLabels) as Platform[]).map((key) => (
-                  <TabsTrigger key={key} value={key}>
-                    {key === "meta" ? "Facebook" : platformLabels[key].replace(" Ads", "")}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-            </Tabs>
-          </div>
+        <div className="space-y-2">
+          <Label htmlFor="house-url">Link da casa</Label>
+          <Input
+            id="house-url"
+            type="url"
+            placeholder="https://sua-casa.com/cadastro"
+            value={houseUrl}
+            onChange={(e) => onHouseUrlChange(e.target.value)}
+          />
+          <p className="text-xs text-muted-foreground">
+            O <code>utm_id</code> leva o ID do anúncio. É ele que liga cada cadastro ao anúncio
+            certo, mesmo quando dois anúncios têm o mesmo nome.
+          </p>
         </div>
         <div className="mt-5 space-y-4">
-          <CopyBlock title="Parametros de URL" value={utmParams} onCopy={() => onCopy(utmParams)} />
+          <CopyBlock title="Parâmetros de URL" value={utmParams} onCopy={() => onCopy(utmParams)} />
           <CopyBlock title="Link completo" value={fullUrl} onCopy={() => onCopy(fullUrl)} />
-        </div>
-      </DataCard>
-
-      <DataCard
-        title="Plano tecnico"
-        description="Ordem recomendada para ligar Meta com seguranca."
-        icon={<ShieldCheck className="h-4 w-4" />}
-      >
-        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-5">
-          {[
-            "Usar o app e o Usuário do Sistema da própria operação.",
-            "Solicitar ads_read e business_management para contas de clientes.",
-            "Salvar tokens apenas no servidor, com expiracao monitorada.",
-            "Sincronizar campanhas/adsets/ads/insights por acao e job diario.",
-            "Cruzar utm_id/utm_content dos players com gasto do anuncio.",
-          ].map((step, index) => (
-            <div
-              key={step}
-              className="rounded-lg border border-border/60 bg-background/40 p-3 text-sm"
-            >
-              <span className="mb-2 flex h-6 w-6 items-center justify-center rounded-md bg-primary/15 text-xs font-bold text-primary">
-                {index + 1}
-              </span>
-              <p className="text-muted-foreground">{step}</p>
-            </div>
-          ))}
         </div>
       </DataCard>
     </div>
@@ -1533,7 +1406,8 @@ function MetaConnectionWizard({
                   disabled={isDemo || selectionPending || accounts.length === 0}
                   onClick={() => onSaveSelection(selectedIds)}
                 >
-                  {selectionPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Salvar contas
+                  {selectionPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Salvar
+                  contas
                 </Button>
               </DemoDisabledTooltip>
             </div>
@@ -1776,7 +1650,9 @@ function AudienceTable({ rows, isLoading }: { rows: AudienceRow[]; isLoading: bo
           }
           title={isLoading ? "Carregando públicos" : "Sem públicos no período"}
           description={
-            isDemo ? DEMO_EMPTY_STATE_TEXT : "Depois de sincronizar conjuntos de anúncio, eles aparecem aqui."
+            isDemo
+              ? DEMO_EMPTY_STATE_TEXT
+              : "Depois de sincronizar conjuntos de anúncio, eles aparecem aqui."
           }
         />
       ) : (
@@ -1962,10 +1838,10 @@ function CampaignTable({
             </TableBody>
           </Table>
           <p className="text-sm text-muted-foreground">
-            ROAS é o total depositado dividido pelo investido. Sem a conta de anúncios conectada,
-            {orphanRevenue > 0 ? ` ${brl(orphanRevenue)} continuam` : " a receita órfã continua"} no
-            início e em Relatórios.investimento fica em zero e a coluna aparece como “—”: é receita,
-            não retorno.
+            ROAS é o total depositado dividido pelo investido. Campanhas de contas de anúncio não
+            conectadas ficam com investimento zero e a coluna aparece como “—”
+            {orphanRevenue > 0 ? ` (${brl(orphanRevenue)} nessa situação)` : ""}: é receita, não
+            retorno.
           </p>
         </div>
       )}
@@ -2067,7 +1943,7 @@ function CreativeTable({ creatives, isLoading }: { creatives: CreativeRow[]; isL
   return (
     <DataCard
       title="Criativo por criativo"
-      description="Ordenado pelo que devolve, não pelo que é barato"
+      description="Custo e entrega de cada anúncio no período"
       icon={<Target className="h-4 w-4" />}
       bodyClassName="overflow-x-auto"
     >
@@ -2080,7 +1956,7 @@ function CreativeTable({ creatives, isLoading }: { creatives: CreativeRow[]; isL
               <Target className="h-6 w-6" />
             )
           }
-          title={isLoading ? "Carregando criativos" : "Sem dados atribuidos"}
+          title={isLoading ? "Carregando criativos" : "Sem dados atribuídos"}
           description={
             isDemo
               ? DEMO_EMPTY_STATE_TEXT
@@ -2165,9 +2041,8 @@ function CreativeTable({ creatives, isLoading }: { creatives: CreativeRow[]; isL
             </Table>
           </div>
           <p className="text-sm text-muted-foreground">
-            {num(rows.length)} criativos no período, do que mais devolveu para o que menos devolveu
-            — {brl(totals.spend)} investido no total. O FTD vem da conta de anúncio, para bater com
-            o gerenciador.
+            {num(rows.length)} criativos no período, {brl(totals.spend)} investidos no total. Gasto,
+            impressões e cliques vêm da Meta; cadastros e FTD vêm do webhook da casa.
           </p>
         </div>
       )}
