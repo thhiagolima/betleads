@@ -36,7 +36,7 @@ import { bulkDispatchCalls, listCallScripts } from "@/lib/calls.functions";
 import { tenantSafeChannelError } from "@/lib/channel-error";
 import { listEmailTemplates, saveEmailTemplate, sendTestEmail } from "@/lib/email.functions";
 import { previewTrackedText, smsPartsForLength } from "@/lib/link-tracking-preview";
-import { sendBulkSms } from "@/lib/sms.functions";
+import { sendTestSms } from "@/lib/sms.functions";
 import { listSmsTemplates } from "@/lib/sms-templates.functions";
 import { listJourneyVoiceAssets } from "@/lib/journey-voice-assets.functions";
 
@@ -66,7 +66,7 @@ export function IndividualSmsDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const sendSms = useServerFn(sendBulkSms);
+  const sendSms = useServerFn(sendTestSms);
   const sendEmail = useServerFn(sendTestEmail);
   const sendVoice = useServerFn(bulkDispatchCalls);
   const listScripts = useServerFn(listCallScripts);
@@ -162,7 +162,7 @@ export function IndividualSmsDialog({
     atualizadoEm: "agora",
   };
   const mutation = useMutation<unknown, Error, void>({
-    mutationFn: () => {
+    mutationFn: async () => {
       if (channel === "email") {
         return sendEmail({ data: { to: email, subject, html: message, trackLinks } });
       }
@@ -176,17 +176,13 @@ export function IndividualSmsDialog({
           },
         });
       }
-      return sendSms({
-        data: {
-          phones: [digits],
-          content: renderMessage(message, name, digits),
-          campaignName: `Individual: ${name.trim() || digits}`,
-          route: "iGaming",
-          ratePerMinute: 1000,
-          trackLinks,
-          templateId: templateId || undefined,
-        },
+      // Avulso: não passa pela resolução de campanha, então não exige que o
+      // número pertença a um jogador cadastrado.
+      const result = await sendSms({
+        data: { to: digits, content: renderMessage(message, name, digits), trackLinks },
       });
+      if (!result.ok) throw new Error(result.error ?? "Não foi possível enviar o SMS.");
+      return result;
     },
     onSuccess: (result) => {
       const voiceWasDeferred =
@@ -200,7 +196,9 @@ export function IndividualSmsDialog({
         toast.success(
           channel === "voice"
             ? "Ligação individual enviada para o provedor"
-            : "Envio individual registrado para processamento",
+            : channel === "sms"
+              ? "SMS enviado ao provedor"
+              : "Envio individual registrado para processamento",
         );
       }
       queryClient.invalidateQueries({ queryKey: ["sms-scheduled-campaigns"] });
