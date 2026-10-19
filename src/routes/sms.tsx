@@ -2769,6 +2769,8 @@ function LegacyNewSmsCampaignDialog({
             route: "iGaming",
             scheduledAt: fromBrtInput(scheduledAt)!,
             ratePerMinute: 1000,
+            // Público dinâmico: o worker recalcula quem se enquadra no horário do envio.
+            audienceCriteria: savedAudiences.find((item) => item.id === selectedSaved)?.criteria,
           },
         });
       }

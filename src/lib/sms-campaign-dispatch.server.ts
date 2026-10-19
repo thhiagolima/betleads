@@ -34,6 +34,10 @@ export type SmsCampaignRow = {
   track_links?: boolean | null;
   locked_by?: string | null;
   unresolved_count?: number | null;
+  /** Saved audience rule; when set, recipients are recalculated at dispatch time. */
+  audience_criteria?: unknown;
+  /** When the rule was materialized into `recipients` (once, on the first tick). */
+  audience_resolved_at?: string | null;
 };
 
 export type CampaignTarget = {
@@ -116,6 +120,8 @@ export type CampaignDispatchDeps = {
   }) => Promise<SendOutcome[]>;
   /** SMS provider breaker; absent = always closed. */
   providerGate?: () => Promise<ProviderGateDecision>;
+  /** Phones matching a saved audience rule right now (dynamic audiences). */
+  resolveAudiencePhones?: (tenantId: string, criteria: unknown) => Promise<string[]>;
 };
 
 export type CampaignTickResult = {
@@ -198,6 +204,51 @@ export async function processSmsCampaignTick(
     status: "enviando",
     stopReason: "done",
   };
+
+  // 0. Dynamic audience: the saved rule is recalculated once, before the first
+  // send, so players who entered (or left) it since scheduling are included
+  // (or excluded). The fresh phones then go through the normal resolution.
+  if (
+    c.audience_criteria &&
+    !c.audience_resolved_at &&
+    (c.sent_cursor ?? 0) === 0 &&
+    deps.resolveAudiencePhones
+  ) {
+    let phones: string[];
+    try {
+      phones = await deps.resolveAudiencePhones(c.tenant_id, c.audience_criteria);
+    } catch (error) {
+      await deps.updateCampaign(c, {
+        status: "enviando",
+        last_error: `Falha ao recalcular o público: ${error instanceof Error ? error.message : String(error)}`,
+        locked_at: null,
+        locked_by: null,
+      });
+      return { ...result, stopReason: "resolution_error" };
+    }
+    if (phones.length === 0) {
+      await deps.updateCampaign(c, {
+        status: "falhou",
+        recipients: [],
+        total_count: 0,
+        audience_resolved_at: new Date(deps.now()).toISOString(),
+        last_error: "Nenhum jogador se enquadrava no público no horário do envio.",
+        locked_at: null,
+        locked_by: null,
+      });
+      return { ...result, status: "falhou", stopReason: "no_recipients" };
+    }
+    const fresh: CampaignTarget[] = phones.map((phone) => ({ phone, playerId: null }));
+    const resolvedAt = new Date(deps.now()).toISOString();
+    const ok = await deps.updateCampaign(c, {
+      recipients: fresh,
+      total_count: fresh.length,
+      audience_resolved_at: resolvedAt,
+    });
+    if (!ok) return { ...result, stopReason: "lock_lost" };
+    c = { ...c, recipients: fresh, total_count: fresh.length, audience_resolved_at: resolvedAt };
+  }
+
   const targets = parseCampaignTargets(c.recipients);
   if (targets.length === 0) {
     await deps.updateCampaign(c, {

@@ -563,7 +563,14 @@ export function ChannelCampaignComposer({
         };
         const result =
           when === "schedule"
-            ? scheduleSms({ data: { ...payload, scheduledAt: scheduleAt! } })
+            ? scheduleSms({
+                data: {
+                  ...payload,
+                  scheduledAt: scheduleAt!,
+                  // Público dinâmico: o worker recalcula quem se enquadra no horário do envio.
+                  audienceCriteria: audienceCriteria ?? undefined,
+                },
+              })
             : sendSms({ data: payload });
         const completed = await result;
         if (draftId) await submitDraft({ data: { id: draftId } });
@@ -787,6 +794,12 @@ export function ChannelCampaignComposer({
                   contato ou consentimento.
                 </p>
               )}
+              {channel === "sms" && when === "schedule" && audienceCriteria ? (
+                <p className="text-xs text-muted-foreground">
+                  Contagem de agora. No horário agendado o público é recalculado: entra quem
+                  passou a se enquadrar e sai quem deixou de se enquadrar.
+                </p>
+              ) : null}
               {channel === "sms" && smsPhones.length > 0 ? (
                 <UnresolvedRecipientsNotice
                   loading={smsRecipientPreview.isFetching && !smsPreview}

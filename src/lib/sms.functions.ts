@@ -37,6 +37,7 @@ import {
 } from "./sms-provider-breaker.server";
 import type { LinkTrackingContext } from "./shortio.server";
 import { conversionFunnelSnapshot } from "./conversion-funnel";
+import { normalizeSmsAudienceCriteria } from "./sms-audience-criteria";
 import {
   campaignDeliveryKey,
   countUnresolvedByReason,
@@ -2012,6 +2013,8 @@ const ScheduleBulkSchema = z.object({
   templateId: dbUuid().optional(),
   conversionObjective: z.enum(["acquisition", "conversion", "reactivation"]).default("conversion"),
   enabledFunnelSteps: z.array(z.string().max(80)).max(10).optional(),
+  /** Saved audience rule: recipients are recalculated by the worker at send time. */
+  audienceCriteria: z.record(z.string(), z.unknown()).optional(),
 });
 
 /**
@@ -2092,31 +2095,46 @@ export const scheduleBulkSms = createServerFn({ method: "POST" })
     ]);
     const targets = resolution.resolved;
 
-    const { data: inserted, error } = await (context.supabase as any)
-      .from("sms_campaigns")
-      .insert({
-        tenant_id: tenantId,
-        name: data.campaignName,
-        content: data.content,
-        route: data.route,
-        recipients: targets as unknown as Json,
-        total_count: targets.length,
-        scheduled_at: scheduled.toISOString(),
-        status: "agendada",
-        rate_per_minute: data.ratePerMinute,
-        track_links: true,
-        template_id: data.templateId ?? null,
-        template_snapshot: templateSnapshot,
-        conversion_objective: data.conversionObjective,
-        conversion_funnel_snapshot: conversionFunnelSnapshot(
-          data.conversionObjective,
-          "campaign",
-          data.enabledFunnelSteps,
-        ),
-        created_by: context.userId,
-      })
-      .select("id, name, scheduled_at, total_count, status")
-      .single();
+    const campaignRow = {
+      tenant_id: tenantId,
+      name: data.campaignName,
+      content: data.content,
+      route: data.route,
+      recipients: targets as unknown as Json,
+      total_count: targets.length,
+      scheduled_at: scheduled.toISOString(),
+      status: "agendada",
+      rate_per_minute: data.ratePerMinute,
+      track_links: true,
+      template_id: data.templateId ?? null,
+      template_snapshot: templateSnapshot,
+      conversion_objective: data.conversionObjective,
+      conversion_funnel_snapshot: conversionFunnelSnapshot(
+        data.conversionObjective,
+        "campaign",
+        data.enabledFunnelSteps,
+      ),
+      created_by: context.userId,
+    };
+    const insertCampaign = (row: Record<string, unknown>) =>
+      (context.supabase as any)
+        .from("sms_campaigns")
+        .insert(row)
+        .select("id, name, scheduled_at, total_count, status")
+        .single();
+    // Dynamic audience: the worker recalculates the rule at send time; the
+    // snapshot above only validates the schedule and shows the current count.
+    let { data: inserted, error } = await insertCampaign(
+      data.audienceCriteria
+        ? {
+            ...campaignRow,
+            audience_criteria: normalizeSmsAudienceCriteria(data.audienceCriteria) as unknown as Json,
+          }
+        : campaignRow,
+    );
+    // Column ships with migration 20261019160000; until then the send keeps the snapshot.
+    if (error && data.audienceCriteria && isMissingColumnError(error))
+      ({ data: inserted, error } = await insertCampaign(campaignRow));
     if (error) throw new Error(error.message);
     if (resolution.unresolved.length > 0)
       await persistCampaignUnresolved(campaignDb(), inserted.id, resolution.unresolved);

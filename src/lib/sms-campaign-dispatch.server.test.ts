@@ -131,6 +131,68 @@ describe("processSmsCampaignTick", () => {
     expect(String(lastPatch(state.patches).last_error)).toContain("Nenhum destinatário");
   });
 
+  it("dynamic audience: recalculates the saved rule at dispatch and drops the scheduling snapshot", async () => {
+    const { state, deps } = world();
+    const calls: unknown[] = [];
+    deps.resolveAudiencePhones = async (_tenant, criteria) => {
+      calls.push(criteria);
+      return [phone(10), phone(20), phone(30)];
+    };
+    const c = campaign([{ phone: phone(99), playerId: "p-old" }], {
+      audience_criteria: { activity: { deposit: "yes" } },
+      audience_resolved_at: null,
+    });
+    const r = await processSmsCampaignTick(c, deps, { deadline: 45_000 });
+    expect(calls).toHaveLength(1);
+    expect(state.patches[0]).toMatchObject({ total_count: 3 });
+    expect(state.patches[0].audience_resolved_at).toBeTruthy();
+    expect(r.sent).toBe(3);
+    expect(state.sendCalls).not.toContain(await campaignDeliveryKey(c.id, "p-old"));
+  });
+
+  it("dynamic audience: resolved once; later ticks keep the materialized list", async () => {
+    const { deps } = world();
+    let calls = 0;
+    deps.resolveAudiencePhones = async () => {
+      calls++;
+      return [phone(10)];
+    };
+    const c = campaign([{ phone: phone(10), playerId: `p-${phone(10)}` }], {
+      audience_criteria: { activity: { deposit: "yes" } },
+      audience_resolved_at: "2026-10-19T12:00:00Z",
+    });
+    await processSmsCampaignTick(c, deps, { deadline: 45_000 });
+    expect(calls).toBe(0);
+  });
+
+  it("dynamic audience: nobody matches at send time → campaign fails with a clear reason", async () => {
+    const { state, deps } = world();
+    deps.resolveAudiencePhones = async () => [];
+    const c = campaign([{ phone: phone(10), playerId: "p-old" }], {
+      audience_criteria: { activity: { deposit: "yes" } },
+      audience_resolved_at: null,
+    });
+    const r = await processSmsCampaignTick(c, deps, { deadline: 45_000 });
+    expect(r.status).toBe("falhou");
+    expect(state.sendCalls).toHaveLength(0);
+    expect(String(lastPatch(state.patches).last_error)).toContain("público");
+  });
+
+  it("dynamic audience: a resolution error keeps the campaign for the next tick", async () => {
+    const { state, deps } = world();
+    deps.resolveAudiencePhones = async () => {
+      throw new Error("timeout");
+    };
+    const c = campaign([{ phone: phone(10), playerId: "p-old" }], {
+      audience_criteria: { activity: { deposit: "yes" } },
+      audience_resolved_at: null,
+    });
+    const r = await processSmsCampaignTick(c, deps, { deadline: 45_000 });
+    expect(r.stopReason).toBe("resolution_error");
+    expect(state.sendCalls).toHaveLength(0);
+    expect(lastPatch(state.patches)).toMatchObject({ status: "enviando", locked_by: null });
+  });
+
   it("dedupes by (campaign, player), not by rendered content", async () => {
     const c = campaign([
       { phone: phone(1), playerId: pid(1) },

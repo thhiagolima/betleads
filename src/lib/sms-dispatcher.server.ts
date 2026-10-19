@@ -27,6 +27,7 @@ import {
 } from "./dispatch-pause-insufficient.server";
 import { pingHeartbeat, startJobRun, type JobRunHandle } from "./observability/job-monitor.server";
 import { SMS_CAMPAIGN_RUN_BUDGET_MS, SMS_CAMPAIGN_TICK_SECONDS } from "./campaign-recipients";
+import { normalizeSmsAudienceCriteria } from "./sms-audience-criteria";
 import {
   findAcceptedDeliveryKeys,
   persistCampaignUnresolved,
@@ -882,6 +883,16 @@ function campaignDeps(): CampaignDispatchDeps {
       await persistCampaignUnresolved(campaignDb, campaignId, unresolved);
     },
     acquireSendBudget: acquireCampaignSendBudget,
+    async resolveAudiencePhones(tenantId, criteria) {
+      const { data, error } = await supabaseAdmin.rpc("resolve_sms_audience_v2", {
+        _tenant: tenantId,
+        _criteria: normalizeSmsAudienceCriteria(criteria),
+      });
+      if (error) throw new Error(error.message);
+      if (!data) throw new Error("Sem acesso aos jogadores desta conta.");
+      const phones = (data as { phones?: unknown }).phones;
+      return Array.isArray(phones) ? phones.filter((p): p is string => typeof p === "string") : [];
+    },
     findAcceptedDeliveryKeys: (keys) => findAcceptedDeliveryKeys(campaignDb, keys),
     async loadPlayerVariables(playerIds) {
       const vars = new Map<string, Record<string, string>>();
