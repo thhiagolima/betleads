@@ -175,9 +175,9 @@ Com duas pessoas (uma em dados/back e outra em front), a entrega estimada é de 
 
 | ID | Status | Commit | Evidência | Data |
 |---|---|---|---|---|
-| AL0-01 | parcial | — | `.env` local fixa `META_API_VERSION=v23.0` e o docker-compose carrega as variáveis por `env_file`, então a produção provavelmente está na versão expirada. Falta a leitura em produção (env, `meta_sync_runs`, jobs presos), que depende de autorização | 19/10/2026 |
+| AL0-01 | feito | — | Leitura em produção (sessão `read_only: on`, PG 17.6). Nenhuma casa conectada no modelo de token; a única conexão é a legada da `betleads-original`, em `error` e **com token em texto puro** (AQ-29 confirmado). Nenhum run ou job de sync jamais criado. Cron `betleads-meta-sync-worker` ativo a cada 5 min e `betleads_cron_secret` presente no Vault. Sorte Alta (`pixpgf`): 12.424 atribuições, 9.389 com o ID do anúncio em `utm_content`, campanha e conjunto também por ID em `utm_campaign`/`utm_term`; 98% marcadas como `orphan_campaign`; 19 mil cadastros e 87 mil depósitos em 30 dias (o corte em 1.000 linhas atinge a casa com certeza). A `META_API_VERSION` do container não é legível pelo banco; o `.env` local fixa v23.0 e o AL0-02 cobre o caso | 19/10/2026 |
 | AL0-02 | implementado | branch `feat/aquisicao-ltv-al0` | `meta-api-version.ts` com piso v25.0: um valor expirado no ambiente é ignorado com aviso. 4 testes. Versões conferidas no changelog em 19/10/2026: v23.0 expirou em 09/06, v24.0 em 06/10, v25.0 vigente (expiração a definir) | 19/10/2026 |
-| AL0-03 | aguardando AL0-01 | | | |
+| AL0-03 | não necessário | — | Nenhum run ou job existe, então não há nada travado | 19/10/2026 |
 | AL0-04 | implementado | branch `feat/aquisicao-ltv-al0` | Cards Windsor, CSV e Plano técnico removidos; gerador só com Meta; link da casa como placeholder; erro ao copiar tratado | 19/10/2026 |
 | AL0-05 | implementado | branch `feat/aquisicao-ltv-al0` | Textos falsos removidos; banner de erro com a mensagem real e "Tentar novamente"; nome "Aquisição e LTV". Busca por iFluxHub, migrations e "disponível" na rota retorna 0 | 19/10/2026 |
 | AL0-06 | implementado | branch `feat/aquisicao-ltv-al0` | Aviso "Números em revisão" no painel | 19/10/2026 |
