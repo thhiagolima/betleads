@@ -7,15 +7,15 @@ Base de jogadores, Comparar casas, CSV e o "recuperado" dos cards de Jornadas.
 
 ## 1. O que a tela mostrava (Sorte Alta, 18/10)
 
-| Indicador | Valor exibido |
-|---|---|
-| SMS cobrados | 12.522 |
-| SMS clicados | 400 (3,2%) |
-| Jogadores convertidos | 95 (23,8% dos cliques) |
-| Valor convertido | R$ 22.904,51 |
-| Custo em SMS | R$ 738,80 |
-| Custo por convertido | R$ 7,78 |
-| Retorno | 31,0x |
+| Indicador                 | Valor exibido           |
+| ------------------------- | ----------------------- |
+| SMS cobrados              | 12.522                  |
+| SMS clicados              | 400 (3,2%)              |
+| Jogadores convertidos     | 95 (23,8% dos cliques)  |
+| Valor convertido          | R$ 22.904,51            |
+| Custo em SMS              | R$ 738,80               |
+| Custo por convertido      | R$ 7,78                 |
+| Retorno                   | 31,0x                   |
 | Visão ampla (recuperados) | 83 · R$ 4.492,36 · 6,1x |
 
 ## 2. O que está correto
@@ -31,12 +31,12 @@ não há duplicidade. SMS cobrados, cliques e custo batem com os logs. **Não h�
 
 A regra somava **todo** depósito feito até 7 dias depois de um clique, de qualquer jogador.
 
-| Situação do jogador no momento do clique | Jogadores | Valor |
-|---|---|---|
-| Ativo: depositou nas 48 h anteriores (média de **18,9 depósitos** nos 7 dias antes) | 66 | R$ 15.763,97 (69%) |
-| Parado há 2 a 7 dias | 17 | R$ 3.584,54 |
-| Parado há 7 dias ou mais | 6 | R$ 356,00 |
-| Nunca tinha depositado | 1 | R$ 3.200,00 |
+| Situação do jogador no momento do clique                                            | Jogadores | Valor              |
+| ----------------------------------------------------------------------------------- | --------- | ------------------ |
+| Ativo: depositou nas 48 h anteriores (média de **18,9 depósitos** nos 7 dias antes) | 66        | R$ 15.763,97 (69%) |
+| Parado há 2 a 7 dias                                                                | 17        | R$ 3.584,54        |
+| Parado há 7 dias ou mais                                                            | 6         | R$ 356,00          |
+| Nunca tinha depositado                                                              | 1         | R$ 3.200,00        |
 
 Quem deposita quase três vezes por dia ia depositar com ou sem o SMS. A "Visão ampla" já excluía esses
 jogadores, e por isso as duas visões se contradiziam na mesma tela (31x contra 6,1x).
@@ -86,25 +86,22 @@ os de jogadores ativos.
 
 ## 5. Efeito esperado em 18/10 (Sorte Alta)
 
-| Indicador | Antes | Depois (estimado na auditoria) |
-|---|---|---|
-| Jogadores convertidos | 95 | 24 |
-| Valor convertido | R$ 22.904,51 | R$ 7.140,54 |
-| Custo por convertido | R$ 7,78 | ~R$ 30,78 |
-| Retorno | 31,0x | ~9,7x |
-| Já ativos (fora do retorno) | — | 66 jogadores · R$ 15.763,97 |
+| Indicador                   | Antes        | Depois (estimado na auditoria) |
+| --------------------------- | ------------ | ------------------------------ |
+| Jogadores convertidos       | 95           | 24                             |
+| Valor convertido            | R$ 22.904,51 | R$ 7.140,54                    |
+| Custo por convertido        | R$ 7,78      | ~R$ 30,78                      |
+| Retorno                     | 31,0x        | ~9,7x                          |
+| Já ativos (fora do retorno) | —            | 66 jogadores · R$ 15.763,97    |
 
 Um único depósito de R$ 3.200 (jogador novo) pesa no valor: sem ele, o retorno fica perto de 5x,
 alinhado com a visão ampla (6,1x). Os valores finais depois do recálculo estão na seção 7.
 
-## 6. Fora deste escopo (pendências)
+## 6. Limites da regra
 
-- Relatórios detalhados por campanha/jornada (`conversion-report.functions.ts`), exportação de
-  atribuições e painel de experimento A/B continuam listando todos os depósitos atribuídos. São
-  registros de auditoria, não indicadores de retorno. O A/B compara variantes sob a mesma regra.
-  Avaliar se o cabeçalho desses relatórios deve adotar o mesmo filtro.
 - O efeito causal real continua sendo medido pelo Teste de controle (holdout). A conversão por clique
   é atribuição, não prova de incrementalidade.
+- As demais telas foram alinhadas na etapa 2 (seção 8).
 
 ## 7. Implantação
 
@@ -121,14 +118,49 @@ linhas em rule_version 3. A migração está registrada em `supabase_migrations.
 
 Sorte Alta depois do recálculo:
 
-| Dia | Custo | Cliques | Cliques convertidos | Jogadores | Valor convertido | Já ativos (fora do retorno) |
-|---|---|---|---|---|---|---|
-| 15/10 | R$ 723,34 | 251 | 22 | 17 | R$ 1.510,43 | 13 · R$ 2.783,41 |
-| 16/10 | R$ 1.745,99 | 937 | 67 | 44 | R$ 7.435,00 | 56 · R$ 13.769,26 |
-| 17/10 | R$ 1.144,01 | 492 | 25 | 32 | R$ 11.624,04 | 93 · R$ 19.006,55 |
-| 18/10 | R$ 738,80 | 400 | 5 (maturando) | 13 | R$ 6.717,54 | 70 · R$ 16.186,97 |
+| Dia   | Custo       | Cliques | Cliques convertidos | Jogadores | Valor convertido | Já ativos (fora do retorno) |
+| ----- | ----------- | ------- | ------------------- | --------- | ---------------- | --------------------------- |
+| 15/10 | R$ 723,34   | 251     | 22                  | 17        | R$ 1.510,43      | 13 · R$ 2.783,41            |
+| 16/10 | R$ 1.745,99 | 937     | 67                  | 44        | R$ 7.435,00      | 56 · R$ 13.769,26           |
+| 17/10 | R$ 1.144,01 | 492     | 25                  | 32        | R$ 11.624,04     | 93 · R$ 19.006,55           |
+| 18/10 | R$ 738,80   | 400     | 5 (maturando)       | 13        | R$ 6.717,54      | 70 · R$ 16.186,97           |
 
 - 18/10: retorno de 31,0x para 9,1x; custo por convertido de R$ 7,78 para R$ 56,83.
 - Últimos 7 dias, retorno por clique: Sorte Alta 5,2x · PixReals 1,8x · Casa Betleads 1,7x ·
   ForrandoBet 0,4x.
 - Jornadas da Sorte Alta, "recuperado" total: de R$ 38.321,78 para R$ 12.414,99.
+
+## 8. Etapa 2 — mesma regra nas demais telas do CRM
+
+**Migração:** `20261019150000_conversion_reports_exclude_active.sql`.
+
+A regra "jogador ativo no clique não é conversão" virou uma definição única no banco,
+`crm_dispatch_was_active(tenant, envio)`. Ela olha o primeiro clique atribuído do SMS, de modo que um
+jogador reativado pelo clique continua contando durante toda a janela. A Central, o Início, a lista
+de relatórios e a coluna calculada `conversion_attributions.player_active_at_click` (lida pelos
+relatórios via PostgREST) usam todos essa mesma função.
+
+| Tela                                                                           | Antes                                               | Depois                                                                                  |
+| ------------------------------------------------------------------------------ | --------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Início — "Recuperado pelo CRM", "Clicaram e depositaram", insight e retorno    | todos os depósitos após clique                      | só jogadores que não estavam ativos                                                     |
+| Lista de relatórios de conversão e comparação de origens                       | receita direta inclui ativos                        | ativos saem da receita e da contagem; nova coluna `active_revenue`                      |
+| Relatório da campanha: cabeçalho, funil, "Depositaram", lista de destinatários | contava depósitos como "jogadores" e incluía ativos | jogadores distintos e não ativos; depósito de ativo aparece como "já ativo", sem contar |
+| Relatório da jornada: totais, degraus e cópias                                 | incluía ativos                                      | exclui ativos; nota "Fora da conta" com jogadores e valor                               |
+| Drilldown e CSV de atribuições                                                 | sem indicação                                       | marca "já ativo, não conta"; coluna `ja_ativo_no_clique`                                |
+| Experimento A/B                                                                | incluía ativos                                      | conversões e receita só de não ativos                                                   |
+
+O "Clicaram e depositaram" do Início conta quem depositou no período (os donos do valor exibido). A
+Central conta o jogador no dia da conversão. Em "Ontem" os dois podem diferir: em 18/10, foram 25
+jogadores depositando contra 13 convertidos naquele dia, com o mesmo valor de R$ 6.717,54.
+
+Ensaio em produção (com ROLLBACK), Sorte Alta, 18/10:
+
+|                                      | Antes                        | Depois                                                      |
+| ------------------------------------ | ---------------------------- | ----------------------------------------------------------- |
+| Início — recuperado                  | R$ 22.904,51 (90 jogadores)  | R$ 6.717,54 (25 jogadores)                                  |
+| Início — reativado por jornadas      | R$ 15.194,26                 | R$ 4.725,54                                                 |
+| Lista de relatórios — receita direta | R$ 22.904,51 (262 depósitos) | R$ 6.717,54 (50 depósitos) + R$ 16.186,97 de ativos à parte |
+| Central                              | 13 · R$ 6.717,54             | inalterada                                                  |
+
+A coluna calculada foi testada como usuário autenticado da casa: o RLS vale, e 212 dos 262
+depósitos foram marcados como "já ativo".

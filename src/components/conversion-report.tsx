@@ -39,6 +39,9 @@ type Recipient = {
   firstDepositAt: string | null;
   depositAt: string | null;
   depositValue: number;
+  /** Deposit of a player already active at the click: shown, never counted. */
+  activeDepositAt?: string | null;
+  activeDepositValue?: number;
   historicalDepositCount: number;
   historicalDepositValue: number;
 };
@@ -294,7 +297,7 @@ function CampaignReport({
   );
   const delivered = data.delivered ?? 0;
   const clicked = recipients.filter((row) => row.clicked).length || data.clicked || 0;
-  const deposited = recipients.filter((row) => row.depositAt).length || data.deposits;
+  const deposited = recipients.filter((row) => row.depositAt).length || data.depositors;
   const notClicked = Math.max(0, delivered - clicked);
   const clickedNoDeposit = Math.max(0, clicked - deposited);
   const audience = campaign?.total || campaign?.audience || details?.trackedDeliveries || data.sent;
@@ -343,8 +346,8 @@ function CampaignReport({
               </h1>
             </div>
             <p className="text-xs text-sky-400">
-              {data.deposits
-                ? `${number(data.deposits)} jogador${data.deposits === 1 ? "" : "es"} depositou após a campanha`
+              {data.depositors
+                ? `${number(data.depositors)} jogador${data.depositors === 1 ? "" : "es"} depositou após a campanha`
                 : `${number(audience)} destinatários no público`}
             </p>
           </div>
@@ -454,10 +457,10 @@ function CampaignReport({
             <Metric label="Primeiro depósito" value={number(data.ftd)} accent />
             <Metric
               label="Depositaram"
-              value={number(data.deposits)}
+              value={number(data.depositors)}
               hint={
                 clicked
-                  ? `${Math.round((data.deposits / clicked) * 100)}% de quem clicou`
+                  ? `${Math.round((data.depositors / clicked) * 100)}% de quem clicou`
                   : undefined
               }
               accent
@@ -468,8 +471,9 @@ function CampaignReport({
             <p className="text-xs text-emerald-300">Total da campanha, desde o disparo</p>
             <p className="mt-1 text-2xl font-bold text-emerald-400">{money(directRevenue)}</p>
             <p className="mt-1 text-xs text-sky-300">
-              de {number(data.deposits)} jogadores atribuídos pelo último clique em até 7 dias
+              de {number(data.depositors)} jogadores atribuídos pelo último clique em até 7 dias
             </p>
+            <ActiveNote players={data.activeDepositors} revenue={data.activeRevenue} />
             {data.assistedRevenue > 0 ? (
               <p className="mt-2 text-xs text-muted-foreground">
                 Receita assistida, separada: {money(data.assistedRevenue)}
@@ -762,20 +766,45 @@ function RecipientTable({ rows }: { rows: Recipient[] }) {
               <td className="p-3 text-sky-300">{dateTime(row.registeredAt)}</td>
               <td className="p-3 text-sky-300">{dateTime(row.loginOrGameAt)}</td>
               <td className="p-3 text-sky-300">{dateTime(row.firstDepositAt)}</td>
-              <td className="p-3 text-sky-300">{dateTime(row.depositAt)}</td>
+              <td className="p-3 text-sky-300">
+                {row.activeDepositAt ? (
+                  <span className="text-muted-foreground">
+                    {dateTime(row.activeDepositAt)} · já ativo
+                  </span>
+                ) : (
+                  dateTime(row.depositAt)
+                )}
+              </td>
               <td
                 className={cn(
                   "p-3 text-right",
                   row.depositValue > 0 && "font-bold text-emerald-400",
                 )}
               >
-                {row.depositValue ? money(row.depositValue) : "—"}
+                {row.depositValue ? (
+                  money(row.depositValue)
+                ) : row.activeDepositValue ? (
+                  <span className="text-muted-foreground">{money(row.activeDepositValue)}</span>
+                ) : (
+                  "—"
+                )}
               </td>
             </tr>
           ))}
         </tbody>
       </table>
     </div>
+  );
+}
+
+/** Click deposits of players already active: reported apart, never in the totals. */
+function ActiveNote({ players, revenue }: { players?: number; revenue?: number }) {
+  if (!players) return null;
+  return (
+    <p className="mt-2 text-xs text-muted-foreground">
+      Fora da conta: {number(players)} {players === 1 ? "jogador já ativo" : "jogadores já ativos"}{" "}
+      (depositaram nas 48 h antes do clique) somaram {money(revenue ?? 0)} depois de clicar.
+    </p>
   );
 }
 
@@ -977,6 +1006,7 @@ function JourneyReport({
             <Metric label="Depósitos atribuídos" value={number(deposits)} />
             <Metric label="Recuperado atribuído" value={money(recovered)} accent />
           </section>
+          <ActiveNote players={data.activeDepositors} revenue={data.activeRevenue} />
 
           <section className="rounded-2xl border border-border/80">
             <div className="border-b px-4 py-3">
@@ -1133,7 +1163,9 @@ function JourneyReport({
                         <td className="px-4 py-3">{dateTime(row.loginAt)}</td>
                         <td className="px-4 py-3">
                           {row.depositedAt
-                            ? `${dateTime(row.depositedAt)} · ${money(row.depositValue)}`
+                            ? `${dateTime(row.depositedAt)} · ${money(row.depositValue)}${
+                                row.alreadyActive ? " · já ativo, não conta" : ""
+                              }`
                             : "—"}
                         </td>
                       </tr>

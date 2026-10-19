@@ -536,7 +536,9 @@ export const getCampaignReportDetails = createServerFn({ method: "GET" })
       selectInChunks<any>(tokens, (chunk) =>
         db
           .from("conversion_attributions")
-          .select("tracking_token,event_type,occurred_at,monetary_value,is_ftd,classification")
+          .select(
+            "tracking_token,event_type,occurred_at,monetary_value,is_ftd,classification,player_active_at_click",
+          )
           .eq("tenant_id", tenantId)
           .eq("source_type", "campaign")
           .eq("source_id", data.campaignId)
@@ -628,7 +630,13 @@ export const getCampaignReportDetails = createServerFn({ method: "GET" })
       const firstDeposit = directAttributions.find(
         (row) => row.event_type === "deposit_approved" && row.is_ftd === true,
       );
-      const deposit = directAttributions.find((row) => row.event_type === "deposit_approved");
+      const firstDirectDeposit = directAttributions.find(
+        (row) => row.event_type === "deposit_approved",
+      );
+      // A player already active at the click is not a conversion (rule_version 3):
+      // the deposit is shown apart and stays out of the campaign's counts.
+      const alreadyActive = firstDirectDeposit?.player_active_at_click === true;
+      const deposit = alreadyActive ? undefined : firstDirectDeposit;
       const historicalDeposits = depositsByPlayer.get(first.recipient_player_id) ?? [];
       return {
         id: key,
@@ -649,6 +657,8 @@ export const getCampaignReportDetails = createServerFn({ method: "GET" })
         firstDepositAt: firstDeposit?.occurred_at ?? null,
         depositAt: deposit?.occurred_at ?? null,
         depositValue: Number(deposit?.monetary_value ?? 0),
+        activeDepositAt: alreadyActive ? (firstDirectDeposit?.occurred_at ?? null) : null,
+        activeDepositValue: alreadyActive ? Number(firstDirectDeposit?.monetary_value ?? 0) : 0,
         historicalDepositCount: historicalDeposits.length,
         historicalDepositValue: historicalDeposits.reduce(
           (sum, row) => sum + Number(row.valor ?? 0),
@@ -872,7 +882,9 @@ export const getConversionDrilldown = createServerFn({ method: "GET" })
       selectInChunks<any>(dispatchIds, (chunk) =>
         db
           .from("conversion_attributions")
-          .select("link_dispatch_id,event_type,occurred_at,monetary_value,is_ftd")
+          .select(
+            "link_dispatch_id,event_type,occurred_at,monetary_value,is_ftd,player_active_at_click",
+          )
           .eq("tenant_id", tenantId)
           .eq("source_type", data.sourceType)
           .eq("source_id", data.sourceId)
@@ -938,6 +950,8 @@ export const getConversionDrilldown = createServerFn({ method: "GET" })
           depositedAt: deposit?.occurred_at ?? null,
           depositValue: Number(deposit?.monetary_value ?? 0),
           isFtd: deposit?.is_ftd === true,
+          // Already active at the click: listed, but not a conversion.
+          alreadyActive: deposit?.player_active_at_click === true,
         };
       });
     await db.from("conversion_report_audit_events").insert({
@@ -959,7 +973,9 @@ export const exportConversionDrilldownCsv = createServerFn({ method: "POST" })
     const db = context.supabase as any;
     const { data: rows, error } = await db
       .from("conversion_attributions")
-      .select("event_type,event_id,occurred_at,monetary_value,is_ftd,players(nome,email,telefone)")
+      .select(
+        "event_type,event_id,occurred_at,monetary_value,is_ftd,player_active_at_click,players(nome,email,telefone)",
+      )
       .eq("tenant_id", tenantId)
       .eq("source_type", data.sourceType)
       .eq("source_id", data.sourceId)
@@ -968,7 +984,7 @@ export const exportConversionDrilldownCsv = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     const cell = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
     const csv = [
-      "nome,email,telefone,event_type,event_id,ocorrido_em,valor,is_ftd",
+      "nome,email,telefone,event_type,event_id,ocorrido_em,valor,is_ftd,ja_ativo_no_clique",
       ...(rows ?? []).map((row: any) =>
         [
           row.players?.nome,
@@ -979,6 +995,7 @@ export const exportConversionDrilldownCsv = createServerFn({ method: "POST" })
           row.occurred_at,
           row.monetary_value,
           row.is_ftd,
+          row.player_active_at_click === true,
         ]
           .map(cell)
           .join(","),
@@ -1021,7 +1038,7 @@ export const getConversionReport = createServerFn({ method: "GET" })
         db
           .from("conversion_attributions")
           .select(
-            "id,link_dispatch_id,tracking_token,event_type,event_id,monetary_value,is_ftd,occurred_at,created_at,classification",
+            "id,link_dispatch_id,tracking_token,player_id,event_type,event_id,monetary_value,is_ftd,occurred_at,created_at,classification,player_active_at_click",
           )
           .eq("tenant_id", tenantId)
           .eq("source_type", data.sourceType)
@@ -1057,7 +1074,15 @@ export const getConversionReport = createServerFn({ method: "GET" })
     if (attributionResult.error) throw new Error(attributionResult.error.message);
     if (journeyStepsResult.error) throw new Error(journeyStepsResult.error.message);
     const dispatches = dispatchResult.data ?? [];
-    const attributions = attributionResult.data ?? [];
+    // Deposits of players already active at the click are not conversions
+    // (rule_version 3); they are reported apart and never in the totals.
+    const isActiveDeposit = (item: any) =>
+      item.event_type === "deposit_approved" && item.player_active_at_click === true;
+    const allAttributions: any[] = attributionResult.data ?? [];
+    const attributions = allAttributions.filter((item) => !isActiveDeposit(item));
+    const activeDeposits = allAttributions.filter(
+      (item) => isActiveDeposit(item) && item.classification === "direct",
+    );
     const journeySteps: any[] = journeyStepsResult.data ?? [];
     // Copy rotation: the dispatcher stores the drawn copy in the execution's
     // provider_response; the dispatch shares the execution key (+ ":n").
@@ -1149,13 +1174,20 @@ export const getConversionReport = createServerFn({ method: "GET" })
         (item: any) => item.event_type === eventType && item.classification === "direct",
       ).length;
     const deposits = count("deposit_approved");
+    const depositors = new Set(
+      attributions
+        .filter(
+          (item: any) => item.event_type === "deposit_approved" && item.classification === "direct",
+        )
+        .map((item: any) => String(item.player_id)),
+    ).size;
     const revenue = attributions
       .filter(
         (item: any) => item.event_type === "deposit_approved" && item.classification === "direct",
       )
       .reduce((sum: number, item: any) => sum + Number(item.monetary_value ?? 0), 0);
     const latest =
-      [...dispatches, ...attributions]
+      [...dispatches, ...allAttributions]
         .map((item: any) => item.updated_at ?? item.created_at ?? item.occurred_at ?? item.sent_at)
         .filter(Boolean)
         .sort()
@@ -1173,6 +1205,12 @@ export const getConversionReport = createServerFn({ method: "GET" })
       registered: count("registered"),
       loginOrGame: count("login") + count("game"),
       deposits,
+      depositors,
+      activeDepositors: new Set(activeDeposits.map((item: any) => String(item.player_id))).size,
+      activeRevenue: activeDeposits.reduce(
+        (sum: number, item: any) => sum + Number(item.monetary_value ?? 0),
+        0,
+      ),
       ftd: attributions.filter(
         (item: any) =>
           item.event_type === "deposit_approved" && item.is_ftd && item.classification === "direct",
@@ -1207,6 +1245,6 @@ export const getConversionReport = createServerFn({ method: "GET" })
         };
       })(),
       truncated: Boolean(dispatchResult.truncated || attributionResult.truncated),
-      historical: dispatches.length === 0 && attributions.length === 0,
+      historical: dispatches.length === 0 && allAttributions.length === 0,
     };
   });

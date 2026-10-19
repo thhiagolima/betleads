@@ -29,6 +29,10 @@ const INCREMENTAL_MIGRATION = readFileSync(
   resolve(root, "supabase/migrations/20261019120000_crm_click_conversion_incremental.sql"),
   "utf8",
 );
+const REPORTS_MIGRATION = readFileSync(
+  resolve(root, "supabase/migrations/20261019150000_conversion_reports_exclude_active.sql"),
+  "utf8",
+);
 const CAMPAIGN_ID_MIGRATION = readFileSync(
   resolve(root, "supabase/migrations/20261016170000_sms_log_campaign_id.sql"),
   "utf8",
@@ -61,7 +65,8 @@ create table public.sms_campaigns (
 create table public.link_dispatches (
   id uuid primary key, tenant_id uuid, source_type text, source_id text,
   journey_step_position integer, recipient_player_id uuid, sent_at timestamptz,
-  created_at timestamptz default now());
+  created_at timestamptz default now(), message_log_id text, idempotency_key text,
+  channel text default 'sms', send_status text default 'sent', delivery_status text);
 create table public.click_events (
   id uuid primary key default gen_random_uuid(), tenant_id uuid, link_dispatch_id uuid,
   is_human boolean, occurred_at timestamptz);
@@ -153,6 +158,10 @@ beforeAll(async () => {
   await db.exec(`begin; ${DIRECT_PLAYERS_MIGRATION}; commit;`);
   await db.exec(`begin; ${INCREMENTAL_MIGRATION}; commit;`);
   await db.exec(`begin; ${INCREMENTAL_MIGRATION}; commit;`);
+  // The home dashboard function reads tables this schema does not model.
+  const reports = `begin; set local check_function_bodies = off; ${REPORTS_MIGRATION}; commit;`;
+  await db.exec(reports);
+  await db.exec(reports);
   await db.exec(`
     insert into tenants values ('${T}');
     insert into journeys values ('${J1}', '${T}'), ('${J2}', '${T}');
@@ -429,5 +438,40 @@ describe("click conversion excludes players already active (rule_version 3)", ()
     // A on J1: 100 + 40 (B-01 test) + 25 (next day). B's campaign deposit is not a journey.
     expect(Number(metrics.find((m) => m.journey_id === J1)?.metrics.recovered)).toBe(165);
     expect(Number(metrics.find((m) => m.journey_id === J2)?.metrics.recovered)).toBe(0);
+  });
+});
+
+describe("other CRM screens use the same rule (conversion reports)", () => {
+  it("flags each attribution through the computed column", async () => {
+    const { rows: flags } = await db.query<{ player_id: string; active: boolean }>(
+      `select a.player_id, player_active_at_click(a) active
+         from conversion_attributions a order by a.occurred_at`,
+    );
+    expect(flags.filter((f) => f.player_id === A).every((f) => f.active === false)).toBe(true);
+    expect(flags.find((f) => f.player_id === B)?.active).toBe(true);
+  });
+
+  it("keeps already-active revenue apart in the report list", async () => {
+    const { rows: sources } = await db.query<{
+      source_type: string;
+      source_id: string;
+      conversions: number;
+      direct_revenue: string;
+      active_revenue: string;
+    }>(`select * from conversion_report_sources($1, '2026-10-01', '2026-10-31')`, [T]);
+    const campaign = sources.find((r) => r.source_type === "campaign");
+    expect(campaign).toMatchObject({ conversions: 0 });
+    expect(Number(campaign?.direct_revenue)).toBe(0);
+    expect(Number(campaign?.active_revenue)).toBe(40);
+    const journey = sources.find((r) => r.source_id === J1);
+    expect(Number(journey?.direct_revenue)).toBe(165);
+    expect(Number(journey?.active_revenue)).toBe(0);
+  });
+
+  it("leaves the Central de Resultados numbers unchanged", async () => {
+    await db.query(`select refresh_crm_results_day($1, $2::date)`, [T, DAY]);
+    const row = (await rows()).find((r) => r.source_type === "campaign");
+    expect(row).toMatchObject({ direct_players: 0, direct_active_players: 1 });
+    expect(Number(row?.direct_active_revenue)).toBe(40);
   });
 });

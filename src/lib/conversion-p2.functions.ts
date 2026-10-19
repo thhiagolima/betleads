@@ -46,6 +46,8 @@ type SourceRow = {
   conversions: number;
   directRevenue: number;
   assistedRevenue: number;
+  /** Click deposits of players already active: never in the revenue (rule_version 3). */
+  activeRevenue: number;
   channels: Record<"sms" | "email" | "whatsapp", number>;
 };
 
@@ -90,6 +92,7 @@ async function loadSourceRows(db: any, tenantId: string, from: string, to: strin
     conversions: Number(row.conversions ?? 0),
     directRevenue: Number(row.direct_revenue ?? 0),
     assistedRevenue: Number(row.assisted_revenue ?? 0),
+    activeRevenue: Number(row.active_revenue ?? 0),
     channels: {
       sms: Number(row.sms ?? 0),
       email: Number(row.email ?? 0),
@@ -117,6 +120,7 @@ async function sourceMetric(
       conversions: 0,
       directRevenue: 0,
       assistedRevenue: 0,
+      activeRevenue: 0,
       channels: { sms: 0, email: 0, whatsapp: 0 },
     }
   );
@@ -223,7 +227,7 @@ export const getConversionExperimentResults = createServerFn({ method: "GET" })
       db
         .from("link_dispatches")
         .select(
-          "id,experiment_variant,send_status,conversion_attributions(event_type,monetary_value,classification)",
+          "id,experiment_variant,send_status,conversion_attributions(event_type,monetary_value,classification,player_active_at_click)",
         )
         .eq("tenant_id", tenantId)
         .eq("experiment_id", data.id),
@@ -243,7 +247,11 @@ export const getConversionExperimentResults = createServerFn({ method: "GET" })
       const conversions = rows
         .flatMap((row: any) => row.conversion_attributions ?? [])
         .filter(
-          (row: any) => row.event_type === "deposit_approved" && row.classification === "direct",
+          (row: any) =>
+            row.event_type === "deposit_approved" &&
+            row.classification === "direct" &&
+            // Players already active at the click are not conversions (rule_version 3).
+            row.player_active_at_click !== true,
         );
       return {
         variant,

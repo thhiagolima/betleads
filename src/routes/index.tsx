@@ -693,7 +693,7 @@ function Dashboard() {
         <KpiCard
           title="Recuperado pelo CRM"
           value={brl(data.recoveredAmount)}
-          detail={`${num(data.recoveredPlayers)} jogador(es) · depósito até 7 dias após clique no link`}
+          detail={`${num(data.recoveredPlayers)} jogador(es) que estavam parados · depósito até 7 dias após clique no link`}
           icon={Target}
           tone="green"
           featured
@@ -853,7 +853,7 @@ function Dashboard() {
               icon={Target}
               label="Recuperado pelo CRM"
               value={brl(data.recoveredAmount)}
-              detail="depósitos após clique em link"
+              detail="depósitos após clique em link, sem quem já estava ativo"
               tone="green"
               to="/resultados"
             />
