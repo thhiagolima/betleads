@@ -1,6 +1,8 @@
 // Central de Resultados (F2): pure aggregation of crm_results_daily rows.
 // Direct (click) and influenced (recovered) are separate levels, never summed.
-// The click conversion is the headline measure (client, 16/10).
+// The click conversion is the headline measure (client, 16/10). Since
+// rule_version 3 it only counts players who were not already active at the
+// click (docs/AUDITORIA_NUMEROS_RESULTADOS_CRM_2026-10-19.md).
 
 export type CrmResultRow = {
   metric_date: string;
@@ -14,10 +16,16 @@ export type CrmResultRow = {
   cost: number;
   recipients: number;
   human_clicks: number;
+  /** Clicked SMS that brought a deposit of a non-active player (cohort of the click). */
+  converted_clicks?: number;
   direct_conversions: number;
-  /** Distinct players with a deposit attributed to a click (rule_version 2). */
+  /** Players converted by a click, on the day of their first deposit from it. */
   direct_players?: number;
   direct_revenue: number;
+  /** Deposits after a click of players already active: never in the return. */
+  direct_active_conversions?: number;
+  direct_active_players?: number;
+  direct_active_revenue?: number;
   influenced_players: number;
   influenced_deposits: number;
   influenced_revenue: number;
@@ -29,9 +37,12 @@ export type CrmMetrics = {
   cost: number;
   recipients: number;
   humanClicks: number;
+  convertedClicks: number;
   directConversions: number;
   directPlayers: number;
   directRevenue: number;
+  directActivePlayers: number;
+  directActiveRevenue: number;
   influencedPlayers: number;
   influencedDeposits: number;
   influencedRevenue: number;
@@ -40,7 +51,7 @@ export type CrmMetrics = {
 export type CrmMetricsWithRatios = CrmMetrics & {
   /** Clicked SMS / SMS sent. */
   clickRate: number | null;
-  /** Converted players / clicked SMS. */
+  /** Converted clicked SMS / clicked SMS (same clicks, up to 7 days to deposit). */
   conversionRate: number | null;
   /** Cost per converted player; null when nobody converted. */
   costPerConversion: number | null;
@@ -78,9 +89,12 @@ const empty = (): CrmMetrics => ({
   cost: 0,
   recipients: 0,
   humanClicks: 0,
+  convertedClicks: 0,
   directConversions: 0,
   directPlayers: 0,
   directRevenue: 0,
+  directActivePlayers: 0,
+  directActiveRevenue: 0,
   influencedPlayers: 0,
   influencedDeposits: 0,
   influencedRevenue: 0,
@@ -92,9 +106,12 @@ function add(target: CrmMetrics, row: CrmResultRow) {
   target.cost += Number(row.cost) || 0;
   target.recipients += Number(row.recipients) || 0;
   target.humanClicks += Number(row.human_clicks) || 0;
+  target.convertedClicks += Number(row.converted_clicks) || 0;
   target.directConversions += Number(row.direct_conversions) || 0;
   target.directPlayers += Number(row.direct_players) || 0;
   target.directRevenue += Number(row.direct_revenue) || 0;
+  target.directActivePlayers += Number(row.direct_active_players) || 0;
+  target.directActiveRevenue += Number(row.direct_active_revenue) || 0;
   target.influencedPlayers += Number(row.influenced_players) || 0;
   target.influencedDeposits += Number(row.influenced_deposits) || 0;
   target.influencedRevenue += Number(row.influenced_revenue) || 0;
@@ -104,7 +121,7 @@ export function withRatios(metrics: CrmMetrics): CrmMetricsWithRatios {
   return {
     ...metrics,
     clickRate: metrics.sent > 0 ? metrics.humanClicks / metrics.sent : null,
-    conversionRate: metrics.humanClicks > 0 ? metrics.directPlayers / metrics.humanClicks : null,
+    conversionRate: metrics.humanClicks > 0 ? metrics.convertedClicks / metrics.humanClicks : null,
     costPerConversion: metrics.directPlayers > 0 ? metrics.cost / metrics.directPlayers : null,
     clickRoi: metrics.cost > 0 ? metrics.directRevenue / metrics.cost : null,
     smallSample: metrics.directPlayers < MIN_CONVERSIONS,
@@ -112,6 +129,28 @@ export function withRatios(metrics: CrmMetrics): CrmMetricsWithRatios {
       metrics.influencedPlayers > 0 ? metrics.cost / metrics.influencedPlayers : null,
     roi: metrics.cost > 0 ? metrics.influencedRevenue / metrics.cost : null,
     recoveryRate: metrics.recipients > 0 ? metrics.influencedPlayers / metrics.recipients : null,
+  };
+}
+
+/** Distinct players of the whole period (crm_click_players_period). */
+export type PeriodPlayers = { converted: number; active: number };
+
+/**
+ * Period totals with distinct players: the daily rows count a player once per
+ * day, origin and SMS, so their sum can pass the real number of people.
+ */
+export function withPeriodPlayers<T extends CrmMetricsWithRatios>(
+  totals: T,
+  players: PeriodPlayers | null,
+): T {
+  if (!players) return totals;
+  return {
+    ...totals,
+    ...withRatios({
+      ...totals,
+      directPlayers: players.converted,
+      directActivePlayers: players.active,
+    }),
   };
 }
 

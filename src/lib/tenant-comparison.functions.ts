@@ -3,7 +3,8 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { aggregateCrmResults, type CrmResultRow } from "./crm-results";
+import { aggregateCrmResults, type CrmResultRow, withPeriodPlayers } from "./crm-results";
+import { loadPeriodPlayers } from "./crm-results.functions";
 import { comparableTenantIds } from "./tenant-comparison";
 
 const PAGE = 1000;
@@ -67,7 +68,7 @@ export const getTenantComparison = createServerFn({ method: "GET" })
           const { data: chunk, error } = await db
             .from("crm_results_daily")
             .select(
-              "metric_date,source_type,source_key,source_id,step_position,player_state,sent,failed,cost,recipients,human_clicks,direct_conversions,direct_players,direct_revenue,influenced_players,influenced_deposits,influenced_revenue",
+              "metric_date,source_type,source_key,source_id,step_position,player_state,sent,failed,cost,recipients,human_clicks,converted_clicks,direct_conversions,direct_players,direct_revenue,direct_active_players,direct_active_revenue,influenced_players,influenced_deposits,influenced_revenue",
             )
             .eq("tenant_id", tenant.id)
             .gte("metric_date", from)
@@ -81,7 +82,7 @@ export const getTenantComparison = createServerFn({ method: "GET" })
           results.push(...((chunk ?? []) as CrmResultRow[]));
           if (!chunk || chunk.length < PAGE) break;
         }
-        const [lifecycle, funnel, cohorts] = await Promise.all([
+        const [lifecycle, funnel, cohorts, players] = await Promise.all([
           db.rpc("crm_lifecycle_snapshot", { _tenant: tenant.id }),
           db.rpc("crm_acquisition_funnel", {
             _tenant: tenant.id,
@@ -89,8 +90,9 @@ export const getTenantComparison = createServerFn({ method: "GET" })
             _to: new Date().toISOString(),
           }),
           db.rpc("crm_retention_cohorts", { _tenant: tenant.id, _weeks: 8 }),
+          loadPeriodPlayers(db, tenant.id, from, brtDate(0)),
         ]);
-        const totals = aggregateCrmResults(results).totals;
+        const totals = withPeriodPlayers(aggregateCrmResults(results).totals, players);
         const states = Object.fromEntries(
           ((lifecycle.data ?? []) as Array<{ state: string; players: number }>).map((row) => [
             row.state,

@@ -25,6 +25,10 @@ const DIRECT_PLAYERS_MIGRATION = readFileSync(
   resolve(root, "supabase/migrations/20261016210000_crm_direct_players.sql"),
   "utf8",
 );
+const INCREMENTAL_MIGRATION = readFileSync(
+  resolve(root, "supabase/migrations/20261019120000_crm_click_conversion_incremental.sql"),
+  "utf8",
+);
 const CAMPAIGN_ID_MIGRATION = readFileSync(
   resolve(root, "supabase/migrations/20261016170000_sms_log_campaign_id.sql"),
   "utf8",
@@ -36,6 +40,12 @@ create role authenticated nologin;
 create role service_role nologin;
 create table public.tenants (id uuid primary key, slug text);
 create function public.has_tenant_access(_tenant uuid) returns boolean language sql as $$ select true $$;
+create schema auth;
+create function auth.role() returns text language sql as $$ select 'service_role' $$;
+create table public.journeys (id uuid primary key, tenant_id uuid);
+create table public.journey_enrollments (
+  id uuid primary key default gen_random_uuid(), tenant_id uuid, journey_id uuid, status text,
+  exit_reason text, current_position integer);
 create table public.players (id uuid primary key, tenant_id uuid, ftd_em timestamptz);
 create table public.deposits (
   id uuid primary key default gen_random_uuid(), tenant_id uuid, player_id uuid,
@@ -44,7 +54,8 @@ create table public.sms_send_logs (
   id uuid primary key default gen_random_uuid(), tenant_id uuid, player_id uuid, status text,
   trigger_name text, idempotency_key text, created_at timestamptz);
 create table public.journey_step_executions (
-  id uuid primary key default gen_random_uuid(), idempotency_key uuid, step_position integer);
+  id uuid primary key default gen_random_uuid(), idempotency_key uuid, step_position integer,
+  tenant_id uuid, journey_id uuid, channel text, status text);
 create table public.sms_campaigns (
   id uuid primary key, tenant_id uuid, name text, created_at timestamptz, status text default 'enviado');
 create table public.link_dispatches (
@@ -56,6 +67,7 @@ create table public.click_events (
   is_human boolean, occurred_at timestamptz);
 create table public.conversion_attributions (
   id uuid primary key default gen_random_uuid(), tenant_id uuid, link_dispatch_id uuid,
+  source_type text, source_id uuid, player_id uuid, window_started_at timestamptz,
   classification text, event_type text, monetary_value numeric, occurred_at timestamptz);
 create table public.tenant_sms_pricing (
   tenant_id uuid primary key, sale_price_per_sms numeric, provider_cost_per_sms numeric,
@@ -78,6 +90,7 @@ const B = "00000000-0000-4000-8000-0000000000f2"; // active, campaign
 const C = "00000000-0000-4000-8000-0000000000f3"; // never deposited, journey J2 step 0
 const D = "00000000-0000-4000-8000-0000000000f4"; // old depositor, first deposit in our history
 const LD1 = "00000000-0000-4000-8000-0000000000d1";
+const LD2 = "00000000-0000-4000-8000-0000000000d2"; // campaign SMS clicked by the active player B
 const KEY_A = "00000000-0000-4000-8000-0000000000e1";
 const KEY_C = "00000000-0000-4000-8000-0000000000e2";
 const DAY = "2026-10-10";
@@ -99,6 +112,10 @@ type Row = {
   direct_conversions: number;
   direct_players: number;
   direct_revenue: string;
+  converted_clicks: number;
+  direct_active_conversions: number;
+  direct_active_players: number;
+  direct_active_revenue: string;
   influenced_players: number;
   influenced_deposits: number;
   influenced_revenue: string;
@@ -134,8 +151,11 @@ beforeAll(async () => {
   await db.exec(`begin; ${PRICE_MIGRATION}; commit;`);
   await db.exec(`begin; ${DIRECT_PLAYERS_MIGRATION}; commit;`);
   await db.exec(`begin; ${DIRECT_PLAYERS_MIGRATION}; commit;`);
+  await db.exec(`begin; ${INCREMENTAL_MIGRATION}; commit;`);
+  await db.exec(`begin; ${INCREMENTAL_MIGRATION}; commit;`);
   await db.exec(`
     insert into tenants values ('${T}');
+    insert into journeys values ('${J1}', '${T}'), ('${J2}', '${T}');
     insert into players values ('${A}', '${T}', '2026-09-01'), ('${B}', '${T}', '2026-09-01'),
       ('${C}', '${T}', null), ('${D}', '${T}', '2026-08-01');
     insert into sms_campaigns values ('${CAMPAIGN}', '${T}', 'Promo X', '2026-10-01');
@@ -156,12 +176,17 @@ beforeAll(async () => {
       ('${T}', '${C}', 'sent', 'journey:${J2}', '${KEY_C}', '${at("09:00")}'),
       ('${T}', '${D}', 'sent', 'journey:${J2}', 'k-d', '${at("12:00")}');
     insert into link_dispatches values
-      ('${LD1}', '${T}', 'journey', '${J1}', 2, '${A}', '${at("10:00")}', '${at("10:00")}');
+      ('${LD1}', '${T}', 'journey', '${J1}', 2, '${A}', '${at("10:00")}', '${at("10:00")}'),
+      ('${LD2}', '${T}', 'campaign', '${CAMPAIGN}', null, '${B}', '${at("09:00")}', '${at("09:00")}');
     insert into click_events (tenant_id, link_dispatch_id, is_human, occurred_at) values
       ('${T}', '${LD1}', true, '${at("10:05")}'),
-      ('${T}', '${LD1}', false, '${at("10:01")}');
-    insert into conversion_attributions (tenant_id, link_dispatch_id, classification, event_type, monetary_value, occurred_at) values
-      ('${T}', '${LD1}', 'direct', 'deposit_approved', 100, '${at("15:00")}');
+      ('${T}', '${LD1}', false, '${at("10:01")}'),
+      ('${T}', '${LD2}', true, '${at("09:05")}');
+    -- A last deposited 5 days before the click: a conversion. B deposited at
+    -- 08:00 and clicked at 09:05: already active, never a conversion.
+    insert into conversion_attributions (tenant_id, link_dispatch_id, source_type, source_id, player_id, window_started_at, classification, event_type, monetary_value, occurred_at) values
+      ('${T}', '${LD1}', 'journey', '${J1}', '${A}', '${at("10:05")}', 'direct', 'deposit_approved', 100, '${at("15:00")}'),
+      ('${T}', '${LD2}', 'campaign', '${CAMPAIGN}', '${B}', '${at("09:05")}', 'direct', 'deposit_approved', 40, '${at("11:00")}');
   `);
   await db.query(`select refresh_crm_results_day($1, $2::date)`, [T, DAY]);
 }, 60_000);
@@ -220,7 +245,7 @@ describe("crm_results_daily (golden day)", () => {
     const all = await rows();
     expect(all.reduce((sum, r) => sum + r.sent, 0)).toBe(4);
     expect(all.reduce((sum, r) => sum + r.failed, 0)).toBe(1);
-    expect(all.reduce((sum, r) => sum + r.human_clicks, 0)).toBe(1);
+    expect(all.reduce((sum, r) => sum + r.human_clicks, 0)).toBe(2);
     expect(all.reduce((sum, r) => sum + r.direct_conversions, 0)).toBe(1);
   });
 
@@ -332,12 +357,77 @@ describe("SMS price R$ 0,059", () => {
 describe("click conversion counts players (B-01)", () => {
   it("counts one player for one click followed by two deposits", async () => {
     await db.exec(`
-      insert into conversion_attributions (tenant_id, link_dispatch_id, classification, event_type, monetary_value, occurred_at)
-      values ('${T}', '${LD1}', 'direct', 'deposit_approved', 40, '${at("16:00")}');
+      insert into conversion_attributions (tenant_id, link_dispatch_id, source_type, source_id, player_id, window_started_at, classification, event_type, monetary_value, occurred_at)
+      values ('${T}', '${LD1}', 'journey', '${J1}', '${A}', '${at("10:05")}', 'direct', 'deposit_approved', 40, '${at("16:00")}');
     `);
     await db.query(`select refresh_crm_results_day($1, $2::date)`, [T, DAY]);
     const row = (await rows()).find((r) => r.source_key === J1);
     expect(row).toMatchObject({ human_clicks: 1, direct_conversions: 2, direct_players: 1 });
     expect(Number(row?.direct_revenue)).toBe(140);
+  });
+});
+
+describe("click conversion excludes players already active (rule_version 3)", () => {
+  const NEXT = "2026-10-11";
+
+  it("moves the deposit of a player active at the click out of the click revenue", async () => {
+    await db.query(`select refresh_crm_results_day($1, $2::date)`, [T, DAY]);
+    const row = (await rows()).find((r) => r.source_type === "campaign");
+    expect(row).toMatchObject({
+      human_clicks: 1,
+      converted_clicks: 0,
+      direct_conversions: 0,
+      direct_players: 0,
+      direct_active_conversions: 1,
+      direct_active_players: 1,
+    });
+    expect(Number(row?.direct_revenue)).toBe(0);
+    expect(Number(row?.direct_active_revenue)).toBe(40);
+  });
+
+  it("counts the clicked SMS that converted (cohort of the click)", async () => {
+    const row = (await rows()).find((r) => r.source_key === J1);
+    expect(row).toMatchObject({ human_clicks: 1, converted_clicks: 1, direct_active_players: 0 });
+  });
+
+  it("keeps crediting a reactivated player's later deposits without counting them again", async () => {
+    // Day after: A clicks the same SMS again and deposits. A is active by now,
+    // but the SMS reactivated A, so the deposit is still click revenue.
+    await db.exec(`
+      insert into deposits (tenant_id, player_id, valor, status, created_at) values
+        ('${T}', '${A}', 25, 'aprovado', '${NEXT}T10:00:00-03:00');
+      insert into conversion_attributions (tenant_id, link_dispatch_id, source_type, source_id, player_id, window_started_at, classification, event_type, monetary_value, occurred_at)
+      values ('${T}', '${LD1}', 'journey', '${J1}', '${A}', '${NEXT}T09:00:00-03:00', 'direct', 'deposit_approved', 25, '${NEXT}T10:00:00-03:00');
+    `);
+    await db.query(`select refresh_crm_results_day($1, $2::date)`, [T, NEXT]);
+    const { rows: next } = await db.query<Row>(
+      `select * from crm_results_daily where tenant_id = $1 and metric_date = $2 and source_key = $3`,
+      [T, NEXT, J1],
+    );
+    expect(next).toHaveLength(1);
+    expect(next[0]).toMatchObject({
+      direct_conversions: 1,
+      direct_players: 0,
+      direct_active_players: 0,
+    });
+    expect(Number(next[0].direct_revenue)).toBe(25);
+  });
+
+  it("counts distinct players over the period", async () => {
+    const { rows: period } = await db.query<{ converted_players: number; active_players: number }>(
+      `select * from crm_click_players_period($1, $2::date, $3::date)`,
+      [T, DAY, NEXT],
+    );
+    expect(period[0]).toMatchObject({ converted_players: 1, active_players: 1 });
+  });
+
+  it("reports only non-active click revenue as recovered on the journey cards", async () => {
+    const { rows: metrics } = await db.query<{
+      journey_id: string;
+      metrics: { recovered: number };
+    }>(`select * from list_journey_metrics($1)`, [T]);
+    // A on J1: 100 + 40 (B-01 test) + 25 (next day). B's campaign deposit is not a journey.
+    expect(Number(metrics.find((m) => m.journey_id === J1)?.metrics.recovered)).toBe(165);
+    expect(Number(metrics.find((m) => m.journey_id === J2)?.metrics.recovered)).toBe(0);
   });
 });

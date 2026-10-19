@@ -8,6 +8,8 @@ import {
   stepLabels,
   type CrmResultRow,
   type JourneyStepInfo,
+  type PeriodPlayers,
+  withPeriodPlayers,
 } from "./crm-results";
 import { resolveOperationalTenantId } from "./tenant-access.server";
 
@@ -45,7 +47,7 @@ function periodBounds(days: number, endOffset: number) {
 }
 
 const RESULT_COLUMNS =
-  "metric_date,source_type,source_key,source_id,step_position,player_state,sent,failed,cost,recipients,human_clicks,direct_conversions,direct_players,direct_revenue,influenced_players,influenced_deposits,influenced_revenue";
+  "metric_date,source_type,source_key,source_id,step_position,player_state,sent,failed,cost,recipients,human_clicks,converted_clicks,direct_conversions,direct_players,direct_revenue,direct_active_players,direct_active_revenue,influenced_players,influenced_deposits,influenced_revenue";
 
 /** crm_results_daily rows of one tenant between two BRT dates; PostgREST caps at 1,000 per page. */
 async function loadResultRows(db: any, tenantId: string, from: string, to: string) {
@@ -70,6 +72,23 @@ async function loadResultRows(db: any, tenantId: string, from: string, to: strin
   return rows;
 }
 
+/** Distinct click-converted and already-active players of the period. */
+export async function loadPeriodPlayers(
+  db: any,
+  tenantId: string,
+  from: string,
+  to: string,
+): Promise<PeriodPlayers | null> {
+  const { data, error } = await db.rpc("crm_click_players_period", {
+    _tenant: tenantId,
+    _from: from,
+    _to: to,
+  });
+  const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | null;
+  if (error || !row) return null;
+  return { converted: Number(row.converted_players ?? 0), active: Number(row.active_players ?? 0) };
+}
+
 /**
  * Central de Resultados: results of the tenant's journeys and campaigns in the
  * last `days` days (BRT), read from crm_results_daily (refreshed every 10 min).
@@ -84,9 +103,11 @@ export const getCrmResults = createServerFn({ method: "GET" })
 
     // Same-length period right before this one, for the variation on each KPI.
     const previous = periodBounds(data.days, data.endOffset + data.days);
-    const [rows, previousRows] = await Promise.all([
+    const [rows, previousRows, players, previousPlayers] = await Promise.all([
       loadResultRows(db, tenantId, from, to),
       loadResultRows(db, tenantId, previous.from, previous.to),
+      loadPeriodPlayers(db, tenantId, from, to),
+      loadPeriodPlayers(db, tenantId, previous.from, previous.to),
     ]);
 
     const journeyIds = [
@@ -246,10 +267,13 @@ export const getCrmResults = createServerFn({ method: "GET" })
       previous: {
         from: previous.from,
         to: previous.to,
-        totals: previousRows.length ? aggregateCrmResults(previousRows).totals : null,
+        totals: previousRows.length
+          ? withPeriodPlayers(aggregateCrmResults(previousRows).totals, previousPlayers)
+          : null,
       },
       stepNames: steps,
       ...result,
+      totals: withPeriodPlayers(result.totals, players),
       holdout,
       holdoutSetup,
       health: {

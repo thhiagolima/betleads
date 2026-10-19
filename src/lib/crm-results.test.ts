@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { aggregateCrmResults, compareHoldout, stepLabels, type CrmResultRow } from "./crm-results";
+import {
+  aggregateCrmResults,
+  compareHoldout,
+  stepLabels,
+  type CrmResultRow,
+  withPeriodPlayers,
+} from "./crm-results";
 
 const row = (overrides: Partial<CrmResultRow>): CrmResultRow => ({
   metric_date: "2026-10-10",
@@ -99,14 +105,42 @@ describe("aggregateCrmResults", () => {
 
   it("measures the click conversion in players, flagging small samples", () => {
     const click = aggregateCrmResults([
-      row({ sent: 1000, cost: 59, human_clicks: 20, direct_conversions: 9, direct_players: 6 }),
+      row({
+        sent: 1000,
+        cost: 59,
+        human_clicks: 20,
+        converted_clicks: 5,
+        direct_conversions: 9,
+        direct_players: 6,
+      }),
       row({ source_key: "j2", source_id: "j2", sent: 10, cost: 1, direct_players: 1 }),
     ]);
     expect(click.sources[0]).toMatchObject({ directPlayers: 6, smallSample: false });
     expect(click.sources[0].clickRate).toBeCloseTo(0.02);
-    expect(click.sources[0].conversionRate).toBeCloseTo(0.3);
+    // Clicks of the period that converted, not the day's players over the day's clicks.
+    expect(click.sources[0].conversionRate).toBeCloseTo(0.25);
     expect(click.sources[0].costPerConversion).toBeCloseTo(59 / 6);
     expect(click.sources[1].smallSample).toBe(true);
+  });
+
+  it("uses distinct period players for the totals, keeping already-active revenue apart", () => {
+    const daily = aggregateCrmResults([
+      row({ cost: 30, direct_players: 2, direct_revenue: 200, direct_active_players: 1 }),
+      row({ metric_date: "2026-10-11", cost: 30, direct_players: 2, direct_revenue: 100 }),
+      row({ metric_date: "2026-10-11", direct_active_players: 1, direct_active_revenue: 500 }),
+    ]).totals;
+    expect(daily).toMatchObject({ directPlayers: 4, directActivePlayers: 2 });
+    const totals = withPeriodPlayers(daily, { converted: 3, active: 1 });
+    expect(totals).toMatchObject({
+      directPlayers: 3,
+      directActivePlayers: 1,
+      directRevenue: 300,
+      directActiveRevenue: 500,
+      costOnActive: daily.costOnActive,
+    });
+    expect(totals.costPerConversion).toBeCloseTo(20);
+    expect(totals.clickRoi).toBeCloseTo(5);
+    expect(withPeriodPlayers(daily, null)).toBe(daily);
   });
 
   it("builds a daily series in date order", () => {

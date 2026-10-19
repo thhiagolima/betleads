@@ -21,7 +21,6 @@ import { type Data, dayLabel, isWaste, money, pct, ratio } from "./format";
 import { Delta, EmptyCard, InfoTip, Kpi } from "./shared";
 
 /** Conversions arrive up to 7 days after the click: the last week is still filling in. */
-const MATURING_DAYS = 7;
 
 export function Overview({
   data,
@@ -52,7 +51,10 @@ export function Overview({
     {
       label: "Jogadores convertidos",
       value: num(totals.directPlayers),
-      rate: totals.conversionRate == null ? null : `${pct(totals.conversionRate)} dos cliques`,
+      rate:
+        totals.conversionRate == null
+          ? null
+          : `${pct(totals.conversionRate)} dos cliques converteram`,
     },
   ];
   const recommendations = buildRecommendations(data, data.holdout);
@@ -64,10 +66,11 @@ export function Overview({
           <div>
             <h2 id="click-title" className="flex items-center gap-1.5 text-base font-semibold">
               Conversão por clique
-              <InfoTip text="Jogadores que clicaram no link do SMS e depositaram em até 7 dias. Conta jogadores, não depósitos: quem deposita 3 vezes conta 1." />
+              <InfoTip text="Jogadores que não depositavam havia 2+ dias (ou nunca depositaram), clicaram no link do SMS e depositaram em até 7 dias. Quem já estava ativo ia depositar de qualquer jeito e fica fora da conta. Conta jogadores, não depósitos: quem deposita 3 vezes conta 1, no dia do primeiro depósito. A taxa compara os cliques do período com quantos deles converteram." />
             </h2>
             <p className="text-sm text-muted-foreground">
-              Clicaram no link do SMS e depositaram em até 7 dias.
+              Parados há 2+ dias ou sem depósito que clicaram no link do SMS e depositaram em até 7
+              dias.
             </p>
           </div>
           {previous && (
@@ -137,10 +140,19 @@ export function Overview({
           />
         </div>
 
+        {totals.directActivePlayers > 0 && (
+          <p className="text-xs text-muted-foreground">
+            Fora da conta: {num(totals.directActivePlayers)}{" "}
+            {totals.directActivePlayers === 1 ? "jogador já ativo" : "jogadores já ativos"}{" "}
+            (depositaram nas 48 h antes do clique) somaram {brl(totals.directActiveRevenue)} depois
+            de clicar. Esse valor não entra no retorno.
+          </p>
+        )}
+
         <p className="flex items-start gap-2 text-xs text-muted-foreground">
           <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-          Conversões chegam até 7 dias depois do clique: os números dos últimos 7 dias ainda vão
-          crescer, e a comparação com o período anterior (já fechado) tende a ficar abaixo.
+          Jogadores e valor contam no dia do depósito. A taxa de conversão dos cliques dos últimos 7
+          dias ainda pode subir: quem clicou tem até 7 dias para depositar.
         </p>
       </section>
 
@@ -204,33 +216,23 @@ function DailyChart({ data }: { data: Data }) {
         origem na aba “Origens”.
       </EmptyCard>
     );
-  // The last 7 days are drawn dashed: their conversions are still arriving (B-02).
-  const cutoff = new Date(
-    new Date(`${data.to}T12:00:00Z`).getTime() - (MATURING_DAYS - 1) * 86_400_000,
-  )
-    .toISOString()
-    .slice(0, 10);
+  // Revenue counts on the day of the deposit, so a closed day does not grow.
   const points = data.daily.map((day) => ({
     label: dayLabel(day.date),
     cost: day.cost,
-    // The cutoff day belongs to both lines so they join.
-    closed: day.date <= cutoff ? day.directRevenue : null,
-    maturing: day.date >= cutoff ? day.directRevenue : null,
+    converted: day.directRevenue,
     recovered: day.influencedRevenue,
   }));
   const names: Record<string, string> = {
     cost: "Custo em SMS",
-    closed: "Conversão por clique",
-    maturing: "Conversão por clique (ainda chegando)",
+    converted: "Conversão por clique",
     recovered: "Recuperado (visão ampla)",
   };
   return (
     <Card>
       <CardHeader>
         <CardTitle className="text-base">Custo × conversão por dia</CardTitle>
-        <CardDescription>
-          Trecho tracejado: últimos 7 dias, conversões ainda chegando.
-        </CardDescription>
+        <CardDescription>Valor convertido pelo dia do depósito.</CardDescription>
       </CardHeader>
       <CardContent className="h-72">
         <ResponsiveContainer width="100%" height="100%">
@@ -256,14 +258,7 @@ function DailyChart({ data }: { data: Data }) {
               strokeDasharray="2 3"
               dot={false}
             />
-            <Line dataKey="closed" stroke="oklch(0.72 0.18 150)" strokeWidth={3} dot={false} />
-            <Line
-              dataKey="maturing"
-              stroke="oklch(0.72 0.18 150)"
-              strokeWidth={3}
-              strokeDasharray="6 4"
-              dot={false}
-            />
+            <Line dataKey="converted" stroke="oklch(0.72 0.18 150)" strokeWidth={3} dot={false} />
           </ComposedChart>
         </ResponsiveContainer>
       </CardContent>

@@ -29,6 +29,9 @@ const HEADER = [
   "custo_por_recuperado",
   "retorno_recuperados",
   "depositos_apos_clique",
+  "cliques_convertidos",
+  "jogadores_ja_ativos_clique",
+  "receita_ja_ativos_clique",
 ];
 
 const metricCells = (metrics: CrmMetricsWithRatios) => [
@@ -54,6 +57,9 @@ const resultCells = (metrics: CrmMetricsWithRatios) => [
   amount(metrics.costPerRecovered),
   metrics.roi == null ? "" : metrics.roi.toFixed(2),
   metrics.directConversions,
+  metrics.convertedClicks,
+  metrics.directActivePlayers,
+  amount(metrics.directActiveRevenue),
 ];
 
 export function crmResultsCsv(
