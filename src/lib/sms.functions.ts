@@ -2184,15 +2184,39 @@ export const cancelScheduledSmsCampaign = createServerFn({ method: "POST" })
   .inputValidator((input) => z.object({ id: dbUuid() }).parse(input))
   .handler(async ({ data, context }) => {
     const tenantId = await resolveCurrentTenantId(context.supabase);
+    // The reason is kept on the campaign so the list and the report can say
+    // who cancelled it and when (status alone read as "Ação necessária").
+    const actor = String((context.claims as { email?: unknown }).email ?? "") || "um usuário";
+    const cancelledAt = new Date();
+    const when = cancelledAt.toLocaleString("pt-BR", {
+      timeZone: "America/Sao_Paulo",
+      dateStyle: "short",
+      timeStyle: "short",
+    });
     const { data: updated, error } = await context.supabase
       .from("sms_campaigns")
-      .update({ status: "cancelada" })
+      .update({ status: "cancelada", last_error: `Cancelada manualmente por ${actor} em ${when}.` })
       .eq("id", data.id)
       .eq("tenant_id", tenantId)
       .eq("status", "agendada")
-      .select("id")
+      .select("id, name, scheduled_at, total_count")
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!updated) throw new Error("Campanha não pode mais ser cancelada");
+    const { error: auditError } = await supabaseAdmin.from("tenant_audit_logs").insert({
+      tenant_id: tenantId,
+      actor_user_id: context.userId,
+      action: "sms_campaign.cancelled",
+      entity_type: "sms_campaign",
+      entity_id: data.id,
+      before_data: { status: "agendada" } as Json,
+      after_data: { status: "cancelada" } as Json,
+      metadata: { ...updated, actor_email: actor, cancelled_at: cancelledAt.toISOString() } as Json,
+    });
+    if (auditError)
+      console.warn("[sms-campaigns] cancelamento sem auditoria", {
+        campaignId: data.id,
+        error: auditError.message,
+      });
     return { ok: true };
   });

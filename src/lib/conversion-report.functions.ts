@@ -307,7 +307,7 @@ export const getCampaignReportDetails = createServerFn({ method: "GET" })
       db
         .from("sms_campaigns")
         .select(
-          "id,name,content,route,status,total_count,sent_count,deduplicated_count,failed_count,scheduled_at,created_at,updated_at,recipients",
+          "id,name,content,route,status,total_count,sent_count,deduplicated_count,failed_count,scheduled_at,created_at,updated_at,recipients,last_error",
         )
         .eq("tenant_id", tenantId)
         .eq("id", data.campaignId)
@@ -415,6 +415,7 @@ export const getCampaignReportDetails = createServerFn({ method: "GET" })
           createdAt: sms.created_at,
           finishedAt: sms.updated_at,
           audience: Array.isArray(sms.recipients) ? sms.recipients.length : 0,
+          lastError: (sms.last_error as string | null) ?? null,
         }
       : email
         ? {
@@ -434,6 +435,7 @@ export const getCampaignReportDetails = createServerFn({ method: "GET" })
             createdAt: email.created_at,
             finishedAt: email.updated_at,
             audience: Number(email.stats?.total ?? email.stats?.destinatarios ?? 0),
+            lastError: null,
           }
         : voice
           ? {
@@ -454,6 +456,7 @@ export const getCampaignReportDetails = createServerFn({ method: "GET" })
                 ? voice.updated_at
                 : null,
               audience: 1,
+              lastError: null,
             }
           : null;
 

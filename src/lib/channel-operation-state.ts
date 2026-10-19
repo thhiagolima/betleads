@@ -21,6 +21,24 @@ const HISTORY_DESTINATION: Record<ChannelOperation, string> = {
   voice: "/ligacoes#historico",
 };
 
+/** Reason shown for a cancelled or failed campaign (null for any other status). */
+export function campaignStopReason(
+  status: string | null | undefined,
+  lastError: string | null | undefined,
+  updatedAt: string | null | undefined,
+): string | null {
+  const normalized = (status ?? "").trim().toLowerCase();
+  if (["cancelada", "cancelled", "canceled"].includes(normalized)) {
+    if (lastError) return lastError;
+    // Cancelled before the reason was recorded: only the time is known.
+    return updatedAt
+      ? `Cancelada manualmente em ${new Date(updatedAt).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", dateStyle: "short", timeStyle: "short" })}.`
+      : "Cancelada manualmente.";
+  }
+  if (["falhou", "failed", "error", "rejected"].includes(normalized)) return lastError || null;
+  return null;
+}
+
 export function getChannelOperationState(
   status: string | null | undefined,
   channel: ChannelOperation,
@@ -79,7 +97,18 @@ export function getChannelOperationState(
     };
   }
 
-  if (["failed", "falhou", "error", "cancelled", "cancelada", "rejected"].includes(normalized)) {
+  if (["cancelled", "canceled", "cancelada"].includes(normalized)) {
+    return {
+      label: "Cancelada",
+      description: "A campanha foi cancelada antes do envio; nenhuma mensagem saiu.",
+      nextAction: "Para enviar, crie ou agende uma nova campanha.",
+      actionLabel: "Ver campanhas",
+      actionTo: "/campanhas",
+      tone: "border-border bg-muted/40 text-muted-foreground",
+    };
+  }
+
+  if (["failed", "falhou", "error", "rejected"].includes(normalized)) {
     return {
       label: "Ação necessária",
       description: "O envio não foi concluído e precisa de revisão antes de uma nova tentativa.",

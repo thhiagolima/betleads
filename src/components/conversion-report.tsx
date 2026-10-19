@@ -18,6 +18,7 @@ import {
   getJourneyReportDetails,
 } from "@/lib/conversion-report.functions";
 import { TRIGGER_NAMES, type TriggerType } from "@/lib/triggers";
+import { campaignStopReason, getChannelOperationState } from "@/lib/channel-operation-state";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -322,6 +323,9 @@ function CampaignReport({
   const failureReasons = Object.entries(details?.failureReasons ?? {}).sort((a, b) => b[1] - a[1]);
   const directRevenue = data.revenue;
   const costPerReturn = deposited ? directRevenue / deposited : 0;
+  const stopReason = campaign
+    ? campaignStopReason(campaign.status, campaign.lastError, campaign.finishedAt)
+    : null;
 
   const setActiveFilter = (next: RecipientFilter) => {
     setFilter(next);
@@ -359,6 +363,14 @@ function CampaignReport({
         </header>
 
         <div className="space-y-4 p-4 sm:p-5">
+          {stopReason && campaign ? (
+            <section className="rounded-xl border border-border bg-muted/40 p-3 text-sm">
+              <p className="font-semibold">
+                {getChannelOperationState(campaign.status, campaign.channel).label}
+              </p>
+              <p className="mt-1 text-muted-foreground">{stopReason}</p>
+            </section>
+          ) : null}
           <section className="grid gap-3 rounded-xl bg-card/60 p-3 text-xs sm:grid-cols-3 lg:grid-cols-5">
             <TimelineValue label="Criada em" value={dateTime(campaign?.createdAt)} />
             <TimelineValue label="Disparo iniciado" value={dateTime(campaign?.scheduledAt)} />

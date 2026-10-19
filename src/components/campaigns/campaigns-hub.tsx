@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { num } from "@/lib/format";
-import { getChannelOperationState } from "@/lib/channel-operation-state";
+import { campaignStopReason, getChannelOperationState } from "@/lib/channel-operation-state";
 import { cancelScheduledSmsCampaign, listScheduledSmsCampaigns } from "@/lib/sms.functions";
 import { listEmailCampaigns } from "@/lib/email.functions";
 import { listCallQueue } from "@/lib/calls.functions";
@@ -40,6 +40,9 @@ type Campaign = {
   failed_count: number | null;
   /** ENV-06: recipients skipped because they did not resolve to a player. */
   unresolved_count?: number | null;
+  /** Why the campaign stopped (provider error, or who cancelled it). */
+  last_error?: string | null;
+  updated_at?: string | null;
   channel: "sms" | "email" | "voice";
   cancellable?: boolean;
 };
@@ -410,6 +413,11 @@ export function CampaignsHub() {
             const deduplicated = Number(campaign.deduplicated_count ?? 0);
             const completed = delivered + deduplicated + Number(campaign.failed_count ?? 0);
             const operation = getChannelOperationState(campaign.status, campaign.channel);
+            const reason = campaignStopReason(
+              campaign.status,
+              campaign.last_error,
+              campaign.updated_at,
+            );
             return (
               <div
                 key={campaign.id}
@@ -440,6 +448,11 @@ export function CampaignsHub() {
                     · {num(total)} destinatários ·{" "}
                     {new Date(campaign.scheduled_at).toLocaleString("pt-BR")}
                   </p>
+                  {reason ? (
+                    <p className="mt-1 text-xs text-foreground/80">
+                      <span className="font-medium">Motivo:</span> {reason}
+                    </p>
+                  ) : null}
                   <p className="mt-1 text-xs text-muted-foreground">{operation.nextAction}</p>
                 </div>
                 <CampaignMetric label="Enviados" value={num(delivered)} />
