@@ -115,4 +115,20 @@ alinhado com a visão ampla (6,1x). Os valores finais depois do recálculo estã
 
 ### Registro de implantação
 
-_(preenchido após a aplicação em produção)_
+**19/10/2026.** A migração foi aplicada numa transação única, com o recálculo automático travado.
+Foram recalculados 43 dias×casa em 29 s, com 0 falha na verificação de saúde de 18/10 e todas as
+linhas em rule_version 3. A migração está registrada em `supabase_migrations.schema_migrations`.
+
+Sorte Alta depois do recálculo:
+
+| Dia | Custo | Cliques | Cliques convertidos | Jogadores | Valor convertido | Já ativos (fora do retorno) |
+|---|---|---|---|---|---|---|
+| 15/10 | R$ 723,34 | 251 | 22 | 17 | R$ 1.510,43 | 13 · R$ 2.783,41 |
+| 16/10 | R$ 1.745,99 | 937 | 67 | 44 | R$ 7.435,00 | 56 · R$ 13.769,26 |
+| 17/10 | R$ 1.144,01 | 492 | 25 | 32 | R$ 11.624,04 | 93 · R$ 19.006,55 |
+| 18/10 | R$ 738,80 | 400 | 5 (maturando) | 13 | R$ 6.717,54 | 70 · R$ 16.186,97 |
+
+- 18/10: retorno de 31,0x para 9,1x; custo por convertido de R$ 7,78 para R$ 56,83.
+- Últimos 7 dias, retorno por clique: Sorte Alta 5,2x · PixReals 1,8x · Casa Betleads 1,7x ·
+  ForrandoBet 0,4x.
+- Jornadas da Sorte Alta, "recuperado" total: de R$ 38.321,78 para R$ 12.414,99.
