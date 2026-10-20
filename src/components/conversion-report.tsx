@@ -62,6 +62,10 @@ type RecipientFilter =
 const money = (value: number) =>
   value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const number = (value: number) => value.toLocaleString("pt-BR");
+const percent = (part: number, whole: number) =>
+  `${((part / whole) * 100).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
+const ratio = (value: number) =>
+  value.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const dateTime = (value?: string | null) =>
   value
     ? new Date(value).toLocaleString("pt-BR", {
@@ -296,12 +300,18 @@ function CampaignReport({
     () => (details?.recipients ?? []) as Recipient[],
     [details?.recipients],
   );
+  // Every count comes from the whole campaign (server). `recipients` holds only
+  // the first rows of the list and must never feed a total or a rate.
   const delivered = data.delivered ?? 0;
-  const clicked = recipients.filter((row) => row.clicked).length || data.clicked || 0;
-  const deposited = recipients.filter((row) => row.depositAt).length || data.depositors;
-  const notClicked = Math.max(0, delivered - clicked);
-  const clickedNoDeposit = Math.max(0, clicked - deposited);
+  const clicked = data.clicked ?? 0;
+  const depositors = data.depositors;
+  const activeDepositors = data.activeDepositors ?? 0;
+  // Without delivery receipts the click rate falls back to the sent messages.
+  const reached = delivered || data.sent;
+  const notClicked = Math.max(0, reached - clicked);
+  const clickedNoDeposit = Math.max(0, clicked - depositors - activeDepositors);
   const audience = campaign?.total || campaign?.audience || details?.trackedDeliveries || data.sent;
+  const listIsPartial = Boolean(details && audience > details.recipientsShown);
   const filtered = useMemo(
     () =>
       recipients.filter((row) => {
@@ -313,7 +323,8 @@ function CampaignReport({
         if (filter === "engaged") return Boolean(row.loginOrGameAt);
         if (filter === "first-deposit") return Boolean(row.firstDepositAt);
         if (filter === "deposited") return Boolean(row.depositAt);
-        if (filter === "clicked-no-deposit") return row.clicked && !row.depositAt;
+        if (filter === "clicked-no-deposit")
+          return row.clicked && !row.depositAt && !row.activeDepositAt;
         return true;
       }),
     [filter, recipients],
@@ -322,7 +333,8 @@ function CampaignReport({
   const visible = filtered.slice((page - 1) * pageSize, page * pageSize);
   const failureReasons = Object.entries(details?.failureReasons ?? {}).sort((a, b) => b[1] - a[1]);
   const directRevenue = data.revenue;
-  const costPerReturn = deposited ? directRevenue / deposited : 0;
+  const revenuePerPlayer = depositors ? directRevenue / depositors : 0;
+  const smsCost = data.smsCost ?? null;
   const stopReason = campaign
     ? campaignStopReason(campaign.status, campaign.lastError, campaign.finishedAt)
     : null;
@@ -350,8 +362,10 @@ function CampaignReport({
               </h1>
             </div>
             <p className="text-xs text-sky-400">
-              {data.depositors
-                ? `${number(data.depositors)} jogador${data.depositors === 1 ? "" : "es"} depositou após a campanha`
+              {depositors
+                ? depositors === 1
+                  ? "1 jogador depositou após a campanha"
+                  : `${number(depositors)} jogadores depositaram após a campanha`
                 : `${number(audience)} destinatários no público`}
             </p>
           </div>
@@ -459,22 +473,22 @@ function CampaignReport({
               label="Clicaram"
               value={data.clicked === null ? "—" : number(clicked)}
               hint={
-                delivered
-                  ? `${Math.round((clicked / delivered) * 100)}% de quem recebeu`
+                reached
+                  ? `${percent(clicked, reached)} ${delivered ? "de quem recebeu" : "dos enviados"}`
                   : undefined
               }
             />
-            <Metric label="Cadastros" value={number(data.registered)} />
-            <Metric label="Login ou jogo" value={number(data.loginOrGame)} />
-            <Metric label="Primeiro depósito" value={number(data.ftd)} accent />
+            <Metric label="Cadastros" value={number(data.registered)} hint="jogadores" />
+            <Metric
+              label="Login ou jogo"
+              value={number(data.loginOrGame)}
+              hint={clicked ? `${percent(data.loginOrGame, clicked)} de quem clicou` : "jogadores"}
+            />
+            <Metric label="Primeiro depósito" value={number(data.ftd)} hint="jogadores" accent />
             <Metric
               label="Depositaram"
-              value={number(data.depositors)}
-              hint={
-                clicked
-                  ? `${Math.round((data.depositors / clicked) * 100)}% de quem clicou`
-                  : undefined
-              }
+              value={number(depositors)}
+              hint={clicked ? `${percent(depositors, clicked)} de quem clicou` : undefined}
               accent
             />
           </section>
@@ -483,7 +497,9 @@ function CampaignReport({
             <p className="text-xs text-emerald-300">Total da campanha, desde o disparo</p>
             <p className="mt-1 text-2xl font-bold text-emerald-400">{money(directRevenue)}</p>
             <p className="mt-1 text-xs text-sky-300">
-              de {number(data.depositors)} jogadores atribuídos pelo último clique em até 7 dias
+              de {number(depositors)}{" "}
+              {depositors === 1 ? "jogador atribuído" : "jogadores atribuídos"} pelo último clique
+              em até 7 dias
             </p>
             <ActiveNote players={data.activeDepositors} revenue={data.activeRevenue} />
             {data.assistedRevenue > 0 ? (
@@ -495,15 +511,23 @@ function CampaignReport({
 
           <section className="grid gap-2 sm:grid-cols-3">
             <Metric
-              label={campaign?.channel === "email" ? "Consumo de e-mail" : "Consumo de SMS"}
-              value={`${number(data.sent)} envios`}
-              hint="custo financeiro indisponível"
+              label={campaign?.channel === "email" ? "Consumo de e-mail" : "Custo em SMS"}
+              value={smsCost === null ? `${number(data.sent)} envios` : money(smsCost)}
+              hint={
+                smsCost === null
+                  ? "custo financeiro indisponível"
+                  : `${number(data.sent)} envios × ${money(data.smsPrice ?? 0)}`
+              }
             />
-            <Metric label="ROAS" value="—" hint="aguardando custo confirmado" />
             <Metric
-              label="Valor médio por jogador que voltou"
-              value={deposited ? money(costPerReturn) : "—"}
-              hint={`${number(deposited)} retornos atribuídos`}
+              label="ROAS"
+              value={smsCost ? `${ratio(directRevenue / smsCost)}x` : "—"}
+              hint={smsCost ? "total da campanha ÷ custo em SMS" : "sem custo de envio"}
+            />
+            <Metric
+              label="Receita média por jogador que voltou"
+              value={depositors ? money(revenuePerPlayer) : "—"}
+              hint={`${number(depositors)} ${depositors === 1 ? "jogador atribuído" : "jogadores atribuídos"}`}
             />
           </section>
 
@@ -545,7 +569,7 @@ function CampaignReport({
                 active={filter === "delivered"}
                 onClick={() => setActiveFilter("delivered")}
               >
-                Entregues {number(delivered)}
+                Entregues {data.delivered === null ? "—" : number(delivered)}
               </FilterButton>
               <FilterButton
                 active={filter === "clicked"}
@@ -583,7 +607,7 @@ function CampaignReport({
                 onClick={() => setActiveFilter("deposited")}
                 tone="green"
               >
-                Depositaram {number(deposited)}
+                Depositaram {number(depositors)}
               </FilterButton>
               <FilterButton
                 active={filter === "clicked-no-deposit"}
@@ -593,6 +617,13 @@ function CampaignReport({
                 Clicaram e não depositaram {number(clickedNoDeposit)}
               </FilterButton>
             </div>
+            {listIsPartial && details ? (
+              <p className="mb-3 text-xs text-muted-foreground">
+                Os números dos filtros são da campanha inteira. A lista abaixo mostra só os
+                primeiros {number(details.recipientsShown)} de {number(audience)} destinatários; o
+                CSV traz todos.
+              </p>
+            ) : null}
 
             {detailsError ? (
               <div className="rounded-xl border p-5 text-sm text-muted-foreground">
@@ -630,12 +661,6 @@ function CampaignReport({
                     </Button>
                   </div>
                 </div>
-                {details && audience > details.recipientsShown ? (
-                  <p className="text-xs text-muted-foreground">
-                    Mostrando os primeiros {number(details.recipientsShown)} de {number(audience)} —
-                    o CSV traz todos os registros rastreados.
-                  </p>
-                ) : null}
               </>
             )}
           </section>

@@ -225,3 +225,37 @@ export function journeyStepPositionRanges(steps: JourneyStepRef[]) {
   }
   return ranges;
 }
+
+export type CampaignFunnelAttribution = {
+  player_id?: string | null;
+  link_dispatch_id?: string | null;
+  tracking_token?: string | null;
+  event_type?: string | null;
+  classification?: string | null;
+  is_ftd?: boolean | null;
+  player_active_at_click?: boolean | null;
+};
+
+/**
+ * Funnel steps of a campaign in distinct players, like "Depositaram". A player
+ * already active at the click (rule_version 3) leaves the whole funnel of that
+ * SMS, not only its deposits, so login and deposit share the same base.
+ */
+export function campaignFunnelPlayers(attributions: CampaignFunnelAttribution[]) {
+  const sms = (row: CampaignFunnelAttribution) =>
+    String(row.link_dispatch_id ?? row.tracking_token ?? row.player_id);
+  const direct = attributions.filter((row) => row.classification === "direct");
+  const activeSms = new Set(
+    direct
+      .filter((row) => row.event_type === "deposit_approved" && row.player_active_at_click)
+      .map(sms),
+  );
+  const counted = direct.filter((row) => !activeSms.has(sms(row)));
+  const players = (match: (row: CampaignFunnelAttribution) => boolean) =>
+    new Set(counted.filter(match).map((row) => String(row.player_id))).size;
+  return {
+    registered: players((row) => row.event_type === "registered"),
+    loginOrGame: players((row) => row.event_type === "login" || row.event_type === "game"),
+    ftd: players((row) => row.event_type === "deposit_approved" && row.is_ftd === true),
+  };
+}

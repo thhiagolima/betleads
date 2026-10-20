@@ -6,6 +6,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { resolveOperationalTenantId } from "./tenant-access.server";
 import {
   buildJourneyStepConversions,
+  campaignFunnelPlayers,
   canAccessConversionDrilldown,
   journeyStepPositionRanges,
   uniqueDeliveryCount,
@@ -657,7 +658,7 @@ export const getCampaignReportDetails = createServerFn({ method: "GET" })
         observedClickCount,
         registeredAt: registered?.occurred_at ?? null,
         loginOrGameAt: loginOrGame?.occurred_at ?? null,
-        firstDepositAt: firstDeposit?.occurred_at ?? null,
+        firstDepositAt: alreadyActive ? null : (firstDeposit?.occurred_at ?? null),
         depositAt: deposit?.occurred_at ?? null,
         depositValue: Number(deposit?.monetary_value ?? 0),
         activeDepositAt: alreadyActive ? (firstDirectDeposit?.occurred_at ?? null) : null,
@@ -1026,6 +1027,7 @@ export const getConversionReport = createServerFn({ method: "GET" })
       smsCampaignResult,
       emailCampaignResult,
       journeyStepsResult,
+      smsPrice,
     ] = await Promise.all([
       selectAllPages<any>("link_dispatches", () =>
         db
@@ -1072,6 +1074,24 @@ export const getConversionReport = createServerFn({ method: "GET" })
             .eq("journey_id", data.sourceId)
             .order("position")
         : Promise.resolve({ data: [], error: null }),
+      // Same price the Central de Resultados uses as SMS cost.
+      data.sourceType === "campaign"
+        ? Promise.all([
+            supabaseAdmin
+              .from("tenant_sms_pricing")
+              .select("sale_price_per_sms")
+              .eq("tenant_id", tenantId)
+              .maybeSingle(),
+            supabaseAdmin
+              .from("sms_credit_settings")
+              .select("default_sale_price_per_sms")
+              .maybeSingle(),
+          ]).then(([pricing, settings]) =>
+            Number(
+              pricing.data?.sale_price_per_sms ?? settings.data?.default_sale_price_per_sms ?? 0.12,
+            ),
+          )
+        : Promise.resolve(null),
     ]);
     if (dispatchResult.error) throw new Error(dispatchResult.error.message);
     if (attributionResult.error) throw new Error(attributionResult.error.message);
@@ -1172,11 +1192,13 @@ export const getConversionReport = createServerFn({ method: "GET" })
       dispatches,
       (row: any) => dispatchClickCount(row) > 0,
     );
-    const count = (eventType: string) =>
-      attributions.filter(
-        (item: any) => item.event_type === eventType && item.classification === "direct",
-      ).length;
-    const deposits = count("deposit_approved");
+    const deposits = attributions.filter(
+      (item: any) => item.event_type === "deposit_approved" && item.classification === "direct",
+    ).length;
+    const funnel = campaignFunnelPlayers(allAttributions);
+    // Only SMS campaigns have a per-message price; e-mail stays without cost.
+    const smsCost =
+      smsPrice !== null && smsCampaignResult.data ? Number((sent * smsPrice).toFixed(2)) : null;
     const depositors = new Set(
       attributions
         .filter(
@@ -1205,8 +1227,9 @@ export const getConversionReport = createServerFn({ method: "GET" })
       // legacy diagnostics and is never causal evidence.
       clicked: dispatches.length ? clicked : null,
       observedClicked: clicksByLink.size ? observedClicked : null,
-      registered: count("registered"),
-      loginOrGame: count("login") + count("game"),
+      // Funnel steps in distinct players, without players already active.
+      registered: funnel.registered,
+      loginOrGame: funnel.loginOrGame,
       deposits,
       depositors,
       activeDepositors: new Set(activeDeposits.map((item: any) => String(item.player_id))).size,
@@ -1214,11 +1237,10 @@ export const getConversionReport = createServerFn({ method: "GET" })
         (sum: number, item: any) => sum + Number(item.monetary_value ?? 0),
         0,
       ),
-      ftd: attributions.filter(
-        (item: any) =>
-          item.event_type === "deposit_approved" && item.is_ftd && item.classification === "direct",
-      ).length,
+      ftd: funnel.ftd,
       revenue,
+      smsPrice: smsCampaignResult.data ? smsPrice : null,
+      smsCost,
       assistedRevenue: attributions
         .filter(
           (item: any) =>

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildJourneyStepConversions,
+  campaignFunnelPlayers,
   canAccessConversionDrilldown,
   journeyStepPositionRanges,
   deliveryIdentity,
@@ -292,5 +293,52 @@ describe("journey copy rotation", () => {
     });
     expect(result.steps[0].variants).toEqual([]);
     expect(result.steps[0].withoutVariant.sent).toBe(4);
+  });
+});
+
+describe("campaign funnel players", () => {
+  const row = (
+    player: string,
+    dispatch: string,
+    event_type: string,
+    extra: Partial<{
+      is_ftd: boolean;
+      player_active_at_click: boolean;
+      classification: string;
+    }> = {},
+  ) => ({
+    player_id: player,
+    link_dispatch_id: dispatch,
+    event_type,
+    classification: "direct",
+    ...extra,
+  });
+
+  it("counts distinct players, not events", () => {
+    const funnel = campaignFunnelPlayers([
+      row("p1", "d1", "login"),
+      row("p1", "d1", "game"),
+      row("p1", "d1", "login"),
+      row("p2", "d2", "registered"),
+      row("p2", "d2", "deposit_approved", { is_ftd: true }),
+      row("p2", "d2", "deposit_approved"),
+    ]);
+    expect(funnel).toEqual({ registered: 1, loginOrGame: 1, ftd: 1 });
+  });
+
+  it("leaves out every step of a dispatch whose player was already active", () => {
+    const funnel = campaignFunnelPlayers([
+      row("active", "d1", "login"),
+      row("active", "d1", "deposit_approved", { player_active_at_click: true }),
+      row("new", "d2", "login"),
+    ]);
+    expect(funnel.loginOrGame).toBe(1);
+  });
+
+  it("ignores assisted attributions", () => {
+    const funnel = campaignFunnelPlayers([
+      row("p1", "d1", "login", { classification: "assisted" }),
+    ]);
+    expect(funnel.loginOrGame).toBe(0);
   });
 });
