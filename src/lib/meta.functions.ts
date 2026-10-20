@@ -3,6 +3,15 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { resolveMetaApiVersion } from "@/lib/meta-api-version";
+import {
+  INSIGHT_FIELDS,
+  catalogRow,
+  catalogRowsFromInsights,
+  insightRow,
+  syncWindow,
+  type MetaAd,
+  type MetaInsight,
+} from "@/lib/meta-sync-rows";
 import { decryptMetaToken, encryptMetaToken, metaTokenHint } from "@/lib/meta-token.server";
 import { assertTenantNotDemo, listDemoTenantIds } from "@/lib/tenant-access.server";
 
@@ -19,50 +28,6 @@ const metaAccountSelectionSchema = z.object({
   accountIds: z.array(z.string().uuid()).max(200),
 });
 
-type MetaInsight = {
-  date_start?: string;
-  campaign_id?: string;
-  campaign_name?: string;
-  adset_id?: string;
-  adset_name?: string;
-  ad_id?: string;
-  ad_name?: string;
-  spend?: string;
-  impressions?: string;
-  clicks?: string;
-  ctr?: string;
-  cpc?: string;
-  cpm?: string;
-  reach?: string;
-  frequency?: string;
-};
-
-type MetaAd = {
-  id: string;
-  name?: string;
-  status?: string;
-  effective_status?: string;
-  campaign?: {
-    id?: string;
-    name?: string;
-    status?: string;
-    effective_status?: string;
-  };
-  adset?: {
-    id?: string;
-    name?: string;
-    status?: string;
-    effective_status?: string;
-  };
-  creative?: {
-    id?: string;
-    name?: string;
-    thumbnail_url?: string;
-    image_url?: string;
-    effective_object_story_id?: string;
-  };
-};
-
 type MetaAccountForSync = {
   id: string;
   tenant_id: string;
@@ -71,6 +36,7 @@ type MetaAccountForSync = {
   account_id: string | null;
   name: string | null;
   currency: string | null;
+  timezone_name: string | null;
   meta_connections:
     | {
         access_token: string;
@@ -101,14 +67,6 @@ function metaApiVersion() {
   return resolveMetaApiVersion(process.env.META_API_VERSION);
 }
 
-function dateOnly(date: Date) {
-  return date.toISOString().slice(0, 10);
-}
-
-function toNumber(value: unknown) {
-  const n = Number(value ?? 0);
-  return Number.isFinite(n) ? n : 0;
-}
 
 function accountPath(id: string) {
   return id.startsWith("act_") ? id : `act_${id}`;
@@ -140,27 +98,12 @@ async function fetchMetaJson<T>(path: string, params: Record<string, string>) {
   return json as T & { paging?: { next?: string } };
 }
 
-async function loadInsights(accessToken: string, adAccountId: string, days: number) {
-  const until = new Date();
-  const since = new Date();
-  since.setDate(until.getDate() - (days - 1));
-
-  const fields = [
-    "campaign_id",
-    "campaign_name",
-    "adset_id",
-    "adset_name",
-    "ad_id",
-    "ad_name",
-    "spend",
-    "impressions",
-    "clicks",
-    "ctr",
-    "cpc",
-    "cpm",
-    "reach",
-    "frequency",
-  ].join(",");
+async function loadInsights(
+  accessToken: string,
+  adAccountId: string,
+  window: { since: string; until: string },
+) {
+  const fields = INSIGHT_FIELDS;
 
   const first = await fetchMetaJson<{ data?: MetaInsight[] }>(
     `/${accountPath(adAccountId)}/insights`,
@@ -170,10 +113,7 @@ async function loadInsights(accessToken: string, adAccountId: string, days: numb
       level: "ad",
       time_increment: "1",
       limit: "500",
-      time_range: JSON.stringify({
-        since: dateOnly(since),
-        until: dateOnly(until),
-      }),
+      time_range: JSON.stringify(window),
     },
   );
 
@@ -684,66 +624,51 @@ async function syncMetaAccount(tenantId: string, account: MetaAccountForSync, da
     .update({ sync_status: "syncing", last_attempt_at: now, last_error: null })
     .eq("id", account.id)
     .eq("tenant_id", tenantId);
-  const activeAds = await loadActiveAds(token, account.meta_ad_account_id);
+  const activeAds: MetaAd[] = await loadActiveAds(token, account.meta_ad_account_id);
   if (activeAds.length > 0) {
-    const today = dateOnly(new Date());
-    const rows = activeAds.map((ad) => ({
-      tenant_id: tenantId,
-      provider: "meta",
-      ad_account_id: account.meta_ad_account_id,
-      campaign_id: ad.campaign?.id ?? null,
-      campaign_name: ad.campaign?.name ?? null,
-      adset_id: ad.adset?.id ?? null,
-      adset_name: ad.adset?.name ?? null,
-      ad_id: ad.id,
-      ad_name: ad.name ?? ad.id,
-      creative_name: ad.name ?? ad.id,
-      metric_date: today,
-      spend: 0,
-      impressions: 0,
-      clicks: 0,
-      ctr: 0,
-      cpc: 0,
-      cpm: 0,
-      raw: ad,
-      imported_at: now,
-    }));
-    const { error } = await supabaseAdmin
-      .from("marketing_ad_metrics_daily")
-      .upsert(rows, { onConflict: "tenant_id,provider,metric_date,ad_account_id,ad_id" });
+    const { error } = await (supabaseAdmin as any).from("meta_ads").upsert(
+      activeAds.map((ad) => catalogRow(tenantId, account.meta_ad_account_id, ad, now)),
+      { onConflict: "tenant_id,ad_account_id,ad_id" },
+    );
     if (error) throw new Error(error.message);
-    imported += rows.length;
   }
 
-  const insights = await loadInsights(token, account.meta_ad_account_id, days);
-  if (insights.length > 0) {
-    const rows = insights.map((row) => ({
-      tenant_id: tenantId,
-      provider: "meta",
-      ad_account_id: account.meta_ad_account_id,
-      campaign_id: row.campaign_id ?? null,
-      campaign_name: row.campaign_name ?? null,
-      adset_id: row.adset_id ?? null,
-      adset_name: row.adset_name ?? null,
-      ad_id: row.ad_id ?? null,
-      ad_name: row.ad_name ?? null,
-      creative_name: row.ad_name ?? null,
-      metric_date: row.date_start ?? dateOnly(new Date()),
-      spend: toNumber(row.spend),
-      impressions: Math.round(toNumber(row.impressions)),
-      clicks: Math.round(toNumber(row.clicks)),
-      ctr: toNumber(row.ctr),
-      cpc: toNumber(row.cpc),
-      cpm: toNumber(row.cpm),
-      raw: row,
-      imported_at: now,
-    }));
-    const { error } = await supabaseAdmin
-      .from("marketing_ad_metrics_daily")
-      .upsert(rows, { onConflict: "tenant_id,provider,metric_date,ad_account_id,ad_id" });
+  const window = syncWindow(account.timezone_name, days);
+  const insights = await loadInsights(token, account.meta_ad_account_id, window);
+  const knownAdIds = new Set(activeAds.map((ad) => ad.id));
+  const missingCatalog = catalogRowsFromInsights(
+    tenantId,
+    account.meta_ad_account_id,
+    insights,
+    knownAdIds,
+    now,
+  );
+  if (missingCatalog.length > 0) {
+    // Anúncio pausado ou encerrado que teve entrega: entra no catálogo sem apagar
+    // a miniatura de quem já está lá.
+    const { error } = await (supabaseAdmin as any)
+      .from("meta_ads")
+      .upsert(missingCatalog, {
+        onConflict: "tenant_id,ad_account_id,ad_id",
+        ignoreDuplicates: true,
+      });
     if (error) throw new Error(error.message);
-    imported += rows.length;
   }
+
+  // A janela inteira é substituída numa transação: o que a Meta não devolve mais sai,
+  // e uma falha antes deste ponto não zera o gasto já importado.
+  const { data: replaced, error: replaceError } = await (supabaseAdmin as any).rpc(
+    "replace_meta_ad_metrics",
+    {
+      p_tenant_id: tenantId,
+      p_ad_account_id: account.meta_ad_account_id,
+      p_since: window.since,
+      p_until: window.until,
+      p_rows: insights.map((row) => insightRow(row, account.currency)),
+    },
+  );
+  if (replaceError) throw new Error(replaceError.message);
+  imported = Number(replaced ?? 0);
 
   await (supabaseAdmin as any)
     .from("meta_ad_accounts")
@@ -976,7 +901,7 @@ export async function processMetaSyncQueue(limit = 2) {
     const { data: account, error: accountError } = await (supabaseAdmin as any)
       .from("meta_ad_accounts")
       .select(
-        "id,tenant_id,connection_id,meta_ad_account_id,account_id,name,currency,selected,meta_connections!inner(access_token,encrypted_access_token,status)",
+        "id,tenant_id,connection_id,meta_ad_account_id,account_id,name,currency,timezone_name,selected,meta_connections!inner(access_token,encrypted_access_token,status)",
       )
       .eq("id", job.account_id)
       .eq("tenant_id", job.tenant_id)
@@ -1073,9 +998,15 @@ export async function processMetaSyncQueue(limit = 2) {
     }
   }
 
+  const { data: pendingReconciled, error: pendingError } = await (supabaseAdmin as any).rpc(
+    "reconcile_pending_meta_attributions",
+  );
+  if (pendingError) console.error("[meta-sync reconcile pending]", pendingError.message);
+
   return {
     workerId,
     scheduled,
+    pendingReconciled: Number(pendingReconciled ?? 0),
     claimed: claimed?.length ?? 0,
     completed,
     retried,

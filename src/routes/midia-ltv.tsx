@@ -61,6 +61,17 @@ import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import { DEMO_EMPTY_STATE_TEXT } from "@/lib/demo-tenant";
 import { getMarketingOverview } from "@/lib/marketing.functions";
+import type {
+  AudienceRow,
+  CampaignRow,
+  CreativeRow,
+  DailyPoint,
+  MarketingOverview as MarketingOverviewData,
+  MoneyRow,
+  OrphanAttributionRow,
+  OthersRow,
+} from "@/lib/marketing-overview";
+import { brtPeriodRange, brtToday, periodDays, type PeriodPreset } from "@/lib/marketing-overview";
 import {
   connectMetaSystemUserToken,
   disconnectMetaConnection,
@@ -84,106 +95,7 @@ type MarketingIntegration = {
   status: string;
 };
 
-type MarketingTotals = {
-  spend: number;
-  revenue: number;
-  ftdRevenue: number;
-  redepositRevenue: number;
-  roas: number | null;
-  players: number;
-  markedPlayers: number;
-  orphanPlayers: number;
-  ftd: number;
-  cpaFtd: number | null;
-};
-
-type CampaignRow = {
-  campaign: string;
-  campaign_id: string | null;
-  match_status: string;
-  spend: number;
-  impressions: number;
-  clicks: number;
-  players: number;
-  ftd: number;
-  revenue: number;
-  ftdRevenue: number;
-  redepositRevenue: number;
-};
-
-type OrphanAttributionRow = {
-  campaign: string;
-  creative: string;
-  adset: string | null;
-  source: string | null;
-  provider: string | null;
-  players: number;
-  ftd: number;
-  revenue: number;
-};
-
-type CreativeRow = {
-  creative: string;
-  campaign: string | null;
-  adset: string | null;
-  ad_id: string | null;
-  thumbnail_url: string | null;
-  spend: number;
-  impressions: number;
-  clicks: number;
-  frequency: number | null;
-  players: number;
-  ftd: number;
-  revenue: number;
-  ftdRevenue: number;
-  redepositRevenue: number;
-};
-
-type AudienceRow = {
-  adset: string;
-  spend: number;
-  ads: number;
-  impressions: number;
-  clicks: number;
-  players: number;
-  ftd: number;
-  revenue: number;
-};
-
-type DailyPoint = {
-  date: string;
-  label: string;
-  spend: number;
-  ftd: number;
-};
-
-type MoneyRow = {
-  creative: string;
-  campaign: string | null;
-  thumbnail_url: string | null;
-  revenue: number;
-  share: number;
-};
-
-type MarketingOverview = {
-  integrations: MarketingIntegration[];
-  period: { from: string; to: string };
-  totals: MarketingTotals;
-  campaigns: CampaignRow[];
-  creatives: CreativeRow[];
-  audiences: AudienceRow[];
-  daily: DailyPoint[];
-  moneyMap: MoneyRow[];
-  orphanAttributions: OrphanAttributionRow[];
-  attributionHealth: {
-    total: number;
-    marked: number;
-    matched: number;
-    missingUtm: number;
-    orphan: number;
-    matchRate: number | null;
-  };
-};
+type MarketingOverview = MarketingOverviewData & { integrations: MarketingIntegration[] };
 
 type MetaAccount = {
   id: string;
@@ -244,8 +156,6 @@ type MetaSyncRun = {
 const META_UTM_PARAMS =
   "utm_source={{site_source_name}}&utm_medium=paid&utm_campaign={{campaign.name}}&utm_content={{ad.name}}&utm_term={{adset.name}}&utm_id={{ad.id}}";
 
-type PeriodPreset = "today" | "yesterday" | "7d" | "30d" | "this_month" | "last_month";
-
 const periodLabels: Record<PeriodPreset, string> = {
   today: "Hoje",
   yesterday: "Ontem",
@@ -254,42 +164,6 @@ const periodLabels: Record<PeriodPreset, string> = {
   this_month: "Este mês",
   last_month: "Mês passado",
 };
-
-function isoDate(date: Date) {
-  return date.toISOString().slice(0, 10);
-}
-
-function periodRange(preset: PeriodPreset) {
-  const now = new Date();
-  const from = new Date(now);
-  const to = new Date(now);
-
-  if (preset === "today") {
-    return { from: isoDate(from), to: isoDate(to), days: 1 };
-  }
-  if (preset === "yesterday") {
-    from.setDate(now.getDate() - 1);
-    to.setDate(now.getDate() - 1);
-    return { from: isoDate(from), to: isoDate(to), days: 1 };
-  }
-  if (preset === "30d") {
-    from.setDate(now.getDate() - 29);
-    return { from: isoDate(from), to: isoDate(to), days: 30 };
-  }
-  if (preset === "this_month") {
-    from.setDate(1);
-    return { from: isoDate(from), to: isoDate(to), days: Math.max(1, now.getDate()) };
-  }
-  if (preset === "last_month") {
-    from.setMonth(now.getMonth() - 1, 1);
-    to.setDate(0);
-    const days = Math.max(1, Math.round((to.getTime() - from.getTime()) / 86400000) + 1);
-    return { from: isoDate(from), to: isoDate(to), days };
-  }
-
-  from.setDate(now.getDate() - 6);
-  return { from: isoDate(from), to: isoDate(to), days: 7 };
-}
 
 function periodText(period?: { from: string; to: string }) {
   if (!period) return "";
@@ -315,12 +189,20 @@ function brl2(value: number | null | undefined) {
   }).format(value ?? 0);
 }
 
+function money(value: number, currency: string) {
+  try {
+    return new Intl.NumberFormat("pt-BR", { style: "currency", currency }).format(value);
+  } catch {
+    return `${currency} ${value.toFixed(2)}`;
+  }
+}
+
 function num(value: number | null | undefined) {
   return new Intl.NumberFormat("pt-BR").format(value ?? 0);
 }
 
 function ratio(value: number | null | undefined) {
-  return value == null ? "-" : `${value.toFixed(2)}x`;
+  return value == null ? "-" : `${value.toFixed(2).replace(".", ",")}x`;
 }
 
 function pct(value: number | null | undefined) {
@@ -365,25 +247,19 @@ function MediaLtvPage() {
   const [section, setSection] = useState<"visualizacao" | "configuracao">("visualizacao");
   const [houseUrl, setHouseUrl] = useState("");
   const range = useMemo(() => {
-    if (!customRange) return periodRange(period);
-    const days = Math.max(
-      1,
-      Math.round(
-        (new Date(`${customRange.to}T00:00:00`).getTime() -
-          new Date(`${customRange.from}T00:00:00`).getTime()) /
-          86400000,
-      ) + 1,
-    );
-    return { ...customRange, days };
+    if (!customRange) return brtPeriodRange(period);
+    return { ...customRange, days: periodDays(customRange.from, customRange.to) };
   }, [period, customRange]);
+  const includesToday = range.to >= brtToday();
 
   const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ["marketing-overview", range.from, range.to],
     queryFn: async () =>
       (await fetchOverview({
-        data: { days: range.days, from: range.from, to: range.to },
+        data: { from: range.from, to: range.to },
       })) as MarketingOverview,
-    refetchInterval: 30000,
+    // Só o período que inclui hoje muda sozinho; o resto é atualizado ao fim de um sync.
+    refetchInterval: includesToday ? 60_000 : false,
   });
 
   const { data: metaSummary } = useQuery({
@@ -685,7 +561,7 @@ function VisualizacaoSection({
   const orphanRows = data?.orphanAttributions ?? [];
   const orphanRevenue = orphanRows.reduce((sum, row) => sum + row.revenue, 0);
   const orphanFtd = orphanRows.reduce((sum, row) => sum + row.ftd, 0);
-  const totalReturn = (totals?.ftdRevenue ?? 0) + (totals?.redepositRevenue ?? 0);
+  const spendOther = totals?.spendOther ?? [];
   const latestRun = syncRuns[0];
   const progress = latestRun?.total_accounts
     ? Math.round((latestRun.processed_accounts / latestRun.total_accounts) * 100)
@@ -808,7 +684,7 @@ function VisualizacaoSection({
             className="h-8 w-36 border-0 bg-transparent p-0"
             value={customRange?.to ?? range.to}
             min={customRange?.from ?? range.from}
-            max={isoDate(new Date())}
+            max={brtToday()}
             onChange={(event) =>
               onCustomRangeChange({ from: customRange?.from ?? range.from, to: event.target.value })
             }
@@ -824,21 +700,31 @@ function VisualizacaoSection({
         . Cadastros, FTD e depósitos: webhook da casa.
       </p>
 
-      {/* AL0-06: sai quando a AL1 do escopo de Aquisição e LTV for aceita. */}
+      {/* AL0-06: sai quando a conferência da AL1 com a casa piloto for aceita. */}
       <div
         role="note"
         className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100"
       >
         <p className="flex items-center gap-2 font-semibold">
           <AlertTriangle className="h-4 w-4" aria-hidden="true" />
-          Números em revisão
+          Números em validação
         </p>
         <p className="mt-1">
-          Estamos refazendo os cálculos desta tela. Em casas com muito volume os totais podem sair
-          incompletos, e o custo por FTD ainda considera todos os FTDs da casa, não só os que vieram
-          de anúncio. Use os valores como referência, não para decidir orçamento.
+          Os cálculos desta tela foram refeitos e estão sendo conferidos com o Gerenciador de
+          Anúncios. Até o fim da conferência, use os valores como referência.
         </p>
       </div>
+
+      {spendOther.length > 0 && (
+        <div
+          role="note"
+          className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100"
+        >
+          <strong>Contas em outra moeda:</strong>{" "}
+          {spendOther.map((row) => money(row.spend, row.currency)).join(" · ")}. Esse gasto fica
+          fora do investido, do ROAS e do custo por FTD, que estão em reais.
+        </div>
+      )}
 
       {staleAccounts > 0 && (
         <div className="rounded-xl border border-red-500/40 bg-card/70 p-4 text-sm">
@@ -855,10 +741,10 @@ function VisualizacaoSection({
       {orphanRows.length > 0 && (
         <div className="rounded-lg border border-amber-500/20 bg-amber-500/15 px-4 py-3 text-sm text-amber-100">
           <strong>
-            {num(orphanRows.length)} origens marcadas sem anúncio correspondente nas contas
+            {num(totals?.orphanPlayers)} cadastros marcados sem anúncio correspondente nas contas
             conectadas
           </strong>
-          : {brl(orphanRevenue)} de receita e {num(orphanFtd)} FTD sem gasto importado. Veja os
+          : {brl(orphanRevenue)} de depósitos e {num(orphanFtd)} FTD sem gasto importado. Veja os
           detalhes na aba Diagnóstico.
         </div>
       )}
@@ -870,45 +756,44 @@ function VisualizacaoSection({
           detail={`${brl((totals?.spend ?? 0) / Math.max(1, range.days))} por dia, em média`}
         />
         <Kpi
-          title="ROAS no período"
+          title="ROAS líquido"
           value={ratio(totals?.roas)}
-          detail={`investiu ${brl(totals?.spend)} · voltou ${brl(totalReturn)}`}
-          tone="info"
-        />
-        <Kpi
-          title="ROAS do FTD"
-          value={ratio(
-            (totals?.spend ?? 0) > 0 ? (totals?.ftdRevenue ?? 0) / (totals?.spend ?? 0) : null,
-          )}
-          detail={`${brl(totals?.ftdRevenue)} em primeiros depósitos`}
+          detail={`depósitos − saques ÷ investido · bruto ${ratio(totals?.roasGross)}`}
           tone="info"
         />
         <Kpi
           title="Custo por FTD"
           value={totals?.cpaFtd == null ? "-" : brl2(totals.cpaFtd)}
-          detail={`${num(totals?.ftd)} primeiros depósitos no período`}
+          detail={`${num(totals?.paidFtd)} FTD de anúncio · ${num(totals?.ftd)} na casa`}
         />
         <Kpi
-          title="Redepósito no período"
-          value={brl(totals?.redepositRevenue)}
-          detail="recompra somada no período"
+          title="Custo por cadastro"
+          value={totals?.cacSignup == null ? "-" : brl2(totals.cacSignup)}
+          detail={`${num(totals?.paidPlayers)} cadastros de anúncio · ${num(totals?.players)} na casa`}
+        />
+        <Kpi
+          title="Depósito líquido"
+          value={brl(totals?.net)}
+          detail={`${brl(totals?.revenue)} depositados − ${brl(totals?.withdrawals)} sacados`}
           tone="success"
         />
       </div>
 
       <div className="rounded-lg bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-        <strong className="text-foreground">{brl(totals?.ftdRevenue)}</strong> de {num(totals?.ftd)}{" "}
-        primeiros depósitos
+        <strong className="text-foreground">{brl(totals?.ftdRevenue)}</strong> em{" "}
+        {num(totals?.paidFtd)} primeiros depósitos
         <span className="px-2">+</span>
         <strong className="text-foreground">{brl(totals?.redepositRevenue)}</strong> de redepósito
+        <span className="px-2">−</span>
+        <strong className="text-foreground">{brl(totals?.withdrawals)}</strong> de saques
         <span className="px-2">=</span>
-        <strong className="text-emerald-400">{brl(totalReturn)}</strong> de volta
+        <strong className="text-emerald-400">{brl(totals?.net)}</strong> líquidos
         <span className="px-2">÷</span>
         <strong className="text-foreground">{brl(totals?.spend)}</strong> investidos
         <span className="px-2">=</span>
         <strong className="text-emerald-400">{ratio(totals?.roas)}</strong>
         <span className="float-right hidden text-muted-foreground lg:inline">
-          no período · só de quem chegou por anúncio marcado
+          jogadores cadastrados no período por anúncio · horário de Brasília
         </span>
       </div>
 
@@ -923,14 +808,24 @@ function VisualizacaoSection({
       </Tabs>
 
       {reportView === "creatives" && (
-        <CreativeTable creatives={data?.creatives ?? []} isLoading={isLoading} />
+        <CreativeTable
+          creatives={data?.creatives ?? []}
+          others={data?.creativesOthers}
+          totals={totals}
+          isLoading={isLoading}
+        />
       )}
       {reportView === "audiences" && (
-        <AudienceTable rows={data?.audiences ?? []} isLoading={isLoading} />
+        <AudienceTable
+          rows={data?.audiences ?? []}
+          others={data?.audiencesOthers}
+          isLoading={isLoading}
+        />
       )}
       {reportView === "campaigns" && (
         <CampaignTable
           campaigns={data?.campaigns ?? []}
+          others={data?.campaignsOthers}
           isLoading={isLoading}
           orphanRevenue={orphanRevenue}
         />
@@ -946,7 +841,7 @@ function VisualizacaoSection({
             formatter={brl}
           />
           <DailyChart
-            title="Primeiros depósitos (FTD) por dia"
+            title="FTD de anúncio por dia"
             subtitle={`${range.days} dias`}
             data={data?.daily ?? []}
             dataKey="ftd"
@@ -958,28 +853,35 @@ function VisualizacaoSection({
       )}
       {reportView === "diagnostics" && (
         <div className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
             <Kpi title="Cadastros" value={num(data?.attributionHealth.total)} detail="no período" />
             <Kpi
               title="Com marcação"
               value={num(data?.attributionHealth.marked)}
-              detail="receberam UTM ou ID"
+              detail="chegaram com UTM ou ID"
             />
             <Kpi
-              title="Identificados"
+              title="Ligados a anúncio"
               value={num(data?.attributionHealth.matched)}
-              detail={`${pct(data?.attributionHealth.matchRate)} dos marcados`}
+              detail={`${pct(data?.attributionHealth.matchRate)} dos marcados por mídia`}
               tone="success"
+            />
+            <Kpi
+              title="Sem anúncio correspondente"
+              value={num(
+                (data?.attributionHealth.orphan ?? 0) + (data?.attributionHealth.ambiguous ?? 0),
+              )}
+              detail={`${num(data?.attributionHealth.ambiguous)} com nome repetido em mais de um anúncio`}
+            />
+            <Kpi
+              title="Vindos do CRM"
+              value={num(data?.attributionHealth.crm)}
+              detail="link de SMS ou WhatsApp, não é mídia paga"
             />
             <Kpi
               title="Sem UTM"
               value={num(data?.attributionHealth.missingUtm)}
               detail="não permitem atribuição"
-            />
-            <Kpi
-              title="Sem correspondência"
-              value={num(data?.attributionHealth.orphan)}
-              detail="marcação não encontrada na Meta"
             />
           </div>
           <OrphanAttributionTable rows={orphanRows} isLoading={isLoading} />
@@ -1453,16 +1355,18 @@ function MetaConnectionWizard({
 }
 
 function attributionStatusLabel(status: string) {
-  if (status === "matched_ad_id") return "anuncio";
-  if (status === "matched_ad_name") return "criativo";
-  if (status === "matched_campaign_name") return "campanha";
-  if (status === "orphan_campaign") return "sem BM";
+  if (status === "matched_ad_id") return "anúncio";
+  if (status === "matched_ad_name") return "nome do anúncio";
+  if (status === "matched_campaign_id" || status === "matched_campaign_name") return "campanha";
+  if (status === "ambiguous") return "nome repetido";
+  if (status === "crm") return "CRM";
+  if (status === "orphan_campaign") return "fora das contas";
   if (status === "missing_utm") return "sem UTM";
   return "pendente";
 }
 
 function AttributionBadge({ status }: { status: string }) {
-  const orphan = status === "orphan_campaign" || status === "missing_utm";
+  const orphan = ["orphan_campaign", "missing_utm", "ambiguous"].includes(status);
   const matched = status.startsWith("matched_");
   return (
     <Badge
@@ -1562,7 +1466,7 @@ function MoneyMapCard({ rows }: { rows: MoneyRow[] }) {
   return (
     <DataCard
       title="Onde o dinheiro está"
-      description="Participação na receita do período (FTD + recompra), por anúncio"
+      description="Participação nos depósitos do período (FTD e redepósito), por anúncio"
     >
       {rows.length === 0 ? (
         <EmptyState
@@ -1619,24 +1523,84 @@ function MoneyMapCard({ rows }: { rows: MoneyRow[] }) {
   );
 }
 
-function AudienceTable({ rows, isLoading }: { rows: AudienceRow[]; isLoading: boolean }) {
-  const isDemo = useIsDemoTenant();
-  const totals = rows.reduce(
+type BusinessTotals = {
+  spend: number;
+  players: number;
+  ftd: number;
+  net: number;
+  revenue: number;
+};
+
+function sumBusiness(
+  rows: { spend: number; players: number; ftd: number; net: number; revenue: number }[],
+  others: OthersRow | undefined,
+): BusinessTotals {
+  const listed = rows.reduce(
     (acc, row) => ({
       spend: acc.spend + row.spend,
-      ads: acc.ads + row.ads,
-      impressions: acc.impressions + row.impressions,
-      clicks: acc.clicks + row.clicks,
-      ftd: acc.ftd + row.ftd,
       players: acc.players + row.players,
+      ftd: acc.ftd + row.ftd,
+      net: acc.net + row.net,
+      revenue: acc.revenue + row.revenue,
     }),
-    { spend: 0, ads: 0, impressions: 0, clicks: 0, ftd: 0, players: 0 },
+    { spend: 0, players: 0, ftd: 0, net: 0, revenue: 0 },
   );
+  return {
+    spend: listed.spend + (others?.spend ?? 0),
+    players: listed.players + (others?.players ?? 0),
+    ftd: listed.ftd + (others?.ftd ?? 0),
+    net: listed.net + (others?.net ?? 0),
+    revenue: listed.revenue + (others?.revenue ?? 0),
+  };
+}
+
+function BusinessCells({ spend, players, ftd, net }: Omit<BusinessTotals, "revenue">) {
+  return (
+    <>
+      <TableCell className="text-right">{players > 0 ? num(players) : "—"}</TableCell>
+      <TableCell className="text-right">
+        {players > 0 && spend > 0 ? brl2(spend / players) : "—"}
+      </TableCell>
+      <TableCell className="text-right font-semibold">{ftd > 0 ? num(ftd) : "—"}</TableCell>
+      <TableCell className="text-right">{ftd > 0 && spend > 0 ? brl2(spend / ftd) : "—"}</TableCell>
+      <TableCell className="text-right">{brl(net)}</TableCell>
+      <TableCell className="text-right font-semibold">
+        {spend > 0 ? ratio(net / spend) : "—"}
+      </TableCell>
+    </>
+  );
+}
+
+function BusinessHeads() {
+  return (
+    <>
+      <TableHead className="text-right">Cadastros</TableHead>
+      <TableHead className="text-right">Custo por cadastro</TableHead>
+      <TableHead className="text-right">FTD</TableHead>
+      <TableHead className="text-right">Custo por FTD</TableHead>
+      <TableHead className="text-right">Depósito líquido</TableHead>
+      <TableHead className="text-right">ROAS líquido</TableHead>
+    </>
+  );
+}
+
+function AudienceTable({
+  rows,
+  others,
+  isLoading,
+}: {
+  rows: AudienceRow[];
+  others: OthersRow | undefined;
+  isLoading: boolean;
+}) {
+  const isDemo = useIsDemoTenant();
+  const totals = sumBusiness(rows, others);
+  const othersCount = others?.count ?? 0;
 
   return (
     <DataCard
       title="Público por público"
-      description="O que cada conjunto custou e quantos primeiros depósitos ele trouxe. É onde mora a segmentação — idade, posicionamento, interesse. Só conjuntos que investiram no período."
+      description="O que cada conjunto de anúncios custou e o que os jogadores dele trouxeram. É onde mora a segmentação: idade, posicionamento, interesse."
       bodyClassName="overflow-x-auto"
     >
       {rows.length === 0 ? (
@@ -1662,11 +1626,7 @@ function AudienceTable({ rows, isLoading }: { rows: AudienceRow[]; isLoading: bo
               <TableHead>Público</TableHead>
               <TableHead className="text-right">Investido</TableHead>
               <TableHead className="text-right">Anúncios</TableHead>
-              <TableHead className="text-right">Impressões</TableHead>
-              <TableHead className="text-right">Cliques</TableHead>
-              <TableHead className="text-right">FTD</TableHead>
-              <TableHead className="text-right">Custo por FTD</TableHead>
-              <TableHead className="text-right">Cadastros</TableHead>
+              <BusinessHeads />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -1675,34 +1635,27 @@ function AudienceTable({ rows, isLoading }: { rows: AudienceRow[]; isLoading: bo
                 <TableCell>{row.adset}</TableCell>
                 <TableCell className="text-right font-medium">{brl(row.spend)}</TableCell>
                 <TableCell className="text-right text-muted-foreground">{num(row.ads)}</TableCell>
-                <TableCell className="text-right text-muted-foreground">
-                  {num(row.impressions)}
-                </TableCell>
-                <TableCell className="text-right text-muted-foreground">
-                  {num(row.clicks)}
-                </TableCell>
-                <TableCell className="text-right font-semibold">
-                  {row.ftd > 0 ? num(row.ftd) : "—"}
-                </TableCell>
-                <TableCell className="text-right">
-                  {row.ftd > 0 ? brl2(row.spend / row.ftd) : "—"}
-                </TableCell>
-                <TableCell className="text-right text-muted-foreground">
-                  {row.players > 0 ? num(row.players) : "—"}
-                </TableCell>
+                <BusinessCells {...row} />
               </TableRow>
             ))}
+            {othersCount > 0 && (
+              <TableRow className="text-muted-foreground">
+                <TableCell>Outros {num(othersCount)} públicos</TableCell>
+                <TableCell className="text-right">{brl(others?.spend)}</TableCell>
+                <TableCell className="text-right">—</TableCell>
+                <BusinessCells
+                  spend={others?.spend ?? 0}
+                  players={others?.players ?? 0}
+                  ftd={others?.ftd ?? 0}
+                  net={others?.net ?? 0}
+                />
+              </TableRow>
+            )}
             <TableRow className="bg-muted/35 font-semibold">
-              <TableCell>{num(rows.length)} públicos</TableCell>
+              <TableCell>{num(rows.length + othersCount)} públicos</TableCell>
               <TableCell className="text-right">{brl(totals.spend)}</TableCell>
-              <TableCell className="text-right">{num(totals.ads)}</TableCell>
-              <TableCell className="text-right">{num(totals.impressions)}</TableCell>
-              <TableCell className="text-right">{num(totals.clicks)}</TableCell>
-              <TableCell className="text-right">{num(totals.ftd)}</TableCell>
-              <TableCell className="text-right">
-                {totals.ftd > 0 ? brl2(totals.spend / totals.ftd) : "—"}
-              </TableCell>
-              <TableCell className="text-right">{num(totals.players)}</TableCell>
+              <TableCell className="text-right">—</TableCell>
+              <BusinessCells {...totals} />
             </TableRow>
           </TableBody>
         </Table>
@@ -1713,34 +1666,24 @@ function AudienceTable({ rows, isLoading }: { rows: AudienceRow[]; isLoading: bo
 
 function CampaignTable({
   campaigns,
+  others,
   isLoading,
   orphanRevenue,
 }: {
   campaigns: CampaignRow[];
+  others: OthersRow | undefined;
   isLoading: boolean;
   orphanRevenue: number;
 }) {
   const isDemo = useIsDemoTenant();
-  const rows = campaigns.filter((row) => row.spend > 0 || row.players > 0);
-  const totals = rows.reduce(
-    (acc, row) => ({
-      spend: acc.spend + row.spend,
-      impressions: acc.impressions + row.impressions,
-      clicks: acc.clicks + row.clicks,
-      players: acc.players + row.players,
-      ftd: acc.ftd + row.ftd,
-      ftdRevenue: acc.ftdRevenue + row.ftdRevenue,
-    }),
-    { spend: 0, impressions: 0, clicks: 0, players: 0, ftd: 0, ftdRevenue: 0 },
-  );
-  const totalCtr = totals.impressions > 0 ? (totals.clicks / totals.impressions) * 100 : null;
-  const totalCpc = totals.clicks > 0 ? totals.spend / totals.clicks : null;
-  const totalCpm = totals.impressions > 0 ? (totals.spend / totals.impressions) * 1000 : null;
+  const rows = campaigns;
+  const totals = sumBusiness(rows, others);
+  const othersCount = others?.count ?? 0;
 
   return (
     <DataCard
       title="Campanha por campanha"
-      description="O que cada campanha custou e o que ela devolveu — primeiro depósito e recompra do mesmo dia. Só campanhas que investiram no período."
+      description="O que cada campanha custou e o que os jogadores dela depositaram, menos os saques, no período."
       icon={<BarChart3 className="h-4 w-4" />}
       bodyClassName="overflow-x-auto"
     >
@@ -1753,11 +1696,11 @@ function CampaignTable({
               <BarChart3 className="h-6 w-6" />
             )
           }
-          title={isLoading ? "Carregando campanhas" : "Sem campanhas sincronizadas"}
+          title={isLoading ? "Carregando campanhas" : "Sem campanhas no período"}
           description={
             isDemo
               ? DEMO_EMPTY_STATE_TEXT
-              : "Depois de sincronizar o Meta ou receber players com UTM, as campanhas aparecem aqui."
+              : "Depois de sincronizar o Meta ou receber jogadores com UTM, as campanhas aparecem aqui."
           }
         />
       ) : (
@@ -1767,81 +1710,57 @@ function CampaignTable({
               <TableRow>
                 <TableHead>Campanha</TableHead>
                 <TableHead className="text-right">Investido</TableHead>
-                <TableHead className="text-right">Impressões</TableHead>
-                <TableHead className="text-right">Cliques</TableHead>
-                <TableHead className="text-right">CTR</TableHead>
-                <TableHead className="text-right">CPC</TableHead>
-                <TableHead className="text-right">CPM</TableHead>
-                <TableHead className="text-right">Cadastros</TableHead>
-                <TableHead className="text-right">CPA cadastro</TableHead>
-                <TableHead className="text-right">FTD</TableHead>
-                <TableHead className="text-right">Valor FTD</TableHead>
+                <TableHead className="text-right">Cliques no link</TableHead>
+                <BusinessHeads />
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map((row) => {
-                const ctr = row.impressions > 0 ? (row.clicks / row.impressions) * 100 : null;
-                const cpc = row.clicks > 0 ? row.spend / row.clicks : null;
-                const cpm = row.impressions > 0 ? (row.spend / row.impressions) * 1000 : null;
-                return (
-                  <TableRow key={`${row.campaign_id ?? row.campaign}`}>
-                    <TableCell>
-                      <p className="font-semibold">{row.campaign}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {num(row.players)} cadastros · {row.campaign_id ?? "sem id"}
-                      </p>
-                    </TableCell>
-                    <TableCell className="text-right font-medium">{brl(row.spend)}</TableCell>
-                    <TableCell className="text-right">{num(row.impressions)}</TableCell>
-                    <TableCell className="text-right">{num(row.clicks)}</TableCell>
-                    <TableCell className="text-right">{pct(ctr)}</TableCell>
-                    <TableCell className="text-right">{cpc == null ? "—" : brl2(cpc)}</TableCell>
-                    <TableCell className="text-right">{cpm == null ? "—" : brl2(cpm)}</TableCell>
-                    <TableCell className="text-right">{num(row.players)}</TableCell>
-                    <TableCell className="text-right">
-                      {row.players > 0 ? brl2(row.spend / row.players) : "—"}
-                    </TableCell>
-                    <TableCell className="text-right font-semibold">{num(row.ftd)}</TableCell>
-                    <TableCell className="text-right">
-                      <p className="font-semibold">{brl(row.ftdRevenue)}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {row.ftd > 0 ? `${brl(row.ftdRevenue / row.ftd)} por jogador` : "—"}
-                      </p>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
+              {rows.map((row) => (
+                <TableRow key={`${row.campaign_id ?? row.campaign}`}>
+                  <TableCell>
+                    <p className="font-semibold">{row.campaign}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {row.match_status === "no_spend"
+                        ? "sem gasto importado no período"
+                        : (row.campaign_id ?? "sem id")}
+                    </p>
+                  </TableCell>
+                  <TableCell className="text-right font-medium">{brl(row.spend)}</TableCell>
+                  <TableCell className="text-right">{num(row.linkClicks)}</TableCell>
+                  <BusinessCells {...row} />
+                </TableRow>
+              ))}
+              {othersCount > 0 && (
+                <TableRow className="text-muted-foreground">
+                  <TableCell>Outras {num(othersCount)} campanhas</TableCell>
+                  <TableCell className="text-right">{brl(others?.spend)}</TableCell>
+                  <TableCell className="text-right">—</TableCell>
+                  <BusinessCells
+                    spend={others?.spend ?? 0}
+                    players={others?.players ?? 0}
+                    ftd={others?.ftd ?? 0}
+                    net={others?.net ?? 0}
+                  />
+                </TableRow>
+              )}
               <TableRow className="bg-muted/35 font-semibold">
                 <TableCell>
                   Total
                   <p className="text-xs font-normal text-muted-foreground">
-                    {num(rows.length)} campanha(s)
+                    {num(rows.length + othersCount)} campanha(s)
                   </p>
                 </TableCell>
                 <TableCell className="text-right">{brl(totals.spend)}</TableCell>
-                <TableCell className="text-right">{num(totals.impressions)}</TableCell>
-                <TableCell className="text-right">{num(totals.clicks)}</TableCell>
-                <TableCell className="text-right">{pct(totalCtr)}</TableCell>
-                <TableCell className="text-right">
-                  {totalCpc == null ? "—" : brl2(totalCpc)}
-                </TableCell>
-                <TableCell className="text-right">
-                  {totalCpm == null ? "—" : brl2(totalCpm)}
-                </TableCell>
-                <TableCell className="text-right">{num(totals.players)}</TableCell>
-                <TableCell className="text-right">
-                  {totals.players > 0 ? brl2(totals.spend / totals.players) : "—"}
-                </TableCell>
-                <TableCell className="text-right">{num(totals.ftd)}</TableCell>
-                <TableCell className="text-right">{brl(totals.ftdRevenue)}</TableCell>
+                <TableCell className="text-right">—</TableCell>
+                <BusinessCells {...totals} />
               </TableRow>
             </TableBody>
           </Table>
           <p className="text-sm text-muted-foreground">
-            ROAS é o total depositado dividido pelo investido. Campanhas de contas de anúncio não
-            conectadas ficam com investimento zero e a coluna aparece como “—”
-            {orphanRevenue > 0 ? ` (${brl(orphanRevenue)} nessa situação)` : ""}: é receita, não
-            retorno.
+            ROAS líquido é o que os jogadores da campanha depositaram, menos os saques, dividido
+            pelo investido. Campanhas de contas de anúncio não conectadas ficam sem investimento e
+            sem ROAS
+            {orphanRevenue > 0 ? ` (${brl(orphanRevenue)} de depósitos nessa situação)` : ""}.
           </p>
         </div>
       )}
@@ -1859,8 +1778,8 @@ function OrphanAttributionTable({
   const isDemo = useIsDemoTenant();
   return (
     <DataCard
-      title="UTMs sem midia vinculada"
-      description="Players que chegaram marcados, mas nao casaram com nenhuma campanha/anuncio das contas conectadas."
+      title="Marcações sem anúncio correspondente"
+      description="Jogadores que chegaram com UTM, mas não foram ligados a nenhum anúncio ou campanha das contas conectadas."
       icon={<ShieldCheck className="h-4 w-4" />}
       bodyClassName="overflow-x-auto"
     >
@@ -1873,7 +1792,7 @@ function OrphanAttributionTable({
               <ShieldCheck className="h-6 w-6" />
             )
           }
-          title={isLoading ? "Conferindo atribuicoes" : "Nenhum orfao no periodo"}
+          title={isLoading ? "Conferindo atribuições" : "Nenhuma marcação sem anúncio no período"}
           description={
             isDemo
               ? DEMO_EMPTY_STATE_TEXT
@@ -1888,9 +1807,9 @@ function OrphanAttributionTable({
               <TableHead>Criativo</TableHead>
               <TableHead>Conjunto</TableHead>
               <TableHead>Origem</TableHead>
-              <TableHead className="text-right">Players</TableHead>
+              <TableHead className="text-right">Jogadores</TableHead>
               <TableHead className="text-right">FTD</TableHead>
-              <TableHead className="text-right">Receita</TableHead>
+              <TableHead className="text-right">Depósitos</TableHead>
               <TableHead className="text-right">Investido</TableHead>
               <TableHead className="text-right">ROAS</TableHead>
             </TableRow>
@@ -1904,14 +1823,14 @@ function OrphanAttributionTable({
                 <TableCell>
                   <div className="flex items-center gap-2">
                     <span>{row.source ?? row.provider ?? "-"}</span>
-                    <AttributionBadge status="orphan_campaign" />
+                    <AttributionBadge status={row.ambiguous ? "ambiguous" : "orphan_campaign"} />
                   </div>
                 </TableCell>
                 <TableCell className="text-right">{num(row.players)}</TableCell>
                 <TableCell className="text-right">{num(row.ftd)}</TableCell>
                 <TableCell className="text-right">{brl(row.revenue)}</TableCell>
-                <TableCell className="text-right text-muted-foreground">nao encontrado</TableCell>
-                <TableCell className="text-right text-muted-foreground">nao calculado</TableCell>
+                <TableCell className="text-right text-muted-foreground">não encontrado</TableCell>
+                <TableCell className="text-right text-muted-foreground">não calculado</TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -1921,29 +1840,25 @@ function OrphanAttributionTable({
   );
 }
 
-function CreativeTable({ creatives, isLoading }: { creatives: CreativeRow[]; isLoading: boolean }) {
+function CreativeTable({
+  creatives,
+  others,
+  totals,
+  isLoading,
+}: {
+  creatives: CreativeRow[];
+  others: OthersRow | undefined;
+  totals: MarketingOverview["totals"] | undefined;
+  isLoading: boolean;
+}) {
   const isDemo = useIsDemoTenant();
-  const rows = creatives.filter((row) => row.spend > 0 || row.players > 0).slice(0, 75);
-  const totals = rows.reduce(
-    (acc, row) => ({
-      spend: acc.spend + row.spend,
-      impressions: acc.impressions + row.impressions,
-      clicks: acc.clicks + row.clicks,
-      frequencySum: acc.frequencySum + (row.frequency ?? 0),
-      frequencyCount: acc.frequencyCount + (row.frequency ? 1 : 0),
-    }),
-    { spend: 0, impressions: 0, clicks: 0, frequencySum: 0, frequencyCount: 0 },
-  );
-  const totalCtr = totals.impressions > 0 ? (totals.clicks / totals.impressions) * 100 : null;
-  const totalCpc = totals.clicks > 0 ? totals.spend / totals.clicks : null;
-  const totalCpm = totals.impressions > 0 ? (totals.spend / totals.impressions) * 1000 : null;
-  const totalFrequency =
-    totals.frequencyCount > 0 ? totals.frequencySum / totals.frequencyCount : null;
+  const rows = creatives;
+  const othersCount = others?.count ?? 0;
 
   return (
     <DataCard
       title="Criativo por criativo"
-      description="Custo e entrega de cada anúncio no período"
+      description="Do anúncio que mais devolveu para o que menos devolveu, em depósitos dos jogadores que ele trouxe"
       icon={<Target className="h-4 w-4" />}
       bodyClassName="overflow-x-auto"
     >
@@ -1960,7 +1875,7 @@ function CreativeTable({ creatives, isLoading }: { creatives: CreativeRow[]; isL
           description={
             isDemo
               ? DEMO_EMPTY_STATE_TEXT
-              : "Depois que players chegarem com UTM ou gasto for importado, a leitura por criativo aparece aqui."
+              : "Depois que jogadores chegarem com UTM ou o gasto for importado, a leitura por criativo aparece aqui."
           }
         />
       ) : (
@@ -1971,78 +1886,90 @@ function CreativeTable({ creatives, isLoading }: { creatives: CreativeRow[]; isL
                 <TableRow>
                   <TableHead>Criativo</TableHead>
                   <TableHead className="text-right">Investido</TableHead>
-                  <TableHead className="text-right">CTR</TableHead>
-                  <TableHead className="text-right">CPC</TableHead>
-                  <TableHead className="text-right">CPM</TableHead>
-                  <TableHead className="text-right">Freq.</TableHead>
+                  <TableHead className="text-right">Cliques no link</TableHead>
+                  <TableHead className="text-right">Cadastros</TableHead>
+                  <TableHead className="text-right">FTD</TableHead>
+                  <TableHead className="text-right">Custo por FTD</TableHead>
+                  <TableHead className="text-right">Depósito líquido</TableHead>
+                  <TableHead className="text-right">ROAS líquido</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {rows.map((row) => {
-                  const ctr = row.impressions > 0 ? (row.clicks / row.impressions) * 100 : null;
-                  const cpc = row.clicks > 0 ? row.spend / row.clicks : null;
-                  const cpm = row.impressions > 0 ? (row.spend / row.impressions) * 1000 : null;
-                  return (
-                    <TableRow key={`${row.ad_id ?? row.creative}`}>
-                      <TableCell>
-                        <div className="flex min-w-[260px] items-center gap-3">
-                          <CreativeThumb src={row.thumbnail_url} label={row.creative} />
-                          <div className="min-w-0">
-                            <p className="truncate font-semibold">{row.creative}</p>
-                            <p className="truncate text-xs text-muted-foreground">
-                              {row.campaign ?? "Sem campanha"}
-                            </p>
-                          </div>
+                {rows.map((row) => (
+                  <TableRow key={`${row.ad_id ?? row.creative}`}>
+                    <TableCell>
+                      <div className="flex min-w-[260px] items-center gap-3">
+                        <CreativeThumb src={row.thumbnail_url} label={row.creative} />
+                        <div className="min-w-0">
+                          <p className="truncate font-semibold">{row.creative}</p>
+                          <p className="truncate text-xs text-muted-foreground">
+                            {row.campaign ?? "Sem campanha"}
+                          </p>
                         </div>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <p className="font-medium">{brl(row.spend)}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {num(row.impressions)} impressões
-                        </p>
-                      </TableCell>
-                      <TableCell className="text-right font-medium">{pct(ctr)}</TableCell>
-                      <TableCell className="text-right">
-                        <p>{cpc == null ? "—" : brl2(cpc)}</p>
-                        <p className="text-xs text-muted-foreground">{num(row.clicks)} cliques</p>
-                      </TableCell>
-                      <TableCell className="text-right text-muted-foreground">
-                        {cpm == null ? "—" : brl2(cpm)}
-                      </TableCell>
-                      <TableCell className="text-right text-amber-400">
-                        {row.frequency == null ? "—" : row.frequency.toFixed(1)}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <p className="font-medium">{brl(row.spend)}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {num(row.impressions)} impressões
+                      </p>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <p>{num(row.linkClicks)}</p>
+                      <p className="text-xs text-muted-foreground">
+                        CTR{" "}
+                        {pct(row.impressions > 0 ? (row.linkClicks / row.impressions) * 100 : null)}
+                      </p>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {row.players > 0 ? num(row.players) : "—"}
+                    </TableCell>
+                    <TableCell className="text-right font-semibold">
+                      {row.ftd > 0 ? num(row.ftd) : "—"}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {row.ftd > 0 && row.spend > 0 ? brl2(row.spend / row.ftd) : "—"}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <p className="font-medium">{brl(row.net)}</p>
+                      <p className="text-xs text-muted-foreground">{brl(row.revenue)} bruto</p>
+                    </TableCell>
+                    <TableCell className="text-right font-semibold">
+                      {row.spend > 0 ? ratio(row.net / row.spend) : "—"}
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {othersCount > 0 && (
+                  <TableRow className="text-muted-foreground">
+                    <TableCell>Outros {num(othersCount)} criativos</TableCell>
+                    <TableCell className="text-right">{brl(others?.spend)}</TableCell>
+                    <TableCell className="text-right">{num(others?.linkClicks)}</TableCell>
+                    <TableCell className="text-right">{num(others?.players)}</TableCell>
+                    <TableCell className="text-right">{num(others?.ftd)}</TableCell>
+                    <TableCell className="text-right">—</TableCell>
+                    <TableCell className="text-right">{brl(others?.net)}</TableCell>
+                    <TableCell className="text-right">—</TableCell>
+                  </TableRow>
+                )}
                 <TableRow className="sticky bottom-0 bg-muted font-semibold">
-                  <TableCell>Total · {num(rows.length)} criativos</TableCell>
+                  <TableCell>Total · {num(rows.length + othersCount)} criativos</TableCell>
+                  <TableCell className="text-right">{brl(totals?.spend)}</TableCell>
+                  <TableCell className="text-right">{num(totals?.linkClicks)}</TableCell>
+                  <TableCell className="text-right">{num(totals?.paidPlayers)}</TableCell>
+                  <TableCell className="text-right">{num(totals?.paidFtd)}</TableCell>
                   <TableCell className="text-right">
-                    <p>{brl(totals.spend)}</p>
-                    <p className="text-xs font-normal text-muted-foreground">
-                      {num(totals.impressions)} impressões
-                    </p>
+                    {totals?.cpaFtd == null ? "—" : brl2(totals.cpaFtd)}
                   </TableCell>
-                  <TableCell className="text-right">{pct(totalCtr)}</TableCell>
-                  <TableCell className="text-right">
-                    <p>{totalCpc == null ? "—" : brl2(totalCpc)}</p>
-                    <p className="text-xs font-normal text-muted-foreground">
-                      {num(totals.clicks)} cliques
-                    </p>
-                  </TableCell>
-                  <TableCell className="text-right text-muted-foreground">
-                    {totalCpm == null ? "—" : brl2(totalCpm)}
-                  </TableCell>
-                  <TableCell className="text-right text-muted-foreground">
-                    {totalFrequency == null ? "—" : totalFrequency.toFixed(1)}
-                  </TableCell>
+                  <TableCell className="text-right">{brl(totals?.net)}</TableCell>
+                  <TableCell className="text-right">{ratio(totals?.roas)}</TableCell>
                 </TableRow>
               </TableBody>
             </Table>
           </div>
           <p className="text-sm text-muted-foreground">
-            {num(rows.length)} criativos no período, {brl(totals.spend)} investidos no total. Gasto,
-            impressões e cliques vêm da Meta; cadastros e FTD vêm do webhook da casa.
+            Gasto, impressões e cliques vêm da Meta. Cadastros, FTD e depósitos vêm do webhook da
+            casa, só de jogadores cadastrados no período que foram ligados a este anúncio. Jogadores
+            ligados só à campanha aparecem na aba Campanhas.
           </p>
         </div>
       )}

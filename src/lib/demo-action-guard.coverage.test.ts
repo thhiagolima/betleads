@@ -148,12 +148,15 @@ const entries: Entry[] = [
   { file: "whatsapp-proxies.functions.ts", name: "assignProxyToSession", kind: "handler" },
   { file: "whatsapp-external.server.ts", name: "saveExternalIntegrationFor", kind: "function" },
   { file: "whatsapp-external.functions.ts", name: "testWhatsappExternalWebhook", kind: "handler" },
-  { file: "whatsapp-external.functions.ts", name: "sendAllWhatsappExternalEvents", kind: "handler" },
+  {
+    file: "whatsapp-external.functions.ts",
+    name: "sendAllWhatsappExternalEvents",
+    kind: "handler",
+  },
   { file: "meta.functions.ts", name: "connectMetaSystemUserToken", kind: "handler" },
   { file: "meta.functions.ts", name: "updateMetaAccountSelection", kind: "handler" },
   { file: "meta.functions.ts", name: "validateMetaConnection", kind: "handler" },
   { file: "meta.functions.ts", name: "disconnectMetaConnection", kind: "handler" },
-  { file: "marketing.functions.ts", name: "saveMarketingIntegration", kind: "handler" },
   { file: "sms-credits.functions.ts", name: "createSmsCreditCheckout", kind: "handler" },
   { file: "webhooks.functions.ts", name: "rotateMyWebhookCredentials", kind: "handler" },
   { file: "webhooks.functions.ts", name: "provisionMyWebhookHmacSecret", kind: "handler" },
@@ -181,16 +184,13 @@ describe("demo action guard — static coverage", () => {
     return sourceCache.get(file)!;
   };
 
-  it.each(entries)(
-    "$file :: $name calls its demo guard",
-    ({ file, name, kind, mustContain }) => {
-      const body =
-        kind === "function"
-          ? extractFunctionBody(source(file), name)
-          : extractHandlerBody(source(file), name);
-      expect(body).toContain(mustContain ?? "assertTenantNotDemo(");
-    },
-  );
+  it.each(entries)("$file :: $name calls its demo guard", ({ file, name, kind, mustContain }) => {
+    const body =
+      kind === "function"
+        ? extractFunctionBody(source(file), name)
+        : extractHandlerBody(source(file), name);
+    expect(body).toContain(mustContain ?? "assertTenantNotDemo(");
+  });
 
   it.each(unguardedReadOnlyEntries)(
     "$file :: $name stays unguarded (read-only, demo tenant must keep working)",

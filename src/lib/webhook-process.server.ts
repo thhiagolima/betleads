@@ -353,12 +353,25 @@ export async function processWebhookEvent(
       const now = new Date().toISOString();
       const updates: Record<string, unknown> = { updated_at: now };
 
-      if (utm.utm_source) updates.utm_source = utm.utm_source;
-      if (utm.utm_medium) updates.utm_medium = utm.utm_medium;
-      if (utm.utm_campaign) updates.utm_campaign = utm.utm_campaign;
-      if (utm.utm_content) updates.utm_content = utm.utm_content;
-      if (utm.utm_term) updates.utm_term = utm.utm_term;
-      if (utm.utm_id) updates.utm_id = utm.utm_id;
+      if (Object.values(utm).some(Boolean)) {
+        let keepOrigin = false;
+        if (!signupEvent) {
+          const { data: origin } = await sb
+            .from("players")
+            .select("utm_source, utm_campaign, utm_content, utm_id")
+            .eq("id", playerId)
+            .maybeSingle();
+          keepOrigin = hasAcquisitionOrigin(origin);
+        }
+        if (!keepOrigin) {
+          if (utm.utm_source) updates.utm_source = utm.utm_source;
+          if (utm.utm_medium) updates.utm_medium = utm.utm_medium;
+          if (utm.utm_campaign) updates.utm_campaign = utm.utm_campaign;
+          if (utm.utm_content) updates.utm_content = utm.utm_content;
+          if (utm.utm_term) updates.utm_term = utm.utm_term;
+          if (utm.utm_id) updates.utm_id = utm.utm_id;
+        }
+      }
       if (origem) updates.origem = origem;
 
       if (affiliateId) {
@@ -689,8 +702,12 @@ export async function processWebhookEvent(
         if (attributionEventId) {
           try {
             const baseAttribution = {
-              tenantId, playerId, eventType: conversionEvent, eventId: attributionEventId,
-              occurredAt: eventIso, monetaryValue: conversionEvent === "deposit_approved" ? valor : null,
+              tenantId,
+              playerId,
+              eventType: conversionEvent,
+              eventId: attributionEventId,
+              occurredAt: eventIso,
+              monetaryValue: conversionEvent === "deposit_approved" ? valor : null,
               isFtd:
                 conversionEvent === "deposit_approved" &&
                 (data.isFtd === true ||
@@ -1406,6 +1423,15 @@ function resolveUtm(
   };
 }
 
+/** O jogador já tem uma origem de aquisição gravada (primeiro toque). */
+export function hasAcquisitionOrigin(origin: Record<string, unknown> | null | undefined): boolean {
+  if (!origin) return false;
+  return ["utm_source", "utm_campaign", "utm_content", "utm_id"].some((key) => {
+    const value = origin[key];
+    return typeof value === "string" && value.trim() !== "";
+  });
+}
+
 export function isTrackingToken(value: string | null | undefined): value is string {
   return (
     typeof value === "string" &&
@@ -1510,7 +1536,7 @@ async function savePlayerAttribution(
 
   if (!hasUtm && !hasClickId) return;
 
-  await sb.from("player_attributions").upsert(
+  const { error } = await sb.from("player_attributions").upsert(
     {
       tenant_id: args.tenantId,
       player_id: args.playerId,
@@ -1541,15 +1567,26 @@ async function savePlayerAttribution(
         signupAttribution: args.signupAttribution,
         tracking: args.tracking,
       },
-      match_status: hasUtm ? "orphan_campaign" : "missing_utm",
+      // "pending": o worker da Meta reconcilia com anúncio e campanha a cada tick.
+      match_status: hasUtm ? "pending" : "missing_utm",
       match_confidence: 0,
       captured_at: args.capturedAt,
     },
     { onConflict: "tenant_id,player_id,event_type" },
   );
+  // A atribuição é análise: uma falha aqui não pode rejeitar o cadastro, mas precisa aparecer.
+  if (error) {
+    console.error("[player attribution] upsert failed", {
+      tenantId: args.tenantId,
+      playerId: args.playerId,
+      error: error.message,
+    });
+  }
 }
 
-function inferAttributionProvider(
+const META_SOURCES = new Set(["fb", "facebook", "ig", "instagram", "meta", "an", "msg", "threads"]);
+
+export function inferAttributionProvider(
   utm: ResolvedUtm,
   clickIds: {
     fbclid: string | null;
@@ -1560,9 +1597,13 @@ function inferAttributionProvider(
     msclkid: string | null;
     trackgram_click_id: string | null;
   },
-) {
-  const source = String(utm.utm_source ?? "").toLowerCase();
-  if (source.includes("fb") || source.includes("facebook") || source.includes("ig")) return "meta";
+): string | null {
+  const source = String(utm.utm_source ?? "")
+    .trim()
+    .toLowerCase();
+  // Comparação exata: "digital" ou "original" contêm "ig" e não são Meta.
+  if (META_SOURCES.has(source) || source.startsWith("facebook") || source.startsWith("instagram"))
+    return "meta";
   if (source.includes("google")) return "google";
   if (source.includes("tiktok")) return "tiktok";
   if (source.includes("kwai")) return "kwai";

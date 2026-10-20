@@ -182,6 +182,15 @@ Com duas pessoas (uma em dados/back e outra em front), a entrega estimada é de 
 | AL0-05 | implementado | branch `feat/aquisicao-ltv-al0` | Textos falsos removidos; banner de erro com a mensagem real e "Tentar novamente"; nome "Aquisição e LTV". Busca por iFluxHub, migrations e "disponível" na rota retorna 0 | 19/10/2026 |
 | AL0-06 | implementado | branch `feat/aquisicao-ltv-al0` | Aviso "Números em revisão" no painel | 19/10/2026 |
 | AL0-07 | implementado | branch `feat/aquisicao-ltv-al0` | `npm test` com `--exclude ".claude/**"`: 107 arquivos e 1.176 testes verdes | 19/10/2026 |
+| AL1-01 | implementado, aguarda conferência | migration `834d0d2` + tela | RPC `marketing_overview` aplicada em produção (Sorte Alta, 30 dias, 18.788 cadastros, 0,6 s) e usada pela tela. 23 testes PGlite. Totais sobre todas as linhas, linha "Outros" nas três tabelas | 20/10/2026 |
+| AL1-02 | implementado | tela + sync | Presets no calendário de Brasília (`brtPeriodRange`, testado às 22h30 BRT); insights pedidos no fuso da conta (`syncWindow`) | 20/10/2026 |
+| AL1-03 | implementado | migration + sync | Moeda por linha; gasto fora de BRL separado e avisado na tela, fora do ROAS e do custo por FTD | 20/10/2026 |
+| AL1-04 | implementado | migration + tela | ROAS líquido (depósitos − saques), bruto ao lado; custo por FTD e por cadastro só sobre jogadores pagos; FTD pela regra da Central; sem fallback vitalício | 20/10/2026 |
+| AL1-05 | implementado | migration | Reconciliação única por ID antes de nome, com `ambiguous` e `crm`; reconciliação dos pendentes a cada tick; backfill de 8.243 atribuições | 20/10/2026 |
+| AL1-06 | implementado | webhook | UTMs do jogador só no cadastro ou quando ele ainda não tem origem; atribuição entra como `pending`; erro do upsert registrado; provedor por comparação exata. Pendente: o script de importação da Sorte Alta ainda não cria atribuições (o backfill cobriu o passado) | 20/10/2026 |
+| AL1-07 | implementado | sync + tela | `inline_link_clicks` e `account_currency`; a coluna Freq. saiu | 20/10/2026 |
+| AL1-08 | implementado | migration + sync | Catálogo em `meta_ads`; fim da linha de gasto zero; miniatura vinda do catálogo | 20/10/2026 |
+| AL1-09 | implementado | migration + sync | Janela substituída por `replace_meta_ad_metrics`; chave única `NULLS NOT DISTINCT` | 20/10/2026 |
 
 ---
 
