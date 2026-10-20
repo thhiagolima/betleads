@@ -243,6 +243,35 @@ async function updateFromPayload(payload: CallbackPayload): Promise<boolean> {
   return matched;
 }
 
+/**
+ * Stores the request as received (body byte for byte) before any parsing, so
+ * the provider's real format can be read from sms_callback_raw. Only our own
+ * auth parameter leaves the query string. Never blocks the callback.
+ */
+async function saveRawCallback(request: Request, body: string): Promise<number | null> {
+  try {
+    const url = new URL(request.url);
+    const query = new URLSearchParams(url.search);
+    for (const key of SECRET_KEYS) query.delete(key);
+    const { data, error } = await (supabaseAdmin as any)
+      .from("sms_callback_raw")
+      .insert({
+        method: request.method,
+        content_type: request.headers.get("content-type"),
+        user_agent: request.headers.get("user-agent"),
+        query_string: query.toString(),
+        body,
+      })
+      .select("id")
+      .single();
+    if (error) throw error;
+    return data?.id ?? null;
+  } catch (err) {
+    console.error("[sms-webhook] raw callback not saved:", err);
+    return null;
+  }
+}
+
 async function handleCallback(request: Request): Promise<Response> {
   const unauthorized = authorizeCallback(request);
   if (unauthorized) return unauthorized;
@@ -250,7 +279,11 @@ async function handleCallback(request: Request): Promise<Response> {
   let processed = 0;
   let matched = 0;
   let unidentified = 0;
+  let rawId: number | null = null;
   try {
+    // Read the raw body once; the parser receives a copy of the request.
+    const rawBody = request.method === "GET" ? "" : await request.clone().text();
+    rawId = await saveRawCallback(request, rawBody);
     let bodyText = "";
     const payloads = await parseSmsCallbackPayloads(request, (text) => {
       bodyText = text;
@@ -268,6 +301,17 @@ async function handleCallback(request: Request): Promise<Response> {
     if (unidentified > 0) logUnrecognizedShape(request, payloads, bodyText);
   } catch (err) {
     console.error("sms-webhook handler error:", err);
+  }
+  if (rawId !== null) {
+    try {
+      const { error } = await (supabaseAdmin as any)
+        .from("sms_callback_raw")
+        .update({ processed, matched, unidentified })
+        .eq("id", rawId);
+      if (error) throw error;
+    } catch (err) {
+      console.error("[sms-webhook] raw callback result not saved:", err);
+    }
   }
 
   return Response.json(

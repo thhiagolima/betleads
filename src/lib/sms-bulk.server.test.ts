@@ -438,6 +438,21 @@ describe("sendSmsBatch (ENV-10, Short Brasil bulk)", () => {
     expect(logs().some((l) => l.trigger_name === "callback-orphan")).toBe(false);
     const dispatch = fake.db.rows("link_dispatches").find((d) => d.idempotency_key === `${key(1)}:0`);
     expect(dispatch?.delivery_status).toBe("delivered");
+
+    // Every callback is kept raw: body byte for byte, our token out of the query.
+    const raw = fake.db.rows("sms_callback_raw");
+    expect(raw).toHaveLength(2);
+    expect(raw[0]).toMatchObject({
+      method: "POST",
+      query_string: "",
+      body: JSON.stringify({
+        lote: [{ id: "msg-1", parceiroId: key(1), statusConfirmacao: "CONFIRMADO" }],
+      }),
+      processed: 1,
+      matched: 1,
+    });
+    expect(raw[1]).toMatchObject({ method: "GET", body: "" });
+    expect(raw[1].query_string).toBe(`parceiroId=${key(2)}&statusConfirmacao=CONFIRMADO`);
   });
 
   it("B1: bulk is OFF unless SMS_BULK_ENABLED is exactly true", () => {
