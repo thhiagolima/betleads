@@ -17,6 +17,7 @@ import { AuthGate } from "@/components/auth-gate";
 import { SystemDialogHost } from "@/components/system-dialog-host";
 import { createClientOnlyFn } from "@tanstack/react-start";
 import { captureClientException } from "@/lib/observability/sentry.client";
+import { SIDEBAR_BOOT_SCRIPT } from "@/components/shell/sidebar-collapse";
 
 // Compiled away on the server (import protection forbids *.client.ts there).
 const reportBoundaryError = createClientOnlyFn(
@@ -136,8 +137,10 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootShell({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="pt-BR" className="dark">
+    <html lang="pt-BR" className="dark" suppressHydrationWarning>
       <head>
+        {/* Applies the saved sidebar width before the first paint. */}
+        <script dangerouslySetInnerHTML={{ __html: SIDEBAR_BOOT_SCRIPT }} />
         <HeadContent />
       </head>
       <body className="bg-background text-foreground antialiased">

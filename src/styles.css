@@ -5,6 +5,20 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
+ * Desktop sidebar collapsed. Driven by <html data-sidebar="collapsed">, which
+ * an inline script in the root shell sets from localStorage before the first
+ * paint, so the sidebar never renders wide and then snaps narrow. Mobile
+ * ignores it (the menu is a drawer there).
+ */
+@custom-variant sb-collapsed {
+  @media (width >= 48rem) {
+    :where(html[data-sidebar="collapsed"]) & {
+      @slot;
+    }
+  }
+}
+
+/*
  * Design system definition.
  *
  * The @theme inline block maps CSS custom properties to Tailwind utility
@@ -150,7 +164,10 @@
     background: linear-gradient(180deg, oklch(0.14 0.024 260 / 0.85), oklch(0.11 0.02 260 / 0.85));
     border: 1px solid oklch(1 0 0 / 0.06);
     backdrop-filter: blur(10px);
-    transition: border-color 200ms ease, box-shadow 200ms ease, transform 200ms ease;
+    transition:
+      border-color 200ms ease,
+      box-shadow 200ms ease,
+      transform 200ms ease;
   }
   .card-premium:hover {
     border-color: oklch(0.72 0.19 235 / 0.35);
@@ -160,15 +177,28 @@
     animation: pulse-realtime 2s ease-in-out infinite;
   }
   @keyframes pulse-realtime {
-    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 oklch(0.74 0.2 145 / 0.5); }
-    50% { opacity: 0.85; box-shadow: 0 0 0 6px oklch(0.74 0.2 145 / 0); }
+    0%,
+    100% {
+      opacity: 1;
+      box-shadow: 0 0 0 0 oklch(0.74 0.2 145 / 0.5);
+    }
+    50% {
+      opacity: 0.85;
+      box-shadow: 0 0 0 6px oklch(0.74 0.2 145 / 0);
+    }
   }
   .animate-fade-in {
     animation: fade-in 280ms ease-out both;
   }
   @keyframes fade-in {
-    from { opacity: 0; transform: translateY(4px); }
-    to { opacity: 1; transform: translateY(0); }
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 }
 

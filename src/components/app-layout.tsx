@@ -1,138 +1,106 @@
 import { useRouterState } from "@tanstack/react-router";
+import { ChevronRight, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { AppSidebar } from "@/components/app-sidebar";
+import { ActiveTenantSwitcher } from "@/components/active-tenant-switcher";
 import { DemoBanner } from "@/components/demo-banner";
 import { ProviderAuthBanner } from "@/components/provider-auth-banner";
+import { AccountMenu } from "@/components/shell/account-menu";
+import { MobileMenu, MobileTabBar } from "@/components/shell/mobile-nav";
+import { useSidebarCollapsed } from "@/components/shell/sidebar-collapse";
+import { useShellNav } from "@/components/shell/use-shell-nav";
 import { TenantStatusGate } from "@/components/tenant-status-gate";
-import { SidebarToggle } from "@/components/ui/sidebar";
-import { ActiveTenantSwitcher } from "@/components/active-tenant-switcher";
 import { useGlobalRealtimeStatus } from "@/hooks/use-realtime-invalidate";
+import { resolveRouteMeta } from "@/lib/navigation";
+import { cn } from "@/lib/utils";
 
-const titles: Record<string, { title: string; subtitle: string }> = {
-  "/": { title: "Início", subtitle: "Visão geral em tempo real" },
-  "/players": { title: "Jogadores", subtitle: "Base completa de jogadores" },
-  "/midia-ltv": { title: "Aquisição e LTV", subtitle: "ROI por criativo, campanha e público" },
-  "/inteligencia": {
-    title: "Assistente IA",
-    subtitle: "Pergunte qualquer coisa sobre seus players",
-  },
-  "/treino-ia": { title: "Configurar IA", subtitle: "Ensine a inteligência com exemplos reais" },
-  "/alertas": { title: "Oportunidades", subtitle: "Jogadores que precisam de atenção" },
-  "/gamificacao": {
-    title: "Níveis e fidelização",
-    subtitle: "Classificação e comportamento dos jogadores",
-  },
-  "/regras": {
-    title: "Níveis e fidelização",
-    subtitle: "Classificação e comportamento dos jogadores",
-  },
-  "/sms": { title: "SMS", subtitle: "Disparos em massa e automações por SMS" },
-  "/campanhas": { title: "Campanhas", subtitle: "Disparos segmentados e resultados" },
-  "/creditos-sms": { title: "Créditos SMS", subtitle: "Saldo, pedidos e extrato de consumo" },
-  "/email": { title: "Email", subtitle: "Campanhas e fluxos de email" },
-  "/ligacoes": { title: "Voz", subtitle: "Áudios, chamadas e disponibilidade" },
-  "/eventos": { title: "Eventos", subtitle: "Timeline de atividades em tempo real" },
-  "/webhooks": { title: "Integrações", subtitle: "Conexão com sua plataforma de apostas" },
-  "/configuracoes": { title: "Configurações", subtitle: "Preferências da plataforma" },
-  "/admin": { title: "Super Admin", subtitle: "Usuários, métricas e billing da plataforma" },
-  "/tenants": { title: "Conta e equipe", subtitle: "Usuários, saldo e auditoria" },
-};
-
-export function AppLayout({ children }: { children: React.ReactNode }) {
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [isMobile, setIsMobile] = useState(false);
-  const [sidebarPreferenceLoaded, setSidebarPreferenceLoaded] = useState(false);
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
-
-  useEffect(() => {
-    const media = window.matchMedia("(max-width: 767px)");
-    const syncViewport = () => setIsMobile(media.matches);
-    syncViewport();
-    media.addEventListener("change", syncViewport);
-    const savedPreference = window.localStorage.getItem("betleads:sidebar-collapsed");
-    if (savedPreference !== null) setSidebarCollapsed(savedPreference === "true");
-    setSidebarPreferenceLoaded(true);
-    return () => media.removeEventListener("change", syncViewport);
-  }, []);
-
-  useEffect(() => {
-    if (sidebarPreferenceLoaded && !isMobile) {
-      window.localStorage.setItem("betleads:sidebar-collapsed", String(sidebarCollapsed));
-    }
-  }, [isMobile, sidebarCollapsed, sidebarPreferenceLoaded]);
-
-  useEffect(() => {
-    setMobileSidebarOpen(false);
-  }, [pathname]);
-  const key = Object.keys(titles).find((k) =>
-    k === "/" ? pathname === "/" : pathname.startsWith(k),
-  );
-  const meta = key ? titles[key] : { title: "BETLEADS", subtitle: "" };
+function RealtimeIndicator() {
   const rt = useGlobalRealtimeStatus();
-  const rtMeta =
+  const meta =
     rt === "active"
-      ? { dot: "bg-emerald-400 pulse-realtime", label: "Realtime ativo" }
+      ? { dot: "bg-emerald-400 pulse-realtime", label: "Ao vivo" }
       : rt === "connecting"
-        ? { dot: "bg-amber-400 animate-pulse", label: "Conectando..." }
+        ? { dot: "bg-amber-400 animate-pulse", label: "Conectando…" }
         : rt === "offline"
           ? { dot: "bg-rose-500", label: "Offline" }
           : { dot: "bg-muted-foreground/60", label: "Em espera" };
+  return (
+    <span
+      role="status"
+      aria-label={`Tempo real: ${meta.label}`}
+      className="flex h-8 shrink-0 items-center gap-2 rounded-full border border-border px-3 text-xs text-foreground/80"
+    >
+      <span className={cn("size-1.5 rounded-full", meta.dot)} aria-hidden="true" />
+      <span className="hidden sm:inline">{meta.label}</span>
+    </span>
+  );
+}
+
+export function AppLayout({ children }: { children: React.ReactNode }) {
+  const { collapsed, toggle } = useSidebarCollapsed();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const meta = resolveRouteMeta(pathname);
+  const { role } = useShellNav();
+
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    document.title = meta.title === "BETLEADS" ? "BETLEADS" : `${meta.title} · BETLEADS`;
+  }, [meta.title]);
+
+  const ToggleIcon = collapsed ? PanelLeftOpen : PanelLeftClose;
 
   return (
-    <div className="flex min-h-screen w-full bg-app-gradient">
-      {isMobile && mobileSidebarOpen && (
-        <button
-          type="button"
-          aria-label="Fechar menu"
-          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-[2px] md:hidden"
-          onClick={() => setMobileSidebarOpen(false)}
-        />
-      )}
-      <AppSidebar
-        collapsed={isMobile ? false : sidebarCollapsed}
-        onCollapsedChange={setSidebarCollapsed}
-        mobile={isMobile}
-        mobileOpen={mobileSidebarOpen}
-        onMobileClose={() => setMobileSidebarOpen(false)}
-      />
-      <div
-        aria-hidden="true"
-        className="hidden shrink-0 transition-[width] duration-200 ease-out md:block"
-        style={{ width: sidebarCollapsed ? 60 : 244 }}
-      />
+    <div className="flex min-h-dvh w-full bg-app-gradient">
+      <AppSidebar collapsed={collapsed} />
+      <MobileMenu open={menuOpen} onOpenChange={setMenuOpen} />
+
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-border/60 bg-background/70 px-4 backdrop-blur-xl sm:px-5">
-          <SidebarToggle
-            collapsed={isMobile ? !mobileSidebarOpen : sidebarCollapsed}
-            onToggle={() =>
-              isMobile
-                ? setMobileSidebarOpen((open) => !open)
-                : setSidebarCollapsed((collapsed) => !collapsed)
-            }
-          />
-          <div className="flex min-w-0 flex-col leading-tight">
-            <p className="truncate text-base font-semibold tracking-tight">{meta.title}</p>
-            <p className="hidden truncate text-xs text-muted-foreground sm:block">
-              {meta.subtitle}
-            </p>
-          </div>
-          <ActiveTenantSwitcher />
-          <div className="ml-auto flex shrink-0 items-center gap-2 rounded-full border border-border/60 bg-card/50 px-3 py-1 text-xs text-muted-foreground backdrop-blur">
-            <span className={`h-1.5 w-1.5 rounded-full ${rtMeta.dot}`} />
-            <span className="hidden text-foreground/80 sm:inline">{rtMeta.label}</span>
+        <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-border/60 bg-background/80 px-4 backdrop-blur-xl sm:gap-3 md:px-6">
+          <button
+            type="button"
+            onClick={toggle}
+            aria-label={collapsed ? "Expandir menu" : "Recolher menu"}
+            className="hidden size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-foreground/[0.06] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring md:flex"
+          >
+            <ToggleIcon className="size-[18px]" strokeWidth={1.75} aria-hidden="true" />
+          </button>
+          <nav aria-label="Você está em" className="flex min-w-0 items-center gap-2 text-[13.5px]">
+            <span className="hidden shrink-0 text-muted-foreground md:inline">{meta.section}</span>
+            <ChevronRight
+              className="hidden size-3.5 shrink-0 text-muted-foreground md:block"
+              aria-hidden="true"
+            />
+            <span className="truncate text-[15px] font-semibold md:text-[13.5px] md:font-medium">
+              {meta.title}
+            </span>
+          </nav>
+          <div className="ml-auto flex min-w-0 items-center gap-2">
+            <div className="min-w-0 md:hidden">
+              <ActiveTenantSwitcher compact />
+            </div>
+            <div className="hidden min-w-0 md:block">
+              <ActiveTenantSwitcher />
+            </div>
+            <RealtimeIndicator />
+            <AccountMenu role={role} />
           </div>
         </header>
         <DemoBanner />
         <ProviderAuthBanner />
         <main
           aria-label={meta.title}
-          className="flex-1 overflow-x-hidden p-4 animate-fade-in sm:p-6"
+          className="flex-1 overflow-x-hidden p-4 pb-[calc(76px+env(safe-area-inset-bottom))] animate-fade-in sm:p-6 sm:pb-[calc(76px+env(safe-area-inset-bottom))] md:pb-6"
         >
           <TenantStatusGate>{children}</TenantStatusGate>
         </main>
       </div>
+
+      <MobileTabBar menuOpen={menuOpen} onOpenMenu={() => setMenuOpen(true)} />
     </div>
   );
 }
