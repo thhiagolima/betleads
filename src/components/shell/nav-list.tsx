@@ -47,6 +47,9 @@ function NavLinkItem({
       hash={item.hash}
       onClick={onNavigate}
       aria-current={active ? "page" : undefined}
+      // The router would also mark parents and hash siblings as current;
+      // only our single active item should be.
+      activeOptions={{ exact: true, includeHash: true }}
       title={collapsed && !nested ? item.title : undefined}
       className={cn(
         itemBase,

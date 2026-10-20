@@ -46,13 +46,10 @@ export function KpiCard({
 }) {
   return (
     <HomeCard className={cn("flex flex-col p-4 sm:p-5", className)}>
-      <h3 className="text-[12.5px] font-normal text-muted-foreground">{title}</h3>
-      <div className="mt-1.5 flex items-end justify-between gap-3">
-        <p className="min-w-0 truncate text-2xl font-semibold tracking-[-0.03em] tabular-nums sm:text-[28px]">
-          {value}
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <h3 className="text-[12.5px] font-normal text-muted-foreground">{title}</h3>
         {sparkline && sparkline.length > 1 && (
-          <div className="h-9 w-24 shrink-0" aria-hidden="true">
+          <div className="-mt-1 h-8 w-20 shrink-0" aria-hidden="true">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={sparkline}>
                 <Line
@@ -68,6 +65,9 @@ export function KpiCard({
           </div>
         )}
       </div>
+      <p className="mt-1 text-2xl font-semibold tracking-[-0.03em] tabular-nums sm:text-[28px]">
+        {value}
+      </p>
       {(trend || detail) && (
         <p className="mt-2 flex flex-wrap gap-x-1.5 text-xs text-muted-foreground">
           <TrendText trend={trend ?? null} />

@@ -47,6 +47,9 @@ export function MobileTabBar({
             key={tab.title}
             to={tab.to}
             aria-current={active ? "page" : undefined}
+            // The router would also mark parents and hash siblings as current;
+            // only our single active item should be.
+            activeOptions={{ exact: true, includeHash: true }}
             className={cn(classes, active ? "text-primary" : "text-muted-foreground")}
           >
             <Icon className="size-[21px]" strokeWidth={1.75} aria-hidden="true" />

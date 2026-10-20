@@ -63,7 +63,7 @@ function fmtRoi(value: number) {
 
 function CashflowChart({ data }: { data: DashboardData }) {
   return (
-    <HomeCard className="p-4 sm:p-5">
+    <HomeCard className="flex h-full flex-col p-4 sm:p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-[15px] font-semibold">Depósitos e saques</h2>
         <div className="flex gap-4 text-xs text-muted-foreground">
@@ -77,7 +77,7 @@ function CashflowChart({ data }: { data: DashboardData }) {
           </span>
         </div>
       </div>
-      <div className="mt-4 h-[220px] sm:h-[260px]">
+      <div className="mt-4 h-[220px] sm:h-[260px] lg:h-auto lg:min-h-[260px] lg:flex-1">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={data.cashflowChart} margin={{ left: 0, right: 4, top: 4, bottom: 0 }}>
             <defs>
@@ -140,7 +140,7 @@ function CashflowChart({ data }: { data: DashboardData }) {
 
 function CrmCard({ data }: { data: DashboardData }) {
   return (
-    <HomeCard className="flex flex-col border-emerald-500/30 p-4 sm:p-5">
+    <HomeCard className="flex h-full flex-col border-emerald-500/30 p-4 sm:p-5">
       <h2 className="text-[12.5px] font-semibold text-emerald-400">Recuperado pelo CRM</h2>
       <p className="mt-1.5 text-[28px] font-semibold tracking-[-0.03em] tabular-nums sm:text-[32px]">
         {brl(data.recoveredAmount)}
@@ -252,7 +252,7 @@ function LiveFeed({ events }: { events: DashboardData["liveEvents"] }) {
           Ainda sem eventos recentes para exibir.
         </p>
       ) : (
-        <ul className="mt-1 grid gap-x-8 md:grid-cols-2">
+        <ul className="mt-1 grid grid-cols-[minmax(0,1fr)] gap-x-8 md:grid-cols-2">
           {events.slice(0, 6).map((event) => (
             <li
               key={event.id}
@@ -425,7 +425,7 @@ function Dashboard() {
       </div>
 
       <div className="grid gap-3 sm:gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-        <div className="order-2 lg:order-1">
+        <div className="order-2 min-w-0 lg:order-1">
           <CashflowChart data={data} />
         </div>
         <div className="order-1 lg:order-2">
