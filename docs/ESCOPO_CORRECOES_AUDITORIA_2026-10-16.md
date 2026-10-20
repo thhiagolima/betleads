@@ -223,12 +223,14 @@ Atualize a cada PR. Estados: `Pendente` · `Em andamento` · `Implementado` · `
 
 | Fase | Itens | Pendente | Em andamento | Implementado | Homologado | Aceito |
 |---|---:|---:|---:|---:|---:|---:|
-| F0 Contenção | 16 | 1 | 0 | 12 | 0 | 3 |
+| F0 Contenção | 16 | 0 | 0 | 12 | 0 | 4 |
 | F1 Envio e conformidade | 32 | 32 | 0 | 0 | 0 | 0 |
 | F2 Ambientes e operação | 17 | 17 | 0 | 0 | 0 | 0 |
 | F3 Aceite e governança | 13 | 12 | 0 | 1 | 0 | 0 |
 | F4 UX e acessibilidade | 20 | 16 | 0 | 4 | 0 | 0 |
 | F5 Dívida técnica | 16 | 16 | 0 | 0 | 0 | 0 |
+
+**Atualização 19/10/2026 (confirmada pelo responsável):** o app no VPS está atualizado com todo o código da Fase 0; `EVOLUTION_API_KEY` e `EVOLUTION_WEBHOOK_SECRET` foram trocadas; o cadastro público do Supabase está desligado. Decisão F0-02: a tela Inteligência (e a edge function) é só para admin da casa e super admin — **gestor não vê** (ajuste em andamento). A edge function corrigida ainda não foi publicada. A Fase 1 foi adiada por decisão do responsável; a execução segue pelas Fases 2 a 5.
 
 Itens que não aparecem na tabela abaixo estão `Pendente`. Todos os itens `Implementado` estão integrados na branch `fix/audit-phase0-integration` (820 testes, typecheck, build ok); nenhum código foi publicado em produção. Migrations `20261017100000` e `20261017110000` **aplicadas em produção em 16/10/2026** e registradas em `schema_migrations` (a primeira não alterou linhas: as 7 tabelas estavam vazias; a segunda: 0 supressões e 1 token, nada a deduplicar).
 
@@ -244,7 +246,7 @@ Itens que não aparecem na tabela abaixo estão `Pendente`. Todos os itens `Impl
 | F0-08 | Implementado | `fix/f0-tenant-isolation` 0226b39 | tenant-admin-guard.test.ts | 16/10/2026 |
 | F0-09 | Implementado | `fix/f0-whatsapp-security` 9c599c8 | whatsapp-admin.server.test.ts | 16/10/2026 |
 | F0-10 | Aceito | n/a | Produção 16/10 (somente leitura): `20261015090000` (CON-08) e `20261015100000` (SEC-01) em `schema_migrations`; policies `user_roles_select_own`/`user_roles_super_admin_write` e `tenant_sms_credit_balances_*` presentes; `accessible_tenant_ids`, `managed_tenant_ids`, `is_tenant_admin` existem; 151 policies em `public`. | 16/10/2026 |
-| F0-11 | Pendente | | | |
+| F0-11 | Aceito | n/a | Cadastro público desligado no painel do Supabase (confirmado pelo responsável em 19/10/2026). | 19/10/2026 |
 | F0-12 | Implementado | `fix/f0-consent-optout` 2f002a5 + integração (u.$token) | PGlite sobre migrations reais; migration 20261017110000 (aplicar em produção) | 16/10/2026 |
 | F0-13 | Implementado | `fix/f0-consent-optout` 1b52a7a | email-send-consent + consent-fail-closed | 16/10/2026 |
 | F0-14 | Implementado | `fix/f0-consent-optout` 2f002a5 | PGlite + unitário | 16/10/2026 |
