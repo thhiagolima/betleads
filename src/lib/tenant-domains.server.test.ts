@@ -7,7 +7,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 type Row = Record<string, any>;
 
-function makeFakeSupabase(tables: Record<string, Row[]>) {
+type UpdateLogEntry = { table: string; payload: Row; matchedIds: string[] };
+
+function makeFakeSupabase(tables: Record<string, Row[]>, updateLog: UpdateLogEntry[] = []) {
   function from(table: string) {
     if (!tables[table]) tables[table] = [];
 
@@ -47,6 +49,11 @@ function makeFakeSupabase(tables: Record<string, Row[]>) {
 
       if (mode === "update") {
         const matched = applyFilters(rows);
+        updateLog.push({
+          table,
+          payload: { ...updatePayload },
+          matchedIds: matched.map((r) => r.id as string),
+        });
         for (const r of matched) Object.assign(r, updatePayload);
         if (singleMode) {
           return matched.length === 1
@@ -167,10 +174,11 @@ const mocks = vi.hoisted(() => ({
 }));
 
 let tables: Record<string, Row[]> = {};
+let updateLog: UpdateLogEntry[] = [];
 
 vi.mock("@/integrations/supabase/client.server", () => ({
   get supabaseAdmin() {
-    return makeFakeSupabase(tables);
+    return makeFakeSupabase(tables, updateLog);
   },
 }));
 
@@ -210,6 +218,7 @@ const USER_ID = "00000000-0000-4000-8000-0000000000u1";
 
 function seed(partial: Record<string, Row[]>) {
   tables = { tenant_domains: [], tenants: [], sms_campaigns: [], email_campaigns: [], email_senders: [], journeys: [], journey_steps: [], ...partial };
+  updateLog = [];
 }
 
 function domainRow(overrides: Partial<Row> = {}): Row {
@@ -321,6 +330,111 @@ describe("addTenantDomain", () => {
     expect(result.status).toBe("pending");
     expect(result.kind).toBe("email");
   });
+
+  it("rethrows a readable error and inserts no row on a non-ALREADY_EXISTS provider failure", async () => {
+    seed({ tenants: [{ id: TENANT_A, site_url: null }] });
+    mocks.createShortioDomain.mockRejectedValue(
+      new DomainProviderError("UNAVAILABLE", 500, "Short.io fora do ar"),
+    );
+
+    await expect(
+      addTenantDomain({ tenantId: TENANT_A, kind: "shortener", rawHostname: "go.example.com", userId: USER_ID }),
+    ).rejects.toThrow(/Short\.io fora do ar/);
+
+    expect(tables.tenant_domains).toHaveLength(0);
+  });
+
+  it("reactivates a removed shortener row for the same tenant instead of inserting a new one", async () => {
+    seed({
+      tenants: [{ id: TENANT_A, site_url: null }],
+      tenant_domains: [
+        domainRow({
+          id: "dom-1",
+          hostname: "go.example.com",
+          removed_at: "2026-01-01T00:00:00.000Z",
+          status: "failed",
+          provider_domain_id: "old-id",
+        }),
+      ],
+    });
+    mocks.createShortioDomain.mockResolvedValue({
+      providerDomainId: "shortio-new",
+      providerState: "pending",
+      status: "pending",
+      dnsRecords: [],
+    });
+
+    const result = await addTenantDomain({
+      tenantId: TENANT_A,
+      kind: "shortener",
+      rawHostname: "go.example.com",
+      userId: USER_ID,
+    });
+
+    expect(result.id).toBe("dom-1");
+    expect(result.removed_at).toBeNull();
+    expect(result.provider_domain_id).toBe("shortio-new");
+    expect(tables.tenant_domains).toHaveLength(1);
+  });
+
+  it("re-adding a removed email domain with Infobip ALREADY_EXISTS adopts it via getInfobipDomain", async () => {
+    seed({
+      tenant_domains: [
+        domainRow({
+          id: "dom-1",
+          kind: "email",
+          hostname: "mail.example.com",
+          removed_at: "2026-01-01T00:00:00.000Z",
+          status: "failed",
+        }),
+      ],
+    });
+    mocks.createInfobipDomain.mockRejectedValue(
+      new DomainProviderError("ALREADY_EXISTS", 409, "Infobip: already exists"),
+    );
+    mocks.getInfobipDomain.mockResolvedValue({
+      providerDomainId: "infobip-adopted",
+      providerState: "active",
+      status: "verified",
+      dnsRecords: [],
+    });
+
+    const result = await addTenantDomain({
+      tenantId: TENANT_A,
+      kind: "email",
+      rawHostname: "mail.example.com",
+      userId: USER_ID,
+    });
+
+    expect(mocks.getInfobipDomain).toHaveBeenCalledWith("mail.example.com");
+    expect(result.id).toBe("dom-1");
+    expect(result.removed_at).toBeNull();
+    expect(result.provider_domain_id).toBe("infobip-adopted");
+    expect(result.status).toBe("verified");
+  });
+
+  it("still persists the row when create succeeds but requestInfobipVerification fails (non-fatal)", async () => {
+    seed({});
+    mocks.createInfobipDomain.mockResolvedValue({
+      providerDomainId: "infobip-1",
+      providerState: "inactive",
+      status: "pending",
+      dnsRecords: [],
+    });
+    mocks.requestInfobipVerification.mockRejectedValue(new Error("timeout solicitando verificação"));
+
+    const result = await addTenantDomain({
+      tenantId: TENANT_A,
+      kind: "email",
+      rawHostname: "mail.example.com",
+      userId: USER_ID,
+    });
+
+    expect(result.id).toBeTruthy();
+    expect(result.status).toBe("pending");
+    expect(result.last_error).toMatch(/timeout solicitando verificação/);
+    expect(tables.tenant_domains).toHaveLength(1);
+  });
 });
 
 describe("refreshTenantDomain", () => {
@@ -412,6 +526,31 @@ describe("refreshTenantDomain", () => {
     expect(mocks.findShortioDomainByHostname).toHaveBeenCalledWith("bmkt.click");
     expect(result.provider_domain_id).toBe("shortio-42");
   });
+
+  it("never promotes a removed domain to default, even when it refreshes into verified", async () => {
+    seed({
+      tenant_domains: [
+        domainRow({
+          id: "dom-1",
+          status: "pending",
+          is_default: false,
+          provider_domain_id: "shortio-1",
+          removed_at: "2026-01-01T00:00:00.000Z",
+        }),
+      ],
+    });
+    mocks.getShortioDomain.mockResolvedValue({
+      providerDomainId: "shortio-1",
+      providerState: "configured",
+      status: "verified",
+      dnsRecords: [],
+    });
+
+    const result = await refreshTenantDomain("dom-1");
+
+    expect(result.status).toBe("verified");
+    expect(result.is_default).toBe(false);
+  });
 });
 
 describe("setDefaultTenantDomain", () => {
@@ -437,6 +576,18 @@ describe("setDefaultTenantDomain", () => {
     const dom2 = tables.tenant_domains.find((r) => r.id === "dom-2");
     expect(dom1?.is_default).toBe(false);
     expect(dom2?.is_default).toBe(true);
+
+    // Prove the *order* of writes: the old default must be cleared before
+    // the new one is set, so the partial unique index (one default per
+    // tenant+kind) is never briefly violated.
+    const clearIndex = updateLog.findIndex(
+      (u) => u.matchedIds.includes("dom-1") && u.payload.is_default === false,
+    );
+    const setIndex = updateLog.findIndex(
+      (u) => u.matchedIds.includes("dom-2") && u.payload.is_default === true,
+    );
+    expect(clearIndex).toBeGreaterThanOrEqual(0);
+    expect(setIndex).toBeGreaterThan(clearIndex);
   });
 });
 

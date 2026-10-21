@@ -104,7 +104,8 @@ async function maybeAutoDefault(tenantId: string, kind: DomainKind, domainId: st
   const { error: updErr } = await supabaseAdmin
     .from("tenant_domains")
     .update({ is_default: true })
-    .eq("id", domainId);
+    .eq("id", domainId)
+    .is("removed_at", null);
   if (updErr) throw new Error(updErr.message);
 }
 
@@ -127,7 +128,8 @@ async function promoteNextDefault(tenantId: string, kind: DomainKind, excludeId:
   const { error: updErr } = await supabaseAdmin
     .from("tenant_domains")
     .update({ is_default: true })
-    .eq("id", next.id);
+    .eq("id", next.id)
+    .is("removed_at", null);
   if (updErr) throw new Error(updErr.message);
 }
 
@@ -170,6 +172,11 @@ export async function addTenantDomain(input: {
   }
 
   let provider: ProviderDomain;
+  // A verify-request failure right after a successful create is not fatal:
+  // the domain was registered at the provider, so the row must still be
+  // persisted (otherwise it becomes an orphan at the provider with no local
+  // row). Record it as the row's last_error instead.
+  let createVerifyError: string | null = null;
   try {
     if (input.kind === "shortener") {
       try {
@@ -184,8 +191,23 @@ export async function addTenantDomain(input: {
         }
       }
     } else {
-      provider = await createInfobipDomain(hostname);
-      await requestInfobipVerification(hostname);
+      try {
+        provider = await createInfobipDomain(hostname);
+      } catch (err) {
+        if (err instanceof DomainProviderError && err.code === "ALREADY_EXISTS") {
+          // The DB-ownership check above already passed (no local row, or
+          // it belongs to this tenant): adopt the domain that already
+          // exists in the central Infobip account.
+          provider = await getInfobipDomain(hostname);
+        } else {
+          throw err;
+        }
+      }
+      try {
+        await requestInfobipVerification(hostname);
+      } catch (err) {
+        createVerifyError = err instanceof Error ? err.message : String(err);
+      }
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -204,7 +226,7 @@ export async function addTenantDomain(input: {
     is_default: false,
     last_checked_at: now,
     verified_at: provider.status === "verified" ? now : null,
-    last_error: null,
+    last_error: createVerifyError,
     removed_at: null,
     created_by: input.userId,
   };
@@ -303,11 +325,15 @@ export async function refreshTenantDomain(
   if (error) throw new Error(error.message);
   let saved = data as DomainRow;
 
-  if (isVerified && !wasVerified) {
-    await maybeAutoDefault(row.tenant_id, row.kind, domainId);
-    saved = (await fetchDomainById(domainId)) as DomainRow;
-  } else if (losingDefault) {
-    await promoteNextDefault(row.tenant_id, row.kind, domainId);
+  // A removed domain never becomes (or keeps being) the default — it is out
+  // of rotation regardless of what the provider reports.
+  if (!row.removed_at) {
+    if (isVerified && !wasVerified) {
+      await maybeAutoDefault(row.tenant_id, row.kind, domainId);
+      saved = (await fetchDomainById(domainId)) as DomainRow;
+    } else if (losingDefault) {
+      await promoteNextDefault(row.tenant_id, row.kind, domainId);
+    }
   }
 
   return rowToDomain(saved);
