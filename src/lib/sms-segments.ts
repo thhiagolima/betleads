@@ -1,16 +1,17 @@
 // GSM-7 alphabet and segment counter for SMS billing.
 // Pure function used by SMS send path (server) and SMS composer (browser).
 
-// GSM-7 basic alphabet (03.38 standard)
-// Includes: @£$¥èéùìòÇØøÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !"#¤%&'()*+,-./0-9:;<=>?¡A-ZÄÖÑÜ§¿a-zäöñüà and ç (c with cedilla)
+// GSM-7 basic alphabet (3GPP TS 23.038 default alphabet, 0x00–0x7F minus 0x1B escape)
+// Explicitly lists all single-byte characters (no character ranges)
+// Note: lowercase ç is NOT in GSM-7; uppercase Ç is included
 const GSM7_BASIC = new Set(
-  "@£$¥èéùìòÇØøÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !\"#¤%&'()*+,-./0-9:;<=>?¡A-ZÄÖÑÜ§¿a-zäöñüàç\n\r".split(
+  "@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà".split(
     ""
   )
 );
 
-// GSM-7 extension characters (2 units each)
-const GSM7_EXTENSION = new Set("^{}\\[~]|€".split(""));
+// GSM-7 extension characters (2 units each, includes form feed \f)
+const GSM7_EXTENSION = new Set("^{}\\[~]|€\f".split(""));
 
 export interface SmsSegmentInfo {
   encoding: "GSM-7" | "UCS-2";
