@@ -196,17 +196,23 @@ bateu com o que já existia.
 ```sql
 select
   (select coalesce(sum(balance_credits), 0) from public.tenant_sms_credit_balances) as legacy_balance_total,
-  (select count(*) from public.sms_credit_ledger) as legacy_ledger_rows,
-  (select count(*) from public.crm_results_health
-     where check_name = 'cost' and ok = false and metric_date >= current_date - 29) as cost_health_failures_now;
+  (select count(*) from public.sms_credit_ledger) as legacy_ledger_rows;
+
+select tenant_id, metric_date
+from public.crm_results_health
+where check_name = 'cost' and ok = false and metric_date >= (now() at time zone 'America/Sao_Paulo')::date - 29
+order by metric_date desc, tenant_id;
 ```
 
-**Esperado:** `cost_health_failures_now` é o número de falhas de checagem de
-custo que **já existiam antes da virada** (preço antigo, R$ 0,12 ou o que
-estiver em `tenant_sms_pricing`/`sms_credit_settings`) — qualquer coisa além
-disso depois do Passo 6 é nova e precisa de investigação; qualquer uma destas
-que já existia antes não é culpa do Passo 6. `legacy_balance_total` e
-`legacy_ledger_rows` são o tamanho do saldo legado que o Passo 3 vai
+**Esperado:** a segunda consulta é a lista **par a par** (`tenant_id`,
+`metric_date`) de falhas de checagem de custo que **já existiam antes da
+virada** (preço antigo, R$ 0,12 ou o que estiver em
+`tenant_sms_pricing`/`sms_credit_settings`) — guarde a lista inteira, não só
+a contagem: o Passo 6 compara **por par**, não por total, porque checar os
+30 dias completos ali pode trazer à luz dias nunca checados antes (a cron só
+checa o dia de ontem), e um total igual poderia esconder um par novo atrás
+de um par antigo que coincidentemente parou de falhar. `legacy_balance_total`
+e `legacy_ledger_rows` são o tamanho do saldo legado que o Passo 3 vai
 converter — compare com o total somado das linhas do Passo 1c.
 
 **Resultado:** _______________________________________________
@@ -571,20 +577,24 @@ redefinido por último em `20261018110000_demo_tenant_skip_workers.sql`) pega
 um advisory lock de transação (`betleads.refresh_crm_results`), roda todas as
 casas **não-demo** (`where not is_demo`), isola cada casa num bloco
 `begin/exception` próprio e devolve a contagem de casas que falharam, ou
-`-1` se outra execução (o próprio cron, que já roda isso a cada 5/10 min)
-está com o lock. Use-o em vez de escrever um loop do zero:
+`-1` se outra execução estiver com o lock — e o cron `betleads-crm-results-recent`
+chama exatamente essa função a cada 10 minutos (`*/10 * * * *`, com
+`_days=2`; ver `20261016130000_crm_results_daily.sql`), então é normal
+disputar o lock com ele. Use-o em vez de escrever um loop do zero:
 
 ```sql
-set statement_timeout = '30min';
+begin;
+set local statement_timeout = '30min';
 select public.refresh_crm_results_recent(30);
+commit;
 ```
 
 **Esperado:** `0` (nenhuma casa falhou). Rode pelo pooler **sem** `SET
 SESSION CHARACTERISTICS AS TRANSACTION READ ONLY` (é uma escrita).
 
-**Se vier `-1`:** outra execução (o cron) está com o advisory lock agora.
-Espere 1–2 min (o cron roda rápido, só 2 ou 8 dias por padrão) e rode de
-novo — não force destravar o lock.
+**Se vier `-1`:** o cron (a cada 10 min) ou outra execução manual está com o
+advisory lock agora. Espere 1–2 min (o cron roda rápido, só 2 dias por
+padrão) e rode de novo — não force destravar o lock.
 
 **Se vier um número `> 0`:** alguma(s) casa(s) falhou/falharam (a função só
 registra `raise warning`, visível no log do Postgres, não no retorno — pela
@@ -600,9 +610,11 @@ separada, num statement próprio:
 
 ```sql
 do $$
-declare v_day date;
+declare
+  v_day date;
+  v_today date := (now() at time zone 'America/Sao_Paulo')::date;
 begin
-  for v_day in select generate_series(current_date - 29, current_date, interval '1 day')::date loop
+  for v_day in select generate_series(v_today - 29, v_today, interval '1 day')::date loop
     perform public.refresh_crm_results_day('258b2d5b-50a6-3d66-8df4-a3bba0fde0c4', v_day);
   end loop;
 end $$;
@@ -618,7 +630,8 @@ rode `check_crm_results_day` à parte, casa a casa, para os últimos 30 dias
 (use o dia civil de Brasília, igual à própria função):
 
 ```sql
-set statement_timeout = '15min';
+begin;
+set local statement_timeout = '15min';
 do $$
 declare
   v_tenant uuid;
@@ -626,12 +639,23 @@ declare
   v_today date := (now() at time zone 'America/Sao_Paulo')::date;
 begin
   for v_tenant in select id from public.tenants where not is_demo order by id loop
-    for v_day in select generate_series(v_today - 29, v_today, interval '1 day')::date loop
-      perform public.check_crm_results_day(v_tenant, v_day);
-    end loop;
+    begin
+      for v_day in select generate_series(v_today - 29, v_today, interval '1 day')::date loop
+        perform public.check_crm_results_day(v_tenant, v_day);
+      end loop;
+    exception when others then
+      raise notice 'check_crm_results_day: tenant % failed: % %', v_tenant, sqlstate, left(sqlerrm, 200);
+    end;
   end loop;
 end $$;
+commit;
 ```
+
+O `begin ... exception when others ... end;` por casa, dentro do `do $$`,
+garante que uma casa com erro (ex.: dados inconsistentes só naquela casa)
+não aborta o bloco inteiro — as outras casas continuam sendo checadas; o
+`raise notice` com o `tenant_id` e o erro aparece no log da sessão/Postgres,
+não no retorno (a função não devolve nada útil pela sessão SQL).
 
 ```sql
 select tenant_id, metric_date, check_name, expected, actual
@@ -639,13 +663,21 @@ from public.crm_results_health
 where check_name = 'cost' and ok = false and metric_date >= current_date - 29
 order by metric_date desc, tenant_id;
 ```
-**Esperado:** o número de linhas aqui não deve ser maior que o
-`cost_health_failures_now` anotado no Passo 1e (a linha de base de antes da
-virada) — qualquer linha **nova** em relação a esse baseline, em dias **a
-partir de 2026-10-01** (a data de `valid_from` do preço inicial no price
-book), é uma regressão do refresh desta virada. Dias **antes de
-2026-10-01** usam o preço legado via `crm_sms_report_price` (cai no
-fallback `tenant_sms_pricing.sale_price_per_sms` →
+**Esperado:** compare esta lista com a do Passo 1e **por `(tenant_id,
+metric_date)`, nunca só pela contagem total** — rodar `check_crm_results_day`
+para os 30 dias completos aqui pode trazer à tona falhas de custo
+**antigas, nunca checadas antes** (o Passo 1e só tinha o que já estava
+gravado em `crm_results_health` de checagens anteriores; a cron
+`check_crm_results_recent()` só checa o dia de ontem, então muitos desses 30
+dias nunca foram checados até agora). Uma comparação por contagem total
+poderia mascarar um par `(tenant_id, metric_date)` novo que falhou
+escondido atrás de um par antigo que, por coincidência, parou de falhar.
+Então: todo par que já aparecia na lista do Passo 1e continua sendo uma
+falha pré-existente (não é culpa desta virada); todo par **novo** em dias
+**a partir de 2026-10-01** (a data de `valid_from` do preço inicial no price
+book) é uma regressão a investigar. Dias **antes de 2026-10-01** usam o
+preço legado via `crm_sms_report_price` (cai no fallback
+`tenant_sms_pricing.sale_price_per_sms` →
 `sms_credit_settings.default_sale_price_per_sms` → R$ 0,12) — a checagem de
 custo desses dias compara contra esse preço legado, não contra R$ 0,08,
 então não deveria dar `ok = false` por esse motivo. Se os últimos 30 dias
@@ -780,23 +812,33 @@ Para cada pedido `pending` da lista do Passo 1d, nesta ordem:
 3. Confirmar o ajuste e **checar que a linha apareceu** no razão antes de
    tocar no pedido legado:
    ```sql
-   select id, amount, reason, created_at
+   select id, entry_type, amount, reason, created_at
    from public.wallet_ledger
    where tenant_id = '<tenant_id do pedido>'
      and reason like 'Pedido pendente <id do pedido>%'
-   order by created_at desc limit 1;
+   order by created_at desc;
    ```
-   **Esperado:** uma linha, `entry_type = 'manual_adjustment'`,
-   `amount = credits × 0,08` do pedido.
+   **Esperado: exatamente uma linha**, `entry_type = 'manual_adjustment'`,
+   `amount = credits × 0,08` do pedido. **Se vier mais de uma linha**, o
+   diálogo foi confirmado duas vezes (duplo clique, nova tentativa depois de
+   um erro de rede, etc.) — estorne a duplicata **agora**, na mesma tela de
+   ajuste de carteira, com um novo ajuste de `amount` negativo igual ao da
+   linha extra e o motivo `"Estorno de duplicidade pedido <id do pedido>"`;
+   só então siga para o passo 4 (que exige exatamente uma linha ativa por
+   pedido).
 4. **Só depois de confirmar o passo 3**, marcar o pedido legado — a condição
    `exists (...)` repete a mesma checagem dentro da transação, para nunca
    marcar um pedido como liquidado sem o lançamento correspondente já
-   gravado:
+   gravado; `and status = 'pending'` garante que o `update` só afeta o
+   pedido se ele ainda estiver pendente no momento exato do commit (sem
+   isso, duas execuções concorrentes deste passo poderiam marcar e
+   "remarcar" o mesmo pedido sem erro nem aviso):
    ```sql
    begin;
    update public.sms_credit_orders
    set status = 'paid', paid_at = now()
    where id = '<id do pedido>'
+     and status = 'pending'
      and exists (
        select 1 from public.wallet_ledger
        where tenant_id = '<tenant_id do pedido>'
@@ -804,9 +846,10 @@ Para cada pedido `pending` da lista do Passo 1d, nesta ordem:
      );
    commit;
    ```
-   **Esperado:** 1 linha afetada (`UPDATE 1`). Se vier `UPDATE 0`, o
-   lançamento do passo 3 não foi encontrado — não insista; volte ao passo 1
-   e refaça o ajuste pela tela antes de tentar marcar o pedido de novo.
+   **Esperado:** 1 linha afetada (`UPDATE 1`). Se vier `UPDATE 0`, ou o
+   lançamento do passo 3 não foi encontrado, ou o pedido já não está mais
+   `pending` (alguém já marcou) — não insista; confira o status atual do
+   pedido antes de repetir o ajuste pela tela.
 
 Use `status = 'paid'` só se o valor foi de fato cobrado fora do sistema (Pix
 manual, boleto etc. já confirmado); se o pedido nunca foi pago e deve ser
