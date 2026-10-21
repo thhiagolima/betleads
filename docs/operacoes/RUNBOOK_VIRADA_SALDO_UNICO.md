@@ -33,6 +33,17 @@ Passos 1–4, nesta ordem: Passo 1 (leitura + aprovação) → Passo 2 (migratio
 → Passo 3 (conversão) → Passo 4 (deploy do código). Não faça merge para
 `main` fora dessa janela.
 
+**Cosmético esperado entre os Passos 2 e 4:** a migration 20261022100400
+redefine `dashboard_summary_v2` para devolver `walletBalance`/`exempt` em vez
+do campo `smsCredits` que o Início antigo lê (`src/routes/index.tsx`,
+`<MetricRow label="Créditos de SMS" value={num(data.smsCredits)} />`). Entre
+o Passo 2 (migrations já aplicadas) e o Passo 4 (frontend novo no ar), o
+frontend **antigo** ainda chama essa RPC esperando `smsCredits`, que não
+existe mais no retorno — o card "Créditos de SMS" do Início antigo mostra
+**0** nesse intervalo. É esperado e cosmético (não há perda de dado, só a
+leitura de um campo que a RPC já não devolve); não é motivo para pausar a
+virada.
+
 **Resultado:** _______________________________________________
 
 ---
@@ -42,29 +53,37 @@ Passos 1–4, nesta ordem: Passo 1 (leitura + aprovação) → Passo 2 (migratio
 Todo este passo é só leitura. Rode cada consulta pelo pooler com
 `SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY;` logo após conectar.
 
-### 1a. Casas com `plano = 'interno'` hoje (antes da migration)
+### 1a. Casas com `plano = 'interno'` hoje, e snapshot do `plano` que a migration vai sobrescrever
+
+A consulta inclui as 3 casas e qualquer casa `is_demo` mesmo que o `plano`
+delas hoje **não** seja `'interno'` — é exatamente esse conjunto que a
+migration 20261022100000 sobrescreve (`update tenants set plano = 'interno'
+where slug in (...) or is_demo`), então é esse o `plano` anterior que o
+rollback do Passo 2.1 precisa restaurar, não só quem já estava `interno`.
 
 ```sql
 select id, slug, nome, is_demo, plano
 from public.tenants
-where plano = 'interno'
+where slug in ('pixpgf', 'pixreals', 'forrandobet')
+   or is_demo
+   or plano = 'interno'
 order by slug;
 ```
 
-**Esperado:** zero linhas, ou só casas que o usuário já aprovou como `interno`
-antes desta virada (a migration 20261022100000 vai setar `plano = 'interno'`
-para `pixpgf`, `pixreals`, `forrandobet` e qualquer casa com `is_demo = true` —
-hoje isso deveria ser só a casa demo `258b2d5b-50a6-3d66-8df4-a3bba0fde0c4`,
-slug `demo`).
+**Esperado:** pelo menos 4 linhas (as 3 casas interno + a casa demo
+`258b2d5b-50a6-3d66-8df4-a3bba0fde0c4`, slug `demo`), cada uma com o `plano`
+que tem **agora** (antes da migration). Qualquer linha extra é uma casa que
+já está `plano = 'interno'` sem ser nenhuma das 4.
 
-**Se vier diferente:** qualquer casa aqui que não seja `pixpgf`, `pixreals`,
-`forrandobet` ou uma casa `is_demo = true` precisa de aprovação explícita do
-usuário antes de seguir — ela vai ficar isenta de cobrança a partir do
-Passo 2. Sem essa aprovação, pare aqui.
+**Se vier diferente:** qualquer casa na lista que não seja `pixpgf`,
+`pixreals`, `forrandobet` ou uma casa `is_demo = true` precisa de aprovação
+explícita do usuário antes de seguir — ela vai ficar (ou já está) isenta de
+cobrança a partir do Passo 2. Sem essa aprovação, pare aqui.
 
-**Guarde o resultado** (lista de `id`/`slug`/`plano`): é o valor anterior de
-`plano`, necessário para o rollback do Passo 2 (a migration sobrescreve
-`plano` para as 4 casas acima e não guarda o valor antigo).
+**Guarde o resultado inteiro** (`id`/`slug`/`plano` de cada linha): é o
+snapshot usado pelo rollback do Passo 2.1 para devolver cada casa ao `plano`
+que tinha antes — a migration sobrescreve `plano` para as 4 casas e não
+guarda o valor antigo em lugar nenhum.
 
 **Resultado:** _______________________________________________
 
@@ -94,7 +113,16 @@ A função `billing_convert_legacy_sms_credits` ainda não existe antes do
 Passo 2 (ela é criada pela migration 20261022100200). Esta consulta reproduz
 à mão a mesma regra de preview (`_apply = false`): preço efetivo de SMS é o
 preço padrão vigente (`billing_price_book`, hoje R$ 0,08, sem overrides por
-casa aplicados ainda) e casas `interno` (passo 1a) são puladas.
+casa aplicados ainda); a casa é pulada (`amount = 0`, não `null` — é o que a
+função real faz: `v_skip := 'interno'; v_amount := 0;`) quando `plano`
+já é `'interno'`, `is_demo` é verdadeiro, **ou** o slug é `pixpgf`,
+`pixreals` ou `forrandobet` — estas 3 ainda não têm `plano = 'interno'`
+antes do Passo 2 (ele só é setado por essa migration), mas vão virar isentas
+assim que ela rodar, então o preview já deve tratá-las como tal, igual ao
+que a função vai calcular depois de 2.1. A lista omite casas com
+`balance_credits = 0` (nada a converter nelas, `delta` seria 0 de qualquer
+forma) — a função real não as pula, só a prévia à mão aqui pula por não
+terem nada a mostrar.
 
 ```sql
 select
@@ -103,9 +131,11 @@ select
   t.plano,
   b.balance_credits as legacy_balance,
   case when t.plano = 'interno' or coalesce(t.is_demo, false)
-       then null
+         or t.slug in ('pixpgf', 'pixreals', 'forrandobet')
+       then 0
        else round(b.balance_credits * 0.08, 4) end as preview_amount,
   case when t.plano = 'interno' or coalesce(t.is_demo, false)
+         or t.slug in ('pixpgf', 'pixreals', 'forrandobet')
        then 'interno' else null end as skipped_reason
 from public.tenant_sms_credit_balances b
 join public.tenants t on t.id = b.tenant_id
@@ -114,8 +144,9 @@ order by t.slug;
 ```
 
 **Esperado:** uma linha por casa com saldo legado positivo; `preview_amount`
-preenchido para toda casa não-`interno`/não-demo (créditos × R$ 0,08); null
-só para `interno`/demo.
+preenchido para toda casa não-`interno`/não-demo/não-(`pixpgf`/`pixreals`/
+`forrandobet`) (créditos × R$ 0,08); `0` com `skipped_reason = 'interno'`
+para as 4 casas isentas.
 
 **Se vier diferente:** se alguma casa não-`interno` tiver `plano` sem preço
 cadastrado o suficiente para calcular (não deveria acontecer — o preço padrão
@@ -138,31 +169,45 @@ order by o.created_at;
 **Esperado:** a lista completa (pode vir vazia). Depois do Passo 8, a RPC
 `admin_mark_sms_credit_order_paid` perde o EXECUTE de `authenticated`, então
 nenhum desses pedidos pode mais ser marcado como pago pela RPC antiga. Cada
-linha pendente nesta lista deve ser liquidada manualmente, depois da virada,
-com `admin_adjust_wallet(tenant_id, amount, reason)` (R$ = `amount_cents / 100`,
-motivo citando o `id` do pedido) — e então marcada à mão
-(`update sms_credit_orders set status = 'canceled' where id = ...` ou `'paid'`
-se o valor realmente foi cobrado fora do sistema).
+linha pendente nesta lista deve ser liquidada manualmente depois da virada,
+pela tela (**não** por uma chamada SQL direta a `admin_adjust_wallet` — ela
+exige `is_super_admin()`, que verifica `auth.uid()`; conectado pelo pooler
+como `postgres`, `auth.uid()` é nulo e a chamada cai em `forbidden`): em
+`/admin` → aba "Saldo", no diálogo de ajuste de carteira da casa do pedido,
+logado como super admin, com `amount = credits × 0,08` (o preço novo da
+casa — não `unit_price`/`amount_cents` do pedido legado, que é o preço
+antigo) e o motivo `"Pedido pendente <id do pedido> quitado na virada"`. Essa
+via passa pela sessão do usuário (auditada em `tenant_audit_logs`) — ver
+o detalhe completo no Passo 8.2.
 
 **Se vier diferente:** nenhuma ação aqui além de guardar a lista — ela só é
 usada no Passo 8.
 
 **Resultado:** _______________________________________________
 
-### 1e. Linha de base para comparar depois (contagens)
+### 1e. Linha de base do mundo legado (para comparar depois, Passo 6)
+
+As tabelas novas (`tenant_wallets`, `wallet_ledger`, `billing_price_book`,
+`tenant_price_overrides`) ainda não existem antes do Passo 2 — não há nada a
+contar nelas ainda. A linha de base que importa aqui é do **lado legado**:
+usada no Passo 6 para saber se o refresh da Central de Resultados pós-virada
+bateu com o que já existia.
 
 ```sql
 select
-  (select count(*) from public.tenant_wallets) as wallet_rows,
-  (select count(*) from public.wallet_ledger) as ledger_rows,
-  (select count(*) from public.billing_price_book) as price_book_rows,
-  (select count(*) from public.tenant_price_overrides) as overrides_rows;
+  (select coalesce(sum(balance_credits), 0) from public.tenant_sms_credit_balances) as legacy_balance_total,
+  (select count(*) from public.sms_credit_ledger) as legacy_ledger_rows,
+  (select count(*) from public.crm_results_health
+     where check_name = 'cost' and ok = false and metric_date >= current_date - 29) as cost_health_failures_now;
 ```
 
-**Esperado:** todas as tabelas ainda não existem antes do Passo 2 — esta
-consulta **falha** com `relation does not exist` (esperado e normal: as
-tabelas são criadas na migration 20261022100100/20261022100000). Anote isso
-como a linha de base ("0 porque a tabela não existe ainda").
+**Esperado:** `cost_health_failures_now` é o número de falhas de checagem de
+custo que **já existiam antes da virada** (preço antigo, R$ 0,12 ou o que
+estiver em `tenant_sms_pricing`/`sms_credit_settings`) — qualquer coisa além
+disso depois do Passo 6 é nova e precisa de investigação; qualquer uma destas
+que já existia antes não é culpa do Passo 6. `legacy_balance_total` e
+`legacy_ledger_rows` são o tamanho do saldo legado que o Passo 3 vai
+converter — compare com o total somado das linhas do Passo 1c.
 
 **Resultado:** _______________________________________________
 
@@ -189,9 +234,18 @@ conexão de escrita):
 begin;
 -- cole o conteúdo INTEGRAL do arquivo de migration aqui
 insert into supabase_migrations.schema_migrations (version, name, statements)
-values ('<versão, ex: 20261022100000>', '<nome, ex: billing_price_book>', array['<conteúdo integral do arquivo como string>']);
+values ('<versão, ex: 20261022100000>', '<nome, ex: billing_price_book>', array[$mig$<conteúdo integral do arquivo aqui>$mig$]);
 commit;
 ```
+
+Use um dollar-quote com tag própria (`$mig$...$mig$`) para o conteúdo do
+arquivo, nunca aspas simples: todos os 5 arquivos de migration usam `$$` para
+delimitar corpo de função, então uma string entre aspas simples quebraria em
+todo apóstrofo/aspas simples do SQL colado, e `$$...$$` colidiria com os
+blocos `$$` do próprio arquivo. Alternativa igualmente válida: passar o
+conteúdo do arquivo como parâmetro da consulta (`$1`) em vez de literal
+inline, se a ferramenta usada (script Node com `pg`) permitir — nesse caso
+não há escaping para pensar.
 
 Isso é o mesmo padrão já usado na virada de 19/10 (`docs/operacoes/2026-10-19_aquisicao-ltv-al1.md`):
 registrar a migration em `supabase_migrations.schema_migrations` dentro da
@@ -291,9 +345,22 @@ notify pgrst, 'reload schema';
 
 ### 2.4 — `20261022100300_billing_prices_in_reports.sql`
 
+Antes de colar o conteúdo da migration dentro do `begin;`, rode
+`set lock_timeout = '5s';` na mesma transação — o `alter table
+public.sms_send_logs add column if not exists billed_units smallint null`
+pode ficar esperando um lock de escrita em `sms_send_logs` se houver envios
+de SMS em andamento no momento exato da virada (tabela de alto volume).
+Mesmo sendo `add column ... null` (rápido, sem reescrever a tabela), ele
+ainda precisa de um `ACCESS EXCLUSIVE` lock para a alteração de catálogo.
+
 **Esperado:** sucesso. Esta migration redefine `refresh_crm_results_day` e
 `check_crm_results_day` (sem apagar dados) e adiciona a coluna
 `sms_send_logs.billed_units` (nullable, `add column if not exists`).
+
+**Se der erro `canceling statement due to lock timeout`:** a transação já
+fez rollback automático; não há dado parcial. Espere um minuto (os envios em
+andamento liberam o lock rápido) e rode a mesma transação de novo — repita
+até passar.
 
 **Rollback desta migration:** restaurar as definições anteriores das 3
 funções a partir de `20261019120000_crm_click_conversion_incremental.sql` e
@@ -329,8 +396,13 @@ notify pgrst, 'reload schema';
 begin;
 -- recriar dashboard_summary_v2 com o corpo de
 -- 20261019150000_conversion_reports_exclude_active.sql
--- recriar billing_report_unit_price com o corpo de
--- 20261022100000_billing_price_book.sql (sem o tratamento de is_demo)
+-- recriar billing_report_unit_price com O CORPO (a função) de
+-- 20261022100000_billing_price_book.sql (sem o tratamento de is_demo) —
+-- copiar SÓ o "create or replace function", NÃO o "grant execute ...
+-- to authenticated" que acompanha essa função em 20261022100000: esta
+-- migration (100400) revogou esse grant de authenticated de propósito
+-- (vazava o custo do fornecedor por essa RPC; só service_role deveria
+-- chamá-la). Re-rodar aquele grant reabriria o vazamento.
 delete from supabase_migrations.schema_migrations where version = '20261022100400';
 commit;
 notify pgrst, 'reload schema';
@@ -409,6 +481,13 @@ preço do override, não 0,08.
 
 ## Passo 4 — Deploy do código (com autorização)
 
+**Antes de mergear**, anote o SHA do `main` atual (o código que vai ficar no
+ar até este passo) — é o que o Passo 10 usa para reverter:
+```bash
+git rev-parse main
+```
+**SHA do `main` antes do merge:** _______________________________________
+
 Na VPS, a partir do diretório do `docker-compose.yml` (depois do merge desta
 branch no `main` e do build da imagem — ver `docs/docker-deployment.md`):
 
@@ -441,22 +520,40 @@ em R$, não erro 500).
 select * from public.billing_convert_legacy_sms_credits(true);
 ```
 
-**Esperado:** quase todas as linhas com `delta_credits = 0` (nada de novo a
-converter — o saldo legado não mudou desde o Passo 3.2). Só vêm linhas com
-`delta_credits <> 0` para casas onde o código antigo (ainda rodando entre o
-Passo 3 e o deploy do Passo 4) processou um envio de SMS que debitou o saldo
-legado (`tenant_sms_credit_balances`) nesse intervalo — essas linhas lançam a
+**Esperado, casas não-`interno` (`skipped_reason` nulo):** quase todas as
+linhas com `delta_credits = 0` (nada de novo a converter — o saldo legado
+não mudou desde o Passo 3.2). Só vêm linhas com `delta_credits <> 0` para
+casas onde o código antigo (ainda rodando entre o Passo 3 e o deploy do
+Passo 4) processou um envio de SMS que debitou o saldo legado
+(`tenant_sms_credit_balances`) nesse intervalo — essas linhas lançam a
 diferença no saldo novo.
 
-**Nota (item adiado, ruling Task 5):** um SMS que reservou no razão **legado**
-antes do deploy, mas cuja resposta do provedor (e portanto o estorno, se
-rejeitado) só chega **depois** do deploy, vai cair no caminho novo
-(`wallet_refund`) procurando uma reserva que não existe no `wallet_ledger` —
-`wallet_refund` devolve `{"ok": false, "reason": "reservation_not_found"}` em
-vez de lançar exceção (não quebra o envio), mas o crédito legado daquele envio
-nunca é devolvido pelo lado antigo. Esta reconversão do Passo 5 é o que cobre
-esse caso: ela relê o saldo legado atual (já líquido do que não foi devolvido)
-e lança só a diferença.
+**Esperado, casas `interno` (`skipped_reason = 'interno'`):** `delta_credits`
+**não** vai a 0 depois da primeira conversão, nem aqui nem em execuções
+futuras — a função só chama `wallet_mutation` (que é quem grava a linha
+`migration` usada para calcular `already_converted` da próxima vez) dentro
+do ramo não-isento; para uma casa isenta ela nunca grava essa linha, então
+`already_converted` fica para sempre em 0 e `delta_credits` sempre mostra o
+`legacy_balance` inteiro da casa, de novo, a cada execução (preview, apply
+ou esta reconversão). Isso é esperado e sem efeito: `amount` continua 0
+sempre que `skipped_reason = 'interno'`, então repetir não cobra nada — é só
+um artefato de leitura que reaparece.
+
+**Nota (item adiado, ruling Task 5 — perda pequena aceita, não coberta por
+este passo):** um SMS que reservou no razão **legado** antes do deploy, mas
+cuja resposta do provedor (e portanto o estorno, se rejeitado) só chega
+**depois** do deploy, cai no caminho novo (`wallet_refund`) procurando uma
+reserva que não existe no `wallet_ledger` — `wallet_refund` devolve
+`{"ok": false, "reason": "reservation_not_found"}` em vez de lançar exceção
+(não quebra o processamento do callback), mas o crédito daquele envio
+**nunca é devolvido em nenhum dos dois lados**: não no legado (o código
+antigo que faria o estorno já não está mais rodando) nem no novo (não há
+reserva correspondente para estornar). Esta reconversão do Passo 5 relê o
+saldo legado atual e lança a diferença para o saldo novo — ela cobre a
+diferença de saldo entre os dois lados, mas **não recupera** o crédito
+específico perdido nesse SMS rejeitado: é uma perda pequena e aceita (no
+máximo 1 segmento por envio nessa janela estreita entre os Passos 3 e 4),
+não algo que este passo resolve.
 
 **Se vier `skipped_reason` começando com `'error:'`:** mesmo procedimento do
 Passo 3.2 — corrigir e rodar de novo.
@@ -467,47 +564,92 @@ Passo 3.2 — corrigir e rodar de novo.
 
 ## Passo 6 — Refresh dos últimos 30 dias da Central de Resultados
 
-A função de refresh é `public.refresh_crm_results_day(_tenant uuid, _day date)`
-— por casa e por dia (não existe uma variante em lote); rode em loop para cada
-casa ativa e cada um dos últimos 30 dias:
+`refresh_crm_results_day(_tenant uuid, _day date)` é por casa e por dia, mas
+já existe um orquestrador em lote para o refresh: `refresh_crm_results_recent(_days
+integer default 2)` (criado em `20261016130000_crm_results_daily.sql`,
+redefinido por último em `20261018110000_demo_tenant_skip_workers.sql`) pega
+um advisory lock de transação (`betleads.refresh_crm_results`), roda todas as
+casas **não-demo** (`where not is_demo`), isola cada casa num bloco
+`begin/exception` próprio e devolve a contagem de casas que falharam, ou
+`-1` se outra execução (o próprio cron, que já roda isso a cada 5/10 min)
+está com o lock. Use-o em vez de escrever um loop do zero:
+
+```sql
+set statement_timeout = '30min';
+select public.refresh_crm_results_recent(30);
+```
+
+**Esperado:** `0` (nenhuma casa falhou). Rode pelo pooler **sem** `SET
+SESSION CHARACTERISTICS AS TRANSACTION READ ONLY` (é uma escrita).
+
+**Se vier `-1`:** outra execução (o cron) está com o advisory lock agora.
+Espere 1–2 min (o cron roda rápido, só 2 ou 8 dias por padrão) e rode de
+novo — não force destravar o lock.
+
+**Se vier um número `> 0`:** alguma(s) casa(s) falhou/falharam (a função só
+registra `raise warning`, visível no log do Postgres, não no retorno — pela
+sessão SQL você só sabe a contagem). Para saber quais casas, rode o loop
+manual só nas suspeitas (qualquer casa com saldo legado alto do Passo 1c é
+candidata) com `refresh_crm_results_day` direto e leia o erro.
+
+**A casa demo fica de fora** desse refresh em lote (`where not is_demo`) de
+propósito — o worker nunca toca a demo (é um clone congelado, não dados
+reais). Se quiser os números dela atualizados com o preço novo (ela reporta
+o preço de **venda**, não o custo, pela regra da migration 100400), rode-a
+separada, num statement próprio:
 
 ```sql
 do $$
-declare
-  v_tenant record;
-  v_day date;
+declare v_day date;
 begin
-  for v_tenant in select id from public.tenants where coalesce(is_demo, false) = false or id = '258b2d5b-50a6-3d66-8df4-a3bba0fde0c4' loop
-    for v_day in select generate_series(current_date - 29, current_date, interval '1 day')::date loop
-      perform public.refresh_crm_results_day(v_tenant.id, v_day);
-      perform public.check_crm_results_day(v_tenant.id, v_day);
+  for v_day in select generate_series(current_date - 29, current_date, interval '1 day')::date loop
+    perform public.refresh_crm_results_day('258b2d5b-50a6-3d66-8df4-a3bba0fde0c4', v_day);
+  end loop;
+end $$;
+```
+
+Isso é opcional: a demo é re-clonada periodicamente
+(`scripts/demo/clone-tenant-demo.mjs`, ver memória `demo-tenant`) e o próximo
+reset já traz os números corretos sem precisar deste passo. Faça-o só se um
+prospect for olhar a Central de Resultados da demo antes do próximo reset.
+
+**Checagem de saúde** — `refresh_crm_results_recent` não roda a checagem;
+rode `check_crm_results_day` à parte, casa a casa, para os últimos 30 dias
+(use o dia civil de Brasília, igual à própria função):
+
+```sql
+set statement_timeout = '15min';
+do $$
+declare
+  v_tenant uuid;
+  v_day date;
+  v_today date := (now() at time zone 'America/Sao_Paulo')::date;
+begin
+  for v_tenant in select id from public.tenants where not is_demo order by id loop
+    for v_day in select generate_series(v_today - 29, v_today, interval '1 day')::date loop
+      perform public.check_crm_results_day(v_tenant, v_day);
     end loop;
   end loop;
 end $$;
 ```
 
-Rode isso pelo pooler **sem** `SET SESSION CHARACTERISTICS AS TRANSACTION
-READ ONLY` (é uma escrita) e com `SET statement_timeout` generoso (ex.:
-`SET statement_timeout = '10min';` antes do bloco) — 30 dias × todas as casas
-pode levar alguns minutos.
-
-**Esperado:** o bloco termina sem erro.
-
-**Checagem de saúde:**
 ```sql
 select tenant_id, metric_date, check_name, expected, actual
 from public.crm_results_health
 where check_name = 'cost' and ok = false and metric_date >= current_date - 29
 order by metric_date desc, tenant_id;
 ```
-**Esperado:** zero linhas para dias **a partir de 2026-10-01** (a data de
-`valid_from` do preço inicial no price book). Dias **antes de 2026-10-01**
-usam o preço legado via `crm_sms_report_price` (cai no fallback
-`tenant_sms_pricing.sale_price_per_sms` → `sms_credit_settings.default_sale_price_per_sms`
-→ R$ 0,12) — a checagem de custo desses dias compara contra esse preço
-legado, não contra R$ 0,08, então não deveria dar `ok = false` por esse
-motivo. Se os últimos 30 dias não cruzarem 01/10, esta ressalva não se
-aplica.
+**Esperado:** o número de linhas aqui não deve ser maior que o
+`cost_health_failures_now` anotado no Passo 1e (a linha de base de antes da
+virada) — qualquer linha **nova** em relação a esse baseline, em dias **a
+partir de 2026-10-01** (a data de `valid_from` do preço inicial no price
+book), é uma regressão do refresh desta virada. Dias **antes de
+2026-10-01** usam o preço legado via `crm_sms_report_price` (cai no
+fallback `tenant_sms_pricing.sale_price_per_sms` →
+`sms_credit_settings.default_sale_price_per_sms` → R$ 0,12) — a checagem de
+custo desses dias compara contra esse preço legado, não contra R$ 0,08,
+então não deveria dar `ok = false` por esse motivo. Se os últimos 30 dias
+não cruzarem 01/10, esta ressalva não se aplica.
 
 **Se vier alguma linha com `ok = false`:** anote `tenant_id`/`metric_date` e
 compare `expected` (crua, somada de `wallet_ledger`+`sms_credit_ledger`) com
@@ -553,8 +695,11 @@ houver); uma linha nova `entry_type = 'usage_reservation'`, `item = 'sms'`,
 
 ### 7.3 — Envio de teste: 1 SMS de uma casa `interno`
 
-Mesmo envio, de uma das 4 casas isentas (`pixpgf`, `pixreals`, `forrandobet`
-ou `demo` — usar `demo` evita qualquer ligação com um número real da operação).
+Mesmo envio, de uma das 3 casas isentas operacionais: `pixpgf`, `pixreals`
+ou `forrandobet`. **Não use a casa demo aqui** — ela tem o envio bloqueado
+no código (`DEMO_SEND_BLOCKED`, "Ambiente de demonstração: nenhum envio é
+feito"); o teste falharia por esse motivo, não por nada relacionado à
+carteira. Use um número de teste autorizado, exatamente como no 7.2.
 
 ```sql
 select balance from public.tenant_wallets where tenant_id = '<tenant interno>';
@@ -617,24 +762,56 @@ funções; `service_role` e o dono (`postgres`) continuam aparecendo.
 
 ### 8.2 — Liquidar os pedidos pendentes anotados no Passo 1d
 
-Para cada pedido `pending` da lista do Passo 1d:
+`admin_adjust_wallet` só aceita quem passa `is_super_admin()` (checa
+`auth.uid()`, nulo numa sessão do pooler) — **não existe SQL direto para
+este passo**; ele é feito pela tela, numa sessão de super admin autenticada,
+para que a escrita fique auditada em `tenant_audit_logs` (como qualquer
+outro ajuste manual de carteira).
 
-```sql
-select public.admin_adjust_wallet(
-  '<tenant_id do pedido>',
-  <amount_cents / 100.0>,
-  'Liquidação manual do pedido sms_credit_orders <id do pedido> (RPC de marcar pago removida na virada do saldo único)'
-);
-update public.sms_credit_orders set status = 'paid', paid_at = now() where id = '<id do pedido>';
-```
+Para cada pedido `pending` da lista do Passo 1d, nesta ordem:
+
+1. Logar como super admin (`thiago@businesscode.com.br`). Abrir `/admin` →
+   aba "Saldo" (ou `/tenants` → casa do pedido → aba "Saldo") → diálogo de
+   ajuste de carteira dessa casa.
+2. Preencher `amount = credits × 0,08` (créditos do pedido × o preço **novo**
+   de SMS da casa — não `unit_price`/`amount_cents` do pedido, que são o
+   preço antigo) e o motivo exatamente
+   `"Pedido pendente <id do pedido> quitado na virada"`.
+3. Confirmar o ajuste e **checar que a linha apareceu** no razão antes de
+   tocar no pedido legado:
+   ```sql
+   select id, amount, reason, created_at
+   from public.wallet_ledger
+   where tenant_id = '<tenant_id do pedido>'
+     and reason like 'Pedido pendente <id do pedido>%'
+   order by created_at desc limit 1;
+   ```
+   **Esperado:** uma linha, `entry_type = 'manual_adjustment'`,
+   `amount = credits × 0,08` do pedido.
+4. **Só depois de confirmar o passo 3**, marcar o pedido legado — a condição
+   `exists (...)` repete a mesma checagem dentro da transação, para nunca
+   marcar um pedido como liquidado sem o lançamento correspondente já
+   gravado:
+   ```sql
+   begin;
+   update public.sms_credit_orders
+   set status = 'paid', paid_at = now()
+   where id = '<id do pedido>'
+     and exists (
+       select 1 from public.wallet_ledger
+       where tenant_id = '<tenant_id do pedido>'
+         and reason like 'Pedido pendente <id do pedido>%'
+     );
+   commit;
+   ```
+   **Esperado:** 1 linha afetada (`UPDATE 1`). Se vier `UPDATE 0`, o
+   lançamento do passo 3 não foi encontrado — não insista; volte ao passo 1
+   e refaça o ajuste pela tela antes de tentar marcar o pedido de novo.
 
 Use `status = 'paid'` só se o valor foi de fato cobrado fora do sistema (Pix
-manual, boleto etc. já confirmado); use `'canceled'` se o pedido nunca foi
-pago e deve ser descartado (sem rodar `admin_adjust_wallet` nesse caso).
-
-**Esperado:** uma linha nova em `wallet_ledger` (`entry_type =
-'manual_adjustment'`) por pedido liquidado, e o pedido correspondente saindo
-da lista de `pending`.
+manual, boleto etc. já confirmado); se o pedido nunca foi pago e deve ser
+descartado, marque `status = 'canceled'` direto (sem passar pelos passos
+1–3, que são só para quem está sendo de fato creditado agora).
 
 **Verificação final:**
 ```sql
@@ -676,25 +853,55 @@ Task 8 (`.superpowers/sdd/2026-10-21-pg1-precos-saldo-unico/task-8-report.md`):
 
 ## Passo 10 — Plano de rollback
 
-**Código:** reimplantar a imagem Docker anterior (`docker compose up -d
---force-recreate` apontando para a tag/imagem anterior) e confirmar
-`docker compose logs` sem erro. As tabelas novas (`tenant_wallets`,
-`wallet_ledger`, `tenant_monthly_usage`, `billing_price_book`,
-`tenant_price_overrides`, `billing_plans`) são **aditivas**: o código antigo
-não as lê nem as escreve, então reverter o código não precisa desfazer as
-migrations.
+**Código:** usar o SHA anotado no Passo 4 (o `main` de antes do merge) —
+não uma imagem Docker antiga sem referência, para ter certeza de qual
+código volta ao ar:
+
+```bash
+git checkout <SHA anotado no Passo 4>
+docker compose up -d --build --force-recreate crm
+docker compose ps
+docker compose logs --since=5m crm
+```
+
+(mesmo comando do Passo 4/`docs/docker-deployment.md`, só com o código do
+SHA anterior). As tabelas novas (`tenant_wallets`, `wallet_ledger`,
+`tenant_monthly_usage`, `billing_price_book`, `tenant_price_overrides`,
+`billing_plans`) são **aditivas**: o código antigo não as lê nem as escreve,
+então reverter o código não precisa desfazer as migrations 100000–100300.
+
+**Atenção — `dashboard_summary_v2` (migration 100400) não tem essa
+propriedade aditiva:** ela redefine a função para devolver
+`walletBalance`/`exempt` em vez do `smsCredits` que o Início antigo lê (ver
+a nota do Passo 0). Depois do Passo 4, o saldo **legado**
+(`tenant_sms_credit_balances`) também já ficou estático — o código novo só
+debita a carteira nova, nunca mais o saldo legado — então, se o rollback do
+código acontecer depois do Passo 4, o Início antigo de volta no ar não tem
+um número correto para mostrar de nenhum dos dois lados: o campo que ele lê
+não existe mais na RPC (mostra 0, igual à janela cosmética do Passo 0) e o
+saldo legado, mesmo que a RPC ainda devolvesse, já estaria desatualizado
+(não reflete o consumo real depois do Passo 4). Duas opções, sem meio-termo
+melhor: (a) aceitar o card "Créditos de SMS" zerado enquanto o código antigo
+estiver no ar (mesma situação cosmética do Passo 0, sem perda de dado real —
+o saldo de verdade mora na carteira nova); ou (b) reverter também a migration
+100400 (bloco de rollback da seção 2.5) para que `dashboard_summary_v2`
+volte a devolver `smsCredits` a partir do saldo legado — mas nesse caso ele
+vai mostrar um número **desatualizado** (parado no valor do Passo 3/5), não
+o consumo real desde o Passo 4. Prefira (a): é mais simples e não esconde
+que o saldo mostrado é obsoleto.
 
 **Dados:** as tabelas legadas (`tenant_sms_credit_balances`,
 `sms_credit_ledger`, `sms_credit_orders`, `tenant_sms_pricing`,
 `sms_credit_settings`) **não são tocadas** até o Passo 8 (as RPCs continuam
 gravando nelas se o código antigo rodar, e a conversão só lê — nunca escreve
-nelas). Se o rollback do código acontecer **antes** do Passo 8, o sistema
-volta a funcionar exatamente como antes da virada, sem perda: o saldo legado
-ainda está intacto (modulo o que a conversão já havia deduzido do lado novo,
-que é só leitura do lado legado). Se o rollback acontecer **depois** do
-Passo 8 (RPCs legadas já revogadas de `authenticated`), o código antigo
-volta a chamar essas RPCs como `authenticated` e vai receber `permission
-denied` — nesse caso, reconceda o EXECUTE antes de reverter o código:
+nelas). Se o rollback do código acontecer **antes** do Passo 4 (ainda não
+fez o deploy do código novo), o sistema volta a funcionar exatamente como
+antes da virada, sem perda: o saldo legado ainda está intacto (módulo o que
+a conversão já havia deduzido do lado novo, que é só leitura do lado
+legado). Se o rollback acontecer **depois** do Passo 8 (RPCs legadas já
+revogadas de `authenticated`), o código antigo volta a chamar essas RPCs
+como `authenticated` e vai receber `permission denied` — nesse caso,
+reconceda o EXECUTE antes de reverter o código:
 
 ```sql
 begin;
