@@ -192,22 +192,45 @@ export const adminPlatformMetrics = createServerFn({ method: "POST" })
   });
 
 // ─── Preços ─────────────────────────────────────────────────────────────────
+// Global default prices live in `billing_price_book` (PG1 Task 2): the
+// current (latest `valid_from`) row per item. Per-tenant overrides are a
+// separate, item-scoped dialog — see `src/lib/billing/billing.functions.ts`
+// (`adminSetTenantPrice`/`adminClearTenantPrice`).
+const BILLING_ITEMS = ["sms", "voice_30s", "email"] as const;
+
 export const getPricing = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     await assertSuperAdmin(context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data, error } = await supabaseAdmin
-      .from("platform_pricing")
-      .select("channel, price_per_unit, unit_label, updated_at")
-      .order("channel");
+      .from("billing_price_book")
+      .select("item, unit_price, provider_unit_cost, free_monthly_units, created_at")
+      .order("valid_from", { ascending: false });
     if (error) throw new Error(error.message);
-    return { pricing: data ?? [] };
+    // Most recent row per item (the table keeps full history by valid_from).
+    const latestByItem = new Map<string, (typeof data)[number]>();
+    for (const row of data ?? []) {
+      if (!latestByItem.has(row.item)) latestByItem.set(row.item, row);
+    }
+    const pricing = BILLING_ITEMS.map(
+      (item) =>
+        latestByItem.get(item) ?? {
+          item,
+          unit_price: 0,
+          provider_unit_cost: null,
+          free_monthly_units: 0,
+          created_at: null,
+        },
+    );
+    return { pricing };
   });
 
 const pricingInput = z.object({
-  channel: z.enum(["sms", "call", "email"]),
-  price_per_unit: z.number().min(0).max(1000),
+  item: z.enum(BILLING_ITEMS),
+  unit_price: z.number().min(0).max(1000),
+  provider_unit_cost: z.number().min(0).max(1000).optional().nullable(),
+  free_monthly_units: z.number().int().min(0).max(10_000_000).optional(),
 });
 
 export const setPricing = createServerFn({ method: "POST" })
@@ -216,10 +239,12 @@ export const setPricing = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertSuperAdmin(context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { error } = await supabaseAdmin
-      .from("platform_pricing")
-      .update({ price_per_unit: data.price_per_unit, updated_at: new Date().toISOString() })
-      .eq("channel", data.channel);
+    const { error } = await supabaseAdmin.rpc("admin_set_price", {
+      _item: data.item,
+      _unit_price: data.unit_price,
+      _provider_unit_cost: data.provider_unit_cost ?? undefined,
+      _free_monthly_units: data.free_monthly_units ?? 0,
+    });
     if (error) throw new Error(error.message);
     return { ok: true };
   });
