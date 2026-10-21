@@ -106,15 +106,18 @@ export function EmailSendersSection({ variant = "page" }: { variant?: "page" | "
             <div className="flex items-center gap-2">
               {s.isDefault && <Badge variant="outline">Padrão</Badge>}
               {canEdit && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="text-destructive hover:text-destructive"
-                  onClick={() => remove.mutate(s.id)}
-                >
-                  Remover
-                </Button>
+                <DemoDisabledTooltip active={isDemo}>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="text-destructive hover:text-destructive"
+                    disabled={isDemo}
+                    onClick={() => remove.mutate(s.id)}
+                  >
+                    Remover
+                  </Button>
+                </DemoDisabledTooltip>
               )}
             </div>
           </div>

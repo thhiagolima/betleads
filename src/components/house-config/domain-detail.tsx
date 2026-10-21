@@ -15,6 +15,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import type { DnsRecord, DomainStatus } from "@/lib/house-config";
 
 export type DomainDetailDomain = {
@@ -48,6 +49,7 @@ export function DomainDetail({
   domain,
   canEdit,
   verifying,
+  isDemo = false,
   onCopyRecord,
   onVerifyNow,
   onSendInstructions,
@@ -57,6 +59,10 @@ export function DomainDetail({
   domain: DomainDetailDomain;
   canEdit: boolean;
   verifying?: boolean;
+  /** Demo tenants can view every action but never execute a write — same
+   * `DemoDisabledTooltip` + disabled pattern as the rest of the house-config
+   * write controls. */
+  isDemo?: boolean;
   onCopyRecord?: (record: DnsRecord) => void;
   onVerifyNow?: () => void;
   onSendInstructions?: () => void;
@@ -115,30 +121,51 @@ export function DomainDetail({
 
       {canEdit && (
         <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="outline" size="sm" onClick={onVerifyNow} disabled={verifying}>
-            {verifying ? "Verificando…" : "Verificar agora"}
-          </Button>
-          <Button type="button" variant="outline" size="sm" onClick={onSendInstructions}>
-            Enviar instruções por e-mail
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={onSetDefault}
-            disabled={!canBeDefault}
-          >
-            Definir como padrão
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="text-destructive hover:text-destructive"
-            onClick={onRemove}
-          >
-            Remover
-          </Button>
+          <DemoDisabledTooltip active={isDemo}>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onVerifyNow}
+              disabled={isDemo || verifying}
+            >
+              {verifying ? "Verificando…" : "Verificar agora"}
+            </Button>
+          </DemoDisabledTooltip>
+          <DemoDisabledTooltip active={isDemo}>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onSendInstructions}
+              disabled={isDemo}
+            >
+              Enviar instruções por e-mail
+            </Button>
+          </DemoDisabledTooltip>
+          <DemoDisabledTooltip active={isDemo}>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onSetDefault}
+              disabled={isDemo || !canBeDefault}
+            >
+              Definir como padrão
+            </Button>
+          </DemoDisabledTooltip>
+          <DemoDisabledTooltip active={isDemo}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="text-destructive hover:text-destructive"
+              onClick={onRemove}
+              disabled={isDemo}
+            >
+              Remover
+            </Button>
+          </DemoDisabledTooltip>
         </div>
       )}
     </div>

@@ -93,16 +93,18 @@ export function HouseSiteSection({ variant = "page" }: { variant?: "page" | "wiz
             disabled={!canEdit}
             className="max-w-sm"
           />
-          <DemoDisabledTooltip active={isDemo}>
-            <Button
-              type="button"
-              size="sm"
-              disabled={!canEdit || isDemo || saveSite.isPending}
-              onClick={() => saveSite.mutate()}
-            >
-              {saveSite.isPending ? "Salvando…" : "Salvar"}
-            </Button>
-          </DemoDisabledTooltip>
+          {canEdit && (
+            <DemoDisabledTooltip active={isDemo}>
+              <Button
+                type="button"
+                size="sm"
+                disabled={isDemo || saveSite.isPending}
+                onClick={() => saveSite.mutate()}
+              >
+                {saveSite.isPending ? "Salvando…" : "Salvar"}
+              </Button>
+            </DemoDisabledTooltip>
+          )}
         </div>
       </div>
 

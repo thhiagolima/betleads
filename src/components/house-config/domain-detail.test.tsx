@@ -92,4 +92,22 @@ describe("DomainDetail", () => {
     const defaultButtonAttrs = findButtonOpenTag(html, "Definir como padrão");
     expect(isDisabled(defaultButtonAttrs)).toBe(true);
   });
+
+  it("demo tenant: every action still renders but is disabled", () => {
+    const html = renderToStaticMarkup(
+      <DomainDetail domain={makeDomain({ status: "verified" })} canEdit isDemo />,
+    );
+
+    // Actions are still present (read access is unaffected by demo gating)...
+    expect(html).toContain("Verificar agora");
+    expect(html).toContain("Enviar instruções por e-mail");
+    expect(html).toContain("Definir como padrão");
+    expect(html).toContain("Remover");
+
+    // ...but every one of them is disabled.
+    expect(isDisabled(findButtonOpenTag(html, "Verificar agora"))).toBe(true);
+    expect(isDisabled(findButtonOpenTag(html, "Enviar instruções por e-mail"))).toBe(true);
+    expect(isDisabled(findButtonOpenTag(html, "Definir como padrão"))).toBe(true);
+    expect(isDisabled(findButtonOpenTag(html, "Remover"))).toBe(true);
+  });
 });

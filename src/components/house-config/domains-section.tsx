@@ -6,7 +6,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { Globe, Mail, Plus } from "lucide-react";
+import { ChevronDown, ChevronRight, Globe, Mail, Plus } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -38,6 +38,7 @@ import {
   computeShortenerPending,
   getHouseConfig,
   getHouseDomainUsages,
+  purgeHouseDomain,
   refreshHouseDomain,
   removeHouseDomain,
   sendDnsInstructions,
@@ -68,17 +69,23 @@ export function DomainsSection({
   const removeFn = useServerFn(removeHouseDomain);
   const sendInstructionsFn = useServerFn(sendDnsInstructions);
   const usagesFn = useServerFn(getHouseDomainUsages);
+  const purgeFn = useServerFn(purgeHouseDomain);
 
   const query = useQuery({ queryKey: HOUSE_CONFIG_QUERY_KEY, queryFn: () => getConfig() });
   const config = query.data;
   const canEdit = config?.canEdit ?? false;
   const domains = (config?.domains ?? []).filter((d) => d.kind === kind);
+  // Only populated by the server when the caller is a super admin — everyone
+  // else always sees an empty array (see `selectRemovedDomainsForSuperAdmin`).
+  const removedDomains = (config?.removedDomains ?? []).filter((d) => d.kind === kind);
 
   const [newHostname, setNewHostname] = useState("");
   const [verifyingId, setVerifyingId] = useState<string | null>(null);
   const [removeDialogDomainId, setRemoveDialogDomainId] = useState<string | null>(null);
   const [instructionsDialogDomainId, setInstructionsDialogDomainId] = useState<string | null>(null);
   const [instructionsEmail, setInstructionsEmail] = useState("");
+  const [removedListOpen, setRemovedListOpen] = useState(false);
+  const [purgeDialogDomainId, setPurgeDialogDomainId] = useState<string | null>(null);
 
   const refresh = () => qc.invalidateQueries({ queryKey: HOUSE_CONFIG_QUERY_KEY });
 
@@ -131,6 +138,16 @@ export function DomainsSection({
     onError: (error: Error) => toast.error(error.message),
   });
 
+  const purge = useMutation({
+    mutationFn: (domainId: string) => purgeFn({ data: { domainId } }),
+    onSuccess: () => {
+      toast.success("Domínio apagado no provedor");
+      setPurgeDialogDomainId(null);
+      refresh();
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+
   const usagesQuery = useQuery({
     queryKey: ["house-domain-usages", removeDialogDomainId],
     queryFn: () => usagesFn({ data: { domainId: removeDialogDomainId! } }),
@@ -138,12 +155,14 @@ export function DomainsSection({
   });
 
   function copyRecord(record: DnsRecord) {
-    if (typeof navigator !== "undefined" && navigator.clipboard) {
-      navigator.clipboard.writeText(record.value).then(
-        () => toast.success("Valor copiado"),
-        () => toast.error("Não foi possível copiar"),
-      );
+    if (typeof navigator === "undefined" || !navigator.clipboard) {
+      toast.error("Não foi possível copiar");
+      return;
     }
+    navigator.clipboard.writeText(record.value).then(
+      () => toast.success("Valor copiado"),
+      () => toast.error("Não foi possível copiar"),
+    );
   }
 
   const meta = KIND_LABEL[kind];
@@ -186,6 +205,7 @@ export function DomainsSection({
             domain={d}
             canEdit={canEdit}
             verifying={verifyingId === d.id}
+            isDemo={isDemo}
             onCopyRecord={copyRecord}
             onVerifyNow={() => verifyNow.mutate(d.id)}
             onSendInstructions={() => setInstructionsDialogDomainId(d.id)}
@@ -197,6 +217,71 @@ export function DomainsSection({
           <p className="text-sm text-muted-foreground">Nenhum domínio cadastrado ainda.</p>
         )}
       </div>
+
+      {variant === "page" && removedDomains.length > 0 && (
+        <div className="space-y-2 rounded-lg border border-border/40 bg-background/20 p-3">
+          <button
+            type="button"
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => setRemovedListOpen((open) => !open)}
+          >
+            {removedListOpen ? (
+              <ChevronDown className="h-3.5 w-3.5" />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5" />
+            )}
+            Domínios removidos ({removedDomains.length})
+          </button>
+          {removedListOpen && (
+            <div className="space-y-2">
+              {removedDomains.map((d) => (
+                <div
+                  key={d.id}
+                  className="flex flex-wrap items-center justify-between gap-2 text-sm"
+                >
+                  <span className="font-mono truncate text-muted-foreground">{d.hostname}</span>
+                  <DemoDisabledTooltip active={isDemo}>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="text-destructive hover:text-destructive"
+                      disabled={isDemo}
+                      onClick={() => setPurgeDialogDomainId(d.id)}
+                    >
+                      Apagar no provedor
+                    </Button>
+                  </DemoDisabledTooltip>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      <AlertDialog
+        open={!!purgeDialogDomainId}
+        onOpenChange={(open) => !open && setPurgeDialogDomainId(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Apagar domínio no provedor</AlertDialogTitle>
+            <AlertDialogDescription>
+              Essa ação é irreversível: o domínio é apagado na conta do provedor (Short.io ou
+              Infobip) e links e histórico que ainda dependem dele deixam de funcionar.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={purge.isPending}
+              onClick={() => purgeDialogDomainId && purge.mutate(purgeDialogDomainId)}
+            >
+              Apagar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog
         open={!!removeDialogDomainId}
