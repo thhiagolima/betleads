@@ -13,6 +13,7 @@ import {
 import { callInfobipVoice, normalizeE164BR } from "./infobip-voice.server";
 import { sendSmsInternal } from "./sms.functions";
 import { buildPlayerVariables } from "./template-vars.server";
+import { loadHouseLinks } from "./house-links.server";
 import { deferIfOutsideWindow } from "./send-window.server";
 import { evaluateVoiceContactPolicy } from "./consent.server";
 import { listDemoTenantIds } from "./tenant-access.server";
@@ -775,8 +776,9 @@ export async function handleCallCompletion(args: {
     const player = await loadPlayer(progress.player_id);
     const phone = progress.phone_e164 || player?.telefone || "";
     if (phone && player) {
+      const house = await loadHouseLinks(progress.tenant_id);
       const vars = {
-        ...buildPlayerVariables(player),
+        ...buildPlayerVariables(player, house),
         duracao_chamada: String(duration),
         resultado_ligacao: args.status,
         tentativas_ligacao: String(progress.attempts_on_block ?? 0),

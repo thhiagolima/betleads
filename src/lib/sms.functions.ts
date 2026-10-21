@@ -15,6 +15,7 @@ import {
   resolveOperationalTenantId,
 } from "@/lib/tenant-access.server";
 import { buildPlayerVariables } from "./template-vars.server";
+import { loadHouseLinks } from "./house-links.server";
 import {
   markTrackedDispatchesFailed,
   markTrackedDispatchesSent,
@@ -985,7 +986,7 @@ export const sendTestSms = createServerFn({ method: "POST" })
         .eq("tenant_id", tenantId)
         .maybeSingle();
       if (p) {
-        variables = buildPlayerVariables(p);
+        variables = buildPlayerVariables(p, await loadHouseLinks(tenantId));
       }
     }
     return sendSmsInternal({
@@ -1063,7 +1064,7 @@ export const triggerSmsFlowNow = createServerFn({ method: "POST" })
       .maybeSingle();
     if (!player?.telefone) return { ok: false, error: "Player sem telefone" };
 
-    const variables = buildPlayerVariables(player);
+    const variables = buildPlayerVariables(player, await loadHouseLinks(tenantId));
     return sendSmsInternal({
       to: player.telefone,
       content: first.content,
@@ -1207,6 +1208,7 @@ export const sendBulkSms = createServerFn({ method: "POST" })
     const playerIds = Array.from(new Set(targets.map((t) => t.playerId)));
     const varsByPlayer = new Map<string, Record<string, string>>();
     if (playerIds.length > 0) {
+      const house = await loadHouseLinks(tenantId);
       const { data: players } = await supabaseAdmin
         .from("players")
         .select(
@@ -1214,7 +1216,7 @@ export const sendBulkSms = createServerFn({ method: "POST" })
         )
         .in("id", playerIds);
       (players ?? []).forEach((p) => {
-        varsByPlayer.set(p.id, buildPlayerVariables(p));
+        varsByPlayer.set(p.id, buildPlayerVariables(p, house));
       });
     }
 
@@ -1937,6 +1939,7 @@ export const resendFailedSms = createServerFn({ method: "POST" })
     );
     const varsByPlayer = new Map<string, Record<string, string>>();
     if (playerIds.length > 0) {
+      const house = await loadHouseLinks(tenantId);
       const { data: players } = await supabaseAdmin
         .from("players")
         .select(
@@ -1945,7 +1948,7 @@ export const resendFailedSms = createServerFn({ method: "POST" })
         .eq("tenant_id", tenantId)
         .in("id", playerIds);
       (players ?? []).forEach((p) => {
-        varsByPlayer.set(p.id, buildPlayerVariables(p));
+        varsByPlayer.set(p.id, buildPlayerVariables(p, house));
       });
     }
 

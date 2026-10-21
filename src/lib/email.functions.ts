@@ -15,6 +15,7 @@ import {
 } from "./email-segments.server";
 import { buildPlayerVariables } from "./template-vars.server";
 import { renderTemplate } from "./template-vars.server";
+import { loadHouseLinks } from "./house-links.server";
 import {
   assertTenantNotDemoForSend,
   resolveCurrentTenantId,
@@ -107,9 +108,10 @@ export const sendTestEmail = createServerFn({ method: "POST" })
         .maybeSingle();
       if (p) {
         playerId = p.id;
-        const vars = buildPlayerVariables(p);
-        html = renderTemplate(html, vars);
-        subject = renderTemplate(subject, vars);
+        const house = await loadHouseLinks(tenantId);
+        const vars = buildPlayerVariables(p, house);
+        html = renderTemplate(html, vars, house);
+        subject = renderTemplate(subject, vars, house);
       }
     } else {
       // tenta auto-match por email
@@ -121,9 +123,10 @@ export const sendTestEmail = createServerFn({ method: "POST" })
         .maybeSingle();
       if (p) {
         playerId = p.id;
-        const vars = buildPlayerVariables(p);
-        html = renderTemplate(html, vars);
-        subject = renderTemplate(subject, vars);
+        const house = await loadHouseLinks(tenantId);
+        const vars = buildPlayerVariables(p, house);
+        html = renderTemplate(html, vars, house);
+        subject = renderTemplate(subject, vars, house);
       }
     }
 
@@ -978,13 +981,15 @@ export async function runCampaignSend(campaignId: string) {
   let falhas = 0;
   let pendentes = 0;
 
+  const house = await loadHouseLinks(camp.tenant_id);
+
   for (const p of players) {
     if (!p.email) continue;
     try {
       // Campaigns are not frequency-capped (the contact limit is for journeys).
-      const vars = buildPlayerVariables(p);
-      const subject = renderTemplate(tpl.subject ?? "", vars);
-      const html = renderTemplate(tpl.body_html ?? "", vars);
+      const vars = buildPlayerVariables(p, house);
+      const subject = renderTemplate(tpl.subject ?? "", vars, house);
+      const html = renderTemplate(tpl.body_html ?? "", vars, house);
       const r = await sendInfobipEmail({
         to: p.email,
         from: sender.fromEmail,

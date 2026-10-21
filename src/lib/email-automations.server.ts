@@ -4,6 +4,7 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { EmailDomainNotVerifiedError, resolveSender, sendInfobipEmail } from "./email-send.server";
 import { buildPlayerVariables, renderTemplate } from "./template-vars.server";
+import { loadHouseLinks } from "./house-links.server";
 import { deferIfOutsideWindow } from "./send-window.server";
 import {
   consumeBudget,
@@ -432,6 +433,7 @@ async function planLead(lead: Lead): Promise<SendPlan | null> {
       }
 
       // variaveis do player
+      const house = await loadHouseLinks(lead.tenant_id);
       let vars: Record<string, string> = { email: lead.email };
       if (lead.player_id) {
         const { data: p } = await supabaseAdmin
@@ -440,10 +442,10 @@ async function planLead(lead: Lead): Promise<SendPlan | null> {
           .eq("id", lead.player_id)
           .eq("tenant_id", lead.tenant_id)
           .maybeSingle();
-        if (p) vars = buildPlayerVariables(p) as Record<string, string>;
+        if (p) vars = buildPlayerVariables(p, house) as Record<string, string>;
       }
-      const subject = renderTemplate(block.subject_override || tpl.subject || "", vars);
-      const html = renderTemplate(tpl.body_html || "", vars);
+      const subject = renderTemplate(block.subject_override || tpl.subject || "", vars, house);
+      const html = renderTemplate(tpl.body_html || "", vars, house);
 
       // Retorna o plano de envio. O caller agrupa por (subject+html+from)
       // e despacha em lote. Toda a lógica pós-envio é aplicada lá.
