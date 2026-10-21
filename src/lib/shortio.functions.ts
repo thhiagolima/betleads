@@ -8,69 +8,33 @@ import {
 } from "./tenant-access.server";
 import { z } from "zod";
 
-// PostgREST devolve no máximo 1.000 linhas por requisição; sem paginar, os
-// totais de links travavam em 1.000. Paginamos com ordem estável e quebramos
-// listas grandes de ids em lotes (um `.in()` com milhares de ids estoura a URL).
-const PAGE_SIZE = 1000;
-const IN_CHUNK = 200;
-const MAX_ROWS = 500_000; // teto de segurança
-// Teto por tela: a sincronização grava um registro por link a cada rodada, então
-// casas grandes podem ter milhões de linhas. Acima disso os números saem
-// marcados como parciais (o conserto definitivo é agregar no banco).
-const DISPATCH_BUDGET = 50_000;
-const SNAPSHOT_BUDGET = 50_000;
+type OverviewRow = {
+  channel: string;
+  source_type: string;
+  sent: number | string;
+  links: number | string;
+  clicks: number | string;
+};
 
-export async function fetchAllPages<T>(
-  buildPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: any }>,
-  pageSize = PAGE_SIZE,
-  maxRows = MAX_ROWS,
-): Promise<T[]> {
-  const out: T[] = [];
-  for (let from = 0; from < maxRows; from += pageSize) {
-    const { data, error } = await buildPage(from, from + pageSize - 1);
-    if (error) throw new Error(error.message ?? String(error));
-    const got = data ?? [];
-    out.push(...got);
-    if (got.length < pageSize) break;
-  }
-  return out;
-}
-
-export function chunk<T>(items: T[], size = IN_CHUNK): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
-  return out;
-}
-
-async function fetchSnapshotsFor(db: any, tenantId: string, linkIds: string[]) {
-  const all: Array<{ tracked_link_id: string; clicks: number | null }> = [];
-  let truncated = false;
-  for (const ids of chunk(linkIds)) {
-    const remaining = SNAPSHOT_BUDGET - all.length;
-    if (remaining <= 0) {
-      truncated = true;
-      break;
-    }
-    // (tracked_link_id, snapshot_at) é único: ordem estável para paginar e
-    // coberta pelo índice link_click_snapshots_tenant_link_time_idx.
-    const rows = await fetchAllPages<{ tracked_link_id: string; clicks: number | null }>(
-      (from, to) =>
-        db
-          .from("link_click_snapshots")
-          .select("tracked_link_id,clicks")
-          .eq("tenant_id", tenantId)
-          .in("tracked_link_id", ids)
-          .order("tracked_link_id", { ascending: true })
-          // Mais recentes primeiro: se o teto cortar, ficam os cliques acumulados mais novos.
-          .order("snapshot_at", { ascending: false })
-          .range(from, to),
-      PAGE_SIZE,
-      remaining,
-    );
-    all.push(...rows);
-    if (rows.length >= remaining) truncated = true;
-  }
-  return { rows: all, truncated };
+/** Shapes the rows of the `link_tracking_overview` RPC (bigints arrive as strings). */
+export function overviewFromRows(rows: OverviewRow[]) {
+  const mapped = rows.map((row) => {
+    const sent = Number(row.sent ?? 0);
+    const clicks = Number(row.clicks ?? 0);
+    return {
+      channel: row.channel,
+      sourceType: row.source_type,
+      sent,
+      clicks,
+      links: Number(row.links ?? 0),
+      ctr: sent ? clicks / sent : 0,
+    };
+  });
+  return {
+    rows: mapped,
+    sent: mapped.reduce((sum, row) => sum + row.sent, 0),
+    clicks: mapped.reduce((sum, row) => sum + row.clicks, 0),
+  };
 }
 
 export const getLinkTrackingOverview = createServerFn({ method: "GET" })
@@ -79,25 +43,10 @@ export const getLinkTrackingOverview = createServerFn({ method: "GET" })
     const tenantId = await resolveOperationalTenantId(context.supabase);
     const db = context.supabase as any;
     const since = new Date(Date.now() - 30 * 86400000).toISOString();
-    const [dispatches, { data: lastSync }] = await Promise.all([
-      fetchAllPages<{
-        id: string;
-        channel: string;
-        source_type: string;
-        tracked_link_id: string;
-      }>(
-        (from, to) =>
-          db
-            .from("link_dispatches")
-            .select("id,channel,source_type,tracked_link_id")
-            .eq("tenant_id", tenantId)
-            .eq("send_status", "sent")
-            .gte("sent_at", since)
-            .order("id", { ascending: true })
-            .range(from, to),
-        PAGE_SIZE,
-        DISPATCH_BUDGET,
-      ),
+    // Aggregated in the database (migration 20261021121000): ~226k dispatches and
+    // ~1.1M click snapshots a month are too many to sum row by row here.
+    const [overview, { data: lastSync }] = await Promise.all([
+      db.rpc("link_tracking_overview", { _tenant: tenantId, _since: since }),
       db
         .from("link_tracking_sync_runs")
         .select("started_at,finished_at,status,links_processed,error")
@@ -106,51 +55,9 @@ export const getLinkTrackingOverview = createServerFn({ method: "GET" })
         .limit(1)
         .maybeSingle(),
     ]);
-    const linkIds = Array.from(
-      new Set(dispatches.map((row) => row.tracked_link_id).filter(Boolean)),
-    ) as string[];
-    const snapshotResult = linkIds.length
-      ? await fetchSnapshotsFor(db, tenantId, linkIds)
-      : { rows: [], truncated: false };
-    const snapshots = snapshotResult.rows;
-    const partial = dispatches.length >= DISPATCH_BUDGET || snapshotResult.truncated;
-    const clicksByLink = new Map<string, number>();
-    for (const row of snapshots) {
-      const previous = clicksByLink.get(row.tracked_link_id) ?? 0;
-      clicksByLink.set(row.tracked_link_id, Math.max(previous, Number(row.clicks ?? 0)));
-    }
-    const grouped = new Map<
-      string,
-      { channel: string; sourceType: string; sent: number; clicks: number; links: Set<string> }
-    >();
-    for (const row of dispatches) {
-      const key = `${row.channel}:${row.source_type}`;
-      const group = grouped.get(key) ?? {
-        channel: row.channel,
-        sourceType: row.source_type,
-        sent: 0,
-        clicks: 0,
-        links: new Set(),
-      };
-      group.sent++;
-      if (!group.links.has(row.tracked_link_id))
-        group.clicks += clicksByLink.get(row.tracked_link_id) ?? 0;
-      group.links.add(row.tracked_link_id);
-      grouped.set(key, group);
-    }
-    const rows = Array.from(grouped.values()).map((row) => ({
-      ...row,
-      links: row.links.size,
-      ctr: row.sent ? row.clicks / row.sent : 0,
-    }));
-    return {
-      since,
-      sent: dispatches.length,
-      clicks: rows.reduce((sum, row) => sum + row.clicks, 0),
-      rows,
-      lastSync: lastSync ?? null,
-      partial,
-    };
+    if (overview.error) throw new Error(overview.error.message);
+    const { rows, sent, clicks } = overviewFromRows((overview.data ?? []) as OverviewRow[]);
+    return { since, sent, clicks, rows, lastSync: lastSync ?? null };
   });
 
 export const getPlayerLinkHistory = createServerFn({ method: "GET" })

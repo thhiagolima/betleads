@@ -36,11 +36,6 @@ function LinksOverview() {
         {data?.lastSync?.links_processed ?? 0} links · {data?.lastSync?.status ?? "sem estado"}
         {data?.lastSync?.error ? ` · ${data.lastSync.error}` : ""}
       </p>
-      {data?.partial && (
-        <p className="text-xs text-amber-400">
-          Volume acima do limite desta tela: os totais abaixo são parciais.
-        </p>
-      )}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
