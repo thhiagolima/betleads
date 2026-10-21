@@ -108,3 +108,14 @@ export const journeyInputSchema = z.object({
 
 export type JourneyInput = z.infer<typeof journeyInputSchema>;
 export type JourneyStepInput = z.infer<typeof journeyStepInputSchema>;
+
+/**
+ * Sender of a legacy e-mail flow block converted into a journey step: the
+ * block's email_senders row. The legacy smtp_config_id (email_smtp_configs)
+ * is never copied — saveJourney would reject it as a sender of the house.
+ */
+export function legacyEmailBlockSenderConfig(block: { sender_id?: string | null }): {
+  sender_id?: string;
+} {
+  return block.sender_id ? { sender_id: block.sender_id } : {};
+}

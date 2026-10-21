@@ -415,13 +415,9 @@ async function planLead(lead: Lead): Promise<SendPlan | null> {
           .eq("id", lead.id);
         return null;
       }
-      // smtp_config_id is passed as the requested sender. It still has an FK to
-      // email_smtp_configs, so it never matches an email_senders row today and
-      // the house's verified default sender is used.
-      const sender = await resolveSender({
-        tenantId: block.tenant_id,
-        senderId: block.smtp_config_id,
-      });
+      // The block's chosen email_senders row (the legacy smtp_config_id is
+      // ignored); resolveSender falls back to the verified house default.
+      const sender = await resolveSender({ tenantId: block.tenant_id, senderId: block.sender_id });
       if (!sender) {
         const blocked = new EmailDomainNotVerifiedError();
         await logEvent(lead.tenant_id, lead.flow_id, lead.id, lead.player_id, "failed", {

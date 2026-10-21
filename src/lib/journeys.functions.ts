@@ -4,7 +4,11 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { resolveOperationalTenantId } from "./tenant-access.server";
-import { journeyInputSchema, journeyStatusSchema } from "./journeys.shared";
+import {
+  journeyInputSchema,
+  journeyStatusSchema,
+  legacyEmailBlockSenderConfig,
+} from "./journeys.shared";
 import { activationTriggerConfig, journeyEntryKey } from "./journey-policy";
 import { conversionFunnelSnapshot } from "./conversion-funnel";
 import { toggleJourneyExpress } from "./journey-express";
@@ -377,7 +381,7 @@ export const convertLegacyJourney = createServerFn({ method: "POST" })
           label: block.label ?? "E-mail",
           config: {
             template_id: template.id,
-            ...(block.smtp_config_id ? { sender_id: block.smtp_config_id } : {}),
+            ...legacyEmailBlockSenderConfig(block),
             template_snapshot: {
               id: template.id,
               subject: block.subject_override ?? template.subject,

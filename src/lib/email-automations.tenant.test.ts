@@ -67,7 +67,7 @@ vi.mock("./dispatch-rate.server", () => ({
 }));
 
 import { runEmailFlowDispatcher } from "./email-automations.server";
-import { resolveSender } from "./email-send.server";
+import { resolveSender, sendInfobipEmail } from "./email-send.server";
 
 const A = "00000000-0000-4000-8000-00000000000a";
 const B = "00000000-0000-4000-8000-00000000000b";
@@ -150,9 +150,10 @@ describe("email flow dispatcher stays inside the lead's tenant", () => {
 });
 
 describe("email flow sender", () => {
-  it("treats the block's smtp_config_id as senderId and fails the lead without a verified sender", async () => {
+  it("passes the block's sender_id and fails the lead without a verified sender", async () => {
     seed("tpl-a", "p-a");
-    state.tables.email_flow_blocks[0].smtp_config_id = "sender-1";
+    state.tables.email_flow_blocks[0].sender_id = "sender-1";
+    state.tables.email_flow_blocks[0].smtp_config_id = "smtp-1";
     vi.mocked(resolveSender).mockResolvedValueOnce(null);
     await runEmailFlowDispatcher({ onlyLeadId: "lead-1" });
     expect(resolveSender).toHaveBeenCalledWith({ tenantId: A, senderId: "sender-1" });
@@ -166,5 +167,23 @@ describe("email flow sender", () => {
     expect(JSON.stringify(state.tables.email_flow_logs.at(-1))).toContain(
       "Configure e verifique um domínio de e-mail da casa para enviar e-mails.",
     );
+  });
+
+  it("sends from the block's sender_id when it resolves", async () => {
+    seed("tpl-a", "p-a");
+    state.tables.email_flow_blocks[0].sender_id = "sender-1";
+    state.tables.email_flow_blocks[0].smtp_config_id = "smtp-1";
+    vi.mocked(resolveSender).mockResolvedValueOnce({
+      fromEmail: "promo@mail.casa.bet",
+      fromName: "Promo",
+      replyTo: null,
+      senderId: "sender-1",
+    });
+    await runEmailFlowDispatcher({ onlyLeadId: "lead-1" });
+    expect(resolveSender).toHaveBeenCalledWith({ tenantId: A, senderId: "sender-1" });
+    expect(vi.mocked(sendInfobipEmail).mock.calls[0]?.[0]).toMatchObject({
+      from: "promo@mail.casa.bet",
+      fromName: "Promo",
+    });
   });
 });

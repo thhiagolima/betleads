@@ -638,7 +638,7 @@ export const saveEmailCampaign = createServerFn({ method: "POST" })
     const smtpIdNorm = data.smtpId ?? null;
     let refColumns: { sender_id?: string | null; short_domain_id?: string | null } = {};
     if (data.senderId !== undefined || data.shortDomainId !== undefined) {
-      const tenantId = await resolveCurrentTenantId(context.supabase);
+      const tenantId = await resolveOperationalTenantId(context.supabase);
       refColumns = {
         ...(await campaignSenderColumn(tenantId, data.senderId)),
         ...(data.shortDomainId === null

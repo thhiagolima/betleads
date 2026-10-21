@@ -33,6 +33,7 @@ vi.mock("./email-send.server", async (importOriginal) => ({
 import { EmailDomainNotVerifiedError, resolveSender } from "./email-send.server";
 import { runCampaignSend } from "./email.functions";
 import { campaignSenderColumn, campaignShortDomainColumn } from "./campaign-refs.server";
+import { legacyEmailBlockSenderConfig } from "./journeys.shared";
 
 const TENANT = "00000000-0000-4000-8000-0000000000a1";
 const OTHER = "00000000-0000-4000-8000-0000000000b2";
@@ -145,49 +146,43 @@ describe("resolveSender", () => {
 
   it("returns null when the house has no sender on a verified domain", async () => {
     seedDomains();
-    fake.db
-      .rows("email_senders")
-      .push(
-        sender({
-          id: S_PENDING,
-          from_email: "x@novo.casa.bet",
-          domain_id: DOM_PENDING,
-          is_default: true,
-        }),
-        sender({ id: S_REMOVED, from_email: "x@velho.casa.bet", domain_id: DOM_REMOVED }),
-      );
+    fake.db.rows("email_senders").push(
+      sender({
+        id: S_PENDING,
+        from_email: "x@novo.casa.bet",
+        domain_id: DOM_PENDING,
+        is_default: true,
+      }),
+      sender({ id: S_REMOVED, from_email: "x@velho.casa.bet", domain_id: DOM_REMOVED }),
+    );
     await expect(resolveSender({ tenantId: TENANT, senderId: S_PENDING })).resolves.toBeNull();
   });
 
   it("ignores a legacy sender without domain_id, even when it is the default", async () => {
     seedDomains();
-    fake.db
-      .rows("email_senders")
-      .push(
-        sender({
-          id: S_LEGACY,
-          from_email: "legacy@casa.bet",
-          domain: "casa.bet",
-          domain_id: null,
-          is_default: true,
-        }),
-      );
+    fake.db.rows("email_senders").push(
+      sender({
+        id: S_LEGACY,
+        from_email: "legacy@casa.bet",
+        domain: "casa.bet",
+        domain_id: null,
+        is_default: true,
+      }),
+    );
     await expect(resolveSender({ tenantId: TENANT, senderId: S_LEGACY })).resolves.toBeNull();
     await expect(resolveSender({ tenantId: TENANT })).resolves.toBeNull();
   });
 
   it("ignores a sender pointing at a shortener domain", async () => {
     seedDomains();
-    fake.db
-      .rows("email_senders")
-      .push(
-        sender({
-          id: S_LEGACY,
-          from_email: "x@go.casa.bet",
-          domain_id: DOM_SHORT,
-          is_default: true,
-        }),
-      );
+    fake.db.rows("email_senders").push(
+      sender({
+        id: S_LEGACY,
+        from_email: "x@go.casa.bet",
+        domain_id: DOM_SHORT,
+        is_default: true,
+      }),
+    );
     await expect(resolveSender({ tenantId: TENANT })).resolves.toBeNull();
   });
 
@@ -243,16 +238,14 @@ function seedCampaign(over: Record<string, unknown> = {}) {
 describe("runCampaignSend sender", () => {
   it("blocks with EMAIL_DOMAIN_NOT_VERIFIED: nothing sent, nothing logged, campaign untouched", async () => {
     seedDomains();
-    fake.db
-      .rows("email_senders")
-      .push(
-        sender({
-          id: S_PENDING,
-          from_email: "x@novo.casa.bet",
-          domain_id: DOM_PENDING,
-          is_default: true,
-        }),
-      );
+    fake.db.rows("email_senders").push(
+      sender({
+        id: S_PENDING,
+        from_email: "x@novo.casa.bet",
+        domain_id: DOM_PENDING,
+        is_default: true,
+      }),
+    );
     fake.db.rows("email_smtp_configs").push({
       id: "smtp-1",
       tenant_id: TENANT,
@@ -307,5 +300,15 @@ describe("campaign reference columns", () => {
     await expect(campaignShortDomainColumn(TENANT, DOM_VERIFIED)).rejects.toThrow(
       "Domínio do encurtador indisponível para esta conta",
     );
+  });
+});
+
+describe("legacy e-mail flow conversion", () => {
+  it("maps the block's sender_id and never the SMTP config id", () => {
+    // Rows as read from email_flow_blocks (select "*").
+    const withSender = { sender_id: S_PROMO, smtp_config_id: "smtp-1" };
+    const smtpOnly = { sender_id: null, smtp_config_id: "smtp-1" };
+    expect(legacyEmailBlockSenderConfig(withSender)).toEqual({ sender_id: S_PROMO });
+    expect(legacyEmailBlockSenderConfig(smtpOnly)).toEqual({});
   });
 });
