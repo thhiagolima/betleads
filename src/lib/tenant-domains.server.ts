@@ -483,6 +483,25 @@ export async function listTenantDomains(tenantId: string, kind?: DomainKind): Pr
   return ((data ?? []) as DomainRow[]).map(rowToDomain);
 }
 
+/** Same as `listTenantDomains`, but also includes removed rows. Used only by
+ * `getHouseConfig`'s super-admin-only "removedDomains" projection (the
+ * "Apagar no provedor" action needs to see them); regular reads keep using
+ * `listTenantDomains`, which never surfaces a removed domain. */
+export async function listTenantDomainsIncludingRemoved(
+  tenantId: string,
+  kind?: DomainKind,
+): Promise<TenantDomain[]> {
+  const base = supabaseAdmin
+    .from("tenant_domains")
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .order("created_at", { ascending: true });
+
+  const { data, error } = await (kind ? base.eq("kind", kind) : base);
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as DomainRow[]).map(rowToDomain);
+}
+
 export async function purgeTenantDomain(domainId: string): Promise<void> {
   const row = await fetchDomainById(domainId);
   if (!row) throw new Error("Domínio não encontrado");

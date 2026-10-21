@@ -6,6 +6,7 @@ import {
   normalizeHostname,
   normalizeSiteUrl,
   quickLinkKeyFromLabel,
+  suggestedQuickLinks,
   validateShortenerHostname,
 } from "./house-config";
 
@@ -84,6 +85,16 @@ describe("normalizeSiteUrl", () => {
 describe("quickLinkKeyFromLabel", () => {
   it("slugifies a label", () => {
     expect(quickLinkKeyFromLabel("Depósito PIX")).toBe("deposito_pix");
+  });
+});
+
+describe("suggestedQuickLinks", () => {
+  it("offers Login, Depósito and Promo in that order", () => {
+    expect(suggestedQuickLinks()).toEqual([
+      { label: "Login", path: "/login" },
+      { label: "Depósito", path: "/deposito" },
+      { label: "Promo", path: "/promo" },
+    ]);
   });
 });
 

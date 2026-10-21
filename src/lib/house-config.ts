@@ -133,6 +133,18 @@ export function quickLinkKeyFromLabel(label: string): string {
   return slug;
 }
 
+/** Pre-filled quick links offered when the house hasn't created any yet
+ * (design spec: Login, Depósito, Promo). Purely a UI suggestion — the admin
+ * can edit, remove or add to them before saving; nothing is written until
+ * `saveQuickLinks` is called. */
+export function suggestedQuickLinks(): { label: string; path: string }[] {
+  return [
+    { label: "Login", path: "/login" },
+    { label: "Depósito", path: "/deposito" },
+    { label: "Promo", path: "/promo" },
+  ];
+}
+
 export function buildQuickLinkUrl(siteUrl: string, path: string): string {
   if (/^https?:\/\//i.test(path)) {
     return path;

@@ -26,6 +26,7 @@ import {
   addTenantDomain,
   findDomainUsages,
   listTenantDomains,
+  listTenantDomainsIncludingRemoved,
   purgeTenantDomain,
   refreshTenantDomain,
   removeTenantDomain,
@@ -131,6 +132,18 @@ export function selectComposerSenders(
       label: formatSenderLabel(s.from_name ?? "", s.from_email),
       isDefault: s.is_default,
     }));
+}
+
+/** `getHouseConfig`'s `removedDomains` projection: only super admins get to see
+ * removed domains at all (that's who can purge them at the provider via
+ * `purgeHouseDomain`) — everyone else gets an empty array, regardless of
+ * what's actually in `allDomains`. */
+export function selectRemovedDomainsForSuperAdmin(
+  allDomains: TenantDomain[],
+  isSuperAdmin: boolean,
+): TenantDomain[] {
+  if (!isSuperAdmin) return [];
+  return allDomains.filter((d) => d.removed_at !== null);
 }
 
 /** A tenant's custom shortener domain exists but none of it is verified yet —
@@ -329,13 +342,17 @@ export const getHouseConfig = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const tenantId = await resolveOperationalTenantId(context.supabase);
 
-    const [tenant, quickLinkRows, domains, senderRows, canEdit] = await Promise.all([
+    const [tenant, quickLinkRows, allDomains, senderRows, canEdit, isSuperAdmin] = await Promise.all([
       fetchTenantRow(tenantId),
       fetchQuickLinks(tenantId),
-      listTenantDomains(tenantId),
+      listTenantDomainsIncludingRemoved(tenantId),
       fetchSenders(tenantId),
       checkTenantAdmin(context.supabase, tenantId),
+      checkSuperAdmin(context.supabase, context.userId),
     ]);
+
+    const domains = allDomains.filter((d) => d.removed_at === null);
+    const removedDomains = selectRemovedDomainsForSuperAdmin(allDomains, isSuperAdmin);
 
     const domainIds = Array.from(
       new Set(senderRows.map((s) => s.domain_id).filter((id): id is string => Boolean(id))),
@@ -358,6 +375,7 @@ export const getHouseConfig = createServerFn({ method: "GET" })
       siteUrl,
       quickLinks,
       domains,
+      removedDomains,
       senders,
       canEdit,
       onboarding: {

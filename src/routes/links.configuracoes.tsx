@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -54,9 +54,11 @@ function LinkSettings() {
               <Switch name="enabled" defaultChecked={s.enabled} />
               <Label>Ativar encurtamento e rastreio</Label>
             </div>
-            <div>
-              <Label>Domínio curto</Label>
-              <Input name="domain" defaultValue={s.domain ?? ""} placeholder="go.sua-marca.com" />
+            <div className="text-sm text-muted-foreground">
+              Domínios do encurtador →{" "}
+              <Link to="/configuracoes/casa" className="text-primary underline underline-offset-4">
+                Configuração da casa
+              </Link>
             </div>
             <div>
               <Label>Hosts de destino permitidos</Label>

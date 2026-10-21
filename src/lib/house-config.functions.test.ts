@@ -15,7 +15,9 @@ import {
   recordDnsSend,
   selectComposerSenders,
   selectNewlyVerifiedDomains,
+  selectRemovedDomainsForSuperAdmin,
 } from "./house-config.functions";
+import type { TenantDomain } from "./tenant-domains.server";
 
 describe("ensureDomainOwnership", () => {
   it("passes silently when the row belongs to the tenant", () => {
@@ -311,5 +313,41 @@ describe("isDnsSendRateLimited / recordDnsSend", () => {
       expect(isDnsSendRateLimited(log, "d1", base)).toBe(false);
     }
     expect(log.get("d1") ?? []).toEqual([]);
+  });
+});
+
+describe("selectRemovedDomainsForSuperAdmin", () => {
+  function makeDomain(overrides: Partial<TenantDomain> = {}): TenantDomain {
+    return {
+      id: "d1",
+      tenant_id: "t1",
+      kind: "shortener",
+      hostname: "go.suacasa.bet.br",
+      status: "verified",
+      is_default: false,
+      dns_records: [],
+      provider_domain_id: null,
+      last_checked_at: null,
+      verified_at: null,
+      last_error: null,
+      removed_at: null,
+      created_at: "2026-01-01T00:00:00Z",
+      ...overrides,
+    };
+  }
+
+  it("returns an empty array for a non-super-admin, even when removed domains exist", () => {
+    const domains = [makeDomain({ id: "a", removed_at: "2026-02-01T00:00:00Z" }), makeDomain({ id: "b" })];
+    expect(selectRemovedDomainsForSuperAdmin(domains, false)).toEqual([]);
+  });
+
+  it("returns only the removed domains for a super admin", () => {
+    const removed = makeDomain({ id: "a", removed_at: "2026-02-01T00:00:00Z" });
+    const active = makeDomain({ id: "b" });
+    expect(selectRemovedDomainsForSuperAdmin([removed, active], true)).toEqual([removed]);
+  });
+
+  it("returns an empty array for a super admin when nothing is removed", () => {
+    expect(selectRemovedDomainsForSuperAdmin([makeDomain({ id: "a" })], true)).toEqual([]);
   });
 });
