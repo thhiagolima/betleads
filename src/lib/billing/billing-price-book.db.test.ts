@@ -116,14 +116,10 @@ describe("billing_price_book: data migration", () => {
 
 describe("billing_effective_price", () => {
   it("returns the default sms price for a normal tenant", async () => {
-    const v = await effectivePrice(NORMAL, "sms");
-    expect(v).toMatchObject({
-      item: "sms",
-      unit_price: "0.0800",
-      provider_unit_cost: "0.0590",
-      exempt: false,
-      source: "default",
-    });
+    const v = (await effectivePrice(NORMAL, "sms")) as Record<string, unknown>;
+    expect(v).toMatchObject({ item: "sms", exempt: false, source: "default" });
+    expect(Number(v.unit_price)).toBeCloseTo(0.08, 4);
+    expect(Number(v.provider_unit_cost)).toBeCloseTo(0.059, 4);
   });
 
   it("free_monthly_units for email is 100000", async () => {
@@ -138,11 +134,13 @@ describe("billing_effective_price", () => {
     await db.exec("set test.super = 'on'");
     await db.query("select public.admin_set_tenant_price($1, $2, $3)", [NORMAL, "sms", 0.07]);
 
-    const after = await effectivePrice(NORMAL, "sms");
-    expect(after).toMatchObject({ unit_price: "0.0700", source: "override" });
+    const after = (await effectivePrice(NORMAL, "sms")) as Record<string, unknown>;
+    expect(after).toMatchObject({ source: "override" });
+    expect(Number(after.unit_price)).toBeCloseTo(0.07, 4);
 
-    const previously = await effectivePrice(NORMAL, "sms", beforeAt);
-    expect(previously).toMatchObject({ unit_price: "0.0800", source: "default" });
+    const previously = (await effectivePrice(NORMAL, "sms", beforeAt)) as Record<string, unknown>;
+    expect(previously).toMatchObject({ source: "default" });
+    expect(Number(previously.unit_price)).toBeCloseTo(0.08, 4);
 
     // Clean up: this tenant override must not leak into later tests.
     await db.query("select public.admin_clear_tenant_price($1, $2)", [NORMAL, "sms"]);
@@ -157,11 +155,11 @@ describe("billing_effective_price", () => {
     await db.query("select public.admin_set_price($1, $2, $3, $4)", ["sms", 0.09, 0.059, 0]);
     await db.exec("set test.super = 'off'");
 
-    const previously = await effectivePrice(NORMAL, "sms", beforeAt);
-    expect(previously).toMatchObject({ unit_price: "0.0800" });
+    const previously = (await effectivePrice(NORMAL, "sms", beforeAt)) as Record<string, unknown>;
+    expect(Number(previously.unit_price)).toBeCloseTo(0.08, 4);
 
-    const now = await effectivePrice(NORMAL, "sms");
-    expect(now).toMatchObject({ unit_price: "0.0900" });
+    const now = (await effectivePrice(NORMAL, "sms")) as Record<string, unknown>;
+    expect(Number(now.unit_price)).toBeCloseTo(0.09, 4);
   });
 
   it("the interno tenant is exempt", async () => {
@@ -207,6 +205,19 @@ describe("provider_unit_cost redaction", () => {
   it("is present for service_role / no uid (e.g. migration, server)", async () => {
     const v = (await effectivePrice(NORMAL, "sms")) as Record<string, unknown>;
     expect(Object.keys(v)).toContain("provider_unit_cost");
+  });
+});
+
+describe("EXECUTE privileges", () => {
+  it("anon cannot execute billing_effective_price (no EXECUTE for PUBLIC/anon)", async () => {
+    await db.exec("set role anon");
+    try {
+      await expect(
+        db.query("select public.billing_effective_price($1, $2)", [NORMAL, "sms"]),
+      ).rejects.toThrow(/permission denied/);
+    } finally {
+      await db.exec("reset role");
+    }
   });
 });
 
@@ -279,6 +290,18 @@ describe("tenants_plan_guard", () => {
       await db.query(`update public.tenants set plano = 'starter' where id = '${NORMAL}'`);
     } finally {
       await db.exec("set test.super = 'off'");
+    }
+  });
+
+  it("allows the change when test.role is service_role (not super admin)", async () => {
+    await db.exec("set test.role = 'service_role'");
+    try {
+      await expect(
+        db.query(`update public.tenants set plano = 'interno' where id = '${NORMAL}'`),
+      ).resolves.toBeDefined();
+      await db.query(`update public.tenants set plano = 'starter' where id = '${NORMAL}'`);
+    } finally {
+      await db.exec("set test.role = ''");
     }
   });
 });

@@ -162,14 +162,10 @@ begin
     v_source := 'default';
   end if;
 
-  -- unit_price/provider_unit_cost vão como texto: jsonb_build_object com um
-  -- numeric produz um número json, e o round-trip por JSON (driver do
-  -- PostgREST/pg) perde a escala (0.0800 -> 0.08). Como texto, a escala de
-  -- numeric(12,4) chega intacta a quem lê.
   v_result := jsonb_build_object(
     'item', _item,
-    'unit_price', v_unit_price::text,
-    'provider_unit_cost', v_default.provider_unit_cost::text,
+    'unit_price', v_unit_price,
+    'provider_unit_cost', v_default.provider_unit_cost,
     'free_monthly_units', coalesce(v_default.free_monthly_units, 0),
     'exempt', public.billing_tenant_exempt(_tenant),
     'source', v_source
@@ -370,11 +366,18 @@ grant select on public.billing_price_book to service_role;
 
 grant select on public.tenant_price_overrides to authenticated, service_role;
 
+-- EXECUTE nunca para PUBLIC/anon (padrão F6 de 20261015100000_fix_rls_privilege_escalation.sql).
+revoke execute on function public.billing_tenant_exempt(uuid) from public, anon;
 grant execute on function public.billing_tenant_exempt(uuid) to authenticated, service_role;
+revoke execute on function public.billing_effective_price(uuid, text, timestamptz) from public, anon;
 grant execute on function public.billing_effective_price(uuid, text, timestamptz) to authenticated, service_role;
+revoke execute on function public.billing_report_unit_price(uuid, text, timestamptz) from public, anon;
 grant execute on function public.billing_report_unit_price(uuid, text, timestamptz) to authenticated, service_role;
+revoke execute on function public.admin_set_price(text, numeric, numeric, integer) from public, anon;
 grant execute on function public.admin_set_price(text, numeric, numeric, integer) to authenticated, service_role;
+revoke execute on function public.admin_set_tenant_price(uuid, text, numeric) from public, anon;
 grant execute on function public.admin_set_tenant_price(uuid, text, numeric) to authenticated, service_role;
+revoke execute on function public.admin_clear_tenant_price(uuid, text) from public, anon;
 grant execute on function public.admin_clear_tenant_price(uuid, text) to authenticated, service_role;
 
 notify pgrst, 'reload schema';
