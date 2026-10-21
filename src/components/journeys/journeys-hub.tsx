@@ -55,6 +55,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { TRIGGER_NAMES } from "@/lib/triggers";
+import { journeyTriggerLabel } from "@/components/journeys/journey-editor-config";
 
 // Grade A only: direct conversion_attributions (confirmed first-party click,
 // same player, up to 7 days). Operational deposits never appear in journeys.
@@ -622,8 +623,7 @@ export function JourneysHub() {
                         )}
                       </div>
                       <p className="mt-1 truncate text-xs text-muted-foreground">
-                        {TRIGGER_NAMES[journey.trigger_type as keyof typeof TRIGGER_NAMES] ??
-                          journey.trigger_type}
+                        {journeyTriggerLabel(journey.trigger_type, journey.trigger_config)}
                       </p>
                       <JourneyStepSummary steps={steps} />
                     </div>

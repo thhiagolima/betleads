@@ -1334,11 +1334,13 @@ function MetricsTab() {
   const items: Array<{ label: string; value: string }> = [
     { label: "Usuários totais", value: String(m.total_users ?? 0) },
     { label: "Usuários ativos (30d)", value: String(m.active_users_30d ?? 0) },
-    { label: "SMS enviados (30d)", value: String(m.sms_total ?? 0) },
-    { label: "SMS entregues", value: String(m.sms_delivered ?? 0) },
+    { label: "Tentativas de SMS (30d)", value: String(m.sms_total ?? 0) },
+    // `sms_delivered` counts status in (sent, delivered, ...): accepted by the
+    // provider, not confirmed delivery (the provider does not report it).
+    { label: "SMS enviados (30d)", value: String(m.sms_delivered ?? 0) },
     { label: "Ligações (30d)", value: String(m.call_total ?? 0) },
-    { label: "Emails enviados (30d)", value: String(m.email_total ?? 0) },
-    { label: "Emails entregues", value: String(m.email_delivered ?? 0) },
+    { label: "Tentativas de email (30d)", value: String(m.email_total ?? 0) },
+    { label: "Emails enviados (30d)", value: String(m.email_delivered ?? 0) },
   ];
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">

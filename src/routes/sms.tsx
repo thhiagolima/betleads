@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet } from "@tanstack/react-router";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { POLL_INTERVALS, UpdatedAgo } from "@/hooks/use-updated-ago";
@@ -305,6 +305,13 @@ function renderIndividualSmsTemplate(message: string, recipientName: string, pho
 // ---------------- Page ----------------
 
 function SmsPage() {
+  // /sms é pai de /sms/templates: nas rotas filhas renderiza só a filha.
+  const pathname = useLocation({ select: (l) => l.pathname });
+  if (pathname !== "/sms") return <Outlet />;
+  return <SmsHome />;
+}
+
+function SmsHome() {
   const navigate = useNavigate();
   const hash = useLocation({ select: (l) => l.hash });
   const aliases: Record<string, "saude" | "historico" | "campanhas" | "configuracoes"> = {
@@ -379,11 +386,12 @@ function SmsCompactWorkspace({
   const totals = dashboard.data?.totals;
   const today = dashboard.data?.today;
   const sent = readNumber(totals?.sent);
-  const delivered = readNumber(totals?.delivered);
   const failed = readNumber(totals?.failed);
-  const deliveryRate = sent > 0 ? Math.round((delivered / sent) * 100) : 0;
+  // Sem "Entregues"/taxa de entrega: o callback da Short Brasil não confirma
+  // entrega (nenhum SMS é marcado entregue), então mostramos Enviados e Falhas.
+  // "enviando" é o status que o despacho grava enquanto a campanha roda.
   const queue = ((campaigns.data?.campaigns ?? []) as SmsCampaignRow[]).filter((campaign) =>
-    ["agendada", "running", "processando"].includes(campaign.status),
+    ["agendada", "running", "processando", "enviando"].includes(campaign.status),
   ).length;
   const canSend = phoneDigits.length >= 10 && message.trim().length > 0 && balance >= parts;
   const preview = previewMensagem(message, recipientName.trim() || "Rafael");
@@ -418,9 +426,9 @@ function SmsCompactWorkspace({
       hint: `${num(sent)} em 30 dias`,
     },
     {
-      label: "Entregues",
-      value: num(delivered),
-      hint: `${deliveryRate}% de entrega · ${num(failed)} falharam`,
+      label: "Falhas",
+      value: num(failed),
+      hint: "nos últimos 30 dias",
     },
   ];
 
@@ -430,7 +438,7 @@ function SmsCompactWorkspace({
         configured={!!provider.data?.configured}
         balance={num(balance)}
         queue={queue}
-        deliveryRate={deliveryRate}
+        failed={num(failed)}
         metrics={kpis}
         onRefresh={() => qc.invalidateQueries({ queryKey: ["sms-compact-dashboard"] })}
         onOpenHistory={() => onTabChange("historico")}
@@ -1583,26 +1591,26 @@ function Dashboard() {
               <AreaChart data={data?.by_day ?? []}>
                 <defs>
                   <linearGradient id="grad1" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.5} />
-                    <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                    <stop offset="0%" stopColor="var(--color-primary)" stopOpacity={0.5} />
+                    <stop offset="100%" stopColor="var(--color-primary)" stopOpacity={0} />
                   </linearGradient>
                   <linearGradient id="grad2" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#10b981" stopOpacity={0.4} />
-                    <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
+                    <stop offset="0%" stopColor="var(--color-chart-4)" stopOpacity={0.4} />
+                    <stop offset="100%" stopColor="var(--color-chart-4)" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
                 <XAxis
                   dataKey="date"
                   tickFormatter={fmtDay}
-                  stroke="hsl(var(--muted-foreground))"
+                  stroke="var(--color-muted-foreground)"
                   fontSize={12}
                 />
-                <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                <YAxis stroke="var(--color-muted-foreground)" fontSize={12} />
                 <Tooltip
                   contentStyle={{
-                    background: "hsl(var(--popover))",
-                    border: "1px solid hsl(var(--border))",
+                    background: "var(--color-popover)",
+                    border: "1px solid var(--color-border)",
                     borderRadius: 8,
                   }}
                   labelFormatter={(v) => fmtDay(String(v))}
@@ -1611,10 +1619,15 @@ function Dashboard() {
                 <Area
                   type="monotone"
                   dataKey="enviados"
-                  stroke="hsl(var(--primary))"
+                  stroke="var(--color-primary)"
                   fill="url(#grad1)"
                 />
-                <Area type="monotone" dataKey="entregues" stroke="#10b981" fill="url(#grad2)" />
+                <Area
+                  type="monotone"
+                  dataKey="entregues"
+                  stroke="var(--color-chart-4)"
+                  fill="url(#grad2)"
+                />
               </AreaChart>
             </ResponsiveContainer>
           </CardContent>
@@ -1628,18 +1641,18 @@ function Dashboard() {
           <CardContent>
             <ResponsiveContainer width="100%" height={240}>
               <LineChart data={data?.conversions_by_day ?? []}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
                 <XAxis
                   dataKey="date"
                   tickFormatter={fmtDay}
-                  stroke="hsl(var(--muted-foreground))"
+                  stroke="var(--color-muted-foreground)"
                   fontSize={12}
                 />
-                <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                <YAxis stroke="var(--color-muted-foreground)" fontSize={12} />
                 <Tooltip
                   contentStyle={{
-                    background: "hsl(var(--popover))",
-                    border: "1px solid hsl(var(--border))",
+                    background: "var(--color-popover)",
+                    border: "1px solid var(--color-border)",
                     borderRadius: 8,
                   }}
                   labelFormatter={(v) => fmtDay(String(v))}
@@ -1647,9 +1660,9 @@ function Dashboard() {
                 <Line
                   type="monotone"
                   dataKey="conversoes"
-                  stroke="hsl(var(--primary))"
+                  stroke="var(--color-primary)"
                   strokeWidth={2}
-                  dot={{ fill: "hsl(var(--primary))" }}
+                  dot={{ fill: "var(--color-primary)" }}
                 />
               </LineChart>
             </ResponsiveContainer>

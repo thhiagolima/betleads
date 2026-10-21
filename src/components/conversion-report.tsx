@@ -308,6 +308,8 @@ function CampaignReport({
   const activeDepositors = data.activeDepositors ?? 0;
   // Without delivery receipts the click rate falls back to the sent messages.
   const reached = delivered || data.sent;
+  // SMS (Short Brasil) never confirms delivery: show only sent and failed.
+  const showDelivered = campaign?.channel !== "sms" && data.delivered !== null;
   const notClicked = Math.max(0, reached - clicked);
   const clickedNoDeposit = Math.max(0, clicked - depositors - activeDepositors);
   const audience = campaign?.total || campaign?.audience || details?.trackedDeliveries || data.sent;
@@ -468,7 +470,7 @@ function CampaignReport({
           <section className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
             <Metric label="Enviados" value={number(data.sent)} />
             <Metric label="Deduplicados" value={number(data.deduplicated)} />
-            <Metric label="Entregues" value={data.delivered === null ? "—" : number(delivered)} />
+            {showDelivered ? <Metric label="Entregues" value={number(delivered)} /> : null}
             <Metric
               label="Clicaram"
               value={data.clicked === null ? "—" : number(clicked)}
@@ -520,7 +522,7 @@ function CampaignReport({
               }
             />
             <Metric
-              label="ROAS"
+              label="Retorno"
               value={smsCost ? `${ratio(directRevenue / smsCost)}x` : "—"}
               hint={smsCost ? "total da campanha ÷ custo em SMS" : "sem custo de envio"}
             />
@@ -565,12 +567,14 @@ function CampaignReport({
               <FilterButton active={filter === "sent"} onClick={() => setActiveFilter("sent")}>
                 Enviados {number(data.sent)}
               </FilterButton>
-              <FilterButton
-                active={filter === "delivered"}
-                onClick={() => setActiveFilter("delivered")}
-              >
-                Entregues {data.delivered === null ? "—" : number(delivered)}
-              </FilterButton>
+              {showDelivered ? (
+                <FilterButton
+                  active={filter === "delivered"}
+                  onClick={() => setActiveFilter("delivered")}
+                >
+                  Entregues {number(delivered)}
+                </FilterButton>
+              ) : null}
               <FilterButton
                 active={filter === "clicked"}
                 onClick={() => setActiveFilter("clicked")}
@@ -1041,7 +1045,7 @@ function JourneyReport({
             />
             <Metric label="Clicaram" value={data.clicked === null ? "—" : number(data.clicked)} />
             <Metric label="Depósitos atribuídos" value={number(deposits)} />
-            <Metric label="Recuperado atribuído" value={money(recovered)} accent />
+            <Metric label="Recuperado pelo CRM" value={money(recovered)} accent />
           </section>
           <ActiveNote players={data.activeDepositors} revenue={data.activeRevenue} />
 
@@ -1078,11 +1082,13 @@ function JourneyReport({
                         />
                         <JourneyStepMetric label="Enviados 7d" value={step.sent7d} />
                         <JourneyStepMetric label="Enviados total" value={step.sent} />
-                        <JourneyStepMetric label="Entregues" value={step.delivered} />
+                        {step.step_type === "sms" ? null : (
+                          <JourneyStepMetric label="Entregues" value={step.delivered} />
+                        )}
                         <JourneyStepMetric label="Clicaram" value={step.clicked} />
                         <JourneyStepMetric label="Depósitos atribuídos" value={step.deposits} />
                         <JourneyStepMetric
-                          label="Recuperado atribuído"
+                          label="Recuperado pelo CRM"
                           value={step.recovered}
                           currency
                           accent

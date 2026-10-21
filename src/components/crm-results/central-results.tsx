@@ -188,18 +188,18 @@ function LoadingSkeleton() {
 function Glossary() {
   const terms: Array<[string, string]> = [
     [
-      "Conversão por clique",
-      "Jogador que clicou no link do SMS e depositou em até 7 dias. É a medida principal. Conta jogadores, não depósitos: quem deposita 3 vezes conta 1.",
+      "Recuperado pelo CRM",
+      "Jogador que clicou no link do SMS e depositou em até 7 dias, e o valor depositado. É a medida principal, a mesma do Início (conversão por clique). Conta jogadores, não depósitos: quem deposita 3 vezes conta 1.",
     ],
     ["Taxa de clique", "SMS clicados ÷ SMS enviados."],
     ["Custo por jogador convertido", "Custo em SMS ÷ jogadores convertidos pelo clique."],
     [
       "Retorno",
-      "Valor convertido ÷ custo em SMS. Verde quando paga o envio (1x ou mais), vermelho quando não paga. Com menos de 5 jogadores convertidos aparece como “amostra pequena” e não entra em comparações.",
+      "Recuperado pelo CRM ÷ custo em SMS. Verde quando paga o envio (1x ou mais), vermelho quando não paga. Com menos de 5 jogadores convertidos aparece como “amostra pequena” e não entra em comparações.",
     ],
     [
       "Recuperados (visão ampla)",
-      "Jogador parado há 2+ dias (ou sem 1º depósito) que depositou até 3 dias depois de um SMS, com ou sem clique. Conta retornos, não pessoas, e o valor é só o depósito de retorno. Inclui boa parte das conversões por clique: não some os dois.",
+      "Jogador parado há 2+ dias (ou sem 1º depósito) que depositou até 3 dias depois de um SMS, com ou sem clique. Conta retornos, não pessoas, e o valor é só o depósito de retorno. Inclui boa parte do Recuperado pelo CRM: não some os dois.",
     ],
     [
       "Últimos 7 dias",

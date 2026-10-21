@@ -65,7 +65,7 @@ export function Overview({
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div>
             <h2 id="click-title" className="flex items-center gap-1.5 text-base font-semibold">
-              Conversão por clique
+              Recuperado pelo CRM
               <InfoTip text="Jogadores que não depositavam havia 2+ dias (ou nunca depositaram), clicaram no link do SMS e depositaram em até 7 dias. Quem já estava ativo ia depositar de qualquer jeito e fica fora da conta. Conta jogadores, não depósitos: quem deposita 3 vezes conta 1, no dia do primeiro depósito. A taxa compara os cliques do período com quantos deles converteram." />
             </h2>
             <p className="text-sm text-muted-foreground">
@@ -101,7 +101,7 @@ export function Overview({
               ))}
             </ol>
             <div className="lg:text-right">
-              <p className="text-sm text-muted-foreground">Valor convertido</p>
+              <p className="text-sm text-muted-foreground">Valor recuperado pelo CRM</p>
               <div className="flex items-baseline gap-2 lg:justify-end">
                 <p className="text-3xl font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
                   {brl(totals.directRevenue)}
@@ -135,7 +135,7 @@ export function Overview({
           <Kpi
             label="Retorno"
             value={ratio(totals.clickRoi)}
-            detail="valor convertido ÷ custo"
+            detail="recuperado pelo CRM ÷ custo"
             delta={<Delta current={totals.clickRoi} previous={previous?.clickRoi} />}
           />
         </div>
@@ -160,12 +160,12 @@ export function Overview({
         <CardContent className="flex flex-col gap-3 p-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="space-y-0.5">
             <p className="flex items-center gap-1.5 text-sm font-medium">
-              Visão ampla: jogadores recuperados
+              Recuperados (visão ampla)
               <InfoTip text="Retornos, não pessoas: quem parou e voltou duas vezes no período conta duas. O valor é só o depósito de retorno. Voltar depois do SMS não prova que foi por causa dele; o efeito real está no Teste de controle." />
             </p>
             <p className="text-xs text-muted-foreground">
               Parados há 2+ dias que voltaram a depositar até 3 dias depois de um SMS, com ou sem
-              clique. Inclui boa parte das conversões por clique: não some os dois.
+              clique. Inclui boa parte do Recuperado pelo CRM: não some os dois.
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap gap-6 tabular-nums">
@@ -225,14 +225,14 @@ function DailyChart({ data }: { data: Data }) {
   }));
   const names: Record<string, string> = {
     cost: "Custo em SMS",
-    converted: "Conversão por clique",
-    recovered: "Recuperado (visão ampla)",
+    converted: "Recuperado pelo CRM",
+    recovered: "Recuperados (visão ampla)",
   };
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Custo × conversão por dia</CardTitle>
-        <CardDescription>Valor convertido pelo dia do depósito.</CardDescription>
+        <CardTitle className="text-base">Custo × recuperado pelo CRM por dia</CardTitle>
+        <CardDescription>Recuperado pelo CRM pelo dia do depósito.</CardDescription>
       </CardHeader>
       <CardContent className="h-72">
         <ResponsiveContainer width="100%" height="100%">

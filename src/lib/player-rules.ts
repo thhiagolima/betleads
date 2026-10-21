@@ -1,13 +1,9 @@
+import { normalizeBrazilianPhone } from "@/lib/phone-normalization";
 // Regras de negócio compartilhadas para classificação, scores e alertas.
 // Puro TS, sem dependências — usado no frontend (Alertas, Dashboard, PlayerCard).
 
 export type Classificacao =
-  | "vip"
-  | "lead_quente"
-  | "lead_frio"
-  | "alto_potencial"
-  | "em_risco"
-  | "neutro";
+  "vip" | "lead_quente" | "lead_frio" | "alto_potencial" | "em_risco" | "neutro";
 
 export type Prioridade = "critico" | "alto" | "medio" | "baixo";
 
@@ -26,12 +22,7 @@ export type AlertaTipo =
   | "frequencia_caindo";
 
 export type AcaoRecomendada =
-  | "whatsapp"
-  | "sms"
-  | "bonus"
-  | "campanha"
-  | "acompanhamento"
-  | "copiar";
+  "whatsapp" | "sms" | "bonus" | "campanha" | "acompanhamento" | "copiar";
 
 export type Alerta = {
   tipo: AlertaTipo;
@@ -96,8 +87,8 @@ export type PlayerLike = {
   saques_recentes?: number;
   qtd_logins_30d?: number;
   qtd_logins_30_60d?: number;
-  reativado_em?: string | null;     // data do primeiro depósito após gap >=14d (se houver nos últimos 30d)
-  horario_pico?: number | null;      // hora do dia mais comum nas sessions (0–23)
+  reativado_em?: string | null; // data do primeiro depósito após gap >=14d (se houver nos últimos 30d)
+  horario_pico?: number | null; // hora do dia mais comum nas sessions (0–23)
   // Cashback (alimentado pelo webhook `cashback-pago`)
   last_cashback_paid_at?: string | null;
   last_cashback_amount?: number | null;
@@ -138,8 +129,7 @@ export function classify(p: PlayerLike): Classificacao {
   if (p.vip || dep >= 1000) return "vip";
   if (diasSeg >= 7 && media >= 200) return "lead_quente";
   if (diasLogin > 15 && dep < 150) return "lead_frio";
-  if (diasLogin > 5 || (dep3060 > 0 && dep30 < dep3060 * 0.5))
-    return "em_risco";
+  if (diasLogin > 5 || (dep3060 > 0 && dep30 < dep3060 * 0.5)) return "em_risco";
   if (logins30 >= 10 && dep30 > dep3060 && diasLogin <= 2) return "alto_potencial";
   return "neutro";
 }
@@ -157,11 +147,11 @@ export function isRelevante(p: PlayerLike): boolean {
   const dep3060 = p.dep_30_60d ?? 0;
   const seg = p.dias_seguidos_depositando ?? 0;
 
-  if (p.vip || dep >= 1000) return true;          // VIP
+  if (p.vip || dep >= 1000) return true; // VIP
   if (logins30 >= 10 && dep30 >= dep3060 * 0.7) return true; // alto potencial
-  if (seg >= 5) return true;                       // lead quente / recorrente
-  if (lucro >= 300) return true;                   // lucrativo
-  if (dep30 > 0 && dep3060 > 0) return true;       // recorrente nos últimos 60d
+  if (seg >= 5) return true; // lead quente / recorrente
+  if (lucro >= 300) return true; // lucrativo
+  if (dep30 > 0 && dep3060 > 0) return true; // recorrente nos últimos 60d
   return false;
 }
 
@@ -180,8 +170,7 @@ export function playerScore(p: PlayerLike): number {
   const freq = Math.min(25, logins30 * 1.5);
   // retenção (0-20): quanto mais recente o último login, melhor
   const ret =
-    diasLogin <= 1 ? 20 : diasLogin <= 3 ? 16 : diasLogin <= 7 ? 12
-      : diasLogin <= 15 ? 6 : 0;
+    diasLogin <= 1 ? 20 : diasLogin <= 3 ? 16 : diasLogin <= 7 ? 12 : diasLogin <= 15 ? 6 : 0;
   // depósitos histórico (0-20): log-scale até R$2000
   const depScore = Math.min(20, Math.log10(Math.max(1, dep)) * 6);
   // crescimento (0-20): dep30 vs dep30_60
@@ -211,8 +200,7 @@ export function retentionScore(p: PlayerLike): number {
   const seg = p.dias_seguidos_depositando ?? 0;
 
   const recencia =
-    diasLogin <= 1 ? 35 : diasLogin <= 3 ? 28 : diasLogin <= 7 ? 18
-      : diasLogin <= 15 ? 8 : 0;
+    diasLogin <= 1 ? 35 : diasLogin <= 3 ? 28 : diasLogin <= 7 ? 18 : diasLogin <= 15 ? 8 : 0;
   const freq = Math.min(30, logins30 * 2);
   const consist = Math.min(25, seg * 3);
   const jogo = diasJogo <= 3 ? 10 : diasJogo <= 7 ? 5 : 0;
@@ -250,11 +238,10 @@ export function riskScore(p: PlayerLike): number {
   const dep3060 = p.dep_30_60d ?? 0;
   const saqRec = p.saques_recentes ?? 0;
   const dep = Number(p.total_depositado ?? 0);
-  const vipBoost = (p.vip || dep >= 1000) ? 10 : 0;
+  const vipBoost = p.vip || dep >= 1000 ? 10 : 0;
 
   const inativ =
-    diasLogin > 30 ? 35 : diasLogin > 15 ? 28 : diasLogin > 7 ? 18
-      : diasLogin > 3 ? 8 : 0;
+    diasLogin > 30 ? 35 : diasLogin > 15 ? 28 : diasLogin > 7 ? 18 : diasLogin > 3 ? 8 : 0;
   const semDep = diasDep > 30 ? 20 : diasDep > 14 ? 12 : diasDep > 7 ? 6 : 0;
   let queda = 0;
   if (dep3060 > 0) {
@@ -419,15 +406,19 @@ export function detectAlerts(p: PlayerLike): Alerta[] {
   if (p.horario_pico !== null && p.horario_pico !== undefined && logins30 >= 8) {
     const h = p.horario_pico;
     const faixa =
-      h >= 6 && h < 12 ? "manhã" : h >= 12 && h < 18 ? "tarde"
-        : h >= 18 && h < 24 ? "noite" : "madrugada";
+      h >= 6 && h < 12
+        ? "manhã"
+        : h >= 12 && h < 18
+          ? "tarde"
+          : h >= 18 && h < 24
+            ? "noite"
+            : "madrugada";
     out.push({
       tipo: "padrao_horario",
       titulo: "Janela ideal de contato",
       prioridade: "baixo",
       motivo: `Costuma jogar à ${faixa} (pico às ${String(h).padStart(2, "0")}h).`,
-      impacto:
-        "Comunicação enviada na janela certa tem taxa de resposta significativamente maior.",
+      impacto: "Comunicação enviada na janela certa tem taxa de resposta significativamente maior.",
       acaoRecomendada: "campanha",
       acaoLabel: "Agendar campanha no horário",
     });
@@ -469,8 +460,7 @@ export function detectAlerts(p: PlayerLike): Alerta[] {
       titulo: "Frequência caindo — chance de retorno",
       prioridade: isVip ? "alto" : "medio",
       motivo: `${logins30} logins nos últimos 30 dias, contra ${logins3060} no período anterior.`,
-      impacto:
-        "Curva descendente de engajamento. Sem intervenção, vira churn em algumas semanas.",
+      impacto: "Curva descendente de engajamento. Sem intervenção, vira churn em algumas semanas.",
       acaoRecomendada: "campanha",
       acaoLabel: "Adicionar em campanha de reativação",
     });
@@ -529,8 +519,8 @@ export function prioridadeRank(p: Prioridade): number {
 }
 
 export function topPrioridade(alertas: Alerta[]): Prioridade {
-  return alertas.reduce<Prioridade>((acc, a) =>
-    prioridadeRank(a.prioridade) < prioridadeRank(acc) ? a.prioridade : acc,
+  return alertas.reduce<Prioridade>(
+    (acc, a) => (prioridadeRank(a.prioridade) < prioridadeRank(acc) ? a.prioridade : acc),
     "baixo",
   );
 }
@@ -582,36 +572,69 @@ export function whatsappMessageFor(a: Alerta, p: PlayerLike): string {
   switch (a.tipo) {
     case "abandono_vip":
     case "vip_sem_atividade":
-      return base + "Senti sua falta por aqui. Como VIP, separei um benefício exclusivo pra te receber de volta." + saldoTxt + " Posso te mandar agora?";
+      return (
+        base +
+        "Senti sua falta por aqui. Como VIP, separei um benefício exclusivo pra te receber de volta." +
+        saldoTxt +
+        " Posso te mandar agora?"
+      );
     case "queda_depositos":
-      return base + "Notei que você sumiu um pouco. Tá tudo certo com a plataforma? Se precisar de algo, é só me chamar.";
+      return (
+        base +
+        "Notei que você sumiu um pouco. Tá tudo certo com a plataforma? Se precisar de algo, é só me chamar."
+      );
     case "lead_quente_esfriando":
-      return base + "Vi que você estava bem ativo e acabou pausando. Tenho um bônus pronto pra te dar aquele empurrão. Quer aproveitar?";
+      return (
+        base +
+        "Vi que você estava bem ativo e acabou pausando. Tenho um bônus pronto pra te dar aquele empurrão. Quer aproveitar?"
+      );
     case "proximo_vip":
-      return base + "Você está a um passo de virar VIP e desbloquear benefícios exclusivos. Posso te ajudar com um bônus pra completar?";
+      return (
+        base +
+        "Você está a um passo de virar VIP e desbloquear benefícios exclusivos. Posso te ajudar com um bônus pra completar?"
+      );
     case "alto_potencial":
-      return base + "Quero te dar uma atenção especial. Topa receber novidades e bônus exclusivos antes de todo mundo?";
+      return (
+        base +
+        "Quero te dar uma atenção especial. Topa receber novidades e bônus exclusivos antes de todo mundo?"
+      );
     case "player_reativado":
-      return base + "Que bom te ver de volta! Pra comemorar, tenho uma surpresa pronta pra você. Posso enviar?";
+      return (
+        base +
+        "Que bom te ver de volta! Pra comemorar, tenho uma surpresa pronta pra você. Posso enviar?"
+      );
     case "sequencia_depositos":
       return base + "Tá num momento bom! Qualquer coisa que precisar, é só falar comigo direto.";
     case "padrao_horario":
-      return base + "Tenho uma promoção que combina perfeito com seu horário de jogo. Quer dar uma olhada?";
+      return (
+        base +
+        "Tenho uma promoção que combina perfeito com seu horário de jogo. Quer dar uma olhada?"
+      );
     case "saldo_parado":
-      return base + `Vi que tem ${formatBRL(saldo)} na sua conta te esperando. Posso te mostrar os jogos que estão pagando bem agora pra você aproveitar?`;
+      return (
+        base +
+        `Vi que tem ${formatBRL(saldo)} na sua conta te esperando. Posso te mostrar os jogos que estão pagando bem agora pra você aproveitar?`
+      );
     case "login_sem_deposito":
-      return base + "Vi você por aqui mas sem aquela rodada gostosa. Posso liberar um bônus pra você jogar hoje?";
+      return (
+        base +
+        "Vi você por aqui mas sem aquela rodada gostosa. Posso liberar um bônus pra você jogar hoje?"
+      );
     case "frequencia_caindo":
-      return base + "Faz um tempo que a gente não conversa direito. Quer que eu te mostre o que tem de novo?";
+      return (
+        base +
+        "Faz um tempo que a gente não conversa direito. Quer que eu te mostre o que tem de novo?"
+      );
     default:
       return base + "Tudo certo? Qualquer coisa, estou por aqui.";
   }
 }
 
 export function buildWhatsAppLink(p: PlayerLike, a: Alerta): string | null {
-  if (!p.telefone) return null;
-  const digits = p.telefone.replace(/\D/g, "");
-  if (!digits) return null;
+  // wa.me needs the country code: "11999998888" would be read as +1.
+  const phone = normalizeBrazilianPhone(p.telefone);
+  if (!phone) return null;
+  const digits = phone.slice(1);
   const msg = encodeURIComponent(whatsappMessageFor(a, p));
   return `https://wa.me/${digits}?text=${msg}`;
 }
@@ -693,9 +716,18 @@ export function returnChance(p: PlayerLike): number {
 // ============================================================
 
 export type RawPlayerRow = PlayerLike & { id: string };
-export type RawDepositRow = { player_id: string | null; valor: number | string | null; created_at: string; status?: string | null };
+export type RawDepositRow = {
+  player_id: string | null;
+  valor: number | string | null;
+  created_at: string;
+  status?: string | null;
+};
 export type RawSessionRow = { player_id: string | null; iniciado_em: string };
-export type RawWithdrawalRow = { player_id: string | null; valor: number | string | null; created_at: string };
+export type RawWithdrawalRow = {
+  player_id: string | null;
+  valor: number | string | null;
+  created_at: string;
+};
 export type RawFollowupRow = { player_id: string; alerta_tipo: string; created_at: string };
 
 /**
@@ -785,7 +817,8 @@ export function computeAlertsByPlayer(args: {
     let reativadoEm: string | null = null;
     const sortedAsc = (depDates.get(p.id) ?? []).slice().sort();
     for (let i = 1; i < sortedAsc.length; i++) {
-      const gap = (new Date(sortedAsc[i]).getTime() - new Date(sortedAsc[i - 1]).getTime()) / 86400000;
+      const gap =
+        (new Date(sortedAsc[i]).getTime() - new Date(sortedAsc[i - 1]).getTime()) / 86400000;
       if (gap >= 14 && new Date(sortedAsc[i]).getTime() >= now - 7 * 86400000) {
         reativadoEm = sortedAsc[i];
         break;
@@ -797,7 +830,10 @@ export function computeAlertsByPlayer(args: {
     if (hours) {
       let max = 0;
       hours.forEach((cnt, h) => {
-        if (cnt > max) { max = cnt; horarioPico = h; }
+        if (cnt > max) {
+          max = cnt;
+          horarioPico = h;
+        }
       });
     }
 
@@ -816,9 +852,7 @@ export function computeAlertsByPlayer(args: {
       horario_pico: horarioPico,
     };
 
-    const alertas = detectAlerts(enriched).filter(
-      (a) => !recentFollowup.has(`${p.id}:${a.tipo}`),
-    );
+    const alertas = detectAlerts(enriched).filter((a) => !recentFollowup.has(`${p.id}:${a.tipo}`));
     if (alertas.length) out.set(p.id, alertas);
   }
   return out;

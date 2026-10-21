@@ -75,10 +75,12 @@ const RANGE_OPTIONS = [
   { value: "yesterday", label: "Ontem" },
   { value: "7d", label: "Últimos 7 dias" },
   { value: "30d", label: "Últimos 30 dias" },
-  { value: "all", label: "Tudo" },
 ];
+// Sem opção "Tudo": as funções de servidor (history.functions.ts) tratam
+// `from: null` como "hoje"/"24 h"/"7 dias", então "Tudo" mostraria um recorte
+// diferente do que promete. Volta quando o servidor aceitar janela sem início.
 
-// Janelas abertas ("hoje", "7 dias", "30 dias", "tudo") mandam `to: null`: o
+// Janelas abertas ("hoje", "7 dias", "30 dias") mandam `to: null`: o
 // servidor usa "agora" (mesma semântica de antes, inclusive a janela anterior
 // do delta). Antes o `to` era `new Date()` a cada render, o que mudava a
 // queryKey a cada render e fazia cada resposta disparar uma nova busca.
@@ -88,12 +90,6 @@ function rangeIso(value: string): {
   to: string | null;
   bucket: "hour" | "day";
 } {
-  if (value === "all")
-    return {
-      from: new Date(Date.now() - 30 * 86400000).toISOString(),
-      to: null,
-      bucket: "day",
-    };
   if (value === "today") {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
@@ -134,7 +130,19 @@ function formatRelative(iso: string | null | undefined): string {
   return `há ${d}d`;
 }
 
+// Canais cujo provedor confirma entrega de verdade. O callback de SMS da Short
+// Brasil não informa status (nenhum SMS é marcado entregue), então para SMS o
+// "sucesso" é só "aceito pelo provedor" — mostramos Enviados, sem taxa de entrega.
+const CHANNEL_SHOWS_DELIVERY: Record<ChannelKey, boolean> = {
+  sms: false,
+  email: true,
+  calls: true,
+  whatsapp: true,
+};
+
 export interface HistoryShellOptions {
+  /** Sobrescreve CHANNEL_SHOWS_DELIVERY: exibe "Entregues" e taxa de entrega. */
+  showsDelivery?: boolean;
   showFlow?: boolean;
   showStep?: boolean;
   title?: string;
@@ -188,6 +196,7 @@ export function HistoryShell({
   const showFlow = options.showFlow !== false;
   const showStep = options.showStep !== false;
   const showDirection = channel === "whatsapp";
+  const showsDelivery = options.showsDelivery ?? CHANNEL_SHOWS_DELIVERY[channel];
 
   const histFn = useServerFn(getChannelHistory);
   const statsFn = useServerFn(getChannelHistoryStats);
@@ -262,7 +271,7 @@ export function HistoryShell({
 
   const cards = options.cardLabels ?? {
     total: "Disparos",
-    success: "Entregues",
+    success: showsDelivery ? "Entregues" : "Enviados",
     failed: "Falhas",
     pending: "Pendentes",
     conversions: "Conversões",
@@ -341,7 +350,7 @@ export function HistoryShell({
           icon={<CheckCircle2 className="h-4 w-4 text-emerald-400" />}
           label={cards.success}
           value={stats.data?.success}
-          subtitle={stats.data ? `${stats.data.deliveryRate}% taxa` : undefined}
+          subtitle={showsDelivery && stats.data ? `${stats.data.deliveryRate}% taxa` : undefined}
         />
         <StatCard
           icon={<XCircle className="h-4 w-4 text-rose-400" />}
@@ -382,10 +391,10 @@ export function HistoryShell({
               >
                 <XAxis dataKey="t" hide />
                 <Tooltip
-                  cursor={{ fill: "rgba(255,255,255,0.04)" }}
+                  cursor={{ fill: "var(--color-muted)", fillOpacity: 0.4 }}
                   contentStyle={{
-                    background: "rgba(15,15,20,0.95)",
-                    border: "1px solid rgba(255,255,255,0.1)",
+                    background: "var(--color-popover)",
+                    border: "1px solid var(--color-border)",
                     borderRadius: 6,
                     fontSize: 11,
                   }}
@@ -399,7 +408,7 @@ export function HistoryShell({
                   }
                   formatter={(v) => [`${v}`, "envios"]}
                 />
-                <Bar dataKey="count" fill="hsl(var(--primary))" radius={[2, 2, 0, 0]} />
+                <Bar dataKey="count" fill="var(--color-primary)" radius={[2, 2, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
@@ -433,6 +442,7 @@ export function HistoryShell({
               selectedId={flowId === "all" ? null : flowId}
               onSelect={(id) => setFlowId(id)}
               loading={summary.isLoading}
+              showsDelivery={showsDelivery}
             />
           </CardContent>
         </Card>
@@ -753,11 +763,13 @@ function FlowRanking({
   selectedId,
   onSelect,
   loading,
+  showsDelivery,
 }: {
   items: FlowSummaryItem[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   loading: boolean;
+  showsDelivery: boolean;
 }) {
   if (loading && items.length === 0) {
     return <p className="p-6 text-center text-xs text-muted-foreground">Carregando fluxos…</p>;
@@ -776,8 +788,8 @@ function FlowRanking({
         <TableRow>
           <TableHead>Fluxo</TableHead>
           <TableHead className="text-right">Envios</TableHead>
-          <TableHead className="text-right">Sucesso</TableHead>
-          <TableHead className="text-right">% entrega</TableHead>
+          <TableHead className="text-right">{showsDelivery ? "Sucesso" : "Enviados"}</TableHead>
+          {showsDelivery && <TableHead className="text-right">% entrega</TableHead>}
           <TableHead className="text-right">Falhas</TableHead>
           <TableHead>Último</TableHead>
           <TableHead className="w-6"></TableHead>
@@ -806,9 +818,11 @@ function FlowRanking({
               <TableCell className="text-right text-xs tabular-nums text-emerald-300">
                 {s.success.toLocaleString("pt-BR")}
               </TableCell>
-              <TableCell className="text-right text-xs tabular-nums text-muted-foreground">
-                {pct}%
-              </TableCell>
+              {showsDelivery && (
+                <TableCell className="text-right text-xs tabular-nums text-muted-foreground">
+                  {pct}%
+                </TableCell>
+              )}
               <TableCell className="text-right text-xs tabular-nums text-rose-300">
                 {s.failed.toLocaleString("pt-BR")}
               </TableCell>

@@ -242,7 +242,52 @@ async function auditTenant(args: {
   }
 }
 
-async function buildTenantDetail(tenantId: string) {
+/**
+ * `provider_cost_per_sms` is what Betleads pays the SMS supplier. Only the
+ * super admin may see it (and the margin derived from it); for anyone else it
+ * is stripped from the payload here on the server, both from the top-level
+ * pricing and from the copy nested in `sms_credit_summary.pricing`.
+ */
+function withoutProviderCost(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const { provider_cost_per_sms: _cost, ...rest } = value as Record<string, unknown>;
+  void _cost;
+  return rest;
+}
+
+function redactSummaryPricing(summary: unknown): Record<string, unknown> {
+  if (!summary || typeof summary !== "object" || Array.isArray(summary)) return {};
+  const copy = { ...(summary as Record<string, unknown>) };
+  if ("pricing" in copy) copy.pricing = withoutProviderCost(copy.pricing);
+  return copy;
+}
+
+/**
+ * Audit rows written by the pricing and credit admin actions carry the provider
+ * cost in before/after/metadata (top level or inside `pricing`). Strip it the
+ * same way for anyone who is not the super admin.
+ */
+type AuditRow = { [key: string]: Json };
+
+function redactAuditJson(value: Json): Json {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  return redactSummaryPricing(withoutProviderCost(value)) as Json;
+}
+
+function redactAuditRows(rows: AuditRow[]): AuditRow[] {
+  return rows.map((row) => {
+    const copy = { ...row };
+    for (const key of ["before_data", "after_data", "metadata", "before", "after"]) {
+      if (key in copy) copy[key] = redactAuditJson(copy[key]);
+    }
+    return copy;
+  });
+}
+
+async function buildTenantDetail(
+  tenantId: string,
+  { includeProviderCost }: { includeProviderCost: boolean },
+) {
   const since30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
   const [
@@ -334,12 +379,16 @@ async function buildTenantDetail(tenantId: string) {
       meta_accounts: metaAccounts,
     },
     sms: {
-      summary: smsSummaryRes.data ?? {},
-      pricing: pricingRes.data ?? {},
+      summary: includeProviderCost
+        ? (smsSummaryRes.data ?? {})
+        : redactSummaryPricing(smsSummaryRes.data),
+      pricing: includeProviderCost ? (pricingRes.data ?? {}) : withoutProviderCost(pricingRes.data),
       ledger: ledgerRes.data ?? [],
       orders: ordersRes.data ?? [],
     },
-    audit: auditRes.data ?? [],
+    audit: includeProviderCost
+      ? ((auditRes.data ?? []) as AuditRow[])
+      : redactAuditRows((auditRes.data ?? []) as AuditRow[]),
   };
 }
 
@@ -352,32 +401,39 @@ const consoleInput = z
 export const getTenantManagementConsole = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => consoleInput.parse(data ?? {}))
-  .handler(async ({ data, context }) => {
-    const ctx = context as unknown as ServerContext;
-    const { superAdmin, tenants } = await getAccessibleTenants(ctx);
-    const selectedTenantId = data.tenantId ?? tenants[0]?.id ?? null;
+  .handler(async ({ data, context }) =>
+    getTenantManagementConsoleFor(context as unknown as ServerContext, data),
+  );
 
-    if (!selectedTenantId) {
-      return {
-        isSuperAdmin: superAdmin,
-        tenants,
-        selectedTenantId: null,
-        detail: null,
-      };
-    }
+/** Body of `getTenantManagementConsole`, extracted so it is unit-testable. */
+export async function getTenantManagementConsoleFor(
+  ctx: ServerContext,
+  data: { tenantId?: string | null },
+) {
+  const { superAdmin, tenants } = await getAccessibleTenants(ctx);
+  const selectedTenantId = data.tenantId ?? tenants[0]?.id ?? null;
 
-    if (!tenants.some((tenant) => tenant.id === selectedTenantId)) {
-      throw new Error("Tenant sem acesso");
-    }
-
+  if (!selectedTenantId) {
     return {
       isSuperAdmin: superAdmin,
-      canManage: await canManageTenant(ctx, selectedTenantId),
       tenants,
-      selectedTenantId,
-      detail: await buildTenantDetail(selectedTenantId),
+      selectedTenantId: null,
+      detail: null,
     };
-  });
+  }
+
+  if (!tenants.some((tenant) => tenant.id === selectedTenantId)) {
+    throw new Error("Tenant sem acesso");
+  }
+
+  return {
+    isSuperAdmin: superAdmin,
+    canManage: await canManageTenant(ctx, selectedTenantId),
+    tenants,
+    selectedTenantId,
+    detail: await buildTenantDetail(selectedTenantId, { includeProviderCost: superAdmin }),
+  };
+}
 
 /**
  * Body of `getTenantSwitcher`, extracted so `is_demo` is directly
@@ -594,13 +650,12 @@ const addUserInput = z.object({
 export const addUserToTenant = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => addUserInput.parse(data))
-  .handler(async ({ data, context }) => addUserToTenantFor(context as unknown as ServerContext, data));
+  .handler(async ({ data, context }) =>
+    addUserToTenantFor(context as unknown as ServerContext, data),
+  );
 
 // Body of `addUserToTenant`, exported so the demo guard wiring is unit-testable.
-export async function addUserToTenantFor(
-  ctx: ServerContext,
-  data: z.infer<typeof addUserInput>,
-) {
+export async function addUserToTenantFor(ctx: ServerContext, data: z.infer<typeof addUserInput>) {
   await requireTenantManager(ctx, data.tenantId);
   await assertTenantNotDemo(data.tenantId);
   const actorIsSuperAdmin = await checkSuperAdmin(ctx.userId);

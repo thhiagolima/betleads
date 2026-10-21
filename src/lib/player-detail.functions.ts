@@ -1,7 +1,20 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { detectAlerts, playerScore, retentionScore, riskScore, conversionScore } from "./player-rules";
+import {
+  detectAlerts,
+  playerScore,
+  retentionScore,
+  riskScore,
+  conversionScore,
+} from "./player-rules";
 import { lastActivityMs } from "./player-activity";
+import { levelForTotal, thresholdsFromSettingsRow, type LevelSlug } from "./player-level";
+
+// Status de sms_send_logs.status que contam como SMS enviado (aceito pelo
+// provedor). A Short Brasil não confirma entrega, então a ficha não mostra
+// "entregues": só enviados e falhas.
+const SMS_SENT_STATUSES = ["sent", "delivered", "enviado", "entregue"];
+const SMS_FAILED_STATUSES = ["error", "failed", "erro", "falhou"];
 
 type DbRow = Record<string, any>;
 
@@ -11,6 +24,8 @@ type Input = {
 
 export type PlayerDetail = {
   player: DbRow;
+  /** Nível pelas faixas de gamification_settings da casa (mesma regra da lista). */
+  level: LevelSlug;
   metrics: {
     saldo_total: number;
     lucro: number;
@@ -20,7 +35,7 @@ export type PlayerDetail = {
     withdrawal_count: number;
     cashback_count: number;
     sms_sent: number;
-    sms_delivered: number;
+    sms_failed: number;
     sms_clicked: number;
     score: number;
     retention_score: number;
@@ -88,6 +103,9 @@ export const getPlayerDetail = createServerFn({ method: "POST" })
       followupsRes,
       attributionsRes,
       mediaRes,
+      settingsRes,
+      smsSentRes,
+      smsFailedRes,
     ] = await Promise.all([
       supabase
         .from("deposits")
@@ -112,7 +130,9 @@ export const getPlayerDetail = createServerFn({ method: "POST" })
         .limit(80),
       supabase
         .from("sms_send_logs")
-        .select("id, created_at, delivered_at, status, delivery_status, trigger_name, content, error, provider, to_phone")
+        .select(
+          "id, created_at, delivered_at, status, delivery_status, trigger_name, content, error, provider, to_phone",
+        )
         .eq("tenant_id", tenantId)
         .eq("player_id", playerId)
         .order("created_at", { ascending: false })
@@ -147,10 +167,30 @@ export const getPlayerDetail = createServerFn({ method: "POST" })
         .limit(10),
       supabase
         .from("marketing_ad_metrics_daily")
-        .select("campaign_name, ad_id, ad_name, creative_name, spend, impressions, clicks, metric_date")
+        .select(
+          "campaign_name, ad_id, ad_name, creative_name, spend, impressions, clicks, metric_date",
+        )
         .eq("tenant_id", tenantId)
         .gte("metric_date", since90)
         .limit(20000),
+      supabase
+        .from("gamification_settings")
+        .select("level_thresholds")
+        .eq("tenant_id", tenantId)
+        .maybeSingle(),
+      // Contagens do histórico inteiro (a lista smsLogs acima vem limitada a 80).
+      supabase
+        .from("sms_send_logs")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .eq("player_id", playerId)
+        .in("status", SMS_SENT_STATUSES),
+      supabase
+        .from("sms_send_logs")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .eq("player_id", playerId)
+        .in("status", SMS_FAILED_STATUSES),
     ]);
 
     const required = [
@@ -161,6 +201,8 @@ export const getPlayerDetail = createServerFn({ method: "POST" })
       sessionsRes,
       eventsRes,
       followupsRes,
+      smsSentRes,
+      smsFailedRes,
     ];
     for (const res of required) {
       if (res.error) throw new Error(res.error.message);
@@ -177,27 +219,51 @@ export const getPlayerDetail = createServerFn({ method: "POST" })
     const mediaRows = (mediaRes.data ?? []) as DbRow[];
 
     const importedDepositCount = Number(
-      attribution?.raw_payload?.normalized?.depositos ?? attribution?.raw_payload?.raw?.depositos ?? 0,
+      attribution?.raw_payload?.normalized?.depositos ??
+        attribution?.raw_payload?.raw?.depositos ??
+        0,
     );
-    const approvedDepositCount = deposits.filter((d) => !d.status || d.status === "aprovado").length;
+    const approvedDepositCount = deposits.filter(
+      (d) => !d.status || d.status === "aprovado",
+    ).length;
     const depositCount = Math.max(approvedDepositCount, importedDepositCount || 0);
     const lastActivity = lastActivityMs(player);
     const media = summarizeMedia(player, attribution, mediaRows);
-    const timeline = buildTimeline({ deposits, withdrawals, cashbacks, smsLogs, sessions, events, followups });
+    const timeline = buildTimeline({
+      deposits,
+      withdrawals,
+      cashbacks,
+      smsLogs,
+      sessions,
+      events,
+      followups,
+    });
+
+    // Sem linha (ou tabela ausente) => faixas padrão, igual ao RPC gamification_snapshot_v2.
+    const thresholds = thresholdsFromSettingsRow(
+      settingsRes.error ? null : settingsRes.data?.level_thresholds,
+    );
 
     return {
       player,
+      level: levelForTotal(player.total_depositado, thresholds),
       metrics: {
         saldo_total: Number(player.saldo_carteira ?? 0) + Number(player.saldo_bonus ?? 0),
         lucro: Number(player.total_depositado ?? 0) - Number(player.total_sacado ?? 0),
         last_activity_at: lastActivity ? new Date(lastActivity).toISOString() : null,
-        days_since_activity: lastActivity ? Math.floor((Date.now() - lastActivity) / 86400000) : null,
+        days_since_activity: lastActivity
+          ? Math.floor((Date.now() - lastActivity) / 86400000)
+          : null,
         deposit_count: depositCount,
         withdrawal_count: withdrawals.length,
         cashback_count: cashbacks.length,
-        sms_sent: smsLogs.length,
-        sms_delivered: smsLogs.filter((s) => ["delivered", "delivered_to_operator", "sent"].includes(String(s.delivery_status ?? s.status))).length,
-        sms_clicked: events.filter((e) => String(e.tipo ?? "").toLowerCase().includes("click")).length,
+        sms_sent: smsSentRes.count ?? 0,
+        sms_failed: smsFailedRes.count ?? 0,
+        sms_clicked: events.filter((e) =>
+          String(e.tipo ?? "")
+            .toLowerCase()
+            .includes("click"),
+        ).length,
         score: playerScore(player),
         retention_score: retentionScore(player),
         risk_score: riskScore(player),
@@ -218,10 +284,16 @@ export const getPlayerDetail = createServerFn({ method: "POST" })
   });
 
 function keyOf(value: unknown) {
-  return String(value ?? "").trim().toLowerCase();
+  return String(value ?? "")
+    .trim()
+    .toLowerCase();
 }
 
-function summarizeMedia(player: DbRow, attribution: DbRow | null, rows: DbRow[]): PlayerDetail["media"] {
+function summarizeMedia(
+  player: DbRow,
+  attribution: DbRow | null,
+  rows: DbRow[],
+): PlayerDetail["media"] {
   const source = attribution?.utm_source ?? player.utm_source ?? player.origem ?? null;
   const campaign = attribution?.utm_campaign ?? player.utm_campaign ?? null;
   const creative = attribution?.utm_content ?? player.utm_content ?? null;
@@ -244,7 +316,10 @@ function summarizeMedia(player: DbRow, attribution: DbRow | null, rows: DbRow[])
     const impressions = Number(row.impressions ?? 0);
     const clicks = Number(row.clicks ?? 0);
 
-    if ((adIdKey && rowAdKeys.includes(adIdKey)) || (creativeKey && rowAdKeys.includes(creativeKey))) {
+    if (
+      (adIdKey && rowAdKeys.includes(adIdKey)) ||
+      (creativeKey && rowAdKeys.includes(creativeKey))
+    ) {
       adSpend += spend;
       adImpressions += impressions;
       adClicks += clicks;
@@ -258,7 +333,8 @@ function summarizeMedia(player: DbRow, attribution: DbRow | null, rows: DbRow[])
 
   const basis = adSpend > 0 ? "ad" : campaignSpend > 0 ? "campaign" : null;
   const spend = basis === "ad" ? adSpend : basis === "campaign" ? campaignSpend : null;
-  const impressions = basis === "ad" ? adImpressions : basis === "campaign" ? campaignImpressions : null;
+  const impressions =
+    basis === "ad" ? adImpressions : basis === "campaign" ? campaignImpressions : null;
   const clicks = basis === "ad" ? adClicks : basis === "campaign" ? campaignClicks : null;
 
   return {

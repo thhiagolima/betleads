@@ -18,22 +18,14 @@ export const Route = createFileRoute("/ligacoes")({
       { title: "Voz — BETLEADS" },
       {
         name: "description",
-        content:
-          "Central de voz com áudios enviados, disponibilidade e fila de chamadas.",
+        content: "Central de voz com áudios enviados, disponibilidade e fila de chamadas.",
       },
     ],
   }),
   component: LigacoesPage,
 });
 
-const VALID_TABS = [
-  "dashboard",
-  "fluxos",
-  "scripts",
-  "massa",
-  "audios",
-  "historico",
-] as const;
+const VALID_TABS = ["dashboard", "fluxos", "scripts", "massa", "audios", "historico"] as const;
 
 function LigacoesPage() {
   const navigate = useNavigate();
@@ -91,7 +83,7 @@ function LigacoesPage() {
               subtitle: "Tudo que foi disparado para os leads.",
               showStep: false,
               cardLabels: {
-                total: "Ligações hoje",
+                total: "Ligações",
                 success: "Atendidas",
                 failed: "Não atendidas / falhas",
                 pending: "Pendentes",

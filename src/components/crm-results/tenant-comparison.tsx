@@ -51,7 +51,7 @@ const currency = (value: number | null) => money(value);
 
 const GROUPS: Array<{ title: string; metrics: Metric[] }> = [
   {
-    title: "Conversão por clique",
+    title: "Recuperado pelo CRM",
     metrics: [
       { label: "SMS enviados", raw: (row) => row.sent, format: count },
       { label: "Custo em SMS", raw: (row) => row.cost, format: currency },
@@ -77,7 +77,7 @@ const GROUPS: Array<{ title: string; metrics: Metric[] }> = [
         better: "high",
       },
       {
-        label: "Valor convertido",
+        label: "Recuperado pelo CRM",
         raw: (row) => row.directRevenue,
         format: currency,
         better: "high",
@@ -90,7 +90,7 @@ const GROUPS: Array<{ title: string; metrics: Metric[] }> = [
       },
       {
         label: "Retorno",
-        hint: "Valor convertido ÷ custo.",
+        hint: "Recuperado pelo CRM ÷ custo.",
         raw: (row) => row.clickRoi,
         format: ratio,
         better: "high",
@@ -98,7 +98,7 @@ const GROUPS: Array<{ title: string; metrics: Metric[] }> = [
     ],
   },
   {
-    title: "Visão ampla: recuperados",
+    title: "Recuperados (visão ampla)",
     metrics: [
       {
         label: "Jogadores recuperados",
@@ -212,7 +212,7 @@ export function TenantComparison() {
           <CardHeader>
             <CardTitle className="text-base">Últimos {query.data.days} dias</CardTitle>
             <CardDescription>
-              Conversão por clique primeiro. Em verde, a melhor casa em cada linha. A base de
+              Recuperado pelo CRM primeiro. Em verde, a melhor casa em cada linha. A base de
               jogadores é a de agora, não a do período.
             </CardDescription>
           </CardHeader>

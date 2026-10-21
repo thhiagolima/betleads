@@ -29,6 +29,21 @@ type Template = {
   version: number;
 };
 
+// Rascunho controlado do formulário. `tagsText` guarda o texto cru das tags
+// para a digitação com vírgulas não ser reescrita a cada tecla.
+type Draft = Template & { tagsText: string };
+
+const toDraft = (template: Template): Draft => ({
+  ...template,
+  tagsText: template.tags.join(", "),
+});
+
+const parseTags = (text: string) =>
+  text
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+
 function SmsTemplatesPage() {
   const queryClient = useQueryClient();
   const list = useServerFn(listSmsTemplates);
@@ -36,26 +51,25 @@ function SmsTemplatesPage() {
   const duplicate = useServerFn(duplicateSmsTemplate);
   const archive = useServerFn(archiveSmsTemplate);
   const templates = useQuery({ queryKey: ["sms-templates"], queryFn: () => list() });
-  const [editing, setEditing] = useState<Template | null>(null);
+  const [editing, setEditing] = useState<Draft | null>(null);
+  const patch = (fields: Partial<Draft>) =>
+    setEditing((current) => (current ? { ...current, ...fields } : current));
   const estimate = estimateSms(editing?.content ?? "");
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["sms-templates"] });
   const saveMutation = useMutation({
-    mutationFn: (form: HTMLFormElement) => {
-      const fields = new FormData(form);
-      return save({
+    // Lê do estado controlado (não do DOM): nunca grava campos de outro template.
+    mutationFn: (draft: Draft) =>
+      save({
         data: {
-          id: editing?.id,
-          name: String(fields.get("name") ?? ""),
-          content: String(fields.get("content") ?? ""),
-          category: String(fields.get("category") ?? "Geral"),
-          tags: String(fields.get("tags") ?? "")
-            .split(",")
-            .map((tag) => tag.trim())
-            .filter(Boolean),
-          isActive: editing?.isActive ?? true,
+          // Template novo tem id "" — o servidor espera UUID ou ausência.
+          id: draft.id || undefined,
+          name: draft.name.trim(),
+          content: draft.content,
+          category: draft.category.trim() || "Geral",
+          tags: parseTags(draft.tagsText),
+          isActive: draft.isActive,
         },
-      });
-    },
+      }),
     onSuccess: () => {
       toast.success("Template salvo");
       setEditing(null);
@@ -86,15 +100,17 @@ function SmsTemplatesPage() {
         </div>
         <Button
           onClick={() =>
-            setEditing({
-              id: "",
-              name: "",
-              content: "",
-              category: "Geral",
-              tags: [],
-              isActive: true,
-              version: 1,
-            })
+            setEditing(
+              toDraft({
+                id: "",
+                name: "",
+                content: "",
+                category: "Geral",
+                tags: [],
+                isActive: true,
+                version: 1,
+              }),
+            )
           }
         >
           <Plus className="mr-2 h-4 w-4" />
@@ -102,7 +118,7 @@ function SmsTemplatesPage() {
         </Button>
       </div>
       {editing && (
-        <Card>
+        <Card key={editing.id || "new"}>
           <CardHeader>
             <CardTitle>{editing.id ? "Editar template" : "Novo template"}</CardTitle>
           </CardHeader>
@@ -111,24 +127,35 @@ function SmsTemplatesPage() {
               className="grid gap-4"
               onSubmit={(event) => {
                 event.preventDefault();
-                saveMutation.mutate(event.currentTarget);
+                saveMutation.mutate(editing);
               }}
             >
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
                   <Label>Nome</Label>
-                  <Input name="name" defaultValue={editing.name} required />
+                  <Input
+                    name="name"
+                    value={editing.name}
+                    onChange={(event) => patch({ name: event.target.value })}
+                    required
+                  />
                 </div>
                 <div>
                   <Label>Categoria</Label>
-                  <Input name="category" defaultValue={editing.category} required />
+                  <Input
+                    name="category"
+                    value={editing.category}
+                    onChange={(event) => patch({ category: event.target.value })}
+                    required
+                  />
                 </div>
               </div>
               <div>
                 <Label>Tags</Label>
                 <Input
                   name="tags"
-                  defaultValue={editing.tags.join(", ")}
+                  value={editing.tagsText}
+                  onChange={(event) => patch({ tagsText: event.target.value })}
                   placeholder="reativação, vip"
                 />
               </div>
@@ -140,11 +167,7 @@ function SmsTemplatesPage() {
                   value={editing.content}
                   maxLength={480}
                   required
-                  onChange={(event) =>
-                    setEditing((current) =>
-                      current ? { ...current, content: event.target.value } : current,
-                    )
-                  }
+                  onChange={(event) => patch({ content: event.target.value })}
                 />
                 <p className="mt-1 text-xs text-muted-foreground">
                   {estimate.characters} caracteres · {estimate.encoding} · {estimate.parts} parte(s)
@@ -179,7 +202,7 @@ function SmsTemplatesPage() {
                 {item.tags.length ? ` · ${item.tags.join(", ")}` : ""}
               </p>
               <div className="flex flex-wrap gap-2">
-                <Button size="sm" variant="outline" onClick={() => setEditing(item)}>
+                <Button size="sm" variant="outline" onClick={() => setEditing(toDraft(item))}>
                   <Pencil className="mr-1 h-3.5 w-3.5" />
                   Editar
                 </Button>

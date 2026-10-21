@@ -78,6 +78,12 @@ describe("buildJourneyMap", () => {
 
   it("labels a band without end", () => {
     expect(bandLabel(lost)).toBe("30 dia(s) ou mais");
+    expect(
+      bandLabel({
+        ...lost,
+        trigger_config: { field: "ultimo_login", hours: 48, hours_max: 168 },
+      } as MapJourney),
+    ).toMatch(/sem login$/);
   });
 });
 

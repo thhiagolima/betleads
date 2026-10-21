@@ -143,6 +143,18 @@ async function resolveTenantId(context: ServerContext, requestedTenantId?: strin
   return tenantId;
 }
 
+/**
+ * The client portal never needs what the platform pays the provider; the RPC
+ * returns it inside `pricing`, so drop it before it leaves the server.
+ */
+export function withoutProviderCost(summary: unknown): { [key: string]: Json } {
+  if (!summary || typeof summary !== "object" || Array.isArray(summary)) return {};
+  const { pricing, ...rest } = summary as { [key: string]: Json };
+  if (!pricing || typeof pricing !== "object" || Array.isArray(pricing)) return rest;
+  const { provider_cost_per_sms: _hidden, ...publicPricing } = pricing;
+  return { ...rest, pricing: publicPricing };
+}
+
 const tenantInput = z
   .object({
     tenantId: dbUuid().optional().nullable(),
@@ -187,7 +199,7 @@ export const getSmsCreditPortal = createServerFn({ method: "POST" })
 
     return {
       tenantId,
-      summary: summaryRes.data ?? {},
+      summary: withoutProviderCost(summaryRes.data),
       packages: packagesRes.data ?? [],
       orders: ordersRes.data ?? [],
       ledger: ledgerRes.data ?? [],

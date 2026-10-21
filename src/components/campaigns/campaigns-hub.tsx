@@ -22,7 +22,13 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { num } from "@/lib/format";
-import { campaignStopReason, getChannelOperationState } from "@/lib/channel-operation-state";
+import {
+  campaignStopReason,
+  getChannelOperationState,
+  groupVoiceQueueItems,
+  isFinishedCampaignStatus,
+  type VoiceQueueItem,
+} from "@/lib/channel-operation-state";
 import { cancelScheduledSmsCampaign, listScheduledSmsCampaigns } from "@/lib/sms.functions";
 import { listEmailCampaigns } from "@/lib/email.functions";
 import { listCallQueue } from "@/lib/calls.functions";
@@ -38,6 +44,19 @@ type Campaign = {
   sent_count: number | null;
   deduplicated_count?: number | null;
   failed_count: number | null;
+  /** Voice: calls the provider finished. */
+  completed_count?: number | null;
+  /** Items that will not change any more; feeds the progress of a voice campaign. */
+  finished_count?: number | null;
+  /**
+   * Whether `total_count` is the planned audience. Without it the progress
+   * cannot be computed (an e-mail campaign only knows what it already sent).
+   */
+  has_planned_total?: boolean;
+  /** `scheduled_at` holds the creation date only (no time). */
+  date_is_creation?: boolean;
+  /** Voice campaigns grouped from more than one queue item have no single report. */
+  has_report?: boolean;
   /** ENV-06: recipients skipped because they did not resolve to a player. */
   unresolved_count?: number | null;
   /** Why the campaign stopped (provider error, or who cancelled it). */
@@ -51,6 +70,8 @@ type EmailCampaignRow = {
   id: string;
   nome: string | null;
   agendadoPara: string | null;
+  /** Creation date, dd/mm/aaaa. */
+  data: string | null;
   status: string;
   enviados: number;
   falhas: number;
@@ -104,7 +125,7 @@ export function CampaignsHub() {
   });
   const voiceQueue = useQuery({
     queryKey: ["call-queue", "campaigns-hub"],
-    queryFn: () => listCallQueueFn({ data: { limit: 100 } }),
+    queryFn: () => listCallQueueFn({ data: { limit: 200, order: "recent" } }),
     refetchInterval: 30_000,
   });
   const drafts = useQuery({
@@ -136,44 +157,43 @@ export function CampaignsHub() {
       cancellable: campaign.status === "agendada",
     }),
   );
-  const emailRows = ((emailCampaigns.data?.items ?? []) as EmailCampaignRow[]).map((campaign) => ({
-    id: campaign.id,
-    name: campaign.nome,
-    scheduled_at: campaign.agendadoPara ?? new Date().toISOString(),
-    status: campaign.status,
-    total_count: campaign.enviados + campaign.falhas,
-    sent_count: campaign.enviados,
-    failed_count: campaign.falhas,
-    channel: "email" as const,
+  const emailRows: Campaign[] = ((emailCampaigns.data?.items ?? []) as EmailCampaignRow[]).map(
+    (campaign) => {
+      // Without a schedule the row shows the creation date, never "now".
+      const createdAt = parsePtBrDate(campaign.data);
+      return {
+        id: campaign.id,
+        name: campaign.nome,
+        scheduled_at: campaign.agendadoPara ?? createdAt ?? new Date(0).toISOString(),
+        date_is_creation: !campaign.agendadoPara,
+        status: campaign.status,
+        total_count: campaign.enviados + campaign.falhas,
+        sent_count: campaign.enviados,
+        failed_count: campaign.falhas,
+        has_planned_total: false,
+        channel: "email" as const,
+        cancellable: false,
+      };
+    },
+  );
+  // The queue has one item per call; group them back into campaigns.
+  const voiceRows: Campaign[] = groupVoiceQueueItems(
+    (voiceQueue.data?.items ?? []) as VoiceQueueItem[],
+  ).map((group) => ({
+    id: group.id,
+    name: group.name,
+    scheduled_at: group.scheduledAt,
+    status: group.status,
+    total_count: group.total,
+    sent_count: group.sent,
+    completed_count: group.completed,
+    failed_count: group.failed,
+    finished_count: group.finished,
+    has_planned_total: true,
+    has_report: group.total === 1,
+    channel: "voice",
     cancellable: false,
   }));
-  const voiceRows: Campaign[] = ((voiceQueue.data?.items ?? []) as any[]).map((item) => {
-    const scheduledAt = item.scheduled_at ?? item.created_at ?? new Date().toISOString();
-    const isFuture = new Date(scheduledAt).getTime() > Date.now();
-    const isContactLimited = ["rolling_24h_limit", "cooldown"].includes(item.provider_status);
-    return {
-      id: item.id,
-      name: item.script_name ?? item.audio_name ?? "Ligação por voz",
-      scheduled_at: scheduledAt,
-      // `audio_ready` means the audio was prepared successfully. It is only
-      // waiting for the selected schedule, not for the provider.
-      status:
-        item.status === "audio_ready" && isContactLimited
-          ? "paused_limit"
-          : item.status === "audio_ready" && isFuture
-            ? "agendada"
-            : (item.status ?? "pendente"),
-      total_count: 1,
-      sent_count: ["dispatched", "sent", "completed", "answered", "waiting_provider"].includes(
-        item.status,
-      )
-        ? 1
-        : 0,
-      failed_count: ["failed", "error", "cancelled"].includes(item.status) ? 1 : 0,
-      channel: "voice",
-      cancellable: false,
-    };
-  });
   const all: Campaign[] = [...smsCampaigns, ...emailRows, ...voiceRows].sort(
     (a, b) => new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime(),
   );
@@ -181,10 +201,9 @@ export function CampaignsHub() {
   const rows = all.filter((campaign) => {
     const statusMatches =
       status === "todos" ||
-      (status === "agendadas" && campaign.status === "agendada") ||
+      (status === "agendadas" && ["agendada", "scheduled"].includes(campaign.status)) ||
       (status === "enviando" && campaign.status === "enviando") ||
-      (status === "finalizadas" &&
-        ["enviado", "falhou", "cancelada", "concluida", "pausada"].includes(campaign.status));
+      (status === "finalizadas" && isFinishedCampaignStatus(campaign.status));
     return (
       statusMatches &&
       (!normalizedSearch ||
@@ -309,13 +328,8 @@ export function CampaignsHub() {
           </CardContent>
         </Card>
       )}
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-3">
         <MetricCard label="Enviados" value={num(sent)} hint="nas campanhas listadas" />
-        <MetricCard
-          label="Entregues"
-          value={num(Math.max(0, sent - failed))}
-          hint="estimativa confirmada"
-        />
         <MetricCard label="Falhas" value={num(failed)} hint="rejeitados ou inválidos" />
         <MetricCard label="Em envio" value={num(queued)} hint="agendadas ou processando" />
       </div>
@@ -411,7 +425,11 @@ export function CampaignsHub() {
             const total = Number(campaign.total_count ?? 0);
             const delivered = Number(campaign.sent_count ?? 0);
             const deduplicated = Number(campaign.deduplicated_count ?? 0);
-            const completed = delivered + deduplicated + Number(campaign.failed_count ?? 0);
+            const isVoice = campaign.channel === "voice";
+            const completed = isVoice
+              ? Number(campaign.finished_count ?? 0)
+              : delivered + deduplicated + Number(campaign.failed_count ?? 0);
+            const hasPlannedTotal = campaign.has_planned_total ?? total > 0;
             const operation = getChannelOperationState(campaign.status, campaign.channel);
             const reason = campaignStopReason(
               campaign.status,
@@ -446,7 +464,9 @@ export function CampaignsHub() {
                         ? "E-mail"
                         : "Voz"}{" "}
                     · {num(total)} destinatários ·{" "}
-                    {new Date(campaign.scheduled_at).toLocaleString("pt-BR")}
+                    {campaign.date_is_creation
+                      ? `criada em ${new Date(campaign.scheduled_at).toLocaleDateString("pt-BR")}`
+                      : new Date(campaign.scheduled_at).toLocaleString("pt-BR")}
                   </p>
                   {reason ? (
                     <p className="mt-1 text-xs text-foreground/80">
@@ -456,21 +476,34 @@ export function CampaignsHub() {
                   <p className="mt-1 text-xs text-muted-foreground">{operation.nextAction}</p>
                 </div>
                 <CampaignMetric label="Enviados" value={num(delivered)} />
-                <CampaignMetric label="Deduplicados" value={num(deduplicated)} />
+                {isVoice ? (
+                  <CampaignMetric
+                    label="Concluídas"
+                    value={num(Number(campaign.completed_count ?? 0))}
+                  />
+                ) : (
+                  <CampaignMetric label="Deduplicados" value={num(deduplicated)} />
+                )}
                 <CampaignMetric label="Falhas" value={num(campaign.failed_count ?? 0)} />
                 <CampaignMetric
                   label="Progresso"
-                  value={`${total ? Math.round((completed / total) * 100) : 0}%`}
+                  value={
+                    hasPlannedTotal && total > 0
+                      ? `${Math.min(100, Math.round((completed / total) * 100))}%`
+                      : "—"
+                  }
                 />
                 <div className="flex justify-end gap-1">
-                  <Button size="sm" variant="outline" asChild>
-                    <Link
-                      to="/campanhas/$campaignId/relatorio"
-                      params={{ campaignId: campaign.id }}
-                    >
-                      Relatório
-                    </Link>
-                  </Button>
+                  {campaign.has_report === false ? null : (
+                    <Button size="sm" variant="outline" asChild>
+                      <Link
+                        to="/campanhas/$campaignId/relatorio"
+                        params={{ campaignId: campaign.id }}
+                      >
+                        Relatório
+                      </Link>
+                    </Button>
+                  )}
                   {campaign.cancellable ? (
                     <Button
                       size="sm"
@@ -516,6 +549,14 @@ export function CampaignsHub() {
       <IndividualSmsDialog open={individualOpen} onOpenChange={setIndividualOpen} />
     </div>
   );
+}
+
+/** "21/10/2026" → ISO at noon UTC (keeps the same calendar day in Brazil). */
+function parsePtBrDate(value: string | null | undefined): string | null {
+  const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(value ?? "");
+  if (!match) return null;
+  const [, day, month, year] = match;
+  return `${year}-${month}-${day}T12:00:00.000Z`;
 }
 
 function CampaignMetric({ label, value }: { label: string; value: string }) {

@@ -12,7 +12,7 @@ export function SmsChannelHealth({
   configured,
   balance,
   queue,
-  deliveryRate,
+  failed,
   metrics,
   onRefresh,
   onOpenHistory,
@@ -20,7 +20,8 @@ export function SmsChannelHealth({
   configured: boolean;
   balance: string;
   queue: number;
-  deliveryRate: number;
+  /** Falhas em 30 dias, já formatado. Não há taxa de entrega: o provedor de SMS não confirma entrega. */
+  failed: string;
   metrics: SmsHealthMetric[];
   onRefresh: () => void;
   onOpenHistory: () => void;
@@ -69,7 +70,7 @@ export function SmsChannelHealth({
           <CardHeader>
             <CardTitle className="text-base">Saúde do canal</CardTitle>
             <CardDescription>
-              Confira a disponibilidade e se as entregas seguem dentro do esperado.
+              Confira a disponibilidade, a fila e as falhas de envio.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3 sm:grid-cols-3">
@@ -77,7 +78,7 @@ export function SmsChannelHealth({
               label="Disponibilidade"
               value={configured ? "Disponível" : "Indisponível"}
             />
-            <HealthValue label="Taxa de entrega" value={`${deliveryRate}%`} />
+            <HealthValue label="Falhas (30 dias)" value={failed} />
             <HealthValue label="Fila atual" value={`${queue} campanha${queue === 1 ? "" : "s"}`} />
           </CardContent>
         </Card>
@@ -105,7 +106,7 @@ export function SmsChannelHealth({
         <CardHeader>
           <CardTitle className="text-base">Relatório de SMS</CardTitle>
           <CardDescription>
-            Consulte todos os envios, entregas, respostas e falhas em um único histórico.
+            Consulte todos os envios, respostas e falhas em um único histórico.
           </CardDescription>
         </CardHeader>
         <CardContent>

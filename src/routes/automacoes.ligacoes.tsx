@@ -14,11 +14,11 @@ function CallAutomationFlowsPage() {
     <div className="space-y-6 p-6">
       <div>
         <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary">
-          AutomaÃ§Ãµes Â· Fluxos
+          Automações · Fluxos
         </p>
-        <h2 className="mt-1 text-2xl font-semibold tracking-tight">Fluxos de ligaÃ§Ã£o</h2>
+        <h2 className="mt-1 text-2xl font-semibold tracking-tight">Fluxos de ligação</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Defina tentativas, etapas de contato e mensagens de apoio para a operaÃ§Ã£o de voz.
+          Defina tentativas, etapas de contato e mensagens de apoio para a operação de voz.
         </p>
       </div>
       <FlowsTab />

@@ -837,7 +837,7 @@ function VisualizacaoSection({
             subtitle={`${range.days} dias · o que foi gasto em mídia`}
             data={data?.daily ?? []}
             dataKey="spend"
-            color="#f59e0b"
+            color="var(--color-chart-5)"
             formatter={brl}
           />
           <DailyChart
@@ -845,7 +845,7 @@ function VisualizacaoSection({
             subtitle={`${range.days} dias`}
             data={data?.daily ?? []}
             dataKey="ftd"
-            color="#22c55e"
+            color="var(--color-chart-4)"
             formatter={num}
           />
           <MoneyMapCard rows={data?.moneyMap ?? []} />
@@ -1419,15 +1419,15 @@ function DailyChart({
               <stop offset="95%" stopColor={color} stopOpacity={0.02} />
             </linearGradient>
           </defs>
-          <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" opacity={0.45} />
+          <CartesianGrid stroke="var(--color-border)" strokeDasharray="3 3" opacity={0.45} />
           <XAxis
             dataKey="label"
-            tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }}
+            tick={{ fill: "var(--color-muted-foreground)", fontSize: 11 }}
             axisLine={false}
             tickLine={false}
           />
           <YAxis
-            tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }}
+            tick={{ fill: "var(--color-muted-foreground)", fontSize: 11 }}
             axisLine={false}
             tickLine={false}
             tickFormatter={(value) => formatter(Number(value))}
@@ -1436,10 +1436,10 @@ function DailyChart({
           <Tooltip
             cursor={{ stroke: color, strokeOpacity: 0.35 }}
             contentStyle={{
-              background: "hsl(var(--popover))",
-              border: "1px solid hsl(var(--border))",
+              background: "var(--color-popover)",
+              border: "1px solid var(--color-border)",
               borderRadius: 8,
-              color: "hsl(var(--popover-foreground))",
+              color: "var(--color-popover-foreground)",
             }}
             formatter={(value) => formatter(Number(value))}
           />

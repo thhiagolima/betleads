@@ -117,6 +117,7 @@ type TenantDetail = {
     };
     pricing: {
       sale_price_per_sms?: number;
+      /** Only present for the super admin (stripped on the server otherwise). */
       provider_cost_per_sms?: number;
       has_tenant_override?: boolean;
       low_balance_threshold?: number;
@@ -461,19 +462,24 @@ function OverviewTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAd
         </CardHeader>
         <CardContent className="space-y-3">
           <HealthLine label="Saldo SMS" ok={Number(detail.sms.summary.balance_credits ?? 0) > 0} />
-          <HealthLine label="Usuário administrador" ok={detail.users.length > 0} />
+          <HealthLine
+            label="Usuário administrador"
+            ok={detail.users.some((user) => user.role === "admin")}
+          />
           <HealthLine label="Meta conectada" ok={detail.reports.meta_accounts > 0} />
           <HealthLine label="Webhooks chegando" ok={detail.reports.webhooks_30d > 0} />
-          <div className="rounded-lg border border-border/70 p-3 text-sm">
-            <div className="text-muted-foreground">Margem estimada por SMS</div>
-            <div
-              className={
-                margin >= 0 ? "font-semibold text-emerald-400" : "font-semibold text-red-400"
-              }
-            >
-              {brl(margin)}
+          {isSuperAdmin && (
+            <div className="rounded-lg border border-border/70 p-3 text-sm">
+              <div className="text-muted-foreground">Margem estimada por SMS</div>
+              <div
+                className={
+                  margin >= 0 ? "font-semibold text-emerald-400" : "font-semibold text-red-400"
+                }
+              >
+                {brl(margin)}
+              </div>
             </div>
-          </div>
+          )}
           {!isSuperAdmin && (
             <p className="text-xs text-muted-foreground">
               Alterações financeiras e status do tenant ficam restritas ao superadmin.
@@ -787,9 +793,11 @@ function CreditsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAdm
             <div className="mt-2 text-3xl font-bold">
               {brl(Number(pricing.sale_price_per_sms ?? 0))}
             </div>
-            <div className="mt-1 text-sm text-muted-foreground">
-              custo fornecedor {brl(Number(pricing.provider_cost_per_sms ?? 0))}
-            </div>
+            {isSuperAdmin && (
+              <div className="mt-1 text-sm text-muted-foreground">
+                custo fornecedor {brl(Number(pricing.provider_cost_per_sms ?? 0))}
+              </div>
+            )}
           </CardContent>
         </Card>
         <Card>
