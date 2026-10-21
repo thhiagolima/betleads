@@ -6556,6 +6556,7 @@ export type Database = {
           reason: string | null
           reference_id: string | null
           reference_type: string | null
+          reverses_ledger_id: string | null
           tenant_id: string
           unit_price: number | null
           units: number | null
@@ -6576,6 +6577,7 @@ export type Database = {
           reason?: string | null
           reference_id?: string | null
           reference_type?: string | null
+          reverses_ledger_id?: string | null
           tenant_id: string
           unit_price?: number | null
           units?: number | null
@@ -6596,12 +6598,20 @@ export type Database = {
           reason?: string | null
           reference_id?: string | null
           reference_type?: string | null
+          reverses_ledger_id?: string | null
           tenant_id?: string
           unit_price?: number | null
           units?: number | null
           usage_month?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "wallet_ledger_reverses_ledger_id_fkey"
+            columns: ["reverses_ledger_id"]
+            isOneToOne: false
+            referencedRelation: "wallet_ledger"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "wallet_ledger_tenant_id_fkey"
             columns: ["tenant_id"]
@@ -7911,6 +7921,7 @@ export type Database = {
           _reason?: string
           _reference_id?: string
           _reference_type?: string
+          _reverses_ledger_id?: string
           _tenant: string
           _unit_price?: number
           _units?: number

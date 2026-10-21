@@ -66,5 +66,6 @@ export async function resetSession(db: PGlite) {
     set test.uid = '';
     set test.tenant = '';
     set test.now = '';
+    set app.allow_test_clock = '';
   `);
 }

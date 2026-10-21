@@ -138,10 +138,23 @@ describe("wallet_reserve + wallet_mutation: simple reservation", () => {
   });
 
   it("repeating the same idempotency key is idempotent and balance stays 0.84", async () => {
+    const before = await db.query<{ units: string; free_units_used: string; billed_amount: string }>(
+      `select units::text, free_units_used::text, billed_amount::text
+       from public.tenant_monthly_usage where tenant_id = $1 and item = 'sms'`,
+      [tenant],
+    );
+
     const result = await reserve(tenant, "sms", 2, "a", "sms-reserve:a");
     expect(result.idempotent).toBe(true);
     expect(Number(result.balance)).toBeCloseTo(0.84, 4);
     expect(await balanceOf(tenant)).toBeCloseTo(0.84, 4);
+
+    const after = await db.query<{ units: string; free_units_used: string; billed_amount: string }>(
+      `select units::text, free_units_used::text, billed_amount::text
+       from public.tenant_monthly_usage where tenant_id = $1 and item = 'sms'`,
+      [tenant],
+    );
+    expect(after.rows).toEqual(before.rows);
   });
 });
 
@@ -217,6 +230,63 @@ describe("wallet_refund", () => {
   });
 });
 
+describe("wallet_refund: cannot refund the same reservation twice", () => {
+  const tenant = freshTenant();
+
+  beforeAll(async () => {
+    await createTenant(tenant, "wallet-refund-once");
+    await adjustWallet(tenant, 1.0, "saldo inicial", "adj:refund-once:1");
+    await reserve(tenant, "sms", 2, "a", "sms-reserve:a");
+    await refund(tenant, "a", "sms-refund:a", "primeiro estorno");
+  });
+
+  it("a second refund of the same reservation with a different key returns already_refunded, balance unchanged", async () => {
+    const balanceBefore = await balanceOf(tenant);
+    const result = await refund(tenant, "a", "sms-refund:a-again", "segunda tentativa");
+    expect(result).toMatchObject({ ok: false, reason: "already_refunded" });
+    expect(await balanceOf(tenant)).toBeCloseTo(balanceBefore, 4);
+  });
+
+  it("rejects a null/empty idempotency key with invalid_idempotency_key", async () => {
+    await expect(
+      asSuperAdmin(() =>
+        db.query("select public.wallet_refund($1, $2, $3, $4)", [tenant, "a", null, "x"]),
+      ),
+    ).rejects.toThrow(/invalid_idempotency_key/);
+    await expect(
+      asSuperAdmin(() =>
+        db.query("select public.wallet_refund($1, $2, $3, $4)", [tenant, "a", "", "x"]),
+      ),
+    ).rejects.toThrow(/invalid_idempotency_key/);
+  });
+});
+
+describe("lifetime_used: net of refunds", () => {
+  const tenant = freshTenant();
+
+  async function lifetimeUsedOf(t: string): Promise<number> {
+    const { rows } = await db.query<{ lifetime_used: string }>(
+      "select lifetime_used::text from public.tenant_wallets where tenant_id = $1",
+      [t],
+    );
+    return Number(rows[0].lifetime_used);
+  }
+
+  beforeAll(async () => {
+    await createTenant(tenant, "wallet-lifetime-used");
+    await adjustWallet(tenant, 1.0, "saldo inicial", "adj:lifetime:1");
+  });
+
+  it("a reservation increases lifetime_used, a refund decreases it back (floored at 0)", async () => {
+    const result = await reserve(tenant, "sms", 2, "a", "sms-reserve:lifetime-a");
+    const reserved = Math.abs(Number(result.amount));
+    expect(await lifetimeUsedOf(tenant)).toBeCloseTo(reserved, 4);
+
+    await refund(tenant, "a", "sms-refund:lifetime-a", "estorno");
+    expect(await lifetimeUsedOf(tenant)).toBeCloseTo(0, 4);
+  });
+});
+
 describe("wallet_refund: price change between reservation and refund", () => {
   const tenant = freshTenant();
 
@@ -258,6 +328,21 @@ describe("wallet_reserve: email free tier", () => {
   it("reserving 2 emails uses 1 free unit and bills 0.002", async () => {
     const result = await reserve(tenant, "email", 2, "a", "email-reserve:a");
     expect(Number(result.amount)).toBeCloseTo(-0.002, 4);
+
+    const { rows } = await db.query<{ free_units: number }>(
+      `select free_units from public.wallet_ledger
+       where tenant_id = $1 and reference_id = 'a' and entry_type = 'usage_reservation'`,
+      [tenant],
+    );
+    expect(rows[0].free_units).toBe(1);
+
+    const { rows: usageRows } = await db.query<{ free_units_used: string }>(
+      `select free_units_used::text from public.tenant_monthly_usage
+       where tenant_id = $1 and item = 'email'
+         and month = date_trunc('month', public.billing_now() at time zone 'America/Sao_Paulo')::date`,
+      [tenant],
+    );
+    expect(Number(usageRows[0].free_units_used)).toBe(100000);
   });
 
   it("the next reservation of 1 unit costs 0.002 (franchise exhausted)", async () => {
@@ -275,7 +360,7 @@ describe("wallet_reserve + wallet_refund: month rollover (America/Sao_Paulo)", (
   });
 
   it("reserves in October 31st 23:59 BRT, refunds credit back to October after the rollover", async () => {
-    await db.exec("set test.now = '2026-10-31 23:59-03'");
+    await db.exec("set app.allow_test_clock = 'on'; set test.now = '2026-10-31 23:59-03';");
     await reserve(tenant, "sms", 1, "a", "sms-reserve:rollover-a");
 
     const { rows: octRows } = await db.query<{ units: string; month: string }>(
@@ -304,7 +389,30 @@ describe("wallet_reserve + wallet_refund: month rollover (America/Sao_Paulo)", (
     );
     expect(Number(novRows[0].count)).toBe(0);
 
-    await db.exec("set test.now = ''");
+    await db.exec("set test.now = ''; set app.allow_test_clock = '';");
+  });
+});
+
+describe("billing_now(): test.now is only honored with app.allow_test_clock = 'on'", () => {
+  it("ignores test.now when app.allow_test_clock is not 'on'", async () => {
+    await db.exec("set test.now = '2099-01-01 00:00-03'");
+    try {
+      const { rows } = await db.query<{ v: string }>("select public.billing_now()::text v");
+      const parsed = new Date(rows[0].v);
+      expect(parsed.getUTCFullYear()).toBeLessThan(2099);
+    } finally {
+      await db.exec("set test.now = ''");
+    }
+  });
+
+  it("honors test.now once app.allow_test_clock = 'on'", async () => {
+    await db.exec("set app.allow_test_clock = 'on'; set test.now = '2099-01-01 00:00-03';");
+    try {
+      const { rows } = await db.query<{ v: string }>("select public.billing_now()::text v");
+      expect(new Date(rows[0].v).getUTCFullYear()).toBe(2099);
+    } finally {
+      await db.exec("set test.now = ''; set app.allow_test_clock = '';");
+    }
   });
 });
 
@@ -386,6 +494,47 @@ describe("permissions", () => {
       ).rejects.toThrow(/invalid_reason/);
     } finally {
       await db.exec("set test.super = 'off'");
+    }
+  });
+});
+
+describe("wallet_reserve: input validation", () => {
+  const tenant = freshTenant();
+
+  beforeAll(async () => {
+    await createTenant(tenant, "wallet-validation");
+  });
+
+  it("rejects an item outside sms/voice_30s/email with invalid_item", async () => {
+    await expect(
+      reserve(tenant, "whatsapp", 1, "a", "sms-reserve:invalid-item"),
+    ).rejects.toThrow(/invalid_item/);
+  });
+
+  it("rejects units <= 0 with invalid_units", async () => {
+    await expect(reserve(tenant, "sms", 0, "a", "sms-reserve:invalid-units-0")).rejects.toThrow(
+      /invalid_units/,
+    );
+    await expect(reserve(tenant, "sms", -1, "a", "sms-reserve:invalid-units-neg")).rejects.toThrow(
+      /invalid_units/,
+    );
+  });
+
+  it("raises price_not_found when there is no price row for the item, even for an exempt tenant", async () => {
+    await asSuperAdmin(async () => {
+      await db.query("delete from public.billing_price_book where item = 'voice_30s'");
+    });
+    try {
+      await expect(
+        reserve(tenant, "voice_30s", 1, "a", "sms-reserve:no-price"),
+      ).rejects.toThrow(/price_not_found/);
+      await expect(
+        reserve(INTERNO, "voice_30s", 1, "a", "sms-reserve:no-price-interno"),
+      ).rejects.toThrow(/price_not_found/);
+    } finally {
+      await asSuperAdmin(async () => {
+        await db.query("select public.admin_set_price($1, $2, $3, $4)", ["voice_30s", 0.09, null, 0]);
+      });
     }
   });
 });

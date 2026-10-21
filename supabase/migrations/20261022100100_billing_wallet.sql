@@ -22,14 +22,30 @@
 --
 -- `billing_now()` existe para o teste de virada de mês: em produção é só
 -- `now()`; os testes fixam `test.now` para simular 31/10 23:59 e 01/11 00:01
--- (horário de Brasília) sem esperar o relógio.
+-- (horário de Brasília) sem esperar o relógio. `test.now` só é honrado
+-- quando `app.allow_test_clock` também está 'on' (os testes fixam os dois),
+-- para que nenhum GUC de sessão escapado na produção consiga mexer no
+-- relógio de cobrança.
+--
+-- Fix round 1: `wallet_refund` agora exige `reverses_ledger_id` (coluna nova
+-- em `wallet_ledger`, com índice único parcial `where entry_type =
+-- 'usage_refund'`) para nunca estornar a mesma reserva duas vezes, mesmo com
+-- chaves de idempotência diferentes; `wallet_mutation` trava a carteira
+-- antes de checar a idempotência (e `wallet_reserve`/`wallet_refund` travam
+-- a carteira antes de ler a franquia/reserva), para que duas chamadas
+-- concorrentes sempre serializem em vez de uma delas ver dados obsoletos ou
+-- estourar `unique_violation`.
 
 create or replace function public.billing_now()
 returns timestamptz
 language sql
 stable
 as $$
-  select coalesce(nullif(current_setting('test.now', true), '')::timestamptz, now())
+  select case
+    when coalesce(current_setting('app.allow_test_clock', true), '') = 'on'
+      then coalesce(nullif(current_setting('test.now', true), '')::timestamptz, now())
+    else now()
+  end
 $$;
 
 create table public.tenant_wallets (
@@ -61,6 +77,10 @@ create table public.wallet_ledger (
   metadata jsonb not null default '{}'::jsonb,
   created_by uuid null,
   created_at timestamptz not null default now(),
+  -- Linha do razão que esta linha estorna (só preenchida em entry_type =
+  -- 'usage_refund'). Com o índice único parcial abaixo, uma reserva nunca
+  -- pode ser estornada duas vezes, mesmo com idempotency_key diferente.
+  reverses_ledger_id uuid null references public.wallet_ledger(id),
   unique (tenant_id, idempotency_key)
 );
 
@@ -68,6 +88,9 @@ create index idx_wallet_ledger_tenant_reference
   on public.wallet_ledger (tenant_id, reference_id);
 create index idx_wallet_ledger_tenant_created
   on public.wallet_ledger (tenant_id, created_at desc);
+create unique index idx_wallet_ledger_reverses_once
+  on public.wallet_ledger (reverses_ledger_id)
+  where entry_type = 'usage_refund';
 
 create table public.tenant_monthly_usage (
   tenant_id uuid not null references public.tenants(id) on delete cascade,
@@ -101,7 +124,8 @@ create or replace function public.wallet_mutation(
   _idempotency_key text,
   _reason text,
   _metadata jsonb,
-  _created_by uuid
+  _created_by uuid,
+  _reverses_ledger_id uuid default null
 )
 returns jsonb
 language plpgsql
@@ -117,6 +141,20 @@ begin
   if _tenant is null or _amount is null or _entry_type is null then
     raise exception 'invalid_wallet_mutation';
   end if;
+
+  -- Garante a carteira e trava a linha ANTES de checar a idempotência: duas
+  -- chamadas concorrentes com a mesma chave serializam aqui (a segunda só
+  -- segue depois que a primeira grava e libera o lock), então a segunda
+  -- sempre vê a linha já gravada pela primeira em vez de estourar
+  -- unique_violation em (tenant_id, idempotency_key).
+  insert into public.tenant_wallets (tenant_id)
+  values (_tenant)
+  on conflict (tenant_id) do nothing;
+
+  select balance into v_balance
+  from public.tenant_wallets
+  where tenant_id = _tenant
+  for update;
 
   if _idempotency_key is not null then
     select * into v_existing
@@ -134,38 +172,36 @@ begin
     end if;
   end if;
 
-  insert into public.tenant_wallets (tenant_id)
-  values (_tenant)
-  on conflict (tenant_id) do nothing;
-
-  select balance into v_balance
-  from public.tenant_wallets
-  where tenant_id = _tenant
-  for update;
-
   v_after := v_balance + _amount;
   if v_after < 0 then
     raise exception 'insufficient_balance';
   end if;
 
+  -- lifetime_used é líquido de estorno (nunca abaixo de 0): reserva de uso
+  -- soma, estorno de uso subtrai de volta o que tinha somado.
   update public.tenant_wallets
      set balance = v_after,
          lifetime_purchased = lifetime_purchased
            + case when _entry_type = 'purchase' and _amount > 0 then _amount else 0 end,
-         lifetime_used = lifetime_used
-           + case when _entry_type = 'usage_reservation' and _amount < 0 then -_amount else 0 end,
+         lifetime_used = greatest(
+           lifetime_used
+             + case when _entry_type = 'usage_reservation' and _amount < 0 then -_amount else 0 end
+             - case when _entry_type = 'usage_refund' and _amount > 0 then _amount else 0 end,
+           0
+         ),
          updated_at = now()
    where tenant_id = _tenant;
 
   insert into public.wallet_ledger (
     tenant_id, entry_type, item, units, free_units, usage_month,
     unit_price, provider_unit_cost, amount, balance_after,
-    reference_type, reference_id, idempotency_key, reason, metadata, created_by
+    reference_type, reference_id, idempotency_key, reason, metadata, created_by,
+    reverses_ledger_id
   ) values (
     _tenant, _entry_type, _item, _units, _free_units, _usage_month,
     _unit_price, _provider_unit_cost, _amount, v_after,
     _reference_type, _reference_id, _idempotency_key, _reason,
-    coalesce(_metadata, '{}'::jsonb), _created_by
+    coalesce(_metadata, '{}'::jsonb), _created_by, _reverses_ledger_id
   )
   returning id into v_ledger_id;
 
@@ -215,9 +251,28 @@ begin
     raise exception 'forbidden';
   end if;
 
-  if _tenant is null or _item is null or _units is null or _units <= 0 then
+  if _tenant is null then
     raise exception 'invalid_wallet_reserve';
   end if;
+
+  if _item is null or _item not in ('sms', 'voice_30s', 'email') then
+    raise exception 'invalid_item';
+  end if;
+
+  if _units is null or _units <= 0 then
+    raise exception 'invalid_units';
+  end if;
+
+  -- Garante a carteira e trava a linha ANTES de ler a franquia do mês: sem
+  -- isso, duas reservas concorrentes no mesmo mês poderiam ler o mesmo
+  -- free_units_used e gastar a franquia duas vezes. wallet_mutation trava a
+  -- mesma linha de novo mais abaixo (a mesma transação pode travar outra vez
+  -- a linha que já travou, sem autodeadlock).
+  insert into public.tenant_wallets (tenant_id)
+  values (_tenant)
+  on conflict (tenant_id) do nothing;
+
+  perform 1 from public.tenant_wallets where tenant_id = _tenant for update;
 
   v_at := public.billing_now();
   v_month := date_trunc('month', v_at at time zone 'America/Sao_Paulo')::date;
@@ -226,6 +281,13 @@ begin
   v_unit_price := (v_price ->> 'unit_price')::numeric;
   v_free_limit := coalesce((v_price ->> 'free_monthly_units')::integer, 0);
   v_exempt := (v_price ->> 'exempt')::boolean;
+
+  -- Mesmo para uma casa isenta: sem preço cadastrado, algo está errado com
+  -- o catálogo e a reserva deve falhar de forma clara, não silenciar o
+  -- custo do fornecedor nem virar um 'invalid_wallet_mutation' opaco.
+  if v_unit_price is null then
+    raise exception 'price_not_found';
+  end if;
 
   -- Custo do fornecedor lido direto da tabela (mesma regra de vigência de
   -- billing_effective_price), nunca da chave provider_unit_cost acima: ela
@@ -275,7 +337,18 @@ $$;
 -- pode ter mudado). Sem reserva encontrada, devolve ok:false em vez de
 -- lançar exceção (cobre o SMS que reservou no razão antigo e cuja resposta
 -- do provedor chega depois do deploy desta migration). Desconta de
--- tenant_monthly_usage no usage_month gravado na reserva, não no mês atual.
+-- tenant_monthly_usage no usage_month gravado na reserva, não no mês atual
+-- (nunca abaixo de 0: um estorno nunca deveria deixar o consumo do mês
+-- negativo, mas o clamp é defensivo).
+--
+-- Fix round 1: idempotency_key é obrigatória (sem ela, uma chamada sem
+-- querer sempre pareceria "nova"). Antes de gravar, verifica se já existe
+-- uma linha usage_refund que reverte essa reserva (reverses_ledger_id): se
+-- a chave bate, é a mesma repetição (idempotent:true); se não bate, é uma
+-- segunda tentativa de estornar a mesma reserva com uma chave diferente —
+-- devolve already_refunded em vez de estornar de novo. A carteira é
+-- travada antes dessas leituras para que duas chamadas concorrentes sempre
+-- serializem (uma só vê o resultado da outra depois que ela terminou).
 create or replace function public.wallet_refund(
   _tenant uuid,
   _reference_id text,
@@ -289,11 +362,26 @@ set search_path to 'public'
 as $$
 declare
   v_reservation public.wallet_ledger%rowtype;
+  v_existing_refund public.wallet_ledger%rowtype;
   v_result jsonb;
 begin
   if auth.role() <> 'service_role' and not public.is_super_admin() then
     raise exception 'forbidden';
   end if;
+
+  if _tenant is null then
+    raise exception 'invalid_wallet_refund';
+  end if;
+
+  if _idempotency_key is null or btrim(_idempotency_key) = '' then
+    raise exception 'invalid_idempotency_key';
+  end if;
+
+  insert into public.tenant_wallets (tenant_id)
+  values (_tenant)
+  on conflict (tenant_id) do nothing;
+
+  perform 1 from public.tenant_wallets where tenant_id = _tenant for update;
 
   select * into v_reservation
   from public.wallet_ledger
@@ -307,19 +395,38 @@ begin
     return jsonb_build_object('ok', false, 'reason', 'reservation_not_found');
   end if;
 
+  select * into v_existing_refund
+  from public.wallet_ledger
+  where reverses_ledger_id = v_reservation.id
+    and entry_type = 'usage_refund';
+
+  if found then
+    if v_existing_refund.idempotency_key = _idempotency_key then
+      return jsonb_build_object(
+        'ok', true,
+        'idempotent', true,
+        'ledger_id', v_existing_refund.id,
+        'amount', v_existing_refund.amount,
+        'balance', v_existing_refund.balance_after
+      );
+    else
+      return jsonb_build_object('ok', false, 'reason', 'already_refunded');
+    end if;
+  end if;
+
   v_result := public.wallet_mutation(
     _tenant, -v_reservation.amount, 'usage_refund', v_reservation.item,
     v_reservation.units, v_reservation.free_units, v_reservation.usage_month,
     v_reservation.unit_price, v_reservation.provider_unit_cost,
     v_reservation.reference_type, _reference_id, _idempotency_key,
-    _reason, '{}'::jsonb, null
+    _reason, '{}'::jsonb, null, v_reservation.id
   );
 
   if not (v_result ->> 'idempotent')::boolean then
     update public.tenant_monthly_usage
-       set units = units - v_reservation.units,
-           free_units_used = free_units_used - v_reservation.free_units,
-           billed_amount = billed_amount - abs(v_reservation.amount)
+       set units = greatest(units - v_reservation.units, 0),
+           free_units_used = greatest(free_units_used - v_reservation.free_units, 0),
+           billed_amount = greatest(billed_amount - abs(v_reservation.amount), 0)
      where tenant_id = _tenant and month = v_reservation.usage_month and item = v_reservation.item;
   end if;
 
@@ -479,7 +586,7 @@ revoke select on public.wallet_ledger from anon, authenticated;
 grant select (
   id, tenant_id, entry_type, item, units, free_units, usage_month,
   unit_price, amount, balance_after, reference_type, reference_id,
-  idempotency_key, reason, metadata, created_by, created_at
+  idempotency_key, reason, metadata, created_by, created_at, reverses_ledger_id
 ) on public.wallet_ledger to authenticated;
 grant all on public.wallet_ledger to service_role;
 
@@ -494,11 +601,11 @@ grant execute on function public.billing_now() to authenticated, service_role;
 
 revoke execute on function public.wallet_mutation(
   uuid, numeric, text, text, integer, integer, date, numeric, numeric,
-  text, text, text, text, jsonb, uuid
+  text, text, text, text, jsonb, uuid, uuid
 ) from public, anon, authenticated;
 grant execute on function public.wallet_mutation(
   uuid, numeric, text, text, integer, integer, date, numeric, numeric,
-  text, text, text, text, jsonb, uuid
+  text, text, text, text, jsonb, uuid, uuid
 ) to service_role;
 
 revoke execute on function public.wallet_reserve(uuid, text, integer, text, text, text) from public, anon;
