@@ -94,6 +94,7 @@ export const SIDEBAR_SECTIONS: NavSection[] = [
       link("SMS", "/sms", MessageSquare, { alsoActiveOn: ["/creditos-sms", "/links"] }),
       link("Email", "/email", Mail),
       link("Voz", "/ligacoes", Phone),
+      link("Consentimentos", "/consentimentos", ShieldQuestion),
       {
         kind: "group",
         title: "Templates e áudios",
@@ -115,6 +116,13 @@ export const SIDEBAR_SECTIONS: NavSection[] = [
     ],
   },
   {
+    label: "Configurações",
+    items: [
+      link("Integrações", "/webhooks", Plug),
+      link("Configurações", "/configuracoes", Settings),
+    ],
+  },
+  {
     label: "Administração",
     requires: "super_admin",
     items: [
@@ -122,13 +130,6 @@ export const SIDEBAR_SECTIONS: NavSection[] = [
       link("Contas", "/tenants", Building2),
     ],
   },
-];
-
-/** Pinned to the bottom of the sidebar. */
-export const SIDEBAR_FOOTER: NavLink[] = [
-  link("Integrações", "/webhooks", Plug),
-  link("Consentimentos", "/consentimentos", ShieldQuestion),
-  link("Configurações", "/configuracoes", Settings),
 ];
 
 /** Lives in the account menu (header avatar). */
@@ -195,7 +196,7 @@ export const ROUTE_META: Record<string, RouteMeta> = {
   "/treino-ia": { section: "IA", title: "Configurar IA" },
   "/experts": { section: "IA", title: "Experts" },
   "/webhooks": { section: "Configurações", title: "Integrações" },
-  "/consentimentos": { section: "Configurações", title: "Consentimentos" },
+  "/consentimentos": { section: "Canais", title: "Consentimentos" },
   "/configuracoes": { section: "Configurações", title: "Configurações" },
   "/tenants": { section: "Conta", title: "Conta e equipe" },
   "/admin": { section: "Administração", title: "Visão da plataforma" },
@@ -254,10 +255,9 @@ export function navLinkKey(item: Pick<NavLink, "to" | "hash">) {
 }
 
 function allLinks(): NavLink[] {
-  const fromSections = SIDEBAR_SECTIONS.flatMap((section) =>
+  return SIDEBAR_SECTIONS.flatMap((section) =>
     section.items.flatMap((item) => (item.kind === "group" ? item.children : [item])),
   );
-  return [...fromSections, ...SIDEBAR_FOOTER];
 }
 
 /**

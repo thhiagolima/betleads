@@ -60,6 +60,12 @@ describe("active nav item", () => {
     expect(activeNavKey("/relatorios/conversao", "")).toBe("/resultados");
   });
 
+  it("lights the settings items that used to be pinned", () => {
+    expect(activeNavKey("/consentimentos", "")).toBe("/consentimentos");
+    expect(activeNavKey("/webhooks", "")).toBe("/webhooks");
+    expect(activeNavKey("/configuracoes", "")).toBe("/configuracoes");
+  });
+
   it("does not light Início on other pages", () => {
     expect(activeNavKey("/players", "")).toBe("/players");
     expect(activeNavKey("/", "")).toBe("/");
@@ -90,6 +96,18 @@ describe("visible sections", () => {
   it("shows Administração only to the super admin", () => {
     expect(labels("admin", false)).not.toContain("Administração");
     expect(labels("super_admin", true)).toContain("Administração");
+  });
+
+  it("ends with Configurações for everyone but the super admin, who also gets Administração", () => {
+    expect(labels("gestor", false).at(-1)).toBe("Configurações");
+    expect(labels("admin", false).at(-1)).toBe("Configurações");
+    expect(labels("super_admin", true).slice(-2)).toEqual(["Configurações", "Administração"]);
+  });
+
+  it("keeps Consentimentos with the channels", () => {
+    const canais = visibleSections("gestor", false).find((section) => section.label === "Canais");
+    const titles = canais?.items.map((item) => item.title) ?? [];
+    expect(titles.indexOf("Consentimentos")).toBe(titles.indexOf("Voz") + 1);
   });
 
   it("hides IA while the role is unknown", () => {
