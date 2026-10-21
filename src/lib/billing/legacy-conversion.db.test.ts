@@ -270,6 +270,121 @@ describe("billing_convert_legacy_sms_credits: clamped case", () => {
   });
 });
 
+describe("billing_convert_legacy_sms_credits: monotonic key survives a repeated AC/LB pair", () => {
+  // Fix round 1, finding #1: the old key legacy-sms:<tenant>:<ac>:<lb>
+  // collides whenever the (already_converted, legacy_balance) pair repeats
+  // across runs (e.g. legacy balance going 1000 -> 990 -> 1000 -> 990).
+  // Step 2 posts ac=1000,lb=990; step 4 would recompute the exact same pair
+  // (ac=1000,lb=990 again), so with the old key wallet_mutation would see it
+  // as a repeat of step 2's idempotency key and silently drop the real new
+  // delta. The monotonic key (legacy-sms:<tenant>:<n>) must keep all 4 runs
+  // distinct.
+  const CASA_D = "00000000-0000-4000-9100-000000000004";
+
+  beforeAll(async () => {
+    await asSuperAdmin(() =>
+      db.query(`insert into public.tenants (id, slug, plano, is_demo) values ($1, 'casa-d', 'starter', false)`, [
+        CASA_D,
+      ]),
+    );
+  });
+
+  it("posts +80.00, -0.80, +0.80, -0.80 across 1000 -> 990 -> 1000 -> 990, ending at 79.20 with 4 ledger rows", async () => {
+    await setLegacyBalance(CASA_D, "casa-d", 1000, 0.12);
+    const r1 = await convert(true);
+    const d1 = r1.find((r) => r.tenant_id === CASA_D)!;
+    expect(d1.skipped_reason).toBeNull();
+    expect(Number(d1.amount)).toBeCloseTo(80.0, 4);
+    expect(await balanceOf(CASA_D)).toBeCloseTo(80.0, 4);
+
+    await setLegacyBalance(CASA_D, "casa-d", 990, 0.12);
+    const r2 = await convert(true);
+    const d2 = r2.find((r) => r.tenant_id === CASA_D)!;
+    expect(Number(d2.amount)).toBeCloseTo(-0.8, 4);
+    expect(await balanceOf(CASA_D)).toBeCloseTo(79.2, 4);
+
+    await setLegacyBalance(CASA_D, "casa-d", 1000, 0.12);
+    const r3 = await convert(true);
+    const d3 = r3.find((r) => r.tenant_id === CASA_D)!;
+    expect(Number(d3.amount)).toBeCloseTo(0.8, 4);
+    expect(await balanceOf(CASA_D)).toBeCloseTo(80.0, 4);
+
+    await setLegacyBalance(CASA_D, "casa-d", 990, 0.12);
+    const r4 = await convert(true);
+    const d4 = r4.find((r) => r.tenant_id === CASA_D)!;
+    expect(Number(d4.amount)).toBeCloseTo(-0.8, 4);
+    expect(await balanceOf(CASA_D)).toBeCloseTo(79.2, 4);
+
+    const { rows } = await db.query<{ count: string }>(
+      `select count(*)::text as count from public.wallet_ledger
+       where tenant_id = $1 and entry_type = 'migration' and reference_type = 'legacy_sms_conversion'`,
+      [CASA_D],
+    );
+    expect(Number(rows[0].count)).toBe(4);
+  });
+});
+
+describe("billing_convert_legacy_sms_credits: per-tenant isolation on error", () => {
+  // Fix round 1, finding #2: a tenant whose unit price cannot be resolved
+  // (billing_effective_price returns unit_price = null) must not abort the
+  // whole run; it comes back with skipped_reason = 'error: ...' while other
+  // tenants still convert normally.
+  const GOOD = "00000000-0000-4000-9100-000000000010";
+  const BAD = "00000000-0000-4000-9100-000000000011";
+
+  beforeAll(async () => {
+    await asSuperAdmin(async () => {
+      await db.query(
+        `insert into public.tenants (id, slug, plano, is_demo) values ($1, 'casa-good', 'starter', false)`,
+        [GOOD],
+      );
+      await db.query(
+        `insert into public.tenants (id, slug, plano, is_demo) values ($1, 'casa-bad', 'starter', false)`,
+        [BAD],
+      );
+      // GOOD gets its own price override, so it still resolves once the
+      // global default sms price row is removed below.
+      await db.query("select public.admin_set_tenant_price($1, $2, $3)", [GOOD, "sms", 0.08]);
+    });
+    await setLegacyBalance(GOOD, "casa-good", 100, 0.12);
+    await setLegacyBalance(BAD, "casa-bad", 50, 0.12);
+  });
+
+  afterAll(async () => {
+    // Restore the global sms default price so it doesn't leak into any test
+    // that might run after this describe block in the same file.
+    await asSuperAdmin(async () => {
+      await db.query("select public.admin_set_price($1, $2, $3, $4)", ["sms", 0.08, 0.059, 0]);
+    });
+  });
+
+  it("BAD (no price available) gets an error row; GOOD still converts", async () => {
+    await asSuperAdmin(async () => {
+      await db.query("delete from public.billing_price_book where item = 'sms'");
+    });
+
+    const rows = await convert(true);
+
+    const bad = rows.find((r) => r.tenant_id === BAD);
+    expect(bad).toBeDefined();
+    expect(bad!.skipped_reason).toMatch(/^error: /);
+    expect(bad!.delta_credits).toBeNull();
+    expect(await balanceOf(BAD)).toBe(0);
+
+    const good = rows.find((r) => r.tenant_id === GOOD);
+    expect(good).toBeDefined();
+    expect(good!.skipped_reason).toBeNull();
+    expect(Number(good!.amount)).toBeCloseTo(8.0, 4);
+    expect(await balanceOf(GOOD)).toBeCloseTo(8.0, 4);
+
+    // The interno tenant stays exempt even with the sms price catalog
+    // broken: an exempt tenant never needs a valid price to be skipped.
+    const interno = rows.find((r) => r.tenant_id === INTERNO);
+    expect(interno).toBeDefined();
+    expect(interno!.skipped_reason).toBe("interno");
+  });
+});
+
 describe("billing_convert_legacy_sms_credits: permissions", () => {
   beforeEach(async () => {
     await resetSession();
