@@ -722,7 +722,7 @@ export async function sendSmsInternal(args: {
   /** Structured origin for campaign/journey attribution. Never infer this from display text. */
   linkTrackingOrigin?: Pick<
     LinkTrackingContext,
-    "sourceType" | "sourceId" | "journeyStepId" | "journeyStepPosition"
+    "sourceType" | "sourceId" | "journeyStepId" | "journeyStepPosition" | "shortDomainId"
   >;
   /** Stable identity supplied by a queue/worker when retrying one delivery. */
   deliveryKey?: string | null;
@@ -823,6 +823,7 @@ export async function sendSmsInternal(args: {
       sourceId: args.linkTrackingOrigin?.sourceId ?? args.flowId ?? args.triggerName ?? null,
       journeyStepId: args.linkTrackingOrigin?.journeyStepId ?? null,
       journeyStepPosition: args.linkTrackingOrigin?.journeyStepPosition ?? null,
+      shortDomainId: args.linkTrackingOrigin?.shortDomainId ?? null,
       recipientPlayerId: args.playerId ?? null,
       messageLogType: "sms_send_logs",
       deliveryKey,
@@ -1073,6 +1074,30 @@ export const triggerSmsFlowNow = createServerFn({ method: "POST" })
     });
   });
 
+/**
+ * `sms_campaigns.short_domain_id` for a new campaign. The id must be a
+ * non-removed shortener of this tenant (no cross-tenant reference is stored);
+ * verification is checked again at send time by resolveShortenerDomain, which
+ * falls back to the house default. Omitted when not chosen, so the insert
+ * keeps working on a database without the column.
+ */
+async function campaignShortDomainColumn(
+  tenantId: string,
+  shortDomainId: string | null | undefined,
+): Promise<{ short_domain_id?: string }> {
+  if (!shortDomainId) return {};
+  const { data, error } = await (supabaseAdmin as any)
+    .from("tenant_domains")
+    .select("id,removed_at")
+    .eq("id", shortDomainId)
+    .eq("tenant_id", tenantId)
+    .eq("kind", "shortener")
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data || data.removed_at) throw new Error("Domínio do encurtador indisponível para esta conta");
+  return { short_domain_id: shortDomainId };
+}
+
 export const sendBulkSms = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) =>
@@ -1099,6 +1124,8 @@ export const sendBulkSms = createServerFn({ method: "POST" })
           .enum(["acquisition", "conversion", "reactivation"])
           .default("conversion"),
         enabledFunnelSteps: z.array(z.string().max(80)).max(10).optional(),
+        /** tenant_domains shortener for this campaign's links. */
+        shortDomainId: dbUuid().nullable().optional(),
       })
       .parse(input),
   )
@@ -1129,6 +1156,7 @@ export const sendBulkSms = createServerFn({ method: "POST" })
       };
     }
 
+    const shortDomainColumn = await campaignShortDomainColumn(tenantId, data.shortDomainId);
     const trigger = `campanha:${data.campaignName}:${data.route}`;
     const inputTargets: Array<{ phone: string; playerId?: string }> = [
       ...data.recipients,
@@ -1173,6 +1201,7 @@ export const sendBulkSms = createServerFn({ method: "POST" })
             data.enabledFunnelSteps,
           ),
           created_by: context.userId,
+          ...shortDomainColumn,
         })
         .select("id")
         .single();
@@ -1238,6 +1267,7 @@ export const sendBulkSms = createServerFn({ method: "POST" })
           data.enabledFunnelSteps,
         ),
         created_by: context.userId,
+        ...shortDomainColumn,
       })
       .select("id")
       .single();
@@ -1290,7 +1320,11 @@ export const sendBulkSms = createServerFn({ method: "POST" })
             variables,
             tenantId,
             linkTrackingEnabled: true,
-            linkTrackingOrigin: { sourceType: "campaign", sourceId: immediateCampaign.id },
+            linkTrackingOrigin: {
+              sourceType: "campaign",
+              sourceId: immediateCampaign.id,
+              shortDomainId: shortDomainColumn.short_domain_id ?? null,
+            },
             // Mesma chave que o worker usaria: uma nova tentativa deste
             // destinatário nunca chega de novo ao provedor nem à cobrança.
             deliveryKey: await campaignDeliveryKey(immediateCampaign.id, t.playerId),
@@ -2015,6 +2049,8 @@ const ScheduleBulkSchema = z.object({
   enabledFunnelSteps: z.array(z.string().max(80)).max(10).optional(),
   /** Saved audience rule: recipients are recalculated by the worker at send time. */
   audienceCriteria: z.record(z.string(), z.unknown()).optional(),
+  /** tenant_domains shortener for this campaign's links. */
+  shortDomainId: dbUuid().nullable().optional(),
 });
 
 /**
@@ -2094,6 +2130,7 @@ export const scheduleBulkSms = createServerFn({ method: "POST" })
       ...data.phones.map((phone) => ({ phone })),
     ]);
     const targets = resolution.resolved;
+    const shortDomainColumn = await campaignShortDomainColumn(tenantId, data.shortDomainId);
 
     const campaignRow = {
       tenant_id: tenantId,
@@ -2115,6 +2152,7 @@ export const scheduleBulkSms = createServerFn({ method: "POST" })
         data.enabledFunnelSteps,
       ),
       created_by: context.userId,
+      ...shortDomainColumn,
     };
     const insertCampaign = (row: Record<string, unknown>) =>
       (context.supabase as any)

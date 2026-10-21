@@ -916,7 +916,11 @@ function campaignDeps(): CampaignDispatchDeps {
         variables,
         tenantId: campaign.tenant_id,
         linkTrackingEnabled: campaign.track_links !== false,
-        linkTrackingOrigin: { sourceType: "campaign", sourceId: campaign.id },
+        linkTrackingOrigin: {
+          sourceType: "campaign",
+          sourceId: campaign.id,
+          shortDomainId: campaign.short_domain_id ?? null,
+        },
         deliveryKey,
       });
       const providerAccount =
@@ -946,7 +950,11 @@ function campaignDeps(): CampaignDispatchDeps {
                 playerId: it.target.playerId,
                 triggerName: `campanha:${campaign.name}:${campaign.route}`,
                 linkTrackingEnabled: campaign.track_links !== false,
-                linkTrackingOrigin: { sourceType: "campaign" as const, sourceId: campaign.id },
+                linkTrackingOrigin: {
+                  sourceType: "campaign" as const,
+                  sourceId: campaign.id,
+                  shortDomainId: campaign.short_domain_id ?? null,
+                },
               })),
             );
             // 101/505 (no balance/auth) are reported to the SMS provider

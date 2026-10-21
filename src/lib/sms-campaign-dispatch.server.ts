@@ -32,6 +32,8 @@ export type SmsCampaignRow = {
   last_error: string | null;
   rate_per_minute: number | null;
   track_links?: boolean | null;
+  /** Shortener domain chosen for the campaign (validated again at send time). */
+  short_domain_id?: string | null;
   locked_by?: string | null;
   unresolved_count?: number | null;
   /** Saved audience rule; when set, recipients are recalculated at dispatch time. */

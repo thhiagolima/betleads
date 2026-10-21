@@ -299,6 +299,13 @@ async function reserveDelivery(enrollment: EnrollmentRow, step: StepRow, journey
   } | null;
 }
 
+/** Shortener chosen on the step; resolveShortenerDomain validates it at send time. */
+function stepShortDomainId(config: Record<string, unknown>): string | null {
+  return typeof config.short_domain_id === "string" && config.short_domain_id
+    ? config.short_domain_id
+    : null;
+}
+
 async function finishExecution(id: string, patch: Record<string, unknown>) {
   await db
     .from("journey_step_executions")
@@ -788,6 +795,7 @@ async function deliverStep(
         sourceId: enrollment.journey_id,
         journeyStepId: step.id,
         journeyStepPosition: step.position,
+        shortDomainId: stepShortDomainId(step.config),
       },
       variables: vars,
       linkTrackingEnabled: step.config.track_links !== false,
@@ -852,6 +860,7 @@ async function deliverStep(
         enabled: step.config.track_links !== false,
         journeyStepId: step.id,
         journeyStepPosition: step.position,
+        shortDomainId: stepShortDomainId(step.config),
       },
     });
     if (!result.ok)
