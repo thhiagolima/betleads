@@ -6208,6 +6208,41 @@ export type Database = {
           },
         ]
       }
+      tenant_monthly_usage: {
+        Row: {
+          billed_amount: number
+          free_units_used: number
+          item: string
+          month: string
+          tenant_id: string
+          units: number
+        }
+        Insert: {
+          billed_amount?: number
+          free_units_used?: number
+          item: string
+          month: string
+          tenant_id: string
+          units?: number
+        }
+        Update: {
+          billed_amount?: number
+          free_units_used?: number
+          item?: string
+          month?: string
+          tenant_id?: string
+          units?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tenant_monthly_usage_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tenant_price_overrides: {
         Row: {
           created_at: string
@@ -6295,6 +6330,38 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "tenant_sms_pricing_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: true
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tenant_wallets: {
+        Row: {
+          balance: number
+          lifetime_purchased: number
+          lifetime_used: number
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          balance?: number
+          lifetime_purchased?: number
+          lifetime_used?: number
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          balance?: number
+          lifetime_purchased?: number
+          lifetime_used?: number
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tenant_wallets_tenant_id_fkey"
             columns: ["tenant_id"]
             isOneToOne: true
             referencedRelation: "tenants"
@@ -6468,6 +6535,77 @@ export type Database = {
             foreignKeyName: "voice_contact_policies_tenant_id_fkey"
             columns: ["tenant_id"]
             isOneToOne: true
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      wallet_ledger: {
+        Row: {
+          amount: number
+          balance_after: number
+          created_at: string
+          created_by: string | null
+          entry_type: string
+          free_units: number | null
+          id: string
+          idempotency_key: string | null
+          item: string | null
+          metadata: Json
+          provider_unit_cost: number | null
+          reason: string | null
+          reference_id: string | null
+          reference_type: string | null
+          tenant_id: string
+          unit_price: number | null
+          units: number | null
+          usage_month: string | null
+        }
+        Insert: {
+          amount: number
+          balance_after: number
+          created_at?: string
+          created_by?: string | null
+          entry_type: string
+          free_units?: number | null
+          id?: string
+          idempotency_key?: string | null
+          item?: string | null
+          metadata?: Json
+          provider_unit_cost?: number | null
+          reason?: string | null
+          reference_id?: string | null
+          reference_type?: string | null
+          tenant_id: string
+          unit_price?: number | null
+          units?: number | null
+          usage_month?: string | null
+        }
+        Update: {
+          amount?: number
+          balance_after?: number
+          created_at?: string
+          created_by?: string | null
+          entry_type?: string
+          free_units?: number | null
+          id?: string
+          idempotency_key?: string | null
+          item?: string | null
+          metadata?: Json
+          provider_unit_cost?: number | null
+          reason?: string | null
+          reference_id?: string | null
+          reference_type?: string | null
+          tenant_id?: string
+          unit_price?: number | null
+          units?: number | null
+          usage_month?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wallet_ledger_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
             referencedRelation: "tenants"
             referencedColumns: ["id"]
           },
@@ -7127,6 +7265,15 @@ export type Database = {
         }
         Returns: Json
       }
+      admin_adjust_wallet: {
+        Args: {
+          _amount: number
+          _idempotency_key?: string
+          _reason: string
+          _tenant: string
+        }
+        Returns: Json
+      }
       admin_clear_tenant_price: {
         Args: { _item: string; _tenant: string }
         Returns: {
@@ -7253,6 +7400,10 @@ export type Database = {
         Args: { _at?: string; _item: string; _tenant: string }
         Returns: Json
       }
+      billing_now: {
+        Args: never
+        Returns: string
+      }
       billing_report_unit_price: {
         Args: { _at?: string; _item: string; _tenant: string }
         Returns: number
@@ -7260,6 +7411,14 @@ export type Database = {
       billing_tenant_exempt: {
         Args: { _tenant: string }
         Returns: boolean
+      }
+      billing_wallet_integrity: {
+        Args: never
+        Returns: {
+          balance: number
+          ledger_sum: number
+          tenant_id: string
+        }[]
       }
       claim_call_flow_progress: {
         Args: { p_limit: number }
@@ -7739,6 +7898,50 @@ export type Database = {
       }
       sms_credit_summary: { Args: { _tenant?: string }; Returns: Json }
       sms_effective_pricing: { Args: { _tenant?: string }; Returns: Json }
+      wallet_mutation: {
+        Args: {
+          _amount: number
+          _created_by?: string
+          _entry_type: string
+          _free_units?: number
+          _idempotency_key?: string
+          _item?: string
+          _metadata?: Json
+          _provider_unit_cost?: number
+          _reason?: string
+          _reference_id?: string
+          _reference_type?: string
+          _tenant: string
+          _unit_price?: number
+          _units?: number
+          _usage_month?: string
+        }
+        Returns: Json
+      }
+      wallet_refund: {
+        Args: {
+          _idempotency_key: string
+          _reason: string
+          _reference_id: string
+          _tenant: string
+        }
+        Returns: Json
+      }
+      wallet_reserve: {
+        Args: {
+          _idempotency_key: string
+          _item: string
+          _reference_id: string
+          _reference_type: string
+          _tenant: string
+          _units: number
+        }
+        Returns: Json
+      }
+      wallet_summary: {
+        Args: { _tenant?: string }
+        Returns: Json
+      }
     }
     Enums: {
       app_role: "admin" | "user" | "super_admin" | "owner" | "member" | "gestor"

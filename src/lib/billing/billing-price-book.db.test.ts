@@ -3,69 +3,25 @@
 // billing_plans/billing_price_book/tenant_price_overrides, the price
 // lookup functions, the admin_* RPCs and the tenants.plano guard.
 
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-const root = resolve(__dirname, "../../..");
-const MIGRATION = readFileSync(
-  resolve(root, "supabase/migrations/20261022100000_billing_price_book.sql"),
-  "utf8",
-);
+import {
+  INTERNO,
+  LEGACY_INTERNO,
+  NORMAL,
+  readMigration,
+  resetSession as resetDbSession,
+  SCHEMA,
+  SEED,
+} from "./billing-db-test-support";
 
-// Minimal schema with the production stub pattern (see aquisicao-ltv.db.test.ts):
-// auth.role() from test.role, has_tenant_access from test.access,
-// is_super_admin from test.super. auth.uid() from test.uid (empty -> null),
-// needed for the provider-cost redaction.
-const SCHEMA = `
-create role anon nologin;
-create role authenticated nologin;
-create role service_role nologin;
-create schema auth;
-create function auth.role() returns text language sql as $$
-  select coalesce(nullif(current_setting('test.role', true), ''), 'authenticated') $$;
-create function auth.uid() returns uuid language sql as $$
-  select nullif(current_setting('test.uid', true), '')::uuid $$;
-create table public.tenants (
-  id uuid primary key,
-  slug text unique,
-  plano text not null default 'starter'
-    constraint tenants_plano_check check (plano in ('starter', 'pro', 'enterprise', 'interno')),
-  is_demo boolean not null default false
-);
-create function public.has_tenant_access(_tenant uuid) returns boolean language sql as $$
-  select coalesce(nullif(current_setting('test.access', true), ''), 'on') = 'on' $$;
-create function public.is_super_admin() returns boolean language sql as $$
-  select coalesce(nullif(current_setting('test.super', true), ''), 'off') = 'on' $$;
-create function public.accessible_tenant_ids() returns uuid[] language sql as $$
-  select array[]::uuid[] $$;
-`;
-
-const NORMAL = "00000000-0000-4000-8000-000000000001";
-const INTERNO = "00000000-0000-4000-8000-0000000000d1";
-const LEGACY_INTERNO = "00000000-0000-4000-8000-0000000000e1";
-
-const SEED = `
-insert into public.tenants (id, slug, plano, is_demo) values
-  ('${NORMAL}', 'casa-normal', 'starter', false),
-  ('${INTERNO}', 'minha-demo', 'starter', true),
-  ('00000000-0000-4000-8000-0000000000f1', 'pixpgf', 'starter', false),
-  ('00000000-0000-4000-8000-0000000000f2', 'pixreals', 'starter', false),
-  ('00000000-0000-4000-8000-0000000000f3', 'forrandobet', 'starter', false),
-  ('${LEGACY_INTERNO}', 'ja-era-interno', 'interno', false);
-`;
+const MIGRATION = readMigration("supabase/migrations/20261022100000_billing_price_book.sql");
 
 let db: PGlite;
 
 async function resetSession() {
-  await db.exec(`
-    set test.role = '';
-    set test.access = 'on';
-    set test.super = 'off';
-    set test.uid = '';
-  `);
+  await resetDbSession(db);
 }
 
 beforeAll(async () => {
