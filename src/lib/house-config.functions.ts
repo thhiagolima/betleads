@@ -1,0 +1,677 @@
+// Server functions for the house onboarding/configuration screen: site URL,
+// quick links, shortener/email domains, email senders and the setup wizard
+// state. Reads are open to any tenant member; writes require a tenant admin
+// and a non-demo tenant (assertTenantNotDemo), and go through supabaseAdmin
+// once that check has passed (RLS on the new tables is SELECT-only).
+import { createServerFn } from "@tanstack/react-start";
+import { z } from "zod";
+import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { dbUuid } from "@/lib/zod-helpers";
+import { assertSuperAdmin } from "@/lib/provider-governance.server";
+import {
+  assertTenantNotDemo,
+  requireTenantAdmin,
+  resolveOperationalTenantId,
+} from "@/lib/tenant-access.server";
+import {
+  buildQuickLinkUrl,
+  computeSetupChecklist,
+  normalizeSiteUrl,
+  quickLinkKeyFromLabel,
+  type DomainKind,
+  type DomainStatus,
+} from "@/lib/house-config";
+import {
+  addTenantDomain,
+  findDomainUsages,
+  listTenantDomains,
+  purgeTenantDomain,
+  refreshTenantDomain,
+  removeTenantDomain,
+  setDefaultTenantDomain,
+  type TenantDomain,
+} from "@/lib/tenant-domains.server";
+import { renderDnsInstructionsEmail, sendPlatformEmail } from "@/lib/platform-email.server";
+
+// ============ Pure helpers (exported for unit tests) ============
+
+/** Throws unless `row` exists and belongs to `tenantId`. Never leaks whether
+ * the row exists for a different tenant — the message is the same either
+ * way. */
+export function ensureDomainOwnership(
+  row: { tenant_id: string } | null,
+  tenantId: string,
+): void {
+  if (!row || row.tenant_id !== tenantId) {
+    throw new Error("Domínio não encontrado");
+  }
+}
+
+export function ensureSenderOwnership(
+  row: { tenant_id: string } | null,
+  tenantId: string,
+): void {
+  if (!row || row.tenant_id !== tenantId) {
+    throw new Error("Remetente não encontrado");
+  }
+}
+
+export function formatSenderLabel(fromName: string, fromEmail: string): string {
+  return `${fromName} <${fromEmail}>`;
+}
+
+/** A tenant's custom shortener domain exists but none of it is verified yet —
+ * links are currently going out through the CRM's default shortener. */
+export function computeShortenerPending(statuses: DomainStatus[]): boolean {
+  const hasVerified = statuses.includes("verified");
+  const hasPendingOrFailed = statuses.some((s) => s === "pending" || s === "failed");
+  return hasPendingOrFailed && !hasVerified;
+}
+
+export type NoticeDomainRow = {
+  id: string;
+  hostname: string;
+  kind: DomainKind;
+  status: DomainStatus;
+  verified_at: string | null;
+  verified_notice_seen_at: string | null;
+};
+
+/** Domains that just turned verified and whose notice hasn't been shown yet. */
+export function selectNewlyVerifiedDomains(
+  rows: NoticeDomainRow[],
+): { id: string; hostname: string; kind: DomainKind }[] {
+  return rows
+    .filter((r) => r.status === "verified" && r.verified_at !== null && r.verified_notice_seen_at === null)
+    .map((r) => ({ id: r.id, hostname: r.hostname, kind: r.kind }));
+}
+
+export function computeShowWizard(input: {
+  isAdmin: boolean;
+  isSuperAdmin: boolean;
+  onboardingCompletedAt: string | null;
+  onboardingSkippedAt: string | null;
+}): boolean {
+  return (
+    input.isAdmin &&
+    !input.isSuperAdmin &&
+    !input.onboardingCompletedAt &&
+    !input.onboardingSkippedAt
+  );
+}
+
+const DNS_SEND_WINDOW_MS = 60 * 60 * 1000;
+const DNS_SEND_MAX_PER_WINDOW = 5;
+
+/**
+ * Pure rate-limit check over an injected log (domainId -> send timestamps in
+ * ms). Returns true and records `now` when the send is allowed; returns
+ * false (without recording) once `domainId` already has
+ * `DNS_SEND_MAX_PER_WINDOW` sends inside the last hour.
+ */
+export function recordAndCheckDnsSendRateLimit(
+  log: Map<string, number[]>,
+  domainId: string,
+  now: number,
+): boolean {
+  const entries = (log.get(domainId) ?? []).filter((t) => now - t < DNS_SEND_WINDOW_MS);
+  if (entries.length >= DNS_SEND_MAX_PER_WINDOW) {
+    log.set(domainId, entries);
+    return false;
+  }
+  entries.push(now);
+  log.set(domainId, entries);
+  return true;
+}
+
+// Module-level log backing the real `sendDnsInstructions` server function.
+const dnsSendLog = new Map<string, number[]>();
+
+// ============ Internal (non-exported) DB helpers ============
+
+type TenantRow = {
+  nome: string;
+  site_url: string | null;
+  onboarding_completed_at: string | null;
+  onboarding_skipped_at: string | null;
+};
+
+async function fetchTenantRow(tenantId: string): Promise<TenantRow> {
+  const { data, error } = await supabaseAdmin
+    .from("tenants")
+    .select("nome,site_url,onboarding_completed_at,onboarding_skipped_at")
+    .eq("id", tenantId)
+    .single();
+  if (error) throw new Error(error.message);
+  return data as TenantRow;
+}
+
+type QuickLinkRow = { id: string; key: string; label: string; path: string; position: number };
+
+async function fetchQuickLinks(tenantId: string): Promise<QuickLinkRow[]> {
+  const { data, error } = await supabaseAdmin
+    .from("tenant_quick_links")
+    .select("id,key,label,path,position")
+    .eq("tenant_id", tenantId)
+    .order("position", { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data ?? []) as QuickLinkRow[];
+}
+
+type SenderRow = {
+  id: string;
+  from_name: string | null;
+  from_email: string;
+  reply_to: string | null;
+  domain_id: string | null;
+  is_default: boolean;
+  tenant_id: string;
+};
+
+async function fetchSenders(tenantId: string): Promise<SenderRow[]> {
+  const { data, error } = await supabaseAdmin
+    .from("email_senders")
+    .select("id,from_name,from_email,reply_to,domain_id,is_default,tenant_id")
+    .eq("tenant_id", tenantId)
+    .order("created_at", { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data ?? []) as SenderRow[];
+}
+
+async function fetchDomainStatusById(domainIds: string[]): Promise<Map<string, DomainStatus>> {
+  const map = new Map<string, DomainStatus>();
+  if (domainIds.length === 0) return map;
+  const { data, error } = await supabaseAdmin
+    .from("tenant_domains")
+    .select("id,status")
+    .in("id", domainIds);
+  if (error) throw new Error(error.message);
+  for (const row of (data ?? []) as { id: string; status: DomainStatus }[]) {
+    map.set(row.id, row.status);
+  }
+  return map;
+}
+
+type DomainIdentityRow = { id: string; tenant_id: string; kind: DomainKind; hostname: string };
+
+async function fetchDomainIdentity(domainId: string): Promise<DomainIdentityRow | null> {
+  const { data, error } = await supabaseAdmin
+    .from("tenant_domains")
+    .select("id,tenant_id,kind,hostname")
+    .eq("id", domainId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data as DomainIdentityRow | null) ?? null;
+}
+
+async function fetchDomainFull(domainId: string): Promise<(DomainIdentityRow & { dns_records: unknown }) | null> {
+  const { data, error } = await supabaseAdmin
+    .from("tenant_domains")
+    .select("id,tenant_id,kind,hostname,dns_records")
+    .eq("id", domainId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data as (DomainIdentityRow & { dns_records: unknown }) | null;
+}
+
+async function fetchNoticeRows(tenantId: string): Promise<NoticeDomainRow[]> {
+  const { data, error } = await supabaseAdmin
+    .from("tenant_domains")
+    .select("id,hostname,kind,status,verified_at,verified_notice_seen_at")
+    .eq("tenant_id", tenantId)
+    .is("removed_at", null);
+  if (error) throw new Error(error.message);
+  return (data ?? []) as NoticeDomainRow[];
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- structural RPC boundary, same pattern as tenant-access.server.ts's RpcClient.
+async function checkTenantAdmin(supabase: any, tenantId: string): Promise<boolean> {
+  const { data, error } = await supabase.rpc("is_tenant_admin", { _tenant: tenantId });
+  if (error) throw new Error(error.message);
+  return Boolean(data);
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- structural RPC boundary, same pattern as tenant-access.server.ts's RpcClient.
+async function checkSuperAdmin(supabase: any, userId: string): Promise<boolean> {
+  const { data, error } = await supabase.rpc("is_super_admin", { _user_id: userId });
+  if (error) throw new Error(error.message);
+  return Boolean(data);
+}
+
+// ============ Reads ============
+
+export const getHouseConfig = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const tenantId = await resolveOperationalTenantId(context.supabase);
+
+    const [tenant, quickLinkRows, domains, senderRows, canEdit] = await Promise.all([
+      fetchTenantRow(tenantId),
+      fetchQuickLinks(tenantId),
+      listTenantDomains(tenantId),
+      fetchSenders(tenantId),
+      checkTenantAdmin(context.supabase, tenantId),
+    ]);
+
+    const domainIds = Array.from(
+      new Set(senderRows.map((s) => s.domain_id).filter((id): id is string => Boolean(id))),
+    );
+    const statusById = await fetchDomainStatusById(domainIds);
+
+    const siteUrl = tenant.site_url;
+    const quickLinks = quickLinkRows.map((l) => ({
+      id: l.id,
+      key: l.key,
+      label: l.label,
+      path: l.path,
+      url: siteUrl ? buildQuickLinkUrl(siteUrl, l.path) : l.path,
+    }));
+
+    const senders = senderRows.map((s) => ({
+      id: s.id,
+      fromName: s.from_name ?? "",
+      fromEmail: s.from_email,
+      replyTo: s.reply_to,
+      domainId: s.domain_id,
+      isDefault: s.is_default,
+      domainVerified: s.domain_id ? statusById.get(s.domain_id) === "verified" : false,
+    }));
+
+    return {
+      tenantName: tenant.nome,
+      siteUrl,
+      quickLinks,
+      domains,
+      senders,
+      canEdit,
+      onboarding: {
+        completedAt: tenant.onboarding_completed_at,
+        skippedAt: tenant.onboarding_skipped_at,
+      },
+    };
+  });
+
+export const getHouseSetupStatus = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const tenantId = await resolveOperationalTenantId(context.supabase);
+
+    const [tenant, domains, senderRows, isAdmin, isSuperAdmin, noticeRows] = await Promise.all([
+      fetchTenantRow(tenantId),
+      listTenantDomains(tenantId),
+      fetchSenders(tenantId),
+      checkTenantAdmin(context.supabase, tenantId),
+      checkSuperAdmin(context.supabase, context.userId),
+      fetchNoticeRows(tenantId),
+    ]);
+
+    const shortenerStatuses = domains.filter((d) => d.kind === "shortener").map((d) => d.status);
+    const emailDomains = domains.filter((d) => d.kind === "email");
+    const emailStatuses = emailDomains.map((d) => d.status);
+
+    const verifiedEmailDomainIds = new Set(
+      emailDomains.filter((d) => d.status === "verified").map((d) => d.id),
+    );
+    const hasVerifiedSender = senderRows.some(
+      (s) => s.domain_id !== null && verifiedEmailDomainIds.has(s.domain_id),
+    );
+
+    const checklist = computeSetupChecklist({
+      siteUrl: tenant.site_url,
+      shortenerStatuses,
+      emailStatuses,
+      hasVerifiedSender,
+    });
+
+    const showWizard = computeShowWizard({
+      isAdmin,
+      isSuperAdmin,
+      onboardingCompletedAt: tenant.onboarding_completed_at,
+      onboardingSkippedAt: tenant.onboarding_skipped_at,
+    });
+
+    const newlyVerified = selectNewlyVerifiedDomains(noticeRows);
+
+    return { checklist, showWizard, newlyVerified };
+  });
+
+export const getComposerOptions = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const tenantId = await resolveOperationalTenantId(context.supabase);
+
+    const [tenant, quickLinkRows, shortenerDomains, senderRows] = await Promise.all([
+      fetchTenantRow(tenantId),
+      fetchQuickLinks(tenantId),
+      listTenantDomains(tenantId, "shortener"),
+      fetchSenders(tenantId),
+    ]);
+
+    const siteUrl = tenant.site_url;
+    const quickLinks = quickLinkRows.map((l) => ({
+      key: l.key,
+      label: l.label,
+      url: siteUrl ? buildQuickLinkUrl(siteUrl, l.path) : l.path,
+    }));
+
+    const shortDomains = shortenerDomains
+      .filter((d) => d.status === "verified")
+      .map((d) => ({ id: d.id, hostname: d.hostname, isDefault: d.is_default }));
+
+    const shortenerPending = computeShortenerPending(shortenerDomains.map((d) => d.status));
+
+    const domainIds = Array.from(
+      new Set(senderRows.map((s) => s.domain_id).filter((id): id is string => Boolean(id))),
+    );
+    const statusById = await fetchDomainStatusById(domainIds);
+    const senders = senderRows
+      .filter((s) => s.domain_id !== null && statusById.get(s.domain_id) === "verified")
+      .map((s) => ({
+        id: s.id,
+        label: formatSenderLabel(s.from_name ?? "", s.from_email),
+        isDefault: s.is_default,
+      }));
+
+    return { siteUrl, quickLinks, shortDomains, shortenerPending, senders };
+  });
+
+export const getHouseDomainUsages = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((v: unknown) => z.object({ domainId: dbUuid() }).parse(v))
+  .handler(async ({ data, context }) => {
+    const tenantId = await resolveOperationalTenantId(context.supabase);
+    return findDomainUsages(tenantId, data.domainId);
+  });
+
+// ============ Writes: site + quick links ============
+
+async function requireHouseAdmin(context: { supabase: unknown; userId: string }) {
+  const tenantId = await resolveOperationalTenantId(
+    context.supabase as Parameters<typeof resolveOperationalTenantId>[0],
+  );
+  await requireTenantAdmin(
+    context.supabase as Parameters<typeof requireTenantAdmin>[0],
+    tenantId,
+    "Apenas administradores da conta podem configurar a casa.",
+  );
+  await assertTenantNotDemo(tenantId);
+  return tenantId;
+}
+
+export const saveHouseSite = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((v: unknown) => z.object({ siteUrl: z.string().min(1).max(500) }).parse(v))
+  .handler(async ({ data, context }) => {
+    const tenantId = await requireHouseAdmin(context);
+    const normalized = normalizeSiteUrl(data.siteUrl);
+    if (!normalized.ok) throw new Error(normalized.error);
+
+    const { error } = await supabaseAdmin
+      .from("tenants")
+      .update({ site_url: normalized.url })
+      .eq("id", tenantId);
+    if (error) throw new Error(error.message);
+    return { siteUrl: normalized.url };
+  });
+
+const quickLinkInput = z.object({
+  id: dbUuid().optional(),
+  label: z.string().min(1).max(80),
+  key: z.string().min(1).max(30).optional(),
+  path: z.string().min(1).max(500),
+});
+
+export const saveQuickLinks = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((v: unknown) => z.object({ links: z.array(quickLinkInput).max(50) }).parse(v))
+  .handler(async ({ data, context }) => {
+    const tenantId = await requireHouseAdmin(context);
+
+    const payload = data.links.map((link, index) => {
+      const key = link.key?.trim() || quickLinkKeyFromLabel(link.label);
+      if (!key) throw new Error(`Não foi possível gerar uma chave para "${link.label}"`);
+      return {
+        tenant_id: tenantId,
+        key,
+        label: link.label,
+        path: link.path,
+        position: index,
+      };
+    });
+
+    const { error: delErr } = await supabaseAdmin
+      .from("tenant_quick_links")
+      .delete()
+      .eq("tenant_id", tenantId);
+    if (delErr) throw new Error(delErr.message);
+
+    if (payload.length > 0) {
+      const { error: insErr } = await supabaseAdmin.from("tenant_quick_links").insert(payload);
+      if (insErr) throw new Error(insErr.message);
+    }
+
+    return { ok: true };
+  });
+
+// ============ Writes: onboarding ============
+
+export const completeOnboarding = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const tenantId = await requireHouseAdmin(context);
+    const { error } = await supabaseAdmin
+      .from("tenants")
+      .update({ onboarding_completed_at: new Date().toISOString() })
+      .eq("id", tenantId);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+export const skipOnboarding = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const tenantId = await requireHouseAdmin(context);
+    const { error } = await supabaseAdmin
+      .from("tenants")
+      .update({ onboarding_skipped_at: new Date().toISOString() })
+      .eq("id", tenantId);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+export const markVerifiedNoticeSeen = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((v: unknown) => z.object({ domainIds: z.array(dbUuid()).min(1).max(50) }).parse(v))
+  .handler(async ({ data, context }) => {
+    const tenantId = await requireHouseAdmin(context);
+    const { error } = await supabaseAdmin
+      .from("tenant_domains")
+      .update({ verified_notice_seen_at: new Date().toISOString() })
+      .eq("tenant_id", tenantId)
+      .in("id", data.domainIds);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+// ============ Writes: domains ============
+
+export const addHouseDomain = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((v: unknown) =>
+    z.object({ kind: z.enum(["shortener", "email"]), hostname: z.string().min(1).max(253) }).parse(v),
+  )
+  .handler(async ({ data, context }) => {
+    const tenantId = await requireHouseAdmin(context);
+    const domain: TenantDomain = await addTenantDomain({
+      tenantId,
+      kind: data.kind,
+      rawHostname: data.hostname,
+      userId: context.userId,
+    });
+    return domain;
+  });
+
+export const refreshHouseDomain = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((v: unknown) => z.object({ domainId: dbUuid() }).parse(v))
+  .handler(async ({ data, context }) => {
+    const tenantId = await requireHouseAdmin(context);
+    const identity = await fetchDomainIdentity(data.domainId);
+    ensureDomainOwnership(identity, tenantId);
+    return refreshTenantDomain(data.domainId, { requestVerify: true });
+  });
+
+export const setDefaultHouseDomain = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((v: unknown) => z.object({ domainId: dbUuid() }).parse(v))
+  .handler(async ({ data, context }) => {
+    const tenantId = await requireHouseAdmin(context);
+    await setDefaultTenantDomain(tenantId, data.domainId);
+    return { ok: true };
+  });
+
+export const removeHouseDomain = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((v: unknown) => z.object({ domainId: dbUuid() }).parse(v))
+  .handler(async ({ data, context }) => {
+    const tenantId = await requireHouseAdmin(context);
+    await removeTenantDomain(tenantId, data.domainId);
+    return { ok: true };
+  });
+
+export const purgeHouseDomain = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((v: unknown) => z.object({ domainId: dbUuid() }).parse(v))
+  .handler(async ({ data, context }) => {
+    await assertSuperAdmin(context.userId);
+    const tenantId = await resolveOperationalTenantId(context.supabase);
+    const identity = await fetchDomainIdentity(data.domainId);
+    ensureDomainOwnership(identity, tenantId);
+    await purgeTenantDomain(data.domainId);
+    return { ok: true };
+  });
+
+const DNS_SEND_RATE_LIMIT_MESSAGE =
+  "Limite de envios atingido para este domínio. Tente novamente mais tarde.";
+
+export const sendDnsInstructions = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((v: unknown) =>
+    z.object({ domainId: dbUuid(), to: z.string().email().max(255) }).parse(v),
+  )
+  .handler(async ({ data, context }) => {
+    const tenantId = await requireHouseAdmin(context);
+    const domain = await fetchDomainFull(data.domainId);
+    ensureDomainOwnership(domain, tenantId);
+
+    if (!recordAndCheckDnsSendRateLimit(dnsSendLog, data.domainId, Date.now())) {
+      throw new Error(DNS_SEND_RATE_LIMIT_MESSAGE);
+    }
+
+    const tenant = await fetchTenantRow(tenantId);
+    const { subject, html } = renderDnsInstructionsEmail({
+      tenantName: tenant.nome,
+      hostname: domain!.hostname,
+      kind: domain!.kind,
+      records: (domain!.dns_records ?? []) as Parameters<typeof renderDnsInstructionsEmail>[0]["records"],
+    });
+
+    await sendPlatformEmail({ to: data.to, subject, html });
+    return { ok: true };
+  });
+
+// ============ Writes: email senders ============
+
+const localPartRegex = /^[^@\s]+$/;
+
+export const saveEmailSenderForHouse = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((v: unknown) =>
+    z
+      .object({
+        id: dbUuid().optional(),
+        domainId: dbUuid(),
+        localPart: z.string().min(1).max(64).regex(localPartRegex, "Parte local inválida"),
+        fromName: z.string().min(1).max(160),
+        replyTo: z.string().email().max(255).optional().nullable(),
+        isDefault: z.boolean().optional(),
+      })
+      .parse(v),
+  )
+  .handler(async ({ data, context }) => {
+    const tenantId = await requireHouseAdmin(context);
+
+    const domain = await fetchDomainIdentity(data.domainId);
+    ensureDomainOwnership(domain, tenantId);
+    if (domain!.kind !== "email") {
+      throw new Error("Selecione um domínio de e-mail da casa.");
+    }
+
+    if (data.id) {
+      const { data: existing, error } = await supabaseAdmin
+        .from("email_senders")
+        .select("id,tenant_id")
+        .eq("id", data.id)
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      ensureSenderOwnership(existing, tenantId);
+    }
+
+    const fromEmail = `${data.localPart}@${domain!.hostname}`;
+    const isDefault = data.isDefault ?? false;
+
+    const payload = {
+      tenant_id: tenantId,
+      name: data.fromName,
+      from_email: fromEmail,
+      from_name: data.fromName,
+      reply_to: data.replyTo ?? null,
+      domain: domain!.hostname,
+      domain_id: data.domainId,
+      is_default: isDefault,
+    };
+
+    let id = data.id;
+    if (id) {
+      const { error } = await supabaseAdmin.from("email_senders").update(payload).eq("id", id);
+      if (error) throw new Error(error.message);
+    } else {
+      const { data: created, error } = await supabaseAdmin
+        .from("email_senders")
+        .insert(payload)
+        .select("id")
+        .single();
+      if (error) throw new Error(error.message);
+      id = created.id;
+    }
+
+    if (isDefault) {
+      await supabaseAdmin
+        .from("email_senders")
+        .update({ is_default: false })
+        .eq("tenant_id", tenantId)
+        .neq("id", id);
+      await supabaseAdmin.from("email_senders").update({ is_default: true }).eq("id", id);
+    }
+
+    return { id };
+  });
+
+export const removeEmailSenderForHouse = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((v: unknown) => z.object({ id: dbUuid() }).parse(v))
+  .handler(async ({ data, context }) => {
+    const tenantId = await requireHouseAdmin(context);
+    const { data: existing, error } = await supabaseAdmin
+      .from("email_senders")
+      .select("id,tenant_id")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    ensureSenderOwnership(existing, tenantId);
+
+    const { error: delErr } = await supabaseAdmin.from("email_senders").delete().eq("id", data.id);
+    if (delErr) throw new Error(delErr.message);
+    return { ok: true };
+  });
