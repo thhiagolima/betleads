@@ -2,7 +2,7 @@
 // Pega leads com next_run_at <= now() e executa o bloco atual.
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { sendInfobipEmail, resolveSender } from "./email-send.server";
+import { EmailDomainNotVerifiedError, resolveSender, sendInfobipEmail } from "./email-send.server";
 import { buildPlayerVariables, renderTemplate } from "./template-vars.server";
 import { deferIfOutsideWindow } from "./send-window.server";
 import {
@@ -415,14 +415,22 @@ async function planLead(lead: Lead): Promise<SendPlan | null> {
           .eq("id", lead.id);
         return null;
       }
-      const sender = await resolveSender(block.smtp_config_id, block.tenant_id);
+      // smtp_config_id is passed as the requested sender. It still has an FK to
+      // email_smtp_configs, so it never matches an email_senders row today and
+      // the house's verified default sender is used.
+      const sender = await resolveSender({
+        tenantId: block.tenant_id,
+        senderId: block.smtp_config_id,
+      });
       if (!sender) {
+        const blocked = new EmailDomainNotVerifiedError();
         await logEvent(lead.tenant_id, lead.flow_id, lead.id, lead.player_id, "failed", {
-          reason: "no_sender",
+          reason: blocked.code,
+          error: blocked.message,
         });
         await supabaseAdmin
           .from("email_flow_leads")
-          .update({ status: "failed", exit_reason: "no_sender", locked_at: null, locked_by: null })
+          .update({ status: "failed", exit_reason: blocked.code, locked_at: null, locked_by: null })
           .eq("id", lead.id);
         return null;
       }

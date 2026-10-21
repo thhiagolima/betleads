@@ -1,5 +1,5 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { sendInfobipEmail, resolveSender } from "./email-send.server";
+import { EmailDomainNotVerifiedError, resolveSender, sendInfobipEmail } from "./email-send.server";
 import { callInfobipVoice, normalizeE164BR } from "./infobip-voice.server";
 import { sendSmsInternal } from "./sms.functions";
 import { buildPlayerVariables, renderTemplate } from "./template-vars.server";
@@ -837,11 +837,11 @@ async function deliverStep(
             .eq("tenant_id", enrollment.tenant_id)
             .maybeSingle();
     if (!template) throw new Error("Template de e-mail não encontrado");
-    const sender = await resolveSender(
-      String(step.config.sender_id ?? "") || null,
-      enrollment.tenant_id,
-    );
-    if (!sender) throw new Error("Remetente de e-mail não configurado");
+    const sender = await resolveSender({
+      tenantId: enrollment.tenant_id,
+      senderId: String(step.config.sender_id ?? "") || null,
+    });
+    if (!sender) throw new EmailDomainNotVerifiedError();
     const result = await sendInfobipEmail({
       to: player.email,
       from: sender.fromEmail,

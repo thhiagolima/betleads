@@ -8,6 +8,7 @@ import { journeyInputSchema, journeyStatusSchema } from "./journeys.shared";
 import { activationTriggerConfig, journeyEntryKey } from "./journey-policy";
 import { conversionFunnelSnapshot } from "./conversion-funnel";
 import { toggleJourneyExpress } from "./journey-express";
+import { assertTenantEmailSender } from "./campaign-refs.server";
 
 const journeyIdSchema = z.object({ id: z.string().uuid() });
 const legacyJourneySchema = z.object({
@@ -548,15 +549,7 @@ export const saveJourney = createServerFn({ method: "POST" })
             .maybeSingle();
           if (!template || template.is_active === false || template.lifecycle_status === "archived")
             throw new Error("Selecione um template de e-mail ativo deste tenant.");
-          if (step.config.sender_id) {
-            const { data: sender } = await db
-              .from("email_smtp_configs")
-              .select("id")
-              .eq("id", step.config.sender_id)
-              .eq("tenant_id", tenantId)
-              .maybeSingle();
-            if (!sender) throw new Error("Selecione um remetente de e-mail deste tenant.");
-          }
+          if (step.config.sender_id) await assertTenantEmailSender(tenantId, step.config.sender_id);
           config = {
             ...step.config,
             template_snapshot: {

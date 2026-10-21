@@ -6,7 +6,8 @@ import { z } from "zod";
 import { assertSuperAdmin, tenantChannelHealth } from "@/lib/provider-governance.server";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { sendInfobipEmail, resolveSender } from "./email-send.server";
+import { EmailDomainNotVerifiedError, resolveSender, sendInfobipEmail } from "./email-send.server";
+import { campaignSenderColumn, campaignShortDomainColumn } from "./campaign-refs.server";
 import {
   countPlayersForSegment,
   loadPlayersByIds,
@@ -88,12 +89,10 @@ export const sendTestEmail = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => SendTestEmailSchema.parse(d))
   .handler(async ({ data, context }) => {
     const tenantId = await resolveOperationalTenantId(context.supabase);
-    // Tenant requests always use the centrally approved editorial identity.
-    // Sender/provider overrides are deliberately ignored at this boundary.
-    const sender = await resolveSender(null, tenantId);
-    if (!sender) {
-      throw new Error("O canal de e-mail ainda não está disponível. Contate o suporte.");
-    }
+    // Always the house's verified default sender: sender/provider overrides
+    // in the request are deliberately ignored at this boundary.
+    const sender = await resolveSender({ tenantId });
+    if (!sender) throw new EmailDomainNotVerifiedError();
 
     // Variáveis do player (se informado)
     let html = data.html;
@@ -573,7 +572,12 @@ const CampanhaInputSchema = z.object({
   template: z.string().max(160).default(""),
   smtp: z.string().max(160).default(""),
   templateId: dbUuid().nullable().optional(),
+  /** Legacy: kept for old clients, no longer chooses the sender. */
   smtpId: z.string().max(64).nullable().optional(),
+  /** email_senders row of the house; domain verification is checked at send time. */
+  senderId: dbUuid().nullable().optional(),
+  /** tenant_domains shortener for this campaign's links. */
+  shortDomainId: dbUuid().nullable().optional(),
   agendadoPara: z.string().nullable().optional(),
   status: z.enum(["rascunho", "agendada", "enviando", "pausada", "concluida"]).default("rascunho"),
   targetPlayerIds: z.array(dbUuid()).max(5000).optional(),
@@ -599,6 +603,8 @@ function campanhaRowToUI(r: any) {
     smtp: af.smtp_label ?? "",
     templateId: r.template_id ?? null,
     smtpId: r.smtp_id ?? null,
+    senderId: r.sender_id ?? null,
+    shortDomainId: r.short_domain_id ?? null,
     agendadoPara: r.scheduled_at ?? undefined,
     status: r.status,
     targetPlayerIds: targetIds,
@@ -630,6 +636,16 @@ export const saveEmailCampaign = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => CampanhaInputSchema.parse(d))
   .handler(async ({ data, context }) => {
     const smtpIdNorm = data.smtpId ?? null;
+    let refColumns: { sender_id?: string | null; short_domain_id?: string | null } = {};
+    if (data.senderId !== undefined || data.shortDomainId !== undefined) {
+      const tenantId = await resolveCurrentTenantId(context.supabase);
+      refColumns = {
+        ...(await campaignSenderColumn(tenantId, data.senderId)),
+        ...(data.shortDomainId === null
+          ? { short_domain_id: null }
+          : await campaignShortDomainColumn(tenantId, data.shortDomainId)),
+      };
+    }
     let templateSnapshot: Record<string, unknown> | null = null;
     if (data.templateId) {
       const { data: template, error: templateError } = await context.supabase
@@ -657,6 +673,7 @@ export const saveEmailCampaign = createServerFn({ method: "POST" })
       },
       template_id: data.templateId ?? null,
       smtp_id: smtpIdNorm,
+      ...refColumns,
       scheduled_at: data.agendadoPara ? new Date(data.agendadoPara).toISOString() : null,
       status: data.status,
       track_links: true,
@@ -864,13 +881,9 @@ export async function runCampaignSend(campaignId: string) {
   // Campanhas legadas, sem snapshot, seguem usando o template publicado atual.
   const tpl = (camp.template_snapshot as Record<string, any> | null) ?? liveTpl;
 
-  // resolveSender tenta primeiro a tabela `email_senders`, depois SMTP padrão.
-  const sender = await resolveSender(camp.smtp_id ?? null, camp.tenant_id);
-  if (!sender) {
-    throw new Error(
-      "Nenhum remetente configurado. Vá em Email > Remetentes e cadastre um remetente padrão com domínio verificado na Infobip.",
-    );
-  }
+  // Only a sender on a verified e-mail domain of the house; before any write.
+  const sender = await resolveSender({ tenantId: camp.tenant_id, senderId: camp.sender_id });
+  if (!sender) throw new EmailDomainNotVerifiedError();
 
   const af = (camp.audience_filter ?? {}) as {
     audience_mode?: "segmento" | "leads" | "emails";
@@ -987,6 +1000,7 @@ export async function runCampaignSend(campaignId: string) {
           recipientPlayerId: p.id,
           messageLogType: "email_send_logs",
           enabled: camp.track_links !== false,
+          shortDomainId: camp.short_domain_id,
         },
       });
       const errSnippet = r.ok

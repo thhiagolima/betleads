@@ -37,6 +37,7 @@ import {
 } from "./sms-provider-breaker.server";
 import type { LinkTrackingContext } from "./shortio.server";
 import { conversionFunnelSnapshot } from "./conversion-funnel";
+import { campaignShortDomainColumn } from "./campaign-refs.server";
 import { normalizeSmsAudienceCriteria } from "./sms-audience-criteria";
 import {
   campaignDeliveryKey,
@@ -1073,30 +1074,6 @@ export const triggerSmsFlowNow = createServerFn({ method: "POST" })
       tenantId,
     });
   });
-
-/**
- * `sms_campaigns.short_domain_id` for a new campaign. The id must be a
- * non-removed shortener of this tenant (no cross-tenant reference is stored);
- * verification is checked again at send time by resolveShortenerDomain, which
- * falls back to the house default. Omitted when not chosen, so the insert
- * keeps working on a database without the column.
- */
-async function campaignShortDomainColumn(
-  tenantId: string,
-  shortDomainId: string | null | undefined,
-): Promise<{ short_domain_id?: string }> {
-  if (!shortDomainId) return {};
-  const { data, error } = await (supabaseAdmin as any)
-    .from("tenant_domains")
-    .select("id,removed_at")
-    .eq("id", shortDomainId)
-    .eq("tenant_id", tenantId)
-    .eq("kind", "shortener")
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  if (!data || data.removed_at) throw new Error("Domínio do encurtador indisponível para esta conta");
-  return { short_domain_id: shortDomainId };
-}
 
 export const sendBulkSms = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
