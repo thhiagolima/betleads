@@ -470,28 +470,28 @@ async function logSend(row: {
   /** Units reserved from the wallet for this send (Task 6 adds the column). */
   billed_units?: number | null;
 }) {
-  // billed_units: column lands in Task 6; loose-typed insert until types.ts
-  // is regenerated (mirrors the cast pattern used elsewhere in this file).
-  const { data, error } = await (supabaseAdmin.from("sms_send_logs") as any).insert({
-    to_phone: row.to,
-    content: row.content,
-    status: row.status,
-    provider: "short-brasil",
-    provider_response: (row.provider_response ?? {}) as Json,
-    error: row.error,
-    idempotency_key: row.idempotency_key || null,
-    provider_message_id: row.provider_message_id ?? null,
-    delivery_status:
-      row.status === "sent" ? "sent" : row.status === "pending" ? "pending" : "failed",
-    player_id: row.player_id ?? null,
-    flow_id: row.flow_id ?? null,
-    trigger_name: row.trigger_name ?? null,
-    step_index: row.step_index ?? null,
-    step_label: row.step_label ?? null,
-    flow_lead_id: row.flow_lead_id ?? null,
-    ...(row.tenant_id ? { tenant_id: row.tenant_id } : {}),
-    ...(row.billed_units != null ? { billed_units: row.billed_units } : {}),
-  })
+  const { data, error } = await supabaseAdmin
+    .from("sms_send_logs")
+    .insert({
+      to_phone: row.to,
+      content: row.content,
+      status: row.status,
+      provider: "short-brasil",
+      provider_response: (row.provider_response ?? {}) as Json,
+      error: row.error,
+      idempotency_key: row.idempotency_key || null,
+      provider_message_id: row.provider_message_id ?? null,
+      delivery_status:
+        row.status === "sent" ? "sent" : row.status === "pending" ? "pending" : "failed",
+      player_id: row.player_id ?? null,
+      flow_id: row.flow_id ?? null,
+      trigger_name: row.trigger_name ?? null,
+      step_index: row.step_index ?? null,
+      step_label: row.step_label ?? null,
+      flow_lead_id: row.flow_lead_id ?? null,
+      ...(row.tenant_id ? { tenant_id: row.tenant_id } : {}),
+      billed_units: row.billed_units ?? null,
+    })
     .select("id")
     .single();
   if (error) {

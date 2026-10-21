@@ -5820,6 +5820,7 @@ export type Database = {
       }
       sms_send_logs: {
         Row: {
+          billed_units: number | null
           content: string
           created_at: string
           delivered_at: string | null
@@ -5842,6 +5843,7 @@ export type Database = {
           trigger_name: string | null
         }
         Insert: {
+          billed_units?: number | null
           content: string
           created_at?: string
           delivered_at?: string | null
@@ -5864,6 +5866,7 @@ export type Database = {
           trigger_name?: string | null
         }
         Update: {
+          billed_units?: number | null
           content?: string
           created_at?: string
           delivered_at?: string | null
