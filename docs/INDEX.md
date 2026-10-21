@@ -15,6 +15,7 @@ Status usados:
 
 | Documento | Tipo | Data | Status | Para que serve |
 |---|---|---|---|---|
+| [ESCOPO_GATEWAY_PAGAMENTO_UPPER_2026-10-21.md](ESCOPO_GATEWAY_PAGAMENTO_UPPER_2026-10-21.md) | escopo | 21/10/2026 | Proposto | Pix da Upper para o plano mensal (R$ 4.000) e créditos com saldo único que não expira (SMS R$ 0,08 por segmento, voz R$ 0,09/30 s, e-mail 100 mil grátis + R$ 0,002); casas isentas no plano `interno`; fases PG0–PG6. |
 | [AUDITORIA_COMPLETA_SISTEMA_2026-10-16.md](AUDITORIA_COMPLETA_SISTEMA_2026-10-16.md) | auditoria | 16/10/2026 | Vigente | Auditoria de UX, dev, red team, QA e gestão; origem dos IDs SEC/DEV/QA/UX/PM. |
 | [ESCOPO_CORRECOES_AUDITORIA_2026-10-16.md](ESCOPO_CORRECOES_AUDITORIA_2026-10-16.md) | escopo | 16/10/2026 | Vigente | Plano de correção em fases F0–F5 e **quadro único de status** (seção 8). |
 | [ESCOPO_AUDITORIA_GATILHOS_JORNADAS_2026-10-15.md](ESCOPO_AUDITORIA_GATILHOS_JORNADAS_2026-10-15.md) | auditoria | 15/10/2026 | Vigente | Gatilhos de entrada e saída, sobreposição e frequência das jornadas; decisões de 15/10 (2+4/dia, prioridades). |
