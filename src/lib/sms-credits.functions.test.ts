@@ -26,10 +26,11 @@ vi.mock("@/lib/tenant-access.server", async () => {
 
 import { createFakeDb } from "@/lib/sms-bulk.test-support";
 import {
-  adjustWalletInputFor,
+  adjustWalletInput,
   adminAdjustSmsCreditsFor,
   adminSmsCreditConsoleFor,
   createSmsCreditCheckoutFor,
+  currentOverrideItemsByTenant,
   withoutProviderCost,
 } from "./sms-credits.functions";
 
@@ -38,7 +39,20 @@ const SUPER_ADMIN = "00000000-0000-4000-8000-0000000000aa";
 const HOUSE_ADMIN = "00000000-0000-4000-8000-0000000000bb";
 
 type Ctx = Parameters<typeof adminAdjustSmsCreditsFor>[0];
-const ctxFor = (userId: string) => ({ userId, supabase: fake.admin.client }) as unknown as Ctx;
+
+/**
+ * `admin_adjust_wallet` checks `is_super_admin()` with no service_role
+ * bypass: calling it through `supabaseAdmin` (auth.uid() is null there)
+ * always fails with `forbidden`, even for a real super admin. The
+ * `supabaseAdmin` fake (`fake.admin`) below registers `admin_adjust_wallet`
+ * to fail exactly that way, so a test that still passes a context whose
+ * `supabase` is `fake.admin.client` would catch a regression back to the
+ * bug; `ctxFor` below instead wires `supabase` to a separate `userDb` fake
+ * that registers a real, succeeding handler — proving the code calls the
+ * caller's own client, not `supabaseAdmin`.
+ */
+let userDb: ReturnType<typeof createFakeDb>;
+const ctxFor = (userId: string) => ({ userId, supabase: userDb.client }) as unknown as Ctx;
 
 beforeEach(() => {
   fake.admin.reset();
@@ -50,7 +64,13 @@ beforeEach(() => {
     data: { balance: 100, lifetime_purchased: 200, lifetime_used: 100, exempt: false },
     error: null,
   }));
-  fake.admin.onRpc("admin_adjust_wallet", () => ({ data: { balance: 150 }, error: null }));
+  fake.admin.onRpc("admin_adjust_wallet", () => ({
+    data: null,
+    error: { message: "forbidden" },
+  }));
+
+  userDb = createFakeDb();
+  userDb.onRpc("admin_adjust_wallet", () => ({ data: { balance: 150 }, error: null }));
 });
 
 describe("withoutProviderCost", () => {
@@ -90,7 +110,22 @@ describe("adminAdjustSmsCreditsFor", () => {
   });
 
   it("fails validation when amount is 0", () => {
-    expect(() => adjustWalletInputFor().parse({ tenantId: TENANT, amount: 0, reason: "ajuste" })).toThrow();
+    expect(() =>
+      adjustWalletInput.parse({ tenantId: TENANT, amount: 0, reason: "ajuste" }),
+    ).toThrow();
+  });
+
+  it("calls admin_adjust_wallet through the caller's own client, not supabaseAdmin", async () => {
+    // Regression guard for the `forbidden` bug: if the code called
+    // `supabaseAdmin.rpc("admin_adjust_wallet", ...)` instead of
+    // `ctx.supabase`, this would reject (see the `supabaseAdmin` fake's
+    // handler in beforeEach).
+    const result = await adminAdjustSmsCreditsFor(ctxFor(SUPER_ADMIN), {
+      tenantId: TENANT,
+      amount: 50,
+      reason: "ajuste manual",
+    });
+    expect(result).toEqual({ ok: true });
   });
 
   it("calls admin_adjust_wallet with the R$ amount and audits before/after", async () => {
@@ -138,5 +173,62 @@ describe("adminSmsCreditConsoleFor", () => {
     expect(result.wallets.find((w) => w.tenant_id === TENANT)).toMatchObject({
       balance: 120.5,
     });
+  });
+
+  it("has_custom_pricing reflects the CURRENT override, not 'ever had one'", async () => {
+    fake.admin.rows("tenants").push({ id: TENANT, nome: "Casa Normal", slug: "normal", plano: "pro" });
+    // An override was set, then cleared (the clear writes a newer row with
+    // unit_price = null) — the badge must be OFF, not stuck on from the
+    // first row.
+    fake.admin.rows("tenant_price_overrides").push(
+      { tenant_id: TENANT, item: "sms", unit_price: 0.07, valid_from: "2026-01-01T00:00:00Z" },
+      { tenant_id: TENANT, item: "sms", unit_price: null, valid_from: "2026-02-01T00:00:00Z" },
+    );
+    const result = await adminSmsCreditConsoleFor(ctxFor(SUPER_ADMIN) as never);
+    expect(result.wallets.find((w) => w.tenant_id === TENANT)).toMatchObject({
+      has_custom_pricing: false,
+    });
+  });
+
+  it("has_custom_pricing is ON when the latest row for an item is a live override", async () => {
+    fake.admin.rows("tenants").push({ id: TENANT, nome: "Casa Normal", slug: "normal", plano: "pro" });
+    fake.admin.rows("tenant_price_overrides").push({
+      tenant_id: TENANT,
+      item: "email",
+      unit_price: 0.003,
+      valid_from: "2026-01-01T00:00:00Z",
+    });
+    const result = await adminSmsCreditConsoleFor(ctxFor(SUPER_ADMIN) as never);
+    expect(result.wallets.find((w) => w.tenant_id === TENANT)).toMatchObject({
+      has_custom_pricing: true,
+    });
+  });
+});
+
+describe("currentOverrideItemsByTenant", () => {
+  it("ignores a future-dated row (not in effect yet)", () => {
+    const result = currentOverrideItemsByTenant([
+      { tenant_id: TENANT, item: "sms", unit_price: 0.07, valid_from: "2999-01-01T00:00:00Z" },
+    ]);
+    expect(result.get(TENANT)).toBeUndefined();
+  });
+
+  it("picks the latest-per-(tenant,item) row and drops null unit_price", () => {
+    const result = currentOverrideItemsByTenant([
+      { tenant_id: TENANT, item: "sms", unit_price: 0.07, valid_from: "2026-01-01T00:00:00Z" },
+      { tenant_id: TENANT, item: "sms", unit_price: null, valid_from: "2026-02-01T00:00:00Z" },
+      { tenant_id: TENANT, item: "email", unit_price: 0.003, valid_from: "2026-01-15T00:00:00Z" },
+    ]);
+    expect(result.get(TENANT)).toEqual(new Set(["email"]));
+  });
+
+  it("tracks multiple tenants independently", () => {
+    const other = "00000000-0000-4000-8000-00000000c0c0";
+    const result = currentOverrideItemsByTenant([
+      { tenant_id: TENANT, item: "sms", unit_price: 0.07, valid_from: "2026-01-01T00:00:00Z" },
+      { tenant_id: other, item: "voice_30s", unit_price: 0.1, valid_from: "2026-01-01T00:00:00Z" },
+    ]);
+    expect(result.get(TENANT)).toEqual(new Set(["sms"]));
+    expect(result.get(other)).toEqual(new Set(["voice_30s"]));
   });
 });

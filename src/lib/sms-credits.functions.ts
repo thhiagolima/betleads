@@ -229,6 +229,44 @@ type WalletTenantRow = {
   has_custom_pricing: boolean;
 };
 
+type TenantPriceOverrideRow = {
+  tenant_id: string;
+  item: string;
+  unit_price: number | null;
+  valid_from: string;
+};
+
+/**
+ * `tenant_price_overrides` keeps full history (one row per
+ * (tenant, item, valid_from)); the CURRENT override for an item is the row
+ * with the latest `valid_from <= now()`, and it counts as "has an override"
+ * only when that row's `unit_price` is not null (a clear writes a new row
+ * with `unit_price = null`, which must turn the badge off again — a naive
+ * "any row ever inserted" check would wrongly keep it on forever). Returns,
+ * per tenant, the set of items currently overridden.
+ */
+export function currentOverrideItemsByTenant(
+  rows: TenantPriceOverrideRow[],
+): Map<string, Set<string>> {
+  const now = Date.now();
+  const latestByTenantItem = new Map<string, TenantPriceOverrideRow>();
+  for (const row of rows) {
+    if (new Date(row.valid_from).getTime() > now) continue;
+    const key = `${row.tenant_id}:${row.item}`;
+    const current = latestByTenantItem.get(key);
+    if (!current || row.valid_from > current.valid_from) {
+      latestByTenantItem.set(key, row);
+    }
+  }
+  const result = new Map<string, Set<string>>();
+  for (const row of latestByTenantItem.values()) {
+    if (row.unit_price == null) continue;
+    if (!result.has(row.tenant_id)) result.set(row.tenant_id, new Set());
+    result.get(row.tenant_id)!.add(row.item);
+  }
+  return result;
+}
+
 /**
  * Body of `adminSmsCreditConsole`, exported so the demo-tenant filtering is
  * directly unit-testable (mirrors the existing `*For` convention used for
@@ -249,7 +287,7 @@ export async function adminSmsCreditConsoleFor(ctx: ServerContext) {
   const [tenantsRes, walletsRes, overridesRes, ordersRes, demoTenantIds] = await Promise.all([
     sb.from("tenants").select("id,nome,slug,plano").order("nome", { ascending: true }),
     sb.from("tenant_wallets").select("tenant_id,balance,lifetime_purchased,lifetime_used"),
-    sb.from("tenant_price_overrides").select("tenant_id,unit_price").not("unit_price", "is", null),
+    sb.from("tenant_price_overrides").select("tenant_id,item,unit_price,valid_from"),
     sb
       .from("sms_credit_orders")
       .select(
@@ -274,8 +312,8 @@ export async function adminSmsCreditConsoleFor(ctx: ServerContext) {
       lifetime_used: number;
     }>).map((row) => [row.tenant_id, row]),
   );
-  const overrideTenantIds = new Set(
-    ((overridesRes.data ?? []) as Array<{ tenant_id: string }>).map((row) => row.tenant_id),
+  const currentOverrides = currentOverrideItemsByTenant(
+    (overridesRes.data ?? []) as TenantPriceOverrideRow[],
   );
 
   const wallets: WalletTenantRow[] = ((tenantsRes.data ?? []) as Array<{
@@ -293,7 +331,7 @@ export async function adminSmsCreditConsoleFor(ctx: ServerContext) {
         lifetime_purchased: Number(wallet?.lifetime_purchased ?? 0),
         lifetime_used: Number(wallet?.lifetime_used ?? 0),
         exempt: tenant.plano === "interno",
-        has_custom_pricing: overrideTenantIds.has(tenant.id),
+        has_custom_pricing: (currentOverrides.get(tenant.id)?.size ?? 0) > 0,
       };
     });
 
@@ -308,12 +346,8 @@ export const adminSmsCreditConsole = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => adminSmsCreditConsoleFor(context as ServerContext));
 
-/** Exported so the zod rule ("amount !== 0") can be exercised directly in tests. */
-export function adjustWalletInputFor() {
-  return adjustInput;
-}
-
-const adjustInput = z.object({
+/** Exported directly (not behind a getter) so tests can exercise the zod rules. */
+export const adjustWalletInput = z.object({
   tenantId: dbUuid(),
   amount: z
     .number()
@@ -325,11 +359,16 @@ const adjustInput = z.object({
 
 export async function adminAdjustSmsCreditsFor(
   ctx: ServerContext,
-  data: z.infer<typeof adjustInput>,
+  data: z.infer<typeof adjustWalletInput>,
 ) {
   await assertSuperAdmin(ctx.userId);
   const before = await getWalletSummarySnapshot(data.tenantId);
-  const { error } = await looseDb(supabaseAdmin).rpc("admin_adjust_wallet", {
+  // admin_adjust_wallet checks is_super_admin() with no service_role bypass,
+  // so it must run as the caller (auth.uid() = the super admin), never
+  // through the elevated supabaseAdmin client (auth.uid() is null there and
+  // the call would fail with `forbidden`); it also makes `created_by` the
+  // real actor instead of null.
+  const { error } = await looseDb(ctx.supabase).rpc("admin_adjust_wallet", {
     _tenant: data.tenantId,
     _amount: data.amount,
     _reason: data.reason,
@@ -354,5 +393,5 @@ export async function adminAdjustSmsCreditsFor(
 
 export const adminAdjustSmsCredits = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => adjustInput.parse(data))
+  .inputValidator((data: unknown) => adjustWalletInput.parse(data))
   .handler(async ({ data, context }) => adminAdjustSmsCreditsFor(context as ServerContext, data));

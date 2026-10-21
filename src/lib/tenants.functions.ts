@@ -243,39 +243,48 @@ async function auditTenant(args: {
 }
 
 /**
- * `provider_unit_cost` is what Betleads pays the SMS/voice/email supplier.
- * Only the super admin may see it (and the margin derived from it); for
- * anyone else it is stripped here on the server — both when it sits at the
- * top level (the flat shape `billing_effective_price`/`admin_set_tenant_price`
- * return) and when it's nested one level inside `prices` (the shape
- * `wallet_summary` returns, one entry per item).
+ * Keys that carry what Betleads pays the supplier: `provider_unit_cost` is
+ * the current (PG1) key on `billing_effective_price`/`wallet_summary.prices.*`
+ * /`admin_set_tenant_price`; `provider_cost_per_sms` is the legacy (pre-PG1)
+ * key, still present verbatim in old `sms_credit_summary.pricing`/
+ * `sms_effective_pricing` audit rows written before this migration. Only the
+ * super admin may see either (or the margin derived from them).
  */
-function withoutProviderCost(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  const { provider_unit_cost: _cost, prices, ...rest } = value as Record<string, unknown>;
-  void _cost;
-  if (!prices || typeof prices !== "object" || Array.isArray(prices)) return rest;
-  const strippedPrices: Record<string, unknown> = {};
-  for (const [item, price] of Object.entries(prices as Record<string, unknown>)) {
-    strippedPrices[item] =
-      price && typeof price === "object" && !Array.isArray(price)
-        ? withoutProviderCost(price)
-        : price;
+const PROVIDER_COST_KEYS = new Set(["provider_unit_cost", "provider_cost_per_sms"]);
+
+/**
+ * Recursively strips every `PROVIDER_COST_KEYS` entry from `value`, at any
+ * depth — top level, nested one level in `prices.<item>` (wallet_summary) or
+ * `pricing` (legacy sms_credit_summary), and inside arrays. Used both for the
+ * live wallet summary and for historical audit rows (`before_data`/
+ * `after_data`/`metadata`), which may carry either shape depending on when
+ * they were written.
+ */
+function withoutProviderCost<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((item) => withoutProviderCost(item)) as unknown as T;
   }
-  return { ...rest, prices: strippedPrices };
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, v] of Object.entries(value as Record<string, unknown>)) {
+      if (PROVIDER_COST_KEYS.has(key)) continue;
+      out[key] = withoutProviderCost(v);
+    }
+    return out as T;
+  }
+  return value;
 }
 
 /**
- * Audit rows written by the price-book and wallet admin actions carry the
- * provider cost in before/after/metadata (flat or nested in `prices`, see
- * `withoutProviderCost` above). Strip it the same way for anyone who is not
- * the super admin.
+ * Audit rows written by the price-book and wallet admin actions (and, for
+ * older rows, the legacy SMS-credit admin actions) carry the provider cost
+ * in before/after/metadata, at any depth. Strip it the same way for anyone
+ * who is not the super admin.
  */
 type AuditRow = { [key: string]: Json };
 
 function redactAuditJson(value: Json): Json {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
-  return withoutProviderCost(value) as Json;
+  return withoutProviderCost(value);
 }
 
 function redactAuditRows(rows: AuditRow[]): AuditRow[] {

@@ -1,8 +1,11 @@
-// F-14 — the tenant detail must never ship the SMS supplier cost
-// (`provider_unit_cost`) to anyone but the super admin. Since PG1 Task 8 it
-// comes both from `wallet_summary.prices.sms` and from the flat
-// `billing_effective_price`-shaped before/after of a price-override audit
-// row; both are checked here against a mocked Supabase client.
+// F-14 — the tenant detail must never ship the SMS supplier cost to anyone
+// but the super admin. PG1 Task 8 added a second key/shape on top of the
+// original: `provider_unit_cost`, flat or nested one level in
+// `prices.<item>` (wallet_summary / billing_effective_price); the ORIGINAL
+// `provider_cost_per_sms`, nested in `pricing`, still appears verbatim in
+// audit rows written before PG1 (`sms_credit_summary`/`sms_effective_pricing`)
+// and must keep being stripped too. Both are checked here, against a mocked
+// Supabase client, for both audit shapes and the live wallet summary.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -72,6 +75,30 @@ beforeEach(() => {
     metadata: { amount: 50, reason: "ajuste" },
     created_at: "2026-10-02T00:00:00Z",
   });
+  // A row written before PG1 by the old `adminSetTenantSmsPricing` — the
+  // legacy key/shape (`pricing.provider_cost_per_sms`), never migrated, must
+  // still never leak to a non-super-admin reading old history.
+  fake.admin.rows("tenant_audit_logs").push({
+    id: "audit-0-legacy",
+    tenant_id: TENANT,
+    actor_user_id: SUPER_ADMIN_USER,
+    action: "tenant_sms.pricing_set",
+    entity_type: "tenant_sms_pricing",
+    entity_id: TENANT,
+    before_data: {
+      tenant_id: TENANT,
+      sale_price_per_sms: 0.12,
+      provider_cost_per_sms: 0.059,
+      pricing: { sale_price_per_sms: 0.1, provider_cost_per_sms: 0.059 },
+    },
+    after_data: {
+      tenant_id: TENANT,
+      sale_price_per_sms: 0.12,
+      pricing: { sale_price_per_sms: 0.12, provider_cost_per_sms: 0.059 },
+    },
+    metadata: { sale_price_per_sms: 0.12, provider_cost_per_sms: 0.059 },
+    created_at: "2026-09-01T00:00:00Z",
+  });
   fake.admin.onRpc("is_super_admin", (args) => ({
     data: args._user_id === SUPER_ADMIN_USER,
     error: null,
@@ -94,12 +121,20 @@ describe("getTenantManagementConsoleFor — supplier cost", () => {
     expect(sms.pricing).not.toHaveProperty("provider_unit_cost");
     expect(sms.pricing).toMatchObject({ unit_price: 0.08 });
     // Includes the audit trail: before/after/metadata of wallet changes.
-    expect(result.detail!.audit).toHaveLength(1);
-    expect(result.detail!.audit[0]).toMatchObject({ metadata: { reason: "ajuste" } });
+    expect(result.detail!.audit).toHaveLength(2);
+    const [newRow, legacyRow] = result.detail!.audit;
+    expect(newRow).toMatchObject({ metadata: { reason: "ajuste" } });
+    // The legacy row (pre-PG1 shape) must be stripped too: both the flat
+    // `provider_cost_per_sms` and the one nested in `pricing`.
+    expect(legacyRow.before_data).toMatchObject({ sale_price_per_sms: 0.12 });
+    expect((legacyRow.before_data as Record<string, unknown>).pricing).toMatchObject({
+      sale_price_per_sms: 0.1,
+    });
     expect(JSON.stringify(result)).not.toContain("provider_unit_cost");
+    expect(JSON.stringify(result)).not.toContain("provider_cost_per_sms");
   });
 
-  it("keeps provider_unit_cost for the super admin", async () => {
+  it("keeps provider_unit_cost and provider_cost_per_sms for the super admin", async () => {
     const result = await getTenantManagementConsoleFor(ctxFor(SUPER_ADMIN_USER), {
       tenantId: TENANT,
     });
@@ -107,5 +142,6 @@ describe("getTenantManagementConsoleFor — supplier cost", () => {
     expect(result.isSuperAdmin).toBe(true);
     expect(result.detail!.sms.pricing).toMatchObject({ provider_unit_cost: 0.059 });
     expect(JSON.stringify(result.detail!.audit)).toContain("provider_unit_cost");
+    expect(JSON.stringify(result.detail!.audit)).toContain("provider_cost_per_sms");
   });
 });

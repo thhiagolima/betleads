@@ -1,9 +1,10 @@
-// PG1 Task 8 — per-tenant price overrides (billing_price_book / Task 2) used
-// by the "preço por casa" dialog in admin.tsx and tenants.tsx. Superadmin
-// only. The global default prices (getPricing/setPricing) stay in
-// admin.functions.ts; this file is only the per-tenant override, by item
+// PG1 Task 7/8 — billing server functions for the price book (billing_price_book
+// / Task 2): `getBillingPrices` is the house-facing read (the SMS composer and
+// anything else that needs to show "this costs R$ X"); `adminSetTenantPrice`/
+// `adminClearTenantPrice` are the superadmin-only per-tenant override, by item
 // (sms, voice_30s, email), replacing the old SMS-only
-// adminSetTenantSmsPricing/adminClearTenantSmsPricing.
+// adminSetTenantSmsPricing/adminClearTenantSmsPricing. The global default
+// prices (getPricing/setPricing) stay in admin.functions.ts.
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
@@ -11,8 +12,20 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import type { Json } from "@/integrations/supabase/types";
 import { dbUuid } from "@/lib/zod-helpers";
+import { getEffectivePrices } from "./pricing.server";
+import { resolveOperationalTenantId } from "../tenant-access.server";
 
-type ServerContext = { userId: string };
+type ServerContext = {
+  userId: string;
+  // Loose on purpose: the real runtime value is the per-request, user-scoped
+  // Supabase client the auth middleware attaches (never `supabaseAdmin`).
+  // RPCs that check `is_super_admin()` with no service_role bypass
+  // (admin_set_tenant_price, admin_clear_tenant_price, admin_set_price,
+  // admin_adjust_wallet) MUST run through this client — `auth.uid()` is null
+  // on `supabaseAdmin`, so `is_super_admin()` is false there and the call
+  // fails with `forbidden` even for a real super admin.
+  supabase: unknown;
+};
 
 type DbError = { message: string };
 type DbResult<T = unknown> = { data: T | null; error: DbError | null };
@@ -24,6 +37,13 @@ type LooseSupabase = {
 function looseDb(client: unknown) {
   return client as LooseSupabase;
 }
+
+export const getBillingPrices = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const tenantId = await resolveOperationalTenantId(context.supabase);
+    return getEffectivePrices(tenantId);
+  });
 
 export const billingItem = z.enum(["sms", "voice_30s", "email"]);
 
@@ -74,6 +94,42 @@ async function auditTenantPriceChange(args: {
   }
 }
 
+const tenantEffectivePriceInput = z.object({
+  tenantId: dbUuid(),
+  item: billingItem,
+});
+
+/**
+ * One tenant's current effective price for one item (`billing_effective_price`,
+ * which has a service_role bypass, so this is safe to read via
+ * `supabaseAdmin`). Used by the per-tenant price dialog (admin.tsx) to
+ * prefill `unitPrice` with the actually-current value instead of a literal,
+ * and to know whether "Voltar ao padrão" applies to the selected item.
+ */
+export async function getTenantEffectivePriceFor(
+  ctx: ServerContext,
+  data: z.infer<typeof tenantEffectivePriceInput>,
+) {
+  await assertSuperAdmin(ctx.userId);
+  const { data: row, error } = await looseDb(supabaseAdmin).rpc("billing_effective_price", {
+    _tenant: data.tenantId,
+    _item: data.item,
+  });
+  if (error) throw new Error(error.message);
+  const price = (row ?? {}) as { unit_price?: number | string | null; source?: string | null };
+  return {
+    unitPrice: price.unit_price == null ? null : Number(price.unit_price),
+    hasOverride: price.source === "override",
+  };
+}
+
+export const getTenantEffectivePrice = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => tenantEffectivePriceInput.parse(data))
+  .handler(async ({ data, context }) =>
+    getTenantEffectivePriceFor(context as ServerContext, data),
+  );
+
 const setTenantPriceInput = z.object({
   tenantId: dbUuid(),
   item: billingItem,
@@ -86,7 +142,9 @@ export async function adminSetTenantPriceFor(
 ) {
   await assertSuperAdmin(ctx.userId);
   const before = await getTenantPriceSnapshot(data.tenantId, data.item);
-  const { error } = await looseDb(supabaseAdmin).rpc("admin_set_tenant_price", {
+  // See the `supabase` field comment on `ServerContext`: must run as the
+  // caller, not through `supabaseAdmin`.
+  const { error } = await looseDb(ctx.supabase).rpc("admin_set_tenant_price", {
     _tenant: data.tenantId,
     _item: data.item,
     _unit_price: data.unitPrice,
@@ -120,7 +178,9 @@ export async function adminClearTenantPriceFor(
 ) {
   await assertSuperAdmin(ctx.userId);
   const before = await getTenantPriceSnapshot(data.tenantId, data.item);
-  const { error } = await looseDb(supabaseAdmin).rpc("admin_clear_tenant_price", {
+  // See the `supabase` field comment on `ServerContext`: must run as the
+  // caller, not through `supabaseAdmin`.
+  const { error } = await looseDb(ctx.supabase).rpc("admin_clear_tenant_price", {
     _tenant: data.tenantId,
     _item: data.item,
   });
