@@ -21,8 +21,11 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
 
+  // Full-viewport overlay, above the app shell (sidebar/header stay mounted
+  // underneath but out of view) — its own scroll container, same dark
+  // background as the rest of the app.
   return (
-    <div className="mx-auto min-h-full w-full max-w-3xl px-4 py-6 sm:px-6 sm:py-10">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-background">
       <HouseSetupWizard />
     </div>
   );

@@ -42,6 +42,29 @@ function ItemIcon({ state }: { state: SetupItemState }) {
   return <CircleDashed className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />;
 }
 
+/** The `<ul>` of checklist items, shared by the home checklist card and the
+ * wizard's "Pronto" step summary. Pure presentational — no data fetching. */
+export function ChecklistItemsList({
+  items,
+  className,
+}: {
+  items: ChecklistItem[];
+  className?: string;
+}) {
+  return (
+    <ul className={cn("space-y-2", className)}>
+      {items.map((item) => (
+        <li key={item.id} className="flex items-center gap-2 text-[13.5px]">
+          <ItemIcon state={item.state} />
+          <span className={cn(item.state === "done" && "text-muted-foreground line-through")}>
+            {checklistItemLabel(item)}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /** Presentational, data-free view — kept separate from `HouseSetupChecklist`
  * so it can be exercised with `renderToStaticMarkup` in tests (no jsdom in
  * this repo, no react-query context needed). */
@@ -56,16 +79,7 @@ export function HouseSetupChecklistView({ checklist }: { checklist: SetupCheckli
           {checklistProgressLabel(checklist.items)}
         </span>
       </div>
-      <ul className="mt-3 space-y-2">
-        {checklist.items.map((item) => (
-          <li key={item.id} className="flex items-center gap-2 text-[13.5px]">
-            <ItemIcon state={item.state} />
-            <span className={cn(item.state === "done" && "text-muted-foreground line-through")}>
-              {checklistItemLabel(item)}
-            </span>
-          </li>
-        ))}
-      </ul>
+      <ChecklistItemsList items={checklist.items} className="mt-3" />
       <a
         href="/configuracoes/casa"
         className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"

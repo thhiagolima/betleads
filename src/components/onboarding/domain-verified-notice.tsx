@@ -5,6 +5,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { X } from "lucide-react";
+import { toast } from "sonner";
 
 import { HOUSE_SETUP_STATUS_QUERY_KEY } from "@/components/house-config/house-config-query";
 import { getHouseSetupStatus, markVerifiedNoticeSeen } from "@/lib/house-config.functions";
@@ -27,6 +28,7 @@ export function DomainVerifiedNotice() {
   const markSeen = useMutation({
     mutationFn: (domainIds: string[]) => markSeenFn({ data: { domainIds } }),
     onSuccess: () => qc.invalidateQueries({ queryKey: HOUSE_SETUP_STATUS_QUERY_KEY }),
+    onError: (error: Error) => toast.error(error.message),
   });
 
   if (!canEdit) return null;

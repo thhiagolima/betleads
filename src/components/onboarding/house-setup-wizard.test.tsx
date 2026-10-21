@@ -1,10 +1,13 @@
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
+import type { SetupChecklist } from "./house-setup-checklist";
 import {
   applyWizardEffect,
   nextWizardStep,
   reduceWizard,
   WIZARD_STEPS,
+  WizardReadyStepView,
   wizardStepButtons,
 } from "./house-setup-wizard";
 
@@ -45,6 +48,32 @@ describe("wizardStepButtons", () => {
     expect(wizardStepButtons("encurtador").later).toBe(true);
     expect(wizardStepButtons("email").later).toBe(true);
     expect(wizardStepButtons("pronto").later).toBe(false);
+  });
+});
+
+describe("WizardReadyStepView", () => {
+  it("summarizes the checklist — progress and every item's label", () => {
+    const checklist: SetupChecklist = {
+      items: [
+        { id: "house", state: "done" },
+        { id: "shortener", state: "pending_dns" },
+        { id: "email", state: "todo" },
+      ],
+      complete: false,
+    };
+
+    const html = renderToStaticMarkup(<WizardReadyStepView checklist={checklist} />);
+
+    expect(html).toContain("1 de 3");
+    expect(html).toContain("URL da casa e URLs rápidas");
+    expect(html).toContain("Domínio do encurtador · aguardando DNS");
+    expect(html).toContain("Domínio e remetente de e-mail");
+  });
+
+  it("renders no summary while the checklist hasn't loaded yet", () => {
+    const html = renderToStaticMarkup(<WizardReadyStepView checklist={undefined} />);
+
+    expect(html).not.toContain("de 3");
   });
 });
 

@@ -7,7 +7,7 @@
 // logic is pure (`reduceWizard`/`applyWizardEffect`) so it's testable without
 // a DOM — the component below only wires it to the two mutations.
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 
@@ -16,7 +16,12 @@ import { HouseSiteSection } from "@/components/house-config/house-site-section";
 import { DomainsSection } from "@/components/house-config/domains-section";
 import { EmailSendersSection } from "@/components/house-config/email-senders-section";
 import { HOUSE_SETUP_STATUS_QUERY_KEY } from "@/components/house-config/house-config-query";
-import { completeOnboarding, skipOnboarding } from "@/lib/house-config.functions";
+import { completeOnboarding, getHouseSetupStatus, skipOnboarding } from "@/lib/house-config.functions";
+import {
+  ChecklistItemsList,
+  checklistProgressLabel,
+  type SetupChecklist,
+} from "@/components/onboarding/house-setup-checklist";
 
 export type WizardStepId = "casa" | "encurtador" | "email" | "pronto";
 
@@ -75,7 +80,40 @@ export function applyWizardEffect(
   else handlers.onComplete();
 }
 
-function WizardStepContent({ step }: { step: WizardStepId }) {
+/** The "Pronto" step's content: a checklist summary (controller-mandated —
+ * the wizard's last step must show where the house's setup actually stands,
+ * not just a generic "all done" message) above the footer's "Concluir".
+ * Presentational and data-free, like `HouseSetupChecklistView`, so it's
+ * testable with `renderToStaticMarkup`; `checklist` is `undefined` only
+ * while the status query hasn't resolved yet. */
+export function WizardReadyStepView({ checklist }: { checklist: SetupChecklist | undefined }) {
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-muted-foreground">
+        Tudo pronto. Você pode ajustar qualquer coisa depois em Configurações → Casa.
+      </p>
+      {checklist && (
+        <div className="rounded-lg border border-border/40 bg-background/30 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-sm font-semibold">Resumo da configuração</h3>
+            <span className="text-xs tabular-nums text-muted-foreground">
+              {checklistProgressLabel(checklist.items)}
+            </span>
+          </div>
+          <ChecklistItemsList items={checklist.items} className="mt-3" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WizardStepContent({
+  step,
+  checklist,
+}: {
+  step: WizardStepId;
+  checklist: SetupChecklist | undefined;
+}) {
   if (step === "casa") return <HouseSiteSection variant="wizard" />;
   if (step === "encurtador") return <DomainsSection kind="shortener" variant="wizard" />;
   if (step === "email") {
@@ -86,16 +124,18 @@ function WizardStepContent({ step }: { step: WizardStepId }) {
       </div>
     );
   }
-  return (
-    <p className="text-sm text-muted-foreground">
-      Tudo pronto. Você pode ajustar qualquer coisa depois em Configurações → Casa.
-    </p>
-  );
+  return <WizardReadyStepView checklist={checklist} />;
 }
 
 export function HouseSetupWizard({ initialStep = "casa" }: { initialStep?: WizardStepId }) {
   const qc = useQueryClient();
   const [step, setStep] = useState<WizardStepId>(initialStep);
+
+  const fetchStatus = useServerFn(getHouseSetupStatus);
+  const statusQuery = useQuery({
+    queryKey: HOUSE_SETUP_STATUS_QUERY_KEY,
+    queryFn: () => fetchStatus(),
+  });
 
   const skipFn = useServerFn(skipOnboarding);
   const completeFn = useServerFn(completeOnboarding);
@@ -127,52 +167,57 @@ export function HouseSetupWizard({ initialStep = "casa" }: { initialStep?: Wizar
 
   return (
     <div className="flex min-h-full flex-col">
-      <nav aria-label="Passos da configuração" className="flex flex-wrap items-center gap-2 pb-6">
-        {WIZARD_STEPS.map((s, i) => (
-          <span
-            key={s.id}
-            className={
-              s.id === step
-                ? "rounded-full bg-primary px-3 py-1 text-xs font-semibold text-primary-foreground"
-                : "rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground"
-            }
-          >
-            {i + 1}. {s.label}
-          </span>
-        ))}
-      </nav>
-
-      <div className="flex-1">
-        <WizardStepContent step={step} />
-      </div>
-
-      <div className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-border/40 pt-4">
-        <Button type="button" variant="ghost" disabled={pending} onClick={() => dispatch({ type: "skip" })}>
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border/40 px-4 py-4 sm:px-6">
+        <nav aria-label="Passos da configuração" className="flex flex-wrap items-center gap-2">
+          {WIZARD_STEPS.map((s, i) => (
+            <span
+              key={s.id}
+              className={
+                s.id === step
+                  ? "rounded-full bg-primary px-3 py-1 text-xs font-semibold text-primary-foreground"
+                  : "rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground"
+              }
+            >
+              {i + 1}. {s.label}
+            </span>
+          ))}
+        </nav>
+        <Button
+          type="button"
+          variant="ghost"
+          disabled={pending}
+          onClick={() => dispatch({ type: "skip" })}
+        >
           Pular configuração
         </Button>
-        <div className="flex items-center gap-2">
-          {buttons.later && (
-            <Button
-              type="button"
-              variant="outline"
-              disabled={pending}
-              onClick={() => dispatch({ type: "later" })}
-            >
-              Fazer depois
-            </Button>
-          )}
+      </header>
+
+      <div className="mx-auto w-full max-w-3xl flex-1 px-4 py-6 sm:px-6 sm:py-10">
+        <WizardStepContent step={step} checklist={statusQuery.data?.checklist} />
+      </div>
+
+      <div className="mx-auto flex w-full max-w-3xl flex-wrap items-center justify-end gap-2 border-t border-border/40 px-4 py-4 sm:px-6">
+        {buttons.later && (
           <Button
             type="button"
+            variant="outline"
             disabled={pending}
-            onClick={() => dispatch({ type: buttons.primary === "concluir" ? "complete" : "later" })}
+            onClick={() => dispatch({ type: "later" })}
           >
-            {buttons.primary === "concluir"
-              ? complete.isPending
-                ? "Concluindo…"
-                : "Concluir"
-              : "Avançar"}
+            Fazer depois
           </Button>
-        </div>
+        )}
+        <Button
+          type="button"
+          disabled={pending}
+          onClick={() => dispatch({ type: buttons.primary === "concluir" ? "complete" : "later" })}
+        >
+          {buttons.primary === "concluir"
+            ? complete.isPending
+              ? "Concluindo…"
+              : "Concluir"
+            : "Avançar"}
+        </Button>
       </div>
     </div>
   );
