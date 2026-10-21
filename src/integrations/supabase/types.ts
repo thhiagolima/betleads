@@ -494,6 +494,72 @@ export type Database = {
           },
         ]
       }
+      billing_plans: {
+        Row: {
+          code: string
+          created_at: string
+          exempt_all: boolean
+          included: Json
+          interval: string
+          is_active: boolean
+          name: string
+          price_cents: number
+          updated_at: string
+        }
+        Insert: {
+          code: string
+          created_at?: string
+          exempt_all?: boolean
+          included?: Json
+          interval?: string
+          is_active?: boolean
+          name: string
+          price_cents?: number
+          updated_at?: string
+        }
+        Update: {
+          code?: string
+          created_at?: string
+          exempt_all?: boolean
+          included?: Json
+          interval?: string
+          is_active?: boolean
+          name?: string
+          price_cents?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      billing_price_book: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          free_monthly_units: number
+          item: string
+          provider_unit_cost: number | null
+          unit_price: number
+          valid_from: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          free_monthly_units?: number
+          item: string
+          provider_unit_cost?: number | null
+          unit_price: number
+          valid_from: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          free_monthly_units?: number
+          item?: string
+          provider_unit_cost?: number | null
+          unit_price?: number
+          valid_from?: string
+        }
+        Relationships: []
+      }
       call_audio_generations: {
         Row: {
           audio_hash: string
@@ -6142,6 +6208,33 @@ export type Database = {
           },
         ]
       }
+      tenant_price_overrides: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          item: string
+          tenant_id: string
+          unit_price: number | null
+          valid_from: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          item: string
+          tenant_id: string
+          unit_price?: number | null
+          valid_from: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          item?: string
+          tenant_id?: string
+          unit_price?: number | null
+          valid_from?: string
+        }
+        Relationships: []
+      }
       tenant_sms_credit_balances: {
         Row: {
           balance_credits: number
@@ -7034,6 +7127,17 @@ export type Database = {
         }
         Returns: Json
       }
+      admin_clear_tenant_price: {
+        Args: { _item: string; _tenant: string }
+        Returns: {
+          created_at: string
+          created_by: string | null
+          item: string
+          tenant_id: string
+          unit_price: number | null
+          valid_from: string
+        }
+      }
       admin_clear_tenant_sms_pricing: {
         Args: { _tenant: string }
         Returns: Json
@@ -7071,6 +7175,23 @@ export type Database = {
         Args: { _from?: string; _to?: string }
         Returns: Json
       }
+      admin_set_price: {
+        Args: {
+          _free_monthly_units?: number
+          _item: string
+          _provider_unit_cost?: number
+          _unit_price: number
+        }
+        Returns: {
+          created_at: string
+          created_by: string | null
+          free_monthly_units: number
+          item: string
+          provider_unit_cost: number | null
+          unit_price: number
+          valid_from: string
+        }
+      }
       admin_set_sms_credit_settings: {
         Args: {
           _default_sale_price_per_sms: number
@@ -7079,6 +7200,17 @@ export type Database = {
           _provider_cost_per_sms: number
         }
         Returns: Json
+      }
+      admin_set_tenant_price: {
+        Args: { _item: string; _tenant: string; _unit_price: number }
+        Returns: {
+          created_at: string
+          created_by: string | null
+          item: string
+          tenant_id: string
+          unit_price: number | null
+          valid_from: string
+        }
       }
       admin_set_tenant_sms_pricing: {
         Args: {
@@ -7116,6 +7248,18 @@ export type Database = {
           _tenant: string
         }
         Returns: Json
+      }
+      billing_effective_price: {
+        Args: { _at?: string; _item: string; _tenant: string }
+        Returns: Json
+      }
+      billing_report_unit_price: {
+        Args: { _at?: string; _item: string; _tenant: string }
+        Returns: number
+      }
+      billing_tenant_exempt: {
+        Args: { _tenant: string }
+        Returns: boolean
       }
       claim_call_flow_progress: {
         Args: { p_limit: number }
