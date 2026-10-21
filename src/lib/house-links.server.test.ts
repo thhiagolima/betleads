@@ -66,4 +66,29 @@ describe("loadHouseLinks", () => {
     await loadHouseLinks(TENANT);
     expect(fake.db.calls.length).toBeGreaterThan(callsAfterReset);
   });
+
+  it("normaliza site_url vazio para null", async () => {
+    fake.db.rows("tenants").push({ id: TENANT, site_url: "" });
+    const house = await loadHouseLinks(TENANT);
+    expect(house).toEqual({ siteUrl: null, quickLinks: {} });
+  });
+
+  // Important 2 (controller ruling) — a DB error must never break a send: a
+  // batch across several tenants (runSmsFlowBatch's Promise.all) must not
+  // fail wholesale because one tenant's house lookup errored. Falls back to
+  // the legacy rendering (siteUrl: null) instead of throwing, and the
+  // fallback value isn't cached (the next call retries the query).
+  it("nunca lança em erro de banco — cai para o legado e não é cacheado", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    fake.db.rows("tenants").push({ id: TENANT, site_url: "https://x.com" });
+    fake.db.failNext("tenants", "select", "connection reset");
+
+    await expect(loadHouseLinks(TENANT)).resolves.toEqual({ siteUrl: null, quickLinks: {} });
+    expect(errorSpy).toHaveBeenCalled();
+
+    // Not cached: a retry now succeeds and reflects the real data.
+    const house = await loadHouseLinks(TENANT);
+    expect(house).toEqual({ siteUrl: "https://x.com", quickLinks: {} });
+    errorSpy.mockRestore();
+  });
 });

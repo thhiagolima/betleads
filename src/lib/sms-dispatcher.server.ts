@@ -919,6 +919,7 @@ function campaignDeps(): CampaignDispatchDeps {
       return vars;
     },
     async send({ campaign, target, deliveryKey, variables }) {
+      const house = await loadHouseLinks(campaign.tenant_id);
       const r = await sendSmsInternal({
         to: target.phone,
         content: campaign.content,
@@ -926,6 +927,7 @@ function campaignDeps(): CampaignDispatchDeps {
         triggerName: `campanha:${campaign.name}:${campaign.route}`,
         variables,
         tenantId: campaign.tenant_id,
+        house,
         linkTrackingEnabled: campaign.track_links !== false,
         linkTrackingOrigin: {
           sourceType: "campaign",
@@ -952,11 +954,12 @@ function campaignDeps(): CampaignDispatchDeps {
     ...(smsBulkEnabled() && smsBulkTransport() === "short-brasil-bulk"
       ? {
           async sendBatch({ campaign, items }) {
+            const house = await loadHouseLinks(campaign.tenant_id);
             const { outcomes } = await sendSmsBatch(
               items.map((it) => ({
                 tenantId: campaign.tenant_id,
                 to: it.target.phone,
-                content: renderSmsVariables(campaign.content, it.variables),
+                content: renderSmsVariables(campaign.content, it.variables, house),
                 deliveryKey: it.deliveryKey,
                 playerId: it.target.playerId,
                 triggerName: `campanha:${campaign.name}:${campaign.route}`,

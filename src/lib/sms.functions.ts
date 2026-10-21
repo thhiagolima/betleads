@@ -14,8 +14,8 @@ import {
   resolveCurrentTenantId,
   resolveOperationalTenantId,
 } from "@/lib/tenant-access.server";
-import { buildPlayerVariables } from "./template-vars.server";
-import { loadHouseLinks } from "./house-links.server";
+import { buildPlayerVariables, renderTemplate } from "./template-vars.server";
+import { loadHouseLinks, type HouseLinks } from "./house-links.server";
 import {
   markTrackedDispatchesFailed,
   markTrackedDispatchesSent,
@@ -133,15 +133,22 @@ export function toShortBrasilCell(e164OrRaw: string): string {
   return local;
 }
 
+/** Also applies the unknown-`{link_*}` → house site URL fallback (see
+ * `template-vars.server.ts`'s `renderTemplate`, which this delegates to) when
+ * `house` is supplied and has a `siteUrl` — e.g. a free-typed `{link_promo}`
+ * that isn't in `variables`. Without `house` (or `siteUrl: null`), behavior
+ * is byte-for-byte identical to the legacy implementation. */
 export function renderSmsVariables(
   content: string,
   variables?: Record<string, string | number> | null,
+  house?: HouseLinks | null,
 ): string {
-  if (!variables || Object.keys(variables).length === 0) return content;
-  return content.replace(/\{([a-zA-Z0-9_]+)\}/g, (match, key: string) => {
-    const value = variables[key];
-    return value === undefined || value === null ? match : String(value);
-  });
+  if ((!variables || Object.keys(variables).length === 0) && !house?.siteUrl) return content;
+  const vars: Record<string, string> = {};
+  for (const [key, value] of Object.entries(variables ?? {})) {
+    if (value !== undefined && value !== null) vars[key] = String(value);
+  }
+  return renderTemplate(content, vars, house);
 }
 
 export function shortBrasilCredentials(): { usuario: string; chave: string } {
@@ -728,6 +735,11 @@ export async function sendSmsInternal(args: {
   >;
   /** Stable identity supplied by a queue/worker when retrying one delivery. */
   deliveryKey?: string | null;
+  /** House URL / quick links for the unknown-`{link_*}` fallback. Pass it
+   * whenever `content` may still contain unrendered `{token}`s (the common
+   * case: campaign/bulk/test sends pass raw content + `variables` and rely
+   * on this function to render them). */
+  house?: HouseLinks | null;
 }) {
   // Demo guard first: before the phone check, billing, link tracking or any
   // sms_send_logs / sms_credit_ledger / link_dispatches write. Fail-closed: a
@@ -805,7 +817,7 @@ export async function sendSmsInternal(args: {
       };
     }
   }
-  const renderedContent = renderSmsVariables(args.content, args.variables);
+  const renderedContent = renderSmsVariables(args.content, args.variables, args.house);
   const deliveryKey = args.deliveryKey ?? crypto.randomUUID();
   let preparedContent = renderedContent;
   let trackedDispatchIds: string[] = [];
@@ -975,6 +987,7 @@ export const sendTestSms = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const tenantId = await resolveOperationalTenantId(context.supabase);
+    const house = await loadHouseLinks(tenantId);
     let variables: Record<string, string> | null = null;
     if (data.playerId) {
       const { data: p } = await supabaseAdmin
@@ -986,7 +999,7 @@ export const sendTestSms = createServerFn({ method: "POST" })
         .eq("tenant_id", tenantId)
         .maybeSingle();
       if (p) {
-        variables = buildPlayerVariables(p, await loadHouseLinks(tenantId));
+        variables = buildPlayerVariables(p, house);
       }
     }
     return sendSmsInternal({
@@ -997,6 +1010,7 @@ export const sendTestSms = createServerFn({ method: "POST" })
       variables,
       tenantId,
       linkTrackingEnabled: data.trackLinks,
+      house,
     });
   });
 
@@ -1064,7 +1078,8 @@ export const triggerSmsFlowNow = createServerFn({ method: "POST" })
       .maybeSingle();
     if (!player?.telefone) return { ok: false, error: "Player sem telefone" };
 
-    const variables = buildPlayerVariables(player, await loadHouseLinks(tenantId));
+    const house = await loadHouseLinks(tenantId);
+    const variables = buildPlayerVariables(player, house);
     return sendSmsInternal({
       to: player.telefone,
       content: first.content,
@@ -1073,6 +1088,7 @@ export const triggerSmsFlowNow = createServerFn({ method: "POST" })
       triggerName: data.triggerName,
       variables,
       tenantId,
+      house,
     });
   });
 
@@ -1205,10 +1221,10 @@ export const sendBulkSms = createServerFn({ method: "POST" })
     }
 
     // Carrega variáveis dos players envolvidos (uma query só)
+    const house = await loadHouseLinks(tenantId);
     const playerIds = Array.from(new Set(targets.map((t) => t.playerId)));
     const varsByPlayer = new Map<string, Record<string, string>>();
     if (playerIds.length > 0) {
-      const house = await loadHouseLinks(tenantId);
       const { data: players } = await supabaseAdmin
         .from("players")
         .select(
@@ -1298,6 +1314,7 @@ export const sendBulkSms = createServerFn({ method: "POST" })
             triggerName: trigger,
             variables,
             tenantId,
+            house,
             linkTrackingEnabled: true,
             linkTrackingOrigin: {
               sourceType: "campaign",

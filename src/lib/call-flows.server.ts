@@ -813,6 +813,7 @@ export async function handleCallCompletion(args: {
             // The flow's tenant: without it a lead-only progress row would
             // reach the SMS guard with no tenant and be blocked (fail-closed).
             tenantId: progress.tenant_id,
+            house,
           });
           await logEvent(
             progress.id,
