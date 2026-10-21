@@ -181,19 +181,15 @@ export const getSmsCreditPortal = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => tenantInput.parse(data ?? {}))
   .handler(async ({ data, context }) => getSmsCreditPortalFor(context as ServerContext, data));
 
-const checkoutInput = z
-  .object({
-    tenantId: dbUuid().optional().nullable(),
-  })
-  .default({});
-
 const PURCHASE_UNAVAILABLE_MESSAGE =
   "Compra por Pix disponível em breve. Fale com o suporte para adicionar saldo.";
 
 /**
- * Real Pix checkout arrives in PG2. Until then this (and
- * `adminMarkSmsCreditOrderPaid`) always refuses with the same message; the
- * old package/credits checkout RPC is no longer called.
+ * Real Pix checkout arrives in PG2. Until then this always refuses with the
+ * same message; the old package/credits checkout RPC is no longer called.
+ * (The `createSmsCreditCheckout`/`adminMarkSmsCreditOrderPaid` createServerFn
+ * wrappers that used to call this were dead code -- no screen called either
+ * one -- and were removed in the PG1 final review.)
  */
 export async function createSmsCreditCheckoutFor(
   _ctx: ServerContext,
@@ -201,23 +197,6 @@ export async function createSmsCreditCheckoutFor(
 ) {
   throw new Error(PURCHASE_UNAVAILABLE_MESSAGE);
 }
-
-export const createSmsCreditCheckout = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => checkoutInput.parse(data))
-  .handler(async ({ data, context }) =>
-    createSmsCreditCheckoutFor(context as ServerContext, data),
-  );
-
-export const adminMarkSmsCreditOrderPaid = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) =>
-    z.object({ orderId: dbUuid() }).parse(data),
-  )
-  .handler(async ({ context }) => {
-    await assertSuperAdmin((context as ServerContext).userId);
-    throw new Error(PURCHASE_UNAVAILABLE_MESSAGE);
-  });
 
 type WalletTenantRow = {
   tenant_id: string;
