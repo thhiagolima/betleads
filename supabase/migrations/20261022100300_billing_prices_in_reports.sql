@@ -16,6 +16,39 @@
 alter table public.sms_send_logs
   add column if not exists billed_units smallint null;
 
+-- Fix round 1: billing_report_unit_price returns null for any instant before
+-- the price book's first valid_from (2026-10-01) -- the cutover runbook
+-- (Task 9) refreshes the last 30 days, which reaches back before that date.
+-- This helper is what refresh_crm_results_day and check_crm_results_day both
+-- call for the SMS price: it falls back to the exact legacy chain the old
+-- functions used (tenant override, then the global default, then the
+-- original flat rate) whenever the price book has nothing yet for _at.
+create or replace function public.crm_sms_report_price(_tenant uuid, _at timestamptz)
+returns numeric
+language plpgsql
+stable
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_price numeric;
+begin
+  v_price := public.billing_report_unit_price(_tenant, 'sms', _at);
+  if v_price is not null then
+    return v_price;
+  end if;
+
+  return coalesce(
+    (select sale_price_per_sms from public.tenant_sms_pricing where tenant_id = _tenant),
+    (select default_sale_price_per_sms from public.sms_credit_settings limit 1),
+    0.12
+  );
+end;
+$$;
+
+revoke all on function public.crm_sms_report_price(uuid, timestamptz) from public, anon, authenticated;
+grant execute on function public.crm_sms_report_price(uuid, timestamptz) to service_role;
+
 -- `refresh_crm_results_day`: copied whole from
 -- 20261019120000_crm_click_conversion_incremental.sql. Only the SMS price
 -- source and the "sends" cost change: the price comes from
@@ -34,7 +67,7 @@ declare
   v_price numeric;
   v_rows integer;
 begin
-  v_price := public.billing_report_unit_price(_tenant, 'sms', v_from);
+  v_price := public.crm_sms_report_price(_tenant, v_from);
 
   delete from public.crm_results_daily where tenant_id = _tenant and metric_date = _day;
 
@@ -242,7 +275,7 @@ declare
   v_failed integer := 0;
   v_ok boolean;
 begin
-  v_price := public.billing_report_unit_price(_tenant, 'sms', v_from);
+  v_price := public.crm_sms_report_price(_tenant, v_from);
 
   select coalesce(sum(sent), 0) sent, coalesce(sum(cost), 0) cost,
          coalesce(sum(direct_conversions + direct_active_conversions), 0) direct
@@ -314,8 +347,10 @@ grant execute on function public.check_crm_results_day(uuid, date) to service_ro
 -- billing_price_book's current default unit_price (latest valid_from <=
 -- now()) for sms/email, and voice billing switches from "price per minute x
 -- total minutes" to "price per 30s segment x ceil(duration_seconds/30) per
--- call row, summed" (voice_30s price). call_minutes keeps the same meaning
--- (output columns are unchanged).
+-- call row, summed" (voice_30s price). SMS cost is now weighted by
+-- sum(coalesce(billed_units, 1)) over the same rows sms_count already
+-- counts, instead of a flat 1 unit per row. call_minutes and sms_count keep
+-- the same meaning (output columns are unchanged).
 create or replace function public.admin_list_users_with_usage(
   _from timestamptz default (now() - interval '30 days'),
   _to timestamptz default now()
@@ -355,7 +390,8 @@ begin
     where not public.is_super_admin(u.id)
     group by u.id, u.email, u.created_at, u.last_sign_in_at, u.banned_until
   ), sms as (
-    select m.user_id, count(*)::bigint as c
+    select m.user_id, count(*)::bigint as c,
+      coalesce(sum(coalesce(l.billed_units, 1)), 0)::numeric as units
     from memberships m join public.sms_send_logs l on l.tenant_id = m.tenant_id
     where l.created_at >= _from and l.created_at < _to group by m.user_id
   ), calls as (
@@ -371,10 +407,10 @@ begin
   )
   select b.user_id, b.email, b.created_at, b.last_sign_in_at, b.banned_until,
     b.tenant_id, b.tenant_nome, b.role,
-    coalesce(s.c,0), (coalesce(s.c,0)*coalesce(v_sms,0))::numeric,
+    coalesce(s.c,0), (coalesce(s.units,0)*coalesce(v_sms,0))::numeric,
     coalesce(c.minutes,0), (coalesce(c.units,0)*coalesce(v_call,0))::numeric,
     coalesce(e.c,0), (coalesce(e.c,0)*coalesce(v_email,0))::numeric,
-    (coalesce(s.c,0)*coalesce(v_sms,0)+coalesce(c.units,0)*coalesce(v_call,0)+coalesce(e.c,0)*coalesce(v_email,0))::numeric
+    (coalesce(s.units,0)*coalesce(v_sms,0)+coalesce(c.units,0)*coalesce(v_call,0)+coalesce(e.c,0)*coalesce(v_email,0))::numeric
   from base b left join sms s on s.user_id=b.user_id
   left join calls c on c.user_id=b.user_id left join emails e on e.user_id=b.user_id
   order by b.email;
