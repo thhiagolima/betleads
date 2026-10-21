@@ -27,6 +27,10 @@ create function auth.role() returns text language sql as $$
   select coalesce(nullif(current_setting('test.role', true), ''), 'authenticated') $$;
 create function auth.uid() returns uuid language sql as $$
   select nullif(current_setting('test.uid', true), '')::uuid $$;
+-- Minimal stub so FK columns like "updated_by uuid references auth.users(id)"
+-- in legacy migrations (e.g. 20260922193000_create_sms_credit_billing.sql)
+-- can be applied. Unused by Tasks 2/3.
+create table auth.users (id uuid primary key);
 create table public.tenants (
   id uuid primary key,
   slug text unique,

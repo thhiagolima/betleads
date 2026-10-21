@@ -7406,6 +7406,19 @@ export type Database = {
         }
         Returns: Json
       }
+      billing_convert_legacy_sms_credits: {
+        Args: { _apply?: boolean }
+        Returns: {
+          already_converted: number
+          amount: number
+          delta_credits: number
+          legacy_balance: number
+          skipped_reason: string | null
+          slug: string
+          tenant_id: string
+          unit_price: number
+        }[]
+      }
       billing_effective_price: {
         Args: { _at?: string; _item: string; _tenant: string }
         Returns: Json
