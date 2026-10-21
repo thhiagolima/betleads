@@ -16,6 +16,8 @@ import {
 
 import { HomeCard, KpiCard, MetricRow, TrendText } from "@/components/home/home-cards";
 import { PeriodPicker } from "@/components/home/period-picker";
+import { DomainVerifiedNotice } from "@/components/onboarding/domain-verified-notice";
+import { HouseSetupChecklist } from "@/components/onboarding/house-setup-checklist";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useActiveTenant } from "@/hooks/use-active-tenant";
@@ -393,6 +395,9 @@ function Dashboard() {
           }}
         />
       </header>
+
+      <DomainVerifiedNotice />
+      <HouseSetupChecklist />
 
       <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
         <KpiCard
