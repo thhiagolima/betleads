@@ -162,7 +162,10 @@ function CrmCard({ data }: { data: DashboardData }) {
           value={`${num(data.reactivationQueue)} · ${num(data.activeFlows)}/${num(data.totalFlows)} ativas`}
           to="/jornadas"
         />
-        <MetricRow label="Créditos de SMS" value={num(data.smsCredits)} />
+        <MetricRow
+          label="Saldo"
+          value={data.exempt ? "Isenta" : brl(data.walletBalance)}
+        />
       </div>
       <Button
         asChild
@@ -439,8 +442,8 @@ function Dashboard() {
 
       <p className="text-xs leading-relaxed text-muted-foreground">
         Recuperado pelo CRM considera depósitos feitos em até 7 dias depois de um clique humano em
-        link de campanha ou jornada, sem quem já estava ativo; gasto em SMS é o valor cobrado em
-        créditos. Datas no fuso de Brasília.
+        link de campanha ou jornada, sem quem já estava ativo; gasto em SMS é o preço por
+        segmento vezes os segmentos enviados. Datas no fuso de Brasília.
       </p>
     </div>
   );

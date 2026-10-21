@@ -35,10 +35,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { bulkDispatchCalls, listCallScripts } from "@/lib/calls.functions";
 import { tenantSafeChannelError } from "@/lib/channel-error";
 import { listEmailTemplates, saveEmailTemplate, sendTestEmail } from "@/lib/email.functions";
-import { previewTrackedText, smsPartsForLength } from "@/lib/link-tracking-preview";
+import { previewTrackedText } from "@/lib/link-tracking-preview";
 import { sendTestSms } from "@/lib/sms.functions";
 import { listSmsTemplates } from "@/lib/sms-templates.functions";
 import { listJourneyVoiceAssets } from "@/lib/journey-voice-assets.functions";
+import { getBillingPrices } from "@/lib/billing/billing.functions";
+import { countSmsSegments } from "@/lib/sms-segments";
+import { brl } from "@/lib/format";
 
 type Channel = "sms" | "email" | "voice";
 type VoiceDispatchSummary = {
@@ -74,6 +77,7 @@ export function IndividualSmsDialog({
   const listEmailTemplateFn = useServerFn(listEmailTemplates);
   const saveEmailTemplateFn = useServerFn(saveEmailTemplate);
   const listVoiceAssets = useServerFn(listJourneyVoiceAssets);
+  const getPrices = useServerFn(getBillingPrices);
   const queryClient = useQueryClient();
   const [channel, setChannel] = useState<Channel>("sms");
   const [phone, setPhone] = useState("");
@@ -94,11 +98,23 @@ export function IndividualSmsDialog({
   const messageRef = useRef<HTMLTextAreaElement>(null);
   const digits = phone.replace(/\D/g, "");
   const previewContent = previewTrackedText(message, trackLinks);
-  const parts = smsPartsForLength(previewContent.length);
   const preview = useMemo(
     () => previewTrackedText(renderMessage(message, name || "Cliente", digits), trackLinks),
     [message, name, digits, trackLinks],
   );
+  // Billing counts segments on the final rendered text (variables replaced,
+  // links shortened), never the raw template -- a {nome} like "João" or an
+  // emoji can push GSM-7 into UCS-2 and double the segment count.
+  const parts = countSmsSegments(preview).segments;
+  const pricesQuery = useQuery({
+    queryKey: ["billing-prices"],
+    queryFn: () => getPrices(),
+    enabled: open,
+    staleTime: 5 * 60_000,
+  });
+  const smsPrice = pricesQuery.data?.sms ?? null;
+  const smsExempt = smsPrice?.exempt ?? false;
+  const smsCost = smsPrice == null ? null : parts * smsPrice.unitPrice;
 
   const scripts = useQuery({
     queryKey: ["call-scripts", "individual"],
@@ -460,7 +476,10 @@ export function IndividualSmsDialog({
                 <Label>Mensagem</Label>
                 {channel === "sms" && (
                   <span className="text-xs text-muted-foreground">
-                    {previewContent.length} caracteres · {parts} parte{parts === 1 ? "" : "s"}
+                    {previewContent.length} caracteres · {parts} segmento{parts === 1 ? "" : "s"}
+                    {smsExempt
+                      ? " · casa isenta"
+                      : smsCost != null && ` · ${brl(smsCost)}`}
                   </span>
                 )}
               </div>
@@ -504,7 +523,9 @@ export function IndividualSmsDialog({
             {mutation.isPending
               ? "Enviando…"
               : channel === "sms"
-                ? `Enviar · ${parts} crédito${parts === 1 ? "" : "s"}`
+                ? smsExempt
+                  ? "Enviar"
+                  : `Enviar · ${smsCost == null ? `${parts} segmento${parts === 1 ? "" : "s"}` : brl(smsCost)}`
                 : "Enviar teste"}
           </Button>
         </DialogFooter>

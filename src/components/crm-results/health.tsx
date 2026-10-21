@@ -118,7 +118,7 @@ function HealthLine({ ok, label, value }: { ok: boolean; label: string; value: s
 
 const CHECK_LABELS: Record<string, string> = {
   sends: "Envios conferem com o registro de SMS",
-  cost: "Custo confere com os créditos cobrados",
+  cost: "Custo confere com o preço por segmento cobrado",
   direct: "Conversões por clique conferem com as atribuições",
 };
 

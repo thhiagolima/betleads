@@ -469,7 +469,7 @@ function SmsCompactWorkspace({
     return (
       <SmsChannelHealth
         configured={!!provider.data?.configured}
-        balance={exempt ? "Saldo isenta" : `Saldo ${brl(balance)}`}
+        balance={exempt ? "Casa isenta" : `Saldo ${brl(balance)}`}
         queue={queue}
         failed={num(failed)}
         metrics={kpis}
@@ -499,7 +499,7 @@ function SmsCompactWorkspace({
           <RotateCw className="mr-2 h-3.5 w-3.5" /> Atualizar
         </Button>
         <Button variant="outline" size="sm" onClick={() => window.location.assign("/creditos-sms")}>
-          <CreditCard className="mr-2 h-3.5 w-3.5" /> Saldo {exempt ? "isenta" : brl(balance)}
+          <CreditCard className="mr-2 h-3.5 w-3.5" /> {exempt ? "Casa isenta" : `Saldo ${brl(balance)}`}
         </Button>
       </div>
 
@@ -542,11 +542,11 @@ function SmsCompactWorkspace({
             </Card>
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Créditos</CardTitle>
+                <CardTitle className="text-base">Saldo</CardTitle>
               </CardHeader>
               <CardContent>
                 <Button variant="outline" asChild>
-                  <Link to="/creditos-sms">Saldo e recargas</Link>
+                  <Link to="/creditos-sms">Saldo e consumo</Link>
                 </Button>
               </CardContent>
             </Card>
@@ -1126,7 +1126,7 @@ function SmsHomePanel() {
           onClick={() => navigate({ to: "/creditos-sms" })}
         >
           <CreditCard className="h-4 w-4" />
-          Saldo {exempt ? "isenta" : brl(balance)}
+          {exempt ? "Casa isenta" : `Saldo ${brl(balance)}`}
         </Button>
       </div>
 
@@ -1392,7 +1392,7 @@ function SmsHomePanel() {
               <CardDescription>
                 {pendingCampaigns.length > 0
                   ? `${pendingCampaigns.length} campanha(s) precisam de atenção`
-                  : `nada parado · saldo ${exempt ? "isenta" : brl(balance)}`}
+                  : `nada parado · ${exempt ? "casa isenta" : `saldo ${brl(balance)}`}`}
               </CardDescription>
             </div>
             <div className="flex flex-wrap gap-2">

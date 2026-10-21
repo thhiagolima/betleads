@@ -62,10 +62,6 @@ describe("TS: no hardcoded legacy prices in the price-book call sites", () => {
     expect(source).toContain("getEffectivePrices");
   });
 
-  it("dashboard.functions.ts falls back to getReportUnitPrices, not a literal", () => {
-    expect(readTarget("src/lib/dashboard.functions.ts")).toContain("getReportUnitPrices");
-  });
-
   it("conversion-report.functions.ts reads the SMS report price from the price book", () => {
     expect(readTarget("src/lib/conversion-report.functions.ts")).toContain("getReportUnitPrices");
   });

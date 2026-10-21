@@ -44,7 +44,7 @@ function ConfigPage() {
             {
               role: "Superadmin global",
               access:
-                "Administra contas, administradores, créditos, status e diagnósticos globais.",
+                "Administra contas, administradores, saldo, status e diagnósticos globais.",
               limit: "Acesso reservado à operação da plataforma e registrado em auditoria.",
             },
           ].map((permission) => (
