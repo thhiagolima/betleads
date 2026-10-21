@@ -63,14 +63,16 @@ describe("renderDnsInstructionsEmail", () => {
     expect(result.html.toLowerCase()).toContain("e-mail");
   });
 
-  it("does not require mentioning e-mail for a shortener domain", () => {
+  it("does not mention e-mail for a shortener domain, but still shows its records", () => {
     const result = renderDnsInstructionsEmail({
       tenantName: "Casa X",
       hostname: "go.x.com",
       kind: "shortener",
-      records: [],
+      records: [{ type: "CNAME", name: "go", value: "cname.short.io", verified: null }],
     });
-    expect(result.subject).toBe("Registros DNS para go.x.com — Casa X");
+    expect(result.html).toContain("CNAME");
+    expect(result.html).toContain("cname.short.io");
+    expect(result.html.toLowerCase()).not.toContain("e-mail");
   });
 });
 

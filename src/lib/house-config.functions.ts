@@ -38,12 +38,25 @@ import { renderDnsInstructionsEmail, sendPlatformEmail } from "@/lib/platform-em
 
 /** Throws unless `row` exists and belongs to `tenantId`. Never leaks whether
  * the row exists for a different tenant — the message is the same either
- * way. */
+ * way. Does NOT reject a removed domain — `purgeHouseDomain` operates on
+ * already-removed rows by design; use `ensureActiveDomainOwnership` for every
+ * other action. */
 export function ensureDomainOwnership(
   row: { tenant_id: string } | null,
   tenantId: string,
 ): void {
   if (!row || row.tenant_id !== tenantId) {
+    throw new Error("Domínio não encontrado");
+  }
+}
+
+/** Same as `ensureDomainOwnership`, plus: a removed domain is treated as not
+ * found. Used by every action except `purgeHouseDomain`. */
+export function ensureActiveDomainOwnership(
+  row: { tenant_id: string; removed_at: string | null } | null,
+  tenantId: string,
+): void {
+  if (!row || row.tenant_id !== tenantId || row.removed_at !== null) {
     throw new Error("Domínio não encontrado");
   }
 }
@@ -59,6 +72,65 @@ export function ensureSenderOwnership(
 
 export function formatSenderLabel(fromName: string, fromEmail: string): string {
   return `${fromName} <${fromEmail}>`;
+}
+
+export type DomainStatusRow = { status: DomainStatus; removed_at: string | null };
+
+/** A domain counts as verified only while it's active — a removed domain,
+ * however its `status` column still reads, is never "verified" again. */
+export function isDomainVerified(domain: DomainStatusRow | undefined | null): boolean {
+  return !!domain && domain.status === "verified" && domain.removed_at === null;
+}
+
+export type SenderForProjection = {
+  id: string;
+  from_name: string | null;
+  from_email: string;
+  reply_to: string | null;
+  domain_id: string | null;
+  is_default: boolean;
+};
+
+/** `getHouseConfig`'s `senders` projection: every sender, each flagged with
+ * whether its domain is currently verified (never true for a removed
+ * domain). */
+export function projectHouseConfigSenders(
+  senders: SenderForProjection[],
+  domainById: Map<string, DomainStatusRow>,
+): {
+  id: string;
+  fromName: string;
+  fromEmail: string;
+  replyTo: string | null;
+  domainId: string | null;
+  isDefault: boolean;
+  domainVerified: boolean;
+}[] {
+  return senders.map((s) => ({
+    id: s.id,
+    fromName: s.from_name ?? "",
+    fromEmail: s.from_email,
+    replyTo: s.reply_to,
+    domainId: s.domain_id,
+    isDefault: s.is_default,
+    domainVerified: s.domain_id ? isDomainVerified(domainById.get(s.domain_id)) : false,
+  }));
+}
+
+/** `getComposerOptions`'s `senders`: only senders whose domain is currently
+ * verified (a removed domain disqualifies it, even if `status` still reads
+ * "verified"). */
+export function selectComposerSenders(
+  senders: SenderForProjection[],
+  domainById: Map<string, DomainStatusRow>,
+): { id: string; label: string; isDefault: boolean }[] {
+  return senders
+    .filter((s) => s.domain_id !== null && isDomainVerified(domainById.get(s.domain_id)))
+    .map((s) => ({
+      id: s.id,
+      label: formatSenderLabel(s.from_name ?? "", s.from_email),
+      isDefault: s.is_default,
+    }));
 }
 
 /** A tenant's custom shortener domain exists but none of it is verified yet —
@@ -106,23 +178,28 @@ const DNS_SEND_MAX_PER_WINDOW = 5;
 
 /**
  * Pure rate-limit check over an injected log (domainId -> send timestamps in
- * ms). Returns true and records `now` when the send is allowed; returns
- * false (without recording) once `domainId` already has
- * `DNS_SEND_MAX_PER_WINDOW` sends inside the last hour.
+ * ms). Returns true once `domainId` already has `DNS_SEND_MAX_PER_WINDOW`
+ * sends inside the rolling hour. Read-only (also prunes expired entries from
+ * `log` so it doesn't grow forever) — it never records a new attempt; call
+ * `recordDnsSend` for that, and only once the send actually succeeded.
  */
-export function recordAndCheckDnsSendRateLimit(
+export function isDnsSendRateLimited(
   log: Map<string, number[]>,
   domainId: string,
   now: number,
 ): boolean {
   const entries = (log.get(domainId) ?? []).filter((t) => now - t < DNS_SEND_WINDOW_MS);
-  if (entries.length >= DNS_SEND_MAX_PER_WINDOW) {
-    log.set(domainId, entries);
-    return false;
-  }
+  log.set(domainId, entries);
+  return entries.length >= DNS_SEND_MAX_PER_WINDOW;
+}
+
+/** Records one DNS-instructions send for `domainId` at `now`. Call only
+ * after the send has actually succeeded, so a failed send doesn't eat into
+ * the tenant's rate-limit budget. */
+export function recordDnsSend(log: Map<string, number[]>, domainId: string, now: number): void {
+  const entries = (log.get(domainId) ?? []).filter((t) => now - t < DNS_SEND_WINDOW_MS);
   entries.push(now);
   log.set(domainId, entries);
-  return true;
 }
 
 // Module-level log backing the real `sendDnsInstructions` server function.
@@ -179,26 +256,32 @@ async function fetchSenders(tenantId: string): Promise<SenderRow[]> {
   return (data ?? []) as SenderRow[];
 }
 
-async function fetchDomainStatusById(domainIds: string[]): Promise<Map<string, DomainStatus>> {
-  const map = new Map<string, DomainStatus>();
+async function fetchDomainStatusById(domainIds: string[]): Promise<Map<string, DomainStatusRow>> {
+  const map = new Map<string, DomainStatusRow>();
   if (domainIds.length === 0) return map;
   const { data, error } = await supabaseAdmin
     .from("tenant_domains")
-    .select("id,status")
+    .select("id,status,removed_at")
     .in("id", domainIds);
   if (error) throw new Error(error.message);
-  for (const row of (data ?? []) as { id: string; status: DomainStatus }[]) {
-    map.set(row.id, row.status);
+  for (const row of (data ?? []) as { id: string; status: DomainStatus; removed_at: string | null }[]) {
+    map.set(row.id, { status: row.status, removed_at: row.removed_at });
   }
   return map;
 }
 
-type DomainIdentityRow = { id: string; tenant_id: string; kind: DomainKind; hostname: string };
+type DomainIdentityRow = {
+  id: string;
+  tenant_id: string;
+  kind: DomainKind;
+  hostname: string;
+  removed_at: string | null;
+};
 
 async function fetchDomainIdentity(domainId: string): Promise<DomainIdentityRow | null> {
   const { data, error } = await supabaseAdmin
     .from("tenant_domains")
-    .select("id,tenant_id,kind,hostname")
+    .select("id,tenant_id,kind,hostname,removed_at")
     .eq("id", domainId)
     .maybeSingle();
   if (error) throw new Error(error.message);
@@ -208,7 +291,7 @@ async function fetchDomainIdentity(domainId: string): Promise<DomainIdentityRow 
 async function fetchDomainFull(domainId: string): Promise<(DomainIdentityRow & { dns_records: unknown }) | null> {
   const { data, error } = await supabaseAdmin
     .from("tenant_domains")
-    .select("id,tenant_id,kind,hostname,dns_records")
+    .select("id,tenant_id,kind,hostname,removed_at,dns_records")
     .eq("id", domainId)
     .maybeSingle();
   if (error) throw new Error(error.message);
@@ -268,15 +351,7 @@ export const getHouseConfig = createServerFn({ method: "GET" })
       url: siteUrl ? buildQuickLinkUrl(siteUrl, l.path) : l.path,
     }));
 
-    const senders = senderRows.map((s) => ({
-      id: s.id,
-      fromName: s.from_name ?? "",
-      fromEmail: s.from_email,
-      replyTo: s.reply_to,
-      domainId: s.domain_id,
-      isDefault: s.is_default,
-      domainVerified: s.domain_id ? statusById.get(s.domain_id) === "verified" : false,
-    }));
+    const senders = projectHouseConfigSenders(senderRows, statusById);
 
     return {
       tenantName: tenant.nome,
@@ -365,13 +440,7 @@ export const getComposerOptions = createServerFn({ method: "GET" })
       new Set(senderRows.map((s) => s.domain_id).filter((id): id is string => Boolean(id))),
     );
     const statusById = await fetchDomainStatusById(domainIds);
-    const senders = senderRows
-      .filter((s) => s.domain_id !== null && statusById.get(s.domain_id) === "verified")
-      .map((s) => ({
-        id: s.id,
-        label: formatSenderLabel(s.from_name ?? "", s.from_email),
-        isDefault: s.is_default,
-      }));
+    const senders = selectComposerSenders(senderRows, statusById);
 
     return { siteUrl, quickLinks, shortDomains, shortenerPending, senders };
   });
@@ -518,7 +587,7 @@ export const refreshHouseDomain = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const tenantId = await requireHouseAdmin(context);
     const identity = await fetchDomainIdentity(data.domainId);
-    ensureDomainOwnership(identity, tenantId);
+    ensureActiveDomainOwnership(identity, tenantId);
     return refreshTenantDomain(data.domainId, { requestVerify: true });
   });
 
@@ -563,9 +632,9 @@ export const sendDnsInstructions = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const tenantId = await requireHouseAdmin(context);
     const domain = await fetchDomainFull(data.domainId);
-    ensureDomainOwnership(domain, tenantId);
+    ensureActiveDomainOwnership(domain, tenantId);
 
-    if (!recordAndCheckDnsSendRateLimit(dnsSendLog, data.domainId, Date.now())) {
+    if (isDnsSendRateLimited(dnsSendLog, data.domainId, Date.now())) {
       throw new Error(DNS_SEND_RATE_LIMIT_MESSAGE);
     }
 
@@ -578,6 +647,8 @@ export const sendDnsInstructions = createServerFn({ method: "POST" })
     });
 
     await sendPlatformEmail({ to: data.to, subject, html });
+    // Only counts against the rate limit once the send actually succeeded.
+    recordDnsSend(dnsSendLog, data.domainId, Date.now());
     return { ok: true };
   });
 
@@ -603,7 +674,7 @@ export const saveEmailSenderForHouse = createServerFn({ method: "POST" })
     const tenantId = await requireHouseAdmin(context);
 
     const domain = await fetchDomainIdentity(data.domainId);
-    ensureDomainOwnership(domain, tenantId);
+    ensureActiveDomainOwnership(domain, tenantId);
     if (domain!.kind !== "email") {
       throw new Error("Selecione um domínio de e-mail da casa.");
     }
@@ -619,6 +690,9 @@ export const saveEmailSenderForHouse = createServerFn({ method: "POST" })
     }
 
     const fromEmail = `${data.localPart}@${domain!.hostname}`;
+    if (!z.string().email().safeParse(fromEmail).success) {
+      throw new Error("Não foi possível formar um e-mail de remetente válido com esse valor.");
+    }
     const isDefault = data.isDefault ?? false;
 
     const payload = {
@@ -647,12 +721,17 @@ export const saveEmailSenderForHouse = createServerFn({ method: "POST" })
     }
 
     if (isDefault) {
-      await supabaseAdmin
+      const { error: clearErr } = await supabaseAdmin
         .from("email_senders")
         .update({ is_default: false })
         .eq("tenant_id", tenantId)
         .neq("id", id);
-      await supabaseAdmin.from("email_senders").update({ is_default: true }).eq("id", id);
+      if (clearErr) throw new Error(clearErr.message);
+      const { error: setErr } = await supabaseAdmin
+        .from("email_senders")
+        .update({ is_default: true })
+        .eq("id", id);
+      if (setErr) throw new Error(setErr.message);
     }
 
     return { id };
