@@ -50,6 +50,8 @@ import {
   resolveCampaignRecipients,
   type CampaignDb,
 } from "./campaign-recipients.server";
+import { reserveUsage, refundUsage } from "./billing/wallet.server";
+import { countSmsSegments } from "./sms-segments";
 
 const DEFAULT_SHORT_BRASIL_SINGLE_URL = "http://lp01-short.painelsms.com/bot/single-sms.php";
 const DEFAULT_SHORT_BRASIL_BULK_URL = "http://lp01-short.painelsms.com/bot/bulk-sms.php";
@@ -465,28 +467,31 @@ async function logSend(row: {
   step_label?: string | null;
   flow_lead_id?: string | null;
   tenant_id?: string | null;
+  /** Units reserved from the wallet for this send (Task 6 adds the column). */
+  billed_units?: number | null;
 }) {
-  const { data, error } = await supabaseAdmin
-    .from("sms_send_logs")
-    .insert({
-      to_phone: row.to,
-      content: row.content,
-      status: row.status,
-      provider: "short-brasil",
-      provider_response: (row.provider_response ?? {}) as Json,
-      error: row.error,
-      idempotency_key: row.idempotency_key || null,
-      provider_message_id: row.provider_message_id ?? null,
-      delivery_status:
-        row.status === "sent" ? "sent" : row.status === "pending" ? "pending" : "failed",
-      player_id: row.player_id ?? null,
-      flow_id: row.flow_id ?? null,
-      trigger_name: row.trigger_name ?? null,
-      step_index: row.step_index ?? null,
-      step_label: row.step_label ?? null,
-      flow_lead_id: row.flow_lead_id ?? null,
-      ...(row.tenant_id ? { tenant_id: row.tenant_id } : {}),
-    })
+  // billed_units: column lands in Task 6; loose-typed insert until types.ts
+  // is regenerated (mirrors the cast pattern used elsewhere in this file).
+  const { data, error } = await (supabaseAdmin.from("sms_send_logs") as any).insert({
+    to_phone: row.to,
+    content: row.content,
+    status: row.status,
+    provider: "short-brasil",
+    provider_response: (row.provider_response ?? {}) as Json,
+    error: row.error,
+    idempotency_key: row.idempotency_key || null,
+    provider_message_id: row.provider_message_id ?? null,
+    delivery_status:
+      row.status === "sent" ? "sent" : row.status === "pending" ? "pending" : "failed",
+    player_id: row.player_id ?? null,
+    flow_id: row.flow_id ?? null,
+    trigger_name: row.trigger_name ?? null,
+    step_index: row.step_index ?? null,
+    step_label: row.step_label ?? null,
+    flow_lead_id: row.flow_lead_id ?? null,
+    ...(row.tenant_id ? { tenant_id: row.tenant_id } : {}),
+    ...(row.billed_units != null ? { billed_units: row.billed_units } : {}),
+  })
     .select("id")
     .single();
   if (error) {
@@ -573,18 +578,6 @@ export function summarizeProviderError(status: number, body: unknown): string {
   return `HTTP ${status} do provedor`;
 }
 
-type SmsCreditRpcResult<T = unknown> = {
-  data: T | null;
-  error: { message: string } | null;
-};
-type SmsCreditRpcClient = {
-  rpc: <T = unknown>(fn: string, args: Record<string, unknown>) => Promise<SmsCreditRpcResult<T>>;
-};
-
-function smsCreditDb() {
-  return supabaseAdmin as unknown as SmsCreditRpcClient;
-}
-
 async function resolveBillingTenantId(args: {
   tenantId?: string | null;
   playerId?: string | null;
@@ -606,40 +599,26 @@ async function resolveBillingTenantId(args: {
   return data?.tenant_id ?? null;
 }
 
-async function reserveSmsCredit(tenantId: string, referenceId: string) {
-  const { data, error } = await smsCreditDb().rpc("reserve_sms_credits", {
-    _tenant: tenantId,
-    _credits: 1,
-    _reference_type: "sms_send",
-    _reference_id: referenceId,
-    _idempotency_key: `sms-reserve:${referenceId}`,
+async function reserveSmsCredit(tenantId: string, referenceId: string, units: number) {
+  const reservation = await reserveUsage(supabaseAdmin, {
+    tenantId,
+    item: "sms",
+    units,
+    referenceType: "sms_send",
+    referenceId,
+    idempotencyKey: `sms-reserve:${referenceId}`,
   });
-  if (error) {
-    const message = String(error.message ?? "");
-    if (message.includes("insufficient_sms_credits")) {
-      return { ok: false as const, error: "Saldo de créditos SMS insuficiente" };
-    }
-    throw new Error(message);
-  }
-  return { ok: true as const, data };
+  if (!reservation.ok) return reservation;
+  return { ok: true as const, data: reservation };
 }
 
 export async function refundSmsCredit(tenantId: string, referenceId: string, reason: string) {
-  const { error } = await smsCreditDb().rpc("refund_sms_credits", {
-    _tenant: tenantId,
-    _credits: 1,
-    _reference_type: "sms_send",
-    _reference_id: referenceId,
-    _idempotency_key: `sms-refund:${referenceId}`,
-    _reason: reason,
+  await refundUsage(supabaseAdmin, {
+    tenantId,
+    referenceId,
+    idempotencyKey: `sms-refund:${referenceId}`,
+    reason,
   });
-  if (error) {
-    console.error("Failed to refund SMS credit", {
-      tenantId,
-      referenceId,
-      error: error.message,
-    });
-  }
 }
 
 /** Max refunded attempts of one delivery that still get a deterministic billing reference. */
@@ -657,7 +636,7 @@ export function smsBillingReference(deliveryKey: string, generation: number): st
 
 async function smsCreditWasRefunded(tenantId: string, referenceId: string): Promise<boolean> {
   const { data, error } = await (supabaseAdmin as any)
-    .from("sms_credit_ledger")
+    .from("wallet_ledger")
     .select("id")
     .eq("tenant_id", tenantId)
     .eq("idempotency_key", `sms-refund:${referenceId}`)
@@ -670,28 +649,35 @@ async function smsCreditWasRefunded(tenantId: string, referenceId: string): Prom
  * Reserves the credit for one send. Without a delivery key every call is a new
  * charge (campaigns, manual sends). With one, the reference is derived from it:
  * an existing, non-refunded reservation is reused instead of charging again.
+ *
+ * `segments` is the result of countSmsSegments(finalContent).segments; a
+ * non-empty send is always billed at least 1 unit (wallet_reserve rejects
+ * _units = 0 with invalid_units), so the caller's segment count is clamped
+ * to a 1-unit floor here.
  */
 export async function reserveSmsCreditForDelivery(
   tenantId: string,
   deliveryKey: string | null | undefined,
+  segments: number,
 ): Promise<{ ok: true; referenceId: string } | { ok: false; referenceId: string; error: string }> {
+  const units = Math.max(1, segments);
   if (!deliveryKey) {
     const referenceId = crypto.randomUUID();
-    const reservation = await reserveSmsCredit(tenantId, referenceId);
+    const reservation = await reserveSmsCredit(tenantId, referenceId, units);
     return reservation.ok
       ? { ok: true, referenceId }
       : { ok: false, referenceId, error: reservation.error };
   }
   for (let generation = 0; generation < SMS_BILLING_MAX_GENERATIONS; generation++) {
     const referenceId = smsBillingReference(deliveryKey, generation);
-    const reservation = await reserveSmsCredit(tenantId, referenceId);
+    const reservation = await reserveSmsCredit(tenantId, referenceId, units);
     if (!reservation.ok) return { ok: false, referenceId, error: reservation.error };
     const idempotent = (reservation.data as { idempotent?: boolean } | null)?.idempotent === true;
     if (!idempotent) return { ok: true, referenceId };
     if (!(await smsCreditWasRefunded(tenantId, referenceId))) return { ok: true, referenceId };
   }
   console.warn("SMS delivery exceeded deterministic billing generations", { deliveryKey });
-  return reserveSmsCreditForDelivery(tenantId, null);
+  return reserveSmsCreditForDelivery(tenantId, null, segments);
 }
 
 /** Log of a previous send of this delivery that the provider already accepted. */
@@ -833,8 +819,15 @@ export async function sendSmsInternal(args: {
   }
   let billingReferenceId: string = crypto.randomUUID();
   let creditReserved = false;
+  // Segments are counted on the FINAL content actually sent (after
+  // variables and link shortening), never the template or preview text.
+  const billedUnits = Math.max(1, countSmsSegments(preparedContent).segments);
   if (billingTenantId) {
-    const reservation = await reserveSmsCreditForDelivery(billingTenantId, args.deliveryKey);
+    const reservation = await reserveSmsCreditForDelivery(
+      billingTenantId,
+      args.deliveryKey,
+      billedUnits,
+    );
     billingReferenceId = reservation.referenceId;
     if (!reservation.ok) {
       await logSend({
@@ -914,6 +907,7 @@ export async function sendSmsInternal(args: {
     step_label: args.stepLabel,
     flow_lead_id: args.flowLeadId,
     tenant_id: billingTenantId ?? args.tenantId ?? null,
+    billed_units: creditReserved ? billedUnits : null,
   });
   if (messageLogId && trackedDispatchIds.length > 0) {
     const { error: dispatchLogError } = await (supabaseAdmin as any)

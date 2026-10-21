@@ -4,7 +4,7 @@
 // Runs the real senders and the real fail-closed guard
 // (assertTenantCanSendExternally) against an in-memory database and a mocked
 // fetch. For a demo tenant nothing may reach the network and nothing may be
-// recorded as sent (sms_send_logs, sms_credit_ledger, email_send_logs,
+// recorded as sent (sms_send_logs, wallet_ledger, email_send_logs,
 // link_dispatches). A normal tenant is the control: it reaches fetch.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createFakeDb, installCreditLedger } from "./sms-bulk.test-support";
@@ -51,7 +51,7 @@ const NORMAL = "00000000-0000-4000-8000-000000000001";
 const DEMO = "00000000-0000-4000-8000-000000000002";
 const SUSPENDED = "00000000-0000-4000-8000-000000000003";
 const PLAYER = "33333333-3333-4333-8333-000000000001";
-const GUARDED_TABLES = ["sms_send_logs", "sms_credit_ledger", "email_send_logs", "link_dispatches"];
+const GUARDED_TABLES = ["sms_send_logs", "wallet_ledger", "email_send_logs", "link_dispatches"];
 
 let fetchMock: ReturnType<typeof vi.fn>;
 
@@ -78,7 +78,7 @@ function installFetch() {
 /** Rows written (insert/upsert/update/rpc ledger) in the tables that mean "sent". */
 function guardedWrites() {
   const writes = fake.db.calls.filter((c) => GUARDED_TABLES.includes(c.table) && c.op !== "select");
-  const ledgerRows = fake.db.rows("sms_credit_ledger").length;
+  const ledgerRows = fake.db.rows("wallet_ledger").length;
   return { writes, ledgerRows };
 }
 
@@ -493,7 +493,7 @@ describe("transport guard: tenant flagged demo after the top-level check", () =>
     // once, then reserve with the same idempotency semantics.
     const ledger = installCreditLedger(fake.db);
     let flipped = false;
-    fake.db.onRpc("reserve_sms_credits", (args) => {
+    fake.db.onRpc("wallet_reserve", (args) => {
       if (!flipped) {
         flipped = true;
         fake.db.rows("tenants").find((t) => t.id === NORMAL)!.is_demo = true;
@@ -506,13 +506,17 @@ describe("transport guard: tenant flagged demo after the top-level check", () =>
         )
       )
         return { data: { ok: true, idempotent: true }, error: null };
+      const units = Number(args._units ?? 1);
+      const amount = -(units * 0.08);
       rows.push({
         tenant_id: args._tenant,
         idempotency_key: args._idempotency_key,
         reference_id: args._reference_id,
-        delta_credits: -1,
+        units,
+        amount,
+        entry_type: "usage_reservation",
       });
-      return { data: { ok: true, idempotent: false }, error: null };
+      return { data: { ok: true, idempotent: false, amount, exempt: false }, error: null };
     });
     return ledger;
   }

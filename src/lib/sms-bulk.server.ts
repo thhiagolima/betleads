@@ -61,6 +61,7 @@ import {
   summarizeProviderError,
   toShortBrasilCell,
 } from "./sms.functions";
+import { countSmsSegments } from "./sms-segments";
 
 /** Items per HTTP request. The provider accepts 5000; 500 limits the blast radius. */
 export const SMS_BULK_CHUNK_SIZE = 500;
@@ -149,6 +150,8 @@ type Prepared = {
   content: string;
   dispatchIds: string[];
   billingReferenceId: string | null;
+  /** Units reserved from the wallet (countSmsSegments(content).segments, min 1). */
+  billedUnits: number;
 };
 
 type LogRow = {
@@ -165,6 +168,8 @@ type LogRow = {
   player_id: string | null;
   trigger_name: string | null;
   tenant_id: string;
+  /** Units reserved from the wallet for this send; null when nothing was billed. */
+  billed_units?: number | null;
 };
 
 const db = () => supabaseAdmin as any; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -480,6 +485,7 @@ async function sendChunk(chunk: Prepared[]): Promise<{
           player_id: p.item.playerId,
           trigger_name: p.item.triggerName ?? null,
           tenant_id: p.item.tenantId,
+          billed_units: p.billedUnits,
         })),
         { onConflict: "id" },
       );
@@ -755,7 +761,13 @@ export async function sendSmsBatch(items: SmsBatchItem[]): Promise<SmsBatchResul
       const link = links[k];
       const content = link.ok ? link.content : c.item.content;
       const dispatchIds = link.ok ? link.links.map((l) => l.dispatchId) : [];
-      const reservation = await reserveSmsCreditForDelivery(c.item.tenantId, c.item.deliveryKey);
+      // Segments counted on the FINAL content (post-link), never the template text.
+      const billedUnits = Math.max(1, countSmsSegments(content).segments);
+      const reservation = await reserveSmsCreditForDelivery(
+        c.item.tenantId,
+        c.item.deliveryKey,
+        billedUnits,
+      );
       if (!reservation.ok) {
         outcomes[c.index] = {
           deliveryKey: c.item.deliveryKey,
@@ -792,6 +804,7 @@ export async function sendSmsBatch(items: SmsBatchItem[]): Promise<SmsBatchResul
         content,
         dispatchIds,
         billingReferenceId: reservation.referenceId,
+        billedUnits,
       });
     },
   );
@@ -825,6 +838,7 @@ export async function sendSmsBatch(items: SmsBatchItem[]): Promise<SmsBatchResul
             player_id: p.item.playerId,
             trigger_name: p.item.triggerName ?? null,
             tenant_id: p.item.tenantId,
+            billed_units: p.billedUnits,
           }),
         ),
       );
