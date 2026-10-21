@@ -191,7 +191,7 @@ export const ROUTE_META: Record<string, RouteMeta> = {
   "/jornadas/$journeyId/relatorio": { section: "Jornadas", title: "Relatório da jornada" },
   "/sms": { section: "Canais", title: "SMS" },
   "/sms/templates": { section: "Canais", title: "Templates de SMS" },
-  "/creditos-sms": { section: "Canais", title: "Créditos SMS" },
+  "/creditos-sms": { section: "Canais", title: "Saldo e consumo" },
   "/email": { section: "Canais", title: "Email" },
   "/ligacoes": { section: "Canais", title: "Voz" },
   "/whatsapp": { section: "Canais", title: "WhatsApp" },
