@@ -4,6 +4,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { resolveOperationalTenantId } from "./tenant-access.server";
+import { getReportUnitPrices } from "./billing/pricing.server";
 import {
   buildJourneyStepConversions,
   campaignFunnelPlayers,
@@ -1028,6 +1029,7 @@ export const getConversionReport = createServerFn({ method: "GET" })
       emailCampaignResult,
       journeyStepsResult,
       smsPrice,
+      smsBilledUnitsResult,
     ] = await Promise.all([
       selectAllPages<any>("link_dispatches", () =>
         db
@@ -1076,22 +1078,21 @@ export const getConversionReport = createServerFn({ method: "GET" })
         : Promise.resolve({ data: [], error: null }),
       // Same price the Central de Resultados uses as SMS cost.
       data.sourceType === "campaign"
-        ? Promise.all([
-            supabaseAdmin
-              .from("tenant_sms_pricing")
-              .select("sale_price_per_sms")
-              .eq("tenant_id", tenantId)
-              .maybeSingle(),
-            supabaseAdmin
-              .from("sms_credit_settings")
-              .select("default_sale_price_per_sms")
-              .maybeSingle(),
-          ]).then(([pricing, settings]) =>
-            Number(
-              pricing.data?.sale_price_per_sms ?? settings.data?.default_sale_price_per_sms ?? 0.12,
-            ),
-          )
+        ? getReportUnitPrices(tenantId).then((prices) => prices.sms)
         : Promise.resolve(null),
+      // Units actually billed (segments), not the row count: sum
+      // coalesce(billed_units, 1) of this campaign's accepted (status
+      // 'sent') messages. sms_send_logs has no campaign_id column; campaign
+      // rows are tagged by trigger_name (see the "campanha:" prefix check
+      // further down this file).
+      data.sourceType === "campaign"
+        ? supabaseAdmin
+            .from("sms_send_logs")
+            .select("billed_units")
+            .eq("tenant_id", tenantId)
+            .eq("trigger_name", `campanha:${data.sourceId}`)
+            .eq("status", "sent")
+        : Promise.resolve({ data: [], error: null }),
     ]);
     if (dispatchResult.error) throw new Error(dispatchResult.error.message);
     if (attributionResult.error) throw new Error(attributionResult.error.message);
@@ -1196,9 +1197,16 @@ export const getConversionReport = createServerFn({ method: "GET" })
       (item: any) => item.event_type === "deposit_approved" && item.classification === "direct",
     ).length;
     const funnel = campaignFunnelPlayers(allAttributions);
+    if (smsBilledUnitsResult.error) throw new Error(smsBilledUnitsResult.error.message);
+    const smsBilledUnits = (smsBilledUnitsResult.data ?? []).reduce(
+      (sum: number, row: { billed_units: number | null }) => sum + Number(row.billed_units ?? 1),
+      0,
+    );
     // Only SMS campaigns have a per-message price; e-mail stays without cost.
     const smsCost =
-      smsPrice !== null && smsCampaignResult.data ? Number((sent * smsPrice).toFixed(2)) : null;
+      smsPrice !== null && smsCampaignResult.data
+        ? Number((smsBilledUnits * smsPrice).toFixed(2))
+        : null;
     const depositors = new Set(
       attributions
         .filter(

@@ -64,6 +64,8 @@ import {
   cancelScheduledSmsCampaign,
 } from "@/lib/sms.functions";
 import { getFailedSmsBreakdown, resendFailedSms } from "@/lib/sms.functions";
+import { getBillingPrices } from "@/lib/billing.functions";
+import { countSmsSegments } from "@/lib/sms-segments";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import { DEMO_SEND_BLOCKED_TEXT } from "@/lib/demo-tenant";
@@ -287,10 +289,30 @@ function previewMensagem(msg: string, recipient = "João Silva") {
     .replaceAll("{link}", "bet.ly/x9k");
 }
 
-function smsCount(len: number) {
-  if (len === 0) return 0;
-  if (len <= 160) return 1;
-  return Math.ceil(len / 153);
+/**
+ * House-facing SMS unit price (PG1 Task 7): reads the price book through
+ * `getBillingPrices`, never a hard-coded literal. `null` while loading —
+ * callers must show "—", not a fallback price.
+ */
+function useSmsUnitPrice(): number | null {
+  const pricesFn = useServerFn(getBillingPrices);
+  const { data } = useQuery({
+    queryKey: ["billing-prices"],
+    queryFn: () => pricesFn(),
+    staleTime: 5 * 60_000,
+  });
+  return data?.sms.unitPrice ?? null;
+}
+
+function fmtBrl(value: number) {
+  return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+/** "{N} segmento(s) × R$ 0,08 = R$ X por jogador" — null unitPrice shows "—". */
+function smsSegmentCostLabel(segments: number, unitPrice: number | null) {
+  if (unitPrice == null) return `${segments} segmento${segments === 1 ? "" : "s"} × — por jogador`;
+  const total = segments * unitPrice;
+  return `${segments} segmento${segments === 1 ? "" : "s"} × ${fmtBrl(unitPrice)} = ${fmtBrl(total)} por jogador`;
 }
 
 function renderIndividualSmsTemplate(message: string, recipientName: string, phone: string) {
@@ -379,7 +401,9 @@ function SmsCompactWorkspace({
   const [message, setMessage] = useState("Oi {nome}, seu bônus está liberado. Acesse: suacasa.com");
   const [trackLinks, setTrackLinks] = useState(true);
   const [bulkMode, setBulkMode] = useState(false);
-  const parts = smsCount(message.length);
+  const smsUnitPrice = useSmsUnitPrice();
+  const preview = previewMensagem(message, recipientName.trim() || "Rafael");
+  const parts = countSmsSegments(preview).segments;
   const phoneDigits = phone.replace(/\D/g, "");
   const summary = (credits.data?.summary ?? {}) as Record<string, unknown>;
   const balance = readNumber(summary.balance_credits);
@@ -394,7 +418,6 @@ function SmsCompactWorkspace({
     ["agendada", "running", "processando", "enviando"].includes(campaign.status),
   ).length;
   const canSend = phoneDigits.length >= 10 && message.trim().length > 0 && balance >= parts;
-  const preview = previewMensagem(message, recipientName.trim() || "Rafael");
 
   const send = useMutation({
     mutationFn: () =>
@@ -590,6 +613,9 @@ function SmsCompactWorkspace({
                     {parts} crédito{parts === 1 ? "" : "s"}
                   </strong>
                 </div>
+                <p className="text-xs text-muted-foreground">
+                  {smsSegmentCostLabel(parts, smsUnitPrice)}
+                </p>
                 <DemoDisabledTooltip active={isDemo} text={DEMO_SEND_BLOCKED_TEXT}>
                   <Button
                     className="w-full"
@@ -1008,7 +1034,9 @@ function SmsHomePanel() {
   const [message, setMessage] = useState("Oi {nome}, seu bonus esta liberado. Acesse: suacasa.com");
   const [trackLinks, setTrackLinks] = useState(true);
 
-  const parts = smsCount(message.length);
+  const smsUnitPrice = useSmsUnitPrice();
+  const preview = previewMensagem(message, recipientName || "Rafael");
+  const parts = countSmsSegments(preview).segments;
   const phoneDigits = phone.replace(/\D/g, "");
   const canSend = phoneDigits.length >= 10 && message.trim().length > 0;
   const logsRows = ((logs.data?.logs ?? []) as SmsLogRow[]).slice(0, 10);
@@ -1211,6 +1239,9 @@ function SmsHomePanel() {
                 <p className="mt-2 text-xs text-muted-foreground">
                   160 caracteres por parte. Acima disso, cada parte consome um crédito.
                 </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {smsSegmentCostLabel(parts, smsUnitPrice)}
+                </p>
               </div>
 
               <div className="space-y-2">
@@ -1226,7 +1257,7 @@ function SmsHomePanel() {
                     <Smartphone className="h-4 w-4" />
                   </div>
                   <div className="rounded-2xl bg-muted px-4 py-3 text-sm text-muted-foreground">
-                    {previewMensagem(message, recipientName || "Rafael")}
+                    {preview}
                   </div>
                 </div>
               </div>
@@ -1322,7 +1353,7 @@ function SmsHomePanel() {
                           ? "campanha"
                           : (row.trigger_name ?? "manual")}
                       </TableCell>
-                      <TableCell>{smsCount((row.content ?? "").length)}</TableCell>
+                      <TableCell>{countSmsSegments(row.content ?? "").segments}</TableCell>
                       <TableCell className="text-right">
                         {smsStatusBadge(row.status, row.delivery_status)}
                       </TableCell>
@@ -2079,9 +2110,9 @@ function EnvioMassa() {
   }
 
   const chars = mensagem.length;
-  const qtdSms = smsCount(chars);
-  const custoUnit = 0.18;
-  const custoTotal = numeros.length * qtdSms * custoUnit;
+  const qtdSms = countSmsSegments(previewMensagem(mensagem)).segments;
+  const custoUnit = useSmsUnitPrice();
+  const custoTotal = custoUnit == null ? null : numeros.length * qtdSms * custoUnit;
 
   function inserirVar(v: string) {
     setMensagem((m) => m + v);
@@ -2403,6 +2434,9 @@ function EnvioMassa() {
                 <span>{chars} caracteres</span>
                 <span>{qtdSms} SMS por destinatário</span>
               </div>
+              <p className="text-xs text-muted-foreground">
+                {smsSegmentCostLabel(qtdSms, custoUnit)}
+              </p>
             </div>
 
             <div className="rounded-lg border border-border/60 bg-muted/30 p-3">
@@ -2436,10 +2470,7 @@ function EnvioMassa() {
             <Row label="SMS estimados" value={String(numeros.length * qtdSms)} />
             <Row
               label="Custo estimado"
-              value={custoTotal.toLocaleString("pt-BR", {
-                style: "currency",
-                currency: "BRL",
-              })}
+              value={custoTotal == null ? "—" : fmtBrl(custoTotal)}
             />
             <Separator />
             <div className="flex items-center justify-between">
@@ -2808,7 +2839,8 @@ function LegacyNewSmsCampaignDialog({
     },
     onError: (error: Error) => toast.error(error.message),
   });
-  const parts = smsCount(message.length);
+  const smsUnitPrice = useSmsUnitPrice();
+  const parts = countSmsSegments(previewMensagem(message)).segments;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[92vh] max-w-xl overflow-y-auto">
@@ -2884,6 +2916,9 @@ function LegacyNewSmsCampaignDialog({
               </span>
               <strong>{num(phones.length * parts)} créditos</strong>
             </div>
+            <p className="text-xs text-muted-foreground">
+              {smsSegmentCostLabel(parts, smsUnitPrice)}
+            </p>
           </div>
           <div className="space-y-2">
             <Label>Quando disparar</Label>

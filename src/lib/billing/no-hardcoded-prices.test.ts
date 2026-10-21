@@ -17,6 +17,8 @@
 // covered in Task 7; this file only exercises the SQL migration.
 
 import { PGlite } from "@electric-sql/pglite";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -27,6 +29,57 @@ import {
   SCHEMA,
   SEED,
 } from "./billing-db-test-support";
+
+// PG1 Task 7 — none of the call sites fixed by this task may keep a
+// hard-coded price literal: they all must read the price book through
+// getReportUnitPrices/getEffectivePrices (pricing.server.ts) instead.
+const TS_TARGET_FILES = [
+  "src/lib/journeys.functions.ts",
+  "src/lib/dashboard.functions.ts",
+  "src/lib/conversion-report.functions.ts",
+  "src/lib/sms.functions.ts",
+  "src/routes/sms.tsx",
+] as const;
+
+const FORBIDDEN_LITERALS = ["0.12", "0.18", "0.35", "* 0.01", "FALLBACK_SMS_UNIT_PRICE"] as const;
+
+function readTarget(relativePath: string): string {
+  return readFileSync(resolve(process.cwd(), relativePath), "utf8");
+}
+
+describe("TS: no hardcoded legacy prices in the price-book call sites", () => {
+  for (const file of TS_TARGET_FILES) {
+    for (const literal of FORBIDDEN_LITERALS) {
+      it(`${file} does not contain ${JSON.stringify(literal)}`, () => {
+        expect(readTarget(file)).not.toContain(literal);
+      });
+    }
+  }
+
+  it("journeys.functions.ts reads its journey/publication-estimate price from the price book helpers", () => {
+    const source = readTarget("src/lib/journeys.functions.ts");
+    expect(source).toContain("getReportUnitPrices");
+    expect(source).toContain("getEffectivePrices");
+  });
+
+  it("dashboard.functions.ts falls back to getReportUnitPrices, not a literal", () => {
+    expect(readTarget("src/lib/dashboard.functions.ts")).toContain("getReportUnitPrices");
+  });
+
+  it("conversion-report.functions.ts reads the SMS report price from the price book", () => {
+    expect(readTarget("src/lib/conversion-report.functions.ts")).toContain("getReportUnitPrices");
+  });
+
+  it("sms.functions.ts dashboard ROI reads the SMS report price from the price book", () => {
+    expect(readTarget("src/lib/sms.functions.ts")).toContain("getReportUnitPrices");
+  });
+
+  it("sms.tsx composer counts segments with countSmsSegments and prices via getBillingPrices", () => {
+    const source = readTarget("src/routes/sms.tsx");
+    expect(source).toContain("countSmsSegments");
+    expect(source).toContain("getBillingPrices");
+  });
+});
 
 const MIGRATION_PATH = "supabase/migrations/20261022100300_billing_prices_in_reports.sql";
 const MIGRATION_SQL = readMigration(MIGRATION_PATH);

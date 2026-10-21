@@ -14,6 +14,7 @@ import {
   resolveCurrentTenantId,
   resolveOperationalTenantId,
 } from "@/lib/tenant-access.server";
+import { getReportUnitPrices } from "./billing/pricing.server";
 import { buildPlayerVariables } from "./template-vars.server";
 import {
   markTrackedDispatchesFailed,
@@ -1550,6 +1551,7 @@ export const getSmsDashboard = createServerFn({ method: "POST" })
       created_at: string;
       player_id: string | null;
       to_phone: string | null;
+      billed_units: number | null;
     }> = [];
     {
       const PAGE = 1000;
@@ -1557,7 +1559,7 @@ export const getSmsDashboard = createServerFn({ method: "POST" })
       while (true) {
         const { data: chunk, error: logsErr } = await supabaseAdmin
           .from("sms_send_logs")
-          .select("id, status, delivery_status, created_at, player_id, to_phone")
+          .select("id, status, delivery_status, created_at, player_id, to_phone, billed_units")
           .eq("tenant_id", tenantId)
           .gte("created_at", sinceIso)
           .lte("created_at", endIso)
@@ -1664,6 +1666,7 @@ export const getSmsDashboard = createServerFn({ method: "POST" })
     };
 
     let sentTotal = 0;
+    let billedUnitsTotal = 0;
     let deliveredTotal = 0;
     let failedTotal = 0;
     let todaySent = 0;
@@ -1681,6 +1684,7 @@ export const getSmsDashboard = createServerFn({ method: "POST" })
       const isSent = r.status === "sent";
       if (isSent) {
         sentTotal++;
+        billedUnitsTotal += Number(r.billed_units ?? 1);
         b.enviados++;
         if (created >= todayStart) todaySent++;
         if (r.to_phone) {
@@ -1725,12 +1729,11 @@ export const getSmsDashboard = createServerFn({ method: "POST" })
       }
     }
 
-    // Same price the house pays per credit (and the Central uses as cost).
-    const { data: pricing } = await (supabaseAdmin as any).rpc("sms_effective_pricing", {
-      _tenant: tenantId,
-    });
-    const smsPrice = Number(pricing?.sale_price_per_sms) || 0.12;
-    const totalCost = sentTotal * smsPrice;
+    // Same report price the Central de Resultados uses as cost: segments
+    // actually billed (billed_units, defaulting legacy null rows to 1), not
+    // the row count.
+    const { sms: smsPrice } = await getReportUnitPrices(tenantId);
+    const totalCost = billedUnitsTotal * smsPrice;
     const roi_brl = Math.max(0, convertedRevenue - totalCost);
 
     const series = denseSeries(rangeDays, buckets, endDate);

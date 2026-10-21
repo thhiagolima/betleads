@@ -4,6 +4,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { brtDayEnd, brtDayStart } from "@/lib/tz";
 import { withServerResultCache } from "@/lib/server-result-cache";
 import { resolveOperationalTenantForRequest } from "@/lib/tenant-access.server";
+import { getReportUnitPrices } from "@/lib/billing/pricing.server";
 
 const inputSchema = z.object({
   tenantId: z.string().uuid(),
@@ -72,8 +73,6 @@ type DashboardDb = {
   from: <T = unknown>(table: string) => DashboardQuery<T>;
 };
 
-// Only used if the database does not return the charged cost (older RPC).
-const FALLBACK_SMS_UNIT_PRICE = 0.12;
 const DASHBOARD_REQUEST_TIMEOUT_MS = 25_000;
 
 /**
@@ -170,9 +169,12 @@ export const getDashboardSummary = createServerFn({ method: "POST" })
           const recoveredNew = number(value.recoveredNew);
           const recoveredReactivated = number(value.recoveredReactivated);
           const smsSent = number(value.smsSent);
+          // dashboard_summary_v2 doesn't return billed_units per send, only a
+          // count of sends, so when the RPC itself doesn't return the charged
+          // cost this fallback counts sends (not segments/credits).
           const messageCost =
             value.messageCost == null
-              ? smsSent * FALLBACK_SMS_UNIT_PRICE
+              ? smsSent * (await getReportUnitPrices(tenantId)).sms
               : number(value.messageCost);
 
           return {
