@@ -61,7 +61,21 @@ import {
 } from "@/lib/tenants.functions";
 import { adminAdjustSmsCredits } from "@/lib/sms-credits.functions";
 import { adminClearTenantPrice, adminSetTenantPrice } from "@/lib/billing/billing.functions";
-import { billingItemLabel, brl, brlUnitPrice, num, walletEntryTypeLabel } from "@/lib/format";
+import {
+  type BillingItem,
+  CurrentPricesCard,
+  MonthUsageCard,
+  type WalletMonthUsageRow,
+  type WalletPriceRow,
+} from "@/components/billing/wallet-usage-panels";
+import {
+  billingItemLabel,
+  brl,
+  brlUnitPrice,
+  ledgerAmountTone,
+  num,
+  walletEntryTypeLabel,
+} from "@/lib/format";
 import { requestConfirmation } from "@/components/system-dialog-host";
 import { MetricCard as DashboardMetricCard } from "@/components/ui-premium/metric-card";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
@@ -110,13 +124,8 @@ type TenantDetail = {
       lifetime_purchased?: number;
       lifetime_used?: number;
       exempt?: boolean;
-      month_usage?: Array<{
-        item: string;
-        units: number;
-        free_units_used: number;
-        billed_amount: number;
-      }>;
-      prices?: Record<string, { unit_price?: number; provider_unit_cost?: number }>;
+      month_usage?: WalletMonthUsageRow[];
+      prices?: Partial<Record<BillingItem, WalletPriceRow>>;
     };
     pricing: {
       item: "sms";
@@ -827,6 +836,13 @@ function CreditsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAdm
         </Card>
       </div>
 
+      <MonthUsageCard
+        monthUsage={detail.sms.summary.month_usage ?? []}
+        prices={detail.sms.summary.prices ?? {}}
+      />
+
+      <CurrentPricesCard prices={detail.sms.summary.prices ?? {}} />
+
       <div className="grid gap-4 xl:grid-cols-2">
         <Card>
           <CardHeader>
@@ -858,9 +874,7 @@ function CreditsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAdm
                     </TableCell>
                     <TableCell>{billingItemLabel(entry.item)}</TableCell>
                     <TableCell
-                      className={`text-right font-semibold ${
-                        Number(entry.amount) > 0 ? "text-emerald-400" : "text-red-300"
-                      }`}
+                      className={`text-right font-semibold ${ledgerAmountTone(Number(entry.amount))}`}
                     >
                       {Number(entry.amount) > 0 ? "+" : ""}
                       {brl(Number(entry.amount))}

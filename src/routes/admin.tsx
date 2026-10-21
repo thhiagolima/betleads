@@ -1,7 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { BILLING_ITEM_LABEL } from "@/lib/format";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -60,7 +61,11 @@ import {
   getPricing,
   setPricing,
 } from "@/lib/admin.functions";
-import { adminClearTenantPrice, adminSetTenantPrice } from "@/lib/billing/billing.functions";
+import {
+  adminClearTenantPrice,
+  adminSetTenantPrice,
+  getTenantEffectivePrice,
+} from "@/lib/billing/billing.functions";
 import { adminAdjustSmsCredits, adminSmsCreditConsole } from "@/lib/sms-credits.functions";
 import {
   Activity,
@@ -921,11 +926,28 @@ function AdjustWalletDialog({ tenant }: { tenant: WalletTenantRow }) {
 
 function TenantPriceDialog({ tenant }: { tenant: WalletTenantRow }) {
   const qc = useQueryClient();
+  const effectiveFn = useServerFn(getTenantEffectivePrice);
   const setFn = useServerFn(adminSetTenantPrice);
   const clearFn = useServerFn(adminClearTenantPrice);
   const [open, setOpen] = useState(false);
   const [item, setItem] = useState<"sms" | "voice_30s" | "email">("sms");
-  const [unitPrice, setUnitPrice] = useState("0.08");
+  const [unitPrice, setUnitPrice] = useState("");
+
+  const effective = useQuery({
+    queryKey: ["admin", "tenant-price", tenant.tenant_id, item],
+    queryFn: () => effectiveFn({ data: { tenantId: tenant.tenant_id, item } }),
+    enabled: open,
+  });
+
+  // Prefill with the item's CURRENT effective price whenever the dialog
+  // opens or the selected item changes — never a literal default (a
+  // previous bug always started at "0.08", which silently priced E-mail at
+  // R$ 0,08 if saved without editing it first).
+  useEffect(() => {
+    if (!open) return;
+    setUnitPrice(effective.data?.unitPrice != null ? String(effective.data.unitPrice) : "");
+  }, [open, item, effective.data?.unitPrice]);
+
   const save = useMutation({
     mutationFn: () =>
       setFn({ data: { tenantId: tenant.tenant_id, item, unitPrice: Number(unitPrice) } }),
@@ -933,6 +955,7 @@ function TenantPriceDialog({ tenant }: { tenant: WalletTenantRow }) {
       toast.success("Preço individual salvo");
       setOpen(false);
       qc.invalidateQueries({ queryKey: ["admin", "balance"] });
+      qc.invalidateQueries({ queryKey: ["admin", "tenant-price"] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -942,12 +965,23 @@ function TenantPriceDialog({ tenant }: { tenant: WalletTenantRow }) {
       toast.success("Preço individual removido");
       setOpen(false);
       qc.invalidateQueries({ queryKey: ["admin", "balance"] });
+      qc.invalidateQueries({ queryKey: ["admin", "tenant-price"] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const unitPriceValue = Number(unitPrice);
+  const unitPriceInvalid =
+    unitPrice.trim() === "" || !Number.isFinite(unitPriceValue) || unitPriceValue < 0;
+
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) setItem("sms");
+      }}
+    >
       <DialogTrigger asChild>
         <Button size="sm" variant="outline">
           Preço
@@ -982,17 +1016,22 @@ function TenantPriceDialog({ tenant }: { tenant: WalletTenantRow }) {
               min="0"
               step="0.0001"
               value={unitPrice}
+              disabled={effective.isLoading}
+              placeholder={effective.isLoading ? "Carregando…" : undefined}
               onChange={(e) => setUnitPrice(e.target.value)}
             />
           </div>
         </div>
         <DialogFooter>
-          {tenant.has_custom_pricing && (
+          {effective.data?.hasOverride && (
             <Button variant="outline" disabled={clear.isPending} onClick={() => clear.mutate()}>
               Voltar ao padrão
             </Button>
           )}
-          <Button disabled={save.isPending} onClick={() => save.mutate()}>
+          <Button
+            disabled={save.isPending || effective.isLoading || unitPriceInvalid}
+            onClick={() => save.mutate()}
+          >
             Salvar preço
           </Button>
         </DialogFooter>
@@ -1101,20 +1140,27 @@ type PriceBookRow = {
   free_monthly_units: number;
 };
 
-const PRICE_ITEM_LABEL: Record<PriceBookRow["item"], string> = {
-  sms: "SMS",
-  voice_30s: "Voz (bloco de 30s)",
-  email: "E-mail",
-};
-
 function PricingTab() {
   const qc = useQueryClient();
   const fn = useServerFn(getPricing);
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["admin", "pricing"],
     queryFn: () => fn(),
   });
   const items = (data?.pricing ?? []) as PriceBookRow[];
+
+  if (isError) {
+    return (
+      <Card className="max-w-2xl">
+        <CardContent className="flex flex-col items-start gap-3 py-8 text-sm text-muted-foreground">
+          Não foi possível carregar os preços agora.
+          <Button size="sm" variant="outline" onClick={() => refetch()}>
+            Tentar de novo
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <div className="space-y-3 max-w-2xl">
@@ -1159,7 +1205,7 @@ function PricingRow({ row, onSaved }: { row: PriceBookRow; onSaved: () => void }
   return (
     <Card>
       <CardContent className="grid gap-3 p-4 sm:grid-cols-[1fr_repeat(3,0.8fr)_auto] sm:items-end">
-        <div className="font-medium">{PRICE_ITEM_LABEL[row.item]}</div>
+        <div className="font-medium">{BILLING_ITEM_LABEL[row.item]}</div>
         <div className="space-y-1">
           <Label className="text-xs text-muted-foreground">Preço de venda (R$)</Label>
           <Input

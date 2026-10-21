@@ -18,6 +18,7 @@ export function SmsChannelHealth({
   onOpenHistory,
 }: {
   configured: boolean;
+  /** Fully formatted, e.g. "Saldo R$ 123,45" or "Saldo isenta" — no suffix is appended here. */
   balance: string;
   queue: number;
   /** Falhas em 30 dias, já formatado. Não há taxa de entrega: o provedor de SMS não confirma entrega. */
@@ -49,7 +50,7 @@ export function SmsChannelHealth({
           <Button size="sm" variant="outline" asChild>
             <Link to="/creditos-sms">
               <CreditCard className="mr-2 h-3.5 w-3.5" />
-              {balance} créditos
+              {balance}
             </Link>
           </Button>
         </div>

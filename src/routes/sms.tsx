@@ -64,7 +64,7 @@ import {
   cancelScheduledSmsCampaign,
 } from "@/lib/sms.functions";
 import { getFailedSmsBreakdown, resendFailedSms } from "@/lib/sms.functions";
-import { getBillingPrices } from "@/lib/billing.functions";
+import { getBillingPrices } from "@/lib/billing/billing.functions";
 import { countSmsSegments } from "@/lib/sms-segments";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
@@ -142,7 +142,7 @@ import {
   SYSTEM_SMS_AUDIENCES,
   type SmsAudienceCriteria,
 } from "@/lib/sms-audience-criteria";
-import { num } from "@/lib/format";
+import { brl, num } from "@/lib/format";
 import { SendWindowCard } from "@/components/send-window-card";
 import { fromBrtInput, toBrtInput } from "@/components/journeys/journey-editor-config";
 
@@ -405,8 +405,10 @@ function SmsCompactWorkspace({
   const preview = previewMensagem(message, recipientName.trim() || "Rafael");
   const parts = countSmsSegments(preview).segments;
   const phoneDigits = phone.replace(/\D/g, "");
-  const summary = (credits.data?.summary ?? {}) as Record<string, unknown>;
-  const balance = readNumber(summary.balance_credits);
+  const summary = (credits.data?.summary ?? {}) as { balance?: number; exempt?: boolean };
+  const balance = readNumber(summary.balance);
+  const exempt = Boolean(summary.exempt);
+  const estimatedCost = smsUnitPrice == null ? null : parts * smsUnitPrice;
   const totals = dashboard.data?.totals;
   const today = dashboard.data?.today;
   const sent = readNumber(totals?.sent);
@@ -417,7 +419,11 @@ function SmsCompactWorkspace({
   const queue = ((campaigns.data?.campaigns ?? []) as SmsCampaignRow[]).filter((campaign) =>
     ["agendada", "running", "processando", "enviando"].includes(campaign.status),
   ).length;
-  const canSend = phoneDigits.length >= 10 && message.trim().length > 0 && balance >= parts;
+  // Uma casa isenta nunca é bloqueada por saldo (não é debitada).
+  const canSend =
+    phoneDigits.length >= 10 &&
+    message.trim().length > 0 &&
+    (exempt || (estimatedCost != null && balance >= estimatedCost));
 
   const send = useMutation({
     mutationFn: () =>
@@ -441,7 +447,11 @@ function SmsCompactWorkspace({
   });
 
   const kpis = [
-    { label: "Créditos disponíveis", value: num(balance), hint: "1 crédito por parte de SMS" },
+    {
+      label: "Saldo disponível",
+      value: brl(balance),
+      hint: exempt ? "casa isenta" : "para envio de SMS",
+    },
     { label: "Fila", value: num(queue), hint: "campanhas aguardando" },
     {
       label: "Enviados hoje",
@@ -459,7 +469,7 @@ function SmsCompactWorkspace({
     return (
       <SmsChannelHealth
         configured={!!provider.data?.configured}
-        balance={num(balance)}
+        balance={exempt ? "Saldo isenta" : `Saldo ${brl(balance)}`}
         queue={queue}
         failed={num(failed)}
         metrics={kpis}
@@ -489,7 +499,7 @@ function SmsCompactWorkspace({
           <RotateCw className="mr-2 h-3.5 w-3.5" /> Atualizar
         </Button>
         <Button variant="outline" size="sm" onClick={() => window.location.assign("/creditos-sms")}>
-          <CreditCard className="mr-2 h-3.5 w-3.5" /> {num(balance)} créditos
+          <CreditCard className="mr-2 h-3.5 w-3.5" /> Saldo {exempt ? "isenta" : brl(balance)}
         </Button>
       </div>
 
@@ -610,7 +620,7 @@ function SmsCompactWorkspace({
                     {message.length} caracteres · {parts} parte{parts === 1 ? "" : "s"}
                   </span>
                   <strong>
-                    {parts} crédito{parts === 1 ? "" : "s"}
+                    {estimatedCost == null ? "—" : fmtBrl(estimatedCost)}
                   </strong>
                 </div>
                 <p className="text-xs text-muted-foreground">
@@ -624,7 +634,7 @@ function SmsCompactWorkspace({
                   >
                     {send.isPending
                       ? "Enviando…"
-                      : `Enviar · ${parts} crédito${parts === 1 ? "" : "s"}`}
+                      : `Enviar · ${estimatedCost == null ? "—" : fmtBrl(estimatedCost)}`}
                   </Button>
                 </DemoDisabledTooltip>
                 <p className="text-[11px] text-muted-foreground">
@@ -1038,7 +1048,6 @@ function SmsHomePanel() {
   const preview = previewMensagem(message, recipientName || "Rafael");
   const parts = countSmsSegments(preview).segments;
   const phoneDigits = phone.replace(/\D/g, "");
-  const canSend = phoneDigits.length >= 10 && message.trim().length > 0;
   const logsRows = ((logs.data?.logs ?? []) as SmsLogRow[]).slice(0, 10);
   const campaignRows = ((campaigns.data?.campaigns ?? []) as SmsCampaignRow[]).slice(0, 8);
   const totals = dashboard.data?.totals;
@@ -1047,9 +1056,20 @@ function SmsHomePanel() {
   const delivered = readNumber(totals?.delivered);
   const failed = readNumber(totals?.failed);
   const deliveryRate = sent30 > 0 ? Math.round((delivered / sent30) * 100) : 0;
-  const summary = (credits.data?.summary ?? {}) as Record<string, unknown>;
-  const balance = readNumber(summary.balance_credits);
-  const usedLifetime = readNumber(summary.lifetime_used_credits);
+  const summary = (credits.data?.summary ?? {}) as {
+    balance?: number;
+    exempt?: boolean;
+    lifetime_used?: number;
+  };
+  const balance = readNumber(summary.balance);
+  const exempt = Boolean(summary.exempt);
+  const usedLifetime = readNumber(summary.lifetime_used);
+  const estimatedCost = smsUnitPrice == null ? null : parts * smsUnitPrice;
+  // Uma casa isenta nunca é bloqueada por saldo (não é debitada).
+  const canSend =
+    phoneDigits.length >= 10 &&
+    message.trim().length > 0 &&
+    (exempt || (estimatedCost != null && balance >= estimatedCost));
   const pendingCampaigns = campaignRows.filter((c) =>
     ["agendada", "running", "processando"].includes(c.status),
   );
@@ -1106,16 +1126,16 @@ function SmsHomePanel() {
           onClick={() => navigate({ to: "/creditos-sms" })}
         >
           <CreditCard className="h-4 w-4" />
-          {num(balance)} créditos de SMS
+          Saldo {exempt ? "isenta" : brl(balance)}
         </Button>
       </div>
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         {[
           {
-            label: "Créditos disponíveis",
-            value: num(balance),
-            hint: `1 crédito por parte · ${num(usedLifetime)} consumidos`,
+            label: "Saldo disponível",
+            value: brl(balance),
+            hint: exempt ? "casa isenta" : `${brl(usedLifetime)} consumidos`,
             tone: "text-primary",
           },
           {
@@ -1226,9 +1246,7 @@ function SmsHomePanel() {
                   <span>
                     <strong>{message.length}</strong> caracteres · <strong>{parts}</strong> parte
                   </span>
-                  <strong>
-                    {parts} crédito{parts === 1 ? "" : "s"}
-                  </strong>
+                  <strong>{estimatedCost == null ? "—" : fmtBrl(estimatedCost)}</strong>
                 </div>
                 <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
                   <div
@@ -1237,7 +1255,7 @@ function SmsHomePanel() {
                   />
                 </div>
                 <p className="mt-2 text-xs text-muted-foreground">
-                  160 caracteres por parte. Acima disso, cada parte consome um crédito.
+                  160 caracteres por parte. Acima disso, cada parte é cobrada pelo preço vigente.
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   {smsSegmentCostLabel(parts, smsUnitPrice)}
@@ -1269,7 +1287,7 @@ function SmsHomePanel() {
               >
                 {sendManual.isPending
                   ? "Enviando..."
-                  : `Enviar · ${parts} crédito${parts === 1 ? "" : "s"}`}
+                  : `Enviar · ${estimatedCost == null ? "—" : fmtBrl(estimatedCost)}`}
               </Button>
               <p className="text-xs leading-relaxed text-muted-foreground">
                 Toda mensagem de divulgação precisa de opt-in e saída fácil. A resposta SAIR ainda
@@ -1374,7 +1392,7 @@ function SmsHomePanel() {
               <CardDescription>
                 {pendingCampaigns.length > 0
                   ? `${pendingCampaigns.length} campanha(s) precisam de atenção`
-                  : `nada parado · saldo ${num(balance)}`}
+                  : `nada parado · saldo ${exempt ? "isenta" : brl(balance)}`}
               </CardDescription>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -2914,7 +2932,9 @@ function LegacyNewSmsCampaignDialog({
               <span>
                 {message.length} caracteres · {parts} parte{parts === 1 ? "" : "s"}
               </span>
-              <strong>{num(phones.length * parts)} créditos</strong>
+              <strong>
+                {smsUnitPrice == null ? "—" : fmtBrl(phones.length * parts * smsUnitPrice)}
+              </strong>
             </div>
             <p className="text-xs text-muted-foreground">
               {smsSegmentCostLabel(parts, smsUnitPrice)}

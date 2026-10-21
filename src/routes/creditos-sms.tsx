@@ -4,7 +4,14 @@ import { useServerFn } from "@tanstack/react-start";
 import { History, ShieldCheck, Wallet } from "lucide-react";
 
 import { getSmsCreditPortal } from "@/lib/sms-credits.functions";
-import { billingItemLabel, brl, brlUnitPrice, num, walletEntryTypeLabel } from "@/lib/format";
+import { billingItemLabel, brl, ledgerAmountTone, num, walletEntryTypeLabel } from "@/lib/format";
+import {
+  type BillingItem,
+  CurrentPricesCard,
+  MonthUsageCard,
+  type WalletMonthUsageRow,
+  type WalletPriceRow,
+} from "@/components/billing/wallet-usage-panels";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import { DEMO_EMPTY_STATE_TEXT } from "@/lib/demo-tenant";
 import { Badge } from "@/components/ui/badge";
@@ -22,20 +29,6 @@ export const Route = createFileRoute("/creditos-sms")({
   component: SaldoConsumoPage,
 });
 
-type BillingItem = "sms" | "voice_30s" | "email";
-
-type PriceRow = {
-  unit_price?: number;
-  free_monthly_units?: number;
-};
-
-type MonthUsageRow = {
-  item: BillingItem;
-  units: number;
-  free_units_used: number;
-  billed_amount: number;
-};
-
 type LedgerRow = {
   id: string;
   entry_type: string;
@@ -47,12 +40,6 @@ type LedgerRow = {
   reference_type: string | null;
   reason: string | null;
   created_at: string;
-};
-
-const ITEM_LABEL: Record<BillingItem, string> = {
-  sms: "SMS",
-  voice_30s: "Voz",
-  email: "E-mail",
 };
 
 function fmtDate(value: string | null) {
@@ -94,15 +81,13 @@ function SaldoConsumoPage() {
     lifetime_purchased?: number;
     lifetime_used?: number;
     exempt?: boolean;
-    month_usage?: MonthUsageRow[];
-    prices?: Partial<Record<BillingItem, PriceRow>>;
+    month_usage?: WalletMonthUsageRow[];
+    prices?: Partial<Record<BillingItem, WalletPriceRow>>;
   };
   const ledger = (data.ledger ?? []) as LedgerRow[];
   const balance = Number(summary.balance ?? 0);
   const prices = summary.prices ?? {};
   const monthUsage = summary.month_usage ?? [];
-  const emailUsage = monthUsage.find((row) => row.item === "email");
-  const emailFree = Number(prices.email?.free_monthly_units ?? 0);
 
   return (
     <div className="space-y-6">
@@ -157,64 +142,9 @@ function SaldoConsumoPage() {
         </Card>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Consumo do mês</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-3 md:grid-cols-3">
-          {(["sms", "voice_30s", "email"] as BillingItem[]).map((item) => {
-            const usage = monthUsage.find((row) => row.item === item);
-            return (
-              <Card key={item} className="bg-background/40">
-                <CardContent className="p-4">
-                  <p className="text-sm text-muted-foreground">{ITEM_LABEL[item]}</p>
-                  <p className="mt-1 text-2xl font-bold">{num(Number(usage?.units ?? 0))}</p>
-                  {item === "email" && emailFree > 0 && (
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {num(Number(emailUsage?.free_units_used ?? 0))} de {num(emailFree)} grátis
-                    </p>
-                  )}
-                  <p className="mt-2 text-sm font-medium">
-                    {brl(Number(usage?.billed_amount ?? 0))} cobrados
-                  </p>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </CardContent>
-      </Card>
+      <MonthUsageCard monthUsage={monthUsage} prices={prices} />
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Preços vigentes</CardTitle>
-        </CardHeader>
-        <CardContent className="overflow-x-auto p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Canal</TableHead>
-                <TableHead className="text-right">Preço unitário</TableHead>
-                <TableHead className="text-right">Franquia mensal</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(["sms", "voice_30s", "email"] as BillingItem[]).map((item) => (
-                <TableRow key={item}>
-                  <TableCell>{ITEM_LABEL[item]}</TableCell>
-                  <TableCell className="text-right">
-                    {brlUnitPrice(prices[item]?.unit_price ?? 0)}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {Number(prices[item]?.free_monthly_units ?? 0) > 0
-                      ? num(Number(prices[item]?.free_monthly_units))
-                      : "-"}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+      <CurrentPricesCard prices={prices} />
 
       <Card>
         <CardHeader>
@@ -250,9 +180,7 @@ function SaldoConsumoPage() {
                     {entry.units == null ? "-" : num(Number(entry.units))}
                   </TableCell>
                   <TableCell
-                    className={`text-right font-medium ${
-                      Number(entry.amount) > 0 ? "text-emerald-400" : "text-red-400"
-                    }`}
+                    className={`text-right font-medium ${ledgerAmountTone(Number(entry.amount))}`}
                   >
                     {Number(entry.amount) > 0 ? "+" : ""}
                     {brl(Number(entry.amount))}
