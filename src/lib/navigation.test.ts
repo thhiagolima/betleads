@@ -74,7 +74,9 @@ describe("active nav item", () => {
   it("maps mobile tabs", () => {
     expect(activeMobileTab("/")).toBe("Início");
     expect(activeMobileTab("/players/1")).toBe("Jogadores");
-    expect(activeMobileTab("/jornadas")).toBe("Campanhas");
+    expect(activeMobileTab("/jornadas")).toBe("Ações");
+    expect(activeMobileTab("/campanhas")).toBe("Ações");
+    expect(activeMobileTab("/gamificacao")).toBe("Jogadores");
     expect(activeMobileTab("/sms")).toBeNull();
   });
 });
@@ -108,6 +110,16 @@ describe("visible sections", () => {
     const canais = visibleSections("gestor", false).find((section) => section.label === "Canais");
     const titles = canais?.items.map((item) => item.title) ?? [];
     expect(titles.indexOf("Consentimentos")).toBe(titles.indexOf("Voz") + 1);
+  });
+
+  it("keeps parked pages out of the menu", () => {
+    const titles = visibleSections("super_admin", true)
+      .flatMap((section) =>
+        section.items.flatMap((item) => (item.kind === "group" ? item.children : [item])),
+      )
+      .map((item) => item.title);
+    expect(titles).not.toContain("Oportunidades");
+    expect(titles).not.toContain("Experts");
   });
 
   it("hides IA while the role is unknown", () => {
