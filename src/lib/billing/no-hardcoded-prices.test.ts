@@ -98,6 +98,9 @@ const PRICE_BOOK_MIGRATION = readMigration(
   "supabase/migrations/20261022100000_billing_price_book.sql",
 );
 const WALLET_MIGRATION = readMigration("supabase/migrations/20261022100100_billing_wallet.sql");
+const COST_NULL_FIX_MIGRATION = readMigration(
+  "supabase/migrations/20261022100500_crm_results_cost_null_fix.sql",
+);
 
 // Minimal stubs of the tables/functions refresh_crm_results_day and
 // check_crm_results_day touch beyond what billing-db-test-support's
@@ -250,6 +253,7 @@ describe("check_crm_results_day and refresh_crm_results_day: price book + wallet
     await db.exec(WALLET_MIGRATION);
     await db.exec(REPORT_STUBS);
     await db.exec(MIGRATION_SQL);
+    await db.exec(COST_NULL_FIX_MIGRATION);
     await resetSession();
   }, 60_000);
 
@@ -500,6 +504,31 @@ describe("check_crm_results_day and refresh_crm_results_day: price book + wallet
       );
       expect(Number(rows[0].sent)).toBe(2);
       expect(Number(rows[0].cost)).toBeCloseTo(0.24, 4);
+    });
+  });
+
+  // Production cutover 21/10: a source group with only failed sends made
+  // `sum(...) filter (where is_sent)` null, and the not-null cost column
+  // aborted the whole tenant refresh (fixed in 20261022100500).
+  describe("refresh_crm_results_day: a group with only failed sends costs 0, not null", () => {
+    const tenant = "00000000-0000-4000-9000-000000000105";
+
+    it("refreshes the day and records cost 0 for the failed-only group", async () => {
+      await asSuperAdmin(async () => {
+        await db.query(
+          `insert into public.sms_send_logs (tenant_id, created_at, status, billed_units) values
+             ($1, (($2::date)::timestamp at time zone 'America/Sao_Paulo') + interval '10 hours', 'error', 1)`,
+          [tenant, DAY],
+        );
+        await db.query("select public.refresh_crm_results_day($1, $2::date)", [tenant, DAY]);
+      });
+      const { rows } = await db.query<{ failed: string; cost: string }>(
+        `select sum(failed)::text failed, sum(cost)::text cost
+         from public.crm_results_daily where tenant_id = $1 and metric_date = $2::date`,
+        [tenant, DAY],
+      );
+      expect(Number(rows[0].failed)).toBe(1);
+      expect(Number(rows[0].cost)).toBe(0);
     });
   });
 
