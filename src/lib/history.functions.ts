@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { dbUuid } from "@/lib/zod-helpers";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { assertCallerNotBillingLocked } from "@/lib/tenant-access.server";
 
 /**
  * Histórico unificado dos canais BETLEADS (WhatsApp, SMS, Email, Ligações).
@@ -29,7 +30,11 @@ export async function resolveTenantReadFilter(
     sb.rpc("current_tenant_id"),
   ]);
   if (superAdmin.error || current.error || superAdmin.data) return null;
-  return current.data ? String(current.data) : null;
+  if (!current.data) return null;
+  const tenantId = String(current.data);
+  // A house locked for the monthly fee is refused (the superadmin returned above).
+  await assertCallerNotBillingLocked(sb, tenantId, false);
+  return tenantId;
 }
 
 /** Adds `.eq("tenant_id", tenantId)` when a tenant filter applies (see resolveTenantReadFilter). */

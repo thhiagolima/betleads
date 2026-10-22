@@ -75,6 +75,15 @@ export function __resetDemoTenantCacheForTests() {
   tenantStatusCache = new Map();
 }
 
+/**
+ * Drops one tenant from the 5 s guard cache, so the next guard reads its
+ * status (and billing state) fresh — e.g. right after an invoice is settled,
+ * so the house unlocks at once in this process.
+ */
+export function invalidateTenantStatusCache(tenantId: string) {
+  tenantStatusCache.delete(tenantId);
+}
+
 async function getCachedTenantStatus(tenantId: string): Promise<TenantStatusRow | null> {
   const cached = tenantStatusCache.get(tenantId);
   if (cached && cached.expiresAt > Date.now()) return cached.tenant;
@@ -160,6 +169,19 @@ async function assertNotBillingLockedForCaller(
   if (!hasEffectiveBillingLock(tenant)) return;
   const isSuperAdmin = superAdmin ?? (await callerIsSuperAdmin(supabase));
   if (!isSuperAdmin) throw new TenantBillingLockedError();
+}
+
+/**
+ * The billing-lock half of `resolveCurrentTenantId`, for the few callers that
+ * must read `current_tenant_id` themselves (they tolerate a missing tenant or
+ * filter differently for the superadmin). `superAdmin` when already known.
+ */
+export async function assertCallerNotBillingLocked(
+  supabase: RpcClient,
+  tenantId: string,
+  superAdmin: boolean | null = null,
+) {
+  await assertNotBillingLockedForCaller(supabase, await getCachedTenantStatus(tenantId), superAdmin);
 }
 
 /**

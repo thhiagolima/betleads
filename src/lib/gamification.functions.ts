@@ -3,6 +3,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { invalidateServerResultCache, withServerResultCache } from "@/lib/server-result-cache";
 
 import { levelForTotal, type LevelSlug, type PaidLevelSlug } from "@/lib/player-level";
+import { resolveCurrentTenantId } from "@/lib/tenant-access.server";
 
 export type { LevelSlug, PaidLevelSlug };
 export type PlayerStatus = "active" | "cooling" | "sleeping" | "no_deposit";
@@ -93,25 +94,24 @@ export type DbPlayer = {
   email: string | null;
 };
 
+/** Body of `getGamificationData`, exported for tests. */
+export async function getGamificationDataFor(supabase: any): Promise<GamificationData> {
+  const tenantId = await resolveCurrentTenantId(supabase);
+  return readGamificationSnapshot(supabase, tenantId as string);
+}
+
 export const getGamificationData = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }): Promise<GamificationData> => {
-    const supabase = context.supabase as any;
-    const { data: tenantId, error: tenantError } = await supabase.rpc("current_tenant_id");
-    if (tenantError) throw new Error(tenantError.message);
-    if (!tenantId) throw new Error("Tenant atual nao encontrado.");
-    return readGamificationSnapshot(supabase, tenantId as string);
-  });
+  .handler(async ({ context }): Promise<GamificationData> =>
+    getGamificationDataFor(context.supabase as any),
+  );
 
 export const saveGamificationSettings = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) => normalizeSettingsInput(input))
   .handler(async ({ data, context }): Promise<GamificationData> => {
     const supabase = context.supabase as any;
-    const { data: tenantRow, error: tenantErr } = await supabase.rpc("current_tenant_id");
-    if (tenantErr) throw new Error(tenantErr.message);
-    const tenantId = tenantRow as string | null;
-    if (!tenantId) throw new Error("Tenant atual nao encontrado.");
+    const tenantId = await resolveCurrentTenantId(supabase);
 
     const { error } = await supabase.from("gamification_settings").upsert(
       {
@@ -161,9 +161,7 @@ export const searchGamificationRanking = createServerFn({ method: "POST" })
   .inputValidator((input: RankingSearchInput) => input ?? {})
   .handler(async ({ data, context }): Promise<RankingSearchResult> => {
     const supabase = context.supabase as any;
-    const { data: tenantId, error: tenantError } = await supabase.rpc("current_tenant_id");
-    if (tenantError) throw new Error(tenantError.message);
-    if (!tenantId) throw new Error("Tenant atual não encontrado.");
+    const tenantId = await resolveCurrentTenantId(supabase);
     const settings = await readSettings(supabase, tenantId as string);
 
     let q = supabase

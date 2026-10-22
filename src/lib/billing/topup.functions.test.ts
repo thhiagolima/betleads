@@ -141,7 +141,7 @@ describe("createCreditTopupFor", () => {
   ])("refuses a %s of the house", async (_role, userId) => {
     await expect(
       createCreditTopupFor(ctxFor(userId), { tenantId: TENANT, packageCode: "p1000" }),
-    ).rejects.toThrow("Só o admin da casa pode comprar créditos");
+    ).rejects.toThrow("Só o admin ou o gestor da casa pode comprar créditos.");
     expect(createUpperCharge).not.toHaveBeenCalled();
   });
 

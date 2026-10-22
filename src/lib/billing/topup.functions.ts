@@ -53,7 +53,7 @@ function looseDb(client: unknown) {
 const GENERIC_UPPER_FAILURE_MESSAGE =
   "Não foi possível gerar o Pix agora. Tente de novo em instantes.";
 const GATEWAY_UNAVAILABLE_MESSAGE = "Compra por Pix indisponível no momento.";
-const NOT_ADMIN_MESSAGE = "Só o admin da casa pode comprar créditos";
+const NOT_ADMIN_MESSAGE = "Só o admin ou o gestor da casa pode comprar créditos.";
 /** A house under an effective billing lock pays the monthly fee before buying credits. */
 export const BILLING_LOCKED_PURCHASE_MESSAGE = "Disponível depois de pagar a mensalidade";
 const EXEMPT_MESSAGE = "Esta casa é isenta e não precisa comprar créditos";

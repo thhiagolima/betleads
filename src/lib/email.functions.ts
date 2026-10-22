@@ -365,10 +365,7 @@ export const saveEmailSender = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertSuperAdmin(context.userId);
     const { supabase } = context;
-    const { data: tenantRow, error: tenantErr } = await supabase.rpc("current_tenant_id");
-    if (tenantErr) throw new Error(tenantErr.message);
-    const tenantId = tenantRow as string | null;
-    if (!tenantId) throw new Error("tenant não encontrado para o usuário");
+    const tenantId = await resolveCurrentTenantId(supabase);
     const payload: any = {
       name: data.name,
       from_email: data.fromEmail,
@@ -418,10 +415,7 @@ export const setDefaultEmailSender = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertSuperAdmin(context.userId);
     const { supabase } = context;
-    const { data: tenantRow, error: tenantErr } = await supabase.rpc("current_tenant_id");
-    if (tenantErr) throw new Error(tenantErr.message);
-    const tenantId = tenantRow as string | null;
-    if (!tenantId) throw new Error("tenant não encontrado para o usuário");
+    const tenantId = await resolveCurrentTenantId(supabase);
     await supabase
       .from("email_senders")
       .update({ is_default: false })
@@ -1239,10 +1233,7 @@ export const getEmailDashboard = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     // Resolve tenant do usuário autenticado — todas as queries do dashboard
     // DEVEM ser filtradas por tenant para não misturar dados de outros tenants.
-    const { data: tenantRow, error: tenantErr } = await context.supabase.rpc("current_tenant_id");
-    if (tenantErr) throw new Error(tenantErr.message);
-    const tenantId = tenantRow as string | null;
-    if (!tenantId) throw new Error("tenant não encontrado para o usuário");
+    const tenantId = await resolveCurrentTenantId(context.supabase);
     // Dias YYYY-MM-DD = calendário em Brasília (BRT), não em UTC.
     const { parseBrtDayStart, parseBrtDayEnd, brtDayStart, brtDayEnd } = await import("./tz");
     let sinceDate: Date;

@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { applyActiveWithin, applyInactiveAtLeast, applyInactivityWindow } from "./player-activity";
+import { resolveCurrentTenantId } from "@/lib/tenant-access.server";
 
 // Colunas usadas pela tabela /players. Mantenha em sincronia com o tipo Player no route.
 const COLS =
@@ -327,9 +328,7 @@ export const getPlayersPage = createServerFn({ method: "POST" })
       dateTo,
     } = data;
     const supabase = context.supabase;
-    const { data: tenantId, error: tenantError } = await (supabase as any).rpc("current_tenant_id");
-    if (tenantError) throw new Error(tenantError.message);
-    if (!tenantId) throw new Error("Tenant atual não encontrado.");
+    const tenantId = await resolveCurrentTenantId((supabase as any));
     const behaviorFilters = Array.from(
       new Set((rawBehaviorFilters ?? []).filter((value) => typeof value === "string" && value)),
     );
@@ -691,9 +690,7 @@ async function buildFilteredPlayersQuery(
     dateFrom,
     dateTo,
   } = data;
-  const { data: tenantId, error: tenantError } = await supabase.rpc("current_tenant_id");
-  if (tenantError) throw new Error(tenantError.message);
-  if (!tenantId) throw new Error("Tenant atual não encontrado.");
+  const tenantId = await resolveCurrentTenantId(supabase);
   const behaviorFilters = Array.from(
     new Set((rawBehaviorFilters ?? []).filter((value) => typeof value === "string" && value)),
   );

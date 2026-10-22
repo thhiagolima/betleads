@@ -21,6 +21,10 @@ import {
   recordChargeSnapshot,
 } from "./payment-charges.server";
 import { UpperError, type UpperCharge } from "./upper-pix.server";
+import {
+  __resetDemoTenantCacheForTests,
+  assertTenantNotDemoForSend,
+} from "@/lib/tenant-access.server";
 
 const TENANT = "00000000-0000-4000-8000-000000000001";
 
@@ -381,6 +385,48 @@ describe("confirmChargeFromUpper", () => {
     const result = await confirmChargeFromUpper("bl-top-order-1");
     expect(result).toEqual({ outcome: "credited" });
     expect(fake.admin.rows("payment_charges")[0].status).toBe("PAID");
+  });
+
+  describe("tenant-status cache after an invoice settle", () => {
+    beforeEach(() => {
+      __resetDemoTenantCacheForTests();
+      vi.stubEnv("BILLING_ENFORCEMENT_ENABLED", "true");
+      fake.admin.rows("tenants").push({
+        id: TENANT,
+        status: "active",
+        is_demo: false,
+        tenant_billing: { access_state: "locked_unpaid" },
+      });
+    });
+    afterEach(() => vi.unstubAllEnvs());
+
+    async function primeLockedCacheThenSettle(kind: string) {
+      // The guard caches the locked state for 5 s.
+      await expect(assertTenantNotDemoForSend(TENANT)).rejects.toMatchObject({
+        code: "BILLING_LOCKED",
+      });
+      // The SQL settle recomputes access_state (simulated here).
+      fake.admin.rows("tenants")[0].tenant_billing = { access_state: "ok" };
+      fake.admin.rows("payment_charges").push(
+        chargeRow({ kind, ref_id: "inv-1", external_id: "bl-inv-inv-1-1" }),
+      );
+      getUpperCharge.mockResolvedValue(
+        upperCharge({ status: "PAID", paidAmountCents: 50000, paidAt: new Date().toISOString() }),
+      );
+      expect(await confirmChargeFromUpper("bl-inv-inv-1-1")).toEqual({ outcome: "credited" });
+    }
+
+    it("a credited invoice drops the house from the cache: it unlocks at once", async () => {
+      await primeLockedCacheThenSettle("invoice");
+      await expect(assertTenantNotDemoForSend(TENANT)).resolves.toBeUndefined();
+    });
+
+    it("a credit top-up leaves the cache alone (still the cached state)", async () => {
+      await primeLockedCacheThenSettle("credit_topup");
+      await expect(assertTenantNotDemoForSend(TENANT)).rejects.toMatchObject({
+        code: "BILLING_LOCKED",
+      });
+    });
   });
 
   it("marks needs_review and does not call the RPC when the paid amount differs", async () => {
