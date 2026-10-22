@@ -93,3 +93,37 @@ export function topupDescription(tenantName: string, amountCents: number): strin
   const name = cut.trimEnd() || "Casa";
   return `${name}${suffix}`;
 }
+
+/** Upper statuses after which a Pix can no longer be paid. */
+const FINAL_TOPUP_STATUSES = new Set(["EXPIRED", "CANCELLED", "FAILED"]);
+
+export type TopupStatusSnapshot = { status: string; credited: boolean; needsReview?: boolean };
+
+export type TopupView = "credited" | "review" | "paid_confirming" | "expired" | "pay";
+
+/**
+ * Which screen the buy-credits dialog shows. Order matters: credited, then a
+ * review flag (needs a human), then PAID-not-yet-credited ("Pagamento
+ * recebido, confirmando…") — money received always beats "expired", even
+ * when the local countdown already hit zero — then expired, else the Pix.
+ */
+export function topupView(args: {
+  credited: boolean;
+  needsReview: boolean;
+  serverStatus: string | null;
+  localExpired: boolean;
+}): TopupView {
+  if (args.credited) return "credited";
+  if (args.needsReview) return "review";
+  if (args.serverStatus === "PAID") return "paid_confirming";
+  if (args.localExpired) return "expired";
+  if (args.serverStatus !== null && FINAL_TOPUP_STATUSES.has(args.serverStatus)) return "expired";
+  return "pay";
+}
+
+/** Keep polling (3 s) until credited, flagged for review, or a final unpaid status. */
+export function shouldPollTopupStatus(data: TopupStatusSnapshot | undefined): boolean {
+  if (!data) return true;
+  if (data.credited || data.needsReview) return false;
+  return !FINAL_TOPUP_STATUSES.has(data.status);
+}

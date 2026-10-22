@@ -54,14 +54,14 @@ describe("walletBalanceNotice", () => {
     );
   });
 
-  it("with canBuy, the text ends pointing to the Pix purchase on this page", () => {
+  it("with canBuy, the text ends pointing (page-neutral) to the Pix purchase in Saldo e consumo", () => {
     const empty = walletBalanceNotice({ balance: 0, exempt: false, smsUnitPrice: 0.08, canBuy: true });
     expect(empty?.text).toBe(
-      "Os envios de SMS estão bloqueados até entrar saldo. Compre créditos por Pix nesta página.",
+      "Os envios de SMS estão bloqueados até entrar saldo. Compre créditos por Pix em Saldo e consumo.",
     );
     const low = walletBalanceNotice({ balance: 50, exempt: false, smsUnitPrice: 0.08, canBuy: true });
     expect(low?.text).toBe(
-      "Quando o saldo acabar, os envios de SMS param. Compre créditos por Pix nesta página.",
+      "Quando o saldo acabar, os envios de SMS param. Compre créditos por Pix em Saldo e consumo.",
     );
   });
 });

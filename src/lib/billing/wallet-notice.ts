@@ -11,7 +11,10 @@ export type WalletNotice = { kind: "empty" | "low"; title: string; text: string 
 
 const SUPPORT_CLOSING_TEXT =
   "A compra por Pix chega em breve; enquanto isso, fale com o suporte para adicionar saldo.";
-const PIX_CLOSING_TEXT = "Compre créditos por Pix nesta página.";
+/** Page name the canBuy text points to; WalletBalanceNotice links it to /creditos-sms. */
+export const WALLET_PAGE_LINK_LABEL = "Saldo e consumo";
+/** Page-neutral: the notice also shows on the SMS pages, not only on Saldo e consumo. */
+const PIX_CLOSING_TEXT = `Compre créditos por Pix em ${WALLET_PAGE_LINK_LABEL}.`;
 
 export function walletBalanceNotice(args: {
   balance: number;

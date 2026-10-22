@@ -35,6 +35,7 @@ type DbResult<T = unknown> = { data: T | null; error: DbError | null };
 type LooseQuery<T = unknown> = PromiseLike<DbResult<T>> & {
   select: (columns?: string) => LooseQuery<T>;
   eq: (column: string, value: unknown) => LooseQuery<T>;
+  in: (column: string, values: unknown[]) => LooseQuery<T>;
   update: (value: Record<string, unknown>) => LooseQuery<T>;
   insert: (value: Record<string, unknown>) => LooseQuery<T>;
   maybeSingle: () => Promise<DbResult<T>>;
@@ -54,10 +55,39 @@ const GENERIC_UPPER_FAILURE_MESSAGE =
 const GATEWAY_UNAVAILABLE_MESSAGE = "Compra por Pix indisponível no momento.";
 const NOT_ADMIN_MESSAGE = "Só o admin da casa pode comprar créditos";
 const EXEMPT_MESSAGE = "Esta casa é isenta e não precisa comprar créditos";
+const TOO_MANY_OPEN_MESSAGE =
+  "Você já tem Pix em aberto. Pague ou aguarde expirar antes de gerar outro.";
+/** At most this many unexpired PENDING/ACTIVE Pix charges per house at once. */
+export const MAX_OPEN_TOPUP_CHARGES = 3;
 
 /** Shared `BILLING_GATEWAY_ENABLED` check, also read by `getSmsCreditPortal`'s `canBuy`. */
 export function isBillingGatewayEnabled(): boolean {
   return process.env.BILLING_GATEWAY_ENABLED === "true";
+}
+
+/** The Upper client can only work with an API key; checked before any row is written. */
+function isUpperConfigured(): boolean {
+  return Boolean(process.env.UPPER_API_KEY?.trim());
+}
+
+/**
+ * Per-house cap on Pix charges still payable (PENDING/ACTIVE and not past
+ * `expires_at`, or with no expiry recorded yet): each click creates a new
+ * order + charge, so without this a double-click loop could pile up
+ * charges at Upper.
+ */
+async function assertOpenChargesBelowCap(tenantId: string): Promise<void> {
+  const { data, error } = await looseDb(supabaseAdmin)
+    .from<Array<{ expires_at: string | null }>>("payment_charges")
+    .select("expires_at")
+    .eq("tenant_id", tenantId)
+    .in("status", ["PENDING", "ACTIVE"]);
+  if (error) logAndThrowGeneric("count open charges", error.message);
+  const nowMs = Date.now();
+  const open = (data ?? []).filter(
+    (row) => row.expires_at === null || new Date(row.expires_at).getTime() > nowMs,
+  ).length;
+  if (open >= MAX_OPEN_TOPUP_CHARGES) throw new Error(TOO_MANY_OPEN_MESSAGE);
 }
 
 async function isTenantExempt(tenantId: string): Promise<boolean> {
@@ -103,15 +133,18 @@ const createTopupInput = z
 
 /**
  * Body of `createCreditTopup`, exported for tests. Follows the order from
- * the task brief: gateway on, resolve the house, admin-only, not demo, not
- * exempt, billing open, resolve the amount, insert order+charge PENDING,
+ * the task brief: gateway on (and Upper configured), resolve the house,
+ * admin-only, not demo, not exempt, billing open, resolve the amount, under
+ * the open-Pix cap, insert order+charge PENDING,
  * ask Upper, snapshot the response, link the charge back onto the order.
  */
 export async function createCreditTopupFor(
   ctx: ServerContext,
   data: z.infer<typeof createTopupInput>,
 ) {
-  if (!isBillingGatewayEnabled()) throw new Error(GATEWAY_UNAVAILABLE_MESSAGE);
+  if (!isBillingGatewayEnabled() || !isUpperConfigured()) {
+    throw new Error(GATEWAY_UNAVAILABLE_MESSAGE);
+  }
 
   const tenantId = await resolveOperationalTenantForRequest(
     looseDb(ctx.supabase) as unknown as Parameters<typeof resolveOperationalTenantForRequest>[0],
@@ -139,6 +172,8 @@ export async function createCreditTopupFor(
     packageCode: data.packageCode,
     amountCents: data.amountCents,
   });
+
+  await assertOpenChargesBelowCap(tenantId);
 
   const { data: orderRow, error: orderError } = await looseDb(supabaseAdmin)
     .from("credit_topup_orders")
@@ -170,7 +205,17 @@ export async function createCreditTopupFor(
     })
     .select("id")
     .single();
-  if (chargeError || !chargeRow) throw new Error(GENERIC_UPPER_FAILURE_MESSAGE);
+  if (chargeError || !chargeRow) {
+    // Never leave the order we just created stuck 'pending' with no charge.
+    const { error: failOrderError } = await looseDb(supabaseAdmin)
+      .from("credit_topup_orders")
+      .update({ status: "failed" })
+      .eq("id", orderId);
+    if (failOrderError) {
+      console.error("[billing/topup] mark order failed failed:", failOrderError.message);
+    }
+    logAndThrowGeneric("insert charge", chargeError?.message ?? "no row returned");
+  }
 
   const chargeId = (chargeRow as { id: string }).id;
 
@@ -251,10 +296,13 @@ export async function getTopupStatusFor(
   data: z.infer<typeof getTopupStatusInput>,
 ) {
   const { data: row, error } = await looseDb(ctx.supabase)
-    .from<{ status: string; paid_at: string | null; credited_at: string | null }>(
-      "payment_charges",
-    )
-    .select("status,paid_at,credited_at")
+    .from<{
+      status: string;
+      paid_at: string | null;
+      credited_at: string | null;
+      needs_review: boolean | null;
+    }>("payment_charges")
+    .select("status,paid_at,credited_at,needs_review")
     .eq("id", data.chargeId)
     .maybeSingle();
   if (error) throw new Error(error.message);
@@ -264,6 +312,7 @@ export async function getTopupStatusFor(
     status: row.status,
     paidAt: row.paid_at,
     credited: row.credited_at !== null,
+    needsReview: row.needs_review === true,
   };
 }
 

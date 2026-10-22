@@ -16,21 +16,25 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { brl } from "@/lib/format";
 import { createCreditTopup, getTopupStatus } from "@/lib/billing/topup.functions";
-import { MAX_TOPUP_CENTS, MIN_TOPUP_CENTS, TOPUP_PACKAGES } from "@/lib/billing/topup";
+import {
+  MAX_TOPUP_CENTS,
+  MIN_TOPUP_CENTS,
+  shouldPollTopupStatus,
+  TOPUP_PACKAGES,
+  topupView,
+  type TopupStatusSnapshot,
+} from "@/lib/billing/topup";
 import { safeHttpsUrl, safePixImageSrc } from "@/lib/billing/pix-display";
-
-/** Statuses that stop the 3s poll (brief, ruling 2): credited, or any final Upper status. */
-const FINAL_STATUSES = new Set(["EXPIRED", "CANCELLED", "FAILED"]);
 
 type TopupResult = {
   orderId: string;
   chargeId: string;
   status: string;
   amountCents: number;
-  emv: string;
-  qrCodeImage: string;
-  paymentUrl: string;
-  expiresAt: string;
+  emv: string | null;
+  qrCodeImage: string | null;
+  paymentUrl: string | null;
+  expiresAt: string | null;
 };
 
 function formatCountdown(seconds: number) {
@@ -83,7 +87,8 @@ export function BuyCreditsDialog({
   // Countdown to `expiresAt`, ticking every second (ruling 3). At 0 the
   // dialog shows "Este Pix expirou" even before the server confirms EXPIRED.
   useEffect(() => {
-    if (!charge) {
+    if (!charge?.expiresAt) {
+      // No expiry from Upper: no countdown, and never "expired" locally.
       setSecondsLeft(null);
       return;
     }
@@ -107,16 +112,21 @@ export function BuyCreditsDialog({
     queryFn: () => getStatusFn({ data: { chargeId: charge!.chargeId } }),
     enabled: open && !!charge,
     refetchInterval: (query) => {
-      const data = query.state.data as { status: string; credited: boolean } | undefined;
-      if (!data) return 3000;
-      if (data.credited || FINAL_STATUSES.has(data.status)) return false;
-      return 3000;
+      // PAID but not credited yet keeps polling ("confirmando…"); credited,
+      // a review flag (needs a human) or a final unpaid status stop it.
+      const data = query.state.data as TopupStatusSnapshot | undefined;
+      return shouldPollTopupStatus(data) ? 3000 : false;
     },
   });
 
-  const credited = status.data?.credited === true;
-  const serverStatus = status.data?.status ?? charge?.status ?? null;
-  const expired = localExpired || (serverStatus != null && FINAL_STATUSES.has(serverStatus));
+  const statusData = status.data as TopupStatusSnapshot | undefined;
+  const credited = statusData?.credited === true;
+  const view = topupView({
+    credited,
+    needsReview: statusData?.needsReview === true,
+    serverStatus: statusData?.status ?? charge?.status ?? null,
+    localExpired,
+  });
 
   useEffect(() => {
     if (credited) {
@@ -130,7 +140,7 @@ export function BuyCreditsDialog({
   };
 
   const copyPix = async () => {
-    if (!charge) return;
+    if (!charge?.emv) return;
     try {
       await navigator.clipboard.writeText(charge.emv);
       toast.success("Código Pix copiado");
@@ -205,7 +215,7 @@ export function BuyCreditsDialog({
               Gerar Pix
             </Button>
           </>
-        ) : credited ? (
+        ) : view === "credited" ? (
           <>
             <DialogHeader>
               <DialogTitle>Pagamento confirmado</DialogTitle>
@@ -220,7 +230,35 @@ export function BuyCreditsDialog({
               Fechar
             </Button>
           </>
-        ) : expired ? (
+        ) : view === "review" ? (
+          <>
+            <DialogHeader>
+              <DialogTitle>Pagamento em análise</DialogTitle>
+              <DialogDescription className="sr-only">
+                O pagamento precisa ser conferido pela equipe antes de entrar no saldo.
+              </DialogDescription>
+            </DialogHeader>
+            <p className="text-sm text-muted-foreground">
+              Pagamento em análise. Fale com o suporte.
+            </p>
+            <Button type="button" className="w-full" onClick={() => handleOpenChange(false)}>
+              Fechar
+            </Button>
+          </>
+        ) : view === "paid_confirming" ? (
+          <>
+            <DialogHeader>
+              <DialogTitle>Pagamento recebido</DialogTitle>
+              <DialogDescription className="sr-only">
+                O Pix foi pago; o saldo é atualizado assim que a confirmação terminar.
+              </DialogDescription>
+            </DialogHeader>
+            <p className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Pagamento recebido, confirmando…
+            </p>
+          </>
+        ) : view === "expired" ? (
           <>
             <DialogHeader>
               <DialogTitle>Este Pix expirou</DialogTitle>
@@ -241,8 +279,8 @@ export function BuyCreditsDialog({
                 <DialogHeader>
                   <DialogTitle>Pague com Pix</DialogTitle>
                   <DialogDescription>
-                    {brl(charge.amountCents / 100)} — expira em{" "}
-                    {formatCountdown(secondsLeft ?? 0)}
+                    {brl(charge.amountCents / 100)}
+                    {secondsLeft !== null && <> — expira em {formatCountdown(secondsLeft)}</>}
                   </DialogDescription>
                 </DialogHeader>
                 {qrSrc && (
@@ -254,26 +292,28 @@ export function BuyCreditsDialog({
                     />
                   </div>
                 )}
-                <div className="space-y-2">
-                  <Label htmlFor="buy-credits-emv">Pix Copia e Cola</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      id="buy-credits-emv"
-                      readOnly
-                      value={charge.emv}
-                      className="font-mono text-xs"
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      aria-label="Copiar código Pix"
-                      onClick={copyPix}
-                    >
-                      <Copy className="h-4 w-4" />
-                    </Button>
+                {charge.emv && (
+                  <div className="space-y-2">
+                    <Label htmlFor="buy-credits-emv">Pix Copia e Cola</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        id="buy-credits-emv"
+                        readOnly
+                        value={charge.emv}
+                        className="font-mono text-xs"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        aria-label="Copiar código Pix"
+                        onClick={copyPix}
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
-                </div>
+                )}
                 {paymentHref && (
                   <a
                     href={paymentHref}

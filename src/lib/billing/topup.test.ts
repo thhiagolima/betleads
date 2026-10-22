@@ -4,7 +4,9 @@ import {
   MAX_TOPUP_CENTS,
   MIN_TOPUP_CENTS,
   resolveTopupAmount,
+  shouldPollTopupStatus,
   topupDescription,
+  topupView,
 } from "./topup";
 
 describe("resolveTopupAmount", () => {
@@ -79,5 +81,56 @@ describe("topupDescription", () => {
 
   it("falls back to 'Casa' for a house name that is only whitespace after the cut", () => {
     expect(topupDescription("   ", 100000)).toBe("Casa - Créditos BetLeads R$ 1.000,00");
+  });
+});
+
+describe("topupView (buy-credits dialog screen)", () => {
+  const base = { credited: false, needsReview: false, serverStatus: "ACTIVE", localExpired: false };
+
+  it("shows the Pix while ACTIVE and not expired", () => {
+    expect(topupView(base)).toBe("pay");
+  });
+
+  it("credited wins over everything", () => {
+    expect(topupView({ ...base, credited: true, needsReview: true, serverStatus: "PAID" })).toBe(
+      "credited",
+    );
+  });
+
+  it("needs review (stop polling, talk to support) before PAID or expired", () => {
+    expect(topupView({ ...base, needsReview: true, serverStatus: "PAID" })).toBe("review");
+    expect(topupView({ ...base, needsReview: true, localExpired: true })).toBe("review");
+  });
+
+  it("PAID not credited shows 'confirmando' even after the local countdown hit zero", () => {
+    expect(topupView({ ...base, serverStatus: "PAID" })).toBe("paid_confirming");
+    expect(topupView({ ...base, serverStatus: "PAID", localExpired: true })).toBe(
+      "paid_confirming",
+    );
+  });
+
+  it("expired locally or by a final Upper status", () => {
+    expect(topupView({ ...base, localExpired: true })).toBe("expired");
+    for (const status of ["EXPIRED", "CANCELLED", "FAILED"]) {
+      expect(topupView({ ...base, serverStatus: status })).toBe("expired");
+    }
+  });
+});
+
+describe("shouldPollTopupStatus", () => {
+  it("polls before the first answer and while PENDING/ACTIVE/PAID-not-credited", () => {
+    expect(shouldPollTopupStatus(undefined)).toBe(true);
+    expect(shouldPollTopupStatus({ status: "ACTIVE", credited: false })).toBe(true);
+    expect(shouldPollTopupStatus({ status: "PAID", credited: false, needsReview: false })).toBe(
+      true,
+    );
+  });
+
+  it("stops when credited, flagged for review, or on a final unpaid status", () => {
+    expect(shouldPollTopupStatus({ status: "PAID", credited: true })).toBe(false);
+    expect(shouldPollTopupStatus({ status: "PAID", credited: false, needsReview: true })).toBe(
+      false,
+    );
+    expect(shouldPollTopupStatus({ status: "EXPIRED", credited: false })).toBe(false);
   });
 });

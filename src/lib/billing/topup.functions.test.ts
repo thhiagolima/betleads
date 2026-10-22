@@ -61,6 +61,7 @@ function upperChargeResult(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   process.env.BILLING_GATEWAY_ENABLED = "true";
+  process.env.UPPER_API_KEY = "test-upper-key";
 
   fake.admin.reset();
   __resetDemoTenantCacheForTests();
@@ -83,6 +84,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   delete process.env.BILLING_GATEWAY_ENABLED;
+  delete process.env.UPPER_API_KEY;
 });
 
 describe("createCreditTopupFor", () => {
@@ -92,6 +94,16 @@ describe("createCreditTopupFor", () => {
       createCreditTopupFor(ctxFor(ADMIN_USER), { tenantId: TENANT, packageCode: "p1000" }),
     ).rejects.toThrow("Compra por Pix indisponível no momento.");
     expect(createUpperCharge).not.toHaveBeenCalled();
+  });
+
+  it("refuses with the unavailable message, before writing anything, when UPPER_API_KEY is missing", async () => {
+    process.env.UPPER_API_KEY = "  ";
+    await expect(
+      createCreditTopupFor(ctxFor(ADMIN_USER), { tenantId: TENANT, packageCode: "p1000" }),
+    ).rejects.toThrow("Compra por Pix indisponível no momento.");
+    expect(createUpperCharge).not.toHaveBeenCalled();
+    expect(fake.admin.rows("credit_topup_orders")).toHaveLength(0);
+    expect(fake.admin.rows("payment_charges")).toHaveLength(0);
   });
 
   it("refuses a non-admin (gestor) caller", async () => {
@@ -231,6 +243,65 @@ describe("createCreditTopupFor", () => {
     expect(JSON.stringify(charge.last_error)).not.toContain("502.");
   });
 
+  it("marks the just-created order failed when the charge insert fails, never calling Upper", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    fake.admin.failNext("payment_charges", "insert", "db down");
+
+    await expect(
+      createCreditTopupFor(ctxFor(ADMIN_USER), { tenantId: TENANT, packageCode: "p1000" }),
+    ).rejects.toThrow("Não foi possível gerar o Pix agora. Tente de novo em instantes.");
+
+    expect(fake.admin.rows("payment_charges")).toHaveLength(0);
+    expect(fake.admin.rows("credit_topup_orders")).toHaveLength(1);
+    expect(fake.admin.rows("credit_topup_orders")[0].status).toBe("failed");
+    expect(createUpperCharge).not.toHaveBeenCalled();
+  });
+
+  describe("open Pix cap (3 per house)", () => {
+    const FUTURE = "2999-01-01T00:00:00Z";
+    const PAST = "2000-01-01T00:00:00Z";
+
+    function seedCharge(overrides: Record<string, unknown>) {
+      fake.admin.rows("payment_charges").push({
+        tenant_id: TENANT,
+        status: "ACTIVE",
+        expires_at: FUTURE,
+        ...overrides,
+      });
+    }
+
+    it("refuses a 4th purchase while 3 unexpired PENDING/ACTIVE charges are open", async () => {
+      seedCharge({ id: "open-1", status: "ACTIVE" });
+      seedCharge({ id: "open-2", status: "PENDING", expires_at: null });
+      seedCharge({ id: "open-3", status: "ACTIVE" });
+
+      await expect(
+        createCreditTopupFor(ctxFor(ADMIN_USER), { tenantId: TENANT, packageCode: "p1000" }),
+      ).rejects.toThrow(
+        "Você já tem Pix em aberto. Pague ou aguarde expirar antes de gerar outro.",
+      );
+      expect(createUpperCharge).not.toHaveBeenCalled();
+      expect(fake.admin.rows("credit_topup_orders")).toHaveLength(0);
+      expect(fake.admin.rows("payment_charges")).toHaveLength(3);
+    });
+
+    it("does not count expired-by-time, terminal, paid or other houses' charges", async () => {
+      seedCharge({ id: "open-1", status: "ACTIVE" });
+      seedCharge({ id: "open-2", status: "PENDING", expires_at: null });
+      seedCharge({ id: "stale", status: "ACTIVE", expires_at: PAST });
+      seedCharge({ id: "expired", status: "EXPIRED" });
+      seedCharge({ id: "paid", status: "PAID" });
+      seedCharge({ id: "other", status: "ACTIVE", tenant_id: OTHER_TENANT });
+
+      const result = await createCreditTopupFor(ctxFor(ADMIN_USER), {
+        tenantId: TENANT,
+        packageCode: "p1000",
+      });
+      expect(result.chargeId).toBeTruthy();
+      expect(createUpperCharge).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it("maps NOT_CONFIGURED/FEATURE_DISABLED Upper errors to the unavailable message", async () => {
     createUpperCharge.mockRejectedValue(
       new UpperError("Upper não configurado.", {
@@ -261,6 +332,26 @@ describe("getTopupStatusFor", () => {
       status: "PAID",
       paidAt: "2026-10-22T12:00:00Z",
       credited: true,
+      needsReview: false,
+    });
+  });
+
+  it("returns needsReview:true for a PAID charge flagged for review (not credited)", async () => {
+    userDb.rows("payment_charges").push({
+      id: "charge-1",
+      tenant_id: TENANT,
+      status: "PAID",
+      paid_at: "2026-10-22T12:00:00Z",
+      credited_at: null,
+      needs_review: true,
+    });
+
+    const result = await getTopupStatusFor(ctxFor(ADMIN_USER), { chargeId: "charge-1" });
+    expect(result).toEqual({
+      status: "PAID",
+      paidAt: "2026-10-22T12:00:00Z",
+      credited: false,
+      needsReview: true,
     });
   });
 
