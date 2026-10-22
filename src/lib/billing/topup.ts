@@ -68,7 +68,7 @@ function formatBRL(amountCents: number): string {
   // constraints doc shows verbatim ("R$ 1.000,00").
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" })
     .format(amountCents / 100)
-    .replace(/ /g, " ");
+    .replace(/\u00a0/g, " ");
 }
 
 /**

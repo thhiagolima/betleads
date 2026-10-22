@@ -17,6 +17,7 @@ import { Label } from "@/components/ui/label";
 import { brl } from "@/lib/format";
 import { createCreditTopup, getTopupStatus } from "@/lib/billing/topup.functions";
 import { MAX_TOPUP_CENTS, MIN_TOPUP_CENTS, TOPUP_PACKAGES } from "@/lib/billing/topup";
+import { safeHttpsUrl, safePixImageSrc } from "@/lib/billing/pix-display";
 
 /** Statuses that stop the 3s poll (brief, ruling 2): credited, or any final Upper status. */
 const FINAL_STATUSES = new Set(["EXPIRED", "CANCELLED", "FAILED"]);
@@ -87,13 +88,17 @@ export function BuyCreditsDialog({
       return;
     }
     const expiresAt = new Date(charge.expiresAt).getTime();
-    const tick = () => {
+    const interval = setInterval(tick, 1000);
+    function tick() {
       const remaining = Math.round((expiresAt - Date.now()) / 1000);
       setSecondsLeft(remaining);
-      if (remaining <= 0) setLocalExpired(true);
-    };
+      if (remaining <= 0) {
+        setLocalExpired(true);
+        // Stop ticking once expired — nothing left to count down.
+        clearInterval(interval);
+      }
+    }
     tick();
-    const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
   }, [charge]);
 
@@ -204,6 +209,9 @@ export function BuyCreditsDialog({
           <>
             <DialogHeader>
               <DialogTitle>Pagamento confirmado</DialogTitle>
+              <DialogDescription className="sr-only">
+                O pagamento por Pix foi confirmado e o saldo já foi atualizado.
+              </DialogDescription>
             </DialogHeader>
             <p className="text-sm text-muted-foreground">
               Pagamento confirmado — {brl(charge.amountCents / 100)} adicionados ao saldo.
@@ -216,44 +224,69 @@ export function BuyCreditsDialog({
           <>
             <DialogHeader>
               <DialogTitle>Este Pix expirou</DialogTitle>
+              <DialogDescription className="sr-only">
+                O prazo para pagar este Pix acabou. Gere um novo código para continuar a compra.
+              </DialogDescription>
             </DialogHeader>
             <Button type="button" className="w-full" onClick={reset}>
               Gerar outro
             </Button>
           </>
         ) : (
-          <>
-            <DialogHeader>
-              <DialogTitle>Pague com Pix</DialogTitle>
-              <DialogDescription>
-                {brl(charge.amountCents / 100)} — expira em {formatCountdown(secondsLeft ?? 0)}
-              </DialogDescription>
-            </DialogHeader>
-            <div className="flex justify-center">
-              <img
-                src={charge.qrCodeImage}
-                alt="QR Code Pix"
-                className="h-48 w-48 rounded-md border bg-white p-2"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="buy-credits-emv">Pix Copia e Cola</Label>
-              <div className="flex gap-2">
-                <Input id="buy-credits-emv" readOnly value={charge.emv} className="font-mono text-xs" />
-                <Button type="button" variant="outline" size="icon" onClick={copyPix}>
-                  <Copy className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-            <a
-              href={charge.paymentUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="flex items-center justify-center gap-1 text-sm text-primary hover:underline"
-            >
-              Abrir página de pagamento <ExternalLink className="h-3.5 w-3.5" />
-            </a>
-          </>
+          (() => {
+            const qrSrc = safePixImageSrc(charge.qrCodeImage);
+            const paymentHref = safeHttpsUrl(charge.paymentUrl);
+            return (
+              <>
+                <DialogHeader>
+                  <DialogTitle>Pague com Pix</DialogTitle>
+                  <DialogDescription>
+                    {brl(charge.amountCents / 100)} — expira em{" "}
+                    {formatCountdown(secondsLeft ?? 0)}
+                  </DialogDescription>
+                </DialogHeader>
+                {qrSrc && (
+                  <div className="flex justify-center">
+                    <img
+                      src={qrSrc}
+                      alt="QR Code Pix"
+                      className="h-48 w-48 rounded-md border bg-white p-2"
+                    />
+                  </div>
+                )}
+                <div className="space-y-2">
+                  <Label htmlFor="buy-credits-emv">Pix Copia e Cola</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="buy-credits-emv"
+                      readOnly
+                      value={charge.emv}
+                      className="font-mono text-xs"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      aria-label="Copiar código Pix"
+                      onClick={copyPix}
+                    >
+                      <Copy className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+                {paymentHref && (
+                  <a
+                    href={paymentHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-center gap-1 text-sm text-primary hover:underline"
+                  >
+                    Abrir página de pagamento <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
+                )}
+              </>
+            );
+          })()
         )}
       </DialogContent>
     </Dialog>
