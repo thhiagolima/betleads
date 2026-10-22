@@ -52,6 +52,8 @@ beforeEach(() => {
   });
   fake.admin.rows("user_roles").push({ user_id: ADMIN, tenant_id: TENANT, role: "admin" });
   vi.stubEnv("BILLING_ENFORCEMENT_ENABLED", "true");
+  // Enforcement only counts with invoices on (fails closed otherwise).
+  vi.stubEnv("BILLING_INVOICES_ENABLED", "true");
 });
 
 afterEach(() => {

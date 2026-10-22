@@ -99,6 +99,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   delete process.env.BILLING_ENFORCEMENT_ENABLED;
+  delete process.env.BILLING_INVOICES_ENABLED;
   delete process.env.BILLING_GATEWAY_ENABLED;
   delete process.env.UPPER_API_KEY;
 });
@@ -147,6 +148,7 @@ describe("createCreditTopupFor", () => {
 
   it("refuses a house locked for the monthly fee with the exact copy, before writing anything", async () => {
     process.env.BILLING_ENFORCEMENT_ENABLED = "true";
+    process.env.BILLING_INVOICES_ENABLED = "true";
     fake.admin.onRpc("is_super_admin", () => ({ data: false, error: null }));
     fake.admin.rows("tenants")[0].tenant_billing = { access_state: "locked_unpaid" };
     await expect(

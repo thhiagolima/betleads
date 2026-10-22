@@ -42,6 +42,8 @@ beforeEach(() => {
   fake.service.reset();
   __resetDemoTenantCacheForTests();
   vi.stubEnv("BILLING_ENFORCEMENT_ENABLED", "true");
+  // Enforcement only counts with invoices on (fails closed otherwise).
+  vi.stubEnv("BILLING_INVOICES_ENABLED", "true");
   const tenant = {
     id: TENANT,
     status: "active",

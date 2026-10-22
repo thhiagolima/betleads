@@ -84,7 +84,9 @@ servidor.
   nunca e bloqueado. Desligado (padrao `false`), a casa so ve a faixa
   vermelha ("Sua mensalidade venceu..."), sem cartao de bloqueio nem o
   e-mail "locked" (que exige esta flag mesmo num reenvio forcado pelo
-  superadmin).
+  superadmin). So vale com `BILLING_INVOICES_ENABLED=true`: sem ela, a flag
+  e ignorada (nenhuma casa e bloqueada por falta de pagamento) e o servidor
+  registra um `console.error` uma vez por processo.
 - `PLATFORM_EMAIL_FROM`: remetente dos quatro e-mails de cobranca (fatura
   emitida, vence hoje, acesso suspenso, pagamento confirmado), nome fixo
   "BetLeads". Padrao `no-reply@betleads.io`. Esse envio nunca passa pela

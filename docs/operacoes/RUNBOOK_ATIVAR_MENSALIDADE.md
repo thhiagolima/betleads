@@ -133,7 +133,10 @@ PLATFORM_EMAIL_FROM=no-reply@betleads.io
   `awaiting_first_payment` nunca bloqueiam (a casa só vê a faixa vermelha,
   sem cartão de bloqueio e sem o e-mail "locked"); `frozen` e
   `locked_manual` bloqueiam sempre, com a flag ligada ou não; o superadmin
-  nunca é bloqueado. Confirmado em `src/lib/tenant-access.server.ts` e
+  nunca é bloqueado. Só vale com `BILLING_INVOICES_ENABLED=true`: sem ela,
+  a flag é ignorada (nenhuma casa é bloqueada por falta de pagamento) e o
+  servidor loga um erro uma vez por processo. Confirmado em
+  `src/lib/tenant-access.server.ts` e
   `src/lib/billing/billing-state.server.ts` — mesma checagem acima, comentário
   já correto.
 - **`PLATFORM_EMAIL_FROM`**: remetente dos 4 e-mails de cobrança (`issued`,

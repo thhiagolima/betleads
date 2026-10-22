@@ -396,6 +396,8 @@ describe("confirmChargeFromUpper", () => {
     beforeEach(() => {
       __resetDemoTenantCacheForTests();
       vi.stubEnv("BILLING_ENFORCEMENT_ENABLED", "true");
+      // Enforcement only counts with invoices on (fails closed otherwise).
+      vi.stubEnv("BILLING_INVOICES_ENABLED", "true");
       fake.admin.rows("tenants").push({
         id: TENANT,
         status: "active",

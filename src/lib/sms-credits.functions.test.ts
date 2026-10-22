@@ -171,6 +171,7 @@ describe("getSmsCreditPortalFor canBuy", () => {
   afterEach(() => {
     delete process.env.BILLING_GATEWAY_ENABLED;
     delete process.env.BILLING_ENFORCEMENT_ENABLED;
+    delete process.env.BILLING_INVOICES_ENABLED;
   });
 
   it("is false when the gateway is off, even for an admin of a paying house", async () => {
@@ -195,6 +196,7 @@ describe("getSmsCreditPortalFor canBuy", () => {
   it("is false (without throwing) for a house locked for the monthly fee, and the portal still loads", async () => {
     process.env.BILLING_GATEWAY_ENABLED = "true";
     process.env.BILLING_ENFORCEMENT_ENABLED = "true";
+    process.env.BILLING_INVOICES_ENABLED = "true";
     fake.admin.rows("tenants").push({
       id: TENANT,
       status: "active",

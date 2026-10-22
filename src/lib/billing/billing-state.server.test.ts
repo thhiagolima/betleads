@@ -95,6 +95,8 @@ beforeEach(() => {
     { id: SUSPENDED_TENANT, status: "suspended", is_demo: false, tenant_billing: null },
   );
   vi.stubEnv("BILLING_ENFORCEMENT_ENABLED", "true");
+  // Enforcement only counts with invoices on (fails closed otherwise).
+  vi.stubEnv("BILLING_INVOICES_ENABLED", "true");
 });
 
 afterEach(() => {

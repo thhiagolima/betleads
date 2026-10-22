@@ -46,9 +46,30 @@ function toTenantStatusRow(data: TenantStatusDbRow | null): TenantStatusRow | nu
   };
 }
 
-/** `BILLING_ENFORCEMENT_ENABLED === "true"` turns on the lock for unpaid houses. */
+let enforcementWithoutInvoicesReported = false;
+
+/** Test-only: lets the misconfiguration error be observed again. */
+export function __resetBillingEnforcementWarningForTests() {
+  enforcementWithoutInvoicesReported = false;
+}
+
+/**
+ * `BILLING_ENFORCEMENT_ENABLED === "true"` turns on the lock for unpaid
+ * houses — but only together with `BILLING_INVOICES_ENABLED === "true"`.
+ * Enforcement without invoices would lock houses that never got an invoice
+ * or e-mail to pay, so that combination fails closed to "no lock" and logs
+ * one console.error per process.
+ */
 export function isBillingEnforcementEnabled(): boolean {
-  return process.env.BILLING_ENFORCEMENT_ENABLED === "true";
+  if (process.env.BILLING_ENFORCEMENT_ENABLED !== "true") return false;
+  if (process.env.BILLING_INVOICES_ENABLED === "true") return true;
+  if (!enforcementWithoutInvoicesReported) {
+    enforcementWithoutInvoicesReported = true;
+    console.error(
+      "[billing] BILLING_ENFORCEMENT_ENABLED=true is ignored: BILLING_INVOICES_ENABLED is not \"true\". No house is locked for an unpaid invoice.",
+    );
+  }
+  return false;
 }
 
 /**
