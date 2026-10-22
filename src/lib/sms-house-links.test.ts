@@ -3,7 +3,7 @@
 // unknown {link_*} token, not just the 3 hard-coded variables baked into
 // buildPlayerVariables. Exercises the real sendSmsInternal (as
 // sms-dispatcher.server.ts's campaign `send` path does) against an in-memory
-// stand-in for tenants/tenant_quick_links/sms_send_logs/sms_credit_ledger,
+// stand-in for tenants/tenant_quick_links/sms_send_logs/wallet_ledger,
 // the same mock shape as sms-delivery-idempotency.test.ts.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -21,7 +21,7 @@ vi.mock("@/integrations/supabase/client.server", () => {
     tenants: () => state.tenants,
     tenant_quick_links: () => state.quickLinks,
     sms_send_logs: () => state.smsLogs,
-    sms_credit_ledger: () => state.ledger,
+    wallet_ledger: () => state.ledger,
     link_dispatches: () => [],
   };
   function from(table: string) {
@@ -66,23 +66,36 @@ vi.mock("@/integrations/supabase/client.server", () => {
     };
     return builder;
   }
-  function mutate(args: Row, delta: number, entryType: string) {
+  function reserve(args: Row) {
     const existing = state.ledger.find(
       (row) => row.tenant_id === args._tenant && row.idempotency_key === args._idempotency_key,
     );
-    if (existing) return { data: { ok: true, idempotent: true }, error: null };
+    if (existing)
+      return { data: { ok: true, idempotent: true, amount: existing.amount }, error: null };
+    const units = Number(args._units ?? 1);
+    const amount = -(units * 0.08);
     state.ledger.push({
       tenant_id: args._tenant,
       idempotency_key: args._idempotency_key,
       reference_id: args._reference_id,
-      delta_credits: delta,
-      entry_type: entryType,
+      units,
+      amount,
+      entry_type: "usage_reservation",
+    });
+    return { data: { ok: true, idempotent: false, amount, exempt: false }, error: null };
+  }
+  function refund(args: Row) {
+    state.ledger.push({
+      tenant_id: args._tenant,
+      idempotency_key: args._idempotency_key,
+      reference_id: args._reference_id,
+      entry_type: "usage_refund",
     });
     return { data: { ok: true, idempotent: false }, error: null };
   }
   async function rpc(fn: string, args: Row) {
-    if (fn === "reserve_sms_credits") return mutate(args, -1, "sms_reservation");
-    if (fn === "refund_sms_credits") return mutate(args, 1, "sms_refund");
+    if (fn === "wallet_reserve") return reserve(args);
+    if (fn === "wallet_refund") return refund(args);
     throw new Error(`unexpected rpc ${fn}`);
   }
   return { supabaseAdmin: { from, rpc } };
@@ -109,8 +122,9 @@ import { __resetHouseLinksCacheForTests, loadHouseLinks } from "./house-links.se
 const TENANT = "00000000-0000-4000-8000-000000000001";
 
 function providerAccepts() {
-  return vi.fn(async () =>
-    new Response(JSON.stringify([{ external_id: "x", status: "accepted" }]), { status: 200 }),
+  return vi.fn(
+    async () =>
+      new Response(JSON.stringify([{ external_id: "x", status: "accepted" }]), { status: 200 }),
   );
 }
 
@@ -155,9 +169,7 @@ describe("sendSmsInternal — house quick links (Task 9 fix round 1, Critical 1)
     });
 
     expect(result.ok).toBe(true);
-    expect(lastSentContent(fetchMock)).toBe(
-      "Promo: https://x.com/promo | Antigo: https://x.com",
-    );
+    expect(lastSentContent(fetchMock)).toBe("Promo: https://x.com/promo | Antigo: https://x.com");
   });
 
   it("without house, unknown {link_*} tokens stay literal (legacy, unchanged)", async () => {
