@@ -331,17 +331,75 @@ describe("addTenantDomain", () => {
     expect(result.kind).toBe("email");
   });
 
-  it("rethrows a readable error and inserts no row on a non-ALREADY_EXISTS provider failure", async () => {
+  it("rethrows a pt-BR error (raw provider text only in logs) and inserts no row on a provider failure", async () => {
     seed({ tenants: [{ id: TENANT_A, site_url: null }] });
     mocks.createShortioDomain.mockRejectedValue(
-      new DomainProviderError("UNAVAILABLE", 500, "Short.io fora do ar"),
+      new DomainProviderError("UNAVAILABLE", 500, "Short.io service unavailable"),
     );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    let message = "";
+    try {
+      await addTenantDomain({ tenantId: TENANT_A, kind: "shortener", rawHostname: "go.example.com", userId: USER_ID });
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).toBe("O provedor está indisponível no momento. Tente novamente em alguns minutos.");
+    expect(warn.mock.calls.some((c) => String(c[0]).includes("Short.io service unavailable"))).toBe(true);
+    warn.mockRestore();
+
+    expect(tables.tenant_domains).toHaveLength(0);
+  });
+
+  it.each([
+    ["INVALID", 400, "O provedor recusou esse domínio. Confira se o nome está correto."],
+    ["NOT_FOUND", 404, "Domínio não encontrado no provedor."],
+    ["ALREADY_EXISTS", 409, "Esse domínio já está cadastrado no provedor."],
+  ] as const)("maps provider %s to its pt-BR message", async (code, status, expected) => {
+    seed({});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mocks.createShortioDomain.mockRejectedValue(new DomainProviderError(code, status, "raw english"));
+    // ALREADY_EXISTS with nothing to adopt in the account -> the original error surfaces.
+    mocks.findShortioDomainByHostname.mockResolvedValue(null);
 
     await expect(
       addTenantDomain({ tenantId: TENANT_A, kind: "shortener", rawHostname: "go.example.com", userId: USER_ID }),
-    ).rejects.toThrow(/Short\.io fora do ar/);
+    ).rejects.toThrow(expected);
+    warn.mockRestore();
+  });
 
-    expect(tables.tenant_domains).toHaveLength(0);
+  it.each(["betleads.io", "mail.betleads.io", "BETLEADS.APP", "go.betleads.app"])(
+    "rejects the reserved platform hostname %s without calling any provider",
+    async (host) => {
+      seed({});
+      for (const kind of ["shortener", "email"] as const) {
+        await expect(
+          addTenantDomain({ tenantId: TENANT_A, kind, rawHostname: host, userId: USER_ID }),
+        ).rejects.toThrow("Esse domínio é reservado da plataforma e não pode ser usado pela casa.");
+      }
+      expect(mocks.createShortioDomain).not.toHaveBeenCalled();
+      expect(mocks.createInfobipDomain).not.toHaveBeenCalled();
+      expect(mocks.findShortioDomainByHostname).not.toHaveBeenCalled();
+      expect(mocks.getInfobipDomain).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects the env-derived CRM shortener (SHORTIO_DOMAIN) and PLATFORM_EMAIL_FROM domains", async () => {
+    seed({});
+    vi.stubEnv("SHORTIO_DOMAIN", "lk.crmlinks.com");
+    vi.stubEnv("PLATFORM_EMAIL_FROM", "avisos@plataforma-mail.com");
+    try {
+      await expect(
+        addTenantDomain({ tenantId: TENANT_A, kind: "shortener", rawHostname: "LK.crmlinks.com", userId: USER_ID }),
+      ).rejects.toThrow(/reservado da plataforma/);
+      await expect(
+        addTenantDomain({ tenantId: TENANT_A, kind: "email", rawHostname: "plataforma-mail.com", userId: USER_ID }),
+      ).rejects.toThrow(/reservado da plataforma/);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(mocks.createShortioDomain).not.toHaveBeenCalled();
+    expect(mocks.createInfobipDomain).not.toHaveBeenCalled();
   });
 
   it("reactivates a removed shortener row for the same tenant instead of inserting a new one", async () => {
@@ -432,7 +490,7 @@ describe("addTenantDomain", () => {
 
     expect(result.id).toBeTruthy();
     expect(result.status).toBe("pending");
-    expect(result.last_error).toMatch(/timeout solicitando verificação/);
+    expect(result.last_error).toBe("O provedor está indisponível no momento. Tente novamente em alguns minutos.");
     expect(tables.tenant_domains).toHaveLength(1);
   });
 });
@@ -506,7 +564,10 @@ describe("refreshTenantDomain", () => {
     const result = await refreshTenantDomain("dom-1");
 
     expect(result.status).toBe("pending");
-    expect(result.last_error).toBe("timeout");
+    // Stored (and shown in the UI) in pt-BR; the raw "timeout" stays in logs.
+    expect(result.last_error).toBe(
+      "O provedor está indisponível no momento. Tente novamente em alguns minutos.",
+    );
     expect(result.last_checked_at).toBeTruthy();
   });
 
@@ -661,6 +722,18 @@ describe("purgeTenantDomain", () => {
     await purgeTenantDomain("dom-1");
 
     expect(mocks.deleteInfobipDomain).toHaveBeenCalledWith("mail.example.com");
+  });
+
+  it("refuses to purge a reserved platform domain", async () => {
+    seed({
+      tenant_domains: [
+        domainRow({ id: "dom-1", kind: "email", hostname: "betleads.io", removed_at: new Date().toISOString() }),
+      ],
+    });
+
+    await expect(purgeTenantDomain("dom-1")).rejects.toThrow(/reservado da plataforma/);
+    expect(mocks.deleteInfobipDomain).not.toHaveBeenCalled();
+    expect(tables.tenant_domains).toHaveLength(1);
   });
 });
 

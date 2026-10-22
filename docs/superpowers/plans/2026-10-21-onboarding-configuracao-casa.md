@@ -319,5 +319,5 @@
 ## Deploy (fora das tasks, com autorização do usuário no momento)
 
 1. Setar env em produção: `PLATFORM_EMAIL_FROM=no-reply@betleads.io` (opcional), `SHORTIO_A_RECORD_IP` (opcional).
-2. Cadastrar e verificar `betleads.io` na Infobip (pode usar o próprio fluxo como superadmin) antes de usar "Enviar instruções por e-mail".
+2. Cadastrar e verificar `betleads.io` **diretamente no console da Infobip** (NÃO pelo fluxo do app — o app recusa domínios reservados da plataforma: `betleads.io`, `betleads.app`, o domínio de `PLATFORM_EMAIL_FROM`, o host de `SHORTIO_DOMAIN` e seus subdomínios) antes de usar "Enviar instruções por e-mail".
 3. Aplicar as duas migrations `20261021…` em produção.

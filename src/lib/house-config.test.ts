@@ -3,8 +3,10 @@ import {
   buildQuickLinkUrl,
   computeSetupChecklist,
   isDomainDueForCheck,
+  isReservedPlatformHostname,
   normalizeHostname,
   normalizeSiteUrl,
+  providerErrorMessage,
   quickLinkKeyFromLabel,
   suggestedQuickLinks,
   validateShortenerHostname,
@@ -269,5 +271,58 @@ describe("computeSetupChecklist", () => {
       hasVerifiedSender: true,
     });
     expect(result.complete).toBe(true);
+  });
+});
+
+describe("isReservedPlatformHostname", () => {
+  const env = { platformEmailFrom: "no-reply@betleads.io", shortioDomain: null };
+
+  it("blocks the platform domains exactly", () => {
+    expect(isReservedPlatformHostname("betleads.io", env)).toBe(true);
+    expect(isReservedPlatformHostname("betleads.app", env)).toBe(true);
+  });
+
+  it("blocks any subdomain of a reserved domain", () => {
+    expect(isReservedPlatformHostname("mail.betleads.io", env)).toBe(true);
+    expect(isReservedPlatformHostname("a.b.betleads.app", env)).toBe(true);
+  });
+
+  it("is case-insensitive and ignores a trailing dot", () => {
+    expect(isReservedPlatformHostname("Mail.BetLeads.IO", env)).toBe(true);
+    expect(isReservedPlatformHostname("betleads.app.", env)).toBe(true);
+  });
+
+  it("derives reserved domains from PLATFORM_EMAIL_FROM and SHORTIO_DOMAIN", () => {
+    const custom = { platformEmailFrom: "Betleads <avisos@Notify.Example.com>", shortioDomain: "https://LK.crm.link/" };
+    expect(isReservedPlatformHostname("notify.example.com", custom)).toBe(true);
+    expect(isReservedPlatformHostname("x.notify.example.com", custom)).toBe(true);
+    expect(isReservedPlatformHostname("lk.crm.link", custom)).toBe(true);
+    expect(isReservedPlatformHostname("go.lk.crm.link", custom)).toBe(true);
+    // Siblings/parents of an env-derived host are not reserved.
+    expect(isReservedPlatformHostname("example.com", custom)).toBe(false);
+    expect(isReservedPlatformHostname("crm.link", custom)).toBe(false);
+  });
+
+  it("does not block look-alike or unrelated domains", () => {
+    expect(isReservedPlatformHostname("notbetleads.io", env)).toBe(false);
+    expect(isReservedPlatformHostname("betleads.io.suacasa.bet.br", env)).toBe(false);
+    expect(isReservedPlatformHostname("go.suacasa.bet.br", env)).toBe(false);
+  });
+});
+
+describe("providerErrorMessage", () => {
+  it("maps every provider code to pt-BR", () => {
+    expect(providerErrorMessage("ALREADY_EXISTS")).toBe("Esse domínio já está cadastrado no provedor.");
+    expect(providerErrorMessage("INVALID")).toBe("O provedor recusou esse domínio. Confira se o nome está correto.");
+    expect(providerErrorMessage("UNAVAILABLE")).toBe(
+      "O provedor está indisponível no momento. Tente novamente em alguns minutos.",
+    );
+    expect(providerErrorMessage("NOT_FOUND")).toBe("Domínio não encontrado no provedor.");
+  });
+
+  it("falls back to the unavailable message for unknown failures", () => {
+    expect(providerErrorMessage(null)).toBe(
+      "O provedor está indisponível no momento. Tente novamente em alguns minutos.",
+    );
   });
 });

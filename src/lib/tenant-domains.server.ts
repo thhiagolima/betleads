@@ -9,7 +9,10 @@ import {
   type DnsRecord,
   type DomainKind,
   type DomainStatus,
+  isReservedPlatformHostname,
   normalizeHostname,
+  providerErrorMessage,
+  RESERVED_DOMAIN_ERROR,
   validateShortenerHostname,
 } from "@/lib/house-config";
 import {
@@ -133,6 +136,27 @@ async function promoteNextDefault(tenantId: string, kind: DomainKind, excludeId:
   if (updErr) throw new Error(updErr.message);
 }
 
+function reservedEnv() {
+  return {
+    platformEmailFrom: process.env.PLATFORM_EMAIL_FROM?.trim() || "no-reply@betleads.io",
+    shortioDomain: process.env.SHORTIO_DOMAIN?.trim() || null,
+  };
+}
+
+/** True for platform/CRM-owned hostnames (betleads.io, betleads.app, the
+ * PLATFORM_EMAIL_FROM domain, SHORTIO_DOMAIN) and their subdomains. */
+export function isReservedHostname(hostname: string): boolean {
+  return isReservedPlatformHostname(hostname, reservedEnv());
+}
+
+/** Turns any provider failure into the admin-facing pt-BR message, logging
+ * the raw provider text on the server only. */
+function toAdminProviderMessage(err: unknown, context: string): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  console.warn(`[tenant-domains] ${context}: ${raw}`);
+  return providerErrorMessage(err instanceof DomainProviderError ? err.code : "UNAVAILABLE");
+}
+
 export async function addTenantDomain(input: {
   tenantId: string;
   kind: DomainKind;
@@ -142,6 +166,8 @@ export async function addTenantDomain(input: {
   const normalized = normalizeHostname(input.rawHostname);
   if (!normalized.ok) throw new Error(normalized.error);
   const hostname = normalized.hostname;
+
+  if (isReservedHostname(hostname)) throw new Error(RESERVED_DOMAIN_ERROR);
 
   if (input.kind === "shortener") {
     const { data: tenantRow, error: tenantErr } = await supabaseAdmin
@@ -206,12 +232,11 @@ export async function addTenantDomain(input: {
       try {
         await requestInfobipVerification(hostname);
       } catch (err) {
-        createVerifyError = err instanceof Error ? err.message : String(err);
+        createVerifyError = toAdminProviderMessage(err, `verify request for ${hostname}`);
       }
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    throw new Error(`Não foi possível registrar o domínio no provedor: ${message}`);
+    throw new Error(toAdminProviderMessage(err, `register ${input.kind} domain ${hostname}`));
   }
 
   const now = new Date().toISOString();
@@ -290,7 +315,7 @@ export async function refreshTenantDomain(
       providerIdToStore = provider.providerDomainId;
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = toAdminProviderMessage(err, `refresh ${row.kind} domain ${row.hostname}`);
     const { data, error } = await supabaseAdmin
       .from("tenant_domains")
       .update({ last_error: message, last_checked_at: now })
@@ -506,6 +531,7 @@ export async function purgeTenantDomain(domainId: string): Promise<void> {
   const row = await fetchDomainById(domainId);
   if (!row) throw new Error("Domínio não encontrado");
   if (!row.removed_at) throw new Error("Remova o domínio antes de apagá-lo no provedor");
+  if (isReservedHostname(row.hostname)) throw new Error(RESERVED_DOMAIN_ERROR);
 
   if (row.kind === "shortener") {
     if (row.provider_domain_id) {

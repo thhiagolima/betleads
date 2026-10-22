@@ -81,6 +81,73 @@ export function validateShortenerHostname(hostname: string, siteUrl: string | nu
   return `Esse é o domínio do site da casa — use um subdomínio, ex.: go.${normalizedSite}`;
 }
 
+export const RESERVED_DOMAIN_ERROR = "Esse domínio é reservado da plataforma e não pode ser usado pela casa.";
+
+const ALWAYS_RESERVED_DOMAINS = ["betleads.io", "betleads.app"];
+
+/** Pulls a bare lower-case hostname out of an e-mail address, URL or hostname
+ * string (env values may come in any of those shapes). */
+function hostFromEnvValue(value: string | null | undefined): string | null {
+  if (!value) return null;
+  let v = value.trim().toLowerCase();
+  if (!v) return null;
+  const at = v.lastIndexOf("@");
+  if (at >= 0) v = v.slice(at + 1).replace(/>.*$/, "");
+  if (/^https?:\/\//.test(v)) {
+    try {
+      v = new URL(v).hostname;
+    } catch {
+      return null;
+    }
+  } else {
+    v = v.split("/")[0];
+  }
+  v = v.replace(/\.$/, "");
+  return v || null;
+}
+
+/** Platform/CRM-owned domains a house can never claim: betleads.io,
+ * betleads.app, the domain of PLATFORM_EMAIL_FROM (default betleads.io) and
+ * the hostname of SHORTIO_DOMAIN — plus any subdomain of those. */
+export function reservedPlatformDomains(env: {
+  platformEmailFrom?: string | null;
+  shortioDomain?: string | null;
+}): string[] {
+  const out = new Set<string>(ALWAYS_RESERVED_DOMAINS);
+  const fromHost = hostFromEnvValue(env.platformEmailFrom);
+  if (fromHost) out.add(fromHost);
+  const shortHost = hostFromEnvValue(env.shortioDomain);
+  if (shortHost) out.add(shortHost);
+  return Array.from(out);
+}
+
+export function isReservedPlatformHostname(
+  hostname: string,
+  env: { platformEmailFrom?: string | null; shortioDomain?: string | null },
+): boolean {
+  const host = hostname.trim().toLowerCase().replace(/\.$/, "");
+  if (!host) return false;
+  return reservedPlatformDomains(env).some((r) => host === r || host.endsWith(`.${r}`));
+}
+
+export type DomainProviderErrorCode = "ALREADY_EXISTS" | "INVALID" | "UNAVAILABLE" | "NOT_FOUND";
+
+/** Admin-facing pt-BR text for a domain-provider failure. The raw provider
+ * text (English, provider-specific) stays in server logs only. */
+export function providerErrorMessage(code: DomainProviderErrorCode | null | undefined): string {
+  switch (code) {
+    case "ALREADY_EXISTS":
+      return "Esse domínio já está cadastrado no provedor.";
+    case "INVALID":
+      return "O provedor recusou esse domínio. Confira se o nome está correto.";
+    case "NOT_FOUND":
+      return "Domínio não encontrado no provedor.";
+    case "UNAVAILABLE":
+    default:
+      return "O provedor está indisponível no momento. Tente novamente em alguns minutos.";
+  }
+}
+
 export function normalizeSiteUrl(input: string): { ok: true; url: string } | { ok: false; error: string } {
   const trimmed = input.trim();
   if (!trimmed) {
