@@ -9,11 +9,18 @@ vi.mock("@/integrations/supabase/client.server", async () => {
 });
 
 const { getUpperCharge } = vi.hoisted(() => ({ getUpperCharge: vi.fn() }));
-vi.mock("./upper-pix.server", () => ({ getUpperCharge }));
+vi.mock("./upper-pix.server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./upper-pix.server")>();
+  return { ...actual, getUpperCharge };
+});
 
 import { createFakeDb } from "@/lib/sms-bulk.test-support";
-import { confirmChargeFromUpper, recordChargeSnapshot } from "./payment-charges.server";
-import type { UpperCharge } from "./upper-pix.server";
+import {
+  confirmChargeFromUpper,
+  reconcilePendingCharges,
+  recordChargeSnapshot,
+} from "./payment-charges.server";
+import { UpperError, type UpperCharge } from "./upper-pix.server";
 
 const TENANT = "00000000-0000-4000-8000-000000000001";
 
@@ -323,5 +330,168 @@ describe("confirmChargeFromUpper", () => {
 
     const result = await confirmChargeFromUpper("bl-top-order-1");
     expect(result).toEqual({ outcome: "already_credited" });
+  });
+});
+
+describe("reconcilePendingCharges", () => {
+  const NOW = new Date("2026-10-22T12:10:00Z");
+  const OLD_ENOUGH = "2026-10-22T12:00:00Z"; // 10 min before NOW, past the 2 min cutoff
+
+  beforeEach(() => {
+    fake.admin.onRpc("billing_credit_paid_charge", () => ({ data: { ok: true }, error: null }));
+  });
+
+  it("checks pending/active charges older than 2 minutes, crediting the one Upper reports PAID", async () => {
+    fake.admin
+      .rows("payment_charges")
+      .push(
+        chargeRow({ id: "c1", external_id: "bl-top-c1", status: "PENDING", created_at: OLD_ENOUGH }),
+        chargeRow({ id: "c2", external_id: "bl-top-c2", status: "ACTIVE", created_at: OLD_ENOUGH }),
+        chargeRow({ id: "c3", external_id: "bl-top-c3", status: "ACTIVE", created_at: OLD_ENOUGH }),
+      );
+    getUpperCharge.mockImplementation(async (externalId: string) =>
+      upperCharge({
+        externalId,
+        status: externalId === "bl-top-c2" ? "PAID" : "ACTIVE",
+        paidAmountCents: externalId === "bl-top-c2" ? 50000 : null,
+        paidAt: externalId === "bl-top-c2" ? NOW.toISOString() : null,
+      }),
+    );
+
+    const result = await reconcilePendingCharges({ now: NOW });
+    expect(result).toEqual({ checked: 3, credited: 1, expired: 0, errors: 0 });
+  });
+
+  it("counts a network error on one charge and keeps checking the others", async () => {
+    fake.admin
+      .rows("payment_charges")
+      .push(
+        chargeRow({ id: "c1", external_id: "bl-top-c1", status: "PENDING", created_at: OLD_ENOUGH }),
+        chargeRow({ id: "c2", external_id: "bl-top-c2", status: "ACTIVE", created_at: OLD_ENOUGH }),
+        chargeRow({ id: "c3", external_id: "bl-top-c3", status: "ACTIVE", created_at: OLD_ENOUGH }),
+      );
+    getUpperCharge.mockImplementation(async (externalId: string) => {
+      if (externalId === "bl-top-c2") {
+        throw new UpperError("Falha de rede ao chamar a Upper.", {
+          status: 0,
+          code: "NETWORK_ERROR",
+          retryable: true,
+        });
+      }
+      return upperCharge({ externalId, status: "ACTIVE" });
+    });
+
+    const result = await reconcilePendingCharges({ now: NOW });
+    expect(result).toEqual({ checked: 3, credited: 0, expired: 0, errors: 1 });
+  });
+
+  it("ignores a charge created less than 2 minutes ago", async () => {
+    fake.admin.rows("payment_charges").push(
+      chargeRow({
+        id: "c1",
+        external_id: "bl-top-c1",
+        status: "PENDING",
+        created_at: NOW.toISOString(),
+      }),
+    );
+
+    const result = await reconcilePendingCharges({ now: NOW });
+    expect(result).toEqual({ checked: 0, credited: 0, expired: 0, errors: 0 });
+    expect(getUpperCharge).not.toHaveBeenCalled();
+  });
+
+  it("credits a locally PAID charge with no credited_at, without calling Upper", async () => {
+    fake.admin.rows("payment_charges").push(
+      chargeRow({
+        id: "c1",
+        external_id: "bl-top-c1",
+        status: "PAID",
+        credited_at: null,
+        needs_review: false,
+        created_at: OLD_ENOUGH,
+      }),
+    );
+
+    const result = await reconcilePendingCharges({ now: NOW });
+    expect(result.credited).toBe(1);
+    expect(getUpperCharge).not.toHaveBeenCalled();
+  });
+
+  it("does not directly credit a locally PAID charge flagged needs_review", async () => {
+    fake.admin.rows("payment_charges").push(
+      chargeRow({
+        id: "c1",
+        external_id: "bl-top-c1",
+        status: "PAID",
+        credited_at: null,
+        needs_review: true,
+        created_at: OLD_ENOUGH,
+      }),
+    );
+    const rpcSpy = vi.fn(() => ({ data: { ok: true }, error: null }));
+    fake.admin.onRpc("billing_credit_paid_charge", rpcSpy);
+
+    const result = await reconcilePendingCharges({ now: NOW });
+    expect(result.credited).toBe(0);
+    expect(rpcSpy).not.toHaveBeenCalled();
+  });
+
+  it("respects the limit option for the pending/active batch", async () => {
+    fake.admin.rows("payment_charges").push(
+      chargeRow({ id: "c1", external_id: "bl-top-c1", status: "ACTIVE", created_at: OLD_ENOUGH }),
+      chargeRow({ id: "c2", external_id: "bl-top-c2", status: "ACTIVE", created_at: OLD_ENOUGH }),
+      chargeRow({ id: "c3", external_id: "bl-top-c3", status: "ACTIVE", created_at: OLD_ENOUGH }),
+    );
+    getUpperCharge.mockImplementation(async (externalId: string) =>
+      upperCharge({ externalId, status: "ACTIVE" }),
+    );
+
+    const result = await reconcilePendingCharges({ now: NOW, limit: 2 });
+    expect(result.checked).toBe(2);
+  });
+
+  it("marks a charge EXPIRED locally when Upper still reports ACTIVE more than 10 minutes past our expires_at", async () => {
+    fake.admin.rows("payment_charges").push(
+      chargeRow({
+        id: "c1",
+        external_id: "bl-top-c1",
+        status: "ACTIVE",
+        created_at: OLD_ENOUGH,
+        expires_at: "2026-10-22T11:59:00Z", // 11 min before NOW
+      }),
+    );
+    fake.admin
+      .rows("credit_topup_orders")
+      .push({ id: "order-1", tenant_id: TENANT, status: "pending" });
+    getUpperCharge.mockResolvedValue(
+      upperCharge({ externalId: "bl-top-c1", status: "ACTIVE", expiresAt: "2026-10-22T11:59:00Z" }),
+    );
+
+    const result = await reconcilePendingCharges({ now: NOW });
+    expect(result.expired).toBe(1);
+    expect(fake.admin.rows("payment_charges")[0].status).toBe("EXPIRED");
+    expect(fake.admin.rows("credit_topup_orders")[0].status).toBe("expired");
+  });
+
+  it("never marks an already-credited charge EXPIRED even if its expires_at is long past", async () => {
+    // Defensive case: a charge already carrying credited_at (should not
+    // normally coexist with status ACTIVE, but the guard must hold anyway).
+    fake.admin.rows("payment_charges").push(
+      chargeRow({
+        id: "c1",
+        external_id: "bl-top-c1",
+        status: "ACTIVE",
+        credited_at: NOW.toISOString(),
+        created_at: OLD_ENOUGH,
+        expires_at: "2026-10-22T11:59:00Z",
+      }),
+    );
+    getUpperCharge.mockResolvedValue(
+      upperCharge({ externalId: "bl-top-c1", status: "ACTIVE", expiresAt: "2026-10-22T11:59:00Z" }),
+    );
+
+    const result = await reconcilePendingCharges({ now: NOW });
+    expect(result.expired).toBe(0);
+    expect(fake.admin.rows("payment_charges")[0].status).not.toBe("EXPIRED");
   });
 });

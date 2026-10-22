@@ -118,6 +118,8 @@ export function createFakeDb(options: { unique?: Record<string, string[][]> } = 
       },
       eq: (col: string, value: unknown) => (filters.push((r) => r[col] === value), builder),
       neq: (col: string, value: unknown) => (filters.push((r) => r[col] !== value), builder),
+      is: (col: string, value: unknown) =>
+        (filters.push((r) => (value === null ? r[col] == null : r[col] === value)), builder),
       in: (col: string, values: unknown[]) => (filters.push((r) => values.includes(r[col])), builder),
       // PostgREST `not(col, "in", "(a,b)")` and `not(col, "is", null)`.
       not: (col: string, operator: string, value: unknown) => {

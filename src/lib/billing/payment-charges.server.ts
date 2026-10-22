@@ -9,7 +9,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import type { Database, Json } from "@/integrations/supabase/types";
 
 import { maskPayerDocument } from "./payer";
-import { getUpperCharge, type UpperCharge } from "./upper-pix.server";
+import { getUpperCharge, UpperError, type UpperCharge } from "./upper-pix.server";
 
 export type ConfirmChargeOutcome =
   | "credited"
@@ -160,4 +160,167 @@ export async function confirmChargeFromUpper(
     return { outcome: "needs_review" };
   }
   return { outcome: "not_paid" };
+}
+
+export type ReconcileResult = {
+  checked: number;
+  credited: number;
+  expired: number;
+  errors: number;
+};
+
+const PENDING_CUTOFF_MS = 2 * 60_000;
+const EXPIRY_GRACE_MS = 10 * 60_000;
+const DEFAULT_RECONCILE_LIMIT = 30;
+/**
+ * Separate, small budget for the "PAID locally but never credited" sweep
+ * (ruling 1): this batch never calls Upper, so it does not compete with the
+ * caller-provided `limit` for the PENDING/ACTIVE batch below.
+ */
+const LOCALLY_PAID_LIMIT = 30;
+
+function logReconcileError(context: string, err: unknown, externalId: string): void {
+  if (err instanceof UpperError) {
+    console.error(`[billing-reconcile] ${context}`, {
+      code: err.code,
+      status: err.status,
+      externalId,
+    });
+  } else {
+    console.error(`[billing-reconcile] ${context}`, {
+      error: err instanceof Error ? err.message : "unknown error",
+      externalId,
+    });
+  }
+}
+
+/**
+ * Catches up charges already PAID in our own table whose credit never
+ * landed (e.g. the RPC call failed right after a snapshot was recorded).
+ * Credits directly through the RPC — Upper is never called here, the charge
+ * is already known PAID from our side.
+ */
+async function creditLocallyPaidCharges(result: ReconcileResult): Promise<void> {
+  const { data: rows, error } = await supabaseAdmin
+    .from("payment_charges")
+    .select("id, external_id")
+    .eq("status", "PAID")
+    .is("credited_at", null)
+    .eq("needs_review", false)
+    .order("created_at", { ascending: true })
+    .limit(LOCALLY_PAID_LIMIT);
+  if (error) throw new Error(error.message);
+
+  for (const row of rows ?? []) {
+    try {
+      const { data, error: rpcError } = await supabaseAdmin.rpc("billing_credit_paid_charge", {
+        _charge_id: row.id,
+      });
+      if (rpcError) throw new Error(rpcError.message);
+      const rpcResult = data as BillingCreditPaidChargeResult | null;
+      if (rpcResult?.ok) result.credited += 1;
+    } catch (err) {
+      result.errors += 1;
+      logReconcileError("error crediting locally-paid charge", err, row.external_id);
+    }
+  }
+}
+
+/**
+ * A charge the Upper API still reports ACTIVE more than EXPIRY_GRACE_MS past
+ * our stored `expires_at` is dead on Upper's own terms (their PIX QR expired)
+ * even though they have not flipped its status yet. Marks it EXPIRED locally
+ * so it stops being retried forever. Never touches a charge that is not
+ * (still) ACTIVE, or that already carries a `credited_at` — crediting always
+ * wins and is never undone here.
+ */
+async function maybeExpireStaleActiveCharge(
+  chargeId: string,
+  now: Date,
+  result: ReconcileResult,
+): Promise<void> {
+  const { data: current, error } = await supabaseAdmin
+    .from("payment_charges")
+    .select("id, status, expires_at, credited_at, kind, ref_id")
+    .eq("id", chargeId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!current) return;
+  if (current.status !== "ACTIVE") return;
+  if (current.credited_at) return;
+  if (!current.expires_at) return;
+
+  const expiresAtMs = new Date(current.expires_at).getTime();
+  if (now.getTime() - expiresAtMs <= EXPIRY_GRACE_MS) return;
+
+  const { error: updateError } = await supabaseAdmin
+    .from("payment_charges")
+    .update({ status: "EXPIRED", updated_at: new Date().toISOString() })
+    .eq("id", current.id);
+  if (updateError) throw new Error(updateError.message);
+
+  if (current.kind === "credit_topup") {
+    const { error: orderError } = await supabaseAdmin
+      .from("credit_topup_orders")
+      .update({ status: "expired" })
+      .eq("id", current.ref_id);
+    if (orderError) throw new Error(orderError.message);
+  }
+
+  result.expired += 1;
+}
+
+/**
+ * The 5-minute reconciliation sweep (Task 5): picks up any Pix charge whose
+ * state might have drifted from Upper's — a webhook that never arrived or
+ * failed to process, a crediting RPC call that errored after a PAID
+ * snapshot, or a PIX QR that quietly expired on Upper's side. The webhook
+ * (src/routes/api/public/upper/webhook.ts) is the fast path; this is the
+ * safety net, so every outcome here must be safe to repeat.
+ *
+ * - Charges PAID locally but never credited are credited directly (ruling
+ *   1), on a separate LOCALLY_PAID_LIMIT budget — see creditLocallyPaidCharges.
+ * - PENDING/ACTIVE charges older than PENDING_CUTOFF_MS are re-checked
+ *   against Upper via confirmChargeFromUpper, oldest first, up to `limit`
+ *   (default DEFAULT_RECONCILE_LIMIT).
+ * - A charge that comes back from that check still ACTIVE and long past its
+ *   expiry is marked EXPIRED locally (ruling 2).
+ * - Any error on one charge (Upper or DB) is counted and never stops the
+ *   rest (ruling 3); only `.code`, `.status` and the externalId are logged.
+ */
+export async function reconcilePendingCharges(
+  opts: { limit?: number; now?: Date } = {},
+): Promise<ReconcileResult> {
+  const limit = opts.limit ?? DEFAULT_RECONCILE_LIMIT;
+  const now = opts.now ?? new Date();
+  const result: ReconcileResult = { checked: 0, credited: 0, expired: 0, errors: 0 };
+
+  await creditLocallyPaidCharges(result);
+
+  const cutoff = new Date(now.getTime() - PENDING_CUTOFF_MS).toISOString();
+  const { data: pendingRows, error: pendingError } = await supabaseAdmin
+    .from("payment_charges")
+    .select("id, external_id")
+    .in("status", ["PENDING", "ACTIVE"])
+    .lt("created_at", cutoff)
+    .order("created_at", { ascending: true })
+    .limit(limit);
+  if (pendingError) throw new Error(pendingError.message);
+
+  for (const row of pendingRows ?? []) {
+    result.checked += 1;
+    try {
+      const { outcome } = await confirmChargeFromUpper(row.external_id);
+      if (outcome === "credited" || outcome === "already_credited") {
+        result.credited += 1;
+        continue;
+      }
+      await maybeExpireStaleActiveCharge(row.id, now, result);
+    } catch (err) {
+      result.errors += 1;
+      logReconcileError("error reconciling charge", err, row.external_id);
+    }
+  }
+
+  return result;
 }
