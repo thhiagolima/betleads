@@ -62,7 +62,7 @@ describe("active nav item", () => {
   it("lights the settings items that used to be pinned", () => {
     expect(activeNavKey("/consentimentos", "")).toBe("/consentimentos");
     expect(activeNavKey("/webhooks", "")).toBe("/webhooks");
-    expect(activeNavKey("/creditos-sms", "")).toBe("/creditos-sms");
+    expect(activeNavKey("/plano-e-creditos", "")).toBe("/plano-e-creditos");
     expect(activeNavKey("/configuracoes", "")).toBe("/configuracoes");
   });
 

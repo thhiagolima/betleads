@@ -118,7 +118,7 @@ export const SIDEBAR_SECTIONS: NavSection[] = [
   {
     label: "Configurações",
     items: [
-      link("Saldo e consumo", "/creditos-sms", Wallet),
+      link("Plano e créditos", "/plano-e-creditos", Wallet),
       link("Integrações", "/webhooks", Plug),
       link("Configurações", "/configuracoes", Settings),
     ],

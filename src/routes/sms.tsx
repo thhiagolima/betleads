@@ -504,7 +504,7 @@ function SmsCompactWorkspace({
         >
           <RotateCw className="mr-2 h-3.5 w-3.5" /> Atualizar
         </Button>
-        <Button variant="outline" size="sm" onClick={() => window.location.assign("/creditos-sms")}>
+        <Button variant="outline" size="sm" onClick={() => window.location.assign("/plano-e-creditos")}>
           <CreditCard className="mr-2 h-3.5 w-3.5" /> {exempt ? "Casa isenta" : `Saldo ${brl(balance)}`}
         </Button>
       </div>
@@ -560,7 +560,7 @@ function SmsCompactWorkspace({
               </CardHeader>
               <CardContent>
                 <Button variant="outline" asChild>
-                  <Link to="/creditos-sms">Saldo e consumo</Link>
+                  <Link to="/plano-e-creditos">Saldo e consumo</Link>
                 </Button>
               </CardContent>
             </Card>
@@ -1141,7 +1141,7 @@ function SmsHomePanel() {
         <Button
           variant="outline"
           className="gap-2"
-          onClick={() => navigate({ to: "/creditos-sms" })}
+          onClick={() => navigate({ to: "/plano-e-creditos" })}
         >
           <CreditCard className="h-4 w-4" />
           {exempt ? "Casa isenta" : `Saldo ${brl(balance)}`}
