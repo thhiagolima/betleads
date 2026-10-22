@@ -5,10 +5,15 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { resolveOperationalTenantId } from "./tenant-access.server";
 import { getEffectivePrices, getReportUnitPrices } from "./billing/pricing.server";
-import { journeyInputSchema, journeyStatusSchema } from "./journeys.shared";
+import {
+  journeyInputSchema,
+  journeyStatusSchema,
+  legacyEmailBlockSenderConfig,
+} from "./journeys.shared";
 import { activationTriggerConfig, journeyEntryKey } from "./journey-policy";
 import { conversionFunnelSnapshot } from "./conversion-funnel";
 import { toggleJourneyExpress } from "./journey-express";
+import { assertTenantEmailSender } from "./campaign-refs.server";
 
 const journeyIdSchema = z.object({ id: z.string().uuid() });
 const legacyJourneySchema = z.object({
@@ -377,7 +382,7 @@ export const convertLegacyJourney = createServerFn({ method: "POST" })
           label: block.label ?? "E-mail",
           config: {
             template_id: template.id,
-            ...(block.smtp_config_id ? { sender_id: block.smtp_config_id } : {}),
+            ...legacyEmailBlockSenderConfig(block),
             template_snapshot: {
               id: template.id,
               subject: block.subject_override ?? template.subject,
@@ -552,15 +557,7 @@ export const saveJourney = createServerFn({ method: "POST" })
             .maybeSingle();
           if (!template || template.is_active === false || template.lifecycle_status === "archived")
             throw new Error("Selecione um template de e-mail ativo deste tenant.");
-          if (step.config.sender_id) {
-            const { data: sender } = await db
-              .from("email_smtp_configs")
-              .select("id")
-              .eq("id", step.config.sender_id)
-              .eq("tenant_id", tenantId)
-              .maybeSingle();
-            if (!sender) throw new Error("Selecione um remetente de e-mail deste tenant.");
-          }
+          if (step.config.sender_id) await assertTenantEmailSender(tenantId, step.config.sender_id);
           config = {
             ...step.config,
             template_snapshot: {

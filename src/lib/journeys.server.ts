@@ -1,8 +1,9 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { sendInfobipEmail, resolveSender } from "./email-send.server";
+import { EmailDomainNotVerifiedError, resolveSender, sendInfobipEmail } from "./email-send.server";
 import { callInfobipVoice, normalizeE164BR } from "./infobip-voice.server";
 import { sendSmsInternal } from "./sms.functions";
 import { buildPlayerVariables, renderTemplate } from "./template-vars.server";
+import { loadHouseLinks } from "./house-links.server";
 import { detectTriggersForPlayer } from "./triggers.server";
 import { evaluateVoiceContactPolicy, isChannelRevoked } from "./consent.server";
 import { startJobRun, type JobRunHandle } from "./observability/job-monitor.server";
@@ -299,6 +300,13 @@ async function reserveDelivery(enrollment: EnrollmentRow, step: StepRow, journey
   } | null;
 }
 
+/** Shortener chosen on the step; resolveShortenerDomain validates it at send time. */
+function stepShortDomainId(config: Record<string, unknown>): string | null {
+  return typeof config.short_domain_id === "string" && config.short_domain_id
+    ? config.short_domain_id
+    : null;
+}
+
 async function finishExecution(id: string, patch: Record<string, unknown>) {
   await db
     .from("journey_step_executions")
@@ -582,7 +590,8 @@ async function executeEnrollment(
 
   const player = await playerFor(enrollment);
   if (!player) throw new Error("Jogador da jornada não encontrado");
-  const vars = buildPlayerVariables(player);
+  const house = await loadHouseLinks(enrollment.tenant_id);
+  const vars = buildPlayerVariables(player, house);
   const channel = step.step_type;
   const consentTarget = channel === "email" ? player.email : player.telefone;
   if (
@@ -691,6 +700,7 @@ async function deliverStep(
   gate: ChannelGate,
 ): Promise<void> {
   const channel = step.step_type;
+  const house = await loadHouseLinks(enrollment.tenant_id);
   const reservation = await reserveDelivery(enrollment, step, journey);
   // ENV-02: this step already has a sent execution (e.g. a previous attempt
   // reached the provider but failed before advancing): move on, never resend.
@@ -776,7 +786,7 @@ async function deliverStep(
             await variantsUsedToday(enrollment),
           )
         : 0;
-    const content = renderTemplate(variants[variantIndex], vars);
+    const content = renderTemplate(variants[variantIndex], vars, house);
     const result = await sendSmsInternal({
       to: player.telefone ?? "",
       content,
@@ -788,6 +798,7 @@ async function deliverStep(
         sourceId: enrollment.journey_id,
         journeyStepId: step.id,
         journeyStepPosition: step.position,
+        shortDomainId: stepShortDomainId(step.config),
       },
       variables: vars,
       linkTrackingEnabled: step.config.track_links !== false,
@@ -829,18 +840,18 @@ async function deliverStep(
             .eq("tenant_id", enrollment.tenant_id)
             .maybeSingle();
     if (!template) throw new Error("Template de e-mail não encontrado");
-    const sender = await resolveSender(
-      String(step.config.sender_id ?? "") || null,
-      enrollment.tenant_id,
-    );
-    if (!sender) throw new Error("Remetente de e-mail não configurado");
+    const sender = await resolveSender({
+      tenantId: enrollment.tenant_id,
+      senderId: String(step.config.sender_id ?? "") || null,
+    });
+    if (!sender) throw new EmailDomainNotVerifiedError();
     const result = await sendInfobipEmail({
       to: player.email,
       from: sender.fromEmail,
       fromName: sender.fromName,
       replyTo: sender.replyTo,
-      subject: renderTemplate(template.subject, vars),
-      html: renderTemplate(template.body_html, vars),
+      subject: renderTemplate(template.subject, vars, house),
+      html: renderTemplate(template.body_html, vars, house),
       tenantId: enrollment.tenant_id,
       idempotencyKey: run.idempotency_key,
       linkTracking: {
@@ -852,6 +863,7 @@ async function deliverStep(
         enabled: step.config.track_links !== false,
         journeyStepId: step.id,
         journeyStepPosition: step.position,
+        shortDomainId: stepShortDomainId(step.config),
       },
     });
     if (!result.ok)
@@ -869,7 +881,7 @@ async function deliverStep(
         tenant_id: enrollment.tenant_id,
         player_id: enrollment.player_id,
         to_email: player.email,
-        subject: renderTemplate(template.subject, vars),
+        subject: renderTemplate(template.subject, vars, house),
         status: "sent",
         sent_at: new Date().toISOString(),
         provider_response: {

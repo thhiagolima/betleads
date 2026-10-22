@@ -25,14 +25,25 @@ import {
   finalizeJourneyVoiceUpload,
   listJourneyVoiceAssets,
 } from "@/lib/journey-voice-assets.functions";
+import { getComposerOptions } from "@/lib/house-config.functions";
+import { COMPOSER_OPTIONS_QUERY_KEY } from "@/components/house-config/house-config-query";
+import { ShortDomainSelect } from "@/components/house-config/short-domain-select";
+import { EmailSenderSelect } from "@/components/house-config/email-sender-select";
+import {
+  EmailBlockedNotice,
+  ShortenerFallbackNotice,
+} from "@/components/house-config/composer-notices";
 import { supabase } from "@/integrations/supabase/client";
 import type { JourneyStepInput } from "@/lib/journeys.shared";
 import { Button } from "@/components/ui/button";
 import {
   INACTIVITY_FIELDS,
   INACTIVITY_TRIGGER_NAME,
+  emailStepFromConfig,
+  emailStepIdsForConfig,
   fromBrtInput,
   smsExtra,
+  smsExtraForTemplateChange,
   toBrtInput,
 } from "./journey-editor-config";
 import { Input } from "@/components/ui/input";
@@ -42,7 +53,12 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 type Step =
   | { kind: "wait"; seconds: number }
   | { kind: "sms"; templateId: string; content: string; extra?: Record<string, unknown> }
-  | { kind: "email"; templateId: string }
+  | {
+      kind: "email";
+      templateId: string;
+      senderId: string | null;
+      shortDomainId: string | null;
+    }
   | { kind: "voice"; assetId: string; callerId: string };
 type SavedStep = { step_type: string; config: Record<string, unknown>; is_enabled?: boolean };
 
@@ -254,6 +270,14 @@ export function JourneyEditor({
     queryKey: ["journey-voice-assets"],
     queryFn: () => voiceAssetsFn(),
   });
+  const composerOptionsFn = useServerFn(getComposerOptions);
+  const composerOptions = useQuery({
+    queryKey: COMPOSER_OPTIONS_QUERY_KEY,
+    queryFn: () => composerOptionsFn(),
+  });
+  const shortDomains = composerOptions.data?.shortDomains ?? [];
+  const shortenerPending = composerOptions.data?.shortenerPending ?? false;
+  const emailSenders = composerOptions.data?.senders ?? [];
   const voiceAssetRows = (voiceAssets.data?.assets ?? []) as Array<{ id: string; name: string }>;
   const uploadAudio = useMutation({
     mutationFn: async (file: File) => {
@@ -333,7 +357,7 @@ export function JourneyEditor({
               },
             ]
           : s.step_type === "email"
-            ? [{ kind: "email" as const, templateId: String(s.config.template_id ?? "") }]
+            ? [{ kind: "email" as const, ...emailStepFromConfig(s.config) }]
             : s.step_type === "voice"
               ? [
                   {
@@ -401,6 +425,10 @@ export function JourneyEditor({
                         );
                         return {
                           template_id: s.templateId,
+                          ...emailStepIdsForConfig({
+                            senderId: s.senderId,
+                            shortDomainId: s.shortDomainId,
+                          }),
                           ...(template
                             ? {
                                 template_snapshot: {
@@ -487,7 +515,7 @@ export function JourneyEditor({
         : kind === "sms"
           ? { kind, templateId: "", content: "" }
           : kind === "email"
-            ? { kind, templateId: "" }
+            ? { kind, templateId: "", senderId: null, shortDomainId: null }
             : { kind, assetId: "", callerId: "5511980465329" },
     ]);
   const change = (i: number, value: Step) =>
@@ -1053,9 +1081,10 @@ export function JourneyEditor({
                         (item) => item.id === event.target.value,
                       );
                       change(i, {
-                        kind: "sms",
+                        ...s,
                         templateId: event.target.value,
                         content: template?.content ?? "",
+                        extra: smsExtraForTemplateChange(s.extra),
                       });
                     }}
                   >
@@ -1078,22 +1107,58 @@ export function JourneyEditor({
                   <p className="text-xs text-muted-foreground">
                     A jornada guarda uma cópia desta versão para não mudar após a publicação.
                   </p>
+                  <ShortenerFallbackNotice
+                    isSuccess={composerOptions.isSuccess}
+                    isError={composerOptions.isError}
+                    shortenerPending={shortenerPending}
+                    hasVerifiedDomain={shortDomains.length > 0}
+                  />
+                  <ShortDomainSelect
+                    domains={shortDomains}
+                    value={(s.extra?.short_domain_id as string | null | undefined) ?? null}
+                    onChange={(short_domain_id) =>
+                      change(i, { ...s, extra: { ...s.extra, short_domain_id } })
+                    }
+                  />
                 </div>
               ) : s.kind === "email" ? (
-                <select
-                  className="flex h-10 w-full rounded-md border bg-background px-3 text-sm"
-                  value={s.templateId}
-                  onChange={(e) => change(i, { kind: "email", templateId: e.target.value })}
-                >
-                  <option value="">Selecione um template</option>
-                  {(templates.data?.items ?? [])
-                    .filter((t) => t.ativo)
-                    .map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.nome}
-                      </option>
-                    ))}
-                </select>
+                <div className="space-y-2">
+                  <select
+                    className="flex h-10 w-full rounded-md border bg-background px-3 text-sm"
+                    value={s.templateId}
+                    onChange={(e) => change(i, { ...s, templateId: e.target.value })}
+                  >
+                    <option value="">Selecione um template</option>
+                    {(templates.data?.items ?? [])
+                      .filter((t) => t.ativo)
+                      .map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.nome}
+                        </option>
+                      ))}
+                  </select>
+                  <EmailBlockedNotice
+                    isSuccess={composerOptions.isSuccess}
+                    isError={composerOptions.isError}
+                    hasVerifiedSender={emailSenders.length > 0}
+                  />
+                  <EmailSenderSelect
+                    senders={emailSenders}
+                    value={s.senderId}
+                    onChange={(senderId) => change(i, { ...s, senderId })}
+                  />
+                  <ShortenerFallbackNotice
+                    isSuccess={composerOptions.isSuccess}
+                    isError={composerOptions.isError}
+                    shortenerPending={shortenerPending}
+                    hasVerifiedDomain={shortDomains.length > 0}
+                  />
+                  <ShortDomainSelect
+                    domains={shortDomains}
+                    value={s.shortDomainId}
+                    onChange={(shortDomainId) => change(i, { ...s, shortDomainId })}
+                  />
+                </div>
               ) : (
                 <div className="space-y-2">
                   <label className="inline-flex cursor-pointer items-center rounded-md border px-3 py-2 text-sm hover:bg-muted">

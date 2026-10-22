@@ -38,6 +38,7 @@ import {
 import { Route as SmsWebhookRoute } from "@/routes/api/public/sms-webhook";
 import { assertTenantNotDemoForSend } from "@/lib/tenant-access.server";
 import { BILLING_LOCKED_TEXT, TenantBillingLockedError } from "@/lib/billing/billing-locked-error";
+import { __resetShortenerDomainCacheForTests } from "./shortio.server";
 
 const TENANT = "00000000-0000-4000-8000-000000000001";
 const CAMPAIGN = "11111111-1111-4111-8111-111111111111";
@@ -112,6 +113,18 @@ function settings(fallback: "block" | "passthrough") {
     allowed_destination_hosts: [],
     enabled_channels: ["sms", "email"],
   });
+  // The shortener domain comes from tenant_domains (the migration backfilled
+  // shortio_settings.domain as the verified default).
+  if (!fake.db.rows("tenant_domains").some((d) => d.tenant_id === TENANT))
+    fake.db.rows("tenant_domains").push({
+      id: "44444444-4444-4444-8444-444444444444",
+      tenant_id: TENANT,
+      kind: "shortener",
+      hostname: "go.example",
+      status: "verified",
+      is_default: true,
+      removed_at: null,
+    });
 }
 
 const logs = () => fake.db.rows("sms_send_logs");
@@ -120,6 +133,7 @@ const logFor = (k: string) => logs().filter((l) => l.idempotency_key === k);
 describe("sendSmsBatch (ENV-10, Short Brasil bulk)", () => {
   beforeEach(() => {
     fake.db.reset();
+    __resetShortenerDomainCacheForTests();
     credits = installCreditLedger(fake.db);
     budgetCalls = [];
     fake.db.onRpc("consume_channel_budget", (args) => {

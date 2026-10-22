@@ -1,5 +1,6 @@
 // Renderiza variáveis {token} em mensagens de fluxo usando dados do player.
 // Espelha a lógica de `components/ligacoes/shared.ts` no lado servidor.
+import type { HouseLinks } from "@/lib/house-links.server";
 
 export type PlayerVarsInput = {
   nome?: string | null;
@@ -45,7 +46,10 @@ function safe(v: string | number | null | undefined, fb: string) {
   return String(v);
 }
 
-export function buildPlayerVariables(p: PlayerVarsInput): Record<string, string> {
+export function buildPlayerVariables(
+  p: PlayerVarsInput,
+  house?: HouseLinks | null,
+): Record<string, string> {
   const dl = daysSince(p.ultimo_login);
   const dj = daysSince(p.ultimo_jogo);
   const dd = daysSince(p.ultimo_deposito);
@@ -53,6 +57,12 @@ export function buildPlayerVariables(p: PlayerVarsInput): Record<string, string>
   const saq = Number(p.total_sacado ?? 0);
   const cashback = p.last_cashback_amount != null ? Number(p.last_cashback_amount) : null;
   const cashbackPaidAt = p.last_cashback_paid_at ? new Date(p.last_cashback_paid_at) : null;
+  // Legacy defaults, unchanged for a house with no site URL.
+  const siteUrl = house?.siteUrl ?? null;
+  const quickLinks = house?.quickLinks ?? {};
+  const link = siteUrl ?? "https://betleads.app/depositar";
+  const linkLogin = quickLinks.login ?? siteUrl ?? "https://betleads.app";
+  const linkDeposito = quickLinks.deposito ?? siteUrl ?? "https://betleads.app/depositar";
   return {
     primeiro_nome: firstName(p.nome),
     nome: safe(p.nome, "amigo"),
@@ -79,9 +89,9 @@ export function buildPlayerVariables(p: PlayerVarsInput): Record<string, string>
     status_lead: safe(p.status, "ativo"),
     expert: safe(p.expert, "Equipe BETLEADS"),
     nome_expert: safe(p.expert, "Equipe BETLEADS"),
-    link: "https://betleads.app/depositar",
-    link_login: "https://betleads.app",
-    link_deposito: "https://betleads.app/depositar",
+    link,
+    link_login: linkLogin,
+    link_deposito: linkDeposito,
     cashback_amount: cashback != null ? cashback.toFixed(2).replace(".", ",") : "0,00",
     cashback_valor: brl(cashback ?? 0),
     cashback_pago_em: cashbackPaidAt
@@ -94,13 +104,22 @@ export function buildPlayerVariables(p: PlayerVarsInput): Record<string, string>
 
 /** Substitui `{token}` em `content` pelos valores de `vars`. Tokens
  * desconhecidos são preservados (`{token_desconhecido}`) para evitar
- * mensagens com lacunas vazias enganosas. */
+ * mensagens com lacunas vazias enganosas — EXCETO um `{link_*}` desconhecido
+ * quando `house.siteUrl` existe: cai para a URL do site da casa em vez de
+ * vazar a chave literal (uma URL rápida apagada, por exemplo). Sem `house`
+ * ou com `siteUrl: null`, o comportamento é idêntico ao legado. */
 export function renderTemplate(
   content: string | null | undefined,
   vars: Record<string, string>,
+  house?: HouseLinks | null,
 ): string {
   if (!content) return "";
   return content.replace(/\{(\w+)\}/g, (m, key: string) => {
-    return vars[key] != null ? vars[key] : m;
+    if (vars[key] != null) return vars[key];
+    if (house?.siteUrl && key.startsWith("link_")) {
+      const quickKey = key.slice("link_".length);
+      return house.quickLinks[quickKey] ?? house.siteUrl;
+    }
+    return m;
   });
 }

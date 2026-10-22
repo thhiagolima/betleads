@@ -141,7 +141,12 @@ vi.mock("./observability/sentry.server", () => ({
   captureServerMessage: sentry.captureServerMessage,
 }));
 vi.mock("./sms.functions", () => ({ sendSmsInternal: sms.sendSmsInternal }));
-vi.mock("./email-send.server", () => ({ sendInfobipEmail: vi.fn(), resolveSender: vi.fn() }));
+const email = vi.hoisted(() => ({ sendInfobipEmail: vi.fn(), resolveSender: vi.fn() }));
+vi.mock("./email-send.server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./email-send.server")>()),
+  sendInfobipEmail: email.sendInfobipEmail,
+  resolveSender: email.resolveSender,
+}));
 vi.mock("./infobip-voice.server", () => ({
   callInfobipVoice: voice.callInfobipVoice,
   normalizeE164BR: (v: string) => v,
@@ -858,5 +863,41 @@ describe("runJourneyDispatcher with the SMS provider breaker (incident 15/10/202
     expect(result).toMatchObject({ processed: 2, failed: 0, smsBreaker: "closed" });
     expect(enrollment("e1")).toMatchObject({ current_position: 1, attempts: 0 });
     expect(enrollment("e2")).toMatchObject({ current_position: 1, attempts: 0 });
+  });
+});
+
+describe("runJourneyDispatcher email step", () => {
+  it("email step without a verified sender: EmailDomainNotVerifiedError, nothing sent or logged", async () => {
+    seed(["e1"]);
+    const SENDER = "55555555-5555-4555-8555-555555555555";
+    fake.tables.journey_steps[0] = {
+      id: "step-0",
+      journey_id: JOURNEY,
+      position: 0,
+      step_type: "email",
+      is_enabled: true,
+      config: {
+        template_id: "tpl-1",
+        sender_id: SENDER,
+        template_snapshot: { subject: "Oi", body_html: "<p>oi</p>" },
+      },
+    };
+    fake.tables.players = [{ id: PLAYER, tenant_id: TENANT, email: "jogador@x.com" }];
+    fake.tables.email_send_logs = [];
+    email.resolveSender.mockReset();
+    email.sendInfobipEmail.mockReset();
+    email.resolveSender.mockResolvedValue(null);
+
+    const result = await runJourneyDispatcher(1000);
+    expect(email.resolveSender).toHaveBeenCalledWith({ tenantId: TENANT, senderId: SENDER });
+    expect(email.sendInfobipEmail).not.toHaveBeenCalled();
+    expect(fake.tables.email_send_logs).toHaveLength(0);
+    expect(result).toMatchObject({ processed: 0, failed: 1 });
+    const execution = fake.tables.journey_step_executions[0];
+    expect(execution.status).not.toBe("sent");
+    expect(execution).toMatchObject({
+      status: "failed",
+      error: "Configure e verifique um domínio de e-mail da casa para enviar e-mails.",
+    });
   });
 });

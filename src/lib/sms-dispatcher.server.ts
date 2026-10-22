@@ -11,6 +11,7 @@ import {
   smsBulkTransport,
 } from "./sms-bulk.server";
 import { buildPlayerVariables, renderTemplate } from "./template-vars.server";
+import { loadHouseLinks, type HouseLinks } from "./house-links.server";
 import { deferIfOutsideWindow } from "./send-window.server";
 import { brtDayStart } from "./tz";
 import {
@@ -326,6 +327,14 @@ async function runSmsFlowBatch({
   const players = new Map(
     (playersData ?? []).map((p) => [p.id as string, p as Record<string, unknown>]),
   );
+  // House links loaded once per tenant for the whole batch (loadHouseLinks
+  // itself also caches 60s), not once per lead.
+  const tenantIdsInBatch = Array.from(new Set(all.map((l) => l.tenant_id)));
+  const houseByTenant = new Map<string, HouseLinks>(
+    await Promise.all(
+      tenantIdsInBatch.map(async (tid) => [tid, await loadHouseLinks(tid)] as const),
+    ),
+  );
 
   type Prepared = {
     lead: Lead;
@@ -418,8 +427,9 @@ async function runSmsFlowBatch({
     if (step.step_type === "sms" && step.content) {
       let content = step.content;
       if (p) {
-        const vars = buildPlayerVariables(p) as Record<string, string>;
-        content = renderTemplate(content, vars);
+        const house = houseByTenant.get(l.tenant_id);
+        const vars = buildPlayerVariables(p, house) as Record<string, string>;
+        content = renderTemplate(content, vars, house);
       }
       const next = stepList[l.current_step_index + 1];
       const nextDelayMs = next && next.step_type === "delay" ? delayMs(next) : 0;
@@ -894,7 +904,8 @@ function campaignDeps(): CampaignDispatchDeps {
       return Array.isArray(phones) ? phones.filter((p): p is string => typeof p === "string") : [];
     },
     findAcceptedDeliveryKeys: (keys) => findAcceptedDeliveryKeys(campaignDb, keys),
-    async loadPlayerVariables(playerIds) {
+    async loadPlayerVariables(playerIds, tenantId) {
+      const house = await loadHouseLinks(tenantId);
       const vars = new Map<string, Record<string, string>>();
       for (let i = 0; i < playerIds.length; i += 300) {
         const { data: players } = await supabaseAdmin
@@ -903,11 +914,12 @@ function campaignDeps(): CampaignDispatchDeps {
             "id, nome, telefone, saldo_carteira, ultimo_login, ultimo_jogo, ultimo_deposito, total_depositado, total_sacado, vip, status, expert, risco",
           )
           .in("id", playerIds.slice(i, i + 300));
-        (players ?? []).forEach((p) => vars.set(p.id, buildPlayerVariables(p)));
+        (players ?? []).forEach((p) => vars.set(p.id, buildPlayerVariables(p, house)));
       }
       return vars;
     },
     async send({ campaign, target, deliveryKey, variables }) {
+      const house = await loadHouseLinks(campaign.tenant_id);
       const r = await sendSmsInternal({
         to: target.phone,
         content: campaign.content,
@@ -915,8 +927,13 @@ function campaignDeps(): CampaignDispatchDeps {
         triggerName: `campanha:${campaign.name}:${campaign.route}`,
         variables,
         tenantId: campaign.tenant_id,
+        house,
         linkTrackingEnabled: campaign.track_links !== false,
-        linkTrackingOrigin: { sourceType: "campaign", sourceId: campaign.id },
+        linkTrackingOrigin: {
+          sourceType: "campaign",
+          sourceId: campaign.id,
+          shortDomainId: campaign.short_domain_id ?? null,
+        },
         deliveryKey,
       });
       const providerAccount =
@@ -937,16 +954,21 @@ function campaignDeps(): CampaignDispatchDeps {
     ...(smsBulkEnabled() && smsBulkTransport() === "short-brasil-bulk"
       ? {
           async sendBatch({ campaign, items }) {
+            const house = await loadHouseLinks(campaign.tenant_id);
             const { outcomes } = await sendSmsBatch(
               items.map((it) => ({
                 tenantId: campaign.tenant_id,
                 to: it.target.phone,
-                content: renderSmsVariables(campaign.content, it.variables),
+                content: renderSmsVariables(campaign.content, it.variables, house),
                 deliveryKey: it.deliveryKey,
                 playerId: it.target.playerId,
                 triggerName: `campanha:${campaign.name}:${campaign.route}`,
                 linkTrackingEnabled: campaign.track_links !== false,
-                linkTrackingOrigin: { sourceType: "campaign" as const, sourceId: campaign.id },
+                linkTrackingOrigin: {
+                  sourceType: "campaign" as const,
+                  sourceId: campaign.id,
+                  shortDomainId: campaign.short_domain_id ?? null,
+                },
               })),
             );
             // 101/505 (no balance/auth) are reported to the SMS provider

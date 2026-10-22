@@ -36,6 +36,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { CampaignBlockedBadge } from "@/components/house-config/campaign-blocked-badge";
 import { Switch } from "@/components/ui/switch";
 import { LinkTrackingToggle } from "@/components/link-tracking-toggle";
 import { Separator } from "@/components/ui/separator";
@@ -116,6 +117,14 @@ import {
   getEmailDashboard,
   getEmailHistory,
 } from "@/lib/email.functions";
+import { getComposerOptions } from "@/lib/house-config.functions";
+import { COMPOSER_OPTIONS_QUERY_KEY } from "@/components/house-config/house-config-query";
+import { EmailSenderSelect, EMAIL_BLOCKED_WARNING } from "@/components/house-config/email-sender-select";
+import { ShortDomainSelect } from "@/components/house-config/short-domain-select";
+import {
+  EmailBlockedNotice,
+  ShortenerFallbackNotice,
+} from "@/components/house-config/composer-notices";
 import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
 import {
   DashboardDateRangePicker,
@@ -211,8 +220,11 @@ type Campanha = {
   smtp: string;
   templateId?: string | null;
   smtpId?: string | null;
+  senderId?: string | null;
+  shortDomainId?: string | null;
   agendadoPara?: string;
   status: CampStatus;
+  blockedReason?: string | null;
   enviados: number;
   entregues: number;
   abertos: number;
@@ -1706,7 +1718,8 @@ function CampanhasTab() {
           template: c.template,
           smtp: c.smtp,
           templateId: c.templateId ?? null,
-          smtpId: c.smtpId ?? null,
+          senderId: c.senderId ?? null,
+          shortDomainId: c.shortDomainId ?? null,
           agendadoPara: c.agendadoPara ?? null,
           status: c.status,
           targetPlayerIds: mode === "leads" ? (c.targetPlayerIds ?? []) : [],
@@ -1838,7 +1851,10 @@ function CampanhasTab() {
                       {c.template || "—"}
                     </TableCell>
                     <TableCell>
-                      <StatusBadgeCampanha s={c.status} />
+                      <div className="flex flex-wrap items-center gap-1">
+                        <StatusBadgeCampanha s={c.status} />
+                        <CampaignBlockedBadge reason={c.blockedReason} />
+                      </div>
                     </TableCell>
                     <TableCell className="text-right tabular-nums">{c.enviados}</TableCell>
                     <TableCell className="text-right tabular-nums">{c.entregues}</TableCell>
@@ -2008,43 +2024,28 @@ function CampanhaDialog({
   }, [editing]);
 
   const listTpl = useServerFn(listEmailTemplates);
-  const listSmtp = useServerFn(listSmtpConfigs);
   const previewFn = useServerFn(previewSegmentCount);
   const sendNowFn = useServerFn(sendEmailCampaignNow);
   const saveFn = useServerFn(saveEmailCampaign);
-  const getStatus = useServerFn(getEmailProviderStatus);
+  const getComposerOpts = useServerFn(getComposerOptions);
 
   const tplQ = useQuery({
     queryKey: ["email-templates-sel"],
     queryFn: () => listTpl(),
     enabled: open,
   });
-  const smtpQ = useQuery({
-    queryKey: ["email-smtp-sel"],
-    queryFn: () => listSmtp(),
-    enabled: open,
-  });
-  const provQ = useQuery({
-    queryKey: ["email-provider-status"],
-    queryFn: () => getStatus(),
+  const composerOptions = useQuery({
+    queryKey: COMPOSER_OPTIONS_QUERY_KEY,
+    queryFn: () => getComposerOpts(),
     enabled: open,
   });
   const templates: any[] = (tplQ.data?.items ?? []) as any;
-  const smtps: any[] = (smtpQ.data?.items ?? []) as any;
-  const bcAtivo: boolean = Boolean((provQ.data as any)?.configured);
-
-  // Pré-seleciona o remetente padrão para envio via Infobip.
-  useEffect(() => {
-    if (!c || c.smtpId) return;
-    const padrao = smtps.find((s) => s.padrao);
-    if (padrao) {
-      setC((p) => (p ? { ...p, smtpId: padrao.id, smtp: padrao.nome } : p));
-      return;
-    }
-    if (bcAtivo) {
-      setC((p) => (p ? { ...p, smtpId: "", smtp: "Infobip" } : p));
-    }
-  }, [smtps, bcAtivo, c]);
+  const senders = composerOptions.data?.senders ?? [];
+  const shortDomains = composerOptions.data?.shortDomains ?? [];
+  const shortenerPending = composerOptions.data?.shortenerPending ?? false;
+  // Only a confirmed-empty sender list blocks sending — while the query is
+  // still loading or failed, we don't know yet, so we don't block on it.
+  const emailBlocked = composerOptions.isSuccess && senders.length === 0;
 
   const [count, setCount] = useState<number | null>(null);
   useEffect(() => {
@@ -2095,6 +2096,10 @@ function CampanhaDialog({
       toast.error("Selecione pelo menos um lead com email.");
       return;
     }
+    if (emailBlocked) {
+      toast.error(EMAIL_BLOCKED_WARNING);
+      return;
+    }
     const tid = toast.loading("Salvando e enviando…");
     try {
       // Garante que a campanha está salva antes do envio
@@ -2107,7 +2112,8 @@ function CampanhaDialog({
           template: c.template,
           smtp: c.smtp,
           templateId: c.templateId ?? null,
-          smtpId: c.smtpId ?? null,
+          senderId: c.senderId ?? null,
+          shortDomainId: c.shortDomainId ?? null,
           agendadoPara: null,
           status: "enviando",
           targetPlayerIds: audienceMode === "leads" ? (c.targetPlayerIds ?? []) : [],
@@ -2256,35 +2262,30 @@ function CampanhaDialog({
               </SelectContent>
             </Select>
           </Field>
-          <Field label="Servidor de envio">
-            <Select
-              value={c.smtpId ?? ""}
-              onValueChange={(v) => {
-                if (v === "infobip") {
-                  setC((p) => (p ? { ...p, smtpId: "", smtp: "Infobip" } : p));
-                  return;
-                }
-                const s = smtps.find((x) => x.id === v);
-                setC((p) => (p ? { ...p, smtpId: v, smtp: s?.nome ?? "" } : p));
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue
-                  placeholder={
-                    bcAtivo || smtps.length ? "Selecionar servidor" : "Cadastre um SMTP primeiro"
-                  }
-                />
-              </SelectTrigger>
-              <SelectContent className="max-h-72">
-                {bcAtivo && <SelectItem value="infobip">Provedor de Email (Infobip)</SelectItem>}
-                {smtps.map((s) => (
-                  <SelectItem key={s.id} value={s.id}>
-                    {s.nome}
-                    {s.padrao ? " · padrão" : ""}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <Field label="Remetente">
+            <EmailBlockedNotice
+              isSuccess={composerOptions.isSuccess}
+              isError={composerOptions.isError}
+              hasVerifiedSender={senders.length > 0}
+            />
+            <EmailSenderSelect
+              senders={senders}
+              value={c.senderId ?? null}
+              onChange={(senderId) => setC((p) => (p ? { ...p, senderId } : p))}
+            />
+          </Field>
+          <Field label="Domínio do encurtador">
+            <ShortenerFallbackNotice
+              isSuccess={composerOptions.isSuccess}
+              isError={composerOptions.isError}
+              shortenerPending={shortenerPending}
+              hasVerifiedDomain={shortDomains.length > 0}
+            />
+            <ShortDomainSelect
+              domains={shortDomains}
+              value={c.shortDomainId ?? null}
+              onChange={(shortDomainId) => setC((p) => (p ? { ...p, shortDomainId } : p))}
+            />
           </Field>
           <div className="sm:col-span-2 flex items-center gap-3">
             <Switch
@@ -2309,12 +2310,17 @@ function CampanhaDialog({
           )}
         </div>
         <DialogFooter className="gap-2">
-          <Button variant="outline" onClick={() => onSave(c)} className="gap-2">
+          <Button
+            variant="outline"
+            onClick={() => onSave(c)}
+            className="gap-2"
+            disabled={agendar && emailBlocked}
+          >
             <CheckCircle2 className="h-4 w-4" />
             {agendar ? "Salvar agendamento" : "Salvar rascunho"}
           </Button>
           {!agendar && (
-            <Button onClick={enviarAgoraDoDialogo} className="gap-2">
+            <Button onClick={enviarAgoraDoDialogo} className="gap-2" disabled={emailBlocked}>
               <Send className="h-4 w-4" /> Enviar agora
             </Button>
           )}

@@ -6,7 +6,13 @@ import { z } from "zod";
 import { assertSuperAdmin, tenantChannelHealth } from "@/lib/provider-governance.server";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { sendInfobipEmail, resolveSender } from "./email-send.server";
+import {
+  EmailDomainNotVerifiedError,
+  resolveSender,
+  sendInfobipEmail,
+  STALE_SENDER_MESSAGE,
+} from "./email-send.server";
+import { campaignSenderColumn, campaignShortDomainColumn } from "./campaign-refs.server";
 import {
   countPlayersForSegment,
   loadPlayersByIds,
@@ -14,6 +20,7 @@ import {
 } from "./email-segments.server";
 import { buildPlayerVariables } from "./template-vars.server";
 import { renderTemplate } from "./template-vars.server";
+import { loadHouseLinks } from "./house-links.server";
 import {
   assertTenantNotDemoForSend,
   resolveCurrentTenantId,
@@ -88,12 +95,10 @@ export const sendTestEmail = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => SendTestEmailSchema.parse(d))
   .handler(async ({ data, context }) => {
     const tenantId = await resolveOperationalTenantId(context.supabase);
-    // Tenant requests always use the centrally approved editorial identity.
-    // Sender/provider overrides are deliberately ignored at this boundary.
-    const sender = await resolveSender(null, tenantId);
-    if (!sender) {
-      throw new Error("O canal de e-mail ainda não está disponível. Contate o suporte.");
-    }
+    // Always the house's verified default sender: sender/provider overrides
+    // in the request are deliberately ignored at this boundary.
+    const sender = await resolveSender({ tenantId });
+    if (!sender) throw new EmailDomainNotVerifiedError();
 
     // Variáveis do player (se informado)
     let html = data.html;
@@ -108,9 +113,10 @@ export const sendTestEmail = createServerFn({ method: "POST" })
         .maybeSingle();
       if (p) {
         playerId = p.id;
-        const vars = buildPlayerVariables(p);
-        html = renderTemplate(html, vars);
-        subject = renderTemplate(subject, vars);
+        const house = await loadHouseLinks(tenantId);
+        const vars = buildPlayerVariables(p, house);
+        html = renderTemplate(html, vars, house);
+        subject = renderTemplate(subject, vars, house);
       }
     } else {
       // tenta auto-match por email
@@ -122,9 +128,10 @@ export const sendTestEmail = createServerFn({ method: "POST" })
         .maybeSingle();
       if (p) {
         playerId = p.id;
-        const vars = buildPlayerVariables(p);
-        html = renderTemplate(html, vars);
-        subject = renderTemplate(subject, vars);
+        const house = await loadHouseLinks(tenantId);
+        const vars = buildPlayerVariables(p, house);
+        html = renderTemplate(html, vars, house);
+        subject = renderTemplate(subject, vars, house);
       }
     }
 
@@ -567,7 +574,12 @@ const CampanhaInputSchema = z.object({
   template: z.string().max(160).default(""),
   smtp: z.string().max(160).default(""),
   templateId: dbUuid().nullable().optional(),
+  /** Legacy: kept for old clients, no longer chooses the sender. */
   smtpId: z.string().max(64).nullable().optional(),
+  /** email_senders row of the house; domain verification is checked at send time. */
+  senderId: dbUuid().nullable().optional(),
+  /** tenant_domains shortener for this campaign's links. */
+  shortDomainId: dbUuid().nullable().optional(),
   agendadoPara: z.string().nullable().optional(),
   status: z.enum(["rascunho", "agendada", "enviando", "pausada", "concluida"]).default("rascunho"),
   targetPlayerIds: z.array(dbUuid()).max(5000).optional(),
@@ -593,8 +605,11 @@ function campanhaRowToUI(r: any) {
     smtp: af.smtp_label ?? "",
     templateId: r.template_id ?? null,
     smtpId: r.smtp_id ?? null,
+    senderId: r.sender_id ?? null,
+    shortDomainId: r.short_domain_id ?? null,
     agendadoPara: r.scheduled_at ?? undefined,
     status: r.status,
+    blockedReason: (r.blocked_reason as string | null | undefined) ?? null,
     targetPlayerIds: targetIds,
     extraEmails,
     enviados: stats.enviados ?? 0,
@@ -624,6 +639,16 @@ export const saveEmailCampaign = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => CampanhaInputSchema.parse(d))
   .handler(async ({ data, context }) => {
     const smtpIdNorm = data.smtpId ?? null;
+    let refColumns: { sender_id?: string | null; short_domain_id?: string | null } = {};
+    if (data.senderId !== undefined || data.shortDomainId !== undefined) {
+      const tenantId = await resolveOperationalTenantId(context.supabase);
+      refColumns = {
+        ...(await campaignSenderColumn(tenantId, data.senderId)),
+        ...(data.shortDomainId === null
+          ? { short_domain_id: null }
+          : await campaignShortDomainColumn(tenantId, data.shortDomainId)),
+      };
+    }
     let templateSnapshot: Record<string, unknown> | null = null;
     if (data.templateId) {
       const { data: template, error: templateError } = await context.supabase
@@ -651,8 +676,12 @@ export const saveEmailCampaign = createServerFn({ method: "POST" })
       },
       template_id: data.templateId ?? null,
       smtp_id: smtpIdNorm,
+      ...refColumns,
       scheduled_at: data.agendadoPara ? new Date(data.agendadoPara).toISOString() : null,
       status: data.status,
+      // Editing the campaign clears a previous "blocked" reason; the next
+      // send attempt records a new one if it is still blocked.
+      blocked_reason: null,
       track_links: true,
       template_snapshot: templateSnapshot,
       conversion_objective: data.conversionObjective,
@@ -696,7 +725,7 @@ export const updateEmailCampaignStatus = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { error } = await context.supabase
       .from("email_campaigns")
-      .update({ status: data.status })
+      .update({ status: data.status, blocked_reason: null })
       .eq("id", data.id);
     if (error) throw new Error(error.message);
     return { ok: true };
@@ -858,12 +887,32 @@ export async function runCampaignSend(campaignId: string) {
   // Campanhas legadas, sem snapshot, seguem usando o template publicado atual.
   const tpl = (camp.template_snapshot as Record<string, any> | null) ?? liveTpl;
 
-  // resolveSender tenta primeiro a tabela `email_senders`, depois SMTP padrão.
-  const sender = await resolveSender(camp.smtp_id ?? null, camp.tenant_id);
+  // Only a sender on a verified e-mail domain of the house; before any write.
+  const sender = await resolveSender({ tenantId: camp.tenant_id, senderId: camp.sender_id });
   if (!sender) {
-    throw new Error(
-      "Nenhum remetente configurado. Vá em Email > Remetentes e cadastre um remetente padrão com domínio verificado na Infobip.",
+    const blocked = new EmailDomainNotVerifiedError(
+      camp.sender_id ? STALE_SENDER_MESSAGE : undefined,
     );
+    // Recorded on the campaign so the admin sees why it did not go out (the
+    // tick / send-now then put it back to rascunho). Nothing else is written.
+    // Best-effort: a failure here must not hide the original send block.
+    const { error: blockedErr } = await supabaseAdmin
+      .from("email_campaigns")
+      .update({ blocked_reason: blocked.message })
+      .eq("id", campaignId);
+    if (blockedErr) {
+      console.error(`[email.functions] failed to record blocked_reason for campaign ${campaignId}:`, blockedErr);
+    }
+    throw blocked;
+  }
+  if (camp.blocked_reason) {
+    const { error: clearErr } = await supabaseAdmin
+      .from("email_campaigns")
+      .update({ blocked_reason: null })
+      .eq("id", campaignId);
+    if (clearErr) {
+      console.error(`[email.functions] failed to clear blocked_reason for campaign ${campaignId}:`, clearErr);
+    }
   }
 
   const af = (camp.audience_filter ?? {}) as {
@@ -959,13 +1008,15 @@ export async function runCampaignSend(campaignId: string) {
   let falhas = 0;
   let pendentes = 0;
 
+  const house = await loadHouseLinks(camp.tenant_id);
+
   for (const p of players) {
     if (!p.email) continue;
     try {
       // Campaigns are not frequency-capped (the contact limit is for journeys).
-      const vars = buildPlayerVariables(p);
-      const subject = renderTemplate(tpl.subject ?? "", vars);
-      const html = renderTemplate(tpl.body_html ?? "", vars);
+      const vars = buildPlayerVariables(p, house);
+      const subject = renderTemplate(tpl.subject ?? "", vars, house);
+      const html = renderTemplate(tpl.body_html ?? "", vars, house);
       const r = await sendInfobipEmail({
         to: p.email,
         from: sender.fromEmail,
@@ -981,6 +1032,7 @@ export async function runCampaignSend(campaignId: string) {
           recipientPlayerId: p.id,
           messageLogType: "email_send_logs",
           enabled: camp.track_links !== false,
+          shortDomainId: camp.short_domain_id,
         },
       });
       const errSnippet = r.ok

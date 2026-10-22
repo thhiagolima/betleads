@@ -42,6 +42,7 @@ vi.mock("./whatsapp-send.server", () => ({
 }));
 
 import { detectPrecallResponse, runPrecallDispatcher } from "./precall-dispatcher.server";
+import { __resetHouseLinksCacheForTests } from "./house-links.server";
 
 const A = "00000000-0000-4000-8000-00000000000a";
 const B = "00000000-0000-4000-8000-00000000000b";
@@ -49,6 +50,7 @@ const PHONE = "5511999990001";
 
 beforeEach(() => {
   state.sends = 0;
+  __resetHouseLinksCacheForTests();
   state.tables = {
     precall_leads: [
       { id: "la", tenant_id: A, campaign_id: "ca", telefone_e164: PHONE, status: "enviado" },
@@ -104,5 +106,48 @@ describe("runPrecallDispatcher", () => {
     };
     await runPrecallDispatcher();
     expect(state.sends).toBe(0);
+  });
+});
+
+// Task 9 — house URL / quick links wired through a real dispatcher call site
+// (not just the pure buildPlayerVariables/renderTemplate unit tests).
+describe("runPrecallDispatcher — house links", () => {
+  it("renderiza {link_login} com a URL rápida da casa", async () => {
+    const sendFlowBlock = (await import("./whatsapp-send.server")).sendFlowBlock;
+    state.tables = {
+      tenants: [{ id: A, site_url: "https://x.com" }],
+      tenant_quick_links: [{ tenant_id: A, key: "login", path: "/login" }],
+      precall_campaigns: [
+        {
+          id: "ca",
+          tenant_id: A,
+          session_id: "sess-a",
+          status: "rodando",
+          delay_min_seconds: 1,
+          delay_max_seconds: 1,
+        },
+      ],
+      precall_leads: [
+        {
+          id: "la",
+          tenant_id: A,
+          campaign_id: "ca",
+          player_id: null,
+          telefone_e164: PHONE,
+          status: "pendente",
+        },
+      ],
+      precall_templates: [
+        { id: "t1", tenant_id: A, campaign_id: "ca", ordem: 0, content: "Entre: {link_login}" },
+      ],
+      whatsapp_sessions: [
+        { id: "sess-a", tenant_id: A, instance_name: "a", name: "A", status: "connected" },
+      ],
+      players: [],
+    };
+    await runPrecallDispatcher();
+    expect(state.sends).toBe(1);
+    const sentContent = vi.mocked(sendFlowBlock).mock.calls.at(-1)?.[0]?.content;
+    expect(sentContent).toBe("Entre: https://x.com/login");
   });
 });

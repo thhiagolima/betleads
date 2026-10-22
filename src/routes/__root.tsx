@@ -14,6 +14,7 @@ import appCss from "../styles.css?url";
 import { AppLayout } from "@/components/app-layout";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthGate } from "@/components/auth-gate";
+import { OnboardingGate } from "@/components/onboarding/onboarding-gate";
 import { SystemDialogHost } from "@/components/system-dialog-host";
 import { createClientOnlyFn } from "@tanstack/react-start";
 import { captureClientException } from "@/lib/observability/sentry.client";
@@ -170,7 +171,9 @@ function RootComponent() {
     <QueryClientProvider client={queryClient}>
       <AuthGate>
         <AppLayout>
-          <Outlet />
+          <OnboardingGate>
+            <Outlet />
+          </OnboardingGate>
         </AppLayout>
       </AuthGate>
       <SystemDialogHost />

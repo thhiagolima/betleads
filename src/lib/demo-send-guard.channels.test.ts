@@ -640,8 +640,18 @@ describe("e-mail campaign send (runCampaignSend)", () => {
       subject: "Oi",
       body_html: "<p>Oi</p>",
     });
+    // Only a sender on a verified e-mail domain of the house can send.
+    fake.db.rows("tenant_domains").push({
+      id: `dom-${tenantId}`,
+      tenant_id: tenantId,
+      kind: "email",
+      status: "verified",
+      removed_at: null,
+    });
     fake.db.rows("email_senders").push({
       tenant_id: tenantId,
+      domain_id: `dom-${tenantId}`,
+      name: "CRM",
       is_default: true,
       from_email: "crm@example.com",
       from_name: "CRM",

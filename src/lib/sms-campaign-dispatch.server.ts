@@ -32,6 +32,8 @@ export type SmsCampaignRow = {
   last_error: string | null;
   rate_per_minute: number | null;
   track_links?: boolean | null;
+  /** Shortener domain chosen for the campaign (validated again at send time). */
+  short_domain_id?: string | null;
   locked_by?: string | null;
   unresolved_count?: number | null;
   /** Saved audience rule; when set, recipients are recalculated at dispatch time. */
@@ -101,7 +103,10 @@ export type CampaignDispatchDeps = {
   /** Rate-limit integration point: returns how many sends may happen now (0..want). */
   acquireSendBudget: (tenantId: string, want: number) => Promise<number>;
   findAcceptedDeliveryKeys: (keys: string[]) => Promise<Set<string>>;
-  loadPlayerVariables: (playerIds: string[]) => Promise<Map<string, Record<string, string>>>;
+  loadPlayerVariables: (
+    playerIds: string[],
+    tenantId: string,
+  ) => Promise<Map<string, Record<string, string>>>;
   send: (args: {
     campaign: SmsCampaignRow;
     target: CampaignTarget & { playerId: string };
@@ -423,7 +428,10 @@ export async function processSmsCampaignTick(
       (it): it is Extract<BatchItem, { kind: "send" }> => it.kind === "send",
     );
     const vars = sends.length
-      ? await deps.loadPlayerVariables(Array.from(new Set(sends.map((s) => s.target.playerId))))
+      ? await deps.loadPlayerVariables(
+          Array.from(new Set(sends.map((s) => s.target.playerId))),
+          c.tenant_id,
+        )
       : new Map<string, Record<string, string>>();
     let outcomes: SendOutcome[];
     let deferredError: string | null = null;

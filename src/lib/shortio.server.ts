@@ -42,6 +42,12 @@ export type LinkTrackingContext = {
   experimentVariant?: "A" | "B" | null;
   journeyStepId?: string | null;
   journeyStepPosition?: number | null;
+  /**
+   * tenant_domains id chosen for this send (campaign/journey step). Only
+   * honoured when it is a verified, non-removed shortener of the same tenant;
+   * otherwise the tenant default (or the CRM SHORTIO_DOMAIN) is used.
+   */
+  shortDomainId?: string | null;
 };
 
 type TenantShortioSettings = {
@@ -77,10 +83,11 @@ function normalizeHost(value: string) {
   return value.trim().toLowerCase().replace(/^\.+/, "");
 }
 
-function defaultSettings(): TenantShortioSettings {
+type BaseShortioSettings = Omit<TenantShortioSettings, "domain">;
+
+function defaultSettings(): BaseShortioSettings {
   return {
     enabled: envEnabled(),
-    domain: process.env.SHORTIO_DOMAIN?.trim().toLowerCase() || null,
     fallback_mode: "block",
     default_ttl_days: null,
     allowed_destination_hosts: [],
@@ -88,22 +95,76 @@ function defaultSettings(): TenantShortioSettings {
   };
 }
 
-async function settingsForTenant(tenantId: string): Promise<TenantShortioSettings> {
+export type ResolvedShortenerDomain = {
+  hostname: string | null;
+  domainId: string | null;
+  /** True when the link goes out on the CRM-wide SHORTIO_DOMAIN. */
+  usingCrmFallback: boolean;
+};
+
+const SHORTENER_DOMAIN_CACHE_TTL_MS = 60_000;
+const shortenerDomainCache = new Map<
+  string,
+  { value: ResolvedShortenerDomain; expiresAt: number }
+>();
+
+export function __resetShortenerDomainCacheForTests() {
+  shortenerDomainCache.clear();
+}
+
+/**
+ * Shortener hostname for one send: the requested tenant_domains row when it
+ * is a verified, non-removed shortener of this tenant; else the tenant's
+ * verified default; else the CRM-wide SHORTIO_DOMAIN. A requested id that is
+ * foreign, pending, failed or removed never errors: it just falls back.
+ */
+export async function resolveShortenerDomain(
+  tenantId: string,
+  requestedDomainId?: string | null,
+): Promise<ResolvedShortenerDomain> {
+  const requested = requestedDomainId || null;
+  const key = `${tenantId}:${requested ?? ""}`;
+  const cached = shortenerDomainCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+
+  const { data, error } = await (supabaseAdmin as any)
+    .from("tenant_domains")
+    .select("id,hostname,is_default,removed_at")
+    .eq("tenant_id", tenantId)
+    .eq("kind", "shortener")
+    .eq("status", "verified");
+  if (error) throw new Error(`Falha ao carregar o domínio do encurtador: ${error.message}`);
+  const usable = ((data ?? []) as Array<Record<string, unknown>>).filter(
+    (row) => !row.removed_at && typeof row.hostname === "string" && row.hostname,
+  );
+  const chosen =
+    (requested ? usable.find((row) => row.id === requested) : undefined) ??
+    usable.find((row) => row.is_default === true);
+  const crmDomain = process.env.SHORTIO_DOMAIN?.trim().toLowerCase() || null;
+  const value: ResolvedShortenerDomain = chosen
+    ? {
+        hostname: String(chosen.hostname).toLowerCase(),
+        domainId: String(chosen.id),
+        usingCrmFallback: false,
+      }
+    : { hostname: crmDomain, domainId: null, usingCrmFallback: true };
+  shortenerDomainCache.set(key, { value, expiresAt: Date.now() + SHORTENER_DOMAIN_CACHE_TTL_MS });
+  return value;
+}
+
+/** shortio_settings without the legacy `domain` column (see resolveShortenerDomain). */
+async function baseSettingsForTenant(tenantId: string): Promise<BaseShortioSettings> {
   const fallback = defaultSettings();
   const db = supabaseAdmin as any;
   const { data, error } = await db
     .from("shortio_settings")
-    .select(
-      "enabled,domain,fallback_mode,default_ttl_days,allowed_destination_hosts,enabled_channels",
-    )
+    .select("enabled,fallback_mode,default_ttl_days,allowed_destination_hosts,enabled_channels")
     .eq("tenant_id", tenantId)
     .maybeSingle();
   if (error) throw new Error(`Falha ao carregar a configuração Short.io: ${error.message}`);
   if (!data) return fallback;
   return {
     enabled: Boolean(data.enabled),
-    domain:
-      typeof data.domain === "string" && data.domain ? data.domain.toLowerCase() : fallback.domain,
     fallback_mode: data.fallback_mode === "passthrough" ? "passthrough" : "block",
     default_ttl_days:
       typeof data.default_ttl_days === "number" ? data.default_ttl_days : fallback.default_ttl_days,
@@ -117,6 +178,17 @@ async function settingsForTenant(tenantId: string): Promise<TenantShortioSetting
         )
       : ["sms", "email"],
   };
+}
+
+/** The domain is resolved only when tracking is on (no extra query otherwise). */
+async function settingsForTenant(
+  tenantId: string,
+  requestedDomainId?: string | null,
+): Promise<TenantShortioSettings> {
+  const base = await baseSettingsForTenant(tenantId);
+  if (!base.enabled) return { ...base, domain: null };
+  const resolved = await resolveShortenerDomain(tenantId, requestedDomainId);
+  return { ...base, domain: resolved.hostname };
 }
 
 export function stripTrackingUrlTrailingPunctuation(raw: string) {
@@ -469,7 +541,7 @@ export async function prepareTrackedText(
   content: string,
   context: LinkTrackingContext,
 ): Promise<PreparedText> {
-  const settings = await settingsForTenant(context.tenantId);
+  const settings = await settingsForTenant(context.tenantId, context.shortDomainId);
   if (
     context.enabled === false ||
     !settings.enabled ||
@@ -548,7 +620,7 @@ export async function prepareTrackedEmailHtml(
   html: string,
   context: Omit<LinkTrackingContext, "channel">,
 ): Promise<PreparedText> {
-  const settings = await settingsForTenant(context.tenantId);
+  const settings = await settingsForTenant(context.tenantId, context.shortDomainId);
   if (
     context.enabled === false ||
     !settings.enabled ||
@@ -1189,13 +1261,30 @@ export async function prepareTrackedTextBatch(
   inputs: BatchTrackedTextInput[],
 ): Promise<BatchTrackedTextResult[]> {
   const results: Array<BatchTrackedTextResult | undefined> = new Array(inputs.length);
-  const byTenant = new Map<string, number[]>();
-  inputs.forEach((input, index) => {
-    byTenant.set(input.context.tenantId, [...(byTenant.get(input.context.tenantId) ?? []), index]);
-  });
+  // Group by tenant + resolved shortener domain: a Short.io bulk request
+  // carries a single `domain`.
+  const baseByTenant = new Map<string, BaseShortioSettings>();
+  const groups = new Map<
+    string,
+    { tenantId: string; settings: TenantShortioSettings; indexes: number[] }
+  >();
+  for (let index = 0; index < inputs.length; index++) {
+    const { tenantId, shortDomainId } = inputs[index].context;
+    let base = baseByTenant.get(tenantId);
+    if (!base) {
+      base = await baseSettingsForTenant(tenantId);
+      baseByTenant.set(tenantId, base);
+    }
+    const domain = base.enabled
+      ? (await resolveShortenerDomain(tenantId, shortDomainId)).hostname
+      : null;
+    const key = `${tenantId}|${domain ?? ""}`;
+    const group = groups.get(key);
+    if (group) group.indexes.push(index);
+    else groups.set(key, { tenantId, settings: { ...base, domain }, indexes: [index] });
+  }
 
-  for (const [tenantId, indexes] of byTenant) {
-    const settings = await settingsForTenant(tenantId);
+  for (const { tenantId, settings, indexes } of groups.values()) {
     const active: number[] = [];
     for (const index of indexes) {
       const { context, content } = inputs[index];

@@ -2148,12 +2148,15 @@ export type Database = {
       email_campaigns: {
         Row: {
           audience_filter: Json
+          blocked_reason: string | null
           created_at: string
           id: string
           locked_at: string | null
           locked_by: string | null
           name: string
           scheduled_at: string | null
+          sender_id: string | null
+          short_domain_id: string | null
           smtp_id: string | null
           stats: Json
           status: string
@@ -2165,12 +2168,15 @@ export type Database = {
         }
         Insert: {
           audience_filter?: Json
+          blocked_reason?: string | null
           created_at?: string
           id?: string
           locked_at?: string | null
           locked_by?: string | null
           name: string
           scheduled_at?: string | null
+          sender_id?: string | null
+          short_domain_id?: string | null
           smtp_id?: string | null
           stats?: Json
           status?: string
@@ -2182,12 +2188,15 @@ export type Database = {
         }
         Update: {
           audience_filter?: Json
+          blocked_reason?: string | null
           created_at?: string
           id?: string
           locked_at?: string | null
           locked_by?: string | null
           name?: string
           scheduled_at?: string | null
+          sender_id?: string | null
+          short_domain_id?: string | null
           smtp_id?: string | null
           stats?: Json
           status?: string
@@ -2198,6 +2207,20 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "email_campaigns_sender_id_fkey"
+            columns: ["sender_id"]
+            isOneToOne: false
+            referencedRelation: "email_senders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "email_campaigns_short_domain_id_fkey"
+            columns: ["short_domain_id"]
+            isOneToOne: false
+            referencedRelation: "tenant_domains"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "email_campaigns_smtp_id_fkey"
             columns: ["smtp_id"]
@@ -2609,6 +2632,7 @@ export type Database = {
         Row: {
           created_at: string
           domain: string | null
+          domain_id: string | null
           from_email: string
           from_name: string | null
           id: string
@@ -2621,6 +2645,7 @@ export type Database = {
         Insert: {
           created_at?: string
           domain?: string | null
+          domain_id?: string | null
           from_email: string
           from_name?: string | null
           id?: string
@@ -2633,6 +2658,7 @@ export type Database = {
         Update: {
           created_at?: string
           domain?: string | null
+          domain_id?: string | null
           from_email?: string
           from_name?: string | null
           id?: string
@@ -2643,6 +2669,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "email_senders_domain_id_fkey"
+            columns: ["domain_id"]
+            isOneToOne: false
+            referencedRelation: "tenant_domains"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "email_senders_tenant_id_fkey"
             columns: ["tenant_id"]
@@ -5624,6 +5657,7 @@ export type Database = {
           scheduled_at: string
           sent_count: number
           sent_cursor: number
+          short_domain_id: string | null
           status: string
           template_id: string | null
           template_snapshot: Json | null
@@ -5649,6 +5683,7 @@ export type Database = {
           scheduled_at: string
           sent_count?: number
           sent_cursor?: number
+          short_domain_id?: string | null
           status?: string
           template_id?: string | null
           template_snapshot?: Json | null
@@ -5674,6 +5709,7 @@ export type Database = {
           scheduled_at?: string
           sent_count?: number
           sent_cursor?: number
+          short_domain_id?: string | null
           status?: string
           template_id?: string | null
           template_snapshot?: Json | null
@@ -5683,6 +5719,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "sms_campaigns_short_domain_id_fkey"
+            columns: ["short_domain_id"]
+            isOneToOne: false
+            referencedRelation: "tenant_domains"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "sms_campaigns_template_id_fkey"
             columns: ["template_id"]
@@ -6699,6 +6742,115 @@ export type Database = {
           },
         ]
       }
+      tenant_domains: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          dns_records: Json
+          hostname: string
+          id: string
+          is_default: boolean
+          kind: string
+          last_checked_at: string | null
+          last_error: string | null
+          provider_domain_id: string | null
+          provider_state: string | null
+          removed_at: string | null
+          status: string
+          tenant_id: string
+          updated_at: string
+          verified_at: string | null
+          verified_notice_seen_at: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          dns_records?: Json
+          hostname: string
+          id?: string
+          is_default?: boolean
+          kind: string
+          last_checked_at?: string | null
+          last_error?: string | null
+          provider_domain_id?: string | null
+          provider_state?: string | null
+          removed_at?: string | null
+          status?: string
+          tenant_id: string
+          updated_at?: string
+          verified_at?: string | null
+          verified_notice_seen_at?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          dns_records?: Json
+          hostname?: string
+          id?: string
+          is_default?: boolean
+          kind?: string
+          last_checked_at?: string | null
+          last_error?: string | null
+          provider_domain_id?: string | null
+          provider_state?: string | null
+          removed_at?: string | null
+          status?: string
+          tenant_id?: string
+          updated_at?: string
+          verified_at?: string | null
+          verified_notice_seen_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tenant_domains_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tenant_quick_links: {
+        Row: {
+          created_at: string
+          id: string
+          key: string
+          label: string
+          path: string
+          position: number
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          key: string
+          label: string
+          path: string
+          position?: number
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          key?: string
+          label?: string
+          path?: string
+          position?: number
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tenant_quick_links_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tenant_sms_pricing: {
         Row: {
           provider_cost_per_sms: number | null
@@ -6772,7 +6924,10 @@ export type Database = {
           limits: Json
           metadata: Json
           nome: string
+          onboarding_completed_at: string | null
+          onboarding_skipped_at: string | null
           plano: string
+          site_url: string | null
           slug: string
           status: string
           updated_at: string
@@ -6788,7 +6943,10 @@ export type Database = {
           limits?: Json
           metadata?: Json
           nome: string
+          onboarding_completed_at?: string | null
+          onboarding_skipped_at?: string | null
           plano?: string
+          site_url?: string | null
           slug: string
           status?: string
           updated_at?: string
@@ -6804,7 +6962,10 @@ export type Database = {
           limits?: Json
           metadata?: Json
           nome?: string
+          onboarding_completed_at?: string | null
+          onboarding_skipped_at?: string | null
           plano?: string
+          site_url?: string | null
           slug?: string
           status?: string
           updated_at?: string
@@ -8385,6 +8546,24 @@ export type Database = {
           p_tenant_id: string
         }
         Returns: string
+      }
+      save_tenant_quick_links: {
+        Args: {
+          _delete_ids: string[]
+          _inserts: Json
+          _tenant: string
+          _updates: Json
+        }
+        Returns: {
+          created_at: string
+          id: string
+          key: string
+          label: string
+          path: string
+          position: number
+          tenant_id: string
+          updated_at: string
+        }[]
       }
       sms_audience_player_matches: {
         Args: {

@@ -2,8 +2,9 @@
 // Pega leads com next_run_at <= now() e executa o bloco atual.
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { sendInfobipEmail, resolveSender } from "./email-send.server";
+import { EmailDomainNotVerifiedError, resolveSender, sendInfobipEmail } from "./email-send.server";
 import { buildPlayerVariables, renderTemplate } from "./template-vars.server";
+import { loadHouseLinks } from "./house-links.server";
 import { deferIfOutsideWindow } from "./send-window.server";
 import {
   consumeBudget,
@@ -415,19 +416,26 @@ async function planLead(lead: Lead): Promise<SendPlan | null> {
           .eq("id", lead.id);
         return null;
       }
-      const sender = await resolveSender(block.smtp_config_id, block.tenant_id);
+      // The block's chosen email_senders row (the legacy smtp_config_id is
+      // ignored); resolveSender blocks the send if that explicit sender's
+      // domain is no longer a verified domain of the house (it does not
+      // silently fall back to another sender).
+      const sender = await resolveSender({ tenantId: block.tenant_id, senderId: block.sender_id });
       if (!sender) {
+        const blocked = new EmailDomainNotVerifiedError();
         await logEvent(lead.tenant_id, lead.flow_id, lead.id, lead.player_id, "failed", {
-          reason: "no_sender",
+          reason: blocked.code,
+          error: blocked.message,
         });
         await supabaseAdmin
           .from("email_flow_leads")
-          .update({ status: "failed", exit_reason: "no_sender", locked_at: null, locked_by: null })
+          .update({ status: "failed", exit_reason: blocked.code, locked_at: null, locked_by: null })
           .eq("id", lead.id);
         return null;
       }
 
       // variaveis do player
+      const house = await loadHouseLinks(lead.tenant_id);
       let vars: Record<string, string> = { email: lead.email };
       if (lead.player_id) {
         const { data: p } = await supabaseAdmin
@@ -436,10 +444,10 @@ async function planLead(lead: Lead): Promise<SendPlan | null> {
           .eq("id", lead.player_id)
           .eq("tenant_id", lead.tenant_id)
           .maybeSingle();
-        if (p) vars = buildPlayerVariables(p) as Record<string, string>;
+        if (p) vars = buildPlayerVariables(p, house) as Record<string, string>;
       }
-      const subject = renderTemplate(block.subject_override || tpl.subject || "", vars);
-      const html = renderTemplate(tpl.body_html || "", vars);
+      const subject = renderTemplate(block.subject_override || tpl.subject || "", vars, house);
+      const html = renderTemplate(tpl.body_html || "", vars, house);
 
       // Retorna o plano de envio. O caller agrupa por (subject+html+from)
       // e despacha em lote. Toda a lógica pós-envio é aplicada lá.
