@@ -13,3 +13,20 @@ export const HOUSE_SETUP_STATUS_QUERY_KEY = ["house-setup-status"];
 // e-mail campaign editor) so a house-config mutation invalidated alongside
 // `HOUSE_CONFIG_QUERY_KEY` also refreshes the pickers' default domain/sender.
 export const COMPOSER_OPTIONS_QUERY_KEY = ["composer-options"];
+
+/** Every query a house-config change can affect: the config itself, the
+ * composers' pickers and the setup status (wizard "Pronto" summary, home
+ * checklist, verified notice). Each section's refresh invalidates all three. */
+export const HOUSE_CONFIG_RELATED_QUERY_KEYS = [
+  HOUSE_CONFIG_QUERY_KEY,
+  COMPOSER_OPTIONS_QUERY_KEY,
+  HOUSE_SETUP_STATUS_QUERY_KEY,
+] as const;
+
+export function invalidateHouseConfigQueries(qc: {
+  invalidateQueries: (filters: { queryKey: readonly unknown[] }) => unknown;
+}): void {
+  for (const queryKey of HOUSE_CONFIG_RELATED_QUERY_KEYS) {
+    void qc.invalidateQueries({ queryKey });
+  }
+}

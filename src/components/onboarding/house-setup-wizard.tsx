@@ -2,17 +2,22 @@
 // step reuses a Task 10 section with `variant="wizard"` (no card chrome).
 // "Pular configuração" is always visible and calls `skipOnboarding`; "Fazer
 // depois" just advances to the next step (no save call of its own — whatever
-// the step's inputs already saved stays saved, nothing extra happens); the
-// last step's "Concluir" calls `completeOnboarding`. The step-transition
+// the step's inputs already saved stays saved, nothing extra happens);
+// "Avançar" on the Casa step first saves the unsaved site URL / quick links
+// (ruling R10 — on error it stays on the step with a toast); the last step's
+// "Concluir" calls `completeOnboarding`. The step-transition
 // logic is pure (`reduceWizard`/`applyWizardEffect`) so it's testable without
 // a DOM — the component below only wires it to the two mutations.
-import { useState } from "react";
+import { useRef, useState, type Ref } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { HouseSiteSection } from "@/components/house-config/house-site-section";
+import {
+  HouseSiteSection,
+  type HouseSiteSaveHandle,
+} from "@/components/house-config/house-site-section";
 import { DomainsSection } from "@/components/house-config/domains-section";
 import { EmailSendersSection } from "@/components/house-config/email-senders-section";
 import { HOUSE_SETUP_STATUS_QUERY_KEY } from "@/components/house-config/house-config-query";
@@ -65,6 +70,28 @@ export function reduceWizard(current: WizardStepId, action: WizardAction): Wizar
   return { kind: "advance", step: nextWizardStep(current) };
 }
 
+/** Ruling R10: "Avançar" on the Casa step first saves the unsaved site URL /
+ * quick links; "Fazer depois", "Pular" and the other steps never save. */
+export function shouldSaveBeforeAdvance(step: WizardStepId, action: WizardAction["type"]): boolean {
+  return step === "casa" && action === "later";
+}
+
+/** The primary button ("Avançar"/"Concluir"): runs the step's pending save
+ * when required, and only then applies the transition; a failed save keeps
+ * the wizard on the step. ("Fazer depois" dispatches directly, no save.) */
+export async function runWizardPrimary(
+  step: WizardStepId,
+  action: WizardAction,
+  opts: { save: () => Promise<boolean>; apply: (effect: WizardEffect) => void },
+): Promise<boolean> {
+  if (shouldSaveBeforeAdvance(step, action.type)) {
+    const ok = await opts.save();
+    if (!ok) return false;
+  }
+  opts.apply(reduceWizard(step, action));
+  return true;
+}
+
 /** Wires a `WizardEffect` to its handler — the only place that touches the
  * outside world (step state, `skipOnboarding`, `completeOnboarding`). */
 export function applyWizardEffect(
@@ -110,11 +137,13 @@ export function WizardReadyStepView({ checklist }: { checklist: SetupChecklist |
 function WizardStepContent({
   step,
   checklist,
+  siteSaveRef,
 }: {
   step: WizardStepId;
   checklist: SetupChecklist | undefined;
+  siteSaveRef: Ref<HouseSiteSaveHandle>;
 }) {
-  if (step === "casa") return <HouseSiteSection variant="wizard" />;
+  if (step === "casa") return <HouseSiteSection variant="wizard" saveRef={siteSaveRef} />;
   if (step === "encurtador") return <DomainsSection kind="shortener" variant="wizard" />;
   if (step === "email") {
     return (
@@ -130,6 +159,8 @@ function WizardStepContent({
 export function HouseSetupWizard({ initialStep = "casa" }: { initialStep?: WizardStepId }) {
   const qc = useQueryClient();
   const [step, setStep] = useState<WizardStepId>(initialStep);
+  const siteSaveRef = useRef<HouseSiteSaveHandle>(null);
+  const [savingStep, setSavingStep] = useState(false);
 
   const fetchStatus = useServerFn(getHouseSetupStatus);
   const statusQuery = useQuery({
@@ -154,16 +185,31 @@ export function HouseSetupWizard({ initialStep = "casa" }: { initialStep?: Wizar
     onError: (error: Error) => toast.error(error.message),
   });
 
-  function dispatch(action: WizardAction) {
-    applyWizardEffect(reduceWizard(step, action), {
+  const applyEffect = (effect: WizardEffect) =>
+    applyWizardEffect(effect, {
       onAdvance: setStep,
       onSkip: () => skip.mutate(),
       onComplete: () => complete.mutate(),
     });
+
+  function dispatch(action: WizardAction) {
+    applyEffect(reduceWizard(step, action));
+  }
+
+  async function primary(action: WizardAction) {
+    setSavingStep(true);
+    try {
+      await runWizardPrimary(step, action, {
+        save: () => siteSaveRef.current?.saveIfDirty() ?? Promise.resolve(true),
+        apply: applyEffect,
+      });
+    } finally {
+      setSavingStep(false);
+    }
   }
 
   const buttons = wizardStepButtons(step);
-  const pending = skip.isPending || complete.isPending;
+  const pending = skip.isPending || complete.isPending || savingStep;
 
   return (
     <div className="flex min-h-full flex-col">
@@ -193,7 +239,11 @@ export function HouseSetupWizard({ initialStep = "casa" }: { initialStep?: Wizar
       </header>
 
       <div className="mx-auto w-full max-w-3xl flex-1 px-4 py-6 sm:px-6 sm:py-10">
-        <WizardStepContent step={step} checklist={statusQuery.data?.checklist} />
+        <WizardStepContent
+          step={step}
+          checklist={statusQuery.data?.checklist}
+          siteSaveRef={siteSaveRef}
+        />
       </div>
 
       <div className="mx-auto flex w-full max-w-3xl flex-wrap items-center justify-end gap-2 border-t border-border/40 px-4 py-4 sm:px-6">
@@ -210,13 +260,15 @@ export function HouseSetupWizard({ initialStep = "casa" }: { initialStep?: Wizar
         <Button
           type="button"
           disabled={pending}
-          onClick={() => dispatch({ type: buttons.primary === "concluir" ? "complete" : "later" })}
+          onClick={() => void primary({ type: buttons.primary === "concluir" ? "complete" : "later" })}
         >
           {buttons.primary === "concluir"
             ? complete.isPending
               ? "Concluindo…"
               : "Concluir"
-            : "Avançar"}
+            : savingStep
+              ? "Salvando…"
+              : "Avançar"}
         </Button>
       </div>
     </div>

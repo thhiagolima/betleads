@@ -6,6 +6,8 @@ import {
   applyWizardEffect,
   nextWizardStep,
   reduceWizard,
+  runWizardPrimary,
+  shouldSaveBeforeAdvance,
   WIZARD_STEPS,
   WizardReadyStepView,
   wizardStepButtons,
@@ -116,5 +118,51 @@ describe("reduceWizard + applyWizardEffect", () => {
     expect(onSkip).toHaveBeenCalledTimes(1);
     expect(onAdvance).not.toHaveBeenCalled();
     expect(onComplete).not.toHaveBeenCalled();
+  });
+});
+
+describe("Avançar on the Casa step saves first (ruling R10)", () => {
+  it("only the Casa step's Avançar requires a save", () => {
+    expect(shouldSaveBeforeAdvance("casa", "later")).toBe(true);
+    expect(shouldSaveBeforeAdvance("encurtador", "later")).toBe(false);
+    expect(shouldSaveBeforeAdvance("email", "later")).toBe(false);
+    expect(shouldSaveBeforeAdvance("casa", "skip")).toBe(false);
+    expect(shouldSaveBeforeAdvance("pronto", "complete")).toBe(false);
+  });
+
+  it("saves, then advances when the save succeeds", async () => {
+    const calls: string[] = [];
+    const save = vi.fn(async () => {
+      calls.push("save");
+      return true;
+    });
+    const apply = vi.fn(() => {
+      calls.push("apply");
+    });
+
+    const ok = await runWizardPrimary("casa", { type: "later" }, { save, apply });
+    expect(ok).toBe(true);
+    expect(calls).toEqual(["save", "apply"]);
+    expect(apply).toHaveBeenCalledWith({ kind: "advance", step: "encurtador" });
+  });
+
+  it("stays on the step when the save fails", async () => {
+    const save = vi.fn(async () => false);
+    const apply = vi.fn();
+
+    const ok = await runWizardPrimary("casa", { type: "later" }, { save, apply });
+    expect(ok).toBe(false);
+    expect(apply).not.toHaveBeenCalled();
+  });
+
+  it("other steps advance without calling save", async () => {
+    const save = vi.fn(async () => true);
+    const apply = vi.fn();
+
+    await runWizardPrimary("encurtador", { type: "later" }, { save, apply });
+    await runWizardPrimary("pronto", { type: "complete" }, { save, apply });
+    expect(save).not.toHaveBeenCalled();
+    expect(apply).toHaveBeenNthCalledWith(1, { kind: "advance", step: "email" });
+    expect(apply).toHaveBeenNthCalledWith(2, { kind: "complete" });
   });
 });

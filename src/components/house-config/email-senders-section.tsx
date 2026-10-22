@@ -29,8 +29,8 @@ import {
   saveEmailSenderForHouse,
 } from "@/lib/house-config.functions";
 import {
-  COMPOSER_OPTIONS_QUERY_KEY,
   HOUSE_CONFIG_QUERY_KEY,
+  invalidateHouseConfigQueries,
 } from "@/components/house-config/house-config-query";
 
 export function EmailSendersSection({ variant = "page" }: { variant?: "page" | "wizard" }) {
@@ -52,10 +52,8 @@ export function EmailSendersSection({ variant = "page" }: { variant?: "page" | "
   const [replyTo, setReplyTo] = useState("");
   const [isDefault, setIsDefault] = useState(false);
 
-  const refresh = () => {
-    qc.invalidateQueries({ queryKey: HOUSE_CONFIG_QUERY_KEY });
-    qc.invalidateQueries({ queryKey: COMPOSER_OPTIONS_QUERY_KEY });
-  };
+  // Config, composer pickers and setup status (wizard summary / checklist).
+  const refresh = () => invalidateHouseConfigQueries(qc);
 
   const save = useMutation({
     mutationFn: () =>

@@ -46,8 +46,8 @@ import {
 } from "@/lib/house-config.functions";
 import type { DnsRecord, DomainKind } from "@/lib/house-config";
 import {
-  COMPOSER_OPTIONS_QUERY_KEY,
   HOUSE_CONFIG_QUERY_KEY,
+  invalidateHouseConfigQueries,
 } from "@/components/house-config/house-config-query";
 import { DomainDetail } from "@/components/house-config/domain-detail";
 
@@ -90,10 +90,8 @@ export function DomainsSection({
   const [removedListOpen, setRemovedListOpen] = useState(false);
   const [purgeDialogDomainId, setPurgeDialogDomainId] = useState<string | null>(null);
 
-  const refresh = () => {
-    qc.invalidateQueries({ queryKey: HOUSE_CONFIG_QUERY_KEY });
-    qc.invalidateQueries({ queryKey: COMPOSER_OPTIONS_QUERY_KEY });
-  };
+  // Config, composer pickers and setup status (wizard summary / checklist).
+  const refresh = () => invalidateHouseConfigQueries(qc);
 
   const addDomain = useMutation({
     mutationFn: () => addFn({ data: { kind, hostname: newHostname } }),
