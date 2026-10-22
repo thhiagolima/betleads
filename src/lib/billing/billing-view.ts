@@ -121,6 +121,65 @@ function lockCopyText(title: string, text: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// "Plano e créditos" page (Task 7): status badge + paid-mensalidade copy.
+// Pure, same rules as this module's banner/lock derivation.
+// ---------------------------------------------------------------------------
+
+export type PlanStatusBadgeInput = {
+  state: BillingAccessState;
+  /** Brasília today (YYYY-MM-DD), used for the due_soon "daqui a N dias" count. */
+  today: string;
+  /** The house's open invoice, when there is one (due_soon/overdue). */
+  invoice: BillingInvoice | null;
+  /**
+   * `tenant_billing.next_due_date` — used only for the `ok` badge, as
+   * "Em dia até" the day BEFORE the next invoice is due (the last day of
+   * coverage), same convention as `invoicePaidSuccessText` below.
+   */
+  nextDueDate: string | null;
+};
+
+/**
+ * The plan status badge shown on "Plano e créditos" (ruling 4, exact
+ * texts): one line per `access_state`, independent of role/enforcement —
+ * this is a status label, not the banner/lock copy above.
+ */
+export function planStatusBadge(input: PlanStatusBadgeInput): string {
+  const { state, today, invoice, nextDueDate } = input;
+  switch (state) {
+    case "exempt":
+      return "Plano interno — isento";
+    case "frozen":
+      return "Plano pausado";
+    case "locked_manual":
+      return "Bloqueada";
+    case "awaiting_first_payment":
+      return "Aguardando primeiro pagamento";
+    case "locked_unpaid":
+      return "Bloqueada";
+    case "overdue":
+      return invoice ? `Vencida em ${formatDDMM(invoice.dueDate)}` : "Vencida";
+    case "due_soon": {
+      if (!invoice) return "Em dia";
+      const n = Math.max(1, daysBetween(today, invoice.dueDate));
+      return `Vence em ${formatDDMM(invoice.dueDate)} · daqui a ${daysLabel(n)}`;
+    }
+    case "ok":
+    default:
+      return nextDueDate ? `Em dia até ${formatDDMM(addDays(nextDueDate, -1))}` : "Em dia";
+  }
+}
+
+/**
+ * The monthly-fee Pix dialog's success copy (ruling 2): "Mensalidade paga —
+ * acesso liberado até DD/MM", where DD/MM is the new `next_due_date` minus
+ * one day (the last day the house stays covered before the next invoice).
+ */
+export function invoicePaidSuccessText(newNextDueDate: string): string {
+  return `Mensalidade paga — acesso liberado até ${formatDDMM(addDays(newNextDueDate, -1))}`;
+}
+
+// ---------------------------------------------------------------------------
 // Effective lock
 // ---------------------------------------------------------------------------
 

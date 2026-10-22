@@ -1,8 +1,75 @@
 import { describe, expect, it } from "vitest";
 
-import { billingView, isEffectiveLock } from "./billing-view";
+import {
+  billingView,
+  invoicePaidSuccessText,
+  isEffectiveLock,
+  planStatusBadge,
+} from "./billing-view";
 
 const invoice4000 = { amountCents: 400000, dueDate: "2026-11-05" };
+
+describe("planStatusBadge", () => {
+  it('ok: "Em dia até" the day before next_due_date', () => {
+    expect(
+      planStatusBadge({ state: "ok", today: "2026-11-01", invoice: null, nextDueDate: "2026-12-05" }),
+    ).toBe("Em dia até 04/12");
+  });
+
+  it('due_soon: "Vence em DD/MM · daqui a N dias"', () => {
+    expect(
+      planStatusBadge({ state: "due_soon", today: "2026-11-02", invoice: invoice4000, nextDueDate: null }),
+    ).toBe("Vence em 05/11 · daqui a 3 dias");
+  });
+
+  it('overdue: "Vencida em DD/MM"', () => {
+    expect(
+      planStatusBadge({ state: "overdue", today: "2026-11-06", invoice: invoice4000, nextDueDate: null }),
+    ).toBe("Vencida em 05/11");
+  });
+
+  it.each(["locked_unpaid", "locked_manual"])('%s: "Bloqueada"', (state) => {
+    expect(
+      planStatusBadge({
+        state: state as "locked_unpaid" | "locked_manual",
+        today: "2026-11-10",
+        invoice: invoice4000,
+        nextDueDate: null,
+      }),
+    ).toBe("Bloqueada");
+  });
+
+  it('exempt: "Plano interno — isento"', () => {
+    expect(
+      planStatusBadge({ state: "exempt", today: "2026-11-10", invoice: null, nextDueDate: null }),
+    ).toBe("Plano interno — isento");
+  });
+
+  it('frozen: "Plano pausado"', () => {
+    expect(
+      planStatusBadge({ state: "frozen", today: "2026-11-10", invoice: null, nextDueDate: null }),
+    ).toBe("Plano pausado");
+  });
+
+  it('awaiting_first_payment: "Aguardando primeiro pagamento"', () => {
+    expect(
+      planStatusBadge({
+        state: "awaiting_first_payment",
+        today: "2026-11-10",
+        invoice: invoice4000,
+        nextDueDate: null,
+      }),
+    ).toBe("Aguardando primeiro pagamento");
+  });
+});
+
+describe("invoicePaidSuccessText", () => {
+  it('"Mensalidade paga — acesso liberado até" the day before the new next_due_date', () => {
+    expect(invoicePaidSuccessText("2026-12-05")).toBe(
+      "Mensalidade paga — acesso liberado até 04/12",
+    );
+  });
+});
 
 describe("billingView — due_soon", () => {
   it("shows the yellow banner with the exact pt-BR text and showPay for the payer", () => {
