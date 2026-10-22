@@ -315,6 +315,29 @@ describe("sendBillingEmail", () => {
     expect(fake.admin.rows("billing_email_log")).toHaveLength(0);
   });
 
+  it("never logs a recipient's e-mail address when a send fails (only its index)", async () => {
+    seedTenant();
+    seedInvoice();
+    seedRolesAndUsers();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    callInfobipEmail
+      .mockResolvedValueOnce({ ok: false, status: 500, body: {}, idempotencyKey: "k" })
+      .mockRejectedValueOnce(new Error("network down"));
+
+    await sendBillingEmail("invoice-1", "issued", { now: INSIDE_WINDOW });
+
+    const logged = JSON.stringify(errorSpy.mock.calls);
+    for (const address of Object.values(EMAIL_BY_USER)) expect(logged).not.toContain(address);
+    expect(errorSpy).toHaveBeenCalledWith(
+      "[billing-emails] provider refused the send",
+      expect.objectContaining({ recipientIndex: 0 }),
+    );
+    expect(errorSpy).toHaveBeenCalledWith(
+      "[billing-emails] send failed",
+      expect.objectContaining({ recipientIndex: 1 }),
+    );
+  });
+
   it("uses exact subjects per kind", async () => {
     seedTenant();
     fake.admin.rows("user_roles").push({ user_id: ADMIN_USER, tenant_id: TENANT, role: "admin" });
@@ -468,6 +491,26 @@ describe("sendPendingBillingEmails", () => {
     expect(result).toBe(1);
     const paidLogs = fake.admin.rows("billing_email_log").filter((r) => r.kind === "paid");
     expect(paidLogs).toEqual([expect.objectContaining({ invoice_id: "paid-recent" })]);
+  });
+
+  it("never sends paid for an invoice settled by a 100% discount (full_discount)", async () => {
+    seedTenant();
+    seedRolesAndUsers();
+    const paidAt = new Date(INSIDE_WINDOW.getTime() - 60_000).toISOString();
+    seedInvoice({ id: "paid-pix", status: "paid", paid_via: "pix", paid_at: paidAt });
+    seedInvoice({ id: "paid-free", status: "paid", paid_via: "full_discount", paid_at: paidAt });
+    fake.admin
+      .rows("billing_email_log")
+      .push(
+        { invoice_id: "paid-pix", kind: "issued", recipients: 3, sent_at: new Date().toISOString() },
+        { invoice_id: "paid-free", kind: "issued", recipients: 3, sent_at: new Date().toISOString() },
+      );
+
+    const result = await sendPendingBillingEmails({ now: INSIDE_WINDOW });
+
+    expect(result).toBe(1);
+    const paidLogs = fake.admin.rows("billing_email_log").filter((r) => r.kind === "paid");
+    expect(paidLogs).toEqual([expect.objectContaining({ invoice_id: "paid-pix" })]);
   });
 
   it("an exempt house without any invoice never gets an e-mail", async () => {

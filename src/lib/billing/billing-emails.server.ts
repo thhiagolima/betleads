@@ -298,7 +298,9 @@ export async function sendBillingEmail(
         console.error("[billing-emails] provider refused the send", {
           invoiceId,
           kind,
-          to,
+          // Never log the address itself; its position in the recipient list
+          // (also in the idempotency key) is enough to trace it.
+          recipientIndex: index,
           status: result.status,
         });
       }
@@ -306,7 +308,7 @@ export async function sendBillingEmail(
       console.error("[billing-emails] send failed", {
         invoiceId,
         kind,
-        to,
+        recipientIndex: index,
         error: err instanceof Error ? err.message : String(err),
       });
     }
@@ -402,7 +404,15 @@ async function findLockedCandidates(): Promise<string[]> {
 async function findPaidCandidates(now: Date): Promise<string[]> {
   const cutoff = new Date(now.getTime() - PAID_LOOKBACK_MS).toISOString();
   const [{ data, error }, sent] = await Promise.all([
-    supabaseAdmin.from("billing_invoices").select("id").eq("status", "paid").gte("paid_at", cutoff),
+    // A 100% discount settles the invoice as 'full_discount': nothing was
+    // paid, so no "pagamento confirmado" e-mail. Every paid invoice has a
+    // paid_via (the settle always sets it), so neq never drops a real payment.
+    supabaseAdmin
+      .from("billing_invoices")
+      .select("id")
+      .eq("status", "paid")
+      .neq("paid_via", "full_discount")
+      .gte("paid_at", cutoff),
     sentInvoiceIds("paid"),
   ]);
   if (error) throw new Error(error.message);
