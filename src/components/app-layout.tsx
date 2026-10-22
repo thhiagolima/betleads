@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { AppSidebar } from "@/components/app-sidebar";
 import { ActiveTenantSwitcher } from "@/components/active-tenant-switcher";
+import { BillingBanner } from "@/components/billing/billing-banner";
 import { DemoBanner } from "@/components/demo-banner";
 import { ProviderAuthBanner } from "@/components/provider-auth-banner";
 import { AccountMenu } from "@/components/shell/account-menu";
@@ -90,6 +91,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             <AccountMenu role={role} />
           </div>
         </header>
+        <BillingBanner />
         <DemoBanner />
         <ProviderAuthBanner />
         <main

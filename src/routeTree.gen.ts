@@ -26,6 +26,7 @@ import { Route as JornadasRouteImport } from './routes/jornadas'
 import { Route as LigacoesRouteImport } from './routes/ligacoes'
 import { Route as LinksRouteImport } from './routes/links'
 import { Route as MidiaLtvRouteImport } from './routes/midia-ltv'
+import { Route as PlanoECreditosRouteImport } from './routes/plano-e-creditos'
 import { Route as PlayersRouteImport } from './routes/players'
 import { Route as PublicosRouteImport } from './routes/publicos'
 import { Route as RegrasRouteImport } from './routes/regras'
@@ -165,6 +166,11 @@ const LinksRoute = LinksRouteImport.update({
 const MidiaLtvRoute = MidiaLtvRouteImport.update({
   id: '/midia-ltv',
   path: '/midia-ltv',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PlanoECreditosRoute = PlanoECreditosRouteImport.update({
+  id: '/plano-e-creditos',
+  path: '/plano-e-creditos',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PlayersRoute = PlayersRouteImport.update({
@@ -484,6 +490,7 @@ export interface FileRoutesByFullPath {
   '/ligacoes': typeof LigacoesRoute
   '/links': typeof LinksRouteWithChildren
   '/midia-ltv': typeof MidiaLtvRoute
+  '/plano-e-creditos': typeof PlanoECreditosRoute
   '/players': typeof PlayersRouteWithChildren
   '/publicos': typeof PublicosRoute
   '/regras': typeof RegrasRoute
@@ -558,6 +565,7 @@ export interface FileRoutesByTo {
   '/ligacoes': typeof LigacoesRoute
   '/links': typeof LinksRouteWithChildren
   '/midia-ltv': typeof MidiaLtvRoute
+  '/plano-e-creditos': typeof PlanoECreditosRoute
   '/players': typeof PlayersRouteWithChildren
   '/publicos': typeof PublicosRoute
   '/regras': typeof RegrasRoute
@@ -633,6 +641,7 @@ export interface FileRoutesById {
   '/ligacoes': typeof LigacoesRoute
   '/links': typeof LinksRouteWithChildren
   '/midia-ltv': typeof MidiaLtvRoute
+  '/plano-e-creditos': typeof PlanoECreditosRoute
   '/players': typeof PlayersRouteWithChildren
   '/publicos': typeof PublicosRoute
   '/regras': typeof RegrasRoute
@@ -709,6 +718,7 @@ export interface FileRouteTypes {
     | '/ligacoes'
     | '/links'
     | '/midia-ltv'
+    | '/plano-e-creditos'
     | '/players'
     | '/publicos'
     | '/regras'
@@ -783,6 +793,7 @@ export interface FileRouteTypes {
     | '/ligacoes'
     | '/links'
     | '/midia-ltv'
+    | '/plano-e-creditos'
     | '/players'
     | '/publicos'
     | '/regras'
@@ -857,6 +868,7 @@ export interface FileRouteTypes {
     | '/ligacoes'
     | '/links'
     | '/midia-ltv'
+    | '/plano-e-creditos'
     | '/players'
     | '/publicos'
     | '/regras'
@@ -932,6 +944,7 @@ export interface RootRouteChildren {
   LigacoesRoute: typeof LigacoesRoute
   LinksRoute: typeof LinksRouteWithChildren
   MidiaLtvRoute: typeof MidiaLtvRoute
+  PlanoECreditosRoute: typeof PlanoECreditosRoute
   PlayersRoute: typeof PlayersRouteWithChildren
   PublicosRoute: typeof PublicosRoute
   RegrasRoute: typeof RegrasRoute
@@ -1097,6 +1110,13 @@ declare module '@tanstack/react-router' {
       path: '/midia-ltv'
       fullPath: '/midia-ltv'
       preLoaderRoute: typeof MidiaLtvRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/plano-e-creditos': {
+      id: '/plano-e-creditos'
+      path: '/plano-e-creditos'
+      fullPath: '/plano-e-creditos'
+      preLoaderRoute: typeof PlanoECreditosRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/players': {
@@ -1582,6 +1602,7 @@ const rootRouteChildren: RootRouteChildren = {
   LigacoesRoute: LigacoesRoute,
   LinksRoute: LinksRouteWithChildren,
   MidiaLtvRoute: MidiaLtvRoute,
+  PlanoECreditosRoute: PlanoECreditosRoute,
   PlayersRoute: PlayersRouteWithChildren,
   PublicosRoute: PublicosRoute,
   RegrasRoute: RegrasRoute,
