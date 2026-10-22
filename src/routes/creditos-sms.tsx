@@ -12,6 +12,7 @@ import {
   type WalletMonthUsageRow,
   type WalletPriceRow,
 } from "@/components/billing/wallet-usage-panels";
+import { useActiveTenant } from "@/hooks/use-active-tenant";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import { DEMO_EMPTY_STATE_TEXT } from "@/lib/demo-tenant";
 import { Badge } from "@/components/ui/badge";
@@ -50,13 +51,17 @@ function fmtDate(value: string | null) {
 function SaldoConsumoPage() {
   const isDemo = useIsDemoTenant();
   const portalFn = useServerFn(getSmsCreditPortal);
+  // The house is chosen only in the header; this page follows it.
+  const tenant = useActiveTenant();
+  const tenantId = tenant.data?.activeTenantId ?? null;
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ["sms-credits", "portal"],
-    queryFn: () => portalFn({ data: {} }),
+    queryKey: ["sms-credits", "portal", tenantId],
+    queryFn: () => portalFn({ data: { tenantId } }),
+    enabled: !!tenantId,
   });
 
-  if (isLoading) {
+  if (isLoading || tenant.isLoading) {
     return (
       <div className="grid gap-4 md:grid-cols-3">
         {Array.from({ length: 6 }).map((_, i) => (

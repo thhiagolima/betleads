@@ -67,6 +67,7 @@ import { getFailedSmsBreakdown, resendFailedSms } from "@/lib/sms.functions";
 import { getBillingPrices } from "@/lib/billing/billing.functions";
 import { countSmsSegments } from "@/lib/sms-segments";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
+import { useActiveTenant } from "@/hooks/use-active-tenant";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import { DEMO_SEND_BLOCKED_TEXT } from "@/lib/demo-tenant";
 import { listPlayersForCalls } from "@/lib/calls.functions";
@@ -391,9 +392,12 @@ function SmsCompactWorkspace({
     queryFn: () => statusFn(),
     refetchInterval: 30_000,
   });
+  const activeTenant = useActiveTenant();
+  const activeTenantId = activeTenant.data?.activeTenantId ?? null;
   const credits = useQuery({
-    queryKey: ["sms-credits", "portal"],
-    queryFn: () => portalFn({ data: {} }),
+    queryKey: ["sms-credits", "portal", activeTenantId],
+    queryFn: () => portalFn({ data: { tenantId: activeTenantId } }),
+    enabled: !!activeTenantId,
     refetchInterval: 30_000,
   });
   const [phone, setPhone] = useState("");
@@ -1033,9 +1037,12 @@ function SmsHomePanel() {
     queryFn: () => statusFn(),
     refetchInterval: 30_000,
   });
+  const activeTenant = useActiveTenant();
+  const activeTenantId = activeTenant.data?.activeTenantId ?? null;
   const credits = useQuery({
-    queryKey: ["sms-credits", "portal"],
-    queryFn: () => portalFn({ data: {} }),
+    queryKey: ["sms-credits", "portal", activeTenantId],
+    queryFn: () => portalFn({ data: { tenantId: activeTenantId } }),
+    enabled: !!activeTenantId,
     refetchInterval: 30_000,
   });
 

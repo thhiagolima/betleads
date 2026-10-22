@@ -17,6 +17,7 @@ import {
   Target,
   Trophy,
   Users,
+  Wallet,
   Workflow,
   type LucideIcon,
 } from "lucide-react";
@@ -90,7 +91,7 @@ export const SIDEBAR_SECTIONS: NavSection[] = [
   {
     label: "Canais",
     items: [
-      link("SMS", "/sms", MessageSquare, { alsoActiveOn: ["/creditos-sms", "/links"] }),
+      link("SMS", "/sms", MessageSquare, { alsoActiveOn: ["/links"] }),
       link("Email", "/email", Mail),
       link("Voz", "/ligacoes", Phone),
       link("Consentimentos", "/consentimentos", ShieldQuestion),
@@ -117,6 +118,7 @@ export const SIDEBAR_SECTIONS: NavSection[] = [
   {
     label: "Configurações",
     items: [
+      link("Saldo e consumo", "/creditos-sms", Wallet),
       link("Integrações", "/webhooks", Plug),
       link("Configurações", "/configuracoes", Settings),
     ],
@@ -191,7 +193,7 @@ export const ROUTE_META: Record<string, RouteMeta> = {
   "/jornadas/$journeyId/relatorio": { section: "Jornadas", title: "Relatório da jornada" },
   "/sms": { section: "Canais", title: "SMS" },
   "/sms/templates": { section: "Canais", title: "Templates de SMS" },
-  "/creditos-sms": { section: "Canais", title: "Saldo e consumo" },
+  "/creditos-sms": { section: "Configurações", title: "Saldo e consumo" },
   "/email": { section: "Canais", title: "Email" },
   "/ligacoes": { section: "Canais", title: "Voz" },
   "/whatsapp": { section: "Canais", title: "WhatsApp" },

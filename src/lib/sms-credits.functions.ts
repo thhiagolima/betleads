@@ -4,7 +4,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import type { Json } from "@/integrations/supabase/types";
-import { listDemoTenantIds } from "@/lib/tenant-access.server";
+import { listDemoTenantIds, resolveOperationalTenantForRequest } from "@/lib/tenant-access.server";
 import { dbUuid } from "@/lib/zod-helpers";
 
 type ServerContext = {
@@ -122,17 +122,13 @@ async function resolveTenantId(context: ServerContext, requestedTenantId?: strin
     return requestedTenantId;
   }
 
-  const { data, error } = await context.supabase
-    .from("user_roles")
-    .select("tenant_id")
-    .eq("user_id", context.userId)
-    .not("tenant_id", "is", null)
-    .order("tenant_id")
-    .limit(1);
-  if (error) throw new Error(error.message);
-  const tenantId = data?.[0]?.tenant_id;
-  if (!tenantId) throw new Error("Usuário sem tenant");
-  return tenantId;
+  // No explicit tenant: the house chosen in the header (x-active-tenant),
+  // the same resolution every other house screen uses.
+  return resolveOperationalTenantForRequest(
+    context.supabase as unknown as Parameters<typeof resolveOperationalTenantForRequest>[0],
+    context.userId,
+    null,
+  );
 }
 
 const tenantInput = z

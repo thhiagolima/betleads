@@ -56,13 +56,13 @@ describe("active nav item", () => {
 
   it("maps routes kept out of the menu to their parent item", () => {
     expect(activeNavKey("/jornadas/123", "")).toBe("/automacoes");
-    expect(activeNavKey("/creditos-sms", "")).toBe("/sms");
     expect(activeNavKey("/relatorios/conversao", "")).toBe("/resultados");
   });
 
   it("lights the settings items that used to be pinned", () => {
     expect(activeNavKey("/consentimentos", "")).toBe("/consentimentos");
     expect(activeNavKey("/webhooks", "")).toBe("/webhooks");
+    expect(activeNavKey("/creditos-sms", "")).toBe("/creditos-sms");
     expect(activeNavKey("/configuracoes", "")).toBe("/configuracoes");
   });
 
