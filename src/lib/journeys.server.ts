@@ -1298,7 +1298,9 @@ async function handleItemFailure(row: ClaimedRow, ctx: DispatchContext, error: u
 
   const policy = await retryPolicy(enrollment.journey_id);
   const attempts = Number(enrollment.attempts ?? 0) + 1;
-  const exhausted = attempts >= policy.maxAttempts;
+  // A send refused by a tenant guard (demo, or the house locked for the
+  // monthly fee) is final: no retry would ever get through.
+  const exhausted = decision.reason === "tenant_blocked" || attempts >= policy.maxAttempts;
 
   if (decision.kind === "unknown") {
     ctx.counters.outcomeUnknown++;

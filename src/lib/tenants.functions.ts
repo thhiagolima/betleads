@@ -4,7 +4,17 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import type { Json } from "@/integrations/supabase/types";
-import { assertTenantNotDemo } from "@/lib/tenant-access.server";
+import {
+  getTenantBillingSnapshot,
+  isTenantPayer,
+  type BillingSnapshotInvoice,
+} from "@/lib/billing/billing-state.server";
+import {
+  isEffectiveLock,
+  type BillingAccessState,
+  type BillingRole,
+} from "@/lib/billing/billing-view";
+import { assertTenantNotDemo, isBillingEnforcementEnabled } from "@/lib/tenant-access.server";
 import { dbUuid } from "@/lib/zod-helpers";
 
 type DbError = { message: string };
@@ -507,47 +517,106 @@ export const getTenantSwitcher = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => getTenantSwitcherFor(context as unknown as ServerContext));
 
-export const getCurrentTenantAccessStatus = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    const ctx = context as unknown as ServerContext;
-    const superAdmin = await checkSuperAdmin(ctx.userId);
+/** The billing block of `getCurrentTenantAccessStatus`, for the banner and lock UI. */
+export type TenantAccessBilling = {
+  state: BillingAccessState;
+  /** The lock for THIS caller: always false for the superadmin. */
+  effectiveLock: boolean;
+  role: BillingRole;
+  invoice: BillingSnapshotInvoice | null;
+  enforcement: boolean;
+  /** Brasília calendar day (YYYY-MM-DD), for `billingView`. */
+  today: string;
+};
 
-    if (superAdmin) {
-      return {
-        isSuperAdmin: true,
-        tenant: null,
-        blocked: false,
-      };
-    }
+function brasiliaToday(now: Date = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+}
 
-    const { data: tenantId, error: tenantErr } =
-      await ctx.supabase.rpc<string>("current_tenant_id");
-    if (tenantErr) throw new Error(tenantErr.message);
+async function tenantAccessBilling(
+  ctx: ServerContext,
+  tenantId: string,
+  superAdmin: boolean,
+): Promise<TenantAccessBilling> {
+  const [snapshot, payer] = await Promise.all([
+    getTenantBillingSnapshot(tenantId),
+    superAdmin ? Promise.resolve(true) : isTenantPayer(ctx.supabase, tenantId, ctx.userId),
+  ]);
+  const enforcement = isBillingEnforcementEnabled();
+  return {
+    state: snapshot.state,
+    effectiveLock: !superAdmin && isEffectiveLock(snapshot.state, enforcement),
+    role: superAdmin ? "super_admin" : payer ? "payer" : "member",
+    invoice: snapshot.invoice,
+    enforcement,
+    today: brasiliaToday(),
+  };
+}
 
-    if (!tenantId) {
-      return {
-        isSuperAdmin: false,
-        tenant: null,
-        blocked: false,
-      };
-    }
+/**
+ * Status the UI gate polls. Never refused for a billing-locked house (it is
+ * how the UI learns about the lock), so it reads the active tenant with the
+ * raw `current_tenant_id` RPC, not a locking resolver.
+ */
+export async function getCurrentTenantAccessStatusFor(ctx: ServerContext) {
+  const superAdmin = await checkSuperAdmin(ctx.userId);
 
-    const { data: tenant, error } = await db()
+  if (superAdmin) {
+    // The superadmin is never locked, but sees the house's billing state
+    // (banner) for the house currently selected, when there is one.
+    let billing: TenantAccessBilling | null = null;
+    const { data: activeTenantId } = await ctx.supabase.rpc<string>("current_tenant_id");
+    if (activeTenantId) billing = await tenantAccessBilling(ctx, activeTenantId, true);
+    return {
+      isSuperAdmin: true,
+      tenant: null,
+      blocked: false,
+      billing,
+    };
+  }
+
+  const { data: tenantId, error: tenantErr } = await ctx.supabase.rpc<string>("current_tenant_id");
+  if (tenantErr) throw new Error(tenantErr.message);
+
+  if (!tenantId) {
+    return {
+      isSuperAdmin: false,
+      tenant: null,
+      blocked: false,
+      billing: null,
+    };
+  }
+
+  const [{ data: tenant, error }, billing] = await Promise.all([
+    db()
       .from<TenantRow>("tenants")
       .select("id,nome,slug,status,plano,crm_model,created_at,updated_at")
       .eq("id", tenantId)
-      .maybeSingle();
-    if (error) throw new Error(error.message);
+      .maybeSingle(),
+    tenantAccessBilling(ctx, tenantId, false),
+  ]);
+  if (error) throw new Error(error.message);
 
-    const status = tenant?.status ?? null;
+  const status = tenant?.status ?? null;
 
-    return {
-      isSuperAdmin: false,
-      tenant,
-      blocked: status === "suspended" || status === "canceled",
-    };
-  });
+  return {
+    isSuperAdmin: false,
+    tenant,
+    blocked: status === "suspended" || status === "canceled",
+    billing,
+  };
+}
+
+export const getCurrentTenantAccessStatus = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) =>
+    getCurrentTenantAccessStatusFor(context as unknown as ServerContext),
+  );
 
 const createTenantInput = z.object({
   nome: z.string().min(2).max(160),

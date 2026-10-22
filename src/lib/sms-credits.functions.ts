@@ -4,11 +4,12 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import type { Json } from "@/integrations/supabase/types";
+import { isBillingLockedFor, isTenantPayer } from "@/lib/billing/billing-state.server";
 import { isBillingGatewayEnabled } from "@/lib/billing/topup.functions";
 import {
   checkDemoTenant,
   listDemoTenantIds,
-  resolveOperationalTenantForRequest,
+  resolveTenantForBilling,
 } from "@/lib/tenant-access.server";
 import { dbUuid } from "@/lib/zod-helpers";
 
@@ -128,9 +129,11 @@ async function resolveTenantId(context: ServerContext, requestedTenantId?: strin
   }
 
   // No explicit tenant: the house chosen in the header (x-active-tenant),
-  // the same resolution every other house screen uses.
-  return resolveOperationalTenantForRequest(
-    context.supabase as unknown as Parameters<typeof resolveOperationalTenantForRequest>[0],
+  // the same resolution every other house screen uses — through the billing
+  // resolver, so a house locked for the monthly fee still sees its wallet
+  // on Plano e créditos.
+  return resolveTenantForBilling(
+    context.supabase as unknown as Parameters<typeof resolveTenantForBilling>[0],
     context.userId,
     null,
   );
@@ -172,20 +175,21 @@ export async function getSmsCreditPortalFor(
 
   const summary = withoutProviderCost(summaryRes.data);
 
-  // `canBuy`: gateway on && admin of this house && not exempt && not demo
-  // (brief, Task 6). Non-throwing by design — this is a display flag, not a
-  // guard; `createCreditTopupFor` re-checks every one of these server-side
+  // `canBuy`: gateway on && payer of this house (admin, owner, gestor or
+  // superadmin) && not exempt && not demo && no effective billing lock for
+  // this caller (PG2 Task 6, mensalidade Task 4). Non-throwing by design —
+  // this is a display flag, not a guard; `createCreditTopupFor` re-checks every one of these server-side
   // before actually charging.
   let canBuy = false;
   if (isBillingGatewayEnabled()) {
     const exempt = (summary as { exempt?: boolean }).exempt === true;
     if (!exempt) {
-      const [{ data: isAdmin, error: isAdminError }, demoCheck] = await Promise.all([
-        sb.rpc("is_tenant_admin", { _tenant: tenantId }),
+      const [isPayer, demoCheck, locked] = await Promise.all([
+        isTenantPayer(ctx.supabase, tenantId, ctx.userId),
         checkDemoTenant(tenantId),
+        isBillingLockedFor(tenantId, ctx.userId),
       ]);
-      if (isAdminError) throw new Error(isAdminError.message);
-      canBuy = Boolean(isAdmin) && demoCheck === "not_demo";
+      canBuy = isPayer && demoCheck === "not_demo" && !locked;
     }
   }
 

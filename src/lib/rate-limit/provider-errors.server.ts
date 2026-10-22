@@ -23,6 +23,7 @@
 // Workers wrap a non-ok provider result in ProviderSendError so the status,
 // body and transport kind survive until the classification.
 
+import { isSendBlockedError } from "@/lib/billing/billing-locked-error";
 import { isInsufficientFunds } from "@/lib/dispatch-pause-insufficient.server";
 import { parseRetryAfter } from "@/lib/dispatch-rate.server";
 import { isProviderErrorKind, type ProviderErrorKind } from "./transport-errors";
@@ -42,6 +43,7 @@ export type ProviderFailureDecision = {
     | "outcome_unknown"
     | "provider_misconfigured"
     | "not_sent"
+    | "tenant_blocked"
     | "permanent_error";
   /** Delay before the item becomes due again (defer/unknown only). */
   retryAfterMs: number;
@@ -101,6 +103,14 @@ function parseBody(body: unknown): unknown {
 }
 
 export function classifyProviderFailure(error: unknown): ProviderFailureDecision {
+  // Refused by a tenant send guard (demo, or the house locked for the monthly
+  // fee): nothing reached the provider and no retry would get through. Final:
+  // callers must not spend further attempts on it (see journeys'
+  // handleItemFailure). Checked first: such a result carries status 0, which
+  // would otherwise read as "outcome unknown".
+  if (isSendBlockedError(error)) {
+    return { kind: "fail", reason: "tenant_blocked", retryAfterMs: 0 };
+  }
   if (error instanceof ProviderSendError) {
     if (error.errorKind === "provider_account") {
       return {

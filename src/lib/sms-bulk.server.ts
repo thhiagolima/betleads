@@ -30,7 +30,7 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import type { Json } from "@/integrations/supabase/types";
 import { assertTenantCanOperate, assertTenantNotDemoForSend } from "./tenant-access.server";
-import { isDemoBlockedError } from "./demo-tenant";
+import { isBillingLockedError, isSendBlockedError } from "./billing/billing-locked-error";
 import { captureServerException } from "./observability/sentry.server";
 import { normalizeConsentSubject } from "./consent.server";
 import { requireBrazilianPhone } from "./phone-normalization";
@@ -232,8 +232,9 @@ type ProviderCall =
 
 /**
  * One Short Brasil bulk request. `tenantIds` are the tenants of every item in
- * the payload (a chunk may mix tenants); each passes the demo send guard right
- * before the request, and a DemoTenantBlockedError propagates (nothing sent).
+ * the payload (a chunk may mix tenants); each passes the send guard right
+ * before the request, and a DemoTenantBlockedError/TenantBillingLockedError
+ * propagates (nothing sent).
  */
 async function postBulk(tenantIds: readonly string[], payload: unknown): Promise<ProviderCall> {
   const { usuario, chave } = shortBrasilCredentials();
@@ -407,10 +408,11 @@ async function sendChunk(chunk: Prepared[]): Promise<{
   try {
     call = await postBulk(chunk.map((p) => p.item.tenantId), payload);
   } catch (error) {
-    if (!isDemoBlockedError(error)) throw error;
-    // Only reachable if a tenant turned demo after sendSmsBatch's own guard:
-    // nothing left, so the write-ahead rows and credits are released as failed.
-    return wholeChunkFailed(error.message, false, null);
+    if (!isSendBlockedError(error)) throw error;
+    // Only reachable if a tenant turned demo or got billing-locked after
+    // sendSmsBatch's own guard: nothing left, so the write-ahead rows and
+    // credits are released as failed (final, never retried).
+    return wholeChunkFailed((error as Error).message, false, null);
   }
 
   if (call.kind === "transport") {
@@ -546,15 +548,28 @@ async function sendChunk(chunk: Prepared[]): Promise<{
 }
 
 /**
- * Demo send guard for every distinct tenant of a batch. Throws only the
+ * Send guard for every distinct tenant of a batch. Throws the
  * DemoTenantBlockedError (DEMO_SEND_BLOCKED, fail-closed for an empty or
- * unknown tenant); other tenant states (suspended/canceled) are left to the
- * existing checks so their behaviour is unchanged.
+ * unknown tenant) or the TenantBillingLockedError (effective billing lock);
+ * other tenant states (suspended/canceled) are left to the existing checks so
+ * their behaviour is unchanged.
  */
-async function assertBatchTenantsCanSend(tenantIds: Iterable<string>) {
+async function assertBatchTenantsCanSend(
+  tenantIds: Iterable<string>,
+  billingLocked?: Map<string, string>,
+) {
   const ids = Array.from(new Set(tenantIds));
   if (ids.length === 0) await assertTenantNotDemoForSend(null);
-  for (const tenantId of ids) await assertTenantNotDemoForSend(tenantId);
+  for (const tenantId of ids) {
+    try {
+      await assertTenantNotDemoForSend(tenantId);
+    } catch (error) {
+      // With a collector, a billing-locked tenant is recorded instead of
+      // failing the whole batch; a demo/unknown tenant still throws.
+      if (!billingLocked || !isBillingLockedError(error)) throw error;
+      billingLocked.set(tenantId, (error as Error).message);
+    }
+  }
 }
 
 /** Thrown before anything is charged or sent: the caller must retry the whole batch later. */
@@ -570,7 +585,10 @@ export class SmsBatchDeferredError extends Error {
  * Throws SmsBatchDeferredError (nothing charged or sent) when the tenant is
  * blocked or link tracking is in 'block' mode and links could not be prepared.
  * Throws DemoTenantBlockedError (DEMO_SEND_BLOCKED, nothing written) when any
- * item belongs to a demo or unknown tenant.
+ * item belongs to a demo or unknown tenant. Items of a house with an
+ * effective billing lock come back failed, final (`retryable: false`), with
+ * the lock copy and nothing written or charged; the other tenants' items are
+ * sent normally.
  */
 export async function sendSmsBatch(items: SmsBatchItem[]): Promise<SmsBatchResult> {
   const outcomes: Array<SmsBatchOutcome | undefined> = new Array(items.length);
@@ -583,8 +601,31 @@ export async function sendSmsBatch(items: SmsBatchItem[]): Promise<SmsBatchResul
 
   // Demo guard for the whole batch, before any transport choice, log, credit
   // or link: one demo (or unknown) tenant rejects the batch with
-  // DemoTenantBlockedError and no per-recipient row is written.
-  await assertBatchTenantsCanSend(items.map((i) => i.tenantId));
+  // DemoTenantBlockedError and no per-recipient row is written. A
+  // billing-locked house's items fail here, final, before anything is written.
+  const billingLocked = new Map<string, string>();
+  await assertBatchTenantsCanSend(items.map((i) => i.tenantId), billingLocked);
+  if (billingLocked.size > 0) {
+    const keep: Array<{ item: SmsBatchItem; index: number }> = [];
+    items.forEach((item, index) => {
+      const reason = billingLocked.get(item.tenantId);
+      if (reason === undefined) keep.push({ item, index });
+      else
+        outcomes[index] = {
+          deliveryKey: item.deliveryKey,
+          status: "failed",
+          ok: false,
+          retryable: false,
+          error: reason,
+        };
+    });
+    if (keep.length === 0) return result([], 0);
+    const rest = await sendSmsBatch(keep.map((k) => k.item));
+    rest.outcomes.forEach((outcome, j) => {
+      outcomes[keep[j].index] = outcome;
+    });
+    return result(rest.lotes, rest.httpCalls);
+  }
 
   const transport = smsBulkTransport();
   if (transport === "misconfigured") {

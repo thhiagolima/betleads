@@ -39,6 +39,8 @@ import {
 const TENANT = "00000000-0000-4000-8000-00000000a0a0";
 const SUPER_ADMIN = "00000000-0000-4000-8000-0000000000aa";
 const HOUSE_ADMIN = "00000000-0000-4000-8000-0000000000bb";
+const HOUSE_GESTOR = "00000000-0000-4000-8000-0000000000bc";
+const HOUSE_MEMBER = "00000000-0000-4000-8000-0000000000bd";
 
 type Ctx = Parameters<typeof adminAdjustSmsCreditsFor>[0];
 
@@ -159,10 +161,16 @@ describe("getSmsCreditPortalFor canBuy", () => {
       data: { balance: 100, lifetime_purchased: 200, lifetime_used: 100, exempt: false },
       error: null,
     }));
+    userDb.rows("user_roles").push(
+      { user_id: HOUSE_ADMIN, tenant_id: TENANT, role: "admin" },
+      { user_id: HOUSE_GESTOR, tenant_id: TENANT, role: "gestor" },
+      { user_id: HOUSE_MEMBER, tenant_id: TENANT, role: "member" },
+    );
   });
 
   afterEach(() => {
     delete process.env.BILLING_GATEWAY_ENABLED;
+    delete process.env.BILLING_ENFORCEMENT_ENABLED;
   });
 
   it("is false when the gateway is off, even for an admin of a paying house", async () => {
@@ -171,10 +179,30 @@ describe("getSmsCreditPortalFor canBuy", () => {
     expect(result.canBuy).toBe(false);
   });
 
-  it("is false for a gestor (non-admin) of a paying house, gateway on", async () => {
+  it("is true for a gestor of a paying house, gateway on (gestor can pay)", async () => {
     process.env.BILLING_GATEWAY_ENABLED = "true";
     userDb.onRpc("is_tenant_admin", () => ({ data: false, error: null }));
+    const result = await getSmsCreditPortalFor(ctxFor(HOUSE_GESTOR), { tenantId: null });
+    expect(result.canBuy).toBe(true);
+  });
+
+  it("is false for a member of a paying house, gateway on", async () => {
+    process.env.BILLING_GATEWAY_ENABLED = "true";
+    const result = await getSmsCreditPortalFor(ctxFor(HOUSE_MEMBER), { tenantId: null });
+    expect(result.canBuy).toBe(false);
+  });
+
+  it("is false (without throwing) for a house locked for the monthly fee, and the portal still loads", async () => {
+    process.env.BILLING_GATEWAY_ENABLED = "true";
+    process.env.BILLING_ENFORCEMENT_ENABLED = "true";
+    fake.admin.rows("tenants").push({
+      id: TENANT,
+      status: "active",
+      is_demo: false,
+      tenant_billing: { access_state: "locked_unpaid" },
+    });
     const result = await getSmsCreditPortalFor(ctxFor(HOUSE_ADMIN), { tenantId: null });
+    expect(result.tenantId).toBe(TENANT);
     expect(result.canBuy).toBe(false);
   });
 

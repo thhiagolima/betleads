@@ -19,7 +19,7 @@ import {
   resolveCurrentTenantId,
   resolveOperationalTenantId,
 } from "./tenant-access.server";
-import { isDemoBlockedError } from "./demo-tenant";
+import { isSendBlockedError } from "./billing/billing-locked-error";
 import { bindTrackedDispatchesToMessageLog } from "./shortio.server";
 import { conversionFunnelSnapshot, type ConversionObjective } from "./conversion-funnel";
 
@@ -1022,8 +1022,9 @@ export async function runCampaignSend(campaignId: string) {
         console.error("campaign send failed", { to: p.email, snippet: errSnippet });
       }
     } catch (err) {
-      // Second net: a demo block is not a delivery failure and is never logged.
-      if (isDemoBlockedError(err)) throw err;
+      // Second net: a demo block or a billing lock is not a delivery failure
+      // and is never logged; it ends the whole campaign run (final).
+      if (isSendBlockedError(err)) throw err;
       falhas++;
       console.error("campaign send error", err);
       await supabaseAdmin.from("email_send_logs").insert({
