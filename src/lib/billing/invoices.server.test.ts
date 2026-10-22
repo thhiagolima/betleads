@@ -180,6 +180,22 @@ describe("runBillingCycle", () => {
     // but with an empty list — never with stale/partial ids.
     expect(sendEmails).toHaveBeenCalledWith({ issuedInvoiceIds: [] });
   });
+
+  it("still sends the e-mail sweep and reports the failure when listing the houses fails", async () => {
+    fake.admin.onRpc("billing_generate_due_invoices", () => ({ data: ["new-invoice-1"], error: null }));
+    const refreshRpc = vi.fn(() => ({ data: "ok", error: null }));
+    fake.admin.onRpc("billing_refresh_access_state", refreshRpc);
+    fake.admin.failNext("tenant_billing", "select", "list timeout");
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const sendEmails = vi.fn().mockResolvedValue(3);
+
+    const result = await runBillingCycle({ sendEmails });
+
+    expect(refreshRpc).not.toHaveBeenCalled();
+    expect(sendEmails).toHaveBeenCalledWith({ issuedInvoiceIds: ["new-invoice-1"] });
+    expect(result).toMatchObject({ generated: 1, refreshed: 0, issued: 3, errors: 1 });
+    expect(result.failures).toEqual(["list_tenants: list timeout"]);
+  });
 });
 
 describe("createInvoicePayment", () => {

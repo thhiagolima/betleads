@@ -127,6 +127,12 @@ export type RunBillingCycleResult = {
    */
   issued: number;
   errors: number;
+  /**
+   * One line per failed stage of the run (generation, house listing), e.g.
+   * `"list_tenants: timeout"`. A failed stage never stops the later ones:
+   * the e-mail sweep runs even if the house list could not be read.
+   */
+  failures: string[];
 };
 
 /**
@@ -190,6 +196,7 @@ export async function runBillingCycle(
 ): Promise<RunBillingCycleResult> {
   const sendEmails = opts.sendEmails ?? (async () => undefined);
   const counters = { refreshed: 0, errors: 0 };
+  const failures: string[] = [];
   let issuedInvoiceIds: string[] = [];
 
   if (isBillingInvoicesEnabled()) {
@@ -199,6 +206,7 @@ export async function runBillingCycle(
       issuedInvoiceIds = ((data ?? []) as unknown[]).map((id) => String(id));
     } catch (err) {
       counters.errors += 1;
+      failures.push(`generate: ${errorMessage(err)}`);
       console.error("[billing/invoices] billing_generate_due_invoices failed", {
         error: errorMessage(err),
       });
@@ -207,7 +215,18 @@ export async function runBillingCycle(
     }
   }
 
-  const tenantIds = await listNonExemptTenantIds();
+  // A failed house listing skips only the refresh: the e-mail sweep below
+  // still runs (it reads its own candidates from the DB).
+  let tenantIds: string[] = [];
+  try {
+    tenantIds = await listNonExemptTenantIds();
+  } catch (err) {
+    counters.errors += 1;
+    failures.push(`list_tenants: ${errorMessage(err)}`);
+    console.error("[billing/invoices] listing non-exempt houses failed", {
+      error: errorMessage(err),
+    });
+  }
   for (const tenantId of tenantIds) {
     await refreshOneTenant(tenantId, counters);
   }
@@ -223,6 +242,7 @@ export async function runBillingCycle(
     refreshed: counters.refreshed,
     issued,
     errors: counters.errors,
+    failures,
   };
 }
 
