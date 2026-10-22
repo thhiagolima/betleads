@@ -82,18 +82,35 @@ export function __resetUpperRateLimiterForTests(): void {
   callTimestamps = [];
 }
 
+// Normalizes UPPER_API_BASE so the request path always has exactly one
+// trailing /v1 segment, regardless of whether the configured value already
+// carries it or has a trailing slash.
 function baseUrl(): string {
-  return (process.env.UPPER_API_BASE?.trim() || DEFAULT_BASE_URL).replace(/\/$/, "");
+  const raw = (process.env.UPPER_API_BASE?.trim() || DEFAULT_BASE_URL).replace(/\/+$/, "");
+  return /\/v1$/i.test(raw) ? raw : `${raw}/v1`;
 }
 
 function apiKey(): string | null {
   return process.env.UPPER_API_KEY?.trim() || null;
 }
 
-function toNumberOrNull(value: unknown): number | null {
-  if (value === null || value === undefined) return null;
+/** Throws UpperError(INVALID_RESPONSE) when `value` doesn't parse to a finite number. */
+function parseAmountCents(value: unknown, field: string): number {
   const n = Number(value);
-  return Number.isFinite(n) ? n : null;
+  if (!Number.isFinite(n)) {
+    throw new UpperError(`Resposta da Upper com ${field} inválido.`, {
+      status: 0,
+      code: "INVALID_RESPONSE",
+      retryable: false,
+    });
+  }
+  return n;
+}
+
+/** Same as parseAmountCents, but null/undefined is a valid "not paid yet" value. */
+function parseNullableAmountCents(value: unknown, field: string): number | null {
+  if (value === null || value === undefined) return null;
+  return parseAmountCents(value, field);
 }
 
 type UpperChargeResponse = {
@@ -116,13 +133,13 @@ function parseUpperCharge(body: unknown): UpperCharge {
     id: b.id ?? "",
     externalId: b.externalId ?? null,
     status: (b.status ?? "PENDING") as UpperChargeStatus,
-    amountCents: toNumberOrNull(b.amountCents) ?? 0,
+    amountCents: parseAmountCents(b.amountCents, "amountCents"),
     emv: b.pix?.emv ?? null,
     qrCodeImage: b.pix?.qrCodeImage ?? null,
     paymentUrl: b.paymentUrl ?? null,
     expiresAt: b.expiresAt ?? null,
     paidAt: b.paidAt ?? null,
-    paidAmountCents: toNumberOrNull(b.paidAmountCents ?? null),
+    paidAmountCents: parseNullableAmountCents(b.paidAmountCents, "paidAmountCents"),
     payer: b.payer ? { name: b.payer.name ?? null, document: b.payer.document ?? null } : null,
     raw: body,
   };

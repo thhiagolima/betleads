@@ -191,6 +191,52 @@ describe("upper-pix.server", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["https://api.uppersc.com.br", "https://api.uppersc.com.br/v1/pix/charges/bl-top-abc"],
+    ["https://api.uppersc.com.br/", "https://api.uppersc.com.br/v1/pix/charges/bl-top-abc"],
+    ["https://api.uppersc.com.br/v1", "https://api.uppersc.com.br/v1/pix/charges/bl-top-abc"],
+    ["https://api.uppersc.com.br/v1/", "https://api.uppersc.com.br/v1/pix/charges/bl-top-abc"],
+  ])("normalizes UPPER_API_BASE=%s to exactly one /v1 segment", async (configured, expectedUrl) => {
+    process.env.UPPER_API_BASE = configured;
+    const fetchMock = vi.fn().mockResolvedValue(okResponse(chargeBody()));
+    vi.stubGlobal("fetch", fetchMock);
+    const { getUpperCharge } = await import("./upper-pix.server");
+
+    await getUpperCharge("bl-top-abc");
+
+    expect(fetchMock).toHaveBeenCalledWith(expectedUrl, expect.anything());
+  });
+
+  it("throws UpperError INVALID_RESPONSE when amountCents doesn't parse to a finite number", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okResponse(chargeBody({ amountCents: "not-a-number" })));
+    vi.stubGlobal("fetch", fetchMock);
+    const { getUpperCharge } = await import("./upper-pix.server");
+
+    await expect(getUpperCharge("bl-top-abc")).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
+      retryable: false,
+    });
+  });
+
+  it("accepts a null paidAmountCents but throws on an unparsable non-null one", async () => {
+    const fetchMockOk = vi
+      .fn()
+      .mockResolvedValue(okResponse(chargeBody({ paidAmountCents: null })));
+    vi.stubGlobal("fetch", fetchMockOk);
+    const { getUpperCharge } = await import("./upper-pix.server");
+    const ok = await getUpperCharge("bl-top-abc");
+    expect(ok.paidAmountCents).toBeNull();
+
+    const fetchMockBad = vi
+      .fn()
+      .mockResolvedValue(okResponse(chargeBody({ paidAmountCents: "garbage" })));
+    vi.stubGlobal("fetch", fetchMockBad);
+    await expect(getUpperCharge("bl-top-abc")).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
+      retryable: false,
+    });
+  });
+
   it("waits (never fails) when over 100 calls in a rolling 60s window", async () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn().mockImplementation(async () => okResponse(chargeBody()));
