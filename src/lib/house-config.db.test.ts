@@ -211,3 +211,79 @@ describe("onboarding backfill", () => {
     expect(rows[0].onboarding_completed_at).not.toBeNull();
   });
 });
+
+describe("save_tenant_quick_links", () => {
+  const TENANT = "00000000-0000-4000-8000-000000000003";
+  let keepId: string;
+  let doomedId: string;
+
+  beforeAll(async () => {
+    await db.query(`insert into public.tenants (id, nome) values ($1, 'Casa Links')`, [TENANT]);
+
+    const { rows: inserted } = await db.query<{ id: string }>(
+      `insert into public.tenant_quick_links (tenant_id, key, label, path, position)
+       values ($1, 'login', 'Login', '/login', 0), ($1, 'deposito', 'Depósito', '/deposito', 1)
+       returning id, key`,
+      [TENANT],
+    );
+    keepId = inserted[0].id;
+    doomedId = inserted[1].id;
+  });
+
+  it("inserts, updates and deletes in one call", async () => {
+    const { rows } = await db.query<{
+      id: string;
+      key: string;
+      label: string;
+      path: string;
+      position: number;
+    }>(
+      `select * from public.save_tenant_quick_links($1, $2, $3, $4)`,
+      [
+        TENANT,
+        [doomedId],
+        JSON.stringify([{ id: keepId, label: "Login novo", path: "/login2", position: 0 }]),
+        JSON.stringify([{ key: "promo", label: "Promo", path: "/promo", position: 1 }]),
+      ],
+    );
+
+    expect(rows).toHaveLength(2);
+    const byKey = Object.fromEntries(rows.map((r) => [r.key, r]));
+    expect(byKey.login).toMatchObject({ id: keepId, label: "Login novo", path: "/login2", position: 0 });
+    expect(byKey.promo).toMatchObject({ label: "Promo", path: "/promo", position: 1 });
+    expect(byKey.deposito).toBeUndefined();
+
+    const { rows: all } = await db.query(
+      `select key from public.tenant_quick_links where tenant_id = $1`,
+      [TENANT],
+    );
+    expect(all).toHaveLength(2);
+  });
+
+  it("rolls back the whole call when one row is invalid, leaving the previous set intact", async () => {
+    const before = await db.query<{ key: string; label: string }>(
+      `select key, label from public.tenant_quick_links where tenant_id = $1 order by key`,
+      [TENANT],
+    );
+
+    await expect(
+      db.query(
+        `select * from public.save_tenant_quick_links($1, $2, $3, $4)`,
+        [
+          TENANT,
+          [],
+          JSON.stringify([{ id: keepId, label: "Should not stick", path: "/nope", position: 0 }]),
+          // Invalid key (uppercase) must violate the check constraint and
+          // roll back the update above together with it.
+          JSON.stringify([{ key: "INVALID", label: "Bad", path: "/bad", position: 2 }]),
+        ],
+      ),
+    ).rejects.toThrow();
+
+    const after = await db.query<{ key: string; label: string }>(
+      `select key, label from public.tenant_quick_links where tenant_id = $1 order by key`,
+      [TENANT],
+    );
+    expect(after.rows).toEqual(before.rows);
+  });
+});

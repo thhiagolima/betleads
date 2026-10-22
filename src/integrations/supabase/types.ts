@@ -7736,6 +7736,24 @@ export type Database = {
         }
         Returns: string
       }
+      save_tenant_quick_links: {
+        Args: {
+          _delete_ids: string[]
+          _inserts: Json
+          _tenant: string
+          _updates: Json
+        }
+        Returns: {
+          created_at: string
+          id: string
+          key: string
+          label: string
+          path: string
+          position: number
+          tenant_id: string
+          updated_at: string
+        }[]
+      }
       sms_audience_player_matches: {
         Args: {
           _cashback_at: string

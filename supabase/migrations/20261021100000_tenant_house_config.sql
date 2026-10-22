@@ -132,6 +132,61 @@ update public.tenants
 set onboarding_completed_at = now()
 where onboarding_completed_at is null;
 
+-- Atomic quick-links save: the admin's whole intended set (deletes, in-place
+-- updates and inserts) is already validated and planned, pure, in
+-- planQuickLinksSave (src/lib/house-config.ts) before this is ever called.
+-- This function just applies that plan as a single statement, so a bad row
+-- (e.g. a unique-key clash the planner missed) raises and the whole call
+-- rolls back together, leaving the house's previous quick links intact.
+create or replace function public.save_tenant_quick_links(
+  _tenant uuid,
+  _delete_ids uuid[],
+  _updates jsonb,
+  _inserts jsonb
+) returns setof public.tenant_quick_links
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  _row jsonb;
+begin
+  if _delete_ids is not null and array_length(_delete_ids, 1) > 0 then
+    delete from public.tenant_quick_links
+    where tenant_id = _tenant and id = any(_delete_ids);
+  end if;
+
+  for _row in select * from jsonb_array_elements(coalesce(_updates, '[]'::jsonb))
+  loop
+    update public.tenant_quick_links
+    set label = _row ->> 'label',
+        path = _row ->> 'path',
+        position = (_row ->> 'position')::integer
+    where id = (_row ->> 'id')::uuid and tenant_id = _tenant;
+  end loop;
+
+  for _row in select * from jsonb_array_elements(coalesce(_inserts, '[]'::jsonb))
+  loop
+    insert into public.tenant_quick_links (tenant_id, key, label, path, position)
+    values (
+      _tenant,
+      _row ->> 'key',
+      _row ->> 'label',
+      _row ->> 'path',
+      (_row ->> 'position')::integer
+    );
+  end loop;
+
+  return query
+    select * from public.tenant_quick_links
+    where tenant_id = _tenant
+    order by position;
+end;
+$$;
+
+revoke all on function public.save_tenant_quick_links(uuid, uuid[], jsonb, jsonb) from public, anon, authenticated;
+grant execute on function public.save_tenant_quick_links(uuid, uuid[], jsonb, jsonb) to service_role;
+
 commit;
 
 notify pgrst, 'reload schema';

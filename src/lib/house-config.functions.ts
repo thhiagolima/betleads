@@ -526,39 +526,27 @@ export const saveQuickLinks = createServerFn({ method: "POST" })
     const plan = planQuickLinksSave(data.links, (existingRows ?? []) as { id: string; key: string }[]);
     if (!plan.ok) throw new Error(plan.error);
 
-    // Delete only the links the admin removed (frees their keys for new rows).
-    if (plan.deleteIds.length > 0) {
-      const { error: delErr } = await supabaseAdmin
-        .from("tenant_quick_links")
-        .delete()
-        .eq("tenant_id", tenantId)
-        .in("id", plan.deleteIds);
-      if (delErr) throw new Error(delErr.message);
-    }
-
-    // Existing rows: update in place by id (stored key is kept).
-    for (const row of plan.updates) {
-      const { error: updErr } = await supabaseAdmin
-        .from("tenant_quick_links")
-        .update({ label: row.label, path: row.path, position: row.position })
-        .eq("id", row.id)
-        .eq("tenant_id", tenantId);
-      if (updErr) throw new Error(updErr.message);
-    }
-
-    if (plan.inserts.length > 0) {
-      const { error: insErr } = await supabaseAdmin
-        .from("tenant_quick_links")
-        .insert(plan.inserts.map((row) => ({ ...row, tenant_id: tenantId })));
-      if (insErr) throw new Error(insErr.message);
-    }
-
-    const { data: savedRows, error: savedErr } = await supabaseAdmin
-      .from("tenant_quick_links")
-      .select("id,key,label,path")
-      .eq("tenant_id", tenantId)
-      .order("position", { ascending: true });
-    if (savedErr) throw new Error(savedErr.message);
+    // Applied atomically in a single Postgres function: delete-missing,
+    // update-kept and insert-new all happen in one transaction, so a bad row
+    // (shouldn't happen — plan already validated it) can never leave the
+    // house's quick links half-written.
+    const { data: savedRows, error: saveErr } = await supabaseAdmin.rpc("save_tenant_quick_links", {
+      _tenant: tenantId,
+      _delete_ids: plan.deleteIds,
+      _updates: plan.updates.map((row) => ({
+        id: row.id,
+        label: row.label,
+        path: row.path,
+        position: row.position,
+      })),
+      _inserts: plan.inserts.map((row) => ({
+        key: row.key,
+        label: row.label,
+        path: row.path,
+        position: row.position,
+      })),
+    });
+    if (saveErr) throw new Error(saveErr.message);
 
     return {
       ok: true,
