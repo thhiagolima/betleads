@@ -317,6 +317,32 @@ describe("runCampaignSend sender", () => {
     expect(fake.db.rows("email_campaigns")[0].blocked_reason).toBeNull();
   });
 
+  it("logs but does not mask the original error when recording blocked_reason fails", async () => {
+    seedDomains();
+    seedCampaign({ sender_id: null });
+    fake.db.failNext("email_campaigns", "update", "db unavailable");
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const error = await runCampaignSend("camp-1").catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(EmailDomainNotVerifiedError);
+    expect(errSpy).toHaveBeenCalled();
+    errSpy.mockRestore();
+  });
+
+  it("logs but does not throw when clearing a previous blocked_reason fails", async () => {
+    seedDomains();
+    seedSenders();
+    seedCampaign({ sender_id: S_PROMO, blocked_reason: "antigo" });
+    fake.db.failNext("email_campaigns", "update", "db unavailable");
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await runCampaignSend("camp-1");
+
+    expect(errSpy).toHaveBeenCalled();
+    errSpy.mockRestore();
+  });
+
   it("sends from the campaign's verified sender and passes its short domain to link tracking", async () => {
     seedDomains();
     seedSenders();

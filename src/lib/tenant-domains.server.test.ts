@@ -735,6 +735,29 @@ describe("purgeTenantDomain", () => {
     expect(mocks.deleteInfobipDomain).not.toHaveBeenCalled();
     expect(tables.tenant_domains).toHaveLength(1);
   });
+
+  it("maps a provider failure to the pt-BR message and keeps the row (logs the raw text instead)", async () => {
+    seed({
+      tenant_domains: [
+        domainRow({
+          id: "dom-1",
+          provider_domain_id: "shortio-1",
+          removed_at: new Date().toISOString(),
+        }),
+      ],
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mocks.deleteShortioDomain.mockRejectedValue(
+      new DomainProviderError("UNAVAILABLE", 500, "raw provider english"),
+    );
+
+    await expect(purgeTenantDomain("dom-1")).rejects.toThrow(
+      "O provedor está indisponível no momento. Tente novamente em alguns minutos.",
+    );
+    expect(warn.mock.calls.some((c) => String(c[0]).includes("raw provider english"))).toBe(true);
+    expect(tables.tenant_domains).toHaveLength(1);
+    warn.mockRestore();
+  });
 });
 
 describe("findDomainUsages", () => {

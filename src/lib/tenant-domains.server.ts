@@ -533,12 +533,16 @@ export async function purgeTenantDomain(domainId: string): Promise<void> {
   if (!row.removed_at) throw new Error("Remova o domínio antes de apagá-lo no provedor");
   if (isReservedHostname(row.hostname)) throw new Error(RESERVED_DOMAIN_ERROR);
 
-  if (row.kind === "shortener") {
-    if (row.provider_domain_id) {
-      await deleteShortioDomain(row.provider_domain_id);
+  try {
+    if (row.kind === "shortener") {
+      if (row.provider_domain_id) {
+        await deleteShortioDomain(row.provider_domain_id);
+      }
+    } else {
+      await deleteInfobipDomain(row.hostname);
     }
-  } else {
-    await deleteInfobipDomain(row.hostname);
+  } catch (err) {
+    throw new Error(toAdminProviderMessage(err, `purge ${row.kind} domain ${row.hostname}`));
   }
 
   const { error } = await supabaseAdmin.from("tenant_domains").delete().eq("id", domainId);

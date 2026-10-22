@@ -901,14 +901,24 @@ export async function runCampaignSend(campaignId: string) {
     );
     // Recorded on the campaign so the admin sees why it did not go out (the
     // tick / send-now then put it back to rascunho). Nothing else is written.
-    await supabaseAdmin
+    // Best-effort: a failure here must not hide the original send block.
+    const { error: blockedErr } = await supabaseAdmin
       .from("email_campaigns")
       .update({ blocked_reason: blocked.message })
       .eq("id", campaignId);
+    if (blockedErr) {
+      console.error(`[email.functions] failed to record blocked_reason for campaign ${campaignId}:`, blockedErr);
+    }
     throw blocked;
   }
   if (camp.blocked_reason) {
-    await supabaseAdmin.from("email_campaigns").update({ blocked_reason: null }).eq("id", campaignId);
+    const { error: clearErr } = await supabaseAdmin
+      .from("email_campaigns")
+      .update({ blocked_reason: null })
+      .eq("id", campaignId);
+    if (clearErr) {
+      console.error(`[email.functions] failed to clear blocked_reason for campaign ${campaignId}:`, clearErr);
+    }
   }
 
   const af = (camp.audience_filter ?? {}) as {

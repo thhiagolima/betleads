@@ -417,7 +417,9 @@ async function planLead(lead: Lead): Promise<SendPlan | null> {
         return null;
       }
       // The block's chosen email_senders row (the legacy smtp_config_id is
-      // ignored); resolveSender falls back to the verified house default.
+      // ignored); resolveSender blocks the send if that explicit sender's
+      // domain is no longer a verified domain of the house (it does not
+      // silently fall back to another sender).
       const sender = await resolveSender({ tenantId: block.tenant_id, senderId: block.sender_id });
       if (!sender) {
         const blocked = new EmailDomainNotVerifiedError();
