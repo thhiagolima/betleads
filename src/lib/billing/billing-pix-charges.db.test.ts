@@ -38,6 +38,20 @@ beforeAll(async () => {
   await db.exec(PRICE_BOOK_MIGRATION);
   await db.exec(WALLET_MIGRATION);
   await db.exec(PIX_CHARGES_MIGRATION);
+  // Fix round 1: the shared stub in billing-db-test-support.ts hardcodes
+  // accessible_tenant_ids() to an empty array, which makes a real
+  // "house A sees its own rows, not house B's" RLS test impossible. This
+  // file overrides it to read test.tenant instead, so a test can act as a
+  // specific signed-in house. test.tenant is reset to '' by resetSession(),
+  // which turns into array[null] here (not the empty array) — under RLS's
+  // `tenant_id = ANY(...)`, a null element never matches any row, so every
+  // other test in this file that didn't opt into a tenant keeps seeing zero
+  // rows, same as before this override.
+  await db.exec(`
+    create or replace function public.accessible_tenant_ids() returns uuid[] language sql as $$
+      select array[nullif(current_setting('test.tenant', true), '')::uuid]
+    $$;
+  `);
   await resetSession();
 }, 60_000);
 
@@ -60,6 +74,20 @@ async function asServiceRole<T>(fn: () => Promise<T>): Promise<T> {
     return await fn();
   } finally {
     await db.exec("set test.role = ''");
+  }
+}
+
+// Acts as a signed-in house user: real Postgres role `authenticated` (so
+// column-level grants and `for select to authenticated` policies actually
+// apply), test.tenant set so the overridden accessible_tenant_ids() above
+// resolves to that one house, and superadmin off.
+async function asHouse<T>(tenant: string, fn: () => Promise<T>): Promise<T> {
+  await db.exec(`set role authenticated; set test.tenant = '${tenant}'; set test.super = 'off';`);
+  try {
+    return await fn();
+  } finally {
+    await db.exec("reset role");
+    await resetSession();
   }
 }
 
@@ -96,20 +124,22 @@ async function createTenant(id: string, slug: string) {
   });
 }
 
-async function seedOrderAndCharge(
+async function seedOrderAndChargeWithAmounts(
   tenant: string,
   opts: {
-    amountCents: number;
+    orderAmountCents: number;
+    chargeAmountCents: number;
     paidAmountCents: number;
     status: string;
     externalId: string;
+    refId?: string;
   },
 ): Promise<{ orderId: string; chargeId: string }> {
   return asServiceRole(async () => {
     const { rows: orderRows } = await db.query<{ id: string }>(
       `insert into public.credit_topup_orders (tenant_id, amount_cents)
        values ($1, $2) returning id`,
-      [tenant, opts.amountCents],
+      [tenant, opts.orderAmountCents],
     );
     const orderId = orderRows[0].id;
 
@@ -118,7 +148,14 @@ async function seedOrderAndCharge(
          tenant_id, kind, ref_id, external_id, status, amount_cents, paid_amount_cents, paid_at
        ) values ($1, 'credit_topup', $2, $3, $4, $5, $6, now())
        returning id`,
-      [tenant, orderId, opts.externalId, opts.status, opts.amountCents, opts.paidAmountCents],
+      [
+        tenant,
+        opts.refId ?? orderId,
+        opts.externalId,
+        opts.status,
+        opts.chargeAmountCents,
+        opts.paidAmountCents,
+      ],
     );
     const chargeId = chargeRows[0].id;
 
@@ -128,6 +165,24 @@ async function seedOrderAndCharge(
     ]);
 
     return { orderId, chargeId };
+  });
+}
+
+async function seedOrderAndCharge(
+  tenant: string,
+  opts: {
+    amountCents: number;
+    paidAmountCents: number;
+    status: string;
+    externalId: string;
+  },
+): Promise<{ orderId: string; chargeId: string }> {
+  return seedOrderAndChargeWithAmounts(tenant, {
+    orderAmountCents: opts.amountCents,
+    chargeAmountCents: opts.amountCents,
+    paidAmountCents: opts.paidAmountCents,
+    status: opts.status,
+    externalId: opts.externalId,
   });
 }
 
@@ -228,6 +283,69 @@ describe("billing_credit_paid_charge: amount mismatch", () => {
       paidAmountCents: 49999,
       status: "PAID",
       externalId: "bl-top-mismatch-1",
+    });
+
+    const result = await creditPaidCharge(chargeId);
+    expect(result).toMatchObject({ ok: false, reason: "amount_mismatch" });
+    expect(await balanceOf(tenant)).toBeCloseTo(0, 4);
+  });
+});
+
+describe("billing_credit_paid_charge: topup order not found", () => {
+  const tenant = freshTenant();
+
+  it("raises topup_order_not_found when ref_id points at no order of this tenant", async () => {
+    await createTenant(tenant, "pix-order-missing");
+    const { rows } = await asServiceRole(() =>
+      db.query<{ id: string }>(
+        `insert into public.payment_charges (
+           tenant_id, kind, ref_id, external_id, status, amount_cents, paid_amount_cents, paid_at
+         ) values ($1, 'credit_topup', gen_random_uuid(), 'bl-top-no-order-1', 'PAID', 50000, 50000, now())
+         returning id`,
+        [tenant],
+      ),
+    );
+
+    await expect(creditPaidCharge(rows[0].id)).rejects.toThrow(/topup_order_not_found/);
+    expect(await balanceOf(tenant)).toBeCloseTo(0, 4);
+  });
+
+  it("also raises topup_order_not_found when the order exists but belongs to another tenant", async () => {
+    const otherTenant = freshTenant();
+    await createTenant(otherTenant, "pix-order-other-tenant");
+    const { orderId } = await seedOrderAndCharge(otherTenant, {
+      amountCents: 50000,
+      paidAmountCents: 50000,
+      status: "PENDING",
+      externalId: "bl-top-other-tenant-order",
+    });
+
+    const { rows } = await asServiceRole(() =>
+      db.query<{ id: string }>(
+        `insert into public.payment_charges (
+           tenant_id, kind, ref_id, external_id, status, amount_cents, paid_amount_cents, paid_at
+         ) values ($1, 'credit_topup', $2, 'bl-top-cross-tenant-1', 'PAID', 50000, 50000, now())
+         returning id`,
+        [tenant, orderId],
+      ),
+    );
+
+    await expect(creditPaidCharge(rows[0].id)).rejects.toThrow(/topup_order_not_found/);
+    expect(await balanceOf(tenant)).toBeCloseTo(0, 4);
+  });
+});
+
+describe("billing_credit_paid_charge: order amount vs charge amount mismatch", () => {
+  const tenant = freshTenant();
+
+  it("returns ok:false reason:amount_mismatch when the order's amount_cents differs from the charge's, credits nothing", async () => {
+    await createTenant(tenant, "pix-order-charge-mismatch");
+    const { chargeId } = await seedOrderAndChargeWithAmounts(tenant, {
+      orderAmountCents: 50000,
+      chargeAmountCents: 60000,
+      paidAmountCents: 60000,
+      status: "PAID",
+      externalId: "bl-top-order-charge-mismatch-1",
     });
 
     const result = await creditPaidCharge(chargeId);
@@ -362,20 +480,38 @@ describe("billing_credit_paid_charge: invoice kind is not supported yet", () => 
 
 describe("RLS: reading the 4 tables as authenticated", () => {
   const tenantA = freshTenant();
+  const tenantB = freshTenant();
   let orderA: string;
+  let chargeA: string;
+  let orderB: string;
 
   beforeAll(async () => {
     await createTenant(tenantA, "pix-rls-a");
-    const seeded = await seedOrderAndCharge(tenantA, {
+    await createTenant(tenantB, "pix-rls-b");
+    const seededA = await seedOrderAndCharge(tenantA, {
       amountCents: 50000,
       paidAmountCents: 50000,
       status: "PENDING",
       externalId: "bl-top-rls-a",
     });
-    orderA = seeded.orderId;
+    orderA = seededA.orderId;
+    chargeA = seededA.chargeId;
+    const seededB = await seedOrderAndCharge(tenantB, {
+      amountCents: 70000,
+      paidAmountCents: 70000,
+      status: "PENDING",
+      externalId: "bl-top-rls-b",
+    });
+    orderB = seededB.orderId;
     await asServiceRole(() =>
       db.query(
         `insert into public.payment_webhook_events (event_id, event, raw_body) values ('evt-1', 'charge.paid', '{}')`,
+      ),
+    );
+    await asServiceRole(() =>
+      db.query(
+        `insert into public.payment_fee_settings (provider, fee_percent, fee_fixed_cents, valid_from)
+         values ('upper', 2, 0, now())`,
       ),
     );
   });
@@ -384,39 +520,144 @@ describe("RLS: reading the 4 tables as authenticated", () => {
     await resetSession();
   });
 
-  // accessible_tenant_ids() is stubbed to always return an empty array (see
-  // billing-db-test-support.ts), so a signed-in house with no superadmin
-  // flag sees no rows under RLS — this is the same limitation the PG1 tests
-  // live with, and it still proves non-superadmin authenticated reads are
-  // gated by is_super_admin() OR tenant_id = ANY(accessible_tenant_ids()).
-  it("authenticated without superadmin sees none of the 4 tables; superadmin sees all", async () => {
-    await db.exec("set role authenticated;");
+  // Fix round 1: accessible_tenant_ids() is overridden at the top of this
+  // file to read test.tenant, so asHouse(tenant, ...) now exercises the real
+  // RLS policy (is_super_admin() OR tenant_id = ANY(accessible_tenant_ids())),
+  // not just the "always empty" stub.
+  it("house A sees its own order and charge, not house B's", async () => {
+    await asHouse(tenantA, async () => {
+      const { rows: ordersAsA } = await db.query<{ id: string }>(
+        `select id from public.credit_topup_orders where id in ($1, $2)`,
+        [orderA, orderB],
+      );
+      expect(ordersAsA.map((r) => r.id)).toEqual([orderA]);
+
+      const { rows: chargesAsA } = await db.query<{ id: string }>(
+        `select id from public.payment_charges where id = $1`,
+        [chargeA],
+      );
+      expect(chargesAsA).toHaveLength(1);
+    });
+  });
+
+  it("house A cannot read house B's order by id", async () => {
+    await asHouse(tenantA, async () => {
+      const { rows } = await db.query<{ id: string }>(
+        `select id from public.credit_topup_orders where id = $1`,
+        [orderB],
+      );
+      expect(rows).toHaveLength(0);
+    });
+  });
+
+  it("a house (not superadmin) cannot read payment_webhook_events or payment_fee_settings", async () => {
+    await asHouse(tenantA, async () => {
+      const { rows: events } = await db.query<{ event_id: string }>(
+        `select event_id from public.payment_webhook_events`,
+      );
+      expect(events).toHaveLength(0);
+
+      const { rows: fees } = await db.query<{ id: string }>(
+        `select id from public.payment_fee_settings`,
+      );
+      expect(fees).toHaveLength(0);
+    });
+  });
+
+  it("the superadmin reads all 4 tables regardless of tenant", async () => {
+    await db.exec("set role authenticated; set test.super = 'on';");
     try {
-      await db.exec("set test.super = 'off'");
-      const { rows: ordersAsHouse } = await db.query<{ id: string }>(
-        `select id from public.credit_topup_orders where id = $1`,
-        [orderA],
+      const { rows: orders } = await db.query<{ id: string }>(
+        `select id from public.credit_topup_orders where id in ($1, $2)`,
+        [orderA, orderB],
       );
-      expect(ordersAsHouse).toHaveLength(0);
+      expect(orders.map((r) => r.id).sort()).toEqual([orderA, orderB].sort());
 
-      const { rows: eventsAsHouse } = await db.query<{ event_id: string }>(
+      const { rows: events } = await db.query<{ event_id: string }>(
         `select event_id from public.payment_webhook_events`,
       );
-      expect(eventsAsHouse).toHaveLength(0);
+      expect(events.length).toBeGreaterThanOrEqual(1);
 
-      await db.exec("set test.super = 'on'");
-      const { rows: ordersAsSuper } = await db.query<{ id: string }>(
-        `select id from public.credit_topup_orders where id = $1`,
-        [orderA],
+      const { rows: fees } = await db.query<{ id: string }>(
+        `select id from public.payment_fee_settings`,
       );
-      expect(ordersAsSuper).toHaveLength(1);
-
-      const { rows: eventsAsSuper } = await db.query<{ event_id: string }>(
-        `select event_id from public.payment_webhook_events`,
-      );
-      expect(eventsAsSuper.length).toBeGreaterThanOrEqual(1);
+      expect(fees.length).toBeGreaterThanOrEqual(1);
     } finally {
       await db.exec("reset role");
     }
+  });
+});
+
+describe("Fix round 1: payment_charges column-level grants hide provider-only fields from houses", () => {
+  const tenant = freshTenant();
+  let chargeId: string;
+
+  beforeAll(async () => {
+    await createTenant(tenant, "pix-column-grants");
+    const seeded = await seedOrderAndCharge(tenant, {
+      amountCents: 50000,
+      paidAmountCents: 50000,
+      status: "PAID",
+      externalId: "bl-top-column-grants-1",
+    });
+    chargeId = seeded.chargeId;
+    await asServiceRole(() =>
+      db.query(
+        `update public.payment_charges
+           set fee_cents = 123, last_provider_payload = '{"payer": {"document": "12345678900"}}'::jsonb,
+               last_error = 'boom'
+         where id = $1`,
+        [chargeId],
+      ),
+    );
+  });
+
+  it("a house in scope can select the public columns (id, status, amount_cents, emv)", async () => {
+    await asHouse(tenant, async () => {
+      const { rows } = await db.query<{ id: string; status: string; amount_cents: number }>(
+        `select id, status, amount_cents, emv from public.payment_charges where id = $1`,
+        [chargeId],
+      );
+      expect(rows).toHaveLength(1);
+      expect(rows[0].status).toBe("PAID");
+      expect(rows[0].amount_cents).toBe(50000);
+    });
+  });
+
+  it("a house in scope gets permission denied selecting fee_cents", async () => {
+    await asHouse(tenant, async () => {
+      await expect(
+        db.query(`select fee_cents from public.payment_charges where id = $1`, [chargeId]),
+      ).rejects.toThrow(/permission denied/);
+    });
+  });
+
+  it("a house in scope gets permission denied selecting last_provider_payload", async () => {
+    await asHouse(tenant, async () => {
+      await expect(
+        db.query(`select last_provider_payload from public.payment_charges where id = $1`, [
+          chargeId,
+        ]),
+      ).rejects.toThrow(/permission denied/);
+    });
+  });
+
+  it("a house in scope gets permission denied selecting last_error", async () => {
+    await asHouse(tenant, async () => {
+      await expect(
+        db.query(`select last_error from public.payment_charges where id = $1`, [chargeId]),
+      ).rejects.toThrow(/permission denied/);
+    });
+  });
+
+  it("service_role (backend) can still read fee_cents and last_provider_payload", async () => {
+    const { rows } = await asServiceRole(() =>
+      db.query<{ fee_cents: number; last_provider_payload: unknown }>(
+        `select fee_cents, last_provider_payload from public.payment_charges where id = $1`,
+        [chargeId],
+      ),
+    );
+    expect(rows[0].fee_cents).toBe(123);
+    expect(rows[0].last_provider_payload).not.toBeNull();
   });
 });

@@ -58,6 +58,10 @@ create table public.payment_charges (
   paid_at timestamptz null,
   payer_name text null,
   payer_document_masked text null,
+  -- last_provider_payload é a resposta crua da Upper, só para diagnóstico do
+  -- superadmin: NUNCA deve conter o documento completo do pagador (a Task 3
+  -- sanitiza o payload antes de gravar aqui; payer_document_masked acima é
+  -- quem guarda a versão mascarada, pensada para authenticated).
   last_provider_payload jsonb null,
   last_error text null,
   credited_at timestamptz null,
@@ -91,11 +95,14 @@ create table public.payment_webhook_events (
 create table public.payment_fee_settings (
   id uuid primary key default gen_random_uuid(),
   provider text not null default 'upper',
-  fee_percent numeric(6,4) not null default 0,
-  fee_fixed_cents bigint not null default 0,
+  fee_percent numeric(6,4) not null default 0 check (fee_percent >= 0),
+  fee_fixed_cents bigint not null default 0 check (fee_fixed_cents >= 0),
   valid_from timestamptz not null default now(),
   updated_by uuid null
 );
+
+create index idx_payment_fee_settings_provider_valid_from
+  on public.payment_fee_settings (provider, valid_from desc);
 
 -- Credita uma cobrança paga na carteira (PG1). Idempotente: uma vez
 -- creditada (credited_at preenchido), repetir a chamada só devolve
@@ -110,6 +117,7 @@ set search_path to 'public'
 as $$
 declare
   v_charge public.payment_charges%rowtype;
+  v_order public.credit_topup_orders%rowtype;
   v_fee public.payment_fee_settings%rowtype;
   v_fee_cents bigint;
   v_wallet_result jsonb;
@@ -151,6 +159,25 @@ begin
     raise exception 'unknown_charge_kind';
   end if;
 
+  -- O pedido precisa existir e pertencer à mesma casa da cobrança: sem isso,
+  -- um ref_id corrompido ou de outra casa creditaria a carteira errada ou
+  -- marcaria um pedido estranho como pago.
+  select * into v_order
+  from public.credit_topup_orders
+  where id = v_charge.ref_id and tenant_id = v_charge.tenant_id
+  for update;
+
+  if not found then
+    raise exception 'topup_order_not_found';
+  end if;
+
+  -- O valor da cobrança tem que ser exatamente o valor do pedido: se não
+  -- bater, algo divergiu entre a criação do pedido e da cobrança (Task 2) e
+  -- não deve creditar nada.
+  if v_order.amount_cents <> v_charge.amount_cents then
+    return jsonb_build_object('ok', false, 'reason', 'amount_mismatch');
+  end if;
+
   -- Taxa vigente do provedor nesta cobrança (ou null se nenhuma estiver
   -- cadastrada ainda: payment_fee_settings começa vazia).
   select * into v_fee
@@ -187,7 +214,11 @@ begin
   update public.credit_topup_orders
      set status = 'paid',
          paid_at = now()
-   where id = v_charge.ref_id;
+   where id = v_order.id and tenant_id = v_charge.tenant_id;
+
+  if not found then
+    raise exception 'topup_order_not_found';
+  end if;
 
   return v_wallet_result;
 end;
@@ -220,7 +251,17 @@ create policy payment_fee_settings_superadmin_select on public.payment_fee_setti
 grant select on public.credit_topup_orders to authenticated;
 grant all on public.credit_topup_orders to service_role;
 
-grant select on public.payment_charges to authenticated;
+-- fee_cents (custo/taxa do fornecedor, regra igual a billing_price_book) e
+-- last_provider_payload/last_error (resposta crua da Upper e erro interno,
+-- podem carregar detalhe que não é da casa) nunca vão para authenticated;
+-- o superadmin lê tudo isso pelo backend (service_role), não pela RLS.
+revoke select on public.payment_charges from anon, authenticated;
+grant select (
+  id, tenant_id, kind, ref_id, provider, external_id, provider_charge_id,
+  status, needs_review, amount_cents, paid_amount_cents, emv, qr_code_image,
+  payment_url, expires_at, paid_at, payer_name, payer_document_masked,
+  credited_at, created_by, created_at, updated_at
+) on public.payment_charges to authenticated;
 grant all on public.payment_charges to service_role;
 
 grant select on public.payment_webhook_events to authenticated;
