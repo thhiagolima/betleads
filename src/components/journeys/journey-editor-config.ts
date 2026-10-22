@@ -11,6 +11,23 @@ export function smsExtra(config: Record<string, unknown>) {
   return extra;
 }
 
+/** The SMS step's `extra` config to keep when the editor switches to a
+ * different template: `short_domain_id` and `track_links` are picker/toggle
+ * choices independent of which template is selected, so they carry over.
+ * Everything else — `variants`, `sender` — is authored on the template
+ * itself (or copied from it at save time via `template_snapshot`), so it's
+ * dropped: keeping a previous template's `variants` here would make
+ * `smsVariants()` prefer the stale list over the newly selected template's
+ * content at send time. */
+export function smsExtraForTemplateChange(
+  extra: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  const picked: Record<string, unknown> = {};
+  if (extra && "short_domain_id" in extra) picked.short_domain_id = extra.short_domain_id;
+  if (extra && "track_links" in extra) picked.track_links = extra.track_links;
+  return picked;
+}
+
 /** ISO instant -> value of a datetime-local input in Brasília time. */
 export function toBrtInput(iso: string | null | undefined) {
   if (!iso || !Number.isFinite(Date.parse(iso))) return "";

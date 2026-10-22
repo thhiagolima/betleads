@@ -75,14 +75,12 @@ import { estimateSms } from "@/lib/link-tracking-preview";
 import { fromBrtInput, toBrtInput } from "@/components/journeys/journey-editor-config";
 import { getComposerOptions } from "@/lib/house-config.functions";
 import { COMPOSER_OPTIONS_QUERY_KEY } from "@/components/house-config/house-config-query";
+import { ShortDomainSelect } from "@/components/house-config/short-domain-select";
+import { EmailSenderSelect, EMAIL_BLOCKED_WARNING } from "@/components/house-config/email-sender-select";
 import {
-  ShortDomainSelect,
-  SHORTENER_FALLBACK_WARNING,
-} from "@/components/house-config/short-domain-select";
-import {
-  EmailSenderSelect,
-  EMAIL_BLOCKED_WARNING,
-} from "@/components/house-config/email-sender-select";
+  EmailBlockedNotice,
+  ShortenerFallbackNotice,
+} from "@/components/house-config/composer-notices";
 import { LinkInsertMenu } from "@/components/house-config/link-insert-menu";
 import { UNRESOLVED_REASONS, type UnresolvedReason } from "@/lib/campaign-recipients";
 import { requestConfirmation, requestTextInput } from "@/components/system-dialog-host";
@@ -163,6 +161,9 @@ export function ChannelCampaignComposer({
   const shortDomains = composerOptions.data?.shortDomains ?? [];
   const shortenerPending = composerOptions.data?.shortenerPending ?? false;
   const emailSenders = composerOptions.data?.senders ?? [];
+  // Only a confirmed-empty sender list blocks sending — while the query is
+  // still loading or failed, we don't know yet, so we don't block on it.
+  const emailBlocked = composerOptions.isSuccess && emailSenders.length === 0;
 
   const [channel, setChannel] = useState<Channel>(initialChannel);
   const [name, setName] = useState("");
@@ -581,8 +582,7 @@ export function ChannelCampaignComposer({
       if (when === "schedule" && scheduleTooSoon)
         throw new Error("O agendamento deve ter pelo menos um minuto de antecedência.");
       if (!riskConfirmed) throw new Error("Confirme a revisão de risco antes de enviar.");
-      if (channel === "email" && emailSenders.length === 0)
-        throw new Error(EMAIL_BLOCKED_WARNING);
+      if (channel === "email" && emailBlocked) throw new Error(EMAIL_BLOCKED_WARNING);
       const scheduleAt = when === "schedule" ? (fromBrtInput(scheduledAt) ?? undefined) : undefined;
 
       if (channel === "sms") {
@@ -928,11 +928,12 @@ export function ChannelCampaignComposer({
                 </div>
                 <div className="space-y-2">
                   <Label>Domínio do encurtador</Label>
-                  {(shortenerPending || shortDomains.length === 0) && (
-                    <p className="rounded-lg border border-amber-500/35 bg-amber-500/5 p-2 text-xs text-amber-700 dark:text-amber-400">
-                      {SHORTENER_FALLBACK_WARNING}
-                    </p>
-                  )}
+                  <ShortenerFallbackNotice
+                    isSuccess={composerOptions.isSuccess}
+                    isError={composerOptions.isError}
+                    shortenerPending={shortenerPending}
+                    hasVerifiedDomain={shortDomains.length > 0}
+                  />
                   <ShortDomainSelect
                     domains={shortDomains}
                     value={shortDomainId}
@@ -981,14 +982,11 @@ export function ChannelCampaignComposer({
                 />
                 <div className="space-y-2">
                   <Label>Remetente</Label>
-                  {emailSenders.length === 0 && (
-                    <p className="rounded-lg border border-amber-500/35 bg-amber-500/5 p-2 text-xs text-amber-700 dark:text-amber-400">
-                      {EMAIL_BLOCKED_WARNING}{" "}
-                      <a href="/configuracoes/casa" className="font-medium underline">
-                        Configurar
-                      </a>
-                    </p>
-                  )}
+                  <EmailBlockedNotice
+                    isSuccess={composerOptions.isSuccess}
+                    isError={composerOptions.isError}
+                    hasVerifiedSender={emailSenders.length > 0}
+                  />
                   <EmailSenderSelect
                     senders={emailSenders}
                     value={senderId}
@@ -997,11 +995,12 @@ export function ChannelCampaignComposer({
                 </div>
                 <div className="space-y-2">
                   <Label>Domínio do encurtador</Label>
-                  {(shortenerPending || shortDomains.length === 0) && (
-                    <p className="rounded-lg border border-amber-500/35 bg-amber-500/5 p-2 text-xs text-amber-700 dark:text-amber-400">
-                      {SHORTENER_FALLBACK_WARNING}
-                    </p>
-                  )}
+                  <ShortenerFallbackNotice
+                    isSuccess={composerOptions.isSuccess}
+                    isError={composerOptions.isError}
+                    shortenerPending={shortenerPending}
+                    hasVerifiedDomain={shortDomains.length > 0}
+                  />
                   <ShortDomainSelect
                     domains={shortDomains}
                     value={shortDomainId}
@@ -1242,7 +1241,7 @@ export function ChannelCampaignComposer({
               draftState === "dirty" ||
               draftState === "saving" ||
               draftState === "error" ||
-              (channel === "email" && emailSenders.length === 0)
+              (channel === "email" && emailBlocked)
             }
             onClick={() => void confirmAndSubmit()}
             aria-describedby={validationIssues.length ? fieldIds.validation : undefined}

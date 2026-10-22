@@ -118,14 +118,12 @@ import {
 } from "@/lib/email.functions";
 import { getComposerOptions } from "@/lib/house-config.functions";
 import { COMPOSER_OPTIONS_QUERY_KEY } from "@/components/house-config/house-config-query";
+import { EmailSenderSelect, EMAIL_BLOCKED_WARNING } from "@/components/house-config/email-sender-select";
+import { ShortDomainSelect } from "@/components/house-config/short-domain-select";
 import {
-  EmailSenderSelect,
-  EMAIL_BLOCKED_WARNING,
-} from "@/components/house-config/email-sender-select";
-import {
-  ShortDomainSelect,
-  SHORTENER_FALLBACK_WARNING,
-} from "@/components/house-config/short-domain-select";
+  EmailBlockedNotice,
+  ShortenerFallbackNotice,
+} from "@/components/house-config/composer-notices";
 import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
 import {
   DashboardDateRangePicker,
@@ -1718,7 +1716,6 @@ function CampanhasTab() {
           template: c.template,
           smtp: c.smtp,
           templateId: c.templateId ?? null,
-          smtpId: c.smtpId ?? null,
           senderId: c.senderId ?? null,
           shortDomainId: c.shortDomainId ?? null,
           agendadoPara: c.agendadoPara ?? null,
@@ -2041,6 +2038,9 @@ function CampanhaDialog({
   const senders = composerOptions.data?.senders ?? [];
   const shortDomains = composerOptions.data?.shortDomains ?? [];
   const shortenerPending = composerOptions.data?.shortenerPending ?? false;
+  // Only a confirmed-empty sender list blocks sending — while the query is
+  // still loading or failed, we don't know yet, so we don't block on it.
+  const emailBlocked = composerOptions.isSuccess && senders.length === 0;
 
   const [count, setCount] = useState<number | null>(null);
   useEffect(() => {
@@ -2091,7 +2091,7 @@ function CampanhaDialog({
       toast.error("Selecione pelo menos um lead com email.");
       return;
     }
-    if (senders.length === 0) {
+    if (emailBlocked) {
       toast.error(EMAIL_BLOCKED_WARNING);
       return;
     }
@@ -2107,7 +2107,6 @@ function CampanhaDialog({
           template: c.template,
           smtp: c.smtp,
           templateId: c.templateId ?? null,
-          smtpId: c.smtpId ?? null,
           senderId: c.senderId ?? null,
           shortDomainId: c.shortDomainId ?? null,
           agendadoPara: null,
@@ -2259,14 +2258,11 @@ function CampanhaDialog({
             </Select>
           </Field>
           <Field label="Remetente">
-            {senders.length === 0 && (
-              <p className="mb-1.5 text-[11px] text-amber-500/90">
-                {EMAIL_BLOCKED_WARNING}{" "}
-                <a href="/configuracoes/casa" className="font-medium underline">
-                  Configurar
-                </a>
-              </p>
-            )}
+            <EmailBlockedNotice
+              isSuccess={composerOptions.isSuccess}
+              isError={composerOptions.isError}
+              hasVerifiedSender={senders.length > 0}
+            />
             <EmailSenderSelect
               senders={senders}
               value={c.senderId ?? null}
@@ -2274,9 +2270,12 @@ function CampanhaDialog({
             />
           </Field>
           <Field label="Domínio do encurtador">
-            {(shortenerPending || shortDomains.length === 0) && (
-              <p className="mb-1.5 text-[11px] text-amber-500/90">{SHORTENER_FALLBACK_WARNING}</p>
-            )}
+            <ShortenerFallbackNotice
+              isSuccess={composerOptions.isSuccess}
+              isError={composerOptions.isError}
+              shortenerPending={shortenerPending}
+              hasVerifiedDomain={shortDomains.length > 0}
+            />
             <ShortDomainSelect
               domains={shortDomains}
               value={c.shortDomainId ?? null}
@@ -2306,16 +2305,17 @@ function CampanhaDialog({
           )}
         </div>
         <DialogFooter className="gap-2">
-          <Button variant="outline" onClick={() => onSave(c)} className="gap-2">
+          <Button
+            variant="outline"
+            onClick={() => onSave(c)}
+            className="gap-2"
+            disabled={agendar && emailBlocked}
+          >
             <CheckCircle2 className="h-4 w-4" />
             {agendar ? "Salvar agendamento" : "Salvar rascunho"}
           </Button>
           {!agendar && (
-            <Button
-              onClick={enviarAgoraDoDialogo}
-              className="gap-2"
-              disabled={senders.length === 0}
-            >
+            <Button onClick={enviarAgoraDoDialogo} className="gap-2" disabled={emailBlocked}>
               <Send className="h-4 w-4" /> Enviar agora
             </Button>
           )}

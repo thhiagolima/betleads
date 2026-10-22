@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   Dialog,
   DialogContent,
@@ -49,6 +50,9 @@ import {
 } from "./template-presets";
 import { generateEmailContent } from "@/lib/email-ai.functions";
 import { variablesForChannel } from "@/lib/message-variables";
+import { getComposerOptions } from "@/lib/house-config.functions";
+import { COMPOSER_OPTIONS_QUERY_KEY } from "@/components/house-config/house-config-query";
+import { LinkInsertMenu } from "@/components/house-config/link-insert-menu";
 
 export type EditorTemplate = {
   id: string;
@@ -119,6 +123,14 @@ export function TemplateEditorDialog({
   editing: EditorTemplate | null;
   onSave: (t: EditorTemplate) => void;
 }) {
+  const getComposerOpts = useServerFn(getComposerOptions);
+  const composerOptions = useQuery({
+    queryKey: COMPOSER_OPTIONS_QUERY_KEY,
+    queryFn: () => getComposerOpts(),
+    enabled: open,
+  });
+  const linkFieldRef = useRef<HTMLInputElement | null>(null);
+
   const [objetivo, setObjetivo] = useState<EmailObjective>("recuperacao");
   const [modelo, setModelo] = useState<ModeloId>("simples");
   const [advanced, setAdvanced] = useState(false);
@@ -510,12 +522,22 @@ export function TemplateEditorDialog({
                             <Input
                               ref={(el) => {
                                 refs.current[qf.key] = el;
+                                if (qf.key === "link") linkFieldRef.current = el;
                               }}
                               value={val}
                               onFocus={() => setActiveField(qf.key)}
                               onChange={(e) => set(e.target.value)}
                               placeholder={qf.placeholder}
                               className="text-sm"
+                            />
+                          )}
+                          {qf.key === "link" && (
+                            <LinkInsertMenu
+                              siteUrl={composerOptions.data?.siteUrl ?? null}
+                              quickLinks={composerOptions.data?.quickLinks ?? []}
+                              textareaRef={linkFieldRef}
+                              value={fields.link}
+                              onChange={(next) => setFields((f) => ({ ...f, link: next }))}
                             />
                           )}
                         </div>

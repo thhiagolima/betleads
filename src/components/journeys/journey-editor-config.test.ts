@@ -5,6 +5,7 @@ import {
   emailStepIdsForConfig,
   fromBrtInput,
   smsExtra,
+  smsExtraForTemplateChange,
   toBrtInput,
 } from "./journey-editor-config";
 
@@ -37,6 +38,29 @@ describe("journey editor config helpers", () => {
     expect(toBrtInput(null)).toBe("");
     expect(toBrtInput("not a date")).toBe("");
     expect(fromBrtInput("")).toBeNull();
+  });
+});
+
+describe("extra after an SMS template change", () => {
+  it("keeps short_domain_id and track_links, but drops the old template's variants", () => {
+    expect(
+      smsExtraForTemplateChange({
+        short_domain_id: "d1",
+        track_links: true,
+        variants: ["a", "b"],
+        sender: "old-sender",
+      }),
+    ).toEqual({ short_domain_id: "d1", track_links: true });
+  });
+
+  it("is empty when there was no extra to carry over", () => {
+    expect(smsExtraForTemplateChange(undefined)).toEqual({});
+    expect(smsExtraForTemplateChange({})).toEqual({});
+  });
+
+  it("carries over only whichever of the two keys is present", () => {
+    expect(smsExtraForTemplateChange({ variants: ["a"] })).toEqual({});
+    expect(smsExtraForTemplateChange({ short_domain_id: null })).toEqual({ short_domain_id: null });
   });
 });
 

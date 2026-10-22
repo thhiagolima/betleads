@@ -27,9 +27,12 @@ import {
 } from "@/lib/journey-voice-assets.functions";
 import { getComposerOptions } from "@/lib/house-config.functions";
 import { COMPOSER_OPTIONS_QUERY_KEY } from "@/components/house-config/house-config-query";
-import { ShortDomainSelect, SHORTENER_FALLBACK_WARNING } from "@/components/house-config/short-domain-select";
-import { EmailSenderSelect, EMAIL_BLOCKED_WARNING } from "@/components/house-config/email-sender-select";
-import { LinkInsertMenu } from "@/components/house-config/link-insert-menu";
+import { ShortDomainSelect } from "@/components/house-config/short-domain-select";
+import { EmailSenderSelect } from "@/components/house-config/email-sender-select";
+import {
+  EmailBlockedNotice,
+  ShortenerFallbackNotice,
+} from "@/components/house-config/composer-notices";
 import { supabase } from "@/integrations/supabase/client";
 import type { JourneyStepInput } from "@/lib/journeys.shared";
 import { Button } from "@/components/ui/button";
@@ -38,6 +41,7 @@ import {
   emailStepIdsForConfig,
   fromBrtInput,
   smsExtra,
+  smsExtraForTemplateChange,
   toBrtInput,
 } from "./journey-editor-config";
 import { Input } from "@/components/ui/input";
@@ -269,8 +273,6 @@ export function JourneyEditor({
     queryKey: COMPOSER_OPTIONS_QUERY_KEY,
     queryFn: () => composerOptionsFn(),
   });
-  const siteUrl = composerOptions.data?.siteUrl ?? null;
-  const quickLinks = composerOptions.data?.quickLinks ?? [];
   const shortDomains = composerOptions.data?.shortDomains ?? [];
   const shortenerPending = composerOptions.data?.shortenerPending ?? false;
   const emailSenders = composerOptions.data?.senders ?? [];
@@ -1019,6 +1021,7 @@ export function JourneyEditor({
                         ...s,
                         templateId: event.target.value,
                         content: template?.content ?? "",
+                        extra: smsExtraForTemplateChange(s.extra),
                       });
                     }}
                   >
@@ -1041,17 +1044,12 @@ export function JourneyEditor({
                   <p className="text-xs text-muted-foreground">
                     A jornada guarda uma cópia desta versão para não mudar após a publicação.
                   </p>
-                  <LinkInsertMenu
-                    siteUrl={siteUrl}
-                    quickLinks={quickLinks}
-                    value={s.content}
-                    onChange={(content) => change(i, { ...s, content })}
+                  <ShortenerFallbackNotice
+                    isSuccess={composerOptions.isSuccess}
+                    isError={composerOptions.isError}
+                    shortenerPending={shortenerPending}
+                    hasVerifiedDomain={shortDomains.length > 0}
                   />
-                  {(shortenerPending || shortDomains.length === 0) && (
-                    <p className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-300">
-                      {SHORTENER_FALLBACK_WARNING}
-                    </p>
-                  )}
                   <ShortDomainSelect
                     domains={shortDomains}
                     value={(s.extra?.short_domain_id as string | null | undefined) ?? null}
@@ -1076,24 +1074,22 @@ export function JourneyEditor({
                         </option>
                       ))}
                   </select>
-                  {emailSenders.length === 0 && (
-                    <p className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-300">
-                      {EMAIL_BLOCKED_WARNING}{" "}
-                      <a href="/configuracoes/casa" className="font-medium underline">
-                        Configurar
-                      </a>
-                    </p>
-                  )}
+                  <EmailBlockedNotice
+                    isSuccess={composerOptions.isSuccess}
+                    isError={composerOptions.isError}
+                    hasVerifiedSender={emailSenders.length > 0}
+                  />
                   <EmailSenderSelect
                     senders={emailSenders}
                     value={s.senderId}
                     onChange={(senderId) => change(i, { ...s, senderId })}
                   />
-                  {(shortenerPending || shortDomains.length === 0) && (
-                    <p className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-300">
-                      {SHORTENER_FALLBACK_WARNING}
-                    </p>
-                  )}
+                  <ShortenerFallbackNotice
+                    isSuccess={composerOptions.isSuccess}
+                    isError={composerOptions.isError}
+                    shortenerPending={shortenerPending}
+                    hasVerifiedDomain={shortDomains.length > 0}
+                  />
                   <ShortDomainSelect
                     domains={shortDomains}
                     value={s.shortDomainId}
