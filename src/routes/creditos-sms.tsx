@@ -1,7 +1,8 @@
+import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { History, ShieldCheck, Wallet } from "lucide-react";
+import { CreditCard, History, ShieldCheck, Wallet } from "lucide-react";
 
 import { getSmsCreditPortal } from "@/lib/sms-credits.functions";
 import { billingItemLabel, brl, ledgerAmountTone, num, walletEntryTypeLabel } from "@/lib/format";
@@ -13,6 +14,8 @@ import {
   type WalletPriceRow,
 } from "@/components/billing/wallet-usage-panels";
 import { WalletBalanceNotice } from "@/components/billing/wallet-balance-notice";
+import { BuyCreditsDialog } from "@/components/billing/buy-credits-dialog";
+import { Button } from "@/components/ui/button";
 import { useActiveTenant } from "@/hooks/use-active-tenant";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import { DEMO_EMPTY_STATE_TEXT } from "@/lib/demo-tenant";
@@ -55,6 +58,7 @@ function SaldoConsumoPage() {
   // The house is chosen only in the header; this page follows it.
   const tenant = useActiveTenant();
   const tenantId = tenant.data?.activeTenantId ?? null;
+  const [buyOpen, setBuyOpen] = useState(false);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["sms-credits", "portal", tenantId],
@@ -94,6 +98,7 @@ function SaldoConsumoPage() {
   const balance = Number(summary.balance ?? 0);
   const prices = summary.prices ?? {};
   const monthUsage = summary.month_usage ?? [];
+  const canBuy = Boolean((data as { canBuy?: boolean }).canBuy);
 
   return (
     <div className="space-y-6">
@@ -113,7 +118,10 @@ function SaldoConsumoPage() {
         balance={balance}
         exempt={Boolean(summary.exempt)}
         smsUnitPrice={prices.sms?.unit_price == null ? null : Number(prices.sms.unit_price)}
+        canBuy={canBuy}
       />
+
+      <BuyCreditsDialog open={buyOpen} onOpenChange={setBuyOpen} tenantId={tenantId} />
 
       <div className="grid gap-4 md:grid-cols-3">
         <Card className="border-primary/30 bg-card/80">
@@ -126,6 +134,17 @@ function SaldoConsumoPage() {
           <CardContent>
             <div className="text-4xl font-bold">{brl(balance)}</div>
             <p className="mt-1 text-sm text-muted-foreground">disponível para consumo</p>
+            {canBuy && (
+              <Button
+                type="button"
+                size="sm"
+                className="mt-3"
+                onClick={() => setBuyOpen(true)}
+              >
+                <CreditCard className="mr-2 h-3.5 w-3.5" />
+                Comprar créditos
+              </Button>
+            )}
           </CardContent>
         </Card>
         <Card>

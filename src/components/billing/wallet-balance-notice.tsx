@@ -9,14 +9,16 @@ export function WalletBalanceNotice({
   balance,
   exempt,
   smsUnitPrice,
+  canBuy = false,
   className,
 }: {
   balance: number;
   exempt: boolean;
   smsUnitPrice: number | null;
+  canBuy?: boolean;
   className?: string;
 }) {
-  const notice = walletBalanceNotice({ balance, exempt, smsUnitPrice });
+  const notice = walletBalanceNotice({ balance, exempt, smsUnitPrice, canBuy });
   if (!notice) return null;
   return (
     <Alert

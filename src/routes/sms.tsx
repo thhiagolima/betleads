@@ -413,6 +413,7 @@ function SmsCompactWorkspace({
   const summary = (credits.data?.summary ?? {}) as { balance?: number; exempt?: boolean };
   const balance = readNumber(summary.balance);
   const exempt = Boolean(summary.exempt);
+  const canBuyCredits = Boolean((credits.data as { canBuy?: boolean } | undefined)?.canBuy);
   const estimatedCost = smsUnitPrice == null ? null : parts * smsUnitPrice;
   const totals = dashboard.data?.totals;
   const today = dashboard.data?.today;
@@ -508,7 +509,12 @@ function SmsCompactWorkspace({
         </Button>
       </div>
       {credits.data ? (
-        <WalletBalanceNotice balance={balance} exempt={exempt} smsUnitPrice={smsUnitPrice} />
+        <WalletBalanceNotice
+          balance={balance}
+          exempt={exempt}
+          smsUnitPrice={smsUnitPrice}
+          canBuy={canBuyCredits}
+        />
       ) : null}
 
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
@@ -1074,6 +1080,7 @@ function SmsHomePanel() {
   };
   const balance = readNumber(summary.balance);
   const exempt = Boolean(summary.exempt);
+  const canBuyCredits = Boolean((credits.data as { canBuy?: boolean } | undefined)?.canBuy);
   const usedLifetime = readNumber(summary.lifetime_used);
   const estimatedCost = smsUnitPrice == null ? null : parts * smsUnitPrice;
   // Uma casa isenta nunca é bloqueada por saldo (não é debitada).
@@ -1141,7 +1148,12 @@ function SmsHomePanel() {
         </Button>
       </div>
       {credits.data ? (
-        <WalletBalanceNotice balance={balance} exempt={exempt} smsUnitPrice={smsUnitPrice} />
+        <WalletBalanceNotice
+          balance={balance}
+          exempt={exempt}
+          smsUnitPrice={smsUnitPrice}
+          canBuy={canBuyCredits}
+        />
       ) : null}
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">

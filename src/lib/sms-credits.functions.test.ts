@@ -1,7 +1,7 @@
 // PG1 Task 8 — the legacy SMS credit screens/server functions now read the
 // single BRL wallet (wallet_summary / admin_adjust_wallet, Task 3) instead of
 // the old sms_credit_* tables/RPCs.
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const fake = vi.hoisted(() => ({ admin: null as unknown as ReturnType<typeof createFakeDb> }));
 
@@ -25,12 +25,14 @@ vi.mock("@/lib/tenant-access.server", async () => {
 });
 
 import { createFakeDb } from "@/lib/sms-bulk.test-support";
+import { __resetDemoTenantCacheForTests } from "@/lib/tenant-access.server";
 import {
   adjustWalletInput,
   adminAdjustSmsCreditsFor,
   adminSmsCreditConsoleFor,
   createSmsCreditCheckoutFor,
   currentOverrideItemsByTenant,
+  getSmsCreditPortalFor,
   withoutProviderCost,
 } from "./sms-credits.functions";
 
@@ -141,6 +143,55 @@ describe("adminAdjustSmsCreditsFor", () => {
       action: "tenant_wallet.adjusted",
       metadata: { amount: 50, reason: "ajuste manual" },
     });
+  });
+});
+
+describe("getSmsCreditPortalFor canBuy", () => {
+  beforeEach(() => {
+    __resetDemoTenantCacheForTests();
+    userDb.onRpc("is_super_admin", () => ({ data: false, error: null }));
+    userDb.onRpc("current_tenant_id", () => ({ data: TENANT, error: null }));
+    userDb.onRpc("is_tenant_admin", (args) => ({
+      data: args._tenant === TENANT,
+      error: null,
+    }));
+    userDb.onRpc("wallet_summary", () => ({
+      data: { balance: 100, lifetime_purchased: 200, lifetime_used: 100, exempt: false },
+      error: null,
+    }));
+  });
+
+  afterEach(() => {
+    delete process.env.BILLING_GATEWAY_ENABLED;
+  });
+
+  it("is false when the gateway is off, even for an admin of a paying house", async () => {
+    delete process.env.BILLING_GATEWAY_ENABLED;
+    const result = await getSmsCreditPortalFor(ctxFor(HOUSE_ADMIN), { tenantId: null });
+    expect(result.canBuy).toBe(false);
+  });
+
+  it("is false for a gestor (non-admin) of a paying house, gateway on", async () => {
+    process.env.BILLING_GATEWAY_ENABLED = "true";
+    userDb.onRpc("is_tenant_admin", () => ({ data: false, error: null }));
+    const result = await getSmsCreditPortalFor(ctxFor(HOUSE_ADMIN), { tenantId: null });
+    expect(result.canBuy).toBe(false);
+  });
+
+  it("is false for an exempt house's admin, gateway on", async () => {
+    process.env.BILLING_GATEWAY_ENABLED = "true";
+    userDb.onRpc("wallet_summary", () => ({
+      data: { balance: 0, lifetime_purchased: 0, lifetime_used: 0, exempt: true },
+      error: null,
+    }));
+    const result = await getSmsCreditPortalFor(ctxFor(HOUSE_ADMIN), { tenantId: null });
+    expect(result.canBuy).toBe(false);
+  });
+
+  it("is true for the admin of a paying, non-demo house with the gateway on", async () => {
+    process.env.BILLING_GATEWAY_ENABLED = "true";
+    const result = await getSmsCreditPortalFor(ctxFor(HOUSE_ADMIN), { tenantId: null });
+    expect(result.canBuy).toBe(true);
   });
 });
 

@@ -55,7 +55,8 @@ const GATEWAY_UNAVAILABLE_MESSAGE = "Compra por Pix indisponível no momento.";
 const NOT_ADMIN_MESSAGE = "Só o admin da casa pode comprar créditos";
 const EXEMPT_MESSAGE = "Esta casa é isenta e não precisa comprar créditos";
 
-function isGatewayEnabled(): boolean {
+/** Shared `BILLING_GATEWAY_ENABLED` check, also read by `getSmsCreditPortal`'s `canBuy`. */
+export function isBillingGatewayEnabled(): boolean {
   return process.env.BILLING_GATEWAY_ENABLED === "true";
 }
 
@@ -110,7 +111,7 @@ export async function createCreditTopupFor(
   ctx: ServerContext,
   data: z.infer<typeof createTopupInput>,
 ) {
-  if (!isGatewayEnabled()) throw new Error(GATEWAY_UNAVAILABLE_MESSAGE);
+  if (!isBillingGatewayEnabled()) throw new Error(GATEWAY_UNAVAILABLE_MESSAGE);
 
   const tenantId = await resolveOperationalTenantForRequest(
     looseDb(ctx.supabase) as unknown as Parameters<typeof resolveOperationalTenantForRequest>[0],

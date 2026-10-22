@@ -4,7 +4,12 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import type { Json } from "@/integrations/supabase/types";
-import { listDemoTenantIds, resolveOperationalTenantForRequest } from "@/lib/tenant-access.server";
+import { isBillingGatewayEnabled } from "@/lib/billing/topup.functions";
+import {
+  checkDemoTenant,
+  listDemoTenantIds,
+  resolveOperationalTenantForRequest,
+} from "@/lib/tenant-access.server";
 import { dbUuid } from "@/lib/zod-helpers";
 
 type ServerContext = {
@@ -165,10 +170,30 @@ export async function getSmsCreditPortalFor(
   if (summaryRes.error) throw new Error(summaryRes.error.message);
   if (ledgerRes.error) throw new Error(ledgerRes.error.message);
 
+  const summary = withoutProviderCost(summaryRes.data);
+
+  // `canBuy`: gateway on && admin of this house && not exempt && not demo
+  // (brief, Task 6). Non-throwing by design — this is a display flag, not a
+  // guard; `createCreditTopupFor` re-checks every one of these server-side
+  // before actually charging.
+  let canBuy = false;
+  if (isBillingGatewayEnabled()) {
+    const exempt = (summary as { exempt?: boolean }).exempt === true;
+    if (!exempt) {
+      const [{ data: isAdmin, error: isAdminError }, demoCheck] = await Promise.all([
+        sb.rpc("is_tenant_admin", { _tenant: tenantId }),
+        checkDemoTenant(tenantId),
+      ]);
+      if (isAdminError) throw new Error(isAdminError.message);
+      canBuy = Boolean(isAdmin) && demoCheck === "not_demo";
+    }
+  }
+
   return {
     tenantId,
-    summary: withoutProviderCost(summaryRes.data),
+    summary,
     ledger: ledgerRes.data ?? [],
+    canBuy,
   };
 }
 
