@@ -121,7 +121,16 @@ export async function recordChargeSnapshot(chargeId: string, upper: UpperCharge)
 type BillingCreditPaidChargeResult = {
   ok: boolean;
   idempotent?: boolean;
-  reason?: "not_paid" | "needs_review" | "amount_mismatch";
+  // invoice_not_open / invoice_not_found: invoice branch (mensalidade
+  // Task 2) — a Pix paid against an invoice that was already paid/canceled
+  // or does not exist. The RPC flags the charge needs_review in those cases
+  // (and on an invoice amount_mismatch), so it is never retried forever.
+  reason?:
+    | "not_paid"
+    | "needs_review"
+    | "amount_mismatch"
+    | "invoice_not_open"
+    | "invoice_not_found";
 };
 
 /**
@@ -166,7 +175,12 @@ export async function confirmChargeFromUpper(
   if (result?.ok) {
     return { outcome: result.idempotent ? "already_credited" : "credited" };
   }
-  if (result?.reason === "needs_review" || result?.reason === "amount_mismatch") {
+  if (
+    result?.reason === "needs_review" ||
+    result?.reason === "amount_mismatch" ||
+    result?.reason === "invoice_not_open" ||
+    result?.reason === "invoice_not_found"
+  ) {
     return { outcome: "needs_review" };
   }
   return { outcome: "not_paid" };

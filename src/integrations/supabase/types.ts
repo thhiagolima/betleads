@@ -545,6 +545,7 @@ export type Database = {
           status: string
           tenant_id: string
           updated_at: string
+          upfront: boolean
         }
         Insert: {
           amount_cents: number
@@ -567,6 +568,7 @@ export type Database = {
           status?: string
           tenant_id: string
           updated_at?: string
+          upfront?: boolean
         }
         Update: {
           amount_cents?: number
@@ -589,6 +591,7 @@ export type Database = {
           status?: string
           tenant_id?: string
           updated_at?: string
+          upfront?: boolean
         }
         Relationships: [
           {
@@ -7903,6 +7906,7 @@ export type Database = {
           _invoice: string
           _note: string | null
           _paid_amount_cents: number | null
+          _paid_at?: string | null
           _receipt: string | null
           _via: string
         }

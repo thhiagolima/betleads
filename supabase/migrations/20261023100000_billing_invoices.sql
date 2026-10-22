@@ -68,6 +68,10 @@ create table public.billing_invoices (
   one_off_discount_cents bigint not null default 0 check (one_off_discount_cents >= 0),
   amount_cents bigint not null check (amount_cents >= 0),
   status text not null default 'open' check (status in ('open', 'paid', 'canceled')),
+  -- "Paga antes de usar": fatura emitida quando a casa vira pagante (gatilho
+  -- do plano / carga inicial) ou é descongelada. Enquanto aberta, a casa fica
+  -- em awaiting_first_payment, mesmo que já tenha pago faturas antes.
+  upfront boolean not null default false,
   paid_at timestamptz null,
   paid_via text null check (paid_via in ('pix', 'manual', 'full_discount')),
   paid_amount_cents bigint null,
@@ -189,7 +193,9 @@ $$;
 -- Fase da casa segundo a fatura aberta (sem olhar isenção, congelamento ou
 -- bloqueio manual): awaiting_first_payment, due_soon, overdue,
 -- locked_unpaid ou ok. Usada pelo estado e pela regra de ciclo da baixa.
-create or replace function public.billing_invoice_phase(_tenant uuid)
+-- `_on` é o dia de referência (padrão: hoje); a baixa por Pix passa o dia
+-- em que o Pix foi pago. Fatura `upfront` aberta = awaiting_first_payment.
+create or replace function public.billing_invoice_phase(_tenant uuid, _on date default null)
 returns text
 language plpgsql
 stable
@@ -198,7 +204,7 @@ set search_path to 'public'
 as $$
 declare
   v_open public.billing_invoices%rowtype;
-  v_today date := public.billing_today();
+  v_today date := coalesce(_on, public.billing_today());
 begin
   select * into v_open
   from public.billing_invoices
@@ -208,7 +214,7 @@ begin
     return 'ok';
   end if;
 
-  if not exists (
+  if v_open.upfront or not exists (
     select 1 from public.billing_invoices where tenant_id = _tenant and status = 'paid'
   ) then
     return 'awaiting_first_payment';
@@ -266,9 +272,12 @@ $$;
 -- Baixa
 -- ---------------------------------------------------------------------------
 
--- Dá baixa numa fatura aberta e move o ciclo:
--- - casa em locked_unpaid ou awaiting_first_payment: próximo vencimento =
---   dia do pagamento + 1 mês;
+-- Dá baixa numa fatura aberta e move o ciclo. O dia de referência é o dia
+-- do pagamento (`_paid_at` em Brasília; null = agora). A baixa por Pix passa
+-- o paid_at da cobrança, para que um Pix pago às 23:59 do último dia e
+-- creditado depois da meia-noite siga a regra normal.
+-- - casa em locked_unpaid ou awaiting_first_payment (no dia do pagamento):
+--   próximo vencimento = dia do pagamento + 1 mês;
 -- - senão: cycle_due_date + 1 mês;
 -- - exceção: se o superadmin já trocou o dia do ciclo com a fatura aberta
 --   (`billing_admin_set_cycle_day`, next_due_date diferente do
@@ -279,7 +288,8 @@ create or replace function public.billing_settle_invoice(
   _paid_amount_cents bigint,
   _note text,
   _receipt text,
-  _charge uuid
+  _charge uuid,
+  _paid_at timestamptz default null
 )
 returns jsonb
 language plpgsql
@@ -291,12 +301,16 @@ declare
   v_tb public.tenant_billing%rowtype;
   v_inv public.billing_invoices%rowtype;
   v_today date := public.billing_today();
+  v_paid_at timestamptz := least(coalesce(_paid_at, public.billing_now()), public.billing_now());
+  v_pay_day date;
   v_phase text;
   v_next date;
 begin
   if _via is null or _via not in ('pix', 'manual', 'full_discount') then
     raise exception 'invalid_via';
   end if;
+
+  v_pay_day := (v_paid_at at time zone 'America/Sao_Paulo')::date;
 
   select tenant_id into v_tenant from public.billing_invoices where id = _invoice;
   if not found then
@@ -313,21 +327,21 @@ begin
     raise exception 'invoice_not_open';
   end if;
 
-  v_phase := public.billing_invoice_phase(v_tenant);
+  v_phase := public.billing_invoice_phase(v_tenant, v_pay_day);
 
   if v_tb.next_due_date is not null
      and v_tb.next_due_date is distinct from v_inv.cycle_due_date
      and v_tb.next_due_date > v_today then
     v_next := v_tb.next_due_date;
   elsif v_phase in ('locked_unpaid', 'awaiting_first_payment') then
-    v_next := public.billing_add_months(v_today, 1);
+    v_next := public.billing_add_months(v_pay_day, 1);
   else
     v_next := public.billing_add_months(v_inv.cycle_due_date, 1);
   end if;
 
   update public.billing_invoices
      set status = 'paid',
-         paid_at = public.billing_now(),
+         paid_at = v_paid_at,
          paid_via = _via,
          paid_amount_cents = coalesce(_paid_amount_cents, v_inv.amount_cents),
          manual_note = _note,
@@ -358,9 +372,11 @@ $$;
 
 -- Emite a fatura do ciclo `next_due_date` de uma casa, se cabível (pagante,
 -- não congelada, sem fatura aberta, hoje >= vencimento - 5). Quem chama já
--- travou a linha de tenant_billing. Valor 0 recebe baixa `full_discount`.
--- Devolve o id da fatura criada ou null.
-create or replace function public.billing_issue_invoice(_tenant uuid)
+-- travou a linha de tenant_billing. Valor 0 recebe baixa `full_discount`;
+-- valor entre 1 e 9999 centavos (abaixo do mínimo do Pix) não é emitido
+-- (NOTICE no log). `_upfront` marca a fatura "paga antes de usar" (casa que
+-- vira pagante ou é descongelada). Devolve o id da fatura criada ou null.
+create or replace function public.billing_issue_invoice(_tenant uuid, _upfront boolean default false)
 returns uuid
 language plpgsql
 security definer
@@ -370,6 +386,7 @@ declare
   v_tb public.tenant_billing%rowtype;
   v_today date := public.billing_today();
   v_amount jsonb;
+  v_amount_cents bigint;
   v_id uuid;
 begin
   select * into v_tb from public.tenant_billing where tenant_id = _tenant;
@@ -386,10 +403,17 @@ begin
   end if;
 
   v_amount := public.billing_monthly_amount(_tenant, v_tb.next_due_date);
+  v_amount_cents := (v_amount ->> 'amount_cents')::bigint;
+
+  if v_amount_cents between 1 and 9999 then
+    raise notice 'billing_issue_invoice: casa % com fatura de % centavos (abaixo do mínimo do Pix), não emitida',
+      _tenant, v_amount_cents;
+    return null;
+  end if;
 
   insert into public.billing_invoices (
     tenant_id, period_start, period_end, cycle_due_date, due_date,
-    base_amount_cents, discount_cents, one_off_discount_cents, amount_cents, status
+    base_amount_cents, discount_cents, one_off_discount_cents, amount_cents, status, upfront
   ) values (
     _tenant,
     v_tb.next_due_date,
@@ -399,12 +423,13 @@ begin
     (v_amount ->> 'base_cents')::bigint,
     (v_amount ->> 'discount_cents')::bigint,
     0,
-    (v_amount ->> 'amount_cents')::bigint,
-    'open'
+    v_amount_cents,
+    'open',
+    coalesce(_upfront, false)
   )
   returning id into v_id;
 
-  if (v_amount ->> 'amount_cents')::bigint = 0 then
+  if v_amount_cents = 0 then
     perform public.billing_settle_invoice(v_id, 'full_discount', 0, null, null, null);
   end if;
 
@@ -414,7 +439,9 @@ $$;
 
 -- Job da hora: emite as faturas devidas de todas as casas pagantes. Trava
 -- cada casa e confere tudo de novo antes de emitir (billing_issue_invoice),
--- então duas execuções simultâneas nunca emitem duas faturas.
+-- então duas execuções simultâneas nunca emitem duas faturas. Cada casa roda
+-- no seu próprio bloco com EXCEPTION (subtransação): a falha de uma casa vira
+-- WARNING no log e nunca derruba a execução das outras.
 create or replace function public.billing_generate_due_invoices()
 returns setof uuid
 language plpgsql
@@ -438,10 +465,19 @@ begin
       )
     order by tb.tenant_id
   loop
-    perform 1 from public.tenant_billing where tenant_id = v_tenant for update;
-    v_id := public.billing_issue_invoice(v_tenant);
+    v_id := null;
+    begin
+      perform 1 from public.tenant_billing where tenant_id = v_tenant for update;
+      v_id := public.billing_issue_invoice(v_tenant);
+      if v_id is not null then
+        perform public.billing_refresh_access_state(v_tenant);
+      end if;
+    exception when others then
+      raise warning 'billing_generate_due_invoices: casa % falhou: % (%)', v_tenant, sqlerrm, sqlstate;
+      v_id := null;
+    end;
+
     if v_id is not null then
-      perform public.billing_refresh_access_state(v_tenant);
       return next v_id;
     end if;
   end loop;
@@ -525,11 +561,11 @@ $$;
 -- ---------------------------------------------------------------------------
 
 -- Casa nova ou que muda entre isenta e pagante:
--- - vira pagante (ou nasce pagante): garante a linha; se não há fatura
---   aberta e o ciclo está vazio ou no passado, o ciclo recomeça hoje; emite a
---   primeira fatura (vence hoje → awaiting_first_payment);
--- - vira isenta (ou nasce isenta): garante a linha e cancela a fatura aberta
---   com 'Casa isenta' (estado exempt).
+-- - vira pagante (ou nasce pagante): garante a linha, o ciclo recomeça hoje
+--   (mesmo que a casa já tenha pago antes) e emite uma fatura `upfront`
+--   vencendo hoje ("paga antes de usar" → awaiting_first_payment);
+-- - vira isenta (ou nasce isenta): garante a linha, cancela a fatura aberta
+--   com 'Casa isenta' e limpa next_due_date (estado exempt).
 -- Convive com o BEFORE `tenants_plan_guard` (PG1): este é AFTER e só roda
 -- depois que a guarda aceitou a troca.
 create or replace function public.billing_on_tenant_plano()
@@ -562,17 +598,20 @@ begin
 
   if v_new_exempt then
     perform public.billing_cancel_open_invoice(new.id, 'Casa isenta');
+    update public.tenant_billing
+       set next_due_date = null,
+           updated_at = now()
+     where tenant_id = new.id;
   else
     update public.tenant_billing
        set next_due_date = v_today,
            updated_at = now()
      where tenant_id = new.id
-       and (next_due_date is null or next_due_date < v_today)
        and not exists (
          select 1 from public.billing_invoices
          where tenant_id = new.id and status = 'open'
        );
-    perform public.billing_issue_invoice(new.id);
+    perform public.billing_issue_invoice(new.id, true);
   end if;
 
   perform public.billing_refresh_access_state(new.id);
@@ -613,7 +652,7 @@ begin
     if v_rows > 0 then
       perform 1 from public.tenant_billing where tenant_id = v_tenant for update;
       if not v_exempt then
-        perform public.billing_issue_invoice(v_tenant);
+        perform public.billing_issue_invoice(v_tenant, true);
       end if;
       perform public.billing_refresh_access_state(v_tenant);
       v_created := v_created + 1;
@@ -674,22 +713,38 @@ begin
   end if;
 
   if v_charge.kind = 'invoice' then
-    -- A fatura precisa existir e ser da mesma casa da cobrança. A baixa
-    -- (billing_settle_invoice) trava a casa e a fatura de novo e confere
-    -- `open`; aqui só se evita lançar exceção nos casos esperados.
+    -- Ordem de trava: cobrança (acima) → tenant_billing → fatura, a mesma
+    -- de billing_settle_invoice, para que uma baixa concorrente (manual,
+    -- desconto, job) não troque o status da fatura no meio do caminho.
+    perform 1 from public.tenant_billing where tenant_id = v_charge.tenant_id for update;
+
     select * into v_invoice
     from public.billing_invoices
-    where id = v_charge.ref_id and tenant_id = v_charge.tenant_id;
+    where id = v_charge.ref_id and tenant_id = v_charge.tenant_id
+    for update;
 
+    -- Pix pago sem fatura aberta correspondente (fatura inexistente, já paga
+    -- ou cancelada) ou com valor diferente do da fatura: o dinheiro entrou,
+    -- mas não há o que baixar. Marca a cobrança para revisão do superadmin
+    -- (needs_review) em vez de deixá-la presa sendo reprocessada.
     if not found then
-      raise exception 'invoice_not_found';
+      update public.payment_charges
+         set needs_review = true, updated_at = now()
+       where id = v_charge.id;
+      return jsonb_build_object('ok', false, 'reason', 'invoice_not_found');
     end if;
 
     if v_invoice.status <> 'open' then
+      update public.payment_charges
+         set needs_review = true, updated_at = now()
+       where id = v_charge.id;
       return jsonb_build_object('ok', false, 'reason', 'invoice_not_open');
     end if;
 
     if v_invoice.amount_cents <> v_charge.amount_cents then
+      update public.payment_charges
+         set needs_review = true, updated_at = now()
+       where id = v_charge.id;
       return jsonb_build_object('ok', false, 'reason', 'amount_mismatch');
     end if;
 
@@ -706,8 +761,9 @@ begin
     end if;
 
     -- Mensalidade não credita saldo na carteira: só dá baixa na fatura.
+    -- O ciclo usa a hora em que o Pix foi pago, não a hora do crédito.
     v_settle := public.billing_settle_invoice(
-      v_invoice.id, 'pix', v_charge.paid_amount_cents, null, null, v_charge.id
+      v_invoice.id, 'pix', v_charge.paid_amount_cents, null, null, v_charge.id, v_charge.paid_at
     );
 
     update public.payment_charges
@@ -792,8 +848,9 @@ $$;
 -- Ações do superadmin
 -- ---------------------------------------------------------------------------
 
--- Confere superadmin e trava a casa. Recusa casa isenta.
-create or replace function public.billing_admin_lock_tenant(_tenant uuid)
+-- Confere superadmin e trava a casa. Recusa casa isenta, salvo
+-- `_allow_exempt` (tirar um bloqueio manual que sobrou numa casa isenta).
+create or replace function public.billing_admin_lock_tenant(_tenant uuid, _allow_exempt boolean default false)
 returns public.tenant_billing
 language plpgsql
 security definer
@@ -811,7 +868,7 @@ begin
     raise exception 'tenant_not_found';
   end if;
 
-  if public.billing_tenant_exempt(_tenant) then
+  if not coalesce(_allow_exempt, false) and public.billing_tenant_exempt(_tenant) then
     raise exception 'tenant_exempt';
   end if;
 
@@ -875,7 +932,9 @@ security definer
 set search_path to 'public'
 as $$
 begin
-  perform public.billing_admin_lock_tenant(_tenant);
+  -- Desbloquear é permitido em casa isenta (limpa um bloqueio que sobrou);
+  -- bloquear não (isenta vence locked_manual, o bloqueio não teria efeito).
+  perform public.billing_admin_lock_tenant(_tenant, not coalesce(_blocked, false));
 
   update public.tenant_billing
      set manual_block = coalesce(_blocked, false),
@@ -899,7 +958,7 @@ begin
   if not public.is_super_admin() then
     raise exception 'forbidden';
   end if;
-  if _days is null or _days < 1 or _days > 365 then
+  if _days is null or _days < 1 or _days > 31 then
     raise exception 'invalid_days';
   end if;
 
@@ -1123,7 +1182,8 @@ end;
 $$;
 
 -- Congelar cancela a fatura aberta ('Plano congelado') e para a emissão;
--- descongelar recomeça o ciclo hoje e emite a fatura na hora.
+-- descongelar recomeça o ciclo hoje e emite na hora uma fatura `upfront`
+-- ("paga antes de usar": awaiting_first_payment até pagar).
 create or replace function public.billing_admin_set_frozen(_tenant uuid, _frozen boolean)
 returns jsonb
 language plpgsql
@@ -1147,7 +1207,7 @@ begin
            next_due_date = public.billing_today(),
            updated_at = now()
      where tenant_id = _tenant;
-    perform public.billing_issue_invoice(_tenant);
+    perform public.billing_issue_invoice(_tenant, true);
   end if;
 
   return public.billing_admin_result(_tenant);
@@ -1252,20 +1312,20 @@ revoke execute on function public.billing_refresh_access_state(uuid) from public
 grant execute on function public.billing_refresh_access_state(uuid) to service_role;
 revoke execute on function public.billing_generate_due_invoices() from public, anon, authenticated;
 grant execute on function public.billing_generate_due_invoices() to service_role;
-revoke execute on function public.billing_settle_invoice(uuid, text, bigint, text, text, uuid) from public, anon, authenticated;
-grant execute on function public.billing_settle_invoice(uuid, text, bigint, text, text, uuid) to service_role;
+revoke execute on function public.billing_settle_invoice(uuid, text, bigint, text, text, uuid, timestamptz) from public, anon, authenticated;
+grant execute on function public.billing_settle_invoice(uuid, text, bigint, text, text, uuid, timestamptz) to service_role;
 revoke execute on function public.billing_backfill_tenant_billing() from public, anon, authenticated;
 grant execute on function public.billing_backfill_tenant_billing() to service_role;
 
 -- Auxiliares internas: só o dono (chamadas de dentro das funções acima).
 revoke execute on function public.billing_assert_pix_minimum(bigint) from public, anon, authenticated;
 revoke execute on function public.billing_discount_cents(bigint, text, numeric) from public, anon, authenticated;
-revoke execute on function public.billing_invoice_phase(uuid) from public, anon, authenticated;
-revoke execute on function public.billing_issue_invoice(uuid) from public, anon, authenticated;
+revoke execute on function public.billing_invoice_phase(uuid, date) from public, anon, authenticated;
+revoke execute on function public.billing_issue_invoice(uuid, boolean) from public, anon, authenticated;
 revoke execute on function public.billing_cancel_open_invoice(uuid, text) from public, anon, authenticated;
 revoke execute on function public.billing_reprice_open_invoice(uuid) from public, anon, authenticated;
 revoke execute on function public.billing_on_tenant_plano() from public, anon, authenticated;
-revoke execute on function public.billing_admin_lock_tenant(uuid) from public, anon, authenticated;
+revoke execute on function public.billing_admin_lock_tenant(uuid, boolean) from public, anon, authenticated;
 revoke execute on function public.billing_admin_lock_open_invoice(uuid) from public, anon, authenticated;
 revoke execute on function public.billing_admin_result(uuid) from public, anon, authenticated;
 

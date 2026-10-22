@@ -170,6 +170,10 @@ async function openInvoiceOf(tenant: string): Promise<InvoiceRow | undefined> {
   return (await invoicesOf(tenant)).find((i) => i.status === "open");
 }
 
+async function upfrontOf(invoice: string): Promise<boolean> {
+  return scalar<boolean>("select upfront v from public.billing_invoices where id = $1", [invoice]);
+}
+
 async function refresh(tenant: string): Promise<string> {
   return asServiceRole(() =>
     scalar<string>("select public.billing_refresh_access_state($1) v", [tenant]),
@@ -248,6 +252,7 @@ describe("initial load", () => {
       period_end: "2026-11-22",
       amount_cents: "400000",
     });
+    expect(await upfrontOf(invoices[0].id)).toBe(true);
   });
 
   it("re-running the load never duplicates rows or invoices", async () => {
@@ -271,6 +276,7 @@ describe("plano trigger", () => {
     const billing = await billingOf(tenant);
     expect(billing.access_state).toBe("awaiting_first_payment");
     expect(billing.next_due_date).toBe("2026-10-23");
+    expect(await upfrontOf(open!.id)).toBe(true);
 
     await admin("update public.tenants set plano = 'interno' where id = $1", [tenant]);
     const invoices = await invoicesOf(tenant);
@@ -281,6 +287,37 @@ describe("plano trigger", () => {
     await setToday("2026-12-23");
     await generate();
     expect(await openInvoiceOf(tenant)).toBeUndefined();
+  });
+
+  it("paying -> exempt clears next_due_date; exempt -> paying restarts today with an upfront invoice even after past payments", async () => {
+    const { tenant, invoice } = await houseWithOpenInvoiceDueNov5();
+    await admin("update public.tenants set plano = 'interno' where id = $1", [tenant]);
+    expect(await billingOf(tenant)).toMatchObject({ access_state: "exempt", next_due_date: null });
+    expect((await invoicesOf(tenant)).find((i) => i.id === invoice.id)?.status).toBe("canceled");
+
+    await setToday("2026-11-20");
+    await admin("update public.tenants set plano = 'enterprise' where id = $1", [tenant]);
+    const open = await openInvoiceOf(tenant);
+    expect(open).toMatchObject({ due_date: "2026-11-20", cycle_due_date: "2026-11-20" });
+    expect(await upfrontOf(open!.id)).toBe(true);
+    expect(await billingOf(tenant)).toMatchObject({
+      access_state: "awaiting_first_payment",
+      next_due_date: "2026-11-20",
+    });
+    await setToday("2026-11-22");
+    await manualSettle(open!.id);
+    expect((await billingOf(tenant)).next_due_date).toBe("2026-12-22");
+  });
+
+  it("set_block(false) clears a leftover manual block on an exempt house; set_block(true) is refused", async () => {
+    const { tenant } = await houseWithOpenInvoiceDueNov5();
+    await admin("select public.billing_admin_set_block($1, true, 'Fraude')", [tenant]);
+    await admin("update public.tenants set plano = 'interno' where id = $1", [tenant]);
+    await expect(
+      admin("select public.billing_admin_set_block($1, true, 'Fraude')", [tenant]),
+    ).rejects.toThrow(/tenant_exempt/);
+    await admin("select public.billing_admin_set_block($1, false, null)", [tenant]);
+    expect(await billingOf(tenant)).toMatchObject({ manual_block: false, access_state: "exempt" });
   });
 
   it("a new paying house starts awaiting its first payment", async () => {
@@ -416,6 +453,42 @@ describe("billing_generate_due_invoices", () => {
     expect((await invoicesOf(tenant)).filter((i) => i.status === "open")).toHaveLength(1);
   });
 
+  it("skips a house whose invoice would be 1..9999 cents and isolates a failing house", async () => {
+    const { tenant: tiny, invoice: i1 } = await houseWithOpenInvoiceDueNov5();
+    const { tenant: broken, invoice: i2 } = await houseWithOpenInvoiceDueNov5();
+    const { tenant: fine, invoice: i3 } = await houseWithOpenInvoiceDueNov5();
+    await setToday("2026-11-03");
+    for (const id of [i1.id, i2.id, i3.id]) await manualSettle(id);
+    // Bypass the admin validation to force a R$ 50 invoice.
+    await db.query(
+      `update public.tenant_billing set discount_kind = 'fixed', discount_value = 395000
+       where tenant_id = $1`,
+      [tiny],
+    );
+    // A house whose insert fails must not abort the run for the others.
+    await db.exec(`
+      create function public.test_fail_insert() returns trigger language plpgsql as $fn$
+      begin
+        if new.tenant_id = '${broken}' then raise exception 'boom'; end if;
+        return new;
+      end $fn$;
+      create trigger test_fail_insert before insert on public.billing_invoices
+        for each row execute function public.test_fail_insert();
+    `);
+    try {
+      await setToday("2026-11-30");
+      await generate();
+    } finally {
+      await db.exec(`
+        drop trigger test_fail_insert on public.billing_invoices;
+        drop function public.test_fail_insert();
+      `);
+    }
+    expect(await openInvoiceOf(tiny)).toBeUndefined();
+    expect(await openInvoiceOf(broken)).toBeUndefined();
+    expect((await openInvoiceOf(fine))?.due_date).toBe("2026-12-05");
+  });
+
   it("does not issue invoices for frozen houses", async () => {
     const { tenant, invoice } = await houseWithOpenInvoiceDueNov5();
     await setToday("2026-11-03");
@@ -446,6 +519,10 @@ describe("super admin: extend due and free days", () => {
     await expect(
       admin("select public.billing_admin_extend_due($1, 0)", [invoice.id]),
     ).rejects.toThrow(/invalid_days/);
+    await expect(
+      admin("select public.billing_admin_extend_due($1, 32)", [invoice.id]),
+    ).rejects.toThrow(/invalid_days/);
+    await admin("select public.billing_admin_extend_due($1, 31)", [invoice.id]);
     await manualSettle(invoice.id);
     await expect(
       admin("select public.billing_admin_extend_due($1, 5)", [invoice.id]),
@@ -618,7 +695,7 @@ describe("super admin: discounts and price", () => {
 });
 
 describe("super admin: freeze, cancel and permissions", () => {
-  it("freezing makes the state frozen; unfreezing issues an invoice due today", async () => {
+  it("freezing makes the state frozen; unfreezing issues an upfront invoice due today (pay before use)", async () => {
     const { tenant } = await houseWithOpenInvoiceDueNov5();
     await admin("select public.billing_admin_set_frozen($1, true)", [tenant]);
     expect((await billingOf(tenant)).access_state).toBe("frozen");
@@ -630,7 +707,14 @@ describe("super admin: freeze, cancel and permissions", () => {
     expect(await billingOf(tenant)).toMatchObject({
       frozen: false,
       next_due_date: "2027-01-10",
-      access_state: "overdue",
+      access_state: "awaiting_first_payment",
+    });
+    expect(await upfrontOf(open!.id)).toBe(true);
+    await setToday("2027-01-12");
+    await manualSettle(open!.id);
+    expect(await billingOf(tenant)).toMatchObject({
+      next_due_date: "2027-02-12",
+      access_state: "ok",
     });
   });
 
@@ -678,17 +762,46 @@ describe("billing_credit_paid_charge: invoice branch", () => {
     invoiceId: string,
     amount: number,
     externalId: string,
+    paidAt?: string,
   ): Promise<string> {
     return asServiceRole(() =>
       scalar<string>(
         `insert into public.payment_charges (
            tenant_id, kind, ref_id, external_id, status, amount_cents, paid_amount_cents, paid_at
-         ) values ($1, 'invoice', $2, $3, 'PAID', $4, $4, now())
+         ) values ($1, 'invoice', $2, $3, 'PAID', $4, $4, coalesce($5::timestamptz, public.billing_now()))
          returning id v`,
-        [tenant, invoiceId, externalId, amount],
+        [tenant, invoiceId, externalId, amount, paidAt ?? null],
       ),
     );
   }
+
+  async function needsReview(chargeId: string): Promise<boolean> {
+    return scalar<boolean>("select needs_review v from public.payment_charges where id = $1", [
+      chargeId,
+    ]);
+  }
+
+  it("uses the charge's paid time: paid 23:59 on due+3, credited after midnight, keeps the normal cycle", async () => {
+    const { tenant, invoice } = await houseWithOpenInvoiceDueNov5();
+    const chargeId = await seedInvoiceCharge(
+      tenant,
+      invoice.id,
+      400000,
+      `bl-inv-${invoice.id}-1`,
+      "2026-11-08 23:59:00-03",
+    );
+    await db.exec("set app.allow_test_clock = 'on'; set test.now = '2026-11-09 00:30:00-03';");
+    const result = await asServiceRole(() =>
+      scalar<Record<string, unknown>>("select public.billing_credit_paid_charge($1) v", [chargeId]),
+    );
+    expect(result).toMatchObject({ ok: true, next_due_date: "2026-12-05" });
+    const paidAt = await scalar<string>(
+      "select (paid_at at time zone 'America/Sao_Paulo')::text v from public.billing_invoices where id = $1",
+      [invoice.id],
+    );
+    expect(paidAt).toBe("2026-11-08 23:59:00");
+    expect((await billingOf(tenant)).access_state).toBe("ok");
+  });
 
   it("settles the invoice via pix without touching the wallet, and is idempotent", async () => {
     const { tenant, invoice } = await houseWithOpenInvoiceDueNov5();
@@ -733,6 +846,7 @@ describe("billing_credit_paid_charge: invoice branch", () => {
       scalar<Record<string, unknown>>("select public.billing_credit_paid_charge($1) v", [wrong]),
     );
     expect(r1).toMatchObject({ ok: false, reason: "amount_mismatch" });
+    expect(await needsReview(wrong)).toBe(true);
     expect((await openInvoiceOf(tenant))?.id).toBe(invoice.id);
 
     await manualSettle(invoice.id);
@@ -741,6 +855,24 @@ describe("billing_credit_paid_charge: invoice branch", () => {
       scalar<Record<string, unknown>>("select public.billing_credit_paid_charge($1) v", [late]),
     );
     expect(r2).toMatchObject({ ok: false, reason: "invoice_not_open" });
+    expect(await needsReview(late)).toBe(true);
+    const credited = await scalar<string | null>(
+      "select credited_at::text v from public.payment_charges where id = $1",
+      [late],
+    );
+    expect(credited).toBeNull();
+
+    const orphan = await seedInvoiceCharge(
+      tenant,
+      "00000000-0000-4000-8000-00000000beef",
+      400000,
+      `bl-inv-orphan-${invoice.id}`,
+    );
+    const r3 = await asServiceRole(() =>
+      scalar<Record<string, unknown>>("select public.billing_credit_paid_charge($1) v", [orphan]),
+    );
+    expect(r3).toMatchObject({ ok: false, reason: "invoice_not_found" });
+    expect(await needsReview(orphan)).toBe(true);
   });
 });
 

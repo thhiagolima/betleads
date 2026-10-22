@@ -433,6 +433,31 @@ describe("confirmChargeFromUpper", () => {
     expect(fake.admin.rows("payment_charges")[0].needs_review).toBe(true);
   });
 
+  it.each(["invoice_not_open", "invoice_not_found", "amount_mismatch"])(
+    "an invoice charge the RPC refuses with %s is needs_review (the RPC flags it)",
+    async (reason) => {
+      fake.admin
+        .rows("payment_charges")
+        .push(
+          chargeRow({ kind: "invoice", ref_id: "invoice-1", external_id: "bl-inv-invoice-1-1" }),
+        );
+      getUpperCharge.mockResolvedValue(
+        upperCharge({
+          externalId: "bl-inv-invoice-1-1",
+          status: "PAID",
+          paidAmountCents: 50000,
+          paidAt: new Date().toISOString(),
+        }),
+      );
+      const rpcSpy = vi.fn(() => ({ data: { ok: false, reason }, error: null }));
+      fake.admin.onRpc("billing_credit_paid_charge", rpcSpy);
+
+      const result = await confirmChargeFromUpper("bl-inv-invoice-1-1");
+      expect(rpcSpy).toHaveBeenCalledTimes(1);
+      expect(result).toEqual({ outcome: "needs_review" });
+    },
+  );
+
   it("returns not_paid for an ACTIVE charge, without calling the RPC", async () => {
     fake.admin.rows("payment_charges").push(chargeRow());
     getUpperCharge.mockResolvedValue(upperCharge({ status: "ACTIVE" }));
