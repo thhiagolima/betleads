@@ -941,3 +941,88 @@ describe("isolation", () => {
     expect(note).toBe("pago por TED");
   });
 });
+
+describe("Fix round 1: payment_charges_one_open_per_invoice", () => {
+  async function insertCharge(opts: {
+    tenant: string;
+    invoice: string;
+    externalId: string;
+    status: string;
+    amountCents?: number;
+  }) {
+    return asServiceRole(() =>
+      db.query(
+        `insert into public.payment_charges (
+           tenant_id, kind, ref_id, external_id, status, amount_cents
+         ) values ($1, 'invoice', $2, $3, $4, $5)
+         returning id`,
+        [opts.tenant, opts.invoice, opts.externalId, opts.status, opts.amountCents ?? 400000],
+      ),
+    );
+  }
+
+  it("rejects a second PENDING/ACTIVE charge for the same invoice", async () => {
+    const { tenant, invoice } = await houseWithOpenInvoiceDueNov5();
+
+    await insertCharge({
+      tenant,
+      invoice: invoice.id,
+      externalId: `bl-inv-${invoice.id}-1`,
+      status: "ACTIVE",
+    });
+
+    await expect(
+      insertCharge({
+        tenant,
+        invoice: invoice.id,
+        externalId: `bl-inv-${invoice.id}-2`,
+        status: "PENDING",
+      }),
+    ).rejects.toThrow(/duplicate key|unique constraint/i);
+  });
+
+  it("allows a new open charge once the previous one is EXPIRED", async () => {
+    const { tenant, invoice } = await houseWithOpenInvoiceDueNov5();
+
+    await insertCharge({
+      tenant,
+      invoice: invoice.id,
+      externalId: `bl-inv-${invoice.id}-1`,
+      status: "ACTIVE",
+    });
+    await asServiceRole(() =>
+      db.query(`update public.payment_charges set status = 'EXPIRED' where external_id = $1`, [
+        `bl-inv-${invoice.id}-1`,
+      ]),
+    );
+
+    await expect(
+      insertCharge({
+        tenant,
+        invoice: invoice.id,
+        externalId: `bl-inv-${invoice.id}-2`,
+        status: "ACTIVE",
+      }),
+    ).resolves.toBeTruthy();
+  });
+
+  it("does not constrain charges of different invoices or credit_topup charges", async () => {
+    const { tenant: t1, invoice: inv1 } = await houseWithOpenInvoiceDueNov5();
+    const { invoice: inv2 } = await houseWithOpenInvoiceDueNov5();
+
+    await insertCharge({
+      tenant: t1,
+      invoice: inv1.id,
+      externalId: `bl-inv-${inv1.id}-1`,
+      status: "ACTIVE",
+    });
+    await expect(
+      insertCharge({
+        tenant: t1,
+        invoice: inv2.id,
+        externalId: `bl-inv-${inv2.id}-1`,
+        status: "ACTIVE",
+      }),
+    ).resolves.toBeTruthy();
+  });
+});

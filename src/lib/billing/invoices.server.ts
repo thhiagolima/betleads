@@ -18,12 +18,23 @@ const GENERIC_UPPER_FAILURE_MESSAGE =
 const PIX_UNAVAILABLE_MESSAGE = "Pagamento por Pix indisponível no momento.";
 const INVOICE_ALREADY_PAID_MESSAGE = "Esta fatura já está paga.";
 const INVOICE_NOT_FOUND_MESSAGE = "Fatura não encontrada.";
+/** Another request is already creating this invoice's one allowed open charge. */
+const GENERATING_MESSAGE = "Gerando o Pix, tente de novo em instantes.";
 
 const MIN_EXPIRES_IN_SECONDS = 3600;
 const MAX_EXPIRES_IN_SECONDS = 604800;
 /** A reusable ACTIVE charge must still have more than this left before expiry. */
 const REUSE_MIN_REMAINING_MS = 5 * 60_000;
-const MAX_EXTERNAL_ID_RETRIES = 2;
+/**
+ * Fix round 1: at most one retry, and only for an `external_id` collision
+ * with a leftover terminal-status row (same invoice, an old sequence
+ * number). A collision with `payment_charges_one_open_per_invoice` (the
+ * partial unique index added in 20261023100000_billing_invoices.sql) is
+ * never retried here — see `handleOpenChargeRace`.
+ */
+const MAX_EXTERNAL_ID_RETRIES = 1;
+/** PostgREST's default page cap; `listNonExemptTenantIds` pages past it. */
+const LIST_PAGE_SIZE = 1000;
 
 type LooseRow = Record<string, unknown>;
 
@@ -97,18 +108,42 @@ export type RunBillingCycleOptions = {
 export type RunBillingCycleResult = {
   generated: number;
   refreshed: number;
-  emails: number;
+  /**
+   * Invoices for which `sendEmails` was invoked this run (i.e. `generated`,
+   * when the flag is on) — NOT a count of e-mails actually sent. Task 5
+   * wires the real send pipeline and owns the real count; until then this
+   * is just "how many invoices were handed to the (no-op) callback".
+   */
+  issued: number;
   errors: number;
 };
 
-/** Every house not already marked `exempt` locally. */
+/**
+ * Every house not already marked `exempt` locally, paged past PostgREST's
+ * default 1000-row cap (`.range`) so a house list past that size is never
+ * silently truncated — a truncated page would mean the tail of the house
+ * list never gets its access_state refreshed on some runs.
+ */
 async function listNonExemptTenantIds(): Promise<string[]> {
-  const { data, error } = await supabaseAdmin
-    .from("tenant_billing")
-    .select("tenant_id")
-    .neq("access_state", "exempt");
-  if (error) throw new Error(error.message);
-  return ((data ?? []) as LooseRow[]).map((row) => row.tenant_id as string);
+  const ids: string[] = [];
+  let offset = 0;
+  // Sanity guard against an infinite loop if `.range()` is ever ignored by
+  // a stub/mock and every page comes back full — same convention as
+  // sms.functions.ts's paging loops.
+  for (let guard = 0; guard < 10_000; guard += 1) {
+    const { data, error } = await supabaseAdmin
+      .from("tenant_billing")
+      .select("tenant_id")
+      .neq("access_state", "exempt")
+      .order("tenant_id", { ascending: true })
+      .range(offset, offset + LIST_PAGE_SIZE - 1);
+    if (error) throw new Error(error.message);
+    const page = (data ?? []) as LooseRow[];
+    for (const row of page) ids.push(row.tenant_id as string);
+    if (page.length < LIST_PAGE_SIZE) break;
+    offset += LIST_PAGE_SIZE;
+  }
+  return ids;
 }
 
 /**
@@ -134,9 +169,10 @@ async function refreshOneTenant(tenantId: string, counters: { refreshed: number;
 /**
  * Hourly billing job (Task 3). Sequence: generate due invoices (only when
  * `BILLING_INVOICES_ENABLED === "true"`) → refresh every non-exempt house's
- * access state (always, flag or not) → notify `sendEmails` (Task 5) about
- * what was issued, also flag-gated. `sendEmails` defaults to a no-op until
- * Task 5 wires the real e-mail pipeline.
+ * access state (always, flag or not, and even if generation itself failed —
+ * ruling: refresh always happens) → notify `sendEmails` (Task 5) about what
+ * was issued, also flag-gated. `sendEmails` defaults to a no-op until Task 5
+ * wires the real e-mail pipeline.
  */
 export async function runBillingCycle(
   opts: RunBillingCycleOptions = {},
@@ -146,9 +182,18 @@ export async function runBillingCycle(
   let issuedInvoiceIds: string[] = [];
 
   if (isBillingInvoicesEnabled()) {
-    const { data, error } = await supabaseAdmin.rpc("billing_generate_due_invoices", {});
-    if (error) throw new Error(error.message);
-    issuedInvoiceIds = ((data ?? []) as unknown[]).map((id) => String(id));
+    try {
+      const { data, error } = await supabaseAdmin.rpc("billing_generate_due_invoices", {});
+      if (error) throw new Error(error.message);
+      issuedInvoiceIds = ((data ?? []) as unknown[]).map((id) => String(id));
+    } catch (err) {
+      counters.errors += 1;
+      console.error("[billing/invoices] billing_generate_due_invoices failed", {
+        error: errorMessage(err),
+      });
+      // issuedInvoiceIds stays []: the refresh loop below still runs for
+      // every house, generated or not.
+    }
   }
 
   const tenantIds = await listNonExemptTenantIds();
@@ -156,16 +201,16 @@ export async function runBillingCycle(
     await refreshOneTenant(tenantId, counters);
   }
 
-  let emails = 0;
+  let issued = 0;
   if (isBillingInvoicesEnabled()) {
     await sendEmails({ issuedInvoiceIds });
-    emails = issuedInvoiceIds.length;
+    issued = issuedInvoiceIds.length;
   }
 
   return {
     generated: issuedInvoiceIds.length,
     refreshed: counters.refreshed,
-    emails,
+    issued,
     errors: counters.errors,
   };
 }
@@ -216,27 +261,53 @@ async function getTenantName(tenantId: string): Promise<string> {
   return (data as { nome: string | null } | null)?.nome ?? "";
 }
 
-/** A still-payable ACTIVE charge of the exact same amount, with >5 min left. */
-async function findReusableActiveCharge(
-  invoiceId: string,
-  amountCents: number,
-  now: Date,
-): Promise<LooseRow | null> {
+type OpenChargeRow = {
+  id: string;
+  external_id: string;
+  status: string;
+  amount_cents: number;
+  emv: string | null;
+  qr_code_image: string | null;
+  payment_url: string | null;
+  expires_at: string | null;
+};
+
+/**
+ * The invoice's one still-open (PENDING/ACTIVE) charge, if any —
+ * `payment_charges_one_open_per_invoice` (20261023100000_billing_invoices.sql)
+ * guarantees there is at most one once this migration is applied.
+ */
+async function findOpenCharge(invoiceId: string): Promise<OpenChargeRow | null> {
   const { data, error } = await supabaseAdmin
     .from("payment_charges")
-    .select("id, emv, qr_code_image, payment_url, expires_at, amount_cents")
+    .select("id, external_id, status, amount_cents, emv, qr_code_image, payment_url, expires_at")
     .eq("kind", "invoice")
     .eq("ref_id", invoiceId)
-    .eq("status", "ACTIVE")
-    .eq("amount_cents", amountCents)
-    .order("created_at", { ascending: false });
+    .in("status", ["PENDING", "ACTIVE"])
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
   if (error) throw new Error(error.message);
-  const candidate = ((data ?? []) as LooseRow[]).find((row) => {
-    const expiresAt = row.expires_at as string | null;
-    if (!expiresAt) return false;
-    return new Date(expiresAt).getTime() - now.getTime() > REUSE_MIN_REMAINING_MS;
-  });
-  return candidate ?? null;
+  return (data as OpenChargeRow | null) ?? null;
+}
+
+/** ACTIVE, the exact invoice amount, and more than 5 min left before expiry. */
+function isReusable(charge: OpenChargeRow, amountCents: number, now: Date): boolean {
+  if (charge.status !== "ACTIVE") return false;
+  if (charge.amount_cents !== amountCents) return false;
+  if (!charge.expires_at) return false;
+  return new Date(charge.expires_at).getTime() - now.getTime() > REUSE_MIN_REMAINING_MS;
+}
+
+function chargeResult(charge: OpenChargeRow): CreateInvoicePaymentResult {
+  return {
+    chargeId: charge.id,
+    emv: charge.emv,
+    qrCodeImage: charge.qr_code_image,
+    paymentUrl: charge.payment_url,
+    expiresAt: charge.expires_at,
+    amountCents: charge.amount_cents,
+  };
 }
 
 async function nextChargeSequence(invoiceId: string): Promise<number> {
@@ -255,14 +326,29 @@ function isUniqueConflict(error: { code?: string; message?: string } | null | un
   return /duplicate key/i.test(error.message ?? "");
 }
 
-/** Inserts the PENDING charge row for one attempt; null on a unique conflict. */
+type InsertChargeResult =
+  | { ok: true; id: string }
+  | { ok: false; reason: "external_id" | "open_charge" };
+
+/**
+ * Inserts the PENDING charge row for one attempt. On a unique-constraint
+ * conflict, distinguishes which invariant tripped by re-reading whether a
+ * row with this exact `external_id` already exists:
+ * - it does → our own sequence number `n` collided with a leftover
+ *   terminal-status charge (same invoice, an old attempt); the caller bumps
+ *   `n` and retries (at most once);
+ * - it doesn't → a concurrent request already won the race and created the
+ *   invoice's one allowed open charge
+ *   (`payment_charges_one_open_per_invoice`); the caller never retries this,
+ *   it re-reads that charge instead (`handleOpenChargeRace`).
+ */
 async function insertPendingCharge(input: {
   tenantId: string;
   invoiceId: string;
   amountCents: number;
   externalId: string;
   actorUserId: string;
-}): Promise<string | null> {
+}): Promise<InsertChargeResult> {
   const { data, error } = await supabaseAdmin
     .from("payment_charges")
     .insert({
@@ -277,11 +363,16 @@ async function insertPendingCharge(input: {
     })
     .select("id")
     .single();
-  if (error) {
-    if (isUniqueConflict(error)) return null;
-    throw new Error(error.message);
-  }
-  return (data as { id: string }).id;
+  if (!error) return { ok: true, id: (data as { id: string }).id };
+  if (!isUniqueConflict(error)) throw new Error(error.message);
+
+  const { data: collision, error: lookupError } = await supabaseAdmin
+    .from("payment_charges")
+    .select("id")
+    .eq("external_id", input.externalId)
+    .maybeSingle();
+  if (lookupError) throw new Error(lookupError.message);
+  return { ok: false, reason: collision ? "external_id" : "open_charge" };
 }
 
 async function markChargeFailed(chargeId: string, summary: string): Promise<void> {
@@ -293,14 +384,44 @@ async function markChargeFailed(chargeId: string, summary: string): Promise<void
 }
 
 /**
+ * Lost the race to create the invoice's one open charge
+ * (`payment_charges_one_open_per_invoice` conflict on insert): re-reads it
+ * and resolves exactly like the pre-insert check does — reusable → return
+ * it; still `PENDING` → tell the caller to retry shortly; anything else
+ * (amount mismatch, ACTIVE near expiry) → the generic failure message. Never
+ * creates a second charge here.
+ */
+async function handleOpenChargeRace(
+  invoice: InvoiceRow,
+  now: Date,
+): Promise<CreateInvoicePaymentResult> {
+  const openCharge = await findOpenCharge(invoice.id);
+  if (openCharge && isReusable(openCharge, invoice.amount_cents, now)) {
+    return chargeResult(openCharge);
+  }
+  if (openCharge && openCharge.status === "PENDING") {
+    throw new Error(GENERATING_MESSAGE);
+  }
+  throw new Error(GENERIC_UPPER_FAILURE_MESSAGE);
+}
+
+/**
  * Pix payment of an open invoice (Task 3; payer/tenant authorization is
  * Task 7's job — this only asserts the invoice is open and the gateway is
- * on). Reuses a still-valid ACTIVE charge of the exact amount when one
- * exists; otherwise inserts a new `bl-inv-<id>-<n>` charge (n = 1 + the
- * count of existing charges for the invoice) and asks Upper for a Pix,
- * exactly like `createCreditTopupFor` (topup.functions.ts) does for a
- * top-up order. A unique `external_id` conflict (another request racing the
- * same `n`) retries once with `n+1`.
+ * on). At most one still-payable Pix charge exists per invoice at any time
+ * (enforced in the DB by `payment_charges_one_open_per_invoice`, fix round
+ * 1): a reusable ACTIVE charge of the exact amount is returned as-is; an
+ * open charge of a STALE amount (the invoice was repriced after the charge
+ * was created) is canceled first (`cancelOpenInvoiceCharges` semantics)
+ * before a new one is created; an open charge of the current amount that
+ * isn't reusable (still `PENDING`, or ACTIVE but near expiry) is left alone
+ * — the caller is told to wait rather than getting a second Pix. Creating a
+ * genuinely new charge follows `createCreditTopupFor`'s pattern
+ * (topup.functions.ts): insert `PENDING` before calling Upper, `FAILED`
+ * with the generic message on an Upper failure. A unique `external_id`
+ * conflict (an old attempt's row, never the open-charge index) retries once
+ * with `n+1`; a conflict with the open-charge index itself never retries —
+ * see `handleOpenChargeRace`.
  */
 export async function createInvoicePayment(
   invoiceId: string,
@@ -311,18 +432,27 @@ export async function createInvoicePayment(
   }
 
   const invoice = await getOpenInvoiceOrThrow(invoiceId);
-
   const now = new Date();
-  const reusable = await findReusableActiveCharge(invoice.id, invoice.amount_cents, now);
-  if (reusable) {
-    return {
-      chargeId: reusable.id as string,
-      emv: (reusable.emv as string | null) ?? null,
-      qrCodeImage: (reusable.qr_code_image as string | null) ?? null,
-      paymentUrl: (reusable.payment_url as string | null) ?? null,
-      expiresAt: (reusable.expires_at as string | null) ?? null,
-      amountCents: reusable.amount_cents as number,
-    };
+
+  const openCharge = await findOpenCharge(invoice.id);
+  if (openCharge) {
+    if (isReusable(openCharge, invoice.amount_cents, now)) {
+      return chargeResult(openCharge);
+    }
+    if (openCharge.amount_cents !== invoice.amount_cents) {
+      // The invoice was repriced after this charge was created: it can
+      // never be paid for the right amount, so release it before creating
+      // a fresh one for the current amount.
+      await cancelOpenInvoiceCharges(invoice.id);
+    } else if (openCharge.status === "PENDING") {
+      // Same amount, still being created (by this request's own earlier
+      // attempt or a concurrent one) — never pile a second charge on top.
+      throw new Error(GENERATING_MESSAGE);
+    } else {
+      // ACTIVE, same amount, but <=5 min left: let it run its course
+      // (expire/reconcile) instead of creating a duplicate open charge.
+      throw new Error(GENERIC_UPPER_FAILURE_MESSAGE);
+    }
   }
 
   const tenantName = await getTenantName(invoice.tenant_id);
@@ -332,19 +462,25 @@ export async function createInvoicePayment(
   let n = await nextChargeSequence(invoice.id);
   let chargeId: string | null = null;
   let externalId = "";
-  for (let attempt = 0; attempt <= MAX_EXTERNAL_ID_RETRIES; attempt += 1) {
+  for (let attempt = 0; ; attempt += 1) {
     externalId = `bl-inv-${invoice.id}-${n}`;
-    chargeId = await insertPendingCharge({
+    const result = await insertPendingCharge({
       tenantId: invoice.tenant_id,
       invoiceId: invoice.id,
       amountCents: invoice.amount_cents,
       externalId,
       actorUserId,
     });
-    if (chargeId) break;
+    if (result.ok) {
+      chargeId = result.id;
+      break;
+    }
+    if (result.reason === "open_charge") {
+      return await handleOpenChargeRace(invoice, now);
+    }
+    if (attempt >= MAX_EXTERNAL_ID_RETRIES) throw new Error(GENERIC_UPPER_FAILURE_MESSAGE);
     n += 1;
   }
-  if (!chargeId) throw new Error(GENERIC_UPPER_FAILURE_MESSAGE);
 
   let upper: UpperCharge;
   try {

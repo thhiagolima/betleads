@@ -89,6 +89,17 @@ create unique index billing_invoices_one_open_per_tenant
 create index idx_billing_invoices_tenant on public.billing_invoices (tenant_id, created_at desc);
 create index idx_billing_invoices_status_due on public.billing_invoices (status, due_date);
 
+-- Fix round 1 (Task 3): no more than one still-payable Pix charge per
+-- invoice. Without this, two concurrent clicks on "pagar" could each read
+-- "no reusable charge" and both insert a PENDING row before either commits,
+-- leaving two live Pix out for the same invoice. createInvoicePayment
+-- (invoices.server.ts) relies on the 23505 this index raises to serialize
+-- that race: the loser re-reads the open charge instead of creating a
+-- second one.
+create unique index payment_charges_one_open_per_invoice
+  on public.payment_charges (ref_id)
+  where kind = 'invoice' and status in ('PENDING', 'ACTIVE');
+
 create table public.billing_email_log (
   invoice_id uuid not null references public.billing_invoices(id) on delete cascade,
   kind text not null check (kind in ('issued', 'due_today', 'locked', 'paid')),

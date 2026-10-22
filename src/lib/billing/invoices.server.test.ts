@@ -106,7 +106,7 @@ describe("runBillingCycle", () => {
     expect(sendEmails).not.toHaveBeenCalled();
     expect(result.generated).toBe(0);
     expect(result.refreshed).toBe(1);
-    expect(result.emails).toBe(0);
+    expect(result.issued).toBe(0);
   });
 
   it("generates due invoices and refreshes state when the flag is on, calling sendEmails with issued ids", async () => {
@@ -122,7 +122,7 @@ describe("runBillingCycle", () => {
 
     expect(result.generated).toBe(2);
     expect(result.refreshed).toBe(1);
-    expect(result.emails).toBe(2);
+    expect(result.issued).toBe(2);
     expect(sendEmails).toHaveBeenCalledWith({ issuedInvoiceIds: ["new-invoice-1", "new-invoice-2"] });
   });
 
@@ -159,6 +159,27 @@ describe("runBillingCycle", () => {
     expect(refreshRpc).toHaveBeenCalledTimes(2);
     expect(result.refreshed).toBe(1);
   });
+
+  it("still refreshes every house and counts the error when billing_generate_due_invoices itself fails", async () => {
+    seedTenantBilling();
+    fake.admin.onRpc("billing_generate_due_invoices", () => ({
+      data: null,
+      error: { message: "statement timeout" },
+    }));
+    const refreshRpc = vi.fn(() => ({ data: "due_soon", error: null }));
+    fake.admin.onRpc("billing_refresh_access_state", refreshRpc);
+    const sendEmails = vi.fn().mockResolvedValue(undefined);
+
+    const result = await runBillingCycle({ sendEmails });
+
+    expect(refreshRpc).toHaveBeenCalledTimes(1);
+    expect(result.refreshed).toBe(1);
+    expect(result.generated).toBe(0);
+    expect(result.errors).toBeGreaterThanOrEqual(1);
+    // No invoices were issued, so sendEmails is still called (flag is on)
+    // but with an empty list — never with stale/partial ids.
+    expect(sendEmails).toHaveBeenCalledWith({ issuedInvoiceIds: [] });
+  });
 });
 
 describe("createInvoicePayment", () => {
@@ -186,7 +207,7 @@ describe("createInvoicePayment", () => {
     expect(fake.admin.rows("payment_charges")).toHaveLength(1);
   });
 
-  it("creates bl-inv-<id>-2 when the previous ACTIVE charge is past (or near) its validity", async () => {
+  it("creates bl-inv-<id>-2 once the previous charge is actually EXPIRED (no longer open)", async () => {
     fake.admin.rows("billing_invoices").push(invoiceRow());
     fake.admin.rows("payment_charges").push({
       id: "charge-1",
@@ -194,9 +215,8 @@ describe("createInvoicePayment", () => {
       kind: "invoice",
       ref_id: "invoice-1",
       external_id: "bl-inv-invoice-1-1",
-      status: "ACTIVE",
+      status: "EXPIRED",
       amount_cents: 400000,
-      expires_at: new Date(Date.now() + 60_000).toISOString(), // less than 5 min left
     });
     createUpperCharge.mockResolvedValue(upperChargeResult({ externalId: "bl-inv-invoice-1-2" }));
 
@@ -209,6 +229,170 @@ describe("createInvoicePayment", () => {
     expect(newCharge.external_id).toBe("bl-inv-invoice-1-2");
     expect(createUpperCharge).toHaveBeenCalledTimes(1);
     expect(createUpperCharge.mock.calls[0][0].externalId).toBe("bl-inv-invoice-1-2");
+  });
+
+  it("an open ACTIVE charge of the same amount but <=5min left blocks a new one (generic message)", async () => {
+    fake.admin.rows("billing_invoices").push(invoiceRow());
+    fake.admin.rows("payment_charges").push({
+      id: "charge-1",
+      tenant_id: TENANT,
+      kind: "invoice",
+      ref_id: "invoice-1",
+      external_id: "bl-inv-invoice-1-1",
+      status: "ACTIVE",
+      amount_cents: 400000,
+      expires_at: new Date(Date.now() + 60_000).toISOString(), // less than 5 min left
+    });
+
+    await expect(createInvoicePayment("invoice-1", ACTOR)).rejects.toThrow(
+      "Não foi possível gerar o Pix agora. Tente de novo em instantes.",
+    );
+    expect(createUpperCharge).not.toHaveBeenCalled();
+    expect(fake.admin.rows("payment_charges")).toHaveLength(1);
+  });
+
+  it("an open PENDING charge of the same amount throws 'Gerando o Pix...' without creating a second one", async () => {
+    fake.admin.rows("billing_invoices").push(invoiceRow());
+    fake.admin.rows("payment_charges").push({
+      id: "charge-1",
+      tenant_id: TENANT,
+      kind: "invoice",
+      ref_id: "invoice-1",
+      external_id: "bl-inv-invoice-1-1",
+      status: "PENDING",
+      amount_cents: 400000,
+    });
+
+    await expect(createInvoicePayment("invoice-1", ACTOR)).rejects.toThrow(
+      "Gerando o Pix, tente de novo em instantes.",
+    );
+    expect(createUpperCharge).not.toHaveBeenCalled();
+    expect(fake.admin.rows("payment_charges")).toHaveLength(1);
+  });
+
+  it("cancels an open charge of a stale (different) amount before creating a new one", async () => {
+    fake.admin.rows("billing_invoices").push(invoiceRow({ amount_cents: 400000 }));
+    fake.admin.rows("payment_charges").push({
+      id: "charge-stale",
+      tenant_id: TENANT,
+      kind: "invoice",
+      ref_id: "invoice-1",
+      external_id: "bl-inv-invoice-1-1",
+      status: "ACTIVE",
+      amount_cents: 350000, // the invoice was repriced after this charge was created
+      expires_at: new Date(Date.now() + 10 * 60_000).toISOString(),
+    });
+    createUpperCharge.mockResolvedValue(upperChargeResult({ externalId: "bl-inv-invoice-1-2" }));
+
+    const result = await createInvoicePayment("invoice-1", ACTOR);
+
+    expect(cancelUpperCharge).toHaveBeenCalledTimes(1);
+    expect(cancelUpperCharge).toHaveBeenCalledWith("bl-inv-invoice-1-1");
+    const stale = fake.admin.rows("payment_charges").find((r) => r.id === "charge-stale")!;
+    expect(stale.status).toBe("CANCELLED");
+    expect(result.chargeId).not.toBe("charge-stale");
+    expect(result.amountCents).toBe(400000);
+    const created = fake.admin.rows("payment_charges").find((r) => r.id === result.chargeId)!;
+    expect(created.amount_cents).toBe(400000);
+  });
+
+  describe("concurrent second call racing the payment_charges_one_open_per_invoice index", () => {
+    // Simulates two concurrent createInvoicePayment calls both finding no
+    // open charge, then both trying to insert one: the second (and, since
+    // our own retry also collides on the still-open winner, every
+    // subsequent) insert hits the DB's partial unique index (ref_id,
+    // kind='invoice', status in PENDING/ACTIVE) and must never create a
+    // second open charge. `injected` is hoisted so it's shared across every
+    // `.from("payment_charges")` call this test makes (a fresh builder is
+    // created per call) — the winner's row is pushed exactly once, on the
+    // first insert attempt, and keeps rejecting every later attempt too.
+    function simulateRaceOnInsert(winnerCharge: Record<string, unknown>) {
+      type Builder = Record<string, (...args: unknown[]) => unknown>;
+      const client = fake.admin.client as unknown as { from: (table: string) => Builder };
+      const originalFrom = client.from;
+      let injected = false;
+      vi.spyOn(client, "from").mockImplementation((table: string) => {
+        const builder = originalFrom(table);
+        if (table !== "payment_charges") return builder;
+        const originalInsert = builder.insert;
+        builder.insert = (...args: unknown[]) => {
+          const value = args[0] as Record<string, unknown>;
+          if (value.kind !== "invoice") return originalInsert(...args);
+          if (!injected) {
+            injected = true;
+            fake.admin.rows("payment_charges").push({
+              created_at: new Date().toISOString(),
+              ...winnerCharge,
+            });
+          }
+          const hasOpenCharge = fake.admin
+            .rows("payment_charges")
+            .some(
+              (row) =>
+                row.kind === "invoice" &&
+                row.ref_id === value.ref_id &&
+                ["PENDING", "ACTIVE"].includes(row.status as string),
+            );
+          if (hasOpenCharge) {
+            return {
+              select: () => ({
+                single: async () => ({
+                  data: null,
+                  error: {
+                    message:
+                      'duplicate key value violates unique constraint "payment_charges_one_open_per_invoice"',
+                    code: "23505",
+                  },
+                }),
+              }),
+            };
+          }
+          return originalInsert(...args);
+        };
+        return builder;
+      });
+    }
+
+    it("returns the concurrent winner's ACTIVE charge instead of creating a second one", async () => {
+      fake.admin.rows("billing_invoices").push(invoiceRow());
+      simulateRaceOnInsert({
+        id: "charge-winner",
+        tenant_id: TENANT,
+        kind: "invoice",
+        ref_id: "invoice-1",
+        external_id: "bl-inv-invoice-1-1",
+        status: "ACTIVE",
+        amount_cents: 400000,
+        emv: "winner-emv",
+        expires_at: new Date(Date.now() + 10 * 60_000).toISOString(),
+      });
+
+      const result = await createInvoicePayment("invoice-1", ACTOR);
+
+      expect(result.chargeId).toBe("charge-winner");
+      expect(result.emv).toBe("winner-emv");
+      expect(createUpperCharge).not.toHaveBeenCalled();
+      expect(fake.admin.rows("payment_charges")).toHaveLength(1);
+    });
+
+    it("throws 'Gerando o Pix...' when the concurrent winner's charge is still PENDING", async () => {
+      fake.admin.rows("billing_invoices").push(invoiceRow());
+      simulateRaceOnInsert({
+        id: "charge-winner",
+        tenant_id: TENANT,
+        kind: "invoice",
+        ref_id: "invoice-1",
+        external_id: "bl-inv-invoice-1-1",
+        status: "PENDING",
+        amount_cents: 400000,
+      });
+
+      await expect(createInvoicePayment("invoice-1", ACTOR)).rejects.toThrow(
+        "Gerando o Pix, tente de novo em instantes.",
+      );
+      expect(createUpperCharge).not.toHaveBeenCalled();
+      expect(fake.admin.rows("payment_charges")).toHaveLength(1);
+    });
   });
 
   it("computes expiresIn between 3600 and 604800, clamped at the end of due_date+3 Brasília", async () => {
