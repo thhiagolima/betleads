@@ -58,6 +58,7 @@ import { Route as ApiPublicCallFlowsTickRouteImport } from './routes/api/public/
 import { Route as ApiPublicClickTokenRouteImport } from './routes/api/public/click.$token'
 import { Route as ApiPublicEmailCampaignsTickRouteImport } from './routes/api/public/email-campaigns/tick'
 import { Route as ApiPublicEmailFlowsTickRouteImport } from './routes/api/public/email-flows/tick'
+import { Route as ApiPublicHooksBillingCycleRouteImport } from './routes/api/public/hooks/billing-cycle'
 import { Route as ApiPublicHooksBillingReconcileRouteImport } from './routes/api/public/hooks/billing-reconcile'
 import { Route as ApiPublicHooksCashbackCatchupRouteImport } from './routes/api/public/hooks/cashback-catchup'
 import { Route as ApiPublicHooksDispatchRouteImport } from './routes/api/public/hooks/dispatch'
@@ -332,6 +333,12 @@ const ApiPublicEmailFlowsTickRoute = ApiPublicEmailFlowsTickRouteImport.update({
   path: '/api/public/email-flows/tick',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicHooksBillingCycleRoute =
+  ApiPublicHooksBillingCycleRouteImport.update({
+    id: '/api/public/hooks/billing-cycle',
+    path: '/api/public/hooks/billing-cycle',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicHooksBillingReconcileRoute =
   ApiPublicHooksBillingReconcileRouteImport.update({
     id: '/api/public/hooks/billing-reconcile',
@@ -509,6 +516,7 @@ export interface FileRoutesByFullPath {
   '/api/public/click/$token': typeof ApiPublicClickTokenRoute
   '/api/public/email-campaigns/tick': typeof ApiPublicEmailCampaignsTickRoute
   '/api/public/email-flows/tick': typeof ApiPublicEmailFlowsTickRoute
+  '/api/public/hooks/billing-cycle': typeof ApiPublicHooksBillingCycleRoute
   '/api/public/hooks/billing-reconcile': typeof ApiPublicHooksBillingReconcileRoute
   '/api/public/hooks/cashback-catchup': typeof ApiPublicHooksCashbackCatchupRoute
   '/api/public/hooks/dispatch': typeof ApiPublicHooksDispatchRoute
@@ -582,6 +590,7 @@ export interface FileRoutesByTo {
   '/api/public/click/$token': typeof ApiPublicClickTokenRoute
   '/api/public/email-campaigns/tick': typeof ApiPublicEmailCampaignsTickRoute
   '/api/public/email-flows/tick': typeof ApiPublicEmailFlowsTickRoute
+  '/api/public/hooks/billing-cycle': typeof ApiPublicHooksBillingCycleRoute
   '/api/public/hooks/billing-reconcile': typeof ApiPublicHooksBillingReconcileRoute
   '/api/public/hooks/cashback-catchup': typeof ApiPublicHooksCashbackCatchupRoute
   '/api/public/hooks/dispatch': typeof ApiPublicHooksDispatchRoute
@@ -656,6 +665,7 @@ export interface FileRoutesById {
   '/api/public/click/$token': typeof ApiPublicClickTokenRoute
   '/api/public/email-campaigns/tick': typeof ApiPublicEmailCampaignsTickRoute
   '/api/public/email-flows/tick': typeof ApiPublicEmailFlowsTickRoute
+  '/api/public/hooks/billing-cycle': typeof ApiPublicHooksBillingCycleRoute
   '/api/public/hooks/billing-reconcile': typeof ApiPublicHooksBillingReconcileRoute
   '/api/public/hooks/cashback-catchup': typeof ApiPublicHooksCashbackCatchupRoute
   '/api/public/hooks/dispatch': typeof ApiPublicHooksDispatchRoute
@@ -731,6 +741,7 @@ export interface FileRouteTypes {
     | '/api/public/click/$token'
     | '/api/public/email-campaigns/tick'
     | '/api/public/email-flows/tick'
+    | '/api/public/hooks/billing-cycle'
     | '/api/public/hooks/billing-reconcile'
     | '/api/public/hooks/cashback-catchup'
     | '/api/public/hooks/dispatch'
@@ -804,6 +815,7 @@ export interface FileRouteTypes {
     | '/api/public/click/$token'
     | '/api/public/email-campaigns/tick'
     | '/api/public/email-flows/tick'
+    | '/api/public/hooks/billing-cycle'
     | '/api/public/hooks/billing-reconcile'
     | '/api/public/hooks/cashback-catchup'
     | '/api/public/hooks/dispatch'
@@ -877,6 +889,7 @@ export interface FileRouteTypes {
     | '/api/public/click/$token'
     | '/api/public/email-campaigns/tick'
     | '/api/public/email-flows/tick'
+    | '/api/public/hooks/billing-cycle'
     | '/api/public/hooks/billing-reconcile'
     | '/api/public/hooks/cashback-catchup'
     | '/api/public/hooks/dispatch'
@@ -940,6 +953,7 @@ export interface RootRouteChildren {
   ApiPublicClickTokenRoute: typeof ApiPublicClickTokenRoute
   ApiPublicEmailCampaignsTickRoute: typeof ApiPublicEmailCampaignsTickRoute
   ApiPublicEmailFlowsTickRoute: typeof ApiPublicEmailFlowsTickRoute
+  ApiPublicHooksBillingCycleRoute: typeof ApiPublicHooksBillingCycleRoute
   ApiPublicHooksBillingReconcileRoute: typeof ApiPublicHooksBillingReconcileRoute
   ApiPublicHooksCashbackCatchupRoute: typeof ApiPublicHooksCashbackCatchupRoute
   ApiPublicHooksDispatchRoute: typeof ApiPublicHooksDispatchRoute
@@ -1309,6 +1323,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicEmailFlowsTickRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/hooks/billing-cycle': {
+      id: '/api/public/hooks/billing-cycle'
+      path: '/api/public/hooks/billing-cycle'
+      fullPath: '/api/public/hooks/billing-cycle'
+      preLoaderRoute: typeof ApiPublicHooksBillingCycleRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/hooks/billing-reconcile': {
       id: '/api/public/hooks/billing-reconcile'
       path: '/api/public/hooks/billing-reconcile'
@@ -1582,6 +1603,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicClickTokenRoute: ApiPublicClickTokenRoute,
   ApiPublicEmailCampaignsTickRoute: ApiPublicEmailCampaignsTickRoute,
   ApiPublicEmailFlowsTickRoute: ApiPublicEmailFlowsTickRoute,
+  ApiPublicHooksBillingCycleRoute: ApiPublicHooksBillingCycleRoute,
   ApiPublicHooksBillingReconcileRoute: ApiPublicHooksBillingReconcileRoute,
   ApiPublicHooksCashbackCatchupRoute: ApiPublicHooksCashbackCatchupRoute,
   ApiPublicHooksDispatchRoute: ApiPublicHooksDispatchRoute,

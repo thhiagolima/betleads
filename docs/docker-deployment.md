@@ -43,6 +43,7 @@ UPPER_API_BASE=https://api.uppersc.com.br
 UPPER_API_KEY=<upper-pix_in-only-api-key>
 UPPER_WEBHOOK_SECRET=<strong-random-webhook-secret>
 BETTERSTACK_HEARTBEAT_BILLING_RECONCILE=<better-stack-heartbeat-url>
+BILLING_INVOICES_ENABLED=false
 ```
 
 Nunca crie variavel `VITE_` para `SUPABASE_SECRET_KEY`.
@@ -67,6 +68,14 @@ Compra de créditos por Pix (PG2) via a Upper:
 
 Nenhuma dessas variaveis deve ser logada; a chave e o segredo ficam apenas no
 servidor.
+
+## Mensalidade do plano (fatura mensal + ciclo da hora)
+
+- `BILLING_INVOICES_ENABLED`: kill switch. Desligado (padrao `false`), o job
+  `POST /api/public/hooks/billing-cycle` (job `billing-cycle`, cron `7 * * *
+  *`) so recalcula o `access_state` de cada casa paga, sem emitir fatura nem
+  disparar e-mail; o Pix de uma fatura responde "Pagamento por Pix
+  indisponivel no momento." ao criar uma cobranca.
 
 ## Ativacao do dispatcher de jornadas
 
