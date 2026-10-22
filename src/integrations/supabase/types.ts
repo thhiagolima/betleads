@@ -1693,6 +1693,57 @@ export type Database = {
           },
         ]
       }
+      credit_topup_orders: {
+        Row: {
+          amount_cents: number
+          charge_id: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          package_code: string | null
+          paid_at: string | null
+          status: string
+          tenant_id: string
+        }
+        Insert: {
+          amount_cents: number
+          charge_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          package_code?: string | null
+          paid_at?: string | null
+          status?: string
+          tenant_id: string
+        }
+        Update: {
+          amount_cents?: number
+          charge_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          package_code?: string | null
+          paid_at?: string | null
+          status?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "credit_topup_orders_charge_id_fkey"
+            columns: ["charge_id"]
+            isOneToOne: false
+            referencedRelation: "payment_charges"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "credit_topup_orders_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       dashboard_settings: {
         Row: {
           id: string
@@ -4565,6 +4616,161 @@ export type Database = {
           },
         ]
       }
+      payment_charges: {
+        Row: {
+          amount_cents: number
+          created_at: string
+          created_by: string | null
+          credited_at: string | null
+          emv: string | null
+          expires_at: string | null
+          external_id: string
+          fee_cents: number | null
+          id: string
+          kind: string
+          last_error: string | null
+          last_provider_payload: Json | null
+          needs_review: boolean
+          paid_amount_cents: number | null
+          paid_at: string | null
+          payer_document_masked: string | null
+          payer_name: string | null
+          payment_url: string | null
+          provider: string
+          provider_charge_id: string | null
+          qr_code_image: string | null
+          ref_id: string
+          status: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          amount_cents: number
+          created_at?: string
+          created_by?: string | null
+          credited_at?: string | null
+          emv?: string | null
+          expires_at?: string | null
+          external_id: string
+          fee_cents?: number | null
+          id?: string
+          kind: string
+          last_error?: string | null
+          last_provider_payload?: Json | null
+          needs_review?: boolean
+          paid_amount_cents?: number | null
+          paid_at?: string | null
+          payer_document_masked?: string | null
+          payer_name?: string | null
+          payment_url?: string | null
+          provider?: string
+          provider_charge_id?: string | null
+          qr_code_image?: string | null
+          ref_id: string
+          status: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          amount_cents?: number
+          created_at?: string
+          created_by?: string | null
+          credited_at?: string | null
+          emv?: string | null
+          expires_at?: string | null
+          external_id?: string
+          fee_cents?: number | null
+          id?: string
+          kind?: string
+          last_error?: string | null
+          last_provider_payload?: Json | null
+          needs_review?: boolean
+          paid_amount_cents?: number | null
+          paid_at?: string | null
+          payer_document_masked?: string | null
+          payer_name?: string | null
+          payment_url?: string | null
+          provider?: string
+          provider_charge_id?: string | null
+          qr_code_image?: string | null
+          ref_id?: string
+          status?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payment_charges_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payment_fee_settings: {
+        Row: {
+          fee_fixed_cents: number
+          fee_percent: number
+          id: string
+          provider: string
+          updated_by: string | null
+          valid_from: string
+        }
+        Insert: {
+          fee_fixed_cents?: number
+          fee_percent?: number
+          id?: string
+          provider?: string
+          updated_by?: string | null
+          valid_from?: string
+        }
+        Update: {
+          fee_fixed_cents?: number
+          fee_percent?: number
+          id?: string
+          provider?: string
+          updated_by?: string | null
+          valid_from?: string
+        }
+        Relationships: []
+      }
+      payment_webhook_events: {
+        Row: {
+          delivery_id: string | null
+          error: string | null
+          event: string | null
+          event_id: string
+          headers: Json | null
+          processed_at: string | null
+          raw_body: string | null
+          received_at: string
+          signature_valid: boolean | null
+        }
+        Insert: {
+          delivery_id?: string | null
+          error?: string | null
+          event?: string | null
+          event_id: string
+          headers?: Json | null
+          processed_at?: string | null
+          raw_body?: string | null
+          received_at?: string
+          signature_valid?: boolean | null
+        }
+        Update: {
+          delivery_id?: string | null
+          error?: string | null
+          event?: string | null
+          event_id?: string
+          headers?: Json | null
+          processed_at?: string | null
+          raw_body?: string | null
+          received_at?: string
+          signature_valid?: boolean | null
+        }
+        Relationships: []
+      }
       platform_pricing: {
         Row: {
           channel: string
@@ -7421,6 +7627,10 @@ export type Database = {
           tenant_id: string
           unit_price: number
         }[]
+      }
+      billing_credit_paid_charge: {
+        Args: { _charge_id: string }
+        Returns: Json
       }
       billing_effective_price: {
         Args: { _at?: string; _item: string; _tenant: string }
