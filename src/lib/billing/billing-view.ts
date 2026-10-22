@@ -96,13 +96,28 @@ function formatDDMM(s: string): string {
   return `${String(d).padStart(2, "0")}/${String(m).padStart(2, "0")}`;
 }
 
-/** "R$ 4.000,00" — `brl()` with the NBSP it inserts normalized to a space. */
+// `brl()` inserts a U+00A0 (NBSP) between "R$" and the number (Intl's
+// pt-BR currency format). Built via `String.fromCharCode` -- never as a
+// literal NBSP character in source -- so this file has no irregular
+// whitespace for eslint(no-irregular-whitespace) to flag.
+const NBSP_PATTERN = new RegExp(String.fromCharCode(160), "g");
+
+/** "R$ 4.000,00" formatting, with the NBSP normalized to a regular space. */
 function money(amountCents: number): string {
-  return brl(amountCents / 100).replace(/ /g, " ");
+  return brl(amountCents / 100).replace(NBSP_PATTERN, " ");
 }
 
 function daysLabel(n: number): string {
   return n === 1 ? "1 dia" : `${n} dias`;
+}
+
+/**
+ * Concatenates a lock's `title` and `text` into one sentence — used to give
+ * the superadmin bypass banner the exact same house copy as the lock card,
+ * instead of inventing separate banner wording.
+ */
+function lockCopyText(title: string, text: string): string {
+  return `${title}. ${text}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -128,10 +143,10 @@ export function billingView(input: BillingViewInput): BillingView {
   const { state, role, enforcement, invoice, today } = input;
 
   const isMember = role === "member";
+  // The superadmin is never blocked (global constraint): every case below
+  // that would otherwise lock checks `isSuperAdmin` and returns a banner
+  // instead of a `lock`.
   const isSuperAdmin = role === "super_admin";
-  // The superadmin is never blocked (global constraint), so the lock only
-  // ever applies to payer/member.
-  const locked = isEffectiveLock(state, enforcement) && !isSuperAdmin;
 
   const payShownTo = (showForPayerAndSuperAdmin: boolean) =>
     isMember ? false : showForPayerAndSuperAdmin;
@@ -144,7 +159,10 @@ export function billingView(input: BillingViewInput): BillingView {
 
     case "due_soon": {
       if (!invoice) return { banner: null, lock: null, canBuyCredits: true };
-      const n = daysBetween(today, invoice.dueDate);
+      // The state computation owns the due_soon window invariant (today is
+      // strictly before dueDate there), but this module never trusts that
+      // and never prints "daqui a 0 dias" / a negative count — clamp to 1.
+      const n = Math.max(1, daysBetween(today, invoice.dueDate));
       const text =
         `Sua mensalidade de ${money(invoice.amountCents)} vence em ${formatDDMM(invoice.dueDate)} ` +
         `(daqui a ${daysLabel(n)}). Pague por Pix para manter tudo funcionando.`;
@@ -214,9 +232,11 @@ export function billingView(input: BillingViewInput): BillingView {
     }
 
     case "locked_manual": {
+      const title = "Acesso suspenso";
+      const text = "Fale com o suporte.";
       if (isSuperAdmin) {
         return {
-          banner: { tone: "red", text: "Plano com bloqueio manual. Fale com o suporte.", showPay: true, memberHint: null },
+          banner: { tone: "red", text: lockCopyText(title, text), showPay: true, memberHint: null },
           lock: null,
           canBuyCredits: true,
         };
@@ -224,27 +244,24 @@ export function billingView(input: BillingViewInput): BillingView {
       const hasOverdueInvoice = invoice !== null && today >= invoice.dueDate;
       return {
         banner: null,
-        lock: {
-          title: "Acesso suspenso",
-          text: "Fale com o suporte.",
-          showPay: payShownTo(hasOverdueInvoice),
-          memberHint: hintFor(),
-        },
+        lock: { title, text, showPay: payShownTo(hasOverdueInvoice), memberHint: hintFor() },
         canBuyCredits: false,
       };
     }
 
     case "frozen": {
+      const title = "Plano pausado";
+      const text = "Fale com o suporte.";
       if (isSuperAdmin) {
         return {
-          banner: { tone: "red", text: "Plano pausado. Fale com o suporte.", showPay: true, memberHint: null },
+          banner: { tone: "red", text: lockCopyText(title, text), showPay: true, memberHint: null },
           lock: null,
           canBuyCredits: true,
         };
       }
       return {
         banner: null,
-        lock: { title: "Plano pausado", text: "Fale com o suporte.", showPay: false, memberHint: hintFor() },
+        lock: { title, text, showPay: false, memberHint: hintFor() },
         canBuyCredits: false,
       };
     }
@@ -252,14 +269,12 @@ export function billingView(input: BillingViewInput): BillingView {
     case "awaiting_first_payment": {
       if (!enforcement || !invoice) return { banner: null, lock: null, canBuyCredits: true };
 
+      const title = "Ative sua conta";
+      const text = `Pague a primeira mensalidade de ${money(invoice.amountCents)} por Pix para começar a usar o CRM.`;
+
       if (isSuperAdmin) {
         return {
-          banner: {
-            tone: "red",
-            text: `Pague a primeira mensalidade de ${money(invoice.amountCents)} por Pix para começar a usar o CRM.`,
-            showPay: true,
-            memberHint: null,
-          },
+          banner: { tone: "red", text: lockCopyText(title, text), showPay: true, memberHint: null },
           lock: null,
           canBuyCredits: true,
         };
@@ -267,12 +282,7 @@ export function billingView(input: BillingViewInput): BillingView {
 
       return {
         banner: null,
-        lock: {
-          title: "Ative sua conta",
-          text: `Pague a primeira mensalidade de ${money(invoice.amountCents)} por Pix para começar a usar o CRM.`,
-          showPay: payShownTo(true),
-          memberHint: hintFor(),
-        },
+        lock: { title, text, showPay: payShownTo(true), memberHint: hintFor() },
         canBuyCredits: false,
       };
     }

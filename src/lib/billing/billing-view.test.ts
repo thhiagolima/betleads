@@ -35,6 +35,21 @@ describe("billingView — due_soon", () => {
       "Sua mensalidade de R$ 4.000,00 vence em 05/11 (daqui a 1 dia). Pague por Pix para manter tudo funcionando.",
     );
   });
+
+  it("clamps N to 1 — never 0 or negative — when today has reached dueDate", () => {
+    const result = billingView({
+      state: "due_soon",
+      role: "payer",
+      enforcement: true,
+      invoice: invoice4000,
+      today: "2026-11-05", // today === dueDate; a correct state machine
+      // would not emit due_soon here, but this module must never print
+      // "daqui a 0 dias" even so — the invariant is owned elsewhere.
+    });
+    expect(result.banner?.text).toBe(
+      "Sua mensalidade de R$ 4.000,00 vence em 05/11 (daqui a 1 dia). Pague por Pix para manter tudo funcionando.",
+    );
+  });
 });
 
 describe("billingView — overdue", () => {
@@ -183,6 +198,24 @@ describe("billingView — locked_manual", () => {
       "Peça ao administrador da casa para pagar a mensalidade.",
     );
   });
+
+  it("never locks the superadmin, who sees the exact house copy in a red banner", () => {
+    const result = billingView({
+      state: "locked_manual",
+      role: "super_admin",
+      enforcement: true,
+      invoice: null,
+      today: "2026-11-02",
+    });
+    expect(result.lock).toBeNull();
+    expect(result.banner).toEqual({
+      tone: "red",
+      text: "Acesso suspenso. Fale com o suporte.",
+      showPay: true,
+      memberHint: null,
+    });
+    expect(result.canBuyCredits).toBe(true);
+  });
 });
 
 describe("billingView — frozen", () => {
@@ -202,6 +235,24 @@ describe("billingView — frozen", () => {
     });
     expect(result.banner).toBeNull();
     expect(result.canBuyCredits).toBe(false);
+  });
+
+  it("never locks the superadmin, who sees the exact house copy in a red banner", () => {
+    const result = billingView({
+      state: "frozen",
+      role: "super_admin",
+      enforcement: true,
+      invoice: null,
+      today: "2026-11-02",
+    });
+    expect(result.lock).toBeNull();
+    expect(result.banner).toEqual({
+      tone: "red",
+      text: "Plano pausado. Fale com o suporte.",
+      showPay: true,
+      memberHint: null,
+    });
+    expect(result.canBuyCredits).toBe(true);
   });
 });
 
@@ -232,6 +283,24 @@ describe("billingView — awaiting_first_payment", () => {
       today: "2026-11-02",
     });
     expect(result.lock).toBeNull();
+    expect(result.canBuyCredits).toBe(true);
+  });
+
+  it("never locks the superadmin, who sees the exact house copy (title + text) in a red banner", () => {
+    const result = billingView({
+      state: "awaiting_first_payment",
+      role: "super_admin",
+      enforcement: true,
+      invoice: invoice4000,
+      today: "2026-11-02",
+    });
+    expect(result.lock).toBeNull();
+    expect(result.banner).toEqual({
+      tone: "red",
+      text: "Ative sua conta. Pague a primeira mensalidade de R$ 4.000,00 por Pix para começar a usar o CRM.",
+      showPay: true,
+      memberHint: null,
+    });
     expect(result.canBuyCredits).toBe(true);
   });
 });
