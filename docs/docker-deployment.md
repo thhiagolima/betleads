@@ -44,6 +44,7 @@ UPPER_API_KEY=<upper-pix_in-only-api-key>
 UPPER_WEBHOOK_SECRET=<strong-random-webhook-secret>
 BETTERSTACK_HEARTBEAT_BILLING_RECONCILE=<better-stack-heartbeat-url>
 BILLING_INVOICES_ENABLED=false
+BILLING_ENFORCEMENT_ENABLED=false
 PLATFORM_EMAIL_FROM=no-reply@betleads.io
 ```
 
@@ -77,6 +78,13 @@ servidor.
   *`) so recalcula o `access_state` de cada casa paga, sem emitir fatura nem
   disparar e-mail; o Pix de uma fatura responde "Pagamento por Pix
   indisponivel no momento." ao criar uma cobranca.
+- `BILLING_ENFORCEMENT_ENABLED`: liga o bloqueio de acesso por falta de
+  pagamento (`locked_unpaid`/`awaiting_first_payment`); `frozen` e
+  `locked_manual` bloqueiam sempre, com a flag ligada ou nao. O superadmin
+  nunca e bloqueado. Desligado (padrao `false`), a casa so ve a faixa
+  vermelha ("Sua mensalidade venceu..."), sem cartao de bloqueio nem o
+  e-mail "locked" (que exige esta flag mesmo num reenvio forcado pelo
+  superadmin).
 - `PLATFORM_EMAIL_FROM`: remetente dos quatro e-mails de cobranca (fatura
   emitida, vence hoje, acesso suspenso, pagamento confirmado), nome fixo
   "BetLeads". Padrao `no-reply@betleads.io`. Esse envio nunca passa pela

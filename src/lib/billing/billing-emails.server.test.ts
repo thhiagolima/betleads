@@ -143,6 +143,67 @@ describe("sendBillingEmail", () => {
     expect(sentTo).not.toContain("member@casa.com");
   });
 
+  it("uses a per-recipient idempotencyKey (billing:<id>:<kind>:<n>)", async () => {
+    seedTenant();
+    seedInvoice();
+    fake.admin.rows("user_roles").push(
+      { user_id: ADMIN_USER, tenant_id: TENANT, role: "admin" },
+      { user_id: OWNER_USER, tenant_id: TENANT, role: "owner" },
+    );
+    getUserByIdMock().mockImplementation((id: string) => ({
+      data: { user: { email: EMAIL_BY_USER[id] ?? null } },
+      error: null,
+    }));
+
+    await sendBillingEmail("invoice-1", "issued", { now: INSIDE_WINDOW });
+
+    const keys = callInfobipEmail.mock.calls.map((c) => c[0].idempotencyKey).sort();
+    expect(keys).toEqual(["billing:invoice-1:issued:0", "billing:invoice-1:issued:1"]);
+  });
+
+  it("a force resend's row survives the rollback of a concurrent unforced call whose send failed", async () => {
+    seedTenant();
+    seedInvoice();
+    fake.admin.rows("user_roles").push({ user_id: ADMIN_USER, tenant_id: TENANT, role: "admin" });
+    getUserByIdMock().mockImplementation(() => ({
+      data: { user: { email: "admin@casa.com" } },
+      error: null,
+    }));
+
+    const forceSentAt = new Date(INSIDE_WINDOW.getTime() + 1000).toISOString();
+    let firstCall = true;
+    callInfobipEmail.mockImplementation(async (input: { idempotencyKey?: string }) => {
+      if (firstCall) {
+        firstCall = false;
+        // Simulate a superadmin force-resend landing in between this call's
+        // log insert and its (about to fail) send: it overwrites the same
+        // (invoice_id, kind) row with a later sent_at and succeeds.
+        callInfobipEmail.mockImplementationOnce(async () => ({
+          ok: true,
+          status: 200,
+          body: {},
+          idempotencyKey: "force",
+        }));
+        await sendBillingEmail("invoice-1", "issued", {
+          force: true,
+          now: new Date(forceSentAt),
+        });
+        return { ok: false, status: 500, body: {}, idempotencyKey: input.idempotencyKey ?? "k" };
+      }
+      return { ok: true, status: 200, body: {}, idempotencyKey: input.idempotencyKey ?? "k" };
+    });
+
+    const result = await sendBillingEmail("invoice-1", "issued", { now: INSIDE_WINDOW });
+
+    // This call's own send failed...
+    expect(result.sent).toBe(false);
+    // ...but the concurrent force-resend's row (a different sent_at) must
+    // survive this call's rollback, which is scoped to its OWN sent_at.
+    const rows = fake.admin.rows("billing_email_log");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ invoice_id: "invoice-1", kind: "issued", sent_at: forceSentAt });
+  });
+
   it("does nothing at 21:00 Brasília (outside the window), without force", async () => {
     seedTenant();
     seedInvoice();

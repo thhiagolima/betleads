@@ -14,6 +14,9 @@ vi.mock("./upper-pix.server", async (importOriginal) => {
   return { ...actual, getUpperCharge };
 });
 
+const { sendBillingEmail } = vi.hoisted(() => ({ sendBillingEmail: vi.fn() }));
+vi.mock("./billing-emails.server", () => ({ sendBillingEmail }));
+
 import { createFakeDb } from "@/lib/sms-bulk.test-support";
 import {
   confirmChargeFromUpper,
@@ -112,6 +115,8 @@ function racePaidBeforeUpdate(chargeId: string, whenStatus: string) {
 beforeEach(() => {
   fake.admin.reset();
   getUpperCharge.mockReset();
+  sendBillingEmail.mockReset();
+  sendBillingEmail.mockResolvedValue({ sent: true, recipients: 1 });
 });
 
 afterEach(() => {
@@ -419,6 +424,27 @@ describe("confirmChargeFromUpper", () => {
     it("a credited invoice drops the house from the cache: it unlocks at once", async () => {
       await primeLockedCacheThenSettle("invoice");
       await expect(assertTenantNotDemoForSend(TENANT)).resolves.toBeUndefined();
+    });
+
+    it("never waits for the 'paid' e-mail: confirmChargeFromUpper resolves even while it is still pending", async () => {
+      // A sendBillingEmail that never resolves: if confirmChargeFromUpper
+      // awaited it, this test would time out instead of resolving below.
+      sendBillingEmail.mockReturnValue(
+        new Promise(() => {
+          /* intentionally never settles */
+        }),
+      );
+      fake.admin.rows("payment_charges").push(
+        chargeRow({ kind: "invoice", ref_id: "inv-1", external_id: "bl-inv-inv-1-1" }),
+      );
+      getUpperCharge.mockResolvedValue(
+        upperCharge({ status: "PAID", paidAmountCents: 50000, paidAt: new Date().toISOString() }),
+      );
+
+      const result = await confirmChargeFromUpper("bl-inv-inv-1-1");
+
+      expect(result).toEqual({ outcome: "credited" });
+      expect(sendBillingEmail).toHaveBeenCalledWith("inv-1", "paid");
     });
 
     it("a credit top-up leaves the cache alone (still the cached state)", async () => {

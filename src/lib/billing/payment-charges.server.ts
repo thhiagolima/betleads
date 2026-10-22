@@ -145,13 +145,16 @@ type BillingCreditPaidChargeResult = {
 /**
  * A settled invoice changes the house's billing state (the SQL settle
  * recomputes `access_state`): drop the house from the 5 s guard cache so it
- * unlocks at once in this process instead of up to 5 s later. Also fires the
- * 'paid' billing e-mail (Task 5), best-effort — a failure here (provider
- * down, outside the send window, whatever) is only logged, never thrown into
- * the payment path; the hourly sweep (`sendPendingBillingEmails`) still
- * picks up any invoice paid in the last 48h without a 'paid' log.
+ * unlocks at once in this process instead of up to 5 s later — awaited
+ * (cheap, in-memory). Also fires the 'paid' billing e-mail (Task 5),
+ * fire-and-forget: a per-recipient send loop over the platform e-mail
+ * provider must never add its latency to the Upper webhook/reconcile
+ * response. Failure (provider down, outside the send window, whatever) is
+ * only logged, never thrown into the payment path; the hourly sweep
+ * (`sendPendingBillingEmails`) still picks up any invoice paid in the last
+ * 48h without a 'paid' log, so a lost/slow send here is not the only chance.
  */
-async function refreshTenantAfterInvoiceSettle(charge: {
+function refreshTenantAfterInvoiceSettle(charge: {
   kind?: string | null;
   tenant_id?: string | null;
   ref_id?: string | null;
@@ -159,14 +162,12 @@ async function refreshTenantAfterInvoiceSettle(charge: {
   if (charge.kind !== "invoice" || !charge.tenant_id) return;
   invalidateTenantStatusCache(charge.tenant_id);
   if (!charge.ref_id) return;
-  try {
-    await sendBillingEmail(charge.ref_id, "paid");
-  } catch (err) {
+  void sendBillingEmail(charge.ref_id, "paid").catch((err) => {
     console.error("[billing/payment-charges] 'paid' e-mail failed", {
       invoiceId: charge.ref_id,
       error: err instanceof Error ? err.message : String(err),
     });
-  }
+  });
 }
 
 export async function confirmChargeFromUpper(
@@ -203,7 +204,7 @@ export async function confirmChargeFromUpper(
 
   const result = data as BillingCreditPaidChargeResult | null;
   if (result?.ok) {
-    await refreshTenantAfterInvoiceSettle(chargeRow);
+    refreshTenantAfterInvoiceSettle(chargeRow);
     return { outcome: result.idempotent ? "already_credited" : "credited" };
   }
   if (
@@ -289,7 +290,7 @@ async function creditLocallyPaidCharges(result: ReconcileResult): Promise<void> 
       const rpcResult = data as BillingCreditPaidChargeResult | null;
       if (rpcResult?.ok) {
         result.credited += 1;
-        await refreshTenantAfterInvoiceSettle(row);
+        refreshTenantAfterInvoiceSettle(row);
       }
     } catch (err) {
       result.errors += 1;

@@ -253,12 +253,17 @@ export async function sendBillingEmail(
   const tenant = await getTenantForEmail(invoice.tenant_id);
   const recipients = tenant?.is_demo ? [] : await getPayerEmails(invoice.tenant_id);
 
+  // The exact `sent_at` this call writes — used below to scope the rollback
+  // delete to the row THIS call inserted (never a concurrent force-resend's
+  // row, which would carry a different `sent_at`).
+  const mySentAt = now.toISOString();
+
   let shouldSend: boolean;
   if (force) {
     const { error } = await supabaseAdmin
       .from("billing_email_log")
       .upsert(
-        { invoice_id: invoiceId, kind, sent_at: now.toISOString(), recipients: recipients.length },
+        { invoice_id: invoiceId, kind, sent_at: mySentAt, recipients: recipients.length },
         { onConflict: "invoice_id,kind" },
       );
     if (error) throw new Error(error.message);
@@ -267,7 +272,7 @@ export async function sendBillingEmail(
     const { data, error } = await supabaseAdmin
       .from("billing_email_log")
       .upsert(
-        { invoice_id: invoiceId, kind, sent_at: now.toISOString(), recipients: recipients.length },
+        { invoice_id: invoiceId, kind, sent_at: mySentAt, recipients: recipients.length },
         { onConflict: "invoice_id,kind", ignoreDuplicates: true },
       )
       .select("invoice_id");
@@ -280,10 +285,12 @@ export async function sendBillingEmail(
 
   const subject = emailSubject(kind, formatDDMM(invoice.due_date));
   const html = emailHtml(kind, invoice);
-  const idempotencyKey = `billing:${invoiceId}:${kind}`;
 
   let sentCount = 0;
-  for (const to of recipients) {
+  for (const [index, to] of recipients.entries()) {
+    // Per-recipient idempotency key so an Infobip delivery callback can be
+    // attributed to exactly one recipient of this invoice/kind.
+    const idempotencyKey = `billing:${invoiceId}:${kind}:${index}`;
     try {
       const result = await sendPlatformEmail({ to, subject, html, idempotencyKey });
       if (result.ok) sentCount += 1;
@@ -307,12 +314,15 @@ export async function sendBillingEmail(
 
   if (sentCount === 0) {
     // Every recipient failed: undo the log so the next hourly sweep retries
-    // instead of silently giving up forever.
+    // instead of silently giving up forever. Scoped to THIS call's exact
+    // `sent_at`: a concurrent force-resend that won in between (and wrote
+    // its own, later `sent_at`) must never be deleted by this rollback.
     const { error: deleteError } = await supabaseAdmin
       .from("billing_email_log")
       .delete()
       .eq("invoice_id", invoiceId)
-      .eq("kind", kind);
+      .eq("kind", kind)
+      .eq("sent_at", mySentAt);
     if (deleteError) {
       console.error("[billing-emails] could not roll back the log row", {
         invoiceId,
