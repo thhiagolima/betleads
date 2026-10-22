@@ -322,6 +322,29 @@ describe("billingView — locked_manual", () => {
     );
   });
 
+  it("gives a member no pay hint when there is nothing to pay (manual lock, no open invoice)", () => {
+    const result = billingView({
+      state: "locked_manual",
+      role: "member",
+      enforcement: true,
+      invoice: null,
+      today: "2026-11-02",
+    });
+    expect(result.lock?.showPay).toBe(false);
+    expect(result.lock?.memberHint).toBeNull();
+  });
+
+  it("gives a member no pay hint while the open invoice is not yet due (no pay button either)", () => {
+    const result = billingView({
+      state: "locked_manual",
+      role: "member",
+      enforcement: true,
+      invoice: invoice4000,
+      today: "2026-11-02",
+    });
+    expect(result.lock?.memberHint).toBeNull();
+  });
+
   it("never locks the superadmin, who sees the exact house copy in a red banner", () => {
     const result = billingView({
       state: "locked_manual",
@@ -358,6 +381,22 @@ describe("billingView — frozen", () => {
     });
     expect(result.banner).toBeNull();
     expect(result.canBuyCredits).toBe(false);
+  });
+
+  it("gives a member no pay hint: a paused plan has nothing to pay", () => {
+    const result = billingView({
+      state: "frozen",
+      role: "member",
+      enforcement: true,
+      invoice: invoice4000,
+      today: "2026-11-10",
+    });
+    expect(result.lock).toEqual({
+      title: "Plano pausado",
+      text: "Fale com o suporte.",
+      showPay: false,
+      memberHint: null,
+    });
   });
 
   it("never locks the superadmin, who sees the exact house copy in a red banner", () => {

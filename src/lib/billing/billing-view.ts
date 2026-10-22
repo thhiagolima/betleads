@@ -220,7 +220,9 @@ export function billingView(input: BillingViewInput): BillingView {
 
   const payShownTo = (showForPayerAndSuperAdmin: boolean) =>
     isMember ? false : showForPayerAndSuperAdmin;
-  const hintFor = () => (isMember ? MEMBER_HINT : null);
+  // The member hint asks the admin to pay, so it only makes sense when there
+  // is something to pay: it follows the payer's "Pagar" button (`payable`).
+  const hintFor = (payable = true) => (isMember && payable ? MEMBER_HINT : null);
 
   switch (state) {
     case "exempt":
@@ -314,7 +316,12 @@ export function billingView(input: BillingViewInput): BillingView {
       const hasOverdueInvoice = invoice !== null && today >= invoice.dueDate;
       return {
         banner: null,
-        lock: { title, text, showPay: payShownTo(hasOverdueInvoice), memberHint: hintFor() },
+        lock: {
+          title,
+          text,
+          showPay: payShownTo(hasOverdueInvoice),
+          memberHint: hintFor(hasOverdueInvoice),
+        },
         canBuyCredits: false,
       };
     }
@@ -331,7 +338,7 @@ export function billingView(input: BillingViewInput): BillingView {
       }
       return {
         banner: null,
-        lock: { title, text, showPay: false, memberHint: hintFor() },
+        lock: { title, text, showPay: false, memberHint: hintFor(false) },
         canBuyCredits: false,
       };
     }
