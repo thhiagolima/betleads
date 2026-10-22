@@ -43,7 +43,7 @@ export const resolveSmsCampaignAudience = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<ResolvedSmsAudience> => {
     const supabase = context.supabase;
     const tenantId = await resolveCurrentTenantId(supabase);
-    await assertTenantCanOperate(tenantId);
+    await assertTenantCanOperate(tenantId, context.supabase);
     const criteria = normalizeSmsAudienceCriteria(data.criteria);
     const criteriaKey = JSON.stringify(criteria);
 
@@ -78,7 +78,7 @@ export const resolveCampaignAudience = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => channelAudienceInput.parse(input))
   .handler(async ({ data, context }): Promise<ResolvedCampaignAudience> => {
     const tenantId = await resolveCurrentTenantId(context.supabase);
-    await assertTenantCanOperate(tenantId);
+    await assertTenantCanOperate(tenantId, context.supabase);
     const criteria = normalizeSmsAudienceCriteria(data.criteria);
     const { data: raw, error } = await context.supabase.rpc("resolve_sms_audience_v2", {
       _tenant: tenantId,

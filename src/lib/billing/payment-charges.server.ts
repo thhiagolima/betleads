@@ -8,6 +8,9 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import type { Database, Json } from "@/integrations/supabase/types";
 
+import { invalidateTenantStatusCache } from "@/lib/tenant-access.server";
+
+import { sendBillingEmail } from "./billing-emails.server";
 import { maskDocumentsDeep, maskPayerDocument } from "./payer";
 import { getUpperCharge, UpperError, type UpperCharge } from "./upper-pix.server";
 
@@ -121,7 +124,16 @@ export async function recordChargeSnapshot(chargeId: string, upper: UpperCharge)
 type BillingCreditPaidChargeResult = {
   ok: boolean;
   idempotent?: boolean;
-  reason?: "not_paid" | "needs_review" | "amount_mismatch";
+  // invoice_not_open / invoice_not_found: invoice branch (mensalidade
+  // Task 2) — a Pix paid against an invoice that was already paid/canceled
+  // or does not exist. The RPC flags the charge needs_review in those cases
+  // (and on an invoice amount_mismatch), so it is never retried forever.
+  reason?:
+    | "not_paid"
+    | "needs_review"
+    | "amount_mismatch"
+    | "invoice_not_open"
+    | "invoice_not_found";
 };
 
 /**
@@ -130,12 +142,40 @@ type BillingCreditPaidChargeResult = {
  * webhook payload's own numbers) and only calls the crediting RPC when that
  * fresh read says PAID with a matching paid amount.
  */
+/**
+ * A settled invoice changes the house's billing state (the SQL settle
+ * recomputes `access_state`): drop the house from the 5 s guard cache so it
+ * unlocks at once in this process instead of up to 5 s later — awaited
+ * (cheap, in-memory). Also fires the 'paid' billing e-mail (Task 5),
+ * fire-and-forget: a per-recipient send loop over the platform e-mail
+ * provider must never add its latency to the Upper webhook/reconcile
+ * response. Failure (provider down, outside the send window, whatever) is
+ * only logged, never thrown into the payment path; the hourly sweep
+ * (`sendPendingBillingEmails`) still picks up any invoice paid in the last
+ * 48h without a 'paid' log, so a lost/slow send here is not the only chance.
+ */
+function refreshTenantAfterInvoiceSettle(charge: {
+  kind?: string | null;
+  tenant_id?: string | null;
+  ref_id?: string | null;
+}) {
+  if (charge.kind !== "invoice" || !charge.tenant_id) return;
+  invalidateTenantStatusCache(charge.tenant_id);
+  if (!charge.ref_id) return;
+  void sendBillingEmail(charge.ref_id, "paid").catch((err) => {
+    console.error("[billing/payment-charges] 'paid' e-mail failed", {
+      invoiceId: charge.ref_id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
+}
+
 export async function confirmChargeFromUpper(
   externalId: string,
 ): Promise<{ outcome: ConfirmChargeOutcome }> {
   const { data: chargeRow, error: findError } = await supabaseAdmin
     .from("payment_charges")
-    .select("id, amount_cents, needs_review")
+    .select("id, amount_cents, needs_review, kind, tenant_id, ref_id")
     .eq("external_id", externalId)
     .maybeSingle();
   if (findError) throw new Error(findError.message);
@@ -164,9 +204,15 @@ export async function confirmChargeFromUpper(
 
   const result = data as BillingCreditPaidChargeResult | null;
   if (result?.ok) {
+    refreshTenantAfterInvoiceSettle(chargeRow);
     return { outcome: result.idempotent ? "already_credited" : "credited" };
   }
-  if (result?.reason === "needs_review" || result?.reason === "amount_mismatch") {
+  if (
+    result?.reason === "needs_review" ||
+    result?.reason === "amount_mismatch" ||
+    result?.reason === "invoice_not_open" ||
+    result?.reason === "invoice_not_found"
+  ) {
     return { outcome: "needs_review" };
   }
   return { outcome: "not_paid" };
@@ -227,7 +273,7 @@ function logReconcileError(context: string, err: unknown, externalId: string): v
 async function creditLocallyPaidCharges(result: ReconcileResult): Promise<void> {
   const { data: rows, error } = await supabaseAdmin
     .from("payment_charges")
-    .select("id, external_id")
+    .select("id, external_id, kind, tenant_id, ref_id")
     .eq("status", "PAID")
     .is("credited_at", null)
     .eq("needs_review", false)
@@ -242,7 +288,10 @@ async function creditLocallyPaidCharges(result: ReconcileResult): Promise<void> 
       });
       if (rpcError) throw new Error(rpcError.message);
       const rpcResult = data as BillingCreditPaidChargeResult | null;
-      if (rpcResult?.ok) result.credited += 1;
+      if (rpcResult?.ok) {
+        result.credited += 1;
+        refreshTenantAfterInvoiceSettle(row);
+      }
     } catch (err) {
       result.errors += 1;
       logReconcileError("error crediting locally-paid charge", err, row.external_id);

@@ -39,14 +39,14 @@ export function WalletBalanceNotice({
   );
 }
 
-/** Renders `text` with its "Saldo e consumo" mention as a link to /creditos-sms. */
+/** Renders `text` with its "Saldo e consumo" mention as a link to /plano-e-creditos. */
 function TextWithWalletLink({ text }: { text: string }) {
   const index = text.lastIndexOf(WALLET_PAGE_LINK_LABEL);
   if (index < 0) return <>{text}</>;
   return (
     <>
       {text.slice(0, index)}
-      <Link to="/creditos-sms" className="font-medium underline underline-offset-2">
+      <Link to="/plano-e-creditos" className="font-medium underline underline-offset-2">
         {WALLET_PAGE_LINK_LABEL}
       </Link>
       {text.slice(index + WALLET_PAGE_LINK_LABEL.length)}

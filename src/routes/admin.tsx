@@ -67,6 +67,13 @@ import {
   getTenantEffectivePrice,
 } from "@/lib/billing/billing.functions";
 import { adminAdjustSmsCredits, adminSmsCreditConsole } from "@/lib/sms-credits.functions";
+import { BillingDashboardPanel } from "@/components/billing/admin/billing-dashboard-panel";
+import {
+  BILLING_DASHBOARD_QUERY_KEY,
+  BillingTenantListCard,
+} from "@/components/billing/admin/billing-tenant-list";
+import { BillingCsvDownloadCard } from "@/components/billing/admin/billing-csv-download";
+import { PixFeeFormCard } from "@/components/billing/admin/pix-fee-form";
 import {
   Activity,
   Ban,
@@ -74,6 +81,7 @@ import {
   Copy,
   CreditCard,
   DollarSign,
+  Landmark,
   LogIn,
   Plus,
   Receipt,
@@ -171,6 +179,9 @@ function AdminPage() {
           <TabsTrigger value="sms-credits" className="gap-2">
             <CreditCard className="h-4 w-4" /> Saldo
           </TabsTrigger>
+          <TabsTrigger value="billing" className="gap-2">
+            <Landmark className="h-4 w-4" /> Faturamento
+          </TabsTrigger>
           <TabsTrigger value="integrations" className="gap-2">
             <RadioTower className="h-4 w-4" /> Integrações
           </TabsTrigger>
@@ -188,10 +199,27 @@ function AdminPage() {
         <TabsContent value="sms-credits">
           <BalanceAdminTab />
         </TabsContent>
+        <TabsContent value="billing">
+          <BillingTab />
+        </TabsContent>
         <TabsContent value="integrations">
           <AdminIntegrationsTab />
         </TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+// ─── Aba Faturamento (Task 9) ───────────────────────────────────────────────
+function BillingTab() {
+  return (
+    <div className="space-y-4">
+      <BillingDashboardPanel queryKey={BILLING_DASHBOARD_QUERY_KEY} />
+      <BillingTenantListCard />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <BillingCsvDownloadCard />
+        <PixFeeFormCard />
+      </div>
     </div>
   );
 }

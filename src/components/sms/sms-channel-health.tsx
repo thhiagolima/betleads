@@ -48,7 +48,7 @@ export function SmsChannelHealth({
             Atualizar
           </Button>
           <Button size="sm" variant="outline" asChild>
-            <Link to="/creditos-sms">
+            <Link to="/plano-e-creditos">
               <CreditCard className="mr-2 h-3.5 w-3.5" />
               {balance}
             </Link>

@@ -13,7 +13,11 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import type { Json } from "@/integrations/supabase/types";
 import { dbUuid } from "@/lib/zod-helpers";
 import { getEffectivePrices } from "./pricing.server";
-import { resolveOperationalTenantId } from "../tenant-access.server";
+import { resolveOperationalTenantId, resolveTenantForBilling } from "../tenant-access.server";
+import { isBillingEnforcementEnabled, isTenantPayer, requireTenantPayer } from "./billing-state.server";
+import { billingView, type BillingRole } from "./billing-view";
+import { createInvoicePayment } from "./invoices.server";
+import { brtDayKey } from "../tz";
 
 type ServerContext = {
   userId: string;
@@ -29,9 +33,17 @@ type ServerContext = {
 
 type DbError = { message: string };
 type DbResult<T = unknown> = { data: T | null; error: DbError | null };
+type LooseQuery<T = unknown> = PromiseLike<DbResult<T>> & {
+  select: (columns?: string) => LooseQuery<T>;
+  eq: (column: string, value: unknown) => LooseQuery<T>;
+  order: (column: string, options?: { ascending?: boolean }) => LooseQuery<T>;
+  limit: (count: number) => LooseQuery<T>;
+  insert: (values: unknown) => Promise<DbResult>;
+  maybeSingle: () => Promise<DbResult<T>>;
+};
 type LooseSupabase = {
   rpc: <T = unknown>(fn: string, args?: Record<string, unknown>) => Promise<DbResult<T>>;
-  from: (table: string) => { insert: (values: unknown) => Promise<DbResult> };
+  from: <T = unknown>(table: string) => LooseQuery<T>;
 };
 
 function looseDb(client: unknown) {
@@ -201,3 +213,342 @@ export const adminClearTenantPrice = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => clearTenantPriceInput.parse(data))
   .handler(async ({ data, context }) => adminClearTenantPriceFor(context as ServerContext, data));
+
+// ---------------------------------------------------------------------------
+// Task 7 — "Plano e créditos" page: getPlanOverview, payInvoice,
+// getInvoiceReceipt. All three resolve the house through
+// `resolveTenantForBilling` (works even for a locked house) and read with
+// `supabaseAdmin`, scoped to that resolved tenantId — never `manual_note`,
+// `manual_receipt` or `manual_block_reason` reach the client.
+// ---------------------------------------------------------------------------
+
+const NOT_PAYER_MESSAGE = "Peça ao administrador da casa para pagar a mensalidade.";
+const INVOICE_NOT_FOUND_MESSAGE = "Fatura não encontrada.";
+const INVOICE_NOT_PAID_MESSAGE = "Esta fatura ainda não foi paga.";
+
+async function isSuperAdminLoose(userId: string): Promise<boolean> {
+  const { data, error } = await supabaseAdmin.rpc("is_super_admin", { _user_id: userId });
+  if (error) throw new Error(error.message);
+  return data === true;
+}
+
+type TenantBillingRow = {
+  tenant_id: string;
+  plan_code: string;
+  custom_price_cents: number | string | null;
+  discount_kind: "percent" | "fixed" | null;
+  discount_value: number | string | null;
+  discount_starts_on: string | null;
+  discount_ends_on: string | null;
+  next_due_date: string | null;
+  manual_block: boolean;
+  frozen: boolean;
+  access_state: string;
+};
+
+type BillingPlanRow = { code: string; name: string; price_cents: number | string; exempt_all: boolean };
+
+type InvoiceRow = {
+  id: string;
+  tenant_id: string;
+  period_start: string;
+  period_end: string;
+  cycle_due_date: string;
+  due_date: string;
+  amount_cents: number | string;
+  discount_cents: number | string;
+  one_off_discount_cents: number | string;
+  status: "open" | "paid" | "canceled";
+  paid_at: string | null;
+  paid_via: "pix" | "manual" | "full_discount" | null;
+  payment_charge_id: string | null;
+};
+
+type InvoiceDTO = {
+  id: string;
+  periodStart: string;
+  periodEnd: string;
+  dueDate: string;
+  amountCents: number;
+  discountCents: number;
+  status: "open" | "paid" | "canceled";
+  paidAt: string | null;
+  paidVia: "pix" | "manual" | "full_discount" | null;
+};
+
+function toInvoiceDTO(row: InvoiceRow): InvoiceDTO {
+  return {
+    id: row.id,
+    periodStart: row.period_start,
+    periodEnd: row.period_end,
+    dueDate: row.due_date,
+    amountCents: Number(row.amount_cents),
+    discountCents: Number(row.discount_cents) + Number(row.one_off_discount_cents),
+    status: row.status,
+    paidAt: row.paid_at,
+    paidVia: row.paid_via,
+  };
+}
+
+// `toLocaleString("pt-BR", {style: "currency"})` inserts a U+00A0 (NBSP)
+// between "R$" and the number; built via `String.fromCharCode` -- never as
+// a literal NBSP character in source -- so this file has no irregular
+// whitespace for eslint(no-irregular-whitespace) to flag.
+const NBSP_PATTERN = new RegExp(String.fromCharCode(160), "g");
+
+/** "20% de desconto" or "R$ 100,00 de desconto"; null when there is no active discount. */
+function planDiscountLabel(kind: "percent" | "fixed" | null, value: number | string | null): string | null {
+  if (!kind || value == null) return null;
+  if (kind === "percent") return `${Number(value)}% de desconto`;
+  const brlValue = (Number(value) / 100).toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  });
+  return `${brlValue.replace(NBSP_PATTERN, " ")} de desconto`;
+}
+
+const planOverviewInput = z
+  .object({ tenantId: dbUuid().optional().nullable() })
+  .default({});
+
+/**
+ * Body of `getPlanOverview`, exported for tests. Resolves the house through
+ * `resolveTenantForBilling` (a locked house still reaches this page), then
+ * reads `tenant_billing`/`billing_plans`/`billing_invoices` with
+ * `supabaseAdmin` scoped to that tenantId. A house with `access_state =
+ * 'exempt'` never has invoices (ruling 4/6): `plan`, `currentPeriod` and
+ * `openInvoice` are null and `invoices` is always `[]` for it.
+ */
+export async function getPlanOverviewFor(
+  ctx: ServerContext,
+  data: z.infer<typeof planOverviewInput>,
+) {
+  const tenantId = await resolveTenantForBilling(
+    ctx.supabase as unknown as Parameters<typeof resolveTenantForBilling>[0],
+    ctx.userId,
+    data.tenantId,
+  );
+
+  const [superAdmin, payer, billingRes, invoicesRes] = await Promise.all([
+    isSuperAdminLoose(ctx.userId),
+    isTenantPayer(ctx.supabase, tenantId, ctx.userId),
+    looseDb(supabaseAdmin)
+      .from<TenantBillingRow>("tenant_billing")
+      .select(
+        "tenant_id,plan_code,custom_price_cents,discount_kind,discount_value,discount_starts_on,discount_ends_on,next_due_date,manual_block,frozen,access_state",
+      )
+      .eq("tenant_id", tenantId)
+      .maybeSingle(),
+    looseDb(supabaseAdmin)
+      .from<InvoiceRow[]>("billing_invoices")
+      .select(
+        "id,tenant_id,period_start,period_end,cycle_due_date,due_date,amount_cents,discount_cents,one_off_discount_cents,status,paid_at,paid_via,payment_charge_id",
+      )
+      .eq("tenant_id", tenantId)
+      .order("created_at", { ascending: false })
+      .limit(60),
+  ]);
+  if (billingRes.error) throw new Error(billingRes.error.message);
+  if (invoicesRes.error) throw new Error(invoicesRes.error.message);
+
+  const tb = billingRes.data as TenantBillingRow | null;
+  const role: BillingRole = superAdmin ? "super_admin" : payer ? "payer" : "member";
+  const exempt = tb?.access_state === "exempt";
+  const allInvoices = invoicesRes.data ?? [];
+  const today = brtDayKey(new Date());
+  const enforcement = isBillingEnforcementEnabled();
+
+  if (exempt || !tb) {
+    return {
+      state: tb?.access_state ?? "exempt",
+      plan: null,
+      exempt: true,
+      currentPeriod: null,
+      nextDueDate: null,
+      openInvoice: null,
+      invoices: [] as InvoiceDTO[],
+      canPay: role !== "member",
+      // Exempt houses never block credit purchases (`billingView`'s own
+      // "exempt" case: `canBuyCredits: true`) — the fix-round-1 bug had this
+      // reading `role !== "member"`, which showed the "Disponível depois de
+      // pagar a mensalidade" lock copy to an exempt member for no reason.
+      canBuyCredits: true,
+      today,
+      enforcement,
+    };
+  }
+
+  const invoices = allInvoices.map(toInvoiceDTO);
+  const openInvoiceRow = allInvoices.find((row) => row.status === "open") ?? null;
+  const openInvoice = openInvoiceRow ? toInvoiceDTO(openInvoiceRow) : null;
+
+  const cycleDueForAmount = openInvoiceRow?.cycle_due_date ?? tb.next_due_date ?? today;
+  const { data: amountRow, error: amountError } = await looseDb(supabaseAdmin).rpc(
+    "billing_monthly_amount",
+    { _tenant: tenantId, _cycle_due: cycleDueForAmount },
+  );
+  if (amountError) throw new Error(amountError.message);
+  const amount = (amountRow ?? {}) as {
+    base_cents?: number;
+    discount_cents?: number;
+    amount_cents?: number;
+  };
+
+  const { data: planRow, error: planError } = await looseDb(supabaseAdmin)
+    .from<BillingPlanRow>("billing_plans")
+    .select("code,name,price_cents,exempt_all")
+    .eq("code", tb.plan_code)
+    .maybeSingle();
+  if (planError) throw new Error(planError.message);
+
+  const view = billingView({
+    state: tb.access_state as Parameters<typeof billingView>[0]["state"],
+    role,
+    enforcement,
+    invoice: openInvoice ? { amountCents: openInvoice.amountCents, dueDate: openInvoice.dueDate } : null,
+    today,
+  });
+
+  return {
+    state: tb.access_state,
+    plan: {
+      name: (planRow as BillingPlanRow | null)?.name ?? "Plano CRM",
+      priceCents: Number(amount.base_cents ?? 0),
+      discountedCents: Number(amount.amount_cents ?? amount.base_cents ?? 0),
+      discountLabel:
+        Number(amount.discount_cents ?? 0) > 0
+          ? planDiscountLabel(tb.discount_kind, tb.discount_value)
+          : null,
+    },
+    exempt: false,
+    currentPeriod: openInvoice ? { start: openInvoice.periodStart, end: openInvoice.periodEnd } : null,
+    nextDueDate: tb.next_due_date,
+    openInvoice,
+    invoices,
+    canPay: role !== "member",
+    canBuyCredits: view.canBuyCredits,
+    today,
+    enforcement,
+  };
+}
+
+export const getPlanOverview = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => planOverviewInput.parse(data ?? {}))
+  .handler(async ({ data, context }) => getPlanOverviewFor(context as ServerContext, data));
+
+const payInvoiceInput = z.object({
+  tenantId: dbUuid().optional().nullable(),
+  invoiceId: dbUuid(),
+});
+
+/**
+ * Body of `payInvoice`, exported for tests. Requires `requireTenantPayer`
+ * (admin/owner/gestor/superadmin) and that the invoice belongs to the
+ * resolved house — an invoice id of another tenant (or one that doesn't
+ * exist) is refused with the same `"Fatura não encontrada."` either way, so
+ * this never confirms/denies another house's invoice ids. The open/paid
+ * checks and the Pix creation itself are `createInvoicePayment`'s job
+ * (invoices.server.ts).
+ */
+export async function payInvoiceFor(ctx: ServerContext, data: z.infer<typeof payInvoiceInput>) {
+  const tenantId = await resolveTenantForBilling(
+    ctx.supabase as unknown as Parameters<typeof resolveTenantForBilling>[0],
+    ctx.userId,
+    data.tenantId,
+  );
+  await requireTenantPayer(ctx.supabase, tenantId, NOT_PAYER_MESSAGE, ctx.userId);
+
+  const { data: invoiceRow, error } = await looseDb(supabaseAdmin)
+    .from<{ id: string; tenant_id: string }>("billing_invoices")
+    .select("id,tenant_id")
+    .eq("id", data.invoiceId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!invoiceRow || invoiceRow.tenant_id !== tenantId) {
+    throw new Error(INVOICE_NOT_FOUND_MESSAGE);
+  }
+
+  return createInvoicePayment(data.invoiceId, ctx.userId);
+}
+
+export const payInvoice = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => payInvoiceInput.parse(data))
+  .handler(async ({ data, context }) => payInvoiceFor(context as ServerContext, data));
+
+const invoiceReceiptInput = z.object({
+  tenantId: dbUuid().optional().nullable(),
+  invoiceId: dbUuid(),
+});
+
+type ReceiptInvoiceRow = {
+  id: string;
+  tenant_id: string;
+  status: "open" | "paid" | "canceled";
+  period_start: string;
+  period_end: string;
+  cycle_due_date: string;
+  paid_at: string | null;
+  paid_amount_cents: number | string | null;
+  amount_cents: number | string;
+  paid_via: "pix" | "manual" | "full_discount" | null;
+  payment_charge_id: string | null;
+};
+
+/**
+ * Body of `getInvoiceReceipt`, exported for tests. Any member of the house
+ * may read a receipt (it's not a money action); only a PAID invoice of the
+ * resolved house qualifies — an open/canceled invoice, or one belonging to
+ * another tenant, is refused. Reads `payment_charges.last_provider_payload`
+ * only to pull `endToEndId`, and never returns the payload itself.
+ */
+export async function getInvoiceReceiptFor(
+  ctx: ServerContext,
+  data: z.infer<typeof invoiceReceiptInput>,
+) {
+  const tenantId = await resolveTenantForBilling(
+    ctx.supabase as unknown as Parameters<typeof resolveTenantForBilling>[0],
+    ctx.userId,
+    data.tenantId,
+  );
+
+  const { data: invoiceRow, error } = await looseDb(supabaseAdmin)
+    .from<ReceiptInvoiceRow>("billing_invoices")
+    .select(
+      "id,tenant_id,status,period_start,period_end,cycle_due_date,paid_at,paid_amount_cents,amount_cents,paid_via,payment_charge_id",
+    )
+    .eq("id", data.invoiceId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  const invoice = invoiceRow as ReceiptInvoiceRow | null;
+  if (!invoice || invoice.tenant_id !== tenantId) throw new Error(INVOICE_NOT_FOUND_MESSAGE);
+  if (invoice.status !== "paid") throw new Error(INVOICE_NOT_PAID_MESSAGE);
+
+  let endToEndOrExternalId: string | null = null;
+  if (invoice.payment_charge_id) {
+    const { data: chargeRow, error: chargeError } = await looseDb(supabaseAdmin)
+      .from<{ external_id: string; last_provider_payload: Json | null }>("payment_charges")
+      .select("external_id,last_provider_payload")
+      .eq("id", invoice.payment_charge_id)
+      .maybeSingle();
+    if (chargeError) throw new Error(chargeError.message);
+    const payload = chargeRow?.last_provider_payload as { endToEndId?: unknown } | null;
+    const endToEnd = payload && typeof payload.endToEndId === "string" ? payload.endToEndId : null;
+    endToEndOrExternalId = endToEnd ?? chargeRow?.external_id ?? null;
+  }
+
+  const [year, month] = invoice.cycle_due_date.split("-");
+  return {
+    paidAt: invoice.paid_at,
+    amountCents: Number(invoice.paid_amount_cents ?? invoice.amount_cents),
+    description: `Mensalidade BetLeads ${month}/${year}`,
+    endToEndOrExternalId,
+    paidVia: invoice.paid_via,
+  };
+}
+
+export const getInvoiceReceipt = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => invoiceReceiptInput.parse(data))
+  .handler(async ({ data, context }) => getInvoiceReceiptFor(context as ServerContext, data));

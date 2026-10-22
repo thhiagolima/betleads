@@ -12,20 +12,20 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import {
   assertTenantCanOpenBilling,
   assertTenantNotDemo,
-  requireTenantAdmin,
-  resolveOperationalTenantForRequest,
+  resolveTenantForBilling,
 } from "@/lib/tenant-access.server";
 import { dbUuid } from "@/lib/zod-helpers";
 
+import { isBillingLockedFor, requireTenantPayer } from "./billing-state.server";
 import { recordChargeSnapshot } from "./payment-charges.server";
 import { resolveTopupAmount, topupDescription } from "./topup";
 import { createUpperCharge, UpperError, type UpperCharge } from "./upper-pix.server";
 
 type ServerContext = {
   // The per-request, user-scoped Supabase client the auth middleware
-  // attaches. `resolveOperationalTenantForRequest`/`requireTenantAdmin` and
+  // attaches. `resolveTenantForBilling`/`requireTenantPayer` and
   // `getTopupStatus`'s own read all run through this (never `supabaseAdmin`)
-  // so RLS and `is_tenant_admin()`'s `auth.uid()` check apply normally.
+  // so RLS (a user reads only their own `user_roles`) applies normally.
   supabase: unknown;
   userId: string;
 };
@@ -53,7 +53,9 @@ function looseDb(client: unknown) {
 const GENERIC_UPPER_FAILURE_MESSAGE =
   "Não foi possível gerar o Pix agora. Tente de novo em instantes.";
 const GATEWAY_UNAVAILABLE_MESSAGE = "Compra por Pix indisponível no momento.";
-const NOT_ADMIN_MESSAGE = "Só o admin da casa pode comprar créditos";
+const NOT_ADMIN_MESSAGE = "Só o admin ou o gestor da casa pode comprar créditos.";
+/** A house under an effective billing lock pays the monthly fee before buying credits. */
+export const BILLING_LOCKED_PURCHASE_MESSAGE = "Disponível depois de pagar a mensalidade";
 const EXEMPT_MESSAGE = "Esta casa é isenta e não precisa comprar créditos";
 const TOO_MANY_OPEN_MESSAGE =
   "Você já tem Pix em aberto. Pague ou aguarde expirar antes de gerar outro.";
@@ -133,8 +135,9 @@ const createTopupInput = z
 
 /**
  * Body of `createCreditTopup`, exported for tests. Follows the order from
- * the task brief: gateway on (and Upper configured), resolve the house,
- * admin-only, not demo, not exempt, billing open, resolve the amount, under
+ * the task brief: gateway on (and Upper configured), resolve the house
+ * (`resolveTenantForBilling`: a locked house still reaches this), payer
+ * only (admin, owner, gestor or superadmin), not billing-locked, not demo, not exempt, billing open, resolve the amount, under
  * the open-Pix cap, insert order+charge PENDING,
  * ask Upper, snapshot the response, link the charge back onto the order.
  */
@@ -146,17 +149,17 @@ export async function createCreditTopupFor(
     throw new Error(GATEWAY_UNAVAILABLE_MESSAGE);
   }
 
-  const tenantId = await resolveOperationalTenantForRequest(
-    looseDb(ctx.supabase) as unknown as Parameters<typeof resolveOperationalTenantForRequest>[0],
+  const tenantId = await resolveTenantForBilling(
+    looseDb(ctx.supabase) as unknown as Parameters<typeof resolveTenantForBilling>[0],
     ctx.userId,
     data.tenantId,
   );
 
-  await requireTenantAdmin(
-    looseDb(ctx.supabase) as unknown as Parameters<typeof requireTenantAdmin>[0],
-    tenantId,
-    NOT_ADMIN_MESSAGE,
-  );
+  await requireTenantPayer(ctx.supabase, tenantId, NOT_ADMIN_MESSAGE, ctx.userId);
+
+  if (await isBillingLockedFor(tenantId, ctx.userId)) {
+    throw new Error(BILLING_LOCKED_PURCHASE_MESSAGE);
+  }
 
   await assertTenantNotDemo(tenantId);
 

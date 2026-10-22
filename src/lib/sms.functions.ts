@@ -1012,10 +1012,7 @@ export const sendTestSms = createServerFn({ method: "POST" })
 export const listSmsLogs = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data: tenantRow, error: tenantErr } = await context.supabase.rpc("current_tenant_id");
-    if (tenantErr) throw new Error(tenantErr.message);
-    const tenantId = tenantRow as string | null;
-    if (!tenantId) throw new Error("tenant não encontrado para o usuário");
+    const tenantId = await resolveCurrentTenantId(context.supabase);
 
     const { data, error } = await supabaseAdmin
       .from("sms_send_logs")
@@ -1119,10 +1116,7 @@ export const sendBulkSms = createServerFn({ method: "POST" })
       .parse(input),
   )
   .handler(async ({ data, context }) => {
-    const { data: tenantRow, error: tenantErr } = await context.supabase.rpc("current_tenant_id");
-    if (tenantErr) throw new Error(tenantErr.message);
-    const tenantId = tenantRow as string | null;
-    if (!tenantId) throw new Error("tenant não encontrado para o usuário");
+    const tenantId = await resolveCurrentTenantId(context.supabase);
 
     await assertTenantCanOperate(tenantId);
     // Demo guard once, before the campaign row, stats or any per-recipient send.
@@ -1532,10 +1526,7 @@ export const getSmsDashboard = createServerFn({ method: "POST" })
 
     // Resolve tenant do usuário autenticado — todas as queries do dashboard
     // DEVEM ser filtradas por tenant para não misturar dados de outros tenants.
-    const { data: tenantRow, error: tenantErr } = await context.supabase.rpc("current_tenant_id");
-    if (tenantErr) throw new Error(tenantErr.message);
-    const tenantId = tenantRow as string | null;
-    if (!tenantId) throw new Error("tenant não encontrado para o usuário");
+    const tenantId = await resolveCurrentTenantId(context.supabase);
 
     // Resolve período em America/Sao_Paulo (BRT). As datas YYYY-MM-DD vindas
     // do front representam dias do calendário em Brasília — não em UTC.
@@ -2091,10 +2082,7 @@ export const scheduleBulkSms = createServerFn({ method: "POST" })
       throw new Error("O horário agendado precisa estar pelo menos 1 minuto no futuro");
     }
 
-    const { data: tenantRow, error: tenantErr } = await context.supabase.rpc("current_tenant_id");
-    if (tenantErr) throw new Error(tenantErr.message);
-    const tenantId = tenantRow as string | null;
-    if (!tenantId) throw new Error("tenant não encontrado para o usuário");
+    const tenantId = await resolveCurrentTenantId(context.supabase);
 
     await assertTenantCanOperate(tenantId);
     // Demo guard once, before the campaign row, stats or any per-recipient send.

@@ -494,6 +494,122 @@ export type Database = {
           },
         ]
       }
+      billing_email_log: {
+        Row: {
+          invoice_id: string
+          kind: string
+          recipients: number
+          sent_at: string
+        }
+        Insert: {
+          invoice_id: string
+          kind: string
+          recipients?: number
+          sent_at?: string
+        }
+        Update: {
+          invoice_id?: string
+          kind?: string
+          recipients?: number
+          sent_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "billing_email_log_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "billing_invoices"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      billing_invoices: {
+        Row: {
+          amount_cents: number
+          base_amount_cents: number
+          canceled_reason: string | null
+          created_at: string
+          cycle_due_date: string
+          discount_cents: number
+          due_date: string
+          id: string
+          manual_note: string | null
+          manual_receipt: string | null
+          one_off_discount_cents: number
+          paid_amount_cents: number | null
+          paid_at: string | null
+          paid_via: string | null
+          payment_charge_id: string | null
+          period_end: string
+          period_start: string
+          status: string
+          tenant_id: string
+          updated_at: string
+          upfront: boolean
+        }
+        Insert: {
+          amount_cents: number
+          base_amount_cents: number
+          canceled_reason?: string | null
+          created_at?: string
+          cycle_due_date: string
+          discount_cents?: number
+          due_date: string
+          id?: string
+          manual_note?: string | null
+          manual_receipt?: string | null
+          one_off_discount_cents?: number
+          paid_amount_cents?: number | null
+          paid_at?: string | null
+          paid_via?: string | null
+          payment_charge_id?: string | null
+          period_end: string
+          period_start: string
+          status?: string
+          tenant_id: string
+          updated_at?: string
+          upfront?: boolean
+        }
+        Update: {
+          amount_cents?: number
+          base_amount_cents?: number
+          canceled_reason?: string | null
+          created_at?: string
+          cycle_due_date?: string
+          discount_cents?: number
+          due_date?: string
+          id?: string
+          manual_note?: string | null
+          manual_receipt?: string | null
+          one_off_discount_cents?: number
+          paid_amount_cents?: number | null
+          paid_at?: string | null
+          paid_via?: string | null
+          payment_charge_id?: string | null
+          period_end?: string
+          period_start?: string
+          status?: string
+          tenant_id?: string
+          updated_at?: string
+          upfront?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "billing_invoices_payment_charge_id_fkey"
+            columns: ["payment_charge_id"]
+            isOneToOne: false
+            referencedRelation: "payment_charges"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "billing_invoices_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       billing_plans: {
         Row: {
           code: string
@@ -6413,6 +6529,72 @@ export type Database = {
           },
         ]
       }
+      tenant_billing: {
+        Row: {
+          access_state: string
+          access_state_at: string
+          custom_price_cents: number | null
+          discount_ends_on: string | null
+          discount_kind: string | null
+          discount_starts_on: string | null
+          discount_value: number | null
+          frozen: boolean
+          manual_block: boolean
+          manual_block_reason: string | null
+          next_due_date: string | null
+          plan_code: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          access_state?: string
+          access_state_at?: string
+          custom_price_cents?: number | null
+          discount_ends_on?: string | null
+          discount_kind?: string | null
+          discount_starts_on?: string | null
+          discount_value?: number | null
+          frozen?: boolean
+          manual_block?: boolean
+          manual_block_reason?: string | null
+          next_due_date?: string | null
+          plan_code?: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          access_state?: string
+          access_state_at?: string
+          custom_price_cents?: number | null
+          discount_ends_on?: string | null
+          discount_kind?: string | null
+          discount_starts_on?: string | null
+          discount_value?: number | null
+          frozen?: boolean
+          manual_block?: boolean
+          manual_block_reason?: string | null
+          next_due_date?: string | null
+          plan_code?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tenant_billing_plan_code_fkey"
+            columns: ["plan_code"]
+            isOneToOne: false
+            referencedRelation: "billing_plans"
+            referencedColumns: ["code"]
+          },
+          {
+            foreignKeyName: "tenant_billing_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: true
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tenant_daily_metrics: {
         Row: {
           approved_deposit_amount: number
@@ -7779,6 +7961,65 @@ export type Database = {
         }
         Returns: Json
       }
+      billing_add_months: {
+        Args: { _d: string; _n: number }
+        Returns: string
+      }
+      billing_admin_cancel_invoice: {
+        Args: { _invoice: string; _reason: string }
+        Returns: Json
+      }
+      billing_admin_extend_due: {
+        Args: { _days: number; _invoice: string }
+        Returns: Json
+      }
+      billing_admin_free_days: {
+        Args: { _days: number; _tenant: string }
+        Returns: Json
+      }
+      billing_admin_manual_settle: {
+        Args: {
+          _invoice: string
+          _note: string | null
+          _paid_amount_cents: number | null
+          _receipt: string | null
+        }
+        Returns: Json
+      }
+      billing_admin_one_off_discount: {
+        Args: { _invoice: string; _kind: string | null; _value: number | null }
+        Returns: Json
+      }
+      billing_admin_set_block: {
+        Args: { _blocked: boolean; _reason: string | null; _tenant: string }
+        Returns: Json
+      }
+      billing_admin_set_continuous_discount: {
+        Args: {
+          _ends: string | null
+          _kind: string | null
+          _starts: string | null
+          _tenant: string
+          _value: number | null
+        }
+        Returns: Json
+      }
+      billing_admin_set_custom_price: {
+        Args: { _price_cents: number | null; _tenant: string }
+        Returns: Json
+      }
+      billing_admin_set_cycle_day: {
+        Args: { _next_due: string; _tenant: string }
+        Returns: Json
+      }
+      billing_admin_set_frozen: {
+        Args: { _frozen: boolean; _tenant: string }
+        Returns: Json
+      }
+      billing_backfill_tenant_billing: {
+        Args: Record<PropertyKey, never>
+        Returns: number
+      }
       billing_convert_legacy_sms_credits: {
         Args: { _apply?: boolean }
         Returns: {
@@ -7800,17 +8041,45 @@ export type Database = {
         Args: { _at?: string; _item: string; _tenant: string }
         Returns: Json
       }
+      billing_generate_due_invoices: {
+        Args: Record<PropertyKey, never>
+        Returns: string[]
+      }
+      billing_monthly_amount: {
+        Args: { _cycle_due: string; _tenant: string }
+        Returns: Json
+      }
       billing_now: {
         Args: never
+        Returns: string
+      }
+      billing_refresh_access_state: {
+        Args: { _tenant: string }
         Returns: string
       }
       billing_report_unit_price: {
         Args: { _at?: string; _item: string; _tenant: string }
         Returns: number
       }
+      billing_settle_invoice: {
+        Args: {
+          _charge: string | null
+          _invoice: string
+          _note: string | null
+          _paid_amount_cents: number | null
+          _paid_at?: string | null
+          _receipt: string | null
+          _via: string
+        }
+        Returns: Json
+      }
       billing_tenant_exempt: {
         Args: { _tenant: string }
         Returns: boolean
+      }
+      billing_today: {
+        Args: Record<PropertyKey, never>
+        Returns: string
       }
       billing_wallet_integrity: {
         Args: never

@@ -128,7 +128,7 @@ export function getChannelOperationState(
           ? "A chamada será liberada quando a política de contato permitir."
           : "Revise os limites do canal antes de retomar.",
       actionLabel: channel === "sms" ? "Ver saldo" : "Ver configurações",
-      actionTo: channel === "sms" ? "/creditos-sms" : SETTINGS_DESTINATION[channel],
+      actionTo: channel === "sms" ? "/plano-e-creditos" : SETTINGS_DESTINATION[channel],
       tone: "border-orange-500/30 bg-orange-500/10 text-orange-700 dark:text-orange-300",
     };
   }

@@ -43,6 +43,9 @@ UPPER_API_BASE=https://api.uppersc.com.br
 UPPER_API_KEY=<upper-pix_in-only-api-key>
 UPPER_WEBHOOK_SECRET=<strong-random-webhook-secret>
 BETTERSTACK_HEARTBEAT_BILLING_RECONCILE=<better-stack-heartbeat-url>
+BILLING_INVOICES_ENABLED=false
+BILLING_ENFORCEMENT_ENABLED=false
+PLATFORM_EMAIL_FROM=no-reply@betleads.io
 ```
 
 Nunca crie variavel `VITE_` para `SUPABASE_SECRET_KEY`.
@@ -67,6 +70,29 @@ Compra de créditos por Pix (PG2) via a Upper:
 
 Nenhuma dessas variaveis deve ser logada; a chave e o segredo ficam apenas no
 servidor.
+
+## Mensalidade do plano (fatura mensal + ciclo da hora)
+
+- `BILLING_INVOICES_ENABLED`: kill switch. Desligado (padrao `false`), o job
+  `POST /api/public/hooks/billing-cycle` (job `billing-cycle`, cron `7 * * *
+  *`) so recalcula o `access_state` de cada casa paga, sem emitir fatura nem
+  disparar e-mail; o Pix de uma fatura responde "Pagamento por Pix
+  indisponivel no momento." ao criar uma cobranca.
+- `BILLING_ENFORCEMENT_ENABLED`: liga o bloqueio de acesso por falta de
+  pagamento (`locked_unpaid`/`awaiting_first_payment`); `frozen` e
+  `locked_manual` bloqueiam sempre, com a flag ligada ou nao. O superadmin
+  nunca e bloqueado. Desligado (padrao `false`), a casa so ve a faixa
+  vermelha ("Sua mensalidade venceu..."), sem cartao de bloqueio nem o
+  e-mail "locked" (que exige esta flag mesmo num reenvio forcado pelo
+  superadmin). So vale com `BILLING_INVOICES_ENABLED=true`: sem ela, a flag
+  e ignorada (nenhuma casa e bloqueada por falta de pagamento) e o servidor
+  registra um `console.error` uma vez por processo.
+- `PLATFORM_EMAIL_FROM`: remetente dos quatro e-mails de cobranca (fatura
+  emitida, vence hoje, acesso suspenso, pagamento confirmado), nome fixo
+  "BetLeads". Padrao `no-reply@betleads.io`. Esse envio nunca passa pela
+  guarda de demo/bloqueio das casas (senao o e-mail de bloqueio da propria
+  casa bloqueada seria recusado); so entre 08:00-20:00 de Brasilia, e uma vez
+  por fatura e tipo (`billing_email_log`).
 
 ## Ativacao do dispatcher de jornadas
 

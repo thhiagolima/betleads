@@ -794,7 +794,9 @@ export async function syncShortioMetrics(
     };
   }
   // Demo tenants' links are never pulled from Short.io (no run row either).
-  if (await demoSendBlockedReason(tenantId)) {
+  // A billing-locked house keeps receiving its click statistics (inbound
+  // data, like its webhook): only demo/unknown tenants are skipped here.
+  if (await demoSendBlockedReason(tenantId, { allowBillingLocked: true })) {
     return { startedAt, processed: 0, failures: 0, total: 0, skipped: true };
   }
   const staleBefore = new Date(Date.now() - 20 * 60_000).toISOString();
@@ -886,7 +888,8 @@ export async function syncShortioMetrics(
     let response: Response | null = null;
     for (let attempt = 0; attempt < 3; attempt++) {
       // Demo guard immediately before the request (counted as a link failure).
-      await assertTenantNotDemoForSend(linkTenantId);
+      // Reading statistics back is allowed for a billing-locked house.
+      await assertTenantNotDemoForSend(linkTenantId, { allowBillingLocked: true });
       response = await fetch(
         `https://statistics.short.io/statistics/link/${encodeURIComponent(shortioLinkId)}/by_interval`,
         {

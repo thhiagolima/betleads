@@ -999,10 +999,7 @@ export const getCallsDashboard = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const { supabase } = context;
-    const { data: tenantRow, error: tenantErr } = await supabase.rpc("current_tenant_id");
-    if (tenantErr) throw new Error(tenantErr.message);
-    const tenantId = tenantRow as string | null;
-    if (!tenantId) throw new Error("tenant não encontrado para o usuário");
+    const tenantId = await resolveCurrentTenantId(supabase);
     // Dias em BRT (America/Sao_Paulo) — mesmo critério dos outros dashboards.
     const { parseBrtDayStart, parseBrtDayEnd, brtDayStart, brtDayEnd } = await import("./tz");
     let sinceDate: Date;

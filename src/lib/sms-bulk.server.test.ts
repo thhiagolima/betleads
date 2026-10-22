@@ -36,6 +36,8 @@ import {
   type SmsBatchItem,
 } from "./sms-bulk.server";
 import { Route as SmsWebhookRoute } from "@/routes/api/public/sms-webhook";
+import { assertTenantNotDemoForSend } from "@/lib/tenant-access.server";
+import { BILLING_LOCKED_TEXT, TenantBillingLockedError } from "@/lib/billing/billing-locked-error";
 import { __resetShortenerDomainCacheForTests } from "./shortio.server";
 
 const TENANT = "00000000-0000-4000-8000-000000000001";
@@ -205,6 +207,51 @@ describe("sendSmsBatch (ENV-10, Short Brasil bulk)", () => {
     expect(credits.ledger().map((l) => l.idempotency_key)).toContain(
       `sms-reserve:delivery:${key(1)}`,
     );
+  });
+
+  it("a house locked for the monthly fee: its items fail final (not retryable), nothing written or charged; other houses still send", async () => {
+    settings("block");
+    const LOCKED = "00000000-0000-4000-8000-0000000000ff";
+    const guard = vi.mocked(assertTenantNotDemoForSend);
+    guard.mockImplementation(async (tenantId) => {
+      if (tenantId === LOCKED) throw new TenantBillingLockedError();
+    });
+    try {
+      const r = await sendSmsBatch([item(1, { tenantId: LOCKED }), item(2), item(3, { tenantId: LOCKED })]);
+
+      for (const index of [0, 2]) {
+        expect(r.outcomes[index]).toMatchObject({
+          status: "failed",
+          ok: false,
+          retryable: false,
+          error: BILLING_LOCKED_TEXT,
+        });
+      }
+      expect(r.outcomes[1]).toMatchObject({ status: "accepted", ok: true });
+      expect(smsCalls).toHaveLength(1);
+      expect(smsCalls[0].bulk.map((b) => b.parceiroId)).toEqual([key(2)]);
+      expect(logFor(key(1))).toHaveLength(0);
+      expect(logFor(key(3))).toHaveLength(0);
+      expect(credits.charged()).toBe(1);
+    } finally {
+      guard.mockImplementation(async () => undefined);
+    }
+  });
+
+  it("a whole batch of a locked house: nothing is sent and no item is retryable", async () => {
+    const guard = vi.mocked(assertTenantNotDemoForSend);
+    guard.mockImplementation(async () => {
+      throw new TenantBillingLockedError();
+    });
+    try {
+      const r = await sendSmsBatch([item(1), item(2)]);
+      expect(r.outcomes.every((o) => !o.ok && o.retryable === false)).toBe(true);
+      expect(smsCalls).toHaveLength(0);
+      expect(logs()).toHaveLength(0);
+      expect(credits.charged()).toBe(0);
+    } finally {
+      guard.mockImplementation(async () => undefined);
+    }
   });
 
   it("partial rejection: only the items missing from bulk[] fail and are refunded", async () => {

@@ -13,12 +13,12 @@ vi.mock("@tanstack/react-router", () => ({
 import { WalletBalanceNotice } from "./wallet-balance-notice";
 
 describe("WalletBalanceNotice", () => {
-  it("with canBuy, links 'Saldo e consumo' to /creditos-sms", () => {
+  it("with canBuy, links 'Saldo e consumo' to /plano-e-creditos", () => {
     const html = renderToStaticMarkup(
       <WalletBalanceNotice balance={0} exempt={false} smsUnitPrice={0.08} canBuy />,
     );
     expect(html).toMatch(
-      /Compre créditos por Pix em <a href="\/creditos-sms"[^>]*>Saldo e consumo<\/a>\./,
+      /Compre créditos por Pix em <a href="\/plano-e-creditos"[^>]*>Saldo e consumo<\/a>\./,
     );
   });
 

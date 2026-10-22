@@ -14,6 +14,9 @@ vi.mock("./upper-pix.server", async (importOriginal) => {
   return { ...actual, getUpperCharge };
 });
 
+const { sendBillingEmail } = vi.hoisted(() => ({ sendBillingEmail: vi.fn() }));
+vi.mock("./billing-emails.server", () => ({ sendBillingEmail }));
+
 import { createFakeDb } from "@/lib/sms-bulk.test-support";
 import {
   confirmChargeFromUpper,
@@ -21,6 +24,10 @@ import {
   recordChargeSnapshot,
 } from "./payment-charges.server";
 import { UpperError, type UpperCharge } from "./upper-pix.server";
+import {
+  __resetDemoTenantCacheForTests,
+  assertTenantNotDemoForSend,
+} from "@/lib/tenant-access.server";
 
 const TENANT = "00000000-0000-4000-8000-000000000001";
 
@@ -108,6 +115,8 @@ function racePaidBeforeUpdate(chargeId: string, whenStatus: string) {
 beforeEach(() => {
   fake.admin.reset();
   getUpperCharge.mockReset();
+  sendBillingEmail.mockReset();
+  sendBillingEmail.mockResolvedValue({ sent: true, recipients: 1 });
 });
 
 afterEach(() => {
@@ -383,6 +392,71 @@ describe("confirmChargeFromUpper", () => {
     expect(fake.admin.rows("payment_charges")[0].status).toBe("PAID");
   });
 
+  describe("tenant-status cache after an invoice settle", () => {
+    beforeEach(() => {
+      __resetDemoTenantCacheForTests();
+      vi.stubEnv("BILLING_ENFORCEMENT_ENABLED", "true");
+      // Enforcement only counts with invoices on (fails closed otherwise).
+      vi.stubEnv("BILLING_INVOICES_ENABLED", "true");
+      fake.admin.rows("tenants").push({
+        id: TENANT,
+        status: "active",
+        is_demo: false,
+        tenant_billing: { access_state: "locked_unpaid" },
+      });
+    });
+    afterEach(() => vi.unstubAllEnvs());
+
+    async function primeLockedCacheThenSettle(kind: string) {
+      // The guard caches the locked state for 5 s.
+      await expect(assertTenantNotDemoForSend(TENANT)).rejects.toMatchObject({
+        code: "BILLING_LOCKED",
+      });
+      // The SQL settle recomputes access_state (simulated here).
+      fake.admin.rows("tenants")[0].tenant_billing = { access_state: "ok" };
+      fake.admin.rows("payment_charges").push(
+        chargeRow({ kind, ref_id: "inv-1", external_id: "bl-inv-inv-1-1" }),
+      );
+      getUpperCharge.mockResolvedValue(
+        upperCharge({ status: "PAID", paidAmountCents: 50000, paidAt: new Date().toISOString() }),
+      );
+      expect(await confirmChargeFromUpper("bl-inv-inv-1-1")).toEqual({ outcome: "credited" });
+    }
+
+    it("a credited invoice drops the house from the cache: it unlocks at once", async () => {
+      await primeLockedCacheThenSettle("invoice");
+      await expect(assertTenantNotDemoForSend(TENANT)).resolves.toBeUndefined();
+    });
+
+    it("never waits for the 'paid' e-mail: confirmChargeFromUpper resolves even while it is still pending", async () => {
+      // A sendBillingEmail that never resolves: if confirmChargeFromUpper
+      // awaited it, this test would time out instead of resolving below.
+      sendBillingEmail.mockReturnValue(
+        new Promise(() => {
+          /* intentionally never settles */
+        }),
+      );
+      fake.admin.rows("payment_charges").push(
+        chargeRow({ kind: "invoice", ref_id: "inv-1", external_id: "bl-inv-inv-1-1" }),
+      );
+      getUpperCharge.mockResolvedValue(
+        upperCharge({ status: "PAID", paidAmountCents: 50000, paidAt: new Date().toISOString() }),
+      );
+
+      const result = await confirmChargeFromUpper("bl-inv-inv-1-1");
+
+      expect(result).toEqual({ outcome: "credited" });
+      expect(sendBillingEmail).toHaveBeenCalledWith("inv-1", "paid");
+    });
+
+    it("a credit top-up leaves the cache alone (still the cached state)", async () => {
+      await primeLockedCacheThenSettle("credit_topup");
+      await expect(assertTenantNotDemoForSend(TENANT)).rejects.toMatchObject({
+        code: "BILLING_LOCKED",
+      });
+    });
+  });
+
   it("marks needs_review and does not call the RPC when the paid amount differs", async () => {
     fake.admin.rows("payment_charges").push(chargeRow());
     getUpperCharge.mockResolvedValue(
@@ -432,6 +506,31 @@ describe("confirmChargeFromUpper", () => {
     expect(rpcSpy).not.toHaveBeenCalled();
     expect(fake.admin.rows("payment_charges")[0].needs_review).toBe(true);
   });
+
+  it.each(["invoice_not_open", "invoice_not_found", "amount_mismatch"])(
+    "an invoice charge the RPC refuses with %s is needs_review (the RPC flags it)",
+    async (reason) => {
+      fake.admin
+        .rows("payment_charges")
+        .push(
+          chargeRow({ kind: "invoice", ref_id: "invoice-1", external_id: "bl-inv-invoice-1-1" }),
+        );
+      getUpperCharge.mockResolvedValue(
+        upperCharge({
+          externalId: "bl-inv-invoice-1-1",
+          status: "PAID",
+          paidAmountCents: 50000,
+          paidAt: new Date().toISOString(),
+        }),
+      );
+      const rpcSpy = vi.fn(() => ({ data: { ok: false, reason }, error: null }));
+      fake.admin.onRpc("billing_credit_paid_charge", rpcSpy);
+
+      const result = await confirmChargeFromUpper("bl-inv-invoice-1-1");
+      expect(rpcSpy).toHaveBeenCalledTimes(1);
+      expect(result).toEqual({ outcome: "needs_review" });
+    },
+  );
 
   it("returns not_paid for an ACTIVE charge, without calling the RPC", async () => {
     fake.admin.rows("payment_charges").push(chargeRow());

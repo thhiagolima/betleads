@@ -13,7 +13,11 @@ import {
   type MetaInsight,
 } from "@/lib/meta-sync-rows";
 import { decryptMetaToken, encryptMetaToken, metaTokenHint } from "@/lib/meta-token.server";
-import { assertTenantNotDemo, listDemoTenantIds } from "@/lib/tenant-access.server";
+import {
+  assertTenantNotDemo,
+  listDemoTenantIds,
+  resolveCurrentTenantId,
+} from "@/lib/tenant-access.server";
 
 const syncSchema = z.object({
   days: z.number().int().min(1).max(90).default(7),
@@ -201,10 +205,7 @@ async function resolveTenantId(client: unknown) {
   const supabase = client as {
     rpc: (name: string) => PromiseLike<{ data: unknown; error: { message: string } | null }>;
   };
-  const { data, error } = await supabase.rpc("current_tenant_id");
-  if (error) throw new Error(error.message);
-  if (!data) throw new Error("Tenant nao identificado");
-  return data as string;
+  return resolveCurrentTenantId(supabase);
 }
 
 export const connectMetaSystemUserToken = createServerFn({ method: "POST" })

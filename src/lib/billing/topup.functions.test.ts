@@ -28,12 +28,20 @@ vi.mock("./upper-pix.server", () => ({
 import { createFakeDb } from "@/lib/sms-bulk.test-support";
 import { DEMO_ACTION_BLOCKED_TEXT } from "@/lib/demo-tenant";
 import { __resetDemoTenantCacheForTests } from "@/lib/tenant-access.server";
-import { createCreditTopupFor, getTopupStatusFor } from "./topup.functions";
+import {
+  BILLING_LOCKED_PURCHASE_MESSAGE,
+  createCreditTopupFor,
+  getTopupStatusFor,
+} from "./topup.functions";
 import { UpperError } from "./upper-pix.server";
 
 const TENANT = "00000000-0000-4000-8000-0000000000aa";
 const OTHER_TENANT = "00000000-0000-4000-8000-0000000000bb";
 const ADMIN_USER = "00000000-0000-4000-8000-0000000000cc";
+const GESTOR_USER = "00000000-0000-4000-8000-0000000000cd";
+const OWNER_USER = "00000000-0000-4000-8000-0000000000ce";
+const MEMBER_USER = "00000000-0000-4000-8000-0000000000cf";
+const PLAIN_USER = "00000000-0000-4000-8000-0000000000d0";
 
 let userDb: ReturnType<typeof createFakeDb>;
 
@@ -76,6 +84,13 @@ beforeEach(() => {
     data: args._tenant === TENANT,
     error: null,
   }));
+  userDb.rows("user_roles").push(
+    { user_id: ADMIN_USER, tenant_id: TENANT, role: "admin" },
+    { user_id: GESTOR_USER, tenant_id: TENANT, role: "gestor" },
+    { user_id: OWNER_USER, tenant_id: TENANT, role: "owner" },
+    { user_id: MEMBER_USER, tenant_id: TENANT, role: "member" },
+    { user_id: PLAIN_USER, tenant_id: TENANT, role: "user" },
+  );
 
   createUpperCharge.mockReset();
   createUpperCharge.mockResolvedValue(upperChargeResult());
@@ -83,6 +98,8 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  delete process.env.BILLING_ENFORCEMENT_ENABLED;
+  delete process.env.BILLING_INVOICES_ENABLED;
   delete process.env.BILLING_GATEWAY_ENABLED;
   delete process.env.UPPER_API_KEY;
 });
@@ -106,12 +123,49 @@ describe("createCreditTopupFor", () => {
     expect(fake.admin.rows("payment_charges")).toHaveLength(0);
   });
 
-  it("refuses a non-admin (gestor) caller", async () => {
+  it.each([
+    ["gestor", GESTOR_USER],
+    ["owner", OWNER_USER],
+  ])("accepts a %s of the house (payer roles: admin, owner, gestor)", async (_role, userId) => {
     userDb.onRpc("is_tenant_admin", () => ({ data: false, error: null }));
+    const result = await createCreditTopupFor(ctxFor(userId), {
+      tenantId: TENANT,
+      packageCode: "p1000",
+    });
+    expect(result.chargeId).toBeTruthy();
+    expect(createUpperCharge).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["member", MEMBER_USER],
+    ["user", PLAIN_USER],
+  ])("refuses a %s of the house", async (_role, userId) => {
+    await expect(
+      createCreditTopupFor(ctxFor(userId), { tenantId: TENANT, packageCode: "p1000" }),
+    ).rejects.toThrow("Só o admin ou o gestor da casa pode comprar créditos.");
+    expect(createUpperCharge).not.toHaveBeenCalled();
+  });
+
+  it("refuses a house locked for the monthly fee with the exact copy, before writing anything", async () => {
+    process.env.BILLING_ENFORCEMENT_ENABLED = "true";
+    process.env.BILLING_INVOICES_ENABLED = "true";
+    fake.admin.onRpc("is_super_admin", () => ({ data: false, error: null }));
+    fake.admin.rows("tenants")[0].tenant_billing = { access_state: "locked_unpaid" };
     await expect(
       createCreditTopupFor(ctxFor(ADMIN_USER), { tenantId: TENANT, packageCode: "p1000" }),
-    ).rejects.toThrow("Só o admin da casa pode comprar créditos");
+    ).rejects.toThrow("Disponível depois de pagar a mensalidade");
+    expect(BILLING_LOCKED_PURCHASE_MESSAGE).toBe("Disponível depois de pagar a mensalidade");
     expect(createUpperCharge).not.toHaveBeenCalled();
+    expect(fake.admin.rows("credit_topup_orders")).toHaveLength(0);
+  });
+
+  it("buys normally for an unpaid house while enforcement is off (no effective lock)", async () => {
+    fake.admin.rows("tenants")[0].tenant_billing = { access_state: "locked_unpaid" };
+    const result = await createCreditTopupFor(ctxFor(ADMIN_USER), {
+      tenantId: TENANT,
+      packageCode: "p1000",
+    });
+    expect(result.chargeId).toBeTruthy();
   });
 
   it("refuses the demo tenant", async () => {

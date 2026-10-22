@@ -579,6 +579,22 @@ describe("runJourneyDispatcher", () => {
     expect(fake.tables.journey_step_executions[0].status).toBe("failed");
   });
 
+  it("a house locked for the monthly fee: the item fails final, no retry scheduled", async () => {
+    seed(["e1"]);
+    // sendSmsInternal's result when the send guard refuses a locked house.
+    sms.sendSmsInternal.mockResolvedValue({
+      ok: false,
+      status: 0,
+      error: "Acesso suspenso. Regularize a mensalidade em Plano e créditos.",
+      temporary: false,
+    });
+    const result = await runJourneyDispatcher(1000);
+    expect(result).toMatchObject({ failed: 1, rescheduled: 0, outcomeUnknown: 0 });
+    expect(enrollment("e1")).toMatchObject({ status: "failed" });
+    expect(fake.tables.journey_step_executions[0].status).toBe("failed");
+    expect(fake.tables.journey_events.at(-1)).toMatchObject({ event_type: "failed" });
+  });
+
   it("a denied rate-limit admission defers without reserving or sending", async () => {
     seed(["e1"]);
     fake.rpcs.consume_channel_budget = () => [

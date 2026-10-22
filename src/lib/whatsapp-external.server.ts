@@ -8,7 +8,11 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { TRIGGER_NAMES, type TriggerType } from "./triggers.server";
 import { priorityRank } from "./priorities";
-import { assertTenantNotDemo, demoSendBlockedReason } from "./tenant-access.server";
+import {
+  assertCallerNotBillingLocked,
+  assertTenantNotDemo,
+  demoSendBlockedReason,
+} from "./tenant-access.server";
 import {
   assertSafeOutboundUrl,
   safeOutboundFetch,
@@ -42,6 +46,8 @@ export async function assertExternalIntegrationManager(
     _user_id: userId,
   });
   if (superError) throw new Error("Não foi possível validar a permissão.");
+  // A house locked for the monthly fee is refused for everyone but the superadmin.
+  await assertCallerNotBillingLocked(supabase, String(tenantId), Boolean(isSuper));
   if (isSuper) return String(tenantId);
 
   const { data: roles, error: roleError } = await supabaseAdmin

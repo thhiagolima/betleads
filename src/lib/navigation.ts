@@ -118,7 +118,7 @@ export const SIDEBAR_SECTIONS: NavSection[] = [
   {
     label: "Configurações",
     items: [
-      link("Saldo e consumo", "/creditos-sms", Wallet),
+      link("Plano e créditos", "/plano-e-creditos", Wallet),
       link("Integrações", "/webhooks", Plug),
       link("Configuração da casa", "/configuracoes/casa", Building2),
       link("Configurações", "/configuracoes", Settings),
@@ -195,6 +195,7 @@ export const ROUTE_META: Record<string, RouteMeta> = {
   "/sms": { section: "Canais", title: "SMS" },
   "/sms/templates": { section: "Canais", title: "Templates de SMS" },
   "/creditos-sms": { section: "Configurações", title: "Saldo e consumo" },
+  "/plano-e-creditos": { section: "Configurações", title: "Plano e créditos" },
   "/email": { section: "Canais", title: "Email" },
   "/ligacoes": { section: "Canais", title: "Voz" },
   "/whatsapp": { section: "Canais", title: "WhatsApp" },

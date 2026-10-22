@@ -1,4 +1,4 @@
-// PG1 Task 8 (fix round 1) — shared between /creditos-sms and /tenants'
+// PG1 Task 8 (fix round 1) — shared between /plano-e-creditos and /tenants'
 // "Saldo SMS" tab, which must show the same month-usage/price-table summary
 // (same `wallet_summary` shape) instead of two hand-maintained copies.
 import {

@@ -7,7 +7,8 @@ import {
   resolveCurrentTenantId,
   resolveOperationalTenantId,
 } from "./tenant-access.server";
-import { DemoTenantBlockedError, isDemoBlockedError } from "./demo-tenant";
+import { DemoTenantBlockedError } from "./demo-tenant";
+import { isSendBlockedError } from "./billing/billing-locked-error";
 import {
   markTrackedDispatchesFailed,
   markTrackedDispatchesSent,
@@ -22,18 +23,18 @@ import {
 } from "./evolution.server";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 
-/** Non-fatal Evolution catches must never swallow a demo-tenant block. */
+/** Non-fatal Evolution catches must never swallow a demo-tenant block or a billing lock. */
 function rethrowIfDemoBlocked(error: unknown) {
-  if (isDemoBlockedError(error)) throw error;
+  if (isSendBlockedError(error)) throw error;
 }
 
-/** False when the transport guard refuses this instance (demo/unknown tenant). */
+/** False when the transport guard refuses this instance (demo/unknown or billing-locked tenant). */
 async function evolutionInstanceAllowed(instance: string): Promise<boolean> {
   try {
     await assertEvolutionInstanceCanCall(instance);
     return true;
   } catch (error) {
-    if (isDemoBlockedError(error)) return false;
+    if (isSendBlockedError(error)) return false;
     throw error;
   }
 }
