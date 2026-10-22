@@ -524,15 +524,27 @@ export async function createInvoicePayment(
 // cancelOpenInvoiceCharges
 // ---------------------------------------------------------------------------
 
+/** Per-charge Upper cancel failure, reported back so callers can audit it truthfully. */
+export type CancelOpenInvoiceChargesFailure = { chargeId: string; error: string };
+
+export type CancelOpenInvoiceChargesResult = {
+  canceled: number;
+  failed: CancelOpenInvoiceChargesFailure[];
+};
+
 /**
  * Cancels every still-open (PENDING/ACTIVE) Pix charge of an invoice at
  * Upper and records it CANCELLED, through the same `recordChargeSnapshot`
  * path used everywhere else a charge's state changes. Used by the
  * superadmin discount and cancel actions (Task 8) before changing an
  * invoice that may already have an open Pix out. One charge failing to
- * cancel at Upper is logged and never stops the others.
+ * cancel at Upper is logged and never stops the others, but it is reported
+ * back in `failed` (fix round 1, I1) so a caller auditing this action does
+ * not claim success when Upper actually rejected the cancel.
  */
-export async function cancelOpenInvoiceCharges(invoiceId: string): Promise<void> {
+export async function cancelOpenInvoiceCharges(
+  invoiceId: string,
+): Promise<CancelOpenInvoiceChargesResult> {
   const { data, error } = await supabaseAdmin
     .from("payment_charges")
     .select("id, external_id")
@@ -541,17 +553,23 @@ export async function cancelOpenInvoiceCharges(invoiceId: string): Promise<void>
     .in("status", ["PENDING", "ACTIVE"]);
   if (error) throw new Error(error.message);
 
+  let canceled = 0;
+  const failed: CancelOpenInvoiceChargesFailure[] = [];
   for (const row of (data ?? []) as LooseRow[]) {
     const chargeId = row.id as string;
     const externalId = row.external_id as string;
     try {
       const upper = await cancelUpperCharge(externalId);
       await recordChargeSnapshot(chargeId, upper);
+      canceled += 1;
     } catch (err) {
+      const message = errorMessage(err);
       console.error("[billing/invoices] cancelOpenInvoiceCharges failed", {
         chargeId,
-        error: errorMessage(err),
+        error: message,
       });
+      failed.push({ chargeId, error: message });
     }
   }
+  return { canceled, failed };
 }

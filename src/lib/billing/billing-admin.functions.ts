@@ -28,10 +28,12 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import type { Json } from "@/integrations/supabase/types";
+import { neutralizeCsvFormula } from "@/lib/csv-safe";
+import { selectAllPages } from "@/lib/pagination";
 import { listDemoTenantIds } from "@/lib/tenant-access.server";
 import { dbUuid } from "@/lib/zod-helpers";
 
-import { cancelOpenInvoiceCharges } from "./invoices.server";
+import { cancelOpenInvoiceCharges, type CancelOpenInvoiceChargesFailure } from "./invoices.server";
 import { sendBillingEmail, type BillingEmailKind } from "./billing-emails.server";
 import { brtDayKey, parseBrtDayStart } from "../tz";
 
@@ -49,9 +51,9 @@ type ServerContext = {
 };
 
 type DbError = { message: string; details?: string | null };
-type DbResult<T = unknown> = { data: T | null; error: DbError | null };
+type DbResult<T = unknown> = { data: T | null; error: DbError | null; count?: number | null };
 type LooseQuery<T = unknown> = PromiseLike<DbResult<T>> & {
-  select: (columns?: string) => LooseQuery<T>;
+  select: (columns?: string, options?: { count?: "exact"; head?: boolean }) => LooseQuery<T>;
   eq: (column: string, value: unknown) => LooseQuery<T>;
   in: (column: string, values: unknown[]) => LooseQuery<T>;
   not: (column: string, operator: string, value: unknown) => LooseQuery<T>;
@@ -136,6 +138,10 @@ const reasonSchema = z
   .trim()
   .min(5, "O motivo deve ter ao menos 5 caracteres.");
 
+/** Shared `YYYY-MM-DD` validator (minor m4): same shape/message everywhere a plain date string
+ * comes in — `nextDueDate`, and the continuous discount's `startsOn`/`endsOn`. */
+const dateStrSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Data inválida.");
+
 // ---------------------------------------------------------------------------
 // Audit (tenant_audit_logs, action = "billing.<ação>")
 // ---------------------------------------------------------------------------
@@ -155,7 +161,7 @@ async function auditBillingAction(args: {
     entity_id: args.tenantId,
     metadata: { reason: args.reason, ...(args.metadata ?? {}) } as Json,
   });
-  if (error) console.warn("[billing-admin] failed writing audit log", error.message);
+  if (error) console.error("[billing-admin] failed writing audit log", error.message);
 }
 
 // ---------------------------------------------------------------------------
@@ -173,22 +179,37 @@ async function findOpenInvoiceId(tenantId: string): Promise<string | null> {
   return data?.id ?? null;
 }
 
+/** Shape folded into the audit row's `pixCancel` metadata (fix round 1, I1). */
+export type PixCancelAudit = {
+  attempted: boolean;
+  ok: boolean;
+  canceled: number;
+  failed: CancelOpenInvoiceChargesFailure[];
+};
+
 /**
  * Best-effort cancel of the open invoice's Pix charges at Upper. Never
- * throws: a failure is logged and reported back as `{ attempted, ok }` so the
- * caller can fold it into the audit metadata, per ruling 1 ("if the Upper
- * cancel fails, still proceed with the SQL action and record the failure").
+ * throws: `cancelOpenInvoiceCharges` already reports each charge's own
+ * Upper failure instead of swallowing it (fix round 1, I1), so `ok` here is
+ * `failed.length === 0` — true audit truth, not just "the call returned".
+ * The caller proceeds with the SQL action regardless, per ruling 1 ("if the
+ * Upper cancel fails, still proceed with the SQL action and record the
+ * failure").
  */
-async function cancelOpenPixBestEffort(
-  invoiceId: string | null,
-): Promise<{ attempted: boolean; ok: boolean; error?: string }> {
-  if (!invoiceId) return { attempted: false, ok: true };
+async function cancelOpenPixBestEffort(invoiceId: string | null): Promise<PixCancelAudit> {
+  if (!invoiceId) return { attempted: false, ok: true, canceled: 0, failed: [] };
   try {
-    await cancelOpenInvoiceCharges(invoiceId);
-    return { attempted: true, ok: true };
+    const { canceled, failed } = await cancelOpenInvoiceCharges(invoiceId);
+    if (failed.length > 0) {
+      console.error("[billing-admin] cancelOpenInvoiceCharges reported per-charge failures", failed);
+    }
+    return { attempted: true, ok: failed.length === 0, canceled, failed };
   } catch (err) {
-    console.error("[billing-admin] cancelOpenInvoiceCharges failed", errorMessage(err));
-    return { attempted: true, ok: false, error: errorMessage(err) };
+    // Only reached if cancelOpenInvoiceCharges itself throws (e.g. the
+    // lookup query failed), not for an individual charge's Upper rejection.
+    const message = errorMessage(err);
+    console.error("[billing-admin] cancelOpenInvoiceCharges failed", message);
+    return { attempted: true, ok: false, canceled: 0, failed: [{ chargeId: "unknown", error: message }] };
   }
 }
 
@@ -378,8 +399,8 @@ export const adminSetContinuousDiscountInput = z.object({
   tenantId: dbUuid(),
   kind: discountKind,
   value: z.number().min(0).nullable(),
-  startsOn: z.string().nullable().optional(),
-  endsOn: z.string().nullable().optional(),
+  startsOn: dateStrSchema.nullable().optional(),
+  endsOn: dateStrSchema.nullable().optional(),
   reason: reasonSchema,
 });
 
@@ -506,7 +527,7 @@ export const adminCancelInvoice = createServerFn({ method: "POST" })
 
 export const adminSetCycleDayInput = z.object({
   tenantId: dbUuid(),
-  nextDueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Data inválida."),
+  nextDueDate: dateStrSchema,
   reason: reasonSchema,
 });
 
@@ -750,7 +771,11 @@ export async function adminBillingDashboardFor(ctx: ServerContext): Promise<Admi
   const monthEndExclusiveISO = parseBrtDayStart(`${nextYyyyMm(yyyyMm)}-01`).toISOString();
   const in5Days = addDaysStr(today, 5);
 
-  const [tenantsRes, tbRes, plansRes, openInvRes, paidInvRes, topupRes, reviewRes] = await Promise.all([
+  // I3: billing_invoices (open, and paid this month) and payment_charges (credit top-ups this
+  // month) can each exceed PostgREST's 1000-row cap, so they page with selectAllPages instead of
+  // a single `.select()` that would silently drop rows past it. `needsReview` only needs a
+  // count, so it asks Postgres for one (`count: "exact", head: true`) instead of fetching rows.
+  const [tenantsRes, tbRes, plansRes, openInvPaged, paidInvPaged, topupPaged, reviewRes] = await Promise.all([
     sb.from("tenants").select("id,plano"),
     sb
       .from("tenant_billing")
@@ -758,34 +783,52 @@ export async function adminBillingDashboardFor(ctx: ServerContext): Promise<Admi
         "tenant_id,plan_code,custom_price_cents,discount_kind,discount_value,discount_starts_on,discount_ends_on,frozen,access_state",
       ),
     sb.from("billing_plans").select("code,price_cents,exempt_all"),
-    sb.from("billing_invoices").select("amount_cents,due_date").eq("status", "open"),
-    sb
-      .from("billing_invoices")
-      .select("paid_amount_cents,paid_at")
-      .eq("status", "paid")
-      .gte("paid_at", monthStartISO)
-      .lt("paid_at", monthEndExclusiveISO),
+    selectAllPages<{ id: string; amount_cents: number | string; due_date: string }>(
+      "billing_invoices_open",
+      () => sb.from("billing_invoices").select("id,amount_cents,due_date").eq("status", "open"),
+    ),
+    selectAllPages<{ id: string; paid_amount_cents: number | string | null }>(
+      "billing_invoices_paid_this_month",
+      () =>
+        sb
+          .from("billing_invoices")
+          .select("id,paid_amount_cents,paid_at")
+          .eq("status", "paid")
+          .gte("paid_at", monthStartISO)
+          .lt("paid_at", monthEndExclusiveISO),
+    ),
+    selectAllPages<{ id: string; paid_amount_cents: number | string | null }>(
+      "payment_charges_credit_topup_this_month",
+      () =>
+        sb
+          .from("payment_charges")
+          .select("id,paid_amount_cents,credited_at")
+          .eq("kind", "credit_topup")
+          .not("credited_at", "is", null)
+          .gte("credited_at", monthStartISO)
+          .lt("credited_at", monthEndExclusiveISO),
+    ),
     sb
       .from("payment_charges")
-      .select("paid_amount_cents,credited_at")
-      .eq("kind", "credit_topup")
-      .not("credited_at", "is", null)
-      .gte("credited_at", monthStartISO)
-      .lt("credited_at", monthEndExclusiveISO),
-    sb.from("payment_charges").select("id").eq("needs_review", true).is("credited_at", null),
+      .select("id", { count: "exact", head: true })
+      .eq("needs_review", true)
+      .is("credited_at", null),
   ]);
 
-  for (const res of [tenantsRes, tbRes, plansRes, openInvRes, paidInvRes, topupRes, reviewRes]) {
+  for (const res of [tenantsRes, tbRes, plansRes, reviewRes]) {
+    if (res.error) throw new Error(res.error.message);
+  }
+  for (const res of [openInvPaged, paidInvPaged, topupPaged]) {
     if (res.error) throw new Error(res.error.message);
   }
 
   const tenants = (tenantsRes.data ?? []) as Array<{ id: string; plano: string | null }>;
   const tenantBillingRows = (tbRes.data ?? []) as TenantBillingRow[];
   const plans = (plansRes.data ?? []) as BillingPlanRow[];
-  const openInvoices = (openInvRes.data ?? []) as Array<{ amount_cents: number | string; due_date: string }>;
-  const paidInvoices = (paidInvRes.data ?? []) as Array<{ paid_amount_cents: number | string | null }>;
-  const topups = (topupRes.data ?? []) as Array<{ paid_amount_cents: number | string | null }>;
-  const needsReviewRows = (reviewRes.data ?? []) as Array<{ id: string }>;
+  const openInvoices = openInvPaged.data;
+  const paidInvoices = paidInvPaged.data;
+  const topups = topupPaged.data;
+  const needsReview = reviewRes.count ?? 0;
 
   const tenantPlanoById = new Map(tenants.map((t) => [t.id, t.plano] as const));
   const plansByCode = new Map(plans.map((p) => [p.code, p] as const));
@@ -824,7 +867,7 @@ export async function adminBillingDashboardFor(ctx: ServerContext): Promise<Admi
     lockedUnpaid: byState("locked_unpaid"),
     lockedManual: byState("locked_manual"),
     frozen: byState("frozen"),
-    needsReview: needsReviewRows.length,
+    needsReview,
   };
 }
 
@@ -872,21 +915,30 @@ export async function adminTenantBillingHistoryFor(
   await assertSuperAdmin(ctx.userId);
   const sb = looseDb(supabaseAdmin);
 
+  // m5: each source is capped at the newest 200 rows in SQL instead of paged — the merged
+  // timeline only ever shows 200 items anyway, so there is no need to fetch (and page past
+  // PostgREST's 1000-row cap for) rows that would be cut before display.
   const [invRes, chargesRes, auditRes] = await Promise.all([
     sb
       .from("billing_invoices")
       .select("id,amount_cents,due_date,status,paid_at,paid_via,canceled_reason,created_at,updated_at")
-      .eq("tenant_id", input.tenantId),
+      .eq("tenant_id", input.tenantId)
+      .order("created_at", { ascending: false })
+      .limit(200),
     sb
       .from("payment_charges")
       .select("id,amount_cents,status,created_at,paid_at")
       .eq("tenant_id", input.tenantId)
-      .eq("kind", "invoice"),
+      .eq("kind", "invoice")
+      .order("created_at", { ascending: false })
+      .limit(200),
     sb
       .from("tenant_audit_logs")
       .select("id,action,metadata,actor_user_id,created_at")
       .eq("tenant_id", input.tenantId)
-      .like("action", "billing.%"),
+      .like("action", "billing.%")
+      .order("created_at", { ascending: false })
+      .limit(200),
   ]);
   for (const res of [invRes, chargesRes, auditRes]) {
     if (res.error) throw new Error(res.error.message);
@@ -998,6 +1050,8 @@ export const adminBillingMonthlyCsvInput = z.object({
   month: z.string().regex(/^\d{4}-\d{2}$/, "Mês inválido (use AAAA-MM)."),
 });
 
+// I4 (controller ruling, binding): there is no existing `receita` column, so `receita_bruta`
+// is added right before `receita_liquida`, and the header is otherwise unchanged.
 const CSV_HEADER = [
   "casa",
   "slug",
@@ -1009,6 +1063,7 @@ const CSV_HEADER = [
   "consumo_email",
   "custo_fornecedor",
   "taxa_pix",
+  "receita_bruta",
   "receita_liquida",
   "margem",
   "isenta",
@@ -1016,6 +1071,12 @@ const CSV_HEADER = [
 
 function csvText(value: string): string {
   return `"${value.replaceAll('"', '""')}"`;
+}
+
+/** I2: untrusted house/plan text (from webhooks and admin input) neutralized against CSV
+ * formula injection, then quoted. */
+function csvTextSafe(value: string): string {
+  return csvText(neutralizeCsvFormula(value));
 }
 
 export async function adminBillingMonthlyCsvFor(ctx: ServerContext, data: unknown): Promise<string> {
@@ -1027,42 +1088,10 @@ export async function adminBillingMonthlyCsvFor(ctx: ServerContext, data: unknow
   const monthStartISO = parseBrtDayStart(monthStart).toISOString();
   const monthEndExclusiveISO = parseBrtDayStart(`${nextYyyyMm(input.month)}-01`).toISOString();
 
-  const [tenantsRes, plansRes, invRes, topupRes, ledgerRes, chargesRes, demoIds] = await Promise.all([
-    sb.from("tenants").select("id,nome,slug,plano").order("nome", { ascending: true }),
-    sb.from("billing_plans").select("code,price_cents,exempt_all"),
-    sb
-      .from("billing_invoices")
-      .select("tenant_id,paid_amount_cents")
-      .eq("status", "paid")
-      .gte("paid_at", monthStartISO)
-      .lt("paid_at", monthEndExclusiveISO),
-    sb
-      .from("payment_charges")
-      .select("tenant_id,paid_amount_cents")
-      .eq("kind", "credit_topup")
-      .not("credited_at", "is", null)
-      .gte("credited_at", monthStartISO)
-      .lt("credited_at", monthEndExclusiveISO),
-    sb
-      .from("wallet_ledger")
-      .select("tenant_id,item,units,amount,provider_unit_cost,entry_type")
-      .eq("usage_month", monthStart)
-      .in("entry_type", ["usage_reservation", "usage_refund"]),
-    sb
-      .from("payment_charges")
-      .select("tenant_id,fee_cents")
-      .eq("status", "PAID")
-      .gte("paid_at", monthStartISO)
-      .lt("paid_at", monthEndExclusiveISO),
-    listDemoTenantIds(),
-  ]);
-  for (const res of [tenantsRes, plansRes, invRes, topupRes, ledgerRes, chargesRes]) {
-    if (res.error) throw new Error(res.error.message);
-  }
-
   type CsvTenantRow = { id: string; nome: string | null; slug: string | null; plano: string | null };
-  type CsvAmountRow = { tenant_id: string; paid_amount_cents: number | string | null };
+  type CsvAmountRow = { id: string; tenant_id: string; paid_amount_cents: number | string | null };
   type CsvLedgerRow = {
+    id: string;
     tenant_id: string;
     item: string | null;
     units: number | string | null;
@@ -1070,7 +1099,54 @@ export async function adminBillingMonthlyCsvFor(ctx: ServerContext, data: unknow
     provider_unit_cost: number | string | null;
     entry_type: string;
   };
-  type CsvFeeRow = { tenant_id: string; fee_cents: number | string | null };
+  type CsvFeeRow = { id: string; tenant_id: string; fee_cents: number | string | null };
+
+  // I3: billing_invoices, payment_charges and wallet_ledger can each exceed PostgREST's
+  // 1000-row cap for a busy month, so they page with selectAllPages instead of a single
+  // `.select()` that would silently drop rows past it (and under-count the CSV).
+  const [tenantsRes, plansRes, invPaged, topupPaged, ledgerPaged, chargesPaged, demoIds] = await Promise.all([
+    sb.from("tenants").select("id,nome,slug,plano").order("nome", { ascending: true }),
+    sb.from("billing_plans").select("code,price_cents,exempt_all"),
+    selectAllPages<CsvAmountRow>("billing_invoices_paid_csv", () =>
+      sb
+        .from("billing_invoices")
+        .select("id,tenant_id,paid_amount_cents")
+        .eq("status", "paid")
+        .gte("paid_at", monthStartISO)
+        .lt("paid_at", monthEndExclusiveISO),
+    ),
+    selectAllPages<CsvAmountRow>("payment_charges_credit_topup_csv", () =>
+      sb
+        .from("payment_charges")
+        .select("id,tenant_id,paid_amount_cents")
+        .eq("kind", "credit_topup")
+        .not("credited_at", "is", null)
+        .gte("credited_at", monthStartISO)
+        .lt("credited_at", monthEndExclusiveISO),
+    ),
+    selectAllPages<CsvLedgerRow>("wallet_ledger_csv", () =>
+      sb
+        .from("wallet_ledger")
+        .select("id,tenant_id,item,units,amount,provider_unit_cost,entry_type")
+        .eq("usage_month", monthStart)
+        .in("entry_type", ["usage_reservation", "usage_refund"]),
+    ),
+    selectAllPages<CsvFeeRow>("payment_charges_fee_csv", () =>
+      sb
+        .from("payment_charges")
+        .select("id,tenant_id,fee_cents")
+        .eq("status", "PAID")
+        .gte("paid_at", monthStartISO)
+        .lt("paid_at", monthEndExclusiveISO),
+    ),
+    listDemoTenantIds(),
+  ]);
+  for (const res of [tenantsRes, plansRes]) {
+    if (res.error) throw new Error(res.error.message);
+  }
+  for (const res of [invPaged, topupPaged, ledgerPaged, chargesPaged]) {
+    if (res.error) throw new Error(res.error.message);
+  }
 
   const plansByCode = new Map(((plansRes.data ?? []) as BillingPlanRow[]).map((p) => [p.code, p] as const));
   const demoSet = new Set(demoIds);
@@ -1080,14 +1156,20 @@ export async function adminBillingMonthlyCsvFor(ctx: ServerContext, data: unknow
   }
 
   const tenantRows = (tenantsRes.data ?? []) as CsvTenantRow[];
-  const invoiceRows = (invRes.data ?? []) as CsvAmountRow[];
-  const topupRows = (topupRes.data ?? []) as CsvAmountRow[];
-  const ledgerRows = (ledgerRes.data ?? []) as CsvLedgerRow[];
-  const chargeRows = (chargesRes.data ?? []) as CsvFeeRow[];
+  const invoiceRows = invPaged.data;
+  const topupRows = topupPaged.data;
+  const ledgerRows = ledgerPaged.data;
+  const chargeRows = chargesPaged.data;
 
   type CsvRow = { cells: string[]; isenta: boolean };
   const rows: CsvRow[] = [];
 
+  // I4 (controller ruling, binding) — formulas for the row below, all in R$ (not cents):
+  //   receita          = mensalidade_paga + consumo_sms + consumo_voz + consumo_email
+  //                      (creditos_comprados is an informational cash column, not revenue)
+  //   receita_liquida  = receita − custo_fornecedor − taxa_pix
+  //   margem           = receita_liquida / receita × 100, a plain number (comma decimals, no
+  //                      "%"); left empty when receita is 0 to avoid a division by zero.
   for (const tenant of tenantRows) {
     if (demoSet.has(tenant.id)) continue;
     const plan = tenant.plano ? plansByCode.get(tenant.plano) : undefined;
@@ -1132,16 +1214,16 @@ export async function adminBillingMonthlyCsvFor(ctx: ServerContext, data: unknow
     const mensalidadeReais = mensalidadeCents / 100;
     const creditosReais = creditosCents / 100;
     const taxaPixReais = taxaPixCents / 100;
-    const totalRevenue = mensalidadeReais + creditosReais;
-    const receitaLiquida = totalRevenue - custoFornecedor - taxaPixReais;
-    const margem = totalRevenue > 0 ? (receitaLiquida / totalRevenue) * 100 : 0;
+    const receitaBrutaReais = mensalidadeReais + consumoSms + consumoVoz + consumoEmail;
+    const receitaLiquida = receitaBrutaReais - custoFornecedor - taxaPixReais;
+    const margemText = receitaBrutaReais !== 0 ? brlReais((receitaLiquida / receitaBrutaReais) * 100) : "";
 
     rows.push({
       isenta,
       cells: [
-        csvText(tenant.nome ?? ""),
-        csvText(tenant.slug ?? ""),
-        csvText(plan?.code ?? tenant.plano ?? ""),
+        csvTextSafe(tenant.nome ?? ""),
+        csvTextSafe(tenant.slug ?? ""),
+        csvTextSafe(plan?.code ?? tenant.plano ?? ""),
         brlReais(mensalidadeReais),
         brlReais(creditosReais),
         brlReais(consumoSms),
@@ -1149,8 +1231,9 @@ export async function adminBillingMonthlyCsvFor(ctx: ServerContext, data: unknow
         brlReais(consumoEmail),
         brlReais(custoFornecedor),
         brlReais(taxaPixReais),
+        brlReais(receitaBrutaReais),
         brlReais(receitaLiquida),
-        brlReais(margem),
+        margemText,
         isenta ? "sim" : "não",
       ],
     });

@@ -53,7 +53,7 @@ beforeEach(() => {
   fake.admin.onRpc("is_super_admin", (args) => ({ data: args._user_id === SUPER_ADMIN, error: null }));
 
   userDb = createFakeDb();
-  cancelOpenInvoiceCharges.mockReset().mockResolvedValue(undefined);
+  cancelOpenInvoiceCharges.mockReset().mockResolvedValue({ canceled: 0, failed: [] });
   sendBillingEmail.mockReset().mockResolvedValue({ sent: true, recipients: 2 });
 });
 
@@ -178,7 +178,30 @@ describe("adminApplyInvoiceDiscountFor", () => {
     expect(cancelOpenInvoiceCharges).toHaveBeenCalledTimes(1);
   });
 
-  it("still applies the discount and logs the failure in the audit metadata when the Upper cancel fails", async () => {
+  it("still applies the discount and logs the per-charge Upper failure in the audit metadata (audit truth)", async () => {
+    cancelOpenInvoiceCharges.mockResolvedValueOnce({
+      canceled: 0,
+      failed: [{ chargeId: "charge-1", error: "upper rejected cancel" }],
+    });
+    const result = await adminApplyInvoiceDiscountFor(ctxFor(SUPER_ADMIN), {
+      invoiceId: INVOICE,
+      kind: "percent",
+      value: 10,
+      reason: "negociação comercial",
+    });
+    expect(result).toMatchObject({ tenant_id: TENANT });
+    const metadata = fake.admin.rows("tenant_audit_logs")[0].metadata as Record<string, unknown>;
+    // ok must be false — the action still completed, but the audit truthfully
+    // records that Upper rejected the cancel (I1: no more ok:true on failure).
+    expect(metadata.pixCancel).toMatchObject({
+      attempted: true,
+      ok: false,
+      canceled: 0,
+      failed: [{ chargeId: "charge-1", error: "upper rejected cancel" }],
+    });
+  });
+
+  it("still completes and marks pixCancel.ok false when cancelOpenInvoiceCharges itself throws", async () => {
     cancelOpenInvoiceCharges.mockRejectedValueOnce(new Error("upper down"));
     const result = await adminApplyInvoiceDiscountFor(ctxFor(SUPER_ADMIN), {
       invoiceId: INVOICE,
@@ -188,7 +211,7 @@ describe("adminApplyInvoiceDiscountFor", () => {
     });
     expect(result).toMatchObject({ tenant_id: TENANT });
     const metadata = fake.admin.rows("tenant_audit_logs")[0].metadata as Record<string, unknown>;
-    expect(metadata.pixCancel).toMatchObject({ attempted: true, ok: false, error: "upper down" });
+    expect(metadata.pixCancel).toMatchObject({ attempted: true, ok: false });
   });
 
   it("translates amount_below_pix_minimum using the SQL DETAIL text", async () => {
@@ -484,13 +507,93 @@ describe("adminBillingMonthlyCsvFor", () => {
 
     const csv = await adminBillingMonthlyCsvFor(ctxFor(SUPER_ADMIN), { month: "2026-10" });
     const lines = csv.replace(/^\uFEFF/, "").split("\n");
+    // I4: no pre-existing `receita` column, so `receita_bruta` is added right before
+    // `receita_liquida`; the rest of the header is unchanged.
     expect(lines[0]).toBe(
-      "casa;slug;plano;mensalidade_paga;creditos_comprados;consumo_sms;consumo_voz;consumo_email;custo_fornecedor;taxa_pix;receita_liquida;margem;isenta",
+      "casa;slug;plano;mensalidade_paga;creditos_comprados;consumo_sms;consumo_voz;consumo_email;custo_fornecedor;taxa_pix;receita_bruta;receita_liquida;margem;isenta",
     );
     expect(lines[1]).toContain('"Casa Paga"');
     expect(lines[1].endsWith(";não")).toBe(true);
     expect(lines[2]).toContain('"Casa Isenta"');
     expect(lines[2].endsWith(";sim")).toBe(true);
+  });
+
+  it("computes receita_bruta/receita_liquida/margem per ruling I4, excluding creditos from receita", async () => {
+    fake.admin.rows("tenants").push({ id: TENANT, nome: "Casa Paga", slug: "casa-paga", plano: "crm_unico" });
+    fake.admin.rows("billing_plans").push({ code: "crm_unico", price_cents: 400000, exempt_all: false });
+    fake.admin.rows("billing_invoices").push({
+      id: "inv-1",
+      tenant_id: TENANT,
+      status: "paid",
+      paid_amount_cents: 400000, // R$ 4000,00 mensalidade
+      paid_at: "2026-10-10T12:00:00Z",
+    });
+    // Large, unrelated credit top-up: must NOT count toward receita/margem (I4 ruling), only
+    // toward the informational creditos_comprados column.
+    fake.admin.rows("payment_charges").push({
+      id: "charge-topup-1",
+      tenant_id: TENANT,
+      kind: "credit_topup",
+      paid_amount_cents: 900000,
+      credited_at: "2026-10-05T12:00:00Z",
+    });
+
+    const csv = await adminBillingMonthlyCsvFor(ctxFor(SUPER_ADMIN), { month: "2026-10" });
+    const cells = csv.replace(/^\uFEFF/, "").split("\n")[1].split(";");
+    // casa;slug;plano;mensalidade_paga;creditos_comprados;consumo_sms;consumo_voz;consumo_email;
+    // custo_fornecedor;taxa_pix;receita_bruta;receita_liquida;margem;isenta
+    expect(cells[3]).toBe("4000,00"); // mensalidade_paga
+    expect(cells[4]).toBe("9000,00"); // creditos_comprados (informational only)
+    expect(cells[10]).toBe("4000,00"); // receita_bruta = mensalidade (no consumo/fee here)
+    expect(cells[11]).toBe("4000,00"); // receita_liquida = receita_bruta (no custo/taxa here)
+    expect(cells[12]).toBe("100,00"); // margem = receita_liquida / receita_bruta * 100, no "%"
+  });
+
+  it("leaves margem empty when receita is 0, instead of dividing by zero", async () => {
+    fake.admin.rows("tenants").push({ id: TENANT, nome: "Casa Sem Receita", slug: "casa-x", plano: "crm_unico" });
+    fake.admin.rows("billing_plans").push({ code: "crm_unico", price_cents: 400000, exempt_all: false });
+
+    const csv = await adminBillingMonthlyCsvFor(ctxFor(SUPER_ADMIN), { month: "2026-10" });
+    const cells = csv.replace(/^\uFEFF/, "").split("\n")[1].split(";");
+    expect(cells[10]).toBe("0,00"); // receita_bruta
+    expect(cells[12]).toBe(""); // margem: empty, not NaN or "0,00"
+  });
+
+  it("neutralizes CSV formula injection in casa/slug/plano (I2)", async () => {
+    fake.admin.rows("tenants").push({
+      id: TENANT,
+      nome: '=HYPERLINK("http://evil")',
+      slug: "+cmd|'calc'!A0",
+      plano: "crm_unico",
+    });
+    fake.admin.rows("billing_plans").push({ code: "crm_unico", price_cents: 400000, exempt_all: false });
+
+    const csv = await adminBillingMonthlyCsvFor(ctxFor(SUPER_ADMIN), { month: "2026-10" });
+    const line = csv.replace(/^\uFEFF/, "").split("\n")[1];
+    // neutralizeCsvFormula prefixes a leading apostrophe before the cell is quoted, so a
+    // spreadsheet never runs the house's name/slug as a formula.
+    expect(line).toContain('"\'=HYPERLINK(""http://evil"")"');
+    expect(line).toContain("\"'+cmd|'calc'!A0\"");
+  });
+
+  it("sums a paginated source past PostgREST's 1000-row cap (I3)", async () => {
+    fake.admin.rows("tenants").push({ id: TENANT, nome: "Casa Grande", slug: "casa-grande", plano: "crm_unico" });
+    fake.admin.rows("billing_plans").push({ code: "crm_unico", price_cents: 400000, exempt_all: false });
+    const invoices = fake.admin.rows("billing_invoices");
+    for (let i = 0; i < 1500; i += 1) {
+      invoices.push({
+        id: `inv-${String(i).padStart(5, "0")}`,
+        tenant_id: TENANT,
+        status: "paid",
+        paid_amount_cents: 100,
+        paid_at: "2026-10-10T12:00:00Z",
+      });
+    }
+
+    const csv = await adminBillingMonthlyCsvFor(ctxFor(SUPER_ADMIN), { month: "2026-10" });
+    const cells = csv.replace(/^\uFEFF/, "").split("\n")[1].split(";");
+    // 1500 rows * R$ 1,00 = R$ 1500,00 — if capped at 1000 rows this would read 1000,00.
+    expect(cells[3]).toBe("1500,00");
   });
 
   it("excludes demo tenants entirely", async () => {

@@ -532,7 +532,7 @@ describe("cancelOpenInvoiceCharges", () => {
       amount_cents: 400000,
     });
 
-    await cancelOpenInvoiceCharges("invoice-1");
+    const result = await cancelOpenInvoiceCharges("invoice-1");
 
     expect(cancelUpperCharge).toHaveBeenCalledTimes(1);
     expect(cancelUpperCharge).toHaveBeenCalledWith("bl-inv-invoice-1-1");
@@ -540,10 +540,34 @@ describe("cancelOpenInvoiceCharges", () => {
     expect(charge.status).toBe("CANCELLED");
     const paidCharge = fake.admin.rows("payment_charges").find((r) => r.id === "charge-paid")!;
     expect(paidCharge.status).toBe("PAID");
+    expect(result).toEqual({ canceled: 1, failed: [] });
   });
 
   it("does nothing when there is no open charge", async () => {
-    await expect(cancelOpenInvoiceCharges("invoice-without-charges")).resolves.toBeUndefined();
+    await expect(cancelOpenInvoiceCharges("invoice-without-charges")).resolves.toEqual({
+      canceled: 0,
+      failed: [],
+    });
     expect(cancelUpperCharge).not.toHaveBeenCalled();
+  });
+
+  it("reports a per-charge Upper failure instead of swallowing it", async () => {
+    fake.admin.rows("payment_charges").push({
+      id: "charge-2",
+      tenant_id: TENANT,
+      kind: "invoice",
+      ref_id: "invoice-2",
+      external_id: "bl-inv-invoice-2-1",
+      status: "ACTIVE",
+      amount_cents: 400000,
+    });
+    cancelUpperCharge.mockRejectedValueOnce(new Error("upper rejected cancel"));
+
+    const result = await cancelOpenInvoiceCharges("invoice-2");
+
+    expect(result).toEqual({
+      canceled: 0,
+      failed: [{ chargeId: "charge-2", error: "upper rejected cancel" }],
+    });
   });
 });

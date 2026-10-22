@@ -5,7 +5,11 @@
 
 type Row = Record<string, unknown>;
 type Filter = (row: Row) => boolean;
-type Result = { data: unknown; error: { message: string; code?: string } | null };
+type Result = {
+  data: unknown;
+  error: { message: string; code?: string } | null;
+  count?: number | null;
+};
 
 export type FakeDb = ReturnType<typeof createFakeDb>;
 
@@ -44,6 +48,8 @@ export function createFakeDb(options: { unique?: Record<string, string[][]> } = 
     let upsertOpts: { onConflict?: string; ignoreDuplicates?: boolean } = {};
     let limit: number | null = null;
     let returning = false;
+    let selectCount: "exact" | null = null;
+    let selectHead = false;
     const orderBys: Array<{ col: string; ascending: boolean; nullsFirst: boolean }> = [];
 
     const run = (): Result => {
@@ -104,12 +110,17 @@ export function createFakeDb(options: { unique?: Record<string, string[][]> } = 
           return 0;
         });
       }
-      return { data: limit === null ? ordered : ordered.slice(0, limit), error: null };
+      const limited = limit === null ? ordered : ordered.slice(0, limit);
+      const result: Result = { data: selectHead ? null : limited, error: null };
+      if (selectCount === "exact") result.count = matched.length;
+      return result;
     };
 
     const builder: any = {
-      select: () => {
+      select: (_columns?: string, options?: { count?: "exact"; head?: boolean }) => {
         if (op !== "select") returning = true;
+        if (options?.count) selectCount = options.count;
+        if (options?.head) selectHead = true;
         return builder;
       },
       insert: (value: Row | Row[]) => {
