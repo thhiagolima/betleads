@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Outlet, useLocation } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { BarChart3, Link2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,6 +8,13 @@ import { getLinkTrackingOverview } from "@/lib/shortio.functions";
 export const Route = createFileRoute("/links")({ component: LinksPage });
 
 function LinksPage() {
+  // /links é pai de /links/configuracoes: nas rotas filhas renderiza só a filha.
+  const pathname = useLocation({ select: (l) => l.pathname });
+  if (pathname !== "/links") return <Outlet />;
+  return <LinksOverview />;
+}
+
+function LinksOverview() {
   const overview = useQuery({
     queryKey: ["shortio-overview"],
     queryFn: () => getLinkTrackingOverview(),
@@ -38,9 +45,15 @@ function LinksPage() {
         <CardContent>
           {overview.isLoading ? (
             <p>Carregando métricas…</p>
+          ) : overview.isError ? (
+            <p className="text-sm text-destructive">
+              Não foi possível carregar as métricas de links.
+            </p>
+          ) : !data?.rows.length ? (
+            <p className="text-sm text-muted-foreground">Sem links enviados no período.</p>
           ) : (
             <div className="space-y-2">
-              {data?.rows.map((row) => (
+              {data.rows.map((row) => (
                 <div
                   key={`${row.channel}:${row.sourceType}`}
                   className="flex justify-between rounded border p-3 text-sm"
@@ -52,7 +65,7 @@ function LinksPage() {
                     {row.clicks} cliques / {row.sent} envios ({(row.ctr * 100).toFixed(1)}%)
                   </span>
                 </div>
-              )) ?? <p>Sem links enviados no período.</p>}
+              ))}
             </div>
           )}
         </CardContent>

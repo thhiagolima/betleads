@@ -35,7 +35,7 @@ const COLUMNS: Array<{ key: SortKey; label: string; info?: string; align?: "left
   { key: "clickRate", label: "Cliques", info: "SMS clicados e a taxa sobre os enviados." },
   {
     key: "directRevenue",
-    label: "Conversão por clique",
+    label: "Recuperado pelo CRM",
     info: "Jogadores que clicaram e depositaram em até 7 dias, e o valor. A barra compara com a origem que mais converteu.",
     align: "left",
   },
@@ -43,12 +43,12 @@ const COLUMNS: Array<{ key: SortKey; label: string; info?: string; align?: "left
   {
     key: "clickRoi",
     label: "Retorno",
-    info: "Valor convertido ÷ custo. Verde paga o envio (1x ou mais), vermelho não paga. Menos de 5 convertidos: amostra pequena.",
+    info: "Recuperado pelo CRM ÷ custo. Verde paga o envio (1x ou mais), vermelho não paga. Menos de 5 convertidos: amostra pequena.",
   },
   {
     key: "influencedPlayers",
-    label: "Recuperados",
-    info: "Visão ampla: parados há 2+ dias que voltaram até 3 dias após um SMS, com ou sem clique. Não some com a conversão por clique.",
+    label: "Recuperados (visão ampla)",
+    info: "Parados há 2+ dias que voltaram até 3 dias após um SMS, com ou sem clique. Não some com o Recuperado pelo CRM.",
   },
 ];
 

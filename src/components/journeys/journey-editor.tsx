@@ -37,6 +37,8 @@ import { supabase } from "@/integrations/supabase/client";
 import type { JourneyStepInput } from "@/lib/journeys.shared";
 import { Button } from "@/components/ui/button";
 import {
+  INACTIVITY_FIELDS,
+  INACTIVITY_TRIGGER_NAME,
   emailStepFromConfig,
   emailStepIdsForConfig,
   fromBrtInput,
@@ -372,6 +374,15 @@ export function JourneyEditor({
       if (trigger === "nivel_alterado" && !String(triggerConfig.level ?? "")) {
         throw new Error("Selecione o nível que inicia esta jornada.");
       }
+      if (trigger === "inactivity") {
+        const hours = Number(triggerConfig.hours);
+        if (!(String(triggerConfig.field ?? "") in INACTIVITY_FIELDS)) {
+          throw new Error("Escolha a atividade que a jornada observa.");
+        }
+        if (!Number.isInteger(hours) || hours < 1 || hours > 8760) {
+          throw new Error("Informe as horas sem atividade (de 1 a 8760).");
+        }
+      }
       const body = steps.flatMap((s): JourneyStepInput[] =>
         s.kind === "wait"
           ? [{ step_type: "wait", config: { delay_seconds: Math.max(60, s.seconds) } }]
@@ -595,6 +606,16 @@ export function JourneyEditor({
             onChange={(e) => {
               const nextTrigger = e.target.value;
               setTrigger(nextTrigger);
+              if (nextTrigger === "inactivity") {
+                setTriggerConfig((current) => ({
+                  ...current,
+                  field:
+                    String(current.field ?? "") in INACTIVITY_FIELDS
+                      ? current.field
+                      : "ultimo_login",
+                  hours: Number(current.hours) > 0 ? current.hours : 168,
+                }));
+              }
               if (nextTrigger === "nivel_alterado") {
                 setConflictFamily("progressao_niveis");
                 setConflictPolicy("exclusive");
@@ -604,6 +625,7 @@ export function JourneyEditor({
             }}
           >
             <option value="manual">Entrada manual</option>
+            <option value="inactivity">{INACTIVITY_TRIGGER_NAME}</option>
             {Object.entries(TRIGGER_NAMES).map(([value, label]) => (
               <option key={value} value={value}>
                 {label}
@@ -611,6 +633,47 @@ export function JourneyEditor({
             ))}
           </select>
         </div>
+        {trigger === "inactivity" && (
+          <section className="rounded-lg border border-primary/30 bg-primary/5 p-4 text-sm">
+            <p className="font-medium">{INACTIVITY_TRIGGER_NAME}</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              O jogador entra quando passa este tempo sem a atividade escolhida.
+            </p>
+            <div className="mt-3 grid max-w-sm grid-cols-2 gap-2">
+              <label className="text-sm font-medium">
+                Sem atividade em
+                <select
+                  className="mt-1 flex h-10 w-full rounded-md border bg-background px-3 text-sm"
+                  value={String(triggerConfig.field ?? "ultimo_login")}
+                  onChange={(event) =>
+                    setTriggerConfig((current) => ({ ...current, field: event.target.value }))
+                  }
+                >
+                  {Object.entries(INACTIVITY_FIELDS).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-sm font-medium">
+                Horas
+                <Input
+                  type="number"
+                  min={1}
+                  max={8760}
+                  value={String(triggerConfig.hours ?? "")}
+                  onChange={(event) =>
+                    setTriggerConfig((current) => ({
+                      ...current,
+                      hours: event.target.value === "" ? "" : Number(event.target.value),
+                    }))
+                  }
+                />
+              </label>
+            </div>
+          </section>
+        )}
         {trigger === "nivel_alterado" && (
           <section className="rounded-lg border border-primary/30 bg-primary/5 p-4 text-sm">
             <JourneyFieldTitle

@@ -192,37 +192,94 @@ export const adminPlatformMetrics = createServerFn({ method: "POST" })
   });
 
 // ─── Preços ─────────────────────────────────────────────────────────────────
+// Global default prices live in `billing_price_book` (PG1 Task 2): the
+// current (latest `valid_from`) row per item. Per-tenant overrides are a
+// separate, item-scoped dialog — see `src/lib/billing/billing.functions.ts`
+// (`adminSetTenantPrice`/`adminClearTenantPrice`).
+const BILLING_ITEMS = ["sms", "voice_30s", "email"] as const;
+
+/** Body of `getPricing`, exported so the "latest valid_from <= now()" rule is directly testable. */
+export async function getPricingFor(userId: string) {
+  await assertSuperAdmin(userId);
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  // Only prices already in effect: a future-dated `valid_from` is not the
+  // current price, even if it's the most recently inserted row.
+  const { data, error } = await supabaseAdmin
+    .from("billing_price_book")
+    .select("item, unit_price, provider_unit_cost, free_monthly_units, created_at, valid_from")
+    .lte("valid_from", new Date().toISOString())
+    .order("valid_from", { ascending: false });
+  if (error) throw new Error(error.message);
+  // Most recent (still-current) row per item (the table keeps full history by valid_from).
+  const latestByItem = new Map<string, (typeof data)[number]>();
+  for (const row of data ?? []) {
+    if (!latestByItem.has(row.item)) latestByItem.set(row.item, row);
+  }
+  const pricing = BILLING_ITEMS.map(
+    (item) =>
+      latestByItem.get(item) ?? {
+        item,
+        unit_price: 0,
+        provider_unit_cost: null,
+        free_monthly_units: 0,
+        created_at: null,
+      },
+  );
+  return { pricing };
+}
+
 export const getPricing = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    await assertSuperAdmin(context.userId);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data, error } = await supabaseAdmin
-      .from("platform_pricing")
-      .select("channel, price_per_unit, unit_label, updated_at")
-      .order("channel");
-    if (error) throw new Error(error.message);
-    return { pricing: data ?? [] };
-  });
+  .handler(async ({ context }) => getPricingFor(context.userId));
 
 const pricingInput = z.object({
-  channel: z.enum(["sms", "call", "email"]),
-  price_per_unit: z.number().min(0).max(1000),
+  item: z.enum(BILLING_ITEMS),
+  unit_price: z.number().min(0).max(1000),
+  provider_unit_cost: z.number().min(0).max(1000).optional().nullable(),
+  free_monthly_units: z.number().int().min(0).max(10_000_000).optional(),
 });
+
+type PricingServerContext = {
+  userId: string;
+  // Loose on purpose: the real runtime value is the per-request, user-scoped
+  // Supabase client the auth middleware attaches (never `supabaseAdmin`).
+  supabase: unknown;
+};
+
+type LooseRpcClient = {
+  rpc: (
+    fn: string,
+    args?: Record<string, unknown>,
+  ) => Promise<{ error: { message: string } | null }>;
+};
+
+/**
+ * Body of `setPricing`, exported so the "must run as the caller, not
+ * supabaseAdmin" fix is directly unit-testable. `admin_set_price` checks
+ * `is_super_admin()` with no service_role bypass, so it must run through
+ * `ctx.supabase` (the caller's own client) — through `supabaseAdmin`,
+ * `auth.uid()` is null, `is_super_admin()` is false, and the call fails with
+ * `forbidden` even for a real super admin.
+ */
+export async function setPricingFor(
+  ctx: PricingServerContext,
+  data: z.infer<typeof pricingInput>,
+) {
+  await assertSuperAdmin(ctx.userId);
+  const { error } = await (ctx.supabase as LooseRpcClient).rpc("admin_set_price", {
+    _item: data.item,
+    _unit_price: data.unit_price,
+    _provider_unit_cost: data.provider_unit_cost ?? undefined,
+    _free_monthly_units: data.free_monthly_units ?? 0,
+  });
+  if (error) throw new Error(error.message);
+  return { ok: true };
+}
 
 export const setPricing = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => pricingInput.parse(data))
-  .handler(async ({ data, context }) => {
-    await assertSuperAdmin(context.userId);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { error } = await supabaseAdmin
-      .from("platform_pricing")
-      .update({ price_per_unit: data.price_per_unit, updated_at: new Date().toISOString() })
-      .eq("channel", data.channel);
-    if (error) throw new Error(error.message);
-    return { ok: true };
-  });
+  .handler(async ({ data, context }) => setPricingFor(context as PricingServerContext, data));
 
 // ─── Criar novo usuário (com tenant próprio) ────────────────────────────────
 const createUserInput = z.object({

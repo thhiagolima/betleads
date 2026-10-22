@@ -196,18 +196,18 @@ export function DashboardTab() {
           ) : (
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={data.by_day}>
-                <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" />
+                <CartesianGrid stroke="var(--color-border)" strokeDasharray="3 3" />
                 <XAxis
                   dataKey="date"
                   tickFormatter={(v) => formatDate(v + "T00:00:00", sameDay)}
-                  stroke="hsl(var(--muted-foreground))"
+                  stroke="var(--color-muted-foreground)"
                   fontSize={11}
                 />
-                <YAxis stroke="hsl(var(--muted-foreground))" fontSize={11} allowDecimals={false} />
+                <YAxis stroke="var(--color-muted-foreground)" fontSize={11} allowDecimals={false} />
                 <Tooltip
                   contentStyle={{
-                    background: "hsl(var(--card))",
-                    border: "1px solid hsl(var(--border))",
+                    background: "var(--color-popover)",
+                    border: "1px solid var(--color-border)",
                     borderRadius: 8,
                     fontSize: 12,
                   }}
@@ -217,7 +217,7 @@ export function DashboardTab() {
                 <Line
                   type="monotone"
                   dataKey="total"
-                  stroke="hsl(var(--primary))"
+                  stroke="var(--color-primary)"
                   strokeWidth={2}
                   dot={false}
                   name="Total"
@@ -225,7 +225,7 @@ export function DashboardTab() {
                 <Line
                   type="monotone"
                   dataKey="answered"
-                  stroke="#34d399"
+                  stroke="var(--color-chart-4)"
                   strokeWidth={2}
                   dot={false}
                   name="Atendidas"
@@ -233,7 +233,7 @@ export function DashboardTab() {
                 <Line
                   type="monotone"
                   dataKey="failed"
-                  stroke="#fb7185"
+                  stroke="var(--color-destructive)"
                   strokeWidth={2}
                   dot={false}
                   name="Falhas"

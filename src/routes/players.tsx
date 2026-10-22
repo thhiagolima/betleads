@@ -80,8 +80,11 @@ import {
   getPlayersPage,
   getPlayersFilteredExternalIds,
   getPlayersFilteredSmsAudience,
+  getPlayersFilteredExport,
   type PlayerRow,
 } from "@/lib/players-list.functions";
+import { levelForTotal } from "@/lib/player-level";
+import { playersCsv } from "@/lib/players-csv";
 import { getPlayerFilterFacets } from "@/lib/player-filter-facets.functions";
 import { getGamificationData, type LevelSlug } from "@/lib/gamification.functions";
 import {
@@ -321,14 +324,7 @@ function getPlayerLevel(
   player: Player,
   settings: PlayerGamificationSettings = DEFAULT_PLAYER_GAMIFICATION,
 ): LevelSlug {
-  const total = Number(player.total_depositado ?? 0);
-  const { thresholds } = settings;
-  if (total >= thresholds.black) return "black";
-  if (total >= thresholds.diamond) return "diamond";
-  if (total >= thresholds.gold) return "gold";
-  if (total >= thresholds.silver) return "silver";
-  if (total >= thresholds.bronze) return "bronze";
-  return "novice";
+  return levelForTotal(player.total_depositado, settings.thresholds);
 }
 
 function daysSinceIso(value: string | null) {
@@ -1031,69 +1027,67 @@ function PlayersPage() {
     );
   };
 
-  const exportCsv = () => {
-    const rows = paged;
-    const headers = [
-      "nome",
-      "telefone",
-      "email",
-      "player_external_id",
-      "origem",
-      "expert",
-      "status",
-      "vip",
-      "ultimo_login",
-      "ultimo_jogo",
-      "ultimo_deposito",
-      "total_depositado",
-      "total_sacado",
-      "saldo",
-      "lucro",
-      "tags",
-    ];
-    const esc = (v: unknown) => {
-      const s = v === null || v === undefined ? "" : String(v);
-      return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-    };
-    const lines = [headers.join(",")];
-    for (const p of rows) {
-      const lucro = Number(p.total_depositado) - Number(p.total_sacado);
-      const saldo = Number(p.saldo_carteira ?? 0) + Number(p.saldo_bonus ?? 0);
-      lines.push(
-        [
-          p.nome,
-          p.telefone,
-          p.email,
-          p.player_external_id,
-          p.origem,
-          p.expert,
-          p.status,
-          p.vip ? "sim" : "nao",
-          p.ultimo_login,
-          p.ultimo_jogo,
-          p.ultimo_deposito,
-          p.total_depositado,
-          p.total_sacado,
-          saldo,
-          lucro,
-          (p.tags ?? []).join("|"),
-        ]
-          .map(esc)
-          .join(","),
+  // C-06: exporta o filtro inteiro, não só a página visível.
+  const fetchFilteredExport = useServerFn(getPlayersFilteredExport);
+  const [exportingCsv, setExportingCsv] = useState(false);
+  const exportCsv = async () => {
+    setExportingCsv(true);
+    try {
+      let rows: Player[] | Awaited<ReturnType<typeof fetchFilteredExport>>["rows"];
+      let truncatedNote = "";
+      if (isLocalAlertFilter) {
+        // Os 4 alertas calculados no navegador já têm a lista completa em memória.
+        rows = localAlertData?.rows ?? [];
+      } else {
+        const res = await fetchFilteredExport({
+          data: {
+            filter,
+            behaviorFilters,
+            behaviorOperator,
+            gamificationStatus: selectedSituation,
+            gamificationLevel: selectedLevel,
+            search,
+            idsIn: alertIdsForFilter,
+            dateField: hasDateRange ? dateField : null,
+            dateFrom: dateFromIso,
+            dateTo: dateToIso,
+            sortKey: sort?.key ?? defaultSortKey(filter),
+            sortDir: sort?.dir ?? "desc",
+          },
+        });
+        rows = res.rows;
+        if (res.truncated) {
+          truncatedNote = ` Limite de ${res.rows.length.toLocaleString("pt-BR")} de ${res.total.toLocaleString("pt-BR")} jogadores atingido; refine o filtro para exportar o resto.`;
+        }
+      }
+      if (rows.length === 0) {
+        toast.error("Nenhum jogador para exportar nesse filtro.");
+        return;
+      }
+      const csv = playersCsv(
+        rows,
+        gamification?.settings?.thresholds ?? DEFAULT_PLAYER_GAMIFICATION.thresholds,
       );
+      const blob = new Blob(["﻿" + csv], {
+        type: "text/csv;charset=utf-8;",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const ts = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = `jogadores_${filter}_${ts}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      const message = `${rows.length.toLocaleString("pt-BR")} jogadores exportados.${truncatedNote}`;
+      if (truncatedNote) toast.warning(message);
+      else toast.success(message);
+    } catch (e: unknown) {
+      toast.error(getErrorMessage(e, "Erro ao exportar CSV"));
+    } finally {
+      setExportingCsv(false);
     }
-    const blob = new Blob(["\ufeff" + lines.join("\n")], {
-      type: "text/csv;charset=utf-8;",
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    const ts = new Date().toISOString().slice(0, 10);
-    a.href = url;
-    a.download = `leads_${filter}_${ts}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
   };
 
   // ===== Copiar IDs Push (player_external_id) =====
@@ -1525,10 +1519,10 @@ function PlayersPage() {
             size="sm"
             className="h-9 px-3"
             onClick={exportCsv}
-            disabled={filteredCount === 0}
+            disabled={filteredCount === 0 || exportingCsv}
           >
             <Download className="h-4 w-4" />
-            Exportar CSV
+            {exportingCsv ? "Exportando…" : "Exportar CSV"}
           </Button>
           <Button
             size="sm"

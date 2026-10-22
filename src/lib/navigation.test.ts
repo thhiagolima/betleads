@@ -56,8 +56,14 @@ describe("active nav item", () => {
 
   it("maps routes kept out of the menu to their parent item", () => {
     expect(activeNavKey("/jornadas/123", "")).toBe("/automacoes");
-    expect(activeNavKey("/creditos-sms", "")).toBe("/sms");
     expect(activeNavKey("/relatorios/conversao", "")).toBe("/resultados");
+  });
+
+  it("lights the settings items that used to be pinned", () => {
+    expect(activeNavKey("/consentimentos", "")).toBe("/consentimentos");
+    expect(activeNavKey("/webhooks", "")).toBe("/webhooks");
+    expect(activeNavKey("/creditos-sms", "")).toBe("/creditos-sms");
+    expect(activeNavKey("/configuracoes", "")).toBe("/configuracoes");
   });
 
   it("does not light Início on other pages", () => {
@@ -68,7 +74,9 @@ describe("active nav item", () => {
   it("maps mobile tabs", () => {
     expect(activeMobileTab("/")).toBe("Início");
     expect(activeMobileTab("/players/1")).toBe("Jogadores");
-    expect(activeMobileTab("/jornadas")).toBe("Campanhas");
+    expect(activeMobileTab("/jornadas")).toBe("Ações");
+    expect(activeMobileTab("/campanhas")).toBe("Ações");
+    expect(activeMobileTab("/gamificacao")).toBe("Jogadores");
     expect(activeMobileTab("/sms")).toBeNull();
   });
 });
@@ -90,6 +98,28 @@ describe("visible sections", () => {
   it("shows Administração only to the super admin", () => {
     expect(labels("admin", false)).not.toContain("Administração");
     expect(labels("super_admin", true)).toContain("Administração");
+  });
+
+  it("ends with Configurações for everyone but the super admin, who also gets Administração", () => {
+    expect(labels("gestor", false).at(-1)).toBe("Configurações");
+    expect(labels("admin", false).at(-1)).toBe("Configurações");
+    expect(labels("super_admin", true).slice(-2)).toEqual(["Configurações", "Administração"]);
+  });
+
+  it("keeps Consentimentos with the channels", () => {
+    const canais = visibleSections("gestor", false).find((section) => section.label === "Canais");
+    const titles = canais?.items.map((item) => item.title) ?? [];
+    expect(titles.indexOf("Consentimentos")).toBe(titles.indexOf("Voz") + 1);
+  });
+
+  it("keeps parked pages out of the menu", () => {
+    const titles = visibleSections("super_admin", true)
+      .flatMap((section) =>
+        section.items.flatMap((item) => (item.kind === "group" ? item.children : [item])),
+      )
+      .map((item) => item.title);
+    expect(titles).not.toContain("Oportunidades");
+    expect(titles).not.toContain("Experts");
   });
 
   it("hides IA while the role is unknown", () => {

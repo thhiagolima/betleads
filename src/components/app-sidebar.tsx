@@ -1,8 +1,7 @@
 import { Link } from "@tanstack/react-router";
 
-import { NavLinks, NavSections } from "@/components/shell/nav-list";
+import { NavSections } from "@/components/shell/nav-list";
 import { useShellNav } from "@/components/shell/use-shell-nav";
-import { SIDEBAR_FOOTER } from "@/lib/navigation";
 
 export function Brand() {
   return (
@@ -37,12 +36,6 @@ export function AppSidebar({ collapsed }: { collapsed: boolean }) {
         className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2.5 pb-3"
       >
         <NavSections sections={sections} collapsed={collapsed} />
-      </nav>
-      <nav
-        aria-label="Configurações"
-        className="shrink-0 border-t border-sidebar-border px-2.5 py-2"
-      >
-        <NavLinks items={SIDEBAR_FOOTER} collapsed={collapsed} />
       </nav>
     </aside>
   );

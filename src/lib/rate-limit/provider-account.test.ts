@@ -51,7 +51,7 @@ describe("classifyProviderFailure — provider_account", () => {
   it("the tenant's own credit (402 without provider_account) stays insufficient_credit", () => {
     const tenantCredit = new ProviderSendError({
       channel: "sms",
-      message: "Saldo de créditos SMS insuficiente",
+      message: "Saldo insuficiente",
       status: 402,
     });
     expect(classifyProviderFailure(tenantCredit)).toMatchObject({

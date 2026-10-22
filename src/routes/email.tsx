@@ -520,22 +520,22 @@ function DashboardTab() {
               <AreaChart data={data?.by_day ?? []}>
                 <defs>
                   <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.5} />
-                    <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                    <stop offset="0%" stopColor="var(--color-primary)" stopOpacity={0.5} />
+                    <stop offset="100%" stopColor="var(--color-primary)" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" />
+                <CartesianGrid stroke="var(--color-border)" strokeDasharray="3 3" />
                 <XAxis
                   dataKey="date"
                   tickFormatter={fmtDay}
-                  stroke="hsl(var(--muted-foreground))"
+                  stroke="var(--color-muted-foreground)"
                   fontSize={11}
                 />
-                <YAxis stroke="hsl(var(--muted-foreground))" fontSize={11} />
+                <YAxis stroke="var(--color-muted-foreground)" fontSize={11} />
                 <Tooltip
                   contentStyle={{
-                    background: "hsl(var(--card))",
-                    border: "1px solid hsl(var(--border))",
+                    background: "var(--color-popover)",
+                    border: "1px solid var(--color-border)",
                     borderRadius: 8,
                   }}
                   labelFormatter={(v) => fmtDay(String(v))}
@@ -544,13 +544,13 @@ function DashboardTab() {
                 <Area
                   type="monotone"
                   dataKey="enviados"
-                  stroke="hsl(var(--primary))"
+                  stroke="var(--color-primary)"
                   fill="url(#g1)"
                 />
                 <Area
                   type="monotone"
                   dataKey="entregues"
-                  stroke="hsl(var(--accent))"
+                  stroke="var(--color-accent)"
                   fillOpacity={0}
                 />
               </AreaChart>
@@ -628,24 +628,24 @@ function DashboardTab() {
           <CardContent className="h-56">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={data?.by_day ?? []}>
-                <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" />
+                <CartesianGrid stroke="var(--color-border)" strokeDasharray="3 3" />
                 <XAxis
                   dataKey="date"
                   tickFormatter={fmtDay}
-                  stroke="hsl(var(--muted-foreground))"
+                  stroke="var(--color-muted-foreground)"
                   fontSize={11}
                 />
-                <YAxis stroke="hsl(var(--muted-foreground))" fontSize={11} />
+                <YAxis stroke="var(--color-muted-foreground)" fontSize={11} />
                 <Tooltip
                   contentStyle={{
-                    background: "hsl(var(--card))",
-                    border: "1px solid hsl(var(--border))",
+                    background: "var(--color-popover)",
+                    border: "1px solid var(--color-border)",
                     borderRadius: 8,
                   }}
                   labelFormatter={(v) => fmtDay(String(v))}
                 />
                 <Legend />
-                <Line type="monotone" dataKey="falharam" stroke="hsl(var(--destructive))" />
+                <Line type="monotone" dataKey="falharam" stroke="var(--color-destructive)" />
               </LineChart>
             </ResponsiveContainer>
           </CardContent>
@@ -658,23 +658,23 @@ function DashboardTab() {
           <CardContent className="h-56">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={data?.conversions_by_day ?? []}>
-                <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" />
+                <CartesianGrid stroke="var(--color-border)" strokeDasharray="3 3" />
                 <XAxis
                   dataKey="date"
                   tickFormatter={fmtDay}
-                  stroke="hsl(var(--muted-foreground))"
+                  stroke="var(--color-muted-foreground)"
                   fontSize={11}
                 />
-                <YAxis stroke="hsl(var(--muted-foreground))" fontSize={11} />
+                <YAxis stroke="var(--color-muted-foreground)" fontSize={11} />
                 <Tooltip
                   contentStyle={{
-                    background: "hsl(var(--card))",
-                    border: "1px solid hsl(var(--border))",
+                    background: "var(--color-popover)",
+                    border: "1px solid var(--color-border)",
                     borderRadius: 8,
                   }}
                   labelFormatter={(v) => fmtDay(String(v))}
                 />
-                <Bar dataKey="conversoes" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="conversoes" fill="var(--color-primary)" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>

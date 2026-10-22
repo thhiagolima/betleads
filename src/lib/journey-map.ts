@@ -31,13 +31,23 @@ function hoursLabel(hours: number) {
   return hours % 24 === 0 ? `${hours / 24} dia(s)` : `${hours} h`;
 }
 
-/** Inactivity band as text: "2 dia(s) a 7 dia(s)" or "30 dia(s) ou mais". */
+const INACTIVITY_SUFFIX: Record<string, string> = {
+  ultimo_deposito: "sem depositar",
+  ultimo_login: "sem login",
+  ultimo_jogo: "sem jogar",
+};
+
+/** Inactivity band as text: "2 dia(s) a 7 dia(s) sem depositar" or "30 dia(s) ou mais". */
 export function bandLabel(journey: MapJourney) {
   const from = Number(journey.trigger_config?.hours);
   if (!Number.isFinite(from) || from <= 0) return null;
   const to = inactivityUpperBoundHours(journey.trigger_config, journey.exit_rules);
   return to
-    ? `${hoursLabel(from)} a ${hoursLabel(to)} sem depositar`
+    ? `${hoursLabel(from)} a ${hoursLabel(to)} ${
+        // Same default field the conflict check uses.
+        INACTIVITY_SUFFIX[String(journey.trigger_config?.field ?? "ultimo_login")] ??
+        "sem atividade"
+      }`
     : `${hoursLabel(from)} ou mais`;
 }
 

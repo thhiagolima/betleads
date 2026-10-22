@@ -2,8 +2,9 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { invalidateServerResultCache, withServerResultCache } from "@/lib/server-result-cache";
 
-export type LevelSlug = "novice" | "bronze" | "silver" | "gold" | "diamond" | "black";
-export type PaidLevelSlug = Exclude<LevelSlug, "novice">;
+import { levelForTotal, type LevelSlug, type PaidLevelSlug } from "@/lib/player-level";
+
+export type { LevelSlug, PaidLevelSlug };
 export type PlayerStatus = "active" | "cooling" | "sleeping" | "no_deposit";
 
 export type GamificationSettings = {
@@ -80,7 +81,7 @@ const LEVELS: Array<{ slug: LevelSlug; label: string }> = [
 
 const PAID_LEVELS: PaidLevelSlug[] = ["bronze", "silver", "gold", "diamond", "black"];
 
-type DbPlayer = {
+export type DbPlayer = {
   id: string;
   nome: string;
   player_external_id: string | null;
@@ -136,6 +137,121 @@ export const saveGamificationSettings = createServerFn({ method: "POST" })
     invalidateServerResultCache(`audience:${tenantId}:`);
     return readGamificationSnapshot(supabase, tenantId);
   });
+
+export const RANKING_SEARCH_LIMIT = 200;
+
+export type RankingSearchInput = {
+  search?: string | null;
+  level?: LevelSlug | "all" | null;
+  onlyStopped?: boolean | null;
+};
+
+export type RankingSearchResult = {
+  players: GamificationPlayer[];
+  /** Total de jogadores da base que casam com a busca/filtros (sem o corte de 200). */
+  total: number;
+};
+
+// C-07: o snapshot só traz os 200 maiores depositantes. Quando há busca, nível
+// ou "só quem parou", a consulta vai à base inteira da casa (mesmas faixas e
+// mesma regra de situação do RPC gamification_snapshot_v2) e devolve os 200
+// maiores que casam, com o total real.
+export const searchGamificationRanking = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: RankingSearchInput) => input ?? {})
+  .handler(async ({ data, context }): Promise<RankingSearchResult> => {
+    const supabase = context.supabase as any;
+    const { data: tenantId, error: tenantError } = await supabase.rpc("current_tenant_id");
+    if (tenantError) throw new Error(tenantError.message);
+    if (!tenantId) throw new Error("Tenant atual não encontrado.");
+    const settings = await readSettings(supabase, tenantId as string);
+
+    let q = supabase
+      .from("players")
+      .select(
+        "id,nome,player_external_id,total_depositado,total_sacado,ultimo_deposito,ftd_em,telefone,email",
+        { count: "exact" },
+      )
+      .eq("tenant_id", tenantId);
+    q = applyRankingFilters(q, data, settings);
+
+    const {
+      data: rows,
+      count,
+      error,
+    } = await q
+      .order("total_depositado", { ascending: false })
+      .order("id", { ascending: true })
+      .limit(RANKING_SEARCH_LIMIT);
+    if (error) throw new Error(error.message);
+    const players = ((rows ?? []) as DbPlayer[]).map((player) => enrichPlayer(player, settings));
+    return { players, total: count ?? players.length };
+  });
+
+type RankingFilterable = {
+  or: (filters: string) => RankingFilterable;
+  gte: (column: string, value: unknown) => RankingFilterable;
+  lt: (column: string, value: unknown) => RankingFilterable;
+};
+
+// PostgREST `or()`: vírgulas e parênteses quebram a expressão.
+export function sanitizeRankingSearch(value: string | null | undefined) {
+  return String(value ?? "")
+    .replace(/[\\%,()*]/g, " ")
+    .trim();
+}
+
+export function applyRankingFilters<T extends RankingFilterable>(
+  query: T,
+  input: RankingSearchInput,
+  settings: Pick<GamificationSettings, "thresholds" | "coolingAfterDays">,
+  now: number = Date.now(),
+): T {
+  let q: RankingFilterable = query;
+  const term = sanitizeRankingSearch(input.search);
+  if (term) {
+    const like = `%${term}%`;
+    q = q.or(`nome.ilike.${like},telefone.ilike.${like},player_external_id.ilike.${like}`);
+  }
+
+  const t = settings.thresholds;
+  switch (input.level) {
+    case "novice":
+      q = q.lt("total_depositado", t.bronze);
+      break;
+    case "bronze":
+      q = q.gte("total_depositado", t.bronze).lt("total_depositado", t.silver);
+      break;
+    case "silver":
+      q = q.gte("total_depositado", t.silver).lt("total_depositado", t.gold);
+      break;
+    case "gold":
+      q = q.gte("total_depositado", t.gold).lt("total_depositado", t.diamond);
+      break;
+    case "diamond":
+      q = q.gte("total_depositado", t.diamond).lt("total_depositado", t.black);
+      break;
+    case "black":
+      q = q.gte("total_depositado", t.black);
+      break;
+    default:
+      break;
+  }
+
+  if (input.onlyStopped) {
+    // "Parou" = situação diferente de ativo: sem depósito, ou último depósito
+    // (ou FTD, quando não há último depósito) há `coolingAfterDays` dias ou mais.
+    const cutoff = new Date(now - settings.coolingAfterDays * 86400000).toISOString();
+    q = q.or(
+      [
+        "and(ftd_em.is.null,total_depositado.lte.0)",
+        `ultimo_deposito.lt.${cutoff}`,
+        `and(ultimo_deposito.is.null,or(ftd_em.is.null,ftd_em.lt.${cutoff}))`,
+      ].join(","),
+    );
+  }
+  return q as T;
+}
 
 async function readGamificationSnapshot(supabase: any, tenantId: string) {
   return withServerResultCache<GamificationData>(
@@ -194,7 +310,7 @@ async function readPlayers(supabase: any, tenantId: string): Promise<DbPlayer[]>
   return rows;
 }
 
-function buildGamificationData(
+export function buildGamificationData(
   players: DbPlayer[],
   settings: GamificationSettings,
 ): GamificationData {
@@ -221,14 +337,12 @@ function buildGamificationData(
   });
 
   const vipMinRank = levelRank(settings.vipMinLevel);
-  const vipStopped = ranked
-    .filter(
-      (player) =>
-        levelRank(player.level) >= vipMinRank &&
-        player.status !== "active" &&
-        player.status !== "no_deposit",
-    )
-    .slice(0, 50);
+  const vipStopped = ranked.filter(
+    (player) =>
+      levelRank(player.level) >= vipMinRank &&
+      player.status !== "active" &&
+      player.status !== "no_deposit",
+  );
 
   const segmentCounts = Object.fromEntries(
     (["active", "cooling", "sleeping", "no_deposit"] as PlayerStatus[]).map((status) => [
@@ -249,6 +363,7 @@ function buildGamificationData(
       players: totalPlayers,
       depositors: ranked.filter((p) => p.total_depositado > 0 || p.ftd_em).length,
       deposited: sum(ranked.map((p) => p.total_depositado)),
+      // total real (sem corte): a lista exibida abaixo é que se limita a 8
       stoppedVipCount: vipStopped.length,
       activeCount: ranked.filter((p) => p.status === "active").length,
       coolingCount: ranked.filter((p) => p.status === "cooling").length,
@@ -338,12 +453,7 @@ function normalizeSettingsInput(input: unknown): GamificationSettings {
 }
 
 function levelFor(total: number, settings: GamificationSettings): LevelSlug {
-  if (total >= settings.thresholds.black) return "black";
-  if (total >= settings.thresholds.diamond) return "diamond";
-  if (total >= settings.thresholds.gold) return "gold";
-  if (total >= settings.thresholds.silver) return "silver";
-  if (total >= settings.thresholds.bronze) return "bronze";
-  return "novice";
+  return levelForTotal(total, settings.thresholds);
 }
 
 function levelMin(level: LevelSlug, settings: GamificationSettings) {

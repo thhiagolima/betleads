@@ -94,7 +94,7 @@ export const Route = createFileRoute("/api/public/webhook/$token/$evento")({
             request.headers.get("x-webhook-signature"),
           ))
         ) {
-          return Response.json({ ok: false, error: "assinatura invÃ¡lida" }, { status: 401 });
+          return Response.json({ ok: false, error: "assinatura inválida" }, { status: 401 });
         }
 
         const response = await processWebhookEvent(sb, tenantId, evento, payload);

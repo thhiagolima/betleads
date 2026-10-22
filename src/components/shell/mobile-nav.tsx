@@ -2,9 +2,9 @@ import { Link, useRouterState } from "@tanstack/react-router";
 
 import { Brand } from "@/components/app-sidebar";
 import { useShellNav } from "@/components/shell/use-shell-nav";
-import { NavLinks, NavSections } from "@/components/shell/nav-list";
+import { NavSections } from "@/components/shell/nav-list";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
-import { MOBILE_TABS, SIDEBAR_FOOTER, activeMobileTab } from "@/lib/navigation";
+import { MOBILE_TABS, activeMobileTab } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 
 /** Bottom tab bar for phones: the four most used places plus the full menu. */
@@ -85,15 +85,9 @@ export function MobileMenu({
         </div>
         <nav
           aria-label="Navegação principal"
-          className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-3"
+          className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-[calc(0.75rem+env(safe-area-inset-bottom))]"
         >
           <NavSections sections={sections} collapsed={false} onNavigate={close} />
-        </nav>
-        <nav
-          aria-label="Configurações"
-          className="shrink-0 border-t border-sidebar-border px-2.5 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))]"
-        >
-          <NavLinks items={SIDEBAR_FOOTER} collapsed={false} onNavigate={close} />
         </nav>
       </SheetContent>
     </Sheet>

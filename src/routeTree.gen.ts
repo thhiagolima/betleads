@@ -59,6 +59,7 @@ import { Route as ApiPublicCallFlowsTickRouteImport } from './routes/api/public/
 import { Route as ApiPublicClickTokenRouteImport } from './routes/api/public/click.$token'
 import { Route as ApiPublicEmailCampaignsTickRouteImport } from './routes/api/public/email-campaigns/tick'
 import { Route as ApiPublicEmailFlowsTickRouteImport } from './routes/api/public/email-flows/tick'
+import { Route as ApiPublicHooksBillingReconcileRouteImport } from './routes/api/public/hooks/billing-reconcile'
 import { Route as ApiPublicHooksCashbackCatchupRouteImport } from './routes/api/public/hooks/cashback-catchup'
 import { Route as ApiPublicHooksDispatchRouteImport } from './routes/api/public/hooks/dispatch'
 import { Route as ApiPublicHooksJourneyCrossingRouteImport } from './routes/api/public/hooks/journey-crossing'
@@ -73,6 +74,7 @@ import { Route as ApiPublicMetaSyncTickRouteImport } from './routes/api/public/m
 import { Route as ApiPublicPrecallDispatchRouteImport } from './routes/api/public/precall/dispatch'
 import { Route as ApiPublicShortioSyncRouteImport } from './routes/api/public/shortio/sync'
 import { Route as ApiPublicTenantDomainsVerifyRouteImport } from './routes/api/public/tenant-domains/verify'
+import { Route as ApiPublicUpperWebhookRouteImport } from './routes/api/public/upper/webhook'
 import { Route as ApiPublicWebhookEventoRouteImport } from './routes/api/public/webhook.$evento'
 import { Route as ApiPublicEmailImgAssetIdFilenameRouteImport } from './routes/api/public/email-img.$assetId.$filename'
 import { Route as ApiPublicInfobipEmailEventsRouteImport } from './routes/api/public/infobip/email/events'
@@ -337,6 +339,12 @@ const ApiPublicEmailFlowsTickRoute = ApiPublicEmailFlowsTickRouteImport.update({
   path: '/api/public/email-flows/tick',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicHooksBillingReconcileRoute =
+  ApiPublicHooksBillingReconcileRouteImport.update({
+    id: '/api/public/hooks/billing-reconcile',
+    path: '/api/public/hooks/billing-reconcile',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicHooksCashbackCatchupRoute =
   ApiPublicHooksCashbackCatchupRouteImport.update({
     id: '/api/public/hooks/cashback-catchup',
@@ -417,6 +425,11 @@ const ApiPublicTenantDomainsVerifyRoute =
     path: '/api/public/tenant-domains/verify',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicUpperWebhookRoute = ApiPublicUpperWebhookRouteImport.update({
+  id: '/api/public/upper/webhook',
+  path: '/api/public/upper/webhook',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicWebhookEventoRoute = ApiPublicWebhookEventoRouteImport.update({
   id: '/api/public/webhook/$evento',
   path: '/api/public/webhook/$evento',
@@ -510,6 +523,7 @@ export interface FileRoutesByFullPath {
   '/api/public/click/$token': typeof ApiPublicClickTokenRoute
   '/api/public/email-campaigns/tick': typeof ApiPublicEmailCampaignsTickRoute
   '/api/public/email-flows/tick': typeof ApiPublicEmailFlowsTickRoute
+  '/api/public/hooks/billing-reconcile': typeof ApiPublicHooksBillingReconcileRoute
   '/api/public/hooks/cashback-catchup': typeof ApiPublicHooksCashbackCatchupRoute
   '/api/public/hooks/dispatch': typeof ApiPublicHooksDispatchRoute
   '/api/public/hooks/journey-crossing': typeof ApiPublicHooksJourneyCrossingRoute
@@ -524,6 +538,7 @@ export interface FileRoutesByFullPath {
   '/api/public/precall/dispatch': typeof ApiPublicPrecallDispatchRoute
   '/api/public/shortio/sync': typeof ApiPublicShortioSyncRoute
   '/api/public/tenant-domains/verify': typeof ApiPublicTenantDomainsVerifyRoute
+  '/api/public/upper/webhook': typeof ApiPublicUpperWebhookRoute
   '/api/public/webhook/$evento': typeof ApiPublicWebhookEventoRoute
   '/api/public/email-img/$assetId/$filename': typeof ApiPublicEmailImgAssetIdFilenameRoute
   '/api/public/infobip/email/events': typeof ApiPublicInfobipEmailEventsRoute
@@ -583,6 +598,7 @@ export interface FileRoutesByTo {
   '/api/public/click/$token': typeof ApiPublicClickTokenRoute
   '/api/public/email-campaigns/tick': typeof ApiPublicEmailCampaignsTickRoute
   '/api/public/email-flows/tick': typeof ApiPublicEmailFlowsTickRoute
+  '/api/public/hooks/billing-reconcile': typeof ApiPublicHooksBillingReconcileRoute
   '/api/public/hooks/cashback-catchup': typeof ApiPublicHooksCashbackCatchupRoute
   '/api/public/hooks/dispatch': typeof ApiPublicHooksDispatchRoute
   '/api/public/hooks/journey-crossing': typeof ApiPublicHooksJourneyCrossingRoute
@@ -597,6 +613,7 @@ export interface FileRoutesByTo {
   '/api/public/precall/dispatch': typeof ApiPublicPrecallDispatchRoute
   '/api/public/shortio/sync': typeof ApiPublicShortioSyncRoute
   '/api/public/tenant-domains/verify': typeof ApiPublicTenantDomainsVerifyRoute
+  '/api/public/upper/webhook': typeof ApiPublicUpperWebhookRoute
   '/api/public/webhook/$evento': typeof ApiPublicWebhookEventoRoute
   '/api/public/email-img/$assetId/$filename': typeof ApiPublicEmailImgAssetIdFilenameRoute
   '/api/public/infobip/email/events': typeof ApiPublicInfobipEmailEventsRoute
@@ -657,6 +674,7 @@ export interface FileRoutesById {
   '/api/public/click/$token': typeof ApiPublicClickTokenRoute
   '/api/public/email-campaigns/tick': typeof ApiPublicEmailCampaignsTickRoute
   '/api/public/email-flows/tick': typeof ApiPublicEmailFlowsTickRoute
+  '/api/public/hooks/billing-reconcile': typeof ApiPublicHooksBillingReconcileRoute
   '/api/public/hooks/cashback-catchup': typeof ApiPublicHooksCashbackCatchupRoute
   '/api/public/hooks/dispatch': typeof ApiPublicHooksDispatchRoute
   '/api/public/hooks/journey-crossing': typeof ApiPublicHooksJourneyCrossingRoute
@@ -671,6 +689,7 @@ export interface FileRoutesById {
   '/api/public/precall/dispatch': typeof ApiPublicPrecallDispatchRoute
   '/api/public/shortio/sync': typeof ApiPublicShortioSyncRoute
   '/api/public/tenant-domains/verify': typeof ApiPublicTenantDomainsVerifyRoute
+  '/api/public/upper/webhook': typeof ApiPublicUpperWebhookRoute
   '/api/public/webhook/$evento': typeof ApiPublicWebhookEventoRoute
   '/api/public/email-img/$assetId/$filename': typeof ApiPublicEmailImgAssetIdFilenameRoute
   '/api/public/infobip/email/events': typeof ApiPublicInfobipEmailEventsRoute
@@ -732,6 +751,7 @@ export interface FileRouteTypes {
     | '/api/public/click/$token'
     | '/api/public/email-campaigns/tick'
     | '/api/public/email-flows/tick'
+    | '/api/public/hooks/billing-reconcile'
     | '/api/public/hooks/cashback-catchup'
     | '/api/public/hooks/dispatch'
     | '/api/public/hooks/journey-crossing'
@@ -746,6 +766,7 @@ export interface FileRouteTypes {
     | '/api/public/precall/dispatch'
     | '/api/public/shortio/sync'
     | '/api/public/tenant-domains/verify'
+    | '/api/public/upper/webhook'
     | '/api/public/webhook/$evento'
     | '/api/public/email-img/$assetId/$filename'
     | '/api/public/infobip/email/events'
@@ -805,6 +826,7 @@ export interface FileRouteTypes {
     | '/api/public/click/$token'
     | '/api/public/email-campaigns/tick'
     | '/api/public/email-flows/tick'
+    | '/api/public/hooks/billing-reconcile'
     | '/api/public/hooks/cashback-catchup'
     | '/api/public/hooks/dispatch'
     | '/api/public/hooks/journey-crossing'
@@ -819,6 +841,7 @@ export interface FileRouteTypes {
     | '/api/public/precall/dispatch'
     | '/api/public/shortio/sync'
     | '/api/public/tenant-domains/verify'
+    | '/api/public/upper/webhook'
     | '/api/public/webhook/$evento'
     | '/api/public/email-img/$assetId/$filename'
     | '/api/public/infobip/email/events'
@@ -878,6 +901,7 @@ export interface FileRouteTypes {
     | '/api/public/click/$token'
     | '/api/public/email-campaigns/tick'
     | '/api/public/email-flows/tick'
+    | '/api/public/hooks/billing-reconcile'
     | '/api/public/hooks/cashback-catchup'
     | '/api/public/hooks/dispatch'
     | '/api/public/hooks/journey-crossing'
@@ -892,6 +916,7 @@ export interface FileRouteTypes {
     | '/api/public/precall/dispatch'
     | '/api/public/shortio/sync'
     | '/api/public/tenant-domains/verify'
+    | '/api/public/upper/webhook'
     | '/api/public/webhook/$evento'
     | '/api/public/email-img/$assetId/$filename'
     | '/api/public/infobip/email/events'
@@ -940,6 +965,7 @@ export interface RootRouteChildren {
   ApiPublicClickTokenRoute: typeof ApiPublicClickTokenRoute
   ApiPublicEmailCampaignsTickRoute: typeof ApiPublicEmailCampaignsTickRoute
   ApiPublicEmailFlowsTickRoute: typeof ApiPublicEmailFlowsTickRoute
+  ApiPublicHooksBillingReconcileRoute: typeof ApiPublicHooksBillingReconcileRoute
   ApiPublicHooksCashbackCatchupRoute: typeof ApiPublicHooksCashbackCatchupRoute
   ApiPublicHooksDispatchRoute: typeof ApiPublicHooksDispatchRoute
   ApiPublicHooksJourneyCrossingRoute: typeof ApiPublicHooksJourneyCrossingRoute
@@ -954,6 +980,7 @@ export interface RootRouteChildren {
   ApiPublicPrecallDispatchRoute: typeof ApiPublicPrecallDispatchRoute
   ApiPublicShortioSyncRoute: typeof ApiPublicShortioSyncRoute
   ApiPublicTenantDomainsVerifyRoute: typeof ApiPublicTenantDomainsVerifyRoute
+  ApiPublicUpperWebhookRoute: typeof ApiPublicUpperWebhookRoute
   ApiPublicWebhookEventoRoute: typeof ApiPublicWebhookEventoRoute
   ApiPublicEmailImgAssetIdFilenameRoute: typeof ApiPublicEmailImgAssetIdFilenameRoute
   ApiPublicInfobipEmailEventsRoute: typeof ApiPublicInfobipEmailEventsRoute
@@ -1315,6 +1342,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicEmailFlowsTickRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/hooks/billing-reconcile': {
+      id: '/api/public/hooks/billing-reconcile'
+      path: '/api/public/hooks/billing-reconcile'
+      fullPath: '/api/public/hooks/billing-reconcile'
+      preLoaderRoute: typeof ApiPublicHooksBillingReconcileRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/hooks/cashback-catchup': {
       id: '/api/public/hooks/cashback-catchup'
       path: '/api/public/hooks/cashback-catchup'
@@ -1411,6 +1445,13 @@ declare module '@tanstack/react-router' {
       path: '/api/public/tenant-domains/verify'
       fullPath: '/api/public/tenant-domains/verify'
       preLoaderRoute: typeof ApiPublicTenantDomainsVerifyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/upper/webhook': {
+      id: '/api/public/upper/webhook'
+      path: '/api/public/upper/webhook'
+      fullPath: '/api/public/upper/webhook'
+      preLoaderRoute: typeof ApiPublicUpperWebhookRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/public/webhook/$evento': {
@@ -1593,6 +1634,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicClickTokenRoute: ApiPublicClickTokenRoute,
   ApiPublicEmailCampaignsTickRoute: ApiPublicEmailCampaignsTickRoute,
   ApiPublicEmailFlowsTickRoute: ApiPublicEmailFlowsTickRoute,
+  ApiPublicHooksBillingReconcileRoute: ApiPublicHooksBillingReconcileRoute,
   ApiPublicHooksCashbackCatchupRoute: ApiPublicHooksCashbackCatchupRoute,
   ApiPublicHooksDispatchRoute: ApiPublicHooksDispatchRoute,
   ApiPublicHooksJourneyCrossingRoute: ApiPublicHooksJourneyCrossingRoute,
@@ -1607,6 +1649,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicPrecallDispatchRoute: ApiPublicPrecallDispatchRoute,
   ApiPublicShortioSyncRoute: ApiPublicShortioSyncRoute,
   ApiPublicTenantDomainsVerifyRoute: ApiPublicTenantDomainsVerifyRoute,
+  ApiPublicUpperWebhookRoute: ApiPublicUpperWebhookRoute,
   ApiPublicWebhookEventoRoute: ApiPublicWebhookEventoRoute,
   ApiPublicEmailImgAssetIdFilenameRoute: ApiPublicEmailImgAssetIdFilenameRoute,
   ApiPublicInfobipEmailEventsRoute: ApiPublicInfobipEmailEventsRoute,

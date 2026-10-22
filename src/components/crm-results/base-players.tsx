@@ -105,7 +105,7 @@ function States({ data }: { data: Data }) {
           <InfoTip text="Situação do jogador no momento em que recebeu a mensagem. Envios a jogadores ativos são relacionamento, não reativação." />
         </CardTitle>
         <CardDescription>
-          Custo em SMS e conversão por clique pela situação do jogador no envio.
+          Custo em SMS e recuperado pelo CRM pela situação do jogador no envio.
         </CardDescription>
       </CardHeader>
       <CardContent className="overflow-x-auto p-0">
@@ -118,7 +118,7 @@ function States({ data }: { data: Data }) {
               <TableHead className="text-right">Convertidos</TableHead>
               <TableHead className="text-right">Custo / convertido</TableHead>
               <TableHead className="text-right">Retorno</TableHead>
-              <TableHead className="text-right">Recuperados</TableHead>
+              <TableHead className="text-right">Recuperados (visão ampla)</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>

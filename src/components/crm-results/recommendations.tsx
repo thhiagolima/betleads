@@ -43,7 +43,7 @@ export function Recommendations({ data }: { data: Data }) {
       <CardHeader>
         <CardTitle className="text-base">Recomendações</CardTitle>
         <CardDescription>
-          Regras aplicadas aos resultados do período, pela conversão por clique. Cada uma traz o
+          Regras aplicadas aos resultados do período, pelo Recuperado pelo CRM. Cada uma traz o
           número que a justifica; origens com menos de 5 jogadores convertidos não entram nas
           comparações.
         </CardDescription>

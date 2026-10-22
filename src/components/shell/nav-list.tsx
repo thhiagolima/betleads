@@ -211,28 +211,3 @@ export function NavSections({
     </>
   );
 }
-
-export function NavLinks({
-  items,
-  collapsed,
-  onNavigate,
-}: {
-  items: NavLink[];
-  collapsed: boolean;
-  onNavigate?: () => void;
-}) {
-  const activeKey = useActiveKey();
-  return (
-    <div className="flex flex-col gap-0.5">
-      {items.map((item) => (
-        <NavLinkItem
-          key={navLinkKey(item)}
-          item={item}
-          activeKey={activeKey}
-          collapsed={collapsed}
-          onNavigate={onNavigate}
-        />
-      ))}
-    </div>
-  );
-}

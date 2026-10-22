@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet } from "@tanstack/react-router";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { POLL_INTERVALS, UpdatedAgo } from "@/hooks/use-updated-ago";
@@ -64,7 +64,11 @@ import {
   cancelScheduledSmsCampaign,
 } from "@/lib/sms.functions";
 import { getFailedSmsBreakdown, resendFailedSms } from "@/lib/sms.functions";
+import { getBillingPrices } from "@/lib/billing/billing.functions";
+import { countSmsSegments } from "@/lib/sms-segments";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
+import { WalletBalanceNotice } from "@/components/billing/wallet-balance-notice";
+import { useActiveTenant } from "@/hooks/use-active-tenant";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import { DEMO_SEND_BLOCKED_TEXT } from "@/lib/demo-tenant";
 import { listPlayersForCalls } from "@/lib/calls.functions";
@@ -140,7 +144,7 @@ import {
   SYSTEM_SMS_AUDIENCES,
   type SmsAudienceCriteria,
 } from "@/lib/sms-audience-criteria";
-import { num } from "@/lib/format";
+import { brl, num } from "@/lib/format";
 import { SendWindowCard } from "@/components/send-window-card";
 import { fromBrtInput, toBrtInput } from "@/components/journeys/journey-editor-config";
 
@@ -287,10 +291,30 @@ function previewMensagem(msg: string, recipient = "João Silva") {
     .replaceAll("{link}", "bet.ly/x9k");
 }
 
-function smsCount(len: number) {
-  if (len === 0) return 0;
-  if (len <= 160) return 1;
-  return Math.ceil(len / 153);
+/**
+ * House-facing SMS unit price (PG1 Task 7): reads the price book through
+ * `getBillingPrices`, never a hard-coded literal. `null` while loading —
+ * callers must show "—", not a fallback price.
+ */
+function useSmsUnitPrice(): number | null {
+  const pricesFn = useServerFn(getBillingPrices);
+  const { data } = useQuery({
+    queryKey: ["billing-prices"],
+    queryFn: () => pricesFn(),
+    staleTime: 5 * 60_000,
+  });
+  return data?.sms.unitPrice ?? null;
+}
+
+function fmtBrl(value: number) {
+  return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+/** "{N} segmento(s) × R$ 0,08 = R$ X por jogador" — null unitPrice shows "—". */
+function smsSegmentCostLabel(segments: number, unitPrice: number | null) {
+  if (unitPrice == null) return `${segments} segmento${segments === 1 ? "" : "s"} × — por jogador`;
+  const total = segments * unitPrice;
+  return `${segments} segmento${segments === 1 ? "" : "s"} × ${fmtBrl(unitPrice)} = ${fmtBrl(total)} por jogador`;
 }
 
 function renderIndividualSmsTemplate(message: string, recipientName: string, phone: string) {
@@ -305,6 +329,13 @@ function renderIndividualSmsTemplate(message: string, recipientName: string, pho
 // ---------------- Page ----------------
 
 function SmsPage() {
+  // /sms é pai de /sms/templates: nas rotas filhas renderiza só a filha.
+  const pathname = useLocation({ select: (l) => l.pathname });
+  if (pathname !== "/sms") return <Outlet />;
+  return <SmsHome />;
+}
+
+function SmsHome() {
   const navigate = useNavigate();
   const hash = useLocation({ select: (l) => l.hash });
   const aliases: Record<string, "saude" | "historico" | "campanhas" | "configuracoes"> = {
@@ -362,9 +393,12 @@ function SmsCompactWorkspace({
     queryFn: () => statusFn(),
     refetchInterval: 30_000,
   });
+  const activeTenant = useActiveTenant();
+  const activeTenantId = activeTenant.data?.activeTenantId ?? null;
   const credits = useQuery({
-    queryKey: ["sms-credits", "portal"],
-    queryFn: () => portalFn({ data: {} }),
+    queryKey: ["sms-credits", "portal", activeTenantId],
+    queryFn: () => portalFn({ data: { tenantId: activeTenantId } }),
+    enabled: !!activeTenantId,
     refetchInterval: 30_000,
   });
   const [phone, setPhone] = useState("");
@@ -372,21 +406,30 @@ function SmsCompactWorkspace({
   const [message, setMessage] = useState("Oi {nome}, seu bônus está liberado. Acesse: suacasa.com");
   const [trackLinks, setTrackLinks] = useState(true);
   const [bulkMode, setBulkMode] = useState(false);
-  const parts = smsCount(message.length);
+  const smsUnitPrice = useSmsUnitPrice();
+  const preview = previewMensagem(message, recipientName.trim() || "Rafael");
+  const parts = countSmsSegments(preview).segments;
   const phoneDigits = phone.replace(/\D/g, "");
-  const summary = (credits.data?.summary ?? {}) as Record<string, unknown>;
-  const balance = readNumber(summary.balance_credits);
+  const summary = (credits.data?.summary ?? {}) as { balance?: number; exempt?: boolean };
+  const balance = readNumber(summary.balance);
+  const exempt = Boolean(summary.exempt);
+  const canBuyCredits = Boolean((credits.data as { canBuy?: boolean } | undefined)?.canBuy);
+  const estimatedCost = smsUnitPrice == null ? null : parts * smsUnitPrice;
   const totals = dashboard.data?.totals;
   const today = dashboard.data?.today;
   const sent = readNumber(totals?.sent);
-  const delivered = readNumber(totals?.delivered);
   const failed = readNumber(totals?.failed);
-  const deliveryRate = sent > 0 ? Math.round((delivered / sent) * 100) : 0;
+  // Sem "Entregues"/taxa de entrega: o callback da Short Brasil não confirma
+  // entrega (nenhum SMS é marcado entregue), então mostramos Enviados e Falhas.
+  // "enviando" é o status que o despacho grava enquanto a campanha roda.
   const queue = ((campaigns.data?.campaigns ?? []) as SmsCampaignRow[]).filter((campaign) =>
-    ["agendada", "running", "processando"].includes(campaign.status),
+    ["agendada", "running", "processando", "enviando"].includes(campaign.status),
   ).length;
-  const canSend = phoneDigits.length >= 10 && message.trim().length > 0 && balance >= parts;
-  const preview = previewMensagem(message, recipientName.trim() || "Rafael");
+  // Uma casa isenta nunca é bloqueada por saldo (não é debitada).
+  const canSend =
+    phoneDigits.length >= 10 &&
+    message.trim().length > 0 &&
+    (exempt || (estimatedCost != null && balance >= estimatedCost));
 
   const send = useMutation({
     mutationFn: () =>
@@ -410,7 +453,11 @@ function SmsCompactWorkspace({
   });
 
   const kpis = [
-    { label: "Créditos disponíveis", value: num(balance), hint: "1 crédito por parte de SMS" },
+    {
+      label: "Saldo disponível",
+      value: brl(balance),
+      hint: exempt ? "casa isenta" : "para envio de SMS",
+    },
     { label: "Fila", value: num(queue), hint: "campanhas aguardando" },
     {
       label: "Enviados hoje",
@@ -418,9 +465,9 @@ function SmsCompactWorkspace({
       hint: `${num(sent)} em 30 dias`,
     },
     {
-      label: "Entregues",
-      value: num(delivered),
-      hint: `${deliveryRate}% de entrega · ${num(failed)} falharam`,
+      label: "Falhas",
+      value: num(failed),
+      hint: "nos últimos 30 dias",
     },
   ];
 
@@ -428,9 +475,9 @@ function SmsCompactWorkspace({
     return (
       <SmsChannelHealth
         configured={!!provider.data?.configured}
-        balance={num(balance)}
+        balance={exempt ? "Casa isenta" : `Saldo ${brl(balance)}`}
         queue={queue}
-        deliveryRate={deliveryRate}
+        failed={num(failed)}
         metrics={kpis}
         onRefresh={() => qc.invalidateQueries({ queryKey: ["sms-compact-dashboard"] })}
         onOpenHistory={() => onTabChange("historico")}
@@ -458,9 +505,17 @@ function SmsCompactWorkspace({
           <RotateCw className="mr-2 h-3.5 w-3.5" /> Atualizar
         </Button>
         <Button variant="outline" size="sm" onClick={() => window.location.assign("/creditos-sms")}>
-          <CreditCard className="mr-2 h-3.5 w-3.5" /> {num(balance)} créditos
+          <CreditCard className="mr-2 h-3.5 w-3.5" /> {exempt ? "Casa isenta" : `Saldo ${brl(balance)}`}
         </Button>
       </div>
+      {credits.data ? (
+        <WalletBalanceNotice
+          balance={balance}
+          exempt={exempt}
+          smsUnitPrice={smsUnitPrice}
+          canBuy={canBuyCredits}
+        />
+      ) : null}
 
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
         {kpis.map((item) => (
@@ -501,11 +556,11 @@ function SmsCompactWorkspace({
             </Card>
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Créditos</CardTitle>
+                <CardTitle className="text-base">Saldo</CardTitle>
               </CardHeader>
               <CardContent>
                 <Button variant="outline" asChild>
-                  <Link to="/creditos-sms">Saldo e recargas</Link>
+                  <Link to="/creditos-sms">Saldo e consumo</Link>
                 </Button>
               </CardContent>
             </Card>
@@ -579,9 +634,12 @@ function SmsCompactWorkspace({
                     {message.length} caracteres · {parts} parte{parts === 1 ? "" : "s"}
                   </span>
                   <strong>
-                    {parts} crédito{parts === 1 ? "" : "s"}
+                    {estimatedCost == null ? "—" : fmtBrl(estimatedCost)}
                   </strong>
                 </div>
+                <p className="text-xs text-muted-foreground">
+                  {smsSegmentCostLabel(parts, smsUnitPrice)}
+                </p>
                 <DemoDisabledTooltip active={isDemo} text={DEMO_SEND_BLOCKED_TEXT}>
                   <Button
                     className="w-full"
@@ -590,7 +648,7 @@ function SmsCompactWorkspace({
                   >
                     {send.isPending
                       ? "Enviando…"
-                      : `Enviar · ${parts} crédito${parts === 1 ? "" : "s"}`}
+                      : `Enviar · ${estimatedCost == null ? "—" : fmtBrl(estimatedCost)}`}
                   </Button>
                 </DemoDisabledTooltip>
                 <p className="text-[11px] text-muted-foreground">
@@ -989,9 +1047,12 @@ function SmsHomePanel() {
     queryFn: () => statusFn(),
     refetchInterval: 30_000,
   });
+  const activeTenant = useActiveTenant();
+  const activeTenantId = activeTenant.data?.activeTenantId ?? null;
   const credits = useQuery({
-    queryKey: ["sms-credits", "portal"],
-    queryFn: () => portalFn({ data: {} }),
+    queryKey: ["sms-credits", "portal", activeTenantId],
+    queryFn: () => portalFn({ data: { tenantId: activeTenantId } }),
+    enabled: !!activeTenantId,
     refetchInterval: 30_000,
   });
 
@@ -1000,9 +1061,10 @@ function SmsHomePanel() {
   const [message, setMessage] = useState("Oi {nome}, seu bonus esta liberado. Acesse: suacasa.com");
   const [trackLinks, setTrackLinks] = useState(true);
 
-  const parts = smsCount(message.length);
+  const smsUnitPrice = useSmsUnitPrice();
+  const preview = previewMensagem(message, recipientName || "Rafael");
+  const parts = countSmsSegments(preview).segments;
   const phoneDigits = phone.replace(/\D/g, "");
-  const canSend = phoneDigits.length >= 10 && message.trim().length > 0;
   const logsRows = ((logs.data?.logs ?? []) as SmsLogRow[]).slice(0, 10);
   const campaignRows = ((campaigns.data?.campaigns ?? []) as SmsCampaignRow[]).slice(0, 8);
   const totals = dashboard.data?.totals;
@@ -1011,9 +1073,21 @@ function SmsHomePanel() {
   const delivered = readNumber(totals?.delivered);
   const failed = readNumber(totals?.failed);
   const deliveryRate = sent30 > 0 ? Math.round((delivered / sent30) * 100) : 0;
-  const summary = (credits.data?.summary ?? {}) as Record<string, unknown>;
-  const balance = readNumber(summary.balance_credits);
-  const usedLifetime = readNumber(summary.lifetime_used_credits);
+  const summary = (credits.data?.summary ?? {}) as {
+    balance?: number;
+    exempt?: boolean;
+    lifetime_used?: number;
+  };
+  const balance = readNumber(summary.balance);
+  const exempt = Boolean(summary.exempt);
+  const canBuyCredits = Boolean((credits.data as { canBuy?: boolean } | undefined)?.canBuy);
+  const usedLifetime = readNumber(summary.lifetime_used);
+  const estimatedCost = smsUnitPrice == null ? null : parts * smsUnitPrice;
+  // Uma casa isenta nunca é bloqueada por saldo (não é debitada).
+  const canSend =
+    phoneDigits.length >= 10 &&
+    message.trim().length > 0 &&
+    (exempt || (estimatedCost != null && balance >= estimatedCost));
   const pendingCampaigns = campaignRows.filter((c) =>
     ["agendada", "running", "processando"].includes(c.status),
   );
@@ -1070,16 +1144,24 @@ function SmsHomePanel() {
           onClick={() => navigate({ to: "/creditos-sms" })}
         >
           <CreditCard className="h-4 w-4" />
-          {num(balance)} créditos de SMS
+          {exempt ? "Casa isenta" : `Saldo ${brl(balance)}`}
         </Button>
       </div>
+      {credits.data ? (
+        <WalletBalanceNotice
+          balance={balance}
+          exempt={exempt}
+          smsUnitPrice={smsUnitPrice}
+          canBuy={canBuyCredits}
+        />
+      ) : null}
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         {[
           {
-            label: "Créditos disponíveis",
-            value: num(balance),
-            hint: `1 crédito por parte · ${num(usedLifetime)} consumidos`,
+            label: "Saldo disponível",
+            value: brl(balance),
+            hint: exempt ? "casa isenta" : `${brl(usedLifetime)} consumidos`,
             tone: "text-primary",
           },
           {
@@ -1190,9 +1272,7 @@ function SmsHomePanel() {
                   <span>
                     <strong>{message.length}</strong> caracteres · <strong>{parts}</strong> parte
                   </span>
-                  <strong>
-                    {parts} crédito{parts === 1 ? "" : "s"}
-                  </strong>
+                  <strong>{estimatedCost == null ? "—" : fmtBrl(estimatedCost)}</strong>
                 </div>
                 <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
                   <div
@@ -1201,7 +1281,10 @@ function SmsHomePanel() {
                   />
                 </div>
                 <p className="mt-2 text-xs text-muted-foreground">
-                  160 caracteres por parte. Acima disso, cada parte consome um crédito.
+                  160 caracteres por parte. Acima disso, cada parte é cobrada pelo preço vigente.
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {smsSegmentCostLabel(parts, smsUnitPrice)}
                 </p>
               </div>
 
@@ -1218,7 +1301,7 @@ function SmsHomePanel() {
                     <Smartphone className="h-4 w-4" />
                   </div>
                   <div className="rounded-2xl bg-muted px-4 py-3 text-sm text-muted-foreground">
-                    {previewMensagem(message, recipientName || "Rafael")}
+                    {preview}
                   </div>
                 </div>
               </div>
@@ -1230,7 +1313,7 @@ function SmsHomePanel() {
               >
                 {sendManual.isPending
                   ? "Enviando..."
-                  : `Enviar · ${parts} crédito${parts === 1 ? "" : "s"}`}
+                  : `Enviar · ${estimatedCost == null ? "—" : fmtBrl(estimatedCost)}`}
               </Button>
               <p className="text-xs leading-relaxed text-muted-foreground">
                 Toda mensagem de divulgação precisa de opt-in e saída fácil. A resposta SAIR ainda
@@ -1314,7 +1397,7 @@ function SmsHomePanel() {
                           ? "campanha"
                           : (row.trigger_name ?? "manual")}
                       </TableCell>
-                      <TableCell>{smsCount((row.content ?? "").length)}</TableCell>
+                      <TableCell>{countSmsSegments(row.content ?? "").segments}</TableCell>
                       <TableCell className="text-right">
                         {smsStatusBadge(row.status, row.delivery_status)}
                       </TableCell>
@@ -1335,7 +1418,7 @@ function SmsHomePanel() {
               <CardDescription>
                 {pendingCampaigns.length > 0
                   ? `${pendingCampaigns.length} campanha(s) precisam de atenção`
-                  : `nada parado · saldo ${num(balance)}`}
+                  : `nada parado · ${exempt ? "casa isenta" : `saldo ${brl(balance)}`}`}
               </CardDescription>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -1583,26 +1666,26 @@ function Dashboard() {
               <AreaChart data={data?.by_day ?? []}>
                 <defs>
                   <linearGradient id="grad1" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.5} />
-                    <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                    <stop offset="0%" stopColor="var(--color-primary)" stopOpacity={0.5} />
+                    <stop offset="100%" stopColor="var(--color-primary)" stopOpacity={0} />
                   </linearGradient>
                   <linearGradient id="grad2" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#10b981" stopOpacity={0.4} />
-                    <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
+                    <stop offset="0%" stopColor="var(--color-chart-4)" stopOpacity={0.4} />
+                    <stop offset="100%" stopColor="var(--color-chart-4)" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
                 <XAxis
                   dataKey="date"
                   tickFormatter={fmtDay}
-                  stroke="hsl(var(--muted-foreground))"
+                  stroke="var(--color-muted-foreground)"
                   fontSize={12}
                 />
-                <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                <YAxis stroke="var(--color-muted-foreground)" fontSize={12} />
                 <Tooltip
                   contentStyle={{
-                    background: "hsl(var(--popover))",
-                    border: "1px solid hsl(var(--border))",
+                    background: "var(--color-popover)",
+                    border: "1px solid var(--color-border)",
                     borderRadius: 8,
                   }}
                   labelFormatter={(v) => fmtDay(String(v))}
@@ -1611,10 +1694,15 @@ function Dashboard() {
                 <Area
                   type="monotone"
                   dataKey="enviados"
-                  stroke="hsl(var(--primary))"
+                  stroke="var(--color-primary)"
                   fill="url(#grad1)"
                 />
-                <Area type="monotone" dataKey="entregues" stroke="#10b981" fill="url(#grad2)" />
+                <Area
+                  type="monotone"
+                  dataKey="entregues"
+                  stroke="var(--color-chart-4)"
+                  fill="url(#grad2)"
+                />
               </AreaChart>
             </ResponsiveContainer>
           </CardContent>
@@ -1628,18 +1716,18 @@ function Dashboard() {
           <CardContent>
             <ResponsiveContainer width="100%" height={240}>
               <LineChart data={data?.conversions_by_day ?? []}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
                 <XAxis
                   dataKey="date"
                   tickFormatter={fmtDay}
-                  stroke="hsl(var(--muted-foreground))"
+                  stroke="var(--color-muted-foreground)"
                   fontSize={12}
                 />
-                <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                <YAxis stroke="var(--color-muted-foreground)" fontSize={12} />
                 <Tooltip
                   contentStyle={{
-                    background: "hsl(var(--popover))",
-                    border: "1px solid hsl(var(--border))",
+                    background: "var(--color-popover)",
+                    border: "1px solid var(--color-border)",
                     borderRadius: 8,
                   }}
                   labelFormatter={(v) => fmtDay(String(v))}
@@ -1647,9 +1735,9 @@ function Dashboard() {
                 <Line
                   type="monotone"
                   dataKey="conversoes"
-                  stroke="hsl(var(--primary))"
+                  stroke="var(--color-primary)"
                   strokeWidth={2}
-                  dot={{ fill: "hsl(var(--primary))" }}
+                  dot={{ fill: "var(--color-primary)" }}
                 />
               </LineChart>
             </ResponsiveContainer>
@@ -2066,9 +2154,9 @@ function EnvioMassa() {
   }
 
   const chars = mensagem.length;
-  const qtdSms = smsCount(chars);
-  const custoUnit = 0.18;
-  const custoTotal = numeros.length * qtdSms * custoUnit;
+  const qtdSms = countSmsSegments(previewMensagem(mensagem)).segments;
+  const custoUnit = useSmsUnitPrice();
+  const custoTotal = custoUnit == null ? null : numeros.length * qtdSms * custoUnit;
 
   function inserirVar(v: string) {
     setMensagem((m) => m + v);
@@ -2390,6 +2478,9 @@ function EnvioMassa() {
                 <span>{chars} caracteres</span>
                 <span>{qtdSms} SMS por destinatário</span>
               </div>
+              <p className="text-xs text-muted-foreground">
+                {smsSegmentCostLabel(qtdSms, custoUnit)}
+              </p>
             </div>
 
             <div className="rounded-lg border border-border/60 bg-muted/30 p-3">
@@ -2423,10 +2514,7 @@ function EnvioMassa() {
             <Row label="SMS estimados" value={String(numeros.length * qtdSms)} />
             <Row
               label="Custo estimado"
-              value={custoTotal.toLocaleString("pt-BR", {
-                style: "currency",
-                currency: "BRL",
-              })}
+              value={custoTotal == null ? "—" : fmtBrl(custoTotal)}
             />
             <Separator />
             <div className="flex items-center justify-between">
@@ -2795,7 +2883,8 @@ function LegacyNewSmsCampaignDialog({
     },
     onError: (error: Error) => toast.error(error.message),
   });
-  const parts = smsCount(message.length);
+  const smsUnitPrice = useSmsUnitPrice();
+  const parts = countSmsSegments(previewMensagem(message)).segments;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[92vh] max-w-xl overflow-y-auto">
@@ -2869,8 +2958,13 @@ function LegacyNewSmsCampaignDialog({
               <span>
                 {message.length} caracteres · {parts} parte{parts === 1 ? "" : "s"}
               </span>
-              <strong>{num(phones.length * parts)} créditos</strong>
+              <strong>
+                {smsUnitPrice == null ? "—" : fmtBrl(phones.length * parts * smsUnitPrice)}
+              </strong>
             </div>
+            <p className="text-xs text-muted-foreground">
+              {smsSegmentCostLabel(parts, smsUnitPrice)}
+            </p>
           </div>
           <div className="space-y-2">
             <Label>Quando disparar</Label>

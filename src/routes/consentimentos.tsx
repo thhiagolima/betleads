@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Download, ShieldCheck, Upload } from "lucide-react";
 import { toast } from "sonner";
 
@@ -20,6 +20,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  exportChannelConsents,
   importChannelConsents,
   listChannelConsents,
   saveChannelConsent,
@@ -55,20 +56,20 @@ const channelName: Record<Channel, string> = { sms: "SMS", email: "E-mail", voic
 
 function parseCsv(value: string) {
   const lines = value.trim().split(/\r?\n/).filter(Boolean);
-  if (lines.length < 2) throw new Error("Informe o cabecalho e ao menos uma linha");
+  if (lines.length < 2) throw new Error("Informe o cabeçalho e ao menos uma linha");
   const headers = lines[0].split(",").map((v) => v.trim().toLowerCase());
   const required = ["channel", "subject", "status", "reason"];
   if (required.some((name) => !headers.includes(name)))
-    throw new Error(`Cabecalho obrigatorio: ${required.join(",")}`);
+    throw new Error(`Cabeçalho obrigatório: ${required.join(",")}`);
   return lines.slice(1).map((line) => {
     const cells = line.split(",").map((v) => v.trim());
     const get = (name: string) => cells[headers.indexOf(name)] ?? "";
     const channel = get("channel") as Channel;
     const status = get("status") as Status;
     if (!(["sms", "email", "voice"] as string[]).includes(channel))
-      throw new Error(`Canal invalido: ${channel}`);
+      throw new Error(`Canal inválido: ${channel}`);
     if (!(["granted", "revoked"] as string[]).includes(status))
-      throw new Error(`Status invalido: ${status}`);
+      throw new Error(`Status inválido: ${status}`);
     return {
       channel,
       subject: get("subject"),
@@ -86,7 +87,9 @@ function ConsentPage() {
   const saveFn = useServerFn(saveChannelConsent);
   const importFn = useServerFn(importChannelConsents);
   const savePolicyFn = useServerFn(saveVoiceContactPolicy);
+  const exportFn = useServerFn(exportChannelConsents);
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [channel, setChannel] = useState<Channel>("sms");
   const [subject, setSubject] = useState("");
   const [status, setStatus] = useState<Status>("revoked");
@@ -96,7 +99,16 @@ function ConsentPage() {
   const [voicePolicyEnabled, setVoicePolicyEnabled] = useState(true);
   const [cooldownHours, setCooldownHours] = useState(24);
   const [rolling24hLimit, setRolling24hLimit] = useState(1);
-  const query = useQuery({ queryKey: ["channel-consents"], queryFn: () => listFn() });
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+  // Busca no servidor (por destinatário), sobre a base inteira da casa.
+  const query = useQuery({
+    queryKey: ["channel-consents", debouncedSearch],
+    queryFn: () => listFn({ data: { search: debouncedSearch || null } }),
+    placeholderData: keepPreviousData,
+  });
   const refresh = () => qc.invalidateQueries({ queryKey: ["channel-consents"] });
   const save = useMutation({
     mutationFn: () =>
@@ -125,72 +137,74 @@ function ConsentPage() {
     },
     onError: (error: Error) => toast.error(error.message),
   });
+  // Dependências primitivas: refazer a busca não sobrescreve o que o operador
+  // está editando, só uma mudança real na política salva.
+  const policy = query.data?.voicePolicy;
+  const policyEnabled = policy?.enabled;
+  const policyCooldown = policy?.cooldown_hours;
+  const policyLimit = policy?.rolling_24h_limit;
   useEffect(() => {
-    if (!query.data?.voicePolicy) return;
-    setVoicePolicyEnabled(query.data.voicePolicy.enabled);
-    setCooldownHours(query.data.voicePolicy.cooldown_hours);
-    setRolling24hLimit(query.data.voicePolicy.rolling_24h_limit);
-  }, [query.data?.voicePolicy]);
+    if (policyEnabled === undefined) return;
+    setVoicePolicyEnabled(policyEnabled);
+    if (policyCooldown !== undefined) setCooldownHours(policyCooldown);
+    if (policyLimit !== undefined) setRolling24hLimit(policyLimit);
+  }, [policyEnabled, policyCooldown, policyLimit]);
   const savePolicy = useMutation({
     mutationFn: () =>
       savePolicyFn({ data: { enabled: voicePolicyEnabled, cooldownHours, rolling24hLimit } }),
     onSuccess: () => {
-      toast.success("Politica de contato de voz atualizada");
+      toast.success("Política de contato de voz atualizada");
       refresh();
     },
     onError: (error: Error) => toast.error(error.message),
   });
   const items = (query.data?.items ?? []) as ConsentRow[];
+  const total = query.data?.total ?? 0;
   const audit = (query.data?.audit ?? []) as AuditRow[];
-  const filtered = useMemo(
-    () =>
-      items.filter((item) =>
-        `${item.subject} ${item.channel} ${item.status}`
-          .toLowerCase()
-          .includes(search.toLowerCase()),
-      ),
-    [items, search],
-  );
 
-  function exportCsv() {
-    const rows = [
-      "channel,subject,status,reason,legal_basis,source,updated_at",
-      ...items.map((r) =>
-        [r.channel, r.subject, r.status, r.reason, r.legal_basis ?? "", r.source, r.updated_at]
-          .map((v) => `"${String(v).replaceAll('"', '""')}"`)
-          .join(","),
-      ),
-    ];
-    const url = URL.createObjectURL(
-      new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8" }),
-    );
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `consentimentos-${new Date().toISOString().slice(0, 10)}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
-  }
+  // Exportação vem do servidor: base inteira da casa, sem o recorte da tela.
+  const exportCsv = useMutation({
+    mutationFn: () => exportFn({ data: {} }),
+    onSuccess: (result) => {
+      const url = URL.createObjectURL(new Blob([result.csv], { type: "text/csv;charset=utf-8" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `consentimentos-${new Date().toISOString().slice(0, 10)}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+      if (result.truncated)
+        toast.warning(
+          `Exportação limitada a ${result.rows.toLocaleString("pt-BR")} registros. Fale com o suporte para a base completa.`,
+        );
+      else toast.success(`${result.rows.toLocaleString("pt-BR")} registros exportados`);
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
 
   return (
     <div className="space-y-6 p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-semibold">
-            <ShieldCheck className="size-6" /> Consentimentos e supressoes
+            <ShieldCheck className="size-6" /> Consentimentos e supressões
           </h1>
           <p className="text-sm text-muted-foreground">
             Bloqueio central de SMS, e-mail e voz, com trilha de auditoria por conta.
           </p>
         </div>
-        <Button variant="outline" onClick={exportCsv} disabled={!items.length}>
+        <Button
+          variant="outline"
+          onClick={() => exportCsv.mutate()}
+          disabled={exportCsv.isPending || (!debouncedSearch && total === 0)}
+        >
           <Download className="mr-2 size-4" />
-          Exportar CSV
+          {exportCsv.isPending ? "Exportando…" : "Exportar CSV"}
         </Button>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>Registrar decisao</CardTitle>
+          <CardTitle>Registrar decisão</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-6">
           <div>
@@ -243,7 +257,7 @@ function ConsentPage() {
               onClick={() => save.mutate()}
               disabled={save.isPending || subject.trim().length < 3 || !reason.trim()}
             >
-              Salvar decisao
+              Salvar decisão
             </Button>
           </div>
         </CardContent>
@@ -251,7 +265,7 @@ function ConsentPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Importacao em lote</CardTitle>
+          <CardTitle>Importação em lote</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="text-xs text-muted-foreground">
@@ -287,7 +301,7 @@ function ConsentPage() {
             Aplicar limite e cooldown
           </label>
           <div>
-            <Label>Cooldown por destinatario (horas)</Label>
+            <Label>Cooldown por destinatário (horas)</Label>
             <Input
               className="mt-2"
               type="number"
@@ -298,7 +312,7 @@ function ConsentPage() {
             />
           </div>
           <div>
-            <Label>Maximo em 24h por destinatario</Label>
+            <Label>Máximo em 24h por destinatário</Label>
             <Input
               className="mt-2"
               type="number"
@@ -310,7 +324,7 @@ function ConsentPage() {
           </div>
           <div className="md:col-span-3">
             <p className="mb-3 text-xs text-muted-foreground">
-              A janela de horario configurada para a conta continua obrigatoria mesmo com os limites
+              A janela de horário configurada para a conta continua obrigatória mesmo com os limites
               desativados.
             </p>
             <Button
@@ -318,7 +332,7 @@ function ConsentPage() {
               onClick={() => savePolicy.mutate()}
               disabled={savePolicy.isPending}
             >
-              Salvar politica de voz
+              Salvar política de voz
             </Button>
           </div>
         </CardContent>
@@ -326,21 +340,34 @@ function ConsentPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Base central ({items.length})</CardTitle>
+          <CardTitle>
+            Base central (
+            {debouncedSearch
+              ? `${total.toLocaleString("pt-BR")} encontrados`
+              : total.toLocaleString("pt-BR")}
+            )
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <Input
             className="mb-4 max-w-md"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Pesquisar telefone, e-mail, canal ou status"
+            placeholder="Pesquisar por telefone ou e-mail"
           />
+          {total > items.length && (
+            <p className="mb-3 text-xs text-muted-foreground">
+              Mostrando os {items.length.toLocaleString("pt-BR")} mais recentes de{" "}
+              {total.toLocaleString("pt-BR")}. Use a busca para encontrar um destinatário ou exporte
+              o CSV para a base completa.
+            </p>
+          )}
           <div className="overflow-auto">
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Canal</TableHead>
-                  <TableHead>Destinatario</TableHead>
+                  <TableHead>Destinatário</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Motivo</TableHead>
                   <TableHead>Origem</TableHead>
@@ -348,7 +375,18 @@ function ConsentPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filtered.map((row) => (
+                {items.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center text-sm text-muted-foreground">
+                      {query.isLoading
+                        ? "Carregando…"
+                        : debouncedSearch
+                          ? "Nenhum destinatário encontrado."
+                          : "Nenhum consentimento registrado."}
+                    </TableCell>
+                  </TableRow>
+                )}
+                {items.map((row) => (
                   <TableRow key={row.id}>
                     <TableCell>{channelName[row.channel]}</TableCell>
                     <TableCell className="font-mono text-xs">{row.subject}</TableCell>
@@ -379,8 +417,8 @@ function ConsentPage() {
                 <TableRow>
                   <TableHead>Data</TableHead>
                   <TableHead>Canal</TableHead>
-                  <TableHead>Destinatario</TableHead>
-                  <TableHead>Alteracao</TableHead>
+                  <TableHead>Destinatário</TableHead>
+                  <TableHead>Alteração</TableHead>
                   <TableHead>Motivo / origem</TableHead>
                 </TableRow>
               </TableHeader>

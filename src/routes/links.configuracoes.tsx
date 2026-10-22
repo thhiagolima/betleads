@@ -18,7 +18,18 @@ function LinkSettings() {
   const [saving, setSaving] = useState(false);
   const data = q.data;
   const s = data?.settings;
-  if (!s) return <div className="p-6">Carregando…</div>;
+  if (q.isError) {
+    // The server only answers the house admin; anyone else used to see "Carregando…" forever.
+    return (
+      <div className="mx-auto max-w-xl space-y-2 p-6 text-center">
+        <p className="text-base font-medium">Não foi possível abrir as configurações de links</p>
+        <p className="text-sm text-muted-foreground">
+          Esta área é do administrador da casa. Se você é admin, tente de novo em instantes.
+        </p>
+      </div>
+    );
+  }
+  if (!s) return <div className="p-6 text-sm text-muted-foreground">Carregando…</div>;
   async function save(form: FormData) {
     setSaving(true);
     try {

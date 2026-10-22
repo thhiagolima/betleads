@@ -59,12 +59,23 @@ import {
   updateTenantSettings,
   updateTenantUserRole,
 } from "@/lib/tenants.functions";
+import { adminAdjustSmsCredits } from "@/lib/sms-credits.functions";
+import { adminClearTenantPrice, adminSetTenantPrice } from "@/lib/billing/billing.functions";
 import {
-  adminAdjustSmsCredits,
-  adminClearTenantSmsPricing,
-  adminSetTenantSmsPricing,
-} from "@/lib/sms-credits.functions";
-import { brl, num } from "@/lib/format";
+  type BillingItem,
+  CurrentPricesCard,
+  MonthUsageCard,
+  type WalletMonthUsageRow,
+  type WalletPriceRow,
+} from "@/components/billing/wallet-usage-panels";
+import {
+  billingItemLabel,
+  brl,
+  brlUnitPrice,
+  ledgerAmountTone,
+  num,
+  walletEntryTypeLabel,
+} from "@/lib/format";
 import { requestConfirmation } from "@/components/system-dialog-host";
 import { MetricCard as DashboardMetricCard } from "@/components/ui-premium/metric-card";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
@@ -109,23 +120,31 @@ type TenantDetail = {
   };
   sms: {
     summary: {
-      balance_credits?: number;
-      lifetime_purchased_credits?: number;
-      lifetime_manual_credits?: number;
-      lifetime_used_credits?: number;
-      pricing?: Record<string, unknown>;
+      balance?: number;
+      lifetime_purchased?: number;
+      lifetime_used?: number;
+      exempt?: boolean;
+      month_usage?: WalletMonthUsageRow[];
+      prices?: Partial<Record<BillingItem, WalletPriceRow>>;
     };
     pricing: {
-      sale_price_per_sms?: number;
-      provider_cost_per_sms?: number;
+      item: "sms";
+      unit_price?: number;
+      /** Only present for the super admin (stripped on the server otherwise). */
+      provider_unit_cost?: number | null;
+      free_monthly_units?: number;
+      exempt?: boolean;
       has_tenant_override?: boolean;
-      low_balance_threshold?: number;
     };
     ledger: Array<{
       id: string;
-      delta_credits: number;
-      balance_after: number;
       entry_type: string;
+      item: string | null;
+      units: number | null;
+      unit_price: number | null;
+      amount: number;
+      balance_after: number;
+      reference_type: string | null;
       reason: string | null;
       created_by: string | null;
       created_at: string;
@@ -336,9 +355,9 @@ function TenantWorkspace({
   canManage: boolean;
 }) {
   const tenant = detail.tenant;
-  const balance = Number(detail.sms.summary.balance_credits ?? 0);
-  const used = Number(detail.sms.summary.lifetime_used_credits ?? 0);
-  const purchased = Number(detail.sms.summary.lifetime_purchased_credits ?? 0);
+  const balance = Number(detail.sms.summary.balance ?? 0);
+  const used = Number(detail.sms.summary.lifetime_used ?? 0);
+  const purchased = Number(detail.sms.summary.lifetime_purchased ?? 0);
 
   return (
     <div className="space-y-4">
@@ -351,9 +370,9 @@ function TenantWorkspace({
         />
         <MetricCard
           icon={Wallet}
-          label="Saldo SMS"
-          value={num(balance)}
-          hint={`${num(used)} créditos consumidos`}
+          label="Saldo"
+          value={brl(balance)}
+          hint={`${brl(used)} consumidos`}
         />
         <MetricCard
           icon={Activity}
@@ -364,7 +383,7 @@ function TenantWorkspace({
         <MetricCard
           icon={CreditCard}
           label="Comprado"
-          value={num(purchased)}
+          value={brl(purchased)}
           hint={`Status: ${tenant.status}`}
         />
       </div>
@@ -427,8 +446,7 @@ function MetricCard({
 function OverviewTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAdmin: boolean }) {
   const tenant = detail.tenant;
   const pricing = detail.sms.pricing;
-  const margin =
-    Number(pricing.sale_price_per_sms ?? 0) - Number(pricing.provider_cost_per_sms ?? 0);
+  const margin = Number(pricing.unit_price ?? 0) - Number(pricing.provider_unit_cost ?? 0);
 
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_0.8fr]">
@@ -460,20 +478,25 @@ function OverviewTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAd
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          <HealthLine label="Saldo SMS" ok={Number(detail.sms.summary.balance_credits ?? 0) > 0} />
-          <HealthLine label="Usuário administrador" ok={detail.users.length > 0} />
+          <HealthLine label="Saldo" ok={Number(detail.sms.summary.balance ?? 0) > 0} />
+          <HealthLine
+            label="Usuário administrador"
+            ok={detail.users.some((user) => user.role === "admin")}
+          />
           <HealthLine label="Meta conectada" ok={detail.reports.meta_accounts > 0} />
           <HealthLine label="Webhooks chegando" ok={detail.reports.webhooks_30d > 0} />
-          <div className="rounded-lg border border-border/70 p-3 text-sm">
-            <div className="text-muted-foreground">Margem estimada por SMS</div>
-            <div
-              className={
-                margin >= 0 ? "font-semibold text-emerald-400" : "font-semibold text-red-400"
-              }
-            >
-              {brl(margin)}
+          {isSuperAdmin && (
+            <div className="rounded-lg border border-border/70 p-3 text-sm">
+              <div className="text-muted-foreground">Margem estimada por SMS</div>
+              <div
+                className={
+                  margin >= 0 ? "font-semibold text-emerald-400" : "font-semibold text-red-400"
+                }
+              >
+                {brlUnitPrice(margin)}
+              </div>
             </div>
-          </div>
+          )}
           {!isSuperAdmin && (
             <p className="text-xs text-muted-foreground">
               Alterações financeiras e status do tenant ficam restritas ao superadmin.
@@ -594,7 +617,7 @@ function UsersTab({
 }
 
 function AddUserDialog({ tenantId, isSuperAdmin }: { tenantId: string; isSuperAdmin: boolean }) {
-  const isDemo = useIsDemoTenant();
+  const isDemo = useIsDemoTenant(tenantId);
   const qc = useQueryClient();
   const fn = useServerFn(addUserToTenant);
   const [open, setOpen] = useState(false);
@@ -691,7 +714,7 @@ function RoleSelect({
   isSuperAdmin: boolean;
   canManage: boolean;
 }) {
-  const isDemo = useIsDemoTenant();
+  const isDemo = useIsDemoTenant(tenantId);
   const qc = useQueryClient();
   const fn = useServerFn(updateTenantUserRole);
   const mut = useMutation({
@@ -725,7 +748,7 @@ function RoleSelect({
 }
 
 function RemoveUserButton({ tenantId, user }: { tenantId: string; user: TenantUser }) {
-  const isDemo = useIsDemoTenant();
+  const isDemo = useIsDemoTenant(tenantId);
   const qc = useQueryClient();
   const fn = useServerFn(removeUserFromTenant);
   const mut = useMutation({
@@ -763,19 +786,22 @@ function RemoveUserButton({ tenantId, user }: { tenantId: string; user: TenantUs
 
 function CreditsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAdmin: boolean }) {
   const pricing = detail.sms.pricing;
-  const balance = Number(detail.sms.summary.balance_credits ?? 0);
+  const balance = Number(detail.sms.summary.balance ?? 0);
 
   return (
     <div className="space-y-4">
       <div className="grid gap-4 lg:grid-cols-3">
         <Card>
           <CardContent className="p-5">
-            <div className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
               Saldo disponível
+              {detail.sms.summary.exempt && (
+                <Badge className="bg-emerald-500/15 text-emerald-400">Isenta</Badge>
+              )}
             </div>
-            <div className="mt-2 text-4xl font-bold">{num(balance)}</div>
+            <div className="mt-2 text-4xl font-bold">{brl(balance)}</div>
             <div className="mt-1 text-sm text-muted-foreground">
-              {num(Number(detail.sms.summary.lifetime_used_credits ?? 0))} consumidos historicamente
+              {brl(Number(detail.sms.summary.lifetime_used ?? 0))} consumidos historicamente
             </div>
           </CardContent>
         </Card>
@@ -785,11 +811,13 @@ function CreditsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAdm
               Preço venda/SMS
             </div>
             <div className="mt-2 text-3xl font-bold">
-              {brl(Number(pricing.sale_price_per_sms ?? 0))}
+              {brlUnitPrice(Number(pricing.unit_price ?? 0))}
             </div>
-            <div className="mt-1 text-sm text-muted-foreground">
-              custo fornecedor {brl(Number(pricing.provider_cost_per_sms ?? 0))}
-            </div>
+            {isSuperAdmin && (
+              <div className="mt-1 text-sm text-muted-foreground">
+                custo fornecedor {brlUnitPrice(Number(pricing.provider_unit_cost ?? 0))}
+              </div>
+            )}
           </CardContent>
         </Card>
         <Card>
@@ -808,12 +836,19 @@ function CreditsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAdm
         </Card>
       </div>
 
+      <MonthUsageCard
+        monthUsage={detail.sms.summary.month_usage ?? []}
+        prices={detail.sms.summary.prices ?? {}}
+      />
+
+      <CurrentPricesCard prices={detail.sms.summary.prices ?? {}} />
+
       <div className="grid gap-4 xl:grid-cols-2">
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <FileClock className="h-5 w-5 text-primary" />
-              Extrato de créditos
+              Extrato
             </CardTitle>
           </CardHeader>
           <CardContent className="overflow-x-auto p-0">
@@ -822,7 +857,8 @@ function CreditsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAdm
                 <TableRow>
                   <TableHead>Quando</TableHead>
                   <TableHead>Tipo</TableHead>
-                  <TableHead className="text-right">Delta</TableHead>
+                  <TableHead>Canal</TableHead>
+                  <TableHead className="text-right">Valor</TableHead>
                   <TableHead className="text-right">Saldo</TableHead>
                 </TableRow>
               </TableHeader>
@@ -831,25 +867,24 @@ function CreditsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAdm
                   <TableRow key={entry.id}>
                     <TableCell>{fmtDate(entry.created_at)}</TableCell>
                     <TableCell>
-                      <div className="font-medium">{entry.entry_type}</div>
-                      <div className="max-w-64 truncate text-xs text-muted-foreground">
+                      <div className="font-medium">{walletEntryTypeLabel(entry.entry_type)}</div>
+                      <div className="max-w-56 truncate text-xs text-muted-foreground">
                         {entry.reason ?? "-"}
                       </div>
                     </TableCell>
+                    <TableCell>{billingItemLabel(entry.item)}</TableCell>
                     <TableCell
-                      className={`text-right font-semibold ${
-                        Number(entry.delta_credits) > 0 ? "text-emerald-400" : "text-red-300"
-                      }`}
+                      className={`text-right font-semibold ${ledgerAmountTone(Number(entry.amount))}`}
                     >
-                      {Number(entry.delta_credits) > 0 ? "+" : ""}
-                      {num(Number(entry.delta_credits))}
+                      {Number(entry.amount) > 0 ? "+" : ""}
+                      {brl(Number(entry.amount))}
                     </TableCell>
-                    <TableCell className="text-right">{num(Number(entry.balance_after))}</TableCell>
+                    <TableCell className="text-right">{brl(Number(entry.balance_after))}</TableCell>
                   </TableRow>
                 ))}
                 {!detail.sms.ledger.length && (
                   <TableRow>
-                    <TableCell colSpan={4} className="py-8 text-center text-muted-foreground">
+                    <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
                       Nenhuma movimentação ainda.
                     </TableCell>
                   </TableRow>
@@ -916,10 +951,10 @@ function AdjustCreditsDialog({ tenant }: { tenant: TenantRow }) {
   const qc = useQueryClient();
   const fn = useServerFn(adminAdjustSmsCredits);
   const [open, setOpen] = useState(false);
-  const [delta, setDelta] = useState("1000");
+  const [amount, setAmount] = useState("50");
   const [reason, setReason] = useState("Ajuste manual via área de tenants");
   const mut = useMutation({
-    mutationFn: () => fn({ data: { tenantId: tenant.id, delta: Number(delta), reason } }),
+    mutationFn: () => fn({ data: { tenantId: tenant.id, amount: Number(amount), reason } }),
     onSuccess: () => {
       toast.success("Saldo ajustado");
       setOpen(false);
@@ -938,10 +973,9 @@ function AdjustCreditsDialog({ tenant }: { tenant: TenantRow }) {
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Ajustar saldo SMS</DialogTitle>
+          <DialogTitle>Ajustar saldo</DialogTitle>
           <DialogDescription>
-            Valor positivo adiciona créditos; valor negativo remove créditos com registro no
-            extrato.
+            Valor em R$. Positivo adiciona saldo; negativo remove, com registro no extrato.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
@@ -950,8 +984,13 @@ function AdjustCreditsDialog({ tenant }: { tenant: TenantRow }) {
             <Input value={tenant.nome} readOnly />
           </div>
           <div className="space-y-2">
-            <Label>Delta de créditos</Label>
-            <Input type="number" value={delta} onChange={(event) => setDelta(event.target.value)} />
+            <Label>Valor (R$)</Label>
+            <Input
+              type="number"
+              step="0.01"
+              value={amount}
+              onChange={(event) => setAmount(event.target.value)}
+            />
           </div>
           <div className="space-y-2">
             <Label>Motivo</Label>
@@ -962,7 +1001,7 @@ function AdjustCreditsDialog({ tenant }: { tenant: TenantRow }) {
           <Button variant="outline" onClick={() => setOpen(false)}>
             Cancelar
           </Button>
-          <Button disabled={mut.isPending || !Number(delta)} onClick={() => mut.mutate()}>
+          <Button disabled={mut.isPending || !Number(amount)} onClick={() => mut.mutate()}>
             Confirmar
           </Button>
         </DialogFooter>
@@ -979,19 +1018,18 @@ function PricingDialog({
   pricing: TenantDetail["sms"]["pricing"];
 }) {
   const qc = useQueryClient();
-  const setFn = useServerFn(adminSetTenantSmsPricing);
-  const clearFn = useServerFn(adminClearTenantSmsPricing);
+  const setFn = useServerFn(adminSetTenantPrice);
+  const clearFn = useServerFn(adminClearTenantPrice);
   const [open, setOpen] = useState(false);
-  const [sale, setSale] = useState(String(pricing.sale_price_per_sms ?? ""));
-  const [cost, setCost] = useState(String(pricing.provider_cost_per_sms ?? ""));
+  const [unitPrice, setUnitPrice] = useState(String(pricing.unit_price ?? ""));
 
   const save = useMutation({
     mutationFn: () =>
       setFn({
         data: {
           tenantId: tenant.id,
-          sale_price_per_sms: sale.trim() ? Number(sale) : null,
-          provider_cost_per_sms: cost.trim() ? Number(cost) : null,
+          item: "sms",
+          unitPrice: Number(unitPrice),
         },
       }),
     onSuccess: () => {
@@ -1003,7 +1041,7 @@ function PricingDialog({
   });
 
   const clear = useMutation({
-    mutationFn: () => clearFn({ data: { tenantId: tenant.id } }),
+    mutationFn: () => clearFn({ data: { tenantId: tenant.id, item: "sms" } }),
     onSuccess: () => {
       toast.success("Preço individual removido");
       setOpen(false);
@@ -1024,36 +1062,26 @@ function PricingDialog({
         <DialogHeader>
           <DialogTitle>Preço individual de SMS</DialogTitle>
           <DialogDescription>
-            Deixe vazio para voltar a usar a configuração global.
+            Vale só para esta casa. Use &quot;Voltar ao padrão&quot; para remover a exceção.
           </DialogDescription>
         </DialogHeader>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-2">
-            <Label>Venda por SMS</Label>
-            <Input
-              type="number"
-              step="0.0001"
-              value={sale}
-              onChange={(event) => setSale(event.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label>Custo fornecedor</Label>
-            <Input
-              type="number"
-              step="0.0001"
-              value={cost}
-              onChange={(event) => setCost(event.target.value)}
-            />
-          </div>
+        <div className="space-y-2">
+          <Label>Preço unitário (R$)</Label>
+          <Input
+            type="number"
+            min="0"
+            step="0.0001"
+            value={unitPrice}
+            onChange={(event) => setUnitPrice(event.target.value)}
+          />
         </div>
         <DialogFooter>
           {pricing.has_tenant_override && (
             <Button variant="outline" disabled={clear.isPending} onClick={() => clear.mutate()}>
-              Remover individual
+              Voltar ao padrão
             </Button>
           )}
-          <Button disabled={save.isPending} onClick={() => save.mutate()}>
+          <Button disabled={save.isPending || unitPrice.trim() === ""} onClick={() => save.mutate()}>
             Salvar
           </Button>
         </DialogFooter>
@@ -1157,7 +1185,7 @@ function AuditTab({ detail }: { detail: TenantDetail }) {
 }
 
 function SettingsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAdmin: boolean }) {
-  const isDemo = useIsDemoTenant();
+  const isDemo = useIsDemoTenant(detail.tenant.id);
   const qc = useQueryClient();
   const fn = useServerFn(updateTenantSettings);
   const tenant = detail.tenant;
@@ -1167,6 +1195,7 @@ function SettingsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAd
     plano: tenant.plano,
     crm_model: tenant.crm_model ?? "CRM_PLATAFORMA",
   });
+  const [planReason, setPlanReason] = useState("");
 
   useEffect(() => {
     setForm({
@@ -1175,10 +1204,17 @@ function SettingsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAd
       plano: tenant.plano,
       crm_model: tenant.crm_model ?? "CRM_PLATAFORMA",
     });
+    setPlanReason("");
   }, [tenant.id, tenant.nome, tenant.status, tenant.plano, tenant.crm_model]);
 
+  // Required (>= 5 chars) only when the plano select moves into or out of
+  // 'interno' — same rule `updateTenantSettingsFor` enforces server-side.
+  const planTouchesInterno =
+    form.plano !== tenant.plano && (tenant.plano === "interno" || form.plano === "interno");
+
   const mut = useMutation({
-    mutationFn: () => fn({ data: { tenantId: tenant.id, ...form } }),
+    mutationFn: () =>
+      fn({ data: { tenantId: tenant.id, ...form, planReason: planReason.trim() || undefined } }),
     onSuccess: () => {
       toast.success("Tenant atualizado");
       qc.invalidateQueries({ queryKey: ["tenants-console"] });
@@ -1269,10 +1305,25 @@ function SettingsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAd
             </Select>
           </div>
         </div>
+        {planTouchesInterno && (
+          <div className="space-y-2">
+            <Label>Motivo da troca de plano</Label>
+            <Input
+              value={planReason}
+              onChange={(event) => setPlanReason(event.target.value)}
+              placeholder="Por que esta casa está entrando/saindo do plano interno?"
+            />
+          </div>
+        )}
         <DemoDisabledTooltip active={isDemo}>
           <Button
             className="gap-2"
-            disabled={isDemo || mut.isPending || !form.nome.trim()}
+            disabled={
+              isDemo ||
+              mut.isPending ||
+              !form.nome.trim() ||
+              (planTouchesInterno && planReason.trim().length < 5)
+            }
             onClick={() => mut.mutate()}
           >
             <Save className="h-4 w-4" />

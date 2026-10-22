@@ -33,7 +33,8 @@ type DashboardRpc = {
   recoveredReactivated?: number | string;
   smsSent?: number;
   messageCost?: number | string;
-  smsCredits?: number;
+  walletBalance?: number | string;
+  exempt?: boolean;
   pixGenerated?: number;
   previousPixGenerated?: number;
   reactivationQueue?: number;
@@ -72,8 +73,6 @@ type DashboardDb = {
   from: <T = unknown>(table: string) => DashboardQuery<T>;
 };
 
-// Only used if the database does not return the charged cost (older RPC).
-const FALLBACK_SMS_UNIT_PRICE = 0.12;
 const DASHBOARD_REQUEST_TIMEOUT_MS = 25_000;
 
 /**
@@ -100,6 +99,89 @@ function number(value: unknown) {
 function pctChange(current: number, previous: number) {
   if (previous <= 0) return current > 0 ? 100 : 0;
   return ((current - previous) / previous) * 100;
+}
+
+/**
+ * Maps the raw `dashboard_summary_v2` RPC payload to the shape the home
+ * dashboard consumes. Pulled out of the handler (PG1 final review, item 1)
+ * so the new wallet/exempt fields and the removed legacy-credit fallback
+ * can be unit tested without going through requireSupabaseAuth/Supabase.
+ */
+export function mapDashboardRpc(value: DashboardRpc, periodDays: number) {
+  const depositAmount = number(value.depositAmount);
+  const previousDepositAmount = number(value.previousDepositAmount);
+  const depositCount = number(value.depositCount);
+  const previousDepositCount = number(value.previousDepositCount);
+  const depositors = number(value.depositors);
+  const previousDepositors = number(value.previousDepositors);
+  const newPlayers = number(value.newPlayers);
+  const previousNewPlayers = number(value.previousNewPlayers);
+  const ftd = number(value.ftd);
+  const previousFtd = number(value.previousFtd);
+  const conversion = newPlayers > 0 ? (ftd / newPlayers) * 100 : 0;
+  const previousConversion = previousNewPlayers > 0 ? (previousFtd / previousNewPlayers) * 100 : 0;
+  const ticket = depositCount > 0 ? depositAmount / depositCount : 0;
+  const previousTicket =
+    previousDepositCount > 0 ? previousDepositAmount / previousDepositCount : 0;
+  const redepositAmount = number(value.redepositAmount);
+  const recoveredAmount = number(value.recoveredAmount);
+  const recoveredNew = number(value.recoveredNew);
+  const recoveredReactivated = number(value.recoveredReactivated);
+  const smsSent = number(value.smsSent);
+  // smsSent/messageCost now come straight from crm_results_daily
+  // (already on the price book and billed_units -- segments, not
+  // sends -- since Task 6), so there's no fallback to compute here.
+  const messageCost = number(value.messageCost);
+
+  return {
+    periodDays,
+    depositAmount,
+    depositGrowth: pctChange(depositAmount, previousDepositAmount),
+    depositCount,
+    depositors,
+    depositorsGrowth: pctChange(depositors, previousDepositors),
+    newPlayers,
+    newPlayersGrowth: pctChange(newPlayers, previousNewPlayers),
+    ftd,
+    ftdGrowth: pctChange(ftd, previousFtd),
+    conversion,
+    conversionGrowth: conversion - previousConversion,
+    ticket,
+    ticketGrowth: pctChange(ticket, previousTicket),
+    redepositAmount,
+    redepositCount: number(value.redepositCount),
+    redepositPlayers: number(value.redepositPlayers),
+    redepositGrowth: pctChange(redepositAmount, number(value.previousRedepositAmount)),
+    recoveredAmount,
+    recoveredNew,
+    recoveredReactivated,
+    recoveredReturning: Math.max(0, recoveredAmount - recoveredNew - recoveredReactivated),
+    recoveredPlayers: number(value.recoveredPlayers),
+    messageCost,
+    messageRoi: messageCost > 0 ? recoveredAmount / messageCost : 0,
+    withdrawalAmount: number(value.withdrawalAmount),
+    cashflowChart: (value.cashflowChart ?? []).map((row) => ({
+      ...row,
+      deposits: number(row.deposits),
+      withdrawals: number(row.withdrawals),
+    })),
+    pixGenerated: number(value.pixGenerated),
+    pixGeneratedGrowth: pctChange(number(value.pixGenerated), number(value.previousPixGenerated)),
+    pixPayRate:
+      number(value.pixGenerated) > 0 ? (depositCount / number(value.pixGenerated)) * 100 : 0,
+    pixUnpaid: Math.max(0, number(value.pixGenerated) - depositCount),
+    reactivationQueue: number(value.reactivationQueue),
+    activeFlows: number(value.activeFlows),
+    totalFlows: number(value.totalFlows),
+    pausedFlows: number(value.pausedFlows),
+    smsSent,
+    walletBalance: number(value.walletBalance),
+    exempt: value.exempt === true,
+    liveEvents: (value.liveEvents ?? []).slice(0, 8).map((event) => ({
+      ...event,
+      amount: event.amount == null ? undefined : number(event.amount),
+    })),
+  };
 }
 
 export const getDashboardSummary = createServerFn({ method: "POST" })
@@ -148,86 +230,7 @@ export const getDashboardSummary = createServerFn({ method: "POST" })
           if (error) throw new Error(error.message);
           if (!raw) throw new Error("Sem acesso aos dados desta conta.");
 
-          const value = raw as DashboardRpc;
-          const depositAmount = number(value.depositAmount);
-          const previousDepositAmount = number(value.previousDepositAmount);
-          const depositCount = number(value.depositCount);
-          const previousDepositCount = number(value.previousDepositCount);
-          const depositors = number(value.depositors);
-          const previousDepositors = number(value.previousDepositors);
-          const newPlayers = number(value.newPlayers);
-          const previousNewPlayers = number(value.previousNewPlayers);
-          const ftd = number(value.ftd);
-          const previousFtd = number(value.previousFtd);
-          const conversion = newPlayers > 0 ? (ftd / newPlayers) * 100 : 0;
-          const previousConversion =
-            previousNewPlayers > 0 ? (previousFtd / previousNewPlayers) * 100 : 0;
-          const ticket = depositCount > 0 ? depositAmount / depositCount : 0;
-          const previousTicket =
-            previousDepositCount > 0 ? previousDepositAmount / previousDepositCount : 0;
-          const redepositAmount = number(value.redepositAmount);
-          const recoveredAmount = number(value.recoveredAmount);
-          const recoveredNew = number(value.recoveredNew);
-          const recoveredReactivated = number(value.recoveredReactivated);
-          const smsSent = number(value.smsSent);
-          const messageCost =
-            value.messageCost == null
-              ? smsSent * FALLBACK_SMS_UNIT_PRICE
-              : number(value.messageCost);
-
-          return {
-            periodDays,
-            depositAmount,
-            depositGrowth: pctChange(depositAmount, previousDepositAmount),
-            depositCount,
-            depositors,
-            depositorsGrowth: pctChange(depositors, previousDepositors),
-            newPlayers,
-            newPlayersGrowth: pctChange(newPlayers, previousNewPlayers),
-            ftd,
-            ftdGrowth: pctChange(ftd, previousFtd),
-            conversion,
-            conversionGrowth: conversion - previousConversion,
-            ticket,
-            ticketGrowth: pctChange(ticket, previousTicket),
-            redepositAmount,
-            redepositCount: number(value.redepositCount),
-            redepositPlayers: number(value.redepositPlayers),
-            redepositGrowth: pctChange(redepositAmount, number(value.previousRedepositAmount)),
-            recoveredAmount,
-            recoveredNew,
-            recoveredReactivated,
-            recoveredReturning: Math.max(0, recoveredAmount - recoveredNew - recoveredReactivated),
-            recoveredPlayers: number(value.recoveredPlayers),
-            messageCost,
-            messageRoi: messageCost > 0 ? recoveredAmount / messageCost : 0,
-            withdrawalAmount: number(value.withdrawalAmount),
-            cashflowChart: (value.cashflowChart ?? []).map((row) => ({
-              ...row,
-              deposits: number(row.deposits),
-              withdrawals: number(row.withdrawals),
-            })),
-            pixGenerated: number(value.pixGenerated),
-            pixGeneratedGrowth: pctChange(
-              number(value.pixGenerated),
-              number(value.previousPixGenerated),
-            ),
-            pixPayRate:
-              number(value.pixGenerated) > 0
-                ? (depositCount / number(value.pixGenerated)) * 100
-                : 0,
-            pixUnpaid: Math.max(0, number(value.pixGenerated) - depositCount),
-            reactivationQueue: number(value.reactivationQueue),
-            activeFlows: number(value.activeFlows),
-            totalFlows: number(value.totalFlows),
-            pausedFlows: number(value.pausedFlows),
-            smsSent,
-            smsCredits: number(value.smsCredits),
-            liveEvents: (value.liveEvents ?? []).slice(0, 8).map((event) => ({
-              ...event,
-              amount: event.amount == null ? undefined : number(event.amount),
-            })),
-          };
+          return mapDashboardRpc(raw as DashboardRpc, periodDays);
         })(),
         DASHBOARD_REQUEST_TIMEOUT_MS,
         "O painel demorou mais que o esperado para responder. Tente novamente.",

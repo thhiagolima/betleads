@@ -60,7 +60,9 @@ import {
   saveEmailTemplate,
   sendEmailCampaignNow,
 } from "@/lib/email.functions";
-import { num } from "@/lib/format";
+import { brl, num } from "@/lib/format";
+import { getBillingPrices } from "@/lib/billing/billing.functions";
+import { countSmsSegments } from "@/lib/sms-segments";
 import { unknownMessageVariables } from "@/lib/message-variables";
 import { listJourneyVoiceAssets } from "@/lib/journey-voice-assets.functions";
 import {
@@ -71,7 +73,6 @@ import { SYSTEM_SMS_AUDIENCES, type SmsAudienceCriteria } from "@/lib/sms-audien
 import { listSmsAudiences } from "@/lib/sms-audience-crud.functions";
 import { listSmsTemplates } from "@/lib/sms-templates.functions";
 import { previewSmsCampaignRecipients, scheduleBulkSms, sendBulkSms } from "@/lib/sms.functions";
-import { estimateSms } from "@/lib/link-tracking-preview";
 import { fromBrtInput, toBrtInput } from "@/components/journeys/journey-editor-config";
 import { getComposerOptions } from "@/lib/house-config.functions";
 import { COMPOSER_OPTIONS_QUERY_KEY } from "@/components/house-config/house-config-query";
@@ -164,6 +165,7 @@ export function ChannelCampaignComposer({
   // Only a confirmed-empty sender list blocks sending — while the query is
   // still loading or failed, we don't know yet, so we don't block on it.
   const emailBlocked = composerOptions.isSuccess && emailSenders.length === 0;
+  const getPrices = useServerFn(getBillingPrices);
 
   const [channel, setChannel] = useState<Channel>(initialChannel);
   const [name, setName] = useState("");
@@ -212,6 +214,14 @@ export function ChannelCampaignComposer({
     queryFn: () => listAudiences(),
     enabled: open,
   });
+  const pricesQuery = useQuery({
+    queryKey: ["billing-prices"],
+    queryFn: () => getPrices(),
+    enabled: open,
+    staleTime: 5 * 60_000,
+  });
+  const smsPrice = pricesQuery.data?.sms ?? null;
+  const smsExempt = smsPrice?.exempt ?? false;
   const smsTemplatesQuery = useQuery({
     queryKey: ["sms-templates"],
     queryFn: () => listSmsTemplateFn(),
@@ -385,9 +395,10 @@ export function ChannelCampaignComposer({
   });
   const smsPreview = channel === "sms" ? smsRecipientPreview.data : undefined;
   const sendableRecipients = smsPreview ? smsPreview.resolved : recipients;
-  const smsEstimate = estimateSms(smsContent);
-  const parts = smsEstimate.parts;
+  const smsSegmentInfo = countSmsSegments(smsContent);
+  const parts = smsSegmentInfo.segments;
   const cost = channel === "sms" ? sendableRecipients * parts : recipients;
+  const smsCostBrl = smsPrice == null ? null : parts * smsPrice.unitPrice;
   const channelLimitError =
     channel === "voice" && recipients > 200
       ? "Voz aceita até 200 destinatários por campanha."
@@ -701,7 +712,7 @@ export function ChannelCampaignComposer({
       const count = sendableRecipients;
       const typed = await requestTextInput({
         title: when === "schedule" ? "Confirmar agendamento em massa" : "Confirmar envio em massa",
-        description: `${campaignSendLabel({ channel, when, recipients: count, cost })}. Para confirmar, digite a quantidade de destinatários. Depois de iniciado, o envio não pode ser desfeito.`,
+        description: `${campaignSendLabel({ channel, when, recipients: count, cost, smsUnitPrice: smsPrice?.unitPrice, smsExempt })}. Para confirmar, digite a quantidade de destinatários. Depois de iniciado, o envio não pode ser desfeito.`,
         label: `Digite ${num(count)} para confirmar`,
         placeholder: num(count),
         confirmLabel: when === "schedule" ? "Agendar" : "Enviar",
@@ -922,8 +933,13 @@ export function ChannelCampaignComposer({
                     onChange={setSmsContent}
                   />
                   <p className="text-xs text-muted-foreground">
-                    {smsEstimate.characters} caracteres · {smsEstimate.encoding} · {parts} parte(s)
-                    · estimativa: {num(cost)} créditos
+                    {Array.from(smsContent).length} caracteres · {smsSegmentInfo.encoding} ·{" "}
+                    {parts} segmento{parts === 1 ? "" : "s"} ·{" "}
+                    {smsExempt
+                      ? "casa isenta"
+                      : smsCostBrl == null
+                        ? "—"
+                        : `${brl(smsCostBrl)} por jogador`}
                   </p>
                 </div>
                 <div className="space-y-2">
@@ -1204,14 +1220,22 @@ export function ChannelCampaignComposer({
                 ) : null}
               </p>
               <p>
-                <strong>
-                  {channel === "sms"
-                    ? `${num(cost)} créditos`
-                    : channel === "voice"
-                      ? `${num(cost)} chamadas`
-                      : `${num(cost)} e-mails`}
-                </strong>{" "}
-                estimados
+                {channel === "sms" ? (
+                  <strong>
+                    {smsExempt
+                      ? "Casa isenta"
+                      : `${num(cost)} segmento${cost === 1 ? "" : "s"} · ${
+                          smsPrice == null ? "—" : brl(cost * smsPrice.unitPrice)
+                        }`}
+                  </strong>
+                ) : (
+                  <>
+                    <strong>
+                      {channel === "voice" ? `${num(cost)} chamadas` : `${num(cost)} e-mails`}
+                    </strong>{" "}
+                    estimados
+                  </>
+                )}
               </p>
               <div className="rounded-lg bg-muted/50 p-3 text-xs">
                 <p className="mb-1 font-medium">Conteúdo</p>
@@ -1248,7 +1272,14 @@ export function ChannelCampaignComposer({
           >
             {submit.isPending
               ? "Processando..."
-              : campaignSendLabel({ channel, when, recipients: sendableRecipients, cost })}
+              : campaignSendLabel({
+                  channel,
+                  when,
+                  recipients: sendableRecipients,
+                  cost,
+                  smsUnitPrice: smsPrice?.unitPrice,
+                  smsExempt,
+                })}
           </Button>
         </DialogFooter>
       </DialogContent>

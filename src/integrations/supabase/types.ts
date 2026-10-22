@@ -494,6 +494,72 @@ export type Database = {
           },
         ]
       }
+      billing_plans: {
+        Row: {
+          code: string
+          created_at: string
+          exempt_all: boolean
+          included: Json
+          interval: string
+          is_active: boolean
+          name: string
+          price_cents: number
+          updated_at: string
+        }
+        Insert: {
+          code: string
+          created_at?: string
+          exempt_all?: boolean
+          included?: Json
+          interval?: string
+          is_active?: boolean
+          name: string
+          price_cents?: number
+          updated_at?: string
+        }
+        Update: {
+          code?: string
+          created_at?: string
+          exempt_all?: boolean
+          included?: Json
+          interval?: string
+          is_active?: boolean
+          name?: string
+          price_cents?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      billing_price_book: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          free_monthly_units: number
+          item: string
+          provider_unit_cost: number | null
+          unit_price: number
+          valid_from: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          free_monthly_units?: number
+          item: string
+          provider_unit_cost?: number | null
+          unit_price: number
+          valid_from: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          free_monthly_units?: number
+          item?: string
+          provider_unit_cost?: number | null
+          unit_price?: number
+          valid_from?: string
+        }
+        Relationships: []
+      }
       call_audio_generations: {
         Row: {
           audio_hash: string
@@ -1620,6 +1686,57 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "channel_consents_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      credit_topup_orders: {
+        Row: {
+          amount_cents: number
+          charge_id: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          package_code: string | null
+          paid_at: string | null
+          status: string
+          tenant_id: string
+        }
+        Insert: {
+          amount_cents: number
+          charge_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          package_code?: string | null
+          paid_at?: string | null
+          status?: string
+          tenant_id: string
+        }
+        Update: {
+          amount_cents?: number
+          charge_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          package_code?: string | null
+          paid_at?: string | null
+          status?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "credit_topup_orders_charge_id_fkey"
+            columns: ["charge_id"]
+            isOneToOne: false
+            referencedRelation: "payment_charges"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "credit_topup_orders_tenant_id_fkey"
             columns: ["tenant_id"]
             isOneToOne: false
             referencedRelation: "tenants"
@@ -4532,6 +4649,164 @@ export type Database = {
           },
         ]
       }
+      payment_charges: {
+        Row: {
+          amount_cents: number
+          created_at: string
+          created_by: string | null
+          credited_at: string | null
+          emv: string | null
+          expires_at: string | null
+          external_id: string
+          fee_cents: number | null
+          id: string
+          kind: string
+          last_error: string | null
+          last_provider_payload: Json | null
+          needs_review: boolean
+          paid_amount_cents: number | null
+          paid_at: string | null
+          payer_document_masked: string | null
+          payer_name: string | null
+          payment_url: string | null
+          provider: string
+          provider_charge_id: string | null
+          qr_code_image: string | null
+          ref_id: string
+          status: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          amount_cents: number
+          created_at?: string
+          created_by?: string | null
+          credited_at?: string | null
+          emv?: string | null
+          expires_at?: string | null
+          external_id: string
+          fee_cents?: number | null
+          id?: string
+          kind: string
+          last_error?: string | null
+          last_provider_payload?: Json | null
+          needs_review?: boolean
+          paid_amount_cents?: number | null
+          paid_at?: string | null
+          payer_document_masked?: string | null
+          payer_name?: string | null
+          payment_url?: string | null
+          provider?: string
+          provider_charge_id?: string | null
+          qr_code_image?: string | null
+          ref_id: string
+          status: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          amount_cents?: number
+          created_at?: string
+          created_by?: string | null
+          credited_at?: string | null
+          emv?: string | null
+          expires_at?: string | null
+          external_id?: string
+          fee_cents?: number | null
+          id?: string
+          kind?: string
+          last_error?: string | null
+          last_provider_payload?: Json | null
+          needs_review?: boolean
+          paid_amount_cents?: number | null
+          paid_at?: string | null
+          payer_document_masked?: string | null
+          payer_name?: string | null
+          payment_url?: string | null
+          provider?: string
+          provider_charge_id?: string | null
+          qr_code_image?: string | null
+          ref_id?: string
+          status?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payment_charges_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payment_fee_settings: {
+        Row: {
+          fee_fixed_cents: number
+          fee_percent: number
+          id: string
+          provider: string
+          updated_by: string | null
+          valid_from: string
+        }
+        Insert: {
+          fee_fixed_cents?: number
+          fee_percent?: number
+          id?: string
+          provider?: string
+          updated_by?: string | null
+          valid_from?: string
+        }
+        Update: {
+          fee_fixed_cents?: number
+          fee_percent?: number
+          id?: string
+          provider?: string
+          updated_by?: string | null
+          valid_from?: string
+        }
+        Relationships: []
+      }
+      payment_webhook_events: {
+        Row: {
+          delivery_id: string | null
+          error: string | null
+          event: string | null
+          event_id: string
+          headers: Json | null
+          outcome: string | null
+          processed_at: string | null
+          raw_body: string | null
+          received_at: string
+          signature_valid: boolean | null
+        }
+        Insert: {
+          delivery_id?: string | null
+          error?: string | null
+          event?: string | null
+          event_id: string
+          headers?: Json | null
+          outcome?: string | null
+          processed_at?: string | null
+          raw_body?: string | null
+          received_at?: string
+          signature_valid?: boolean | null
+        }
+        Update: {
+          delivery_id?: string | null
+          error?: string | null
+          event?: string | null
+          event_id?: string
+          headers?: Json | null
+          outcome?: string | null
+          processed_at?: string | null
+          raw_body?: string | null
+          received_at?: string
+          signature_valid?: boolean | null
+        }
+        Relationships: []
+      }
       platform_pricing: {
         Row: {
           channel: string
@@ -5797,6 +6072,7 @@ export type Database = {
       }
       sms_send_logs: {
         Row: {
+          billed_units: number | null
           content: string
           created_at: string
           delivered_at: string | null
@@ -5819,6 +6095,7 @@ export type Database = {
           trigger_name: string | null
         }
         Insert: {
+          billed_units?: number | null
           content: string
           created_at?: string
           delivered_at?: string | null
@@ -5841,6 +6118,7 @@ export type Database = {
           trigger_name?: string | null
         }
         Update: {
+          billed_units?: number | null
           content?: string
           created_at?: string
           delivered_at?: string | null
@@ -6185,6 +6463,68 @@ export type Database = {
           },
         ]
       }
+      tenant_monthly_usage: {
+        Row: {
+          billed_amount: number
+          free_units_used: number
+          item: string
+          month: string
+          tenant_id: string
+          units: number
+        }
+        Insert: {
+          billed_amount?: number
+          free_units_used?: number
+          item: string
+          month: string
+          tenant_id: string
+          units?: number
+        }
+        Update: {
+          billed_amount?: number
+          free_units_used?: number
+          item?: string
+          month?: string
+          tenant_id?: string
+          units?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tenant_monthly_usage_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tenant_price_overrides: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          item: string
+          tenant_id: string
+          unit_price: number | null
+          valid_from: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          item: string
+          tenant_id: string
+          unit_price?: number | null
+          valid_from: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          item?: string
+          tenant_id?: string
+          unit_price?: number | null
+          valid_from?: string
+        }
+        Relationships: []
+      }
       tenant_sms_credit_balances: {
         Row: {
           balance_credits: number
@@ -6354,6 +6694,38 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "tenant_sms_pricing_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: true
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tenant_wallets: {
+        Row: {
+          balance: number
+          lifetime_purchased: number
+          lifetime_used: number
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          balance?: number
+          lifetime_purchased?: number
+          lifetime_used?: number
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          balance?: number
+          lifetime_purchased?: number
+          lifetime_used?: number
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tenant_wallets_tenant_id_fkey"
             columns: ["tenant_id"]
             isOneToOne: true
             referencedRelation: "tenants"
@@ -6536,6 +6908,87 @@ export type Database = {
             foreignKeyName: "voice_contact_policies_tenant_id_fkey"
             columns: ["tenant_id"]
             isOneToOne: true
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      wallet_ledger: {
+        Row: {
+          amount: number
+          balance_after: number
+          created_at: string
+          created_by: string | null
+          entry_type: string
+          free_units: number | null
+          id: string
+          idempotency_key: string | null
+          item: string | null
+          metadata: Json
+          provider_unit_cost: number | null
+          reason: string | null
+          reference_id: string | null
+          reference_type: string | null
+          reverses_ledger_id: string | null
+          tenant_id: string
+          unit_price: number | null
+          units: number | null
+          usage_month: string | null
+        }
+        Insert: {
+          amount: number
+          balance_after: number
+          created_at?: string
+          created_by?: string | null
+          entry_type: string
+          free_units?: number | null
+          id?: string
+          idempotency_key?: string | null
+          item?: string | null
+          metadata?: Json
+          provider_unit_cost?: number | null
+          reason?: string | null
+          reference_id?: string | null
+          reference_type?: string | null
+          reverses_ledger_id?: string | null
+          tenant_id: string
+          unit_price?: number | null
+          units?: number | null
+          usage_month?: string | null
+        }
+        Update: {
+          amount?: number
+          balance_after?: number
+          created_at?: string
+          created_by?: string | null
+          entry_type?: string
+          free_units?: number | null
+          id?: string
+          idempotency_key?: string | null
+          item?: string | null
+          metadata?: Json
+          provider_unit_cost?: number | null
+          reason?: string | null
+          reference_id?: string | null
+          reference_type?: string | null
+          reverses_ledger_id?: string | null
+          tenant_id?: string
+          unit_price?: number | null
+          units?: number | null
+          usage_month?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wallet_ledger_reverses_ledger_id_fkey"
+            columns: ["reverses_ledger_id"]
+            isOneToOne: false
+            referencedRelation: "wallet_ledger"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wallet_ledger_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
             referencedRelation: "tenants"
             referencedColumns: ["id"]
           },
@@ -7195,6 +7648,26 @@ export type Database = {
         }
         Returns: Json
       }
+      admin_adjust_wallet: {
+        Args: {
+          _amount: number
+          _idempotency_key?: string
+          _reason: string
+          _tenant: string
+        }
+        Returns: Json
+      }
+      admin_clear_tenant_price: {
+        Args: { _item: string; _tenant: string }
+        Returns: {
+          created_at: string
+          created_by: string | null
+          item: string
+          tenant_id: string
+          unit_price: number | null
+          valid_from: string
+        }
+      }
       admin_clear_tenant_sms_pricing: {
         Args: { _tenant: string }
         Returns: Json
@@ -7232,6 +7705,23 @@ export type Database = {
         Args: { _from?: string; _to?: string }
         Returns: Json
       }
+      admin_set_price: {
+        Args: {
+          _free_monthly_units?: number
+          _item: string
+          _provider_unit_cost?: number
+          _unit_price: number
+        }
+        Returns: {
+          created_at: string
+          created_by: string | null
+          free_monthly_units: number
+          item: string
+          provider_unit_cost: number | null
+          unit_price: number
+          valid_from: string
+        }
+      }
       admin_set_sms_credit_settings: {
         Args: {
           _default_sale_price_per_sms: number
@@ -7240,6 +7730,17 @@ export type Database = {
           _provider_cost_per_sms: number
         }
         Returns: Json
+      }
+      admin_set_tenant_price: {
+        Args: { _item: string; _tenant: string; _unit_price: number }
+        Returns: {
+          created_at: string
+          created_by: string | null
+          item: string
+          tenant_id: string
+          unit_price: number | null
+          valid_from: string
+        }
       }
       admin_set_tenant_sms_pricing: {
         Args: {
@@ -7277,6 +7778,47 @@ export type Database = {
           _tenant: string
         }
         Returns: Json
+      }
+      billing_convert_legacy_sms_credits: {
+        Args: { _apply?: boolean }
+        Returns: {
+          already_converted: number
+          amount: number
+          delta_credits: number
+          legacy_balance: number
+          skipped_reason: string | null
+          slug: string
+          tenant_id: string
+          unit_price: number
+        }[]
+      }
+      billing_credit_paid_charge: {
+        Args: { _charge_id: string }
+        Returns: Json
+      }
+      billing_effective_price: {
+        Args: { _at?: string; _item: string; _tenant: string }
+        Returns: Json
+      }
+      billing_now: {
+        Args: never
+        Returns: string
+      }
+      billing_report_unit_price: {
+        Args: { _at?: string; _item: string; _tenant: string }
+        Returns: number
+      }
+      billing_tenant_exempt: {
+        Args: { _tenant: string }
+        Returns: boolean
+      }
+      billing_wallet_integrity: {
+        Args: never
+        Returns: {
+          balance: number
+          ledger_sum: number
+          tenant_id: string
+        }[]
       }
       claim_call_flow_progress: {
         Args: { p_limit: number }
@@ -7774,6 +8316,51 @@ export type Database = {
       }
       sms_credit_summary: { Args: { _tenant?: string }; Returns: Json }
       sms_effective_pricing: { Args: { _tenant?: string }; Returns: Json }
+      wallet_mutation: {
+        Args: {
+          _amount: number
+          _created_by?: string
+          _entry_type: string
+          _free_units?: number
+          _idempotency_key?: string
+          _item?: string
+          _metadata?: Json
+          _provider_unit_cost?: number
+          _reason?: string
+          _reference_id?: string
+          _reference_type?: string
+          _reverses_ledger_id?: string
+          _tenant: string
+          _unit_price?: number
+          _units?: number
+          _usage_month?: string
+        }
+        Returns: Json
+      }
+      wallet_refund: {
+        Args: {
+          _idempotency_key: string
+          _reason: string
+          _reference_id: string
+          _tenant: string
+        }
+        Returns: Json
+      }
+      wallet_reserve: {
+        Args: {
+          _idempotency_key: string
+          _item: string
+          _reference_id: string
+          _reference_type: string
+          _tenant: string
+          _units: number
+        }
+        Returns: Json
+      }
+      wallet_summary: {
+        Args: { _tenant?: string }
+        Returns: Json
+      }
     }
     Enums: {
       app_role: "admin" | "user" | "super_admin" | "owner" | "member" | "gestor"

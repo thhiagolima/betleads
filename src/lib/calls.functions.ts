@@ -498,16 +498,25 @@ export const listCallQueue = createServerFn({ method: "POST" })
       .object({
         status: z.string().max(40).optional(),
         limit: z.number().int().min(1).max(200).default(100),
+        // "queue" = next to be dialed (queue screen); "recent" = latest dispatches
+        // first, for the campaigns hub that groups them into campaigns.
+        order: z.enum(["queue", "recent"]).default("queue"),
       })
       .parse(input),
   )
   .handler(async ({ data, context }) => {
     let q = context.supabase
       .from("call_queue")
-      .select("id, status, phone_number, audio_url, scheduled_at, provider_status")
-      .order("priority", { ascending: true })
-      .order("scheduled_at", { ascending: true })
+      // trigger_name/script/asset/created_at let the campaigns hub group one
+      // bulk dispatch into a single campaign row.
+      .select(
+        "id, status, phone_number, audio_url, scheduled_at, provider_status, trigger_name, script_id, voice_asset_id, created_at",
+      )
       .limit(data.limit);
+    q =
+      data.order === "recent"
+        ? q.order("created_at", { ascending: false })
+        : q.order("priority", { ascending: true }).order("scheduled_at", { ascending: true });
     if (data.status) q = q.eq("status", data.status as any);
     const { data: rows, error } = await q;
     if (error) throw new Error(error.message);
@@ -519,6 +528,10 @@ export const listCallQueue = createServerFn({ method: "POST" })
         audio_url: row.audio_url,
         scheduled_at: row.scheduled_at,
         provider_status: row.provider_status,
+        trigger_name: row.trigger_name,
+        script_id: row.script_id,
+        voice_asset_id: row.voice_asset_id,
+        created_at: row.created_at,
         retryable:
           row.status === "audio_ready" &&
           (row.provider_status === "provider_unavailable" || !row.provider_status),
@@ -780,9 +793,14 @@ export const dispatchCallQueueItem = createServerFn({ method: "POST" })
       provider_call_id: result.providerCallId ?? result.idempotencyKey ?? null,
       error_message: result.ok ? null : JSON.stringify(result.body).slice(0, 1000),
       provider_response: {
-        ...((result.body && typeof result.body === "object" && !Array.isArray(result.body)) ? result.body : {}),
+        ...(result.body && typeof result.body === "object" && !Array.isArray(result.body)
+          ? result.body
+          : {}),
         correlation_id: result.idempotencyKey,
-        cml: content.type === "tts" ? { type: "say", text: content.text, language: content.language ?? "pt" } : undefined,
+        cml:
+          content.type === "tts"
+            ? { type: "say", text: content.text, language: content.language ?? "pt" }
+            : undefined,
       } as any,
       provider_status_code: result.status,
       to_phone: to,
@@ -911,7 +929,9 @@ export const bulkDispatchCalls = createServerFn({ method: "POST" })
         // 4. dispara
         const dispatchResult = await runVoiceQueueDispatcher(1, q.id);
         if (dispatchResult.failed > 0) {
-          throw new Error("Não foi possível concluir o envio de voz. Consulte o histórico para os detalhes.");
+          throw new Error(
+            "Não foi possível concluir o envio de voz. Consulte o histórico para os detalhes.",
+          );
         }
         if (dispatchResult.deferred > 0) {
           pending += 1;

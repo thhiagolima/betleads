@@ -27,6 +27,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { brl, num, timeAgo } from "@/lib/format";
 import { getPlayerDetail, type PlayerDetail } from "@/lib/player-detail.functions";
+import { LEVEL_LABEL, type LevelSlug } from "@/lib/player-level";
 import { getPlayerLinkHistory } from "@/lib/shortio.functions";
 import { PlayerJourneysCard } from "@/components/players/player-journeys-card";
 
@@ -68,7 +69,7 @@ function PlayerDetailPage() {
   }
 
   const p = data.player;
-  const level = levelFor(Number(p.total_depositado ?? 0), Boolean(p.vip));
+  const level = levelMeta(data.level);
   const ftd = p.ftd_em ?? data.attribution?.raw_payload?.raw?.primeiro_deposito ?? null;
   const lastDeposit =
     p.ultimo_deposito ?? data.attribution?.raw_payload?.raw?.ultimo_deposito ?? null;
@@ -95,6 +96,11 @@ function PlayerDetailPage() {
                 </div>
                 <div className="mt-4 flex flex-wrap gap-2">
                   <Badge className={`${level.className} border`}>{level.label}</Badge>
+                  {p.vip && (
+                    <Badge variant="outline" className="border-amber-500/40 text-amber-300">
+                      <Crown className="mr-1 h-3 w-3" /> VIP
+                    </Badge>
+                  )}
                   <StatusBadge
                     active={
                       data.metrics.days_since_activity != null &&
@@ -273,7 +279,7 @@ function PlayerDetailPage() {
         <Card className="border-border/50 bg-card/70">
           <CardContent className="p-5">
             <SectionTitle title="Cashback" subtitle="O que a casa devolveu e quando pagou." />
-            <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <InfoBox
                 label="Total recebido"
                 value={brl(p.total_cashback_paid)}
@@ -283,11 +289,6 @@ function PlayerDetailPage() {
                 label="Ultimo"
                 value={brl(p.last_cashback_amount)}
                 detail={formatDateTime(p.last_cashback_paid_at)}
-              />
-              <InfoBox
-                label="SMS de cashback"
-                value={num(p.last_cashback_sms_template_sent ?? 0)}
-                detail="template enviado"
               />
             </div>
             <CompactList
@@ -312,7 +313,7 @@ function PlayerDetailPage() {
               <InfoBox
                 label="SMS enviados"
                 value={num(data.metrics.sms_sent)}
-                detail={`${data.metrics.sms_delivered} entregues`}
+                detail={`${num(data.metrics.sms_failed)} com falha`}
               />
               <InfoBox
                 label="Cliques/eventos"
@@ -598,44 +599,19 @@ function timelineStyle(type: string) {
   return "bg-amber-400";
 }
 
-function levelFor(total: number, vip: boolean) {
-  if (vip || total >= 3000) {
-    return {
-      label: "Black VIP",
-      className: "border-violet-400/40 bg-violet-500/15 text-violet-300",
-      icon: Crown,
-    };
-  }
-  if (total >= 1000) {
-    return {
-      label: "Diamante",
-      className: "border-cyan-400/40 bg-cyan-500/15 text-cyan-300",
-      icon: Gem,
-    };
-  }
-  if (total >= 500)
-    return {
-      label: "Ouro",
-      className: "border-amber-400/40 bg-amber-500/15 text-amber-300",
-      icon: Sparkles,
-    };
-  if (total >= 200)
-    return {
-      label: "Prata",
-      className: "border-slate-300/40 bg-slate-300/10 text-slate-200",
-      icon: Target,
-    };
-  if (total >= 10)
-    return {
-      label: "Bronze",
-      className: "border-orange-400/40 bg-orange-500/15 text-orange-300",
-      icon: Target,
-    };
-  return {
-    label: "Novato",
-    className: "border-emerald-400/40 bg-emerald-500/15 text-emerald-300",
-    icon: User,
-  };
+// O nível vem do servidor (faixas configuradas em Gamificação, mesma regra da
+// lista de Jogadores). Aqui só a aparência de cada nível.
+const LEVEL_STYLE: Record<LevelSlug, { className: string; icon: typeof User }> = {
+  black: { className: "border-violet-400/40 bg-violet-500/15 text-violet-300", icon: Crown },
+  diamond: { className: "border-cyan-400/40 bg-cyan-500/15 text-cyan-300", icon: Gem },
+  gold: { className: "border-amber-400/40 bg-amber-500/15 text-amber-300", icon: Sparkles },
+  silver: { className: "border-slate-300/40 bg-slate-300/10 text-slate-200", icon: Target },
+  bronze: { className: "border-orange-400/40 bg-orange-500/15 text-orange-300", icon: Target },
+  novice: { className: "border-emerald-400/40 bg-emerald-500/15 text-emerald-300", icon: User },
+};
+
+function levelMeta(slug: LevelSlug) {
+  return { label: LEVEL_LABEL[slug], ...LEVEL_STYLE[slug] };
 }
 
 function mediaBasis(basis: PlayerDetail["media"]["spend_basis"]) {

@@ -486,7 +486,7 @@ function WebhooksPage() {
                   Detalhes do log
                 </DialogTitle>
                 <DialogDescription>
-                  {selectedLog.evento} Â· {new Date(selectedLog.created_at).toLocaleString("pt-BR")}
+                  {selectedLog.evento} · {new Date(selectedLog.created_at).toLocaleString("pt-BR")}
                 </DialogDescription>
               </DialogHeader>
 

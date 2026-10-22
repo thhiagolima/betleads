@@ -4,6 +4,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { resolveOperationalTenantId } from "./tenant-access.server";
+import { getReportUnitPrices } from "./billing/pricing.server";
 import {
   buildJourneyStepConversions,
   campaignFunnelPlayers,
@@ -57,9 +58,11 @@ async function selectInChunks<T>(
 const PAGE_SIZE = 1000;
 const MAX_PAGES = 100;
 
-type PagedResult<T> = { data: T[]; error: { message: string } | null; truncated: boolean };
+export type PagedResult<T> = { data: T[]; error: { message: string } | null; truncated: boolean };
 
-async function selectAllPages<T extends { id: string }>(
+// Exported so tests can prove it actually pages past PAGE_SIZE instead of
+// mocking the whole getConversionReport handler + auth middleware.
+export async function selectAllPages<T extends { id: string }>(
   label: string,
   build: () => any,
 ): Promise<PagedResult<T>> {
@@ -79,6 +82,19 @@ async function selectAllPages<T extends { id: string }>(
     `[conversion-report] ${label}: stopped after ${MAX_PAGES * PAGE_SIZE} rows; report truncated.`,
   );
   return { data: rows, error: null, truncated: true };
+}
+
+/**
+ * Average segments actually billed per accepted SMS (PG1 Task 7, fix round
+ * 1): sum(coalesce(billed_units, 1)) / count of the rows passed in. A legacy
+ * row with no `billed_units` counts as 1 segment; with no rows at all
+ * (nothing logged yet, or none matched), the average is 1 — never 0, so a
+ * cost multiplication by it is a no-op rather than zeroing the cost out.
+ */
+export function averageBilledSegments(rows: Array<{ billed_units: number | null }>): number {
+  if (rows.length === 0) return 1;
+  const total = rows.reduce((sum, row) => sum + Number(row.billed_units ?? 1), 0);
+  return total / rows.length;
 }
 
 const UNFINISHED_ENROLLMENT_STATUSES = ["active", "waiting", "paused_by_priority"];
@@ -1076,26 +1092,33 @@ export const getConversionReport = createServerFn({ method: "GET" })
         : Promise.resolve({ data: [], error: null }),
       // Same price the Central de Resultados uses as SMS cost.
       data.sourceType === "campaign"
-        ? Promise.all([
-            supabaseAdmin
-              .from("tenant_sms_pricing")
-              .select("sale_price_per_sms")
-              .eq("tenant_id", tenantId)
-              .maybeSingle(),
-            supabaseAdmin
-              .from("sms_credit_settings")
-              .select("default_sale_price_per_sms")
-              .maybeSingle(),
-          ]).then(([pricing, settings]) =>
-            Number(
-              pricing.data?.sale_price_per_sms ?? settings.data?.default_sale_price_per_sms ?? 0.12,
-            ),
-          )
+        ? getReportUnitPrices(tenantId).then((prices) => prices.sms)
         : Promise.resolve(null),
     ]);
     if (dispatchResult.error) throw new Error(dispatchResult.error.message);
     if (attributionResult.error) throw new Error(attributionResult.error.message);
     if (journeyStepsResult.error) throw new Error(journeyStepsResult.error.message);
+    // Fix round 1: cost = the report's own `sent` (below) x price x the
+    // average segments actually billed, not a separate (and differently
+    // scoped) unit count, so cost and `sent` never disagree. Paged with
+    // selectAllPages: a campaign can log over 1000 accepted SMS, past
+    // PostgREST's row cap. Matches by campaign_id (populated since
+    // 20261016170000) OR the legacy trigger_name convention, same "accepted"
+    // (status = 'sent') filter used everywhere else in this file.
+    const smsBilledUnitsResult =
+      data.sourceType === "campaign"
+        ? await selectAllPages<{ id: string; billed_units: number | null }>(
+            "sms_send_logs:campaign_billed_units",
+            () =>
+              (supabaseAdmin as any)
+                .from("sms_send_logs")
+                .select("id,billed_units")
+                .eq("tenant_id", tenantId)
+                .eq("status", "sent")
+                .or(`campaign_id.eq.${data.sourceId},trigger_name.eq.campanha:${data.sourceId}`),
+          )
+        : { data: [], error: null, truncated: false };
+    if (smsBilledUnitsResult.error) throw new Error(smsBilledUnitsResult.error.message);
     const dispatches = dispatchResult.data ?? [];
     // Deposits of players already active at the click are not conversions
     // (rule_version 3); they are reported apart and never in the totals.
@@ -1196,9 +1219,14 @@ export const getConversionReport = createServerFn({ method: "GET" })
       (item: any) => item.event_type === "deposit_approved" && item.classification === "direct",
     ).length;
     const funnel = campaignFunnelPlayers(allAttributions);
+    const avgSegments = averageBilledSegments(smsBilledUnitsResult.data ?? []);
     // Only SMS campaigns have a per-message price; e-mail stays without cost.
+    // `sent` (not a separately-scoped unit count) x price x the average
+    // segments billed per accepted message, so cost and `sent` agree.
     const smsCost =
-      smsPrice !== null && smsCampaignResult.data ? Number((sent * smsPrice).toFixed(2)) : null;
+      smsPrice !== null && smsCampaignResult.data
+        ? Number((sent * smsPrice * avgSegments).toFixed(2))
+        : null;
     const depositors = new Set(
       attributions
         .filter(

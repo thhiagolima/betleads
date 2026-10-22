@@ -34,6 +34,8 @@ import { brl, num } from "@/lib/format";
 import {
   getGamificationData,
   saveGamificationSettings,
+  searchGamificationRanking,
+  RANKING_SEARCH_LIMIT,
   type GamificationData,
   type GamificationPlayer,
   type LevelSlug,
@@ -78,6 +80,11 @@ function GamificacaoPage() {
   const [sort, setSort] = useState<"deposit" | "stopped" | "name">("deposit");
   const [onlyStopped, setOnlyStopped] = useState(false);
   const [page, setPage] = useState(1);
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [search]);
   const [activeTab, setActiveTab] = useState<
     "overview" | "rules" | "campaigns" | "players" | "settings"
   >("overview");
@@ -111,26 +118,31 @@ function GamificacaoPage() {
   });
 
   const dirty = data ? JSON.stringify(draft) !== JSON.stringify(toDraft(data)) : false;
-  const rows = useMemo(() => {
-    const base = data?.ranking ?? [];
-    const term = search.trim().toLowerCase();
-    const filtered = base.filter((player) => {
-      if (levelFilter !== "all" && player.level !== levelFilter) return false;
-      if (onlyStopped && player.status === "active") return false;
-      if (!term) return true;
-      return (
-        player.nome.toLowerCase().includes(term) ||
-        (player.telefone ?? "").toLowerCase().includes(term) ||
-        (player.player_external_id ?? "").toLowerCase().includes(term)
-      );
-    });
 
-    return filtered.sort((a, b) => {
+  // C-07: sem filtro, o ranking é o top 200 do snapshot. Com busca, nível ou
+  // "só quem parou", a consulta vai à base inteira no servidor.
+  const searchRanking = useServerFn(searchGamificationRanking);
+  const hasRankingFilter = debouncedSearch !== "" || levelFilter !== "all" || onlyStopped;
+  const rankingSearch = useQuery({
+    queryKey: ["gamification-ranking-search", debouncedSearch, levelFilter, onlyStopped],
+    queryFn: () =>
+      searchRanking({ data: { search: debouncedSearch, level: levelFilter, onlyStopped } }),
+    enabled: activeTab === "players" && hasRankingFilter,
+    placeholderData: (previous) => previous,
+    staleTime: 20_000,
+  });
+  const rankingTotal = hasRankingFilter
+    ? (rankingSearch.data?.total ?? 0)
+    : (data?.totals.players ?? 0);
+
+  const rows = useMemo(() => {
+    const base = hasRankingFilter ? (rankingSearch.data?.players ?? []) : (data?.ranking ?? []);
+    return [...base].sort((a, b) => {
       if (sort === "name") return a.nome.localeCompare(b.nome);
       if (sort === "stopped") return (b.daysWithoutDeposit ?? -1) - (a.daysWithoutDeposit ?? -1);
       return b.total_depositado - a.total_depositado;
     });
-  }, [data, search, levelFilter, onlyStopped, sort]);
+  }, [data, hasRankingFilter, rankingSearch.data, sort]);
 
   useEffect(() => setPage(1), [search, levelFilter, onlyStopped, sort]);
 
@@ -374,7 +386,8 @@ function GamificacaoPage() {
           <div className="border-b border-border/50 p-5">
             <h2 className="text-lg font-semibold">Jogadores por nivel</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Sem filtro, e o ranking da casa por total depositado
+              Sem filtro, mostra os 200 que mais depositaram. Busca, nível e “Só quem parou”
+              consultam a base inteira.
             </p>
           </div>
           <CardContent className="p-0">
@@ -423,17 +436,43 @@ function GamificacaoPage() {
             </div>
             <div className="flex items-center justify-between px-5 py-3 text-sm text-muted-foreground">
               <span>
-                {rows.length === 0
-                  ? "0"
-                  : `${(currentPage - 1) * pageSize + 1}-${(currentPage - 1) * pageSize + visibleRows.length}`}{" "}
-                de {rows.length} jogadores
+                {rankingSearch.isFetching && hasRankingFilter
+                  ? "Buscando na base…"
+                  : `${
+                      rows.length === 0
+                        ? "0"
+                        : `${(currentPage - 1) * pageSize + 1}-${(currentPage - 1) * pageSize + visibleRows.length}`
+                    } de ${num(rows.length)} jogadores`}
+                {rankingTotal > rows.length &&
+                  ` · os ${num(RANKING_SEARCH_LIMIT)} que mais depositaram, de ${num(rankingTotal)} ${
+                    hasRankingFilter ? "que casam com o filtro" : "na base"
+                  }`}
               </span>
-              <span>base de {num(data.totals.players)}</span>
+              <span className="flex items-center gap-3">
+                <span>base de {num(data.totals.players)}</span>
+                {rankingTotal > rows.length && (
+                  <Link
+                    to="/players"
+                    search={{ id: undefined, focus: undefined }}
+                    className="font-medium text-primary hover:underline"
+                  >
+                    Ver todos em Jogadores
+                  </Link>
+                )}
+              </span>
             </div>
             <div className="divide-y divide-border/50">
               {visibleRows.length === 0 && (
                 <div className="p-8 text-center text-sm text-muted-foreground">
-                  Nenhum jogador encontrado.
+                  {hasRankingFilter && rankingSearch.isError
+                    ? `Não foi possível buscar na base: ${
+                        rankingSearch.error instanceof Error
+                          ? rankingSearch.error.message
+                          : "tente novamente."
+                      }`
+                    : hasRankingFilter && rankingSearch.isLoading
+                      ? "Buscando na base…"
+                      : "Nenhum jogador encontrado."}
                 </div>
               )}
               {visibleRows.map((player, index) => (

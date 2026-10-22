@@ -242,14 +242,71 @@ async function auditTenant(args: {
   }
 }
 
-async function buildTenantDetail(tenantId: string) {
+/**
+ * Keys that carry what Betleads pays the supplier: `provider_unit_cost` is
+ * the current (PG1) key on `billing_effective_price`/`wallet_summary.prices.*`
+ * /`admin_set_tenant_price`; `provider_cost_per_sms` is the legacy (pre-PG1)
+ * key, still present verbatim in old `sms_credit_summary.pricing`/
+ * `sms_effective_pricing` audit rows written before this migration. Only the
+ * super admin may see either (or the margin derived from them).
+ */
+const PROVIDER_COST_KEYS = new Set(["provider_unit_cost", "provider_cost_per_sms"]);
+
+/**
+ * Recursively strips every `PROVIDER_COST_KEYS` entry from `value`, at any
+ * depth — top level, nested one level in `prices.<item>` (wallet_summary) or
+ * `pricing` (legacy sms_credit_summary), and inside arrays. Used both for the
+ * live wallet summary and for historical audit rows (`before_data`/
+ * `after_data`/`metadata`), which may carry either shape depending on when
+ * they were written.
+ */
+function withoutProviderCost<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((item) => withoutProviderCost(item)) as unknown as T;
+  }
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, v] of Object.entries(value as Record<string, unknown>)) {
+      if (PROVIDER_COST_KEYS.has(key)) continue;
+      out[key] = withoutProviderCost(v);
+    }
+    return out as T;
+  }
+  return value;
+}
+
+/**
+ * Audit rows written by the price-book and wallet admin actions (and, for
+ * older rows, the legacy SMS-credit admin actions) carry the provider cost
+ * in before/after/metadata, at any depth. Strip it the same way for anyone
+ * who is not the super admin.
+ */
+type AuditRow = { [key: string]: Json };
+
+function redactAuditJson(value: Json): Json {
+  return withoutProviderCost(value);
+}
+
+function redactAuditRows(rows: AuditRow[]): AuditRow[] {
+  return rows.map((row) => {
+    const copy = { ...row };
+    for (const key of ["before_data", "after_data", "metadata", "before", "after"]) {
+      if (key in copy) copy[key] = redactAuditJson(copy[key]);
+    }
+    return copy;
+  });
+}
+
+async function buildTenantDetail(
+  tenantId: string,
+  { includeProviderCost }: { includeProviderCost: boolean },
+) {
   const since30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
   const [
     tenantRes,
     membersRes,
-    smsSummaryRes,
-    pricingRes,
+    walletSummaryRes,
     ledgerRes,
     ordersRes,
     auditRes,
@@ -270,16 +327,20 @@ async function buildTenantDetail(tenantId: string) {
       .select("id,user_id,tenant_id,role,created_at")
       .eq("tenant_id", tenantId)
       .order("created_at", { ascending: true }),
-    db().rpc("sms_credit_summary", { _tenant: tenantId }),
-    db().rpc("sms_effective_pricing", { _tenant: tenantId }),
+    db().rpc("wallet_summary", { _tenant: tenantId }),
+    // Never selects `provider_unit_cost`, regardless of who's asking: this
+    // query always runs through `db()` (supabaseAdmin), which bypasses the
+    // column grant that normally hides it from `authenticated`.
     db()
-      .from("sms_credit_ledger")
+      .from("wallet_ledger")
       .select(
-        "id,delta_credits,balance_after,entry_type,reason,reference_type,created_by,created_at",
+        "id,entry_type,item,units,free_units,usage_month,unit_price,amount,balance_after,reference_type,reference_id,reason,created_by,created_at",
       )
       .eq("tenant_id", tenantId)
       .order("created_at", { ascending: false })
       .limit(25),
+    // Legacy pre-wallet orders: read-only now (PG2 brings the real Pix
+    // checkout), kept so old purchase history doesn't disappear.
     db()
       .from("sms_credit_orders")
       .select(
@@ -307,8 +368,7 @@ async function buildTenantDetail(tenantId: string) {
   if (tenantRes.error) throw new Error(tenantRes.error.message);
   if (!tenantRes.data) throw new Error("Tenant não encontrado");
   if (membersRes.error) throw new Error(membersRes.error.message);
-  if (smsSummaryRes.error) throw new Error(smsSummaryRes.error.message);
-  if (pricingRes.error) throw new Error(pricingRes.error.message);
+  if (walletSummaryRes.error) throw new Error(walletSummaryRes.error.message);
   if (ledgerRes.error) throw new Error(ledgerRes.error.message);
   if (ordersRes.error) throw new Error(ordersRes.error.message);
   if (auditRes.error) throw new Error(auditRes.error.message);
@@ -322,6 +382,20 @@ async function buildTenantDetail(tenantId: string) {
     banned_until: userMap.get(member.user_id)?.banned_until ?? null,
   }));
 
+  const walletSummary = (walletSummaryRes.data ?? {}) as {
+    exempt?: boolean;
+    prices?: Record<string, { unit_price?: number; provider_unit_cost?: number; free_monthly_units?: number; source?: string }>;
+  };
+  const smsPrice = walletSummary.prices?.sms ?? {};
+  const pricing = {
+    item: "sms",
+    unit_price: Number(smsPrice.unit_price ?? 0),
+    free_monthly_units: Number(smsPrice.free_monthly_units ?? 0),
+    exempt: Boolean(walletSummary.exempt),
+    has_tenant_override: smsPrice.source === "override",
+    ...(includeProviderCost ? { provider_unit_cost: smsPrice.provider_unit_cost ?? null } : {}),
+  };
+
   return {
     tenant: tenantRes.data,
     users,
@@ -334,12 +408,14 @@ async function buildTenantDetail(tenantId: string) {
       meta_accounts: metaAccounts,
     },
     sms: {
-      summary: smsSummaryRes.data ?? {},
-      pricing: pricingRes.data ?? {},
+      summary: includeProviderCost ? walletSummary : withoutProviderCost(walletSummary),
+      pricing,
       ledger: ledgerRes.data ?? [],
       orders: ordersRes.data ?? [],
     },
-    audit: auditRes.data ?? [],
+    audit: includeProviderCost
+      ? ((auditRes.data ?? []) as AuditRow[])
+      : redactAuditRows((auditRes.data ?? []) as AuditRow[]),
   };
 }
 
@@ -352,32 +428,39 @@ const consoleInput = z
 export const getTenantManagementConsole = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => consoleInput.parse(data ?? {}))
-  .handler(async ({ data, context }) => {
-    const ctx = context as unknown as ServerContext;
-    const { superAdmin, tenants } = await getAccessibleTenants(ctx);
-    const selectedTenantId = data.tenantId ?? tenants[0]?.id ?? null;
+  .handler(async ({ data, context }) =>
+    getTenantManagementConsoleFor(context as unknown as ServerContext, data),
+  );
 
-    if (!selectedTenantId) {
-      return {
-        isSuperAdmin: superAdmin,
-        tenants,
-        selectedTenantId: null,
-        detail: null,
-      };
-    }
+/** Body of `getTenantManagementConsole`, extracted so it is unit-testable. */
+export async function getTenantManagementConsoleFor(
+  ctx: ServerContext,
+  data: { tenantId?: string | null },
+) {
+  const { superAdmin, tenants } = await getAccessibleTenants(ctx);
+  const selectedTenantId = data.tenantId ?? tenants[0]?.id ?? null;
 
-    if (!tenants.some((tenant) => tenant.id === selectedTenantId)) {
-      throw new Error("Tenant sem acesso");
-    }
-
+  if (!selectedTenantId) {
     return {
       isSuperAdmin: superAdmin,
-      canManage: await canManageTenant(ctx, selectedTenantId),
       tenants,
-      selectedTenantId,
-      detail: await buildTenantDetail(selectedTenantId),
+      selectedTenantId: null,
+      detail: null,
     };
-  });
+  }
+
+  if (!tenants.some((tenant) => tenant.id === selectedTenantId)) {
+    throw new Error("Tenant sem acesso");
+  }
+
+  return {
+    isSuperAdmin: superAdmin,
+    canManage: await canManageTenant(ctx, selectedTenantId),
+    tenants,
+    selectedTenantId,
+    detail: await buildTenantDetail(selectedTenantId, { includeProviderCost: superAdmin }),
+  };
+}
 
 /**
  * Body of `getTenantSwitcher`, extracted so `is_demo` is directly
@@ -530,59 +613,82 @@ const updateTenantInput = z.object({
   status: tenantStatus,
   plano: tenantPlan,
   crm_model: crmModel,
+  // Required (>= 5 chars) only when `plano` changes into or out of
+  // 'interno'; optional otherwise (see `updateTenantSettingsFor` below).
+  planReason: z.string().max(500).optional().nullable(),
 });
+
+/** Body of `updateTenantSettings`, exported so the plan-reason rule is directly unit-testable. */
+export async function updateTenantSettingsFor(
+  ctx: ServerContext,
+  data: z.infer<typeof updateTenantInput>,
+) {
+  const superAdmin = await checkSuperAdmin(ctx.userId);
+  await requireTenantManager(ctx, data.tenantId);
+  await assertTenantNotDemo(data.tenantId);
+
+  const { data: before, error: beforeErr } = await db()
+    .from<TenantRow>("tenants")
+    .select("id,nome,slug,status,plano,crm_model,limits,metadata,created_at,updated_at")
+    .eq("id", data.tenantId)
+    .maybeSingle();
+  if (beforeErr) throw new Error(beforeErr.message);
+  if (!before) throw new Error("Tenant não encontrado");
+
+  // Only the super admin can actually change `plano` (the `patch` below
+  // omits it otherwise, and `tenants_plan_guard` enforces the same rule at
+  // the DB level), so the reason is only ever required on that branch.
+  const planChanging = superAdmin && before.plano !== data.plano;
+  const touchesInterno = planChanging && (before.plano === "interno" || data.plano === "interno");
+  const planReason = (data.planReason ?? "").trim();
+  if (touchesInterno && planReason.length < 5) {
+    throw new Error("Informe o motivo da troca de plano");
+  }
+
+  const patch = superAdmin
+    ? {
+        nome: data.nome,
+        status: data.status,
+        plano: data.plano,
+        crm_model: data.crm_model,
+        updated_at: new Date().toISOString(),
+      }
+    : {
+        nome: data.nome,
+        updated_at: new Date().toISOString(),
+      };
+
+  const { data: tenant, error } = await db()
+    .from<TenantRow>("tenants")
+    .update(patch)
+    .eq("id", data.tenantId)
+    .select("id,nome,slug,status,plano,crm_model,limits,metadata,created_at,updated_at")
+    .single();
+  if (error) throw new Error(error.message);
+
+  await auditTenant({
+    tenantId: data.tenantId,
+    actorUserId: ctx.userId,
+    action: "tenant.updated",
+    entityType: "tenant",
+    entityId: data.tenantId,
+    before,
+    after: tenant,
+    metadata: {
+      limited_scope: !superAdmin,
+      ...(touchesInterno ? { plan_reason: planReason } : {}),
+    },
+  });
+
+  return { tenant };
+}
 
 export const updateTenantSettings = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => updateTenantInput.parse(data))
-  .handler(async ({ data, context }) => {
-    const ctx = context as unknown as ServerContext;
-    const superAdmin = await checkSuperAdmin(ctx.userId);
-    await requireTenantManager(ctx, data.tenantId);
-    await assertTenantNotDemo(data.tenantId);
-
-    const { data: before, error: beforeErr } = await db()
-      .from<TenantRow>("tenants")
-      .select("id,nome,slug,status,plano,crm_model,limits,metadata,created_at,updated_at")
-      .eq("id", data.tenantId)
-      .maybeSingle();
-    if (beforeErr) throw new Error(beforeErr.message);
-    if (!before) throw new Error("Tenant não encontrado");
-
-    const patch = superAdmin
-      ? {
-          nome: data.nome,
-          status: data.status,
-          plano: data.plano,
-          crm_model: data.crm_model,
-          updated_at: new Date().toISOString(),
-        }
-      : {
-          nome: data.nome,
-          updated_at: new Date().toISOString(),
-        };
-
-    const { data: tenant, error } = await db()
-      .from<TenantRow>("tenants")
-      .update(patch)
-      .eq("id", data.tenantId)
-      .select("id,nome,slug,status,plano,crm_model,limits,metadata,created_at,updated_at")
-      .single();
-    if (error) throw new Error(error.message);
-
-    await auditTenant({
-      tenantId: data.tenantId,
-      actorUserId: ctx.userId,
-      action: "tenant.updated",
-      entityType: "tenant",
-      entityId: data.tenantId,
-      before,
-      after: tenant,
-      metadata: { limited_scope: !superAdmin },
-    });
-
-    return { tenant };
-  });
+  .handler(async ({ data, context }) =>
+    updateTenantSettingsFor(context as unknown as ServerContext, data),
+  );
 
 const addUserInput = z.object({
   tenantId: dbUuid(),
@@ -594,13 +700,12 @@ const addUserInput = z.object({
 export const addUserToTenant = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => addUserInput.parse(data))
-  .handler(async ({ data, context }) => addUserToTenantFor(context as unknown as ServerContext, data));
+  .handler(async ({ data, context }) =>
+    addUserToTenantFor(context as unknown as ServerContext, data),
+  );
 
 // Body of `addUserToTenant`, exported so the demo guard wiring is unit-testable.
-export async function addUserToTenantFor(
-  ctx: ServerContext,
-  data: z.infer<typeof addUserInput>,
-) {
+export async function addUserToTenantFor(ctx: ServerContext, data: z.infer<typeof addUserInput>) {
   await requireTenantManager(ctx, data.tenantId);
   await assertTenantNotDemo(data.tenantId);
   const actorIsSuperAdmin = await checkSuperAdmin(ctx.userId);

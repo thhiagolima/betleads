@@ -6,7 +6,7 @@ export function SmsHistoryPanel() {
       channel="sms"
       options={{
         title: "Histórico de SMS",
-        subtitle: "Todos os disparos, entregas, respostas e falhas do canal.",
+        subtitle: "Todos os disparos, respostas e falhas do canal.",
       }}
     />
   );

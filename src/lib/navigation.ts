@@ -16,8 +16,8 @@ import {
   Sparkles,
   Target,
   Trophy,
-  TriangleAlert,
   Users,
+  Wallet,
   Workflow,
   type LucideIcon,
 } from "lucide-react";
@@ -25,8 +25,9 @@ import {
 /**
  * Single source for the app shell: sidebar sections, mobile tabs and the
  * breadcrumb/title of every route. Routes left out of the menu on purpose
- * (jornadas, whatsapp, eventos, experts, links, créditos SMS, relatório de
- * conversão) still get a title here — they are reachable from inside pages.
+ * still get a title here: some are reached from inside pages (jornadas,
+ * eventos, créditos SMS), others are parked until they are redesigned
+ * (Oportunidades, Experts, WhatsApp — the last one redirects).
  */
 
 export type ShellRole = "admin" | "gestor" | "member" | "super_admin";
@@ -77,7 +78,6 @@ export const SIDEBAR_SECTIONS: NavSection[] = [
     items: [
       link("Jogadores", "/players", Users),
       link("Públicos", "/publicos", PieChart),
-      link("Oportunidades", "/alertas", TriangleAlert),
       link("Níveis e fidelização", "/gamificacao", Trophy, { alsoActiveOn: ["/regras"] }),
     ],
   },
@@ -91,9 +91,10 @@ export const SIDEBAR_SECTIONS: NavSection[] = [
   {
     label: "Canais",
     items: [
-      link("SMS", "/sms", MessageSquare, { alsoActiveOn: ["/creditos-sms", "/links"] }),
+      link("SMS", "/sms", MessageSquare, { alsoActiveOn: ["/links"] }),
       link("Email", "/email", Mail),
       link("Voz", "/ligacoes", Phone),
+      link("Consentimentos", "/consentimentos", ShieldQuestion),
       {
         kind: "group",
         title: "Templates e áudios",
@@ -110,8 +111,17 @@ export const SIDEBAR_SECTIONS: NavSection[] = [
     label: "IA",
     requires: "tenant_admin",
     items: [
-      link("Assistente IA", "/inteligencia", Sparkles, { alsoActiveOn: ["/experts"] }),
+      link("Assistente IA", "/inteligencia", Sparkles),
       link("Configurar IA", "/treino-ia", Settings),
+    ],
+  },
+  {
+    label: "Configurações",
+    items: [
+      link("Saldo e consumo", "/creditos-sms", Wallet),
+      link("Integrações", "/webhooks", Plug),
+      link("Configuração da casa", "/configuracoes/casa", Building2),
+      link("Configurações", "/configuracoes", Settings),
     ],
   },
   {
@@ -124,14 +134,6 @@ export const SIDEBAR_SECTIONS: NavSection[] = [
   },
 ];
 
-/** Pinned to the bottom of the sidebar. */
-export const SIDEBAR_FOOTER: NavLink[] = [
-  link("Integrações", "/webhooks", Plug),
-  link("Consentimentos", "/consentimentos", ShieldQuestion),
-  link("Configuração da casa", "/configuracoes/casa", Building2),
-  link("Configurações", "/configuracoes", Settings),
-];
-
 /** Lives in the account menu (header avatar). */
 export const ACCOUNT_LINKS: NavLink[] = [
   link("Conta e equipe", "/tenants", Building2, { requires: "not_super_admin" }),
@@ -141,9 +143,15 @@ export type MobileTab = { title: string; to?: string; icon: LucideIcon; alsoActi
 
 export const MOBILE_TABS: MobileTab[] = [
   { title: "Início", to: "/", icon: Home },
-  { title: "Jogadores", to: "/players", icon: Users, alsoActiveOn: ["/publicos", "/alertas"] },
   {
-    title: "Campanhas",
+    title: "Jogadores",
+    to: "/players",
+    icon: Users,
+    alsoActiveOn: ["/publicos", "/alertas", "/gamificacao", "/regras"],
+  },
+  {
+    // Same name as the sidebar section; opens Campanhas, lights on Automações too.
+    title: "Ações",
     to: "/campanhas",
     icon: Megaphone,
     alsoActiveOn: ["/automacoes", "/jornadas"],
@@ -186,7 +194,7 @@ export const ROUTE_META: Record<string, RouteMeta> = {
   "/jornadas/$journeyId/relatorio": { section: "Jornadas", title: "Relatório da jornada" },
   "/sms": { section: "Canais", title: "SMS" },
   "/sms/templates": { section: "Canais", title: "Templates de SMS" },
-  "/creditos-sms": { section: "Canais", title: "Créditos SMS" },
+  "/creditos-sms": { section: "Configurações", title: "Saldo e consumo" },
   "/email": { section: "Canais", title: "Email" },
   "/ligacoes": { section: "Canais", title: "Voz" },
   "/whatsapp": { section: "Canais", title: "WhatsApp" },
@@ -196,7 +204,7 @@ export const ROUTE_META: Record<string, RouteMeta> = {
   "/treino-ia": { section: "IA", title: "Configurar IA" },
   "/experts": { section: "IA", title: "Experts" },
   "/webhooks": { section: "Configurações", title: "Integrações" },
-  "/consentimentos": { section: "Configurações", title: "Consentimentos" },
+  "/consentimentos": { section: "Canais", title: "Consentimentos" },
   "/configuracoes/casa": { section: "Configurações", title: "Configuração da casa" },
   "/configuracoes": { section: "Configurações", title: "Configurações" },
   "/tenants": { section: "Conta", title: "Conta e equipe" },
@@ -256,10 +264,9 @@ export function navLinkKey(item: Pick<NavLink, "to" | "hash">) {
 }
 
 function allLinks(): NavLink[] {
-  const fromSections = SIDEBAR_SECTIONS.flatMap((section) =>
+  return SIDEBAR_SECTIONS.flatMap((section) =>
     section.items.flatMap((item) => (item.kind === "group" ? item.children : [item])),
   );
-  return [...fromSections, ...SIDEBAR_FOOTER];
 }
 
 /**
