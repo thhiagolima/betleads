@@ -907,6 +907,35 @@ function auditTitle(action: string): string {
   return AUDIT_TITLES[action] ?? action;
 }
 
+/**
+ * Controller ruling 2: show the actor's name/e-mail when that's cheap to
+ * resolve, else "Superadmin <id curto>". `supabaseAdmin.auth.admin.getUserById`
+ * is a single admin-API call per unique actor (bounded by the handful of
+ * superadmins who ever touch billing, not by the 200-item history cap), so
+ * it qualifies as cheap here. Guarded (no `.auth` in the test double, and a
+ * real transient admin-API failure) so the history still renders — with the
+ * id fallback — instead of failing the whole page over a label.
+ */
+async function resolveActorLabel(userId: string): Promise<string> {
+  const shortId = userId.slice(0, 8);
+  try {
+    const authAdmin = (
+      supabaseAdmin as unknown as {
+        auth?: { admin?: { getUserById?: (id: string) => Promise<{
+          data: { user: { email?: string | null } | null } | null;
+          error: unknown;
+        }> } };
+      }
+    ).auth?.admin;
+    if (!authAdmin?.getUserById) return `Superadmin ${shortId}`;
+    const { data, error } = await authAdmin.getUserById(userId);
+    if (error || !data?.user?.email) return `Superadmin ${shortId}`;
+    return data.user.email;
+  } catch {
+    return `Superadmin ${shortId}`;
+  }
+}
+
 export async function adminTenantBillingHistoryFor(
   ctx: ServerContext,
   data: unknown,
@@ -1020,6 +1049,11 @@ export async function adminTenantBillingHistoryFor(
       });
     }
   }
+  const uniqueActorIds = [...new Set(auditLogs.map((log) => log.actor_user_id).filter((id): id is string => !!id))];
+  const actorLabelById = new Map(
+    await Promise.all(uniqueActorIds.map(async (id) => [id, await resolveActorLabel(id)] as const)),
+  );
+
   for (const log of auditLogs) {
     const reason = log.metadata && typeof log.metadata === "object" ? log.metadata.reason : undefined;
     items.push({
@@ -1027,7 +1061,7 @@ export async function adminTenantBillingHistoryFor(
       kind: "audit",
       title: auditTitle(log.action),
       detail: typeof reason === "string" ? reason : "",
-      actor: log.actor_user_id ?? null,
+      actor: log.actor_user_id ? actorLabelById.get(log.actor_user_id) ?? null : null,
     });
   }
 
@@ -1252,3 +1286,137 @@ export const adminBillingMonthlyCsv = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => adminBillingMonthlyCsvInput.parse(data))
   .handler(async ({ data, context }) => adminBillingMonthlyCsvFor(context as ServerContext, data));
+
+// ===========================================================================
+// Lista por casa (adminBillingTenantList) — Task 9, controller ruling 1.
+//
+// Task 8 shipped the dashboard, the per-tenant history and the CSV, but no
+// per-house list for the "Faturamento" tab/table. This is that list: one row
+// per tenant, with the open invoice (if any) and the fields the admin
+// actions need (invoice id for the per-invoice actions, custom price and
+// continuous discount for the repricing dialogs).
+// ===========================================================================
+
+export type AdminBillingOpenInvoice = {
+  id: string;
+  amountCents: number;
+  dueDate: string;
+  /** Narrowed from `access_state` — only the phases an open invoice can be in. */
+  phase: "due_soon" | "overdue" | "locked_unpaid" | "awaiting_first_payment" | "open";
+};
+
+export type AdminBillingContinuousDiscount = {
+  kind: "percent" | "fixed";
+  value: number;
+  startsOn: string | null;
+  endsOn: string | null;
+};
+
+export type AdminBillingTenantRow = {
+  tenantId: string;
+  name: string;
+  slug: string;
+  planCode: string;
+  accessState: string;
+  frozen: boolean;
+  nextDueDate: string | null;
+  openInvoice: AdminBillingOpenInvoice | null;
+  customPriceCents: number | null;
+  continuousDiscount: AdminBillingContinuousDiscount | null;
+};
+
+type TenantLiteRow = { id: string; nome: string | null; slug: string | null };
+type TenantBillingListRow = {
+  tenant_id: string;
+  plan_code: string;
+  access_state: string;
+  frozen: boolean;
+  next_due_date: string | null;
+  custom_price_cents: number | string | null;
+  discount_kind: "percent" | "fixed" | null;
+  discount_value: number | string | null;
+  discount_starts_on: string | null;
+  discount_ends_on: string | null;
+};
+type OpenInvoiceListRow = { id: string; tenant_id: string; amount_cents: number | string; due_date: string };
+
+/** Only `due_soon`/`overdue`/`locked_unpaid`/`awaiting_first_payment` describe an open
+ * invoice's own phase; any other access_state (ok, exempt, frozen, locked_manual) just
+ * means "there happens to be an open invoice, but not yet in a warning window" -> "open". */
+const OPEN_INVOICE_PHASES = new Set(["due_soon", "overdue", "locked_unpaid", "awaiting_first_payment"]);
+
+function invoicePhaseFor(accessState: string): AdminBillingOpenInvoice["phase"] {
+  return OPEN_INVOICE_PHASES.has(accessState)
+    ? (accessState as AdminBillingOpenInvoice["phase"])
+    : "open";
+}
+
+export async function adminBillingTenantListFor(ctx: ServerContext): Promise<AdminBillingTenantRow[]> {
+  await assertSuperAdmin(ctx.userId);
+  const sb = looseDb(supabaseAdmin);
+
+  // tenant_billing has one row per tenant and its primary key is `tenant_id`, not `id`, so it
+  // can't use the `{id}`-keyset `selectAllPages` helper — same as `adminBillingDashboardFor`
+  // above, which reads it the same (plain, unpaginated) way for the same reason. `tenants` and
+  // `billing_invoices` do have `id` and can exceed PostgREST's 1000-row cap, so those two page.
+  const [tenantsPaged, tbRes, openInvPaged] = await Promise.all([
+    selectAllPages<TenantLiteRow>("billing_admin_tenant_list_tenants", () =>
+      sb.from("tenants").select("id,nome,slug"),
+    ),
+    sb
+      .from("tenant_billing")
+      .select(
+        "tenant_id,plan_code,access_state,frozen,next_due_date,custom_price_cents,discount_kind,discount_value,discount_starts_on,discount_ends_on",
+      ),
+    selectAllPages<OpenInvoiceListRow>("billing_admin_tenant_list_open_invoices", () =>
+      sb.from("billing_invoices").select("id,tenant_id,amount_cents,due_date").eq("status", "open"),
+    ),
+  ]);
+  for (const res of [tenantsPaged, openInvPaged]) {
+    if (res.error) throw new Error(res.error.message);
+  }
+  if (tbRes.error) throw new Error(tbRes.error.message);
+
+  const tenants = tenantsPaged.data;
+  const tenantBillingRows = (tbRes.data ?? []) as TenantBillingListRow[];
+  const billingByTenant = new Map(tenantBillingRows.map((row) => [row.tenant_id, row] as const));
+  const openInvoiceByTenant = new Map(openInvPaged.data.map((row) => [row.tenant_id, row] as const));
+
+  return tenants.map((tenant) => {
+    const tb = billingByTenant.get(tenant.id);
+    const openInv = openInvoiceByTenant.get(tenant.id);
+    const accessState = tb?.access_state ?? "ok";
+
+    return {
+      tenantId: tenant.id,
+      name: tenant.nome ?? "",
+      slug: tenant.slug ?? "",
+      planCode: tb?.plan_code ?? "",
+      accessState,
+      frozen: tb?.frozen ?? false,
+      nextDueDate: tb?.next_due_date ?? null,
+      openInvoice: openInv
+        ? {
+            id: openInv.id,
+            amountCents: Number(openInv.amount_cents),
+            dueDate: openInv.due_date,
+            phase: invoicePhaseFor(accessState),
+          }
+        : null,
+      customPriceCents: tb?.custom_price_cents != null ? Number(tb.custom_price_cents) : null,
+      continuousDiscount:
+        tb?.discount_kind != null && tb.discount_value != null
+          ? {
+              kind: tb.discount_kind,
+              value: Number(tb.discount_value),
+              startsOn: tb.discount_starts_on ?? null,
+              endsOn: tb.discount_ends_on ?? null,
+            }
+          : null,
+    };
+  });
+}
+
+export const adminBillingTenantList = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => adminBillingTenantListFor(context as ServerContext));

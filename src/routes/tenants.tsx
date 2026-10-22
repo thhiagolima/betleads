@@ -62,6 +62,11 @@ import {
 import { adminAdjustSmsCredits } from "@/lib/sms-credits.functions";
 import { adminClearTenantPrice, adminSetTenantPrice } from "@/lib/billing/billing.functions";
 import {
+  BillingTenantCobrancaCard,
+  billingHistoryQueryKey,
+} from "@/components/billing/admin/billing-tenant-list";
+import { BillingHistoryCard } from "@/components/billing/admin/billing-history";
+import {
   type BillingItem,
   CurrentPricesCard,
   MonthUsageCard,
@@ -393,6 +398,7 @@ function TenantWorkspace({
           <TabsTrigger value="overview">Visão geral</TabsTrigger>
           <TabsTrigger value="users">Usuários</TabsTrigger>
           <TabsTrigger value="credits">Saldo SMS</TabsTrigger>
+          <TabsTrigger value="billing">Cobrança</TabsTrigger>
           <TabsTrigger value="reports">Relatórios</TabsTrigger>
           <TabsTrigger value="audit">Auditoria</TabsTrigger>
           <TabsTrigger value="settings">Configuração</TabsTrigger>
@@ -406,6 +412,9 @@ function TenantWorkspace({
         </TabsContent>
         <TabsContent value="credits">
           <CreditsTab detail={detail} isSuperAdmin={isSuperAdmin} />
+        </TabsContent>
+        <TabsContent value="billing">
+          <BillingTab detail={detail} isSuperAdmin={isSuperAdmin} />
         </TabsContent>
         <TabsContent value="reports">
           <ReportsTab detail={detail} />
@@ -781,6 +790,32 @@ function RemoveUserButton({ tenantId, user }: { tenantId: string; user: TenantUs
         <Trash2 className="h-4 w-4 text-destructive" />
       </Button>
     </DemoDisabledTooltip>
+  );
+}
+
+// ─── Aba Cobrança (Task 9) ───────────────────────────────────────────────────
+// Super admin only: the billing admin read functions (`adminBillingTenantList`,
+// `adminTenantBillingHistory`) themselves refuse a non-super-admin caller, so a
+// regular tenant admin would only see load errors here — the tab shows a short
+// explanatory message instead (same pattern as the Saldo tab's restricted dialogs).
+function BillingTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAdmin: boolean }) {
+  if (!isSuperAdmin) {
+    return (
+      <Card>
+        <CardContent className="py-8 text-center text-sm text-muted-foreground">
+          A cobrança desta casa é restrita ao superadmin.
+        </CardContent>
+      </Card>
+    );
+  }
+  return (
+    <div className="space-y-4">
+      <BillingTenantCobrancaCard tenantId={detail.tenant.id} />
+      <BillingHistoryCard
+        tenantId={detail.tenant.id}
+        queryKey={billingHistoryQueryKey(detail.tenant.id)}
+      />
+    </div>
   );
 }
 

@@ -21,6 +21,7 @@ import {
   adminApplyInvoiceDiscountFor,
   adminBillingDashboardFor,
   adminBillingMonthlyCsvFor,
+  adminBillingTenantListFor,
   adminCancelInvoiceFor,
   adminExtendInvoiceDueFor,
   adminGrantFreeDaysFor,
@@ -485,6 +486,131 @@ describe("adminTenantBillingHistoryFor", () => {
     const items = await adminTenantBillingHistoryFor(ctxFor(SUPER_ADMIN), { tenantId: TENANT });
     expect(items.map((i) => i.kind)).toEqual(["invoice_paid", "audit", "invoice_created"]);
     expect(items.every((i) => i.title !== "tenant.renamed")).toBe(true);
+  });
+
+  it("falls back to 'Superadmin <id>' when there is no cheap email to resolve (ruling 2)", async () => {
+    fake.admin.rows("tenant_audit_logs").push({
+      id: "log1",
+      tenant_id: TENANT,
+      action: "billing.extend_due",
+      metadata: { reason: "pedido do cliente" },
+      actor_user_id: SUPER_ADMIN,
+      created_at: "2026-10-05T12:00:00Z",
+    });
+    const items = await adminTenantBillingHistoryFor(ctxFor(SUPER_ADMIN), { tenantId: TENANT });
+    const auditItem = items.find((i) => i.kind === "audit");
+    // The test double's supabaseAdmin has no `.auth.admin.getUserById`, so the
+    // email lookup can't resolve — this must fall back to the short-id label,
+    // never throw.
+    expect(auditItem?.actor).toBe(`Superadmin ${SUPER_ADMIN.slice(0, 8)}`);
+  });
+});
+
+describe("adminBillingTenantListFor", () => {
+  it("refuses a non-super-admin", async () => {
+    await expect(adminBillingTenantListFor(ctxFor(PLAIN_USER))).rejects.toThrow(
+      "Apenas o super admin",
+    );
+  });
+
+  it("lists every tenant with its billing situation, open invoice, custom price and discount", async () => {
+    fake.admin.rows("tenants").push(
+      { id: TENANT, nome: "Casa Paga", slug: "casa-paga" },
+      { id: OTHER_TENANT, nome: "Casa Isenta", slug: "casa-isenta" },
+    );
+    fake.admin.rows("tenant_billing").push(
+      {
+        tenant_id: TENANT,
+        plan_code: "crm_unico",
+        access_state: "overdue",
+        frozen: false,
+        next_due_date: "2026-11-05",
+        custom_price_cents: 350000,
+        discount_kind: "percent",
+        discount_value: 10,
+        discount_starts_on: null,
+        discount_ends_on: null,
+      },
+      {
+        tenant_id: OTHER_TENANT,
+        plan_code: "interno",
+        access_state: "exempt",
+        frozen: false,
+        next_due_date: null,
+        custom_price_cents: null,
+        discount_kind: null,
+        discount_value: null,
+        discount_starts_on: null,
+        discount_ends_on: null,
+      },
+    );
+    fake.admin.rows("billing_invoices").push({
+      id: INVOICE,
+      tenant_id: TENANT,
+      status: "open",
+      amount_cents: 315000,
+      due_date: "2026-11-05",
+    });
+
+    const rows = await adminBillingTenantListFor(ctxFor(SUPER_ADMIN));
+    expect(rows).toHaveLength(2);
+
+    const paying = rows.find((r) => r.tenantId === TENANT);
+    expect(paying).toMatchObject({
+      name: "Casa Paga",
+      slug: "casa-paga",
+      planCode: "crm_unico",
+      accessState: "overdue",
+      frozen: false,
+      nextDueDate: "2026-11-05",
+      customPriceCents: 350000,
+      continuousDiscount: { kind: "percent", value: 10, startsOn: null, endsOn: null },
+      openInvoice: { id: INVOICE, amountCents: 315000, dueDate: "2026-11-05", phase: "overdue" },
+    });
+
+    const exempt = rows.find((r) => r.tenantId === OTHER_TENANT);
+    expect(exempt).toMatchObject({
+      name: "Casa Isenta",
+      accessState: "exempt",
+      openInvoice: null,
+      customPriceCents: null,
+      continuousDiscount: null,
+    });
+  });
+
+  it("marks an open invoice with no warning-window access_state as phase 'open'", async () => {
+    fake.admin.rows("tenants").push({ id: TENANT, nome: "Casa Nova", slug: "casa-nova" });
+    fake.admin.rows("tenant_billing").push({
+      tenant_id: TENANT,
+      plan_code: "crm_unico",
+      access_state: "ok",
+      frozen: false,
+      next_due_date: "2026-12-01",
+      custom_price_cents: null,
+      discount_kind: null,
+      discount_value: null,
+      discount_starts_on: null,
+      discount_ends_on: null,
+    });
+    fake.admin.rows("billing_invoices").push({
+      id: INVOICE,
+      tenant_id: TENANT,
+      status: "open",
+      amount_cents: 400000,
+      due_date: "2026-12-05",
+    });
+
+    const rows = await adminBillingTenantListFor(ctxFor(SUPER_ADMIN));
+    expect(rows[0].openInvoice?.phase).toBe("open");
+  });
+
+  it("pages tenants past PostgREST's 1000-row cap (I3-style, same pattern as the CSV)", async () => {
+    const tenants = fake.admin.rows("tenants");
+    for (let i = 0; i < 1500; i += 1) {
+      tenants.push({ id: `tenant-${String(i).padStart(5, "0")}`, nome: `Casa ${i}`, slug: `casa-${i}` });
+    }
+    const rows = await adminBillingTenantListFor(ctxFor(SUPER_ADMIN));
+    expect(rows).toHaveLength(1500);
   });
 });
 
