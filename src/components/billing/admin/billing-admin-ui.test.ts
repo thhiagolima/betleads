@@ -4,6 +4,13 @@ import {
   adminBillingDashboardCards,
   adminTenantSituationLabel,
   canSubmitReason,
+  validateCalendarDate,
+  validateDiscountDateRange,
+  validateFixedDiscountAmount,
+  validateManualSettleAmount,
+  validatePercentDiscount,
+  validatePixFeeFixedCents,
+  validatePixFeePercent,
 } from "./billing-admin-ui";
 import type { AdminBillingDashboard } from "@/lib/billing/billing-admin.functions";
 
@@ -65,5 +72,114 @@ describe("adminTenantSituationLabel", () => {
 
   it("falls back to the raw state for an unknown value", () => {
     expect(adminTenantSituationLabel("something_new")).toBe("something_new");
+  });
+});
+
+// Fix round 1 (m2-m4): pure client-side validators for each action's own extra fields, with
+// pt-BR error messages.
+
+describe("validateManualSettleAmount", () => {
+  it("accepts an empty value (falls back to the invoice's own amount)", () => {
+    expect(validateManualSettleAmount("").valid).toBe(true);
+  });
+
+  it("accepts a finite value greater than zero", () => {
+    expect(validateManualSettleAmount("4000").valid).toBe(true);
+  });
+
+  it("refuses zero, negative or non-numeric values", () => {
+    expect(validateManualSettleAmount("0").valid).toBe(false);
+    expect(validateManualSettleAmount("-5").valid).toBe(false);
+    expect(validateManualSettleAmount("abc").valid).toBe(false);
+  });
+});
+
+describe("validatePercentDiscount", () => {
+  it("accepts a value strictly between 0 and 100", () => {
+    expect(validatePercentDiscount("10").valid).toBe(true);
+    expect(validatePercentDiscount("100").valid).toBe(true);
+  });
+
+  it("refuses 0, negative, over 100, empty or non-numeric", () => {
+    expect(validatePercentDiscount("0").valid).toBe(false);
+    expect(validatePercentDiscount("-1").valid).toBe(false);
+    expect(validatePercentDiscount("101").valid).toBe(false);
+    expect(validatePercentDiscount("").valid).toBe(false);
+    expect(validatePercentDiscount("abc").valid).toBe(false);
+  });
+});
+
+describe("validateFixedDiscountAmount", () => {
+  it("accepts a finite value greater than zero", () => {
+    expect(validateFixedDiscountAmount("500").valid).toBe(true);
+  });
+
+  it("refuses zero, negative, empty or non-numeric", () => {
+    expect(validateFixedDiscountAmount("0").valid).toBe(false);
+    expect(validateFixedDiscountAmount("-1").valid).toBe(false);
+    expect(validateFixedDiscountAmount("").valid).toBe(false);
+  });
+});
+
+describe("validateDiscountDateRange", () => {
+  it("accepts an end date on/after the start date", () => {
+    expect(validateDiscountDateRange("2026-01-01", "2026-01-01").valid).toBe(true);
+    expect(validateDiscountDateRange("2026-01-01", "2026-02-01").valid).toBe(true);
+  });
+
+  it("refuses an end date before the start date", () => {
+    expect(validateDiscountDateRange("2026-02-01", "2026-01-01").valid).toBe(false);
+  });
+
+  it("is valid when either date is empty (both optional)", () => {
+    expect(validateDiscountDateRange("", "").valid).toBe(true);
+    expect(validateDiscountDateRange("2026-01-01", "").valid).toBe(true);
+    expect(validateDiscountDateRange("", "2026-01-01").valid).toBe(true);
+  });
+});
+
+describe("validateCalendarDate", () => {
+  it("accepts a real calendar date", () => {
+    expect(validateCalendarDate("2026-11-05").valid).toBe(true);
+    expect(validateCalendarDate("2028-02-29").valid).toBe(true); // leap year
+  });
+
+  it("refuses a date that doesn't exist on the calendar", () => {
+    expect(validateCalendarDate("2026-02-30").valid).toBe(false);
+    expect(validateCalendarDate("2026-13-01").valid).toBe(false);
+    expect(validateCalendarDate("2026-02-29").valid).toBe(false); // not a leap year
+  });
+
+  it("refuses an empty or malformed value", () => {
+    expect(validateCalendarDate("").valid).toBe(false);
+    expect(validateCalendarDate("05/11/2026").valid).toBe(false);
+  });
+});
+
+describe("validatePixFeePercent", () => {
+  it("accepts 0 to 10", () => {
+    expect(validatePixFeePercent("0").valid).toBe(true);
+    expect(validatePixFeePercent("10").valid).toBe(true);
+    expect(validatePixFeePercent("1.5").valid).toBe(true);
+  });
+
+  it("refuses under 0, over 10, empty or non-numeric", () => {
+    expect(validatePixFeePercent("-1").valid).toBe(false);
+    expect(validatePixFeePercent("10.01").valid).toBe(false);
+    expect(validatePixFeePercent("").valid).toBe(false);
+  });
+});
+
+describe("validatePixFeeFixedCents", () => {
+  it("accepts an integer between 0 and 1000", () => {
+    expect(validatePixFeeFixedCents("0").valid).toBe(true);
+    expect(validatePixFeeFixedCents("1000").valid).toBe(true);
+  });
+
+  it("refuses under 0, over 1000, non-integer, empty or non-numeric", () => {
+    expect(validatePixFeeFixedCents("-1").valid).toBe(false);
+    expect(validatePixFeeFixedCents("1001").valid).toBe(false);
+    expect(validatePixFeeFixedCents("1.5").valid).toBe(false);
+    expect(validatePixFeeFixedCents("").valid).toBe(false);
   });
 });

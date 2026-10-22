@@ -1319,6 +1319,12 @@ export type AdminBillingTenantRow = {
   planCode: string;
   accessState: string;
   frozen: boolean;
+  /** `tenant_billing.manual_block` — the superadmin's own block toggle (fix round 1, I1): the
+   * UI must read this, not derive it from `accessState === "locked_manual"`. `access_state` is
+   * a computed/cached summary (precedence: exempt > frozen > locked_manual > ...), so a frozen
+   * AND manually-blocked house still reports `accessState: "frozen"` — the block toggle would
+   * read as "not blocked" and let the admin "block" a house that's already blocked. */
+  manualBlock: boolean;
   nextDueDate: string | null;
   openInvoice: AdminBillingOpenInvoice | null;
   customPriceCents: number | null;
@@ -1331,6 +1337,7 @@ type TenantBillingListRow = {
   plan_code: string;
   access_state: string;
   frozen: boolean;
+  manual_block: boolean;
   next_due_date: string | null;
   custom_price_cents: number | string | null;
   discount_kind: "percent" | "fixed" | null;
@@ -1355,31 +1362,33 @@ export async function adminBillingTenantListFor(ctx: ServerContext): Promise<Adm
   await assertSuperAdmin(ctx.userId);
   const sb = looseDb(supabaseAdmin);
 
-  // tenant_billing has one row per tenant and its primary key is `tenant_id`, not `id`, so it
-  // can't use the `{id}`-keyset `selectAllPages` helper — same as `adminBillingDashboardFor`
-  // above, which reads it the same (plain, unpaginated) way for the same reason. `tenants` and
-  // `billing_invoices` do have `id` and can exceed PostgREST's 1000-row cap, so those two page.
-  const [tenantsPaged, tbRes, openInvPaged] = await Promise.all([
+  // `tenants` and `billing_invoices` have `id`; `tenant_billing`'s primary key is `tenant_id`,
+  // so it pages on that column instead (fix round 1, I2 — `selectAllPages` now takes an
+  // optional `keyColumn`, default "id", so every other caller is unaffected).
+  const [tenantsPaged, tbPaged, openInvPaged] = await Promise.all([
     selectAllPages<TenantLiteRow>("billing_admin_tenant_list_tenants", () =>
       sb.from("tenants").select("id,nome,slug"),
     ),
-    sb
-      .from("tenant_billing")
-      .select(
-        "tenant_id,plan_code,access_state,frozen,next_due_date,custom_price_cents,discount_kind,discount_value,discount_starts_on,discount_ends_on",
-      ),
+    selectAllPages<TenantBillingListRow>(
+      "billing_admin_tenant_list_tenant_billing",
+      () =>
+        sb
+          .from("tenant_billing")
+          .select(
+            "tenant_id,plan_code,access_state,frozen,manual_block,next_due_date,custom_price_cents,discount_kind,discount_value,discount_starts_on,discount_ends_on",
+          ),
+      "tenant_id",
+    ),
     selectAllPages<OpenInvoiceListRow>("billing_admin_tenant_list_open_invoices", () =>
       sb.from("billing_invoices").select("id,tenant_id,amount_cents,due_date").eq("status", "open"),
     ),
   ]);
-  for (const res of [tenantsPaged, openInvPaged]) {
+  for (const res of [tenantsPaged, tbPaged, openInvPaged]) {
     if (res.error) throw new Error(res.error.message);
   }
-  if (tbRes.error) throw new Error(tbRes.error.message);
 
   const tenants = tenantsPaged.data;
-  const tenantBillingRows = (tbRes.data ?? []) as TenantBillingListRow[];
-  const billingByTenant = new Map(tenantBillingRows.map((row) => [row.tenant_id, row] as const));
+  const billingByTenant = new Map(tbPaged.data.map((row) => [row.tenant_id, row] as const));
   const openInvoiceByTenant = new Map(openInvPaged.data.map((row) => [row.tenant_id, row] as const));
 
   return tenants.map((tenant) => {
@@ -1394,6 +1403,7 @@ export async function adminBillingTenantListFor(ctx: ServerContext): Promise<Adm
       planCode: tb?.plan_code ?? "",
       accessState,
       frozen: tb?.frozen ?? false,
+      manualBlock: tb?.manual_block ?? false,
       nextDueDate: tb?.next_due_date ?? null,
       openInvoice: openInv
         ? {

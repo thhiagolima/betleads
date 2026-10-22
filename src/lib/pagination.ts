@@ -17,21 +17,26 @@ type ChunkResult<T> = { data: T[] | null; error: { message: string } | null };
 
 // Exported so tests can prove it actually pages past PAGE_SIZE instead of mocking the whole
 // caller's handler + auth middleware.
-export async function selectAllPages<T extends { id: string }>(
+//
+// `keyColumn` (Task 9 fix round 1, I2) defaults to "id" — unchanged behavior for every existing
+// caller — but a table whose primary key isn't `id` (e.g. `tenant_billing`, keyed on
+// `tenant_id`) can page on that column instead, as long as it's unique and sortable.
+export async function selectAllPages<T extends Record<string, unknown>>(
   label: string,
   build: () => any,
+  keyColumn: string = "id",
 ): Promise<PagedResult<T>> {
   const rows: T[] = [];
-  let lastId: string | null = null;
+  let lastKey: unknown = null;
   for (let page = 0; page < MAX_PAGES; page += 1) {
     let query = build();
-    if (lastId) query = query.gt("id", lastId);
-    const result: ChunkResult<T> = await query.order("id", { ascending: true }).limit(PAGE_SIZE);
+    if (lastKey !== null) query = query.gt(keyColumn, lastKey);
+    const result: ChunkResult<T> = await query.order(keyColumn, { ascending: true }).limit(PAGE_SIZE);
     if (result.error) return { data: rows, error: result.error, truncated: false };
     const data = result.data ?? [];
     rows.push(...data);
     if (data.length < PAGE_SIZE) return { data: rows, error: null, truncated: false };
-    lastId = String(data[data.length - 1].id);
+    lastKey = (data[data.length - 1] as Record<string, unknown>)[keyColumn];
   }
   console.warn(
     `[selectAllPages] ${label}: stopped after ${MAX_PAGES * PAGE_SIZE} rows; report truncated.`,

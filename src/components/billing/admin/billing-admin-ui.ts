@@ -80,3 +80,89 @@ export function formatDateBR(dateStr: string | null): string {
   const [y, m, d] = dateStr.split("-");
   return `${d}/${m}/${y}`;
 }
+
+// ---------------------------------------------------------------------------
+// Validação dos campos extras de cada diálogo (fix round 1, m2-m4) — pt-BR,
+// mesma forma que `canSubmitReason`: pura, usada pelos componentes para
+// desabilitar o envio e mostrar a mensagem de erro perto do campo.
+// ---------------------------------------------------------------------------
+
+export type FieldValidation = { valid: boolean; message: string | null };
+
+const VALID: FieldValidation = { valid: true, message: null };
+
+/** "Dar baixa manual" — valor recebido: vazio usa o valor da fatura; senão precisa ser um
+ * número finito maior que zero. */
+export function validateManualSettleAmount(raw: string): FieldValidation {
+  if (raw.trim() === "") return VALID;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) {
+    return {
+      valid: false,
+      message: "Informe um valor maior que zero, ou deixe vazio para usar o valor da fatura.",
+    };
+  }
+  return VALID;
+}
+
+/** Desconto percentual (pontual ou contínuo): 0 (exclusivo) a 100. */
+export function validatePercentDiscount(raw: string): FieldValidation {
+  const n = Number(raw);
+  if (raw.trim() === "" || !Number.isFinite(n) || n <= 0 || n > 100) {
+    return { valid: false, message: "Informe um percentual entre 0 (exclusivo) e 100." };
+  }
+  return VALID;
+}
+
+/** Desconto em valor fixo (R$, pontual ou contínuo): número finito maior que zero. */
+export function validateFixedDiscountAmount(raw: string): FieldValidation {
+  const n = Number(raw);
+  if (raw.trim() === "" || !Number.isFinite(n) || n <= 0) {
+    return { valid: false, message: "Informe um valor em R$ maior que zero." };
+  }
+  return VALID;
+}
+
+/** "Desconto contínuo" — fim não pode ser antes do início, quando os dois estão preenchidos. */
+export function validateDiscountDateRange(startsOn: string, endsOn: string): FieldValidation {
+  if (startsOn.trim() !== "" && endsOn.trim() !== "" && endsOn < startsOn) {
+    return { valid: false, message: "A data de fim não pode ser antes da data de início." };
+  }
+  return VALID;
+}
+
+/** A YYYY-MM-DD string that is a real calendar date (rejects e.g. 2026-02-30), not just a
+ * regex-shaped one. Used by "Trocar dia de vencimento". */
+export function validateCalendarDate(raw: string): FieldValidation {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+  if (!match) return { valid: false, message: "Informe uma data válida." };
+  const [, yStr, mStr, dStr] = match;
+  const y = Number(yStr);
+  const m = Number(mStr);
+  const d = Number(dStr);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  const isRealDate =
+    date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d;
+  if (!isRealDate) return { valid: false, message: "Essa data não existe no calendário." };
+  return VALID;
+}
+
+/** Taxa do Pix — percentual: dentro do limite aceito pelo servidor (`adminSetPixFeeInput`,
+ * 0 a 10). */
+export function validatePixFeePercent(raw: string): FieldValidation {
+  const n = Number(raw);
+  if (raw.trim() === "" || !Number.isFinite(n) || n < 0 || n > 10) {
+    return { valid: false, message: "Informe um percentual entre 0 e 10." };
+  }
+  return VALID;
+}
+
+/** Taxa do Pix — valor fixo em centavos: dentro do limite aceito pelo servidor
+ * (`adminSetPixFeeInput`, 0 a 1000). */
+export function validatePixFeeFixedCents(raw: string): FieldValidation {
+  const n = Number(raw);
+  if (raw.trim() === "" || !Number.isInteger(n) || n < 0 || n > 1000) {
+    return { valid: false, message: "Informe um valor em centavos entre 0 e 1000." };
+  }
+  return VALID;
+}

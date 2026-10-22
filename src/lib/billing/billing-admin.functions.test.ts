@@ -524,6 +524,7 @@ describe("adminBillingTenantListFor", () => {
         plan_code: "crm_unico",
         access_state: "overdue",
         frozen: false,
+        manual_block: false,
         next_due_date: "2026-11-05",
         custom_price_cents: 350000,
         discount_kind: "percent",
@@ -536,6 +537,7 @@ describe("adminBillingTenantListFor", () => {
         plan_code: "interno",
         access_state: "exempt",
         frozen: false,
+        manual_block: false,
         next_due_date: null,
         custom_price_cents: null,
         discount_kind: null,
@@ -562,6 +564,7 @@ describe("adminBillingTenantListFor", () => {
       planCode: "crm_unico",
       accessState: "overdue",
       frozen: false,
+      manualBlock: false,
       nextDueDate: "2026-11-05",
       customPriceCents: 350000,
       continuousDiscount: { kind: "percent", value: 10, startsOn: null, endsOn: null },
@@ -585,6 +588,7 @@ describe("adminBillingTenantListFor", () => {
       plan_code: "crm_unico",
       access_state: "ok",
       frozen: false,
+      manual_block: false,
       next_due_date: "2026-12-01",
       custom_price_cents: null,
       discount_kind: null,
@@ -604,13 +608,56 @@ describe("adminBillingTenantListFor", () => {
     expect(rows[0].openInvoice?.phase).toBe("open");
   });
 
-  it("pages tenants past PostgREST's 1000-row cap (I3-style, same pattern as the CSV)", async () => {
+  it("reads manualBlock from tenant_billing.manual_block, not from access_state (fix round 1, I1)", async () => {
+    // A frozen AND manually-blocked house still reports access_state "frozen" (precedence:
+    // exempt > frozen > locked_manual > ...), so deriving the block toggle from
+    // `accessState === "locked_manual"` would read it as unblocked. `manual_block` is the
+    // superadmin's own, independent toggle.
+    fake.admin.rows("tenants").push({ id: TENANT, nome: "Casa Congelada e Bloqueada", slug: "casa-fb" });
+    fake.admin.rows("tenant_billing").push({
+      tenant_id: TENANT,
+      plan_code: "crm_unico",
+      access_state: "frozen",
+      frozen: true,
+      manual_block: true,
+      next_due_date: null,
+      custom_price_cents: null,
+      discount_kind: null,
+      discount_value: null,
+      discount_starts_on: null,
+      discount_ends_on: null,
+    });
+
+    const rows = await adminBillingTenantListFor(ctxFor(SUPER_ADMIN));
+    expect(rows[0]).toMatchObject({ accessState: "frozen", frozen: true, manualBlock: true });
+  });
+
+  it("pages tenants AND tenant_billing past PostgREST's 1000-row cap (fix round 1, I2)", async () => {
     const tenants = fake.admin.rows("tenants");
+    const tenantBilling = fake.admin.rows("tenant_billing");
     for (let i = 0; i < 1500; i += 1) {
-      tenants.push({ id: `tenant-${String(i).padStart(5, "0")}`, nome: `Casa ${i}`, slug: `casa-${i}` });
+      const id = `tenant-${String(i).padStart(5, "0")}`;
+      tenants.push({ id, nome: `Casa ${i}`, slug: `casa-${i}` });
+      tenantBilling.push({
+        tenant_id: id,
+        plan_code: "crm_unico",
+        access_state: "ok",
+        frozen: false,
+        manual_block: false,
+        next_due_date: null,
+        custom_price_cents: null,
+        discount_kind: null,
+        discount_value: null,
+        discount_starts_on: null,
+        discount_ends_on: null,
+      });
     }
     const rows = await adminBillingTenantListFor(ctxFor(SUPER_ADMIN));
     expect(rows).toHaveLength(1500);
+    // If tenant_billing were truncated at 1000 rows, the remaining 500 tenants would fall back
+    // to the "no tenant_billing row" defaults (planCode "", accessState "ok" default) instead
+    // of the "crm_unico" plan code pushed above for every one of the 1500.
+    expect(rows.every((r) => r.planCode === "crm_unico")).toBe(true);
   });
 });
 

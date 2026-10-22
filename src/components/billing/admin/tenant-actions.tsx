@@ -3,7 +3,7 @@
 // contínuo", "Dar baixa manual", "Cancelar fatura", "Trocar dia de vencimento", "Congelar
 // plano", "Preço próprio", "Reenviar e-mail"). Reused as-is by both the "Faturamento" tab
 // (admin.tsx) and the "Cobrança" section of a house (tenants.tsx) — ruling 3.
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -32,6 +32,13 @@ import {
   adminSetTenantBlock,
 } from "@/lib/billing/billing-admin.functions";
 import { ReasonActionDialog } from "./reason-dialog";
+import {
+  validateCalendarDate,
+  validateDiscountDateRange,
+  validateFixedDiscountAmount,
+  validateManualSettleAmount,
+  validatePercentDiscount,
+} from "./billing-admin-ui";
 
 /** Called after any action settles successfully — the caller refetches the list, the dashboard
  * and the history (ruling 4). */
@@ -81,6 +88,8 @@ export function BlockTenantAction({
 // 2. Estender prazo (uma fatura em aberto)
 // ---------------------------------------------------------------------------
 
+const DEFAULT_EXTEND_DAYS = "5";
+
 export function ExtendInvoiceDueAction({
   invoiceId,
   onDone,
@@ -88,7 +97,8 @@ export function ExtendInvoiceDueAction({
   invoiceId: string | null;
   onDone: OnDone;
 }) {
-  const [days, setDays] = useState("5");
+  const [days, setDays] = useState(DEFAULT_EXTEND_DAYS);
+  const daysId = useId();
   const mut = useBillingAction(adminExtendInvoiceDue);
   const daysValue = Number(days);
   const valid = Number.isInteger(daysValue) && daysValue >= 1 && daysValue <= 31;
@@ -100,6 +110,9 @@ export function ExtendInvoiceDueAction({
       disabledTrigger={!invoiceId}
       extraFieldsValid={valid}
       pending={mut.isPending}
+      onOpenChange={(open) => {
+        if (!open) setDays(DEFAULT_EXTEND_DAYS); // m5: reset on close
+      }}
       onSubmit={async (reason) => {
         if (!invoiceId) return;
         await mut.mutateAsync({ invoiceId, days: daysValue, reason });
@@ -108,8 +121,16 @@ export function ExtendInvoiceDueAction({
       }}
     >
       <div className="space-y-2">
-        <Label>Dias a mais</Label>
-        <Input type="number" min={1} max={31} value={days} onChange={(e) => setDays(e.target.value)} />
+        <Label htmlFor={daysId}>Dias a mais</Label>
+        <Input
+          id={daysId}
+          type="number"
+          min={1}
+          max={31}
+          value={days}
+          onChange={(e) => setDays(e.target.value)}
+        />
+        {!valid && <p className="text-xs text-destructive">Informe um número de 1 a 31 dias.</p>}
       </div>
     </ReasonActionDialog>
   );
@@ -119,8 +140,11 @@ export function ExtendInvoiceDueAction({
 // 3. Dar dias grátis
 // ---------------------------------------------------------------------------
 
+const DEFAULT_FREE_DAYS = "7";
+
 export function GrantFreeDaysAction({ tenantId, onDone }: { tenantId: string; onDone: OnDone }) {
-  const [days, setDays] = useState("7");
+  const [days, setDays] = useState(DEFAULT_FREE_DAYS);
+  const daysId = useId();
   const mut = useBillingAction(adminGrantFreeDays);
   const daysValue = Number(days);
   const valid = Number.isInteger(daysValue) && daysValue >= 1 && daysValue <= 365;
@@ -131,6 +155,9 @@ export function GrantFreeDaysAction({ tenantId, onDone }: { tenantId: string; on
       description="Estende o período pago atual em N dias sem cobrar. O ciclo inteiro anda junto."
       extraFieldsValid={valid}
       pending={mut.isPending}
+      onOpenChange={(open) => {
+        if (!open) setDays(DEFAULT_FREE_DAYS);
+      }}
       onSubmit={async (reason) => {
         await mut.mutateAsync({ tenantId, days: daysValue, reason });
         toast.success("Dias grátis concedidos.");
@@ -138,8 +165,16 @@ export function GrantFreeDaysAction({ tenantId, onDone }: { tenantId: string; on
       }}
     >
       <div className="space-y-2">
-        <Label>Dias grátis</Label>
-        <Input type="number" min={1} max={365} value={days} onChange={(e) => setDays(e.target.value)} />
+        <Label htmlFor={daysId}>Dias grátis</Label>
+        <Input
+          id={daysId}
+          type="number"
+          min={1}
+          max={365}
+          value={days}
+          onChange={(e) => setDays(e.target.value)}
+        />
+        {!valid && <p className="text-xs text-destructive">Informe um número de 1 a 365 dias.</p>}
       </div>
     </ReasonActionDialog>
   );
@@ -158,17 +193,25 @@ export function ApplyInvoiceDiscountAction({
 }) {
   const [kind, setKind] = useState<"percent" | "fixed">("percent");
   const [value, setValue] = useState("");
+  const kindId = useId();
+  const valueId = useId();
   const mut = useBillingAction(adminApplyInvoiceDiscount);
+  const validation = kind === "percent" ? validatePercentDiscount(value) : validateFixedDiscountAmount(value);
   const valueNumber = Number(value);
-  const valid = value.trim() !== "" && Number.isFinite(valueNumber) && valueNumber >= 0;
   return (
     <ReasonActionDialog
       triggerLabel="Desconto nesta fatura"
       title="Desconto pontual nesta fatura"
       description="R$ ou % só nesta fatura em aberto. Cancela o Pix já gerado, se houver."
       disabledTrigger={!invoiceId}
-      extraFieldsValid={valid}
+      extraFieldsValid={validation.valid}
       pending={mut.isPending}
+      onOpenChange={(open) => {
+        if (!open) {
+          setKind("percent");
+          setValue("");
+        }
+      }}
       onSubmit={async (reason) => {
         if (!invoiceId) return;
         await mut.mutateAsync({
@@ -183,9 +226,9 @@ export function ApplyInvoiceDiscountAction({
     >
       <div className="grid grid-cols-2 gap-2">
         <div className="space-y-2">
-          <Label>Tipo</Label>
+          <Label htmlFor={kindId}>Tipo</Label>
           <Select value={kind} onValueChange={(v) => setKind(v as "percent" | "fixed")}>
-            <SelectTrigger>
+            <SelectTrigger id={kindId}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -195,10 +238,18 @@ export function ApplyInvoiceDiscountAction({
           </Select>
         </div>
         <div className="space-y-2">
-          <Label>{kind === "percent" ? "Percentual" : "Valor (R$)"}</Label>
-          <Input type="number" min={0} step="0.01" value={value} onChange={(e) => setValue(e.target.value)} />
+          <Label htmlFor={valueId}>{kind === "percent" ? "Percentual" : "Valor (R$)"}</Label>
+          <Input
+            id={valueId}
+            type="number"
+            min={0}
+            step="0.01"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+          />
         </div>
       </div>
+      {!validation.valid && <p className="text-xs text-destructive">{validation.message}</p>}
     </ReasonActionDialog>
   );
 }
@@ -218,9 +269,20 @@ export function SetContinuousDiscountAction({
   const [value, setValue] = useState("");
   const [startsOn, setStartsOn] = useState("");
   const [endsOn, setEndsOn] = useState("");
+  const kindId = useId();
+  const valueId = useId();
+  const startsOnId = useId();
+  const endsOnId = useId();
   const mut = useBillingAction(adminSetContinuousDiscount);
   const valueNumber = Number(value);
-  const valid = kind === "none" || (value.trim() !== "" && Number.isFinite(valueNumber) && valueNumber >= 0);
+  const valueValidation =
+    kind === "none"
+      ? { valid: true, message: null }
+      : kind === "percent"
+        ? validatePercentDiscount(value)
+        : validateFixedDiscountAmount(value);
+  const dateRangeValidation = validateDiscountDateRange(startsOn, endsOn);
+  const valid = valueValidation.valid && dateRangeValidation.valid;
   return (
     <ReasonActionDialog
       triggerLabel="Desconto contínuo"
@@ -228,6 +290,14 @@ export function SetContinuousDiscountAction({
       description="Aplica a toda fatura gerada da casa, com início e fim opcional. Use 'Nenhum' para remover."
       extraFieldsValid={valid}
       pending={mut.isPending}
+      onOpenChange={(open) => {
+        if (!open) {
+          setKind("percent");
+          setValue("");
+          setStartsOn("");
+          setEndsOn("");
+        }
+      }}
       onSubmit={async (reason) => {
         await mut.mutateAsync({
           tenantId,
@@ -243,9 +313,9 @@ export function SetContinuousDiscountAction({
     >
       <div className="grid grid-cols-2 gap-2">
         <div className="space-y-2">
-          <Label>Tipo</Label>
+          <Label htmlFor={kindId}>Tipo</Label>
           <Select value={kind} onValueChange={(v) => setKind(v as typeof kind)}>
-            <SelectTrigger>
+            <SelectTrigger id={kindId}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -257,22 +327,35 @@ export function SetContinuousDiscountAction({
         </div>
         {kind !== "none" && (
           <div className="space-y-2">
-            <Label>{kind === "percent" ? "Percentual" : "Valor (R$)"}</Label>
-            <Input type="number" min={0} step="0.01" value={value} onChange={(e) => setValue(e.target.value)} />
+            <Label htmlFor={valueId}>{kind === "percent" ? "Percentual" : "Valor (R$)"}</Label>
+            <Input
+              id={valueId}
+              type="number"
+              min={0}
+              step="0.01"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+            />
           </div>
         )}
       </div>
+      {kind !== "none" && !valueValidation.valid && (
+        <p className="text-xs text-destructive">{valueValidation.message}</p>
+      )}
       {kind !== "none" && (
         <div className="grid grid-cols-2 gap-2">
           <div className="space-y-2">
-            <Label>Início (opcional)</Label>
-            <Input type="date" value={startsOn} onChange={(e) => setStartsOn(e.target.value)} />
+            <Label htmlFor={startsOnId}>Início (opcional)</Label>
+            <Input id={startsOnId} type="date" value={startsOn} onChange={(e) => setStartsOn(e.target.value)} />
           </div>
           <div className="space-y-2">
-            <Label>Fim (opcional)</Label>
-            <Input type="date" value={endsOn} onChange={(e) => setEndsOn(e.target.value)} />
+            <Label htmlFor={endsOnId}>Fim (opcional)</Label>
+            <Input id={endsOnId} type="date" value={endsOn} onChange={(e) => setEndsOn(e.target.value)} />
           </div>
         </div>
+      )}
+      {kind !== "none" && !dateRangeValidation.valid && (
+        <p className="text-xs text-destructive">{dateRangeValidation.message}</p>
       )}
     </ReasonActionDialog>
   );
@@ -292,8 +375,12 @@ export function ManualSettleAction({
   const [paidAmount, setPaidAmount] = useState("");
   const [note, setNote] = useState("");
   const [receipt, setReceipt] = useState("");
+  const paidAmountId = useId();
+  const noteId = useId();
+  const receiptId = useId();
   const mut = useBillingAction(adminManualSettle);
-  const valid = note.trim().length >= 1 && receipt.trim().length >= 1;
+  const amountValidation = validateManualSettleAmount(paidAmount);
+  const valid = amountValidation.valid && note.trim().length >= 1 && receipt.trim().length >= 1;
   return (
     <ReasonActionDialog
       triggerLabel="Dar baixa manual"
@@ -302,6 +389,13 @@ export function ManualSettleAction({
       disabledTrigger={!invoiceId}
       extraFieldsValid={valid}
       pending={mut.isPending}
+      onOpenChange={(open) => {
+        if (!open) {
+          setPaidAmount("");
+          setNote("");
+          setReceipt("");
+        }
+      }}
       onSubmit={async (reason) => {
         if (!invoiceId) return;
         await mut.mutateAsync({
@@ -316,16 +410,26 @@ export function ManualSettleAction({
       }}
     >
       <div className="space-y-2">
-        <Label>Valor recebido (R$, opcional — padrão é o valor da fatura)</Label>
-        <Input type="number" min={0} step="0.01" value={paidAmount} onChange={(e) => setPaidAmount(e.target.value)} />
+        <Label htmlFor={paidAmountId}>Valor recebido (R$, opcional — padrão é o valor da fatura)</Label>
+        <Input
+          id={paidAmountId}
+          type="number"
+          min={0}
+          step="0.01"
+          value={paidAmount}
+          onChange={(e) => setPaidAmount(e.target.value)}
+        />
+        {!amountValidation.valid && (
+          <p className="text-xs text-destructive">{amountValidation.message}</p>
+        )}
       </div>
       <div className="space-y-2">
-        <Label>Nota</Label>
-        <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ex: Pago via TED" />
+        <Label htmlFor={noteId}>Nota</Label>
+        <Input id={noteId} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ex: Pago via TED" />
       </div>
       <div className="space-y-2">
-        <Label>Comprovante (arquivo ou texto)</Label>
-        <Textarea value={receipt} onChange={(e) => setReceipt(e.target.value)} rows={2} />
+        <Label htmlFor={receiptId}>Comprovante (arquivo ou texto)</Label>
+        <Textarea id={receiptId} value={receipt} onChange={(e) => setReceipt(e.target.value)} rows={2} />
       </div>
     </ReasonActionDialog>
   );
@@ -351,6 +455,9 @@ export function CancelInvoiceAction({
       description="Fatura em aberto gerada por engano. Cancela o Pix na Upper, se houver."
       disabledTrigger={!invoiceId}
       pending={mut.isPending}
+      // m8: "Cancelar" here would read as cancelling the invoice itself, not dismissing the
+      // dialog — "Voltar" is unambiguous.
+      cancelLabel="Voltar"
       onSubmit={async (reason) => {
         if (!invoiceId) return;
         const result = await mut.mutateAsync({ invoiceId, reason });
@@ -367,15 +474,19 @@ export function CancelInvoiceAction({
 
 export function SetCycleDayAction({ tenantId, onDone }: { tenantId: string; onDone: OnDone }) {
   const [nextDueDate, setNextDueDate] = useState("");
+  const dateId = useId();
   const mut = useBillingAction(adminSetCycleDay);
-  const valid = /^\d{4}-\d{2}-\d{2}$/.test(nextDueDate);
+  const validation = validateCalendarDate(nextDueDate);
   return (
     <ReasonActionDialog
       triggerLabel="Trocar dia de vencimento"
       title="Trocar dia de vencimento"
       description="Muda o dia do ciclo a partir da próxima fatura, sem pró-rata. A fatura em aberto, se houver, mantém a data."
-      extraFieldsValid={valid}
+      extraFieldsValid={validation.valid}
       pending={mut.isPending}
+      onOpenChange={(open) => {
+        if (!open) setNextDueDate("");
+      }}
       onSubmit={async (reason) => {
         await mut.mutateAsync({ tenantId, nextDueDate, reason });
         toast.success("Dia do ciclo alterado.");
@@ -383,8 +494,9 @@ export function SetCycleDayAction({ tenantId, onDone }: { tenantId: string; onDo
       }}
     >
       <div className="space-y-2">
-        <Label>Próximo vencimento</Label>
-        <Input type="date" value={nextDueDate} onChange={(e) => setNextDueDate(e.target.value)} />
+        <Label htmlFor={dateId}>Próximo vencimento</Label>
+        <Input id={dateId} type="date" value={nextDueDate} onChange={(e) => setNextDueDate(e.target.value)} />
+        {!validation.valid && <p className="text-xs text-destructive">{validation.message}</p>}
       </div>
     </ReasonActionDialog>
   );
@@ -428,6 +540,10 @@ export function SetFrozenAction({
 // 14. Preço próprio (valor do plano por casa)
 // ---------------------------------------------------------------------------
 
+function initialCustomPrice(currentPriceCents: number | null): string {
+  return currentPriceCents != null ? String(currentPriceCents / 100) : "";
+}
+
 export function SetCustomPriceAction({
   tenantId,
   currentPriceCents,
@@ -437,9 +553,8 @@ export function SetCustomPriceAction({
   currentPriceCents: number | null;
   onDone: OnDone;
 }) {
-  const [price, setPrice] = useState(
-    currentPriceCents != null ? String(currentPriceCents / 100) : "",
-  );
+  const [price, setPrice] = useState(initialCustomPrice(currentPriceCents));
+  const priceId = useId();
   const mut = useBillingAction(adminSetCustomPrice);
   // Minimum of the Pix (global constraint): a non-null custom price must be >= R$ 100,00.
   const priceNumber = Number(price);
@@ -451,6 +566,12 @@ export function SetCustomPriceAction({
       description="Substitui os R$ 4.000,00 para esta casa. Deixe vazio para voltar ao preço padrão."
       extraFieldsValid={valid}
       pending={mut.isPending}
+      onOpenChange={(open) => {
+        // m6: re-sync from the current prop value every time the dialog opens, instead of only
+        // once at mount — `currentPriceCents` can have changed (e.g. another admin's action, or
+        // this same tenant's row re-rendering after a refetch) since the component first mounted.
+        if (open) setPrice(initialCustomPrice(currentPriceCents));
+      }}
       onSubmit={async (reason) => {
         await mut.mutateAsync({
           tenantId,
@@ -462,8 +583,16 @@ export function SetCustomPriceAction({
       }}
     >
       <div className="space-y-2">
-        <Label>Preço mensal (R$, mínimo 100,00 — vazio volta ao padrão)</Label>
-        <Input type="number" min={0} step="0.01" value={price} onChange={(e) => setPrice(e.target.value)} />
+        <Label htmlFor={priceId}>Preço mensal (R$, mínimo 100,00 — vazio volta ao padrão)</Label>
+        <Input
+          id={priceId}
+          type="number"
+          min={0}
+          step="0.01"
+          value={price}
+          onChange={(e) => setPrice(e.target.value)}
+        />
+        {!valid && <p className="text-xs text-destructive">O preço próprio mínimo é R$ 100,00.</p>}
       </div>
     </ReasonActionDialog>
   );

@@ -1,7 +1,7 @@
 // Design section 6, item 12: monthly report (CSV), per house, with the formulas from
 // controller ruling 5 (receita_bruta = mensalidade + consumo; receita_liquida = receita_bruta
 // - custo_fornecedor - taxa_pix; margem = %).
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { useMutation } from "@tanstack/react-query";
 import { Download, FileSpreadsheet } from "lucide-react";
@@ -12,10 +12,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { adminBillingMonthlyCsv } from "@/lib/billing/billing-admin.functions";
+import { brtDayKey } from "@/lib/tz";
 
-function currentYyyyMm() {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+/** YYYY-MM of "today" in Brasília (m10, fix round 1) — `new Date()`'s local getters would drift
+ * a calendar day/month off from Brasília between 21:00 and 00:00 BRT on month boundaries. */
+function currentYyyyMmBrt() {
+  return brtDayKey(new Date()).slice(0, 7);
 }
 
 function downloadCsv(month: string, csv: string) {
@@ -27,11 +29,15 @@ function downloadCsv(month: string, csv: string) {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  // m10: revoke after a short delay, not synchronously — some browsers (notably Firefox) can
+  // cancel the download if the object URL is revoked before it has actually started reading
+  // the blob.
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export function BillingCsvDownloadCard() {
-  const [month, setMonth] = useState(currentYyyyMm());
+  const [month, setMonth] = useState(currentYyyyMmBrt());
+  const monthId = useId();
   const fn = useServerFn(adminBillingMonthlyCsv);
   const mut = useMutation({
     mutationFn: () => fn({ data: { month } }) as Promise<string>,
@@ -63,13 +69,8 @@ export function BillingCsvDownloadCard() {
         </p>
         <div className="flex items-end gap-2">
           <div className="space-y-2">
-            <Label htmlFor="billing-csv-month">Mês</Label>
-            <Input
-              id="billing-csv-month"
-              type="month"
-              value={month}
-              onChange={(e) => setMonth(e.target.value)}
-            />
+            <Label htmlFor={monthId}>Mês</Label>
+            <Input id={monthId} type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
           </div>
           <Button type="button" disabled={mut.isPending || !month} onClick={() => mut.mutate()}>
             <Download className="mr-2 h-4 w-4" />

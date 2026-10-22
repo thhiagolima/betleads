@@ -59,11 +59,7 @@ function TenantActionsRow({ row }: { row: AdminBillingTenantRow }) {
   const invoiceId = row.openInvoice?.id ?? null;
   return (
     <div className="flex flex-wrap gap-1">
-      <BlockTenantAction
-        tenantId={row.tenantId}
-        blocked={row.accessState === "locked_manual"}
-        onDone={onDone}
-      />
+      <BlockTenantAction tenantId={row.tenantId} blocked={row.manualBlock} onDone={onDone} />
       <ExtendInvoiceDueAction invoiceId={invoiceId} onDone={onDone} />
       <GrantFreeDaysAction tenantId={row.tenantId} onDone={onDone} />
       <ApplyInvoiceDiscountAction invoiceId={invoiceId} onDone={onDone} />
