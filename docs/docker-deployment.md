@@ -42,6 +42,7 @@ BILLING_GATEWAY_ENABLED=false
 UPPER_API_BASE=https://api.uppersc.com.br
 UPPER_API_KEY=<upper-pix_in-only-api-key>
 UPPER_WEBHOOK_SECRET=<strong-random-webhook-secret>
+BETTERSTACK_HEARTBEAT_BILLING_RECONCILE=<better-stack-heartbeat-url>
 ```
 
 Nunca crie variavel `VITE_` para `SUPABASE_SECRET_KEY`.
@@ -59,6 +60,10 @@ Compra de créditos por Pix (PG2) via a Upper:
   uma chave com outros escopos nem prefixe com `VITE_`.
 - `UPPER_WEBHOOK_SECRET`: segredo usado para validar `X-Upper-Signature` nos
   callbacks de `charge.paid`/`charge.expired`/`charge.cancelled`/`ping`.
+- `BETTERSTACK_HEARTBEAT_BILLING_RECONCILE`: URL do heartbeat do Better Stack
+  para a conciliacao (`POST /api/public/hooks/billing-reconcile`, job
+  `billing-reconcile`, cron `*/5 * * * *`). Periodo 5 min, tolerancia 10 min.
+  Vazio = sem ping. Ver `docs/RUNBOOK_OBSERVABILIDADE.md`.
 
 Nenhuma dessas variaveis deve ser logada; a chave e o segredo ficam apenas no
 servidor.

@@ -56,6 +56,7 @@ Criar em **Uptime → Heartbeats** um heartbeat por linha, copiar a URL e coloca
 | `webhook_replay` | `BETTERSTACK_HEARTBEAT_WEBHOOK_REPLAY` | `POST /api/public/hooks/webhook-replay` | `* * * * *` (`20261014213000`) | 1 min | 3 min |
 | `shortio_sync` | `BETTERSTACK_HEARTBEAT_SHORTIO_SYNC` | `POST /api/public/shortio/sync` | `* * * * *` (`20261014193000`) | 1 min | 3 min |
 | `recovery` | `BETTERSTACK_HEARTBEAT_RECOVERY` | `POST /api/public/hooks/recovery` | `*/2 * * * *` (`20261003143000`) | 2 min | 4 min |
+| `billing-reconcile` | `BETTERSTACK_HEARTBEAT_BILLING_RECONCILE` | `POST /api/public/hooks/billing-reconcile` (conciliação Pix Upper) | `*/5 * * * *` (`20261022110100`) | 5 min | 10 min |
 | refresh do dashboard | — | `select public.refresh_recent_dashboard_metrics()` direto no pg_cron | `*/5 * * * *` (`20261014153000`) | — | — |
 
 Regra geral para nomes: `BETTERSTACK_HEARTBEAT_<JOB em MAIÚSCULAS>`.
