@@ -52,16 +52,17 @@ toda leitura de tenant quebram, para toda casa, não só para quem vai pagar.
 
 ### 1a. Casas não-`interno` e o que `billing_tenant_exempt` diz de cada uma
 
-A migration ainda não existe antes deste passo, então `billing_tenant_exempt`
-também não — a consulta reproduz a regra à mão (ela mesma, definida em
-`20261022100000_billing_price_book.sql`: `exempt_all` do plano de
-`billing_plans`, hoje só verdadeiro para `plano = 'interno'`):
+`billing_tenant_exempt` vem da PG1 (`20261022100000_billing_price_book.sql`)
+e já está em produção, então a consulta usa a própria função. O `status`
+importa porque o backfill do Passo 3 não filtra por status: uma casa
+`suspended` ou `canceled` não-isenta também recebe a fatura `upfront`.
 
 ```sql
-select t.id, t.slug, t.nome, t.plano, t.is_demo,
-       coalesce(bp.exempt_all, false) as billing_tenant_exempt
+select slug, plano, status from tenants where plano <> 'interno';
+
+select t.id, t.slug, t.nome, t.plano, t.status, t.is_demo,
+       public.billing_tenant_exempt(t.id) as billing_tenant_exempt
 from public.tenants t
-left join public.billing_plans bp on bp.code = t.plano
 where t.plano <> 'interno'
 order by t.slug;
 ```
@@ -74,7 +75,10 @@ outra casa inesperada também aparece como não-isenta — qualquer casa real
 (não QA, não demo) que apareça aqui vai nascer com uma fatura `upfront`
 assim que o Passo 3 rodar (ver a nota do Passo 3).
 
-**Se vier diferente:** qualquer casa real não-QA/não-demo nesta lista precisa
+**Se vier diferente:** uma casa `suspended` ou `canceled` não-isenta também
+recebe fatura no Passo 3; passe-a para `plano = 'interno'` antes (escrita,
+requer autorização) ou aceite a fatura conscientemente. Qualquer casa real
+não-QA/não-demo nesta lista precisa
 de aprovação explícita do usuário antes de seguir — ela vai começar a ser
 cobrada (fatura upfront) no instante em que a migration do Passo 3 aplicar o
 backfill. Sem essa aprovação, pare aqui.
