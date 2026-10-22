@@ -157,6 +157,22 @@ function toAdminProviderMessage(err: unknown, context: string): string {
   return providerErrorMessage(err instanceof DomainProviderError ? err.code : "UNAVAILABLE");
 }
 
+/** The central Short.io / Infobip accounts hold domains of other projects
+ * too, so a hostname that already exists at the provider is adopted only when
+ * this same tenant already has a (removed) row for it. Anything else is
+ * rejected and logged so a super admin can attach it manually if legitimate. */
+function rejectUnownedProviderDomain(
+  err: DomainProviderError,
+  tenantId: string,
+  kind: DomainKind,
+  hostname: string,
+): DomainProviderError {
+  console.warn(
+    `[tenant-domains] ${kind} domain ${hostname} already exists at the provider and has no row for tenant ${tenantId}; not adopting (attach manually if legitimate)`,
+  );
+  return err;
+}
+
 export async function addTenantDomain(input: {
   tenantId: string;
   kind: DomainKind;
@@ -209,6 +225,7 @@ export async function addTenantDomain(input: {
         provider = await createShortioDomain(hostname);
       } catch (err) {
         if (err instanceof DomainProviderError && err.code === "ALREADY_EXISTS") {
+          if (!existing) throw rejectUnownedProviderDomain(err, input.tenantId, input.kind, hostname);
           const found = await findShortioDomainByHostname(hostname);
           if (!found) throw err;
           provider = found;
@@ -221,9 +238,9 @@ export async function addTenantDomain(input: {
         provider = await createInfobipDomain(hostname);
       } catch (err) {
         if (err instanceof DomainProviderError && err.code === "ALREADY_EXISTS") {
-          // The DB-ownership check above already passed (no local row, or
-          // it belongs to this tenant): adopt the domain that already
-          // exists in the central Infobip account.
+          // Only reactivating this tenant's own removed row may adopt the
+          // domain that already exists in the central Infobip account.
+          if (!existing) throw rejectUnownedProviderDomain(err, input.tenantId, input.kind, hostname);
           provider = await getInfobipDomain(hostname);
         } else {
           throw err;

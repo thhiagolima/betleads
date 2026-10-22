@@ -278,8 +278,51 @@ describe("addTenantDomain", () => {
     expect(mocks.createShortioDomain).not.toHaveBeenCalled();
   });
 
-  it("on Short.io ALREADY_EXISTS with no db owner, adopts the domain found via findShortioDomainByHostname", async () => {
-    seed({ tenants: [{ id: TENANT_A, site_url: null }] });
+  it.each(["shortener", "email"] as const)(
+    "rejects a new %s hostname that already exists at the provider (no adoption, no row)",
+    async (kind) => {
+      seed({ tenants: [{ id: TENANT_A, site_url: null }] });
+      const already = new DomainProviderError("ALREADY_EXISTS", 409, "already exists");
+      mocks.createShortioDomain.mockRejectedValue(already);
+      mocks.createInfobipDomain.mockRejectedValue(already);
+      mocks.findShortioDomainByHostname.mockResolvedValue({
+        providerDomainId: "shortio-other-project",
+        providerState: "configured",
+        status: "verified",
+        dnsRecords: [],
+      });
+      mocks.getInfobipDomain.mockResolvedValue({
+        providerDomainId: "infobip-other-project",
+        providerState: "active",
+        status: "verified",
+        dnsRecords: [],
+      });
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      await expect(
+        addTenantDomain({ tenantId: TENANT_A, kind, rawHostname: "superbanca.short.gy", userId: USER_ID }),
+      ).rejects.toThrow("Esse domínio já está cadastrado no provedor.");
+
+      expect(mocks.findShortioDomainByHostname).not.toHaveBeenCalled();
+      expect(mocks.getInfobipDomain).not.toHaveBeenCalled();
+      expect(tables.tenant_domains).toHaveLength(0);
+      expect(warn.mock.calls.some((c) => String(c[0]).includes("not adopting"))).toBe(true);
+      warn.mockRestore();
+    },
+  );
+
+  it("re-adding a removed shortener with Short.io ALREADY_EXISTS adopts it via findShortioDomainByHostname", async () => {
+    seed({
+      tenants: [{ id: TENANT_A, site_url: null }],
+      tenant_domains: [
+        domainRow({
+          id: "dom-1",
+          hostname: "go.example.com",
+          removed_at: "2026-01-01T00:00:00.000Z",
+          status: "failed",
+        }),
+      ],
+    });
     mocks.createShortioDomain.mockRejectedValue(
       new DomainProviderError("ALREADY_EXISTS", 409, "Short.io: already exists"),
     );
@@ -293,13 +336,16 @@ describe("addTenantDomain", () => {
     const result = await addTenantDomain({
       tenantId: TENANT_A,
       kind: "shortener",
-      rawHostname: "bmkt.click",
+      rawHostname: "go.example.com",
       userId: USER_ID,
     });
 
-    expect(mocks.findShortioDomainByHostname).toHaveBeenCalledWith("bmkt.click");
+    expect(mocks.findShortioDomainByHostname).toHaveBeenCalledWith("go.example.com");
+    expect(result.id).toBe("dom-1");
+    expect(result.removed_at).toBeNull();
     expect(result.provider_domain_id).toBe("shortio-999");
     expect(result.status).toBe("verified");
+    expect(tables.tenant_domains).toHaveLength(1);
   });
 
   it("adding an email domain creates it at Infobip and then requests verification", async () => {
@@ -359,8 +405,7 @@ describe("addTenantDomain", () => {
     seed({});
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     mocks.createShortioDomain.mockRejectedValue(new DomainProviderError(code, status, "raw english"));
-    // ALREADY_EXISTS with nothing to adopt in the account -> the original error surfaces.
-    mocks.findShortioDomainByHostname.mockResolvedValue(null);
+    // ALREADY_EXISTS for a hostname this tenant never had -> rejected, not adopted.
 
     await expect(
       addTenantDomain({ tenantId: TENANT_A, kind: "shortener", rawHostname: "go.example.com", userId: USER_ID }),

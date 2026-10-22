@@ -103,8 +103,11 @@ create trigger tenant_domains_updated_at
   before update on public.tenant_domains
   for each row execute function public.set_updated_at();
 
--- Backfill: a house that already has a shortener domain configured in
--- shortio_settings gets a verified, default tenant_domains row for it.
+-- Backfill: a house that already has its own shortener domain configured in
+-- shortio_settings gets a verified, default tenant_domains row for it. Only
+-- domains used by exactly one tenant count as the house's own: a domain shared
+-- by several tenants (bmkt.click in production) is the CRM's default
+-- shortener, gets no row, and those houses keep using SHORTIO_DOMAIN.
 -- last_checked_at = now() keeps the verify cron from re-checking every
 -- backfilled row at once on its first tick; verified_notice_seen_at = now()
 -- keeps existing houses from getting a "domínio verificado" notice for a
@@ -125,6 +128,13 @@ select
   now()
 from public.shortio_settings s
 where s.domain is not null
+  and lower(s.domain) in (
+    select lower(domain)
+    from public.shortio_settings
+    where domain is not null
+    group by lower(domain)
+    having count(*) = 1
+  )
 on conflict do nothing;
 
 -- Existing houses never see the onboarding wizard.

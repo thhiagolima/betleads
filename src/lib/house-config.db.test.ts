@@ -69,6 +69,9 @@ create table public.email_campaigns (
 
 const EXISTING_TENANT = "00000000-0000-4000-8000-000000000001";
 const BACKFILL_TENANT = "00000000-0000-4000-8000-000000000002";
+// Two houses on the shared CRM shortener (same domain, different case).
+const SHARED_TENANT_1 = "00000000-0000-4000-8000-000000000011";
+const SHARED_TENANT_2 = "00000000-0000-4000-8000-000000000012";
 
 let db: PGlite;
 
@@ -84,9 +87,16 @@ beforeAll(async () => {
     BACKFILL_TENANT,
   ]);
   await db.query(
-    `insert into public.shortio_settings (tenant_id, domain, domain_id) values ($1, 'bmkt.click', 42)`,
+    `insert into public.shortio_settings (tenant_id, domain, domain_id) values ($1, 'go.casaunica.com', 42)`,
     [BACKFILL_TENANT],
   );
+  for (const [id, domain] of [
+    [SHARED_TENANT_1, "bmkt.click"],
+    [SHARED_TENANT_2, "BMKT.click"],
+  ]) {
+    await db.query(`insert into public.tenants (id, nome) values ($1, 'Casa CRM')`, [id]);
+    await db.query(`insert into public.shortio_settings (tenant_id, domain) values ($1, $2)`, [id, domain]);
+  }
 
   await db.exec(MIGRATION);
 });
@@ -168,7 +178,7 @@ describe("tenant_quick_links key format", () => {
 });
 
 describe("backfill from shortio_settings", () => {
-  it("creates a verified default shortener domain for a tenant with a configured domain", async () => {
+  it("creates a verified default shortener domain for a domain used by exactly one tenant", async () => {
     const { rows } = await db.query<{
       kind: string;
       hostname: string;
@@ -188,7 +198,7 @@ describe("backfill from shortio_settings", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       kind: "shortener",
-      hostname: "bmkt.click",
+      hostname: "go.casaunica.com",
       status: "verified",
       is_default: true,
       provider_domain_id: "42",
@@ -198,6 +208,14 @@ describe("backfill from shortio_settings", () => {
     // domain the house has been using all along.
     expect(rows[0].last_checked_at).not.toBeNull();
     expect(rows[0].verified_notice_seen_at).not.toBeNull();
+  });
+
+  it("creates no row for a domain shared by several tenants (the CRM default shortener)", async () => {
+    const { rows } = await db.query(
+      `select id from public.tenant_domains where lower(hostname) = 'bmkt.click' or tenant_id = any($1::uuid[])`,
+      [[SHARED_TENANT_1, SHARED_TENANT_2]],
+    );
+    expect(rows).toHaveLength(0);
   });
 });
 
