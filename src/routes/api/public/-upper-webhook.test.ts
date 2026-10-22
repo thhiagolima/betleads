@@ -156,9 +156,10 @@ describe("POST /api/public/upper/webhook", () => {
       event: "charge.paid",
       data: { externalId: "bl-top-order-1" },
     };
+    vi.spyOn(console, "error").mockImplementation(() => {});
     confirmChargeFromUpper.mockRejectedValueOnce(new Error("temporary failure"));
     const first = await signedPost(eventBody);
-    expect(first.status).toBe(200);
+    expect(first.status).toBe(503);
     let row = fake.admin.rows("payment_webhook_events")[0];
     expect(row.error).toContain("temporary failure");
     expect(row.processed_at).toBeFalsy();
@@ -241,17 +242,46 @@ describe("POST /api/public/upper/webhook", () => {
     expect(fake.admin.rows("payment_webhook_events")).toHaveLength(0);
   });
 
-  it("records the error message and still answers 200 when processing throws", async () => {
+  it("records the error, leaves processed_at null and answers 503 when processing throws, so Upper redelivers", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
     confirmChargeFromUpper.mockRejectedValue(new Error("upper unreachable"));
     const response = await signedPost({
       id: "evt-error",
       event: "charge.paid",
       data: { externalId: "bl-top-order-1" },
     });
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(503);
     const rows = fake.admin.rows("payment_webhook_events");
     expect(rows).toHaveLength(1);
     expect(rows[0].error).toContain("upper unreachable");
-    expect(rows[0].processed_at).toBeFalsy();
+    expect(rows[0].processed_at ?? null).toBeNull();
+  });
+
+  it("still answers 200 for a redelivery of an event already processed", async () => {
+    const eventBody = {
+      id: "evt-processed",
+      event: "charge.paid",
+      data: { externalId: "bl-top-order-1" },
+    };
+    expect((await signedPost(eventBody)).status).toBe(200);
+    confirmChargeFromUpper.mockRejectedValue(new Error("must not be called again"));
+    expect((await signedPost(eventBody)).status).toBe(200);
+    expect(confirmChargeFromUpper).toHaveBeenCalledTimes(1);
+  });
+
+  it("masks a payer document nested anywhere in the stored raw_body (arrays, any key case)", async () => {
+    const response = await signedPost({
+      id: "evt-lgpd-deep",
+      event: "payment.created",
+      data: {
+        payments: [{ payer: { Document: "123.456.789-09" } }, { other: [{ document: 123 }] }],
+      },
+    });
+    expect(response.status).toBe(200);
+    const rawBody = fake.admin.rows("payment_webhook_events")[0].raw_body as string;
+    expect(rawBody).not.toContain("123.456.789-09");
+    const stored = JSON.parse(rawBody);
+    expect(stored.data.payments[0].payer.Document).toBe("***.456.789-**");
+    expect(stored.data.payments[1].other[0].document).toBeNull();
   });
 });

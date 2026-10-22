@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { maskPayerDocument } from "@/lib/billing/payer";
+import { maskDocumentsDeep } from "@/lib/billing/payer";
 import { confirmChargeFromUpper } from "@/lib/billing/payment-charges.server";
 import { verifyUpperSignature } from "@/lib/billing/upper-webhook";
 
@@ -13,8 +13,11 @@ import { verifyUpperSignature } from "@/lib/billing/upper-webhook";
 // - Every event with a valid signature is deduplicated by event_id (the
 //   body's `id`, falling back to X-Upper-Delivery) and recorded in
 //   payment_webhook_events BEFORE any processing. If that recording itself
-//   fails (DB error), we answer 5xx so Upper redelivers — "200 even if
-//   processing throws" only applies to failures AFTER the event row exists.
+//   fails (DB error), we answer 503 so Upper redelivers.
+// - If processing fails AFTER the event row exists (Upper or DB down while
+//   confirming the charge), the error is stored on the row, processed_at
+//   stays null and we answer 503 too, so Upper redelivers and the next
+//   delivery processes it (the reconcile cron is the second safety net).
 // - A repeated event_id that already has `processed_at` is answered with 200
 //   without touching confirmChargeFromUpper again.
 // - `charge.*` events trigger confirmChargeFromUpper, which always re-checks
@@ -44,41 +47,18 @@ function externalIdFrom(body: UpperWebhookBody): string | null {
   return null;
 }
 
-/** Masks `container.payer.document` in place; returns whether it touched anything. */
-function maskPayerDocumentField(container: unknown): boolean {
-  if (!container || typeof container !== "object" || Array.isArray(container)) return false;
-  const record = container as Record<string, unknown>;
-  const payer = record.payer;
-  if (!payer || typeof payer !== "object" || Array.isArray(payer)) return false;
-  const payerRecord = payer as Record<string, unknown>;
-  if (!("document" in payerRecord)) return false;
-  const document = typeof payerRecord.document === "string" ? payerRecord.document : null;
-  payerRecord.document = maskPayerDocument(document);
-  return true;
-}
-
 /**
  * LGPD: payment_webhook_events.raw_body must never carry a full payer
- * document, at either `payer.document` or `data.payer.document`. The
- * signature was already verified against the exact original bytes before
- * this runs; only the stored copy is sanitized. If `parsed` isn't a plain
- * object (or carries no payer.document anywhere), the original bytes are
- * stored unchanged.
+ * document. Every object key named `document` (any case, at any depth,
+ * inside objects or arrays) is masked — see maskDocumentsDeep. The signature
+ * was already verified against the exact original bytes before this runs;
+ * only the stored copy is sanitized. When nothing needed masking, the
+ * original bytes are stored unchanged.
  */
 function sanitizedRawBodyFor(rawBody: string, parsed: unknown): string {
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return rawBody;
-
-  let clone: Record<string, unknown>;
-  try {
-    clone = JSON.parse(JSON.stringify(parsed)) as Record<string, unknown>;
-  } catch {
-    return rawBody;
-  }
-
-  const touchedTop = maskPayerDocumentField(clone);
-  const touchedData = maskPayerDocumentField(clone.data);
-  if (!touchedTop && !touchedData) return rawBody;
-  return JSON.stringify(clone);
+  const { value, masked } = maskDocumentsDeep(parsed);
+  if (masked === 0) return rawBody;
+  return JSON.stringify(value);
 }
 
 /** Only these headers are kept for diagnostics — never X-Upper-Signature (a secret). */
@@ -164,9 +144,12 @@ async function handlePost(request: Request): Promise<Response> {
     return Response.json({ ok: false, error: "event_not_recorded" }, { status: 503 });
   }
 
-  // Stage 2: process. The event row is saved at this point, so any error
-  // from here on is recorded on that row and still answers 200 — Task 5's
-  // reconciliation cron catches up later.
+  // Stage 2: process. The event row is saved at this point; an error from
+  // here on is recorded on that row (processed_at stays null) and answers
+  // 503 so Upper redelivers — a redelivery of an unprocessed event is
+  // processed again (see the dedupe above), and confirmChargeFromUpper is
+  // safe to repeat. The reconciliation cron still catches up if Upper gives
+  // up redelivering.
   let outcome: string | null = null;
   try {
     if (eventName === "ping") {
@@ -202,10 +185,14 @@ async function handlePost(request: Request): Promise<Response> {
     const message =
       processingError instanceof Error ? processingError.message : "unknown processing error";
     console.error("[upper-webhook] processing error:", processingError);
-    await supabaseAdmin
+    const { error: recordError } = await supabaseAdmin
       .from("payment_webhook_events")
-      .update({ error: message, outcome })
+      .update({ error: message, outcome, processed_at: null })
       .eq("event_id", eventId);
+    if (recordError) {
+      console.error("[upper-webhook] failed to record processing error:", recordError);
+    }
+    return Response.json({ ok: false, error: "processing_failed" }, { status: 503 });
   }
 
   return Response.json({ ok: true }, { status: 200 });

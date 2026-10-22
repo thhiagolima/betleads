@@ -8,7 +8,7 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import type { Database, Json } from "@/integrations/supabase/types";
 
-import { maskPayerDocument } from "./payer";
+import { maskDocumentsDeep, maskPayerDocument } from "./payer";
 import { getUpperCharge, UpperError, type UpperCharge } from "./upper-pix.server";
 
 export type ConfirmChargeOutcome =
@@ -23,23 +23,11 @@ const TERMINAL_UNPAID_STATUSES = new Set(["EXPIRED", "CANCELLED", "FAILED"]);
 /**
  * `upper.raw` is the provider's raw response, stored for superadmin
  * diagnostics only (`payment_charges.last_provider_payload`). It must NEVER
- * carry the full payer document (LGPD) — this replaces `payer.document`
- * with the masked value before it is written anywhere.
+ * carry a full payer document (LGPD) — every `document` key, at any depth,
+ * is replaced with its masked value before it is written anywhere.
  */
 function sanitizeProviderPayload(raw: unknown): Json {
-  if (raw && typeof raw === "object" && !Array.isArray(raw) && "payer" in (raw as object)) {
-    const record = raw as Record<string, unknown>;
-    const payer = record.payer;
-    if (payer && typeof payer === "object" && "document" in (payer as object)) {
-      const payerRecord = payer as Record<string, unknown>;
-      const document = typeof payerRecord.document === "string" ? payerRecord.document : null;
-      return {
-        ...record,
-        payer: { ...payerRecord, document: maskPayerDocument(document) },
-      } as Json;
-    }
-  }
-  return raw as Json;
+  return maskDocumentsDeep(raw).value as Json;
 }
 
 /**
@@ -51,7 +39,17 @@ function sanitizeProviderPayload(raw: unknown): Json {
  * earlier, or by the super admin, must survive every later snapshot — only
  * a human resolving the case clears it (out of scope here). For a terminal
  * unpaid status (EXPIRED/CANCELLED/FAILED), also marks the linked
- * credit_topup_orders row with the matching lowercase status.
+ * credit_topup_orders row with the matching lowercase status — only while
+ * that order is still 'pending', and only if the charge row was actually
+ * updated.
+ *
+ * Money received always wins: a snapshot whose status is not PAID never
+ * overwrites a row already PAID (the update is conditional at the DB level,
+ * so it also holds against a concurrent PAID write), and a PENDING/ACTIVE
+ * snapshot never reopens a row already closed locally; a PAID snapshot
+ * may move an EXPIRED/FAILED/CANCELLED row to PAID so the late payment gets
+ * credited. `paid_at`/`paid_amount_cents` are only written when this
+ * snapshot carries a value, never nulled over an existing one.
  */
 export async function recordChargeSnapshot(chargeId: string, upper: UpperCharge): Promise<void> {
   const { data: existing, error: fetchError } = await supabaseAdmin
@@ -65,8 +63,6 @@ export async function recordChargeSnapshot(chargeId: string, upper: UpperCharge)
   type PaymentChargeUpdate = Database["public"]["Tables"]["payment_charges"]["Update"];
   const patch: PaymentChargeUpdate = {
     status: upper.status,
-    paid_amount_cents: upper.paidAmountCents,
-    paid_at: upper.paidAt,
     payer_name: upper.payer?.name ?? null,
     payer_document_masked: maskPayerDocument(upper.payer?.document ?? null),
     last_provider_payload: sanitizeProviderPayload(upper.raw),
@@ -79,6 +75,8 @@ export async function recordChargeSnapshot(chargeId: string, upper: UpperCharge)
   // can omit fields the create response had, and must never erase what was
   // already recorded.
   if (upper.id) patch.provider_charge_id = upper.id;
+  if (upper.paidAt !== null) patch.paid_at = upper.paidAt;
+  if (upper.paidAmountCents !== null) patch.paid_amount_cents = upper.paidAmountCents;
   if (upper.emv !== null) patch.emv = upper.emv;
   if (upper.qrCodeImage !== null) patch.qr_code_image = upper.qrCodeImage;
   if (upper.paymentUrl !== null) patch.payment_url = upper.paymentUrl;
@@ -93,17 +91,29 @@ export async function recordChargeSnapshot(chargeId: string, upper: UpperCharge)
     // A match never resets needs_review to false — see the doc comment above.
   }
 
-  const { error: updateError } = await supabaseAdmin
-    .from("payment_charges")
-    .update(patch)
-    .eq("id", chargeId);
+  let update = supabaseAdmin.from("payment_charges").update(patch).eq("id", chargeId);
+  if (upper.status === "PENDING" || upper.status === "ACTIVE") {
+    // Never "reopens" a charge we already closed locally (EXPIRED/FAILED/
+    // CANCELLED, e.g. by the reconcile cron while Upper still says ACTIVE),
+    // nor un-pays a PAID one.
+    update = update.in("status", ["PENDING", "ACTIVE"]);
+  } else if (upper.status !== "PAID") {
+    update = update.neq("status", "PAID");
+  }
+  const { data: updated, error: updateError } = await update.select("id");
   if (updateError) throw new Error(updateError.message);
+  const chargeUpdated = (updated ?? []).length > 0;
 
-  if (TERMINAL_UNPAID_STATUSES.has(upper.status) && existing.kind === "credit_topup") {
+  if (
+    chargeUpdated &&
+    TERMINAL_UNPAID_STATUSES.has(upper.status) &&
+    existing.kind === "credit_topup"
+  ) {
     const { error: orderError } = await supabaseAdmin
       .from("credit_topup_orders")
       .update({ status: upper.status.toLowerCase() })
-      .eq("id", existing.ref_id);
+      .eq("id", existing.ref_id)
+      .eq("status", "pending");
     if (orderError) throw new Error(orderError.message);
   }
 }
@@ -184,6 +194,14 @@ const DEFAULT_RECONCILE_LIMIT = 30;
  * caller-provided `limit` for the PENDING/ACTIVE batch below.
  */
 const LOCALLY_PAID_LIMIT = 30;
+/**
+ * Terminal-but-uncredited sweep: EXPIRED/FAILED/CANCELLED charges younger
+ * than this are still re-checked with Upper, since a payment can land after
+ * we gave up locally (a late PAID, a create that timed out on our side but
+ * went through on Upper's, a webhook lost while the row was being expired).
+ */
+const TERMINAL_RECHECK_WINDOW_MS = 48 * 60 * 60_000;
+const TERMINAL_RECHECK_LIMIT = 10;
 
 function logReconcileError(context: string, err: unknown, externalId: string): void {
   if (err instanceof UpperError) {
@@ -259,17 +277,25 @@ async function maybeExpireStaleActiveCharge(
   const expiresAtMs = new Date(current.expires_at).getTime();
   if (now.getTime() - expiresAtMs <= EXPIRY_GRACE_MS) return;
 
-  const { error: updateError } = await supabaseAdmin
+  // Conditional at the DB level: a PAID snapshot (webhook) or a credit
+  // landing between the read above and this write must win — then this
+  // matches no row and nothing else is touched.
+  const { data: expiredRows, error: updateError } = await supabaseAdmin
     .from("payment_charges")
     .update({ status: "EXPIRED", updated_at: now.toISOString() })
-    .eq("id", current.id);
+    .eq("id", current.id)
+    .in("status", ["PENDING", "ACTIVE"])
+    .is("credited_at", null)
+    .select("id");
   if (updateError) throw new Error(updateError.message);
+  if ((expiredRows ?? []).length === 0) return;
 
   if (current.kind === "credit_topup") {
     const { error: orderError } = await supabaseAdmin
       .from("credit_topup_orders")
       .update({ status: "expired" })
-      .eq("id", current.ref_id);
+      .eq("id", current.ref_id)
+      .eq("status", "pending");
     if (orderError) throw new Error(orderError.message);
   }
 
@@ -298,18 +324,80 @@ async function markChargeFailedNotFound(chargeId: string, nowIso: string): Promi
   if (current.credited_at) return;
   if (current.status === "PAID") return;
 
-  const { error: updateError } = await supabaseAdmin
+  // Same conditional write as maybeExpireStaleActiveCharge: never over a
+  // row that turned PAID/credited after the read above.
+  const { data: failedRows, error: updateError } = await supabaseAdmin
     .from("payment_charges")
     .update({ status: "FAILED", last_error: "upper_not_found", updated_at: nowIso })
-    .eq("id", current.id);
+    .eq("id", current.id)
+    .in("status", ["PENDING", "ACTIVE"])
+    .is("credited_at", null)
+    .select("id");
   if (updateError) throw new Error(updateError.message);
+  if ((failedRows ?? []).length === 0) return;
 
   if (current.kind === "credit_topup") {
     const { error: orderError } = await supabaseAdmin
       .from("credit_topup_orders")
       .update({ status: "failed" })
-      .eq("id", current.ref_id);
+      .eq("id", current.ref_id)
+      .eq("status", "pending");
     if (orderError) throw new Error(orderError.message);
+  }
+}
+
+/**
+ * Re-checks recent terminal-but-uncredited charges (status EXPIRED, FAILED
+ * or CANCELLED, credited_at null, not flagged needs_review, created within
+ * TERMINAL_RECHECK_WINDOW_MS) through confirmChargeFromUpper, so a payment
+ * Upper reports PAID after we gave up on the charge still gets credited.
+ * Same fair ordering (oldest-checked first) and updated_at touch as the
+ * PENDING/ACTIVE batch, on its own small TERMINAL_RECHECK_LIMIT budget. A
+ * 404 here is expected (Upper never created the charge — the usual reason
+ * it is FAILED) and is not counted as an error.
+ */
+async function recheckTerminalUncreditedCharges(
+  result: ReconcileResult,
+  now: Date,
+  nowIso: string,
+  alreadyChecked: ReadonlySet<string>,
+): Promise<void> {
+  const since = new Date(now.getTime() - TERMINAL_RECHECK_WINDOW_MS).toISOString();
+  const { data: rows, error } = await supabaseAdmin
+    .from("payment_charges")
+    .select("id, external_id")
+    .in("status", ["EXPIRED", "FAILED", "CANCELLED"])
+    .is("credited_at", null)
+    .eq("needs_review", false)
+    .gte("created_at", since)
+    .order("updated_at", { ascending: true, nullsFirst: true })
+    .order("created_at", { ascending: true })
+    .limit(TERMINAL_RECHECK_LIMIT + alreadyChecked.size);
+  if (error) throw new Error(error.message);
+
+  // A charge the PENDING/ACTIVE batch just closed in this same run (expired
+  // or failed) was already asked about a moment ago — skip it this time.
+  const batch = (rows ?? [])
+    .filter((row) => !alreadyChecked.has(row.id))
+    .slice(0, TERMINAL_RECHECK_LIMIT);
+  for (const row of batch) {
+    result.checked += 1;
+    try {
+      const { outcome } = await confirmChargeFromUpper(row.external_id);
+      if (outcome === "credited" || outcome === "already_credited") {
+        result.credited += 1;
+      }
+    } catch (err) {
+      if (!(err instanceof UpperError && err.status === 404)) {
+        result.errors += 1;
+        logReconcileError("error rechecking terminal charge", err, row.external_id);
+      }
+    }
+    try {
+      await touchChargeUpdatedAt(row.id, nowIso);
+    } catch (touchErr) {
+      logReconcileError("error touching charge updated_at", touchErr, row.external_id);
+    }
   }
 }
 
@@ -345,6 +433,8 @@ async function touchChargeUpdatedAt(chargeId: string, nowIso: string): Promise<v
  *   first (`updated_at` ascending, nulls first, then `created_at`
  *   ascending), so a charge that keeps failing moves to the back of the
  *   queue instead of starving newer charges under the same `limit`.
+ * - Recent EXPIRED/FAILED/CANCELLED charges never credited are re-checked
+ *   too (see recheckTerminalUncreditedCharges), so a late PAID still credits.
  * - Any error on one charge (Upper or DB) is counted and never stops the
  *   rest (ruling 3); only `.code`, `.status` and the externalId are logged.
  */
@@ -369,7 +459,9 @@ export async function reconcilePendingCharges(
     .limit(limit);
   if (pendingError) throw new Error(pendingError.message);
 
+  const checkedIds = new Set<string>();
   for (const row of pendingRows ?? []) {
+    checkedIds.add(row.id);
     result.checked += 1;
     try {
       const { outcome } = await confirmChargeFromUpper(row.external_id);
@@ -398,6 +490,8 @@ export async function reconcilePendingCharges(
       logReconcileError("error touching charge updated_at", touchErr, row.external_id);
     }
   }
+
+  await recheckTerminalUncreditedCharges(result, now, nowIso, checkedIds);
 
   return result;
 }

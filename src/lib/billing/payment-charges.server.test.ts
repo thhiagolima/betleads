@@ -56,6 +56,55 @@ function upperCharge(overrides: Partial<UpperCharge> = {}): UpperCharge {
   };
 }
 
+/**
+ * Realistic stand-in for billing_credit_paid_charge: credits only a row that
+ * is PAID, not yet credited, not flagged and with a matching paid amount.
+ */
+function installCreditRpc() {
+  const rpc = vi.fn((args: Record<string, unknown>) => {
+    const row = fake.admin.rows("payment_charges").find((r) => r.id === args._charge_id);
+    if (!row) return { data: null, error: { message: "charge_not_found" } };
+    if (row.credited_at) return { data: { ok: true, idempotent: true }, error: null };
+    if (row.status !== "PAID") return { data: { ok: false, reason: "not_paid" }, error: null };
+    if (row.needs_review) return { data: { ok: false, reason: "needs_review" }, error: null };
+    if (row.paid_amount_cents !== row.amount_cents) {
+      return { data: { ok: false, reason: "amount_mismatch" }, error: null };
+    }
+    row.credited_at = new Date().toISOString();
+    return { data: { ok: true }, error: null };
+  });
+  fake.admin.onRpc("billing_credit_paid_charge", rpc);
+  return rpc;
+}
+
+/**
+ * Simulates a concurrent writer: right when the code under test issues its
+ * `payment_charges` update carrying `status = whenStatus`, the row is first
+ * flipped to PAID (as a PAID webhook snapshot landing between our read and
+ * our write would). The conditional update must then match nothing.
+ */
+function racePaidBeforeUpdate(chargeId: string, whenStatus: string) {
+  type Builder = Record<string, (...args: unknown[]) => unknown>;
+  const client = fake.admin.client as unknown as { from: (table: string) => Builder };
+  const originalFrom = client.from;
+  vi.spyOn(client, "from").mockImplementation((table: string) => {
+    const builder = originalFrom(table);
+    if (table !== "payment_charges") return builder;
+    const originalUpdate = builder.update;
+    builder.update = (value: unknown) => {
+      if ((value as { status?: string }).status === whenStatus) {
+        const row = fake.admin.rows("payment_charges").find((r) => r.id === chargeId);
+        if (row) {
+          row.status = "PAID";
+          row.paid_amount_cents = row.amount_cents;
+        }
+      }
+      return originalUpdate(value);
+    };
+    return builder;
+  });
+}
+
 beforeEach(() => {
   fake.admin.reset();
   getUpperCharge.mockReset();
@@ -218,6 +267,101 @@ describe("recordChargeSnapshot", () => {
 
     expect(fake.admin.rows("credit_topup_orders")[0].status).toBe("pending");
   });
+
+  it.each([["EXPIRED"], ["CANCELLED"], ["FAILED"], ["ACTIVE"], ["PENDING"]] as const)(
+    "a %s snapshot never overwrites a row already PAID, nor touches its order",
+    async (status) => {
+      fake.admin.rows("payment_charges").push(
+        chargeRow({ status: "PAID", paid_amount_cents: 50000, paid_at: "2026-10-22T12:00:00Z" }),
+      );
+      fake.admin
+        .rows("credit_topup_orders")
+        .push({ id: "order-1", tenant_id: TENANT, status: "pending" });
+
+      await recordChargeSnapshot("charge-1", upperCharge({ status }));
+
+      const row = fake.admin.rows("payment_charges")[0];
+      expect(row.status).toBe("PAID");
+      expect(row.paid_at).toBe("2026-10-22T12:00:00Z");
+      expect(row.paid_amount_cents).toBe(50000);
+      expect(fake.admin.rows("credit_topup_orders")[0].status).toBe("pending");
+    },
+  );
+
+  it("an ACTIVE snapshot never reopens a charge already closed locally (EXPIRED)", async () => {
+    fake.admin.rows("payment_charges").push(chargeRow({ status: "EXPIRED" }));
+
+    await recordChargeSnapshot("charge-1", upperCharge({ status: "ACTIVE" }));
+
+    expect(fake.admin.rows("payment_charges")[0].status).toBe("EXPIRED");
+  });
+
+  it.each([["EXPIRED"], ["FAILED"], ["CANCELLED"]] as const)(
+    "a PAID snapshot moves a %s charge to PAID (money received must be credited)",
+    async (status) => {
+      fake.admin.rows("payment_charges").push(chargeRow({ status }));
+
+      await recordChargeSnapshot(
+        "charge-1",
+        upperCharge({ status: "PAID", paidAmountCents: 50000, paidAt: "2026-10-22T12:30:00Z" }),
+      );
+
+      const row = fake.admin.rows("payment_charges")[0];
+      expect(row.status).toBe("PAID");
+      expect(row.paid_amount_cents).toBe(50000);
+      expect(row.paid_at).toBe("2026-10-22T12:30:00Z");
+    },
+  );
+
+  it("never writes paid_at/paid_amount_cents null over an existing value", async () => {
+    fake.admin.rows("payment_charges").push(
+      chargeRow({ status: "PAID", paid_amount_cents: 50000, paid_at: "2026-10-22T12:00:00Z" }),
+    );
+
+    await recordChargeSnapshot(
+      "charge-1",
+      upperCharge({ status: "PAID", paidAmountCents: null, paidAt: null }),
+    );
+
+    const row = fake.admin.rows("payment_charges")[0];
+    expect(row.paid_at).toBe("2026-10-22T12:00:00Z");
+    expect(row.paid_amount_cents).toBe(50000);
+  });
+
+  it("only moves the order to a terminal status while it is still 'pending'", async () => {
+    fake.admin.rows("payment_charges").push(chargeRow({ status: "ACTIVE" }));
+    fake.admin
+      .rows("credit_topup_orders")
+      .push({ id: "order-1", tenant_id: TENANT, status: "paid" });
+
+    await recordChargeSnapshot("charge-1", upperCharge({ status: "EXPIRED" }));
+
+    expect(fake.admin.rows("credit_topup_orders")[0].status).toBe("paid");
+  });
+
+  it("masks a payer document nested anywhere in last_provider_payload", async () => {
+    fake.admin.rows("payment_charges").push(chargeRow());
+
+    await recordChargeSnapshot(
+      "charge-1",
+      upperCharge({
+        status: "ACTIVE",
+        raw: {
+          status: "ACTIVE",
+          payments: [{ payer: { Document: "123.456.789-09" } }],
+          meta: { nested: { document: 12345 } },
+        },
+      }),
+    );
+
+    const payload = fake.admin.rows("payment_charges")[0].last_provider_payload as {
+      payments: Array<{ payer: { Document: string } }>;
+      meta: { nested: { document: unknown } };
+    };
+    expect(JSON.stringify(payload)).not.toContain("123.456.789-09");
+    expect(payload.payments[0].payer.Document).toBe("***.456.789-**");
+    expect(payload.meta.nested.document).toBeNull();
+  });
 });
 
 describe("confirmChargeFromUpper", () => {
@@ -316,6 +460,25 @@ describe("confirmChargeFromUpper", () => {
     const result = await confirmChargeFromUpper("bl-top-order-1");
     expect(result).toEqual({ outcome: "not_paid" });
     expect(fake.admin.rows("credit_topup_orders")[0].status).toBe("expired");
+  });
+
+  it("credits a late PAID (webhook/cron) on a charge already EXPIRED locally", async () => {
+    fake.admin.rows("payment_charges").push(chargeRow({ status: "EXPIRED" }));
+    fake.admin
+      .rows("credit_topup_orders")
+      .push({ id: "order-1", tenant_id: TENANT, status: "expired" });
+    const rpc = installCreditRpc();
+    getUpperCharge.mockResolvedValue(
+      upperCharge({ status: "PAID", paidAmountCents: 50000, paidAt: new Date().toISOString() }),
+    );
+
+    const result = await confirmChargeFromUpper("bl-top-order-1");
+
+    expect(result).toEqual({ outcome: "credited" });
+    expect(rpc).toHaveBeenCalledTimes(1);
+    const row = fake.admin.rows("payment_charges")[0];
+    expect(row.status).toBe("PAID");
+    expect(row.credited_at).toBeTruthy();
   });
 
   it("returns already_credited when the RPC reports idempotent:true", async () => {
@@ -601,5 +764,217 @@ describe("reconcilePendingCharges", () => {
     const result = await reconcilePendingCharges({ now: NOW });
     expect(result.expired).toBe(0);
     expect(fake.admin.rows("payment_charges")[0].status).not.toBe("EXPIRED");
+  });
+
+  it("an expiry write racing a PAID snapshot leaves the charge PAID and the order untouched", async () => {
+    fake.admin.rows("payment_charges").push(
+      chargeRow({
+        id: "c1",
+        external_id: "bl-top-c1",
+        status: "ACTIVE",
+        created_at: OLD_ENOUGH,
+        expires_at: "2026-10-22T11:59:00Z",
+      }),
+    );
+    fake.admin
+      .rows("credit_topup_orders")
+      .push({ id: "order-1", tenant_id: TENANT, status: "pending" });
+    getUpperCharge.mockResolvedValue(
+      upperCharge({ externalId: "bl-top-c1", status: "ACTIVE", expiresAt: "2026-10-22T11:59:00Z" }),
+    );
+    racePaidBeforeUpdate("c1", "EXPIRED");
+
+    const result = await reconcilePendingCharges({ now: NOW });
+
+    expect(result.expired).toBe(0);
+    expect(fake.admin.rows("payment_charges")[0].status).toBe("PAID");
+    expect(fake.admin.rows("credit_topup_orders")[0].status).toBe("pending");
+  });
+
+  it("a not-found FAILED write racing a PAID snapshot leaves the charge PAID and the order untouched", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    fake.admin.rows("payment_charges").push(
+      chargeRow({
+        id: "c1",
+        external_id: "bl-top-c1",
+        status: "PENDING",
+        created_at: "2026-10-22T11:50:00Z",
+      }),
+    );
+    fake.admin
+      .rows("credit_topup_orders")
+      .push({ id: "order-1", tenant_id: TENANT, status: "pending" });
+    getUpperCharge.mockRejectedValue(
+      new UpperError("Cobrança não encontrada.", { status: 404, code: null, retryable: false }),
+    );
+    racePaidBeforeUpdate("c1", "FAILED");
+
+    await reconcilePendingCharges({ now: NOW });
+
+    const row = fake.admin.rows("payment_charges")[0];
+    expect(row.status).toBe("PAID");
+    expect(row.last_error).toBeUndefined();
+    expect(fake.admin.rows("credit_topup_orders")[0].status).toBe("pending");
+  });
+
+  describe("terminal-uncredited sweep", () => {
+    it("credits a FAILED charge that Upper now reports PAID", async () => {
+      fake.admin.rows("payment_charges").push(
+        chargeRow({
+          id: "c1",
+          external_id: "bl-top-c1",
+          status: "FAILED",
+          created_at: OLD_ENOUGH,
+          credited_at: null,
+        }),
+      );
+      fake.admin
+        .rows("credit_topup_orders")
+        .push({ id: "order-1", tenant_id: TENANT, status: "failed" });
+      const rpc = installCreditRpc();
+      getUpperCharge.mockResolvedValue(
+        upperCharge({
+          externalId: "bl-top-c1",
+          status: "PAID",
+          paidAmountCents: 50000,
+          paidAt: NOW.toISOString(),
+        }),
+      );
+
+      const result = await reconcilePendingCharges({ now: NOW });
+
+      expect(result).toEqual({ checked: 1, credited: 1, expired: 0, errors: 0 });
+      expect(getUpperCharge).toHaveBeenCalledWith("bl-top-c1");
+      expect(rpc).toHaveBeenCalledTimes(1);
+      const row = fake.admin.rows("payment_charges")[0];
+      expect(row.status).toBe("PAID");
+      expect(row.credited_at).toBeTruthy();
+      expect(row.updated_at).toBe(NOW.toISOString());
+    });
+
+    it("re-checks EXPIRED and CANCELLED too, leaving them closed while Upper still says not paid", async () => {
+      fake.admin
+        .rows("payment_charges")
+        .push(
+          chargeRow({ id: "c1", external_id: "bl-top-c1", status: "EXPIRED", created_at: OLD_ENOUGH }),
+          chargeRow({ id: "c2", external_id: "bl-top-c2", status: "CANCELLED", created_at: OLD_ENOUGH }),
+        );
+      getUpperCharge.mockImplementation(async (externalId: string) =>
+        upperCharge({ externalId, status: "ACTIVE" }),
+      );
+
+      const result = await reconcilePendingCharges({ now: NOW });
+
+      expect(result).toEqual({ checked: 2, credited: 0, expired: 0, errors: 0 });
+      expect(fake.admin.rows("payment_charges").map((r) => r.status)).toEqual([
+        "EXPIRED",
+        "CANCELLED",
+      ]);
+    });
+
+    it("skips charges older than 48 h, flagged needs_review or already credited", async () => {
+      fake.admin.rows("payment_charges").push(
+        chargeRow({
+          id: "old",
+          external_id: "bl-top-old",
+          status: "EXPIRED",
+          created_at: "2026-10-20T12:00:00Z",
+        }),
+        chargeRow({
+          id: "review",
+          external_id: "bl-top-review",
+          status: "FAILED",
+          needs_review: true,
+          created_at: OLD_ENOUGH,
+        }),
+        chargeRow({
+          id: "credited",
+          external_id: "bl-top-credited",
+          status: "EXPIRED",
+          credited_at: OLD_ENOUGH,
+          created_at: OLD_ENOUGH,
+        }),
+      );
+
+      const result = await reconcilePendingCharges({ now: NOW });
+
+      expect(result.checked).toBe(0);
+      expect(getUpperCharge).not.toHaveBeenCalled();
+    });
+
+    it("checks at most 10 per run, oldest-checked first", async () => {
+      for (let i = 0; i < 12; i++) {
+        fake.admin.rows("payment_charges").push(
+          chargeRow({
+            id: `t${i}`,
+            external_id: `bl-top-t${i}`,
+            status: "EXPIRED",
+            created_at: OLD_ENOUGH,
+            // t10/t11 never checked (updated_at null) -> must come first.
+            updated_at: i >= 10 ? undefined : `2026-10-22T12:0${i}:00Z`,
+          }),
+        );
+      }
+      getUpperCharge.mockImplementation(async (externalId: string) =>
+        upperCharge({ externalId, status: "EXPIRED" }),
+      );
+
+      const result = await reconcilePendingCharges({ now: NOW });
+
+      expect(result.checked).toBe(10);
+      expect(getUpperCharge).toHaveBeenCalledWith("bl-top-t10");
+      expect(getUpperCharge).toHaveBeenCalledWith("bl-top-t11");
+      expect(getUpperCharge).not.toHaveBeenCalledWith("bl-top-t9");
+      expect(getUpperCharge).not.toHaveBeenCalledWith("bl-top-t8");
+    });
+
+    it("does not count a 404 (Upper never created it) as an error, but counts other failures", async () => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      fake.admin
+        .rows("payment_charges")
+        .push(
+          chargeRow({ id: "c1", external_id: "bl-top-c1", status: "FAILED", created_at: OLD_ENOUGH }),
+          chargeRow({ id: "c2", external_id: "bl-top-c2", status: "FAILED", created_at: OLD_ENOUGH }),
+        );
+      getUpperCharge.mockImplementation(async (externalId: string) => {
+        if (externalId === "bl-top-c1") {
+          throw new UpperError("Cobrança não encontrada.", {
+            status: 404,
+            code: null,
+            retryable: false,
+          });
+        }
+        throw new UpperError("Falha de rede ao chamar a Upper.", {
+          status: 0,
+          code: "NETWORK_ERROR",
+          retryable: true,
+        });
+      });
+
+      const result = await reconcilePendingCharges({ now: NOW });
+
+      expect(result).toEqual({ checked: 2, credited: 0, expired: 0, errors: 1 });
+      expect(fake.admin.rows("payment_charges").every((r) => r.status === "FAILED")).toBe(true);
+    });
+
+    it("does not re-ask Upper about a charge the PENDING/ACTIVE batch just closed in the same run", async () => {
+      fake.admin.rows("payment_charges").push(
+        chargeRow({
+          id: "c1",
+          external_id: "bl-top-c1",
+          status: "ACTIVE",
+          created_at: OLD_ENOUGH,
+          expires_at: "2026-10-22T11:59:00Z",
+        }),
+      );
+      getUpperCharge.mockResolvedValue(
+        upperCharge({ externalId: "bl-top-c1", status: "ACTIVE", expiresAt: "2026-10-22T11:59:00Z" }),
+      );
+
+      const result = await reconcilePendingCharges({ now: NOW });
+
+      expect(result).toEqual({ checked: 1, credited: 0, expired: 1, errors: 0 });
+      expect(getUpperCharge).toHaveBeenCalledTimes(1);
+    });
   });
 });
