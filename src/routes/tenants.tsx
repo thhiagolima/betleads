@@ -617,7 +617,7 @@ function UsersTab({
 }
 
 function AddUserDialog({ tenantId, isSuperAdmin }: { tenantId: string; isSuperAdmin: boolean }) {
-  const isDemo = useIsDemoTenant();
+  const isDemo = useIsDemoTenant(tenantId);
   const qc = useQueryClient();
   const fn = useServerFn(addUserToTenant);
   const [open, setOpen] = useState(false);
@@ -714,7 +714,7 @@ function RoleSelect({
   isSuperAdmin: boolean;
   canManage: boolean;
 }) {
-  const isDemo = useIsDemoTenant();
+  const isDemo = useIsDemoTenant(tenantId);
   const qc = useQueryClient();
   const fn = useServerFn(updateTenantUserRole);
   const mut = useMutation({
@@ -748,7 +748,7 @@ function RoleSelect({
 }
 
 function RemoveUserButton({ tenantId, user }: { tenantId: string; user: TenantUser }) {
-  const isDemo = useIsDemoTenant();
+  const isDemo = useIsDemoTenant(tenantId);
   const qc = useQueryClient();
   const fn = useServerFn(removeUserFromTenant);
   const mut = useMutation({
@@ -1185,7 +1185,7 @@ function AuditTab({ detail }: { detail: TenantDetail }) {
 }
 
 function SettingsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAdmin: boolean }) {
-  const isDemo = useIsDemoTenant();
+  const isDemo = useIsDemoTenant(detail.tenant.id);
   const qc = useQueryClient();
   const fn = useServerFn(updateTenantSettings);
   const tenant = detail.tenant;
