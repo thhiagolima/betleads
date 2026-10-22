@@ -255,7 +255,11 @@ declare
   v_tb public.tenant_billing%rowtype;
   v_state text;
 begin
-  select * into v_tb from public.tenant_billing where tenant_id = _tenant;
+  -- Trava a linha da casa antes de ler a fatura: sem isso, um refresh
+  -- concorrente que leu a fatura aberta antes de uma baixa podia gravar
+  -- 'locked_unpaid' por cima do 'ok' que a baixa acabou de gravar. A baixa
+  -- (e as demais escritas) travam tenant_billing primeiro, na mesma ordem.
+  select * into v_tb from public.tenant_billing where tenant_id = _tenant for update;
   if not found then
     return null;
   end if;

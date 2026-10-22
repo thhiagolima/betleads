@@ -1026,3 +1026,22 @@ describe("Fix round 1: payment_charges_one_open_per_invoice", () => {
     ).resolves.toBeTruthy();
   });
 });
+
+describe("billing_refresh_access_state locking", () => {
+  // PGlite has a single connection, so the race (a refresh that read the open
+  // invoice before a concurrent settle, then wrote 'locked_unpaid' over the
+  // settle's 'ok') cannot be reproduced here. This pins the fix instead: the
+  // function locks the house's tenant_billing row before reading the invoice,
+  // the same lock (and order) the settle takes.
+  it("locks the tenant_billing row (for update) before reading the invoice", async () => {
+    const src = await scalar<string>(
+      "select prosrc v from pg_proc where proname = 'billing_refresh_access_state'",
+    );
+    const normalized = src.replace(/\s+/g, " ").toLowerCase();
+    const lockAt = normalized.indexOf(
+      "from public.tenant_billing where tenant_id = _tenant for update",
+    );
+    expect(lockAt).toBeGreaterThan(-1);
+    expect(lockAt).toBeLessThan(normalized.indexOf("billing_invoice_phase"));
+  });
+});
