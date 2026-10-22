@@ -218,6 +218,33 @@ describe("upper-pix.server", () => {
     });
   });
 
+  it.each([["paid"], ["REFUNDED"], [""], [null], [undefined], [42]])(
+    "throws UpperError INVALID_RESPONSE (not retryable) for status %j",
+    async (status) => {
+      const fetchMock = vi.fn().mockResolvedValue(okResponse(chargeBody({ status })));
+      vi.stubGlobal("fetch", fetchMock);
+      const { getUpperCharge } = await import("./upper-pix.server");
+
+      await expect(getUpperCharge("bl-top-abc")).rejects.toMatchObject({
+        name: "UpperError",
+        code: "INVALID_RESPONSE",
+        retryable: false,
+      });
+    },
+  );
+
+  it.each([["PENDING"], ["ACTIVE"], ["PAID"], ["EXPIRED"], ["CANCELLED"], ["FAILED"]])(
+    "accepts the documented status %s",
+    async (status) => {
+      const fetchMock = vi.fn().mockResolvedValue(okResponse(chargeBody({ status })));
+      vi.stubGlobal("fetch", fetchMock);
+      const { getUpperCharge } = await import("./upper-pix.server");
+
+      const charge = await getUpperCharge("bl-top-abc");
+      expect(charge.status).toBe(status);
+    },
+  );
+
   it("accepts a null paidAmountCents but throws on an unparsable non-null one", async () => {
     const fetchMockOk = vi
       .fn()

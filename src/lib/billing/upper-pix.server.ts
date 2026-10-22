@@ -107,6 +107,32 @@ function parseAmountCents(value: unknown, field: string): number {
   return n;
 }
 
+const UPPER_CHARGE_STATUSES: ReadonlySet<string> = new Set<UpperChargeStatus>([
+  "PENDING",
+  "ACTIVE",
+  "PAID",
+  "EXPIRED",
+  "CANCELLED",
+  "FAILED",
+]);
+
+/**
+ * Throws UpperError(INVALID_RESPONSE) unless `value` is exactly one of the
+ * six statuses Upper documents (case-sensitive: Upper sends upper case). A
+ * missing or unknown status is never guessed — it would otherwise be written
+ * to payment_charges as-is.
+ */
+function parseStatus(value: unknown): UpperChargeStatus {
+  if (typeof value === "string" && UPPER_CHARGE_STATUSES.has(value)) {
+    return value as UpperChargeStatus;
+  }
+  throw new UpperError("Resposta da Upper com status inválido.", {
+    status: 0,
+    code: "INVALID_RESPONSE",
+    retryable: false,
+  });
+}
+
 /** Same as parseAmountCents, but null/undefined is a valid "not paid yet" value. */
 function parseNullableAmountCents(value: unknown, field: string): number | null {
   if (value === null || value === undefined) return null;
@@ -116,7 +142,7 @@ function parseNullableAmountCents(value: unknown, field: string): number | null 
 type UpperChargeResponse = {
   id?: string;
   externalId?: string | null;
-  status?: UpperChargeStatus;
+  status?: unknown;
   amountCents?: string | number;
   pix?: { emv?: string | null; qrCodeImage?: string | null } | null;
   paymentUrl?: string | null;
@@ -132,7 +158,7 @@ function parseUpperCharge(body: unknown): UpperCharge {
   return {
     id: b.id ?? "",
     externalId: b.externalId ?? null,
-    status: (b.status ?? "PENDING") as UpperChargeStatus,
+    status: parseStatus(b.status),
     amountCents: parseAmountCents(b.amountCents, "amountCents"),
     emv: b.pix?.emv ?? null,
     qrCodeImage: b.pix?.qrCodeImage ?? null,

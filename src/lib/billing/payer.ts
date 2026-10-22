@@ -25,3 +25,34 @@ export function maskPayerDocument(doc: string | null): string | null {
 
   return "***";
 }
+
+/**
+ * LGPD: returns a deep copy of `value` where every object key named
+ * `document` (any case, at any depth, inside objects or arrays) has its value
+ * replaced by `maskPayerDocument(value)` — or null when that value is not a
+ * string. Used on everything stored from Upper (`last_provider_payload`,
+ * `payment_webhook_events.raw_body`), so a payer document never lands in the
+ * database in full, wherever Upper happens to nest it. `masked` counts the
+ * keys replaced (0 means the copy is identical to the input).
+ */
+export function maskDocumentsDeep(value: unknown): { value: unknown; masked: number } {
+  let masked = 0;
+  const walk = (node: unknown): unknown => {
+    if (Array.isArray(node)) return node.map(walk);
+    if (node && typeof node === "object") {
+      const out: Record<string, unknown> = {};
+      for (const [key, child] of Object.entries(node as Record<string, unknown>)) {
+        if (key.toLowerCase() === "document") {
+          masked += 1;
+          out[key] = typeof child === "string" ? maskPayerDocument(child) : null;
+        } else {
+          out[key] = walk(child);
+        }
+      }
+      return out;
+    }
+    return node;
+  };
+  const result = walk(value);
+  return { value: result, masked };
+}
