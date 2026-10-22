@@ -17,6 +17,7 @@ import { resolveOperationalTenantId, resolveTenantForBilling } from "../tenant-a
 import { isBillingEnforcementEnabled, isTenantPayer, requireTenantPayer } from "./billing-state.server";
 import { billingView, type BillingRole } from "./billing-view";
 import { createInvoicePayment } from "./invoices.server";
+import { brtDayKey } from "../tz";
 
 type ServerContext = {
   userId: string;
@@ -225,15 +226,6 @@ const NOT_PAYER_MESSAGE = "Peça ao administrador da casa para pagar a mensalida
 const INVOICE_NOT_FOUND_MESSAGE = "Fatura não encontrada.";
 const INVOICE_NOT_PAID_MESSAGE = "Esta fatura ainda não foi paga.";
 
-function brasiliaToday(now: Date = new Date()): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Sao_Paulo",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(now);
-}
-
 async function isSuperAdminLoose(userId: string): Promise<boolean> {
   const { data, error } = await supabaseAdmin.rpc("is_super_admin", { _user_id: userId });
   if (error) throw new Error(error.message);
@@ -363,7 +355,8 @@ export async function getPlanOverviewFor(
   const role: BillingRole = superAdmin ? "super_admin" : payer ? "payer" : "member";
   const exempt = tb?.access_state === "exempt";
   const allInvoices = invoicesRes.data ?? [];
-  const today = brasiliaToday();
+  const today = brtDayKey(new Date());
+  const enforcement = isBillingEnforcementEnabled();
 
   if (exempt || !tb) {
     return {
@@ -375,7 +368,13 @@ export async function getPlanOverviewFor(
       openInvoice: null,
       invoices: [] as InvoiceDTO[],
       canPay: role !== "member",
-      canBuyCredits: role !== "member",
+      // Exempt houses never block credit purchases (`billingView`'s own
+      // "exempt" case: `canBuyCredits: true`) — the fix-round-1 bug had this
+      // reading `role !== "member"`, which showed the "Disponível depois de
+      // pagar a mensalidade" lock copy to an exempt member for no reason.
+      canBuyCredits: true,
+      today,
+      enforcement,
     };
   }
 
@@ -402,7 +401,6 @@ export async function getPlanOverviewFor(
     .maybeSingle();
   if (planError) throw new Error(planError.message);
 
-  const enforcement = isBillingEnforcementEnabled();
   const view = billingView({
     state: tb.access_state as Parameters<typeof billingView>[0]["state"],
     role,
@@ -429,6 +427,8 @@ export async function getPlanOverviewFor(
     invoices,
     canPay: role !== "member",
     canBuyCredits: view.canBuyCredits,
+    today,
+    enforcement,
   };
 }
 

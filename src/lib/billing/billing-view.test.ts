@@ -12,42 +12,97 @@ const invoice4000 = { amountCents: 400000, dueDate: "2026-11-05" };
 describe("planStatusBadge", () => {
   it('ok: "Em dia até" the day before next_due_date', () => {
     expect(
-      planStatusBadge({ state: "ok", today: "2026-11-01", invoice: null, nextDueDate: "2026-12-05" }),
+      planStatusBadge({
+        state: "ok",
+        today: "2026-11-01",
+        invoice: null,
+        nextDueDate: "2026-12-05",
+        enforcement: true,
+      }),
     ).toBe("Em dia até 04/12");
   });
 
   it('due_soon: "Vence em DD/MM · daqui a N dias"', () => {
     expect(
-      planStatusBadge({ state: "due_soon", today: "2026-11-02", invoice: invoice4000, nextDueDate: null }),
+      planStatusBadge({
+        state: "due_soon",
+        today: "2026-11-02",
+        invoice: invoice4000,
+        nextDueDate: null,
+        enforcement: true,
+      }),
     ).toBe("Vence em 05/11 · daqui a 3 dias");
   });
 
   it('overdue: "Vencida em DD/MM"', () => {
     expect(
-      planStatusBadge({ state: "overdue", today: "2026-11-06", invoice: invoice4000, nextDueDate: null }),
+      planStatusBadge({
+        state: "overdue",
+        today: "2026-11-06",
+        invoice: invoice4000,
+        nextDueDate: null,
+        enforcement: true,
+      }),
     ).toBe("Vencida em 05/11");
   });
 
-  it.each(["locked_unpaid", "locked_manual"])('%s: "Bloqueada"', (state) => {
+  it.each(["locked_unpaid", "locked_manual"])('%s with enforcement on: "Bloqueada"', (state) => {
     expect(
       planStatusBadge({
         state: state as "locked_unpaid" | "locked_manual",
         today: "2026-11-10",
         invoice: invoice4000,
         nextDueDate: null,
+        enforcement: true,
+      }),
+    ).toBe("Bloqueada");
+  });
+
+  it('locked_unpaid with enforcement off: "Vencida em DD/MM" (never actually blocks)', () => {
+    expect(
+      planStatusBadge({
+        state: "locked_unpaid",
+        today: "2026-11-10",
+        invoice: invoice4000,
+        nextDueDate: null,
+        enforcement: false,
+      }),
+    ).toBe("Vencida em 05/11");
+  });
+
+  it('locked_manual with enforcement off still: "Bloqueada" (manual lock always blocks)', () => {
+    expect(
+      planStatusBadge({
+        state: "locked_manual",
+        today: "2026-11-10",
+        invoice: invoice4000,
+        nextDueDate: null,
+        enforcement: false,
       }),
     ).toBe("Bloqueada");
   });
 
   it('exempt: "Plano interno — isento"', () => {
     expect(
-      planStatusBadge({ state: "exempt", today: "2026-11-10", invoice: null, nextDueDate: null }),
+      planStatusBadge({
+        state: "exempt",
+        today: "2026-11-10",
+        invoice: null,
+        nextDueDate: null,
+        enforcement: true,
+      }),
     ).toBe("Plano interno — isento");
   });
 
   it('frozen: "Plano pausado"', () => {
     expect(
-      planStatusBadge({ state: "frozen", today: "2026-11-10", invoice: null, nextDueDate: null }),
+      planStatusBadge({
+        state: "frozen",
+        today: "2026-11-10",
+        invoice: null,
+        nextDueDate: null,
+        enforcement: true,
+      }),
     ).toBe("Plano pausado");
   });
 
@@ -58,6 +113,7 @@ describe("planStatusBadge", () => {
         today: "2026-11-10",
         invoice: invoice4000,
         nextDueDate: null,
+        enforcement: true,
       }),
     ).toBe("Aguardando primeiro pagamento");
   });

@@ -29,6 +29,12 @@ export type PixChargePayload = {
   paymentUrl: string | null;
   expiresAt: string | null;
   amountCents: number;
+  /**
+   * Upper's status at creation time (e.g. "ACTIVE"). Optional — only the
+   * credit top-up's `createCreditTopup` returns it today; `createInvoicePayment`
+   * doesn't. Used only as a fallback before the first status poll resolves.
+   */
+  status?: string;
 };
 
 function formatCountdown(seconds: number) {
@@ -117,7 +123,13 @@ export function PixPaymentDialog({
   const view = topupView({
     credited,
     needsReview: statusData?.needsReview === true,
-    serverStatus: statusData?.status ?? null,
+    // Fix round 1: fall back to the just-created charge's own `status`
+    // (ACTIVE) while the first status poll hasn't resolved yet — without
+    // it, the very first render after a charge is created briefly treats
+    // `serverStatus: null` as "not PAID, not final" (fine) but loses the
+    // charge's initial status on any render in between the create
+    // mutation settling and the first poll response landing.
+    serverStatus: statusData?.status ?? charge?.status ?? null,
     localExpired,
   });
 

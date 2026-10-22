@@ -2,13 +2,14 @@ import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { CreditCard, FileText, History, Printer, ShieldCheck, Wallet } from "lucide-react";
+import { CreditCard, FileText, History, Loader2, Printer, ShieldCheck, Wallet } from "lucide-react";
 import { toast } from "sonner";
 
 import { getSmsCreditPortal } from "@/lib/sms-credits.functions";
 import { getInvoiceReceipt, getPlanOverview, payInvoice } from "@/lib/billing/billing.functions";
 import { getTopupStatus } from "@/lib/billing/topup.functions";
 import { invoicePaidSuccessText, planStatusBadge } from "@/lib/billing/billing-view";
+import { brtDayKey } from "@/lib/tz";
 import { billingItemLabel, brl, ledgerAmountTone, num, walletEntryTypeLabel } from "@/lib/format";
 import {
   type BillingItem,
@@ -81,6 +82,9 @@ type PlanOverview = {
   invoices: InvoiceDTO[];
   canPay: boolean;
   canBuyCredits: boolean;
+  /** Brasília today (YYYY-MM-DD), from the server clock — feeds `planStatusBadge`. */
+  today: string;
+  enforcement: boolean;
 };
 
 function fmtDate(value: string | null) {
@@ -88,10 +92,17 @@ function fmtDate(value: string | null) {
   return new Date(value).toLocaleString("pt-BR");
 }
 
+/** DD/MM of a YYYY-MM-DD *date-only* string (no time component — never shift by timezone). */
 function fmtDay(value: string | null) {
   if (!value) return "-";
   const [, m, d] = value.split("-");
   return `${d}/${m}`;
+}
+
+/** DD/MM of a timestamptz string, as the Brasília calendar day it falls on. */
+function fmtBrtDay(value: string | null) {
+  if (!value) return "-";
+  return fmtDay(brtDayKey(new Date(value)));
 }
 
 const INVOICE_STATUS_LABEL: Record<InvoiceDTO["status"], string> = {
@@ -107,7 +118,7 @@ const PAID_VIA_LABEL: Record<NonNullable<InvoiceDTO["paidVia"]>, string> = {
 };
 
 function invoiceStatusText(invoice: InvoiceDTO): string {
-  if (invoice.status === "paid") return `Paga em ${fmtDay(invoice.paidAt?.slice(0, 10) ?? null)}`;
+  if (invoice.status === "paid") return `Paga em ${fmtBrtDay(invoice.paidAt)}`;
   return INVOICE_STATUS_LABEL[invoice.status];
 }
 
@@ -154,15 +165,23 @@ function PlanoECreditosPage() {
 
   const handleInvoicePaid = async () => {
     qc.invalidateQueries({ queryKey: ["current-tenant-access-status"] });
+    // The monthly fee doesn't credit the wallet, but paying it can lift a
+    // billing lock that was disabling the "Comprar créditos" button, so
+    // that query needs to refresh too (fix round 1).
+    qc.invalidateQueries({ queryKey: ["sms-credits"] });
     // Documented choice (ruling 2): read the new next_due_date from
     // getPlanOverview after payment (a fresh fetch) rather than from the
     // status-poll result, so the success copy always matches the server's
     // own `billing_settle_invoice` rule for where the new cycle lands.
+    // `staleTime: 0` is required here (fix round 1) — the query's global
+    // staleTime (30s) would otherwise let `fetchQuery` hand back the
+    // pre-payment cached overview instead of actually refetching.
+    await qc.invalidateQueries({ queryKey: ["plan-overview", tenantId] });
     const fresh = await qc.fetchQuery({
       queryKey: ["plan-overview", tenantId],
       queryFn: () => planOverviewFn({ data: { tenantId } }) as Promise<PlanOverview>,
+      staleTime: 0,
     });
-    qc.setQueryData(["plan-overview", tenantId], fresh);
     if (fresh.nextDueDate) {
       setPaySuccessText(invoicePaidSuccessText(fresh.nextDueDate));
     }
@@ -205,11 +224,15 @@ function PlanoECreditosPage() {
 
   const badge = planStatusBadge({
     state: overview.state as Parameters<typeof planStatusBadge>[0]["state"],
-    today: new Date().toISOString().slice(0, 10),
+    // The server's own Brasília "today" (fix round 1) — `new
+    // Date().toISOString().slice(0, 10)` is the UTC day, which drifts a
+    // calendar day off from Brasília between 21:00 and 00:00 BRT.
+    today: overview.today,
     invoice: overview.openInvoice
       ? { amountCents: overview.openInvoice.amountCents, dueDate: overview.openInvoice.dueDate }
       : null,
     nextDueDate: overview.nextDueDate,
+    enforcement: overview.enforcement,
   });
 
   return (
@@ -231,9 +254,7 @@ function PlanoECreditosPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          {overview.exempt ? (
-            <p className="text-sm text-muted-foreground">Plano interno — isento.</p>
-          ) : (
+          {overview.exempt ? null : (
             <>
               <div>
                 <div className="text-xl font-semibold">
@@ -263,7 +284,11 @@ function PlanoECreditosPage() {
                   disabled={payMutation.isPending}
                   onClick={() => overview.openInvoice && payMutation.mutate(overview.openInvoice.id)}
                 >
-                  <CreditCard className="mr-2 h-3.5 w-3.5" />
+                  {payMutation.isPending ? (
+                    <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <CreditCard className="mr-2 h-3.5 w-3.5" />
+                  )}
                   Pagar mensalidade (Pix)
                 </Button>
               )}

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const fake = vi.hoisted(() => ({ admin: null as unknown as ReturnType<typeof createFakeDb> }));
 
@@ -290,10 +290,79 @@ describe("getPlanOverviewFor", () => {
     const result = await getPlanOverviewFor(ctxFor(HOUSE_ADMIN), { tenantId: TENANT });
     expect(result.canPay).toBe(true);
   });
+
+  it("an exempt house never shows the credits lock copy, for a member or an admin", async () => {
+    fake.admin.rows("tenant_billing").push({
+      tenant_id: TENANT,
+      plan_code: "crm_unico",
+      access_state: "exempt",
+      next_due_date: null,
+    });
+    await expect(getPlanOverviewFor(ctxFor(MEMBER), { tenantId: TENANT })).resolves.toMatchObject({
+      canBuyCredits: true,
+    });
+    await expect(
+      getPlanOverviewFor(ctxFor(HOUSE_ADMIN), { tenantId: TENANT }),
+    ).resolves.toMatchObject({ canBuyCredits: true });
+  });
+
+  it("the superadmin reaches another house's overview by passing tenantId", async () => {
+    fake.admin.rows("tenant_billing").push({
+      tenant_id: OTHER_TENANT,
+      plan_code: "crm_unico",
+      access_state: "ok",
+      next_due_date: "2026-12-05",
+    });
+    const result = await getPlanOverviewFor(ctxFor(SUPER_ADMIN), { tenantId: OTHER_TENANT });
+    expect(result.exempt).toBe(false);
+    expect(result.canPay).toBe(true);
+  });
+
+  it("never returns internal-only columns (manual_*, fee, provider payload)", async () => {
+    fake.admin.rows("tenant_billing").push({
+      tenant_id: TENANT,
+      plan_code: "crm_unico",
+      access_state: "ok",
+      next_due_date: "2026-12-05",
+      manual_block_reason: "should never leak",
+    });
+    fake.admin.rows("billing_invoices").push({
+      id: "inv-1",
+      tenant_id: TENANT,
+      status: "paid",
+      due_date: "2026-10-05",
+      cycle_due_date: "2026-10-05",
+      period_start: "2026-10-05",
+      period_end: "2026-11-04",
+      amount_cents: 400000,
+      discount_cents: 0,
+      one_off_discount_cents: 0,
+      paid_at: "2026-10-05T12:00:00Z",
+      paid_via: "pix",
+      manual_note: "should never leak",
+      manual_receipt: "should never leak",
+    });
+    const result = await getPlanOverviewFor(ctxFor(HOUSE_ADMIN), { tenantId: TENANT });
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toMatch(/manual_|fee_cents|last_provider_payload|should never leak/);
+    expect(Object.keys(result.invoices[0])).toEqual([
+      "id",
+      "periodStart",
+      "periodEnd",
+      "dueDate",
+      "amountCents",
+      "discountCents",
+      "status",
+      "paidAt",
+      "paidVia",
+    ]);
+  });
 });
 
 describe("payInvoiceFor", () => {
   beforeEach(() => {
+    vi.stubEnv("BILLING_INVOICES_ENABLED", "true");
+    vi.stubEnv("UPPER_API_KEY", "test-key");
     fake.admin.rows("billing_invoices").push({
       id: "inv-open",
       tenant_id: TENANT,
@@ -320,6 +389,10 @@ describe("payInvoiceFor", () => {
     });
   });
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("refuses a member", async () => {
     await expect(
       payInvoiceFor(ctxFor(MEMBER), { tenantId: TENANT, invoiceId: "inv-open" }),
@@ -333,12 +406,9 @@ describe("payInvoiceFor", () => {
   });
 
   it("refuses an invoice that is already paid", async () => {
-    vi.stubEnv("BILLING_INVOICES_ENABLED", "true");
-    vi.stubEnv("UPPER_API_KEY", "test-key");
     await expect(
       payInvoiceFor(ctxFor(HOUSE_ADMIN), { tenantId: TENANT, invoiceId: "inv-paid" }),
     ).rejects.toThrow("Esta fatura já está paga.");
-    vi.unstubAllEnvs();
   });
 });
 
@@ -389,5 +459,50 @@ describe("getInvoiceReceiptFor", () => {
       paidVia: "pix",
       endToEndOrExternalId: "E12345",
     });
+  });
+
+  it("falls back to the charge's external_id when there is no endToEndId", async () => {
+    fake.admin.rows("payment_charges").push({
+      id: "charge-2",
+      external_id: "bl-inv-inv-paid-2-1",
+      last_provider_payload: null,
+    });
+    fake.admin.rows("billing_invoices").push({
+      id: "inv-paid-2",
+      tenant_id: TENANT,
+      status: "paid",
+      cycle_due_date: "2026-10-05",
+      period_start: "2026-10-05",
+      period_end: "2026-11-04",
+      amount_cents: 400000,
+      paid_amount_cents: 400000,
+      paid_at: "2026-10-05T12:00:00Z",
+      paid_via: "pix",
+      payment_charge_id: "charge-2",
+    });
+    const receipt = await getInvoiceReceiptFor(ctxFor(HOUSE_ADMIN), {
+      tenantId: TENANT,
+      invoiceId: "inv-paid-2",
+    });
+    expect(receipt.endToEndOrExternalId).toBe("bl-inv-inv-paid-2-1");
+  });
+
+  it("refuses an invoice belonging to another house (never confirms/denies its existence)", async () => {
+    fake.admin.rows("billing_invoices").push({
+      id: "inv-cross-tenant",
+      tenant_id: OTHER_TENANT,
+      status: "paid",
+      cycle_due_date: "2026-10-05",
+      period_start: "2026-10-05",
+      period_end: "2026-11-04",
+      amount_cents: 400000,
+      paid_amount_cents: 400000,
+      paid_at: "2026-10-05T12:00:00Z",
+      paid_via: "pix",
+      payment_charge_id: null,
+    });
+    await expect(
+      getInvoiceReceiptFor(ctxFor(HOUSE_ADMIN), { tenantId: TENANT, invoiceId: "inv-cross-tenant" }),
+    ).rejects.toThrow("Fatura não encontrada.");
   });
 });

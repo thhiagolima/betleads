@@ -129,7 +129,7 @@ export type PlanStatusBadgeInput = {
   state: BillingAccessState;
   /** Brasília today (YYYY-MM-DD), used for the due_soon "daqui a N dias" count. */
   today: string;
-  /** The house's open invoice, when there is one (due_soon/overdue). */
+  /** The house's open invoice, when there is one (due_soon/overdue/locked_unpaid). */
   invoice: BillingInvoice | null;
   /**
    * `tenant_billing.next_due_date` — used only for the `ok` badge, as
@@ -137,15 +137,23 @@ export type PlanStatusBadgeInput = {
    * coverage), same convention as `invoicePaidSuccessText` below.
    */
   nextDueDate: string | null;
+  /**
+   * `BILLING_ENFORCEMENT_ENABLED`. With it off, `locked_unpaid` never
+   * actually blocks the house (same rule as `isEffectiveLock`/`billingView`
+   * above), so the badge reads "Vencida em DD/MM" instead of "Bloqueada".
+   */
+  enforcement: boolean;
 };
 
 /**
  * The plan status badge shown on "Plano e créditos" (ruling 4, exact
- * texts): one line per `access_state`, independent of role/enforcement —
- * this is a status label, not the banner/lock copy above.
+ * texts): one line per `access_state`. Independent of role, but
+ * `locked_unpaid` follows `enforcement` — same as the banner/lock copy
+ * above (`isEffectiveLock`): with enforcement off it is never actually
+ * blocked, so it reads as an overdue invoice instead.
  */
 export function planStatusBadge(input: PlanStatusBadgeInput): string {
-  const { state, today, invoice, nextDueDate } = input;
+  const { state, today, invoice, nextDueDate, enforcement } = input;
   switch (state) {
     case "exempt":
       return "Plano interno — isento";
@@ -156,6 +164,9 @@ export function planStatusBadge(input: PlanStatusBadgeInput): string {
     case "awaiting_first_payment":
       return "Aguardando primeiro pagamento";
     case "locked_unpaid":
+      if (!enforcement) {
+        return invoice ? `Vencida em ${formatDDMM(invoice.dueDate)}` : "Vencida";
+      }
       return "Bloqueada";
     case "overdue":
       return invoice ? `Vencida em ${formatDDMM(invoice.dueDate)}` : "Vencida";
