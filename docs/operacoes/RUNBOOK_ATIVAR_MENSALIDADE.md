@@ -234,6 +234,16 @@ order by t.slug;
 desta migration), `due_date = ` hoje (dia de Brasília); as 3 casas `interno` e
 a demo com `access_state = 'exempt'` e nenhuma fatura.
 
+**Verificação de cobertura (só leitura, sessão read-only):** toda casa
+precisa ter a sua linha em `tenant_billing` — uma casa sem linha nunca é
+cobrada nem bloqueada.
+```sql
+select (select count(*) from tenant_billing) as tb, (select count(*) from tenants) as t;
+```
+**Esperado:** `tb` igual a `t`. Se `tb` for menor, pare: rode
+`select public.billing_backfill_tenant_billing();` de novo (é idempotente)
+e repita a contagem antes de seguir para o Passo 4.
+
 **Rollback desta migration** — só para uma ativação que falhou com **zero
 faturas pagas** (nunca depois do Passo 7, quando já pode haver uma fatura
 real paga). O bloco abaixo primeiro checa que não há fatura paga e aborta com
@@ -303,6 +313,15 @@ reverter:
 npm run build
 ```
 **Esperado:** build Nitro conclui sem erro (preset `node-server`).
+
+Rode também a suíte completa no mesmo checkout (a branch já traz o merge do
+`main` com o onboarding das casas):
+
+```bash
+npm test
+```
+**Esperado:** todos os arquivos e testes passam (`Test Files ... passed`,
+nenhum `failed`). Se algum falhar, pare: não mergeie nem faça deploy.
 
 ```bash
 git rev-parse main
