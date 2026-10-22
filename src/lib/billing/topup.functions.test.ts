@@ -1,0 +1,244 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const fake = vi.hoisted(() => ({ admin: null as unknown as ReturnType<typeof createFakeDb> }));
+
+vi.mock("@/integrations/supabase/client.server", async () => {
+  const { createFakeDb } = await import("@/lib/sms-bulk.test-support");
+  fake.admin = createFakeDb();
+  return { supabaseAdmin: fake.admin.client };
+});
+
+const { createUpperCharge } = vi.hoisted(() => ({ createUpperCharge: vi.fn() }));
+vi.mock("./upper-pix.server", () => ({
+  createUpperCharge,
+  UpperError: class UpperError extends Error {
+    status: number;
+    code: string | null;
+    retryable: boolean;
+    constructor(message: string, options: { status: number; code: string | null; retryable: boolean }) {
+      super(message);
+      this.name = "UpperError";
+      this.status = options.status;
+      this.code = options.code;
+      this.retryable = options.retryable;
+    }
+  },
+}));
+
+import { createFakeDb } from "@/lib/sms-bulk.test-support";
+import { __resetDemoTenantCacheForTests } from "@/lib/tenant-access.server";
+import { createCreditTopupFor, getTopupStatusFor } from "./topup.functions";
+import { UpperError } from "./upper-pix.server";
+
+const TENANT = "00000000-0000-4000-8000-0000000000aa";
+const OTHER_TENANT = "00000000-0000-4000-8000-0000000000bb";
+const ADMIN_USER = "00000000-0000-4000-8000-0000000000cc";
+
+let userDb: ReturnType<typeof createFakeDb>;
+
+function ctxFor(userId: string) {
+  return { userId, supabase: userDb.client };
+}
+
+function upperChargeResult(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "upstream-1",
+    externalId: overrides.externalId ?? "bl-top-x",
+    status: "ACTIVE",
+    amountCents: 100000,
+    emv: "00020101...",
+    qrCodeImage: "https://img.example/qr.png",
+    paymentUrl: "https://pay.example/x",
+    expiresAt: "2026-10-22T12:00:00Z",
+    paidAt: null,
+    paidAmountCents: null,
+    payer: null,
+    raw: { status: "ACTIVE" },
+    ...overrides,
+  };
+}
+
+beforeEach(() => {
+  process.env.BILLING_GATEWAY_ENABLED = "true";
+
+  fake.admin.reset();
+  __resetDemoTenantCacheForTests();
+  fake.admin.onRpc("billing_tenant_exempt", () => ({ data: false, error: null }));
+  fake.admin.rows("tenants").push({ id: TENANT, nome: "Sorte Alta", plano: "padrao" });
+  fake.admin.rows("tenants").push({ id: OTHER_TENANT, nome: "Outra Casa", plano: "padrao" });
+
+  userDb = createFakeDb();
+  userDb.onRpc("is_super_admin", () => ({ data: false, error: null }));
+  userDb.onRpc("current_tenant_id", () => ({ data: TENANT, error: null }));
+  userDb.onRpc("is_tenant_admin", (args) => ({
+    data: args._tenant === TENANT,
+    error: null,
+  }));
+
+  createUpperCharge.mockReset();
+  createUpperCharge.mockResolvedValue(upperChargeResult());
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  delete process.env.BILLING_GATEWAY_ENABLED;
+});
+
+describe("createCreditTopupFor", () => {
+  it("refuses when the gateway is off", async () => {
+    process.env.BILLING_GATEWAY_ENABLED = "false";
+    await expect(
+      createCreditTopupFor(ctxFor(ADMIN_USER), { tenantId: TENANT, packageCode: "p1000" }),
+    ).rejects.toThrow("Compra por Pix indisponível no momento.");
+    expect(createUpperCharge).not.toHaveBeenCalled();
+  });
+
+  it("refuses a non-admin (gestor) caller", async () => {
+    userDb.onRpc("is_tenant_admin", () => ({ data: false, error: null }));
+    await expect(
+      createCreditTopupFor(ctxFor(ADMIN_USER), { tenantId: TENANT, packageCode: "p1000" }),
+    ).rejects.toThrow("Só o admin da casa pode comprar créditos");
+    expect(createUpperCharge).not.toHaveBeenCalled();
+  });
+
+  it("refuses the demo tenant", async () => {
+    fake.admin.rows("tenants")[0].is_demo = true;
+    await expect(
+      createCreditTopupFor(ctxFor(ADMIN_USER), { tenantId: TENANT, packageCode: "p1000" }),
+    ).rejects.toThrow();
+    expect(createUpperCharge).not.toHaveBeenCalled();
+  });
+
+  it("refuses an exempt house", async () => {
+    fake.admin.onRpc("billing_tenant_exempt", () => ({ data: true, error: null }));
+    await expect(
+      createCreditTopupFor(ctxFor(ADMIN_USER), { tenantId: TENANT, packageCode: "p1000" }),
+    ).rejects.toThrow("Esta casa é isenta e não precisa comprar créditos");
+    expect(createUpperCharge).not.toHaveBeenCalled();
+  });
+
+  it("creates exactly one order and one charge, with a bl-top- external_id up to 64 chars", async () => {
+    const result = await createCreditTopupFor(ctxFor(ADMIN_USER), {
+      tenantId: TENANT,
+      packageCode: "p1000",
+    });
+
+    expect(fake.admin.rows("credit_topup_orders")).toHaveLength(1);
+    expect(fake.admin.rows("payment_charges")).toHaveLength(1);
+
+    const order = fake.admin.rows("credit_topup_orders")[0];
+    const charge = fake.admin.rows("payment_charges")[0];
+
+    expect(charge.kind).toBe("credit_topup");
+    expect(charge.ref_id).toBe(order.id);
+    expect(charge.external_id).toBe(`bl-top-${order.id}`);
+    expect(String(charge.external_id).length).toBeLessThanOrEqual(64);
+    expect(charge.amount_cents).toBe(100000);
+    expect(order.charge_id).toBe(charge.id);
+
+    expect(result.orderId).toBe(order.id);
+    expect(result.chargeId).toBe(charge.id);
+    expect(result.amountCents).toBe(100000);
+    expect(result.emv).toBe("00020101...");
+    expect(result.qrCodeImage).toBe("https://img.example/qr.png");
+    expect(result.paymentUrl).toBe("https://pay.example/x");
+    expect(result.expiresAt).toBe("2026-10-22T12:00:00Z");
+
+    expect(createUpperCharge).toHaveBeenCalledTimes(1);
+    const callArgs = createUpperCharge.mock.calls[0][0];
+    expect(callArgs.externalId).toBe(`bl-top-${order.id}`);
+    expect(callArgs.expiresIn).toBe(3600);
+    expect(callArgs.description).toBe("Sorte Alta - Créditos BetLeads R$ 1.000,00");
+  });
+
+  it("creates two distinct orders/charges/external_id on two consecutive calls", async () => {
+    const first = await createCreditTopupFor(ctxFor(ADMIN_USER), {
+      tenantId: TENANT,
+      packageCode: "p1000",
+    });
+    const second = await createCreditTopupFor(ctxFor(ADMIN_USER), {
+      tenantId: TENANT,
+      packageCode: "p1000",
+    });
+
+    expect(first.orderId).not.toBe(second.orderId);
+    expect(first.chargeId).not.toBe(second.chargeId);
+    expect(fake.admin.rows("credit_topup_orders")).toHaveLength(2);
+    expect(fake.admin.rows("payment_charges")).toHaveLength(2);
+    const externalIds = fake.admin.rows("payment_charges").map((row) => row.external_id);
+    expect(new Set(externalIds).size).toBe(2);
+  });
+
+  it("marks the order failed and the charge FAILED when Upper fails twice (502), with the generic message", async () => {
+    createUpperCharge.mockRejectedValue(
+      new UpperError("Upper respondeu 502.", { status: 502, code: null, retryable: true }),
+    );
+
+    await expect(
+      createCreditTopupFor(ctxFor(ADMIN_USER), { tenantId: TENANT, packageCode: "p1000" }),
+    ).rejects.toThrow("Não foi possível gerar o Pix agora. Tente de novo em instantes.");
+
+    expect(fake.admin.rows("credit_topup_orders")).toHaveLength(1);
+    expect(fake.admin.rows("payment_charges")).toHaveLength(1);
+    expect(fake.admin.rows("credit_topup_orders")[0].status).toBe("failed");
+    const charge = fake.admin.rows("payment_charges")[0];
+    expect(charge.status).toBe("FAILED");
+    expect(charge.last_error).toBeTruthy();
+    expect(JSON.stringify(charge.last_error)).not.toContain("502.");
+  });
+
+  it("maps NOT_CONFIGURED/FEATURE_DISABLED Upper errors to the unavailable message", async () => {
+    createUpperCharge.mockRejectedValue(
+      new UpperError("Upper não configurado.", {
+        status: 0,
+        code: "NOT_CONFIGURED",
+        retryable: false,
+      }),
+    );
+
+    await expect(
+      createCreditTopupFor(ctxFor(ADMIN_USER), { tenantId: TENANT, packageCode: "p1000" }),
+    ).rejects.toThrow("Compra por Pix indisponível no momento.");
+  });
+});
+
+describe("getTopupStatusFor", () => {
+  it("returns status/paidAt/credited for a charge belonging to the caller's house", async () => {
+    userDb.rows("payment_charges").push({
+      id: "charge-1",
+      tenant_id: TENANT,
+      status: "PAID",
+      paid_at: "2026-10-22T12:00:00Z",
+      credited_at: "2026-10-22T12:00:05Z",
+    });
+
+    const result = await getTopupStatusFor(ctxFor(ADMIN_USER), { chargeId: "charge-1" });
+    expect(result).toEqual({
+      status: "PAID",
+      paidAt: "2026-10-22T12:00:00Z",
+      credited: true,
+    });
+  });
+
+  it("returns credited:false while credited_at is still null", async () => {
+    userDb.rows("payment_charges").push({
+      id: "charge-1",
+      tenant_id: TENANT,
+      status: "ACTIVE",
+      paid_at: null,
+      credited_at: null,
+    });
+
+    const result = await getTopupStatusFor(ctxFor(ADMIN_USER), { chargeId: "charge-1" });
+    expect(result.credited).toBe(false);
+  });
+
+  it("throws not-found for a charge belonging to another house (simulated RLS)", async () => {
+    // The user's own client only ever sees rows RLS lets through; here we
+    // simulate that by simply not inserting the row into userDb at all —
+    // exactly what RLS would produce for another house's charge.
+    await expect(
+      getTopupStatusFor(ctxFor(ADMIN_USER), { chargeId: "charge-does-not-belong-to-me" }),
+    ).rejects.toThrow("Cobrança não encontrada");
+  });
+});
