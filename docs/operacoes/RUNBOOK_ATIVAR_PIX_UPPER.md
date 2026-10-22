@@ -122,8 +122,13 @@ máquina para `supabase db push`.
 
 **Esperado:** sucesso, sem notice. A migration só cria tabelas/função novas.
 
-**Se der erro:** a transação já fez rollback automático; não há dado
-parcial. Leia a mensagem, corrija a causa e recomece do `begin`.
+**Se der erro:** a transação já fez rollback automático no servidor, mas a
+sessão `pg` cliente ainda acha que está dentro de uma transação até você
+mandar `rollback;` explicitamente — rode `rollback;` antes de recomeçar do
+`begin`, ou o próximo `begin;` vira um `WARNING: there is already a
+transaction in progress` e o SQL seguinte roda fora da transação que você
+pensa que está usando. Não há dado parcial. Leia a mensagem, corrija a causa
+e recomece do `begin`.
 
 **Verificação:**
 ```sql
@@ -138,10 +143,20 @@ order by table_name;
 ```
 **Esperado:** a versão e as 4 tabelas.
 
-**Rollback desta migration** (se precisar desfazer antes do próximo passo):
+**Rollback desta migration** — só para uma ativação que falhou com **zero
+linhas de dinheiro gravadas** (nunca depois do Passo 7, quando já pode haver
+cobranças reais). O bloco abaixo primeiro checa que as duas tabelas estão
+vazias e aborta com `raise exception` se não estiverem — isso é intencional:
+nunca apague tabelas com dinheiro associado, mesmo por engano.
 ```sql
 begin;
-revoke execute on function public.billing_credit_paid_charge(uuid) from service_role;
+do $$
+begin
+  if exists (select 1 from public.payment_charges)
+     or exists (select 1 from public.credit_topup_orders) then
+    raise exception 'payment rows exist — do not drop';
+  end if;
+end $$;
 drop function if exists public.billing_credit_paid_charge(uuid);
 drop table if exists public.payment_fee_settings;
 drop table if exists public.payment_webhook_events;
@@ -152,6 +167,11 @@ delete from supabase_migrations.schema_migrations where version = '2026102211000
 commit;
 notify pgrst, 'reload schema';
 ```
+(`drop function` já remove os grants dessa função — não é preciso `revoke`
+antes.) Se este bloco falhar no meio (por exemplo, o `raise exception`
+acima), mande `rollback;` na sessão antes de investigar — o servidor já
+abortou a transação, mas o cliente só sabe disso depois do `rollback;`
+explícito.
 
 **Resultado:** _______________________________________________
 
@@ -173,8 +193,33 @@ git rev-parse main
 ```
 **SHA do `main` antes do merge:** _______________________________________
 
-Depois do merge desta branch (`feat/pg2-pix-upper`) no `main`, na VPS, a
-partir do diretório do `docker-compose.yml` (ver `docs/docker-deployment.md`):
+Na VPS, a partir do diretório do checkout (mesmo diretório do
+`docker-compose.yml`, ver `docs/docker-deployment.md`), **antes de puxar o
+merge**, anote também o SHA que está de fato no ar ali (deve coincidir com o
+anotado acima, mas é o valor que importa para o rollback desta VPS
+especificamente):
+
+```bash
+git rev-parse HEAD
+```
+**SHA no ar na VPS antes do deploy:** _______________________________________
+
+Depois do merge desta branch (`feat/pg2-pix-upper`) no `main` (no repositório
+remoto), puxe o código novo para a VPS:
+
+```bash
+git fetch
+git checkout main
+git pull --ff-only
+git rev-parse HEAD
+```
+**Esperado:** o `git rev-parse HEAD` final bate exatamente com o SHA do
+`main` recém-mergeado (confira no GitHub/remoto) — não um merge local nem um
+`--ff-only` que falhou silenciosamente de outra forma. Se `pull --ff-only`
+recusar (histórico divergente na VPS), pare e investigue antes de forçar
+qualquer coisa.
+
+Só então construa e suba o container:
 
 ```bash
 docker compose up -d --build --force-recreate crm
@@ -187,6 +232,15 @@ Como `BILLING_GATEWAY_ENABLED` ainda está `false` (Passo 2), nenhuma rota de
 Pix é exercitada de verdade ainda — o webhook (`/api/public/upper/webhook`) e
 a rota de conciliação (`/api/public/hooks/billing-reconcile`) já existem no
 código, mas o cron que chama a segunda só é cadastrado no Passo 5.
+
+Confirme que o container recriado de fato carregou as 4 variáveis novas do
+Passo 2 (um `--force-recreate` sem isso é o sinal mais comum de confusão
+depois):
+```bash
+docker compose exec crm node -e "console.log(!!process.env.UPPER_API_KEY, !!process.env.UPPER_WEBHOOK_SECRET, process.env.BILLING_GATEWAY_ENABLED)"
+```
+**Esperado:** `true true false` (as duas primeiras presentes; o gateway
+ainda desligado neste passo).
 
 **Smoke check manual:** abrir o app, logar como super admin
 (`thiago@businesscode.com.br`) e abrir uma casa qualquer em
@@ -225,17 +279,24 @@ commit;
 **Esperado:** sucesso. A migration cria as extensões `pg_cron`/`pg_net` (se
 ainda não existirem) e agenda `betleads-billing-reconcile` para `*/5 * * * *`.
 Ela lê o segredo do cron (`betleads_cron_secret`) do Supabase Vault — **não**
-do `CRON_SECRET` do `.env` da VPS; confirme antes de aplicar que esse nome
-existe em `vault.decrypted_secrets` (já deveria, de crons anteriores — ver
-`docs/RUNBOOK_OBSERVABILIDADE.md`) e que o valor é o mesmo configurado em
-`CRON_SECRET` na VPS (é esse valor que `requireSharedSecret` em
-`src/lib/cron-auth.server.ts` compara contra o header `Authorization: Bearer`
-que o `pg_net` envia).
+do `CRON_SECRET` do `.env` da VPS. Confirme antes de aplicar que esse nome
+existe (já deveria, de crons anteriores — ver `docs/RUNBOOK_OBSERVABILIDADE.md`),
+**sem nunca ler o valor descriptografado pela sessão SQL** (ele fica só no
+Vault e no `.env` da VPS):
+```sql
+select name from vault.decrypted_secrets where name = 'betleads_cron_secret';
+```
+**Esperado:** 1 linha. Confirme o valor por fora (comparando com o que está
+no `.env` da VPS em `CRON_SECRET`) sem imprimi-lo aqui — é esse valor que
+`requireSharedSecret` em `src/lib/cron-auth.server.ts` compara contra o
+header `Authorization: Bearer` que o `pg_net` envia.
 
-**Se der erro `extension "pg_cron" does not exist` (ou `pg_net`):** confirme
-que as extensões estão disponíveis no projeto Supabase (normalmente já estão,
-de crons anteriores); se não, habilite pelo painel do Supabase antes de
-repetir.
+**Se der erro `extension "pg_cron" does not exist` (ou `pg_net`):** mande
+`rollback;` na sessão `pg` antes de tentar de novo (o servidor já abortou a
+transação, mas o cliente só sabe disso depois do `rollback;` explícito).
+Confirme que as extensões estão disponíveis no projeto Supabase (normalmente
+já estão, de crons anteriores); se não, habilite pelo painel do Supabase
+antes de repetir.
 
 **Verificação do agendamento:**
 ```sql
@@ -247,23 +308,32 @@ where jobname = 'betleads-billing-reconcile';
 
 **Verificação da execução, 5 minutos depois:**
 ```sql
-select id, job, status, started_at, finished_at, heartbeat_at, counters
+select id, job, status, started_at, finished_at, heartbeat_at, claimed, sent, errors, stop_reason
 from public.dispatcher_runs
 where job = 'billing-reconcile'
 order by started_at desc
 limit 5;
 ```
 **Esperado:** pelo menos 1 linha com `status` em `succeeded`/`partial` nos
-últimos ~5–10 min, `counters` com `claimed`/`sent`/`errors` preenchidos
-(todos `0` é esperado se não houver nenhuma cobrança pendente ainda — não é
-erro). Confirme também no Better Stack (`BETTERSTACK_HEARTBEAT_BILLING_RECONCILE`)
+últimos ~5–10 min, `claimed`/`sent`/`errors` preenchidos (todos `0` é
+esperado se não houver nenhuma cobrança pendente ainda — não é erro).
+Confirme também no Better Stack (`BETTERSTACK_HEARTBEAT_BILLING_RECONCILE`)
 que o heartbeat está "up".
 
-**Se não aparecer nenhuma linha em `dispatcher_runs`:** confira
-`cron.job_run_details` para o erro do `pg_net` (provável: `CRON_SECRET`/
-`betleads_cron_secret` divergentes entre o Vault e a VPS, causando 401 antes
-mesmo de abrir o job run) ou que o container está de pé e respondendo em
-`https://betleads.io`.
+**Se não aparecer nenhuma linha em `dispatcher_runs`:** o `pg_cron` chama a
+rota por `net.http_post`, que é assíncrono — "succeeded" no `cron.job` só
+significa que a chamada foi *enfileirada*, não que a rota respondeu; a saúde
+real está em `net._http_response` (ver `docs/BASELINE_BANCO_2026-10-14.md`):
+```sql
+select status_code, left(content::text, 200), created
+from net._http_response
+order by created desc
+limit 5;
+```
+Um `status_code` ausente ou de erro de rede aqui indica timeout/DNS/TLS
+contra `https://betleads.io`; um `401` indica `CRON_SECRET`/
+`betleads_cron_secret` divergentes entre o Vault e a VPS; confira também que
+o container está de pé.
 
 **Rollback desta migration:**
 ```sql
@@ -280,6 +350,8 @@ delete from supabase_migrations.schema_migrations where version = '2026102211010
 commit;
 notify pgrst, 'reload schema';
 ```
+Se este bloco falhar no meio, mande `rollback;` na sessão antes de tentar de
+novo.
 
 **Resultado:** _______________________________________________
 
@@ -299,26 +371,36 @@ No painel da Upper, em **API → Webhook**:
 
 Use o botão **"Testar"** do painel da Upper.
 
-**Esperado:** a Upper envia um evento `ping`; pelo pooler,
+**Esperado:** a Upper envia um evento `ping`; pelo pooler (sem filtrar por
+`event`, para ver o que chegou de verdade, qualquer que seja o nome):
 ```sql
 select event_id, event, outcome, received_at, processed_at
 from public.payment_webhook_events
-where event = 'ping'
 order by received_at desc
-limit 1;
+limit 5;
 ```
-mostra uma linha recente com `outcome = 'ping'` e `processed_at` preenchido.
+**Esperado:** a linha mais recente, com `event` igual ao que a Upper de fato
+enviou (anote: pode não ser literalmente `'ping'`) e `outcome = 'ping'`,
+`processed_at` preenchido.
 
 **Se vier diferente:**
 - Nenhuma linha nova: confira `UPPER_WEBHOOK_SECRET` idêntico nos dois lados
   (Upper e `.env` da VPS) e que o container está no ar; a rota responde `400`
   para assinatura inválida/ausente ou corpo malformado, e `500` se
   `UPPER_WEBHOOK_SECRET` não estiver configurado no servidor — nenhum desses
-  dois casos grava linha em `payment_webhook_events`.
+  dois casos grava linha em `payment_webhook_events`. Verifique também o
+  relógio da VPS: a assinatura é recusada com `400` se `|agora − t| > 300 s`
+  (tolerância de 5 min), então um relógio da VPS adiantado/atrasado faz
+  **todo** evento ser recusado por esse motivo — confira com `date -u` na
+  VPS contra um horário confiável antes de suspeitar do segredo.
 - Linha presente mas `processed_at` nulo e `error` preenchido: a rota
   respondeu `503` (erro depois de já ter gravado o evento) — a Upper deve
   reentregar automaticamente; confira `error` na linha e os logs do
   container por `[upper-webhook]`.
+- `outcome = 'missing_external_id'` (só esperado em `charge.*`, não em
+  `ping`): sintoma de que o caminho onde o código procura o `externalId`
+  (`data.externalId`, depois `externalId` na raiz — ver 8.3) não bate com o
+  corpo real que a Upper envia.
 
 **Resultado:** _______________________________________________
 
@@ -330,10 +412,13 @@ Confirme com o painel ou o suporte da Upper:
   webhook automaticamente (política comum em gateways de pagamento).
 - Como reativar pelo painel (**API → Webhook**) se isso acontecer.
 
-Nosso lado sempre responde `503` (nunca `200`) quando o processamento falha
-depois do evento já estar gravado (`src/routes/api/public/upper/webhook.ts`,
-estágio 2), exatamente para que a Upper reentregue — mas se a conta tiver um
-limite de falhas antes de desativar o endpoint, uma instabilidade prolongada
+A especificação da Upper (`docs/ESCOPO_GATEWAY_PAGAMENTO_UPPER_2026-10-21.md`)
+documenta até **15 reentregas** por evento. Nosso lado sempre responde `503`
+(nunca `200`) quando o processamento falha depois do evento já estar gravado
+(`src/routes/api/public/upper/webhook.ts`, estágio 2), exatamente para que a
+Upper reentregue dentro dessas 15 tentativas — mas se a conta tiver, além
+disso, um limite de falhas antes de **desativar** o endpoint por completo
+(confirmar com o painel/suporte, item acima), uma instabilidade prolongada
 do nosso lado (deploy quebrado, banco fora do ar) pode acabar desativando o
 webhook. Nesse caso a conciliação por cron (Passo 5, a cada 5 min) continua
 cobrindo — nenhuma cobrança fica sem crédito por mais que ~5–10 min — mas o
@@ -366,6 +451,11 @@ docker compose ps
 docker compose logs --since=5m crm
 ```
 
+```bash
+docker compose exec crm node -e "console.log(!!process.env.UPPER_API_KEY, !!process.env.UPPER_WEBHOOK_SECRET, process.env.BILLING_GATEWAY_ENABLED)"
+```
+**Esperado:** `true true true`.
+
 **Esperado:** container `crm` `healthy`. Logar como admin de uma casa
 pagante (não isenta, não demo) e abrir `/creditos-sms` — o botão de comprar
 créditos por Pix agora aparece.
@@ -394,6 +484,8 @@ clicar em "Gerar Pix".
 **Esperado:** o diálogo mostra o QR code e o "Copia e Cola", com contagem
 regressiva até a expiração.
 
+**Resultado:** _______________________________________________
+
 ### 8.2 — Pagar o Pix de verdade e conferir o crédito
 
 Pague o Pix (dinheiro real). Depois do pagamento ser confirmado (pela tela,
@@ -402,13 +494,13 @@ que faz polling de `getTopupStatus` a cada 3 s), confira:
 ```sql
 select event_id, event, outcome, received_at, processed_at, raw_body
 from public.payment_webhook_events
-where event = 'charge.paid'
 order by received_at desc
-limit 1;
+limit 5;
 ```
-**Esperado:** 1 linha com `outcome = 'credited'` (ou `'already_credited'` se
-a conciliação já tiver creditado primeiro — ambos são o resultado correto;
-só um dos dois credita de verdade, nunca os dois).
+**Esperado:** a linha mais recente com `event = 'charge.paid'` (anote o nome
+real do evento, caso seja diferente) e `outcome = 'credited'` (ou
+`'already_credited'` se a conciliação já tiver creditado primeiro — ambos
+são o resultado correto; só um dos dois credita de verdade, nunca os dois).
 
 ```sql
 select id, external_id, status, credited_at, paid_amount_cents, amount_cents, needs_review
@@ -438,30 +530,39 @@ zerada antes do teste — se já tinha saldo, confirme que subiu exatamente
 R$ 100,00).
 
 ```sql
-select entry_type, amount, reason, reference_type, reference_id
+select entry_type, amount, reason, idempotency_key, reference_type, reference_id
 from public.wallet_ledger
 where tenant_id = (select id from public.tenants where slug = 'journey-p0-1791418509270')
 order by created_at desc
 limit 1;
 ```
 **Esperado:** `entry_type = 'purchase'`, `amount = 100`, `reason = 'Compra de
-créditos por Pix'`, idempotency key `charge:<id da cobrança>` — confira o
-`charge:<id>` batendo com o `id` da linha de `payment_charges` acima
-(a chave fica no `wallet_ledger`/`wallet_mutation`, não numa coluna exposta
-aqui diretamente — ver `billing_credit_paid_charge`).
+créditos por Pix'`, `idempotency_key = 'charge:' || <id da cobrança>`,
+`reference_type = 'payment_charge'`, `reference_id = <id da cobrança>` —
+confira o `<id da cobrança>` batendo com o `id` da linha de `payment_charges`
+acima (ver `billing_credit_paid_charge`, que grava essas 3 colunas via
+`wallet_mutation`).
 
 Na tela: o diálogo deve mostrar **"Pagamento confirmado"** (com o valor
-creditado) — se continuar em "confirmando…" por mais de ~1 min, veja o Passo
+creditado) — se continuar em "confirmando…" por mais de ~1 min, veja o
 "Se vier diferente" abaixo.
 
 **Se vier diferente:**
 - Nenhuma das condições acima bate, mas a cobrança está `PAID`: espere até
   5 min — a conciliação por cron credita mesmo que o webhook falhe.
 - Depois de 5 min ainda sem crédito: veja as consultas de monitoramento do
-  Passo 9 (`needs_review`, `PAID` sem `credited_at`) para diagnosticar.
+  Passo 10 (`needs_review`, `PAID` sem `credited_at`) para diagnosticar.
 - `needs_review = true`: o valor pago não bateu com `amount_cents` — pare e
   trate como incidente antes de repetir o teste (não é esperado para um
   pagamento exato de R$ 100,00).
+- `outcome = 'missing_external_id'` no evento `charge.paid`: sintoma de que
+  o caminho onde o código procura o `externalId` (`data.externalId`, depois
+  `externalId` na raiz) não bate com o corpo real que a Upper envia — veja
+  8.3 para confirmar o caminho real e corrigir antes de repetir o teste (a
+  conciliação por cron ainda credita dentro de 5 min, então não há perda de
+  dinheiro enquanto isso é corrigido).
+
+**Resultado:** _______________________________________________
 
 ### 8.3 — Capturar o corpo real do webhook e validar as suposições do código
 
@@ -560,8 +661,8 @@ está `PAID` localmente sem nem chamar a Upper de novo):
 select id, tenant_id, external_id, paid_at, credited_at
 from public.payment_charges
 where status = 'PAID' and credited_at is null
-  and created_at < now() - interval '10 minutes'
-order by created_at;
+  and paid_at < now() - interval '10 minutes'
+order by paid_at;
 ```
 
 **Eventos de webhook com erro** (processamento falhou depois de gravado —
@@ -629,7 +730,21 @@ flag**, ou cobranças já pagas por uma casa deixam de ser creditadas.
 ### Parar tudo (inclusive confirmação do que já está em aberto)
 
 Só faça isto se o objetivo for parar **completamente** o fluxo de Pix,
-inclusive deixar de confirmar cobranças já criadas:
+inclusive deixar de confirmar cobranças já criadas.
+
+**Antes de desligar**, confira se há cobranças em aberto (ou já pagas e
+ainda não creditadas) que ficariam penduradas sem o cron nem o webhook:
+```sql
+select id, tenant_id, external_id, status, paid_at, credited_at
+from public.payment_charges
+where credited_at is null and status in ('PENDING', 'ACTIVE', 'PAID')
+order by created_at;
+```
+Qualquer linha `status = 'PAID'` aqui **precisa** ser creditada manualmente
+(rodando `select billing_credit_paid_charge('<id>');` pelo pooler, com
+service role, ou religando o cron/webhook brevemente) antes ou depois de
+desligar — ela não será mais confirmada automaticamente enquanto o cron e o
+webhook estiverem fora.
 
 ```sql
 begin;
@@ -648,10 +763,14 @@ E remova (ou desative) o webhook no painel da Upper (**API → Webhook**).
 
 **Atenção:** com o cron desligado e o webhook removido, qualquer cobrança já
 criada e paga (`PAID` na Upper) **não será mais creditada automaticamente**
-em nenhuma casa até o cron/webhook voltarem. Verifique antes
-(`select * from payment_charges where status in ('PENDING','ACTIVE') and
-credited_at is null;`) se há cobranças em aberto que ficariam penduradas, e
-avise as casas afetadas.
+em nenhuma casa até o cron/webhook voltarem — use a consulta acima, feita
+**antes** de desligar, para saber quais casas avisar.
+
+**Para reativar depois:** rode de novo o bloco `select cron.schedule(...)`
+de `supabase/migrations/20261022110100_billing_reconcile_cron.sql` (o mesmo
+conteúdo do Passo 5, sem precisar reinserir a linha em
+`supabase_migrations.schema_migrations` — ela já está lá) e recadastre/
+reative o webhook no painel da Upper (mesma URL e segredo do Passo 6).
 
 ### Dados
 
@@ -660,14 +779,21 @@ As tabelas são **aditivas**: `credit_topup_orders`, `payment_charges`,
 nada do saldo único (PG1, `tenant_wallets`/`wallet_ledger`) — reverter o
 código ou desligar o gateway não exige desfazer a migration `20261022110000`.
 
-**Nunca apague** uma linha de `payment_charges` ou `credit_topup_orders` que
-tenha dinheiro associado (qualquer `status` diferente de `'pending'`/`'ACTIVE'`
-sem pagamento, ou qualquer linha com `credited_at` preenchido) — é o único
-registro de auditoria daquele pagamento. Se uma cobrança precisar ser
-corrigida manualmente (caso de `needs_review`), isso é tratado caso a caso
-pelo superadmin, nunca por `delete`.
+**Nunca apague linhas destas tabelas** — são o registro de auditoria dos
+pagamentos. Se uma cobrança precisar ser corrigida manualmente (caso de
+`needs_review`), isso é tratado caso a caso pelo superadmin, nunca por
+`delete`.
 
 ### Código
+
+**Antes de reverter o código, faça o "Parar tudo" acima** (unschedule do
+cron + desativar o webhook na Upper) **ou aceite explicitamente** que, sem
+isso, o cron continua chamando `POST /api/public/hooks/billing-reconcile` e
+a Upper continua entregando em `POST /api/public/upper/webhook` contra um
+código que não tem mais essas rotas (o SHA anotado no Passo 4 é de antes
+desta feature) — ambas as chamadas passam a responder `404`, e nenhuma
+cobrança criada depois disso é mais creditada automaticamente até o deploy
+seguinte trazer o código de volta.
 
 Reverter para o SHA anotado no Passo 4:
 ```bash
