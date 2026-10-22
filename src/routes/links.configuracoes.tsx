@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -25,7 +25,6 @@ function LinkSettings() {
       await saveShortioSettings({
         data: {
           enabled: form.get("enabled") === "on",
-          domain: String(form.get("domain") || "") || null,
           attribution_mode: "individual",
           fallback_mode: String(form.get("fallback")) as "block" | "passthrough",
           default_ttl_days: form.get("ttl") ? Number(form.get("ttl")) : null,
@@ -54,9 +53,11 @@ function LinkSettings() {
               <Switch name="enabled" defaultChecked={s.enabled} />
               <Label>Ativar encurtamento e rastreio</Label>
             </div>
-            <div>
-              <Label>Domínio curto</Label>
-              <Input name="domain" defaultValue={s.domain ?? ""} placeholder="go.sua-marca.com" />
+            <div className="text-sm text-muted-foreground">
+              Domínios do encurtador →{" "}
+              <Link to="/configuracoes/casa" className="text-primary underline underline-offset-4">
+                Configuração da casa
+              </Link>
             </div>
             <div>
               <Label>Hosts de destino permitidos</Label>

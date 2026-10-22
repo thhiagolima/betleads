@@ -39,6 +39,7 @@ import { Route as AutomacoesEmailRouteImport } from './routes/automacoes.email'
 import { Route as AutomacoesLigacoesRouteImport } from './routes/automacoes.ligacoes'
 import { Route as AutomacoesSmsRouteImport } from './routes/automacoes.sms'
 import { Route as AutomacoesWhatsappRouteImport } from './routes/automacoes.whatsapp'
+import { Route as ConfiguracoesCasaRouteImport } from './routes/configuracoes.casa'
 import { Route as JornadasJourneyIdRouteImport } from './routes/jornadas.$journeyId'
 import { Route as JornadasNovaRouteImport } from './routes/jornadas.nova'
 import { Route as LinksConfiguracoesRouteImport } from './routes/links.configuracoes'
@@ -71,6 +72,7 @@ import { Route as ApiPublicHooksWhatsappResumeRouteImport } from './routes/api/p
 import { Route as ApiPublicMetaSyncTickRouteImport } from './routes/api/public/meta-sync/tick'
 import { Route as ApiPublicPrecallDispatchRouteImport } from './routes/api/public/precall/dispatch'
 import { Route as ApiPublicShortioSyncRouteImport } from './routes/api/public/shortio/sync'
+import { Route as ApiPublicTenantDomainsVerifyRouteImport } from './routes/api/public/tenant-domains/verify'
 import { Route as ApiPublicWebhookEventoRouteImport } from './routes/api/public/webhook.$evento'
 import { Route as ApiPublicEmailImgAssetIdFilenameRouteImport } from './routes/api/public/email-img.$assetId.$filename'
 import { Route as ApiPublicInfobipEmailEventsRouteImport } from './routes/api/public/infobip/email/events'
@@ -228,6 +230,11 @@ const AutomacoesWhatsappRoute = AutomacoesWhatsappRouteImport.update({
   id: '/whatsapp',
   path: '/whatsapp',
   getParentRoute: () => AutomacoesRoute,
+} as any)
+const ConfiguracoesCasaRoute = ConfiguracoesCasaRouteImport.update({
+  id: '/casa',
+  path: '/casa',
+  getParentRoute: () => ConfiguracoesRoute,
 } as any)
 const JornadasJourneyIdRoute = JornadasJourneyIdRouteImport.update({
   id: '/$journeyId',
@@ -404,6 +411,12 @@ const ApiPublicShortioSyncRoute = ApiPublicShortioSyncRouteImport.update({
   path: '/api/public/shortio/sync',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicTenantDomainsVerifyRoute =
+  ApiPublicTenantDomainsVerifyRouteImport.update({
+    id: '/api/public/tenant-domains/verify',
+    path: '/api/public/tenant-domains/verify',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicWebhookEventoRoute = ApiPublicWebhookEventoRouteImport.update({
   id: '/api/public/webhook/$evento',
   path: '/api/public/webhook/$evento',
@@ -452,7 +465,7 @@ export interface FileRoutesByFullPath {
   '/alertas': typeof AlertasRoute
   '/automacoes': typeof AutomacoesRouteWithChildren
   '/campanhas': typeof CampanhasRouteWithChildren
-  '/configuracoes': typeof ConfiguracoesRoute
+  '/configuracoes': typeof ConfiguracoesRouteWithChildren
   '/consentimentos': typeof ConsentimentosRoute
   '/creditos-sms': typeof CreditosSmsRoute
   '/email': typeof EmailRoute
@@ -477,6 +490,7 @@ export interface FileRoutesByFullPath {
   '/automacoes/ligacoes': typeof AutomacoesLigacoesRoute
   '/automacoes/sms': typeof AutomacoesSmsRoute
   '/automacoes/whatsapp': typeof AutomacoesWhatsappRoute
+  '/configuracoes/casa': typeof ConfiguracoesCasaRoute
   '/jornadas/$journeyId': typeof JornadasJourneyIdRoute
   '/jornadas/nova': typeof JornadasNovaRoute
   '/links/configuracoes': typeof LinksConfiguracoesRoute
@@ -509,6 +523,7 @@ export interface FileRoutesByFullPath {
   '/api/public/meta-sync/tick': typeof ApiPublicMetaSyncTickRoute
   '/api/public/precall/dispatch': typeof ApiPublicPrecallDispatchRoute
   '/api/public/shortio/sync': typeof ApiPublicShortioSyncRoute
+  '/api/public/tenant-domains/verify': typeof ApiPublicTenantDomainsVerifyRoute
   '/api/public/webhook/$evento': typeof ApiPublicWebhookEventoRoute
   '/api/public/email-img/$assetId/$filename': typeof ApiPublicEmailImgAssetIdFilenameRoute
   '/api/public/infobip/email/events': typeof ApiPublicInfobipEmailEventsRoute
@@ -523,7 +538,7 @@ export interface FileRoutesByTo {
   '/alertas': typeof AlertasRoute
   '/automacoes': typeof AutomacoesRouteWithChildren
   '/campanhas': typeof CampanhasRouteWithChildren
-  '/configuracoes': typeof ConfiguracoesRoute
+  '/configuracoes': typeof ConfiguracoesRouteWithChildren
   '/consentimentos': typeof ConsentimentosRoute
   '/creditos-sms': typeof CreditosSmsRoute
   '/email': typeof EmailRoute
@@ -548,6 +563,7 @@ export interface FileRoutesByTo {
   '/automacoes/ligacoes': typeof AutomacoesLigacoesRoute
   '/automacoes/sms': typeof AutomacoesSmsRoute
   '/automacoes/whatsapp': typeof AutomacoesWhatsappRoute
+  '/configuracoes/casa': typeof ConfiguracoesCasaRoute
   '/jornadas/$journeyId': typeof JornadasJourneyIdRoute
   '/jornadas/nova': typeof JornadasNovaRoute
   '/links/configuracoes': typeof LinksConfiguracoesRoute
@@ -580,6 +596,7 @@ export interface FileRoutesByTo {
   '/api/public/meta-sync/tick': typeof ApiPublicMetaSyncTickRoute
   '/api/public/precall/dispatch': typeof ApiPublicPrecallDispatchRoute
   '/api/public/shortio/sync': typeof ApiPublicShortioSyncRoute
+  '/api/public/tenant-domains/verify': typeof ApiPublicTenantDomainsVerifyRoute
   '/api/public/webhook/$evento': typeof ApiPublicWebhookEventoRoute
   '/api/public/email-img/$assetId/$filename': typeof ApiPublicEmailImgAssetIdFilenameRoute
   '/api/public/infobip/email/events': typeof ApiPublicInfobipEmailEventsRoute
@@ -595,7 +612,7 @@ export interface FileRoutesById {
   '/alertas': typeof AlertasRoute
   '/automacoes': typeof AutomacoesRouteWithChildren
   '/campanhas': typeof CampanhasRouteWithChildren
-  '/configuracoes': typeof ConfiguracoesRoute
+  '/configuracoes': typeof ConfiguracoesRouteWithChildren
   '/consentimentos': typeof ConsentimentosRoute
   '/creditos-sms': typeof CreditosSmsRoute
   '/email': typeof EmailRoute
@@ -620,6 +637,7 @@ export interface FileRoutesById {
   '/automacoes/ligacoes': typeof AutomacoesLigacoesRoute
   '/automacoes/sms': typeof AutomacoesSmsRoute
   '/automacoes/whatsapp': typeof AutomacoesWhatsappRoute
+  '/configuracoes/casa': typeof ConfiguracoesCasaRoute
   '/jornadas/$journeyId': typeof JornadasJourneyIdRoute
   '/jornadas/nova': typeof JornadasNovaRoute
   '/links/configuracoes': typeof LinksConfiguracoesRoute
@@ -652,6 +670,7 @@ export interface FileRoutesById {
   '/api/public/meta-sync/tick': typeof ApiPublicMetaSyncTickRoute
   '/api/public/precall/dispatch': typeof ApiPublicPrecallDispatchRoute
   '/api/public/shortio/sync': typeof ApiPublicShortioSyncRoute
+  '/api/public/tenant-domains/verify': typeof ApiPublicTenantDomainsVerifyRoute
   '/api/public/webhook/$evento': typeof ApiPublicWebhookEventoRoute
   '/api/public/email-img/$assetId/$filename': typeof ApiPublicEmailImgAssetIdFilenameRoute
   '/api/public/infobip/email/events': typeof ApiPublicInfobipEmailEventsRoute
@@ -693,6 +712,7 @@ export interface FileRouteTypes {
     | '/automacoes/ligacoes'
     | '/automacoes/sms'
     | '/automacoes/whatsapp'
+    | '/configuracoes/casa'
     | '/jornadas/$journeyId'
     | '/jornadas/nova'
     | '/links/configuracoes'
@@ -725,6 +745,7 @@ export interface FileRouteTypes {
     | '/api/public/meta-sync/tick'
     | '/api/public/precall/dispatch'
     | '/api/public/shortio/sync'
+    | '/api/public/tenant-domains/verify'
     | '/api/public/webhook/$evento'
     | '/api/public/email-img/$assetId/$filename'
     | '/api/public/infobip/email/events'
@@ -764,6 +785,7 @@ export interface FileRouteTypes {
     | '/automacoes/ligacoes'
     | '/automacoes/sms'
     | '/automacoes/whatsapp'
+    | '/configuracoes/casa'
     | '/jornadas/$journeyId'
     | '/jornadas/nova'
     | '/links/configuracoes'
@@ -796,6 +818,7 @@ export interface FileRouteTypes {
     | '/api/public/meta-sync/tick'
     | '/api/public/precall/dispatch'
     | '/api/public/shortio/sync'
+    | '/api/public/tenant-domains/verify'
     | '/api/public/webhook/$evento'
     | '/api/public/email-img/$assetId/$filename'
     | '/api/public/infobip/email/events'
@@ -835,6 +858,7 @@ export interface FileRouteTypes {
     | '/automacoes/ligacoes'
     | '/automacoes/sms'
     | '/automacoes/whatsapp'
+    | '/configuracoes/casa'
     | '/jornadas/$journeyId'
     | '/jornadas/nova'
     | '/links/configuracoes'
@@ -867,6 +891,7 @@ export interface FileRouteTypes {
     | '/api/public/meta-sync/tick'
     | '/api/public/precall/dispatch'
     | '/api/public/shortio/sync'
+    | '/api/public/tenant-domains/verify'
     | '/api/public/webhook/$evento'
     | '/api/public/email-img/$assetId/$filename'
     | '/api/public/infobip/email/events'
@@ -882,7 +907,7 @@ export interface RootRouteChildren {
   AlertasRoute: typeof AlertasRoute
   AutomacoesRoute: typeof AutomacoesRouteWithChildren
   CampanhasRoute: typeof CampanhasRouteWithChildren
-  ConfiguracoesRoute: typeof ConfiguracoesRoute
+  ConfiguracoesRoute: typeof ConfiguracoesRouteWithChildren
   ConsentimentosRoute: typeof ConsentimentosRoute
   CreditosSmsRoute: typeof CreditosSmsRoute
   EmailRoute: typeof EmailRoute
@@ -928,6 +953,7 @@ export interface RootRouteChildren {
   ApiPublicMetaSyncTickRoute: typeof ApiPublicMetaSyncTickRoute
   ApiPublicPrecallDispatchRoute: typeof ApiPublicPrecallDispatchRoute
   ApiPublicShortioSyncRoute: typeof ApiPublicShortioSyncRoute
+  ApiPublicTenantDomainsVerifyRoute: typeof ApiPublicTenantDomainsVerifyRoute
   ApiPublicWebhookEventoRoute: typeof ApiPublicWebhookEventoRoute
   ApiPublicEmailImgAssetIdFilenameRoute: typeof ApiPublicEmailImgAssetIdFilenameRoute
   ApiPublicInfobipEmailEventsRoute: typeof ApiPublicInfobipEmailEventsRoute
@@ -1148,6 +1174,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/automacoes/whatsapp'
       preLoaderRoute: typeof AutomacoesWhatsappRouteImport
       parentRoute: typeof AutomacoesRoute
+    }
+    '/configuracoes/casa': {
+      id: '/configuracoes/casa'
+      path: '/casa'
+      fullPath: '/configuracoes/casa'
+      preLoaderRoute: typeof ConfiguracoesCasaRouteImport
+      parentRoute: typeof ConfiguracoesRoute
     }
     '/jornadas/$journeyId': {
       id: '/jornadas/$journeyId'
@@ -1373,6 +1406,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicShortioSyncRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/tenant-domains/verify': {
+      id: '/api/public/tenant-domains/verify'
+      path: '/api/public/tenant-domains/verify'
+      fullPath: '/api/public/tenant-domains/verify'
+      preLoaderRoute: typeof ApiPublicTenantDomainsVerifyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/webhook/$evento': {
       id: '/api/public/webhook/$evento'
       path: '/api/public/webhook/$evento'
@@ -1455,6 +1495,18 @@ const CampanhasRouteWithChildren = CampanhasRoute._addFileChildren(
   CampanhasRouteChildren,
 )
 
+interface ConfiguracoesRouteChildren {
+  ConfiguracoesCasaRoute: typeof ConfiguracoesCasaRoute
+}
+
+const ConfiguracoesRouteChildren: ConfiguracoesRouteChildren = {
+  ConfiguracoesCasaRoute: ConfiguracoesCasaRoute,
+}
+
+const ConfiguracoesRouteWithChildren = ConfiguracoesRoute._addFileChildren(
+  ConfiguracoesRouteChildren,
+)
+
 interface JornadasRouteChildren {
   JornadasJourneyIdRoute: typeof JornadasJourneyIdRoute
   JornadasNovaRoute: typeof JornadasNovaRoute
@@ -1508,7 +1560,7 @@ const rootRouteChildren: RootRouteChildren = {
   AlertasRoute: AlertasRoute,
   AutomacoesRoute: AutomacoesRouteWithChildren,
   CampanhasRoute: CampanhasRouteWithChildren,
-  ConfiguracoesRoute: ConfiguracoesRoute,
+  ConfiguracoesRoute: ConfiguracoesRouteWithChildren,
   ConsentimentosRoute: ConsentimentosRoute,
   CreditosSmsRoute: CreditosSmsRoute,
   EmailRoute: EmailRoute,
@@ -1554,6 +1606,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicMetaSyncTickRoute: ApiPublicMetaSyncTickRoute,
   ApiPublicPrecallDispatchRoute: ApiPublicPrecallDispatchRoute,
   ApiPublicShortioSyncRoute: ApiPublicShortioSyncRoute,
+  ApiPublicTenantDomainsVerifyRoute: ApiPublicTenantDomainsVerifyRoute,
   ApiPublicWebhookEventoRoute: ApiPublicWebhookEventoRoute,
   ApiPublicEmailImgAssetIdFilenameRoute: ApiPublicEmailImgAssetIdFilenameRoute,
   ApiPublicInfobipEmailEventsRoute: ApiPublicInfobipEmailEventsRoute,

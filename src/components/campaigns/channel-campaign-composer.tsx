@@ -73,6 +73,15 @@ import { listSmsTemplates } from "@/lib/sms-templates.functions";
 import { previewSmsCampaignRecipients, scheduleBulkSms, sendBulkSms } from "@/lib/sms.functions";
 import { estimateSms } from "@/lib/link-tracking-preview";
 import { fromBrtInput, toBrtInput } from "@/components/journeys/journey-editor-config";
+import { getComposerOptions } from "@/lib/house-config.functions";
+import { COMPOSER_OPTIONS_QUERY_KEY } from "@/components/house-config/house-config-query";
+import { ShortDomainSelect } from "@/components/house-config/short-domain-select";
+import { EmailSenderSelect, EMAIL_BLOCKED_WARNING } from "@/components/house-config/email-sender-select";
+import {
+  EmailBlockedNotice,
+  ShortenerFallbackNotice,
+} from "@/components/house-config/composer-notices";
+import { LinkInsertMenu } from "@/components/house-config/link-insert-menu";
 import { UNRESOLVED_REASONS, type UnresolvedReason } from "@/lib/campaign-recipients";
 import { requestConfirmation, requestTextInput } from "@/components/system-dialog-host";
 import {
@@ -140,6 +149,21 @@ export function ChannelCampaignComposer({
   const sendEmail = useServerFn(sendEmailCampaignNow);
   const dispatchVoice = useServerFn(bulkDispatchCalls);
   const createEmailTemplate = useServerFn(saveEmailTemplate);
+  const getComposerOpts = useServerFn(getComposerOptions);
+
+  const composerOptions = useQuery({
+    queryKey: COMPOSER_OPTIONS_QUERY_KEY,
+    queryFn: () => getComposerOpts(),
+    enabled: open,
+  });
+  const siteUrl = composerOptions.data?.siteUrl ?? null;
+  const quickLinks = composerOptions.data?.quickLinks ?? [];
+  const shortDomains = composerOptions.data?.shortDomains ?? [];
+  const shortenerPending = composerOptions.data?.shortenerPending ?? false;
+  const emailSenders = composerOptions.data?.senders ?? [];
+  // Only a confirmed-empty sender list blocks sending — while the query is
+  // still loading or failed, we don't know yet, so we don't block on it.
+  const emailBlocked = composerOptions.isSuccess && emailSenders.length === 0;
 
   const [channel, setChannel] = useState<Channel>(initialChannel);
   const [name, setName] = useState("");
@@ -150,6 +174,9 @@ export function ChannelCampaignComposer({
   const [smsContent, setSmsContent] = useState("");
   const smsContentRef = useRef<HTMLTextAreaElement>(null);
   const [emailTemplateId, setEmailTemplateId] = useState("");
+  // null = "padrão da casa" (the tenant's current default verified domain/sender).
+  const [shortDomainId, setShortDomainId] = useState<string | null>(null);
+  const [senderId, setSenderId] = useState<string | null>(null);
   const [voiceMode, setVoiceMode] = useState<"script" | "asset">("asset");
   const [voiceSourceId, setVoiceSourceId] = useState("");
   const [when, setWhen] = useState<"now" | "schedule">("now");
@@ -268,6 +295,8 @@ export function ChannelCampaignComposer({
     setSmsTemplateId("");
     setSmsContent("");
     setEmailTemplateId("");
+    setShortDomainId(null);
+    setSenderId(null);
     setVoiceMode("asset");
     setVoiceSourceId("");
     setWhen("now");
@@ -295,6 +324,8 @@ export function ChannelCampaignComposer({
     setSmsTemplateId(String(payload.smsTemplateId ?? ""));
     setSmsContent(draft.content);
     setEmailTemplateId(String(payload.emailTemplateId ?? ""));
+    setShortDomainId((payload.shortDomainId as string | null | undefined) ?? null);
+    setSenderId((payload.senderId as string | null | undefined) ?? null);
     setVoiceMode(payload.voiceMode === "script" ? "script" : "asset");
     setVoiceSourceId(draft.assetId ?? "");
     setWhen(draft.scheduledAt ? "schedule" : "now");
@@ -440,6 +471,8 @@ export function ChannelCampaignComposer({
       payload: {
         smsTemplateId,
         emailTemplateId,
+        shortDomainId,
+        senderId,
         voiceMode,
       },
     }),
@@ -451,6 +484,8 @@ export function ChannelCampaignComposer({
       smsTemplateId,
       smsContent,
       emailTemplateId,
+      shortDomainId,
+      senderId,
       voiceSourceId,
       voiceMode,
       activeEmailTemplate,
@@ -547,6 +582,7 @@ export function ChannelCampaignComposer({
       if (when === "schedule" && scheduleTooSoon)
         throw new Error("O agendamento deve ter pelo menos um minuto de antecedência.");
       if (!riskConfirmed) throw new Error("Confirme a revisão de risco antes de enviar.");
+      if (channel === "email" && emailBlocked) throw new Error(EMAIL_BLOCKED_WARNING);
       const scheduleAt = when === "schedule" ? (fromBrtInput(scheduledAt) ?? undefined) : undefined;
 
       if (channel === "sms") {
@@ -560,6 +596,7 @@ export function ChannelCampaignComposer({
           trackLinks,
           templateId: smsTemplateId || undefined,
           conversionObjective: "conversion" as const,
+          shortDomainId,
         };
         const result =
           when === "schedule"
@@ -589,6 +626,8 @@ export function ChannelCampaignComposer({
             smtp: "Remetente padrão",
             templateId: emailTemplateId,
             smtpId: null,
+            senderId,
+            shortDomainId,
             agendadoPara: scheduleAt ?? null,
             status: when === "schedule" ? "agendada" : "enviando",
             targetPlayerIds: audience.eligiblePlayerIds,
@@ -875,10 +914,31 @@ export function ChannelCampaignComposer({
                     value={smsContent}
                     onChange={setSmsContent}
                   />
+                  <LinkInsertMenu
+                    siteUrl={siteUrl}
+                    quickLinks={quickLinks}
+                    textareaRef={smsContentRef}
+                    value={smsContent}
+                    onChange={setSmsContent}
+                  />
                   <p className="text-xs text-muted-foreground">
                     {smsEstimate.characters} caracteres · {smsEstimate.encoding} · {parts} parte(s)
                     · estimativa: {num(cost)} créditos
                   </p>
+                </div>
+                <div className="space-y-2">
+                  <Label>Domínio do encurtador</Label>
+                  <ShortenerFallbackNotice
+                    isSuccess={composerOptions.isSuccess}
+                    isError={composerOptions.isError}
+                    shortenerPending={shortenerPending}
+                    hasVerifiedDomain={shortDomains.length > 0}
+                  />
+                  <ShortDomainSelect
+                    domains={shortDomains}
+                    value={shortDomainId}
+                    onChange={setShortDomainId}
+                  />
                 </div>
               </div>
             )}
@@ -920,6 +980,33 @@ export function ChannelCampaignComposer({
                   readOnly
                   label="Variáveis aceitas nos templates de e-mail"
                 />
+                <div className="space-y-2">
+                  <Label>Remetente</Label>
+                  <EmailBlockedNotice
+                    isSuccess={composerOptions.isSuccess}
+                    isError={composerOptions.isError}
+                    hasVerifiedSender={emailSenders.length > 0}
+                  />
+                  <EmailSenderSelect
+                    senders={emailSenders}
+                    value={senderId}
+                    onChange={setSenderId}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Domínio do encurtador</Label>
+                  <ShortenerFallbackNotice
+                    isSuccess={composerOptions.isSuccess}
+                    isError={composerOptions.isError}
+                    shortenerPending={shortenerPending}
+                    hasVerifiedDomain={shortDomains.length > 0}
+                  />
+                  <ShortDomainSelect
+                    domains={shortDomains}
+                    value={shortDomainId}
+                    onChange={setShortDomainId}
+                  />
+                </div>
               </div>
             )}
             {channel === "voice" && (
@@ -1153,7 +1240,8 @@ export function ChannelCampaignComposer({
               !draftId ||
               draftState === "dirty" ||
               draftState === "saving" ||
-              draftState === "error"
+              draftState === "error" ||
+              (channel === "email" && emailBlocked)
             }
             onClick={() => void confirmAndSubmit()}
             aria-describedby={validationIssues.length ? fieldIds.validation : undefined}

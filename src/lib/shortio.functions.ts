@@ -144,7 +144,10 @@ export const getShortioSettings = createServerFn({ method: "GET" })
 
 const settingsInput = z.object({
   enabled: z.boolean(),
-  domain: z.string().trim().max(253).nullable(),
+  // Accepted for compatibility with older clients but IGNORED: the shortener
+  // domain is now managed through tenant_domains (Configuração da casa), and
+  // this form must never overwrite shortio_settings.domain.
+  domain: z.string().trim().max(253).nullable().optional(),
   // Aggregate attribution is intentionally unavailable until its data model
   // and reporting semantics are implemented.
   attribution_mode: z.literal("individual"),
@@ -154,40 +157,48 @@ const settingsInput = z.object({
   enabled_channels: z.array(z.enum(["sms", "email"])).min(1).max(2),
 });
 
+/** Builds the shortio_settings upsert row. Never includes `domain` (nor any
+ * other column not listed here), so a save from the links settings page can
+ * not null the legacy shortener domain. */
+export function buildShortioSettingsUpsert(
+  data: z.infer<typeof settingsInput>,
+  tenantId: string,
+  userId: string,
+  now: Date = new Date(),
+) {
+  const hosts = Array.from(
+    new Set(
+      data.allowed_destination_hosts.map((host) =>
+        host
+          .toLowerCase()
+          .replace(/^https?:\/\//, "")
+          .replace(/\/.*$/, "")
+          .replace(/^\.+/, ""),
+      ),
+    ),
+  );
+  return {
+    tenant_id: tenantId,
+    enabled: data.enabled,
+    attribution_mode: data.attribution_mode,
+    fallback_mode: data.fallback_mode,
+    default_ttl_days: data.default_ttl_days,
+    allowed_destination_hosts: hosts,
+    enabled_channels: data.enabled_channels,
+    updated_by: userId,
+    updated_at: now.toISOString(),
+  };
+}
+
 export const saveShortioSettings = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((v: unknown) => settingsInput.parse(v))
   .handler(async ({ data, context }) => {
     const tenantId = await requireShortioAdmin(context);
     await assertTenantNotDemo(tenantId);
-    const domain =
-      data.domain
-        ?.replace(/^https?:\/\//, "")
-        .replace(/\/.*$/, "")
-        .toLowerCase() || null;
-    const hosts = Array.from(
-      new Set(
-        data.allowed_destination_hosts.map((host) =>
-          host
-            .toLowerCase()
-            .replace(/^https?:\/\//, "")
-            .replace(/\/.*$/, "")
-            .replace(/^\.+/, ""),
-        ),
-      ),
-    );
-    const { error } = await (context.supabase as any).from("shortio_settings").upsert(
-      {
-        ...data,
-        tenant_id: tenantId,
-        domain,
-        allowed_destination_hosts: hosts,
-        enabled_channels: data.enabled_channels,
-        updated_by: context.userId,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "tenant_id" },
-    );
+    const { error } = await (context.supabase as any)
+      .from("shortio_settings")
+      .upsert(buildShortioSettingsUpsert(data, tenantId, context.userId), { onConflict: "tenant_id" });
     if (error) throw new Error(error.message);
     return { ok: true };
   });

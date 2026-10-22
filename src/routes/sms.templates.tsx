@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Copy, Pencil, Plus, Save, ArchiveRestore, Archive } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   archiveSmsTemplate,
@@ -10,6 +10,9 @@ import {
   listSmsTemplates,
   saveSmsTemplate,
 } from "@/lib/sms-templates.functions";
+import { getComposerOptions } from "@/lib/house-config.functions";
+import { COMPOSER_OPTIONS_QUERY_KEY } from "@/components/house-config/house-config-query";
+import { LinkInsertMenu } from "@/components/house-config/link-insert-menu";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -36,7 +39,13 @@ function SmsTemplatesPage() {
   const duplicate = useServerFn(duplicateSmsTemplate);
   const archive = useServerFn(archiveSmsTemplate);
   const templates = useQuery({ queryKey: ["sms-templates"], queryFn: () => list() });
+  const getComposerOpts = useServerFn(getComposerOptions);
+  const composerOptions = useQuery({
+    queryKey: COMPOSER_OPTIONS_QUERY_KEY,
+    queryFn: () => getComposerOpts(),
+  });
   const [editing, setEditing] = useState<Template | null>(null);
+  const contentRef = useRef<HTMLTextAreaElement>(null);
   const estimate = estimateSms(editing?.content ?? "");
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["sms-templates"] });
   const saveMutation = useMutation({
@@ -135,6 +144,7 @@ function SmsTemplatesPage() {
               <div>
                 <Label>Mensagem</Label>
                 <Textarea
+                  ref={contentRef}
                   name="content"
                   rows={5}
                   value={editing.content}
@@ -144,6 +154,15 @@ function SmsTemplatesPage() {
                     setEditing((current) =>
                       current ? { ...current, content: event.target.value } : current,
                     )
+                  }
+                />
+                <LinkInsertMenu
+                  siteUrl={composerOptions.data?.siteUrl ?? null}
+                  quickLinks={composerOptions.data?.quickLinks ?? []}
+                  textareaRef={contentRef}
+                  value={editing.content}
+                  onChange={(content) =>
+                    setEditing((current) => (current ? { ...current, content } : current))
                   }
                 />
                 <p className="mt-1 text-xs text-muted-foreground">

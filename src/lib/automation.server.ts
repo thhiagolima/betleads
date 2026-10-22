@@ -5,6 +5,7 @@ import { detectTriggersForPlayer, type TriggerType } from "./triggers.server";
 import { sendFlowBlock, type FlowBlock, type SessionRow } from "./whatsapp-send.server";
 import type { PlayerLike } from "./player-rules";
 import { buildPlayerVariables, renderTemplate } from "./template-vars.server";
+import { loadHouseLinks } from "./house-links.server";
 import { pickHighestPriority, priorityRank } from "./priorities";
 import {
   getAntibanSettings,
@@ -737,11 +738,12 @@ export async function runDispatcher(
           .eq("tenant_id", tenantId)
           .maybeSingle();
         if (player) {
-          const vars = buildPlayerVariables(player);
+          const house = await loadHouseLinks(tenantId);
+          const vars = buildPlayerVariables(player, house);
           blockToSend = {
             ...block,
-            content: block.content ? renderTemplate(block.content, vars) : block.content,
-            caption: block.caption ? renderTemplate(block.caption, vars) : block.caption,
+            content: block.content ? renderTemplate(block.content, vars, house) : block.content,
+            caption: block.caption ? renderTemplate(block.caption, vars, house) : block.caption,
           };
         }
       }

@@ -48,7 +48,8 @@ vi.mock("@/integrations/supabase/client.server", () => {
   return { supabaseAdmin: { from, rpc: vi.fn(async () => ({ data: [], error: null })) } };
 });
 
-vi.mock("./email-send.server", () => ({
+vi.mock("./email-send.server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./email-send.server")>()),
   resolveSender: vi.fn(async () => ({ fromEmail: "a@a.com", fromName: "A", replyTo: null })),
   sendInfobipEmail: vi.fn(async (input: { to: string; subject: string; html: string }) => {
     state.sends.push({ to: input.to, subject: input.subject, html: input.html });
@@ -66,6 +67,7 @@ vi.mock("./dispatch-rate.server", () => ({
 }));
 
 import { runEmailFlowDispatcher } from "./email-automations.server";
+import { resolveSender, sendInfobipEmail } from "./email-send.server";
 
 const A = "00000000-0000-4000-8000-00000000000a";
 const B = "00000000-0000-4000-8000-00000000000b";
@@ -144,5 +146,44 @@ describe("email flow dispatcher stays inside the lead's tenant", () => {
     await runEmailFlowDispatcher({ onlyLeadId: "lead-1" });
     expect(state.tables.email_flow_logs.length).toBeGreaterThan(0);
     for (const log of state.tables.email_flow_logs) expect(log.tenant_id).toBe(A);
+  });
+});
+
+describe("email flow sender", () => {
+  it("passes the block's sender_id and fails the lead without a verified sender", async () => {
+    seed("tpl-a", "p-a");
+    state.tables.email_flow_blocks[0].sender_id = "sender-1";
+    state.tables.email_flow_blocks[0].smtp_config_id = "smtp-1";
+    vi.mocked(resolveSender).mockResolvedValueOnce(null);
+    await runEmailFlowDispatcher({ onlyLeadId: "lead-1" });
+    expect(resolveSender).toHaveBeenCalledWith({ tenantId: A, senderId: "sender-1" });
+    expect(state.sends).toEqual([]);
+    expect(state.tables.email_send_logs).toHaveLength(0);
+    expect(state.tables.email_flow_leads[0]).toMatchObject({
+      status: "failed",
+      exit_reason: "EMAIL_DOMAIN_NOT_VERIFIED",
+    });
+    expect(state.tables.email_flow_logs.at(-1)).toMatchObject({ event: "failed" });
+    expect(JSON.stringify(state.tables.email_flow_logs.at(-1))).toContain(
+      "Configure e verifique um domínio de e-mail da casa para enviar e-mails.",
+    );
+  });
+
+  it("sends from the block's sender_id when it resolves", async () => {
+    seed("tpl-a", "p-a");
+    state.tables.email_flow_blocks[0].sender_id = "sender-1";
+    state.tables.email_flow_blocks[0].smtp_config_id = "smtp-1";
+    vi.mocked(resolveSender).mockResolvedValueOnce({
+      fromEmail: "promo@mail.casa.bet",
+      fromName: "Promo",
+      replyTo: null,
+      senderId: "sender-1",
+    });
+    await runEmailFlowDispatcher({ onlyLeadId: "lead-1" });
+    expect(resolveSender).toHaveBeenCalledWith({ tenantId: A, senderId: "sender-1" });
+    expect(vi.mocked(sendInfobipEmail).mock.calls[0]?.[0]).toMatchObject({
+      from: "promo@mail.casa.bet",
+      fromName: "Promo",
+    });
   });
 });

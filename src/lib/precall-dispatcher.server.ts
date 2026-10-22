@@ -4,6 +4,7 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { sendFlowBlock } from "./whatsapp-send.server";
 import { buildPlayerVariables, renderTemplate } from "./template-vars.server";
+import { loadHouseLinks } from "./house-links.server";
 import { randomDelaySeconds } from "./precall.server";
 import { listDemoTenantIds } from "./tenant-access.server";
 
@@ -91,12 +92,13 @@ export async function runPrecallDispatcher(): Promise<{
       continue;
     }
     const tpl = templates[Math.floor(Math.random() * templates.length)];
-    const vars = buildPlayerVariables(player ?? { nome: null });
+    const house = await loadHouseLinks(camp.tenant_id);
+    const vars = buildPlayerVariables(player ?? { nome: null }, house);
     // Fallback seguro: se {primeiro_nome} vazio
     if (!vars.primeiro_nome || vars.primeiro_nome === "amigo") {
       vars.primeiro_nome = "tudo bem";
     }
-    const mensagem = renderTemplate(tpl.content, vars);
+    const mensagem = renderTemplate(tpl.content, vars, house);
 
     try {
       await sendFlowBlock(

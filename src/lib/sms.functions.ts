@@ -14,7 +14,8 @@ import {
   resolveCurrentTenantId,
   resolveOperationalTenantId,
 } from "@/lib/tenant-access.server";
-import { buildPlayerVariables } from "./template-vars.server";
+import { buildPlayerVariables, renderTemplate } from "./template-vars.server";
+import { loadHouseLinks, type HouseLinks } from "./house-links.server";
 import {
   markTrackedDispatchesFailed,
   markTrackedDispatchesSent,
@@ -37,6 +38,7 @@ import {
 } from "./sms-provider-breaker.server";
 import type { LinkTrackingContext } from "./shortio.server";
 import { conversionFunnelSnapshot } from "./conversion-funnel";
+import { campaignShortDomainColumn } from "./campaign-refs.server";
 import { normalizeSmsAudienceCriteria } from "./sms-audience-criteria";
 import {
   campaignDeliveryKey,
@@ -131,15 +133,22 @@ export function toShortBrasilCell(e164OrRaw: string): string {
   return local;
 }
 
+/** Also applies the unknown-`{link_*}` → house site URL fallback (see
+ * `template-vars.server.ts`'s `renderTemplate`, which this delegates to) when
+ * `house` is supplied and has a `siteUrl` — e.g. a free-typed `{link_promo}`
+ * that isn't in `variables`. Without `house` (or `siteUrl: null`), behavior
+ * is byte-for-byte identical to the legacy implementation. */
 export function renderSmsVariables(
   content: string,
   variables?: Record<string, string | number> | null,
+  house?: HouseLinks | null,
 ): string {
-  if (!variables || Object.keys(variables).length === 0) return content;
-  return content.replace(/\{([a-zA-Z0-9_]+)\}/g, (match, key: string) => {
-    const value = variables[key];
-    return value === undefined || value === null ? match : String(value);
-  });
+  if ((!variables || Object.keys(variables).length === 0) && !house?.siteUrl) return content;
+  const vars: Record<string, string> = {};
+  for (const [key, value] of Object.entries(variables ?? {})) {
+    if (value !== undefined && value !== null) vars[key] = String(value);
+  }
+  return renderTemplate(content, vars, house);
 }
 
 export function shortBrasilCredentials(): { usuario: string; chave: string } {
@@ -722,10 +731,15 @@ export async function sendSmsInternal(args: {
   /** Structured origin for campaign/journey attribution. Never infer this from display text. */
   linkTrackingOrigin?: Pick<
     LinkTrackingContext,
-    "sourceType" | "sourceId" | "journeyStepId" | "journeyStepPosition"
+    "sourceType" | "sourceId" | "journeyStepId" | "journeyStepPosition" | "shortDomainId"
   >;
   /** Stable identity supplied by a queue/worker when retrying one delivery. */
   deliveryKey?: string | null;
+  /** House URL / quick links for the unknown-`{link_*}` fallback. Pass it
+   * whenever `content` may still contain unrendered `{token}`s (the common
+   * case: campaign/bulk/test sends pass raw content + `variables` and rely
+   * on this function to render them). */
+  house?: HouseLinks | null;
 }) {
   // Demo guard first: before the phone check, billing, link tracking or any
   // sms_send_logs / sms_credit_ledger / link_dispatches write. Fail-closed: a
@@ -803,7 +817,7 @@ export async function sendSmsInternal(args: {
       };
     }
   }
-  const renderedContent = renderSmsVariables(args.content, args.variables);
+  const renderedContent = renderSmsVariables(args.content, args.variables, args.house);
   const deliveryKey = args.deliveryKey ?? crypto.randomUUID();
   let preparedContent = renderedContent;
   let trackedDispatchIds: string[] = [];
@@ -823,6 +837,7 @@ export async function sendSmsInternal(args: {
       sourceId: args.linkTrackingOrigin?.sourceId ?? args.flowId ?? args.triggerName ?? null,
       journeyStepId: args.linkTrackingOrigin?.journeyStepId ?? null,
       journeyStepPosition: args.linkTrackingOrigin?.journeyStepPosition ?? null,
+      shortDomainId: args.linkTrackingOrigin?.shortDomainId ?? null,
       recipientPlayerId: args.playerId ?? null,
       messageLogType: "sms_send_logs",
       deliveryKey,
@@ -972,6 +987,7 @@ export const sendTestSms = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const tenantId = await resolveOperationalTenantId(context.supabase);
+    const house = await loadHouseLinks(tenantId);
     let variables: Record<string, string> | null = null;
     if (data.playerId) {
       const { data: p } = await supabaseAdmin
@@ -983,7 +999,7 @@ export const sendTestSms = createServerFn({ method: "POST" })
         .eq("tenant_id", tenantId)
         .maybeSingle();
       if (p) {
-        variables = buildPlayerVariables(p);
+        variables = buildPlayerVariables(p, house);
       }
     }
     return sendSmsInternal({
@@ -994,6 +1010,7 @@ export const sendTestSms = createServerFn({ method: "POST" })
       variables,
       tenantId,
       linkTrackingEnabled: data.trackLinks,
+      house,
     });
   });
 
@@ -1061,7 +1078,8 @@ export const triggerSmsFlowNow = createServerFn({ method: "POST" })
       .maybeSingle();
     if (!player?.telefone) return { ok: false, error: "Player sem telefone" };
 
-    const variables = buildPlayerVariables(player);
+    const house = await loadHouseLinks(tenantId);
+    const variables = buildPlayerVariables(player, house);
     return sendSmsInternal({
       to: player.telefone,
       content: first.content,
@@ -1070,6 +1088,7 @@ export const triggerSmsFlowNow = createServerFn({ method: "POST" })
       triggerName: data.triggerName,
       variables,
       tenantId,
+      house,
     });
   });
 
@@ -1099,6 +1118,8 @@ export const sendBulkSms = createServerFn({ method: "POST" })
           .enum(["acquisition", "conversion", "reactivation"])
           .default("conversion"),
         enabledFunnelSteps: z.array(z.string().max(80)).max(10).optional(),
+        /** tenant_domains shortener for this campaign's links. */
+        shortDomainId: dbUuid().nullable().optional(),
       })
       .parse(input),
   )
@@ -1129,6 +1150,7 @@ export const sendBulkSms = createServerFn({ method: "POST" })
       };
     }
 
+    const shortDomainColumn = await campaignShortDomainColumn(tenantId, data.shortDomainId);
     const trigger = `campanha:${data.campaignName}:${data.route}`;
     const inputTargets: Array<{ phone: string; playerId?: string }> = [
       ...data.recipients,
@@ -1173,6 +1195,7 @@ export const sendBulkSms = createServerFn({ method: "POST" })
             data.enabledFunnelSteps,
           ),
           created_by: context.userId,
+          ...shortDomainColumn,
         })
         .select("id")
         .single();
@@ -1198,6 +1221,7 @@ export const sendBulkSms = createServerFn({ method: "POST" })
     }
 
     // Carrega variáveis dos players envolvidos (uma query só)
+    const house = await loadHouseLinks(tenantId);
     const playerIds = Array.from(new Set(targets.map((t) => t.playerId)));
     const varsByPlayer = new Map<string, Record<string, string>>();
     if (playerIds.length > 0) {
@@ -1208,7 +1232,7 @@ export const sendBulkSms = createServerFn({ method: "POST" })
         )
         .in("id", playerIds);
       (players ?? []).forEach((p) => {
-        varsByPlayer.set(p.id, buildPlayerVariables(p));
+        varsByPlayer.set(p.id, buildPlayerVariables(p, house));
       });
     }
 
@@ -1238,6 +1262,7 @@ export const sendBulkSms = createServerFn({ method: "POST" })
           data.enabledFunnelSteps,
         ),
         created_by: context.userId,
+        ...shortDomainColumn,
       })
       .select("id")
       .single();
@@ -1289,8 +1314,13 @@ export const sendBulkSms = createServerFn({ method: "POST" })
             triggerName: trigger,
             variables,
             tenantId,
+            house,
             linkTrackingEnabled: true,
-            linkTrackingOrigin: { sourceType: "campaign", sourceId: immediateCampaign.id },
+            linkTrackingOrigin: {
+              sourceType: "campaign",
+              sourceId: immediateCampaign.id,
+              shortDomainId: shortDomainColumn.short_domain_id ?? null,
+            },
             // Mesma chave que o worker usaria: uma nova tentativa deste
             // destinatário nunca chega de novo ao provedor nem à cobrança.
             deliveryKey: await campaignDeliveryKey(immediateCampaign.id, t.playerId),
@@ -1926,6 +1956,7 @@ export const resendFailedSms = createServerFn({ method: "POST" })
     );
     const varsByPlayer = new Map<string, Record<string, string>>();
     if (playerIds.length > 0) {
+      const house = await loadHouseLinks(tenantId);
       const { data: players } = await supabaseAdmin
         .from("players")
         .select(
@@ -1934,7 +1965,7 @@ export const resendFailedSms = createServerFn({ method: "POST" })
         .eq("tenant_id", tenantId)
         .in("id", playerIds);
       (players ?? []).forEach((p) => {
-        varsByPlayer.set(p.id, buildPlayerVariables(p));
+        varsByPlayer.set(p.id, buildPlayerVariables(p, house));
       });
     }
 
@@ -2015,6 +2046,8 @@ const ScheduleBulkSchema = z.object({
   enabledFunnelSteps: z.array(z.string().max(80)).max(10).optional(),
   /** Saved audience rule: recipients are recalculated by the worker at send time. */
   audienceCriteria: z.record(z.string(), z.unknown()).optional(),
+  /** tenant_domains shortener for this campaign's links. */
+  shortDomainId: dbUuid().nullable().optional(),
 });
 
 /**
@@ -2094,6 +2127,7 @@ export const scheduleBulkSms = createServerFn({ method: "POST" })
       ...data.phones.map((phone) => ({ phone })),
     ]);
     const targets = resolution.resolved;
+    const shortDomainColumn = await campaignShortDomainColumn(tenantId, data.shortDomainId);
 
     const campaignRow = {
       tenant_id: tenantId,
@@ -2115,6 +2149,7 @@ export const scheduleBulkSms = createServerFn({ method: "POST" })
         data.enabledFunnelSteps,
       ),
       created_by: context.userId,
+      ...shortDomainColumn,
     };
     const insertCampaign = (row: Record<string, unknown>) =>
       (context.supabase as any)

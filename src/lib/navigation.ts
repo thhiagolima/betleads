@@ -128,6 +128,7 @@ export const SIDEBAR_SECTIONS: NavSection[] = [
 export const SIDEBAR_FOOTER: NavLink[] = [
   link("Integrações", "/webhooks", Plug),
   link("Consentimentos", "/consentimentos", ShieldQuestion),
+  link("Configuração da casa", "/configuracoes/casa", Building2),
   link("Configurações", "/configuracoes", Settings),
 ];
 
@@ -196,6 +197,7 @@ export const ROUTE_META: Record<string, RouteMeta> = {
   "/experts": { section: "IA", title: "Experts" },
   "/webhooks": { section: "Configurações", title: "Integrações" },
   "/consentimentos": { section: "Configurações", title: "Consentimentos" },
+  "/configuracoes/casa": { section: "Configurações", title: "Configuração da casa" },
   "/configuracoes": { section: "Configurações", title: "Configurações" },
   "/tenants": { section: "Conta", title: "Conta e equipe" },
   "/admin": { section: "Administração", title: "Visão da plataforma" },

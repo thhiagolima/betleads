@@ -182,48 +182,88 @@ export async function sendInfobipEmail(input: SendEmailInput): Promise<SendEmail
   return result;
 }
 
-export async function resolveSender(
-  smtpId?: string | null,
-  tenantId?: string | null,
-): Promise<{ fromEmail: string; fromName: string | null; replyTo: string | null } | null> {
-  if (smtpId) {
-    const { data, error } = await supabaseAdmin
-      .from("email_smtp_configs")
-      .select("from_email, from_name, config")
-      .eq("id", smtpId)
-      .maybeSingle();
-    if (!error && data)
-      return {
-        fromEmail: data.from_email,
-        fromName: data.from_name ?? null,
-        replyTo: ((data.config ?? {}) as { replyTo?: string }).replyTo || null,
-      };
+export const EMAIL_DOMAIN_NOT_VERIFIED = "EMAIL_DOMAIN_NOT_VERIFIED";
+
+/**
+ * The house has no sender on a verified e-mail domain. Thrown before
+ * sendInfobipEmail, so nothing is sent nor logged as sent.
+ */
+export class EmailDomainNotVerifiedError extends Error {
+  readonly code = EMAIL_DOMAIN_NOT_VERIFIED;
+  constructor(message = "Configure e verifique um domínio de e-mail da casa para enviar e-mails.") {
+    super(message);
+    this.name = "EmailDomainNotVerifiedError";
   }
-  const senderQuery = supabaseAdmin
+}
+
+/** Shown when a campaign/step names a sender that no longer qualifies. */
+export const STALE_SENDER_MESSAGE =
+  "O remetente escolhido não está mais disponível (domínio removido ou não verificado). Escolha outro remetente.";
+
+export type ResolvedSender = {
+  fromEmail: string;
+  fromName: string;
+  replyTo: string | null;
+  senderId: string;
+};
+
+/**
+ * Sender of a house e-mail. Only `email_senders` of this tenant whose
+ * `domain_id` is a verified, non-removed e-mail `tenant_domains` row of the
+ * same tenant qualify (legacy senders without domain_id never do, and
+ * `email_smtp_configs` is never read).
+ * - An explicit `senderId` must itself qualify: if it no longer does (other
+ *   house, unverified/removed domain, legacy, deleted) the send is BLOCKED
+ *   (`null`) — it never silently switches to another sender.
+ * - No `senderId`: the house default, then the oldest qualifying sender.
+ * `null` = the house cannot send this e-mail (callers throw
+ * EmailDomainNotVerifiedError).
+ */
+export async function resolveSender(input: {
+  tenantId: string;
+  senderId?: string | null;
+}): Promise<ResolvedSender | null> {
+  const { tenantId, senderId } = input;
+  if (!tenantId) return null;
+  const blockStale = () => {
+    console.warn(
+      `[resolveSender] sender ${senderId} no longer qualifies for tenant ${tenantId}; e-mail blocked`,
+    );
+    return null;
+  };
+  const { data: senders, error } = await supabaseAdmin
     .from("email_senders")
-    .select("from_email, from_name, reply_to")
-    .eq("is_default", true)
-    .limit(1);
-  if (tenantId) senderQuery.eq("tenant_id", tenantId);
-  const { data: sender } = await senderQuery.maybeSingle();
-  if (sender)
-    return {
-      fromEmail: sender.from_email,
-      fromName: sender.from_name ?? null,
-      replyTo: sender.reply_to ?? null,
-    };
-  const smtpQuery = supabaseAdmin
-    .from("email_smtp_configs")
-    .select("from_email, from_name, config")
-    .eq("is_default", true)
-    .limit(1);
-  if (tenantId) smtpQuery.eq("tenant_id", tenantId);
-  const { data: smtp } = await smtpQuery.maybeSingle();
-  return smtp
-    ? {
-        fromEmail: smtp.from_email,
-        fromName: smtp.from_name ?? null,
-        replyTo: ((smtp.config ?? {}) as { replyTo?: string }).replyTo || null,
-      }
-    : null;
+    .select("id, from_email, from_name, name, reply_to, domain_id, is_default, created_at")
+    .eq("tenant_id", tenantId)
+    .not("domain_id", "is", null);
+  if (error) throw new Error(error.message);
+  const candidates = senders ?? [];
+  const domainIds = [...new Set(candidates.map((s) => s.domain_id).filter(Boolean))] as string[];
+  if (domainIds.length === 0) return senderId ? blockStale() : null;
+  const { data: domains, error: domainError } = await supabaseAdmin
+    .from("tenant_domains")
+    .select("id, removed_at")
+    .in("id", domainIds)
+    .eq("tenant_id", tenantId)
+    .eq("kind", "email")
+    .eq("status", "verified");
+  if (domainError) throw new Error(domainError.message);
+  const verified = new Set((domains ?? []).filter((d) => !d.removed_at).map((d) => d.id));
+  const usable = candidates
+    .filter((s) => s.domain_id && verified.has(s.domain_id))
+    .sort((a, b) => String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")));
+  let chosen: (typeof usable)[number] | undefined;
+  if (senderId) {
+    chosen = usable.find((s) => s.id === senderId);
+    if (!chosen) return blockStale();
+  } else {
+    chosen = usable.find((s) => s.is_default) ?? usable[0];
+  }
+  if (!chosen) return null;
+  return {
+    fromEmail: chosen.from_email,
+    fromName: chosen.from_name || chosen.name,
+    replyTo: chosen.reply_to ?? null,
+    senderId: chosen.id,
+  };
 }

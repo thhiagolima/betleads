@@ -16,6 +16,8 @@ const smsConfigSchema = z.object({
   variants: z.array(z.string().trim().min(1).max(1600)).max(20).optional(),
   track_links: z.boolean().optional(),
   sender: z.string().trim().max(30).optional(),
+  /** tenant_domains shortener; unverified/removed falls back at send time. */
+  short_domain_id: z.string().uuid().nullable().optional(),
   template_id: z.string().uuid().optional(),
   template_snapshot: z
     .object({
@@ -29,6 +31,8 @@ const smsConfigSchema = z.object({
 const emailConfigSchema = z.object({
   template_id: z.string().uuid(),
   sender_id: z.string().uuid().optional(),
+  /** tenant_domains shortener; unverified/removed falls back at send time. */
+  short_domain_id: z.string().uuid().nullable().optional(),
   template_snapshot: z
     .object({
       id: z.string().uuid(),
@@ -104,3 +108,14 @@ export const journeyInputSchema = z.object({
 
 export type JourneyInput = z.infer<typeof journeyInputSchema>;
 export type JourneyStepInput = z.infer<typeof journeyStepInputSchema>;
+
+/**
+ * Sender of a legacy e-mail flow block converted into a journey step: the
+ * block's email_senders row. The legacy smtp_config_id (email_smtp_configs)
+ * is never copied — saveJourney would reject it as a sender of the house.
+ */
+export function legacyEmailBlockSenderConfig(block: { sender_id?: string | null }): {
+  sender_id?: string;
+} {
+  return block.sender_id ? { sender_id: block.sender_id } : {};
+}
