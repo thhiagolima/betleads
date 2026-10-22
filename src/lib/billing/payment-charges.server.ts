@@ -45,15 +45,18 @@ function sanitizeProviderPayload(raw: unknown): Json {
 /**
  * Writes the latest known state of a charge from the Upper API. Sets
  * `needs_review` when the charge is reported PAID but the paid amount does
- * not match what was charged — never clears a review flag on its own (only
- * the superadmin resolving it, out of scope here, would do that). For a
- * terminal unpaid status (EXPIRED/CANCELLED/FAILED), also marks the linked
+ * not match OUR stored `amount_cents` (never Upper's own `amountCents` —
+ * that only proves Upper is self-consistent, not that it matches what we
+ * actually charged). Never writes `needs_review = false`: a flag set here
+ * earlier, or by the super admin, must survive every later snapshot — only
+ * a human resolving the case clears it (out of scope here). For a terminal
+ * unpaid status (EXPIRED/CANCELLED/FAILED), also marks the linked
  * credit_topup_orders row with the matching lowercase status.
  */
 export async function recordChargeSnapshot(chargeId: string, upper: UpperCharge): Promise<void> {
   const { data: existing, error: fetchError } = await supabaseAdmin
     .from("payment_charges")
-    .select("ref_id, kind")
+    .select("ref_id, kind, amount_cents")
     .eq("id", chargeId)
     .maybeSingle();
   if (fetchError) throw new Error(fetchError.message);
@@ -71,8 +74,12 @@ export async function recordChargeSnapshot(chargeId: string, upper: UpperCharge)
   };
 
   if (upper.status === "PAID") {
-    patch.needs_review =
-      upper.paidAmountCents === null || upper.paidAmountCents !== upper.amountCents;
+    const amountMismatch =
+      upper.paidAmountCents === null || upper.paidAmountCents !== existing.amount_cents;
+    if (amountMismatch) {
+      patch.needs_review = true;
+    }
+    // A match never resets needs_review to false — see the doc comment above.
   }
 
   const { error: updateError } = await supabaseAdmin
@@ -107,7 +114,7 @@ export async function confirmChargeFromUpper(
 ): Promise<{ outcome: ConfirmChargeOutcome }> {
   const { data: chargeRow, error: findError } = await supabaseAdmin
     .from("payment_charges")
-    .select("id")
+    .select("id, amount_cents, needs_review")
     .eq("external_id", externalId)
     .maybeSingle();
   if (findError) throw new Error(findError.message);
@@ -118,7 +125,14 @@ export async function confirmChargeFromUpper(
 
   if (upper.status !== "PAID") return { outcome: "not_paid" };
 
-  if (upper.paidAmountCents === null || upper.paidAmountCents !== upper.amountCents) {
+  // Compare against OUR stored amount_cents, never Upper's own amountCents
+  // (see recordChargeSnapshot). A review flag already set (by this check or
+  // by a super admin) is sticky and blocks crediting even if this payment
+  // matches — never decided locally only; the RPC enforces the same rule
+  // server-side as a second layer.
+  const amountMismatch =
+    upper.paidAmountCents === null || upper.paidAmountCents !== chargeRow.amount_cents;
+  if (chargeRow.needs_review || amountMismatch) {
     return { outcome: "needs_review" };
   }
 

@@ -64,6 +64,21 @@ describe("verifyUpperSignature", () => {
     });
   });
 
+  it("computes the HMAC over t exactly as received, not Number(t) re-stringified", () => {
+    // A leading-zero t is valid per the header pattern but Number("0" + t)
+    // stringifies without the zero — if the implementation re-stringified
+    // t before hashing, this signature (computed over the literal "0...")
+    // would come out mismatched.
+    const now = Math.floor(Date.now() / 1000);
+    const tRaw = `0${now}`;
+    const v1 = createHmac("sha256", SECRET).update(`${tRaw}.${body}`).digest("hex");
+    const header = `t=${tRaw},v1=${v1}`;
+    // nowSec stays an ordinary integer; only the signed string carries the
+    // leading zero, so staleness math still works off the numeric value.
+    const result = verifyUpperSignature(body, header, SECRET, Number(tRaw));
+    expect(result).toEqual({ ok: true, t: Number(tRaw) });
+  });
+
   it("rejects a v1 of a different length than expected without throwing", () => {
     const now = Math.floor(Date.now() / 1000);
     const header = `t=${now},v1=ab`;

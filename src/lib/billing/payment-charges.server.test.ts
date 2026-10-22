@@ -101,6 +101,36 @@ describe("recordChargeSnapshot", () => {
     expect(fake.admin.rows("payment_charges")[0].needs_review).toBe(true);
   });
 
+  it("flags needs_review against OUR stored amount_cents, not Upper's own amountCents", async () => {
+    // Upper reports PAID with its own amountCents/paidAmountCents matching
+    // each other (50000/50000) — internally consistent on Upper's side —
+    // but our stored charge says 60000. This must still be flagged.
+    fake.admin.rows("payment_charges").push(chargeRow({ amount_cents: 60000 }));
+
+    await recordChargeSnapshot(
+      "charge-1",
+      upperCharge({
+        status: "PAID",
+        amountCents: 50000,
+        paidAmountCents: 50000,
+        paidAt: "2026-10-22T12:00:00Z",
+      }),
+    );
+
+    expect(fake.admin.rows("payment_charges")[0].needs_review).toBe(true);
+  });
+
+  it("never clears needs_review once set, even when a later snapshot's amount matches", async () => {
+    fake.admin.rows("payment_charges").push(chargeRow({ needs_review: true }));
+
+    await recordChargeSnapshot(
+      "charge-1",
+      upperCharge({ status: "PAID", paidAmountCents: 50000, paidAt: "2026-10-22T12:00:00Z" }),
+    );
+
+    expect(fake.admin.rows("payment_charges")[0].needs_review).toBe(true);
+  });
+
   it("marks the linked credit_topup_order lowercase for EXPIRED/CANCELLED/FAILED", async () => {
     fake.admin.rows("payment_charges").push(chargeRow());
     fake.admin
@@ -152,6 +182,39 @@ describe("confirmChargeFromUpper", () => {
       data: { ok: true, charge_id: args._charge_id },
       error: null,
     }));
+    fake.admin.onRpc("billing_credit_paid_charge", rpcSpy);
+
+    const result = await confirmChargeFromUpper("bl-top-order-1");
+    expect(result).toEqual({ outcome: "needs_review" });
+    expect(rpcSpy).not.toHaveBeenCalled();
+    expect(fake.admin.rows("payment_charges")[0].needs_review).toBe(true);
+  });
+
+  it("needs_review when Upper's amount matches its own paid amount but differs from our stored amount_cents, and does not credit", async () => {
+    fake.admin.rows("payment_charges").push(chargeRow({ amount_cents: 60000 }));
+    getUpperCharge.mockResolvedValue(
+      upperCharge({
+        status: "PAID",
+        amountCents: 50000,
+        paidAmountCents: 50000,
+        paidAt: new Date().toISOString(),
+      }),
+    );
+    const rpcSpy = vi.fn(() => ({ data: { ok: true }, error: null }));
+    fake.admin.onRpc("billing_credit_paid_charge", rpcSpy);
+
+    const result = await confirmChargeFromUpper("bl-top-order-1");
+    expect(result).toEqual({ outcome: "needs_review" });
+    expect(rpcSpy).not.toHaveBeenCalled();
+    expect(fake.admin.rows("payment_charges")[0].needs_review).toBe(true);
+  });
+
+  it("stays needs_review and uncredited when the flag was already set, even with a matching payment", async () => {
+    fake.admin.rows("payment_charges").push(chargeRow({ needs_review: true }));
+    getUpperCharge.mockResolvedValue(
+      upperCharge({ status: "PAID", paidAmountCents: 50000, paidAt: new Date().toISOString() }),
+    );
+    const rpcSpy = vi.fn(() => ({ data: { ok: true }, error: null }));
     fake.admin.onRpc("billing_credit_paid_charge", rpcSpy);
 
     const result = await confirmChargeFromUpper("bl-top-order-1");

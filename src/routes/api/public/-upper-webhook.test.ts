@@ -87,6 +87,98 @@ describe("POST /api/public/upper/webhook", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].processed_at).not.toBeNull();
     expect(rows[0].signature_valid).toBe(true);
+    expect(rows[0].outcome).toBe("credited");
+  });
+
+  it("answers 503 and calls confirmChargeFromUpper zero times when the event cannot be recorded", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    fake.admin.failNext("payment_webhook_events", "upsert", "db down");
+    const response = await signedPost({
+      id: "evt-db-down",
+      event: "charge.paid",
+      data: { externalId: "bl-top-order-1" },
+    });
+    expect(response.status).toBe(503);
+    expect(confirmChargeFromUpper).not.toHaveBeenCalled();
+  });
+
+  it("records payment.* events as ignored without calling confirmChargeFromUpper", async () => {
+    const response = await signedPost({ id: "evt-payment-created", event: "payment.created" });
+    expect(response.status).toBe(200);
+    expect(confirmChargeFromUpper).not.toHaveBeenCalled();
+    const rows = fake.admin.rows("payment_webhook_events");
+    expect(rows[0].outcome).toBe("ignored");
+  });
+
+  it("stores raw_body with payer.document masked at both the top level and data.payer, never the original", async () => {
+    const unmaskedDoc = "123.456.789-09";
+    const response = await signedPost({
+      id: "evt-lgpd",
+      event: "charge.paid",
+      payer: { name: "Fulano", document: unmaskedDoc },
+      data: {
+        externalId: "bl-top-order-1",
+        payer: { name: "Fulano", document: unmaskedDoc },
+      },
+    });
+    expect(response.status).toBe(200);
+    const row = fake.admin.rows("payment_webhook_events")[0];
+    const rawBody = row.raw_body as string;
+    expect(rawBody).not.toContain(unmaskedDoc);
+    const stored = JSON.parse(rawBody);
+    expect(stored.payer.document).toBe("***.456.789-**");
+    expect(stored.data.payer.document).toBe("***.456.789-**");
+  });
+
+  it("stores only the allow-listed headers, never the signature", async () => {
+    const body = JSON.stringify({ id: "evt-headers", event: "ping" });
+    const now = Math.floor(Date.now() / 1000);
+    await post(body, {
+      "x-upper-signature": sign(body, now),
+      "x-upper-event": "charge.paid",
+      "x-upper-delivery": "delivery-999",
+      "user-agent": "Upper/1.0",
+    });
+    const row = fake.admin.rows("payment_webhook_events")[0];
+    const headers = row.headers as Record<string, string>;
+    expect(headers).toMatchObject({
+      "x-upper-event": "charge.paid",
+      "x-upper-delivery": "delivery-999",
+      "user-agent": "Upper/1.0",
+      "content-type": "application/json",
+    });
+    expect(headers["x-upper-signature"]).toBeUndefined();
+  });
+
+  it("clears a stale error on a successful reprocessing of the same event", async () => {
+    const eventBody = {
+      id: "evt-retry",
+      event: "charge.paid",
+      data: { externalId: "bl-top-order-1" },
+    };
+    confirmChargeFromUpper.mockRejectedValueOnce(new Error("temporary failure"));
+    const first = await signedPost(eventBody);
+    expect(first.status).toBe(200);
+    let row = fake.admin.rows("payment_webhook_events")[0];
+    expect(row.error).toContain("temporary failure");
+    expect(row.processed_at).toBeFalsy();
+
+    confirmChargeFromUpper.mockResolvedValueOnce({ outcome: "credited" });
+    const second = await signedPost(eventBody);
+    expect(second.status).toBe(200);
+    row = fake.admin.rows("payment_webhook_events")[0];
+    expect(row.processed_at).not.toBeNull();
+    expect(row.error).toBeNull();
+    expect(row.outcome).toBe("credited");
+  });
+
+  it("logs and still answers 200, storing the error, when marking processed_at fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    fake.admin.failNext("payment_webhook_events", "update", "write conflict");
+    const response = await signedPost({ id: "evt-mark-fail", event: "ping" });
+    expect(response.status).toBe(200);
+    const row = fake.admin.rows("payment_webhook_events")[0];
+    expect(row.error).toContain("processed_at update failed");
   });
 
   it("does not reprocess the same event_id a second time", async () => {
@@ -108,7 +200,9 @@ describe("POST /api/public/upper/webhook", () => {
     const response = await signedPost({ id: "evt-ping", event: "ping" });
     expect(response.status).toBe(200);
     expect(confirmChargeFromUpper).not.toHaveBeenCalled();
-    expect(fake.admin.rows("payment_webhook_events")).toHaveLength(1);
+    const rows = fake.admin.rows("payment_webhook_events");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].outcome).toBe("ping");
   });
 
   it("records an unknown externalId (another account) and still answers 200", async () => {
@@ -123,6 +217,7 @@ describe("POST /api/public/upper/webhook", () => {
     const rows = fake.admin.rows("payment_webhook_events");
     expect(rows).toHaveLength(1);
     expect(rows[0].processed_at).not.toBeNull();
+    expect(rows[0].outcome).toBe("unknown_charge");
   });
 
   it("falls back to X-Upper-Delivery for the event id when the body has none", async () => {

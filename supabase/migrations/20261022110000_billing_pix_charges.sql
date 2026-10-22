@@ -89,6 +89,11 @@ create table public.payment_webhook_events (
   headers jsonb null,
   received_at timestamptz not null default now(),
   processed_at timestamptz null,
+  -- What the route (Task 3) did with the event once processed: the
+  -- confirmChargeFromUpper outcome for charge.* ('credited', 'not_paid',
+  -- 'needs_review', 'already_credited', 'unknown_charge'), 'ping' for a
+  -- ping, 'ignored' for payment.*. Null while unprocessed.
+  outcome text null,
   error text null
 );
 

@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { maskPayerDocument } from "@/lib/billing/payer";
 import { confirmChargeFromUpper } from "@/lib/billing/payment-charges.server";
 import { verifyUpperSignature } from "@/lib/billing/upper-webhook";
 
@@ -11,15 +12,18 @@ import { verifyUpperSignature } from "@/lib/billing/upper-webhook";
 //   verifyUpperSignature. A bad signature answers 400 and writes nothing.
 // - Every event with a valid signature is deduplicated by event_id (the
 //   body's `id`, falling back to X-Upper-Delivery) and recorded in
-//   payment_webhook_events before any processing, so a crash mid-processing
-//   still leaves a row the Task 5 reconciliation cron can catch up on.
+//   payment_webhook_events BEFORE any processing. If that recording itself
+//   fails (DB error), we answer 5xx so Upper redelivers — "200 even if
+//   processing throws" only applies to failures AFTER the event row exists.
 // - A repeated event_id that already has `processed_at` is answered with 200
 //   without touching confirmChargeFromUpper again.
 // - `charge.*` events trigger confirmChargeFromUpper, which always re-checks
 //   the charge with Upper directly (the webhook is only ever a hint).
-//   `ping` and `payment.*` are recorded and otherwise ignored.
-// - Processing errors never surface as a non-200: the message (no secrets)
-//   goes to payment_webhook_events.error and the cron retries later.
+//   `ping` and `payment.*` are recorded and otherwise ignored. The outcome
+//   ('credited', 'not_paid', 'needs_review', 'already_credited',
+//   'unknown_charge', 'ping', 'ignored', ...) is stored in `.outcome`.
+// - raw_body and headers are stored for diagnostics, but never the full
+//   payer document (LGPD) or the signature header (a secret).
 
 type UpperWebhookBody = {
   id?: unknown;
@@ -40,6 +44,53 @@ function externalIdFrom(body: UpperWebhookBody): string | null {
   return null;
 }
 
+/** Masks `container.payer.document` in place; returns whether it touched anything. */
+function maskPayerDocumentField(container: unknown): boolean {
+  if (!container || typeof container !== "object" || Array.isArray(container)) return false;
+  const record = container as Record<string, unknown>;
+  const payer = record.payer;
+  if (!payer || typeof payer !== "object" || Array.isArray(payer)) return false;
+  const payerRecord = payer as Record<string, unknown>;
+  if (!("document" in payerRecord)) return false;
+  const document = typeof payerRecord.document === "string" ? payerRecord.document : null;
+  payerRecord.document = maskPayerDocument(document);
+  return true;
+}
+
+/**
+ * LGPD: payment_webhook_events.raw_body must never carry a full payer
+ * document, at either `payer.document` or `data.payer.document`. The
+ * signature was already verified against the exact original bytes before
+ * this runs; only the stored copy is sanitized. If `parsed` isn't a plain
+ * object (or carries no payer.document anywhere), the original bytes are
+ * stored unchanged.
+ */
+function sanitizedRawBodyFor(rawBody: string, parsed: unknown): string {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return rawBody;
+
+  let clone: Record<string, unknown>;
+  try {
+    clone = JSON.parse(JSON.stringify(parsed)) as Record<string, unknown>;
+  } catch {
+    return rawBody;
+  }
+
+  const touchedTop = maskPayerDocumentField(clone);
+  const touchedData = maskPayerDocumentField(clone.data);
+  if (!touchedTop && !touchedData) return rawBody;
+  return JSON.stringify(clone);
+}
+
+/** Only these headers are kept for diagnostics — never X-Upper-Signature (a secret). */
+function headersToStore(request: Request): Record<string, string> {
+  const kept: Record<string, string> = {};
+  for (const name of ["x-upper-event", "x-upper-delivery", "user-agent", "content-type"]) {
+    const value = request.headers.get(name);
+    if (value) kept[name] = value;
+  }
+  return kept;
+}
+
 async function handlePost(request: Request): Promise<Response> {
   const secret = process.env.UPPER_WEBHOOK_SECRET;
   const rawBody = await request.text();
@@ -58,9 +109,11 @@ async function handlePost(request: Request): Promise<Response> {
     return Response.json({ ok: false, error: verification.reason }, { status: 400 });
   }
 
+  let parsedBody: unknown;
   let body: UpperWebhookBody;
   try {
-    body = rawBody ? (JSON.parse(rawBody) as UpperWebhookBody) : {};
+    parsedBody = rawBody ? JSON.parse(rawBody) : {};
+    body = parsedBody as UpperWebhookBody;
   } catch {
     return Response.json({ ok: false, error: "malformed_body" }, { status: 400 });
   }
@@ -73,6 +126,10 @@ async function handlePost(request: Request): Promise<Response> {
 
   const eventName = typeof body.event === "string" ? body.event : null;
 
+  // Stage 1: record the event. A failure here means Upper should redeliver
+  // — nothing has been saved, so there is nothing for the cron to catch up
+  // on later.
+  let isNewEvent: boolean;
   try {
     const { data: inserted, error: insertError } = await supabaseAdmin
       .from("payment_webhook_events")
@@ -82,52 +139,76 @@ async function handlePost(request: Request): Promise<Response> {
           event: eventName,
           delivery_id: deliveryId,
           signature_valid: true,
-          raw_body: rawBody,
+          raw_body: sanitizedRawBodyFor(rawBody, parsedBody),
+          headers: headersToStore(request),
         },
         { onConflict: "event_id", ignoreDuplicates: true },
       )
       .select("event_id");
     if (insertError) throw new Error(insertError.message);
+    isNewEvent = Array.isArray(inserted) && inserted.length > 0;
 
-    const isNewEvent = Array.isArray(inserted) && inserted.length > 0;
     if (!isNewEvent) {
-      const { data: existingRow } = await supabaseAdmin
+      const { data: existingRow, error: existingError } = await supabaseAdmin
         .from("payment_webhook_events")
         .select("processed_at")
         .eq("event_id", eventId)
         .maybeSingle();
+      if (existingError) throw new Error(existingError.message);
       if (existingRow?.processed_at) {
         return Response.json({ ok: true }, { status: 200 });
       }
     }
-
-    try {
-      if (eventName && eventName.startsWith("charge.")) {
-        const externalId = externalIdFrom(body);
-        if (externalId) {
-          await confirmChargeFromUpper(externalId);
-        }
-      }
-      // `ping` and `payment.*` (and a `charge.*` with no externalId) are
-      // recorded above and otherwise need no further action.
-      await supabaseAdmin
-        .from("payment_webhook_events")
-        .update({ processed_at: new Date().toISOString() })
-        .eq("event_id", eventId);
-    } catch (processingError) {
-      const message =
-        processingError instanceof Error ? processingError.message : "unknown processing error";
-      await supabaseAdmin
-        .from("payment_webhook_events")
-        .update({ error: message })
-        .eq("event_id", eventId);
-    }
-
-    return Response.json({ ok: true }, { status: 200 });
   } catch (err) {
     console.error("[upper-webhook] error recording event:", err);
-    return Response.json({ ok: true }, { status: 200 });
+    return Response.json({ ok: false, error: "event_not_recorded" }, { status: 503 });
   }
+
+  // Stage 2: process. The event row is saved at this point, so any error
+  // from here on is recorded on that row and still answers 200 — Task 5's
+  // reconciliation cron catches up later.
+  let outcome: string | null = null;
+  try {
+    if (eventName === "ping") {
+      outcome = "ping";
+    } else if (eventName && eventName.startsWith("payment.")) {
+      outcome = "ignored";
+    } else if (eventName && eventName.startsWith("charge.")) {
+      const externalId = externalIdFrom(body);
+      if (externalId) {
+        const result = await confirmChargeFromUpper(externalId);
+        outcome = result.outcome;
+      } else {
+        outcome = "missing_external_id";
+      }
+    } else {
+      outcome = "ignored";
+    }
+
+    const { error: updateError } = await supabaseAdmin
+      .from("payment_webhook_events")
+      .update({ processed_at: new Date().toISOString(), outcome, error: null })
+      .eq("event_id", eventId);
+    if (updateError) {
+      // The event is safely recorded, but we can't honestly claim it was
+      // marked processed: log it and leave a trail on the row itself.
+      console.error("[upper-webhook] failed to mark event processed:", updateError);
+      await supabaseAdmin
+        .from("payment_webhook_events")
+        .update({ error: `processed_at update failed: ${updateError.message}` })
+        .eq("event_id", eventId);
+    }
+  } catch (processingError) {
+    const message =
+      processingError instanceof Error ? processingError.message : "unknown processing error";
+    console.error("[upper-webhook] processing error:", processingError);
+    await supabaseAdmin
+      .from("payment_webhook_events")
+      .update({ error: message, outcome })
+      .eq("event_id", eventId);
+  }
+
+  return Response.json({ ok: true }, { status: 200 });
 }
 
 export const Route = createFileRoute("/api/public/upper/webhook")({

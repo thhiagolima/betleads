@@ -25,10 +25,14 @@ export function verifyUpperSignature(
   const match = HEADER_PATTERN.exec(header.trim());
   if (!match) return { ok: false, reason: "malformed" };
 
-  const t = Number(match[1]);
+  const tRaw = match[1];
+  const t = Number(tRaw);
   const receivedV1 = match[2].toLowerCase();
 
-  const expectedV1 = createHmac("sha256", secret).update(`${t}.${rawBody}`).digest("hex");
+  // HMAC input must be the `t` exactly as received (no re-stringifying a
+  // parsed number) — Upper signs the literal header bytes, and a value like
+  // a leading zero would otherwise make a valid signature mismatch.
+  const expectedV1 = createHmac("sha256", secret).update(`${tRaw}.${rawBody}`).digest("hex");
 
   const expectedBuf = Buffer.from(expectedV1, "utf8");
   const receivedBuf = Buffer.from(receivedV1, "utf8");

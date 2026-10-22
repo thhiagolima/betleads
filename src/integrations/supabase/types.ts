@@ -4742,6 +4742,7 @@ export type Database = {
           event: string | null
           event_id: string
           headers: Json | null
+          outcome: string | null
           processed_at: string | null
           raw_body: string | null
           received_at: string
@@ -4753,6 +4754,7 @@ export type Database = {
           event?: string | null
           event_id: string
           headers?: Json | null
+          outcome?: string | null
           processed_at?: string | null
           raw_body?: string | null
           received_at?: string
@@ -4764,6 +4766,7 @@ export type Database = {
           event?: string | null
           event_id?: string
           headers?: Json | null
+          outcome?: string | null
           processed_at?: string | null
           raw_body?: string | null
           received_at?: string
