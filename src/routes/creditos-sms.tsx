@@ -12,6 +12,7 @@ import {
   type WalletMonthUsageRow,
   type WalletPriceRow,
 } from "@/components/billing/wallet-usage-panels";
+import { WalletBalanceNotice } from "@/components/billing/wallet-balance-notice";
 import { useActiveTenant } from "@/hooks/use-active-tenant";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import { DEMO_EMPTY_STATE_TEXT } from "@/lib/demo-tenant";
@@ -107,6 +108,12 @@ function SaldoConsumoPage() {
           Saldo disponível, consumo do mês por canal e extrato de movimentações.
         </p>
       </div>
+
+      <WalletBalanceNotice
+        balance={balance}
+        exempt={Boolean(summary.exempt)}
+        smsUnitPrice={prices.sms?.unit_price == null ? null : Number(prices.sms.unit_price)}
+      />
 
       <div className="grid gap-4 md:grid-cols-3">
         <Card className="border-primary/30 bg-card/80">

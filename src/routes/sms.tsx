@@ -67,6 +67,7 @@ import { getFailedSmsBreakdown, resendFailedSms } from "@/lib/sms.functions";
 import { getBillingPrices } from "@/lib/billing/billing.functions";
 import { countSmsSegments } from "@/lib/sms-segments";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
+import { WalletBalanceNotice } from "@/components/billing/wallet-balance-notice";
 import { useActiveTenant } from "@/hooks/use-active-tenant";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import { DEMO_SEND_BLOCKED_TEXT } from "@/lib/demo-tenant";
@@ -506,6 +507,9 @@ function SmsCompactWorkspace({
           <CreditCard className="mr-2 h-3.5 w-3.5" /> {exempt ? "Casa isenta" : `Saldo ${brl(balance)}`}
         </Button>
       </div>
+      {credits.data ? (
+        <WalletBalanceNotice balance={balance} exempt={exempt} smsUnitPrice={smsUnitPrice} />
+      ) : null}
 
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
         {kpis.map((item) => (
@@ -1136,6 +1140,9 @@ function SmsHomePanel() {
           {exempt ? "Casa isenta" : `Saldo ${brl(balance)}`}
         </Button>
       </div>
+      {credits.data ? (
+        <WalletBalanceNotice balance={balance} exempt={exempt} smsUnitPrice={smsUnitPrice} />
+      ) : null}
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         {[
