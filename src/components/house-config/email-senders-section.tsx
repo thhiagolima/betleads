@@ -28,7 +28,10 @@ import {
   removeEmailSenderForHouse,
   saveEmailSenderForHouse,
 } from "@/lib/house-config.functions";
-import { HOUSE_CONFIG_QUERY_KEY } from "@/components/house-config/house-config-query";
+import {
+  COMPOSER_OPTIONS_QUERY_KEY,
+  HOUSE_CONFIG_QUERY_KEY,
+} from "@/components/house-config/house-config-query";
 
 export function EmailSendersSection({ variant = "page" }: { variant?: "page" | "wizard" }) {
   const isDemo = useIsDemoTenant();
@@ -49,7 +52,10 @@ export function EmailSendersSection({ variant = "page" }: { variant?: "page" | "
   const [replyTo, setReplyTo] = useState("");
   const [isDefault, setIsDefault] = useState(false);
 
-  const refresh = () => qc.invalidateQueries({ queryKey: HOUSE_CONFIG_QUERY_KEY });
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: HOUSE_CONFIG_QUERY_KEY });
+    qc.invalidateQueries({ queryKey: COMPOSER_OPTIONS_QUERY_KEY });
+  };
 
   const save = useMutation({
     mutationFn: () =>

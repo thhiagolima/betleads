@@ -32,3 +32,39 @@ export function toBrtInput(iso: string | null | undefined) {
 export function fromBrtInput(value: string) {
   return value ? new Date(`${value}:00-03:00`).toISOString() : null;
 }
+
+/** Sender/short-domain choice carried in the editor's local e-mail step
+ * state. `null` means "padrão da casa" — the tenant's current default
+ * verified sender/domain, so later default changes apply to this draft. */
+export type EmailStepFields = {
+  templateId: string;
+  senderId: string | null;
+  shortDomainId: string | null;
+};
+
+/** Builds the editor's local e-mail step fields from a saved step's config.
+ * Absent `sender_id`/`short_domain_id` (legacy steps saved before this
+ * picker existed, or a step left on "padrão da casa") both read as `null`. */
+export function emailStepFromConfig(config: Record<string, unknown>): EmailStepFields {
+  return {
+    templateId: String(config.template_id ?? ""),
+    senderId: (config.sender_id as string | undefined) ?? null,
+    shortDomainId: (config.short_domain_id as string | null | undefined) ?? null,
+  };
+}
+
+/** The sender_id/short_domain_id fields to merge into a saved e-mail step's
+ * config. `senderId: null` ("padrão da casa") omits `sender_id` entirely —
+ * the journey's email config schema makes it optional and resolves the
+ * house's default sender at send time. `short_domain_id` is always written,
+ * since its schema accepts `null` explicitly (the same "padrão da casa"
+ * meaning there). */
+export function emailStepIdsForConfig(fields: {
+  senderId: string | null;
+  shortDomainId: string | null;
+}): { sender_id?: string; short_domain_id: string | null } {
+  return {
+    ...(fields.senderId ? { sender_id: fields.senderId } : {}),
+    short_domain_id: fields.shortDomainId,
+  };
+}

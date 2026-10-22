@@ -16,7 +16,10 @@ import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import { getHouseConfig, saveHouseSite, saveQuickLinks } from "@/lib/house-config.functions";
 import { suggestedQuickLinks } from "@/lib/house-config";
-import { HOUSE_CONFIG_QUERY_KEY } from "@/components/house-config/house-config-query";
+import {
+  COMPOSER_OPTIONS_QUERY_KEY,
+  HOUSE_CONFIG_QUERY_KEY,
+} from "@/components/house-config/house-config-query";
 
 type QuickLinkDraft = { id?: string; label: string; path: string };
 
@@ -46,7 +49,10 @@ export function HouseSiteSection({ variant = "page" }: { variant?: "page" | "wiz
     setInitialized(true);
   }, [config, initialized]);
 
-  const refresh = () => qc.invalidateQueries({ queryKey: HOUSE_CONFIG_QUERY_KEY });
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: HOUSE_CONFIG_QUERY_KEY });
+    qc.invalidateQueries({ queryKey: COMPOSER_OPTIONS_QUERY_KEY });
+  };
 
   const saveSite = useMutation({
     mutationFn: () => saveSiteFn({ data: { siteUrl } }),
