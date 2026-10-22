@@ -16,7 +16,7 @@
 // - writes one `tenant_audit_logs` row with `action = "billing.<ação>"`.
 //
 // Repricing a house with an open Pix out (continuous discount, custom price,
-// freezing) and the one-off discount/cancel actions must cancel that Pix at
+// freezing) and the one-off discount/manual settle/cancel actions must cancel that Pix at
 // Upper first (`cancelOpenInvoiceCharges`, Task 3) so the next GET/webhook
 // never confirms a charge for an amount that no longer matches the invoice.
 // That cancel is best-effort: a failure at Upper is logged in the audit
@@ -458,6 +458,11 @@ export const adminManualSettleInput = z.object({
 export async function adminManualSettleFor(ctx: ServerContext, data: unknown) {
   const input = adminManualSettleInput.parse(data);
   await assertSuperAdmin(ctx.userId);
+
+  // A house paid outside Pix: cancel any Pix still open for this invoice so
+  // a later payment of it at Upper is not a second payment of a paid invoice.
+  const cancel = await cancelOpenPixBestEffort(input.invoiceId);
+
   const result = unwrap<{ tenant_id: string; invoice_id: string }>(
     await looseDb(ctx.supabase).rpc("billing_admin_manual_settle", {
       _invoice: input.invoiceId,
@@ -476,6 +481,7 @@ export async function adminManualSettleFor(ctx: ServerContext, data: unknown) {
       paidAmountCents: input.paidAmountCents ?? null,
       note: input.note,
       receipt: input.receipt,
+      pixCancel: cancel,
     },
   });
   return result;

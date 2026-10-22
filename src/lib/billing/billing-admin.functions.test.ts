@@ -279,6 +279,45 @@ describe("adminManualSettleFor", () => {
     expect(log).toMatchObject({ tenant_id: TENANT, action: "billing.manual_settle" });
     expect((log.metadata as Record<string, unknown>).note).toBe("Pago via TED");
   });
+
+  it("cancels the invoice's open Pix before the settle and audits pixCancel", async () => {
+    const order: string[] = [];
+    cancelOpenInvoiceCharges.mockImplementationOnce(async () => {
+      order.push("cancel");
+      return { canceled: 1, failed: [] };
+    });
+    userDb.onRpc("billing_admin_manual_settle", () => {
+      order.push("settle");
+      return { data: { ok: true, tenant_id: TENANT, invoice_id: INVOICE }, error: null };
+    });
+    await adminManualSettleFor(ctxFor(SUPER_ADMIN), {
+      invoiceId: INVOICE,
+      note: "Pago via TED",
+      receipt: "comprovante-123",
+      reason: "pagamento fora do Pix",
+    });
+    expect(cancelOpenInvoiceCharges).toHaveBeenCalledWith(INVOICE);
+    expect(order).toEqual(["cancel", "settle"]);
+    const metadata = fake.admin.rows("tenant_audit_logs")[0].metadata as Record<string, unknown>;
+    expect(metadata.pixCancel).toEqual({ attempted: true, ok: true, canceled: 1, failed: [] });
+  });
+
+  it("still settles when the Upper cancel fails, recording it in the audit", async () => {
+    cancelOpenInvoiceCharges.mockRejectedValueOnce(new Error("upper down"));
+    userDb.onRpc("billing_admin_manual_settle", () => ({
+      data: { ok: true, tenant_id: TENANT, invoice_id: INVOICE },
+      error: null,
+    }));
+    const result = await adminManualSettleFor(ctxFor(SUPER_ADMIN), {
+      invoiceId: INVOICE,
+      note: "Pago via TED",
+      receipt: "comprovante-123",
+      reason: "pagamento fora do Pix",
+    });
+    expect(result).toMatchObject({ tenant_id: TENANT });
+    const metadata = fake.admin.rows("tenant_audit_logs")[0].metadata as Record<string, unknown>;
+    expect(metadata.pixCancel).toMatchObject({ attempted: true, ok: false });
+  });
 });
 
 describe("adminCancelInvoiceFor", () => {
