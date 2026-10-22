@@ -67,13 +67,19 @@ async function isTenantExempt(tenantId: string): Promise<boolean> {
   return data === true;
 }
 
+/** Logs the real cause server-side and throws only the fixed, user-safe copy. */
+function logAndThrowGeneric(context: string, message: string): never {
+  console.error(`[billing/topup] ${context} failed:`, message);
+  throw new Error(GENERIC_UPPER_FAILURE_MESSAGE);
+}
+
 async function getTenantName(tenantId: string): Promise<string> {
   const { data, error } = await looseDb(supabaseAdmin)
     .from<{ nome: string | null }>("tenants")
     .select("nome")
     .eq("id", tenantId)
     .maybeSingle();
-  if (error) throw new Error(error.message);
+  if (error) logAndThrowGeneric("getTenantName", error.message);
   return data?.nome ?? "";
 }
 
@@ -89,8 +95,8 @@ function isGatewayUnavailableError(error: UpperError): boolean {
 const createTopupInput = z
   .object({
     tenantId: dbUuid().optional().nullable(),
-    packageCode: z.string().optional().nullable(),
-    amountCents: z.number().optional().nullable(),
+    packageCode: z.string().max(32).optional().nullable(),
+    amountCents: z.number().int().optional().nullable(),
   })
   .default({});
 
@@ -121,6 +127,10 @@ export async function createCreditTopupFor(
   await assertTenantNotDemo(tenantId);
 
   if (await isTenantExempt(tenantId)) throw new Error(EXEMPT_MESSAGE);
+  // Read next to the exempt check, before any order/charge row exists, so
+  // the description is ready the moment we need it and a read failure here
+  // never leaves a half-created order/charge behind.
+  const tenantName = await getTenantName(tenantId);
 
   await assertTenantCanOpenBilling(tenantId);
 
@@ -163,8 +173,6 @@ export async function createCreditTopupFor(
 
   const chargeId = (chargeRow as { id: string }).id;
 
-  const tenantName = await getTenantName(tenantId);
-
   let upper: UpperCharge;
   try {
     upper = await createUpperCharge({
@@ -182,13 +190,13 @@ export async function createCreditTopupFor(
       .from("payment_charges")
       .update({ status: "FAILED", last_error: summary, updated_at: new Date().toISOString() })
       .eq("id", chargeId);
-    if (failChargeError) throw new Error(failChargeError.message);
+    if (failChargeError) logAndThrowGeneric("mark charge FAILED", failChargeError.message);
 
     const { error: failOrderError } = await looseDb(supabaseAdmin)
       .from("credit_topup_orders")
       .update({ status: "failed" })
       .eq("id", orderId);
-    if (failOrderError) throw new Error(failOrderError.message);
+    if (failOrderError) logAndThrowGeneric("mark order failed", failOrderError.message);
 
     if (error instanceof UpperError && isGatewayUnavailableError(error)) {
       throw new Error(GATEWAY_UNAVAILABLE_MESSAGE);
@@ -196,13 +204,20 @@ export async function createCreditTopupFor(
     throw new Error(GENERIC_UPPER_FAILURE_MESSAGE);
   }
 
-  await recordChargeSnapshot(chargeId, upper);
+  try {
+    await recordChargeSnapshot(chargeId, upper);
+  } catch (error) {
+    logAndThrowGeneric(
+      "recordChargeSnapshot",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
 
   const { error: linkError } = await looseDb(supabaseAdmin)
     .from("credit_topup_orders")
     .update({ charge_id: chargeId })
     .eq("id", orderId);
-  if (linkError) throw new Error(linkError.message);
+  if (linkError) logAndThrowGeneric("link charge_id onto order", linkError.message);
 
   return {
     orderId,

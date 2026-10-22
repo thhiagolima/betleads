@@ -26,6 +26,7 @@ vi.mock("./upper-pix.server", () => ({
 }));
 
 import { createFakeDb } from "@/lib/sms-bulk.test-support";
+import { DEMO_ACTION_BLOCKED_TEXT } from "@/lib/demo-tenant";
 import { __resetDemoTenantCacheForTests } from "@/lib/tenant-access.server";
 import { createCreditTopupFor, getTopupStatusFor } from "./topup.functions";
 import { UpperError } from "./upper-pix.server";
@@ -105,8 +106,19 @@ describe("createCreditTopupFor", () => {
     fake.admin.rows("tenants")[0].is_demo = true;
     await expect(
       createCreditTopupFor(ctxFor(ADMIN_USER), { tenantId: TENANT, packageCode: "p1000" }),
-    ).rejects.toThrow();
+    ).rejects.toThrow(DEMO_ACTION_BLOCKED_TEXT);
     expect(createUpperCharge).not.toHaveBeenCalled();
+  });
+
+  it("refuses a house user who passes another house's tenantId", async () => {
+    // userDb's current_tenant_id resolves to TENANT; the caller is not a
+    // super admin, so asking for OTHER_TENANT must be refused before
+    // anything else runs.
+    await expect(
+      createCreditTopupFor(ctxFor(ADMIN_USER), { tenantId: OTHER_TENANT, packageCode: "p1000" }),
+    ).rejects.toThrow("Sem acesso aos dados desta conta.");
+    expect(createUpperCharge).not.toHaveBeenCalled();
+    expect(fake.admin.rows("credit_topup_orders")).toHaveLength(0);
   });
 
   it("refuses an exempt house", async () => {
@@ -149,6 +161,38 @@ describe("createCreditTopupFor", () => {
     expect(callArgs.externalId).toBe(`bl-top-${order.id}`);
     expect(callArgs.expiresIn).toBe(3600);
     expect(callArgs.description).toBe("Sorte Alta - Créditos BetLeads R$ 1.000,00");
+
+    // The Pix checkout details must actually land on the charge row (not
+    // just in the returned result) — this is what the purchase screen
+    // re-reads via getTopupStatus/a page refresh.
+    expect(charge.provider_charge_id).toBe("upstream-1");
+    expect(charge.emv).toBe("00020101...");
+    expect(charge.qr_code_image).toBe("https://img.example/qr.png");
+    expect(charge.payment_url).toBe("https://pay.example/x");
+    expect(charge.expires_at).toBe("2026-10-22T12:00:00Z");
+  });
+
+  it("completes a free-value purchase end to end (no package code)", async () => {
+    createUpperCharge.mockResolvedValue(
+      upperChargeResult({ amountCents: 15000, status: "ACTIVE" }),
+    );
+
+    const result = await createCreditTopupFor(ctxFor(ADMIN_USER), {
+      tenantId: TENANT,
+      amountCents: 15000,
+    });
+
+    const order = fake.admin.rows("credit_topup_orders")[0];
+    const charge = fake.admin.rows("payment_charges")[0];
+
+    expect(order.amount_cents).toBe(15000);
+    expect(order.package_code).toBeNull();
+    expect(charge.amount_cents).toBe(15000);
+    expect(result.amountCents).toBe(15000);
+
+    const callArgs = createUpperCharge.mock.calls[0][0];
+    expect(callArgs.amountCents).toBe(15000);
+    expect(callArgs.description).toBe("Sorte Alta - Créditos BetLeads R$ 150,00");
   });
 
   it("creates two distinct orders/charges/external_id on two consecutive calls", async () => {

@@ -44,14 +44,19 @@ export function resolveTopupAmount(
   if (amountCents === null || amountCents === undefined || !Number.isFinite(amountCents)) {
     throw new Error("Pacote inválido");
   }
-  const rounded = Math.round(amountCents);
-  if (rounded < MIN_TOPUP_CENTS) {
+  // Centavos are always an integer: reject a fractional amount outright
+  // instead of silently rounding it (a client sending cents should never
+  // send a fraction of a cent; this is the server's source of truth).
+  if (!Number.isInteger(amountCents)) {
+    throw new Error("Valor inválido");
+  }
+  if (amountCents < MIN_TOPUP_CENTS) {
     throw new Error("Valor mínimo de compra: R$ 100,00");
   }
-  if (rounded > MAX_TOPUP_CENTS) {
+  if (amountCents > MAX_TOPUP_CENTS) {
     throw new Error("Valor máximo de compra: R$ 50.000,00");
   }
-  return { amountCents: rounded, packageCode: null };
+  return { amountCents, packageCode: null };
 }
 
 const MAX_DESCRIPTION_LENGTH = 140;
@@ -71,10 +76,20 @@ function formatBRL(amountCents: number): string {
  * constraints: up to 140 chars, no CNPJ/e-mail). When the house name alone
  * would push the whole string past 140 chars, the house name is the part
  * that gets cut, never the fixed suffix.
+ *
+ * Cutting is done by Unicode code point (`Array.from`), never by raw
+ * `string.slice` — a plain UTF-16 slice can land in the middle of a
+ * surrogate pair (an emoji, for instance) and produce a lone/broken
+ * surrogate in the description Upper sends to the payer. Any trailing
+ * whitespace left by the cut is trimmed, and a name that ends up empty
+ * (blank, or trimmed down to nothing) falls back to "Casa" so the
+ * description never starts with " - Créditos BetLeads ...".
  */
 export function topupDescription(tenantName: string, amountCents: number): string {
   const suffix = ` - Créditos BetLeads ${formatBRL(amountCents)}`;
   const maxNameLength = Math.max(0, MAX_DESCRIPTION_LENGTH - suffix.length);
-  const name = tenantName.length > maxNameLength ? tenantName.slice(0, maxNameLength) : tenantName;
+  const codePoints = Array.from(tenantName);
+  const cut = codePoints.length > maxNameLength ? codePoints.slice(0, maxNameLength).join("") : tenantName;
+  const name = cut.trimEnd() || "Casa";
   return `${name}${suffix}`;
 }

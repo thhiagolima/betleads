@@ -39,6 +39,10 @@ describe("resolveTopupAmount", () => {
       "Pacote inválido",
     );
   });
+
+  it("rejects a non-integer free amount", () => {
+    expect(() => resolveTopupAmount({ amountCents: 15000.5 })).toThrow("Valor inválido");
+  });
 });
 
 describe("topupDescription", () => {
@@ -53,5 +57,27 @@ describe("topupDescription", () => {
     const description = topupDescription(longName, 100000);
     expect(description.length).toBeLessThanOrEqual(140);
     expect(description.endsWith(" - Créditos BetLeads R$ 1.000,00")).toBe(true);
+  });
+
+  it("cuts a long house name at a code-point boundary, never splitting an emoji's surrogate pair", () => {
+    // Suffix for this amount is 32 chars, so the name is cut at 108 code
+    // points. A leading single-unit char followed only by 2-unit emoji
+    // forces a naive UTF-16 `string.slice(0, 108)` to land mid-surrogate
+    // (1 + 107 emoji-units is an odd number of UTF-16 units into the run),
+    // which this code-point-based cut must avoid.
+    const longName = "A" + "\u{1F600}".repeat(110); // "A" + 110 grinning-face emoji
+    const description = topupDescription(longName, 100000);
+
+    expect(description.endsWith(" - Créditos BetLeads R$ 1.000,00")).toBe(true);
+    const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+    expect(loneSurrogate.test(description)).toBe(false);
+  });
+
+  it("falls back to 'Casa' for an empty house name", () => {
+    expect(topupDescription("", 100000)).toBe("Casa - Créditos BetLeads R$ 1.000,00");
+  });
+
+  it("falls back to 'Casa' for a house name that is only whitespace after the cut", () => {
+    expect(topupDescription("   ", 100000)).toBe("Casa - Créditos BetLeads R$ 1.000,00");
   });
 });

@@ -131,6 +131,65 @@ describe("recordChargeSnapshot", () => {
     expect(fake.admin.rows("payment_charges")[0].needs_review).toBe(true);
   });
 
+  it("writes provider_charge_id, emv, qr_code_image, payment_url and expires_at on create", async () => {
+    fake.admin.rows("payment_charges").push(chargeRow());
+
+    await recordChargeSnapshot(
+      "charge-1",
+      upperCharge({
+        id: "upstream-99",
+        status: "ACTIVE",
+        emv: "00020101...",
+        qrCodeImage: "https://img.example/qr.png",
+        paymentUrl: "https://pay.example/abc",
+        expiresAt: "2026-10-22T13:00:00Z",
+      }),
+    );
+
+    const row = fake.admin.rows("payment_charges")[0];
+    expect(row.provider_charge_id).toBe("upstream-99");
+    expect(row.emv).toBe("00020101...");
+    expect(row.qr_code_image).toBe("https://img.example/qr.png");
+    expect(row.payment_url).toBe("https://pay.example/abc");
+    expect(row.expires_at).toBe("2026-10-22T13:00:00Z");
+  });
+
+  it("does not overwrite previously recorded Pix details with null on a later snapshot", async () => {
+    fake.admin.rows("payment_charges").push(
+      chargeRow({
+        provider_charge_id: "upstream-99",
+        emv: "00020101...",
+        qr_code_image: "https://img.example/qr.png",
+        payment_url: "https://pay.example/abc",
+        expires_at: "2026-10-22T13:00:00Z",
+      }),
+    );
+
+    // Simulates a later GET (e.g. the reconciliation cron) whose response
+    // omits the Pix fields — as a real provider might once a charge is
+    // older/paid/expired.
+    await recordChargeSnapshot(
+      "charge-1",
+      upperCharge({
+        id: "",
+        status: "PAID",
+        paidAmountCents: 50000,
+        paidAt: "2026-10-22T12:30:00Z",
+        emv: null,
+        qrCodeImage: null,
+        paymentUrl: null,
+        expiresAt: null,
+      }),
+    );
+
+    const row = fake.admin.rows("payment_charges")[0];
+    expect(row.provider_charge_id).toBe("upstream-99");
+    expect(row.emv).toBe("00020101...");
+    expect(row.qr_code_image).toBe("https://img.example/qr.png");
+    expect(row.payment_url).toBe("https://pay.example/abc");
+    expect(row.expires_at).toBe("2026-10-22T13:00:00Z");
+  });
+
   it("marks the linked credit_topup_order lowercase for EXPIRED/CANCELLED/FAILED", async () => {
     fake.admin.rows("payment_charges").push(chargeRow());
     fake.admin

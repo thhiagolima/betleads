@@ -73,6 +73,17 @@ export async function recordChargeSnapshot(chargeId: string, upper: UpperCharge)
     updated_at: new Date().toISOString(),
   };
 
+  // Pix checkout details (the purchase screen's QR/EMV/link/expiry): only
+  // ever written when THIS snapshot actually carries a value. A later GET
+  // (e.g. the reconciliation cron polling a charge close to/after expiry)
+  // can omit fields the create response had, and must never erase what was
+  // already recorded.
+  if (upper.id) patch.provider_charge_id = upper.id;
+  if (upper.emv !== null) patch.emv = upper.emv;
+  if (upper.qrCodeImage !== null) patch.qr_code_image = upper.qrCodeImage;
+  if (upper.paymentUrl !== null) patch.payment_url = upper.paymentUrl;
+  if (upper.expiresAt !== null) patch.expires_at = upper.expiresAt;
+
   if (upper.status === "PAID") {
     const amountMismatch =
       upper.paidAmountCents === null || upper.paidAmountCents !== existing.amount_cents;
