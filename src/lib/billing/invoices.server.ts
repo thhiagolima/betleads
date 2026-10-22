@@ -102,17 +102,28 @@ export type BillingCycleEvents = { issuedInvoiceIds: string[] };
 
 export type RunBillingCycleOptions = {
   now?: Date;
-  sendEmails?: (events: BillingCycleEvents) => Promise<void>;
+  /**
+   * Task 5's e-mail pipeline. Wired by the cron route to
+   * `sendPendingBillingEmails` (billing-emails.server.ts); defaults to a
+   * no-op here so this module never depends on it directly. When it returns
+   * a number, that is the real count of e-mails sent and becomes
+   * `RunBillingCycleResult.issued`; a callback that returns nothing (the
+   * default, and every existing test double) falls back to
+   * `issuedInvoiceIds.length`, same as before this task.
+   */
+  sendEmails?: (events: BillingCycleEvents) => Promise<number | void>;
 };
 
 export type RunBillingCycleResult = {
   generated: number;
   refreshed: number;
   /**
-   * Invoices for which `sendEmails` was invoked this run (i.e. `generated`,
-   * when the flag is on) — NOT a count of e-mails actually sent. Task 5
-   * wires the real send pipeline and owns the real count; until then this
-   * is just "how many invoices were handed to the (no-op) callback".
+   * The real count of e-mails `sendEmails` reports as sent this run, when
+   * the cron route wires it to `sendPendingBillingEmails` (Task 5). A
+   * `sendEmails` that returns nothing (the default no-op, and existing test
+   * doubles) falls back to `generated` — "how many invoices were handed to
+   * the callback" — so this never regresses callers that do not inject a
+   * counting callback.
    */
   issued: number;
   errors: number;
@@ -203,8 +214,8 @@ export async function runBillingCycle(
 
   let issued = 0;
   if (isBillingInvoicesEnabled()) {
-    await sendEmails({ issuedInvoiceIds });
-    issued = issuedInvoiceIds.length;
+    const sent = await sendEmails({ issuedInvoiceIds });
+    issued = typeof sent === "number" ? sent : issuedInvoiceIds.length;
   }
 
   return {

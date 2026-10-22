@@ -44,6 +44,7 @@ UPPER_API_KEY=<upper-pix_in-only-api-key>
 UPPER_WEBHOOK_SECRET=<strong-random-webhook-secret>
 BETTERSTACK_HEARTBEAT_BILLING_RECONCILE=<better-stack-heartbeat-url>
 BILLING_INVOICES_ENABLED=false
+PLATFORM_EMAIL_FROM=no-reply@betleads.io
 ```
 
 Nunca crie variavel `VITE_` para `SUPABASE_SECRET_KEY`.
@@ -76,6 +77,12 @@ servidor.
   *`) so recalcula o `access_state` de cada casa paga, sem emitir fatura nem
   disparar e-mail; o Pix de uma fatura responde "Pagamento por Pix
   indisponivel no momento." ao criar uma cobranca.
+- `PLATFORM_EMAIL_FROM`: remetente dos quatro e-mails de cobranca (fatura
+  emitida, vence hoje, acesso suspenso, pagamento confirmado), nome fixo
+  "BetLeads". Padrao `no-reply@betleads.io`. Esse envio nunca passa pela
+  guarda de demo/bloqueio das casas (senao o e-mail de bloqueio da propria
+  casa bloqueada seria recusado); so entre 08:00-20:00 de Brasilia, e uma vez
+  por fatura e tipo (`billing_email_log`).
 
 ## Ativacao do dispatcher de jornadas
 

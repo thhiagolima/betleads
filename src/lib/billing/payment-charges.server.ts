@@ -10,6 +10,7 @@ import type { Database, Json } from "@/integrations/supabase/types";
 
 import { invalidateTenantStatusCache } from "@/lib/tenant-access.server";
 
+import { sendBillingEmail } from "./billing-emails.server";
 import { maskDocumentsDeep, maskPayerDocument } from "./payer";
 import { getUpperCharge, UpperError, type UpperCharge } from "./upper-pix.server";
 
@@ -144,10 +145,28 @@ type BillingCreditPaidChargeResult = {
 /**
  * A settled invoice changes the house's billing state (the SQL settle
  * recomputes `access_state`): drop the house from the 5 s guard cache so it
- * unlocks at once in this process instead of up to 5 s later.
+ * unlocks at once in this process instead of up to 5 s later. Also fires the
+ * 'paid' billing e-mail (Task 5), best-effort — a failure here (provider
+ * down, outside the send window, whatever) is only logged, never thrown into
+ * the payment path; the hourly sweep (`sendPendingBillingEmails`) still
+ * picks up any invoice paid in the last 48h without a 'paid' log.
  */
-function refreshTenantAfterInvoiceSettle(charge: { kind?: string | null; tenant_id?: string | null }) {
-  if (charge.kind === "invoice" && charge.tenant_id) invalidateTenantStatusCache(charge.tenant_id);
+async function refreshTenantAfterInvoiceSettle(charge: {
+  kind?: string | null;
+  tenant_id?: string | null;
+  ref_id?: string | null;
+}) {
+  if (charge.kind !== "invoice" || !charge.tenant_id) return;
+  invalidateTenantStatusCache(charge.tenant_id);
+  if (!charge.ref_id) return;
+  try {
+    await sendBillingEmail(charge.ref_id, "paid");
+  } catch (err) {
+    console.error("[billing/payment-charges] 'paid' e-mail failed", {
+      invoiceId: charge.ref_id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 export async function confirmChargeFromUpper(
@@ -155,7 +174,7 @@ export async function confirmChargeFromUpper(
 ): Promise<{ outcome: ConfirmChargeOutcome }> {
   const { data: chargeRow, error: findError } = await supabaseAdmin
     .from("payment_charges")
-    .select("id, amount_cents, needs_review, kind, tenant_id")
+    .select("id, amount_cents, needs_review, kind, tenant_id, ref_id")
     .eq("external_id", externalId)
     .maybeSingle();
   if (findError) throw new Error(findError.message);
@@ -184,7 +203,7 @@ export async function confirmChargeFromUpper(
 
   const result = data as BillingCreditPaidChargeResult | null;
   if (result?.ok) {
-    refreshTenantAfterInvoiceSettle(chargeRow);
+    await refreshTenantAfterInvoiceSettle(chargeRow);
     return { outcome: result.idempotent ? "already_credited" : "credited" };
   }
   if (
@@ -253,7 +272,7 @@ function logReconcileError(context: string, err: unknown, externalId: string): v
 async function creditLocallyPaidCharges(result: ReconcileResult): Promise<void> {
   const { data: rows, error } = await supabaseAdmin
     .from("payment_charges")
-    .select("id, external_id, kind, tenant_id")
+    .select("id, external_id, kind, tenant_id, ref_id")
     .eq("status", "PAID")
     .is("credited_at", null)
     .eq("needs_review", false)
@@ -270,7 +289,7 @@ async function creditLocallyPaidCharges(result: ReconcileResult): Promise<void> 
       const rpcResult = data as BillingCreditPaidChargeResult | null;
       if (rpcResult?.ok) {
         result.credited += 1;
-        refreshTenantAfterInvoiceSettle(row);
+        await refreshTenantAfterInvoiceSettle(row);
       }
     } catch (err) {
       result.errors += 1;
