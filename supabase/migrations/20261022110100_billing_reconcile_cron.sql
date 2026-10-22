@@ -32,3 +32,5 @@ select cron.schedule(
     );
   $job$
 );
+
+notify pgrst, 'reload schema';

@@ -473,6 +473,114 @@ describe("reconcilePendingCharges", () => {
     expect(fake.admin.rows("credit_topup_orders")[0].status).toBe("expired");
   });
 
+  it("marks a charge FAILED with last_error 'upper_not_found' when Upper 404s and the charge is older than 15 minutes", async () => {
+    fake.admin.rows("payment_charges").push(
+      chargeRow({
+        id: "c1",
+        external_id: "bl-top-c1",
+        status: "PENDING",
+        created_at: "2026-10-22T11:50:00Z", // 20 min before NOW
+      }),
+    );
+    fake.admin
+      .rows("credit_topup_orders")
+      .push({ id: "order-1", tenant_id: TENANT, status: "pending" });
+    getUpperCharge.mockRejectedValue(
+      new UpperError("Cobrança não encontrada.", { status: 404, code: null, retryable: false }),
+    );
+
+    const result = await reconcilePendingCharges({ now: NOW });
+    expect(result).toEqual({ checked: 1, credited: 0, expired: 0, errors: 1 });
+    const row = fake.admin.rows("payment_charges")[0];
+    expect(row.status).toBe("FAILED");
+    expect(row.last_error).toBe("upper_not_found");
+    expect(fake.admin.rows("credit_topup_orders")[0].status).toBe("failed");
+  });
+
+  it("only counts a 404 as an error (no status change) when the charge is younger than 15 minutes", async () => {
+    fake.admin.rows("payment_charges").push(
+      chargeRow({
+        id: "c1",
+        external_id: "bl-top-c1",
+        status: "PENDING",
+        created_at: "2026-10-22T12:05:00Z", // 5 min before NOW, past the 2 min cutoff
+      }),
+    );
+    getUpperCharge.mockRejectedValue(
+      new UpperError("Cobrança não encontrada.", { status: 404, code: null, retryable: false }),
+    );
+
+    const result = await reconcilePendingCharges({ now: NOW });
+    expect(result).toEqual({ checked: 1, credited: 0, expired: 0, errors: 1 });
+    expect(fake.admin.rows("payment_charges")[0].status).toBe("PENDING");
+  });
+
+  it("never marks a credited charge FAILED, even on a 404 past the 15-minute mark", async () => {
+    fake.admin.rows("payment_charges").push(
+      chargeRow({
+        id: "c1",
+        external_id: "bl-top-c1",
+        status: "ACTIVE",
+        credited_at: NOW.toISOString(),
+        created_at: "2026-10-22T11:50:00Z",
+      }),
+    );
+    getUpperCharge.mockRejectedValue(
+      new UpperError("Cobrança não encontrada.", { status: 404, code: null, retryable: false }),
+    );
+
+    const result = await reconcilePendingCharges({ now: NOW });
+    expect(result.errors).toBe(1);
+    expect(fake.admin.rows("payment_charges")[0].status).not.toBe("FAILED");
+  });
+
+  it("checks an unchecked charge (updated_at null) before one already checked this cycle, oldest-updated first", async () => {
+    fake.admin.rows("payment_charges").push(
+      chargeRow({
+        id: "already-checked",
+        external_id: "bl-top-already-checked",
+        status: "ACTIVE",
+        created_at: OLD_ENOUGH,
+        updated_at: "2026-10-22T12:05:00Z",
+      }),
+      chargeRow({
+        id: "never-checked",
+        external_id: "bl-top-never-checked",
+        status: "ACTIVE",
+        created_at: OLD_ENOUGH,
+        // updated_at intentionally absent: never touched by the sweep yet.
+      }),
+    );
+    getUpperCharge.mockImplementation(async (externalId: string) =>
+      upperCharge({ externalId, status: "ACTIVE" }),
+    );
+
+    await reconcilePendingCharges({ now: NOW, limit: 1 });
+    expect(getUpperCharge).toHaveBeenCalledTimes(1);
+    expect(getUpperCharge).toHaveBeenCalledWith("bl-top-never-checked");
+  });
+
+  it("touches updated_at on every charge checked, success or error", async () => {
+    fake.admin.rows("payment_charges").push(
+      chargeRow({ id: "c1", external_id: "bl-top-c1", status: "ACTIVE", created_at: OLD_ENOUGH }),
+      chargeRow({ id: "c2", external_id: "bl-top-c2", status: "ACTIVE", created_at: OLD_ENOUGH }),
+    );
+    getUpperCharge.mockImplementation(async (externalId: string) => {
+      if (externalId === "bl-top-c2") {
+        throw new UpperError("Falha de rede ao chamar a Upper.", {
+          status: 0,
+          code: "NETWORK_ERROR",
+          retryable: true,
+        });
+      }
+      return upperCharge({ externalId, status: "ACTIVE" });
+    });
+
+    await reconcilePendingCharges({ now: NOW });
+    expect(fake.admin.rows("payment_charges")[0].updated_at).toBe(NOW.toISOString());
+    expect(fake.admin.rows("payment_charges")[1].updated_at).toBe(NOW.toISOString());
+  });
+
   it("never marks an already-credited charge EXPIRED even if its expires_at is long past", async () => {
     // Defensive case: a charge already carrying credited_at (should not
     // normally coexist with status ACTIVE, but the guard must hold anyway).

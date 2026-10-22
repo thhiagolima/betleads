@@ -44,6 +44,7 @@ export function createFakeDb(options: { unique?: Record<string, string[][]> } = 
     let upsertOpts: { onConflict?: string; ignoreDuplicates?: boolean } = {};
     let limit: number | null = null;
     let returning = false;
+    const orderBys: Array<{ col: string; ascending: boolean; nullsFirst: boolean }> = [];
 
     const run = (): Result => {
       const failure = failures.findIndex((f) => f.table === table && f.op === op);
@@ -88,7 +89,22 @@ export function createFakeDb(options: { unique?: Record<string, string[][]> } = 
         tables.set(table, rows(table).filter((row) => !matched.includes(row)));
         return { data: matched, error: null };
       }
-      return { data: limit === null ? matched : matched.slice(0, limit), error: null };
+      let ordered = matched;
+      if (orderBys.length > 0) {
+        ordered = [...matched].sort((a, b) => {
+          for (const { col, ascending, nullsFirst } of orderBys) {
+            const av = a[col];
+            const bv = b[col];
+            if (av == null && bv == null) continue;
+            if (av == null) return nullsFirst ? -1 : 1;
+            if (bv == null) return nullsFirst ? 1 : -1;
+            if (av < bv) return ascending ? -1 : 1;
+            if (av > bv) return ascending ? 1 : -1;
+          }
+          return 0;
+        });
+      }
+      return { data: limit === null ? ordered : ordered.slice(0, limit), error: null };
     };
 
     const builder: any = {
@@ -140,7 +156,14 @@ export function createFakeDb(options: { unique?: Record<string, string[][]> } = 
       lte: (col: string, v: unknown) => (filters.push((r) => String(r[col]) <= String(v)), builder),
       lt: (col: string, v: unknown) => (filters.push((r) => String(r[col]) < String(v)), builder),
       gt: (col: string, v: unknown) => (filters.push((r) => String(r[col]) > String(v)), builder),
-      order: () => builder,
+      order: (col: string, opts: { ascending?: boolean; nullsFirst?: boolean } = {}) => {
+        orderBys.push({
+          col,
+          ascending: opts.ascending !== false,
+          nullsFirst: opts.nullsFirst ?? false,
+        });
+        return builder;
+      },
       limit: (n: number) => ((limit = n), builder),
       range: () => builder,
       single: async () => {

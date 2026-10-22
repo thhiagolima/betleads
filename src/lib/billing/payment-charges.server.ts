@@ -171,6 +171,12 @@ export type ReconcileResult = {
 
 const PENDING_CUTOFF_MS = 2 * 60_000;
 const EXPIRY_GRACE_MS = 10 * 60_000;
+/**
+ * A charge Upper has never heard of (404 on confirm/getUpperCharge) usually
+ * just means we are racing Upper's own create — give it this long before
+ * giving up for good. Below this age, a 404 only counts as an error.
+ */
+const NOT_FOUND_FAIL_AGE_MS = 15 * 60_000;
 const DEFAULT_RECONCILE_LIMIT = 30;
 /**
  * Separate, small budget for the "PAID locally but never credited" sweep
@@ -255,7 +261,7 @@ async function maybeExpireStaleActiveCharge(
 
   const { error: updateError } = await supabaseAdmin
     .from("payment_charges")
-    .update({ status: "EXPIRED", updated_at: new Date().toISOString() })
+    .update({ status: "EXPIRED", updated_at: now.toISOString() })
     .eq("id", current.id);
   if (updateError) throw new Error(updateError.message);
 
@@ -268,6 +274,51 @@ async function maybeExpireStaleActiveCharge(
   }
 
   result.expired += 1;
+}
+
+/**
+ * A charge Upper has never created (we crashed between inserting our row
+ * and calling Upper, or the call itself never reached them) answers every
+ * `GET` with a 404 forever — it will never turn PAID. Once it has been
+ * stuck long enough (NOT_FOUND_FAIL_AGE_MS) this gives up on it for good:
+ * FAILED locally with `last_error = 'upper_not_found'`, and its
+ * credit_topup_order (if any) 'failed'. Never touches a charge that is
+ * already credited, or whose status is PAID — a 404 reaching this point
+ * for either would mean something else is very wrong, and crediting always
+ * wins.
+ */
+async function markChargeFailedNotFound(chargeId: string, nowIso: string): Promise<void> {
+  const { data: current, error } = await supabaseAdmin
+    .from("payment_charges")
+    .select("id, status, credited_at, kind, ref_id")
+    .eq("id", chargeId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!current) return;
+  if (current.credited_at) return;
+  if (current.status === "PAID") return;
+
+  const { error: updateError } = await supabaseAdmin
+    .from("payment_charges")
+    .update({ status: "FAILED", last_error: "upper_not_found", updated_at: nowIso })
+    .eq("id", current.id);
+  if (updateError) throw new Error(updateError.message);
+
+  if (current.kind === "credit_topup") {
+    const { error: orderError } = await supabaseAdmin
+      .from("credit_topup_orders")
+      .update({ status: "failed" })
+      .eq("id", current.ref_id);
+    if (orderError) throw new Error(orderError.message);
+  }
+}
+
+async function touchChargeUpdatedAt(chargeId: string, nowIso: string): Promise<void> {
+  const { error } = await supabaseAdmin
+    .from("payment_charges")
+    .update({ updated_at: nowIso })
+    .eq("id", chargeId);
+  if (error) throw new Error(error.message);
 }
 
 /**
@@ -285,6 +336,15 @@ async function maybeExpireStaleActiveCharge(
  *   (default DEFAULT_RECONCILE_LIMIT).
  * - A charge that comes back from that check still ACTIVE and long past its
  *   expiry is marked EXPIRED locally (ruling 2).
+ * - A charge Upper answers 404 for, once stuck more than NOT_FOUND_FAIL_AGE_MS,
+ *   is given up on: FAILED locally with last_error 'upper_not_found' (a
+ *   younger 404 just counts as an error, since it likely means we are
+ *   racing Upper's own create).
+ * - Every charge this sweep checks — success or error — gets its
+ *   `updated_at` touched to `now`, and the batch is selected oldest-checked
+ *   first (`updated_at` ascending, nulls first, then `created_at`
+ *   ascending), so a charge that keeps failing moves to the back of the
+ *   queue instead of starving newer charges under the same `limit`.
  * - Any error on one charge (Upper or DB) is counted and never stops the
  *   rest (ruling 3); only `.code`, `.status` and the externalId are logged.
  */
@@ -293,6 +353,7 @@ export async function reconcilePendingCharges(
 ): Promise<ReconcileResult> {
   const limit = opts.limit ?? DEFAULT_RECONCILE_LIMIT;
   const now = opts.now ?? new Date();
+  const nowIso = now.toISOString();
   const result: ReconcileResult = { checked: 0, credited: 0, expired: 0, errors: 0 };
 
   await creditLocallyPaidCharges(result);
@@ -300,9 +361,10 @@ export async function reconcilePendingCharges(
   const cutoff = new Date(now.getTime() - PENDING_CUTOFF_MS).toISOString();
   const { data: pendingRows, error: pendingError } = await supabaseAdmin
     .from("payment_charges")
-    .select("id, external_id")
+    .select("id, external_id, created_at")
     .in("status", ["PENDING", "ACTIVE"])
     .lt("created_at", cutoff)
+    .order("updated_at", { ascending: true, nullsFirst: true })
     .order("created_at", { ascending: true })
     .limit(limit);
   if (pendingError) throw new Error(pendingError.message);
@@ -313,12 +375,27 @@ export async function reconcilePendingCharges(
       const { outcome } = await confirmChargeFromUpper(row.external_id);
       if (outcome === "credited" || outcome === "already_credited") {
         result.credited += 1;
-        continue;
+      } else {
+        await maybeExpireStaleActiveCharge(row.id, now, result);
       }
-      await maybeExpireStaleActiveCharge(row.id, now, result);
     } catch (err) {
       result.errors += 1;
       logReconcileError("error reconciling charge", err, row.external_id);
+      if (err instanceof UpperError && err.status === 404) {
+        const ageMs = now.getTime() - new Date(row.created_at).getTime();
+        if (ageMs > NOT_FOUND_FAIL_AGE_MS) {
+          try {
+            await markChargeFailedNotFound(row.id, nowIso);
+          } catch (markErr) {
+            logReconcileError("error marking not-found charge failed", markErr, row.external_id);
+          }
+        }
+      }
+    }
+    try {
+      await touchChargeUpdatedAt(row.id, nowIso);
+    } catch (touchErr) {
+      logReconcileError("error touching charge updated_at", touchErr, row.external_id);
     }
   }
 
