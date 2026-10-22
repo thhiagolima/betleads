@@ -101,8 +101,13 @@ create trigger tenant_domains_updated_at
 
 -- Backfill: a house that already has a shortener domain configured in
 -- shortio_settings gets a verified, default tenant_domains row for it.
+-- last_checked_at = now() keeps the verify cron from re-checking every
+-- backfilled row at once on its first tick; verified_notice_seen_at = now()
+-- keeps existing houses from getting a "domínio verificado" notice for a
+-- domain they have been using all along.
 insert into public.tenant_domains (
-  tenant_id, kind, hostname, status, provider_domain_id, is_default, verified_at
+  tenant_id, kind, hostname, status, provider_domain_id, is_default,
+  verified_at, last_checked_at, verified_notice_seen_at
 )
 select
   s.tenant_id,
@@ -111,6 +116,8 @@ select
   'verified',
   s.domain_id::text,
   true,
+  now(),
+  now(),
   now()
 from public.shortio_settings s
 where s.domain is not null

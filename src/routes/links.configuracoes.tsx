@@ -25,7 +25,6 @@ function LinkSettings() {
       await saveShortioSettings({
         data: {
           enabled: form.get("enabled") === "on",
-          domain: String(form.get("domain") || "") || null,
           attribution_mode: "individual",
           fallback_mode: String(form.get("fallback")) as "block" | "passthrough",
           default_ttl_days: form.get("ttl") ? Number(form.get("ttl")) : null,

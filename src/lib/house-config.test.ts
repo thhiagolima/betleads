@@ -6,6 +6,7 @@ import {
   isReservedPlatformHostname,
   normalizeHostname,
   normalizeSiteUrl,
+  planQuickLinksSave,
   providerErrorMessage,
   quickLinkKeyFromLabel,
   suggestedQuickLinks,
@@ -324,5 +325,111 @@ describe("providerErrorMessage", () => {
     expect(providerErrorMessage(null)).toBe(
       "O provedor está indisponível no momento. Tente novamente em alguns minutos.",
     );
+  });
+});
+
+describe("planQuickLinksSave", () => {
+  const existing = [
+    { id: "a", key: "login" },
+    { id: "b", key: "promo" },
+  ];
+
+  it("keeps the stored key when an existing link is renamed", () => {
+    const plan = planQuickLinksSave(
+      [
+        { id: "a", label: "Entrar agora", path: "/entrar" },
+        { id: "b", label: "Promo", path: "/promo" },
+      ],
+      existing,
+    );
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+    expect(plan.updates).toEqual([
+      { id: "a", key: "login", label: "Entrar agora", path: "/entrar", position: 0 },
+      { id: "b", key: "promo", label: "Promo", path: "/promo", position: 1 },
+    ]);
+    expect(plan.inserts).toEqual([]);
+    expect(plan.deleteIds).toEqual([]);
+  });
+
+  it("deletes only the links missing from the input and inserts new ones", () => {
+    const plan = planQuickLinksSave(
+      [
+        { id: "b", label: "Promo", path: "/promo" },
+        { label: "Depósito", path: "/deposito" },
+      ],
+      existing,
+    );
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+    expect(plan.deleteIds).toEqual(["a"]);
+    expect(plan.inserts).toEqual([{ key: "deposito", label: "Depósito", path: "/deposito", position: 1 }]);
+  });
+
+  it("dedupes a derived key that collides with a kept key using a numeric suffix", () => {
+    const plan = planQuickLinksSave(
+      [
+        { id: "b", label: "Promo", path: "/promo" },
+        { label: "Promo", path: "/promo-2" },
+        { label: "Promo", path: "/promo-3" },
+      ],
+      existing,
+    );
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+    expect(plan.inserts.map((r) => r.key)).toEqual(["promo_2", "promo_3"]);
+  });
+
+  it("keeps a suffixed derived key within 30 chars", () => {
+    const long = "a".repeat(40);
+    const plan = planQuickLinksSave(
+      [
+        { label: long, path: "/x" },
+        { label: long, path: "/y" },
+      ],
+      [],
+    );
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+    const keys = plan.inserts.map((r) => r.key);
+    expect(keys[0]).toHaveLength(30);
+    expect(keys[1]).toMatch(/^a+_2$/);
+    expect(keys[1].length).toBeLessThanOrEqual(30);
+  });
+
+  it("rejects an explicit duplicate key, naming it, without planning any delete", () => {
+    const plan = planQuickLinksSave(
+      [
+        { id: "a", label: "Login", path: "/login" },
+        { label: "Outro", key: "login", path: "/outro" },
+      ],
+      existing,
+    );
+    expect(plan).toEqual({
+      ok: false,
+      error: 'A chave "login" está repetida. Cada URL rápida precisa de uma chave única.',
+    });
+  });
+
+  it("rejects an invalid explicit key", () => {
+    const plan = planQuickLinksSave([{ label: "X", key: "Com Espaço", path: "/x" }], []);
+    expect(plan.ok).toBe(false);
+    if (plan.ok) return;
+    expect(plan.error).toContain('"Com Espaço"');
+  });
+
+  it("rejects a label that yields no key", () => {
+    const plan = planQuickLinksSave([{ label: "!!!", path: "/x" }], existing);
+    expect(plan).toEqual({ ok: false, error: 'Não foi possível gerar uma chave para "!!!"' });
+  });
+
+  it("treats an id that does not belong to the house as a new row", () => {
+    const plan = planQuickLinksSave([{ id: "foreign", label: "Login", path: "/login" }], existing);
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+    expect(plan.updates).toEqual([]);
+    expect(plan.deleteIds).toEqual(["a", "b"]);
+    // "login" is freed by the delete of "a", so the new row can take it.
+    expect(plan.inserts).toEqual([{ key: "login", label: "Login", path: "/login", position: 0 }]);
   });
 });

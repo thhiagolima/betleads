@@ -68,7 +68,10 @@ export function HouseSiteSection({ variant = "page" }: { variant?: "page" | "wiz
       saveLinksFn({
         data: { links: links.map((l) => ({ id: l.id, label: l.label, path: l.path })) },
       }),
-    onSuccess: () => {
+    onSuccess: (result) => {
+      // Adopt the saved rows (with their ids) so a second save updates them
+      // in place instead of re-creating them.
+      setLinks(result.links.map((l) => ({ id: l.id, label: l.label, path: l.path })));
       toast.success("URLs rápidas salvas");
       refresh();
     },

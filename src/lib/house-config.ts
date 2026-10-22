@@ -200,6 +200,109 @@ export function quickLinkKeyFromLabel(label: string): string {
   return slug;
 }
 
+export const QUICK_LINK_KEY_RE = /^[a-z0-9_]{1,30}$/;
+
+export type QuickLinkInput = { id?: string; label: string; key?: string; path: string };
+export type QuickLinkWriteRow = { key: string; label: string; path: string; position: number };
+
+/** Appends `_2`, `_3`, ... to `base` until it is not in `taken`, keeping the
+ * result within the 30-char key limit. */
+function dedupeKey(base: string, taken: Set<string>): string {
+  if (!taken.has(base)) return base;
+  for (let n = 2; ; n++) {
+    const suffix = `_${n}`;
+    const candidate = `${base.slice(0, 30 - suffix.length).replace(/_+$/, "")}${suffix}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+}
+
+/**
+ * Plans a quick-links save without touching the database, so the whole set
+ * is validated BEFORE anything is deleted:
+ * - a row whose id matches an existing link keeps its STORED key (renaming
+ *   the label never changes `{link_<key>}` already used in copy);
+ * - an id that doesn't belong to the house is treated as a new row;
+ * - new rows use the given key, or one derived from the label (derived keys
+ *   get a numeric suffix when taken);
+ * - every key must match ^[a-z0-9_]{1,30}$ and be unique (pt-BR error naming
+ *   the duplicate).
+ * Returns rows to update by id, rows to insert and existing ids to delete.
+ */
+export function planQuickLinksSave(
+  links: QuickLinkInput[],
+  existing: { id: string; key: string }[],
+):
+  | {
+      ok: true;
+      updates: (QuickLinkWriteRow & { id: string })[];
+      inserts: QuickLinkWriteRow[];
+      deleteIds: string[];
+    }
+  | { ok: false; error: string } {
+  const existingById = new Map(existing.map((e) => [e.id, e]));
+  const keptIds = new Set<string>();
+  const taken = new Set<string>();
+  const updates: (QuickLinkWriteRow & { id: string })[] = [];
+  const newPositions: number[] = [];
+
+  // Pass 1: existing rows reserve their stored keys first.
+  links.forEach((link, position) => {
+    const stored = link.id ? existingById.get(link.id) : undefined;
+    if (!stored || keptIds.has(stored.id)) {
+      newPositions.push(position);
+      return;
+    }
+    keptIds.add(stored.id);
+    taken.add(stored.key);
+    updates.push({ id: stored.id, key: stored.key, label: link.label.trim(), path: link.path.trim(), position });
+  });
+
+  // Pass 2: new rows with an explicit key (must be valid and unique).
+  const keyByPosition = new Map<number, string>();
+  for (const position of newPositions) {
+    const explicit = links[position].key?.trim();
+    if (!explicit) continue;
+    if (!QUICK_LINK_KEY_RE.test(explicit)) {
+      return {
+        ok: false,
+        error: `A chave "${explicit}" é inválida. Use só letras minúsculas, números e _ (até 30).`,
+      };
+    }
+    if (taken.has(explicit)) {
+      return {
+        ok: false,
+        error: `A chave "${explicit}" está repetida. Cada URL rápida precisa de uma chave única.`,
+      };
+    }
+    taken.add(explicit);
+    keyByPosition.set(position, explicit);
+  }
+
+  // Pass 3: new rows without a key get one derived from the label, with a
+  // numeric suffix when already taken.
+  for (const position of newPositions) {
+    if (keyByPosition.has(position)) continue;
+    const label = links[position].label.trim();
+    const derived = quickLinkKeyFromLabel(label);
+    if (!derived || !QUICK_LINK_KEY_RE.test(derived)) {
+      return { ok: false, error: `Não foi possível gerar uma chave para "${label}"` };
+    }
+    const key = dedupeKey(derived, taken);
+    taken.add(key);
+    keyByPosition.set(position, key);
+  }
+
+  const inserts: QuickLinkWriteRow[] = newPositions.map((position) => ({
+    key: keyByPosition.get(position) as string,
+    label: links[position].label.trim(),
+    path: links[position].path.trim(),
+    position,
+  }));
+
+  const deleteIds = existing.filter((e) => !keptIds.has(e.id)).map((e) => e.id);
+  return { ok: true, updates, inserts, deleteIds };
+}
+
 /** Pre-filled quick links offered when the house hasn't created any yet
  * (design spec: Login, Depósito, Promo). Purely a UI suggestion — the admin
  * can edit, remove or add to them before saving; nothing is written until

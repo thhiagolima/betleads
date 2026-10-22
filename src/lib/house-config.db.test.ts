@@ -175,9 +175,12 @@ describe("backfill from shortio_settings", () => {
       status: string;
       is_default: boolean;
       verified_at: string | null;
+      last_checked_at: string | null;
+      verified_notice_seen_at: string | null;
       provider_domain_id: string | null;
     }>(
-      `select kind, hostname, status, is_default, verified_at, provider_domain_id
+      `select kind, hostname, status, is_default, verified_at, last_checked_at,
+              verified_notice_seen_at, provider_domain_id
        from public.tenant_domains where tenant_id = $1`,
       [BACKFILL_TENANT],
     );
@@ -191,6 +194,10 @@ describe("backfill from shortio_settings", () => {
       provider_domain_id: "42",
     });
     expect(rows[0].verified_at).not.toBeNull();
+    // Not re-checked by the cron right away, and no "verified" notice for a
+    // domain the house has been using all along.
+    expect(rows[0].last_checked_at).not.toBeNull();
+    expect(rows[0].verified_notice_seen_at).not.toBeNull();
   });
 });
 

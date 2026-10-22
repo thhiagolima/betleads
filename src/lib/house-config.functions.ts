@@ -18,7 +18,7 @@ import {
   buildQuickLinkUrl,
   computeSetupChecklist,
   normalizeSiteUrl,
-  quickLinkKeyFromLabel,
+  planQuickLinksSave,
   type DomainKind,
   type DomainStatus,
 } from "@/lib/house-config";
@@ -515,30 +515,55 @@ export const saveQuickLinks = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const tenantId = await requireHouseAdmin(context);
 
-    const payload = data.links.map((link, index) => {
-      const key = link.key?.trim() || quickLinkKeyFromLabel(link.label);
-      if (!key) throw new Error(`Não foi possível gerar uma chave para "${link.label}"`);
-      return {
-        tenant_id: tenantId,
-        key,
-        label: link.label,
-        path: link.path,
-        position: index,
-      };
-    });
-
-    const { error: delErr } = await supabaseAdmin
+    const { data: existingRows, error: existingErr } = await supabaseAdmin
       .from("tenant_quick_links")
-      .delete()
+      .select("id,key")
       .eq("tenant_id", tenantId);
-    if (delErr) throw new Error(delErr.message);
+    if (existingErr) throw new Error(existingErr.message);
 
-    if (payload.length > 0) {
-      const { error: insErr } = await supabaseAdmin.from("tenant_quick_links").insert(payload);
+    // Validate the whole set before writing anything: a bad/duplicate key
+    // must never wipe the house's existing links.
+    const plan = planQuickLinksSave(data.links, (existingRows ?? []) as { id: string; key: string }[]);
+    if (!plan.ok) throw new Error(plan.error);
+
+    // Delete only the links the admin removed (frees their keys for new rows).
+    if (plan.deleteIds.length > 0) {
+      const { error: delErr } = await supabaseAdmin
+        .from("tenant_quick_links")
+        .delete()
+        .eq("tenant_id", tenantId)
+        .in("id", plan.deleteIds);
+      if (delErr) throw new Error(delErr.message);
+    }
+
+    // Existing rows: update in place by id (stored key is kept).
+    for (const row of plan.updates) {
+      const { error: updErr } = await supabaseAdmin
+        .from("tenant_quick_links")
+        .update({ label: row.label, path: row.path, position: row.position })
+        .eq("id", row.id)
+        .eq("tenant_id", tenantId);
+      if (updErr) throw new Error(updErr.message);
+    }
+
+    if (plan.inserts.length > 0) {
+      const { error: insErr } = await supabaseAdmin
+        .from("tenant_quick_links")
+        .insert(plan.inserts.map((row) => ({ ...row, tenant_id: tenantId })));
       if (insErr) throw new Error(insErr.message);
     }
 
-    return { ok: true };
+    const { data: savedRows, error: savedErr } = await supabaseAdmin
+      .from("tenant_quick_links")
+      .select("id,key,label,path")
+      .eq("tenant_id", tenantId)
+      .order("position", { ascending: true });
+    if (savedErr) throw new Error(savedErr.message);
+
+    return {
+      ok: true,
+      links: (savedRows ?? []) as { id: string; key: string; label: string; path: string }[],
+    };
   });
 
 // ============ Writes: onboarding ============
