@@ -343,7 +343,7 @@
 **Interfaces:**
 - Consumes: `createCreditTopup`, `getTopupStatus` (Task 4), `TOPUP_PACKAGES`, `MIN_TOPUP_CENTS` (Task 4).
 - **Produces:**
-  - `walletBalanceNotice({ balance, exempt, smsUnitPrice, canBuy })`, onde `canBuy: boolean` é novo. Com `canBuy`, o texto termina com `"Compre créditos por Pix nesta página."`; sem, mantém o texto atual de suporte.
+  - `walletBalanceNotice({ balance, exempt, smsUnitPrice, canBuy })`, onde `canBuy: boolean` é novo. Com `canBuy`, o texto termina com `"Compre créditos por Pix em Saldo e consumo."`; sem, mantém o texto atual de suporte.
   - O servidor informa `canBuy` em `getSmsCreditPortal`: `gateway ligado && admin da casa && não isenta && não demo`.
 - **Comportamento do modal:**
   1. **Passo 1:** 4 pacotes em botões (R$ 500 / 1.000 / 2.500 / 5.000) mais o campo "Outro valor" (R$, mínimo 100), e o botão "Gerar Pix".
@@ -355,7 +355,7 @@
   4. **Expirado/cancelado:** "Este Pix expirou" e o botão "Gerar outro".
   5. **Erro:** a mensagem do servidor.
 
-- [ ] **Step 1: Write the failing tests** for `walletBalanceNotice` with `canBuy` (texto com "Compre créditos por Pix nesta página." quando `canBuy`; texto de suporte quando não), and for `getSmsCreditPortalFor` returning `canBuy` (gateway off → false; gestor → false; isenta → false; admin pagante com gateway on → true).
+- [ ] **Step 1: Write the failing tests** for `walletBalanceNotice` with `canBuy` (texto com "Compre créditos por Pix em Saldo e consumo." quando `canBuy`; texto de suporte quando não), and for `getSmsCreditPortalFor` returning `canBuy` (gateway off → false; gestor → false; isenta → false; admin pagante com gateway on → true).
 - [ ] **Step 2: Run them.** Expected: FAIL.
 - [ ] **Step 3: Implement** the server flag, the dialog and the page button. Copy from Global Constraints.
 - [ ] **Step 4: Run `npm test`, `npm run typecheck`, `npm run lint`.** Expected: PASS, 0 erros.
