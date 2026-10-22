@@ -71,6 +71,7 @@ import { Route as ApiPublicHooksWhatsappResumeRouteImport } from './routes/api/p
 import { Route as ApiPublicMetaSyncTickRouteImport } from './routes/api/public/meta-sync/tick'
 import { Route as ApiPublicPrecallDispatchRouteImport } from './routes/api/public/precall/dispatch'
 import { Route as ApiPublicShortioSyncRouteImport } from './routes/api/public/shortio/sync'
+import { Route as ApiPublicUpperWebhookRouteImport } from './routes/api/public/upper/webhook'
 import { Route as ApiPublicWebhookEventoRouteImport } from './routes/api/public/webhook.$evento'
 import { Route as ApiPublicEmailImgAssetIdFilenameRouteImport } from './routes/api/public/email-img.$assetId.$filename'
 import { Route as ApiPublicInfobipEmailEventsRouteImport } from './routes/api/public/infobip/email/events'
@@ -404,6 +405,11 @@ const ApiPublicShortioSyncRoute = ApiPublicShortioSyncRouteImport.update({
   path: '/api/public/shortio/sync',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicUpperWebhookRoute = ApiPublicUpperWebhookRouteImport.update({
+  id: '/api/public/upper/webhook',
+  path: '/api/public/upper/webhook',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicWebhookEventoRoute = ApiPublicWebhookEventoRouteImport.update({
   id: '/api/public/webhook/$evento',
   path: '/api/public/webhook/$evento',
@@ -509,6 +515,7 @@ export interface FileRoutesByFullPath {
   '/api/public/meta-sync/tick': typeof ApiPublicMetaSyncTickRoute
   '/api/public/precall/dispatch': typeof ApiPublicPrecallDispatchRoute
   '/api/public/shortio/sync': typeof ApiPublicShortioSyncRoute
+  '/api/public/upper/webhook': typeof ApiPublicUpperWebhookRoute
   '/api/public/webhook/$evento': typeof ApiPublicWebhookEventoRoute
   '/api/public/email-img/$assetId/$filename': typeof ApiPublicEmailImgAssetIdFilenameRoute
   '/api/public/infobip/email/events': typeof ApiPublicInfobipEmailEventsRoute
@@ -580,6 +587,7 @@ export interface FileRoutesByTo {
   '/api/public/meta-sync/tick': typeof ApiPublicMetaSyncTickRoute
   '/api/public/precall/dispatch': typeof ApiPublicPrecallDispatchRoute
   '/api/public/shortio/sync': typeof ApiPublicShortioSyncRoute
+  '/api/public/upper/webhook': typeof ApiPublicUpperWebhookRoute
   '/api/public/webhook/$evento': typeof ApiPublicWebhookEventoRoute
   '/api/public/email-img/$assetId/$filename': typeof ApiPublicEmailImgAssetIdFilenameRoute
   '/api/public/infobip/email/events': typeof ApiPublicInfobipEmailEventsRoute
@@ -652,6 +660,7 @@ export interface FileRoutesById {
   '/api/public/meta-sync/tick': typeof ApiPublicMetaSyncTickRoute
   '/api/public/precall/dispatch': typeof ApiPublicPrecallDispatchRoute
   '/api/public/shortio/sync': typeof ApiPublicShortioSyncRoute
+  '/api/public/upper/webhook': typeof ApiPublicUpperWebhookRoute
   '/api/public/webhook/$evento': typeof ApiPublicWebhookEventoRoute
   '/api/public/email-img/$assetId/$filename': typeof ApiPublicEmailImgAssetIdFilenameRoute
   '/api/public/infobip/email/events': typeof ApiPublicInfobipEmailEventsRoute
@@ -725,6 +734,7 @@ export interface FileRouteTypes {
     | '/api/public/meta-sync/tick'
     | '/api/public/precall/dispatch'
     | '/api/public/shortio/sync'
+    | '/api/public/upper/webhook'
     | '/api/public/webhook/$evento'
     | '/api/public/email-img/$assetId/$filename'
     | '/api/public/infobip/email/events'
@@ -796,6 +806,7 @@ export interface FileRouteTypes {
     | '/api/public/meta-sync/tick'
     | '/api/public/precall/dispatch'
     | '/api/public/shortio/sync'
+    | '/api/public/upper/webhook'
     | '/api/public/webhook/$evento'
     | '/api/public/email-img/$assetId/$filename'
     | '/api/public/infobip/email/events'
@@ -867,6 +878,7 @@ export interface FileRouteTypes {
     | '/api/public/meta-sync/tick'
     | '/api/public/precall/dispatch'
     | '/api/public/shortio/sync'
+    | '/api/public/upper/webhook'
     | '/api/public/webhook/$evento'
     | '/api/public/email-img/$assetId/$filename'
     | '/api/public/infobip/email/events'
@@ -928,6 +940,7 @@ export interface RootRouteChildren {
   ApiPublicMetaSyncTickRoute: typeof ApiPublicMetaSyncTickRoute
   ApiPublicPrecallDispatchRoute: typeof ApiPublicPrecallDispatchRoute
   ApiPublicShortioSyncRoute: typeof ApiPublicShortioSyncRoute
+  ApiPublicUpperWebhookRoute: typeof ApiPublicUpperWebhookRoute
   ApiPublicWebhookEventoRoute: typeof ApiPublicWebhookEventoRoute
   ApiPublicEmailImgAssetIdFilenameRoute: typeof ApiPublicEmailImgAssetIdFilenameRoute
   ApiPublicInfobipEmailEventsRoute: typeof ApiPublicInfobipEmailEventsRoute
@@ -1373,6 +1386,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicShortioSyncRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/upper/webhook': {
+      id: '/api/public/upper/webhook'
+      path: '/api/public/upper/webhook'
+      fullPath: '/api/public/upper/webhook'
+      preLoaderRoute: typeof ApiPublicUpperWebhookRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/webhook/$evento': {
       id: '/api/public/webhook/$evento'
       path: '/api/public/webhook/$evento'
@@ -1554,6 +1574,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicMetaSyncTickRoute: ApiPublicMetaSyncTickRoute,
   ApiPublicPrecallDispatchRoute: ApiPublicPrecallDispatchRoute,
   ApiPublicShortioSyncRoute: ApiPublicShortioSyncRoute,
+  ApiPublicUpperWebhookRoute: ApiPublicUpperWebhookRoute,
   ApiPublicWebhookEventoRoute: ApiPublicWebhookEventoRoute,
   ApiPublicEmailImgAssetIdFilenameRoute: ApiPublicEmailImgAssetIdFilenameRoute,
   ApiPublicInfobipEmailEventsRoute: ApiPublicInfobipEmailEventsRoute,
