@@ -14,6 +14,7 @@ import {
   type BillingAccessState,
   type BillingRole,
 } from "@/lib/billing/billing-view";
+import { cancelOpenInvoiceCharges } from "@/lib/billing/invoices.server";
 import { assertTenantNotDemo, isBillingEnforcementEnabled } from "@/lib/tenant-access.server";
 import { dbUuid } from "@/lib/zod-helpers";
 
@@ -714,6 +715,11 @@ export async function updateTenantSettingsFor(
     throw new Error("Informe o motivo da troca de plano");
   }
 
+  // A house that becomes exempt has its open invoice canceled by the plano
+  // trigger, but the invoice's Pix at Upper stays payable. Note the open
+  // invoice before the update so its charges can be canceled afterwards.
+  const openInvoiceBefore = planChanging ? await findOpenInvoiceId(data.tenantId) : null;
+
   const patch = superAdmin
     ? {
         nome: data.nome,
@@ -735,6 +741,10 @@ export async function updateTenantSettingsFor(
     .single();
   if (error) throw new Error(error.message);
 
+  const pixCancel = openInvoiceBefore
+    ? await cancelPixOfClosedInvoice(openInvoiceBefore)
+    : null;
+
   await auditTenant({
     tenantId: data.tenantId,
     actorUserId: ctx.userId,
@@ -746,10 +756,49 @@ export async function updateTenantSettingsFor(
     metadata: {
       limited_scope: !superAdmin,
       ...(touchesInterno ? { plan_reason: planReason } : {}),
+      ...(pixCancel ? { pix_cancel: pixCancel } : {}),
     },
   });
 
   return { tenant };
+}
+
+async function findOpenInvoiceId(tenantId: string): Promise<string | null> {
+  const { data, error } = await db()
+    .from<{ id: string }>("billing_invoices")
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .eq("status", "open")
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data?.id ?? null;
+}
+
+/**
+ * After a plan change: if the invoice that was open before it is no longer
+ * open (the plano trigger cancels it when the house becomes exempt), cancel
+ * its Pix charges at Upper. Best-effort: the plan change already happened,
+ * so a failure is logged and returned for the audit row, never thrown.
+ */
+async function cancelPixOfClosedInvoice(invoiceId: string) {
+  try {
+    const { data, error } = await db()
+      .from<{ status: string }>("billing_invoices")
+      .select("status")
+      .eq("id", invoiceId)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (data?.status === "open") return null;
+    const { canceled, failed } = await cancelOpenInvoiceCharges(invoiceId);
+    if (failed.length > 0) {
+      console.error("[tenants] cancelOpenInvoiceCharges reported per-charge failures", failed);
+    }
+    return { invoiceId, ok: failed.length === 0, canceled, failed };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[tenants] cancelOpenInvoiceCharges failed", message);
+    return { invoiceId, ok: false, canceled: 0, failed: [{ chargeId: "unknown", error: message }] };
+  }
 }
 
 export const updateTenantSettings = createServerFn({ method: "POST" })
