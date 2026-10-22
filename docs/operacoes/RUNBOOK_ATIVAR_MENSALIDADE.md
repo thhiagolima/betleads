@@ -240,9 +240,10 @@ cobrada nem bloqueada.
 ```sql
 select (select count(*) from tenant_billing) as tb, (select count(*) from tenants) as t;
 ```
-**Esperado:** `tb` igual a `t`. Se `tb` for menor, pare: rode
-`select public.billing_backfill_tenant_billing();` de novo (é idempotente)
-e repita a contagem antes de seguir para o Passo 4.
+**Esperado:** `tb` igual a `t`. Se `tb` for menor, pare e peça autorização
+para rodar `select public.billing_backfill_tenant_billing();` de novo numa
+conexão de escrita (é idempotente); repita a contagem antes de seguir para o
+Passo 4.
 
 **Rollback desta migration** — só para uma ativação que falhou com **zero
 faturas pagas** (nunca depois do Passo 7, quando já pode haver uma fatura
