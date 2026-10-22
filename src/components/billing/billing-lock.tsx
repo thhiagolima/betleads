@@ -11,12 +11,18 @@ export function BillingLock({ view }: { view: BillingLockView | null }) {
 
   return (
     <div className="flex min-h-[60vh] items-center justify-center">
-      <Card className="w-full max-w-xl border-red-500/40 bg-red-500/10 shadow-xl shadow-black/20">
+      <Card
+        role="alert"
+        aria-labelledby="billing-lock-title"
+        className="w-full max-w-xl border-red-500/40 bg-red-500/10 shadow-xl shadow-black/20"
+      >
         <CardContent className="space-y-3 p-6 text-center">
           <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-lg bg-red-500/15">
             <LockKeyhole className="h-5 w-5 text-red-300" />
           </div>
-          <p className="text-lg font-semibold text-red-100">{view.title}</p>
+          <h2 id="billing-lock-title" className="text-lg font-semibold text-red-100">
+            {view.title}
+          </h2>
           <p className="text-sm leading-relaxed text-red-200/90">{view.text}</p>
           {view.showPay && (
             <div className="pt-2">

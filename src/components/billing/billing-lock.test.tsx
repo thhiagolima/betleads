@@ -27,6 +27,9 @@ describe("BillingLock", () => {
     expect(html).toContain("Acesso suspenso por falta de pagamento");
     expect(html).toContain("A mensalidade de R$ 4.000,00 venceu em 05/11.");
     expect(html).toMatch(/<a href="\/plano-e-creditos"[^>]*>Ir para o pagamento<\/a>/);
+    expect(html).toContain('role="alert"');
+    expect(html).toMatch(/<h2 id="billing-lock-title"[^>]*>Acesso suspenso por falta de pagamento<\/h2>/);
+    expect(html).toContain('aria-labelledby="billing-lock-title"');
   });
 
   it("hides the pay button and shows the member hint for a member", () => {

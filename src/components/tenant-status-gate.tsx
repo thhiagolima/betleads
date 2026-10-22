@@ -138,7 +138,7 @@ function BlockedTenantCard({
 }) {
   return (
     <div className="flex min-h-[60vh] items-center justify-center">
-      <Card className="w-full max-w-xl border-border/70 bg-card/80 shadow-xl shadow-black/20">
+      <Card role="alert" className="w-full max-w-xl border-border/70 bg-card/80 shadow-xl shadow-black/20">
         <CardContent className="space-y-5 p-6">
           <div className="flex items-start gap-4">
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-muted">

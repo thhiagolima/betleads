@@ -31,14 +31,19 @@ export function BillingBanner() {
           : "border-red-500/40 bg-red-500/10 text-red-100",
       )}
     >
-      <AlertTriangle
-        className={cn("h-4 w-4 shrink-0", tone === "yellow" ? "text-amber-400" : "text-red-400")}
-        aria-hidden="true"
-      />
-      <p className="min-w-0 flex-1 basis-full leading-relaxed sm:basis-auto">
-        {text}
-        {memberHint && <span className="ml-1 text-xs opacity-80">{memberHint}</span>}
-      </p>
+      <div className="flex min-w-0 flex-1 basis-full items-start gap-2 sm:basis-auto">
+        <AlertTriangle
+          className={cn(
+            "h-4 w-4 shrink-0 translate-y-0.5",
+            tone === "yellow" ? "text-amber-400" : "text-red-400",
+          )}
+          aria-hidden="true"
+        />
+        <p className="min-w-0 leading-relaxed">
+          {text}
+          {memberHint && <span className="ml-1 text-xs opacity-80">{memberHint}</span>}
+        </p>
+      </div>
       {showPay && (
         <Button
           asChild
