@@ -1915,6 +1915,7 @@ export type Database = {
       email_campaigns: {
         Row: {
           audience_filter: Json
+          blocked_reason: string | null
           created_at: string
           id: string
           locked_at: string | null
@@ -1934,6 +1935,7 @@ export type Database = {
         }
         Insert: {
           audience_filter?: Json
+          blocked_reason?: string | null
           created_at?: string
           id?: string
           locked_at?: string | null
@@ -1953,6 +1955,7 @@ export type Database = {
         }
         Update: {
           audience_filter?: Json
+          blocked_reason?: string | null
           created_at?: string
           id?: string
           locked_at?: string | null

@@ -190,11 +190,15 @@ export const EMAIL_DOMAIN_NOT_VERIFIED = "EMAIL_DOMAIN_NOT_VERIFIED";
  */
 export class EmailDomainNotVerifiedError extends Error {
   readonly code = EMAIL_DOMAIN_NOT_VERIFIED;
-  constructor() {
-    super("Configure e verifique um domínio de e-mail da casa para enviar e-mails.");
+  constructor(message = "Configure e verifique um domínio de e-mail da casa para enviar e-mails.") {
+    super(message);
     this.name = "EmailDomainNotVerifiedError";
   }
 }
+
+/** Shown when a campaign/step names a sender that no longer qualifies. */
+export const STALE_SENDER_MESSAGE =
+  "O remetente escolhido não está mais disponível (domínio removido ou não verificado). Escolha outro remetente.";
 
 export type ResolvedSender = {
   fromEmail: string;
@@ -207,9 +211,12 @@ export type ResolvedSender = {
  * Sender of a house e-mail. Only `email_senders` of this tenant whose
  * `domain_id` is a verified, non-removed e-mail `tenant_domains` row of the
  * same tenant qualify (legacy senders without domain_id never do, and
- * `email_smtp_configs` is never read). The requested sender wins when it
- * qualifies; otherwise the house default, then the oldest qualifying sender.
- * `null` = the house cannot send e-mail (callers throw
+ * `email_smtp_configs` is never read).
+ * - An explicit `senderId` must itself qualify: if it no longer does (other
+ *   house, unverified/removed domain, legacy, deleted) the send is BLOCKED
+ *   (`null`) — it never silently switches to another sender.
+ * - No `senderId`: the house default, then the oldest qualifying sender.
+ * `null` = the house cannot send this e-mail (callers throw
  * EmailDomainNotVerifiedError).
  */
 export async function resolveSender(input: {
@@ -218,6 +225,12 @@ export async function resolveSender(input: {
 }): Promise<ResolvedSender | null> {
   const { tenantId, senderId } = input;
   if (!tenantId) return null;
+  const blockStale = () => {
+    console.warn(
+      `[resolveSender] sender ${senderId} no longer qualifies for tenant ${tenantId}; e-mail blocked`,
+    );
+    return null;
+  };
   const { data: senders, error } = await supabaseAdmin
     .from("email_senders")
     .select("id, from_email, from_name, name, reply_to, domain_id, is_default, created_at")
@@ -226,7 +239,7 @@ export async function resolveSender(input: {
   if (error) throw new Error(error.message);
   const candidates = senders ?? [];
   const domainIds = [...new Set(candidates.map((s) => s.domain_id).filter(Boolean))] as string[];
-  if (domainIds.length === 0) return null;
+  if (domainIds.length === 0) return senderId ? blockStale() : null;
   const { data: domains, error: domainError } = await supabaseAdmin
     .from("tenant_domains")
     .select("id, removed_at")
@@ -239,10 +252,13 @@ export async function resolveSender(input: {
   const usable = candidates
     .filter((s) => s.domain_id && verified.has(s.domain_id))
     .sort((a, b) => String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")));
-  const chosen =
-    (senderId ? usable.find((s) => s.id === senderId) : undefined) ??
-    usable.find((s) => s.is_default) ??
-    usable[0];
+  let chosen: (typeof usable)[number] | undefined;
+  if (senderId) {
+    chosen = usable.find((s) => s.id === senderId);
+    if (!chosen) return blockStale();
+  } else {
+    chosen = usable.find((s) => s.is_default) ?? usable[0];
+  }
   if (!chosen) return null;
   return {
     fromEmail: chosen.from_email,

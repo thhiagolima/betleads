@@ -64,7 +64,11 @@ alter table public.sms_campaigns
 
 alter table public.email_campaigns
   add column if not exists sender_id uuid references public.email_senders(id) on delete set null,
-  add column if not exists short_domain_id uuid references public.tenant_domains(id) on delete set null;
+  add column if not exists short_domain_id uuid references public.tenant_domains(id) on delete set null,
+  -- Why the last send attempt was blocked (e.g. sender's e-mail domain no
+  -- longer verified). Shown next to the campaign status; cleared on edit or
+  -- on the next send that gets past the sender check.
+  add column if not exists blocked_reason text;
 
 alter table public.tenant_quick_links enable row level security;
 alter table public.tenant_domains enable row level security;

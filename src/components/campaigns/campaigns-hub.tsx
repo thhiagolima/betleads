@@ -25,6 +25,7 @@ import { num } from "@/lib/format";
 import { campaignStopReason, getChannelOperationState } from "@/lib/channel-operation-state";
 import { cancelScheduledSmsCampaign, listScheduledSmsCampaigns } from "@/lib/sms.functions";
 import { listEmailCampaigns } from "@/lib/email.functions";
+import { CampaignBlockedBadge } from "@/components/house-config/campaign-blocked-badge";
 import { listCallQueue } from "@/lib/calls.functions";
 import { deleteCampaignDraft, listCampaignDrafts } from "@/lib/campaign-drafts.functions";
 
@@ -42,6 +43,8 @@ type Campaign = {
   unresolved_count?: number | null;
   /** Why the campaign stopped (provider error, or who cancelled it). */
   last_error?: string | null;
+  /** E-mail only: why the last send attempt was blocked (sender/domain). */
+  blocked_reason?: string | null;
   updated_at?: string | null;
   channel: "sms" | "email" | "voice";
   cancellable?: boolean;
@@ -52,6 +55,7 @@ type EmailCampaignRow = {
   nome: string | null;
   agendadoPara: string | null;
   status: string;
+  blockedReason?: string | null;
   enviados: number;
   falhas: number;
 };
@@ -144,6 +148,7 @@ export function CampaignsHub() {
     total_count: campaign.enviados + campaign.falhas,
     sent_count: campaign.enviados,
     failed_count: campaign.falhas,
+    blocked_reason: campaign.blockedReason ?? null,
     channel: "email" as const,
     cancellable: false,
   }));
@@ -413,11 +418,10 @@ export function CampaignsHub() {
             const deduplicated = Number(campaign.deduplicated_count ?? 0);
             const completed = delivered + deduplicated + Number(campaign.failed_count ?? 0);
             const operation = getChannelOperationState(campaign.status, campaign.channel);
-            const reason = campaignStopReason(
-              campaign.status,
-              campaign.last_error,
-              campaign.updated_at,
-            );
+            const reason =
+              campaignStopReason(campaign.status, campaign.last_error, campaign.updated_at) ??
+              campaign.blocked_reason ??
+              null;
             return (
               <div
                 key={campaign.id}
@@ -429,6 +433,7 @@ export function CampaignsHub() {
                     <Badge variant="outline" className={operation.tone}>
                       {operation.label}
                     </Badge>
+                    <CampaignBlockedBadge reason={campaign.blocked_reason} />
                     {Number(campaign.unresolved_count ?? 0) > 0 ? (
                       <Badge
                         variant="outline"

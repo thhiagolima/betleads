@@ -6,7 +6,12 @@ import { z } from "zod";
 import { assertSuperAdmin, tenantChannelHealth } from "@/lib/provider-governance.server";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { EmailDomainNotVerifiedError, resolveSender, sendInfobipEmail } from "./email-send.server";
+import {
+  EmailDomainNotVerifiedError,
+  resolveSender,
+  sendInfobipEmail,
+  STALE_SENDER_MESSAGE,
+} from "./email-send.server";
 import { campaignSenderColumn, campaignShortDomainColumn } from "./campaign-refs.server";
 import {
   countPlayersForSegment,
@@ -610,6 +615,7 @@ function campanhaRowToUI(r: any) {
     shortDomainId: r.short_domain_id ?? null,
     agendadoPara: r.scheduled_at ?? undefined,
     status: r.status,
+    blockedReason: (r.blocked_reason as string | null | undefined) ?? null,
     targetPlayerIds: targetIds,
     extraEmails,
     enviados: stats.enviados ?? 0,
@@ -679,6 +685,9 @@ export const saveEmailCampaign = createServerFn({ method: "POST" })
       ...refColumns,
       scheduled_at: data.agendadoPara ? new Date(data.agendadoPara).toISOString() : null,
       status: data.status,
+      // Editing the campaign clears a previous "blocked" reason; the next
+      // send attempt records a new one if it is still blocked.
+      blocked_reason: null,
       track_links: true,
       template_snapshot: templateSnapshot,
       conversion_objective: data.conversionObjective,
@@ -722,7 +731,7 @@ export const updateEmailCampaignStatus = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { error } = await context.supabase
       .from("email_campaigns")
-      .update({ status: data.status })
+      .update({ status: data.status, blocked_reason: null })
       .eq("id", data.id);
     if (error) throw new Error(error.message);
     return { ok: true };
@@ -886,7 +895,21 @@ export async function runCampaignSend(campaignId: string) {
 
   // Only a sender on a verified e-mail domain of the house; before any write.
   const sender = await resolveSender({ tenantId: camp.tenant_id, senderId: camp.sender_id });
-  if (!sender) throw new EmailDomainNotVerifiedError();
+  if (!sender) {
+    const blocked = new EmailDomainNotVerifiedError(
+      camp.sender_id ? STALE_SENDER_MESSAGE : undefined,
+    );
+    // Recorded on the campaign so the admin sees why it did not go out (the
+    // tick / send-now then put it back to rascunho). Nothing else is written.
+    await supabaseAdmin
+      .from("email_campaigns")
+      .update({ blocked_reason: blocked.message })
+      .eq("id", campaignId);
+    throw blocked;
+  }
+  if (camp.blocked_reason) {
+    await supabaseAdmin.from("email_campaigns").update({ blocked_reason: null }).eq("id", campaignId);
+  }
 
   const af = (camp.audience_filter ?? {}) as {
     audience_mode?: "segmento" | "leads" | "emails";

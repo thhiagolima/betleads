@@ -36,6 +36,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { CampaignBlockedBadge } from "@/components/house-config/campaign-blocked-badge";
 import { Switch } from "@/components/ui/switch";
 import { LinkTrackingToggle } from "@/components/link-tracking-toggle";
 import { Separator } from "@/components/ui/separator";
@@ -223,6 +224,7 @@ type Campanha = {
   shortDomainId?: string | null;
   agendadoPara?: string;
   status: CampStatus;
+  blockedReason?: string | null;
   enviados: number;
   entregues: number;
   abertos: number;
@@ -1849,7 +1851,10 @@ function CampanhasTab() {
                       {c.template || "—"}
                     </TableCell>
                     <TableCell>
-                      <StatusBadgeCampanha s={c.status} />
+                      <div className="flex flex-wrap items-center gap-1">
+                        <StatusBadgeCampanha s={c.status} />
+                        <CampaignBlockedBadge reason={c.blockedReason} />
+                      </div>
                     </TableCell>
                     <TableCell className="text-right tabular-nums">{c.enviados}</TableCell>
                     <TableCell className="text-right tabular-nums">{c.entregues}</TableCell>

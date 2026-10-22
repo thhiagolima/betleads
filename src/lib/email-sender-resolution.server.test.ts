@@ -30,7 +30,7 @@ vi.mock("./email-send.server", async (importOriginal) => ({
   sendInfobipEmail: send.sendInfobipEmail,
 }));
 
-import { EmailDomainNotVerifiedError, resolveSender } from "./email-send.server";
+import { EmailDomainNotVerifiedError, resolveSender, STALE_SENDER_MESSAGE } from "./email-send.server";
 import { runCampaignSend } from "./email.functions";
 import { campaignSenderColumn, campaignShortDomainColumn } from "./campaign-refs.server";
 import { legacyEmailBlockSenderConfig } from "./journeys.shared";
@@ -130,18 +130,37 @@ describe("resolveSender", () => {
     ["a sender on a pending domain", S_PENDING],
     ["a sender on a removed domain", S_REMOVED],
     ["an unknown sender", "20000000-0000-4000-8000-0000000000ff"],
-  ])("falls back to the house's verified default for %s", async (_label, requested) => {
+  ])("blocks (null + warning) for an explicit %s, never switching sender", async (_label, requested) => {
     seedDomains();
     seedSenders();
-    await expect(resolveSender({ tenantId: TENANT, senderId: requested })).resolves.toEqual(
-      DEFAULT_RESULT,
-    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await expect(resolveSender({ tenantId: TENANT, senderId: requested })).resolves.toBeNull();
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+
+  it("blocks an explicit legacy sender (no domain_id), even when it is the default", async () => {
+    seedDomains();
+    seedSenders([sender({ id: S_LEGACY, from_email: "legado@casa.bet", domain_id: null })]);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await expect(resolveSender({ tenantId: TENANT, senderId: S_LEGACY })).resolves.toBeNull();
+    warn.mockRestore();
   });
 
   it("uses the verified default when no sender is requested", async () => {
     seedDomains();
     seedSenders();
     await expect(resolveSender({ tenantId: TENANT })).resolves.toEqual(DEFAULT_RESULT);
+    await expect(resolveSender({ tenantId: TENANT, senderId: null })).resolves.toEqual(DEFAULT_RESULT);
+  });
+
+  it("falls back to the oldest verified sender when there is no default and none is requested", async () => {
+    seedDomains();
+    fake.db.rows("email_senders").push(
+      sender({ id: S_PROMO, from_email: "promo@promo.casa.bet", domain_id: DOM_VERIFIED_2, created_at: "2026-01-02T00:00:00Z" }),
+      sender({ id: S_DEFAULT, from_email: "contato@mail.casa.bet", domain_id: DOM_VERIFIED, created_at: "2026-01-01T00:00:00Z" }),
+    );
+    await expect(resolveSender({ tenantId: TENANT })).resolves.toMatchObject({ senderId: S_DEFAULT });
   });
 
   it("returns null when the house has no sender on a verified domain", async () => {
@@ -262,6 +281,40 @@ describe("runCampaignSend sender", () => {
     expect(fake.db.rows("email_send_logs")).toHaveLength(0);
     expect(fake.db.rows("email_campaigns")[0].status).toBe("rascunho");
     expect(fake.db.calls.some((c) => c.table === "email_smtp_configs")).toBe(false);
+  });
+
+  it("an explicit sender whose domain lost verification blocks the campaign and records the reason", async () => {
+    seedDomains();
+    seedSenders();
+    seedCampaign({ sender_id: S_PENDING });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const error = await runCampaignSend("camp-1").catch((e: unknown) => e);
+    warn.mockRestore();
+    expect(error).toBeInstanceOf(EmailDomainNotVerifiedError);
+    expect((error as Error).message).toBe(STALE_SENDER_MESSAGE);
+    // The house still has a verified default, but it is NOT used.
+    expect(send.sendInfobipEmail).not.toHaveBeenCalled();
+    expect(fake.db.rows("email_campaigns")[0].blocked_reason).toBe(STALE_SENDER_MESSAGE);
+  });
+
+  it("a campaign without a sender and no verified domain records the generic reason", async () => {
+    seedDomains();
+    seedCampaign({ sender_id: null });
+
+    await expect(runCampaignSend("camp-1")).rejects.toBeInstanceOf(EmailDomainNotVerifiedError);
+    expect(fake.db.rows("email_campaigns")[0].blocked_reason).toBe(
+      "Configure e verifique um domínio de e-mail da casa para enviar e-mails.",
+    );
+  });
+
+  it("clears a previous blocked_reason once the sender qualifies again", async () => {
+    seedDomains();
+    seedSenders();
+    seedCampaign({ sender_id: S_PROMO, blocked_reason: "antigo" });
+
+    await runCampaignSend("camp-1");
+    expect(fake.db.rows("email_campaigns")[0].blocked_reason).toBeNull();
   });
 
   it("sends from the campaign's verified sender and passes its short domain to link tracking", async () => {
