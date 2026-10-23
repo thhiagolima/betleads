@@ -3,9 +3,12 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  ACCOUNT_LINKS,
   ROUTE_META,
   activeMobileTab,
   activeNavKey,
+  canSee,
+  isExpertAllowedPath,
   resolveRouteMeta,
   visibleSections,
 } from "./navigation";
@@ -135,10 +138,53 @@ describe("visible sections", () => {
       )
       .map((item) => item.title);
     expect(titles).not.toContain("Oportunidades");
-    expect(titles).not.toContain("Experts");
   });
 
   it("hides IA while the role is unknown", () => {
     expect(labels(null, false)).not.toContain("IA");
+  });
+});
+
+describe("expert role", () => {
+  function linkPaths(sections: ReturnType<typeof visibleSections>) {
+    return sections.flatMap((section) =>
+      section.items.flatMap((item) => (item.kind === "group" ? item.children : [item])),
+    ).map((item) => item.to);
+  }
+
+  it("expert sees only the expert section", () => {
+    expect(linkPaths(visibleSections("expert", false))).toEqual(["/expert", "/expert/leads"]);
+  });
+
+  it("expert has no account/team links", () => {
+    const links = ACCOUNT_LINKS.filter((item) => canSee(item, "expert", false));
+    expect(links).toHaveLength(0);
+  });
+
+  it("Experts admin link is visible to admin and super_admin, hidden to gestor, member and expert", () => {
+    const hasExpertsLink = (role: Parameters<typeof visibleSections>[0], superAdmin: boolean) =>
+      linkPaths(visibleSections(role, superAdmin)).includes("/experts");
+    expect(hasExpertsLink("admin", false)).toBe(true);
+    expect(hasExpertsLink("super_admin", true)).toBe(true);
+    expect(hasExpertsLink("gestor", false)).toBe(false);
+    expect(hasExpertsLink("member", false)).toBe(false);
+    expect(hasExpertsLink("expert", false)).toBe(false);
+  });
+
+  it("isExpertAllowedPath allows expert and auth routes and blocks house routes", () => {
+    expect(isExpertAllowedPath("/expert")).toBe(true);
+    expect(isExpertAllowedPath("/expert/leads")).toBe(true);
+    expect(isExpertAllowedPath("/players")).toBe(false);
+    expect(isExpertAllowedPath("/experts")).toBe(false);
+  });
+
+  it("/experts is active under Jogadores", () => {
+    const jogadores = visibleSections("admin", false).find(
+      (section) => section.label === "Jogadores",
+    );
+    expect(jogadores?.items.some((item) => item.kind === "link" && item.to === "/experts")).toBe(
+      true,
+    );
+    expect(activeNavKey("/experts", "")).toBe("/experts");
   });
 });

@@ -16,6 +16,7 @@ import {
   Sparkles,
   Target,
   Trophy,
+  UserCog,
   Users,
   Wallet,
   Workflow,
@@ -30,7 +31,7 @@ import {
  * (Oportunidades, Experts, WhatsApp — the last one redirects).
  */
 
-export type ShellRole = "admin" | "gestor" | "member" | "super_admin";
+export type ShellRole = "admin" | "gestor" | "member" | "super_admin" | "expert";
 
 export type NavAccess = {
   /** Who sees the item. Defaults to everyone. */
@@ -79,6 +80,7 @@ export const SIDEBAR_SECTIONS: NavSection[] = [
       link("Jogadores", "/players", Users),
       link("Públicos", "/publicos", PieChart),
       link("Níveis e fidelização", "/gamificacao", Trophy, { alsoActiveOn: ["/regras"] }),
+      link("Experts", "/experts", UserCog, { requires: "tenant_admin" }),
     ],
   },
   {
@@ -135,12 +137,25 @@ export const SIDEBAR_SECTIONS: NavSection[] = [
   },
 ];
 
+/** The whole shell for an expert: no house sections, just their two pages. */
+export const EXPERT_SECTIONS: NavSection[] = [
+  {
+    label: "Expert",
+    items: [link("Início", "/expert", Home), link("Leads", "/expert/leads", Users)],
+  },
+];
+
 /** Lives in the account menu (header avatar). */
 export const ACCOUNT_LINKS: NavLink[] = [
   link("Conta e equipe", "/tenants", Building2, { requires: "not_super_admin" }),
 ];
 
 export type MobileTab = { title: string; to?: string; icon: LucideIcon; alsoActiveOn?: string[] };
+
+export const EXPERT_MOBILE_TABS: MobileTab[] = [
+  { title: "Início", to: "/expert", icon: Home },
+  { title: "Leads", to: "/expert/leads", icon: Users },
+];
 
 export const MOBILE_TABS: MobileTab[] = [
   { title: "Início", to: "/", icon: Home },
@@ -204,7 +219,9 @@ export const ROUTE_META: Record<string, RouteMeta> = {
   "/links/configuracoes": { section: "Integrações", title: "Links curtos" },
   "/inteligencia": { section: "IA", title: "Assistente IA" },
   "/treino-ia": { section: "IA", title: "Configurar IA" },
-  "/experts": { section: "IA", title: "Experts" },
+  "/experts": { section: "Jogadores", title: "Experts" },
+  "/expert": { section: "Expert", title: "Início" },
+  "/expert/leads": { section: "Expert", title: "Leads" },
   "/webhooks": { section: "Configurações", title: "Integrações" },
   "/consentimentos": { section: "Canais", title: "Consentimentos" },
   "/configuracoes/casa": { section: "Configurações", title: "Configuração da casa" },
@@ -248,17 +265,33 @@ export function isPathUnder(pathname: string, to: string) {
 export function canSee(access: NavAccess, role: ShellRole | null, isSuperAdmin: boolean) {
   if (!access.requires) return true;
   if (access.requires === "super_admin") return isSuperAdmin;
-  if (access.requires === "not_super_admin") return !isSuperAdmin;
+  // The expert never gets house-admin links either, including the ones
+  // (like "Conta e equipe") only gated on "not being the super admin".
+  if (access.requires === "not_super_admin") return !isSuperAdmin && role !== "expert";
   return isSuperAdmin || role === "admin";
 }
 
 export function visibleSections(role: ShellRole | null, isSuperAdmin: boolean): NavSection[] {
+  if (role === "expert") return EXPERT_SECTIONS;
   return SIDEBAR_SECTIONS.filter((section) => canSee(section, role, isSuperAdmin))
     .map((section) => ({
       ...section,
       items: section.items.filter((item) => canSee(item, role, isSuperAdmin)),
     }))
     .filter((section) => section.items.length > 0);
+}
+
+/**
+ * Whether an expert may stay on `pathname` without being bounced to
+ * `/expert`: the Expert area itself, plus the account/auth screens that
+ * exist outside the house shell. Today those screens (login, password
+ * reset, forced password change) are rendered by `AuthGate` before the
+ * shell ever mounts and have no entry in `routeTree.gen.ts`, so there is
+ * nothing else to allow — this stays a dedicated function so a future
+ * account-only route can be added here without touching the redirect.
+ */
+export function isExpertAllowedPath(pathname: string): boolean {
+  return isPathUnder(pathname, "/expert");
 }
 
 export function navLinkKey(item: Pick<NavLink, "to" | "hash">) {

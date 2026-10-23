@@ -4,7 +4,7 @@ import { Brand } from "@/components/app-sidebar";
 import { useShellNav } from "@/components/shell/use-shell-nav";
 import { NavSections } from "@/components/shell/nav-list";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
-import { MOBILE_TABS, activeMobileTab } from "@/lib/navigation";
+import { EXPERT_MOBILE_TABS, MOBILE_TABS, activeMobileTab } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 
 /** Bottom tab bar for phones: the four most used places plus the full menu. */
@@ -15,15 +15,17 @@ export function MobileTabBar({
   onOpenMenu: () => void;
   menuOpen: boolean;
 }) {
+  const { role } = useShellNav();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const current = activeMobileTab(pathname);
+  const tabs = role === "expert" ? EXPERT_MOBILE_TABS : MOBILE_TABS;
 
   return (
     <nav
       aria-label="Atalhos"
       className="fixed inset-x-0 bottom-0 z-40 flex border-t border-sidebar-border bg-sidebar/95 px-1.5 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden"
     >
-      {MOBILE_TABS.map((tab) => {
+      {tabs.map((tab) => {
         const Icon = tab.icon;
         const classes =
           "flex h-[60px] flex-1 flex-col items-center justify-center gap-1 text-[10.5px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring";
