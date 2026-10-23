@@ -283,7 +283,26 @@ async function executeCallBlock(progress: any, block: any, player: any): Promise
 
   // 3. A Infobip sintetiza o script com CML `say` quando a ligação é atendida.
   const content = { type: "tts" as const, text: renderedText, language: "pt" };
-  const result = await callInfobipVoice(to, content, { tenantId: progress.tenant_id });
+  // PG3: the block's max_call_seconds sizes the wallet reservation.
+  const result = await callInfobipVoice(to, content, {
+    tenantId: progress.tenant_id,
+    maxSeconds: block.max_call_seconds ?? null,
+  });
+  if (result.errorKind === "insufficient_balance") {
+    // The house's wallet refused the reservation: nothing was dialed. Same
+    // treatment as other skips (no history row, attempt not consumed): the
+    // flow moves on to the next block.
+    await logEvent(
+      progress.id,
+      progress.flow_id,
+      progress.player_id,
+      progress.current_block_index,
+      "call_skipped",
+      { reason: "saldo_insuficiente" },
+    );
+    await scheduleNext(progress, block);
+    return;
+  }
   const isAuthError = result.status === 401 || result.status === 403;
   if (isAuthError) {
     console.warn(`[call-flow] auth_error ${result.status} — mantendo lead na fila, retry em 10min`);
@@ -307,6 +326,7 @@ async function executeCallBlock(progress: any, block: any, player: any): Promise
     tenant_id: progress.tenant_id,
     error_message: result.ok ? null : JSON.stringify(result.body).slice(0, 1000),
     rendered_text: renderedText,
+    billing_reference_id: result.billing?.referenceId ?? null,
   } as any);
 
   // 6. atualiza progress (aguardando callback do provedor)

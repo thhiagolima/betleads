@@ -5,7 +5,7 @@
 // empty tenantId, nothing may reach the network. A normal tenant is the
 // control: it reaches fetch.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createFakeDb } from "./sms-bulk.test-support";
+import { createFakeDb, installCreditLedger } from "./sms-bulk.test-support";
 
 const fake = vi.hoisted(() => ({ db: null as unknown as ReturnType<typeof createFakeDb> }));
 
@@ -35,6 +35,7 @@ beforeEach(() => {
   fake.db
     .rows("tenants")
     .push({ id: NORMAL, status: "active", is_demo: false }, { id: DEMO, status: "active", is_demo: true });
+  installCreditLedger(fake.db);
   vi.stubEnv("INFOBIP_BASE_URL", "https://infobip.example");
   vi.stubEnv("INFOBIP_API_KEY", "infobip-test-key");
   vi.stubEnv("INFOBIP_VOICE_FROM", "+551130000000");

@@ -264,6 +264,38 @@ export function buildProviderPayload(
   return replace(template) as Record<string, unknown>;
 }
 
+/** Copy shown when the house's wallet refuses a call's reservation. */
+export const VOICE_INSUFFICIENT_BALANCE_MESSAGE = "Saldo insuficiente";
+
+export type VoiceDispatchOutcome = "ok" | "insufficient_balance" | "transient" | "failed";
+
+/**
+ * How a queued call's dispatch result is handled. The wallet refusal
+ * (`errorKind: "insufficient_balance"`, status 0) is checked BEFORE the
+ * transient rule: status 0 alone means "no provider response" and re-queues
+ * the item in 5 minutes, which for a house without balance would repeat
+ * forever. Only the explicit errorKind means the house's wallet; a provider
+ * 402 without it keeps its old (final) classification.
+ */
+export function classifyVoiceDispatchResult(result: {
+  ok: boolean;
+  status: number;
+  body: unknown;
+  errorKind?: string | null;
+}): VoiceDispatchOutcome {
+  if (result.ok) return "ok";
+  if (result.errorKind === "insufficient_balance") return "insufficient_balance";
+  const body = (result.body ?? {}) as { non_json?: boolean };
+  if (
+    result.status === 0 ||
+    result.status === 429 ||
+    (result.status >= 500 && result.status < 600) ||
+    body?.non_json === true
+  )
+    return "transient";
+  return "failed";
+}
+
 /**
  * Dispatches due items created by voice campaigns. Call flows use their own
  * sequential runner; this worker covers the regular call_queue, including
@@ -291,6 +323,7 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
   let dispatched = 0;
   let deferred = 0;
   let failed = 0;
+  let insufficientBalance = 0;
   for (const item of queue ?? []) {
     try {
       let phone = item.phone_number ?? "";
@@ -358,15 +391,28 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
         content = { type: "audio", audioUrl };
       }
 
+      // No idempotency key: each dispatch attempt is its own call, so the
+      // wallet reference is `voice:<fresh uuid>` and the cap is the
+      // VOICE_MAX_CALL_SECONDS default.
       const result = await callInfobipVoice(to, content, { tenantId: item.tenant_id });
-      const body = (result.body ?? {}) as { non_json?: boolean };
-      const transient =
-        !result.ok &&
-        (result.status === 0 ||
-          result.status === 429 ||
-          (result.status >= 500 && result.status < 600) ||
-          body.non_json);
-      if (transient) {
+      const outcome = classifyVoiceDispatchResult(result);
+      if (outcome === "insufficient_balance") {
+        // Final for this item: never re-queued (no call was placed, nothing
+        // reserved). The house reruns the campaign after a top-up.
+        await supabaseAdmin
+          .from("call_queue")
+          .update({
+            status: "failed",
+            provider_status: "saldo_insuficiente",
+            provider_response: { error: VOICE_INSUFFICIENT_BALANCE_MESSAGE } as never,
+            provider_request_id: result.idempotencyKey,
+          } as never)
+          .eq("id", item.id);
+        insufficientBalance++;
+        failed++;
+        continue;
+      }
+      if (outcome === "transient") {
         await supabaseAdmin
           .from("call_queue")
           .update({
@@ -399,6 +445,7 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
         } as never,
         provider_status_code: result.status,
         error_message: result.ok ? null : JSON.stringify(result.body).slice(0, 1000),
+        billing_reference_id: result.billing?.referenceId ?? null,
       } as never);
       await supabaseAdmin
         .from("call_queue")
@@ -429,5 +476,5 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
         .eq("id", item.id);
     }
   }
-  return { due: queue?.length ?? 0, dispatched, deferred, failed };
+  return { due: queue?.length ?? 0, dispatched, deferred, failed, insufficientBalance };
 }

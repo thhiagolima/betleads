@@ -593,6 +593,77 @@ describe("runJourneyDispatcher", () => {
     expect(rpcNames()).not.toContain("release_channel_slot");
   });
 
+  it("voice: caps the reservation by the asset's duration_seconds and stores billing_reference_id (PG3 Task 4)", async () => {
+    seed(["e1"]);
+    fake.tables.journey_steps = [
+      {
+        id: "step-0",
+        journey_id: JOURNEY,
+        position: 0,
+        step_type: "voice",
+        is_enabled: true,
+        config: { asset_id: "a1" },
+      },
+    ];
+    fake.tables.journey_voice_assets = [
+      { id: "a1", tenant_id: TENANT, storage_path: "x.mp3", duration_seconds: 37 },
+    ];
+    const signed = vi.spyOn(fake.client.storage, "from").mockReturnValue({
+      createSignedUrl: async () => ({ data: { signedUrl: "https://a/x.mp3" }, error: null }),
+    } as never);
+    voice.callInfobipVoice.mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: { callId: "call-1" },
+      idempotencyKey: "key-1",
+      providerCallId: "call-1",
+      billing: { referenceId: "voice:key-1", units: 2 },
+    });
+    const result = await runJourneyDispatcher(1000);
+    signed.mockRestore();
+    expect(result).toMatchObject({ processed: 1, failed: 0 });
+    expect(voice.callInfobipVoice).toHaveBeenCalledWith(
+      expect.any(String),
+      { type: "audio", audioUrl: "https://a/x.mp3" },
+      expect.objectContaining({ tenantId: TENANT, maxSeconds: 37 }),
+    );
+    expect(fake.tables.call_history).toEqual([
+      expect.objectContaining({ billing_reference_id: "voice:key-1", tenant_id: TENANT }),
+    ]);
+  });
+
+  it("voice: passes the wallet refusal through as errorKind insufficient_balance (PG3 Task 4)", async () => {
+    seed(["e1"]);
+    fake.tables.journey_steps = [
+      {
+        id: "step-0",
+        journey_id: JOURNEY,
+        position: 0,
+        step_type: "voice",
+        is_enabled: true,
+        config: { asset_id: "a1" },
+      },
+    ];
+    fake.tables.journey_voice_assets = [{ id: "a1", tenant_id: TENANT, storage_path: "x.mp3" }];
+    const signed = vi.spyOn(fake.client.storage, "from").mockReturnValue({
+      createSignedUrl: async () => ({ data: { signedUrl: "https://a/x.mp3" }, error: null }),
+    } as never);
+    voice.callInfobipVoice.mockResolvedValue({
+      ok: false,
+      status: 0,
+      body: { error: "Saldo insuficiente" },
+      idempotencyKey: "key-1",
+      providerCallId: null,
+      errorKind: "insufficient_balance",
+    });
+    const result = await runJourneyDispatcher(1000);
+    signed.mockRestore();
+    // Interim no-cost defer (Task 1); Task 7 turns it into a skip.
+    expect(result).toMatchObject({ failed: 0, outcomeUnknown: 0, rescheduled: 1 });
+    expect(enrollment("e1")).toMatchObject({ attempts: 1 });
+    expect(fake.tables.call_history ?? []).toEqual([]);
+  });
+
   it("permanent provider errors still consume attempts", async () => {
     seed(["e1"]);
     sms.sendSmsInternal.mockResolvedValue({ ok: false, status: 400, error: "numero invalido" });

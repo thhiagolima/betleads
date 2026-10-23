@@ -928,7 +928,7 @@ async function deliverStep(
     const assetId = String(step.config.asset_id ?? "");
     const { data: asset } = await db
       .from("journey_voice_assets")
-      .select("storage_path")
+      .select("storage_path, duration_seconds")
       .eq("id", assetId)
       .eq("tenant_id", enrollment.tenant_id)
       .maybeSingle();
@@ -942,7 +942,13 @@ async function deliverStep(
     const result = await callInfobipVoice(
       to,
       { type: "audio", audioUrl: signed.signedUrl },
-      { idempotencyKey: run.idempotency_key, tenantId: enrollment.tenant_id },
+      {
+        idempotencyKey: run.idempotency_key,
+        tenantId: enrollment.tenant_id,
+        // PG3: the audio's duration sizes the wallet reservation (null falls
+        // back to VOICE_MAX_CALL_SECONDS).
+        maxSeconds: asset.duration_seconds ?? null,
+      },
     );
     if (!result.ok)
       throw new ProviderSendError({
@@ -973,6 +979,7 @@ async function deliverStep(
         } as never,
         provider_status_code: result.status,
         to_phone: to,
+        billing_reference_id: result.billing?.referenceId ?? null,
       });
     }
     await finishExecution(run.id, {

@@ -8,6 +8,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import {
   callElevenLabs,
+  classifyVoiceDispatchResult,
   computeAudioHash,
   DEFAULT_VOICE_SETTINGS,
   defaultVoiceId,
@@ -15,6 +16,7 @@ import {
   renderCallScript,
   runVoiceQueueDispatcher,
   uploadAudioToStorage,
+  VOICE_INSUFFICIENT_BALANCE_MESSAGE,
   type LeadLike,
   type VoiceSettings,
 } from "./calls.server";
@@ -740,19 +742,28 @@ export const dispatchCallQueueItem = createServerFn({ method: "POST" })
       content = { type: "audio", audioUrl: q.audio_url! };
     }
     const result = await callInfobipVoice(to, content, { tenantId });
+    const outcome = classifyVoiceDispatchResult(result);
+
+    // Carteira da casa sem saldo (checado ANTES da regra transitória: status 0
+    // sozinho reenfileiraria o item para sempre). Nenhuma ligação foi feita
+    // nem reservada: falha final, sem registro no histórico.
+    if (outcome === "insufficient_balance") {
+      await supabase
+        .from("call_queue")
+        .update({
+          status: "failed",
+          provider_status: "saldo_insuficiente",
+          provider_response: { error: VOICE_INSUFFICIENT_BALANCE_MESSAGE } as any,
+          provider_request_id: result.idempotencyKey || null,
+        } as any)
+        .eq("id", q.id);
+      throw new Error(VOICE_INSUFFICIENT_BALANCE_MESSAGE);
+    }
 
     // 5xx ou body não-JSON (HTML) = falha transitória do provedor.
     // Preservamos o item em audio_ready com provider_status='provider_unavailable'
     // para retentar depois — não marcamos failed nem registramos no histórico.
-    const bodyAny = (result.body ?? {}) as any;
-    const isTransient =
-      !result.ok &&
-      (result.status === 0 ||
-        result.status === 429 ||
-        (result.status >= 500 && result.status <= 599) ||
-        bodyAny?.non_json === true);
-
-    if (isTransient) {
+    if (outcome === "transient") {
       const errMsg = `Infobip voice ${result.status}: ${JSON.stringify(result.body).slice(0, 400)}`;
       try {
         await supabase.rpc("register_provider_throttle", {
@@ -805,6 +816,7 @@ export const dispatchCallQueueItem = createServerFn({ method: "POST" })
       provider_status_code: result.status,
       to_phone: to,
       tenant_id: tenantId,
+      billing_reference_id: result.billing?.referenceId ?? null,
     } as any);
 
     await supabase
@@ -928,6 +940,18 @@ export const bulkDispatchCalls = createServerFn({ method: "POST" })
 
         // 4. dispara
         const dispatchResult = await runVoiceQueueDispatcher(1, q.id);
+        if (dispatchResult.insufficientBalance > 0) {
+          // The dispatcher already marked the item failed (saldo_insuficiente);
+          // reported as-is, without the catch below overwriting that status.
+          failed += 1;
+          results.push({
+            ok: false,
+            lead_id: target.lead_id ?? null,
+            phone: target.phone_number ?? null,
+            error: VOICE_INSUFFICIENT_BALANCE_MESSAGE,
+          });
+          continue;
+        }
         if (dispatchResult.failed > 0) {
           throw new Error(
             "Não foi possível concluir o envio de voz. Consulte o histórico para os detalhes.",
