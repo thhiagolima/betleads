@@ -7,6 +7,9 @@ vi.mock("@tanstack/react-router", () => ({
 const { runBillingCycle } = vi.hoisted(() => ({ runBillingCycle: vi.fn() }));
 vi.mock("@/lib/billing/invoices.server", () => ({ runBillingCycle }));
 
+const { purgeOldWebhookBodies } = vi.hoisted(() => ({ purgeOldWebhookBodies: vi.fn() }));
+vi.mock("@/lib/billing/billing-retention.server", () => ({ purgeOldWebhookBodies }));
+
 const mocks = vi.hoisted(() => ({
   run: {
     progress: vi.fn(),
@@ -15,16 +18,18 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 vi.mock("@/lib/observability/job-monitor.server", () => ({
-  withJobRun: vi.fn(async (_job: string, _meta: unknown, fn: (run: unknown) => Promise<unknown>) => {
-    try {
-      const value = await fn(mocks.run);
-      await mocks.run.finish();
-      return value;
-    } catch (err) {
-      await mocks.run.fail(err);
-      throw err;
-    }
-  }),
+  withJobRun: vi.fn(
+    async (_job: string, _meta: unknown, fn: (run: unknown) => Promise<unknown>) => {
+      try {
+        const value = await fn(mocks.run);
+        await mocks.run.finish();
+        return value;
+      } catch (err) {
+        await mocks.run.fail(err);
+        throw err;
+      }
+    },
+  ),
 }));
 
 // requireSharedSecret (@/lib/cron-auth.server) is NOT mocked here on
@@ -48,6 +53,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.stubEnv("CRON_SECRET", SECRET);
   runBillingCycle.mockResolvedValue({ generated: 2, refreshed: 10, issued: 2, errors: 0 });
+  purgeOldWebhookBodies.mockResolvedValue({ purged: 4, batches: 1, ok: true });
 });
 
 afterEach(() => {
@@ -72,7 +78,14 @@ describe("POST /api/public/hooks/billing-cycle", () => {
     const response = await post({ authorization: `Bearer ${SECRET}` });
     expect(response.status).toBe(200);
     const body = await response.json();
-    expect(body).toEqual({ ok: true, generated: 2, refreshed: 10, issued: 2, errors: 0 });
+    expect(body).toEqual({
+      ok: true,
+      generated: 2,
+      refreshed: 10,
+      issued: 2,
+      errors: 0,
+      webhook_bodies_purged: 4,
+    });
     expect(runBillingCycle).toHaveBeenCalledTimes(1);
     expect(runBillingCycle).toHaveBeenCalledWith({
       sendEmails: expect.any(Function),
@@ -90,6 +103,32 @@ describe("POST /api/public/hooks/billing-cycle", () => {
     const body = await response.json();
     expect(body).toEqual({ ok: false, error: "db down" });
     expect(mocks.run.fail).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs the 90-day webhook body purge after the cycle, even when the cycle fails", async () => {
+    await post({ authorization: `Bearer ${SECRET}` });
+    expect(purgeOldWebhookBodies).toHaveBeenCalledTimes(1);
+    expect(mocks.run.finish.mock.invocationCallOrder[0]).toBeLessThan(
+      purgeOldWebhookBodies.mock.invocationCallOrder[0],
+    );
+
+    runBillingCycle.mockRejectedValue(new Error("db down"));
+    const failed = await post({ authorization: `Bearer ${SECRET}` });
+    expect(failed.status).toBe(500);
+    expect(purgeOldWebhookBodies).toHaveBeenCalledTimes(2);
+  });
+
+  it("a throwing purge never breaks the cycle response", async () => {
+    purgeOldWebhookBodies.mockRejectedValue(new Error("unexpected"));
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const response = await post({ authorization: `Bearer ${SECRET}` });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, webhook_bodies_purged: null });
+  });
+
+  it("does not purge without the shared secret", async () => {
+    await post();
+    expect(purgeOldWebhookBodies).not.toHaveBeenCalled();
   });
 
   it("also accepts the x-cron-secret header", async () => {
