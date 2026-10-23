@@ -226,6 +226,37 @@ describe("runBillingCycle", () => {
     expect(result.failures).toEqual(["wallet_alerts: candidates timeout"]);
   });
 
+  // Final fix I2: the voice hold release runs hourly as its own stage.
+  it("runs the stale voice settle every hour and reports how many were settled", async () => {
+    process.env.BILLING_INVOICES_ENABLED = "false";
+    seedTenantBilling();
+    fake.admin.onRpc("billing_refresh_access_state", () => ({ data: "ok", error: null }));
+    const settleVoiceReservations = vi.fn().mockResolvedValue({ checked: 3, settled: 2, skipped: 1, failed: 0 });
+
+    const result = await runBillingCycle({ settleVoiceReservations });
+
+    expect(settleVoiceReservations).toHaveBeenCalledTimes(1);
+    expect(result.voiceSettled).toBe(2);
+    expect(result.failures).toEqual([]);
+  });
+
+  it("a failed voice settle is recorded and never stops the other stages", async () => {
+    seedTenantBilling();
+    fake.admin.onRpc("billing_refresh_access_state", () => ({ data: "ok", error: null }));
+    fake.admin.onRpc("billing_generate_due_invoices", () => ({ data: [], error: null }));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const sendEmails = vi.fn().mockResolvedValue(0);
+    const sendWalletAlerts = vi.fn().mockResolvedValue(1);
+    const settleVoiceReservations = vi.fn().mockRejectedValue(new Error("ledger timeout"));
+
+    const result = await runBillingCycle({ sendEmails, sendWalletAlerts, settleVoiceReservations });
+
+    expect(sendEmails).toHaveBeenCalledTimes(1);
+    expect(sendWalletAlerts).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ refreshed: 1, walletAlerts: 1, voiceSettled: 0, errors: 1 });
+    expect(result.failures).toEqual(["voice_settle: ledger timeout"]);
+  });
+
   it("still sends the e-mail sweep and reports the failure when listing the houses fails", async () => {
     fake.admin.onRpc("billing_generate_due_invoices", () => ({ data: ["new-invoice-1"], error: null }));
     const refreshRpc = vi.fn(() => ({ data: "ok", error: null }));

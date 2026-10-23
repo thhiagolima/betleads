@@ -5,6 +5,8 @@
 //   * call_history 'pending' (the CML was never fetched) -> unanswered;
 //   * call_history 'answered' (CML fetched, no final event) -> keep the cap;
 //   * no call_history row (insert failed) -> unanswered.
+// Final fix I2: a 'pending' row with no cml_answered is already due after
+// 60 minutes; everything else waits the 24 h.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createFakeDb } from "./sms-bulk.test-support";
 
@@ -19,7 +21,10 @@ vi.mock("@/integrations/supabase/client.server", async () => {
 vi.mock("./billing/wallet.server", () => ({ settleVoiceCall: wallet.settleVoiceCall }));
 vi.mock("./tenant-access.server", () => ({ listDemoTenantIds: vi.fn(async () => []) }));
 
-import { settleStaleVoiceReservations } from "./infobip-voice-reconciliation.server";
+import {
+  reconcileChannelCallbacks,
+  settleStaleVoiceReservations,
+} from "./infobip-voice-reconciliation.server";
 
 const TENANT = "00000000-0000-4000-8000-000000000001";
 const OTHER = "00000000-0000-4000-8000-000000000002";
@@ -190,6 +195,67 @@ describe("settleStaleVoiceReservations", () => {
     expect(result).toMatchObject({ checked: 0, settled: 0 });
   });
 
+  // Final fix I2: a 'pending' call (no cml_answered) is settled as
+  // unanswered after 60 minutes, not 24 h; everything else keeps 24 h.
+  it("pending call with no cml_answered older than 60 minutes: settles as unanswered", async () => {
+    reservation("voice:pending-1h", { created_at: hoursAgo(2) });
+    const row = history("voice:pending-1h", { status: "pending", created_at: hoursAgo(2) });
+    const result = await settleStaleVoiceReservations();
+    expect(wallet.settleVoiceCall).toHaveBeenCalledWith(expect.anything(), {
+      tenantId: TENANT,
+      referenceId: "voice:pending-1h",
+      durationSeconds: null,
+      answered: false,
+    });
+    expect(row.billing_settled_at).toEqual(expect.any(String));
+    expect(result).toMatchObject({ checked: 1, settled: 1 });
+  });
+
+  it("pending call younger than 60 minutes is left alone", async () => {
+    reservation("voice:pending-30m", { created_at: hoursAgo(0.5) });
+    history("voice:pending-30m", { status: "pending", created_at: hoursAgo(0.5) });
+    const result = await settleStaleVoiceReservations();
+    expect(wallet.settleVoiceCall).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ checked: 0 });
+  });
+
+  it("answered call between 60 minutes and 24 h keeps waiting for the final event", async () => {
+    reservation("voice:answered-2h", { created_at: hoursAgo(2) });
+    history("voice:answered-2h", { status: "answered", created_at: hoursAgo(2) });
+    const result = await settleStaleVoiceReservations();
+    expect(wallet.settleVoiceCall).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ checked: 0 });
+  });
+
+  it("pending row that already has a cml_answered callback keeps the 24 h rule (and the cap)", async () => {
+    reservation("voice:pending-cml", { created_at: hoursAgo(2) });
+    history("voice:pending-cml", {
+      status: "pending",
+      created_at: hoursAgo(2),
+      provider_response: { callbacks: [{ type: "cml_answered" }] },
+    });
+    await settleStaleVoiceReservations();
+    expect(wallet.settleVoiceCall).not.toHaveBeenCalled();
+
+    reservation("voice:pending-cml-old");
+    history("voice:pending-cml-old", {
+      status: "pending",
+      provider_response: { callbacks: [{ type: "cml_answered" }] },
+    });
+    await settleStaleVoiceReservations();
+    expect(wallet.settleVoiceCall).toHaveBeenCalledTimes(1);
+    expect(wallet.settleVoiceCall).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ referenceId: "voice:pending-cml-old", answered: true }),
+    );
+  });
+
+  it("a reservation with no call_history row between 60 minutes and 24 h keeps waiting", async () => {
+    reservation("voice:orphan-2h", { created_at: hoursAgo(2) });
+    await settleStaleVoiceReservations();
+    expect(wallet.settleVoiceCall).not.toHaveBeenCalled();
+  });
+
   it("paginates through every stale reservation", async () => {
     for (let i = 0; i < 7; i++) reservation(`voice:page-${i}`);
     const result = await settleStaleVoiceReservations([], { pageSize: 3 });
@@ -210,5 +276,19 @@ describe("settleStaleVoiceReservations", () => {
     const result = await settleStaleVoiceReservations();
     expect(wallet.settleVoiceCall).toHaveBeenCalledTimes(3);
     expect(result).toMatchObject({ checked: 3, settled: 1, skipped: 1, failed: 1 });
+  });
+});
+
+describe("reconcileChannelCallbacks", () => {
+  // Final fix (minor 5): the daily settle runs even when an audit fails.
+  it("still settles stale voice reservations when a callback audit fails", async () => {
+    fake.db.failNext("sms_send_logs", "select", "sms audit down");
+    reservation("voice:daily");
+    history("voice:daily", { status: "pending" });
+    await expect(reconcileChannelCallbacks()).rejects.toThrow("sms audit down");
+    expect(wallet.settleVoiceCall).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ referenceId: "voice:daily", answered: false }),
+    );
   });
 });

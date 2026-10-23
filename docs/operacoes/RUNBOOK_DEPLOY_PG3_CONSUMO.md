@@ -126,7 +126,8 @@ usado para reservar os blocos de voz; padrão 120). Não é obrigatório.
   `cml_answered` depois de 60 minutos liquida como não atendida (grátis);
   ligação atendida ou reserva sem linha em `call_history` liquida depois de
   24 h. A reconciliação diária roda a mesma rotina.
-- Conferir no log linhas `[billing-cycle]` com falha de algum estágio.
+- Conferir no log linhas `[billing/invoices]` com falha de algum estágio (o
+  JSON de resposta do cron traz `failures`, por exemplo `voice_settle: ...`).
 - Casas sem saldo: SMS e voz param (campanha de SMS fica pausada com
   "Saldo insuficiente"; fila de voz pula a casa no tick); e-mail segue dentro
   da franquia mensal.

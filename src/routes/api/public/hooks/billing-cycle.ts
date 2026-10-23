@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { sendPendingBillingEmails } from "@/lib/billing/billing-emails.server";
 import { runBillingCycle } from "@/lib/billing/invoices.server";
 import { sendLowBalanceAlerts } from "@/lib/billing/wallet-alerts.server";
+import { settleStaleVoiceReservations } from "@/lib/infobip-voice-reconciliation.server";
 import { requireSharedSecret } from "@/lib/cron-auth.server";
 import { withJobRun } from "@/lib/observability/job-monitor.server";
 
@@ -12,7 +13,8 @@ import { withJobRun } from "@/lib/observability/job-monitor.server";
 // e-mail (Task 5): `sendPendingBillingEmails` itself re-derives what is due
 // from the DB (issued/due_today/locked/paid), so it is not limited to the
 // invoices this very run generated. It also runs the hourly low-balance
-// e-mail sweep (PG3 Task 8, `sendLowBalanceAlerts`).
+// e-mail sweep (PG3 Task 8, `sendLowBalanceAlerts`) and releases stale voice
+// holds (PG3 final fix I2, `settleStaleVoiceReservations`).
 
 export const Route = createFileRoute("/api/public/hooks/billing-cycle")({
   server: {
@@ -28,6 +30,7 @@ export const Route = createFileRoute("/api/public/hooks/billing-cycle")({
             const result = await runBillingCycle({
               sendEmails: () => sendPendingBillingEmails(),
               sendWalletAlerts: () => sendLowBalanceAlerts(),
+              settleVoiceReservations: () => settleStaleVoiceReservations(),
             });
             run.progress({
               claimed: result.refreshed,

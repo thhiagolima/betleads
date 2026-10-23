@@ -77,6 +77,7 @@ describe("POST /api/public/hooks/billing-cycle", () => {
     expect(runBillingCycle).toHaveBeenCalledWith({
       sendEmails: expect.any(Function),
       sendWalletAlerts: expect.any(Function),
+      settleVoiceReservations: expect.any(Function),
     });
     expect(mocks.run.progress).toHaveBeenCalledWith({ claimed: 10, sent: 2, errors: 0 });
     expect(mocks.run.finish).toHaveBeenCalledTimes(1);

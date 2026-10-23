@@ -162,6 +162,12 @@ export async function reconcilePendingShortBrasilSms(limit = 500, demoTenantIds?
 /** A reservation is settled here only after the provider had 24 h to report. */
 const VOICE_SETTLE_AFTER_MS = 24 * 60 * 60_000;
 /**
+ * Final fix I2: a call still 'pending' with no `cml_answered` callback after
+ * this long was never picked up (a call lasts at most a few minutes), so its
+ * hold is released as unanswered instead of waiting the full 24 h.
+ */
+const VOICE_UNANSWERED_SETTLE_AFTER_MS = 60 * 60_000;
+/**
  * How far back the daily job looks. Wider than one day so a few missed runs
  * still settle everything; bounded so the scan never reads the whole ledger.
  */
@@ -172,7 +178,12 @@ const IN_CHUNK = 100;
 /** Upper bound on pages per run (500 * 200 = 100k reservations). */
 const VOICE_SETTLE_MAX_PAGES = 200;
 
-type StaleReservation = { id: string; tenant_id: string; reference_id: string | null };
+type StaleReservation = {
+  id: string;
+  tenant_id: string;
+  reference_id: string | null;
+  created_at: string;
+};
 type BillingHistoryRow = {
   id: string;
   tenant_id: string;
@@ -203,8 +214,12 @@ function staleSettlement(row: BillingHistoryRow | undefined): {
   answered: boolean;
   durationSeconds: number | null;
 } {
-  if (!row || row.status === "pending") return { answered: false, durationSeconds: null };
-  if (row.status === "answered") return { answered: true, durationSeconds: null };
+  if (!row) return { answered: false, durationSeconds: null };
+  if (row.status === "pending" || row.status === "answered") {
+    // A 'pending' row that somehow carries a cml_answered callback was
+    // picked up: it keeps the cap like an 'answered' one.
+    return { answered: voiceCallAnswered(row), durationSeconds: null };
+  }
   // Same rule as the final event (events.ts, fix round 1): the CML record or
   // a completed call with a positive duration.
   const completedWithDuration =
@@ -216,11 +231,34 @@ function staleSettlement(row: BillingHistoryRow | undefined): {
 }
 
 /**
- * Settles every `voice_call` reservation older than 24 h that has no
- * reversing usage_refund (no settlement and no refund yet). Keyed by the
- * ledger, not by call_history, so a call whose history insert failed is
- * still settled. The settlement key is the one the final event uses, so a
- * late event after this only replays the stored result.
+ * True when the reservation is due for settlement without a final event:
+ * a call_history row still 'pending' with no `cml_answered` callback after
+ * 60 minutes (nobody picked up); anything else (answered, a processed final
+ * event, or no history row at all) after 24 h.
+ */
+function settlementDue(
+  reservation: StaleReservation,
+  row: BillingHistoryRow | undefined,
+  now: number,
+): boolean {
+  const ageMs = now - new Date(reservation.created_at).getTime();
+  if (ageMs >= VOICE_SETTLE_AFTER_MS) return true;
+  return (
+    row !== undefined &&
+    row.status === "pending" &&
+    !voiceCallAnswered(row) &&
+    ageMs >= VOICE_UNANSWERED_SETTLE_AFTER_MS
+  );
+}
+
+/**
+ * Settles every `voice_call` reservation that has no reversing usage_refund
+ * (no settlement and no refund yet) and is due (`settlementDue`: 60 min for
+ * a never-answered pending call, 24 h otherwise). Keyed by the ledger, not
+ * by call_history, so a call whose history insert failed is still settled.
+ * The settlement key is the one the final event uses, so a late event after
+ * this only replays the stored result. Runs hourly from the billing cycle
+ * and daily from the callback reconciliation.
  */
 export async function settleStaleVoiceReservations(
   demoTenantIds?: string[],
@@ -234,10 +272,10 @@ export async function settleStaleVoiceReservations(
   for (let page = 0; page < VOICE_SETTLE_MAX_PAGES; page++) {
     let query = supabaseAdmin
       .from("wallet_ledger")
-      .select("id, tenant_id, reference_id")
+      .select("id, tenant_id, reference_id, created_at")
       .eq("entry_type", "usage_reservation")
       .eq("reference_type", "voice_call")
-      .lte("created_at", new Date(now - VOICE_SETTLE_AFTER_MS).toISOString())
+      .lte("created_at", new Date(now - VOICE_UNANSWERED_SETTLE_AFTER_MS).toISOString())
       .gte("created_at", new Date(now - VOICE_SETTLE_LOOKBACK_MS).toISOString());
     if (demoFilter) query = query.not("tenant_id", "in", demoFilter);
     // Offset pagination is stable here: settling adds refund rows but never
@@ -281,9 +319,10 @@ export async function settleStaleVoiceReservations(
     }
 
     for (const reservation of open) {
-      counts.checked += 1;
       const referenceId = reservation.reference_id as string;
       const row = historyByKey.get(`${reservation.tenant_id}|${referenceId}`);
+      if (!settlementDue(reservation, row, now)) continue;
+      counts.checked += 1;
       const result = await settleVoiceHistory({
         tenantId: reservation.tenant_id,
         referenceId,
@@ -306,12 +345,22 @@ export async function settleStaleVoiceReservations(
 
 export async function reconcileChannelCallbacks() {
   const demoTenantIds = await listDemoTenantIds();
-  const [voice, email, sms] = await Promise.all([
-    reconcilePendingInfobipVoiceCalls(500, demoTenantIds),
-    reconcilePendingInfobipEmails(500, demoTenantIds),
-    reconcilePendingShortBrasilSms(500, demoTenantIds),
+  // The audits only touch provider_response; the settle moves money. A
+  // failed audit must never hold the settle back (final fix, minor 5), so
+  // both run to completion and the first error is rethrown afterwards.
+  const [audits, settle] = await Promise.allSettled([
+    Promise.all([
+      reconcilePendingInfobipVoiceCalls(500, demoTenantIds),
+      reconcilePendingInfobipEmails(500, demoTenantIds),
+      reconcilePendingShortBrasilSms(500, demoTenantIds),
+    ]),
+    settleStaleVoiceReservations(demoTenantIds),
   ]);
-  // After the audit: it only touches provider_response, never the bill.
-  const voiceBilling = await settleStaleVoiceReservations(demoTenantIds);
-  return { voice, email, sms, voiceBilling };
+  if (settle.status === "rejected") {
+    console.error("[infobip voice reconciliation] falha ao liquidar reservas de voz", settle.reason);
+  }
+  if (audits.status === "rejected") throw audits.reason;
+  if (settle.status === "rejected") throw settle.reason;
+  const [voice, email, sms] = audits.value;
+  return { voice, email, sms, voiceBilling: settle.value };
 }
