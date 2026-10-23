@@ -28,6 +28,7 @@ import {
   getChannelOperationState,
   groupVoiceQueueItems,
   isFinishedCampaignStatus,
+  isPausedCampaignStatus,
   type VoiceQueueItem,
 } from "@/lib/channel-operation-state";
 import {
@@ -46,7 +47,7 @@ import { CampaignBlockedBadge } from "@/components/house-config/campaign-blocked
 import { listCallQueue } from "@/lib/calls.functions";
 import { deleteCampaignDraft, listCampaignDrafts } from "@/lib/campaign-drafts.functions";
 
-type CampaignStatus = "todos" | "agendadas" | "enviando" | "finalizadas";
+type CampaignStatus = "todos" | "agendadas" | "enviando" | "pausadas" | "finalizadas";
 type Campaign = {
   id: string;
   name: string | null;
@@ -254,6 +255,7 @@ export function CampaignsHub() {
       status === "todos" ||
       (status === "agendadas" && ["agendada", "scheduled"].includes(campaign.status)) ||
       (status === "enviando" && campaign.status === "enviando") ||
+      (status === "pausadas" && isPausedCampaignStatus(campaign.status)) ||
       (status === "finalizadas" && isFinishedCampaignStatus(campaign.status));
     return (
       statusMatches &&
@@ -383,18 +385,20 @@ export function CampaignsHub() {
       </div>
       <ChannelObservabilityPanel />
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex rounded-lg border border-border/70 bg-card/60 p-1">
-          {(["todos", "agendadas", "enviando", "finalizadas"] as CampaignStatus[]).map((value) => (
-            <Button
-              key={value}
-              size="sm"
-              variant={status === value ? "default" : "ghost"}
-              onClick={() => setStatus(value)}
-              className="capitalize"
-            >
-              {value}
-            </Button>
-          ))}
+        <div className="flex max-w-full overflow-x-auto rounded-lg border border-border/70 bg-card/60 p-1">
+          {(["todos", "agendadas", "enviando", "pausadas", "finalizadas"] as CampaignStatus[]).map(
+            (value) => (
+              <Button
+                key={value}
+                size="sm"
+                variant={status === value ? "default" : "ghost"}
+                onClick={() => setStatus(value)}
+                className="capitalize"
+              >
+                {value}
+              </Button>
+            ),
+          )}
         </div>
         <div className="relative w-full sm:w-72">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
