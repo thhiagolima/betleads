@@ -193,3 +193,34 @@ export function validatePixFeeFixedCents(raw: string): FieldValidation {
   }
   return VALID;
 }
+
+// ---------------------------------------------------------------------------
+// Saúde da cobrança (PG6-03)
+// ---------------------------------------------------------------------------
+
+export type BillingHealthTone = "ok" | "warning" | "critical";
+
+export function billingHealthSummary(report: {
+  ok: boolean;
+  findings: { severity: "critical" | "warning" }[];
+}): { tone: BillingHealthTone; title: string } {
+  const critical = report.findings.filter((f) => f.severity === "critical").length;
+  if (critical > 0) {
+    return {
+      tone: "critical",
+      title:
+        critical === 1
+          ? "1 problema crítico na cobrança"
+          : `${critical} problemas críticos na cobrança`,
+    };
+  }
+  if (report.findings.length > 0) {
+    return { tone: "warning", title: "Cobrança funcionando, com pontos de atenção" };
+  }
+  return { tone: "ok", title: "Tudo certo com a cobrança" };
+}
+
+export function billingAlertTestMessage(channel: "sentry" | "log" | "none"): string {
+  if (channel === "sentry") return "Alerta de teste enviado ao Sentry (billing_alert_test).";
+  return "Alerta de teste gravado no log do servidor com o prefixo [billing-alert] (billing_alert_test).";
+}
