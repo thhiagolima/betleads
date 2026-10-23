@@ -59,6 +59,7 @@ import {
 import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
 import { TemplateEditorDialog } from "@/components/email/template-editor-dialog";
 import { QuickEditorDialog } from "@/components/email/quick-editor-dialog";
+import { emailPreviewText } from "@/lib/email-preview";
 
 export const Route = createFileRoute("/email")({
   component: EmailPage,
@@ -467,7 +468,7 @@ function TemplatesTab() {
                 </Badge>
               </div>
               <p className="mt-2 line-clamp-3 min-h-[3em] text-xs text-muted-foreground">
-                {t.preheader || t.corpo || "Sem conteúdo ainda."}
+                {t.preheader || emailPreviewText(t.corpo) || "Sem conteúdo ainda."}
               </p>
               <div className="mt-2 flex flex-wrap gap-1.5">
                 <Badge variant="outline" className="text-meta">

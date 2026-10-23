@@ -235,7 +235,7 @@ function PlatformSection() {
       <EmptyState
         icon={<ShieldAlert className="h-5 w-5" />}
         title="Acesso administrativo necessário"
-        description="URLs, assinaturas e payloads de webhook são restritos aos administradores da conta."
+        description="Os endereços e as chaves que a plataforma de apostas usa para enviar dados são vistos só pelos administradores da casa."
       />
     );
   }
