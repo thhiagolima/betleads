@@ -17,11 +17,19 @@
 //             attempt, never fails the item, no MAX_NO_COST_DEFERS cap. The
 //             item waits for the SMS circuit breaker (sms-provider-breaker).
 //   fail    : definitely not accepted (invalid recipient, 4xx, request never
-//             left: DNS/ECONNREFUSED), provider misconfigured (missing
-//             credentials), or the HOUSE's own wallet refused the reservation
-//             (errorKind `insufficient_balance`, final: no retry, no attempt
-//             consumed; the journey step itself is skipped — Task 7) -> the
-//             caller's normal attempts/backoff policy for anything else.
+//             left: DNS/ECONNREFUSED) or provider misconfigured (missing
+//             credentials) -> the caller's normal attempts/backoff policy.
+//
+// `insufficient_balance` (errorKind set explicitly by the wallet-reservation
+// layer, e.g. sendSmsInternal's early 402 before the provider is ever
+// called) is an INTERIM `defer`, same shape as the generic 402 sniff below
+// (15 min, no attempt consumed, same MAX_NO_COST_DEFERS cap): Task 7 will
+// replace this with a journey skip-and-advance. Only the explicit errorKind
+// means "the HOUSE's own wallet" — the generic 402 / "insufficient funds"
+// body sniff (no errorKind at all, e.g. a provider that answers 402 for its
+// own account, such as Infobip voice/e-mail) keeps its original
+// `insufficient_credit` classification; conflating the two would treat a
+// provider-level refusal as if it were this one house's problem.
 //
 // Workers wrap a non-ok provider result in ProviderSendError so the status,
 // body and transport kind survive until the classification.
@@ -39,6 +47,7 @@ export type ProviderFailureDecision = {
   kind: ProviderFailureKind;
   reason:
     | "insufficient_balance"
+    | "insufficient_credit"
     | "provider_account"
     | "provider_rate_limited"
     | "provider_unavailable"
@@ -53,6 +62,8 @@ export type ProviderFailureDecision = {
 };
 
 export const PROVIDER_DEFER_MS = 60_000;
+/** Backoff for missing credit: no pause, the item simply comes back later. */
+export const CREDIT_DEFER_MS = 15 * 60_000;
 /**
  * Possibly-sent items wait at least this long; matches the `in_flight`
  * window of reserve_journey_delivery (20261015111000, c_in_flight_lease).
@@ -121,10 +132,11 @@ export function classifyProviderFailure(error: unknown): ProviderFailureDecision
       };
     }
     // The HOUSE's own wallet refused the reservation (checked before the
-    // generic 402/insufficient-funds body sniffing below): final, no retry,
-    // no attempt consumed. Journey skip-and-advance behaviour is Task 7.
+    // generic 402/insufficient-funds body sniffing below): interim no-cost
+    // defer, same as the generic sniff, until Task 7 replaces this with a
+    // journey skip-and-advance.
     if (error.errorKind === "insufficient_balance") {
-      return { kind: "fail", reason: "insufficient_balance", retryAfterMs: 0 };
+      return { kind: "defer", reason: "insufficient_balance", retryAfterMs: CREDIT_DEFER_MS };
     }
     if (error.errorKind === "misconfigured") {
       return { kind: "fail", reason: "provider_misconfigured", retryAfterMs: 0 };
@@ -141,7 +153,7 @@ export function classifyProviderFailure(error: unknown): ProviderFailureDecision
       isInsufficientFunds(error.status, body) ||
       isInsufficientFunds(undefined, error.message)
     ) {
-      return { kind: "fail", reason: "insufficient_balance", retryAfterMs: 0 };
+      return { kind: "defer", reason: "insufficient_credit", retryAfterMs: CREDIT_DEFER_MS };
     }
     if (error.status === 429) {
       const hinted = parseRetryAfter(body) * 1000;
@@ -163,7 +175,7 @@ export function classifyProviderFailure(error: unknown): ProviderFailureDecision
   }
   const message = error instanceof Error ? error.message : String(error ?? "");
   if (isInsufficientFunds(undefined, message)) {
-    return { kind: "fail", reason: "insufficient_balance", retryAfterMs: 0 };
+    return { kind: "defer", reason: "insufficient_credit", retryAfterMs: CREDIT_DEFER_MS };
   }
   if (TRANSIENT_MESSAGE.test(message)) {
     return { kind: "defer", reason: "transient_error", retryAfterMs: PROVIDER_DEFER_MS };

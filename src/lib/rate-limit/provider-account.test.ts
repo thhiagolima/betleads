@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  CREDIT_DEFER_MS,
   ProviderSendError,
   classifyProviderFailure,
 } from "./provider-errors.server";
@@ -48,20 +49,20 @@ describe("classifyProviderFailure — provider_account", () => {
     expect(decision.retryAfterMs).toBeGreaterThan(0);
   });
 
-  it("the tenant's own wallet (402 without provider_account) is final: insufficient_balance", () => {
-    const tenantCredit = new ProviderSendError({
+  it("the provider's OWN 402 (no errorKind) keeps its original provider-level classification: insufficient_credit", () => {
+    const providerCredit = new ProviderSendError({
       channel: "sms",
       message: "Saldo insuficiente",
       status: 402,
     });
-    expect(classifyProviderFailure(tenantCredit)).toMatchObject({
-      kind: "fail",
-      reason: "insufficient_balance",
-      retryAfterMs: 0,
+    expect(classifyProviderFailure(providerCredit)).toMatchObject({
+      kind: "defer",
+      reason: "insufficient_credit",
+      retryAfterMs: CREDIT_DEFER_MS,
     });
   });
 
-  it("errorKind insufficient_balance (set by the wallet reservation) is final, same as the 402 sniff", () => {
+  it("errorKind insufficient_balance (set by the wallet reservation, the HOUSE's own wallet) is an interim no-cost defer, not final, until Task 7's skip-and-advance", () => {
     const walletRefusal = new ProviderSendError({
       channel: "sms",
       message: "Saldo insuficiente",
@@ -69,9 +70,9 @@ describe("classifyProviderFailure — provider_account", () => {
       errorKind: "insufficient_balance",
     });
     expect(classifyProviderFailure(walletRefusal)).toEqual({
-      kind: "fail",
+      kind: "defer",
       reason: "insufficient_balance",
-      retryAfterMs: 0,
+      retryAfterMs: CREDIT_DEFER_MS,
     });
   });
 

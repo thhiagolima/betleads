@@ -180,6 +180,7 @@ describe("SMS flow dispatcher — wallet refusal stays per-house (PG3 Task 1)", 
       return { ok: true as const, status: 200, response: "{}" } as any;
     });
 
+    const before = Date.now();
     const result = await runSmsDispatcher({ limit: 10 });
 
     expect(pauseChannelForInsufficientFunds).not.toHaveBeenCalled();
@@ -187,9 +188,16 @@ describe("SMS flow dispatcher — wallet refusal stays per-house (PG3 Task 1)", 
     // Tenant B's send still went through in the same tick.
     expect(result).toMatchObject({ processed: 1 });
     expect(leadById("lead-b")).toMatchObject({ current_step_index: 1 });
-    // Tenant A's lead was only skipped (rescheduled), never marked failed.
-    expect(leadById("lead-a").status).not.toBe("failed");
-    expect(leadById("lead-a").current_step_index).toBe(0);
+    // Tenant A's lead was only skipped (rescheduled 15 min out, same backoff
+    // as the generic wallet-insufficient path), never marked failed and
+    // never charged an attempt.
+    const leadA = leadById("lead-a");
+    expect(leadA.status).not.toBe("failed");
+    expect(leadA.current_step_index).toBe(0);
+    expect(leadA.attempts).toBe(0);
+    const nextRunAtMs = Date.parse(String(leadA.next_run_at));
+    expect(nextRunAtMs).toBeGreaterThanOrEqual(before + 15 * 60_000 - 1_000);
+    expect(nextRunAtMs).toBeLessThanOrEqual(before + 15 * 60_000 + 10_000);
   });
 
   it("a real provider 402 (no errorKind) still pauses the channel globally", async () => {

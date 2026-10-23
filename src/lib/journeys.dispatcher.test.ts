@@ -324,17 +324,44 @@ describe("runJourneyDispatcher", () => {
     expect(fake.tables.dispatch_pause_state).toHaveLength(0);
   });
 
-  it("402 (no credit) is a final per-house failure: no pause, consumes an attempt, never retried as a no-cost defer (PG3)", async () => {
+  it("402 (no credit, no errorKind) defers 15 min without pausing the channel or consuming an attempt — provider-level, unchanged by PG3 Task 1 (I4)", async () => {
     seed(["e1"]);
     sms.sendSmsInternal.mockResolvedValue({ ok: false, status: 402, error: "Saldo insuficiente" });
+    const before = Date.now();
     const result = await runJourneyDispatcher(1000);
-    expect(result).toMatchObject({ failed: 1, rescheduled: 0 });
+    expect(result).toMatchObject({ failed: 0, rescheduled: 1 });
     const row = enrollment("e1");
-    expect(row).toMatchObject({ status: "waiting", attempts: 2 });
+    expect(row).toMatchObject({ status: "waiting", attempts: 1 });
+    expect(Date.parse(String(row.next_run_at))).toBeGreaterThanOrEqual(
+      before + 15 * 60_000 - 1_000,
+    );
     expect(fake.tables.dispatch_pause_state).toHaveLength(0);
     expect(fake.tables.journey_events.at(-1)).toMatchObject({
-      event_type: "retry_scheduled",
-      detail: expect.objectContaining({ reason: "insufficient_balance" }),
+      event_type: "step_deferred",
+      detail: expect.objectContaining({ reason: "insufficient_credit", attempt_consumed: false }),
+    });
+  });
+
+  it("house wallet refusal (errorKind insufficient_balance) defers 15 min without pausing or consuming an attempt — PG3 Task 1 interim, Task 7 replaces with skip-and-advance", async () => {
+    seed(["e1"]);
+    sms.sendSmsInternal.mockResolvedValue({
+      ok: false,
+      status: 402,
+      error: "Saldo insuficiente",
+      errorKind: "insufficient_balance",
+    });
+    const before = Date.now();
+    const result = await runJourneyDispatcher(1000);
+    expect(result).toMatchObject({ failed: 0, rescheduled: 1 });
+    const row = enrollment("e1");
+    expect(row).toMatchObject({ status: "waiting", attempts: 1 });
+    expect(Date.parse(String(row.next_run_at))).toBeGreaterThanOrEqual(
+      before + 15 * 60_000 - 1_000,
+    );
+    expect(fake.tables.dispatch_pause_state).toHaveLength(0);
+    expect(fake.tables.journey_events.at(-1)).toMatchObject({
+      event_type: "step_deferred",
+      detail: expect.objectContaining({ reason: "insufficient_balance", attempt_consumed: false }),
     });
   });
 

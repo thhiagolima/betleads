@@ -18,12 +18,15 @@
 //                     deferred and the SMS circuit breaker opens
 //                     (src/lib/sms-provider-breaker.server.ts).
 //   insufficient_balance: the HOUSE's own wallet refused the reservation
-//                     before the provider was ever called. Per-house, final:
-//                     the item is skipped (logged `saldo_insuficiente`), no
-//                     retry, no attempt consumed, and it must never pause the
-//                     channel for every other tenant. Distinct from
-//                     `provider_account`'s "no_balance" reason, which is the
-//                     provider's OWN account (Short Brasil) out of balance.
+//                     before the provider was ever called. Per-house: the
+//                     SMS/e-mail automation dispatchers reschedule just this
+//                     one item 15 min out (no attempt consumed) and never
+//                     pause the channel for every other tenant. Journeys
+//                     (classifyProviderFailure) treat it the same way as an
+//                     interim no-cost defer until Task 7 replaces it with a
+//                     skip-and-advance. Distinct from `provider_account`'s
+//                     "no_balance" reason, which is the provider's OWN
+//                     account (Short Brasil) out of balance.
 //
 // Pure module (no I/O): imported by the SMS, voice and e-mail adapters.
 

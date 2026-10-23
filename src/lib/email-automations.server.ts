@@ -15,6 +15,9 @@ import {
   registerThrottle,
 } from "./dispatch-rate.server";
 
+/** Per-lead backoff when the house's own wallet has no balance (never a global pause). */
+const WALLET_INSUFFICIENT_RETRY_MS = 15 * 60_000;
+
 async function runPool<T, R>(
   items: T[],
   concurrency: number,
@@ -507,14 +510,37 @@ async function applySendFailure(
   status: number,
   temporary: boolean,
   insufficient: boolean = false,
+  /**
+   * Set only for the HOUSE's own wallet refusal (errorKind
+   * "insufficient_balance"): reschedules this one item 15 min out instead of
+   * leaving next_run_at untouched. Never set for a real provider-level 402
+   * (Short Brasil/Infobip account itself out of balance), which still relies
+   * on the channel pause to resume the ORIGINAL schedule without a burst.
+   */
+  walletBackoffMs?: number,
 ) {
   const { lead } = plan;
   const MAX_TEMP_ATTEMPTS = 5;
   const isAuthError = status === 401 || status === 403;
-  // Sem saldo: NÃO toca em next_run_at nem em attempts. O canal já foi pausado
-  // em dispatch_pause_state — quando despausar, o lead volta com o agendamento
-  // ORIGINAL preservado, evitando burst concentrado de envios.
   if (insufficient) {
+    // House wallet refusal: no attempt consumed, but the item still needs to
+    // come back later on its own (never global) — reschedule it.
+    if (walletBackoffMs) {
+      await supabaseAdmin
+        .from("email_flow_leads")
+        .update({
+          status: "running",
+          next_run_at: new Date(Date.now() + walletBackoffMs).toISOString(),
+          locked_at: null,
+          locked_by: null,
+        })
+        .eq("id", lead.id);
+      return;
+    }
+    // Real provider-level "sem saldo": NÃO toca em next_run_at nem em
+    // attempts. O canal já foi pausado em dispatch_pause_state — quando
+    // despausar, o lead volta com o agendamento ORIGINAL preservado,
+    // evitando burst concentrado de envios.
     await supabaseAdmin
       .from("email_flow_leads")
       .update({ status: "running", locked_at: null, locked_by: null })
@@ -857,7 +883,13 @@ export async function runEmailFlowDispatcher({
       const treatAsTemporary = isTemporary || insufficient;
       if (treatAsTemporary || result.status === 429) rescheduled++;
       else errorsCount++;
-      await applySendFailure(plan, result.status, treatAsTemporary, insufficient);
+      await applySendFailure(
+        plan,
+        result.status,
+        treatAsTemporary,
+        insufficient,
+        walletInsufficient ? WALLET_INSUFFICIENT_RETRY_MS : undefined,
+      );
     }
   });
 

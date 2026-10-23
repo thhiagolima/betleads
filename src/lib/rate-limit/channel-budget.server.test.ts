@@ -14,6 +14,7 @@ import {
 } from "./channel-budget.server";
 import {
   classifyProviderFailure,
+  CREDIT_DEFER_MS,
   OUTCOME_UNKNOWN_RETRY_MS,
   PROVIDER_DEFER_MS,
   ProviderSendError,
@@ -219,24 +220,34 @@ describe("classifyProviderFailure (B1 matrix)", () => {
     expect(classifyProviderFailure(sendError(200, { temporary: true })).kind).toBe("defer");
   });
 
-  it("402 / insufficient funds is final: no pause, no retry, no attempt consumed at this layer", () => {
+  it("402 / insufficient funds without errorKind defers 15 min (provider-level, no pause, resumes by itself) — unchanged by PG3 Task 1", () => {
     expect(classifyProviderFailure(sendError(402))).toEqual({
-      kind: "fail",
-      reason: "insufficient_balance",
-      retryAfterMs: 0,
+      kind: "defer",
+      reason: "insufficient_credit",
+      retryAfterMs: CREDIT_DEFER_MS,
     });
     expect(
       classifyProviderFailure(sendError(400, { body: JSON.stringify({ code: "INSUFFICIENT_FUNDS" }) })).kind,
-    ).toBe("fail");
+    ).toBe("defer");
   });
 
-  it("explicit errorKind insufficient_balance (house wallet) is checked before the generic 402 sniff", () => {
+  it("a provider's OWN 402 (e.g. Infobip voice/e-mail, no errorKind) keeps the provider-level classification, never insufficient_balance", () => {
+    for (const channel of ["voice", "email"]) {
+      const error = new ProviderSendError({ channel, message: "HTTP 402", status: 402 });
+      expect(classifyProviderFailure(error)).toMatchObject({
+        kind: "defer",
+        reason: "insufficient_credit",
+      });
+    }
+  });
+
+  it("explicit errorKind insufficient_balance (house wallet) is an interim no-cost defer, same 15 min, until Task 7's skip-and-advance", () => {
     expect(
       classifyProviderFailure(sendError(402, { errorKind: "insufficient_balance" })),
     ).toEqual({
-      kind: "fail",
+      kind: "defer",
       reason: "insufficient_balance",
-      retryAfterMs: 0,
+      retryAfterMs: CREDIT_DEFER_MS,
     });
   });
 
@@ -274,8 +285,8 @@ describe("classifyProviderFailure (B1 matrix)", () => {
     expect(classifyProviderFailure(new Error("Jogador sem e-mail")).kind).toBe("fail");
     expect(classifyProviderFailure(new Error("Template de e-mail não encontrado")).kind).toBe("fail");
     expect(classifyProviderFailure("insufficient funds")).toMatchObject({
-      kind: "fail",
-      reason: "insufficient_balance",
+      kind: "defer",
+      reason: "insufficient_credit",
     });
   });
 });

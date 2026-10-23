@@ -65,9 +65,15 @@ vi.mock("./dispatch-rate.server", () => ({
   recordRun: vi.fn(async () => undefined),
   registerThrottle: vi.fn(async () => undefined),
 }));
+vi.mock("./dispatch-pause-insufficient.server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./dispatch-pause-insufficient.server")>()),
+  pauseChannelForInsufficientFunds: vi.fn(async () => undefined),
+}));
 
 import { runEmailFlowDispatcher } from "./email-automations.server";
 import { resolveSender, sendInfobipEmail } from "./email-send.server";
+import { pauseChannelForInsufficientFunds } from "./dispatch-pause-insufficient.server";
+import { registerThrottle } from "./dispatch-rate.server";
 
 const A = "00000000-0000-4000-8000-00000000000a";
 const B = "00000000-0000-4000-8000-00000000000b";
@@ -185,5 +191,43 @@ describe("email flow sender", () => {
       from: "promo@mail.casa.bet",
       fromName: "Promo",
     });
+  });
+});
+
+describe("email flow dispatcher — wallet refusal stays per-house (PG3 Task 1 fix round 1 / I3)", () => {
+  it("reschedules the lead 15 min out, no attempt consumed, no global pause or throttle", async () => {
+    seed("tpl-a", "p-a");
+    vi.mocked(sendInfobipEmail).mockResolvedValueOnce({
+      ok: false,
+      status: 402,
+      body: { error: "Saldo insuficiente" },
+      idempotencyKey: "k",
+      temporary: false,
+      errorKind: "insufficient_balance",
+    } as any);
+    const before = Date.now();
+    await runEmailFlowDispatcher({ onlyLeadId: "lead-1" });
+    expect(pauseChannelForInsufficientFunds).not.toHaveBeenCalled();
+    expect(registerThrottle).not.toHaveBeenCalled();
+    const lead = state.tables.email_flow_leads[0];
+    expect(lead.status).toBe("running");
+    expect(lead.attempts).toBe(0);
+    expect(Date.parse(String(lead.next_run_at))).toBeGreaterThanOrEqual(
+      before + 15 * 60_000 - 1_000,
+    );
+  });
+
+  it("a real provider 402 (no errorKind) still pauses the channel globally", async () => {
+    seed("tpl-a", "p-a");
+    vi.mocked(sendInfobipEmail).mockResolvedValueOnce({
+      ok: false,
+      status: 402,
+      body: { error: "INSUFFICIENT_FUNDS" },
+      idempotencyKey: "k",
+      temporary: false,
+    } as any);
+    await runEmailFlowDispatcher({ onlyLeadId: "lead-1" });
+    expect(pauseChannelForInsufficientFunds).toHaveBeenCalledTimes(1);
+    expect(pauseChannelForInsufficientFunds).toHaveBeenCalledWith("email", expect.any(String));
   });
 });
