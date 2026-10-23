@@ -1,7 +1,5 @@
-import { buildRecommendations, type Recommendation } from "@/lib/crm-recommendations";
+import type { Recommendation } from "@/lib/crm-recommendations";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { type Data } from "./format";
 
 const SEVERITY_STYLE = {
   acao: {
@@ -33,31 +31,5 @@ export function RecommendationList({ items }: { items: Recommendation[] }) {
         </li>
       ))}
     </ul>
-  );
-}
-
-export function Recommendations({ data }: { data: Data }) {
-  const items = buildRecommendations(data, data.holdout);
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Recomendações</CardTitle>
-        <CardDescription>
-          Regras aplicadas aos resultados do período, pelo Recuperado pelo CRM. Cada uma traz o
-          número que a justifica; origens com menos de 5 jogadores convertidos não entram nas
-          comparações.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        {items.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            Nada a recomendar neste período: nenhuma origem gasta sem converter e não há dados
-            suficientes para comparar eficiência.
-          </p>
-        ) : (
-          <RecommendationList items={items} />
-        )}
-      </CardContent>
-    </Card>
   );
 }

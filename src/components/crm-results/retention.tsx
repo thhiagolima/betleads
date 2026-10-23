@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
+import { useState } from "react";
 import {
   CartesianGrid,
   Legend,
@@ -26,7 +27,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { type Data, dayLabel, money, pct } from "./format";
-import { EmptyCard, InfoTip, NotPeriodBadge, RoiValue } from "./shared";
+import { PERIODS, type PeriodKey } from "./search";
+import { CentralPeriodPicker, EmptyCard, InfoTip, NotPeriodBadge, RoiValue } from "./shared";
 
 const LIFECYCLE_ORDER = ["ativo", "esfriando", "dormindo", "perdido", "sem_ftd", "sem_historico"];
 const TOP_ORIGINS = 15;
@@ -43,16 +45,22 @@ const hours = (value: number | null) =>
       ? `${value.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} h`
       : `${(value / 24).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} dias`;
 
-export function BasePlayers({ data }: { data: Data }) {
+/**
+ * Aquisição e LTV › Retenção: where the base is, the signup funnel and the
+ * first-deposit cohorts (they used to be the Central's "Base de jogadores" tab).
+ */
+export function RetentionPanel() {
+  const [periodKey, setPeriodKey] = useState<PeriodKey>("30");
+  const period = PERIODS.find((item) => item.key === periodKey) ?? PERIODS[3];
   const load = useServerFn(getCrmRetention);
   const query = useQuery({
-    queryKey: ["crm-retention", data.days, data.endOffset],
-    queryFn: () => load({ data: { days: data.days, endOffset: data.endOffset } }),
+    queryKey: ["crm-retention", period.days, period.endOffset],
+    queryFn: () => load({ data: { days: period.days, endOffset: period.endOffset } }),
     staleTime: 5 * 60_000,
   });
   return (
     <div className="space-y-4">
-      <States data={data} />
+      <CentralPeriodPicker value={period.key} onChange={setPeriodKey} />
       {query.isLoading ? (
         <Skeleton className="h-64 rounded-xl" />
       ) : query.isError || !query.data ? (
@@ -60,7 +68,7 @@ export function BasePlayers({ data }: { data: Data }) {
       ) : (
         <>
           <Lifecycle retention={query.data} />
-          <Acquisition retention={query.data} days={data.days} endOffset={data.endOffset} />
+          <Acquisition retention={query.data} days={period.days} endOffset={period.endOffset} />
           <Cohorts retention={query.data} />
         </>
       )}
@@ -94,7 +102,8 @@ function Bars({ items, total }: { items: Array<{ label: string; value: number }>
 }
 
 /** Where the money goes by the player's situation at send, and where it converts (C-06). */
-function States({ data }: { data: Data }) {
+/** Central › Origens: SMS cost and CRM result by the player's situation at send time. */
+export function SpendByState({ data }: { data: Data }) {
   const states = data.states.filter((state) => state.sent > 0 || state.directPlayers > 0);
   if (states.length === 0) return null;
   const totalCost = states.reduce((sum, state) => sum + state.cost, 0);
