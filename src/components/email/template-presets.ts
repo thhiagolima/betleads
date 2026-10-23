@@ -46,7 +46,12 @@ export const MODELOS: {
   cor: string; // hex primário do CTA
 }[] = [
   { id: "simples", label: "Simples", descricao: "Cabeçalho + texto + botão", cor: "#3b82f6" },
-  { id: "promocional", label: "Promocional", descricao: "Banner forte + benefício", cor: "#f59e0b" },
+  {
+    id: "promocional",
+    label: "Promocional",
+    descricao: "Banner forte + benefício",
+    cor: "#f59e0b",
+  },
   { id: "vip", label: "VIP", descricao: "Tom premium, dourado", cor: "#c9a84c" },
   { id: "urgencia", label: "Urgência", descricao: "Última chance, contagem", cor: "#ef4444" },
   { id: "cashback", label: "Cashback", descricao: "Foco em devolução", cor: "#10b981" },
@@ -199,7 +204,8 @@ export const TEMPLATES_PRONTOS: PresetTemplate[] = [
     tags: ["vip", "recuperacao"],
     campos: {
       titulo: "Sentimos sua falta, {primeiro_nome}",
-      texto: "Notamos que faz um tempo que você não acessa. Preparamos uma condição exclusiva para o seu retorno como membro VIP.",
+      texto:
+        "Notamos que faz um tempo que você não acessa. Preparamos uma condição exclusiva para o seu retorno como membro VIP.",
       cupom: "VIPVOLTA",
       beneficio: "Bônus de 100% no próximo depósito",
       cta: "Voltar para a área VIP",
@@ -217,7 +223,8 @@ export const TEMPLATES_PRONTOS: PresetTemplate[] = [
     tags: ["cashback"],
     campos: {
       titulo: "Cashback liberado, {primeiro_nome}!",
-      texto: "Devolvemos parte da sua última jornada em forma de cashback. O valor já está disponível na sua conta.",
+      texto:
+        "Devolvemos parte da sua última jornada em forma de cashback. O valor já está disponível na sua conta.",
       cupom: "",
       beneficio: "Saldo extra para você jogar agora",
       cta: "Resgatar cashback",
@@ -235,7 +242,8 @@ export const TEMPLATES_PRONTOS: PresetTemplate[] = [
     tags: ["cupom", "bonus"],
     campos: {
       titulo: "Um cupom só seu, {primeiro_nome}",
-      texto: "Liberamos um cupom exclusivo para a sua conta. Use no próximo depósito e aproveite o bônus.",
+      texto:
+        "Liberamos um cupom exclusivo para a sua conta. Use no próximo depósito e aproveite o bônus.",
       cupom: "BONUS50",
       beneficio: "+50% no próximo depósito",
       cta: "Usar cupom",
@@ -253,7 +261,8 @@ export const TEMPLATES_PRONTOS: PresetTemplate[] = [
     tags: ["saldo", "ativacao"],
     campos: {
       titulo: "Você tem saldo parado",
-      texto: "Identificamos que seu saldo de R$ {saldo} está disponível e sem uso. Que tal voltar e fazer ele render?",
+      texto:
+        "Identificamos que seu saldo de R$ {saldo} está disponível e sem uso. Que tal voltar e fazer ele render?",
       cupom: "",
       beneficio: "Saldo disponível: R$ {saldo}",
       cta: "Usar meu saldo",
@@ -271,7 +280,8 @@ export const TEMPLATES_PRONTOS: PresetTemplate[] = [
     tags: ["ftd", "boas-vindas"],
     campos: {
       titulo: "Bem-vindo, {primeiro_nome}!",
-      texto: "Estamos felizes em ter você aqui. Faça seu primeiro depósito e ganhe um bônus especial para começar com tudo.",
+      texto:
+        "Estamos felizes em ter você aqui. Faça seu primeiro depósito e ganhe um bônus especial para começar com tudo.",
       cupom: "PRIMEIRO100",
       beneficio: "+100% no seu primeiro depósito",
       cta: "Fazer meu primeiro depósito",
@@ -307,7 +317,8 @@ export const TEMPLATES_PRONTOS: PresetTemplate[] = [
     tags: ["reativacao", "30d"],
     campos: {
       titulo: "Estamos com saudade",
-      texto: "Já se passou um mês desde sua última visita. Para te trazer de volta, preparamos um benefício exclusivo.",
+      texto:
+        "Já se passou um mês desde sua última visita. Para te trazer de volta, preparamos um benefício exclusivo.",
       cupom: "VOLTA30",
       beneficio: "Bônus duplo + cashback",
       cta: "Voltar e resgatar",
@@ -325,7 +336,8 @@ export const TEMPLATES_PRONTOS: PresetTemplate[] = [
     tags: ["vip", "retencao"],
     campos: {
       titulo: "Seu status VIP em risco",
-      texto: "Notamos uma queda na sua atividade. Para manter todos os benefícios VIP ativos, continue jogando essa semana.",
+      texto:
+        "Notamos uma queda na sua atividade. Para manter todos os benefícios VIP ativos, continue jogando essa semana.",
       cupom: "",
       beneficio: "Mantenha cashback, suporte prioritário e bônus exclusivos",
       cta: "Acessar minha área VIP",
@@ -343,7 +355,8 @@ export const TEMPLATES_PRONTOS: PresetTemplate[] = [
     tags: ["urgencia", "ultimo"],
     campos: {
       titulo: "Sua oferta expira hoje",
-      texto: "Esta é a última vez que enviaremos esta condição. Depois de hoje, o benefício será retirado da sua conta.",
+      texto:
+        "Esta é a última vez que enviaremos esta condição. Depois de hoje, o benefício será retirado da sua conta.",
       cupom: "ULTIMA",
       beneficio: "Bônus exclusivo válido só hoje",
       cta: "Resgatar antes que expire",
@@ -361,7 +374,8 @@ export const TEMPLATES_PRONTOS: PresetTemplate[] = [
     tags: ["bonus", "promo"],
     campos: {
       titulo: "Bônus máximo desbloqueado",
-      texto: "Você foi selecionado para receber nossa maior oferta do mês. Aproveite com depósito qualificado.",
+      texto:
+        "Você foi selecionado para receber nossa maior oferta do mês. Aproveite com depósito qualificado.",
       cupom: "MAX200",
       beneficio: "+200% no próximo depósito",
       cta: "Ativar bônus máximo",

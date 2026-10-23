@@ -6,8 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { Trash2, UserCog } from "lucide-react";
-import { PageHeader } from "@/components/ui-premium";
+import { Trash2 } from "lucide-react";
+import { Page, PageHeader } from "@/components/ui-premium/page-header";
 import { requestConfirmation } from "@/components/system-dialog-host";
 
 type Expert = {
@@ -29,10 +29,7 @@ function ExpertsPage() {
   const [loading, setLoading] = useState(false);
 
   async function load() {
-    const { data } = await supabase
-      .from("experts")
-      .select("*")
-      .order("nome");
+    const { data } = await supabase.from("experts").select("*").order("nome");
     if (!data) return setExperts([]);
     // count players per affiliate
     const enriched = await Promise.all(
@@ -80,12 +77,8 @@ function ExpertsPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Experts / Afiliados"
-        subtitle="Mapeie IDs de afiliados às pessoas responsáveis. Novos cadastros são atribuídos automaticamente."
-        icon={<UserCog className="h-5 w-5 text-primary-foreground" />}
-      />
+    <Page>
+      <PageHeader subtitle="Mapeie IDs de afiliados às pessoas responsáveis. Novos cadastros são atribuídos automaticamente." />
 
       <Card>
         <CardHeader>
@@ -134,9 +127,7 @@ function ExpertsPage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className="text-sm text-muted-foreground">
-                    {e.count ?? 0} players
-                  </span>
+                  <span className="text-sm text-muted-foreground">{e.count ?? 0} players</span>
                   <Button
                     size="icon"
                     variant="ghost"
@@ -162,6 +153,6 @@ function ExpertsPage() {
           </div>
         </CardContent>
       </Card>
-    </div>
+    </Page>
   );
 }

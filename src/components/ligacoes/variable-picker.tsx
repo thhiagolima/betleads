@@ -1,4 +1,5 @@
-import { Badge } from "@/components/ui/badge";
+import { badgeVariants } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 import { variablesForChannel } from "@/lib/message-variables";
 
 const SCRIPT_VARIABLES = variablesForChannel("voice");
@@ -15,15 +16,18 @@ export function VariablePicker({ onInsert }: Props) {
       </p>
       <div className="flex flex-wrap gap-1.5">
         {SCRIPT_VARIABLES.map((v) => (
-          <Badge
+          <button
             key={v.key}
-            variant="secondary"
-            className="cursor-pointer font-mono text-[11px] hover:bg-primary hover:text-primary-foreground"
+            type="button"
+            className={cn(
+              badgeVariants({ variant: "secondary" }),
+              "h-8 cursor-pointer font-mono text-meta hover:bg-primary hover:text-primary-foreground",
+            )}
             onClick={() => onInsert(`{${v.key}}`)}
             title={v.label}
           >
             {`{${v.key}}`}
-          </Badge>
+          </button>
         ))}
       </div>
     </div>

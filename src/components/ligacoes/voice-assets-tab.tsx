@@ -246,7 +246,7 @@ export function VoiceAssetsTab() {
       {editing && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Editar metadados</CardTitle>
+            <CardTitle>Editar metadados</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-3 md:grid-cols-3">
             <div>

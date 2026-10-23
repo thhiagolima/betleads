@@ -39,6 +39,8 @@ import { MessageCircle } from "lucide-react";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
+import { Page, PageHeader } from "@/components/ui-premium/page-header";
 import {
   Sheet,
   SheetContent,
@@ -151,9 +153,9 @@ const levelBadgeMeta: Record<LevelSlug, { label: string; className: string }> = 
 };
 
 const situationBadgeMeta: Record<PlayerSituation, { label: string; className: string }> = {
-  active: { label: "Ativo", className: "text-emerald-400" },
-  cooling: { label: "Esfriando", className: "text-amber-400" },
-  sleeping: { label: "Dormindo", className: "text-rose-400" },
+  active: { label: "Ativo", className: "text-success" },
+  cooling: { label: "Esfriando", className: "text-warning" },
+  sleeping: { label: "Dormindo", className: "text-danger" },
   no_deposit: { label: "Sem depósito", className: "text-primary" },
 };
 
@@ -252,9 +254,9 @@ function getErrorMessage(error: unknown, fallback: string) {
 
 const gamificationStatusFilters = [
   { id: "todos", label: "Todos", tone: "text-muted-foreground" },
-  { id: "situacao_active", label: "Ativo", tone: "text-emerald-400" },
-  { id: "situacao_cooling", label: "Esfriando", tone: "text-amber-400" },
-  { id: "situacao_sleeping", label: "Dormindo", tone: "text-rose-400" },
+  { id: "situacao_active", label: "Ativo", tone: "text-success" },
+  { id: "situacao_cooling", label: "Esfriando", tone: "text-warning" },
+  { id: "situacao_sleeping", label: "Dormindo", tone: "text-danger" },
   { id: "situacao_no_deposit", label: "Sem depósito", tone: "text-primary" },
 ];
 
@@ -311,13 +313,8 @@ function defaultSortKey(
 }
 
 function riskDot(r: string) {
-  const c =
-    r === "alto"
-      ? "bg-red-500 shadow-red-500/60"
-      : r === "medio"
-        ? "bg-amber-400 shadow-amber-400/60"
-        : "bg-emerald-400 shadow-emerald-400/60";
-  return <span className={`inline-block h-2 w-2 rounded-full shadow-[0_0_8px] ${c}`} />;
+  const c = r === "alto" ? "bg-danger" : r === "medio" ? "bg-warning" : "bg-success";
+  return <span className={`inline-block h-2 w-2 rounded-full ${c}`} />;
 }
 
 function getPlayerLevel(
@@ -1504,58 +1501,52 @@ function PlayersPage() {
   if (isDetailRoute) return <Outlet />;
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="space-y-1">
-          <h1 className="text-3xl font-bold tracking-normal">Jogadores</h1>
-          <p className="text-sm text-muted-foreground">
-            A base viva da casa. Cada jogador tem um nível, uma situação e pode virar público de
-            SMS.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-9 px-3"
-            onClick={exportCsv}
-            disabled={filteredCount === 0 || exportingCsv}
-          >
-            <Download className="h-4 w-4" />
-            {exportingCsv ? "Exportando…" : "Exportar CSV"}
-          </Button>
-          <Button
-            size="sm"
-            className="h-9 px-3"
-            disabled={filteredCount === 0 || buildingAudience}
-            onClick={() => sendToSmsAudience("filter")}
-          >
-            <MessageSquareText className="h-4 w-4" />
-            Usar na campanha
-          </Button>
-          <Button
-            variant="outline"
-            size="icon"
-            className="h-9 w-9"
-            onClick={() => {
-              qc.invalidateQueries({ queryKey: ["players-page"] });
-              void refetchGamification();
-            }}
-            disabled={isLoading || isFetchingGamification}
-          >
-            <RefreshCw
-              className={`h-4 w-4 ${isLoading || isFetchingGamification ? "animate-spin" : ""}`}
+    <Page>
+      <PageHeader
+        subtitle="A base viva da casa. Cada jogador tem um nível, uma situação e pode virar público de SMS."
+        actions={
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 px-3"
+              onClick={exportCsv}
+              disabled={filteredCount === 0 || exportingCsv}
+            >
+              <Download className="h-4 w-4" />
+              {exportingCsv ? "Exportando…" : "Exportar CSV"}
+            </Button>
+            <Button
+              size="sm"
+              className="h-9 px-3"
+              disabled={filteredCount === 0 || buildingAudience}
+              onClick={() => sendToSmsAudience("filter")}
+            >
+              <MessageSquareText className="h-4 w-4" />
+              Usar na campanha
+            </Button>
+            <IconButton
+              variant="outline"
+              label="Atualizar jogadores"
+              onClick={() => {
+                qc.invalidateQueries({ queryKey: ["players-page"] });
+                void refetchGamification();
+              }}
+              disabled={isLoading || isFetchingGamification}
+              icon={
+                <RefreshCw
+                  className={`h-4 w-4 ${isLoading || isFetchingGamification ? "animate-spin" : ""}`}
+                />
+              }
             />
-          </Button>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
         <Card className="border-border/70 bg-card/70">
           <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Base total
-            </p>
+            <p className="text-label font-semibold text-muted-foreground">Base total</p>
             <p className="mt-2 text-2xl font-bold text-primary">
               {(gamification?.totals.players ?? totalCount).toLocaleString("pt-BR")}
             </p>
@@ -1564,9 +1555,7 @@ function PlayersPage() {
         </Card>
         <Card className="border-border/70 bg-card/70">
           <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Já depositaram
-            </p>
+            <p className="text-label font-semibold text-muted-foreground">Já depositaram</p>
             <p className="mt-2 text-2xl font-bold">
               {(gamification?.totals.depositors ?? 0).toLocaleString("pt-BR")}
             </p>
@@ -1579,18 +1568,14 @@ function PlayersPage() {
         </Card>
         <Card className="border-border/70 bg-card/70">
           <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Depositado no total
-            </p>
+            <p className="text-label font-semibold text-muted-foreground">Depositado no total</p>
             <p className="mt-2 text-2xl font-bold">{brl(gamification?.totals.deposited ?? 0)}</p>
             <p className="mt-1 text-xs text-muted-foreground">soma das fichas importadas</p>
           </CardContent>
         </Card>
         <Card className="border-border/70 bg-card/70">
           <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              VIPs esfriando
-            </p>
+            <p className="text-label font-semibold text-muted-foreground">VIPs esfriando</p>
             <p className="mt-2 text-2xl font-bold">{gamification?.totals.stoppedVipCount ?? 0}</p>
             <p className="mt-1 text-xs text-muted-foreground">Diamante para cima, parados</p>
           </CardContent>
@@ -1682,7 +1667,7 @@ function PlayersPage() {
           <SlidersHorizontal className="h-4 w-4" />
           Mais filtros
           {advancedFilterCount > 0 && (
-            <span className="rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-bold text-primary-foreground">
+            <span className="rounded-full bg-primary px-1.5 py-0.5 text-meta font-bold text-primary-foreground">
               {advancedFilterCount}
             </span>
           )}
@@ -1989,7 +1974,7 @@ function PlayersPage() {
                       <div key={group.title} className="space-y-2">
                         <div>
                           <p className="text-xs font-medium text-foreground">{group.title}</p>
-                          <p className="text-[11px] text-muted-foreground">
+                          <p className="text-meta text-muted-foreground">
                             {group.description} Os números mostram o tamanho atual de cada atalho.
                           </p>
                         </div>
@@ -2024,10 +2009,8 @@ function PlayersPage() {
                 <Card className="border-border/50 bg-card/50">
                   <CardContent className="space-y-2 p-3">
                     <div>
-                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground/80">
-                        Alertas operacionais
-                      </div>
-                      <p className="mt-1 text-[11px] text-muted-foreground">
+                      <div className="text-label text-muted-foreground">Alertas operacionais</div>
+                      <p className="mt-1 text-meta text-muted-foreground">
                         Sinais priorizados para ação; podem cruzar os filtros acima, mas não os
                         substituem. O quantitativo é calculado ao aplicar o alerta.
                       </p>
@@ -2039,7 +2022,7 @@ function PlayersPage() {
                           onClick={() => selectAdvancedFilter(f.id)}
                           className={`rounded-full px-3 py-1 text-xs transition-colors border ${
                             sheetDraft.filter === f.id
-                              ? "border-amber-400/60 bg-amber-400/15 text-amber-300"
+                              ? "border-warning/60 bg-warning/15 text-warning"
                               : "border-border/60 text-muted-foreground hover:text-foreground hover:border-border"
                           }`}
                         >
@@ -2136,7 +2119,7 @@ function PlayersPage() {
                         {row.nome}
                       </button>
                       {row.converted_auto && (
-                        <div className="mt-0.5 text-[10px] uppercase tracking-wide text-emerald-400">
+                        <div className="mt-0.5 text-meta text-success">
                           depositou depois do contato
                         </div>
                       )}
@@ -2146,10 +2129,7 @@ function PlayersPage() {
                       <div className="text-muted-foreground">{row.email ?? "—"}</div>
                     </TableCell>
                     <TableCell>
-                      <Badge
-                        variant="outline"
-                        className="border-amber-400/40 text-amber-300 text-[10px]"
-                      >
+                      <Badge variant="outline" className="border-warning/40 text-warning text-meta">
                         {row.alerta_tipo}
                       </Badge>
                     </TableCell>
@@ -2169,7 +2149,7 @@ function PlayersPage() {
                         </button>
                         <button
                           onClick={() => handleMarkOutcome(row, true)}
-                          className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-300 hover:bg-emerald-500/20"
+                          className="rounded-md border border-success/40 bg-success/10 px-2.5 py-1 text-xs text-success hover:bg-success/20"
                         >
                           Converteu
                         </button>
@@ -2260,7 +2240,7 @@ function PlayersPage() {
                       <TableCell>
                         <Badge
                           variant="outline"
-                          className={`text-[10px] ${isConvertedFilter ? "border-emerald-400/40 text-emerald-300" : "border-rose-400/40 text-rose-300"}`}
+                          className={`text-meta ${isConvertedFilter ? "border-success/40 text-success" : "border-danger/40 text-danger"}`}
                         >
                           {row.alerta_tipo}
                         </Badge>
@@ -2427,13 +2407,13 @@ function PlayersPage() {
                               {pendingPlayerIdsAny.has(p.id) && (
                                 <span
                                   title="Mensagem enviada — aguardando conversão"
-                                  className="ml-1 inline-flex items-center rounded-full border border-sky-400/50 bg-sky-400/10 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-sky-300"
+                                  className="ml-1 inline-flex items-center rounded-full border border-sky-400/50 bg-sky-400/10 px-1.5 py-0.5 text-meta text-sky-300"
                                 >
                                   ⏳ aguardando
                                 </span>
                               )}
                             </Link>
-                            <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                            <span className="inline-flex items-center gap-1 text-meta text-muted-foreground">
                               {extId || "sem ID externo"}
                               {extId && (
                                 <button
@@ -2443,7 +2423,7 @@ function PlayersPage() {
                                   className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-primary/10 hover:text-primary"
                                 >
                                   {copiedId === p.id ? (
-                                    <Check className="h-3 w-3 text-emerald-400" />
+                                    <Check className="h-3 w-3 text-success" />
                                   ) : (
                                     <Copy className="h-3 w-3" />
                                   )}
@@ -2631,6 +2611,6 @@ function PlayersPage() {
         playerId={historyPlayer?.id ?? null}
         playerName={historyPlayer?.nome}
       />
-    </div>
+    </Page>
   );
 }

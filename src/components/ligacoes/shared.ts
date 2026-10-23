@@ -59,11 +59,17 @@ export function buildVariablesClient(lead: LeadLite): Record<string, string> {
     nome: safe(lead.nome, "amigo"),
     telefone: safe(lead.telefone, ""),
     saldo: brl(lead.saldo_carteira ?? 0),
-    ultimo_login: lead.ultimo_login ? new Date(lead.ultimo_login).toLocaleDateString("pt-BR") : "há algum tempo",
+    ultimo_login: lead.ultimo_login
+      ? new Date(lead.ultimo_login).toLocaleDateString("pt-BR")
+      : "há algum tempo",
     dias_sem_login: dl == null ? "alguns dias" : String(dl),
-    ultimo_jogo: lead.ultimo_jogo ? new Date(lead.ultimo_jogo).toLocaleDateString("pt-BR") : "há algum tempo",
+    ultimo_jogo: lead.ultimo_jogo
+      ? new Date(lead.ultimo_jogo).toLocaleDateString("pt-BR")
+      : "há algum tempo",
     dias_sem_jogar: dj == null ? "alguns dias" : String(dj),
-    ultimo_deposito: lead.ultimo_deposito ? new Date(lead.ultimo_deposito).toLocaleDateString("pt-BR") : "há algum tempo",
+    ultimo_deposito: lead.ultimo_deposito
+      ? new Date(lead.ultimo_deposito).toLocaleDateString("pt-BR")
+      : "há algum tempo",
     dias_sem_depositar: dd == null ? "alguns dias" : String(dd),
     total_depositado: brl(lead.total_depositado ?? 0),
     categoria: lead.vip ? "VIP" : safe(lead.risco, "regular"),

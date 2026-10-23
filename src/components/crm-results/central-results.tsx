@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Page, PageHeader } from "@/components/ui-premium/page-header";
 import { BasePlayers } from "./base-players";
 import { HealthIndicator } from "./health";
 import { Holdout } from "./holdout";
@@ -49,38 +50,39 @@ export function CentralResults() {
   });
 
   return (
-    <main className="mx-auto max-w-7xl space-y-5 p-4 sm:p-6">
-      <header className="space-y-3">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold">Resultados do CRM</h1>
-            <p className="text-sm text-muted-foreground">
+    <Page>
+      <div className="space-y-3">
+        <PageHeader
+          subtitle={
+            <>
               Quanto cada jornada e campanha converte e quanto custa cada conversão.
               {query.data &&
                 ` ${periodLabel(query.data.from, query.data.to)} · horário de Brasília`}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-1">
-            {query.data && <HealthIndicator data={query.data} />}
-            <Glossary />
-            {access.data?.allowed && (
-              <Button size="sm" variant="ghost" asChild>
-                <Link to="/resultados/comparar">Comparar casas</Link>
-              </Button>
-            )}
-            {query.data && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="gap-2"
-                onClick={() => downloadCsv(query.data, period.key)}
-              >
-                <Download className="h-4 w-4" aria-hidden="true" />
-                CSV
-              </Button>
-            )}
-          </div>
-        </div>
+            </>
+          }
+          actions={
+            <>
+              {query.data && <HealthIndicator data={query.data} />}
+              <Glossary />
+              {access.data?.allowed && (
+                <Button size="sm" variant="ghost" asChild>
+                  <Link to="/resultados/comparar">Comparar casas</Link>
+                </Button>
+              )}
+              {query.data && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-2"
+                  onClick={() => downloadCsv(query.data, period.key)}
+                >
+                  <Download className="h-4 w-4" aria-hidden="true" />
+                  CSV
+                </Button>
+              )}
+            </>
+          }
+        />
         <div
           className="inline-flex rounded-lg bg-muted p-1 text-sm"
           role="group"
@@ -102,7 +104,7 @@ export function CentralResults() {
             </button>
           ))}
         </div>
-      </header>
+      </div>
 
       {query.isLoading ? (
         <LoadingSkeleton />
@@ -148,7 +150,7 @@ export function CentralResults() {
           </TabsContent>
         </Tabs>
       )}
-    </main>
+    </Page>
   );
 }
 

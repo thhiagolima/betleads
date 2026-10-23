@@ -14,7 +14,7 @@ export function JourneyMapCard({ journeys }: { journeys: MapJourney[] }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Mapa das réguas</CardTitle>
+        <CardTitle>Mapa das réguas</CardTitle>
         <CardDescription>
           Como as jornadas se encaixam e quantos jogadores estão em cada uma agora. Jornadas
           desligadas ou em rascunho aparecem esmaecidas.
@@ -42,7 +42,7 @@ export function JourneyMapCard({ journeys }: { journeys: MapJourney[] }) {
                     >
                       <span
                         className={`size-1.5 shrink-0 rounded-full ${
-                          inactive ? "bg-muted-foreground/50" : "bg-emerald-500"
+                          inactive ? "bg-muted-foreground/50" : "bg-success"
                         }`}
                         aria-hidden="true"
                       />
@@ -53,7 +53,7 @@ export function JourneyMapCard({ journeys }: { journeys: MapJourney[] }) {
                       </span>
                       {inactive && <span className="sr-only">({STATUS_LABEL[item.status]})</span>}
                       {Number(item.holdout_percent ?? 0) > 0 && (
-                        <Badge variant="outline" className="px-1 py-0 text-[10px]">
+                        <Badge variant="outline" className="px-1 py-0 text-meta">
                           controle {item.holdout_percent}%
                         </Badge>
                       )}

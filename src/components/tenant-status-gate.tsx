@@ -73,11 +73,11 @@ export function TenantStatusGate({ children }: { children: ReactNode }) {
   if (isLoading) {
     return (
       <Card className="mx-auto mt-16 max-w-xl border-border/60 bg-card/70">
-        <CardContent className="flex items-center gap-3 p-5 text-sm text-muted-foreground">
+        <CardContent className="flex items-center gap-3 p-5 text-body text-muted-foreground">
           <div className="h-9 w-9 animate-pulse rounded-lg bg-primary/10" />
           <div>
             <p className="font-medium text-foreground">Validando sua conta</p>
-            <p>Conferindo status da conta antes de abrir a operacao.</p>
+            <p>Conferindo status da conta antes de abrir a operação.</p>
           </div>
         </CardContent>
       </Card>
@@ -89,7 +89,7 @@ export function TenantStatusGate({ children }: { children: ReactNode }) {
       <BlockedTenantCard
         title="Não foi possível validar sua conta"
         description="A conexão com os dados da sua conta não respondeu. Aguarde alguns segundos e tente novamente."
-        icon={<AlertTriangle className="h-5 w-5 text-amber-300" />}
+        icon={<AlertTriangle className="h-5 w-5 text-warning" />}
         action={
           <Button variant="outline" disabled={isFetching} onClick={() => void refetch()}>
             Tentar novamente
@@ -105,7 +105,7 @@ export function TenantStatusGate({ children }: { children: ReactNode }) {
       <BlockedTenantCard
         title={`Conta ${statusLabel}`}
         description="Sua conta está bloqueada. As áreas operacionais voltam a ficar disponíveis após a regularização."
-        icon={<LockKeyhole className="h-5 w-5 text-rose-300" />}
+        icon={<LockKeyhole className="h-5 w-5 text-danger" />}
         action={
           <Button asChild>
             <Link to="/tenants">Abrir minha conta</Link>
@@ -138,19 +138,22 @@ function BlockedTenantCard({
 }) {
   return (
     <div className="flex min-h-[60vh] items-center justify-center">
-      <Card role="alert" className="w-full max-w-xl border-border/70 bg-card/80 shadow-xl shadow-black/20">
+      <Card
+        role="alert"
+        className="w-full max-w-xl border-border/70 bg-card/80 shadow-xl shadow-black/20"
+      >
         <CardContent className="space-y-5 p-6">
           <div className="flex items-start gap-4">
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-muted">
               {icon}
             </div>
             <div className="min-w-0 space-y-1">
-              <p className="text-lg font-semibold text-foreground">{title}</p>
-              <p className="text-sm leading-relaxed text-muted-foreground">{description}</p>
+              <p className="text-section text-foreground">{title}</p>
+              <p className="text-body leading-relaxed text-muted-foreground">{description}</p>
             </div>
           </div>
           <div className="flex items-center justify-between gap-3 border-t border-border/60 pt-4">
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <div className="flex items-center gap-2 text-meta text-muted-foreground">
               <Building2 className="h-4 w-4" />
               Gestão da conta e auditoria continuam disponíveis.
             </div>

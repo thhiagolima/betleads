@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Settings, Shield } from "lucide-react";
-import { PageHeader } from "@/components/ui-premium/page-header";
+import { Shield } from "lucide-react";
+import { Page, PageHeader } from "@/components/ui-premium/page-header";
 import { DataCard } from "@/components/ui-premium/data-card";
 import { SendWindowCard } from "@/components/send-window-card";
 
@@ -10,12 +10,8 @@ export const Route = createFileRoute("/configuracoes")({
 
 function ConfigPage() {
   return (
-    <div className="space-y-6 max-w-5xl">
-      <PageHeader
-        title="Configurações"
-        subtitle="Janela de envio e papéis da equipe."
-        icon={<Settings className="h-5 w-5 text-primary-foreground" />}
-      />
+    <Page className="max-w-5xl">
+      <PageHeader subtitle="Janela de envio e papéis da equipe." />
 
       <SendWindowCard />
 
@@ -43,8 +39,7 @@ function ConfigPage() {
             },
             {
               role: "Superadmin global",
-              access:
-                "Administra contas, administradores, saldo, status e diagnósticos globais.",
+              access: "Administra contas, administradores, saldo, status e diagnósticos globais.",
               limit: "Acesso reservado à operação da plataforma e registrado em auditoria.",
             },
           ].map((permission) => (
@@ -52,16 +47,16 @@ function ConfigPage() {
               key={permission.role}
               className="rounded-lg border border-border/40 bg-background/30 p-4"
             >
-              <p className="text-sm font-semibold">{permission.role}</p>
-              <p className="mt-1 text-sm text-muted-foreground">{permission.access}</p>
-              <p className="mt-2 text-xs text-muted-foreground">Limite: {permission.limit}</p>
+              <p className="text-body font-semibold">{permission.role}</p>
+              <p className="mt-1 text-body text-muted-foreground">{permission.access}</p>
+              <p className="mt-2 text-meta text-muted-foreground">Limite: {permission.limit}</p>
             </div>
           ))}
         </div>
-        <p className="mt-4 text-xs text-muted-foreground">
+        <p className="mt-4 text-meta text-muted-foreground">
           Para administrar a equipe da conta, acesse Contas. A alteração de papel é auditada.
         </p>
       </DataCard>
-    </div>
+    </Page>
   );
 }

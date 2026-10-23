@@ -66,7 +66,7 @@ export function ChannelObservabilityPanel() {
     <Card className="border-border/70 bg-card/70">
       <CardHeader className="flex-row items-start justify-between gap-3 space-y-0">
         <div>
-          <CardTitle className="flex items-center gap-2 text-base">
+          <CardTitle className="flex items-center gap-2 text-section">
             <Activity className="size-4 text-primary" /> Operação dos canais
           </CardTitle>
           <p className="mt-1 text-xs text-muted-foreground">
@@ -140,11 +140,7 @@ function ChannelCard({
         </div>
         <Badge
           variant="outline"
-          className={
-            healthy
-              ? "border-emerald-500/40 text-emerald-600"
-              : "border-amber-500/40 text-amber-600"
-          }
+          className={healthy ? "border-success/40 text-success" : "border-warning/40 text-warning"}
         >
           {data.paused ? "Pausado" : healthy ? "Saudável" : "Atenção"}
         </Badge>

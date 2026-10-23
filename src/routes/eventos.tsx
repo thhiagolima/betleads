@@ -18,7 +18,7 @@ import {
   Activity,
   Gift,
 } from "lucide-react";
-import { PageHeader } from "@/components/ui-premium";
+import { Page, PageHeader } from "@/components/ui-premium/page-header";
 
 export const Route = createFileRoute("/eventos")({
   component: EventosPage,
@@ -30,7 +30,7 @@ const NEUTRAL_STYLE: EventStyle = {
   icon: Activity,
   color: "text-zinc-400 bg-zinc-500/15 border-zinc-500/30",
 };
-const FAILED_COLOR = "text-rose-400 bg-rose-500/15 border-rose-500/30";
+const FAILED_COLOR = "text-danger bg-danger/15 border-danger/30";
 
 const SLUG_STYLES: Record<string, EventStyle> = {
   login: { icon: LogIn, color: "text-sky-400 bg-sky-500/15 border-sky-500/30" },
@@ -84,17 +84,13 @@ function EventosPage() {
   });
 
   return (
-    <div className="space-y-4">
-      <PageHeader
-        title="Stream de Eventos"
-        subtitle="Atividade recente dos players — logins, depósitos, jogos e mais"
-        icon={<Activity className="h-5 w-5 text-primary-foreground" />}
-      />
+    <Page>
+      <PageHeader subtitle="Atividade recente dos players — logins, depósitos, jogos e mais" />
       <Card className="border-border/50 bg-card/60 backdrop-blur">
         <CardContent className="p-0">
           <div className="flex items-center justify-between border-b border-border/60 px-5 py-3">
             <div className="flex items-center gap-2 text-sm">
-              <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_8px] shadow-emerald-400/70 animate-pulse" />
+              <span className="h-2 w-2 rounded-full bg-success animate-pulse" />
               Atualização automática a cada 15 s
             </div>
             <div className="flex items-center gap-3 text-xs text-muted-foreground">
@@ -129,7 +125,7 @@ function EventosPage() {
                       </span>
                       <Badge
                         variant="outline"
-                        className={`text-[10px] py-0 ${cfg.color}`}
+                        className={`text-meta py-0 ${cfg.color}`}
                         title={e.tipo ?? undefined}
                       >
                         {cfg.label}
@@ -156,6 +152,6 @@ function EventosPage() {
           </div>
         </CardContent>
       </Card>
-    </div>
+    </Page>
   );
 }

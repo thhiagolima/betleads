@@ -10,6 +10,7 @@ import { ChannelObservabilityPanel } from "@/components/campaigns/channel-observ
 import { IndividualSmsDialog } from "@/components/campaigns/individual-sms-dialog";
 import { requestConfirmation } from "@/components/system-dialog-host";
 import { MetricCard } from "@/components/ui-premium/metric-card";
+import { PageHeader } from "@/components/ui-premium/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -225,60 +226,57 @@ export function CampaignsHub() {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Campanhas</h1>
-          <p className="text-sm text-muted-foreground">
-            Crie, acompanhe e agende disparos para os seus públicos salvos.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" asChild>
-            <Link to="/resultados">
-              <BarChart3 className="mr-2 h-4 w-4" />
-              Resultados
-            </Link>
-          </Button>
-          <Button variant="outline" asChild>
-            <Link to="/automacoes">
-              <Workflow className="mr-2 h-4 w-4" />
-              Automações
-            </Link>
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button>
-                <Plus className="mr-2 h-4 w-4" /> Criar
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem
-                onClick={() => {
-                  setActiveDraftId(null);
-                  setInitialAudienceId("");
-                  setInitialChannel("sms");
-                  setComposerOpen(true);
-                }}
-              >
-                <Plus className="mr-2 h-4 w-4" /> Campanha
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setIndividualOpen(true)}>
-                <Send className="mr-2 h-4 w-4" /> Envio individual / teste
-              </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <Link to="/automacoes">
-                  <Workflow className="mr-2 h-4 w-4" /> Automação
-                </Link>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </div>
+      <PageHeader
+        subtitle="Crie, acompanhe e agende disparos para os seus públicos salvos."
+        actions={
+          <>
+            <Button variant="outline" asChild>
+              <Link to="/resultados">
+                <BarChart3 className="mr-2 h-4 w-4" />
+                Resultados
+              </Link>
+            </Button>
+            <Button variant="outline" asChild>
+              <Link to="/automacoes">
+                <Workflow className="mr-2 h-4 w-4" />
+                Automações
+              </Link>
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button>
+                  <Plus className="mr-2 h-4 w-4" /> Criar
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  onClick={() => {
+                    setActiveDraftId(null);
+                    setInitialAudienceId("");
+                    setInitialChannel("sms");
+                    setComposerOpen(true);
+                  }}
+                >
+                  <Plus className="mr-2 h-4 w-4" /> Campanha
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setIndividualOpen(true)}>
+                  <Send className="mr-2 h-4 w-4" /> Envio individual / teste
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link to="/automacoes">
+                    <Workflow className="mr-2 h-4 w-4" /> Automação
+                  </Link>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </>
+        }
+      />
       {(drafts.data?.items?.length ?? 0) > 0 && (
         <Card className="border-primary/25 bg-primary/[0.03]">
           <CardContent className="p-0">
             <div className="border-b border-border/60 px-4 py-3">
-              <h2 className="font-semibold">Rascunhos</h2>
+              <h2 className="text-section">Rascunhos</h2>
               <p className="text-xs text-muted-foreground">
                 Campanhas salvas automaticamente e disponíveis para continuar.
               </p>
@@ -455,7 +453,7 @@ export function CampaignsHub() {
                     {Number(campaign.unresolved_count ?? 0) > 0 ? (
                       <Badge
                         variant="outline"
-                        className="shrink-0 border-amber-500/40 text-amber-500"
+                        className="shrink-0 border-warning/40 text-warning"
                         title="Destinatários sem cadastro, com telefone inválido ou sem consentimento. Veja o motivo no relatório."
                       >
                         {num(Number(campaign.unresolved_count))} não enviados

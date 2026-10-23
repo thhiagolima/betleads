@@ -42,6 +42,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis } from "recharts";
+import { CHART_COLORS, chartTooltipProps } from "@/lib/chart-theme";
 import { POLL_INTERVALS, UpdatedAgo } from "@/hooks/use-updated-ago";
 import {
   getChannelHistory,
@@ -310,7 +311,7 @@ export function HistoryShell({
       {/* Header */}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          {options.title && <h2 className="text-lg font-semibold">{options.title}</h2>}
+          {options.title && <h2 className="text-section">{options.title}</h2>}
           <p className="mt-0.5 text-xs text-muted-foreground">
             {options.subtitle ? `${options.subtitle} · ` : ""}
             Último disparo:{" "}
@@ -347,18 +348,18 @@ export function HistoryShell({
           deltaPct={deltaPct}
         />
         <StatCard
-          icon={<CheckCircle2 className="h-4 w-4 text-emerald-400" />}
+          icon={<CheckCircle2 className="h-4 w-4 text-success" />}
           label={cards.success}
           value={stats.data?.success}
           subtitle={showsDelivery && stats.data ? `${stats.data.deliveryRate}% taxa` : undefined}
         />
         <StatCard
-          icon={<XCircle className="h-4 w-4 text-rose-400" />}
+          icon={<XCircle className="h-4 w-4 text-danger" />}
           label={cards.failed}
           value={stats.data?.failed}
         />
         <StatCard
-          icon={<Clock className="h-4 w-4 text-amber-400" />}
+          icon={<Clock className="h-4 w-4 text-warning" />}
           label={cards.pending}
           value={stats.data?.pending}
         />
@@ -371,13 +372,13 @@ export function HistoryShell({
 
       {/* Sparkline */}
       {(timeline.data?.points?.length ?? 0) > 1 && (
-        <Card className="border-0 card-premium">
+        <Card>
           <CardContent className="p-3">
             <div className="mb-1 flex items-center justify-between px-1">
-              <p className="text-[11px] uppercase tracking-wider text-muted-foreground">
+              <p className="text-label text-muted-foreground">
                 Disparos por {iso.bucket === "hour" ? "hora" : "dia"}
               </p>
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-meta text-muted-foreground">
                 {(timeline.data?.points ?? [])
                   .reduce((a, b) => a + b.count, 0)
                   .toLocaleString("pt-BR")}{" "}
@@ -391,13 +392,7 @@ export function HistoryShell({
               >
                 <XAxis dataKey="t" hide />
                 <Tooltip
-                  cursor={{ fill: "var(--color-muted)", fillOpacity: 0.4 }}
-                  contentStyle={{
-                    background: "var(--color-popover)",
-                    border: "1px solid var(--color-border)",
-                    borderRadius: 6,
-                    fontSize: 11,
-                  }}
+                  {...chartTooltipProps}
                   labelFormatter={(v) =>
                     new Date(v as string).toLocaleString("pt-BR", {
                       day: "2-digit",
@@ -408,7 +403,7 @@ export function HistoryShell({
                   }
                   formatter={(v) => [`${v}`, "envios"]}
                 />
-                <Bar dataKey="count" fill="var(--color-primary)" radius={[2, 2, 0, 0]} />
+                <Bar dataKey="count" fill={CHART_COLORS.primary} radius={[2, 2, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
@@ -417,11 +412,11 @@ export function HistoryShell({
 
       {/* Top fluxos */}
       {showFlow && (
-        <Card className="border-0 card-premium">
+        <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <div>
-              <CardTitle className="text-sm">Top fluxos no período</CardTitle>
-              <p className="text-[11px] text-muted-foreground">
+              <CardTitle>Top fluxos no período</CardTitle>
+              <p className="text-meta text-muted-foreground">
                 Clique num fluxo para filtrar a tabela abaixo.
               </p>
             </div>
@@ -429,7 +424,7 @@ export function HistoryShell({
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-7 gap-1 text-xs"
+                className="gap-1 text-xs"
                 onClick={() => setFlowId("all")}
               >
                 Limpar seleção
@@ -449,7 +444,7 @@ export function HistoryShell({
       )}
 
       {/* Filters */}
-      <Card className="border-0 card-premium">
+      <Card>
         <CardContent className="grid grid-cols-1 gap-2 p-3 md:grid-cols-5">
           {showFlow ? (
             <Select value={flowId} onValueChange={setFlowId}>
@@ -524,7 +519,7 @@ export function HistoryShell({
       </Card>
 
       {/* Table */}
-      <Card className="border-0 card-premium">
+      <Card>
         <CardContent className="overflow-x-auto p-0">
           {hist.isLoading && rows.length === 0 ? (
             <p className="p-10 text-center text-sm text-muted-foreground">Carregando…</p>
@@ -558,7 +553,7 @@ export function HistoryShell({
               <TableBody>
                 {rows.map((r) => (
                   <TableRow key={r.id} className="cursor-pointer" onClick={() => setOpenRow(r)}>
-                    <TableCell className="whitespace-nowrap text-[11px] text-muted-foreground">
+                    <TableCell className="whitespace-nowrap text-meta text-muted-foreground">
                       {new Date(r.created_at).toLocaleString("pt-BR", {
                         day: "2-digit",
                         month: "2-digit",
@@ -569,7 +564,7 @@ export function HistoryShell({
                     <TableCell className="text-xs font-medium">
                       {r.lead_name ?? <span className="text-muted-foreground">—</span>}
                     </TableCell>
-                    <TableCell className="font-mono text-[11px] text-muted-foreground">
+                    <TableCell className="font-mono text-meta text-muted-foreground">
                       {r.contact}
                     </TableCell>
                     <TableCell className="max-w-[280px] truncate text-xs text-muted-foreground">
@@ -657,13 +652,13 @@ export function HistoryShell({
                 </DetailField>
                 {openRow.error && (
                   <DetailField label="Falha no envio">
-                    <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-rose-500/10 p-2 text-xs text-rose-300">
+                    <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-danger/10 p-2 text-xs text-danger">
                       {openRow.error}
                     </pre>
                   </DetailField>
                 )}
                 {openRow.converted && (
-                  <div className="rounded-md border border-emerald-500/20 bg-emerald-500/5 p-3 text-xs text-emerald-300">
+                  <div className="rounded-md border border-success/20 bg-success/5 p-3 text-xs text-success">
                     Lead converteu (depósito em até 72h após o contato).
                   </div>
                 )}
@@ -728,19 +723,19 @@ function StatCard({
   deltaPct?: number | null;
 }) {
   return (
-    <Card className="border-0 card-premium">
+    <Card>
       <CardContent className="flex items-center justify-between gap-3 p-4">
         <div className="min-w-0">
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
-          <p className="text-xl font-semibold tabular-nums">
+          <p className="text-label text-muted-foreground">{label}</p>
+          <p className="text-kpi-sm tabular-nums">
             {value == null ? "—" : value.toLocaleString("pt-BR")}
           </p>
           {subtitle ? (
-            <p className="text-[10px] text-muted-foreground">{subtitle}</p>
+            <p className="text-meta text-muted-foreground">{subtitle}</p>
           ) : deltaPct != null ? (
             <p
-              className={`flex items-center gap-0.5 text-[10px] ${
-                deltaPct >= 0 ? "text-emerald-400" : "text-rose-400"
+              className={`flex items-center gap-0.5 text-meta ${
+                deltaPct >= 0 ? "text-success" : "text-danger"
               }`}
             >
               {deltaPct >= 0 ? (
@@ -815,7 +810,7 @@ function FlowRanking({
               <TableCell className="text-right text-xs tabular-nums">
                 {s.total.toLocaleString("pt-BR")}
               </TableCell>
-              <TableCell className="text-right text-xs tabular-nums text-emerald-300">
+              <TableCell className="text-right text-xs tabular-nums text-success">
                 {s.success.toLocaleString("pt-BR")}
               </TableCell>
               {showsDelivery && (
@@ -823,10 +818,10 @@ function FlowRanking({
                   {pct}%
                 </TableCell>
               )}
-              <TableCell className="text-right text-xs tabular-nums text-rose-300">
+              <TableCell className="text-right text-xs tabular-nums text-danger">
                 {s.failed.toLocaleString("pt-BR")}
               </TableCell>
-              <TableCell className="text-[11px] text-muted-foreground">
+              <TableCell className="text-meta text-muted-foreground">
                 {formatRelative(s.last_at)}
               </TableCell>
               <TableCell>
@@ -843,7 +838,7 @@ function FlowRanking({
 function DetailField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <p className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
+      <p className="mb-1 text-label text-muted-foreground">{label}</p>
       <div>{children}</div>
     </div>
   );

@@ -67,18 +67,15 @@ function normalize(raw: any): AIPlayer {
     ultimo_login: raw.ultimo_login ?? raw.lastLogin ?? null,
     ultimo_deposito: raw.ultimo_deposito ?? raw.lastDeposit ?? null,
     ultimo_jogo: raw.ultimo_jogo ?? raw.lastGame ?? null,
-    status:
-      raw.status === "active" ? "ativo" : raw.status === "inactive" ? "inativo" : raw.status,
+    status: raw.status === "active" ? "ativo" : raw.status === "inactive" ? "inativo" : raw.status,
     vip: !!raw.vip,
     motivo: raw.motivo ?? raw.reason,
     saldo_atual: raw.saldo_atual != null ? Number(raw.saldo_atual) : undefined,
     expert: raw.expert ?? null,
     origem: raw.origem ?? null,
   };
-  const classificacao: Classificacao =
-    raw.classificacao ?? classify(base);
-  const score: number =
-    typeof raw.score === "number" ? raw.score : playerScore(base);
+  const classificacao: Classificacao = raw.classificacao ?? classify(base);
+  const score: number = typeof raw.score === "number" ? raw.score : playerScore(base);
   return { ...base, classificacao, score };
 }
 
@@ -138,24 +135,24 @@ function fmtDate(d?: string | null) {
 function MetricCard({ m }: { m: AIMetric }) {
   const tone =
     m.tipo === "positivo"
-      ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/5"
+      ? "text-success border-success/30 bg-success/5"
       : m.tipo === "negativo"
-        ? "text-rose-400 border-rose-500/30 bg-rose-500/5"
+        ? "text-danger border-danger/30 bg-danger/5"
         : "text-foreground border-border/50 bg-muted/30";
   return (
     <div className={`rounded-xl border px-4 py-3 ${tone}`}>
-      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{m.label}</p>
-      <p className="text-lg font-semibold mt-0.5">{m.valor}</p>
+      <p className="text-label text-muted-foreground">{m.label}</p>
+      <p className="text-kpi-sm mt-0.5">{m.valor}</p>
     </div>
   );
 }
 
 function InsightCard({ i }: { i: AIInsight }) {
   const map = {
-    alerta: { icon: AlertTriangle, cls: "text-rose-400 bg-rose-500/10 border-rose-500/30" },
-    atencao: { icon: AlertTriangle, cls: "text-amber-400 bg-amber-500/10 border-amber-500/30" },
-    sucesso: { icon: CheckCircle2, cls: "text-emerald-400 bg-emerald-500/10 border-emerald-500/30" },
-    info: { icon: Info, cls: "text-sky-400 bg-sky-500/10 border-sky-500/30" },
+    alerta: { icon: AlertTriangle, cls: "text-danger bg-danger/10 border-danger/30" },
+    atencao: { icon: AlertTriangle, cls: "text-warning bg-warning/10 border-warning/30" },
+    sucesso: { icon: CheckCircle2, cls: "text-success bg-success/10 border-success/30" },
+    info: { icon: Info, cls: "text-info bg-info/10 border-info/30" },
   } as const;
   const cfg = map[i.tipo ?? "info"] ?? map.info;
   const Icon = cfg.icon;
@@ -203,8 +200,8 @@ function PlayerCard({ p }: { p: AIPlayer }) {
                 variant="outline"
                 className={
                   ativo
-                    ? "border-emerald-500/40 text-emerald-400 bg-emerald-500/10"
-                    : "border-rose-500/40 text-rose-400 bg-rose-500/10"
+                    ? "border-success/40 text-success bg-success/10"
+                    : "border-danger/40 text-danger bg-danger/10"
                 }
               >
                 <Activity className="h-3 w-3 mr-1" />
@@ -230,10 +227,10 @@ function PlayerCard({ p }: { p: AIPlayer }) {
           )}
         </div>
         <div className="text-right shrink-0">
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Lucro</p>
+          <p className="text-label text-muted-foreground">Lucro</p>
           <p
             className={`text-sm font-semibold inline-flex items-center gap-1 ${
-              lucro >= 0 ? "text-emerald-400" : "text-rose-400"
+              lucro >= 0 ? "text-success" : "text-danger"
             }`}
           >
             {lucro >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
@@ -245,9 +242,7 @@ function PlayerCard({ p }: { p: AIPlayer }) {
       <div className="mb-3 flex items-center gap-3">
         <div className="flex-1">
           <div className="flex items-center justify-between mb-1">
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-              Score do player
-            </p>
+            <p className="text-label text-muted-foreground">Score do player</p>
             <p className={`text-xs font-bold ${scoreColor(score)}`}>{score}/100</p>
           </div>
           <Progress value={score} className="h-1.5" />
@@ -257,55 +252,59 @@ function PlayerCard({ p }: { p: AIPlayer }) {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
         {hasSaldo ? (
           <>
-            <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/30 px-2.5 py-1.5">
-              <p className="text-[10px] uppercase tracking-wider text-emerald-300/90">Saldo na banca</p>
-              <p className="font-semibold text-emerald-300">{brl(p.saldo_atual ?? 0)}</p>
+            <div className="rounded-lg bg-success/10 border border-success/30 px-2.5 py-1.5">
+              <p className="text-label text-success">Saldo na banca</p>
+              <p className="font-semibold text-success">{brl(p.saldo_atual ?? 0)}</p>
             </div>
             <div className="rounded-lg bg-muted/30 px-2.5 py-1.5">
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Depositado</p>
+              <p className="text-label text-muted-foreground">Depositado</p>
               <p className="font-medium text-foreground">{brl(dep)}</p>
             </div>
             <div className="rounded-lg bg-muted/30 px-2.5 py-1.5">
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Sacado</p>
+              <p className="text-label text-muted-foreground">Sacado</p>
               <p className="font-medium text-foreground">{brl(saq)}</p>
             </div>
           </>
         ) : hasHoje ? (
           <>
-            <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/30 px-2.5 py-1.5">
-              <p className="text-[10px] uppercase tracking-wider text-emerald-300/90">
+            <div className="rounded-lg bg-success/10 border border-success/30 px-2.5 py-1.5">
+              <p className="text-label text-success">
                 {p.depositado_hoje != null ? "Depositado hoje" : "Sacado hoje"}
-                {p.qtd_depositos_hoje ? ` (${p.qtd_depositos_hoje}x)` : p.qtd_saques_hoje ? ` (${p.qtd_saques_hoje}x)` : ""}
+                {p.qtd_depositos_hoje
+                  ? ` (${p.qtd_depositos_hoje}x)`
+                  : p.qtd_saques_hoje
+                    ? ` (${p.qtd_saques_hoje}x)`
+                    : ""}
               </p>
-              <p className="font-semibold text-emerald-300">
+              <p className="font-semibold text-success">
                 {brl(p.depositado_hoje ?? p.sacado_hoje ?? 0)}
               </p>
             </div>
             <div className="rounded-lg bg-muted/30 px-2.5 py-1.5">
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Total histórico</p>
+              <p className="text-label text-muted-foreground">Total histórico</p>
               <p className="font-medium text-foreground">{brl(dep)}</p>
             </div>
           </>
         ) : (
           <>
             <div className="rounded-lg bg-muted/30 px-2.5 py-1.5">
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Depositado</p>
+              <p className="text-label text-muted-foreground">Depositado</p>
               <p className="font-medium text-foreground">{brl(dep)}</p>
             </div>
             <div className="rounded-lg bg-muted/30 px-2.5 py-1.5">
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Sacado</p>
+              <p className="text-label text-muted-foreground">Sacado</p>
               <p className="font-medium text-foreground">{brl(saq)}</p>
             </div>
           </>
         )}
         <div className="rounded-lg bg-muted/30 px-2.5 py-1.5">
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Últ. login</p>
+          <p className="text-label text-muted-foreground">Últ. login</p>
           <p className="font-medium text-foreground" title={fmtDate(p.ultimo_login)}>
             {timeAgo(p.ultimo_login)}
           </p>
         </div>
         <div className="rounded-lg bg-muted/30 px-2.5 py-1.5">
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Últ. depósito</p>
+          <p className="text-label text-muted-foreground">Últ. depósito</p>
           <p className="font-medium text-foreground" title={fmtDate(p.ultimo_deposito)}>
             {timeAgo(p.ultimo_deposito)}
           </p>
@@ -364,11 +363,12 @@ export function AIResponse({ data }: { data: AIAnswer }) {
       {players.length > 0 && (
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <p className="text-xs uppercase tracking-wider text-muted-foreground">
-              Players ({players.length})
-            </p>
+            <p className="text-label text-muted-foreground">Players ({players.length})</p>
             {data.criterio && (
-              <p className="text-[10px] text-muted-foreground italic max-w-[60%] text-right truncate" title={data.criterio}>
+              <p
+                className="text-meta text-muted-foreground italic max-w-[60%] text-right truncate"
+                title={data.criterio}
+              >
                 {data.criterio}
               </p>
             )}

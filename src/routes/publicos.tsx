@@ -26,7 +26,7 @@ import {
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { requestConfirmation } from "@/components/system-dialog-host";
-import { PageHeader } from "@/components/ui-premium/page-header";
+import { Page, PageHeader } from "@/components/ui-premium/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -105,25 +105,25 @@ const TIMING_RULES: Array<{
     value: "cooling",
     label: "Esfriando",
     icon: Snowflake,
-    tone: "border-amber-400/40 bg-amber-400/10 text-amber-400",
+    tone: "border-warning/40 bg-warning/10 text-warning",
   },
   {
     value: "sleeping",
     label: "Dormindo",
     icon: Moon,
-    tone: "border-rose-400/40 bg-rose-400/10 text-rose-400",
+    tone: "border-danger/40 bg-danger/10 text-danger",
   },
   {
     value: "inactive30",
     label: "30+ dias",
     icon: Clock3,
-    tone: "border-rose-500/40 bg-rose-500/10 text-rose-300",
+    tone: "border-danger/40 bg-danger/10 text-danger",
   },
   {
     value: "inactive90",
     label: "90+ dias",
     icon: Clock3,
-    tone: "border-red-500/40 bg-red-500/10 text-red-400",
+    tone: "border-danger/40 bg-danger/10 text-danger",
   },
 ];
 
@@ -222,20 +222,14 @@ function PublicosPage() {
   const facets = preview.data?.facets;
 
   return (
-    <div className="space-y-5">
-      <PageHeader
-        title="Públicos"
-        subtitle="Separe seus jogadores em grupos para criar campanhas mais precisas."
-        icon={<Users className="h-5 w-5 text-primary-foreground" />}
-      />
+    <Page>
+      <PageHeader subtitle="Separe seus jogadores em grupos para criar campanhas mais precisas." />
 
       <div className="grid gap-5 xl:grid-cols-[500px_1fr]">
         <Card className="border-border/60 bg-card/70">
           <CardContent className="space-y-5 p-5">
             <div>
-              <h2 className="text-lg font-semibold">
-                {editingId ? "Editar público" : "Novo público"}
-              </h2>
+              <h2 className="text-section">{editingId ? "Editar público" : "Novo público"}</h2>
               <p className="text-sm text-muted-foreground">Quem deve fazer parte deste público?</p>
             </div>
             <Input
@@ -264,7 +258,7 @@ function PublicosPage() {
               />
               <RuleButton
                 icon={WalletCards}
-                tone="border-emerald-400/40 bg-emerald-400/10 text-emerald-400"
+                tone="border-success/40 bg-success/10 text-success"
                 label="Já depositou"
                 count={facets?.activity.depositYes}
                 loading={calculating}
@@ -273,7 +267,7 @@ function PublicosPage() {
               />
               <RuleButton
                 icon={CircleDollarSign}
-                tone="border-amber-400/40 bg-amber-400/10 text-amber-300"
+                tone="border-warning/40 bg-warning/10 text-warning"
                 label="Gerou PIX e não pagou"
                 count={facets?.activity.pixUnpaid}
                 loading={calculating}
@@ -300,7 +294,7 @@ function PublicosPage() {
               />
               <RuleButton
                 icon={Clock3}
-                tone="border-amber-400/40 bg-amber-400/10 text-amber-300"
+                tone="border-warning/40 bg-warning/10 text-warning"
                 label="Saque pendente"
                 count={facets?.activity.withdrawalPending}
                 loading={calculating}
@@ -456,7 +450,7 @@ function PublicosPage() {
         <Card className="border-border/60 bg-card/70">
           <CardContent className="space-y-3 p-5">
             <div>
-              <h2 className="text-lg font-semibold">Seus públicos</h2>
+              <h2 className="text-section">Seus públicos</h2>
               <p className="text-sm text-muted-foreground">
                 As quantidades são recalculadas no momento do envio.
               </p>
@@ -592,7 +586,7 @@ function PublicosPage() {
           </CardContent>
         </Card>
       </div>
-    </div>
+    </Page>
   );
 }
 
@@ -643,7 +637,7 @@ function RuleButton({
     >
       <Icon className="h-3.5 w-3.5" />
       <span>{label}</span>
-      <span className="ml-0.5 border-l border-current/20 pl-1.5 text-[11px] tabular-nums opacity-80">
+      <span className="ml-0.5 border-l border-current/20 pl-1.5 text-meta tabular-nums opacity-80">
         {loading ? "…" : (count ?? 0).toLocaleString("pt-BR")}
       </span>
     </Button>
@@ -662,13 +656,13 @@ function CriteriaBadges({ criteria }: { criteria: SmsAudienceCriteria }) {
     badges.push({
       label: "Já depositou",
       icon: WalletCards,
-      tone: "border-emerald-400/40 bg-emerald-400/10 text-emerald-400",
+      tone: "border-success/40 bg-success/10 text-success",
     });
   if (criteria.activity.pixUnpaid)
     badges.push({
       label: "PIX não pago",
       icon: CircleDollarSign,
-      tone: "border-amber-400/40 bg-amber-400/10 text-amber-300",
+      tone: "border-warning/40 bg-warning/10 text-warning",
     });
   if (criteria.activity.withdrawal === "yes")
     badges.push({
@@ -686,7 +680,7 @@ function CriteriaBadges({ criteria }: { criteria: SmsAudienceCriteria }) {
     badges.push({
       label: "Saque pendente",
       icon: Clock3,
-      tone: "border-amber-400/40 bg-amber-400/10 text-amber-300",
+      tone: "border-warning/40 bg-warning/10 text-warning",
     });
   if (criteria.activity.cashback)
     badges.push({
@@ -705,7 +699,7 @@ function CriteriaBadges({ criteria }: { criteria: SmsAudienceCriteria }) {
       badges.push({
         label: `${criteria.customDays}+ dias sem depositar`,
         icon: Clock3,
-        tone: "border-rose-400/40 bg-rose-400/10 text-rose-300",
+        tone: "border-danger/40 bg-danger/10 text-danger",
       });
     else if (criteria.timing === "registered_week")
       badges.push({
@@ -718,7 +712,7 @@ function CriteriaBadges({ criteria }: { criteria: SmsAudienceCriteria }) {
     badges.push({
       label: `${criteria.daysWithoutLogin}+ dias sem entrar`,
       icon: Moon,
-      tone: "border-rose-400/40 bg-rose-400/10 text-rose-300",
+      tone: "border-danger/40 bg-danger/10 text-danger",
     });
   if (criteria.daysSinceRegistration)
     badges.push({
@@ -739,7 +733,7 @@ function CriteriaBadges({ criteria }: { criteria: SmsAudienceCriteria }) {
         return (
           <span
             key={`${badge.label}-${index}`}
-            className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-medium ${badge.tone}`}
+            className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-meta font-medium ${badge.tone}`}
           >
             <Icon className="h-3 w-3" />
             {badge.label}

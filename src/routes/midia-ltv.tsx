@@ -53,7 +53,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { PageHeader } from "@/components/ui-premium/page-header";
+import { Page, PageHeader } from "@/components/ui-premium/page-header";
+import { CHART_COLORS, chartAxisProps, chartGridProps, chartTooltipStyle } from "@/lib/chart-theme";
 import { DataCard } from "@/components/ui-premium/data-card";
 import { EmptyState } from "@/components/ui-premium/empty-state";
 import { MetricCard } from "@/components/ui-premium/metric-card";
@@ -84,9 +85,6 @@ import {
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/midia-ltv")({
-  head: () => ({
-    meta: [{ title: "Aquisição e LTV - BETLEADS" }],
-  }),
   component: MediaLtvPage,
 });
 
@@ -359,11 +357,9 @@ function MediaLtvPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <Page>
       <PageHeader
-        title="Aquisição e LTV"
         subtitle="Cada jogador carrega o anúncio que o trouxe. Veja quem trouxe cadastro barato e quem trouxe dinheiro."
-        icon={<BarChart3 className="h-5 w-5 text-primary-foreground" />}
         actions={
           <div className="flex items-center gap-2">
             <Button
@@ -391,7 +387,7 @@ function MediaLtvPage() {
       {error && (
         <div
           role="alert"
-          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-100"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm text-warning"
         >
           <span>
             Não foi possível carregar os dados de mídia deste período.
@@ -451,7 +447,7 @@ function MediaLtvPage() {
           onCopy={copy}
         />
       )}
-    </div>
+    </Page>
   );
 }
 
@@ -462,10 +458,10 @@ function StatusBadge({ status }: { status?: string }) {
     <Badge
       variant="outline"
       className={cn(
-        "border-border/60 text-[10px]",
-        connected && "border-emerald-500/30 bg-emerald-500/10 text-emerald-400",
-        configured && "border-sky-500/30 bg-sky-500/10 text-sky-300",
-        status === "error" && "border-rose-500/30 bg-rose-500/10 text-rose-300",
+        "border-border/60 text-meta",
+        connected && "border-success/30 bg-success/10 text-success",
+        configured && "border-info/30 bg-info/10 text-info",
+        status === "error" && "border-danger/30 bg-danger/10 text-danger",
       )}
     >
       {statusLabel(status)}
@@ -594,9 +590,9 @@ function VisualizacaoSection({
         <div
           className={cn(
             "rounded-xl border px-4 py-3",
-            latestRun.status === "failed" && "border-rose-500/30 bg-rose-500/5",
-            latestRun.status === "partial" && "border-amber-500/30 bg-amber-500/5",
-            latestRun.status === "completed" && "border-emerald-500/30 bg-emerald-500/5",
+            latestRun.status === "failed" && "border-danger/30 bg-danger/5",
+            latestRun.status === "partial" && "border-warning/30 bg-warning/5",
+            latestRun.status === "completed" && "border-success/30 bg-success/5",
             ["queued", "running"].includes(latestRun.status) && "border-primary/30 bg-primary/5",
           )}
         >
@@ -625,7 +621,7 @@ function VisualizacaoSection({
             </div>
           )}
           {latestRun.error_summary && (
-            <p className="mt-2 text-xs text-rose-300">{latestRun.error_summary}</p>
+            <p className="mt-2 text-xs text-danger">{latestRun.error_summary}</p>
           )}
           {syncRuns.length > 1 && (
             <details className="mt-3 text-xs text-muted-foreground">
@@ -703,7 +699,7 @@ function VisualizacaoSection({
       {/* AL0-06: sai quando a conferência da AL1 com a casa piloto for aceita. */}
       <div
         role="note"
-        className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100"
+        className="rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning"
       >
         <p className="flex items-center gap-2 font-semibold">
           <AlertTriangle className="h-4 w-4" aria-hidden="true" />
@@ -718,7 +714,7 @@ function VisualizacaoSection({
       {spendOther.length > 0 && (
         <div
           role="note"
-          className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100"
+          className="rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning"
         >
           <strong>Contas em outra moeda:</strong>{" "}
           {spendOther.map((row) => money(row.spend, row.currency)).join(" · ")}. Esse gasto fica
@@ -727,8 +723,8 @@ function VisualizacaoSection({
       )}
 
       {staleAccounts > 0 && (
-        <div className="rounded-xl border border-red-500/40 bg-card/70 p-4 text-sm">
-          <p className="flex items-center gap-2 font-semibold text-red-400">
+        <div className="rounded-xl border border-danger/40 bg-card/70 p-4 text-sm">
+          <p className="flex items-center gap-2 font-semibold text-danger">
             <AlertTriangle className="h-4 w-4" />A conta conectada ainda não está entregando gasto
           </p>
           <p className="mt-2 text-muted-foreground">
@@ -739,7 +735,7 @@ function VisualizacaoSection({
       )}
 
       {orphanRows.length > 0 && (
-        <div className="rounded-lg border border-amber-500/20 bg-amber-500/15 px-4 py-3 text-sm text-amber-100">
+        <div className="rounded-lg border border-warning/20 bg-warning/15 px-4 py-3 text-sm text-warning">
           <strong>
             {num(totals?.orphanPlayers)} cadastros marcados sem anúncio correspondente nas contas
             conectadas
@@ -787,11 +783,11 @@ function VisualizacaoSection({
         <span className="px-2">−</span>
         <strong className="text-foreground">{brl(totals?.withdrawals)}</strong> de saques
         <span className="px-2">=</span>
-        <strong className="text-emerald-400">{brl(totals?.net)}</strong> líquidos
+        <strong className="text-success">{brl(totals?.net)}</strong> líquidos
         <span className="px-2">÷</span>
         <strong className="text-foreground">{brl(totals?.spend)}</strong> investidos
         <span className="px-2">=</span>
-        <strong className="text-emerald-400">{ratio(totals?.roas)}</strong>
+        <strong className="text-success">{ratio(totals?.roas)}</strong>
         <span className="float-right hidden text-muted-foreground lg:inline">
           jogadores cadastrados no período por anúncio · horário de Brasília
         </span>
@@ -837,7 +833,7 @@ function VisualizacaoSection({
             subtitle={`${range.days} dias · o que foi gasto em mídia`}
             data={data?.daily ?? []}
             dataKey="spend"
-            color="var(--color-chart-5)"
+            color={CHART_COLORS.orange}
             formatter={brl}
           />
           <DailyChart
@@ -845,7 +841,7 @@ function VisualizacaoSection({
             subtitle={`${range.days} dias`}
             data={data?.daily ?? []}
             dataKey="ftd"
-            color="var(--color-chart-4)"
+            color={CHART_COLORS.green}
             formatter={num}
           />
           <MoneyMapCard rows={data?.moneyMap ?? []} />
@@ -1044,14 +1040,14 @@ function MetaConnectionWizard({
               className={cn(
                 "flex items-center gap-2 rounded-lg border px-3 py-2 text-sm",
                 active && "border-primary/60 bg-primary/10",
-                complete && "border-emerald-500/30 bg-emerald-500/10",
+                complete && "border-success/30 bg-success/10",
               )}
             >
               <span
                 className={cn(
                   "flex h-6 w-6 items-center justify-center rounded-full bg-muted text-xs font-bold",
                   active && "bg-primary text-primary-foreground",
-                  complete && "bg-emerald-500/20 text-emerald-400",
+                  complete && "bg-success/20 text-success",
                 )}
               >
                 {complete ? <CheckCircle2 className="h-4 w-4" /> : step}
@@ -1068,8 +1064,8 @@ function MetaConnectionWizard({
         {showGuide ? "Esconder preparação" : "Como preparar a conta"}
       </Button>
       {legacyConnections.length > 0 && (
-        <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm">
-          <p className="font-semibold text-amber-300">Conexão antiga precisa ser substituída</p>
+        <div className="mt-4 rounded-xl border border-warning/30 bg-warning/10 p-4 text-sm">
+          <p className="font-semibold text-warning">Conexão antiga precisa ser substituída</p>
           <p className="mt-1 text-muted-foreground">
             A integração anterior usava o app compartilhado da plataforma. Gere um token no app da
             sua operação e conecte abaixo; os dados já importados serão preservados.
@@ -1173,7 +1169,7 @@ function MetaConnectionWizard({
                 className={cn(
                   "rounded-xl border p-4",
                   connection.status === "error"
-                    ? "border-rose-500/30 bg-rose-500/5"
+                    ? "border-danger/30 bg-danger/5"
                     : "border-border/60 bg-background/40",
                 )}
               >
@@ -1198,7 +1194,7 @@ function MetaConnectionWizard({
                   <StatusBadge status={connection.status} />
                 </div>
                 {connection.last_error && (
-                  <p className="mt-3 rounded-md bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+                  <p className="mt-3 rounded-md bg-danger/10 px-3 py-2 text-xs text-danger">
                     {connection.last_error}
                   </p>
                 )}
@@ -1223,7 +1219,7 @@ function MetaConnectionWizard({
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="gap-2 text-rose-400 hover:text-rose-300"
+                      className="gap-2 text-danger hover:text-danger/80"
                       disabled={isDemo}
                       onClick={() => setDisconnectId(connection.id)}
                     >
@@ -1275,10 +1271,10 @@ function MetaConnectionWizard({
                   <Badge
                     variant="outline"
                     className={cn(
-                      "text-[10px]",
-                      account.sync_status === "healthy" && "border-emerald-500/30 text-emerald-400",
-                      account.sync_status === "warning" && "border-amber-500/30 text-amber-300",
-                      account.sync_status === "error" && "border-rose-500/30 text-rose-300",
+                      "text-meta",
+                      account.sync_status === "healthy" && "border-success/30 text-success",
+                      account.sync_status === "warning" && "border-warning/30 text-warning",
+                      account.sync_status === "error" && "border-danger/30 text-danger",
                     )}
                     title={account.last_error ?? undefined}
                   >
@@ -1372,9 +1368,9 @@ function AttributionBadge({ status }: { status: string }) {
     <Badge
       variant="outline"
       className={cn(
-        "border-border/60 text-[10px]",
-        matched && "border-emerald-500/30 bg-emerald-500/10 text-emerald-400",
-        orphan && "border-amber-500/30 bg-amber-500/10 text-amber-300",
+        "border-border/60 text-meta",
+        matched && "border-success/30 bg-success/10 text-success",
+        orphan && "border-warning/30 bg-warning/10 text-warning",
       )}
     >
       {attributionStatusLabel(status)}
@@ -1419,28 +1415,17 @@ function DailyChart({
               <stop offset="95%" stopColor={color} stopOpacity={0.02} />
             </linearGradient>
           </defs>
-          <CartesianGrid stroke="var(--color-border)" strokeDasharray="3 3" opacity={0.45} />
-          <XAxis
-            dataKey="label"
-            tick={{ fill: "var(--color-muted-foreground)", fontSize: 11 }}
-            axisLine={false}
-            tickLine={false}
-          />
+          <CartesianGrid {...chartGridProps} />
+          <XAxis dataKey="label" {...chartAxisProps} />
           <YAxis
-            tick={{ fill: "var(--color-muted-foreground)", fontSize: 11 }}
-            axisLine={false}
-            tickLine={false}
+            {...chartAxisProps}
             tickFormatter={(value) => formatter(Number(value))}
             width={58}
           />
           <Tooltip
             cursor={{ stroke: color, strokeOpacity: 0.35 }}
-            contentStyle={{
-              background: "var(--color-popover)",
-              border: "1px solid var(--color-border)",
-              borderRadius: 8,
-              color: "var(--color-popover-foreground)",
-            }}
+            contentStyle={chartTooltipStyle}
+            labelStyle={{ color: "var(--color-muted-foreground)" }}
             formatter={(value) => formatter(Number(value))}
           />
           <Area

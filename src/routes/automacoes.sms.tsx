@@ -1,36 +1,7 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-
-import { SmsFlowsPanel } from "@/routes/sms";
-import { consumeAutomationJourneyDraft, type AutomationJourneyDraft } from "@/lib/automation-draft";
 
 export const Route = createFileRoute("/automacoes/sms")({
   beforeLoad: () => {
     throw redirect({ to: "/automacoes" });
   },
-  component: SmsAutomationFlowsPage,
 });
-
-function SmsAutomationFlowsPage() {
-  const [draft, setDraft] = useState<AutomationJourneyDraft | null>(null);
-
-  useEffect(() => {
-    setDraft(consumeAutomationJourneyDraft("sms"));
-  }, []);
-
-  return (
-    <div className="space-y-6 p-6">
-      <div>
-        <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary">
-          Automações · Fluxos
-        </p>
-        <h2 className="mt-1 text-2xl font-semibold tracking-tight">Fluxos de SMS</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Crie jornadas acionadas por comportamento. Estes fluxos agora vivem na central de
-          Automações e poderão ser combinados com outros canais.
-        </p>
-      </div>
-      <SmsFlowsPanel initialDraft={draft} />
-    </div>
-  );
-}

@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
+import { Badge, badgeVariants } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -339,6 +339,8 @@ export function TemplateEditorDialog({
                 <Label className="text-xs text-muted-foreground">HTML avançado</Label>
                 <button
                   type="button"
+                  aria-label="HTML avançado"
+                  aria-pressed={advanced}
                   onClick={() => setAdvanced((v) => !v)}
                   className={cn(
                     "h-6 w-10 rounded-full transition-colors relative",
@@ -380,7 +382,7 @@ export function TemplateEditorDialog({
                         )}
                       >
                         <div className="text-xs font-semibold">{o.label}</div>
-                        <div className="text-[10px] text-muted-foreground line-clamp-1">
+                        <div className="text-meta text-muted-foreground line-clamp-1">
                           {o.descricao}
                         </div>
                       </button>
@@ -407,7 +409,7 @@ export function TemplateEditorDialog({
                           <span className="h-3 w-3 rounded-full" style={{ background: m.cor }} />
                           <span className="text-xs font-semibold">{m.label}</span>
                         </div>
-                        <div className="text-[10px] text-muted-foreground line-clamp-1 mt-0.5">
+                        <div className="text-meta text-muted-foreground line-clamp-1 mt-0.5">
                           {m.descricao}
                         </div>
                       </button>
@@ -495,12 +497,12 @@ export function TemplateEditorDialog({
                       };
                       return (
                         <div key={qf.key} className={cn("space-y-1", isLong && "sm:col-span-2")}>
-                          <Label className="text-[11px] text-muted-foreground flex items-center gap-1">
+                          <Label className="text-meta text-muted-foreground flex items-center gap-1">
                             {qf.label}
                             {activeField === qf.key && (
                               <Badge
                                 variant="outline"
-                                className="text-[9px] py-0 h-3.5 border-primary/40 text-primary"
+                                className="text-meta py-0 h-4 border-primary/40 text-primary"
                               >
                                 ativo
                               </Badge>
@@ -550,16 +552,19 @@ export function TemplateEditorDialog({
                 <Section step={5} title="Variáveis" desc="Clique para inserir no campo ativo.">
                   <div className="flex flex-wrap gap-1.5">
                     {VARIAVEIS.map((variable) => (
-                      <Badge
+                      <button
                         key={variable.token}
-                        variant="outline"
-                        className="text-[11px] cursor-pointer hover:bg-primary hover:text-primary-foreground font-mono"
+                        type="button"
+                        className={cn(
+                          badgeVariants({ variant: "outline" }),
+                          "h-8 text-meta cursor-pointer hover:bg-primary hover:text-primary-foreground font-mono",
+                        )}
                         onClick={() => insertVariable(variable.token)}
                         title={variable.label}
                       >
                         <Variable className="h-3 w-3 mr-1" />
                         {variable.token}
-                      </Badge>
+                      </button>
                     ))}
                   </div>
                 </Section>
@@ -574,28 +579,28 @@ export function TemplateEditorDialog({
               >
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
                   <div className="space-y-1">
-                    <Label className="text-[11px] text-muted-foreground">Nome</Label>
+                    <Label className="text-meta text-muted-foreground">Nome</Label>
                     <Input
                       value={meta.nome}
                       onChange={(e) => setMeta((m) => ({ ...m, nome: e.target.value }))}
                     />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-[11px] text-muted-foreground">Assunto</Label>
+                    <Label className="text-meta text-muted-foreground">Assunto</Label>
                     <Input
                       value={meta.assunto}
                       onChange={(e) => setMeta((m) => ({ ...m, assunto: e.target.value }))}
                     />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-[11px] text-muted-foreground">Pré-header</Label>
+                    <Label className="text-meta text-muted-foreground">Pré-header</Label>
                     <Input
                       value={meta.preheader}
                       onChange={(e) => setMeta((m) => ({ ...m, preheader: e.target.value }))}
                     />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-[11px] text-muted-foreground">Remetente</Label>
+                    <Label className="text-meta text-muted-foreground">Remetente</Label>
                     <Input
                       value={meta.fromName}
                       onChange={(e) => setMeta((m) => ({ ...m, fromName: e.target.value }))}
@@ -648,7 +653,7 @@ export function TemplateEditorDialog({
             </div>
 
             {/* Cabeçalho simulado */}
-            <div className="px-4 py-2 border-b border-border/50 bg-background/40 text-[11px] space-y-0.5">
+            <div className="px-4 py-2 border-b border-border/50 bg-background/40 text-meta space-y-0.5">
               <div className="text-foreground font-semibold truncate">
                 {meta.assunto || "(sem assunto)"}
               </div>
@@ -725,12 +730,12 @@ function Section({
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2">
-        <span className="h-5 w-5 rounded-full bg-primary/15 text-primary text-[11px] font-semibold flex items-center justify-center">
+        <span className="h-5 w-5 rounded-full bg-primary/15 text-primary text-meta font-semibold flex items-center justify-center">
           {step}
         </span>
         <h3 className="text-sm font-semibold">{title}</h3>
       </div>
-      {desc && <p className="text-[11px] text-muted-foreground -mt-1 ml-7">{desc}</p>}
+      {desc && <p className="text-meta text-muted-foreground -mt-1 ml-7">{desc}</p>}
       <div className="ml-7">{children}</div>
     </div>
   );
@@ -799,11 +804,13 @@ function ImageField({
             <ImageIcon className="h-3.5 w-3.5 text-primary" />
             {label}
           </Label>
-          {hint && <p className="text-[10px] text-muted-foreground mt-0.5">{hint}</p>}
+          {hint && <p className="text-meta text-muted-foreground mt-0.5">{hint}</p>}
         </div>
         {showToggle && (
           <button
             type="button"
+            aria-label="Exibir imagem"
+            aria-pressed={!!toggleValue}
             onClick={() => onToggleChange?.(!toggleValue)}
             className={cn(
               "h-5 w-9 rounded-full transition-colors relative shrink-0",
@@ -860,6 +867,7 @@ function ImageField({
               type="button"
               size="sm"
               variant="ghost"
+              aria-label="Remover imagem"
               onClick={() => onChange("")}
               className="gap-1.5 shrink-0 text-destructive hover:text-destructive"
             >
@@ -929,18 +937,16 @@ function PresetsDialog({
                   <span className="h-2.5 w-2.5 rounded-full" style={{ background: m?.cor }} />
                   <span className="text-sm font-semibold">{p.nome}</span>
                 </div>
-                <div className="text-[11px] text-muted-foreground line-clamp-2 mb-2">
-                  {p.assunto}
-                </div>
+                <div className="text-meta text-muted-foreground line-clamp-2 mb-2">{p.assunto}</div>
                 <div className="flex flex-wrap gap-1">
-                  <Badge variant="outline" className="text-[9px]">
+                  <Badge variant="outline" className="text-meta">
                     {m?.label}
                   </Badge>
                   {p.tags.map((t) => (
                     <Badge
                       key={t}
                       variant="outline"
-                      className="text-[9px] text-accent border-accent/30"
+                      className="text-meta text-accent border-accent/30"
                     >
                       #{t}
                     </Badge>
@@ -1026,7 +1032,7 @@ function AiDialog({
         </DialogHeader>
         <div className="space-y-3">
           <div className="space-y-1">
-            <Label className="text-[11px] text-muted-foreground">Gatilho / contexto</Label>
+            <Label className="text-meta text-muted-foreground">Gatilho / contexto</Label>
             <Textarea
               rows={2}
               placeholder="Ex: Lead VIP parou de jogar há 7 dias"
@@ -1035,7 +1041,7 @@ function AiDialog({
             />
           </div>
           <div className="space-y-1">
-            <Label className="text-[11px] text-muted-foreground">Benefício / oferta</Label>
+            <Label className="text-meta text-muted-foreground">Benefício / oferta</Label>
             <Input
               placeholder="Ex: Bônus de 100% no próximo depósito"
               value={beneficio}
@@ -1044,7 +1050,7 @@ function AiDialog({
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1">
-              <Label className="text-[11px] text-muted-foreground">Tom da mensagem</Label>
+              <Label className="text-meta text-muted-foreground">Tom da mensagem</Label>
               <Select value={tom} onValueChange={(v) => setTom(v as any)}>
                 <SelectTrigger>
                   <SelectValue />
@@ -1059,7 +1065,7 @@ function AiDialog({
               </Select>
             </div>
             <div className="space-y-1">
-              <Label className="text-[11px] text-muted-foreground">Cupom (opcional)</Label>
+              <Label className="text-meta text-muted-foreground">Cupom (opcional)</Label>
               <Input
                 value={cupom}
                 onChange={(e) => setCupom(e.target.value)}
@@ -1068,7 +1074,7 @@ function AiDialog({
             </div>
           </div>
           <div className="space-y-1">
-            <Label className="text-[11px] text-muted-foreground">Link do botão</Label>
+            <Label className="text-meta text-muted-foreground">Link do botão</Label>
             <Input value={link} onChange={(e) => setLink(e.target.value)} />
           </div>
         </div>

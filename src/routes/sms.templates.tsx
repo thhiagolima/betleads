@@ -18,6 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Page, PageHeader } from "@/components/ui-premium/page-header";
 import { estimateSms } from "@/lib/link-tracking-preview";
 
 export const Route = createFileRoute("/sms/templates")({ component: SmsTemplatesPage });
@@ -99,33 +100,30 @@ function SmsTemplatesPage() {
   });
   const items = (templates.data?.items ?? []) as Template[];
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-6 p-4 sm:p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold">Templates SMS</h1>
-          <p className="text-sm text-muted-foreground">
-            Mensagens reutilizáveis, isoladas por tenant.
-          </p>
-        </div>
-        <Button
-          onClick={() =>
-            setEditing(
-              toDraft({
-                id: "",
-                name: "",
-                content: "",
-                category: "Geral",
-                tags: [],
-                isActive: true,
-                version: 1,
-              }),
-            )
-          }
-        >
-          <Plus className="mr-2 h-4 w-4" />
-          Novo template
-        </Button>
-      </div>
+    <Page>
+      <PageHeader
+        subtitle="Mensagens reutilizáveis, isoladas por tenant."
+        actions={
+          <Button
+            onClick={() =>
+              setEditing(
+                toDraft({
+                  id: "",
+                  name: "",
+                  content: "",
+                  category: "Geral",
+                  tags: [],
+                  isActive: true,
+                  version: 1,
+                }),
+              )
+            }
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            Novo template
+          </Button>
+        }
+      />
       {editing && (
         <Card key={editing.id || "new"}>
           <CardHeader>
@@ -207,7 +205,7 @@ function SmsTemplatesPage() {
         {items.map((item) => (
           <Card key={item.id} className={!item.isActive ? "opacity-60" : ""}>
             <CardHeader>
-              <CardTitle className="flex items-center justify-between gap-2 text-base">
+              <CardTitle className="flex items-center justify-between gap-2">
                 <span className="truncate">{item.name}</span>
                 <span className="text-xs font-normal text-muted-foreground">v{item.version}</span>
               </CardTitle>
@@ -248,6 +246,6 @@ function SmsTemplatesPage() {
           </Card>
         ))}
       </div>
-    </div>
+    </Page>
   );
 }

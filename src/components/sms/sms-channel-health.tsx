@@ -32,9 +32,7 @@ export function SmsChannelHealth({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <Badge
-            className={
-              configured ? "bg-emerald-500/15 text-emerald-400" : "bg-amber-500/15 text-amber-400"
-            }
+            className={configured ? "bg-success/15 text-success" : "bg-warning/15 text-warning"}
           >
             {configured ? "Canal ativo" : "Canal indisponível"}
           </Badge>
@@ -67,9 +65,9 @@ export function SmsChannelHealth({
         ))}
       </div>
       <div className="grid gap-4 lg:grid-cols-[1.1fr_.9fr]">
-        <Card className="border-border/70 bg-card/70">
+        <Card>
           <CardHeader>
-            <CardTitle className="text-base">Saúde do canal</CardTitle>
+            <CardTitle>Saúde do canal</CardTitle>
             <CardDescription>
               Confira a disponibilidade, a fila e as falhas de envio.
             </CardDescription>
@@ -83,9 +81,9 @@ export function SmsChannelHealth({
             <HealthValue label="Fila atual" value={`${queue} campanha${queue === 1 ? "" : "s"}`} />
           </CardContent>
         </Card>
-        <Card className="border-border/70 bg-card/70">
+        <Card>
           <CardHeader>
-            <CardTitle className="text-base">Ações de envio</CardTitle>
+            <CardTitle>Ações de envio</CardTitle>
             <CardDescription>
               Crie ações no hub de campanhas e gerencie automações fora do canal.
             </CardDescription>
@@ -103,9 +101,9 @@ export function SmsChannelHealth({
           </CardContent>
         </Card>
       </div>
-      <Card className="border-border/70 bg-card/70">
+      <Card>
         <CardHeader>
-          <CardTitle className="text-base">Relatório de SMS</CardTitle>
+          <CardTitle>Relatório de SMS</CardTitle>
           <CardDescription>
             Consulte todos os envios, respostas e falhas em um único histórico.
           </CardDescription>

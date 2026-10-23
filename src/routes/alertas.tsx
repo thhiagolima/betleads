@@ -62,6 +62,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { PageHeader, MetricCard } from "@/components/ui-premium";
+import { Page } from "@/components/ui-premium/page-header";
 
 export const Route = createFileRoute("/alertas")({
   component: AlertasPage,
@@ -318,20 +319,20 @@ function ScoreBlock({
   const tone =
     good === "high"
       ? value >= 70
-        ? "text-emerald-400"
+        ? "text-success"
         : value >= 40
-          ? "text-amber-400"
-          : "text-rose-400"
+          ? "text-warning"
+          : "text-danger"
       : value >= 70
-        ? "text-rose-400"
+        ? "text-danger"
         : value >= 40
-          ? "text-amber-400"
-          : "text-emerald-400";
+          ? "text-warning"
+          : "text-success";
   return (
     <div className="rounded-md bg-muted/30 px-3 py-2 flex items-center gap-2">
       <Icon className={`h-4 w-4 ${tone}`} />
       <div className="min-w-0">
-        <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
+        <p className="text-label text-muted-foreground">{label}</p>
         <p className={`text-base font-bold leading-none mt-0.5 ${tone}`}>{value}</p>
       </div>
     </div>
@@ -355,8 +356,7 @@ function AlertRow({
   const recup = recoveryPotential(p);
   const chance = returnChance(p);
   const abordagem = principal ? ABORDAGEM_POR_TIPO[principal.tipo] : null;
-  const chanceTone =
-    chance >= 70 ? "text-emerald-400" : chance >= 40 ? "text-amber-400" : "text-rose-400";
+  const chanceTone = chance >= 70 ? "text-success" : chance >= 40 ? "text-warning" : "text-danger";
 
   return (
     <div className={`rounded-xl border ${c.border} ${c.bg} p-4 transition-colors`}>
@@ -410,23 +410,19 @@ function AlertRow({
           className={cn(
             "rounded-lg border px-3 py-2 text-right shrink-0",
             saldo >= 200
-              ? "border-emerald-500/40 bg-emerald-500/10"
+              ? "border-success/40 bg-success/10"
               : saldo > 0
-                ? "border-amber-500/30 bg-amber-500/5"
+                ? "border-warning/30 bg-warning/5"
                 : "border-border/40 bg-muted/20",
           )}
         >
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center justify-end gap-1">
+          <p className="text-label text-muted-foreground flex items-center justify-end gap-1">
             <Wallet className="h-3 w-3" /> Saldo atual
           </p>
           <p
             className={cn(
               "text-lg font-bold leading-none mt-1",
-              saldo >= 200
-                ? "text-emerald-400"
-                : saldo > 0
-                  ? "text-amber-400"
-                  : "text-muted-foreground",
+              saldo >= 200 ? "text-success" : saldo > 0 ? "text-warning" : "text-muted-foreground",
             )}
           >
             {brl(saldo)}
@@ -437,21 +433,19 @@ function AlertRow({
       {/* Métricas do lead */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs mb-3">
         <div className="rounded-md bg-muted/30 px-2.5 py-1.5">
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Depositado</p>
+          <p className="text-label text-muted-foreground">Depositado</p>
           <p className="font-semibold mt-0.5">{brl(dep)}</p>
         </div>
         <div className="rounded-md bg-muted/30 px-2.5 py-1.5">
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Últ. login</p>
+          <p className="text-label text-muted-foreground">Últ. login</p>
           <p className="font-semibold mt-0.5">{timeAgo(p.ultimo_login)}</p>
         </div>
         <div className="rounded-md bg-muted/30 px-2.5 py-1.5">
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-            Últ. depósito
-          </p>
+          <p className="text-label text-muted-foreground">Últ. depósito</p>
           <p className="font-semibold mt-0.5">{timeAgo(p.ultimo_deposito)}</p>
         </div>
         <div className="rounded-md bg-muted/30 px-2.5 py-1.5">
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Origem</p>
+          <p className="text-label text-muted-foreground">Origem</p>
           <p className="font-semibold mt-0.5 truncate">{p.origem ?? p.utm_source ?? "—"}</p>
         </div>
       </div>
@@ -495,7 +489,7 @@ function AlertRow({
                 )}
               </div>
               {outros.length > 0 && (
-                <p className="text-[11px] text-muted-foreground mt-2 flex items-center gap-1">
+                <p className="text-meta text-muted-foreground mt-2 flex items-center gap-1">
                   <Lightbulb className="h-3 w-3" /> +{outros.length} alerta(s):{" "}
                   {outros.map((o) => o.titulo).join(" · ")}
                 </p>
@@ -507,17 +501,17 @@ function AlertRow({
 
       {/* Potencial de recuperação + chance de retorno */}
       <div className="grid grid-cols-2 gap-2 mb-3">
-        <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2">
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1">
-            <Sparkles className="h-3 w-3 text-emerald-400" /> Potencial de recuperação
+        <div className="rounded-lg border border-success/30 bg-success/5 px-3 py-2">
+          <p className="text-label text-muted-foreground flex items-center gap-1">
+            <Sparkles className="h-3 w-3 text-success" /> Potencial de recuperação
           </p>
-          <p className="text-sm font-bold text-emerald-300 mt-1 leading-none">
+          <p className="text-sm font-bold text-success mt-1 leading-none">
             {brl(recup.min)} <span className="text-muted-foreground font-normal">–</span>{" "}
             {brl(recup.max)}
           </p>
         </div>
         <div className="rounded-lg border border-border/40 bg-muted/20 px-3 py-2">
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+          <p className="text-label text-muted-foreground flex items-center gap-1">
             <TrendingUp className={cn("h-3 w-3", chanceTone)} /> Chance de retorno
           </p>
           <div className="flex items-center gap-2 mt-1">
@@ -526,7 +520,7 @@ function AlertRow({
               <div
                 className={cn(
                   "h-full rounded-full",
-                  chance >= 70 ? "bg-emerald-400" : chance >= 40 ? "bg-amber-400" : "bg-rose-400",
+                  chance >= 70 ? "bg-success" : chance >= 40 ? "bg-warning" : "bg-danger",
                 )}
                 style={{ width: `${chance}%` }}
               />
@@ -695,11 +689,9 @@ function AlertasPage() {
   };
 
   return (
-    <div className="space-y-6">
+    <Page>
       <PageHeader
-        title="Central de Recuperação de Receita"
         subtitle="Fila de oportunidades — players com maior potencial de retorno e receita recuperável primeiro."
-        icon={<HeartHandshake className="h-5 w-5 text-primary-foreground" />}
         actions={
           <div className="flex items-center gap-3">
             <UpdatedAgo ts={dataUpdatedAt} className="hidden sm:inline" />
@@ -757,19 +749,19 @@ function AlertasPage() {
               id: "pendente",
               label: "Pendente",
               icon: Inbox,
-              cls: "bg-rose-500/15 text-rose-300 border-rose-500/50",
+              cls: "bg-danger/15 text-danger border-danger/50",
             },
             {
               id: "aguardando",
               label: "Aguardando retorno",
               icon: Clock,
-              cls: "bg-amber-500/15 text-amber-300 border-amber-500/50",
+              cls: "bg-warning/15 text-warning border-warning/50",
             },
             {
               id: "recuperado",
               label: "Recuperado",
               icon: CheckCircle2,
-              cls: "bg-emerald-500/15 text-emerald-300 border-emerald-500/50",
+              cls: "bg-success/15 text-success border-success/50",
             },
             {
               id: "convertido",
@@ -794,7 +786,7 @@ function AlertasPage() {
             >
               <Icon className="h-3.5 w-3.5" />
               {t.label}
-              <span className="ml-1 rounded-full bg-background/60 px-1.5 py-0.5 text-[10px]">
+              <span className="ml-1 rounded-full bg-background/60 px-1.5 py-0.5 text-meta">
                 {statusCounts[t.id]}
               </span>
             </button>
@@ -810,7 +802,7 @@ function AlertasPage() {
             {
               id: "critico",
               label: "Crítico",
-              cls: "bg-rose-500/15 text-rose-300 border-rose-500/50",
+              cls: "bg-danger/15 text-danger border-danger/50",
             },
             {
               id: "alto",
@@ -820,7 +812,7 @@ function AlertasPage() {
             {
               id: "medio",
               label: "Médio",
-              cls: "bg-amber-500/15 text-amber-300 border-amber-500/50",
+              cls: "bg-warning/15 text-warning border-warning/50",
             },
             { id: "baixo", label: "Baixo", cls: "bg-sky-500/15 text-sky-300 border-sky-500/50" },
           ] as const
@@ -861,6 +853,6 @@ function AlertasPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </Page>
   );
 }

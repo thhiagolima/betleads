@@ -11,7 +11,7 @@ describe("KpiCard", () => {
       <KpiCard title="Ticket médio" value="R$ 76,23" trend={trendDisplay(-3.1)} />,
     );
     expect(html).toContain("↓ 3,1%");
-    expect(html).toContain("text-rose-400");
+    expect(html).toContain("text-danger");
     expect(html).not.toContain("↑");
   });
 
@@ -20,7 +20,7 @@ describe("KpiCard", () => {
       <KpiCard title="Depositado" value="R$ 10" trend={trendDisplay(12.4)} />,
     );
     expect(html).toContain("↑ 12,4%");
-    expect(html).toContain("text-emerald-400");
+    expect(html).toContain("text-success");
   });
 
   it("omits the trend when it is not a finite number", () => {

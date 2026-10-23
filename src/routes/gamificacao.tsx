@@ -21,7 +21,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { PageHeader } from "@/components/ui-premium/page-header";
+import { Page, PageHeader } from "@/components/ui-premium/page-header";
 import {
   Select,
   SelectContent,
@@ -45,12 +45,6 @@ import {
 
 export const Route = createFileRoute("/gamificacao")({
   component: GamificacaoPage,
-  head: () => ({
-    meta: [
-      { title: "Gamificacao - BetLeads" },
-      { name: "description", content: "Níveis de jogadores, faixas e ranking da sua operação." },
-    ],
-  }),
 });
 
 const PAID_LEVELS: PaidLevelSlug[] = ["bronze", "silver", "gold", "diamond", "black"];
@@ -155,11 +149,9 @@ function GamificacaoPage() {
   const visibleRows = rows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   return (
-    <div className="space-y-5">
+    <Page>
       <PageHeader
-        title="Níveis e fidelização"
         subtitle="Cada jogador ganha um nível pelo total depositado. Os melhores ficam visíveis e podem virar público de campanha."
-        icon={<Trophy className="h-5 w-5 text-primary-foreground" />}
         actions={
           <>
             <Button variant="outline" size="sm" asChild>
@@ -206,7 +198,7 @@ function GamificacaoPage() {
       {activeTab === "rules" && (
         <Card className="border-border/50 bg-card/70">
           <CardContent className="space-y-4 p-5">
-            <h2 className="text-lg font-semibold">O que fazer com isso</h2>
+            <h2 className="text-section">O que fazer com isso</h2>
             <p className="text-sm text-muted-foreground">
               Nível é valor; situação é tempo sem depositar.
             </p>
@@ -222,7 +214,7 @@ function GamificacaoPage() {
       {(activeTab === "campaigns" || activeTab === "settings") && (
         <Card className="border-border/50 bg-card/70">
           <CardContent className="p-5">
-            <h2 className="text-lg font-semibold">
+            <h2 className="text-section">
               {activeTab === "campaigns" ? "Públicos de campanha" : "Configurações"}
             </h2>
             <p className="mt-1 text-sm text-muted-foreground">
@@ -246,7 +238,7 @@ function GamificacaoPage() {
             <div className="border-b border-border/50 p-5">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <h2 className="text-lg font-semibold">VIPs que pararam de depositar</h2>
+                  <h2 className="text-section">VIPs que pararam de depositar</h2>
                   <p className="mt-1 text-sm text-muted-foreground">
                     {levelLabel(data.settings.vipMinLevel)} para cima, sem depositar ha{" "}
                     {data.settings.coolingAfterDays}+ dias. Segurar quem mais vale e a campanha de
@@ -283,7 +275,7 @@ function GamificacaoPage() {
           <div className="space-y-4">
             <Card className="overflow-hidden border-border/50 bg-card/70">
               <div className="border-b border-border/50 p-5">
-                <h2 className="text-lg font-semibold">Faixas de nivel</h2>
+                <h2 className="text-section">Faixas de nivel</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
                   Total depositado a partir do qual o jogador entra em cada nivel. Os numeros acima
                   recalculam quando voce salva.
@@ -352,7 +344,7 @@ function GamificacaoPage() {
 
             <Card className="border-border/50 bg-card/70">
               <CardContent className="p-5">
-                <h2 className="text-lg font-semibold">O que fazer com isso</h2>
+                <h2 className="text-section">O que fazer com isso</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
                   Nivel nao e enfeite: e publico de campanha
                 </p>
@@ -384,7 +376,7 @@ function GamificacaoPage() {
       {activeTab === "players" && (
         <Card className="overflow-hidden border-border/50 bg-card/70">
           <div className="border-b border-border/50 p-5">
-            <h2 className="text-lg font-semibold">Jogadores por nivel</h2>
+            <h2 className="text-section">Jogadores por nivel</h2>
             <p className="mt-1 text-sm text-muted-foreground">
               Sem filtro, mostra os 200 que mais depositaram. Busca, nível e “Só quem parou”
               consultam a base inteira.
@@ -487,6 +479,7 @@ function GamificacaoPage() {
               <Button
                 variant="secondary"
                 size="icon"
+                aria-label="Página anterior"
                 disabled={currentPage === 1}
                 onClick={() => setPage((value) => Math.max(1, value - 1))}
               >
@@ -511,6 +504,7 @@ function GamificacaoPage() {
               <Button
                 variant="secondary"
                 size="icon"
+                aria-label="Próxima página"
                 disabled={currentPage === totalPages}
                 onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
               >
@@ -520,7 +514,7 @@ function GamificacaoPage() {
           </CardContent>
         </Card>
       )}
-    </div>
+    </Page>
   );
 }
 
@@ -531,13 +525,11 @@ function LevelCard({ level }: { level: GamificationData["levels"][number] }) {
       <CardContent className="p-5">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div
-              className={`text-xs font-semibold uppercase tracking-wide ${levelColor(level.slug)}`}
-            >
+            <div className={`text-label font-semibold ${levelColor(level.slug)}`}>
               {level.label}
             </div>
             <div className="mt-4 flex items-end gap-2">
-              <span className="text-3xl font-bold">{num(level.count)}</span>
+              <span className="text-kpi font-bold">{num(level.count)}</span>
               <span className="pb-1 text-sm text-muted-foreground">{level.percent}%</span>
             </div>
           </div>
@@ -547,7 +539,7 @@ function LevelCard({ level }: { level: GamificationData["levels"][number] }) {
           {brl(level.totalDeposited)} depositados
         </div>
         {level.slug !== "novice" && (
-          <div className="mt-2 text-xs font-semibold text-amber-400">
+          <div className="mt-2 text-xs font-semibold text-warning">
             {num(level.stopped)} sem depositar
           </div>
         )}
@@ -566,7 +558,7 @@ function VipStoppedRow({ player }: { player: GamificationPlayer }) {
     >
       <LevelBadge level={player.level} />
       <span className="truncate font-semibold">{player.nome}</span>
-      <span className="text-sm font-medium text-amber-400">
+      <span className="text-sm font-medium text-warning">
         ha {player.daysWithoutDeposit ?? 0} dias
       </span>
       <span className="font-bold">{brl(player.total_depositado)}</span>
@@ -637,7 +629,7 @@ function DaysInput({
   return (
     <div className="grid gap-2 sm:grid-cols-[160px_1fr_110px] sm:items-center">
       <span
-        className={`text-sm font-medium ${tone === "cooling" ? "text-amber-400" : "text-rose-400"}`}
+        className={`text-sm font-medium ${tone === "cooling" ? "text-warning" : "text-danger"}`}
       >
         {label}
       </span>
@@ -677,18 +669,18 @@ function StatusText({ status }: { status: PlayerStatus }) {
           : "Sem deposito";
   const color =
     status === "active"
-      ? "text-emerald-400"
+      ? "text-success"
       : status === "cooling"
-        ? "text-amber-400"
+        ? "text-warning"
         : status === "sleeping"
-          ? "text-rose-400"
+          ? "text-danger"
           : "text-primary";
   return <span className={`text-sm font-medium ${color}`}>{label}</span>;
 }
 
 function LoadingState() {
   return (
-    <div className="space-y-5">
+    <Page>
       <Skeleton className="h-20 w-full" />
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
         {Array.from({ length: 6 }).map((_, index) => (
@@ -696,7 +688,7 @@ function LoadingState() {
         ))}
       </div>
       <Skeleton className="h-[540px] w-full" />
-    </div>
+    </Page>
   );
 }
 
@@ -704,7 +696,7 @@ function EmptyState({ onRetry }: { onRetry: () => void }) {
   return (
     <Card className="border-border/50 bg-card/70">
       <CardContent className="p-8 text-center">
-        <div className="text-lg font-semibold">Nao foi possivel carregar a gamificacao</div>
+        <div className="text-section">Nao foi possivel carregar a gamificacao</div>
         <Button className="mt-4" onClick={onRetry}>
           Tentar novamente
         </Button>

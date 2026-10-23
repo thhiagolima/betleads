@@ -1,10 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import {
-  getSendWindowStatus,
-  updateSendWindow,
-} from "@/lib/send-window.functions";
+import { getSendWindowStatus, updateSendWindow } from "@/lib/send-window.functions";
 import { DataCard } from "@/components/ui-premium/data-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -84,9 +81,9 @@ export function SendWindowCard({ compact = false }: { compact?: boolean }) {
       <div className="rounded-lg border border-border/40 bg-background/30 px-4 py-3 flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
           {within ? (
-            <SunMedium className="h-4 w-4 text-emerald-400 shrink-0" />
+            <SunMedium className="h-4 w-4 text-success shrink-0" />
           ) : (
-            <MoonStar className="h-4 w-4 text-amber-400 shrink-0" />
+            <MoonStar className="h-4 w-4 text-warning shrink-0" />
           )}
           <div className="min-w-0">
             <p className="text-sm font-medium truncate">
@@ -97,7 +94,14 @@ export function SendWindowCard({ compact = false }: { compact?: boolean }) {
                 ? `${settings.start}–${settings.end} (${settings.timezone})`
                 : "Carregando…"}
               {!within && data?.next_allowed_at && (
-                <> · retoma {formatDateTimeBR(data.next_allowed_at, settings?.timezone ?? "America/Sao_Paulo")}</>
+                <>
+                  {" "}
+                  · retoma{" "}
+                  {formatDateTimeBR(
+                    data.next_allowed_at,
+                    settings?.timezone ?? "America/Sao_Paulo",
+                  )}
+                </>
               )}
             </p>
           </div>
@@ -139,9 +143,7 @@ export function SendWindowCard({ compact = false }: { compact?: boolean }) {
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-                Início
-              </Label>
+              <Label className="text-label text-muted-foreground">Início</Label>
               <Input
                 type="time"
                 value={start}
@@ -150,9 +152,7 @@ export function SendWindowCard({ compact = false }: { compact?: boolean }) {
               />
             </div>
             <div>
-              <Label className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-                Fim
-              </Label>
+              <Label className="text-label text-muted-foreground">Fim</Label>
               <Input
                 type="time"
                 value={end}
@@ -162,9 +162,7 @@ export function SendWindowCard({ compact = false }: { compact?: boolean }) {
             </div>
           </div>
           <div>
-            <Label className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-              Timezone
-            </Label>
+            <Label className="text-label text-muted-foreground">Timezone</Label>
             <Input
               value={tz}
               onChange={(e) => setTz(e.target.value)}
@@ -173,9 +171,7 @@ export function SendWindowCard({ compact = false }: { compact?: boolean }) {
             />
           </div>
           <div>
-            <Label className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground mb-2 block">
-              Dias permitidos
-            </Label>
+            <Label className="text-label text-muted-foreground mb-2 block">Dias permitidos</Label>
             <div className="flex flex-wrap gap-1.5">
               {WEEKDAYS.map((d) => {
                 const active = days.includes(d.v);
@@ -184,9 +180,7 @@ export function SendWindowCard({ compact = false }: { compact?: boolean }) {
                     key={d.v}
                     type="button"
                     onClick={() =>
-                      setDays((cur) =>
-                        active ? cur.filter((x) => x !== d.v) : [...cur, d.v],
-                      )
+                      setDays((cur) => (active ? cur.filter((x) => x !== d.v) : [...cur, d.v]))
                     }
                     className={
                       "rounded-md border px-3 py-1.5 text-xs font-medium transition-colors " +
@@ -204,9 +198,7 @@ export function SendWindowCard({ compact = false }: { compact?: boolean }) {
           <div className="flex items-center justify-between rounded-lg border border-border/40 bg-background/30 p-3">
             <div>
               <p className="text-sm font-medium">Janela ativa</p>
-              <p className="text-xs text-muted-foreground">
-                Desligado = envia 24h, todos os dias.
-              </p>
+              <p className="text-xs text-muted-foreground">Desligado = envia 24h, todos os dias.</p>
             </div>
             <Switch checked={enabled} onCheckedChange={setEnabled} />
           </div>
@@ -218,8 +210,8 @@ export function SendWindowCard({ compact = false }: { compact?: boolean }) {
               className={
                 "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium " +
                 (within
-                  ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
-                  : "bg-amber-500/15 text-amber-300 border border-amber-500/30")
+                  ? "bg-success/15 text-success border border-success/30"
+                  : "bg-warning/15 text-warning border border-warning/30")
               }
             >
               {within ? (
@@ -238,18 +230,14 @@ export function SendWindowCard({ compact = false }: { compact?: boolean }) {
 
           <div className="grid grid-cols-2 gap-3">
             <div className="rounded-lg border border-border/40 bg-background/30 p-3">
-              <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-                Horário permitido
-              </p>
+              <p className="text-label text-muted-foreground">Horário permitido</p>
               <p className="mt-1 text-sm font-medium">
                 {settings?.start} – {settings?.end}
               </p>
               <p className="text-xs text-muted-foreground">{settings?.timezone}</p>
             </div>
             <div className="rounded-lg border border-border/40 bg-background/30 p-3">
-              <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-                Próxima retomada
-              </p>
+              <p className="text-label text-muted-foreground">Próxima retomada</p>
               <p className="mt-1 text-sm font-medium">
                 {within
                   ? "—"
@@ -266,7 +254,7 @@ export function SendWindowCard({ compact = false }: { compact?: boolean }) {
 
           <div className="grid grid-cols-3 gap-3">
             <Stat label="Pendentes fora da janela" value={data.pending.outside_total} />
-            <Stat label="Para próxima janela" value={data.pending.tomorrow_total} tone="amber" />
+            <Stat label="Para próxima janela" value={data.pending.tomorrow_total} tone="warning" />
             <Stat
               label="Última execução"
               value={
@@ -303,19 +291,17 @@ function Stat({
 }: {
   label: string;
   value: number | string;
-  tone?: "amber";
+  tone?: "warning";
   compact?: boolean;
 }) {
   return (
     <div className="rounded-lg border border-border/40 bg-background/30 p-3">
-      <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-        {label}
-      </p>
+      <p className="text-label text-muted-foreground">{label}</p>
       <p
         className={
           "mt-1 font-medium " +
-          (compact ? "text-sm" : "text-2xl ") +
-          (tone === "amber" ? "text-amber-300" : "text-foreground")
+          (compact ? "text-sm " : "text-kpi-sm ") +
+          (tone === "warning" ? "text-warning" : "text-foreground")
         }
       >
         {value}

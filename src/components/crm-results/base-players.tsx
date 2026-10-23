@@ -14,6 +14,7 @@ import {
 import { getCrmRetention } from "@/lib/crm-results.functions";
 import { PLAYER_STATE_LABELS, RECOVERABLE_STATES } from "@/lib/crm-results";
 import { brl, num } from "@/lib/format";
+import { CHART_COLORS, chartAxisProps, chartGridProps, chartTooltipProps } from "@/lib/chart-theme";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -100,7 +101,7 @@ function States({ data }: { data: Data }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-1.5 text-base">
+        <CardTitle className="flex items-center gap-1.5">
           Para quem vai o dinheiro
           <InfoTip text="Situação do jogador no momento em que recebeu a mensagem. Envios a jogadores ativos são relacionamento, não reativação." />
         </CardTitle>
@@ -140,7 +141,7 @@ function States({ data }: { data: Data }) {
                   <div className="mt-1 h-1 rounded-full bg-muted" aria-hidden="true">
                     <div
                       className={`h-1 rounded-full ${
-                        state.state === "ativo" ? "bg-amber-500/70" : "bg-primary/70"
+                        state.state === "ativo" ? "bg-warning/70" : "bg-primary/70"
                       }`}
                       style={{ width: `${totalCost ? (state.cost / totalCost) * 100 : 0}%` }}
                     />
@@ -179,7 +180,7 @@ function Lifecycle({ retention }: { retention: Retention }) {
     <div className="grid gap-4 lg:grid-cols-[1fr_1.4fr]">
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">
+          <CardTitle>
             Onde a base está agora
             <NotPeriodBadge />
           </CardTitle>
@@ -198,7 +199,7 @@ function Lifecycle({ retention }: { retention: Retention }) {
       {retention.lifecycleDaily.length > 1 ? (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Evolução da base</CardTitle>
+            <CardTitle>Evolução da base</CardTitle>
             <CardDescription>
               Jogadores em cada situação ao fim de cada dia. Ativos que viram “esfriando” são os que
               o CRM precisa trazer de volta.
@@ -212,25 +213,26 @@ function Lifecycle({ retention }: { retention: Retention }) {
                   label: dayLabel(day.date),
                 }))}
               >
-                <CartesianGrid strokeOpacity={0.15} vertical={false} />
-                <XAxis dataKey="label" fontSize={12} tickLine={false} axisLine={false} />
-                <YAxis fontSize={12} tickLine={false} axisLine={false} width={60} />
+                <CartesianGrid {...chartGridProps} />
+                <XAxis dataKey="label" {...chartAxisProps} />
+                <YAxis {...chartAxisProps} width={60} />
                 <Tooltip
+                  {...chartTooltipProps}
                   formatter={(value: number, name: string) => [
                     num(Number(value)),
                     PLAYER_STATE_LABELS[name] ?? name,
                   ]}
                 />
                 <Legend formatter={(name: string) => PLAYER_STATE_LABELS[name] ?? name} />
-                <Line dataKey="ativo" stroke="oklch(0.72 0.18 150)" strokeWidth={2} dot={false} />
+                <Line dataKey="ativo" stroke={CHART_COLORS.success} strokeWidth={2} dot={false} />
                 <Line
                   dataKey="esfriando"
-                  stroke="oklch(0.75 0.15 75)"
+                  stroke={CHART_COLORS.warning}
                   strokeWidth={2}
                   dot={false}
                 />
-                <Line dataKey="dormindo" stroke="oklch(0.65 0.2 30)" strokeWidth={2} dot={false} />
-                <Line dataKey="perdido" stroke="oklch(0.6 0.03 260)" strokeWidth={2} dot={false} />
+                <Line dataKey="dormindo" stroke={CHART_COLORS.danger} strokeWidth={2} dot={false} />
+                <Line dataKey="perdido" stroke={CHART_COLORS.muted} strokeWidth={2} dot={false} />
               </LineChart>
             </ResponsiveContainer>
           </CardContent>
@@ -246,7 +248,9 @@ function Lifecycle({ retention }: { retention: Retention }) {
 const heat = (value: number | null, max: number) =>
   value == null || max <= 0
     ? undefined
-    : { backgroundColor: `oklch(0.72 0.18 150 / ${((value / max) * 0.35).toFixed(3)})` };
+    : {
+        backgroundColor: `color-mix(in oklch, var(--color-success) ${((value / max) * 35).toFixed(1)}%, transparent)`,
+      };
 
 function Cohorts({ retention }: { retention: Retention }) {
   const { cohorts } = retention;
@@ -257,7 +261,7 @@ function Cohorts({ retention }: { retention: Retention }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">
+        <CardTitle>
           Retenção dos novos depositantes
           <NotPeriodBadge />
         </CardTitle>
@@ -341,7 +345,7 @@ function Acquisition({
     <div className="grid gap-4 lg:grid-cols-[1fr_1.4fr]">
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Funil dos cadastros</CardTitle>
+          <CardTitle>Funil dos cadastros</CardTitle>
           <CardDescription>
             Quem se cadastrou {when} e até onde chegou. Mediana do cadastro ao 1º depósito:{" "}
             {hours(total.medianHoursToFtd)}.
@@ -361,7 +365,7 @@ function Acquisition({
       </Card>
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Por origem do cadastro</CardTitle>
+          <CardTitle>Por origem do cadastro</CardTitle>
           <CardDescription>Origem informada no cadastro (utm_source).</CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto p-0">

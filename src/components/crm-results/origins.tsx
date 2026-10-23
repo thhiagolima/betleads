@@ -109,7 +109,7 @@ export function Origins({
     <Card>
       <CardHeader className="space-y-3">
         <div>
-          <CardTitle className="text-base">Origens</CardTitle>
+          <CardTitle>Origens</CardTitle>
           <CardDescription>
             Cada jornada e campanha do período. Clique no título de uma coluna para ordenar; abra
             uma jornada para ver cada mensagem.
@@ -308,13 +308,13 @@ function SourceName({ source }: { source: CrmSource }) {
         <span className="font-medium">{source.name}</span>
       )}
       <div className="mt-0.5 flex flex-wrap gap-1">
-        <Badge variant="outline" className="text-[10px]">
+        <Badge variant="outline" className="text-meta">
           {label}
         </Badge>
         {isWaste(source) && (
           <Badge
             variant="outline"
-            className="border-amber-500/40 bg-amber-500/10 text-[10px] text-amber-600 dark:text-amber-400"
+            className="border-warning/40 bg-warning/10 text-meta text-warning"
           >
             gasta sem converter
           </Badge>
@@ -358,7 +358,7 @@ function MetricCells({
             </div>
             <div className="h-1 rounded-full bg-muted" aria-hidden="true">
               <div
-                className="h-1 rounded-full bg-emerald-500/70"
+                className="h-1 rounded-full bg-success/70"
                 style={{ width: `${Math.max(2, share * 100)}%` }}
               />
             </div>

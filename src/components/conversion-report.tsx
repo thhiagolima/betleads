@@ -229,8 +229,8 @@ function VoiceCampaignReport({
           </section>
 
           {voice.error ? (
-            <section className="rounded-xl border border-rose-500/30 bg-rose-500/5 p-4">
-              <p className="text-xs text-rose-300">Motivo da falha</p>
+            <section className="rounded-xl border border-danger/30 bg-danger/5 p-4">
+              <p className="text-xs text-danger">Motivo da falha</p>
               <p className="mt-1 text-sm font-semibold">{voice.error}</p>
             </section>
           ) : null}
@@ -406,9 +406,9 @@ function CampaignReport({
           {alerts.map((alert) => (
             <div
               key={alert.code}
-              className="flex gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm"
+              className="flex gap-2 rounded-lg border border-warning/30 bg-warning/5 p-3 text-sm"
             >
-              <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-400" />
+              <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
               {alert.message}
             </div>
           ))}
@@ -495,9 +495,9 @@ function CampaignReport({
             />
           </section>
 
-          <section className="rounded-xl border border-emerald-500/10 bg-emerald-500/10 p-4">
-            <p className="text-xs text-emerald-300">Total da campanha, desde o disparo</p>
-            <p className="mt-1 text-2xl font-bold text-emerald-400">{money(directRevenue)}</p>
+          <section className="rounded-xl border border-success/10 bg-success/10 p-4">
+            <p className="text-xs text-success">Total da campanha, desde o disparo</p>
+            <p className="mt-1 text-2xl font-bold text-success">{money(directRevenue)}</p>
             <p className="mt-1 text-xs text-sky-300">
               de {number(depositors)}{" "}
               {depositors === 1 ? "jogador atribuído" : "jogadores atribuídos"} pelo último clique
@@ -703,7 +703,7 @@ function UnresolvedRecipientsCard({
   const reasons = UNRESOLVED_REASONS.filter((reason) => unresolved.byReason[reason] > 0);
   return (
     <section
-      className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4"
+      className="rounded-2xl border border-warning/30 bg-warning/5 p-4"
       aria-labelledby="unresolved-recipients-title"
     >
       <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
@@ -737,7 +737,7 @@ function UnresolvedRecipientsCard({
         {reasons.map((reason) => (
           <div key={reason} className="rounded-xl bg-card/60 p-3">
             <p className="text-sm font-semibold">
-              <span className="mr-2 text-amber-300">{number(unresolved.byReason[reason])}</span>
+              <span className="mr-2 text-warning">{number(unresolved.byReason[reason])}</span>
               {UNRESOLVED_REASON_LABEL[reason]}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">{UNRESOLVED_REASON_HINT[reason]}</p>
@@ -817,10 +817,7 @@ function RecipientTable({ rows }: { rows: Recipient[] }) {
                 )}
               </td>
               <td
-                className={cn(
-                  "p-3 text-right",
-                  row.depositValue > 0 && "font-bold text-emerald-400",
-                )}
+                className={cn("p-3 text-right", row.depositValue > 0 && "font-bold text-success")}
               >
                 {row.depositValue ? (
                   money(row.depositValue)
@@ -880,9 +877,7 @@ function ConversionTable({ rows }: { rows: Recipient[] }) {
                 <td className="p-3 text-sky-300">{dateTime(row.clickedAt)}</td>
                 <td className="p-3 font-semibold">{dateTime(row.depositAt)}</td>
                 <td className="p-3 text-sky-300">{formatElapsed(elapsed)}</td>
-                <td className="p-3 text-right font-bold text-emerald-400">
-                  {money(row.depositValue)}
-                </td>
+                <td className="p-3 text-right font-bold text-success">{money(row.depositValue)}</td>
               </tr>
             );
           })}
@@ -999,7 +994,7 @@ function JourneyReport({
 
           {alerts.map((alert) => (
             <div
-              className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm"
+              className="rounded-lg border border-warning/40 bg-warning/5 p-3 text-sm"
               key={alert.code}
             >
               {alert.message}
@@ -1020,7 +1015,7 @@ function JourneyReport({
             </p>
           ) : null}
           {sent7d > 0 && data.trackedSent === 0 ? (
-            <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm text-amber-100">
+            <div className="rounded-lg border border-warning/40 bg-warning/5 p-3 text-sm text-amber-100">
               Esta jornada enviou mensagens, mas nenhuma continha link rastreável. Por isso clique,
               depósito atribuído e recuperado permanecem em zero; não é falha de sincronização.
             </div>
@@ -1105,7 +1100,7 @@ function JourneyReport({
                   ))}
                   {retiredSteps.length ? (
                     <div className="space-y-2 bg-muted/20 p-4">
-                      <p className="text-xs font-semibold uppercase text-muted-foreground">
+                      <p className="text-label font-semibold text-muted-foreground">
                         Etapas desativadas — histórico
                       </p>
                       <p className="text-xs text-muted-foreground">
@@ -1157,7 +1152,7 @@ function JourneyReport({
           </section>
 
           {failed ? (
-            <p className="text-xs text-amber-300">
+            <p className="text-xs text-warning">
               {number(failed)} execução(ões) falharam ou foram canceladas nas etapas acima.
             </p>
           ) : null}
@@ -1285,7 +1280,7 @@ function JourneyCopyTable({
               <td className="px-3 py-2 text-right">{number(row.clicked)}</td>
               <td className="px-3 py-2 text-right">{rate(row)}</td>
               <td className="px-3 py-2 text-right">{number(row.deposits)}</td>
-              <td className="px-3 py-2 text-right font-semibold text-emerald-400">
+              <td className="px-3 py-2 text-right font-semibold text-success">
                 {money(row.recovered)}
               </td>
             </tr>
@@ -1316,7 +1311,7 @@ function JourneyStepMetric({
           <TooltipTrigger asChild>
             <p
               tabIndex={0}
-              className="cursor-help text-[11px] text-muted-foreground underline decoration-dotted underline-offset-2"
+              className="cursor-help text-meta text-muted-foreground underline decoration-dotted underline-offset-2"
             >
               {label}
             </p>
@@ -1324,9 +1319,9 @@ function JourneyStepMetric({
           <TooltipContent className="max-w-60">{hint}</TooltipContent>
         </Tooltip>
       ) : (
-        <p className="text-[11px] text-muted-foreground">{label}</p>
+        <p className="text-meta text-muted-foreground">{label}</p>
       )}
-      <p className={cn("mt-0.5 font-bold", accent && "text-emerald-400")}>
+      <p className={cn("mt-0.5 font-bold", accent && "text-success")}>
         {currency ? money(value) : number(value)}
       </p>
     </div>
@@ -1345,9 +1340,9 @@ function Metric({
   accent?: boolean;
 }) {
   return (
-    <div className={cn("rounded-xl bg-card/60 p-3", accent && "bg-emerald-500/10")}>
-      <p className={cn("text-xs text-sky-300", accent && "text-emerald-300")}>{label}</p>
-      <p className={cn("mt-1 text-xl font-bold", accent && "text-emerald-400")}>{value}</p>
+    <div className={cn("rounded-xl bg-card/60 p-3", accent && "bg-success/10")}>
+      <p className={cn("text-xs text-sky-300", accent && "text-success")}>{label}</p>
+      <p className={cn("mt-1 text-xl font-bold", accent && "text-success")}>{value}</p>
       {hint ? <p className="text-xs text-sky-300">{hint}</p> : null}
     </div>
   );
@@ -1388,7 +1383,7 @@ function FilterButton({
       className={cn(
         "rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors",
         active ? "border-blue-500 bg-blue-600 text-white" : "bg-card/60 hover:bg-card",
-        tone === "green" && !active && "border-emerald-500/30 text-emerald-400",
+        tone === "green" && !active && "border-success/30 text-success",
         tone === "orange" && !active && "border-orange-500/30 text-orange-400",
       )}
     >

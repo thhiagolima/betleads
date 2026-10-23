@@ -41,6 +41,7 @@ import {
   type JourneyEntryScope,
 } from "@/lib/journey-policy";
 import { Button } from "@/components/ui/button";
+import { Page, PageHeader } from "@/components/ui-premium/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -316,24 +317,23 @@ export function JourneysHub() {
     );
   }, [journeys.data?.journeys]);
   return (
-    <div className="mx-auto w-full max-w-[1480px] space-y-6 p-4 sm:p-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary">Automações</p>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight sm:text-4xl">Jornadas</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Sequências individuais que combinam SMS, e-mail e voz com esperas e regras de saída.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => toast.message("Importacao de modelo em breve.")}>
-            Importar modelo
-          </Button>
-          <Button onClick={() => setNewOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" /> Nova jornada
-          </Button>
-        </div>
-      </div>
+    <Page>
+      <PageHeader
+        subtitle="Sequências individuais que combinam SMS, e-mail e voz com esperas e regras de saída."
+        actions={
+          <>
+            <Button
+              variant="outline"
+              onClick={() => toast.message("Importacao de modelo em breve.")}
+            >
+              Importar modelo
+            </Button>
+            <Button onClick={() => setNewOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" /> Nova jornada
+            </Button>
+          </>
+        }
+      />
       {/* Period selector (Hoje/7/30 dias) hidden: list_journey_metrics has no
           date filter, so totals below are all-time. Restore with REP-02. */}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -445,7 +445,7 @@ export function JourneysHub() {
           >
             Conflitos
             {Number(operations.data?.summary?.pausedByPriority ?? 0) > 0 && (
-              <span className="ml-1.5 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-xs text-amber-700">
+              <span className="ml-1.5 rounded-full bg-warning/15 px-1.5 py-0.5 text-xs text-warning">
                 {operations.data?.summary?.pausedByPriority}
               </span>
             )}
@@ -526,7 +526,7 @@ export function JourneysHub() {
                       {item.exit_reason ? ` · ${item.exit_reason}` : ""}
                     </p>
                     {item.status === "paused_by_priority" && (
-                      <p className="mt-1 text-amber-700 dark:text-amber-400">
+                      <p className="mt-1 text-warning">
                         Pausada por prioridade
                         {item.priority_paused_by_journey_name
                           ? `: ${item.priority_paused_by_journey_name} venceu a disputa.`
@@ -596,7 +596,7 @@ export function JourneysHub() {
                           variant="outline"
                           className={
                             journey.status === "active"
-                              ? "border-emerald-500/20 bg-emerald-500/15 text-emerald-500"
+                              ? "border-success/20 bg-success/15 text-success"
                               : "bg-muted text-muted-foreground"
                           }
                         >
@@ -615,7 +615,7 @@ export function JourneysHub() {
                         {journey.express && (
                           <Badge
                             variant="outline"
-                            className="gap-1 border-amber-500/30 bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                            className="gap-1 border-warning/30 bg-warning/15 text-warning"
                             title={EXPRESS_JOURNEY_HINT}
                           >
                             <Zap className="h-3 w-3" aria-hidden="true" /> Envio imediato
@@ -658,7 +658,7 @@ export function JourneysHub() {
                               <Zap
                                 className={
                                   journey.express
-                                    ? "h-3.5 w-3.5 text-amber-500"
+                                    ? "h-3.5 w-3.5 text-warning"
                                     : "h-3.5 w-3.5 text-muted-foreground"
                                 }
                                 aria-hidden="true"
@@ -830,7 +830,7 @@ export function JourneysHub() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Zap className="h-4 w-4 text-amber-500" aria-hidden="true" /> Ligar envio imediato?
+              <Zap className="h-4 w-4 text-warning" aria-hidden="true" /> Ligar envio imediato?
             </DialogTitle>
             <DialogDescription>
               {expressCandidate ? `Jornada “${expressCandidate.name}”.` : null}
@@ -1192,7 +1192,7 @@ export function JourneysHub() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </Page>
   );
 }
 const labels = { draft: "Rascunho", active: "Ativa", paused: "Pausada", archived: "Arquivada" };
@@ -1315,9 +1315,7 @@ function JourneyMetric({
           </TooltipProvider>
         ) : null}
       </p>
-      <p className={`mt-0.5 font-semibold tabular-nums ${accent ? "text-emerald-500" : ""}`}>
-        {value}
-      </p>
+      <p className={`mt-0.5 font-semibold tabular-nums ${accent ? "text-success" : ""}`}>{value}</p>
     </div>
   );
 }
@@ -1348,7 +1346,7 @@ function OverviewCard({
           <Icon className="h-5 w-5" />
           {label}
         </div>
-        <p className="mt-5 text-4xl font-semibold tracking-tight text-foreground">{value}</p>
+        <p className="mt-5 text-kpi text-foreground">{value}</p>
         <p className="mt-3 text-sm text-muted-foreground">{detail}</p>
       </CardContent>
     </Card>

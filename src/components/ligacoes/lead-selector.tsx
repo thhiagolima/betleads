@@ -2,11 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Check, ChevronsUpDown, User, Sparkles } from "lucide-react";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -63,11 +59,7 @@ export function LeadSelector({ value, onChange }: Props) {
       {!useFake && (
         <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger asChild>
-            <Button
-              variant="outline"
-              role="combobox"
-              className="w-full justify-between"
-            >
+            <Button variant="outline" role="combobox" className="w-full justify-between">
               <span className="flex items-center gap-2 truncate">
                 <User className="h-4 w-4" />
                 {value && !value.fake
@@ -113,8 +105,7 @@ export function LeadSelector({ value, onChange }: Props) {
                     <div className="min-w-0 flex-1">
                       <p className="truncate font-medium text-foreground">{p.nome}</p>
                       <p className="truncate text-xs text-muted-foreground">
-                        {p.telefone ?? "sem telefone"} ·{" "}
-                        {p.vip ? "VIP" : (p.status ?? "ativo")}
+                        {p.telefone ?? "sem telefone"} · {p.vip ? "VIP" : (p.status ?? "ativo")}
                       </p>
                     </div>
                     {selected && <Check className="h-4 w-4 text-primary" />}

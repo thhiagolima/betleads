@@ -7,8 +7,8 @@ import type { Trend } from "@/lib/home-dashboard";
 import { cn } from "@/lib/utils";
 
 const trendToneClass: Record<Trend["tone"], string> = {
-  positive: "text-emerald-400",
-  negative: "text-rose-400",
+  positive: "text-success",
+  negative: "text-danger",
   neutral: "text-muted-foreground",
 };
 

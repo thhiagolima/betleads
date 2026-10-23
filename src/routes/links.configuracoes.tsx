@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { PageHeader } from "@/components/ui-premium";
+import { Page, PageHeader } from "@/components/ui-premium/page-header";
 import { getShortioSettings, saveShortioSettings } from "@/lib/shortio.functions";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
@@ -21,15 +21,15 @@ function LinkSettings() {
   if (q.isError) {
     // The server only answers the house admin; anyone else used to see "Carregando…" forever.
     return (
-      <div className="mx-auto max-w-xl space-y-2 p-6 text-center">
-        <p className="text-base font-medium">Não foi possível abrir as configurações de links</p>
+      <div className="mx-auto max-w-xl space-y-2 py-6 text-center">
+        <p className="text-section">Não foi possível abrir as configurações de links</p>
         <p className="text-sm text-muted-foreground">
           Esta área é do administrador da casa. Se você é admin, tente de novo em instantes.
         </p>
       </div>
     );
   }
-  if (!s) return <div className="p-6 text-sm text-muted-foreground">Carregando…</div>;
+  if (!s) return <div className="py-6 text-sm text-muted-foreground">Carregando…</div>;
   async function save(form: FormData) {
     setSaving(true);
     try {
@@ -52,8 +52,8 @@ function LinkSettings() {
     }
   }
   return (
-    <div className="space-y-6 p-4 md:p-6">
-      <PageHeader title="Short.io" subtitle="Domínio e regras de rastreamento de links." />
+    <Page>
+      <PageHeader subtitle="Domínio e regras de rastreamento de links." />
       <Card>
         <CardHeader>
           <CardTitle>Configuração do tenant</CardTitle>
@@ -105,6 +105,6 @@ function LinkSettings() {
           </form>
         </CardContent>
       </Card>
-    </div>
+    </Page>
   );
 }

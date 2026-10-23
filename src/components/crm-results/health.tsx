@@ -29,7 +29,7 @@ export function HealthIndicator({ data }: { data: Data }) {
       <SheetTrigger asChild>
         <Button size="sm" variant="ghost" className="gap-2 text-muted-foreground">
           <span
-            className={`h-2 w-2 rounded-full ${ok ? "bg-emerald-500" : "bg-amber-500"}`}
+            className={`h-2 w-2 rounded-full ${ok ? "bg-success" : "bg-warning"}`}
             aria-hidden="true"
           />
           {minutes == null
@@ -103,7 +103,7 @@ function HealthLine({ ok, label, value }: { ok: boolean; label: string; value: s
   return (
     <div className="flex items-start gap-3">
       <span
-        className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${ok ? "bg-emerald-500" : "bg-amber-500"}`}
+        className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${ok ? "bg-success" : "bg-warning"}`}
         aria-hidden="true"
       />
       <div>
@@ -146,7 +146,7 @@ function ConsistencyChecks({ checks }: { checks: Data["health"]["checks"] }) {
         />
       ))}
       {failures.length > 0 && (
-        <p className="text-xs text-amber-600 dark:text-amber-400">
+        <p className="text-xs text-warning">
           {num(failures.length)} checagem(ns) com divergência nos últimos 14 dias:{" "}
           {failures
             .slice(0, 5)

@@ -32,7 +32,40 @@
  * 2. Register it in @theme inline as --color-<name>: var(--<name>)
  */
 
+/*
+ * Type scale of the redesign (the one the Início and the shell use). Utilities:
+ * text-title (page h1), text-section (card/section title), text-body, text-label,
+ * text-meta, text-kpi (headline number), text-kpi-sm (secondary number).
+ * Nothing in the app should go below text-meta (12px).
+ */
+@theme {
+  --text-title: 1.625rem;
+  --text-title--line-height: 2rem;
+  --text-title--letter-spacing: -0.02em;
+  --text-title--font-weight: 700;
+  --text-section: 0.9375rem;
+  --text-section--line-height: 1.35rem;
+  --text-section--font-weight: 600;
+  --text-body: 0.84375rem;
+  --text-body--line-height: 1.3rem;
+  --text-label: 0.78125rem;
+  --text-label--line-height: 1.1rem;
+  --text-meta: 0.75rem;
+  --text-meta--line-height: 1rem;
+  --text-kpi: 1.75rem;
+  --text-kpi--line-height: 2.1rem;
+  --text-kpi--letter-spacing: -0.03em;
+  --text-kpi--font-weight: 600;
+  --text-kpi-sm: 1.25rem;
+  --text-kpi-sm--line-height: 1.6rem;
+  --text-kpi-sm--font-weight: 600;
+}
+
 @theme inline {
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -76,6 +109,10 @@
 }
 
 :root {
+  --success: oklch(0.6 0.15 163);
+  --warning: oklch(0.7 0.16 70);
+  --danger: oklch(0.6 0.22 20);
+  --info: oklch(0.55 0.18 250);
   --radius: 0.625rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.129 0.042 264.695);
@@ -112,6 +149,11 @@
 }
 
 .dark {
+  /* Meaning colors: good / attention / bad / neutral information. */
+  --success: oklch(0.77 0.15 163);
+  --warning: oklch(0.83 0.16 84);
+  --danger: oklch(0.71 0.19 13);
+  --info: oklch(0.72 0.19 235);
   /* BETLEADS premium enterprise dark — inspired by Linear, Stripe, OpenAI dashboards */
   --background: oklch(0.09 0.018 258);
   --foreground: oklch(0.97 0.01 240);
@@ -148,11 +190,12 @@
 }
 
 @layer base {
+  /* Legacy names, neutralised: the redesign has no glow. Remove once unused. */
   .glow-blue {
-    box-shadow: 0 0 28px -6px oklch(0.72 0.19 235 / 0.55);
+    box-shadow: none;
   }
   .text-neon {
-    color: oklch(0.78 0.19 235);
+    color: var(--color-primary);
   }
   .bg-app-gradient {
     background:
@@ -160,18 +203,10 @@
       radial-gradient(ellipse 60% 40% at 90% 110%, oklch(0.6 0.22 270 / 0.08), transparent 60%),
       var(--color-background);
   }
+  /* Legacy card class: now the same surface as the redesign card. */
   .card-premium {
-    background: linear-gradient(180deg, oklch(0.14 0.024 260 / 0.85), oklch(0.11 0.02 260 / 0.85));
-    border: 1px solid oklch(1 0 0 / 0.06);
-    backdrop-filter: blur(10px);
-    transition:
-      border-color 200ms ease,
-      box-shadow 200ms ease,
-      transform 200ms ease;
-  }
-  .card-premium:hover {
-    border-color: oklch(0.72 0.19 235 / 0.35);
-    box-shadow: 0 8px 32px -12px oklch(0.72 0.19 235 / 0.25);
+    background: color-mix(in oklab, var(--color-card) 80%, transparent);
+    border: 1px solid var(--color-border);
   }
   .pulse-realtime {
     animation: pulse-realtime 2s ease-in-out infinite;
