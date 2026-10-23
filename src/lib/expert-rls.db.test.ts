@@ -329,6 +329,37 @@ async function addExpert(
   }
 }
 
+// Runs `sql` like asUser, with function-call tracking on, and returns how
+// many times each named public function ran during it (rolled back).
+async function functionCallsAsUser(
+  userId: string,
+  sql: string,
+  functions: string[],
+): Promise<Record<string, number>> {
+  await db.query("BEGIN");
+  try {
+    await db.exec("SET LOCAL track_functions = 'all'");
+    await db.query(`select set_config('request.jwt.claims', $1, true)`, [
+      JSON.stringify({ sub: userId, role: "authenticated" }),
+    ]);
+    await db.query(`select set_config('request.headers', '{}', true)`);
+    await db.exec("SET LOCAL ROLE authenticated");
+    await db.query(sql);
+    await db.exec("RESET ROLE");
+    const calls: Record<string, number> = {};
+    for (const fn of functions) {
+      const { rows } = await db.query<{ calls: string | number | null }>(
+        `select pg_stat_get_xact_function_calls($1::regproc::oid) as calls`,
+        [`public.${fn}`],
+      );
+      calls[fn] = Number(rows[0].calls ?? 0);
+    }
+    return calls;
+  } finally {
+    await db.query("ROLLBACK");
+  }
+}
+
 beforeAll(async () => {
   db = new PGlite();
   await db.exec(SCHEMA);
@@ -583,7 +614,7 @@ describe("expert RLS", () => {
     //     Index Cond: (tenant_id = A)
     //     Filter: ((InitPlan 1) OR (tenant_id = (InitPlan 2)) OR
     //              ((tenant_id = (InitPlan 3)) AND ((InitPlan 4) IS NOT NULL)
-    //               AND expert_can_see_player(tenant_id, affiliate_id)))
+    //               AND ((InitPlan 5) = 'total' OR btrim(affiliate_id) = ANY (InitPlan 6))))
     //     InitPlan 3 / InitPlan 4 (current_expert_tenant_id): never executed
     // Same plan and cost as with no expert policy at all. Note that an
     // unfiltered `select * from players` is a Seq Scan even WITHOUT any expert
@@ -610,5 +641,76 @@ describe("expert RLS", () => {
 
     // Still only house A's three players for the admin.
     expect(await asUser(ADMIN_A, `select id from public.players`)).toHaveLength(3);
+  });
+
+  it("expert policy helpers run once per query (InitPlan), not once per row", async () => {
+    // 3000 extra players in house A; a third carry the restricted expert's
+    // id as ' AFF1 ' (surrounding spaces keep the btrim rule covered at
+    // volume and tag the bulk rows for the cleanup below).
+    await db.exec(`
+      insert into public.players (tenant_id, affiliate_id)
+        select '${TENANT_A}', case when n % 3 = 0 then ' AFF1 ' else 'BULK' || (n % 5) end
+        from generate_series(1, 3000) n;
+      insert into public.deposits (tenant_id, player_id)
+        select tenant_id, id from public.players
+          where affiliate_id like 'BULK%' or affiliate_id = ' AFF1 ';
+      analyze public.players;
+      analyze public.deposits;
+    `);
+    try {
+      for (const [user, expected] of [
+        [RESTRITO_A, 1001],
+        [TOTAL_A, 3003],
+      ] as const) {
+        const plan = await asUser<{ "QUERY PLAN": string }>(
+          user,
+          `explain (analyze, costs off, timing off, summary off) select id from public.players`,
+        );
+        const text = plan.map((r) => r["QUERY PLAN"]).join("\n");
+        // The tipo and affiliate-id helpers are InitPlans, never a per-row SubPlan.
+        expect(text).toContain("InitPlan");
+        expect(text).not.toContain("SubPlan");
+        // Every node, the InitPlans included, ran exactly once.
+        const loops = [...text.matchAll(/loops=(\d+)/g)].map((m) => Number(m[1]));
+        expect(loops.length).toBeGreaterThan(0);
+        expect(new Set(loops)).toEqual(new Set([1]));
+        expect(await asUser(user, `select id from public.players`)).toHaveLength(expected);
+      }
+
+      // Counted directly: over ~3000 rows each helper runs a handful of
+      // times (its InitPlans), never once per row.
+      const HELPERS = [
+        "current_expert_tenant_id",
+        "current_expert_tipo",
+        "current_expert_affiliate_ids",
+      ];
+      for (const sql of [`select id from public.players`, `select id from public.deposits`]) {
+        const calls = await functionCallsAsUser(RESTRITO_A, sql, HELPERS);
+        expect(calls.current_expert_tipo).toBeGreaterThanOrEqual(1);
+        expect(calls.current_expert_affiliate_ids).toBeGreaterThanOrEqual(1);
+        for (const fn of HELPERS) expect(calls[fn]).toBeLessThan(20);
+      }
+
+      // deposits pay the players rule again through the EXISTS: it becomes a
+      // single hashed SubPlan (the players scan runs once), whose own expert
+      // helpers are InitPlans — nothing re-runs per deposit row.
+      const depositsPlan = await asUser<{ "QUERY PLAN": string }>(
+        RESTRITO_A,
+        `explain (analyze, costs off, timing off, summary off) select id from public.deposits`,
+      );
+      const depositsText = depositsPlan.map((r) => r["QUERY PLAN"]).join("\n");
+      expect(depositsText).toContain("InitPlan");
+      const subPlanRefs = [...depositsText.matchAll(/(hashed )?SubPlan \d+\)/g)];
+      expect(subPlanRefs.every((m) => m[1] === "hashed ")).toBe(true);
+      const depositLoops = [...depositsText.matchAll(/loops=(\d+)/g)].map((m) => Number(m[1]));
+      expect(new Set(depositLoops)).toEqual(new Set([1]));
+      expect(await asUser(RESTRITO_A, `select id from public.deposits`)).toHaveLength(1001);
+    } finally {
+      await db.exec(`
+        delete from public.deposits d using public.players p
+          where p.id = d.player_id and (p.affiliate_id like 'BULK%' or p.affiliate_id = ' AFF1 ');
+        delete from public.players where affiliate_id like 'BULK%' or affiliate_id = ' AFF1 ';
+      `);
+    }
   });
 });

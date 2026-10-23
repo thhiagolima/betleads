@@ -25,7 +25,12 @@
 --     coalesce(...) wrapper would hide it from the planner);
 --   * for a non-expert (current_expert_tenant_id() IS NULL) the comparison is
 --     NULL, which does not stop an AND; the IS NOT NULL arm is false and
---     does, so the per-row helper / EXISTS never runs for non-experts.
+--     does, so the EXISTS never runs for non-experts;
+--   * the tipo / affiliate-id rule is also two scalar subqueries
+--     (current_expert_tipo(), current_expert_affiliate_ids()): each is an
+--     InitPlan, evaluated once per query, never per row. A SECURITY DEFINER
+--     function taking row columns would never be inlined and would run once
+--     per player (and again per deposit/withdrawal through the EXISTS).
 
 begin;
 
@@ -102,36 +107,49 @@ $$;
 revoke all on function public.current_expert_tenant_id() from public, anon;
 grant execute on function public.current_expert_tenant_id() to authenticated, service_role;
 
--- Whether the caller, as an active expert of _tenant, may see a player with
--- this affiliate id: always for tipo 'total', else only for its own ids
--- (compared after btrim, case-sensitive).
-create or replace function public.expert_can_see_player(_tenant uuid, _affiliate_id text)
-returns boolean
+-- The tipo of the caller's active expert row in current_expert_tenant_id(),
+-- or NULL when the caller is not an active expert there.
+create or replace function public.current_expert_tipo()
+returns text
 language sql
 stable
 security definer
 set search_path = public, pg_temp
 as $$
-  select exists (
-    select 1
-    from public.experts e
-    where e.user_id = auth.uid()
-      and e.tenant_id = _tenant
-      and e.ativo
-      and (
-        e.tipo = 'total'
-        or exists (
-          select 1 from public.expert_affiliates ea
-          where ea.expert_id = e.id
-            and ea.tenant_id = _tenant
-            and ea.affiliate_id = btrim(_affiliate_id)
-        )
-      )
-  )
+  select e.tipo
+  from public.experts e
+  where e.user_id = auth.uid()
+    and e.tenant_id = public.current_expert_tenant_id()
+    and e.ativo
+  order by e.id
+  limit 1
 $$;
 
-revoke all on function public.expert_can_see_player(uuid, text) from public, anon;
-grant execute on function public.expert_can_see_player(uuid, text) to authenticated, service_role;
+revoke all on function public.current_expert_tipo() from public, anon;
+grant execute on function public.current_expert_tipo() to authenticated, service_role;
+
+-- The affiliate ids of the caller's active expert row in
+-- current_expert_tenant_id() (empty when none). expert_affiliates stores
+-- them already btrim-ed (save_expert), compared case-sensitively.
+create or replace function public.current_expert_affiliate_ids()
+returns text[]
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select coalesce(array_agg(ea.affiliate_id order by ea.affiliate_id), '{}'::text[])
+  from public.experts e
+  join public.expert_affiliates ea
+    on ea.expert_id = e.id
+   and ea.tenant_id = e.tenant_id
+  where e.user_id = auth.uid()
+    and e.tenant_id = public.current_expert_tenant_id()
+    and e.ativo
+$$;
+
+revoke all on function public.current_expert_affiliate_ids() from public, anon;
+grant execute on function public.current_expert_affiliate_ids() to authenticated, service_role;
 
 -- 2. policies ----------------------------------------------------------------
 
@@ -141,7 +159,12 @@ create policy players_expert_select on public.players
   using (
     tenant_id = (select public.current_expert_tenant_id())
     and (select public.current_expert_tenant_id()) is not null
-    and public.expert_can_see_player(tenant_id, affiliate_id)
+    and (
+      (select public.current_expert_tipo()) = 'total'
+      -- The ::text[] makes this the array form of ANY over an InitPlan;
+      -- without it, "any ((select ...))" parses as ANY (subquery).
+      or btrim(affiliate_id) = any ((select public.current_expert_affiliate_ids())::text[])
+    )
   );
 
 -- The EXISTS below runs under players RLS, so it only matches players the
