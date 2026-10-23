@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Page, PageHeader } from "@/components/ui-premium/page-header";
+import { expertAccessErrorMessage } from "@/lib/expert-access-message";
 import { getExpertHome } from "@/lib/expert-leads.functions";
 
 export const Route = createFileRoute("/expert/")({
@@ -20,25 +21,6 @@ const TIPO_LABEL: Record<"restrito" | "total", string> = {
   restrito: "Restrito",
   total: "Acesso total",
 };
-
-/**
- * `getExpertHome`/`listExpertLeads` throw `ExpertAccessError` (server-only,
- * so not imported here) for two cases: no active expert access (message
- * "Acesso de expert não encontrado ou desativado.") or a suspended house
- * ("Esta casa está indisponível no momento."). The second is shown as-is;
- * the first, and any other unexpected error, collapses to the generic
- * "exclusiva para experts" message so we never leak internal details to a
- * non-expert who lands on this route.
- */
-const HOUSE_UNAVAILABLE_MESSAGE = "Esta casa está indisponível no momento.";
-const GENERIC_ACCESS_MESSAGE = "Esta área é exclusiva para experts.";
-
-function expertAccessErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message === HOUSE_UNAVAILABLE_MESSAGE) {
-    return HOUSE_UNAVAILABLE_MESSAGE;
-  }
-  return GENERIC_ACCESS_MESSAGE;
-}
 
 function ExpertHomePage() {
   const getExpertHomeFn = useServerFn(getExpertHome);

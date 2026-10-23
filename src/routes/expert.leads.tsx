@@ -19,27 +19,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Page, PageHeader } from "@/components/ui-premium/page-header";
+import { expertAccessErrorMessage } from "@/lib/expert-access-message";
 import { brl } from "@/lib/format";
 import { getExpertHome, listExpertLeads } from "@/lib/expert-leads.functions";
 
 export const Route = createFileRoute("/expert/leads")({
   component: ExpertLeadsPage,
 });
-
-// See the matching comment in expert.index.tsx: `getExpertHome`/
-// `listExpertLeads` throw `ExpertAccessError` (server-only, not imported
-// here) for "no active expert access" or "house unavailable" — the second
-// is shown as-is, everything else collapses to the generic message below
-// so this route never leaks internal error details to a non-expert.
-const HOUSE_UNAVAILABLE_MESSAGE = "Esta casa está indisponível no momento.";
-const GENERIC_ACCESS_MESSAGE = "Esta área é exclusiva para experts.";
-
-function expertAccessErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message === HOUSE_UNAVAILABLE_MESSAGE) {
-    return HOUSE_UNAVAILABLE_MESSAGE;
-  }
-  return GENERIC_ACCESS_MESSAGE;
-}
 
 function riscoBadge(risco: string) {
   if (!risco) return <span className="text-muted-foreground">—</span>;
@@ -142,7 +128,7 @@ function ExpertLeadsPage() {
                   <TableCell>{riscoBadge(row.risco)}</TableCell>
                 </TableRow>
               ))}
-              {!leadsQuery.isLoading && rows.length === 0 && (
+              {homeQuery.isSuccess && !leadsQuery.isLoading && rows.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
                     {emptyMessage}
