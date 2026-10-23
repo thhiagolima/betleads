@@ -87,6 +87,11 @@ import {
 } from "@/components/house-config/composer-notices";
 import { LinkInsertMenu } from "@/components/house-config/link-insert-menu";
 import { UNRESOLVED_REASONS, type UnresolvedReason } from "@/lib/campaign-recipients";
+import {
+  alreadySentSuffix,
+  campaignPausedForBalanceMessage,
+  type EmailCampaignRunResult,
+} from "@/lib/email-campaign-messages";
 import { requestConfirmation, requestTextInput } from "@/components/system-dialog-host";
 import {
   campaignRiskSignature,
@@ -677,16 +682,13 @@ export function ChannelCampaignComposer({
       const unresolvedCount = Number(
         (result as { unresolvedCount?: number } | null | undefined)?.unresolvedCount ?? 0,
       );
-      const emailRun = result as
-        | { pausadaPorSaldo?: boolean; enviados?: number; total?: number }
-        | null
-        | undefined;
+      const emailRun =
+        channel === "email" && when !== "schedule"
+          ? (result as EmailCampaignRunResult | null | undefined)
+          : null;
       if (emailRun?.pausadaPorSaldo) {
         // PG3: the e-mail run stopped at the first send the wallet refused.
-        toast.warning(
-          `Campanha pausada por saldo insuficiente: ${num(Number(emailRun.enviados ?? 0))} de ${num(Number(emailRun.total ?? 0))} e-mails enviados.`,
-          { description: "Recarregue a carteira da casa e envie a campanha novamente." },
-        );
+        toast.warning(campaignPausedForBalanceMessage(emailRun));
         onCreated();
         onOpenChange(false);
         return;
@@ -694,7 +696,7 @@ export function ChannelCampaignComposer({
       toast.success(
         when === "schedule"
           ? "Campanha agendada com revisão registrada"
-          : "Campanha enviada para processamento",
+          : `Campanha enviada para processamento${emailRun ? alreadySentSuffix(emailRun) : ""}`,
         unresolvedCount > 0
           ? {
               description: `${num(unresolvedCount)} destinatário(s) não receberão. Veja “Não enviados” no relatório da campanha.`,

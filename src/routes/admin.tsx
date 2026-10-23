@@ -1222,7 +1222,7 @@ function PricingRow({ row, onSaved }: { row: PriceBookRow; onSaved: () => void }
   );
   // Só inteiros >= 0 (blocos de 30 s). Validado aqui para a mensagem sair em
   // pt-BR em vez do texto em inglês do zod no servidor.
-  const unansweredInvalid = isVoice && !/^d+$/.test(unansweredBlocks.trim());
+  const unansweredInvalid = isVoice && !/^[0-9]+$/.test(unansweredBlocks.trim());
   const fn = useServerFn(setPricing);
   const mut = useMutation({
     mutationFn: () => {

@@ -1,0 +1,25 @@
+// PG3: user-facing texts for an e-mail campaign run (runCampaignSend /
+// sendEmailCampaignNow). Shared by the composer and the campaigns hub.
+
+export type EmailCampaignRunResult = {
+  enviados?: number;
+  falhas?: number;
+  pendentes?: number;
+  total?: number;
+  jaEnviados?: number;
+  pausadaPorSaldo?: boolean;
+};
+
+/** Confirmation shown before a (re)send: a re-run never sends twice. */
+export const EMAIL_CAMPAIGN_RESEND_NOTE = "Quem já recebeu esta campanha não recebe de novo.";
+
+/** The run stopped at the first e-mail the house's wallet refused. */
+export function campaignPausedForBalanceMessage(r: EmailCampaignRunResult) {
+  const sent = Number(r.jaEnviados ?? 0) + Number(r.enviados ?? 0);
+  return `Campanha pausada por saldo insuficiente: ${sent} de ${Number(r.total ?? 0)} e-mails enviados. Recarregue a carteira e envie novamente.`;
+}
+
+/** Recipients a re-run skipped because this campaign already reached them. */
+export function alreadySentSuffix(r: EmailCampaignRunResult) {
+  return r.jaEnviados ? ` ${r.jaEnviados} já tinham recebido e não receberam de novo.` : "";
+}
