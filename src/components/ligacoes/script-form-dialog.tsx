@@ -97,7 +97,7 @@ export function ScriptFormDialog({
       onSaved?.({ id: result.id, name: form.name, content: form.content, status: form.status });
       onOpenChange(false);
     },
-    onError: (e: any) => toast.error(e?.message ?? "Erro ao salvar script"),
+    onError: (e: any) => toast.error(e?.message ?? "Erro ao salvar roteiro"),
   });
 
   function insertToken(token: string) {
@@ -144,7 +144,7 @@ export function ScriptFormDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{initial ? "Editar template" : "Novo template"}</DialogTitle>
+          <DialogTitle>{initial ? "Editar roteiro" : "Novo roteiro"}</DialogTitle>
           <DialogDescription>
             Use variáveis entre chaves para personalizar a fala por lead.
           </DialogDescription>
@@ -211,7 +211,7 @@ export function ScriptFormDialog({
           </div>
 
           <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">
-            <p className="mb-1 text-xs font-medium text-primary">Preview com lead de teste</p>
+            <p className="mb-1 text-xs font-medium text-primary">Prévia com jogador de teste</p>
             <p className="text-sm leading-relaxed text-foreground">{preview}</p>
           </div>
 

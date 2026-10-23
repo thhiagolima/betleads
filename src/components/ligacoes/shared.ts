@@ -97,7 +97,7 @@ export const SCRIPT_VARIABLES: { key: string; label: string }[] = [
   { key: "dias_sem_depositar", label: "Dias sem depositar" },
   { key: "total_depositado", label: "Total depositado" },
   { key: "categoria", label: "Categoria (VIP/Regular)" },
-  { key: "status_lead", label: "Status do lead" },
+  { key: "status_lead", label: "Status do jogador" },
   { key: "nome_expert", label: "Nome do expert" },
   { key: "link_deposito", label: "Link de depósito" },
   { key: "cashback_valor", label: "Cashback (R$)" },
@@ -148,11 +148,11 @@ export const HISTORY_STATUS_LABEL: Record<string, string> = {
 
 // Gatilhos oficiais BETLEADS (chave salva no banco -> label exibido)
 export const TRIGGER_OPTIONS: { value: string; label: string }[] = [
-  { value: "lead_cadastrado", label: "Lead cadastrado" },
+  { value: "lead_cadastrado", label: "Jogador cadastrado" },
   { value: "dinheiro_parado", label: "Dinheiro parado" },
   { value: "recuperacao_vip", label: "Recuperação VIP" },
   { value: "frequencia_de_queda", label: "Frequência de queda" },
-  { value: "lead_quente_esfriando", label: "Lead quente esfriando" },
+  { value: "lead_quente_esfriando", label: "Jogador quente esfriando" },
   { value: "receita_em_queda", label: "Receita em queda" },
   { value: "vip_esfriando", label: "VIP esfriando" },
   { value: "quase_vip", label: "Quase VIP" },

@@ -4,10 +4,7 @@ export function SmsHistoryPanel() {
   return (
     <HistoryShell
       channel="sms"
-      options={{
-        title: "Histórico de SMS",
-        subtitle: "Todos os disparos, respostas e falhas do canal.",
-      }}
+      options={{ subtitle: "Todos os envios, respostas e falhas do canal." }}
     />
   );
 }

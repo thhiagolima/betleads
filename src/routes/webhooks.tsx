@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useLocation, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Button } from "@/components/ui/button";
@@ -13,13 +13,27 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { AlertCircle, Check, Copy, FileJson, Link2, ShieldAlert, Terminal } from "lucide-react";
+import {
+  AlertCircle,
+  Check,
+  ChevronDown,
+  Copy,
+  FileJson,
+  Link2,
+  ShieldAlert,
+  Terminal,
+} from "lucide-react";
 import { useState } from "react";
 import { timeAgo } from "@/lib/format";
 import { WEBHOOK_EVENTS } from "@/lib/webhook-events";
 import { Page, PageHeader } from "@/components/ui-premium/page-header";
 import { DataCard } from "@/components/ui-premium/data-card";
 import { EmptyState } from "@/components/ui-premium/empty-state";
+import { PageTabs } from "@/components/ui-premium/page-tabs";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { LinksOverview } from "@/components/integrations/links-overview";
+import { LinksSettings } from "@/components/integrations/links-settings";
+import { MetaConnectionPanel } from "@/components/integrations/meta-connection";
 import {
   getMyWebhookAccess,
   getMyWebhookHealth,
@@ -35,8 +49,48 @@ import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import { DEMO_EMPTY_STATE_TEXT } from "@/lib/demo-tenant";
 
 export const Route = createFileRoute("/webhooks")({
-  component: WebhooksPage,
+  component: IntegrationsPage,
 });
+
+const TABS = [
+  { value: "plataforma", label: "Plataforma de apostas" },
+  { value: "links", label: "Links curtos" },
+  { value: "meta", label: "Meta Ads" },
+] as const;
+type IntegrationTab = (typeof TABS)[number]["value"];
+
+function integrationTabFromHash(hash: string): IntegrationTab {
+  return TABS.some((tab) => tab.value === hash) ? (hash as IntegrationTab) : "plataforma";
+}
+
+function IntegrationsPage() {
+  const hash = useLocation({ select: (l) => l.hash });
+  const navigate = useNavigate();
+  const tab = integrationTabFromHash(hash);
+
+  return (
+    <Page>
+      <PageHeader subtitle="Conecte a plataforma de apostas, os links curtos e a Meta." />
+      <PageTabs
+        label="Integrações"
+        value={tab}
+        // Sem replace: cada aba vira uma entrada no histórico (o voltar do navegador funciona).
+        onValueChange={(value) => void navigate({ to: "/webhooks", hash: value })}
+        items={TABS}
+      />
+      <div role="tabpanel" aria-labelledby={`tab-${tab}`} className="space-y-4 sm:space-y-5">
+        {tab === "plataforma" && <PlatformSection />}
+        {tab === "links" && (
+          <>
+            <LinksOverview />
+            <LinksSettings />
+          </>
+        )}
+        {tab === "meta" && <MetaConnectionPanel />}
+      </div>
+    </Page>
+  );
+}
 
 function publicOrigin(): string {
   if (typeof window !== "undefined") {
@@ -72,7 +126,7 @@ type WebhookHealth = {
   latest: Pick<WebhookLog, "created_at" | "evento" | "status"> | null;
 };
 
-function WebhooksPage() {
+function PlatformSection() {
   const isDemo = useIsDemoTenant();
   const fetchAccess = useServerFn(getMyWebhookAccess);
   const fetchToken = useServerFn(getMyWebhookToken);
@@ -90,6 +144,9 @@ function WebhooksPage() {
     queryFn: () => fetchToken(),
     enabled: Boolean(access?.canManage),
   });
+  // Disabled queries report isLoading=false, so "loading" alone would let a click through
+  // before we know whether a key exists (and rotate it without the confirmation).
+  const hmacUnknown = tokenLoading || !tokenInfo;
   const token = tokenInfo?.token ?? null;
   const legacy = Boolean(tokenInfo?.legacy);
   const origin = publicOrigin();
@@ -175,14 +232,11 @@ function WebhooksPage() {
 
   if (!accessLoading && access && !access.canManage) {
     return (
-      <Page>
-        <PageHeader subtitle="Conecte sua plataforma de apostas e acompanhe a entrada dos dados." />
-        <EmptyState
-          icon={<ShieldAlert className="h-5 w-5" />}
-          title="Acesso administrativo necessário"
-          description="URLs, assinaturas e payloads de webhook são restritos aos administradores da conta."
-        />
-      </Page>
+      <EmptyState
+        icon={<ShieldAlert className="h-5 w-5" />}
+        title="Acesso administrativo necessário"
+        description="Os endereços e as chaves que a plataforma de apostas usa para enviar dados são vistos só pelos administradores da casa."
+      />
     );
   }
 
@@ -194,93 +248,7 @@ function WebhooksPage() {
   const categorias = Array.from(new Set(WEBHOOK_EVENTS.map((e) => e.categoria)));
 
   return (
-    <Page>
-      <PageHeader subtitle="Conecte sua plataforma de apostas e acompanhe a entrada dos dados." />
-
-      {
-        <div className="rounded-lg border border-warning/30 bg-warning/10 p-3 flex items-start gap-3">
-          <ShieldAlert className="h-4 w-4 text-warning mt-0.5 shrink-0" />
-          <div className="text-label text-foreground/85 leading-relaxed">
-            <p className="font-semibold text-warning">URLs exclusivas da sua conta</p>
-            <p>
-              Cada usuário tem seu próprio conjunto de URLs com um token único. Não compartilhe —
-              qualquer pessoa com o link consegue gravar dados na sua conta.
-            </p>
-          </div>
-        </div>
-      }
-
-      <DataCard
-        title="Assinatura HMAC"
-        description="Ative somente depois de configurar a mesma chave na plataforma da casa."
-        icon={<ShieldAlert className="h-4 w-4" />}
-      >
-        <div className="flex flex-wrap items-center gap-3 text-sm">
-          <Badge
-            variant="outline"
-            className={
-              tokenInfo?.hmacEnforced
-                ? "border-success/40 text-success"
-                : "border-warning/40 text-warning"
-            }
-          >
-            {tokenInfo?.hmacEnforced ? "assinatura obrigatória" : "assinatura ainda opcional"}
-          </Badge>
-          <span className="text-muted-foreground">
-            {tokenInfo?.hmacConfigured ? "Chave provisionada." : "Nenhuma chave provisionada."}
-          </span>
-          <DemoDisabledTooltip active={isDemo}>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={isDemo || provision.isPending}
-              onClick={() => void confirmRotate()}
-            >
-              {provision.isPending
-                ? "Gerando..."
-                : tokenInfo?.hmacConfigured
-                  ? "Rotacionar chave"
-                  : "Gerar chave"}
-            </Button>
-          </DemoDisabledTooltip>
-          {tokenInfo?.hmacEnforced ? (
-            <DemoDisabledTooltip active={isDemo}>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={isDemo || enforceHmac.isPending}
-                onClick={() => enforceHmac.mutate(false)}
-              >
-                Permitir transição
-              </Button>
-            </DemoDisabledTooltip>
-          ) : (
-            <DemoDisabledTooltip active={isDemo}>
-              <Button
-                size="sm"
-                disabled={isDemo || !tokenInfo?.hmacConfigured || enforceHmac.isPending}
-                onClick={() => void confirmEnforce()}
-              >
-                Exigir assinatura
-              </Button>
-            </DemoDisabledTooltip>
-          )}
-        </div>
-        {provisionedSecret ? (
-          <div className="mt-3 flex gap-2">
-            <Input
-              value={provisionedSecret}
-              readOnly
-              className="font-mono text-xs"
-              aria-label="Chave HMAC gerada"
-            />
-            <Button size="sm" variant="outline" onClick={() => copy(provisionedSecret)}>
-              <Copy className="mr-1 h-3.5 w-3.5" /> Copiar
-            </Button>
-          </div>
-        ) : null}
-      </DataCard>
-
+    <>
       <section
         className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5"
         aria-label="Saúde dos webhooks nas últimas 24 horas"
@@ -340,12 +308,23 @@ function WebhooksPage() {
             description={`${WEBHOOK_EVENTS.length} endpoints disponíveis · 1 por evento`}
             icon={<Link2 className="h-4 w-4" />}
           >
-            {!tokenLoading && !legacy && !token && (
-              <div className="mb-4 rounded-lg border border-danger/30 bg-danger/10 p-3 text-label text-danger">
-                Não foi possível carregar o token da sua conta. Recarregue a página ou contate o
-                suporte.
-              </div>
-            )}
+            <div className="mb-4 flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 p-3 text-label text-foreground/85">
+              <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
+              <p>Estas URLs são da sua casa. Quem tiver o link consegue enviar dados para ela.</p>
+            </div>
+            {!tokenLoading &&
+              !legacy &&
+              !token &&
+              (isDemo ? (
+                <div className="mb-4 rounded-lg border border-border/60 bg-muted/40 p-3 text-label text-muted-foreground">
+                  {DEMO_EMPTY_STATE_TEXT}
+                </div>
+              ) : (
+                <div className="mb-4 rounded-lg border border-danger/30 bg-danger/10 p-3 text-label text-danger">
+                  Não foi possível carregar o token da sua conta. Recarregue a página ou contate o
+                  suporte.
+                </div>
+              ))}
             <div className="space-y-6">
               {categorias.map((cat) => (
                 <div key={cat}>
@@ -422,7 +401,7 @@ function WebhooksPage() {
         </div>
 
         <DataCard
-          title="Console de logs"
+          title="Registro de eventos"
           description="Atualiza a cada 10s · últimos 50"
           icon={<Terminal className="h-4 w-4" />}
           bodyClassName="p-3"
@@ -482,6 +461,90 @@ function WebhooksPage() {
           </div>
         </DataCard>
       </div>
+
+      <Collapsible className="rounded-2xl border border-border bg-card/80">
+        <CollapsibleTrigger className="group flex w-full items-start justify-between gap-4 rounded-2xl px-4 py-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-5">
+          <div className="min-w-0">
+            <h2 className="text-section">Segurança avançada (HMAC)</h2>
+            <p className="mt-0.5 text-label text-muted-foreground">
+              Assinatura dos envios. Ative somente depois de configurar a mesma chave na plataforma
+              da casa.
+            </p>
+          </div>
+          <ChevronDown
+            className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180"
+            aria-hidden="true"
+          />
+        </CollapsibleTrigger>
+        <CollapsibleContent className="px-4 pb-4 sm:px-5 sm:pb-5">
+          <div className="flex flex-wrap items-center gap-3 text-sm">
+            <Badge
+              variant="outline"
+              className={
+                tokenInfo?.hmacEnforced
+                  ? "border-success/40 text-success"
+                  : "border-warning/40 text-warning"
+              }
+            >
+              {tokenInfo?.hmacEnforced ? "assinatura obrigatória" : "assinatura ainda opcional"}
+            </Badge>
+            <span className="text-muted-foreground">
+              {tokenInfo?.hmacConfigured ? "Chave provisionada." : "Nenhuma chave provisionada."}
+            </span>
+            <DemoDisabledTooltip active={isDemo}>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={isDemo || hmacUnknown || provision.isPending}
+                onClick={() => void confirmRotate()}
+              >
+                {provision.isPending
+                  ? "Gerando..."
+                  : tokenInfo?.hmacConfigured
+                    ? "Rotacionar chave"
+                    : "Gerar chave"}
+              </Button>
+            </DemoDisabledTooltip>
+            {tokenInfo?.hmacEnforced ? (
+              <DemoDisabledTooltip active={isDemo}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={isDemo || hmacUnknown || enforceHmac.isPending}
+                  onClick={() => enforceHmac.mutate(false)}
+                >
+                  Permitir transição
+                </Button>
+              </DemoDisabledTooltip>
+            ) : (
+              <DemoDisabledTooltip active={isDemo}>
+                <Button
+                  size="sm"
+                  disabled={
+                    isDemo || hmacUnknown || !tokenInfo?.hmacConfigured || enforceHmac.isPending
+                  }
+                  onClick={() => void confirmEnforce()}
+                >
+                  Exigir assinatura
+                </Button>
+              </DemoDisabledTooltip>
+            )}
+          </div>
+          {provisionedSecret ? (
+            <div className="mt-3 flex gap-2">
+              <Input
+                value={provisionedSecret}
+                readOnly
+                className="font-mono text-xs"
+                aria-label="Chave HMAC gerada"
+              />
+              <Button size="sm" variant="outline" onClick={() => copy(provisionedSecret)}>
+                <Copy className="mr-1 h-3.5 w-3.5" /> Copiar
+              </Button>
+            </div>
+          ) : null}
+        </CollapsibleContent>
+      </Collapsible>
 
       <Dialog open={!!selectedLog} onOpenChange={(open) => !open && setSelectedLog(null)}>
         <DialogContent className="max-h-[88vh] max-w-4xl overflow-hidden p-0">
@@ -548,7 +611,7 @@ function WebhooksPage() {
           )}
         </DialogContent>
       </Dialog>
-    </Page>
+    </>
   );
 }
 

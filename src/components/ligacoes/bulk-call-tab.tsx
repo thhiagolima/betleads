@@ -199,7 +199,7 @@ export function BulkCallTab() {
     const count = allTargets.length;
     const source =
       audioMode === "tts"
-        ? `script "${scripts.find((s: { id: string }) => s.id === scriptId)?.name ?? "selecionado"}"`
+        ? `roteiro "${scripts.find((s: { id: string }) => s.id === scriptId)?.name ?? "selecionado"}"`
         : `áudio "${assets.find((asset: { id: string }) => asset.id === assetId)?.name ?? "selecionado"}"`;
     const plural = count === 1 ? "ligação" : "ligações";
     const confirmed = await requestConfirmation({
@@ -221,8 +221,8 @@ export function BulkCallTab() {
               Envio em massa de ligações
             </CardTitle>
             <CardDescription>
-              Escolha um script e selecione vários leads — geramos o áudio (com cache) e preparamos
-              o disparo para cada um.
+              Escolha um roteiro e selecione vários jogadores: geramos o áudio de cada um e
+              preparamos as ligações.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
@@ -237,22 +237,22 @@ export function BulkCallTab() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="tts">Script dinâmico (TTS)</SelectItem>
+                    <SelectItem value="tts">Roteiro com voz gerada</SelectItem>
                     <SelectItem value="fixed">Áudio fixo da biblioteca</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <Label>{audioMode === "tts" ? "Script" : "Áudio reutilizável"}</Label>
+                <Label>{audioMode === "tts" ? "Roteiro" : "Áudio reutilizável"}</Label>
                 {audioMode === "tts" ? (
                   <Select value={scriptId} onValueChange={setScriptId}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Selecione um script..." />
+                      <SelectValue placeholder="Selecione um roteiro..." />
                     </SelectTrigger>
                     <SelectContent>
                       {scripts.length === 0 && (
                         <div className="px-3 py-2 text-xs text-muted-foreground">
-                          Nenhum script — crie um na aba Scripts.
+                          Nenhum roteiro: crie um na aba Áudios e roteiros.
                         </div>
                       )}
                       {scripts.map((s: any) => (
@@ -297,7 +297,7 @@ export function BulkCallTab() {
 
             <div className="space-y-2">
               <Label className="flex items-center gap-2">
-                <Search className="h-4 w-4" /> Buscar leads
+                <Search className="h-4 w-4" /> Buscar jogadores
               </Label>
               <Input
                 placeholder="Nome ou telefone..."
@@ -310,7 +310,7 @@ export function BulkCallTab() {
                 )}
                 {!isFetching && players.length === 0 && (
                   <p className="px-3 py-4 text-center text-xs text-muted-foreground">
-                    Nenhum lead encontrado
+                    Nenhum jogador encontrado
                   </p>
                 )}
                 {players.map((p: any) => {
@@ -351,8 +351,8 @@ export function BulkCallTab() {
                 onChange={(e) => setRawPhones(e.target.value)}
               />
               <p className="text-xs text-muted-foreground">
-                {phoneTargets.length} número(s) avulso(s) detectado(s). Sem lead_id — variáveis do
-                script viram placeholder.
+                {phoneTargets.length} número(s) avulso(s) detectado(s). Sem jogador vinculado, as
+                variáveis do roteiro ficam com o texto padrão.
               </p>
             </div>
           </CardContent>
@@ -376,7 +376,7 @@ export function BulkCallTab() {
                     <div className="min-w-0 flex-1">
                       <p className="truncate font-medium">{t.nome}</p>
                       <p className="truncate text-xs text-muted-foreground">
-                        {t.phone ?? "sem telefone"} {t.lead_id ? "· lead" : "· avulso"}
+                        {t.phone ?? "sem telefone"} {t.lead_id ? "· jogador" : "· avulso"}
                       </p>
                     </div>
                     {t.lead_id && (
@@ -404,7 +404,7 @@ export function BulkCallTab() {
             <CardTitle>Resumo do disparo</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
-            <Row label="Script" value={scripts.find((s: any) => s.id === scriptId)?.name ?? "—"} />
+            <Row label="Roteiro" value={scripts.find((s: any) => s.id === scriptId)?.name ?? "—"} />
             <Row label="Destinatários" value={String(allTargets.length)} />
             <Row label="Canal" value="Voz" />
             <Separator />

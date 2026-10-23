@@ -20,6 +20,12 @@ const WEEKDAYS = [
   { v: 0, l: "Dom" },
 ];
 
+/** "horário de Brasília" for the default zone; other zones keep their IANA name. */
+function timezoneLabel(timezone: string | null | undefined): string {
+  if (!timezone || timezone === "America/Sao_Paulo") return "horário de Brasília";
+  return timezone;
+}
+
 function formatDateTimeBR(iso: string | null, timezone: string): string {
   if (!iso) return "—";
   try {
@@ -78,7 +84,7 @@ export function SendWindowCard({ compact = false }: { compact?: boolean }) {
 
   if (compact) {
     return (
-      <div className="rounded-lg border border-border/40 bg-background/30 px-4 py-3 flex items-center justify-between gap-3">
+      <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-card/80 px-4 py-2.5">
         <div className="flex items-center gap-3 min-w-0">
           {within ? (
             <SunMedium className="h-4 w-4 text-success shrink-0" />
@@ -87,11 +93,11 @@ export function SendWindowCard({ compact = false }: { compact?: boolean }) {
           )}
           <div className="min-w-0">
             <p className="text-sm font-medium truncate">
-              {within ? "Dentro da janela de envio" : "Fora da janela — disparos em fila"}
+              {within ? "Dentro da janela de envio" : "Fora da janela de envio — envios aguardando"}
             </p>
             <p className="text-xs text-muted-foreground truncate">
               {settings
-                ? `${settings.start}–${settings.end} (${settings.timezone})`
+                ? `${settings.start}–${settings.end} (${timezoneLabel(settings.timezone)})`
                 : "Carregando…"}
               {!within && data?.next_allowed_at && (
                 <>
@@ -162,7 +168,7 @@ export function SendWindowCard({ compact = false }: { compact?: boolean }) {
             </div>
           </div>
           <div>
-            <Label className="text-label text-muted-foreground">Timezone</Label>
+            <Label className="text-label text-muted-foreground">Fuso horário</Label>
             <Input
               value={tz}
               onChange={(e) => setTz(e.target.value)}
@@ -234,7 +240,7 @@ export function SendWindowCard({ compact = false }: { compact?: boolean }) {
               <p className="mt-1 text-sm font-medium">
                 {settings?.start} – {settings?.end}
               </p>
-              <p className="text-xs text-muted-foreground">{settings?.timezone}</p>
+              <p className="text-xs text-muted-foreground">{timezoneLabel(settings?.timezone)}</p>
             </div>
             <div className="rounded-lg border border-border/40 bg-background/30 p-3">
               <p className="text-label text-muted-foreground">Próxima retomada</p>

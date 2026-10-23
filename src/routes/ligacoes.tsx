@@ -1,86 +1,55 @@
-import { createFileRoute, useLocation, useNavigate } from "@tanstack/react-router";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Page, PageHeader } from "@/components/ui-premium/page-header";
-import { SendWindowCard } from "@/components/send-window-card";
-import { ProvidersPausedBanner } from "@/components/providers-paused-banner";
-import { ActiveTenantWalletNotice } from "@/components/billing/active-tenant-wallet-notice";
-import { ScriptsTab } from "@/components/ligacoes/scripts-tab";
-import { QueueTab } from "@/components/ligacoes/queue-tab";
+import { createFileRoute } from "@tanstack/react-router";
+
+import { ChannelPage } from "@/components/channels/channel-page";
 import { HistoryShell } from "@/components/history/history-shell";
-import { FlowsTab } from "@/components/ligacoes/flows-tab";
 import { BulkCallTab } from "@/components/ligacoes/bulk-call-tab";
 import { DashboardTab } from "@/components/ligacoes/dashboard-tab";
+import { QueueTab } from "@/components/ligacoes/queue-tab";
+import { ScriptsTab } from "@/components/ligacoes/scripts-tab";
 import { VoiceAssetsTab } from "@/components/ligacoes/voice-assets-tab";
 
 export const Route = createFileRoute("/ligacoes")({
   component: LigacoesPage,
 });
 
-const VALID_TABS = ["dashboard", "fluxos", "scripts", "massa", "audios", "historico"] as const;
-
+// Fluxos de voz moved to Automações; #fluxos redirects there (see channel-tabs).
 function LigacoesPage() {
-  const navigate = useNavigate();
-  const hash = useLocation({ select: (l) => l.hash });
-  const currentTab = (VALID_TABS as readonly string[]).includes(hash) ? hash : "dashboard";
-
   return (
-    <Page>
-      <PageHeader subtitle="Envie áudios e acompanhe a disponibilidade e a fila de chamadas." />
-      <ProvidersPausedBanner channel="call" />
-      <ActiveTenantWalletNotice />
-
-      <SendWindowCard compact />
-
-      <Tabs
-        value={currentTab}
-        onValueChange={(v) => navigate({ to: "/ligacoes", hash: v, replace: true })}
-        className="space-y-6"
-      >
-        <TabsList className="hidden">
-          {VALID_TABS.map((t) => (
-            <TabsTrigger key={t} value={t}>
-              {t}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-
-        <TabsContent value="dashboard">
-          <DashboardTab />
-        </TabsContent>
-        <TabsContent value="fluxos">
-          <FlowsTab />
-        </TabsContent>
-        <TabsContent value="scripts" className="space-y-6">
-          <ScriptsTab />
-        </TabsContent>
-        <TabsContent value="massa">
-          <BulkCallTab />
-        </TabsContent>
-        <TabsContent value="audios" className="space-y-10">
-          <VoiceAssetsTab />
-          <div className="border-t border-border/70 pt-8">
-            <ScriptsTab />
-          </div>
-        </TabsContent>
-        <TabsContent value="historico" className="space-y-6">
-          <QueueTab />
-          <HistoryShell
-            channel="calls"
-            options={{
-              title: "Histórico de ligações",
-              subtitle: "Tudo que foi disparado para os leads.",
-              showStep: false,
-              cardLabels: {
-                total: "Ligações",
-                success: "Atendidas",
-                failed: "Não atendidas / falhas",
-                pending: "Pendentes",
-                conversions: "Convertidas",
-              },
-            }}
-          />
-        </TabsContent>
-      </Tabs>
-    </Page>
+    <ChannelPage
+      channel="voz"
+      subtitle="Ligações com áudio gravado ou voz gerada: envios, fila e histórico."
+    >
+      {(tab) => {
+        if (tab === "massa") return <BulkCallTab />;
+        if (tab === "audios")
+          return (
+            <div className="space-y-6">
+              <VoiceAssetsTab />
+              <ScriptsTab />
+            </div>
+          );
+        if (tab === "historico")
+          return (
+            <div className="space-y-6">
+              <QueueTab />
+              <HistoryShell
+                channel="calls"
+                options={{
+                  subtitle: "Todas as ligações feitas para os jogadores.",
+                  showStep: false,
+                  cardLabels: {
+                    total: "Ligações",
+                    success: "Atendidas",
+                    failed: "Não atendidas / falhas",
+                    pending: "Pendentes",
+                    conversions: "Convertidas",
+                  },
+                }}
+              />
+            </div>
+          );
+        return <DashboardTab />;
+      }}
+    </ChannelPage>
   );
 }

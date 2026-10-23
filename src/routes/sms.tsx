@@ -1,26 +1,44 @@
-import { createFileRoute, Outlet } from "@tanstack/react-router";
-import { useLocation, useNavigate } from "@tanstack/react-router";
-import { useEffect } from "react";
-import { RotateCw, CreditCard } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { smsProviderStatus, getSmsDashboard, listScheduledSmsCampaigns } from "@/lib/sms.functions";
-import { getBillingPrices } from "@/lib/billing/billing.functions";
+import { createFileRoute } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
+
 import { WalletBalanceNotice } from "@/components/billing/wallet-balance-notice";
-import { walletNoticeInputFromPortal } from "@/lib/billing/wallet-notice";
-import { useActiveTenant } from "@/hooks/use-active-tenant";
-import { MetricCard } from "@/components/ui-premium/metric-card";
-import { SmsPageShell } from "@/components/sms/sms-page-shell";
+import { ChannelPage } from "@/components/channels/channel-page";
+import {
+  ChannelOverview,
+  ChannelSendsChart,
+  useChannelPeriod,
+} from "@/components/channels/channel-overview";
 import { SmsChannelHealth } from "@/components/sms/sms-channel-health";
 import { SmsHistoryPanel } from "@/components/sms/sms-history-panel";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useServerFn } from "@tanstack/react-start";
-import { getSmsCreditPortal } from "@/lib/sms-credits.functions";
+import { SmsTemplatesPanel } from "@/components/sms/sms-templates-panel";
+import { useActiveTenant } from "@/hooks/use-active-tenant";
+import { POLL_INTERVALS } from "@/hooks/use-updated-ago";
+import { getBillingPrices } from "@/lib/billing/billing.functions";
+import { CHART_COLORS } from "@/lib/chart-theme";
 import { brl, num } from "@/lib/format";
+import { getSmsCreditPortal } from "@/lib/sms-credits.functions";
+import { getSmsDashboard, listScheduledSmsCampaigns, smsProviderStatus } from "@/lib/sms.functions";
 
 export const Route = createFileRoute("/sms")({
   component: SmsPage,
 });
+
+function SmsPage() {
+  return (
+    <ChannelPage channel="sms" subtitle="Envios, saldo, templates e histórico do canal de SMS.">
+      {(tab, setTab) =>
+        tab === "templates" ? (
+          <SmsTemplatesPanel />
+        ) : tab === "historico" ? (
+          <SmsHistoryPanel />
+        ) : (
+          <SmsOverview onOpenHistory={() => setTab("historico")} />
+        )
+      }
+    </ChannelPage>
+  );
+}
 
 /**
  * House-facing SMS unit price (PG1 Task 7): reads the price book through
@@ -37,60 +55,23 @@ function useSmsUnitPrice(): number | null {
   return data?.sms.unitPrice ?? null;
 }
 
-// ---------------- Page ----------------
+// Status the dispatcher writes while a scheduled campaign has not finished.
+const OPEN_CAMPAIGN_STATUSES = ["agendada", "running", "processando", "enviando"];
 
-function SmsPage() {
-  // /sms é pai de /sms/templates: nas rotas filhas renderiza só a filha.
-  const pathname = useLocation({ select: (l) => l.pathname });
-  if (pathname !== "/sms") return <Outlet />;
-  return <SmsHome />;
-}
-
-function SmsHome() {
-  const navigate = useNavigate();
-  const hash = useLocation({ select: (l) => l.hash });
-  const aliases: Record<string, "saude" | "historico" | "campanhas"> = {
-    dashboard: "saude",
-    massa: "saude",
-    campanhas: "campanhas",
-    enviar: "saude",
-    saude: "saude",
-    historico: "historico",
-    fila: "campanhas",
-    configuracoes: "saude",
-  };
-  const currentTab = aliases[hash] ?? "saude";
-  useEffect(() => {
-    if (currentTab === "campanhas") {
-      void navigate({ to: "/campanhas", replace: true });
-    }
-  }, [currentTab, navigate]);
-  return (
-    <SmsPageShell>
-      <SmsCompactWorkspace
-        tab={currentTab}
-        onTabChange={(tab) => navigate({ to: "/sms", hash: tab, replace: true })}
-      />
-    </SmsPageShell>
-  );
-}
-
-function SmsCompactWorkspace({
-  tab,
-  onTabChange,
-}: {
-  tab: "saude" | "historico" | "campanhas";
-  onTabChange: (tab: string) => void;
-}) {
-  const qc = useQueryClient();
+function SmsOverview({ onOpenHistory }: { onOpenHistory: () => void }) {
+  const period = useChannelPeriod();
+  const { query } = period;
   const dashboardFn = useServerFn(getSmsDashboard);
   const campaignsFn = useServerFn(listScheduledSmsCampaigns);
   const statusFn = useServerFn(smsProviderStatus);
   const portalFn = useServerFn(getSmsCreditPortal);
+
   const dashboard = useQuery({
-    queryKey: ["sms-compact-dashboard"],
-    queryFn: () => dashboardFn({ data: { range_days: 30 } }),
-    refetchInterval: 15_000,
+    // Prefix shared with the individual SMS dialog, which invalidates it after a send.
+    queryKey: ["sms-compact-dashboard", query.from, query.to],
+    queryFn: () => dashboardFn({ data: { from: query.from, to: query.to } }),
+    refetchInterval: query.includesToday ? POLL_INTERVALS.dashboard : false,
+    placeholderData: (previous) => previous,
   });
   const campaigns = useQuery({
     queryKey: ["sms-home-campaigns"],
@@ -111,118 +92,84 @@ function SmsCompactWorkspace({
     refetchInterval: 30_000,
   });
   const smsUnitPrice = useSmsUnitPrice();
+
   const summary = (credits.data?.summary ?? {}) as { balance?: number; exempt?: boolean };
   const balance = readNumber(summary.balance);
   const exempt = Boolean(summary.exempt);
   const canBuyCredits = Boolean((credits.data as { canBuy?: boolean } | undefined)?.canBuy);
+  const balanceLabel = !credits.data ? "—" : exempt ? "Casa isenta" : brl(balance);
   const totals = dashboard.data?.totals;
-  const today = dashboard.data?.today;
-  const sent = readNumber(totals?.sent);
-  const failed = readNumber(totals?.failed);
-  // Sem "Entregues"/taxa de entrega: o callback da Short Brasil não confirma
-  // entrega (nenhum SMS é marcado entregue), então mostramos Enviados e Falhas.
-  // "enviando" é o status que o despacho grava enquanto a campanha roda.
-  const queue = ((campaigns.data?.campaigns ?? []) as SmsCampaignRow[]).filter((campaign) =>
-    ["agendada", "running", "processando", "enviando"].includes(campaign.status),
-  ).length;
-  const kpis = [
-    {
-      label: "Saldo disponível",
-      value: brl(balance),
-      hint: exempt ? "casa isenta" : "para envio de SMS",
-    },
-    { label: "Fila", value: num(queue), hint: "campanhas aguardando" },
-    {
-      label: "Enviados hoje",
-      value: num(readNumber(today?.sent)),
-      hint: `${num(sent)} em 30 dias`,
-    },
-    {
-      label: "Falhas",
-      value: num(failed),
-      hint: "nos últimos 30 dias",
-    },
-  ];
-
-  if (tab === "saude") {
-    return (
-      <SmsChannelHealth
-        configured={!!provider.data?.configured}
-        balance={exempt ? "Casa isenta" : `Saldo ${brl(balance)}`}
-        queue={queue}
-        failed={num(failed)}
-        metrics={kpis}
-        onRefresh={() => qc.invalidateQueries({ queryKey: ["sms-compact-dashboard"] })}
-        onOpenHistory={() => onTabChange("historico")}
-      />
-    );
-  }
+  const scheduledCampaigns = (
+    (campaigns.data?.campaigns ?? []) as Array<{ status: string }>
+  ).filter((campaign) => OPEN_CAMPAIGN_STATUSES.includes(campaign.status)).length;
+  // Messages waiting to go out right now: pending sends plus journey steps already due.
+  const queued = readNumber(totals?.pending) + readNumber(totals?.queue_due);
+  const smsLeft =
+    !exempt && smsUnitPrice && smsUnitPrice > 0 ? Math.floor(balance / smsUnitPrice) : null;
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        <Badge
-          className={
-            provider.data?.configured ? "bg-success/15 text-success" : "bg-warning/15 text-warning"
-          }
-        >
-          {provider.data?.configured ? "canal disponível" : "canal indisponível"}
-        </Badge>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => qc.invalidateQueries({ queryKey: ["sms-compact-dashboard"] })}
-        >
-          <RotateCw className="mr-2 h-3.5 w-3.5" /> Atualizar
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => window.location.assign("/plano-e-creditos")}
-        >
-          <CreditCard className="mr-2 h-3.5 w-3.5" />{" "}
-          {exempt ? "Casa isenta" : `Saldo ${brl(balance)}`}
-        </Button>
-      </div>
-      {credits.data ? (
-        <WalletBalanceNotice
-          balance={balance}
-          exempt={exempt}
-          smsUnitPrice={smsUnitPrice}
-          canBuy={canBuyCredits}
-          threshold={walletNoticeInputFromPortal(credits.data).threshold}
-        />
-      ) : null}
-
-      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-        {kpis.map((item) => (
-          <MetricCard
-            key={item.label}
-            label={item.label}
-            value={item.value}
-            hint={item.hint}
-            className="py-3"
+    <ChannelOverview
+      period={period}
+      updatedAt={dashboard.dataUpdatedAt}
+      isFetching={dashboard.isFetching}
+      isLoading={dashboard.isLoading}
+      notice={
+        credits.data ? (
+          <WalletBalanceNotice
+            balance={balance}
+            exempt={exempt}
+            smsUnitPrice={smsUnitPrice}
+            canBuy={canBuyCredits}
           />
-        ))}
-      </div>
-
-      {tab === "historico" && <SmsHistoryPanel />}
-    </div>
+        ) : null
+      }
+      // No "Entregues" or delivery rate: the SMS provider does not confirm delivery.
+      kpis={[
+        {
+          title: "Enviados",
+          value: num(readNumber(totals?.sent)),
+          detail: `para ${num(readNumber(totals?.unique_recipients))} números diferentes`,
+        },
+        { title: "Falhas", value: num(readNumber(totals?.failed)), detail: "não saíram" },
+        {
+          title: "Na fila",
+          value: num(queued),
+          detail:
+            scheduledCampaigns > 0
+              ? `${num(scheduledCampaigns)} campanha(s) agendada(s)`
+              : "aguardando envio agora",
+        },
+        {
+          title: "Créditos disponíveis",
+          value: balanceLabel,
+          detail: exempt
+            ? "sem cobrança por envio"
+            : smsLeft !== null
+              ? `dá para cerca de ${num(smsLeft)} SMS`
+              : undefined,
+        },
+      ]}
+      chart={
+        <ChannelSendsChart
+          historyChannel="sms"
+          period={period}
+          daily={dashboard.data?.by_day}
+          series={[{ key: "enviados", label: "Enviados", color: CHART_COLORS.primary }]}
+        />
+      }
+    >
+      <SmsChannelHealth
+        configured={provider.data ? !!provider.data.configured : undefined}
+        balanceLabel={balanceLabel}
+        scheduledCampaigns={scheduledCampaigns}
+        playersInJourneys={readNumber(totals?.players_in_flow)}
+        activeFlows={readNumber(totals?.active_flows)}
+        conversions={readNumber(totals?.conversions)}
+        onOpenHistory={onOpenHistory}
+      />
+    </ChannelOverview>
   );
 }
-
-type SmsCampaignRow = {
-  id: string;
-  name: string;
-  scheduled_at: string;
-  status: string;
-  total_count: number;
-  sent_count: number | null;
-  failed_count: number | null;
-  last_error: string | null;
-  created_at: string;
-  updated_at: string | null;
-};
 
 function readNumber(value: unknown) {
   const n = Number(value ?? 0);
