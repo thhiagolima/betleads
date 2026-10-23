@@ -688,7 +688,14 @@ describe("sendSmsBatch (ENV-10, Short Brasil bulk)", () => {
       }));
       const content = "A".repeat(161); // 2 segments, only 1 unit of balance available
       const r = await sendSmsBatch([item(1, { content, linkTrackingEnabled: false })]);
-      expect(r.outcomes[0]).toMatchObject({ status: "failed", ok: false, error: "Saldo insuficiente" });
+      expect(r.outcomes[0]).toMatchObject({
+        status: "failed",
+        ok: false,
+        error: "Saldo insuficiente",
+        // Final fix I3: the campaign tick pauses on this kind.
+        errorKind: "insufficient_balance",
+        retryable: false,
+      });
       expect(smsCalls).toHaveLength(0);
       expect(credits.charged()).toBe(0);
     });

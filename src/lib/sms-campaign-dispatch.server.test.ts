@@ -460,6 +460,51 @@ describe("processSmsCampaignTick with sendBatch (ENV-10 bulk)", () => {
     expect(r2).toMatchObject({ sent: 4, status: "enviado" });
     expect(w.batches[1]).toHaveLength(4);
   });
+
+  // Final fix I3: the house's wallet refused the reservation.
+  it("no balance mid-batch: pauses at that recipient, not failed; resume dedupes the rest", async () => {
+    const w = batchWorld();
+    const c = campaign(recipients(5));
+    let call = 0;
+    w.setBehaviour((key) => {
+      call++;
+      // 1 accepted, 2 refused by the wallet, 3.. accepted (reserved concurrently).
+      if (call === 2) return { ok: false, insufficientBalance: true, error: "Saldo insuficiente" };
+      w.state.accepted.add(key);
+      return { ok: true };
+    });
+    const r1 = await processSmsCampaignTick(c, w.deps, { deadline: 45_000 });
+    expect(r1).toMatchObject({
+      sent: 1,
+      failed: 0,
+      advanced: 1,
+      status: "pausada",
+      stopReason: "insufficient_balance",
+    });
+    expect(w.state.patches.filter((p) => "sent_cursor" in p).map((p) => p.sent_cursor)).toEqual([
+      1,
+    ]);
+    expect(lastPatch(w.state.patches)).toMatchObject({
+      status: "pausada",
+      last_error: "Saldo insuficiente",
+      locked_at: null,
+      locked_by: null,
+    });
+
+    // "Retomar" after a top-up: only recipient 2 is really sent now.
+    w.setBehaviour((key) => {
+      if (w.state.accepted.has(key)) return { ok: true, alreadySent: true };
+      w.state.accepted.add(key);
+      return { ok: true };
+    });
+    const r2 = await processSmsCampaignTick(
+      { ...c, sent_cursor: 1, sent_count: 1, status: "enviando" } as SmsCampaignRow,
+      w.deps,
+      { deadline: 45_000 },
+    );
+    expect(r2).toMatchObject({ sent: 1, deduplicated: 3, status: "enviado" });
+    expect(w.batches[1]).toHaveLength(1);
+  });
 });
 
 describe("processSmsCampaignTick with the SMS provider breaker (incident 15/10/2026)", () => {
@@ -531,6 +576,32 @@ describe("processSmsCampaignTick with the SMS provider breaker (incident 15/10/2
     expect(lastPatch(state.patches)).toMatchObject({
       status: "enviando",
       last_error: "Short Brasil: erro de autenticacao",
+    });
+  });
+
+  // Final fix I3 (per-recipient path).
+  it("the house's wallet refuses a recipient: stops before it, not failed, campaign paused", async () => {
+    const { state, deps } = world();
+    let n = 0;
+    deps.send = async ({ deliveryKey }) => {
+      state.sendCalls.push(deliveryKey);
+      if (++n <= 2) return { ok: true };
+      return { ok: false, insufficientBalance: true, error: "Saldo insuficiente" };
+    };
+    const c = campaign(recipients(5), { rate_per_minute: 5 });
+    const r = await processSmsCampaignTick(c, deps, { deadline: 45_000 });
+    expect(r).toMatchObject({
+      sent: 2,
+      failed: 0,
+      status: "pausada",
+      stopReason: "insufficient_balance",
+    });
+    expect(state.patches.filter((p) => "sent_cursor" in p).map((p) => p.sent_cursor)).toEqual([2]);
+    expect(state.patches.some((p) => Number(p.failed_count ?? 0) > 0)).toBe(false);
+    expect(lastPatch(state.patches)).toMatchObject({
+      status: "pausada",
+      last_error: "Saldo insuficiente",
+      locked_by: null,
     });
   });
 });

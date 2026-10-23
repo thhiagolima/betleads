@@ -59,6 +59,7 @@ import {
   refundForDelivery,
 } from "./billing/wallet.server";
 import { countSmsSegments } from "./sms-segments";
+import { resumePausedSmsCampaign } from "./sms-campaign-dispatch.server";
 
 const DEFAULT_SHORT_BRASIL_SINGLE_URL = "http://lp01-short.painelsms.com/bot/single-sms.php";
 const DEFAULT_SHORT_BRASIL_BULK_URL = "http://lp01-short.painelsms.com/bot/bulk-sms.php";
@@ -2189,6 +2190,38 @@ export const listScheduledSmsCampaigns = createServerFn({ method: "GET" })
         unresolved_count: Number(row.unresolved_count ?? 0),
       })),
     };
+  });
+
+/**
+ * PG3 final fix I3 — "Retomar" a campaign the dispatcher paused because the
+ * house ran out of balance. Same access rule as cancelling (the user's own
+ * client, RLS + tenant filter); audited.
+ */
+export const resumeSmsCampaign = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) => z.object({ id: dbUuid() }).parse(input))
+  .handler(async ({ data, context }) => {
+    const tenantId = await resolveCurrentTenantId(context.supabase);
+    const resumed = await resumePausedSmsCampaign(context.supabase, {
+      tenantId,
+      campaignId: data.id,
+    });
+    if (!resumed) throw new Error("Esta campanha não está pausada.");
+    const { error: auditError } = await supabaseAdmin.from("tenant_audit_logs").insert({
+      tenant_id: tenantId,
+      actor_user_id: context.userId,
+      action: "sms_campaign.resumed",
+      entity_type: "sms_campaign",
+      entity_id: data.id,
+      before_data: { status: "pausada" } as Json,
+      after_data: { status: "enviando" } as Json,
+    });
+    if (auditError)
+      console.warn("[sms-campaigns] retomada sem auditoria", {
+        campaignId: data.id,
+        error: auditError.message,
+      });
+    return { ok: true };
   });
 
 export const cancelScheduledSmsCampaign = createServerFn({ method: "POST" })

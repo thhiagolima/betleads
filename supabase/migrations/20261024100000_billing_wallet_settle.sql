@@ -107,6 +107,18 @@ alter table public.email_send_logs
   add column if not exists billing_reference_id text,
   add column if not exists billed_amount numeric(14,4);
 
+-- ─── Campanha de SMS pausada por saldo (correção final I3) ──────────────────
+-- Uma campanha de SMS cuja casa fica sem saldo para no destinatário recusado
+-- (o cursor fica antes dele) com status 'pausada' e last_error
+-- "Saldo insuficiente". claim_due_sms_campaigns só pega 'agendada' e
+-- 'enviando', então uma campanha pausada não roda até a casa clicar em
+-- "Retomar" (volta para 'enviando' sem lock).
+
+alter table public.sms_campaigns drop constraint if exists sms_campaigns_status_chk;
+alter table public.sms_campaigns
+  add constraint sms_campaigns_status_chk
+  check (status in ('agendada', 'enviando', 'enviado', 'falhou', 'cancelada', 'pausada'));
+
 -- ─── wallet_settle ──────────────────────────────────────────────────────────
 
 create or replace function public.wallet_settle(

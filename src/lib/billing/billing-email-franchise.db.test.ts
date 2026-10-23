@@ -23,6 +23,12 @@ const SETTLE_MIGRATION = readMigration(
 const STUB_TABLES = `
 create table public.call_history (id uuid primary key default gen_random_uuid());
 create table public.email_send_logs (id uuid primary key default gen_random_uuid());
+create table public.sms_campaigns (
+  id uuid primary key default gen_random_uuid(),
+  status text not null default 'agendada',
+  constraint sms_campaigns_status_chk
+    check (status in ('agendada', 'enviando', 'enviado', 'falhou', 'cancelada'))
+);
 `;
 
 let db: PGlite;

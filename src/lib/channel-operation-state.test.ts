@@ -61,6 +61,9 @@ describe("getChannelOperationState", () => {
     );
     expect(campaignStopReason("falhou", "Saldo insuficiente", null)).toBe("Saldo insuficiente");
     expect(campaignStopReason("enviado", "erro antigo", null)).toBeNull();
+    // PG3 final fix I3: an SMS campaign paused for lack of balance says why.
+    expect(campaignStopReason("pausada", "Saldo insuficiente", null)).toBe("Saldo insuficiente");
+    expect(campaignStopReason("pausada", null, null)).toBeNull();
   });
 
   it("sempre fornece uma próxima ação navegável", () => {

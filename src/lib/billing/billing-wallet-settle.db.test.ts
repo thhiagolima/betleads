@@ -31,6 +31,12 @@ const SETTLE_MIGRATION = readMigration(
 const STUB_TABLES = `
 create table public.call_history (id uuid primary key default gen_random_uuid());
 create table public.email_send_logs (id uuid primary key default gen_random_uuid());
+create table public.sms_campaigns (
+  id uuid primary key default gen_random_uuid(),
+  status text not null default 'agendada',
+  constraint sms_campaigns_status_chk
+    check (status in ('agendada', 'enviando', 'enviado', 'falhou', 'cancelada'))
+);
 `;
 
 let db: PGlite;
@@ -649,5 +655,15 @@ describe("permissions and schema", () => {
       { table_name: "email_send_logs", column_name: "billed_amount", data_type: "numeric" },
       { table_name: "email_send_logs", column_name: "billing_reference_id", data_type: "text" },
     ]);
+  });
+});
+
+// PG3 final fix I3: an SMS campaign can be paused for lack of balance.
+describe("sms_campaigns status", () => {
+  it("accepts 'pausada' and still refuses an unknown status", async () => {
+    await db.exec("insert into public.sms_campaigns (status) values ('pausada')");
+    await expect(
+      db.exec("insert into public.sms_campaigns (status) values ('qualquer')"),
+    ).rejects.toThrow(/sms_campaigns_status_chk/);
   });
 });

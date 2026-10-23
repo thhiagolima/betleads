@@ -353,7 +353,16 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
   let deferred = 0;
   let failed = 0;
   let insufficientBalance = 0;
+  // PG3 final fix I3: houses whose wallet already refused a call this tick.
+  // Their remaining items are left untouched (still audio_ready) for a later
+  // tick instead of each being refused (and failed) in turn.
+  const noBalanceTenants = new Set<string>();
+  let skippedNoBalance = 0;
   for (const item of queue ?? []) {
+    if (noBalanceTenants.has(item.tenant_id)) {
+      skippedNoBalance++;
+      continue;
+    }
     try {
       let phone = item.phone_number ?? "";
       let player: LeadLike | null = null;
@@ -452,6 +461,7 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
           .eq("id", item.id);
         insufficientBalance++;
         failed++;
+        noBalanceTenants.add(item.tenant_id);
         continue;
       }
       if (outcome === "transient") {
@@ -519,5 +529,12 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
         .eq("id", item.id);
     }
   }
-  return { due: queue?.length ?? 0, dispatched, deferred, failed, insufficientBalance };
+  return {
+    due: queue?.length ?? 0,
+    dispatched,
+    deferred,
+    failed,
+    insufficientBalance,
+    skippedNoBalance,
+  };
 }

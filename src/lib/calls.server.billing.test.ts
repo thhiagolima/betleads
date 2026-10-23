@@ -105,6 +105,59 @@ describe("runVoiceQueueDispatcher wallet refusal", () => {
     expect(voice.callInfobipVoice).not.toHaveBeenCalled();
   });
 
+  // PG3 final fix I3: after a house's first refusal in a tick, its other
+  // items are left untouched (audio_ready) for a later tick; other houses
+  // keep dialing.
+  it("tenant A has no balance and tenant B dials normally: A's remaining items stay ready", async () => {
+    const OTHER = "00000000-0000-4000-8000-000000000002";
+    const at = (s: number) => new Date(Date.now() - 600_000 + s * 1_000).toISOString();
+    const item = (id: string, tenantId: string, s: number) => ({
+      id,
+      tenant_id: tenantId,
+      lead_id: null,
+      script_id: null,
+      voice_asset_id: null,
+      phone_number: `55119999990${s}`,
+      audio_url: "https://audio.example/a.mp3",
+      status: "audio_ready",
+      scheduled_at: at(s),
+    });
+    fake.db.rows("call_queue").push(
+      item("a1", TENANT, 1),
+      item("b1", OTHER, 2),
+      item("a2", TENANT, 3),
+      item("b2", OTHER, 4),
+      item("a3", TENANT, 5),
+    );
+    voice.callInfobipVoice.mockImplementation(async (_to: string, _content: unknown, opts: { tenantId: string }) =>
+      opts.tenantId === TENANT
+        ? {
+            ok: false,
+            status: 0,
+            body: { error: "Saldo insuficiente" },
+            idempotencyKey: "key-a",
+            providerCallId: null,
+            errorKind: "insufficient_balance",
+          }
+        : { ok: true, status: 200, body: {}, idempotencyKey: `key-${Math.random()}`, providerCallId: "c" },
+    );
+
+    const result = await runVoiceQueueDispatcher(10);
+
+    const tenantsCalled = voice.callInfobipVoice.mock.calls.map((call) => call[2].tenantId);
+    expect(tenantsCalled.filter((t) => t === TENANT)).toHaveLength(1);
+    expect(tenantsCalled.filter((t) => t === OTHER)).toHaveLength(2);
+    expect(result).toMatchObject({ dispatched: 2, failed: 1, insufficientBalance: 1, skippedNoBalance: 2 });
+    const byId = (id: string) => fake.db.rows("call_queue").find((r) => r.id === id)!;
+    expect(byId("a1")).toMatchObject({ status: "failed", provider_status: "saldo_insuficiente" });
+    for (const id of ["a2", "a3"]) {
+      expect(byId(id)).toMatchObject({ status: "audio_ready", scheduled_at: expect.any(String) });
+      expect(byId(id).provider_status).toBeUndefined();
+    }
+    expect(byId("b1").status).toBe("waiting_provider");
+    expect(byId("b2").status).toBe("waiting_provider");
+  });
+
   it("control: a transport status 0 without errorKind is still re-queued", async () => {
     seedQueueItem();
     voice.callInfobipVoice.mockResolvedValue({

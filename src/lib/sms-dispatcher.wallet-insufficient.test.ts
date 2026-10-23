@@ -282,3 +282,71 @@ describe("SMS flow dispatcher — wallet refusal stays per-house (PG3 Task 1)", 
     expect(pauseChannelForInsufficientFunds).toHaveBeenCalledWith("sms", expect.any(String));
   });
 });
+
+// PG3 final fix I3 — SMS campaigns: a house without balance pauses only its
+// own campaign (status "pausada", last_error "Saldo insuficiente"), the
+// refused recipient is not counted as failed and the cursor stays before it.
+describe("SMS campaign dispatcher — wallet refusal pauses only that house's campaign", () => {
+  function campaignRow(id: string, tenantId: string) {
+    return {
+      id,
+      tenant_id: tenantId,
+      name: `Campanha ${id}`,
+      content: "Oi",
+      route: "iGaming",
+      recipients: [
+        { phone: "+5511900000101", playerId: "00000000-0000-4000-8000-000000000101" },
+        { phone: "+5511900000102", playerId: "00000000-0000-4000-8000-000000000102" },
+      ],
+      total_count: 2,
+      sent_count: 0,
+      deduplicated_count: 0,
+      failed_count: 0,
+      scheduled_at: new Date(Date.now() - 60_000).toISOString(),
+      sent_cursor: 0,
+      last_error: null,
+      rate_per_minute: 60,
+      track_links: false,
+      status: "enviando",
+      locked_by: `lock-${id}`,
+      audience_resolved_at: null,
+    };
+  }
+
+  it("tenant A's campaign is paused, tenant B's campaign is sent in the same tick", async () => {
+    state.tables = {
+      sms_campaigns: [campaignRow("camp-a", TENANT_A), campaignRow("camp-b", TENANT_B)],
+      sms_send_logs: [],
+      players: [],
+    };
+    state.rpc.mockImplementation(async (name: string, args: Row) => {
+      if (name === "claim_due_sms_campaigns") return { data: state.tables.sms_campaigns, error: null };
+      if (name === "consume_channel_budget") {
+        return { data: [{ granted: args.p_n, retry_after_ms: 0, limited_by: null }], error: null };
+      }
+      return { data: null, error: null };
+    });
+    vi.mocked(sendSmsInternal).mockImplementation(async (args) =>
+      args.tenantId === TENANT_A
+        ? ({ ok: false, status: 402, error: "Saldo insuficiente", errorKind: "insufficient_balance" } as any)
+        : ({ ok: true, status: 200, response: "{}" } as any),
+    );
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const { runScheduledSmsCampaigns } = await import("./sms-dispatcher.server");
+    await runScheduledSmsCampaigns({ limit: 10 });
+
+    const [a, b] = state.tables.sms_campaigns;
+    expect(a).toMatchObject({
+      status: "pausada",
+      last_error: "Saldo insuficiente",
+      failed_count: 0,
+      sent_cursor: 0,
+      locked_by: null,
+    });
+    expect(b).toMatchObject({ status: "enviado", sent_count: 2 });
+    expect(pauseChannelForInsufficientFunds).not.toHaveBeenCalled();
+    expect(notifyNoBalance).toHaveBeenCalledWith(TENANT_A);
+    expect(notifyNoBalance).not.toHaveBeenCalledWith(TENANT_B);
+  });
+});

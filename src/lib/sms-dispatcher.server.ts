@@ -962,8 +962,8 @@ function campaignDeps(): CampaignDispatchDeps {
         },
         deliveryKey,
       });
-      const providerAccount =
-        !r.ok && (r as { errorKind?: unknown }).errorKind === "provider_account";
+      const errorKind = r.ok ? undefined : (r as { errorKind?: unknown }).errorKind;
+      const providerAccount = errorKind === "provider_account";
       return {
         ok: r.ok,
         alreadySent: "alreadySent" in r && r.alreadySent === true,
@@ -971,6 +971,8 @@ function campaignDeps(): CampaignDispatchDeps {
         // stops before this recipient and resends it later (same key).
         retryable: providerAccount,
         providerAccount,
+        // PG3 final fix I3: the house's wallet refused; the campaign pauses.
+        insufficientBalance: errorKind === "insufficient_balance",
         error: r.ok ? undefined : (r as { error?: string }).error,
       };
     },
@@ -1006,6 +1008,7 @@ function campaignDeps(): CampaignDispatchDeps {
               pendingConfirmation: o.status === "pending_confirmation",
               retryable: o.retryable,
               providerAccount: o.errorKind === "provider_account",
+              insufficientBalance: o.errorKind === "insufficient_balance",
               error: o.ok && o.status !== "pending_confirmation" ? undefined : o.error,
             }));
           },
@@ -1110,6 +1113,16 @@ async function dispatchClaimedSmsCampaigns(campaigns: SmsCampaignRow[], run: Job
         r.stopReason === "provider_unavailable"
       )
         stopReason = r.stopReason;
+      if (r.stopReason === "insufficient_balance") {
+        // PG3 final fix I3: paused for this house only; hourly "Saldo
+        // esgotado" e-mail, which never breaks the dispatcher.
+        await notifyNoBalance(c.tenant_id).catch((alertError: unknown) =>
+          console.error("[sms-campaigns] no balance alert failed", {
+            tenantId: c.tenant_id,
+            error: alertError instanceof Error ? alertError.message : String(alertError),
+          }),
+        );
+      }
     } catch (error) {
       console.error("[sms-campaigns] falha ao processar campanha", {
         campaignId: c.id,

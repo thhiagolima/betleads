@@ -47,7 +47,9 @@ Cria `wallet_settle` e `wallet_settle_voice` (só `service_role`), a coluna
 `billing_price_book.charge_unanswered_blocks`, as colunas de cobrança em
 `call_history` (`billing_reference_id`, `billed_blocks`, `billed_amount`,
 `billing_settled_at`) e em `email_send_logs` (`billing_reference_id`,
-`billed_amount`), e recria `admin_set_price` com um 5º parâmetro opcional.
+`billed_amount`), recria `admin_set_price` com um 5º parâmetro opcional e
+aceita o status `'pausada'` em `sms_campaigns` (campanha de SMS pausada por
+falta de saldo).
 
 Aplicar o arquivo inteiro numa transação. Esperado: sem erro.
 
@@ -107,6 +109,12 @@ where proname = 'billing_admin_manual_settle';
 ```
 Esperado: uma linha terminando em `_paid_at timestamp with time zone`.
 
+```sql
+select pg_get_constraintdef(oid) from pg_constraint
+where conname = 'sms_campaigns_status_chk';
+```
+Esperado: a lista inclui `'pausada'`.
+
 **Resultado:**
 
 ## Passo 5 — Deploy
@@ -128,9 +136,10 @@ usado para reservar os blocos de voz; padrão 120). Não é obrigatório.
   24 h. A reconciliação diária roda a mesma rotina.
 - Conferir no log linhas `[billing/invoices]` com falha de algum estágio (o
   JSON de resposta do cron traz `failures`, por exemplo `voice_settle: ...`).
-- Casas sem saldo: SMS e voz param (campanha de SMS fica pausada com
-  "Saldo insuficiente"; fila de voz pula a casa no tick); e-mail segue dentro
-  da franquia mensal.
+- Casas sem saldo: SMS e voz param. Campanha de SMS fica `pausada` com
+  "Saldo insuficiente" (a casa clica em "Retomar" depois de recarregar); na
+  fila de voz, a primeira ligação recusada da casa falha e as demais ficam
+  `audio_ready` para o próximo tick. E-mail segue dentro da franquia mensal.
 
 ### Limitação conhecida (voz)
 
@@ -146,6 +155,9 @@ Voltar o código para o deploy anterior basta. Os objetos das 3 migrations são
 aditivos e seguros com o código antigo:
 
 - funções novas não são chamadas pelo código antigo;
+- o status `'pausada'` de `sms_campaigns` não é pego pelo claim (nem no
+  código antigo); uma campanha pausada no momento do rollback fica parada até
+  alguém mudar o status para `'enviando'` à mão;
 - colunas novas têm default ou aceitam nulo;
 - `admin_set_price` e `billing_admin_manual_settle` mantêm os parâmetros
   antigos e só ganham um último parâmetro com default, então as chamadas do
