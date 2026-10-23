@@ -91,7 +91,7 @@ export const SIDEBAR_SECTIONS: NavSection[] = [
   {
     label: "Canais",
     items: [
-      link("SMS", "/sms", MessageSquare, { alsoActiveOn: ["/links"] }),
+      link("SMS", "/sms", MessageSquare),
       link("Email", "/email", Mail),
       link("Voz", "/ligacoes", Phone),
       link("Consentimentos", "/consentimentos", ShieldQuestion),
@@ -100,7 +100,7 @@ export const SIDEBAR_SECTIONS: NavSection[] = [
         title: "Templates e áudios",
         icon: FileText,
         children: [
-          link("Templates de SMS", "/sms/templates"),
+          link("Templates de SMS", "/sms", undefined, { hash: "templates" }),
           link("Templates de email", "/email", undefined, { hash: "templates" }),
           link("Áudios e scripts", "/ligacoes", undefined, { hash: "audios" }),
         ],
@@ -119,7 +119,8 @@ export const SIDEBAR_SECTIONS: NavSection[] = [
     label: "Configurações",
     items: [
       link("Plano e créditos", "/plano-e-creditos", Wallet),
-      link("Integrações", "/webhooks", Plug),
+      // Links curtos (Short.io) and the Meta connection live inside Integrações.
+      link("Integrações", "/webhooks", Plug, { alsoActiveOn: ["/links"] }),
       link("Configuração da casa", "/configuracoes/casa", Building2),
       link("Configurações", "/configuracoes", Settings),
     ],
@@ -189,9 +190,9 @@ export const ROUTE_META: Record<string, RouteMeta> = {
   "/automacoes/ligacoes": { section: "Automações", title: "Automações de voz" },
   "/automacoes/whatsapp": { section: "Automações", title: "Automações de WhatsApp" },
   "/jornadas": { section: "Ações", title: "Jornadas" },
-  "/jornadas/nova": { section: "Jornadas", title: "Nova jornada" },
-  "/jornadas/$journeyId": { section: "Jornadas", title: "Editar jornada" },
-  "/jornadas/$journeyId/relatorio": { section: "Jornadas", title: "Relatório da jornada" },
+  "/jornadas/nova": { section: "Automações", title: "Nova jornada" },
+  "/jornadas/$journeyId": { section: "Automações", title: "Editar jornada" },
+  "/jornadas/$journeyId/relatorio": { section: "Automações", title: "Relatório da jornada" },
   "/sms": { section: "Canais", title: "SMS" },
   "/sms/templates": { section: "Canais", title: "Templates de SMS" },
   "/creditos-sms": { section: "Configurações", title: "Saldo e consumo" },
@@ -199,8 +200,8 @@ export const ROUTE_META: Record<string, RouteMeta> = {
   "/email": { section: "Canais", title: "Email" },
   "/ligacoes": { section: "Canais", title: "Voz" },
   "/whatsapp": { section: "Canais", title: "WhatsApp" },
-  "/links": { section: "Canais", title: "Links" },
-  "/links/configuracoes": { section: "Links", title: "Configurações de links" },
+  "/links": { section: "Integrações", title: "Links curtos" },
+  "/links/configuracoes": { section: "Integrações", title: "Links curtos" },
   "/inteligencia": { section: "IA", title: "Assistente IA" },
   "/treino-ia": { section: "IA", title: "Configurar IA" },
   "/experts": { section: "IA", title: "Experts" },

@@ -50,7 +50,9 @@ describe("active nav item", () => {
   });
 
   it("prefers the most specific path", () => {
-    expect(activeNavKey("/sms/templates", "")).toBe("/sms/templates");
+    expect(activeNavKey("/sms", "#templates")).toBe("/sms#templates");
+    expect(activeNavKey("/sms", "")).toBe("/sms");
+    expect(activeNavKey("/links", "")).toBe("/webhooks");
     expect(activeNavKey("/sms", "")).toBe("/sms");
   });
 
@@ -75,9 +77,9 @@ describe("active nav item", () => {
       (entry) => entry.kind === "link" && entry.title === "Plano e créditos",
     );
     expect(item).toMatchObject({ to: "/plano-e-creditos" });
-    expect(settings!.items.some((entry) => entry.kind === "link" && entry.title === "Saldo e consumo")).toBe(
-      false,
-    );
+    expect(
+      settings!.items.some((entry) => entry.kind === "link" && entry.title === "Saldo e consumo"),
+    ).toBe(false);
   });
 
   it("does not light Início on other pages", () => {
