@@ -13,3 +13,7 @@ export type HouseMemberRole = (typeof HOUSE_MEMBER_ROLES)[number];
 export function isHouseMemberRole(role: string | null | undefined): role is HouseMemberRole {
   return (HOUSE_MEMBER_ROLES as readonly string[]).includes(role ?? "");
 }
+
+/** Recusa de telas de equipe/super admin ao tentar mexer no papel de um expert. */
+export const EXPERT_MEMBER_GUARD =
+  "Esta pessoa é expert desta casa. Gerencie o acesso dela em Experts.";

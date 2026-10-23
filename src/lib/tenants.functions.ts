@@ -15,7 +15,7 @@ import {
   type BillingRole,
 } from "@/lib/billing/billing-view";
 import { cancelOpenInvoiceCharges } from "@/lib/billing/invoices.server";
-import { HOUSE_MEMBER_ROLES } from "@/lib/house-member-roles";
+import { EXPERT_MEMBER_GUARD, HOUSE_MEMBER_ROLES } from "@/lib/house-member-roles";
 import { assertTenantNotDemo, isBillingEnforcementEnabled } from "@/lib/tenant-access.server";
 import { dbUuid } from "@/lib/zod-helpers";
 
@@ -77,8 +77,6 @@ type TenantMemberRow = {
   role: TenantAssignableRole | "expert";
   created_at: string;
 };
-
-const EXPERT_MEMBER_GUARD = "Esta pessoa é expert desta casa. Gerencie o acesso dela em Experts.";
 
 type TenantAssignableRole = "admin" | "gestor" | "member";
 type ServerContext = {
