@@ -16,3 +16,18 @@ export const adminBillingHealth = createServerFn({ method: "GET" })
 export const adminTestBillingAlert = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => adminTestBillingAlertFor(context as AuthContext));
+
+export const adminListReviewCharges = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { adminListReviewChargesFor } = await import("./billing-review.server");
+    return adminListReviewChargesFor(context as AuthContext);
+  });
+
+export const adminResolveChargeReview = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => data)
+  .handler(async ({ data, context }) => {
+    const { adminResolveChargeReviewFor } = await import("./billing-review.server");
+    return adminResolveChargeReviewFor(context as AuthContext, data);
+  });

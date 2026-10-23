@@ -1,5 +1,6 @@
 // PG6-03: "Saúde da cobrança" — current billing health findings (last 24 h)
-// and the "Testar alerta" button. Super admin only (the admin page itself is
+// the "Testar alerta" button, and the charges waiting for review with the
+// "Resolver" action (BillingReviewList). Super admin only (the admin page itself is
 // gated, and both server functions re-check is_super_admin).
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -12,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { adminBillingHealth, adminTestBillingAlert } from "@/lib/billing/billing-health.functions";
 
 import { billingAlertTestMessage, billingHealthSummary } from "./billing-admin-ui";
+import { BillingReviewList } from "./billing-review-list";
 
 const BILLING_HEALTH_QUERY_KEY = ["admin", "billing", "health"];
 
@@ -106,6 +108,7 @@ export function BillingHealthCard() {
                 ))}
               </ul>
             )}
+            <BillingReviewList onResolved={() => void refetch()} />
             <p className="text-xs text-muted-foreground">
               Verificado em {new Date(data.checkedAt).toLocaleString("pt-BR")}.
             </p>
