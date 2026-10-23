@@ -49,6 +49,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Page, PageHeader } from "@/components/ui-premium/page-header";
 
 type Step =
   | { kind: "wait"; seconds: number }
@@ -521,17 +522,11 @@ export function JourneyEditor({
   const change = (i: number, value: Step) =>
     setSteps((all) => all.map((s, n) => (n === i ? value : s)));
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-6 p-4 sm:p-6">
+    <Page className="max-w-3xl">
       <Button variant="ghost" size="sm" onClick={() => navigate({ to: "/automacoes" })}>
         <ArrowLeft className="mr-1 h-4 w-4" /> Jornadas
       </Button>
-      <div>
-        <p className="text-xs font-medium uppercase tracking-[.18em] text-primary">
-          Jornadas multicanal
-        </p>
-        <h1 className="mt-1 text-2xl font-semibold">{id ? "Editar jornada" : "Nova jornada"}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">A jornada só envia após ser publicada.</p>
-      </div>
+      <PageHeader subtitle="A jornada só envia após ser publicada." />
       <div className="space-y-5 rounded-xl border p-5">
         {metrics && (
           <section className="rounded-lg border bg-muted/30 p-4 text-sm">
@@ -772,7 +767,7 @@ export function JourneyEditor({
             );
             return warnings.length ? (
               <ul
-                className="mt-3 space-y-1 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300"
+                className="mt-3 space-y-1 rounded-md border border-warning/30 bg-warning/10 p-3 text-xs text-warning"
                 role="status"
               >
                 {warnings.map((warning) => (
@@ -1006,7 +1001,7 @@ export function JourneyEditor({
           </div>
         </section>
         <section className="space-y-3">
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <JourneyFieldTitle
               helpId="sequence"
               activeHelp={activeHelp}
@@ -1015,7 +1010,7 @@ export function JourneyEditor({
             >
               Sequência
             </JourneyFieldTitle>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button type="button" size="sm" variant="outline" onClick={() => add("wait")}>
                 <Clock3 className="mr-1 h-4 w-4" /> Espera
               </Button>
@@ -1099,7 +1094,7 @@ export function JourneyEditor({
                   </select>
                   <Textarea value={s.content} readOnly placeholder="Conteúdo do template" />
                   {Array.isArray(s.extra?.variants) && s.extra.variants.length > 1 && (
-                    <p className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-300">
+                    <p className="rounded-md border border-warning/30 bg-warning/10 p-2 text-xs text-warning">
                       Este passo sorteia entre {s.extra.variants.length} variações a cada envio; o
                       texto acima é a primeira. Escolher um template substitui todas.
                     </p>
@@ -1207,6 +1202,6 @@ export function JourneyEditor({
           <Save className="mr-2 h-4 w-4" /> Salvar rascunho
         </Button>
       </div>
-    </div>
+    </Page>
   );
 }

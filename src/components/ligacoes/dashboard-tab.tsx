@@ -35,6 +35,7 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts";
+import { CHART_COLORS, chartAxisProps, chartGridProps, chartTooltipProps } from "@/lib/chart-theme";
 import { cn } from "@/lib/utils";
 import { MetricCard } from "@/components/ui-premium/metric-card";
 import { getCallsDashboard } from "@/lib/calls.functions";
@@ -83,13 +84,13 @@ function statusBadgeTone(status: string) {
     case "answered":
     case "completed":
     case "converted":
-      return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
+      return "bg-success/15 text-success border-success/30";
     case "not_answered":
-      return "bg-amber-500/15 text-amber-400 border-amber-500/30";
+      return "bg-warning/15 text-warning border-warning/30";
     case "busy":
-      return "bg-sky-500/15 text-sky-400 border-sky-500/30";
+      return "bg-info/15 text-info border-info/30";
     case "failed":
-      return "bg-rose-500/15 text-rose-400 border-rose-500/30";
+      return "bg-danger/15 text-danger border-danger/30";
     case "calling":
     case "pending":
       return "bg-primary/15 text-primary border-primary/30";
@@ -129,7 +130,7 @@ export function DashboardTab() {
       {/* Filtro de período */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold">Visão geral</h2>
+          <h2 className="text-section">Visão geral</h2>
           <p className="text-xs text-muted-foreground">
             Métricas operacionais atualizadas a cada 30s
           </p>
@@ -184,7 +185,7 @@ export function DashboardTab() {
       {/* Gráfico */}
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="flex items-center gap-2 text-base">
+          <CardTitle className="flex items-center gap-2">
             <TrendingUp className="h-4 w-4 text-primary" />
             Ligações por dia
           </CardTitle>
@@ -196,28 +197,22 @@ export function DashboardTab() {
           ) : (
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={data.by_day}>
-                <CartesianGrid stroke="var(--color-border)" strokeDasharray="3 3" />
+                <CartesianGrid {...chartGridProps} />
                 <XAxis
                   dataKey="date"
                   tickFormatter={(v) => formatDate(v + "T00:00:00", sameDay)}
-                  stroke="var(--color-muted-foreground)"
-                  fontSize={11}
+                  {...chartAxisProps}
                 />
-                <YAxis stroke="var(--color-muted-foreground)" fontSize={11} allowDecimals={false} />
+                <YAxis {...chartAxisProps} allowDecimals={false} />
                 <Tooltip
-                  contentStyle={{
-                    background: "var(--color-popover)",
-                    border: "1px solid var(--color-border)",
-                    borderRadius: 8,
-                    fontSize: 12,
-                  }}
+                  {...chartTooltipProps}
                   labelFormatter={(v) => formatDate(v + "T00:00:00", sameDay)}
                 />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
                 <Line
                   type="monotone"
                   dataKey="total"
-                  stroke="var(--color-primary)"
+                  stroke={CHART_COLORS.primary}
                   strokeWidth={2}
                   dot={false}
                   name="Total"
@@ -225,7 +220,7 @@ export function DashboardTab() {
                 <Line
                   type="monotone"
                   dataKey="answered"
-                  stroke="var(--color-chart-4)"
+                  stroke={CHART_COLORS.success}
                   strokeWidth={2}
                   dot={false}
                   name="Atendidas"
@@ -233,7 +228,7 @@ export function DashboardTab() {
                 <Line
                   type="monotone"
                   dataKey="failed"
-                  stroke="var(--color-destructive)"
+                  stroke={CHART_COLORS.danger}
                   strokeWidth={2}
                   dot={false}
                   name="Falhas"
@@ -248,7 +243,7 @@ export function DashboardTab() {
         {/* Top scripts */}
         <Card className="lg:col-span-1">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Top scripts</CardTitle>
+            <CardTitle>Top scripts</CardTitle>
             <CardDescription>Mais disparados no período (com taxa de atendimento).</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -276,7 +271,7 @@ export function DashboardTab() {
         {/* Últimas 10 */}
         <Card className="lg:col-span-2">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Últimas ligações</CardTitle>
+            <CardTitle>Últimas ligações</CardTitle>
             <CardDescription>10 mais recentes — atualizadas em tempo real.</CardDescription>
           </CardHeader>
           <CardContent>

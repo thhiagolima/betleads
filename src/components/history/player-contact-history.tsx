@@ -50,7 +50,9 @@ export function PlayerContactHistoryDialog({
         <DialogHeader>
           <DialogTitle>Histórico de contatos</DialogTitle>
           <DialogDescription>
-            {playerName ? `Tudo que já foi enviado para ${playerName}.` : "Tudo que já foi enviado para esse lead."}
+            {playerName
+              ? `Tudo que já foi enviado para ${playerName}.`
+              : "Tudo que já foi enviado para esse lead."}
           </DialogDescription>
         </DialogHeader>
         {q.isLoading ? (
@@ -74,16 +76,10 @@ export function PlayerContactHistoryDialog({
                       {new Date(it.at).toLocaleString("pt-BR")}
                     </span>
                     <StatusBadge color={it.status_color} label={it.status_label} />
-                    {it.flow && (
-                      <span className="text-muted-foreground">· {it.flow}</span>
-                    )}
-                    {it.step && (
-                      <span className="text-muted-foreground">· {it.step}</span>
-                    )}
+                    {it.flow && <span className="text-muted-foreground">· {it.flow}</span>}
+                    {it.step && <span className="text-muted-foreground">· {it.step}</span>}
                   </div>
-                  <p className="mt-1 text-xs text-muted-foreground line-clamp-2">
-                    {it.preview}
-                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground line-clamp-2">{it.preview}</p>
                 </div>
               </li>
             ))}

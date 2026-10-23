@@ -47,6 +47,7 @@ import {
 import { toast } from "sonner";
 import { useIsSuperAdmin } from "@/hooks/use-is-super-admin";
 import { requestConfirmation } from "@/components/system-dialog-host";
+import { Page, PageHeader } from "@/components/ui-premium/page-header";
 import {
   adminCreateUser,
   adminDeleteUser,
@@ -143,7 +144,7 @@ function AdminPage() {
     return (
       <Card className="max-w-md mx-auto mt-12">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-lg">
+          <CardTitle className="flex items-center gap-2">
             <ShieldCheck className="h-5 w-5" /> Acesso restrito
           </CardTitle>
         </CardHeader>
@@ -155,15 +156,8 @@ function AdminPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-          <ShieldCheck className="h-6 w-6 text-primary" /> Painel Super Admin
-        </h2>
-        <p className="text-sm text-muted-foreground">
-          Veja gastos, métricas e gerencie usuários da plataforma.
-        </p>
-      </div>
+    <Page>
+      <PageHeader subtitle="Veja gastos, métricas e gerencie usuários da plataforma." />
 
       <Tabs defaultValue="users" className="space-y-4">
         <TabsList>
@@ -206,7 +200,7 @@ function AdminPage() {
           <AdminIntegrationsTab />
         </TabsContent>
       </Tabs>
-    </div>
+    </Page>
   );
 }
 
@@ -270,6 +264,8 @@ function AdminIntegrationsTab() {
                   <Button
                     size="icon"
                     variant="outline"
+                    aria-label="Copiar callback"
+                    title="Copiar callback"
                     onClick={() => {
                       navigator.clipboard.writeText(item.callbackUrl);
                       toast.success("Callback copiado");
@@ -423,7 +419,12 @@ function ManageAccessButton({ userId, email }: { userId: string; email: string }
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button size="sm" variant="ghost" title="Gerenciar acessos">
+        <Button
+          size="sm"
+          variant="ghost"
+          title="Gerenciar acessos"
+          aria-label={`Gerenciar acessos de ${email}`}
+        >
           <Settings2 className="h-4 w-4" />
         </Button>
       </DialogTrigger>
@@ -625,6 +626,7 @@ function ImpersonateButton({ userId, email }: { userId: string; email: string })
         size="sm"
         variant="ghost"
         title="Entrar como"
+        aria-label={`Entrar como ${email}`}
         onClick={() => mut.mutate()}
         disabled={mut.isPending}
       >
@@ -713,7 +715,7 @@ function ToggleActiveButton({
       }}
       disabled={mut.isPending}
     >
-      {banned ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> : <Ban className="h-4 w-4" />}
+      {banned ? <CheckCircle2 className="h-4 w-4 text-success" /> : <Ban className="h-4 w-4" />}
     </Button>
   );
 }
@@ -732,8 +734,8 @@ function DeleteUserButton({ userId, email }: { userId: string; email: string }) 
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
-        <Button size="sm" variant="ghost" title="Excluir">
-          <Trash2 className="h-4 w-4 text-destructive" />
+        <Button size="sm" variant="ghost" title="Excluir" aria-label={`Excluir ${email}`}>
+          <Trash2 className="h-4 w-4 text-danger" />
         </Button>
       </AlertDialogTrigger>
       <AlertDialogContent>
@@ -843,9 +845,7 @@ function BalanceAdminTab() {
                     <div className="font-medium">{row.tenant_name ?? "Sem nome"}</div>
                     <div className="text-xs text-muted-foreground font-mono">{row.tenant_id}</div>
                     <div className="mt-1 flex gap-1">
-                      {row.exempt && (
-                        <Badge className="bg-emerald-500/15 text-emerald-400">Isenta</Badge>
-                      )}
+                      {row.exempt && <Badge className="bg-success/15 text-success">Isenta</Badge>}
                       {row.has_custom_pricing && (
                         <Badge className="bg-primary/15 text-primary">preço individual</Badge>
                       )}
@@ -1019,8 +1019,8 @@ function TenantPriceDialog({ tenant }: { tenant: WalletTenantRow }) {
         <DialogHeader>
           <DialogTitle>Preço individual da casa</DialogTitle>
           <DialogDescription>
-            Vale para um item só desta casa. Use &quot;Voltar ao padrão&quot; para remover a
-            exceção e voltar ao preço global.
+            Vale para um item só desta casa. Use &quot;Voltar ao padrão&quot; para remover a exceção
+            e voltar ao preço global.
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3 sm:grid-cols-2">
@@ -1100,7 +1100,7 @@ function SmsCreditOrdersCard({ orders }: { orders: SmsCreditOrderRow[] }) {
                 <TableCell className="text-right">{centsAdmin(order.amount_cents)}</TableCell>
                 <TableCell>
                   {order.status === "paid" ? (
-                    <Badge className="bg-emerald-500/15 text-emerald-400">pago</Badge>
+                    <Badge className="bg-success/15 text-success">pago</Badge>
                   ) : (
                     <Badge variant="secondary">{order.status}</Badge>
                   )}
@@ -1147,12 +1147,12 @@ function MetricsTab() {
         : items.map((it) => (
             <Card key={it.label}>
               <CardHeader className="pb-1">
-                <CardTitle className="text-xs text-muted-foreground font-medium">
+                <CardTitle className="text-label text-muted-foreground font-medium">
                   {it.label}
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold tracking-tight">{it.value}</div>
+                <div className="text-kpi">{it.value}</div>
               </CardContent>
             </Card>
           ))}

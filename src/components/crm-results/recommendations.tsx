@@ -6,15 +6,15 @@ import { type Data } from "./format";
 const SEVERITY_STYLE = {
   acao: {
     label: "Ação",
-    className: "border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-400",
+    className: "border-danger/40 bg-danger/10 text-danger",
   },
   atencao: {
     label: "Atenção",
-    className: "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400",
+    className: "border-warning/40 bg-warning/10 text-warning",
   },
   oportunidade: {
     label: "Oportunidade",
-    className: "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+    className: "border-success/40 bg-success/10 text-success",
   },
 } as const;
 
@@ -41,7 +41,7 @@ export function Recommendations({ data }: { data: Data }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Recomendações</CardTitle>
+        <CardTitle>Recomendações</CardTitle>
         <CardDescription>
           Regras aplicadas aos resultados do período, pelo Recuperado pelo CRM. Cada uma traz o
           número que a justifica; origens com menos de 5 jogadores convertidos não entram nas

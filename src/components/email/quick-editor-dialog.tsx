@@ -88,7 +88,8 @@ const DEFAULTS: Record<QuickModelo, Partial<QuickState>> = {
     objetivo: "Trazer o lead de volta para a plataforma",
     titulo: "Sentimos sua falta, {primeiro_nome}",
     saudacao: "Olá, {primeiro_nome}",
-    texto: "Notamos que faz um tempo que você não acessa. Sua conta continua ativa e com benefícios prontos para retorno imediato.",
+    texto:
+      "Notamos que faz um tempo que você não acessa. Sua conta continua ativa e com benefícios prontos para retorno imediato.",
     textoSecundario: "Volte hoje e aproveite a melhor condição da semana.",
     cupom: "VOLTOU",
     beneficio: "Cashback liberado para o seu retorno",
@@ -99,7 +100,8 @@ const DEFAULTS: Record<QuickModelo, Partial<QuickState>> = {
     objetivo: "Reforçar relacionamento com lead VIP",
     titulo: "Sua área VIP, {primeiro_nome}",
     saudacao: "Olá, {primeiro_nome}",
-    texto: "Como membro VIP, você tem acesso a condições exclusivas, suporte prioritário e benefícios diferenciados.",
+    texto:
+      "Como membro VIP, você tem acesso a condições exclusivas, suporte prioritário e benefícios diferenciados.",
     textoSecundario: "Continue aproveitando o que preparamos só para você.",
     cupom: "",
     beneficio: "Bônus VIP + cashback ampliado",
@@ -110,7 +112,8 @@ const DEFAULTS: Record<QuickModelo, Partial<QuickState>> = {
     objetivo: "Converter lead em depósito",
     titulo: "Sua condição está liberada, {primeiro_nome}",
     saudacao: "Olá, {primeiro_nome}",
-    texto: "Liberamos uma condição especial para você ativar agora. Aproveite enquanto está disponível.",
+    texto:
+      "Liberamos uma condição especial para você ativar agora. Aproveite enquanto está disponível.",
     textoSecundario: "Quanto antes ativar, melhor a condição.",
     cupom: "ATIVAR",
     beneficio: "+100% no próximo depósito",
@@ -121,7 +124,8 @@ const DEFAULTS: Record<QuickModelo, Partial<QuickState>> = {
     objetivo: "Reativar lead com saldo disponível",
     titulo: "Você tem saldo esperando, {primeiro_nome}",
     saudacao: "Olá, {primeiro_nome}",
-    texto: "Identificamos que seu saldo está disponível e sem movimentação. Que tal voltar e usar o que é seu?",
+    texto:
+      "Identificamos que seu saldo está disponível e sem movimentação. Que tal voltar e usar o que é seu?",
     textoSecundario: "Seu saldo continua disponível para uso imediato.",
     cupom: "",
     beneficio: "Saldo disponível: R$ {saldo}",
@@ -132,7 +136,8 @@ const DEFAULTS: Record<QuickModelo, Partial<QuickState>> = {
     objetivo: "Ativar primeiro depósito (FTD)",
     titulo: "Bem-vindo, {primeiro_nome}",
     saudacao: "Olá, {primeiro_nome}",
-    texto: "Estamos felizes em ter você aqui. Faça seu primeiro depósito e desbloqueie um bônus especial de boas-vindas.",
+    texto:
+      "Estamos felizes em ter você aqui. Faça seu primeiro depósito e desbloqueie um bônus especial de boas-vindas.",
     textoSecundario: "Comece com tudo. Aproveite o bônus de boas-vindas.",
     cupom: "PRIMEIRO",
     beneficio: "+100% no seu primeiro depósito",
@@ -143,7 +148,8 @@ const DEFAULTS: Record<QuickModelo, Partial<QuickState>> = {
     objetivo: "Relacionamento e fidelização",
     titulo: "Um recado pra você, {primeiro_nome}",
     saudacao: "Olá, {primeiro_nome}",
-    texto: "Queremos manter você sempre por perto. Por isso, preparamos novidades e benefícios pensados especialmente para o seu perfil.",
+    texto:
+      "Queremos manter você sempre por perto. Por isso, preparamos novidades e benefícios pensados especialmente para o seu perfil.",
     textoSecundario: "Conte com a gente sempre que precisar.",
     cupom: "",
     beneficio: "Atendimento e benefícios exclusivos",
@@ -210,8 +216,9 @@ export function renderQuickHtml(s: QuickState): string {
   const banner = s.bannerUrl.trim()
     ? `<tr><td style="padding:12px 0 0"><img src="${escAttr(s.bannerUrl)}" alt="${escAttr(s.bannerAlt)}" width="600" style="display:block;width:100%;max-width:600px;height:auto;border:0" /></td></tr>`
     : "";
-  const cardBeneficio = s.mostrarCard && (s.beneficio.trim() || s.cupom.trim())
-    ? `<tr><td style="padding:8px 24px 16px">
+  const cardBeneficio =
+    s.mostrarCard && (s.beneficio.trim() || s.cupom.trim())
+      ? `<tr><td style="padding:8px 24px 16px">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid ${s.corBordaCard};border-radius:12px;background:rgba(201,168,76,0.06)">
           <tr><td style="padding:18px 20px;text-align:center;font:600 16px/1.4 -apple-system,Segoe UI,Roboto,Arial,sans-serif;color:${s.corDestaque}">
             ${esc(s.beneficio) || "Benefício exclusivo"}
@@ -223,22 +230,25 @@ export function renderQuickHtml(s: QuickState): string {
           </td></tr>
         </table>
       </td></tr>`
-    : "";
-  const blocoExtra = s.mostrarBlocoExtra && textoSec
-    ? `<tr><td style="padding:0 24px 16px;font:400 14px/1.6 -apple-system,Segoe UI,Roboto,Arial,sans-serif;color:${s.corTextoSecundario};text-align:center">
+      : "";
+  const blocoExtra =
+    s.mostrarBlocoExtra && textoSec
+      ? `<tr><td style="padding:0 24px 16px;font:400 14px/1.6 -apple-system,Segoe UI,Roboto,Arial,sans-serif;color:${s.corTextoSecundario};text-align:center">
         ${textoSec}
       </td></tr>`
-    : "";
-  const linkAlt = s.mostrarLinkAlternativo && s.linkAlternativo.trim()
-    ? `<tr><td style="padding:6px 24px 18px;font:400 11px/1.5 -apple-system,Segoe UI,Roboto,Arial,sans-serif;color:${s.corTextoSecundario};text-align:center">
+      : "";
+  const linkAlt =
+    s.mostrarLinkAlternativo && s.linkAlternativo.trim()
+      ? `<tr><td style="padding:6px 24px 18px;font:400 11px/1.5 -apple-system,Segoe UI,Roboto,Arial,sans-serif;color:${s.corTextoSecundario};text-align:center">
         ${esc(s.linkAlternativo)}
       </td></tr>`
-    : "";
-  const urgencia = s.mostrarUrgencia && s.textoUrgencia.trim()
-    ? `<tr><td style="padding:0 24px 18px;text-align:center">
+      : "";
+  const urgencia =
+    s.mostrarUrgencia && s.textoUrgencia.trim()
+      ? `<tr><td style="padding:0 24px 18px;text-align:center">
         <span style="display:inline-block;padding:6px 12px;border-radius:999px;background:rgba(239,68,68,0.12);color:#fecaca;font:600 11px/1 -apple-system,Segoe UI,Roboto,Arial,sans-serif;letter-spacing:1px;text-transform:uppercase">⚠ ${esc(s.textoUrgencia)}</span>
       </td></tr>`
-    : "";
+      : "";
 
   return `<!doctype html>
 <html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>${esc(s.assunto)}</title></head>
@@ -310,7 +320,7 @@ export function QuickEditorDialog({
   }
 
   function changeModelo(m: QuickModelo) {
-    setState((s) => ({ ...s, modelo: m, ...DEFAULTS[m] } as QuickState));
+    setState((s) => ({ ...s, modelo: m, ...DEFAULTS[m] }) as QuickState);
   }
 
   const html = useMemo(() => renderQuickHtml(state), [state]);
@@ -358,14 +368,25 @@ export function QuickEditorDialog({
             <Block title="1. Identificação">
               <Grid2>
                 <Field label="Nome do template">
-                  <Input value={state.nome} onChange={(e) => set("nome", e.target.value)} placeholder="Ex: Retorno dia 1" />
+                  <Input
+                    value={state.nome}
+                    onChange={(e) => set("nome", e.target.value)}
+                    placeholder="Ex: Retorno dia 1"
+                  />
                 </Field>
                 <Field label="Modelo do e-mail">
-                  <Select value={state.modelo} onValueChange={(v) => changeModelo(v as QuickModelo)}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
+                  <Select
+                    value={state.modelo}
+                    onValueChange={(v) => changeModelo(v as QuickModelo)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
                     <SelectContent>
                       {QUICK_MODELOS.map((m) => (
-                        <SelectItem key={m.id} value={m.id}>{m.label}</SelectItem>
+                        <SelectItem key={m.id} value={m.id}>
+                          {m.label}
+                        </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -380,14 +401,22 @@ export function QuickEditorDialog({
                   <Input value={state.assunto} onChange={(e) => set("assunto", e.target.value)} />
                 </Field>
                 <Field label="Preheader" full>
-                  <Input value={state.preheader} onChange={(e) => set("preheader", e.target.value)} />
+                  <Input
+                    value={state.preheader}
+                    onChange={(e) => set("preheader", e.target.value)}
+                  />
                 </Field>
               </Grid2>
             </Block>
 
             <Block title="2. Imagens">
               <div className="space-y-3">
-                <ImageField label="Logo" value={state.logoUrl} onChange={(v) => set("logoUrl", v)} maxW={200} />
+                <ImageField
+                  label="Logo"
+                  value={state.logoUrl}
+                  onChange={(v) => set("logoUrl", v)}
+                  maxW={200}
+                />
                 <ImageField
                   label="Banner principal"
                   value={state.bannerUrl}
@@ -407,13 +436,24 @@ export function QuickEditorDialog({
                   <Input value={state.titulo} onChange={(e) => set("titulo", e.target.value)} />
                 </Field>
                 <Field label="Texto principal" full>
-                  <Textarea rows={4} value={state.texto} onChange={(e) => set("texto", e.target.value)} />
+                  <Textarea
+                    rows={4}
+                    value={state.texto}
+                    onChange={(e) => set("texto", e.target.value)}
+                  />
                 </Field>
                 <Field label="Texto secundário (bloco extra)" full>
-                  <Textarea rows={2} value={state.textoSecundario} onChange={(e) => set("textoSecundario", e.target.value)} />
+                  <Textarea
+                    rows={2}
+                    value={state.textoSecundario}
+                    onChange={(e) => set("textoSecundario", e.target.value)}
+                  />
                 </Field>
                 <Field label="Benefício">
-                  <Input value={state.beneficio} onChange={(e) => set("beneficio", e.target.value)} />
+                  <Input
+                    value={state.beneficio}
+                    onChange={(e) => set("beneficio", e.target.value)}
+                  />
                 </Field>
                 <Field label="Cupom">
                   <Input value={state.cupom} onChange={(e) => set("cupom", e.target.value)} />
@@ -425,36 +465,90 @@ export function QuickEditorDialog({
                   <Input value={state.ctaUrl} onChange={(e) => set("ctaUrl", e.target.value)} />
                 </Field>
                 <Field label="Link alternativo" full>
-                  <Input value={state.linkAlternativo} onChange={(e) => set("linkAlternativo", e.target.value)} />
+                  <Input
+                    value={state.linkAlternativo}
+                    onChange={(e) => set("linkAlternativo", e.target.value)}
+                  />
                 </Field>
                 <Field label="Texto de urgência" full>
-                  <Input value={state.textoUrgencia} onChange={(e) => set("textoUrgencia", e.target.value)} />
+                  <Input
+                    value={state.textoUrgencia}
+                    onChange={(e) => set("textoUrgencia", e.target.value)}
+                  />
                 </Field>
                 <Field label="Rodapé" full>
-                  <Textarea rows={2} value={state.rodape} onChange={(e) => set("rodape", e.target.value)} />
+                  <Textarea
+                    rows={2}
+                    value={state.rodape}
+                    onChange={(e) => set("rodape", e.target.value)}
+                  />
                 </Field>
               </Grid2>
             </Block>
 
             <Block title="4. Blocos visíveis">
               <div className="grid grid-cols-2 gap-3">
-                <Toggle label="Card de benefício" value={state.mostrarCard} onChange={(v) => set("mostrarCard", v)} />
-                <Toggle label="Bloco extra (texto secundário)" value={state.mostrarBlocoExtra} onChange={(v) => set("mostrarBlocoExtra", v)} />
-                <Toggle label="Link alternativo" value={state.mostrarLinkAlternativo} onChange={(v) => set("mostrarLinkAlternativo", v)} />
-                <Toggle label="Aviso de urgência" value={state.mostrarUrgencia} onChange={(v) => set("mostrarUrgencia", v)} />
+                <Toggle
+                  label="Card de benefício"
+                  value={state.mostrarCard}
+                  onChange={(v) => set("mostrarCard", v)}
+                />
+                <Toggle
+                  label="Bloco extra (texto secundário)"
+                  value={state.mostrarBlocoExtra}
+                  onChange={(v) => set("mostrarBlocoExtra", v)}
+                />
+                <Toggle
+                  label="Link alternativo"
+                  value={state.mostrarLinkAlternativo}
+                  onChange={(v) => set("mostrarLinkAlternativo", v)}
+                />
+                <Toggle
+                  label="Aviso de urgência"
+                  value={state.mostrarUrgencia}
+                  onChange={(v) => set("mostrarUrgencia", v)}
+                />
               </div>
             </Block>
 
             <Block title="5. Cores">
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                <Color label="Fundo geral" value={state.bgGeral} onChange={(v) => set("bgGeral", v)} />
-                <Color label="Fundo do container" value={state.bgContainer} onChange={(v) => set("bgContainer", v)} />
-                <Color label="Texto principal" value={state.corTexto} onChange={(v) => set("corTexto", v)} />
-                <Color label="Texto secundário" value={state.corTextoSecundario} onChange={(v) => set("corTextoSecundario", v)} />
-                <Color label="Destaque" value={state.corDestaque} onChange={(v) => set("corDestaque", v)} />
+                <Color
+                  label="Fundo geral"
+                  value={state.bgGeral}
+                  onChange={(v) => set("bgGeral", v)}
+                />
+                <Color
+                  label="Fundo do container"
+                  value={state.bgContainer}
+                  onChange={(v) => set("bgContainer", v)}
+                />
+                <Color
+                  label="Texto principal"
+                  value={state.corTexto}
+                  onChange={(v) => set("corTexto", v)}
+                />
+                <Color
+                  label="Texto secundário"
+                  value={state.corTextoSecundario}
+                  onChange={(v) => set("corTextoSecundario", v)}
+                />
+                <Color
+                  label="Destaque"
+                  value={state.corDestaque}
+                  onChange={(v) => set("corDestaque", v)}
+                />
                 <Color label="Botão" value={state.corBotao} onChange={(v) => set("corBotao", v)} />
-                <Color label="Texto do botão" value={state.corBotaoTexto} onChange={(v) => set("corBotaoTexto", v)} />
-                <Color label="Borda do card" value={state.corBordaCard} onChange={(v) => set("corBordaCard", v)} />
+                <Color
+                  label="Texto do botão"
+                  value={state.corBotaoTexto}
+                  onChange={(v) => set("corBotaoTexto", v)}
+                />
+                <Color
+                  label="Borda do card"
+                  value={state.corBordaCard}
+                  onChange={(v) => set("corBordaCard", v)}
+                />
               </div>
             </Block>
           </div>
@@ -468,22 +562,30 @@ export function QuickEditorDialog({
               <div className="flex rounded-md border border-border overflow-hidden">
                 <button
                   type="button"
-                  className={cn("px-2 py-1 text-xs flex items-center gap-1", device === "desktop" ? "bg-primary/15 text-primary" : "text-muted-foreground")}
+                  className={cn(
+                    "px-2 py-1 text-xs flex items-center gap-1",
+                    device === "desktop" ? "bg-primary/15 text-primary" : "text-muted-foreground",
+                  )}
                   onClick={() => setDevice("desktop")}
                 >
                   <Monitor className="h-3 w-3" /> Desktop
                 </button>
                 <button
                   type="button"
-                  className={cn("px-2 py-1 text-xs flex items-center gap-1", device === "mobile" ? "bg-primary/15 text-primary" : "text-muted-foreground")}
+                  className={cn(
+                    "px-2 py-1 text-xs flex items-center gap-1",
+                    device === "mobile" ? "bg-primary/15 text-primary" : "text-muted-foreground",
+                  )}
                   onClick={() => setDevice("mobile")}
                 >
                   <Smartphone className="h-3 w-3" /> Mobile
                 </button>
               </div>
             </div>
-            <div className="px-4 py-2 border-b border-border/50 bg-background/40 text-[11px] space-y-0.5">
-              <div className="text-foreground font-semibold truncate">{state.assunto || "(sem assunto)"}</div>
+            <div className="px-4 py-2 border-b border-border/50 bg-background/40 text-meta space-y-0.5">
+              <div className="text-foreground font-semibold truncate">
+                {state.assunto || "(sem assunto)"}
+              </div>
               <div className="text-muted-foreground truncate">
                 <span className="font-medium">{state.fromName || "—"}</span>{" "}
                 <span className="opacity-70">— {state.preheader || "(sem pré-header)"}</span>
@@ -511,11 +613,18 @@ export function QuickEditorDialog({
         </div>
 
         <div className="flex items-center justify-between gap-2 px-6 py-3 border-t border-border/50 bg-background/60">
-          <Button variant="outline" onClick={abrirAvancado} className="gap-2" disabled={!onOpenAdvanced}>
+          <Button
+            variant="outline"
+            onClick={abrirAvancado}
+            className="gap-2"
+            disabled={!onOpenAdvanced}
+          >
             <Wand2 className="h-4 w-4" /> Editar no modo avançado
           </Button>
           <div className="flex items-center gap-2">
-            <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancelar</Button>
+            <Button variant="ghost" onClick={() => onOpenChange(false)}>
+              Cancelar
+            </Button>
             <Button onClick={salvar} className="gap-2">
               <CheckCircle2 className="h-4 w-4" /> Salvar template
             </Button>
@@ -541,16 +650,32 @@ function Grid2({ children }: { children: React.ReactNode }) {
   return <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{children}</div>;
 }
 
-function Field({ label, full, children }: { label: string; full?: boolean; children: React.ReactNode }) {
+function Field({
+  label,
+  full,
+  children,
+}: {
+  label: string;
+  full?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <div className={cn("space-y-1", full && "sm:col-span-2")}>
-      <Label className="text-[11px] text-muted-foreground">{label}</Label>
+      <Label className="text-meta text-muted-foreground">{label}</Label>
       {children}
     </div>
   );
 }
 
-function Toggle({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
+function Toggle({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: boolean;
+  onChange: (v: boolean) => void;
+}) {
   return (
     <div className="flex items-center justify-between rounded-md border border-border/60 px-3 py-2 bg-muted/20">
       <span className="text-xs">{label}</span>
@@ -559,10 +684,18 @@ function Toggle({ label, value, onChange }: { label: string; value: boolean; onC
   );
 }
 
-function Color({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+function Color({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
   return (
     <div className="space-y-1">
-      <Label className="text-[11px] text-muted-foreground">{label}</Label>
+      <Label className="text-meta text-muted-foreground">{label}</Label>
       <div className="flex items-center gap-2">
         <input
           type="color"
@@ -570,7 +703,11 @@ function Color({ label, value, onChange }: { label: string; value: string; onCha
           onChange={(e) => onChange(e.target.value)}
           className="h-9 w-10 rounded-md border border-border bg-transparent cursor-pointer"
         />
-        <Input value={value} onChange={(e) => onChange(e.target.value)} className="text-xs font-mono" />
+        <Input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="text-xs font-mono"
+        />
       </div>
     </div>
   );
@@ -641,22 +778,49 @@ function ImageField({
             e.target.value = "";
           }}
         />
-        <Button type="button" size="sm" variant="outline" disabled={uploading} onClick={() => inputRef.current?.click()} className="gap-1.5 shrink-0">
-          {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={uploading}
+          onClick={() => inputRef.current?.click()}
+          className="gap-1.5 shrink-0"
+        >
+          {uploading ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Upload className="h-3.5 w-3.5" />
+          )}
           Enviar
         </Button>
         {value && (
-          <Button type="button" size="sm" variant="ghost" onClick={() => onChange("")} className="shrink-0 text-destructive hover:text-destructive">
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            aria-label="Remover imagem"
+            onClick={() => onChange("")}
+            className="shrink-0 text-destructive hover:text-destructive"
+          >
             <Trash2 className="h-3.5 w-3.5" />
           </Button>
         )}
       </div>
       {onAltChange && (
-        <Input value={altValue || ""} onChange={(e) => onAltChange(e.target.value)} placeholder="Alt text" className="text-xs" />
+        <Input
+          value={altValue || ""}
+          onChange={(e) => onAltChange(e.target.value)}
+          placeholder="Alt text"
+          className="text-xs"
+        />
       )}
       {value && (
         <div className="rounded-md border border-border/60 bg-background p-2 flex justify-center">
-          <img src={value} alt={altValue || label} style={{ maxWidth: maxW, width: "100%", height: "auto", display: "block" }} />
+          <img
+            src={value}
+            alt={altValue || label}
+            style={{ maxWidth: maxW, width: "100%", height: "auto", display: "block" }}
+          />
         </div>
       )}
     </div>

@@ -1,8 +1,8 @@
 import { createFileRoute, Outlet, useLocation } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { BarChart3, Link2 } from "lucide-react";
+import { BarChart3 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { PageHeader } from "@/components/ui-premium";
+import { Page, PageHeader } from "@/components/ui-premium/page-header";
 import { getLinkTrackingOverview } from "@/lib/shortio.functions";
 
 export const Route = createFileRoute("/links")({ component: LinksPage });
@@ -21,12 +21,8 @@ function LinksOverview() {
   });
   const data = overview.data;
   return (
-    <div className="space-y-6 p-4 md:p-6">
-      <PageHeader
-        title="Links rastreados"
-        subtitle="Cliques Short.io dos últimos 30 dias."
-        icon={<Link2 className="h-5 w-5" />}
-      />
+    <Page>
+      <PageHeader subtitle="Cliques Short.io dos últimos 30 dias." />
       <div className="grid gap-4 md:grid-cols-2">
         <Metric title="Links enviados" value={data?.sent ?? 0} />
         <Metric title="Cliques" value={data?.clicks ?? 0} />
@@ -70,7 +66,7 @@ function LinksOverview() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </Page>
   );
 }
 function Metric({ title, value }: { title: string; value: number }) {
@@ -80,7 +76,7 @@ function Metric({ title, value }: { title: string; value: number }) {
         <CardTitle className="text-sm font-medium">{title}</CardTitle>
       </CardHeader>
       <CardContent>
-        <p className="text-3xl font-bold">{value.toLocaleString("pt-BR")}</p>
+        <p className="text-kpi tabular-nums">{value.toLocaleString("pt-BR")}</p>
       </CardContent>
     </Card>
   );

@@ -82,6 +82,7 @@ import {
   walletEntryTypeLabel,
 } from "@/lib/format";
 import { requestConfirmation } from "@/components/system-dialog-host";
+import { Page, PageHeader } from "@/components/ui-premium/page-header";
 import { MetricCard as DashboardMetricCard } from "@/components/ui-premium/metric-card";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
@@ -202,11 +203,9 @@ function cents(value: number | null | undefined) {
 }
 
 function statusBadge(status: TenantRow["status"]) {
-  if (status === "active")
-    return <Badge className="bg-emerald-500/15 text-emerald-400">ativo</Badge>;
-  if (status === "trial") return <Badge className="bg-blue-500/15 text-blue-300">trial</Badge>;
-  if (status === "suspended")
-    return <Badge className="bg-amber-500/15 text-amber-300">suspenso</Badge>;
+  if (status === "active") return <Badge className="bg-success/15 text-success">ativo</Badge>;
+  if (status === "trial") return <Badge className="bg-info/15 text-info">trial</Badge>;
+  if (status === "suspended") return <Badge className="bg-warning/15 text-warning">suspenso</Badge>;
   return <Badge variant="destructive">cancelado</Badge>;
 }
 
@@ -244,34 +243,27 @@ function TenantsPage() {
   }, [search, tenants]);
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-lg bg-primary/15 text-primary">
-            <Building2 className="h-6 w-6" />
-          </div>
-          <h1 className="text-3xl font-bold tracking-tight">
-            {consoleData?.isSuperAdmin ? "Contas" : "Conta e equipe"}
-          </h1>
-          <p className="text-muted-foreground">
-            Gestão de contas, usuários, saldo, relatórios e auditoria da operação.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            onClick={() => qc.invalidateQueries({ queryKey: ["tenants-console"] })}
-          >
-            Atualizar
-          </Button>
-          {consoleData?.isSuperAdmin && <CreateTenantDialog />}
-        </div>
-      </div>
+    <Page>
+      <PageHeader
+        title={consoleData?.isSuperAdmin ? "Contas" : "Conta e equipe"}
+        subtitle="Gestão de contas, usuários, saldo, relatórios e auditoria da operação."
+        actions={
+          <>
+            <Button
+              variant="outline"
+              onClick={() => qc.invalidateQueries({ queryKey: ["tenants-console"] })}
+            >
+              Atualizar
+            </Button>
+            {consoleData?.isSuperAdmin && <CreateTenantDialog />}
+          </>
+        }
+      />
 
       <div className="grid gap-4 xl:grid-cols-[330px_1fr]">
         <Card className="h-fit">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
+            <CardTitle className="flex items-center gap-2">
               <ShieldCheck className="h-4 w-4 text-primary" />
               Contas
             </CardTitle>
@@ -346,7 +338,7 @@ function TenantsPage() {
           </Card>
         )}
       </div>
-    </div>
+    </Page>
   );
 }
 
@@ -498,9 +490,7 @@ function OverviewTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAd
             <div className="rounded-lg border border-border/70 p-3 text-sm">
               <div className="text-muted-foreground">Margem estimada por SMS</div>
               <div
-                className={
-                  margin >= 0 ? "font-semibold text-emerald-400" : "font-semibold text-red-400"
-                }
+                className={margin >= 0 ? "font-semibold text-success" : "font-semibold text-danger"}
               >
                 {brlUnitPrice(margin)}
               </div>
@@ -528,7 +518,7 @@ function Info({
 }) {
   return (
     <div className="rounded-lg border border-border/70 p-3">
-      <div className="text-xs uppercase tracking-[0.14em] text-muted-foreground">{label}</div>
+      <div className="text-label text-muted-foreground">{label}</div>
       <div className={`mt-1 break-words font-medium ${mono ? "font-mono text-xs" : ""}`}>
         {value}
       </div>
@@ -540,9 +530,7 @@ function HealthLine({ label, ok }: { label: string; ok: boolean }) {
   return (
     <div className="flex items-center justify-between rounded-lg border border-border/70 px-3 py-2 text-sm">
       <span>{label}</span>
-      <Badge
-        className={ok ? "bg-emerald-500/15 text-emerald-400" : "bg-amber-500/15 text-amber-300"}
-      >
+      <Badge className={ok ? "bg-success/15 text-success" : "bg-warning/15 text-warning"}>
         {ok ? "ok" : "atenção"}
       </Badge>
     </div>
@@ -603,7 +591,7 @@ function UsersTab({
                   {user.banned_until && new Date(user.banned_until) > new Date() ? (
                     <Badge variant="destructive">bloqueado</Badge>
                   ) : (
-                    <Badge className="bg-emerald-500/15 text-emerald-400">ativo</Badge>
+                    <Badge className="bg-success/15 text-success">ativo</Badge>
                   )}
                 </TableCell>
                 <TableCell className="text-right">
@@ -777,6 +765,7 @@ function RemoveUserButton({ tenantId, user }: { tenantId: string; user: TenantUs
         variant="ghost"
         disabled={isDemo || mut.isPending}
         aria-label={`Remover ${label} da conta`}
+        title={`Remover ${label} da conta`}
         onClick={async () => {
           const confirmed = await requestConfirmation({
             title: "Remover usuário da conta?",
@@ -787,7 +776,7 @@ function RemoveUserButton({ tenantId, user }: { tenantId: string; user: TenantUs
           if (confirmed) mut.mutate();
         }}
       >
-        <Trash2 className="h-4 w-4 text-destructive" />
+        <Trash2 className="h-4 w-4 text-danger" />
       </Button>
     </DemoDisabledTooltip>
   );
@@ -828,13 +817,13 @@ function CreditsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAdm
       <div className="grid gap-4 lg:grid-cols-3">
         <Card>
           <CardContent className="p-5">
-            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+            <div className="flex items-center gap-2 text-label text-muted-foreground">
               Saldo disponível
               {detail.sms.summary.exempt && (
-                <Badge className="bg-emerald-500/15 text-emerald-400">Isenta</Badge>
+                <Badge className="bg-success/15 text-success">Isenta</Badge>
               )}
             </div>
-            <div className="mt-2 text-4xl font-bold">{brl(balance)}</div>
+            <div className="mt-2 text-kpi">{brl(balance)}</div>
             <div className="mt-1 text-sm text-muted-foreground">
               {brl(Number(detail.sms.summary.lifetime_used ?? 0))} consumidos historicamente
             </div>
@@ -842,12 +831,8 @@ function CreditsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAdm
         </Card>
         <Card>
           <CardContent className="p-5">
-            <div className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-              Preço venda/SMS
-            </div>
-            <div className="mt-2 text-3xl font-bold">
-              {brlUnitPrice(Number(pricing.unit_price ?? 0))}
-            </div>
+            <div className="text-label text-muted-foreground">Preço venda/SMS</div>
+            <div className="mt-2 text-kpi">{brlUnitPrice(Number(pricing.unit_price ?? 0))}</div>
             {isSuperAdmin && (
               <div className="mt-1 text-sm text-muted-foreground">
                 custo fornecedor {brlUnitPrice(Number(pricing.provider_unit_cost ?? 0))}
@@ -1116,7 +1101,10 @@ function PricingDialog({
               Voltar ao padrão
             </Button>
           )}
-          <Button disabled={save.isPending || unitPrice.trim() === ""} onClick={() => save.mutate()}>
+          <Button
+            disabled={save.isPending || unitPrice.trim() === ""}
+            onClick={() => save.mutate()}
+          >
             Salvar
           </Button>
         </DialogFooter>
@@ -1140,10 +1128,8 @@ function ReportsTab({ detail }: { detail: TenantDetail }) {
       {items.map((item) => (
         <Card key={item.label}>
           <CardContent className="p-5">
-            <div className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-              {item.label}
-            </div>
-            <div className="mt-2 text-3xl font-bold">{num(item.value)}</div>
+            <div className="text-label text-muted-foreground">{item.label}</div>
+            <div className="mt-2 text-kpi">{num(item.value)}</div>
           </CardContent>
         </Card>
       ))}

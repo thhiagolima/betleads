@@ -1,7 +1,6 @@
 import { createFileRoute, useLocation, useNavigate } from "@tanstack/react-router";
-import { Phone } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { PageHeader } from "@/components/ui-premium";
+import { Page, PageHeader } from "@/components/ui-premium/page-header";
 import { SendWindowCard } from "@/components/send-window-card";
 import { ProvidersPausedBanner } from "@/components/providers-paused-banner";
 import { ActiveTenantWalletNotice } from "@/components/billing/active-tenant-wallet-notice";
@@ -14,15 +13,6 @@ import { DashboardTab } from "@/components/ligacoes/dashboard-tab";
 import { VoiceAssetsTab } from "@/components/ligacoes/voice-assets-tab";
 
 export const Route = createFileRoute("/ligacoes")({
-  head: () => ({
-    meta: [
-      { title: "Voz — BETLEADS" },
-      {
-        name: "description",
-        content: "Central de voz com áudios enviados, disponibilidade e fila de chamadas.",
-      },
-    ],
-  }),
   component: LigacoesPage,
 });
 
@@ -34,12 +24,8 @@ function LigacoesPage() {
   const currentTab = (VALID_TABS as readonly string[]).includes(hash) ? hash : "dashboard";
 
   return (
-    <div className="space-y-6 p-6">
-      <PageHeader
-        icon={<Phone />}
-        title="Voz"
-        subtitle="Envie áudios e acompanhe a disponibilidade e a fila de chamadas."
-      />
+    <Page>
+      <PageHeader subtitle="Envie áudios e acompanhe a disponibilidade e a fila de chamadas." />
       <ProvidersPausedBanner channel="call" />
       <ActiveTenantWalletNotice />
 
@@ -95,6 +81,6 @@ function LigacoesPage() {
           />
         </TabsContent>
       </Tabs>
-    </div>
+    </Page>
   );
 }

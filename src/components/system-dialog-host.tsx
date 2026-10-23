@@ -103,7 +103,12 @@ export function SystemDialogHost() {
   if (current.kind === "confirm") {
     const options = current.options;
     return (
-      <AlertDialog open onOpenChange={(open) => { if (!open) finish(current, false); }}>
+      <AlertDialog
+        open
+        onOpenChange={(open) => {
+          if (!open) finish(current, false);
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{options.title}</AlertDialogTitle>
@@ -114,7 +119,10 @@ export function SystemDialogHost() {
               {options.cancelLabel ?? "Cancelar"}
             </AlertDialogCancel>
             <AlertDialogAction
-              className={cn(options.destructive && "bg-destructive text-destructive-foreground hover:bg-destructive/90")}
+              className={cn(
+                options.destructive &&
+                  "bg-destructive text-destructive-foreground hover:bg-destructive/90",
+              )}
               onClick={() => finish(current, true)}
             >
               {options.confirmLabel ?? "Confirmar"}
@@ -126,9 +134,16 @@ export function SystemDialogHost() {
   }
 
   const options = current.options;
-  const valid = input.trim().length > 0 && (options.inputType !== "email" || /^\S+@\S+\.\S+$/.test(input.trim()));
+  const valid =
+    input.trim().length > 0 &&
+    (options.inputType !== "email" || /^\S+@\S+\.\S+$/.test(input.trim()));
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) finish(current, null); }}>
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) finish(current, null);
+      }}
+    >
       <DialogContent>
         <form
           className="space-y-5"
@@ -141,7 +156,7 @@ export function SystemDialogHost() {
             <DialogTitle>{options.title}</DialogTitle>
             <DialogDescription>{options.description}</DialogDescription>
           </DialogHeader>
-          <label className="block space-y-2 text-sm font-medium">
+          <label className="block space-y-2 text-label font-medium">
             <span>{options.label}</span>
             <Input
               autoFocus
@@ -152,8 +167,12 @@ export function SystemDialogHost() {
             />
           </label>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => finish(current, null)}>Cancelar</Button>
-            <Button type="submit" disabled={!valid}>{options.confirmLabel ?? "Continuar"}</Button>
+            <Button type="button" variant="outline" onClick={() => finish(current, null)}>
+              Cancelar
+            </Button>
+            <Button type="submit" disabled={!valid}>
+              {options.confirmLabel ?? "Continuar"}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>

@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
-import { Download, ShieldCheck, Upload } from "lucide-react";
+import { Download, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Page, PageHeader } from "@/components/ui-premium/page-header";
 import {
   Table,
   TableBody,
@@ -182,25 +183,20 @@ function ConsentPage() {
   });
 
   return (
-    <div className="space-y-6 p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="flex items-center gap-2 text-2xl font-semibold">
-            <ShieldCheck className="size-6" /> Consentimentos e supressões
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Bloqueio central de SMS, e-mail e voz, com trilha de auditoria por conta.
-          </p>
-        </div>
-        <Button
-          variant="outline"
-          onClick={() => exportCsv.mutate()}
-          disabled={exportCsv.isPending || (!debouncedSearch && total === 0)}
-        >
-          <Download className="mr-2 size-4" />
-          {exportCsv.isPending ? "Exportando…" : "Exportar CSV"}
-        </Button>
-      </div>
+    <Page>
+      <PageHeader
+        subtitle="Bloqueio central de SMS, e-mail e voz, com trilha de auditoria por conta."
+        actions={
+          <Button
+            variant="outline"
+            onClick={() => exportCsv.mutate()}
+            disabled={exportCsv.isPending || (!debouncedSearch && total === 0)}
+          >
+            <Download className="mr-2 size-4" />
+            {exportCsv.isPending ? "Exportando…" : "Exportar CSV"}
+          </Button>
+        }
+      />
 
       <Card>
         <CardHeader>
@@ -441,6 +437,6 @@ function ConsentPage() {
           </div>
         </CardContent>
       </Card>
-    </div>
+    </Page>
   );
 }

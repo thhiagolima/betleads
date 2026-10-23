@@ -32,7 +32,7 @@ export function PlayerJourneysCard({ playerId }: { playerId: string }) {
     <Card className="border-border/50 bg-card/70">
       <CardContent className="space-y-4 p-5">
         <div>
-          <div className="text-base font-semibold">Jornadas</div>
+          <div className="text-section">Jornadas</div>
           <div className="text-sm text-muted-foreground">
             Em que réguas o jogador está, o próximo envio e por que saiu das anteriores.
           </div>

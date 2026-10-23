@@ -77,7 +77,10 @@ import { fromBrtInput, toBrtInput } from "@/components/journeys/journey-editor-c
 import { getComposerOptions } from "@/lib/house-config.functions";
 import { COMPOSER_OPTIONS_QUERY_KEY } from "@/components/house-config/house-config-query";
 import { ShortDomainSelect } from "@/components/house-config/short-domain-select";
-import { EmailSenderSelect, EMAIL_BLOCKED_WARNING } from "@/components/house-config/email-sender-select";
+import {
+  EmailSenderSelect,
+  EMAIL_BLOCKED_WARNING,
+} from "@/components/house-config/email-sender-select";
 import {
   EmailBlockedNotice,
   ShortenerFallbackNotice,
@@ -860,8 +863,8 @@ export function ChannelCampaignComposer({
               )}
               {channel === "sms" && when === "schedule" && audienceCriteria ? (
                 <p className="text-xs text-muted-foreground">
-                  Contagem de agora. No horário agendado o público é recalculado: entra quem
-                  passou a se enquadrar e sai quem deixou de se enquadrar.
+                  Contagem de agora. No horário agendado o público é recalculado: entra quem passou
+                  a se enquadrar e sai quem deixou de se enquadrar.
                 </p>
               ) : null}
               {channel === "sms" && smsPhones.length > 0 ? (
@@ -947,8 +950,8 @@ export function ChannelCampaignComposer({
                     onChange={setSmsContent}
                   />
                   <p className="text-xs text-muted-foreground">
-                    {Array.from(smsContent).length} caracteres · {smsSegmentInfo.encoding} ·{" "}
-                    {parts} segmento{parts === 1 ? "" : "s"} ·{" "}
+                    {Array.from(smsContent).length} caracteres · {smsSegmentInfo.encoding} · {parts}{" "}
+                    segmento{parts === 1 ? "" : "s"} ·{" "}
                     {smsExempt
                       ? "casa isenta"
                       : smsCostBrl == null
@@ -1181,7 +1184,7 @@ export function ChannelCampaignComposer({
               )}
             </div>
             <label
-              className="flex cursor-pointer items-start gap-3 rounded-lg border border-amber-500/35 bg-amber-500/5 p-3 text-sm"
+              className="flex cursor-pointer items-start gap-3 rounded-lg border border-warning/35 bg-warning/5 p-3 text-sm"
               htmlFor={fieldIds.risk}
             >
               <Checkbox
@@ -1201,7 +1204,7 @@ export function ChannelCampaignComposer({
             {validationIssues.length > 0 && (
               <div
                 id={fieldIds.validation}
-                className="rounded-lg border border-amber-500/35 bg-amber-500/5 p-3 text-sm"
+                className="rounded-lg border border-warning/35 bg-warning/5 p-3 text-sm"
                 role="status"
                 aria-live="polite"
               >
@@ -1218,7 +1221,7 @@ export function ChannelCampaignComposer({
           </div>
           <Card className="h-fit border-primary/25">
             <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base">
+              <CardTitle className="flex items-center gap-2 text-section">
                 <MetaIcon className={`size-4 ${channelMeta[channel].tone}`} />
                 Prévia e validação
               </CardTitle>
@@ -1228,7 +1231,7 @@ export function ChannelCampaignComposer({
               <p>
                 <strong>{num(sendableRecipients)}</strong> destinatário(s)
                 {smsPreview && smsPreview.unresolvedCount > 0 ? (
-                  <span className="block text-xs text-amber-600 dark:text-amber-400">
+                  <span className="block text-xs text-warning">
                     {num(smsPreview.unresolvedCount)} não receberão
                   </span>
                 ) : null}
@@ -1261,7 +1264,7 @@ export function ChannelCampaignComposer({
                 </p>
               </div>
               <p className="flex items-center gap-2 text-xs text-muted-foreground">
-                <CheckCircle2 className="size-3.5 text-emerald-500" />
+                <CheckCircle2 className="size-3.5 text-success" />
                 Consentimentos são verificados antes do envio.
               </p>
             </CardContent>
@@ -1374,7 +1377,7 @@ function UnresolvedRecipientsNotice({
   const reasons = UNRESOLVED_REASONS.filter((reason) => preview.unresolvedByReason[reason] > 0);
   return (
     <div
-      className="rounded-lg border border-amber-500/35 bg-amber-500/5 px-3 py-2 text-sm"
+      className="rounded-lg border border-warning/35 bg-warning/5 px-3 py-2 text-sm"
       role="status"
       aria-live="polite"
     >

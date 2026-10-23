@@ -107,6 +107,7 @@ export function ScriptsTab() {
                     <Button
                       size="icon"
                       variant="ghost"
+                      aria-label={`Editar ${s.name}`}
                       onClick={() => {
                         setEditing(s);
                         setDialogOpen(true);
@@ -117,6 +118,7 @@ export function ScriptsTab() {
                     <Button
                       size="icon"
                       variant="ghost"
+                      aria-label={`Excluir ${s.name}`}
                       onClick={async () => {
                         const confirmed = await requestConfirmation({
                           title: `Excluir “${s.name}”?`,

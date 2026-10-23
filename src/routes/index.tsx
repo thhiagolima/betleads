@@ -32,6 +32,7 @@ import {
   type PeriodPreset,
 } from "@/lib/home-dashboard";
 import { brtDayStart } from "@/lib/tz";
+import { chartAxisProps, chartGridProps, chartTooltipStyle } from "@/lib/chart-theme";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/")({
@@ -88,30 +89,11 @@ function CashflowChart({ data }: { data: DashboardData }) {
                 <stop offset="100%" stopColor="var(--color-chart-1)" stopOpacity={0} />
               </linearGradient>
             </defs>
-            <CartesianGrid stroke="var(--color-border)" vertical={false} />
-            <XAxis
-              dataKey="label"
-              stroke="var(--color-muted-foreground)"
-              fontSize={11.5}
-              tickLine={false}
-              axisLine={false}
-              minTickGap={16}
-            />
-            <YAxis
-              stroke="var(--color-muted-foreground)"
-              fontSize={11.5}
-              tickLine={false}
-              axisLine={false}
-              tickFormatter={(v) => brl(Number(v))}
-              width={78}
-            />
+            <CartesianGrid {...chartGridProps} />
+            <XAxis dataKey="label" {...chartAxisProps} minTickGap={16} />
+            <YAxis {...chartAxisProps} tickFormatter={(v) => brl(Number(v))} width={78} />
             <Tooltip
-              contentStyle={{
-                background: "var(--color-popover)",
-                border: "1px solid var(--color-border)",
-                borderRadius: 10,
-                fontSize: 12,
-              }}
+              contentStyle={chartTooltipStyle}
               formatter={(value: number, name: string) => [
                 brl(Number(value)),
                 name === "deposits" ? "Depósitos" : "Saques",
@@ -142,8 +124,8 @@ function CashflowChart({ data }: { data: DashboardData }) {
 
 function CrmCard({ data }: { data: DashboardData }) {
   return (
-    <HomeCard className="flex h-full flex-col border-emerald-500/30 p-4 sm:p-5">
-      <h2 className="text-[12.5px] font-semibold text-emerald-400">Recuperado pelo CRM</h2>
+    <HomeCard className="flex h-full flex-col border-success/30 p-4 sm:p-5">
+      <h2 className="text-[12.5px] font-semibold text-success">Recuperado pelo CRM</h2>
       <p className="mt-1.5 text-[28px] font-semibold tracking-[-0.03em] tabular-nums sm:text-[32px]">
         {brl(data.recoveredAmount)}
       </p>
@@ -157,22 +139,19 @@ function CrmCard({ data }: { data: DashboardData }) {
         <MetricRow
           label="Retorno sobre o envio"
           value={data.messageRoi > 0 ? fmtRoi(data.messageRoi) : "—"}
-          valueClassName={data.messageRoi > 0 ? "text-emerald-400" : undefined}
+          valueClassName={data.messageRoi > 0 ? "text-success" : undefined}
         />
         <MetricRow
           label="Em jornada agora"
           value={`${num(data.reactivationQueue)} · ${num(data.activeFlows)}/${num(data.totalFlows)} ativas`}
           to="/jornadas"
         />
-        <MetricRow
-          label="Saldo"
-          value={data.exempt ? "Isenta" : brl(data.walletBalance)}
-        />
+        <MetricRow label="Saldo" value={data.exempt ? "Isenta" : brl(data.walletBalance)} />
       </div>
       <Button
         asChild
         variant="secondary"
-        className="mt-4 h-10 w-full bg-emerald-500/12 font-semibold text-emerald-400 hover:bg-emerald-500/20 lg:mt-auto"
+        className="mt-4 h-10 w-full bg-success/12 font-semibold text-success hover:bg-success/20 lg:mt-auto"
       >
         <Link to="/resultados">
           Ver resultados do CRM
@@ -205,7 +184,7 @@ function SecondaryMetrics({ data }: { data: DashboardData }) {
     {
       label: "PIX não pagos",
       value: num(data.pixUnpaid),
-      valueClassName: data.pixUnpaid > 0 ? "text-amber-400" : undefined,
+      valueClassName: data.pixUnpaid > 0 ? "text-warning" : undefined,
     },
   ];
   return (
@@ -447,8 +426,8 @@ function Dashboard() {
 
       <p className="text-xs leading-relaxed text-muted-foreground">
         Recuperado pelo CRM considera depósitos feitos em até 7 dias depois de um clique humano em
-        link de campanha ou jornada, sem quem já estava ativo; gasto em SMS é o preço por
-        segmento vezes os segmentos enviados. Datas no fuso de Brasília.
+        link de campanha ou jornada, sem quem já estava ativo; gasto em SMS é o preço por segmento
+        vezes os segmentos enviados. Datas no fuso de Brasília.
       </p>
     </div>
   );

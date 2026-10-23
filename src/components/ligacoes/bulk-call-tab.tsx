@@ -216,7 +216,7 @@ export function BulkCallTab() {
       <div className="space-y-4 lg:col-span-2">
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
+            <CardTitle className="flex items-center gap-2">
               <Megaphone className="h-5 w-5 text-primary" />
               Envio em massa de ligações
             </CardTitle>
@@ -360,7 +360,7 @@ export function BulkCallTab() {
 
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
+            <CardTitle className="flex items-center gap-2">
               <Users className="h-4 w-4" /> Destinatários ({allTargets.length})
             </CardTitle>
           </CardHeader>
@@ -383,7 +383,7 @@ export function BulkCallTab() {
                       <Button
                         size="icon"
                         variant="ghost"
-                        className="h-7 w-7"
+                        className="h-9 w-9"
                         aria-label={`Remover ${t.nome} dos destinatários`}
                         onClick={() => removeTarget(t.key)}
                       >
@@ -401,14 +401,18 @@ export function BulkCallTab() {
       <div className="space-y-4">
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Resumo do disparo</CardTitle>
+            <CardTitle>Resumo do disparo</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
             <Row label="Script" value={scripts.find((s: any) => s.id === scriptId)?.name ?? "—"} />
             <Row label="Destinatários" value={String(allTargets.length)} />
             <Row label="Canal" value="Voz" />
             <Separator />
-            <Button className="w-full gap-2" onClick={() => void confirmDispatch()} disabled={!canSend}>
+            <Button
+              className="w-full gap-2"
+              onClick={() => void confirmDispatch()}
+              disabled={!canSend}
+            >
               {bulkMut.isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
@@ -420,9 +424,9 @@ export function BulkCallTab() {
               <div className="rounded-lg border border-border bg-muted/30 p-3 text-xs">
                 <p className="mb-1 font-medium">Último disparo</p>
                 <p>Total: {lastResult.total}</p>
-                <p className="text-emerald-400">Disparadas: {lastResult.queued}</p>
-                <p className="text-amber-400">Pendentes: {lastResult.pending}</p>
-                <p className="text-rose-400">Falhas: {lastResult.failed}</p>
+                <p className="text-success">Disparadas: {lastResult.queued}</p>
+                <p className="text-warning">Pendentes: {lastResult.pending}</p>
+                <p className="text-danger">Falhas: {lastResult.failed}</p>
               </div>
             )}
             {lastResult && lastResult.failed > 0 && (
@@ -475,14 +479,14 @@ function FailureDetails({ results, targets }: { results: DispatchResult[]; targe
         </Alert>
       )}
       <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3">
-        <p className="mb-2 text-xs font-medium text-rose-400">
+        <p className="mb-2 text-xs font-medium text-danger">
           Falhas detalhadas ({failures.length})
         </p>
         <ul className="max-h-48 space-y-2 overflow-y-auto pr-1">
           {parsed.map((f, i) => (
             <li key={i} className="text-xs">
               <p className="font-medium">{nameFor(f)}</p>
-              <p className="text-rose-400/90 break-words">{f.parsed.message}</p>
+              <p className="text-danger/90 break-words">{f.parsed.message}</p>
             </li>
           ))}
         </ul>

@@ -1,4 +1,5 @@
-import { Badge } from "@/components/ui/badge";
+import { badgeVariants } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 import { variablesForChannel, type MessageChannel } from "@/lib/message-variables";
 import type { RefObject } from "react";
 
@@ -62,23 +63,32 @@ export function MessageVariablePicker({
 
   return (
     <div className={`rounded-md border border-border/60 bg-muted/30 p-2 ${className ?? ""}`}>
-      <p className="mb-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="mb-1.5 text-label text-muted-foreground">{label}</p>
       <div className="flex flex-wrap gap-1">
-        {variables.map((v) => (
-          <Badge
-            key={v.key}
-            variant="outline"
-            className={
-              readOnly
-                ? "font-mono text-[10px]"
-                : "cursor-pointer font-mono text-[10px] hover:bg-primary hover:text-primary-foreground"
-            }
-            onClick={() => insert(v.key)}
-            title={readOnly ? v.label : `${v.label} — clique para inserir`}
-          >
-            {`{${v.key}}`}
-          </Badge>
-        ))}
+        {variables.map((v) =>
+          readOnly ? (
+            <span
+              key={v.key}
+              className={cn(badgeVariants({ variant: "outline" }), "h-8 font-mono text-meta")}
+              title={v.label}
+            >
+              {`{${v.key}}`}
+            </span>
+          ) : (
+            <button
+              key={v.key}
+              type="button"
+              className={cn(
+                badgeVariants({ variant: "outline" }),
+                "h-8 cursor-pointer font-mono text-meta hover:bg-primary hover:text-primary-foreground",
+              )}
+              onClick={() => insert(v.key)}
+              title={`${v.label} — clique para inserir`}
+            >
+              {`{${v.key}}`}
+            </button>
+          ),
+        )}
       </div>
     </div>
   );

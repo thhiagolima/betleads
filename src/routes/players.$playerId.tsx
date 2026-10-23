@@ -30,6 +30,7 @@ import { getPlayerDetail, type PlayerDetail } from "@/lib/player-detail.function
 import { LEVEL_LABEL, type LevelSlug } from "@/lib/player-level";
 import { getPlayerLinkHistory } from "@/lib/shortio.functions";
 import { PlayerJourneysCard } from "@/components/players/player-journeys-card";
+import { Page } from "@/components/ui-premium/page-header";
 
 export const Route = createFileRoute("/players/$playerId")({
   component: PlayerDetailPage,
@@ -54,17 +55,17 @@ function PlayerDetailPage() {
 
   if (error || !data) {
     return (
-      <div className="space-y-4">
+      <Page>
         <BackButton />
         <Card className="border-border/50 bg-card/60">
           <CardContent className="p-6">
-            <div className="text-lg font-semibold">Nao foi possivel abrir a ficha</div>
+            <div className="text-section">Nao foi possivel abrir a ficha</div>
             <div className="mt-1 text-sm text-muted-foreground">
               {error instanceof Error ? error.message : "Tente novamente em alguns instantes."}
             </div>
           </CardContent>
         </Card>
-      </div>
+      </Page>
     );
   }
 
@@ -75,7 +76,7 @@ function PlayerDetailPage() {
     p.ultimo_deposito ?? data.attribution?.raw_payload?.raw?.ultimo_deposito ?? null;
 
   return (
-    <div className="space-y-5">
+    <Page>
       <BackButton />
 
       <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
@@ -88,7 +89,9 @@ function PlayerDetailPage() {
                     <User className="h-5 w-5 text-primary" />
                   </div>
                   <div className="min-w-0">
-                    <h1 className="truncate text-2xl font-bold tracking-normal">{p.nome}</h1>
+                    <h1 className="truncate text-2xl font-bold tracking-tight sm:text-title">
+                      {p.nome}
+                    </h1>
                     <div className="mt-0.5 truncate text-sm text-muted-foreground">
                       {p.player_external_id ?? p.id}
                     </div>
@@ -113,7 +116,7 @@ function PlayerDetailPage() {
                     </Badge>
                   )}
                   {p.verificado && (
-                    <Badge className="border-emerald-500/30 bg-emerald-500/15 text-emerald-300">
+                    <Badge className="border-success/30 bg-success/15 text-success">
                       <CheckCircle2 className="mr-1 h-3 w-3" /> verificado
                     </Badge>
                   )}
@@ -171,7 +174,7 @@ function PlayerDetailPage() {
           icon={<TrendingUp />}
           label="Resultado da casa"
           value={brl(data.metrics.lucro)}
-          valueClass={data.metrics.lucro >= 0 ? "text-emerald-400" : "text-rose-400"}
+          valueClass={data.metrics.lucro >= 0 ? "text-success" : "text-danger"}
         />
       </section>
 
@@ -337,8 +340,8 @@ function PlayerDetailPage() {
                 value={data.media.result == null ? "Sem dado" : brl(data.media.result)}
                 valueClass={
                   data.media.result == null || data.media.result >= 0
-                    ? "text-emerald-400"
-                    : "text-rose-400"
+                    ? "text-success"
+                    : "text-danger"
                 }
               />
               <InfoBox
@@ -367,7 +370,7 @@ function PlayerDetailPage() {
                   className="rounded-md border border-border/50 bg-background/40 p-3"
                 >
                   <div className="flex items-center gap-2 text-sm font-semibold">
-                    <ShieldAlert className="h-4 w-4 text-amber-400" />
+                    <ShieldAlert className="h-4 w-4 text-warning" />
                     {alert.titulo}
                   </div>
                   <div className="mt-1 text-xs text-muted-foreground">{alert.motivo}</div>
@@ -396,7 +399,7 @@ function PlayerDetailPage() {
           </CardContent>
         </Card>
       </section>
-    </div>
+    </Page>
   );
 }
 
@@ -413,7 +416,7 @@ function BackButton() {
 
 function DetailSkeleton() {
   return (
-    <div className="space-y-4">
+    <Page>
       <BackButton />
       <Skeleton className="h-32 w-full" />
       <div className="grid gap-3 md:grid-cols-4">
@@ -422,14 +425,14 @@ function DetailSkeleton() {
         ))}
       </div>
       <Skeleton className="h-96 w-full" />
-    </div>
+    </Page>
   );
 }
 
 function SectionTitle({ title, subtitle }: { title: string; subtitle: string }) {
   return (
     <div>
-      <h2 className="text-base font-semibold">{title}</h2>
+      <h2 className="text-section">{title}</h2>
       <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
     </div>
   );
@@ -449,7 +452,7 @@ function MetricCard({
   return (
     <Card className="border-border/50 bg-card/70">
       <CardContent className="p-4">
-        <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
+        <div className="flex items-center gap-2 text-label text-muted-foreground">
           <span className="text-primary [&_svg]:h-4 [&_svg]:w-4">{icon}</span>
           {label}
         </div>
@@ -472,7 +475,7 @@ function InfoBox({
 }) {
   return (
     <div className="rounded-md border border-border/50 bg-background/50 p-3">
-      <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className="text-label text-muted-foreground">{label}</div>
       <div className={`mt-2 text-lg font-bold ${valueClass ?? ""}`}>{value}</div>
       {detail && <div className="mt-1 truncate text-xs text-muted-foreground">{detail}</div>}
     </div>
@@ -482,7 +485,7 @@ function InfoBox({
 function InfoRow({ label, value, wide }: { label: string; value: unknown; wide?: boolean }) {
   return (
     <div className={wide ? "sm:col-span-2" : ""}>
-      <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className="text-label text-muted-foreground">{label}</div>
       <div className="mt-1 break-words text-sm font-medium">{empty(value)}</div>
     </div>
   );
@@ -499,15 +502,15 @@ function ScoreTile({
 }) {
   const color =
     tone === "green"
-      ? "text-emerald-400"
+      ? "text-success"
       : tone === "red"
-        ? "text-rose-400"
+        ? "text-danger"
         : tone === "amber"
-          ? "text-amber-400"
+          ? "text-warning"
           : "text-primary";
   return (
     <div className="rounded-md border border-border/50 bg-background/50 p-3">
-      <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className="text-label text-muted-foreground">{label}</div>
       <div className={`mt-2 text-xl font-bold ${color}`}>{value}</div>
     </div>
   );
@@ -533,7 +536,7 @@ function ContactLine({
 
 function StatusBadge({ active }: { active: boolean }) {
   return active ? (
-    <Badge className="border-emerald-500/30 bg-emerald-500/15 text-emerald-300">Ativo</Badge>
+    <Badge className="border-success/30 bg-success/15 text-success">Ativo</Badge>
   ) : (
     <Badge variant="outline" className="border-border/70 text-muted-foreground">
       Sem atividade recente
@@ -575,11 +578,7 @@ function TimelineItem({ item }: { item: PlayerDetail["timeline"][number] }) {
         {item.description && (
           <div className="mt-0.5 truncate text-xs text-muted-foreground">{item.description}</div>
         )}
-        {item.status && (
-          <div className="mt-1 text-[11px] uppercase tracking-wide text-muted-foreground">
-            {item.status}
-          </div>
-        )}
+        {item.status && <div className="mt-1 text-meta text-muted-foreground">{item.status}</div>}
       </div>
       <div className="text-right">
         <div className="text-xs text-muted-foreground">{timeAgo(item.at)}</div>
@@ -592,8 +591,8 @@ function TimelineItem({ item }: { item: PlayerDetail["timeline"][number] }) {
 }
 
 function timelineStyle(type: string) {
-  if (type === "deposit" || type === "cashback") return "bg-emerald-400";
-  if (type === "withdrawal") return "bg-rose-400";
+  if (type === "deposit" || type === "cashback") return "bg-success";
+  if (type === "withdrawal") return "bg-danger";
   if (type === "sms" || type === "followup") return "bg-primary";
   if (type === "session") return "bg-sky-400";
   return "bg-amber-400";

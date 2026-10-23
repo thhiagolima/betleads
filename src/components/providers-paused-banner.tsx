@@ -78,7 +78,7 @@ export function ProvidersPausedBanner({ channel }: { channel: DispatchChannel })
     if (confirmed) mut.mutate(false);
   }
   return (
-    <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 px-4 py-3 text-sm text-amber-200 flex items-start gap-3">
+    <div className="rounded-lg border border-warning/40 bg-warning/5 px-4 py-3 text-sm text-warning flex items-start gap-3">
       <Pause className="h-4 w-4 mt-0.5 shrink-0" />
       <div className="flex-1 space-y-1">
         <div className="font-medium">Disparos de {LABEL[channel]} pausados</div>
@@ -93,42 +93,11 @@ export function ProvidersPausedBanner({ channel }: { channel: DispatchChannel })
           size="sm"
           onClick={() => void resume()}
           disabled={mut.isPending}
-          className="bg-amber-500 text-amber-950 hover:bg-amber-400"
+          className="bg-warning text-primary-foreground hover:bg-warning/90"
         >
           <Play className="h-3.5 w-3.5 mr-1.5" /> Retomar disparos
         </Button>
       </div>
     </div>
-  );
-}
-
-export function ProvidersPauseControl({ channel }: { channel: DispatchChannel }) {
-  // Mostra um botão "Pausar" quando NÃO está pausado, para uso futuro.
-  const fetchState = useServerFn(getDispatchPauseState);
-  const togglePause = useServerFn(setDispatchPause);
-  const qc = useQueryClient();
-
-  const { data } = useQuery({
-    queryKey: ["dispatch-pause-state"],
-    queryFn: () => fetchState(),
-    refetchInterval: 30_000,
-  });
-
-  const mut = useMutation({
-    mutationFn: () =>
-      togglePause({
-        data: { channel, paused: true, reason: "Pausa manual" },
-      }),
-    onSuccess: () => {
-      toast.success(`Disparos de ${LABEL[channel]} pausados.`);
-      qc.invalidateQueries({ queryKey: ["dispatch-pause-state"] });
-    },
-  });
-
-  if (data?.[channel]?.paused) return null;
-  return (
-    <Button size="sm" variant="outline" onClick={() => mut.mutate()} disabled={mut.isPending}>
-      <Pause className="h-3.5 w-3.5 mr-1.5" /> Pausar disparos
-    </Button>
   );
 }

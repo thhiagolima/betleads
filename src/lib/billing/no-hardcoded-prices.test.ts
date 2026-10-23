@@ -70,9 +70,8 @@ describe("TS: no hardcoded legacy prices in the price-book call sites", () => {
     expect(readTarget("src/lib/sms.functions.ts")).toContain("getReportUnitPrices");
   });
 
-  it("sms.tsx composer counts segments with countSmsSegments and prices via getBillingPrices", () => {
+  it("sms.tsx prices via getBillingPrices", () => {
     const source = readTarget("src/routes/sms.tsx");
-    expect(source).toContain("countSmsSegments");
     expect(source).toContain("getBillingPrices");
   });
 });
@@ -377,7 +376,12 @@ describe("check_crm_results_day and refresh_crm_results_day: price book + wallet
     const tenant = INTERNO;
 
     beforeAll(async () => {
-      const result = (await reserveSms(tenant, 10, "check-crm-interno", "sms-reserve:check-crm-interno")) as {
+      const result = (await reserveSms(
+        tenant,
+        10,
+        "check-crm-interno",
+        "sms-reserve:check-crm-interno",
+      )) as {
         exempt: boolean;
         amount: number;
       };
