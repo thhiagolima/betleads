@@ -48,15 +48,30 @@ describe("classifyProviderFailure — provider_account", () => {
     expect(decision.retryAfterMs).toBeGreaterThan(0);
   });
 
-  it("the tenant's own credit (402 without provider_account) stays insufficient_credit", () => {
+  it("the tenant's own wallet (402 without provider_account) is final: insufficient_balance", () => {
     const tenantCredit = new ProviderSendError({
       channel: "sms",
       message: "Saldo insuficiente",
       status: 402,
     });
     expect(classifyProviderFailure(tenantCredit)).toMatchObject({
-      kind: "defer",
-      reason: "insufficient_credit",
+      kind: "fail",
+      reason: "insufficient_balance",
+      retryAfterMs: 0,
+    });
+  });
+
+  it("errorKind insufficient_balance (set by the wallet reservation) is final, same as the 402 sniff", () => {
+    const walletRefusal = new ProviderSendError({
+      channel: "sms",
+      message: "Saldo insuficiente",
+      status: 402,
+      errorKind: "insufficient_balance",
+    });
+    expect(classifyProviderFailure(walletRefusal)).toEqual({
+      kind: "fail",
+      reason: "insufficient_balance",
+      retryAfterMs: 0,
     });
   });
 

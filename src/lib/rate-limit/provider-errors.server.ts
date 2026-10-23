@@ -17,8 +17,11 @@
 //             attempt, never fails the item, no MAX_NO_COST_DEFERS cap. The
 //             item waits for the SMS circuit breaker (sms-provider-breaker).
 //   fail    : definitely not accepted (invalid recipient, 4xx, request never
-//             left: DNS/ECONNREFUSED) or provider misconfigured (missing
-//             credentials) -> the caller's normal attempts/backoff policy.
+//             left: DNS/ECONNREFUSED), provider misconfigured (missing
+//             credentials), or the HOUSE's own wallet refused the reservation
+//             (errorKind `insufficient_balance`, final: no retry, no attempt
+//             consumed; the journey step itself is skipped — Task 7) -> the
+//             caller's normal attempts/backoff policy for anything else.
 //
 // Workers wrap a non-ok provider result in ProviderSendError so the status,
 // body and transport kind survive until the classification.
@@ -35,7 +38,7 @@ export type ProviderFailureKind = "defer" | "unknown" | "fail" | "provider_accou
 export type ProviderFailureDecision = {
   kind: ProviderFailureKind;
   reason:
-    | "insufficient_credit"
+    | "insufficient_balance"
     | "provider_account"
     | "provider_rate_limited"
     | "provider_unavailable"
@@ -50,8 +53,6 @@ export type ProviderFailureDecision = {
 };
 
 export const PROVIDER_DEFER_MS = 60_000;
-/** Backoff for missing credit: no pause, the item simply comes back later. */
-export const CREDIT_DEFER_MS = 15 * 60_000;
 /**
  * Possibly-sent items wait at least this long; matches the `in_flight`
  * window of reserve_journey_delivery (20261015111000, c_in_flight_lease).
@@ -119,6 +120,12 @@ export function classifyProviderFailure(error: unknown): ProviderFailureDecision
         retryAfterMs: PROVIDER_ACCOUNT_DEFER_MS,
       };
     }
+    // The HOUSE's own wallet refused the reservation (checked before the
+    // generic 402/insufficient-funds body sniffing below): final, no retry,
+    // no attempt consumed. Journey skip-and-advance behaviour is Task 7.
+    if (error.errorKind === "insufficient_balance") {
+      return { kind: "fail", reason: "insufficient_balance", retryAfterMs: 0 };
+    }
     if (error.errorKind === "misconfigured") {
       return { kind: "fail", reason: "provider_misconfigured", retryAfterMs: 0 };
     }
@@ -134,7 +141,7 @@ export function classifyProviderFailure(error: unknown): ProviderFailureDecision
       isInsufficientFunds(error.status, body) ||
       isInsufficientFunds(undefined, error.message)
     ) {
-      return { kind: "defer", reason: "insufficient_credit", retryAfterMs: CREDIT_DEFER_MS };
+      return { kind: "fail", reason: "insufficient_balance", retryAfterMs: 0 };
     }
     if (error.status === 429) {
       const hinted = parseRetryAfter(body) * 1000;
@@ -156,7 +163,7 @@ export function classifyProviderFailure(error: unknown): ProviderFailureDecision
   }
   const message = error instanceof Error ? error.message : String(error ?? "");
   if (isInsufficientFunds(undefined, message)) {
-    return { kind: "defer", reason: "insufficient_credit", retryAfterMs: CREDIT_DEFER_MS };
+    return { kind: "fail", reason: "insufficient_balance", retryAfterMs: 0 };
   }
   if (TRANSIENT_MESSAGE.test(message)) {
     return { kind: "defer", reason: "transient_error", retryAfterMs: PROVIDER_DEFER_MS };

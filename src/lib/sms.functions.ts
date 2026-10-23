@@ -861,7 +861,15 @@ export async function sendSmsInternal(args: {
         flow_lead_id: args.flowLeadId,
         tenant_id: billingTenantId,
       });
-      return { ok: false as const, status: 402, error: reservation.error };
+      // Wallet refusal for THIS house: distinct from a real provider 402
+      // (Short Brasil account out of balance). Never pauses the channel
+      // globally — see errorKind "insufficient_balance".
+      return {
+        ok: false as const,
+        status: 402,
+        error: reservation.error,
+        errorKind: "insufficient_balance" as ProviderErrorKind,
+      };
     }
     creditReserved = true;
   }

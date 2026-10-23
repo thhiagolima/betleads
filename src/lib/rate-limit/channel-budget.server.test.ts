@@ -14,7 +14,6 @@ import {
 } from "./channel-budget.server";
 import {
   classifyProviderFailure,
-  CREDIT_DEFER_MS,
   OUTCOME_UNKNOWN_RETRY_MS,
   PROVIDER_DEFER_MS,
   ProviderSendError,
@@ -220,15 +219,25 @@ describe("classifyProviderFailure (B1 matrix)", () => {
     expect(classifyProviderFailure(sendError(200, { temporary: true })).kind).toBe("defer");
   });
 
-  it("402 / insufficient funds defers 15 min (no pause, resumes by itself after a recharge)", () => {
+  it("402 / insufficient funds is final: no pause, no retry, no attempt consumed at this layer", () => {
     expect(classifyProviderFailure(sendError(402))).toEqual({
-      kind: "defer",
-      reason: "insufficient_credit",
-      retryAfterMs: CREDIT_DEFER_MS,
+      kind: "fail",
+      reason: "insufficient_balance",
+      retryAfterMs: 0,
     });
     expect(
       classifyProviderFailure(sendError(400, { body: JSON.stringify({ code: "INSUFFICIENT_FUNDS" }) })).kind,
-    ).toBe("defer");
+    ).toBe("fail");
+  });
+
+  it("explicit errorKind insufficient_balance (house wallet) is checked before the generic 402 sniff", () => {
+    expect(
+      classifyProviderFailure(sendError(402, { errorKind: "insufficient_balance" })),
+    ).toEqual({
+      kind: "fail",
+      reason: "insufficient_balance",
+      retryAfterMs: 0,
+    });
   });
 
   it("timeout / reset after sending (status 0, outcome unknown) is treated as possibly sent", () => {
@@ -265,8 +274,8 @@ describe("classifyProviderFailure (B1 matrix)", () => {
     expect(classifyProviderFailure(new Error("Jogador sem e-mail")).kind).toBe("fail");
     expect(classifyProviderFailure(new Error("Template de e-mail não encontrado")).kind).toBe("fail");
     expect(classifyProviderFailure("insufficient funds")).toMatchObject({
-      kind: "defer",
-      reason: "insufficient_credit",
+      kind: "fail",
+      reason: "insufficient_balance",
     });
   });
 });

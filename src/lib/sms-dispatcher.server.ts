@@ -53,6 +53,8 @@ import {
 import { PROVIDER_ACCOUNT_DEFER_MS } from "./rate-limit/provider-errors.server";
 
 const SMS_CAMPAIGN_JOB = "sms_campaign_dispatch";
+/** Per-lead backoff when the house's own wallet has no balance (never a global pause). */
+const WALLET_INSUFFICIENT_RETRY_MS = 15 * 60_000;
 
 /**
  * Converte (entered_at, day_offset, "HH:MM") em instante UTC,
@@ -712,6 +714,22 @@ async function runSmsFlowBatch({
           .eq("id", item.lead.player_id);
       }
       processed++;
+    } else if ((r as { errorKind?: unknown }).errorKind === "insufficient_balance") {
+      // Wallet refusal for THIS house: skip only its own item, never the
+      // global channel. Checked before isInsufficientFunds() below, which
+      // would otherwise also match this same HTTP 402 and pause every
+      // tenant. attempts untouched; the lead simply comes back later.
+      lastProviderError =
+        `saldo_insuficiente: ${(r as { error?: string }).error ?? ""}`.slice(0, 800);
+      await supabaseAdmin
+        .from("sms_flow_leads")
+        .update({
+          next_run_at: new Date(Date.now() + WALLET_INSUFFICIENT_RETRY_MS).toISOString(),
+          locked_at: null,
+          locked_by: null,
+        })
+        .eq("id", item.lead.id);
+      rescheduled++;
     } else if ((r as { errorKind?: unknown }).errorKind === "provider_account") {
       // Account refused (101/505, 401/402/403): not the lead's fault. Same
       // step, attempts unchanged, back when the breaker allows a new try.

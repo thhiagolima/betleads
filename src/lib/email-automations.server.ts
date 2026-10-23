@@ -833,7 +833,13 @@ export async function runEmailFlowDispatcher({
       lastProviderError = `status=${result.status} ${bodyStr}`.slice(0, 800);
       const { isInsufficientFunds, pauseChannelForInsufficientFunds } =
         await import("./dispatch-pause-insufficient.server");
-      const insufficient = isInsufficientFunds(result.status, result.body);
+      // Wallet refusal for THIS house (checked before the generic 402/body
+      // sniffing below, same as the SMS dispatcher): skip only its own item,
+      // never the global channel. A real provider 402 (no errorKind) still
+      // pauses every tenant via isInsufficientFunds below.
+      const walletInsufficient =
+        (result as { errorKind?: unknown }).errorKind === "insufficient_balance";
+      const insufficient = walletInsufficient || isInsufficientFunds(result.status, result.body);
       if (result.status === 429 || /rate.?limit|throttle|too many/i.test(bodyStr)) {
         rateLimited++;
         const retryAfter = parseRetryAfter(result.body);
@@ -842,7 +848,9 @@ export async function runEmailFlowDispatcher({
       if (result.status === 401 || result.status === 403) {
         await registerThrottle("email", 600, `auth_error_${result.status}: ${lastProviderError}`);
       }
-      if (insufficient) {
+      if (walletInsufficient) {
+        lastProviderError = `saldo_insuficiente: ${lastProviderError}`.slice(0, 800);
+      } else if (insufficient) {
         await pauseChannelForInsufficientFunds("email", lastProviderError);
         await registerThrottle("email", 1800, `insufficient_funds: ${lastProviderError}`);
       }

@@ -324,21 +324,17 @@ describe("runJourneyDispatcher", () => {
     expect(fake.tables.dispatch_pause_state).toHaveLength(0);
   });
 
-  it("402 (no credit) defers 15 min without pausing the channel or consuming an attempt (I4)", async () => {
+  it("402 (no credit) is a final per-house failure: no pause, consumes an attempt, never retried as a no-cost defer (PG3)", async () => {
     seed(["e1"]);
     sms.sendSmsInternal.mockResolvedValue({ ok: false, status: 402, error: "Saldo insuficiente" });
-    const before = Date.now();
     const result = await runJourneyDispatcher(1000);
-    expect(result).toMatchObject({ failed: 0, rescheduled: 1 });
+    expect(result).toMatchObject({ failed: 1, rescheduled: 0 });
     const row = enrollment("e1");
-    expect(row).toMatchObject({ status: "waiting", attempts: 1 });
-    expect(Date.parse(String(row.next_run_at))).toBeGreaterThanOrEqual(
-      before + 15 * 60_000 - 1_000,
-    );
+    expect(row).toMatchObject({ status: "waiting", attempts: 2 });
     expect(fake.tables.dispatch_pause_state).toHaveLength(0);
     expect(fake.tables.journey_events.at(-1)).toMatchObject({
-      event_type: "step_deferred",
-      detail: expect.objectContaining({ reason: "insufficient_credit", attempt_consumed: false }),
+      event_type: "retry_scheduled",
+      detail: expect.objectContaining({ reason: "insufficient_balance" }),
     });
   });
 

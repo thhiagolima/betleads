@@ -17,6 +17,13 @@
 //                     same answer. Never consumes a lead attempt: the item is
 //                     deferred and the SMS circuit breaker opens
 //                     (src/lib/sms-provider-breaker.server.ts).
+//   insufficient_balance: the HOUSE's own wallet refused the reservation
+//                     before the provider was ever called. Per-house, final:
+//                     the item is skipped (logged `saldo_insuficiente`), no
+//                     retry, no attempt consumed, and it must never pause the
+//                     channel for every other tenant. Distinct from
+//                     `provider_account`'s "no_balance" reason, which is the
+//                     provider's OWN account (Short Brasil) out of balance.
 //
 // Pure module (no I/O): imported by the SMS, voice and e-mail adapters.
 
@@ -24,7 +31,8 @@ export type ProviderErrorKind =
   | "misconfigured"
   | "not_sent"
   | "outcome_unknown"
-  | "provider_account";
+  | "provider_account"
+  | "insufficient_balance";
 
 // Failures that happen before a TCP connection exists (nothing was written).
 const NOT_SENT_CODES = new Set([
@@ -79,7 +87,7 @@ function messagesOf(error: unknown): string {
  */
 export function transportErrorKind(
   error: unknown,
-): Exclude<ProviderErrorKind, "misconfigured" | "provider_account"> {
+): Exclude<ProviderErrorKind, "misconfigured" | "provider_account" | "insufficient_balance"> {
   const codes = codesOf(error);
   if (codes.some((code) => NOT_SENT_CODES.has(code))) return "not_sent";
   // A timeout/abort/reset anywhere in the chain wins over a message match.
@@ -92,7 +100,8 @@ export function isProviderErrorKind(value: unknown): value is ProviderErrorKind 
     value === "misconfigured" ||
     value === "not_sent" ||
     value === "outcome_unknown" ||
-    value === "provider_account"
+    value === "provider_account" ||
+    value === "insufficient_balance"
   );
 }
 
