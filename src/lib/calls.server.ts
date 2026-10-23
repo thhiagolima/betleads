@@ -355,7 +355,7 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
   let insufficientBalance = 0;
   // PG3 final fix I3: houses whose wallet already refused a call this tick.
   // Their remaining items are left untouched (still audio_ready) for a later
-  // tick instead of each being refused (and failed) in turn.
+  // tick instead of each being refused in turn.
   const noBalanceTenants = new Set<string>();
   let skippedNoBalance = 0;
   for (const item of queue ?? []) {
@@ -448,19 +448,11 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
       });
       const outcome = classifyVoiceDispatchResult(result);
       if (outcome === "insufficient_balance") {
-        // Final for this item: never re-queued (no call was placed, nothing
-        // reserved). The house reruns the campaign after a top-up.
-        await supabaseAdmin
-          .from("call_queue")
-          .update({
-            status: "failed",
-            provider_status: "saldo_insuficiente",
-            provider_response: { error: VOICE_INSUFFICIENT_BALANCE_MESSAGE } as never,
-            provider_request_id: result.idempotencyKey,
-          } as never)
-          .eq("id", item.id);
+        // No call was placed and nothing was reserved. The item is left
+        // untouched (still audio_ready, no attempt consumed), like the
+        // house's other items this tick: it is dialed on a later tick once
+        // the house has balance again. Never failed for lack of balance.
         insufficientBalance++;
-        failed++;
         noBalanceTenants.add(item.tenant_id);
         continue;
       }

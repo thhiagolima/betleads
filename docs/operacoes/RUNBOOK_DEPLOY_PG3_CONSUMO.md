@@ -138,8 +138,9 @@ usado para reservar os blocos de voz; padrão 120). Não é obrigatório.
   JSON de resposta do cron traz `failures`, por exemplo `voice_settle: ...`).
 - Casas sem saldo: SMS e voz param. Campanha de SMS fica `pausada` com
   "Saldo insuficiente" (a casa clica em "Retomar" depois de recarregar); na
-  fila de voz, a primeira ligação recusada da casa falha e as demais ficam
-  `audio_ready` para o próximo tick. E-mail segue dentro da franquia mensal.
+  fila de voz, nenhuma ligação falha por falta de saldo: todos os itens da
+  casa ficam `audio_ready` e são discados depois da recarga. E-mail segue
+  dentro da franquia mensal.
 
 ### Limitação conhecida (voz)
 

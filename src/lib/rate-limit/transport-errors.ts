@@ -27,8 +27,8 @@
 //                       - SMS campaigns stop at that recipient and pause
 //                         ('pausada', "Saldo insuficiente") until "Retomar";
 //                         e-mail campaigns pause the same way;
-//                       - the voice queue fails that call and leaves the
-//                         house's other items ready for a later tick.
+//                       - the voice queue leaves that call and the house's
+//                         other items ready (never failed) for a later tick.
 //                     The house gets the hourly no-balance e-mail. Distinct
 //                     from `provider_account`'s "no_balance" reason, which is
 //                     the provider's OWN account (Short Brasil) out of

@@ -82,8 +82,11 @@ describe("classifyVoiceDispatchResult", () => {
 });
 
 describe("runVoiceQueueDispatcher wallet refusal", () => {
-  it("does not re-queue an insufficient_balance call: fails final with Saldo insuficiente", async () => {
+  // Coordinator ruling: a wallet refusal never fails a queue item. It stays
+  // untouched (audio_ready) and is dialed once the house has balance again.
+  it("an insufficient_balance call stays audio_ready, untouched, and is dialed after a top-up", async () => {
     seedQueueItem();
+    const before = { ...queueItem() };
     voice.callInfobipVoice.mockResolvedValue({
       ok: false,
       status: 0,
@@ -93,16 +96,20 @@ describe("runVoiceQueueDispatcher wallet refusal", () => {
       errorKind: "insufficient_balance",
     });
     const result = await runVoiceQueueDispatcher(10);
-    expect(result).toMatchObject({ dispatched: 0, deferred: 0, failed: 1, insufficientBalance: 1 });
-    expect(queueItem()).toMatchObject({
-      status: "failed",
-      provider_status: "saldo_insuficiente",
-      provider_response: { error: "Saldo insuficiente" },
+    expect(result).toMatchObject({ dispatched: 0, deferred: 0, failed: 0, insufficientBalance: 1 });
+    expect(queueItem()).toEqual(before);
+    expect(fake.db.rows("call_history")).toHaveLength(0);
+
+    voice.callInfobipVoice.mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: {},
+      idempotencyKey: "key-2",
+      providerCallId: "c",
     });
-    // The item is not picked up again on the next tick.
-    voice.callInfobipVoice.mockClear();
-    await runVoiceQueueDispatcher(10);
-    expect(voice.callInfobipVoice).not.toHaveBeenCalled();
+    const after = await runVoiceQueueDispatcher(10);
+    expect(after).toMatchObject({ dispatched: 1, failed: 0 });
+    expect(queueItem().status).toBe("waiting_provider");
   });
 
   // PG3 final fix I3: after a house's first refusal in a tick, its other
@@ -142,18 +149,24 @@ describe("runVoiceQueueDispatcher wallet refusal", () => {
         : { ok: true, status: 200, body: {}, idempotencyKey: `key-${Math.random()}`, providerCallId: "c" },
     );
 
-    const result = await runVoiceQueueDispatcher(10);
-
-    const tenantsCalled = voice.callInfobipVoice.mock.calls.map((call) => call[2].tenantId);
-    expect(tenantsCalled.filter((t) => t === TENANT)).toHaveLength(1);
-    expect(tenantsCalled.filter((t) => t === OTHER)).toHaveLength(2);
-    expect(result).toMatchObject({ dispatched: 2, failed: 1, insufficientBalance: 1, skippedNoBalance: 2 });
     const byId = (id: string) => fake.db.rows("call_queue").find((r) => r.id === id)!;
-    expect(byId("a1")).toMatchObject({ status: "failed", provider_status: "saldo_insuficiente" });
-    for (const id of ["a2", "a3"]) {
-      expect(byId(id)).toMatchObject({ status: "audio_ready", scheduled_at: expect.any(String) });
-      expect(byId(id).provider_status).toBeUndefined();
+    const aBefore = ["a1", "a2", "a3"].map((id) => ({ ...byId(id) }));
+
+    // Two ticks while A has no balance: A loses zero queue items.
+    for (let tick = 1; tick <= 2; tick++) {
+      voice.callInfobipVoice.mockClear();
+      const result = await runVoiceQueueDispatcher(10);
+      const tenantsCalled = voice.callInfobipVoice.mock.calls.map((call) => call[2].tenantId);
+      // One refused attempt per tick for A, then the rest of A is skipped.
+      expect(tenantsCalled.filter((t) => t === TENANT)).toHaveLength(1);
+      expect(result).toMatchObject({ failed: 0, insufficientBalance: 1, skippedNoBalance: 2 });
+      if (tick === 1) {
+        expect(tenantsCalled.filter((t) => t === OTHER)).toHaveLength(2);
+        expect(result).toMatchObject({ dispatched: 2 });
+      }
+      expect(["a1", "a2", "a3"].map((id) => byId(id))).toEqual(aBefore);
     }
+    expect(fake.db.rows("call_queue").filter((r) => r.status === "failed")).toHaveLength(0);
     expect(byId("b1").status).toBe("waiting_provider");
     expect(byId("b2").status).toBe("waiting_provider");
   });

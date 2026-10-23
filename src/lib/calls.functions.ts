@@ -957,8 +957,9 @@ export async function bulkDispatchCallsFor(
       // 4. dispara
       const dispatchResult = await runVoiceQueueDispatcher(1, q.id);
       if (dispatchResult.insufficientBalance > 0) {
-        // The dispatcher already marked the item failed (saldo_insuficiente);
-        // reported as-is, without the catch below overwriting that status.
+        // The dispatcher left the item untouched (still audio_ready, dialed
+        // once the house has balance again); reported as not sent here,
+        // without the catch below marking it failed.
         failed += 1;
         results.push({
           ok: false,
