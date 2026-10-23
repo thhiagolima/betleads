@@ -322,7 +322,7 @@ describe("adminManualSettleFor", () => {
     expect(metadata.paidAt).toBe("2026-11-08");
   });
 
-  it("omits paidAt (null) when not given, keeping today's behaviour", async () => {
+  it("omits _paid_at from the RPC args when not given (works on the old 4-arg signature)", async () => {
     let capturedArgs: Record<string, unknown> | undefined;
     userDb.onRpc("billing_admin_manual_settle", (args) => {
       capturedArgs = args;
@@ -334,7 +334,8 @@ describe("adminManualSettleFor", () => {
       receipt: "comprovante-123",
       reason: "pagamento fora do Pix",
     });
-    expect(capturedArgs?._paid_at).toBeNull();
+    expect(capturedArgs).toBeDefined();
+    expect(capturedArgs).not.toHaveProperty("_paid_at");
   });
 
   it("still settles when the Upper cancel fails, recording it in the audit", async () => {
@@ -439,7 +440,7 @@ describe("adminManualSettleFor", () => {
   });
 
   // Fix round 1, Ruling T10 — item 4.
-  it("sends null (paid_at = now()) when paidAt is today's Brasília day", async () => {
+  it("omits _paid_at (paid_at = now()) when paidAt is today's Brasília day", async () => {
     let capturedArgs: Record<string, unknown> | undefined;
     userDb.onRpc("billing_admin_manual_settle", (args) => {
       capturedArgs = args;
@@ -453,7 +454,8 @@ describe("adminManualSettleFor", () => {
       reason: "pagamento fora do Pix",
       paidAt: todayBRT,
     });
-    expect(capturedArgs?._paid_at).toBeNull();
+    expect(capturedArgs).toBeDefined();
+    expect(capturedArgs).not.toHaveProperty("_paid_at");
   });
 });
 

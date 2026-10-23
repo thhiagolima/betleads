@@ -503,7 +503,10 @@ export async function adminManualSettleFor(ctx: ServerContext, data: unknown) {
       _paid_amount_cents: input.paidAmountCents ?? null,
       _note: input.note,
       _receipt: input.receipt,
-      _paid_at: paidAt,
+      // Final fix I1: `_paid_at` is sent only when there is a date, so the
+      // call also resolves against the old 4-arg signature while migration
+      // 20261024100200 is not applied yet (PostgREST matches by arg names).
+      ...(paidAt ? { _paid_at: paidAt } : {}),
     }),
   );
   await auditBillingAction({
