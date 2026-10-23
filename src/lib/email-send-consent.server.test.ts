@@ -27,6 +27,11 @@ vi.mock("./email-deliverability.server", () => ({
   isSuppressed: mocks.suppressed,
 }));
 vi.mock("./infobip-email.server", () => ({ callInfobipEmail: mocks.provider }));
+// The wallet reservation has its own coverage (email-send.billing.test.ts).
+vi.mock("./billing/wallet.server", () => ({
+  reserveForDelivery: vi.fn(async () => ({ ok: true, referenceId: "email:k", amount: 0, balance: 0 })),
+  refundForDelivery: vi.fn(async () => undefined),
+}));
 vi.mock("./shortio.server", () => ({
   prepareTrackedEmailHtml: vi.fn(async (content: string) => ({ content, links: [] })),
   markTrackedDispatchesSent: vi.fn(async () => undefined),

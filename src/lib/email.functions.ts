@@ -8,6 +8,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import {
   EmailDomainNotVerifiedError,
+  emailBillingColumns,
   resolveSender,
   sendInfobipEmail,
   STALE_SENDER_MESSAGE,
@@ -90,6 +91,10 @@ const SendTestEmailSchema = z.object({
   trackLinks: z.boolean().optional().default(true),
 });
 
+/** Shown when the house's wallet cannot pay for a test e-mail. */
+export const EMAIL_TEST_NO_BALANCE_MESSAGE =
+  "Saldo insuficiente para enviar o e-mail de teste. Recarregue a carteira da casa.";
+
 export const sendTestEmail = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => SendTestEmailSchema.parse(d))
@@ -150,6 +155,11 @@ export const sendTestEmail = createServerFn({ method: "POST" })
         enabled: data.trackLinks,
       },
     });
+    // PG3 (spec decision 11): a test e-mail is charged like any send. A
+    // wallet refusal sent nothing and charged nothing: no log row.
+    if (!result.ok && result.errorKind === "insufficient_balance") {
+      throw new Error(EMAIL_TEST_NO_BALANCE_MESSAGE);
+    }
 
     // Log
     const { data: log, error: logErr } = await supabaseAdmin
@@ -162,6 +172,7 @@ export const sendTestEmail = createServerFn({ method: "POST" })
         error: result.ok ? null : JSON.stringify(result.body).slice(0, 1000),
         sent_at: result.ok ? new Date().toISOString() : null,
         player_id: playerId,
+        ...emailBillingColumns(result),
         provider_response: {
           status: result.status,
           body: result.body,
@@ -1007,6 +1018,10 @@ export async function runCampaignSend(campaignId: string) {
   let enviados = 0;
   let falhas = 0;
   let pendentes = 0;
+  // PG3 (spec decision 7): the run stops at the first e-mail the house's
+  // wallet refuses; the campaign is left "pausada" and the house reruns it
+  // after a top-up (no automatic resume).
+  let pausadaPorSaldo = false;
 
   const house = await loadHouseLinks(camp.tenant_id);
 
@@ -1035,6 +1050,11 @@ export async function runCampaignSend(campaignId: string) {
           shortDomainId: camp.short_domain_id,
         },
       });
+      if (!r.ok && r.errorKind === "insufficient_balance") {
+        // Nothing was sent nor charged: not a delivery attempt, no log row.
+        pausadaPorSaldo = true;
+        break;
+      }
       const errSnippet = r.ok
         ? null
         : `status=${(r as any).status ?? "?"} body=${
@@ -1050,6 +1070,7 @@ export async function runCampaignSend(campaignId: string) {
         player_id: p.id,
         campaign_id: campaignId,
         tenant_id: camp.tenant_id,
+        ...emailBillingColumns(r),
         provider_response: {
           status: (r as any).status,
           body: r.body,
@@ -1110,7 +1131,8 @@ export async function runCampaignSend(campaignId: string) {
     .update({
       // Falhas temporárias ficam como pendentes no log; não contam como falha
       // definitiva porque o provedor pode aceitar o próximo retry.
-      status: "concluida",
+      status: pausadaPorSaldo ? "pausada" : "concluida",
+      ...(pausadaPorSaldo ? { blocked_reason: EMAIL_CAMPAIGN_NO_BALANCE_MESSAGE } : {}),
       stats: {
         enviados,
         entregues: 0,
@@ -1122,8 +1144,12 @@ export async function runCampaignSend(campaignId: string) {
     })
     .eq("id", campaignId);
 
-  return { enviados, falhas, pendentes, total: players.length };
+  return { enviados, falhas, pendentes, total: players.length, pausadaPorSaldo };
 }
+
+/** blocked_reason of an e-mail campaign paused because the house ran out of balance. */
+export const EMAIL_CAMPAIGN_NO_BALANCE_MESSAGE =
+  "Saldo insuficiente: a campanha foi pausada. Recarregue a carteira da casa e envie novamente.";
 
 // ============ AUTOMAÇÕES ============
 

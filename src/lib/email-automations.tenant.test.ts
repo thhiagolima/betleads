@@ -215,6 +215,13 @@ describe("email flow dispatcher — wallet refusal stays per-house (PG3 Task 1 f
     expect(Date.parse(String(lead.next_run_at))).toBeGreaterThanOrEqual(
       before + 15 * 60_000 - 1_000,
     );
+    // PG3 Task 6: nothing was sent nor charged, so no email_send_logs row;
+    // the flow log records the skip and its reason.
+    expect(state.tables.email_send_logs).toHaveLength(0);
+    expect(state.tables.email_flow_logs.at(-1)).toMatchObject({
+      event: "skipped_insufficient_balance",
+      detail: { reason: "saldo_insuficiente" },
+    });
   });
 
   it("a real provider 402 (no errorKind) still pauses the channel globally", async () => {
@@ -229,5 +236,26 @@ describe("email flow dispatcher — wallet refusal stays per-house (PG3 Task 1 f
     await runEmailFlowDispatcher({ onlyLeadId: "lead-1" });
     expect(pauseChannelForInsufficientFunds).toHaveBeenCalledTimes(1);
     expect(pauseChannelForInsufficientFunds).toHaveBeenCalledWith("email", expect.any(String));
+  });
+});
+
+describe("email flow dispatcher — billing columns (PG3 Task 6)", () => {
+  it("logs the wallet reference and the amount charged for the e-mail", async () => {
+    seed("tpl-a", "p-a");
+    vi.mocked(sendInfobipEmail).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      body: {},
+      idempotencyKey: "k-1",
+      temporary: false,
+      billing: { referenceId: "email:k-1", amount: 0.002 },
+    } as any);
+    await runEmailFlowDispatcher({ onlyLeadId: "lead-1" });
+    expect(state.tables.email_send_logs).toHaveLength(1);
+    expect(state.tables.email_send_logs[0]).toMatchObject({
+      status: "sent",
+      billing_reference_id: "email:k-1",
+      billed_amount: 0.002,
+    });
   });
 });

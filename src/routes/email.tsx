@@ -211,6 +211,11 @@ type Template = {
 };
 
 type CampStatus = "rascunho" | "agendada" | "enviando" | "pausada" | "concluida";
+
+/** PG3: the run stopped at the first e-mail the house's wallet refused. */
+function campaignPausedForBalanceMessage(r: { enviados: number; total: number }) {
+  return `Campanha pausada por saldo insuficiente: ${r.enviados} de ${r.total} e-mails enviados. Recarregue a carteira e envie novamente.`;
+}
 type Campanha = {
   id: string;
   nome: string;
@@ -1788,10 +1793,14 @@ function CampanhasTab() {
     const tid = toast.loading("Enviando campanha…");
     try {
       const r: any = await sendNowFn({ data: { campaignId: c.id } } as any);
-      toast.success(
-        `Campanha enviada: ${r.enviados} ok, ${r.pendentes ?? 0} pendentes, ${r.falhas} falhas (${r.total} destinatários).`,
-        { id: tid },
-      );
+      if (r.pausadaPorSaldo) {
+        toast.warning(campaignPausedForBalanceMessage(r), { id: tid });
+      } else {
+        toast.success(
+          `Campanha enviada: ${r.enviados} ok, ${r.pendentes ?? 0} pendentes, ${r.falhas} falhas (${r.total} destinatários).`,
+          { id: tid },
+        );
+      }
       q.refetch();
     } catch (e: any) {
       toast.error(e?.message ?? "Erro no envio", { id: tid });
@@ -2122,10 +2131,14 @@ function CampanhaDialog({
       } as any);
       const id = saved?.id || c.id;
       const r: any = await sendNowFn({ data: { campaignId: id } } as any);
-      toast.success(
-        `Aceito pela Infobip: ${r.enviados} encaminhados, ${r.pendentes ?? 0} pendentes, ${r.falhas} falhas (${r.total} destinatários).`,
-        { id: tid },
-      );
+      if (r.pausadaPorSaldo) {
+        toast.warning(campaignPausedForBalanceMessage(r), { id: tid });
+      } else {
+        toast.success(
+          `Aceito pela Infobip: ${r.enviados} encaminhados, ${r.pendentes ?? 0} pendentes, ${r.falhas} falhas (${r.total} destinatários).`,
+          { id: tid },
+        );
+      }
       onOpenChange(false);
     } catch (e: any) {
       toast.error(e?.message ?? "Erro no envio", { id: tid });

@@ -674,6 +674,20 @@ export function ChannelCampaignComposer({
       const unresolvedCount = Number(
         (result as { unresolvedCount?: number } | null | undefined)?.unresolvedCount ?? 0,
       );
+      const emailRun = result as
+        | { pausadaPorSaldo?: boolean; enviados?: number; total?: number }
+        | null
+        | undefined;
+      if (emailRun?.pausadaPorSaldo) {
+        // PG3: the e-mail run stopped at the first send the wallet refused.
+        toast.warning(
+          `Campanha pausada por saldo insuficiente: ${num(Number(emailRun.enviados ?? 0))} de ${num(Number(emailRun.total ?? 0))} e-mails enviados.`,
+          { description: "Recarregue a carteira da casa e envie a campanha novamente." },
+        );
+        onCreated();
+        onOpenChange(false);
+        return;
+      }
       toast.success(
         when === "schedule"
           ? "Campanha agendada com revisão registrada"

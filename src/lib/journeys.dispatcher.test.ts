@@ -1035,4 +1035,48 @@ describe("runJourneyDispatcher email step", () => {
       error: "Configure e verifique um domínio de e-mail da casa para enviar e-mails.",
     });
   });
+
+  it("email step: logs the wallet reference and the amount charged (PG3 Task 6)", async () => {
+    seed(["e1"]);
+    fake.tables.journey_steps[0] = {
+      id: "step-0",
+      journey_id: JOURNEY,
+      position: 0,
+      step_type: "email",
+      is_enabled: true,
+      config: {
+        template_id: "tpl-1",
+        template_snapshot: { subject: "Oi", body_html: "<p>oi</p>" },
+      },
+    };
+    fake.tables.players = [{ id: PLAYER, tenant_id: TENANT, email: "jogador@x.com" }];
+    fake.tables.email_send_logs = [];
+    email.resolveSender.mockReset();
+    email.sendInfobipEmail.mockReset();
+    email.resolveSender.mockResolvedValue({
+      fromEmail: "a@casa.bet",
+      fromName: "Casa",
+      replyTo: null,
+      senderId: "s-1",
+    });
+    email.sendInfobipEmail.mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: {},
+      idempotencyKey: "key-1",
+      temporary: false,
+      billing: { referenceId: "email:key-1", amount: 0 },
+    });
+
+    const result = await runJourneyDispatcher(1000);
+    expect(result).toMatchObject({ processed: 1, failed: 0 });
+    expect(fake.tables.email_send_logs).toEqual([
+      expect.objectContaining({
+        tenant_id: TENANT,
+        status: "sent",
+        billing_reference_id: "email:key-1",
+        billed_amount: 0,
+      }),
+    ]);
+  });
 });

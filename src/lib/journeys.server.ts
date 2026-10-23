@@ -1,5 +1,10 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { EmailDomainNotVerifiedError, resolveSender, sendInfobipEmail } from "./email-send.server";
+import {
+  EmailDomainNotVerifiedError,
+  emailBillingColumns,
+  resolveSender,
+  sendInfobipEmail,
+} from "./email-send.server";
 import { callInfobipVoice, normalizeE164BR } from "./infobip-voice.server";
 import { logCallHistoryInsertError } from "./voice-history-log";
 import { sendSmsInternal } from "./sms.functions";
@@ -885,6 +890,7 @@ async function deliverStep(
         subject: renderTemplate(template.subject, vars, house),
         status: "sent",
         sent_at: new Date().toISOString(),
+        ...emailBillingColumns(result),
         provider_response: {
           journey_execution_id: run.id,
           provider: "infobip",

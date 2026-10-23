@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { refundForDelivery, reserveForDelivery } from "./billing/wallet.server";
 import { augmentEmailHtml, isSuppressed } from "./email-deliverability.server";
 import { callInfobipEmail } from "./infobip-email.server";
 import { getChannelConsentStatus } from "./consent.server";
@@ -22,7 +23,22 @@ export type SendEmailInput = {
   linkTracking?: Omit<LinkTrackingContext, "channel">;
 };
 
-export type SendEmailResult = Awaited<ReturnType<typeof callInfobipEmail>>;
+export type SendEmailResult = Awaited<ReturnType<typeof callInfobipEmail>> & {
+  /**
+   * PG3 — the wallet reservation of this e-mail (`email:<key>[:gen]`).
+   * Present whenever one was made, also on a failure (then already refunded,
+   * `amount` 0). `amount` is what the house paid for this e-mail in R$
+   * (0 inside the monthly free allowance or for an exempt house). Callers
+   * persist both in email_send_logs.billing_reference_id / billed_amount.
+   */
+  billing?: { referenceId: string; amount: number };
+};
+
+/** wallet_ledger.reference_type of an e-mail reservation. */
+export const EMAIL_RESERVATION_REFERENCE_TYPE = "email_send";
+
+/** body.error of a send refused by the house's own wallet. */
+export const EMAIL_INSUFFICIENT_BALANCE_MESSAGE = "Saldo insuficiente";
 
 export function sanitizeEmailHtml(html: string): string {
   return (html || "")
@@ -169,17 +185,85 @@ export async function sendInfobipEmail(input: SendEmailInput): Promise<SendEmail
   const trackedDispatchIds = prepared?.links.map((link) => link.dispatchId) ?? [];
   // Second guard immediately before the provider request.
   await assertTenantNotDemoForSend(tenantId);
-  const result = await callInfobipEmail({
-    ...input,
-    html: shieldDarkEmailHtml(
-      absolutizeEmailUrls(sanitizeEmailHtml(prepared?.content ?? augmentedHtml), getEmailBaseUrl()),
-    ),
-    idempotencyKey,
-  });
+  // PG3: charge this e-mail to the house's wallet. Only here — after both
+  // guards (a demo or locked house never reserves) and after the consent and
+  // suppression checks (a refused recipient is never charged). The monthly
+  // free allowance is counted inside wallet_reserve. The delivery key is the
+  // caller's idempotency key, else the fresh uuid above, so a retry of a
+  // refunded attempt moves to the next generation. Any error other than "no
+  // balance" propagates (nothing is sent). Platform e-mails (billing, DNS)
+  // call callInfobipEmail directly and are never charged.
+  const billingTenantId = tenantId as string; // the guard throws without one
+  let reservation: Awaited<ReturnType<typeof reserveForDelivery>>;
+  try {
+    reservation = await reserveForDelivery(supabaseAdmin, {
+      tenantId: billingTenantId,
+      item: "email",
+      prefix: "email",
+      deliveryKey: idempotencyKey,
+      units: 1,
+      referenceType: EMAIL_RESERVATION_REFERENCE_TYPE,
+    });
+  } catch (error) {
+    await markTrackedDispatchesFailed(trackedDispatchIds);
+    throw error;
+  }
+  if (!reservation.ok) {
+    await markTrackedDispatchesFailed(trackedDispatchIds);
+    return {
+      ok: false,
+      status: 0,
+      body: { error: EMAIL_INSUFFICIENT_BALANCE_MESSAGE },
+      idempotencyKey,
+      temporary: false,
+      // The HOUSE's wallet refused: never sent, never a global pause.
+      errorKind: "insufficient_balance",
+    };
+  }
+  const refund = (reason: string) =>
+    refundForDelivery(supabaseAdmin, {
+      tenantId: billingTenantId,
+      referenceId: reservation.referenceId,
+      prefix: "email",
+      reason,
+    });
+  let result: Awaited<ReturnType<typeof callInfobipEmail>>;
+  try {
+    result = await callInfobipEmail({
+      ...input,
+      html: shieldDarkEmailHtml(
+        absolutizeEmailUrls(sanitizeEmailHtml(prepared?.content ?? augmentedHtml), getEmailBaseUrl()),
+      ),
+      idempotencyKey,
+    });
+  } catch (error) {
+    await refund("infobip_email_error");
+    await markTrackedDispatchesFailed(trackedDispatchIds);
+    throw error;
+  }
+  // Refund on ANY failure, including a timeout that may have been accepted
+  // (PG3 spec, decision 5 — same as SMS).
+  if (!result.ok) {
+    await refund(`infobip_email_${result.status || result.errorKind || "error"}`);
+  }
   await (result.ok
     ? markTrackedDispatchesSent(trackedDispatchIds)
     : markTrackedDispatchesFailed(trackedDispatchIds));
-  return result;
+  return {
+    ...result,
+    billing: {
+      referenceId: reservation.referenceId,
+      amount: result.ok ? Math.abs(reservation.amount) : 0,
+    },
+  };
+}
+
+/** email_send_logs billing columns for a sendInfobipEmail result. */
+export function emailBillingColumns(result: Pick<SendEmailResult, "billing">) {
+  return {
+    billing_reference_id: result.billing?.referenceId ?? null,
+    billed_amount: result.billing ? result.billing.amount : null,
+  };
 }
 
 export const EMAIL_DOMAIN_NOT_VERIFIED = "EMAIL_DOMAIN_NOT_VERIFIED";
