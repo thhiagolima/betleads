@@ -11,6 +11,18 @@
 -- * expert_affiliates: one row per (tenant, affiliate_id), owned by an
 --   expert of that same tenant (enforced by a trigger, since a naive FK
 --   cannot check both expert_id and tenant_id together here).
+-- * Both experts and expert_affiliates are read-only for authenticated
+--   (SELECT via RLS only); INSERT/UPDATE/DELETE/TRUNCATE are revoked from
+--   anon and authenticated outright, since Supabase's default per-table
+--   grants would otherwise hand every tenant member CRUD on both tables
+--   regardless of RLS (see 20261015100000_fix_rls_privilege_escalation.sql,
+--   which only strips those defaults for anon and TRUNCATE for
+--   authenticated — INSERT/UPDATE/DELETE stay granted to authenticated by
+--   default on every new table). The legacy open policies on experts
+--   ("public read experts"/"public write experts" from 20260520231020, and
+--   the generic "Admins full access" from 20260522180650) are dropped;
+--   experts_tenant_rls (from 20261015090000_consolidate_tenant_rls.sql)
+--   stays, now only ever satisfied by SELECT.
 -- * save_expert / delete_expert / tenant_unassigned_affiliate_ids are the
 --   only way to write this model; service_role only (called from server
 --   functions, never from the browser).
@@ -58,6 +70,16 @@ create trigger experts_updated_at
 alter table public.experts
   alter column affiliate_id drop not null;
 
+-- experts is read-only for tenant members: experts_tenant_rls (FOR ALL)
+-- stays in place for SELECT, but writes must go through save_expert/
+-- delete_expert (service_role) so tipo/ativo/envio_modo/teto_mensal/
+-- assumir_prazo_dias/user_id can't be set directly by a member.
+drop policy if exists "public read experts" on public.experts;
+drop policy if exists "public write experts" on public.experts;
+drop policy if exists "Admins full access" on public.experts;
+
+revoke insert, update, delete, truncate on public.experts from anon, authenticated;
+
 -- 3. expert_affiliates: per-house affiliate ids, each owned by exactly one
 --    expert of that house.
 create table if not exists public.expert_affiliates (
@@ -76,15 +98,17 @@ alter table public.expert_affiliates enable row level security;
 
 drop policy if exists expert_affiliates_tenant_rls on public.expert_affiliates;
 create policy expert_affiliates_tenant_rls on public.expert_affiliates
-  as permissive for all to authenticated
-  using ((select public.is_super_admin()) or tenant_id = (select public.current_tenant_id()))
-  with check ((select public.is_super_admin()) or tenant_id = (select public.current_tenant_id()));
+  as permissive for select to authenticated
+  using ((select public.is_super_admin()) or tenant_id = (select public.current_tenant_id()));
 
 -- Reads go straight to tenant members via RLS above; writes only via
 -- save_expert/delete_expert (service_role), which also keep players.expert
--- and the affiliate_taken check consistent.
+-- and the affiliate_taken check consistent. Supabase's default per-table
+-- grants hand new tables INSERT/UPDATE/DELETE on authenticated regardless
+-- of RLS, so revoke them explicitly.
 grant select on public.expert_affiliates to authenticated;
 grant all on public.expert_affiliates to service_role;
+revoke insert, update, delete, truncate on public.expert_affiliates from anon, authenticated;
 
 -- A row's tenant_id must match the tenant_id of the expert it points to —
 -- a plain FK cannot express "the two columns agree", so this trigger does.
@@ -133,11 +157,12 @@ begin
     limit 1;
 
     insert into public.expert_affiliates (tenant_id, expert_id, affiliate_id)
-    select grp.tenant_id, canonical_id, affiliate_id
+    select grp.tenant_id, canonical_id, btrim(affiliate_id)
     from public.experts
     where tenant_id = grp.tenant_id
       and lower(btrim(nome)) = grp.nome_key
       and affiliate_id is not null
+      and btrim(affiliate_id) <> ''
     on conflict (tenant_id, affiliate_id) do nothing;
 
     delete from public.experts
@@ -192,6 +217,11 @@ declare
   v_ids text[];
   v_taken text;
 begin
+  _nome := btrim(_nome);
+  if _nome is null or _nome = '' then
+    raise exception 'expert_nome_required';
+  end if;
+
   select array_agg(distinct btrim(v))
   into v_ids
   from unnest(coalesce(_affiliate_ids, array[]::text[])) as v
@@ -248,13 +278,13 @@ begin
   update public.players
   set expert = _nome
   where tenant_id = _tenant
-    and affiliate_id = any(v_ids);
+    and btrim(affiliate_id) = any(v_ids);
 
   update public.players
   set expert = null
   where tenant_id = _tenant
     and expert in (v_old_nome, _nome)
-    and not (affiliate_id = any(v_ids));
+    and not (btrim(affiliate_id) = any(v_ids));
 
   return v_expert_id;
 end;
@@ -290,7 +320,7 @@ begin
   update public.players p
   set expert = null
   where p.tenant_id = _tenant
-    and p.affiliate_id in (
+    and btrim(p.affiliate_id) in (
       select affiliate_id from public.expert_affiliates where expert_id = _expert_id
     );
 

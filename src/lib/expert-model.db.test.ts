@@ -81,6 +81,13 @@ grant select, insert, update, delete on public.tenants to anon, authenticated, s
 grant select, insert, update, delete on public.user_roles to anon, authenticated, service_role;
 grant select, insert, update, delete on public.players to anon, authenticated, service_role;
 grant select, insert, update, delete on public.experts to anon, authenticated, service_role;
+
+-- Emulates Supabase's real default: every table created from here on
+-- (expert_affiliates, created by the migration below) grants authenticated
+-- full CRUD unless a migration revokes it explicitly, same as production
+-- (see 20261015100000_fix_rls_privilege_escalation.sql, which only strips
+-- the default grants for anon and TRUNCATE for authenticated).
+alter default privileges in schema public grant all on tables to authenticated;
 `;
 
 const TENANT_A = "00000000-0000-4000-8000-00000000000a";
@@ -174,7 +181,7 @@ describe("user_roles role expert", () => {
       db.query(
         `insert into public.user_roles (user_id, tenant_id, role) values (gen_random_uuid(), null, 'expert')`,
       ),
-    ).rejects.toThrow();
+    ).rejects.toThrow(/user_roles_canonical_scope/);
   });
 });
 
@@ -216,6 +223,24 @@ describe("save_expert", () => {
       [TENANT_B],
     );
     expect(playerB[0].expert).toBeNull();
+  });
+
+  it("labels a player whose stored affiliate_id has surrounding whitespace", async () => {
+    await db.query(`insert into public.players (tenant_id, affiliate_id) values ($1, ' AFF8 ')`, [
+      TENANT_A,
+    ]);
+
+    const { rows } = await db.query<{ save_expert: string }>(
+      `select save_expert($1, null, 'Espacado', 'restrito', $2, 'livre', null, 3) as save_expert`,
+      [TENANT_A, ["AFF8"]],
+    );
+    expect(rows[0].save_expert).toBeTruthy();
+
+    const { rows: player } = await db.query<{ expert: string | null }>(
+      `select expert from public.players where tenant_id = $1 and affiliate_id = ' AFF8 '`,
+      [TENANT_A],
+    );
+    expect(player[0].expert).toBe("Espacado");
   });
 
   it("rejects an affiliate id owned by another expert of the same house", async () => {
@@ -292,7 +317,7 @@ describe("expert_affiliates tenant consistency trigger", () => {
         `insert into public.expert_affiliates (tenant_id, expert_id, affiliate_id) values ($1, $2, 'AFFX')`,
         [TENANT_B, andrade[0].id],
       ),
-    ).rejects.toThrow();
+    ).rejects.toThrow(/expert_affiliates_tenant_mismatch/);
   });
 });
 
@@ -360,6 +385,45 @@ describe("tenant_unassigned_affiliate_ids", () => {
       { affiliate_id: "X1", leads: 3 },
       { affiliate_id: "X2", leads: 2 },
     ]);
+  });
+});
+
+describe("authenticated has no direct write access to experts/expert_affiliates", () => {
+  let directWriteExpertId: string;
+
+  beforeAll(async () => {
+    const { rows } = await db.query<{ save_expert: string }>(
+      `select save_expert($1, null, 'Escrita Direta', 'restrito', $2, 'livre', null, 3) as save_expert`,
+      [TENANT_A, ["AFFDIRECT"]],
+    );
+    directWriteExpertId = rows[0].save_expert;
+  });
+
+  it("cannot insert into expert_affiliates directly, even with a matching tenant_id", async () => {
+    await db.query("BEGIN");
+    try {
+      await db.exec("SET LOCAL ROLE authenticated");
+      await expect(
+        db.query(
+          `insert into public.expert_affiliates (tenant_id, expert_id, affiliate_id) values ($1, $2, 'AFFBYPASS')`,
+          [TENANT_A, directWriteExpertId],
+        ),
+      ).rejects.toThrow(/permission denied/);
+    } finally {
+      await db.query("ROLLBACK");
+    }
+  });
+
+  it("cannot update experts directly (e.g. tipo)", async () => {
+    await db.query("BEGIN");
+    try {
+      await db.exec("SET LOCAL ROLE authenticated");
+      await expect(
+        db.query(`update public.experts set tipo = 'total' where id = $1`, [directWriteExpertId]),
+      ).rejects.toThrow(/permission denied/);
+    } finally {
+      await db.query("ROLLBACK");
+    }
   });
 });
 
