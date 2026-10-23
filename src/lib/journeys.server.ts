@@ -1,7 +1,14 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { EmailDomainNotVerifiedError, resolveSender, sendInfobipEmail } from "./email-send.server";
+import {
+  EmailDomainNotVerifiedError,
+  emailBillingColumns,
+  resolveSender,
+  sendInfobipEmail,
+} from "./email-send.server";
 import { callInfobipVoice, normalizeE164BR } from "./infobip-voice.server";
+import { logCallHistoryInsertError } from "./voice-history-log";
 import { sendSmsInternal } from "./sms.functions";
+import { notifyNoBalance } from "./billing/wallet-alerts.server";
 import { buildPlayerVariables, renderTemplate } from "./template-vars.server";
 import { loadHouseLinks } from "./house-links.server";
 import { detectTriggersForPlayer } from "./triggers.server";
@@ -884,6 +891,7 @@ async function deliverStep(
         subject: renderTemplate(template.subject, vars, house),
         status: "sent",
         sent_at: new Date().toISOString(),
+        ...emailBillingColumns(result),
         provider_response: {
           journey_execution_id: run.id,
           provider: "infobip",
@@ -928,7 +936,7 @@ async function deliverStep(
     const assetId = String(step.config.asset_id ?? "");
     const { data: asset } = await db
       .from("journey_voice_assets")
-      .select("storage_path")
+      .select("storage_path, duration_seconds")
       .eq("id", assetId)
       .eq("tenant_id", enrollment.tenant_id)
       .maybeSingle();
@@ -942,7 +950,13 @@ async function deliverStep(
     const result = await callInfobipVoice(
       to,
       { type: "audio", audioUrl: signed.signedUrl },
-      { idempotencyKey: run.idempotency_key, tenantId: enrollment.tenant_id },
+      {
+        idempotencyKey: run.idempotency_key,
+        tenantId: enrollment.tenant_id,
+        // PG3: the audio's duration sizes the wallet reservation (null falls
+        // back to VOICE_MAX_CALL_SECONDS).
+        maxSeconds: asset.duration_seconds ?? null,
+      },
     );
     if (!result.ok)
       throw new ProviderSendError({
@@ -957,7 +971,7 @@ async function deliverStep(
       // The call is ongoing: keep the concurrency permit until the event
       // callback reports the end (I3) or concurrency_hold_seconds elapse.
       gate.keepPermit = Boolean(gate.admission.permitId);
-      await supabaseAdmin.from("call_history").insert({
+      const { error: historyInsertError } = await supabaseAdmin.from("call_history").insert({
         tenant_id: enrollment.tenant_id,
         lead_id: enrollment.player_id,
         audio_url: signed.signedUrl,
@@ -973,7 +987,9 @@ async function deliverStep(
         } as never,
         provider_status_code: result.status,
         to_phone: to,
+        billing_reference_id: result.billing?.referenceId ?? null,
       });
+      if (historyInsertError) logCallHistoryInsertError("journey", historyInsertError, result);
     }
     await finishExecution(run.id, {
       status: "sent",
@@ -1029,6 +1045,8 @@ type DispatchCounters = {
   leaseLost: number;
   /** SMS items held back (no attempt consumed) because the provider breaker is open. */
   providerSuspended: number;
+  /** Steps skipped because the house wallet had no balance (PG3 decision 6). */
+  skippedNoBalance: number;
 };
 
 /**
@@ -1210,6 +1228,10 @@ async function finishOwnExecution(
  *           execution stays `claimed`, so reserve_journey_delivery answers
  *           `in_flight` for 15 min; the item waits 15 min and an attempt is
  *           consumed; at max_attempts the enrollment fails.
+ * - skip    (the HOUSE's wallet had no balance, PG3 decision 6): the step
+ *           is skipped with reason `saldo_insuficiente` and the journey
+ *           advances to the next step now. No retry, no attempt consumed;
+ *           the house gets the hourly "Saldo insuficiente" alert.
  * - fail    : the journey's max_attempts/backoff policy; a misconfigured
  *           provider (missing credentials) is also reported to Sentry.
  */
@@ -1231,6 +1253,37 @@ async function handleItemFailure(row: ClaimedRow, ctx: DispatchContext, error: u
     return;
   }
   const enrollment = enrollmentRaw as EnrollmentRow & Record<string, unknown>;
+
+  if (decision.kind === "skip") {
+    ctx.counters.skippedNoBalance++;
+    const position = Number(enrollment.current_position ?? 0);
+    await finishOwnExecution(ctx, row.id, {
+      status: "skipped",
+      provider: "wallet",
+      error: message.slice(0, 1000),
+      completed_at: nowIso(),
+    });
+    await release(enrollment, ctx, {
+      status: "active",
+      current_position: position + 1,
+      next_run_at: nowIso(),
+      attempts: 0,
+    });
+    await event(enrollment, "step_skipped", {
+      channel: error instanceof ProviderSendError ? error.channel : (row.step_type ?? null),
+      step_position: position,
+      reason: "saldo_insuficiente",
+      attempt_consumed: false,
+    });
+    // PG3 Task 7: hourly "Saldo insuficiente" e-mail; never breaks the dispatcher.
+    await notifyNoBalance(row.tenant_id).catch((alertError: unknown) =>
+      console.error("[journey dispatcher] no balance alert failed", {
+        tenantId: row.tenant_id,
+        error: alertError instanceof Error ? alertError.message : String(alertError),
+      }),
+    );
+    return;
+  }
 
   if (decision.kind === "provider_account") {
     // The provider refused the ACCOUNT (101/505, 401/402/403): every lead would
@@ -1460,6 +1513,7 @@ async function runJourneyDispatcherMonitored(limit: number, run: JobRunHandle) {
       outcomeUnknown: 0,
       leaseLost: 0,
       providerSuspended: 0,
+      skippedNoBalance: 0,
     },
     executions: new Map(),
     exhausted: new Map(),
@@ -1643,6 +1697,7 @@ async function runJourneyDispatcherMonitored(limit: number, run: JobRunHandle) {
       outcomeUnknown: ctx.counters.outcomeUnknown,
       leaseLost: ctx.counters.leaseLost,
       providerSuspended: ctx.counters.providerSuspended,
+      skippedNoBalance: ctx.counters.skippedNoBalance,
       smsBreaker: ctx.sms.mode,
       stopReason,
       scannerSeparated: true,

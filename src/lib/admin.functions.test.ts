@@ -63,6 +63,34 @@ describe("setPricingFor", () => {
   });
 });
 
+describe("setPricingFor: charge_unanswered_blocks (PG3)", () => {
+  it("sends the unanswered rule for voice_30s", async () => {
+    let sent: Record<string, unknown> = {};
+    userDb.onRpc("admin_set_price", (args) => {
+      sent = args;
+      return { data: {}, error: null };
+    });
+    await setPricingFor(
+      { userId: SUPER_ADMIN, supabase: userDb.client },
+      { item: "voice_30s", unit_price: 0.09, charge_unanswered_blocks: 1 },
+    );
+    expect(sent._charge_unanswered_blocks).toBe(1);
+  });
+
+  it("never sends it for other items (the SQL keeps the current value)", async () => {
+    let sent: Record<string, unknown> = {};
+    userDb.onRpc("admin_set_price", (args) => {
+      sent = args;
+      return { data: {}, error: null };
+    });
+    await setPricingFor(
+      { userId: SUPER_ADMIN, supabase: userDb.client },
+      { item: "email", unit_price: 0.002, charge_unanswered_blocks: 3 },
+    );
+    expect(sent).not.toHaveProperty("_charge_unanswered_blocks");
+  });
+});
+
 describe("getPricingFor", () => {
   it("picks the latest valid_from that is not in the future, per item", async () => {
     const past = new Date(Date.now() - 86_400_000).toISOString();

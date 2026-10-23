@@ -220,7 +220,7 @@ describe("classifyProviderFailure (B1 matrix)", () => {
     expect(classifyProviderFailure(sendError(200, { temporary: true })).kind).toBe("defer");
   });
 
-  it("402 / insufficient funds defers 15 min (no pause, resumes by itself after a recharge)", () => {
+  it("402 / insufficient funds without errorKind defers 15 min (provider-level, no pause, resumes by itself) — unchanged by PG3 Task 1", () => {
     expect(classifyProviderFailure(sendError(402))).toEqual({
       kind: "defer",
       reason: "insufficient_credit",
@@ -229,6 +229,26 @@ describe("classifyProviderFailure (B1 matrix)", () => {
     expect(
       classifyProviderFailure(sendError(400, { body: JSON.stringify({ code: "INSUFFICIENT_FUNDS" }) })).kind,
     ).toBe("defer");
+  });
+
+  it("a provider's OWN 402 (e.g. Infobip voice/e-mail, no errorKind) keeps the provider-level classification, never insufficient_balance", () => {
+    for (const channel of ["voice", "email"]) {
+      const error = new ProviderSendError({ channel, message: "HTTP 402", status: 402 });
+      expect(classifyProviderFailure(error)).toMatchObject({
+        kind: "defer",
+        reason: "insufficient_credit",
+      });
+    }
+  });
+
+  it("explicit errorKind insufficient_balance (house wallet) is a skip: no retry, no attempt (PG3 Task 7)", () => {
+    expect(
+      classifyProviderFailure(sendError(402, { errorKind: "insufficient_balance" })),
+    ).toEqual({
+      kind: "skip",
+      reason: "insufficient_balance",
+      retryAfterMs: 0,
+    });
   });
 
   it("timeout / reset after sending (status 0, outcome unknown) is treated as possibly sent", () => {

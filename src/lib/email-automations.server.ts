@@ -2,10 +2,16 @@
 // Pega leads com next_run_at <= now() e executa o bloco atual.
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { EmailDomainNotVerifiedError, resolveSender, sendInfobipEmail } from "./email-send.server";
+import {
+  EmailDomainNotVerifiedError,
+  emailBillingColumns,
+  resolveSender,
+  sendInfobipEmail,
+} from "./email-send.server";
 import { buildPlayerVariables, renderTemplate } from "./template-vars.server";
 import { loadHouseLinks } from "./house-links.server";
 import { deferIfOutsideWindow } from "./send-window.server";
+import { notifyNoBalance } from "./billing/wallet-alerts.server";
 import {
   consumeBudget,
   countQueuePending,
@@ -14,6 +20,9 @@ import {
   recordRun,
   registerThrottle,
 } from "./dispatch-rate.server";
+
+/** Per-lead backoff when the house's own wallet has no balance (never a global pause). */
+const WALLET_INSUFFICIENT_RETRY_MS = 15 * 60_000;
 
 async function runPool<T, R>(
   items: T[],
@@ -507,14 +516,37 @@ async function applySendFailure(
   status: number,
   temporary: boolean,
   insufficient: boolean = false,
+  /**
+   * Set only for the HOUSE's own wallet refusal (errorKind
+   * "insufficient_balance"): reschedules this one item 15 min out instead of
+   * leaving next_run_at untouched. Never set for a real provider-level 402
+   * (Short Brasil/Infobip account itself out of balance), which still relies
+   * on the channel pause to resume the ORIGINAL schedule without a burst.
+   */
+  walletBackoffMs?: number,
 ) {
   const { lead } = plan;
   const MAX_TEMP_ATTEMPTS = 5;
   const isAuthError = status === 401 || status === 403;
-  // Sem saldo: NÃO toca em next_run_at nem em attempts. O canal já foi pausado
-  // em dispatch_pause_state — quando despausar, o lead volta com o agendamento
-  // ORIGINAL preservado, evitando burst concentrado de envios.
   if (insufficient) {
+    // House wallet refusal: no attempt consumed, but the item still needs to
+    // come back later on its own (never global) — reschedule it.
+    if (walletBackoffMs) {
+      await supabaseAdmin
+        .from("email_flow_leads")
+        .update({
+          status: "running",
+          next_run_at: new Date(Date.now() + walletBackoffMs).toISOString(),
+          locked_at: null,
+          locked_by: null,
+        })
+        .eq("id", lead.id);
+      return;
+    }
+    // Real provider-level "sem saldo": NÃO toca em next_run_at nem em
+    // attempts. O canal já foi pausado em dispatch_pause_state — quando
+    // despausar, o lead volta com o agendamento ORIGINAL preservado,
+    // evitando burst concentrado de envios.
     await supabaseAdmin
       .from("email_flow_leads")
       .update({ status: "running", locked_at: null, locked_by: null })
@@ -792,6 +824,32 @@ export async function runEmailFlowDispatcher({
     });
     const isTemporary = !result.ok && result.temporary === true;
 
+    if (!result.ok && result.errorKind === "insufficient_balance") {
+      // PG3: the HOUSE's wallet refused this e-mail. Nothing was sent nor
+      // charged, so it is not a delivery attempt (no email_send_logs row).
+      // Skip only this house's item: reschedule it, no attempt consumed,
+      // never a global pause or throttle (spec decision 8).
+      lastProviderError = `saldo_insuficiente: ${JSON.stringify(result.body ?? {})}`.slice(0, 800);
+      await logEvent(
+        plan.lead.tenant_id,
+        plan.lead.flow_id,
+        plan.lead.id,
+        plan.lead.player_id,
+        "skipped_insufficient_balance",
+        { template_id: plan.tplId, reason: "saldo_insuficiente" },
+      );
+      rescheduled++;
+      await applySendFailure(plan, result.status, true, true, WALLET_INSUFFICIENT_RETRY_MS);
+      // PG3 Task 7: hourly "Saldo insuficiente" e-mail; never breaks the dispatcher.
+      await notifyNoBalance(plan.lead.tenant_id).catch((alertError: unknown) =>
+        console.error("[email-automations] no balance alert failed", {
+          tenantId: plan.lead.tenant_id,
+          error: alertError instanceof Error ? alertError.message : String(alertError),
+        }),
+      );
+      return;
+    }
+
     await supabaseAdmin.from("email_send_logs").insert({
       to_email: plan.lead.email,
       subject: plan.subject,
@@ -804,6 +862,7 @@ export async function runEmailFlowDispatcher({
       block_index: plan.blockIdx,
       step_label: computeEmailStepLabel(plan.blocks, plan.blockIdx),
       tenant_id: plan.lead.tenant_id,
+      ...emailBillingColumns(result),
       provider_response: {
         status: result.status,
         body: result.body,
@@ -833,6 +892,8 @@ export async function runEmailFlowDispatcher({
       lastProviderError = `status=${result.status} ${bodyStr}`.slice(0, 800);
       const { isInsufficientFunds, pauseChannelForInsufficientFunds } =
         await import("./dispatch-pause-insufficient.server");
+      // The house's own wallet refusal returned early above; only a real
+      // provider 402 (no errorKind) reaches here and pauses every tenant.
       const insufficient = isInsufficientFunds(result.status, result.body);
       if (result.status === 429 || /rate.?limit|throttle|too many/i.test(bodyStr)) {
         rateLimited++;

@@ -47,6 +47,7 @@ export function createFakeDb(options: { unique?: Record<string, string[][]> } = 
     let patch: Row = {};
     let upsertOpts: { onConflict?: string; ignoreDuplicates?: boolean } = {};
     let limit: number | null = null;
+    let offset = 0;
     let returning = false;
     let selectCount: "exact" | null = null;
     let selectHead = false;
@@ -110,7 +111,7 @@ export function createFakeDb(options: { unique?: Record<string, string[][]> } = 
           return 0;
         });
       }
-      const limited = limit === null ? ordered : ordered.slice(0, limit);
+      const limited = ordered.slice(offset, limit === null ? undefined : offset + limit);
       const result: Result = { data: selectHead ? null : limited, error: null };
       if (selectCount === "exact") result.count = matched.length;
       return result;
@@ -176,7 +177,8 @@ export function createFakeDb(options: { unique?: Record<string, string[][]> } = 
         return builder;
       },
       limit: (n: number) => ((limit = n), builder),
-      range: () => builder,
+      // PostgREST `range(from, to)` is inclusive on both ends.
+      range: (from: number, to: number) => ((offset = from), (limit = to - from + 1), builder),
       single: async () => {
         const r = run();
         const list = (r.data as Row[] | null) ?? [];

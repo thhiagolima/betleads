@@ -206,7 +206,9 @@ export async function getPricingFor(userId: string) {
   // current price, even if it's the most recently inserted row.
   const { data, error } = await supabaseAdmin
     .from("billing_price_book")
-    .select("item, unit_price, provider_unit_cost, free_monthly_units, created_at, valid_from")
+    .select(
+      "item, unit_price, provider_unit_cost, free_monthly_units, charge_unanswered_blocks, created_at, valid_from",
+    )
     .lte("valid_from", new Date().toISOString())
     .order("valid_from", { ascending: false });
   if (error) throw new Error(error.message);
@@ -222,6 +224,7 @@ export async function getPricingFor(userId: string) {
         unit_price: 0,
         provider_unit_cost: null,
         free_monthly_units: 0,
+        charge_unanswered_blocks: 0,
         created_at: null,
       },
   );
@@ -237,6 +240,9 @@ const pricingInput = z.object({
   unit_price: z.number().min(0).max(1000),
   provider_unit_cost: z.number().min(0).max(1000).optional().nullable(),
   free_monthly_units: z.number().int().min(0).max(10_000_000).optional(),
+  // Blocos de 30 s cobrados numa chamada não atendida (PG3). Só vale para
+  // voice_30s; para os outros itens não é enviado e o SQL mantém o valor.
+  charge_unanswered_blocks: z.number().int().min(0).max(100).optional(),
 });
 
 type PricingServerContext = {
@@ -266,12 +272,16 @@ export async function setPricingFor(
   data: z.infer<typeof pricingInput>,
 ) {
   await assertSuperAdmin(ctx.userId);
-  const { error } = await (ctx.supabase as LooseRpcClient).rpc("admin_set_price", {
+  const args: Record<string, unknown> = {
     _item: data.item,
     _unit_price: data.unit_price,
     _provider_unit_cost: data.provider_unit_cost ?? undefined,
     _free_monthly_units: data.free_monthly_units ?? 0,
-  });
+  };
+  if (data.item === "voice_30s" && data.charge_unanswered_blocks !== undefined) {
+    args._charge_unanswered_blocks = data.charge_unanswered_blocks;
+  }
+  const { error } = await (ctx.supabase as LooseRpcClient).rpc("admin_set_price", args);
   if (error) throw new Error(error.message);
   return { ok: true };
 }

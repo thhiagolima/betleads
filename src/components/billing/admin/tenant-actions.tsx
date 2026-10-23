@@ -31,12 +31,14 @@ import {
   adminSetFrozen,
   adminSetTenantBlock,
 } from "@/lib/billing/billing-admin.functions";
+import { brtDayKey } from "@/lib/tz";
 import { ReasonActionDialog } from "./reason-dialog";
 import {
   validateCalendarDate,
   validateDiscountDateRange,
   validateFixedDiscountAmount,
   validateManualSettleAmount,
+  validateManualSettlePaidAt,
   validatePercentDiscount,
 } from "./billing-admin-ui";
 
@@ -367,20 +369,32 @@ export function SetContinuousDiscountAction({
 
 export function ManualSettleAction({
   invoiceId,
+  issuedOn,
   onDone,
 }: {
   invoiceId: string | null;
+  /** The open invoice's issue day (BRT, YYYY-MM-DD) — the payment date can never be earlier
+   * than this (fix round 1, Ruling T10). Null when there is no open invoice (trigger disabled). */
+  issuedOn: string | null;
   onDone: OnDone;
 }) {
+  const todayBRT = brtDayKey(new Date());
   const [paidAmount, setPaidAmount] = useState("");
   const [note, setNote] = useState("");
   const [receipt, setReceipt] = useState("");
+  const [paidAt, setPaidAt] = useState(todayBRT);
   const paidAmountId = useId();
   const noteId = useId();
   const receiptId = useId();
+  const paidAtId = useId();
   const mut = useBillingAction(adminManualSettle);
   const amountValidation = validateManualSettleAmount(paidAmount);
-  const valid = amountValidation.valid && note.trim().length >= 1 && receipt.trim().length >= 1;
+  const paidAtValidation = validateManualSettlePaidAt(paidAt, todayBRT, issuedOn ?? undefined);
+  const valid =
+    amountValidation.valid &&
+    paidAtValidation.valid &&
+    note.trim().length >= 1 &&
+    receipt.trim().length >= 1;
   return (
     <ReasonActionDialog
       triggerLabel="Dar baixa manual"
@@ -394,6 +408,7 @@ export function ManualSettleAction({
           setPaidAmount("");
           setNote("");
           setReceipt("");
+          setPaidAt(brtDayKey(new Date()));
         }
       }}
       onSubmit={async (reason) => {
@@ -403,6 +418,7 @@ export function ManualSettleAction({
           paidAmountCents: paidAmount.trim() === "" ? null : Math.round(Number(paidAmount) * 100),
           note,
           receipt,
+          paidAt: paidAt.trim() === "" ? null : paidAt,
           reason,
         });
         toast.success("Baixa manual registrada.");
@@ -421,6 +437,20 @@ export function ManualSettleAction({
         />
         {!amountValidation.valid && (
           <p className="text-xs text-destructive">{amountValidation.message}</p>
+        )}
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor={paidAtId}>Data do pagamento</Label>
+        <Input
+          id={paidAtId}
+          type="date"
+          min={issuedOn ?? undefined}
+          max={todayBRT}
+          value={paidAt}
+          onChange={(e) => setPaidAt(e.target.value)}
+        />
+        {!paidAtValidation.valid && (
+          <p className="text-xs text-destructive">{paidAtValidation.message}</p>
         )}
       </div>
       <div className="space-y-2">
@@ -452,7 +482,7 @@ export function CancelInvoiceAction({
       triggerLabel="Cancelar fatura"
       triggerVariant="destructive"
       title="Cancelar fatura"
-      description="Fatura em aberto gerada por engano. Cancela o Pix na Upper, se houver."
+      description="Fatura em aberto gerada por engano. Cancela o Pix na Upper, se houver. Fatura mensal: o mês não é cobrado e a próxima fatura é a do ciclo seguinte. Fatura de ativação: é reemitida na hora com o valor atual."
       disabledTrigger={!invoiceId}
       pending={mut.isPending}
       // m8: "Cancelar" here would read as cancelling the invoice itself, not dismissing the

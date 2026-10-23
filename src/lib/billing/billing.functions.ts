@@ -17,6 +17,7 @@ import { resolveOperationalTenantId, resolveTenantForBilling } from "../tenant-a
 import { isBillingEnforcementEnabled, isTenantPayer, requireTenantPayer } from "./billing-state.server";
 import { billingView, type BillingRole } from "./billing-view";
 import { createInvoicePayment } from "./invoices.server";
+import { getEndToEndOrExternalId } from "./payment-reference.server";
 import { brtDayKey } from "../tz";
 
 type ServerContext = {
@@ -477,6 +478,58 @@ export const payInvoice = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => payInvoiceInput.parse(data))
   .handler(async ({ data, context }) => payInvoiceFor(context as ServerContext, data));
 
+const NOT_THRESHOLD_EDITOR_MESSAGE =
+  "Só o administrador ou gestor da casa pode alterar o limite de saldo baixo.";
+const INVALID_THRESHOLD_MESSAGE = "Informe um valor entre R$ 0 e R$ 100.000.";
+const THRESHOLD_SAVE_FAILED_MESSAGE = "Não foi possível salvar o limite agora. Tente de novo.";
+
+export const lowBalanceThresholdInput = z.object({
+  tenantId: dbUuid().optional().nullable(),
+  value: z
+    .number()
+    .finite()
+    .min(0)
+    .max(100000)
+    .refine((value) => Math.abs(Math.round(value * 100) - value * 100) < 1e-6, {
+      message: "No máximo 2 casas decimais.",
+    }),
+});
+
+/**
+ * Body of `setLowBalanceThreshold` (PG3 Task 8), exported for tests. The
+ * house's payers (admin, owner, gestor) and the superadmin may change it.
+ * `billing_set_low_balance_threshold` re-checks the role, enforces 0-100000
+ * and writes the audit row; it runs on the caller's own client because it
+ * reads `auth.uid()`.
+ */
+export async function setLowBalanceThresholdFor(
+  ctx: ServerContext,
+  data: z.infer<typeof lowBalanceThresholdInput>,
+) {
+  const tenantId = await resolveTenantForBilling(
+    ctx.supabase as unknown as Parameters<typeof resolveTenantForBilling>[0],
+    ctx.userId,
+    data.tenantId,
+  );
+  await requireTenantPayer(ctx.supabase, tenantId, NOT_THRESHOLD_EDITOR_MESSAGE, ctx.userId);
+
+  const { data: row, error } = await looseDb(ctx.supabase).rpc<{
+    low_balance_threshold?: number | string;
+  }>("billing_set_low_balance_threshold", { _tenant: tenantId, _value: data.value });
+  if (error) {
+    if (error.message.includes("invalid_threshold")) throw new Error(INVALID_THRESHOLD_MESSAGE);
+    if (error.message.includes("forbidden")) throw new Error(NOT_THRESHOLD_EDITOR_MESSAGE);
+    console.error("[billing] billing_set_low_balance_threshold failed", error.message);
+    throw new Error(THRESHOLD_SAVE_FAILED_MESSAGE);
+  }
+  return { ok: true as const, lowBalanceThreshold: Number(row?.low_balance_threshold ?? data.value) };
+}
+
+export const setLowBalanceThreshold = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => lowBalanceThresholdInput.parse(data))
+  .handler(async ({ data, context }) => setLowBalanceThresholdFor(context as ServerContext, data));
+
 const invoiceReceiptInput = z.object({
   tenantId: dbUuid().optional().nullable(),
   invoiceId: dbUuid(),
@@ -525,18 +578,10 @@ export async function getInvoiceReceiptFor(
   if (!invoice || invoice.tenant_id !== tenantId) throw new Error(INVOICE_NOT_FOUND_MESSAGE);
   if (invoice.status !== "paid") throw new Error(INVOICE_NOT_PAID_MESSAGE);
 
-  let endToEndOrExternalId: string | null = null;
-  if (invoice.payment_charge_id) {
-    const { data: chargeRow, error: chargeError } = await looseDb(supabaseAdmin)
-      .from<{ external_id: string; last_provider_payload: Json | null }>("payment_charges")
-      .select("external_id,last_provider_payload")
-      .eq("id", invoice.payment_charge_id)
-      .maybeSingle();
-    if (chargeError) throw new Error(chargeError.message);
-    const payload = chargeRow?.last_provider_payload as { endToEndId?: unknown } | null;
-    const endToEnd = payload && typeof payload.endToEndId === "string" ? payload.endToEndId : null;
-    endToEndOrExternalId = endToEnd ?? chargeRow?.external_id ?? null;
-  }
+  const endToEndOrExternalId = await getEndToEndOrExternalId(
+    supabaseAdmin,
+    invoice.payment_charge_id,
+  );
 
   const [year, month] = invoice.cycle_due_date.split("-");
   return {

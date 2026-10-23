@@ -98,6 +98,7 @@ export const BILLING_ADMIN_ERROR_MESSAGES: Record<string, string> = {
   invalid_amount: "Valor inválido.",
   invalid_date: "Data inválida.",
   invalid_via: "Forma de pagamento inválida.",
+  invalid_paid_at: "A data do pagamento não pode ser anterior à emissão da fatura.",
 };
 
 function translateBillingError(error: DbError): Error {
@@ -141,6 +142,19 @@ const reasonSchema = z
 /** Shared `YYYY-MM-DD` validator (minor m4): same shape/message everywhere a plain date string
  * comes in — `nextDueDate`, and the continuous discount's `startsOn`/`endsOn`. */
 const dateStrSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Data inválida.");
+
+/** True only for a `YYYY-MM-DD` that is a real calendar date (rejects e.g. 2026-02-30) — same
+ * check as the client's `validateCalendarDate` (billing-admin-ui.ts), kept in sync by hand since
+ * one is a pure client helper and the other a zod refinement. */
+function isRealCalendarDate(value: string): boolean {
+  const [y, m, d] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  return date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d;
+}
+
+/** Fix round 1 (Ruling T10): `paidAt` must be shaped AND a real calendar date — the server never
+ * forwards an impossible date like 2026-02-30 to the DB. */
+const paidAtSchema = dateStrSchema.refine(isRealCalendarDate, "Essa data não existe no calendário.");
 
 // ---------------------------------------------------------------------------
 // Audit (tenant_audit_logs, action = "billing.<ação>")
@@ -452,8 +466,22 @@ export const adminManualSettleInput = z.object({
   paidAmountCents: z.number().int().min(0).nullable().optional(),
   note: z.string().trim().min(1).max(500),
   receipt: z.string().trim().min(1).max(2000),
+  // Optional (PG3 Task 10): YYYY-MM-DD, interpreted as 12:00 BRT on that
+  // day. Empty/omitted keeps today's behaviour (paid_at = now(), set by the
+  // SQL function when `_paid_at` is null). A future date is harmless to
+  // accept here — `billing_settle_invoice` clamps it to `<= now()` — but the
+  // dialog already blocks it client-side (`validateManualSettlePaidAt`). A
+  // date earlier than the invoice's own issue day is rejected by the SQL
+  // function (`invalid_paid_at`, mapped above).
+  paidAt: paidAtSchema.nullable().optional(),
   reason: reasonSchema,
 });
+
+/** `paidAt` (YYYY-MM-DD) as an ISO instant at 12:00 BRT of that day — the
+ * fixed hour sidesteps any "which minute" ambiguity for a date-only input. */
+function paidAtNoonBrtIso(yyyyMmDd: string): string {
+  return new Date(parseBrtDayStart(yyyyMmDd).getTime() + 12 * 60 * 60_000).toISOString();
+}
 
 export async function adminManualSettleFor(ctx: ServerContext, data: unknown) {
   const input = adminManualSettleInput.parse(data);
@@ -463,12 +491,22 @@ export async function adminManualSettleFor(ctx: ServerContext, data: unknown) {
   // a later payment of it at Upper is not a second payment of a paid invoice.
   const cancel = await cancelOpenPixBestEffort(input.invoiceId);
 
+  // Fix round 1 (Ruling T10): `paidAt === today (BRT)` sends null so the SQL
+  // function records `paid_at = now()` exactly like the "no date given" case
+  // — a same-day payment should carry today's actual time, not a synthetic
+  // 12:00 for a day that already has a real "now".
+  const paidAt =
+    input.paidAt && input.paidAt !== brtDayKey(new Date()) ? paidAtNoonBrtIso(input.paidAt) : null;
   const result = unwrap<{ tenant_id: string; invoice_id: string }>(
     await looseDb(ctx.supabase).rpc("billing_admin_manual_settle", {
       _invoice: input.invoiceId,
       _paid_amount_cents: input.paidAmountCents ?? null,
       _note: input.note,
       _receipt: input.receipt,
+      // Final fix I1: `_paid_at` is sent only when there is a date, so the
+      // call also resolves against the old 4-arg signature while migration
+      // 20261024100200 is not applied yet (PostgREST matches by arg names).
+      ...(paidAt ? { _paid_at: paidAt } : {}),
     }),
   );
   await auditBillingAction({
@@ -481,9 +519,26 @@ export async function adminManualSettleFor(ctx: ServerContext, data: unknown) {
       paidAmountCents: input.paidAmountCents ?? null,
       note: input.note,
       receipt: input.receipt,
+      paidAt: input.paidAt ?? null,
       pixCancel: cancel,
     },
   });
+
+  // Fix round 1 (Ruling T10): a manual settle is a real payment, so it gets
+  // the same 'paid' e-mail a Pix payment does. Best-effort — the invoice is
+  // already settled and audited above; a mail failure here must never
+  // surface as a failed settle. `sendBillingEmail`'s own log row
+  // (invoice_id, kind) makes this idempotent against a retry/resend, so
+  // nothing special is needed here beyond catching and logging.
+  try {
+    await sendBillingEmail(result.invoice_id, "paid");
+  } catch (err) {
+    console.error("[billing-admin] could not send the 'paid' e-mail after a manual settle", {
+      invoiceId: result.invoice_id,
+      error: errorMessage(err),
+    });
+  }
+
   return result;
 }
 
@@ -492,8 +547,29 @@ export const adminManualSettle = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => adminManualSettleInput.parse(data))
   .handler(async ({ data, context }) => adminManualSettleFor(context as ServerContext, data));
 
-export const CANCEL_INVOICE_MESSAGE =
-  "Fatura cancelada. Ela será reemitida na próxima rodada com o valor atual; para não cobrar este mês, use um desconto de 100%.";
+// Canceling a regular monthly invoice skips that month: the SQL moves the
+// cycle forward and the next invoice is the next cycle's. An activation
+// invoice (`upfront`, or any invoice of a house that never paid one, same
+// rule as the SQL) keeps next_due_date and the SQL reissues it in the same
+// call, with the current amount.
+export const CANCEL_UPFRONT_INVOICE_MESSAGE =
+  "Fatura de ativação cancelada e reemitida com o valor atual.";
+
+/** DD/MM/AAAA (Brasília) for a YYYY-MM-DD date. */
+function formatBrtDate(yyyyMmDd: string): string {
+  return parseBrtDayStart(yyyyMmDd).toLocaleDateString("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+}
+
+export function cancelInvoiceMessage(input: { activation: boolean; nextDueDate: string | null }): string {
+  if (input.activation) return CANCEL_UPFRONT_INVOICE_MESSAGE;
+  if (!input.nextDueDate) return "Fatura cancelada. Este mês não será cobrado.";
+  return `Fatura cancelada. Este mês não será cobrado; a próxima fatura vence em ${formatBrtDate(input.nextDueDate)}.`;
+}
 
 export const adminCancelInvoiceInput = z.object({
   invoiceId: dbUuid(),
@@ -504,9 +580,31 @@ export async function adminCancelInvoiceFor(ctx: ServerContext, data: unknown) {
   const input = adminCancelInvoiceInput.parse(data);
   await assertSuperAdmin(ctx.userId);
 
+  // The message depends on the invoice type, read before the cancel.
+  const sb = looseDb(supabaseAdmin);
+  const { data: invoice, error: invoiceError } = await sb
+    .from<{ id: string; tenant_id: string; upfront: boolean }>("billing_invoices")
+    .select("id,tenant_id,upfront")
+    .eq("id", input.invoiceId)
+    .maybeSingle();
+  if (invoiceError) throw new Error(invoiceError.message);
+  if (!invoice) throw new Error(BILLING_ADMIN_ERROR_MESSAGES.invoice_not_found);
+  let activation = invoice.upfront === true;
+  if (!activation) {
+    const { data: paid, error: paidError } = await sb
+      .from<{ id: string }>("billing_invoices")
+      .select("id")
+      .eq("tenant_id", invoice.tenant_id)
+      .eq("status", "paid")
+      .limit(1);
+    if (paidError) throw new Error(paidError.message);
+    // Awaiting the builder (no maybeSingle) yields the row array.
+    activation = ((paid ?? []) as unknown as unknown[]).length === 0;
+  }
+
   const cancel = await cancelOpenPixBestEffort(input.invoiceId);
 
-  const result = unwrap<{ tenant_id: string }>(
+  const result = unwrap<BillingAdminResult>(
     await looseDb(ctx.supabase).rpc("billing_admin_cancel_invoice", {
       _invoice: input.invoiceId,
       _reason: input.reason,
@@ -517,9 +615,15 @@ export async function adminCancelInvoiceFor(ctx: ServerContext, data: unknown) {
     actorUserId: ctx.userId,
     action: "billing.cancel_invoice",
     reason: input.reason,
-    metadata: { invoiceId: input.invoiceId, pixCancel: cancel },
+    metadata: { invoiceId: input.invoiceId, activation, pixCancel: cancel },
   });
-  return { ...result, message: CANCEL_INVOICE_MESSAGE };
+  return {
+    ...result,
+    message: cancelInvoiceMessage({
+      activation,
+      nextDueDate: result.next_due_date ?? null,
+    }),
+  };
 }
 
 export const adminCancelInvoice = createServerFn({ method: "POST" })
@@ -1309,6 +1413,9 @@ export type AdminBillingOpenInvoice = {
   dueDate: string;
   /** Narrowed from `access_state` — only the phases an open invoice can be in. */
   phase: "due_soon" | "overdue" | "locked_unpaid" | "awaiting_first_payment" | "open";
+  /** `created_at`'s Brasília calendar day (fix round 1, Ruling T10): the manual-settle dialog's
+   * `paidAt` lower bound — the SQL function rejects a payment date earlier than this. */
+  issuedOn: string;
 };
 
 export type AdminBillingContinuousDiscount = {
@@ -1351,7 +1458,13 @@ type TenantBillingListRow = {
   discount_starts_on: string | null;
   discount_ends_on: string | null;
 };
-type OpenInvoiceListRow = { id: string; tenant_id: string; amount_cents: number | string; due_date: string };
+type OpenInvoiceListRow = {
+  id: string;
+  tenant_id: string;
+  amount_cents: number | string;
+  due_date: string;
+  created_at: string;
+};
 
 /** Only `due_soon`/`overdue`/`locked_unpaid`/`awaiting_first_payment` describe an open
  * invoice's own phase; any other access_state (ok, exempt, frozen, locked_manual) just
@@ -1386,7 +1499,10 @@ export async function adminBillingTenantListFor(ctx: ServerContext): Promise<Adm
       "tenant_id",
     ),
     selectAllPages<OpenInvoiceListRow>("billing_admin_tenant_list_open_invoices", () =>
-      sb.from("billing_invoices").select("id,tenant_id,amount_cents,due_date").eq("status", "open"),
+      sb
+        .from("billing_invoices")
+        .select("id,tenant_id,amount_cents,due_date,created_at")
+        .eq("status", "open"),
     ),
   ]);
   for (const res of [tenantsPaged, tbPaged, openInvPaged]) {
@@ -1417,6 +1533,7 @@ export async function adminBillingTenantListFor(ctx: ServerContext): Promise<Adm
             amountCents: Number(openInv.amount_cents),
             dueDate: openInv.due_date,
             phase: invoicePhaseFor(accessState),
+            issuedOn: brtDayKey(new Date(openInv.created_at)),
           }
         : null,
       customPriceCents: tb?.custom_price_cents != null ? Number(tb.custom_price_cents) : null,

@@ -69,6 +69,11 @@ function seedInvoice(overrides: Record<string, unknown> = {}) {
     amount_cents: 400000,
     status: "open",
     paid_at: null,
+    period_start: "2026-10-05",
+    period_end: "2026-11-04",
+    payment_charge_id: null,
+    // An old last-change date by default; the paid lookback also reads it.
+    updated_at: "2026-01-01T00:00:00.000Z",
     ...overrides,
   };
   fake.admin.rows("billing_invoices").push(row);
@@ -370,6 +375,110 @@ describe("sendBillingEmail", () => {
     expect(callInfobipEmail.mock.calls.at(-1)?.[0].subject).toBe("Pagamento confirmado — obrigado!");
   });
 
+  it("issued reads 'vence hoje' when the due date is today, not the DD/MM form", async () => {
+    seedTenant();
+    fake.admin.rows("user_roles").push({ user_id: ADMIN_USER, tenant_id: TENANT, role: "admin" });
+    getUserByIdMock().mockImplementation(() => ({
+      data: { user: { email: "admin@casa.com" } },
+      error: null,
+    }));
+    // INSIDE_WINDOW's Brasília day is 2026-10-22: an upfront invoice issued
+    // today is due today too.
+    seedInvoice({ id: "inv-upfront", due_date: "2026-10-22" });
+
+    await sendBillingEmail("inv-upfront", "issued", { now: INSIDE_WINDOW });
+
+    expect(callInfobipEmail.mock.calls.at(-1)?.[0].subject).toBe("Sua mensalidade BetLeads vence hoje");
+    const html = callInfobipEmail.mock.calls.at(-1)?.[0].html as string;
+    expect(html).toContain("vence hoje");
+    expect(html).not.toContain("vence em");
+  });
+
+  it("due_today mentions the grace period's last day (due_date + 3)", async () => {
+    seedTenant();
+    fake.admin.rows("user_roles").push({ user_id: ADMIN_USER, tenant_id: TENANT, role: "admin" });
+    getUserByIdMock().mockImplementation(() => ({
+      data: { user: { email: "admin@casa.com" } },
+      error: null,
+    }));
+    seedInvoice({ id: "inv-due", due_date: "2026-10-22" });
+
+    await sendBillingEmail("inv-due", "due_today", { now: INSIDE_WINDOW });
+
+    const html = callInfobipEmail.mock.calls.at(-1)?.[0].html as string;
+    expect(html).toContain("Pague até 25/10 para evitar o bloqueio (3 dias de carência).");
+  });
+
+  it("locked says what stopped and what keeps coming in", async () => {
+    process.env.BILLING_ENFORCEMENT_ENABLED = "true";
+    seedTenant();
+    fake.admin.rows("user_roles").push({ user_id: ADMIN_USER, tenant_id: TENANT, role: "admin" });
+    getUserByIdMock().mockImplementation(() => ({
+      data: { user: { email: "admin@casa.com" } },
+      error: null,
+    }));
+    seedInvoice({ id: "inv-locked" });
+
+    await sendBillingEmail("inv-locked", "locked", { now: INSIDE_WINDOW });
+
+    const html = callInfobipEmail.mock.calls.at(-1)?.[0].html as string;
+    expect(html).toContain(
+      "Pararam: SMS, voz, e-mail, jornadas e campanhas. Seguem chegando: cadastros e depósitos dos jogadores. Seu saldo continua guardado.",
+    );
+  });
+
+  it("paid shows the payment date, the period paid and the endToEndId", async () => {
+    seedTenant();
+    fake.admin.rows("user_roles").push({ user_id: ADMIN_USER, tenant_id: TENANT, role: "admin" });
+    getUserByIdMock().mockImplementation(() => ({
+      data: { user: { email: "admin@casa.com" } },
+      error: null,
+    }));
+    fake.admin.rows("payment_charges").push({
+      id: "charge-1",
+      external_id: "bl-ext-1",
+      last_provider_payload: { endToEndId: "E12345" },
+    });
+    seedInvoice({
+      id: "inv-paid",
+      status: "paid",
+      paid_at: "2026-10-22T14:00:00.000Z",
+      period_start: "2026-10-05",
+      period_end: "2026-11-04",
+      payment_charge_id: "charge-1",
+    });
+
+    await sendBillingEmail("inv-paid", "paid", { now: INSIDE_WINDOW });
+
+    const html = callInfobipEmail.mock.calls.at(-1)?.[0].html as string;
+    expect(html).toContain("em 22/10");
+    expect(html).toContain("05/10 a 04/11");
+    expect(html).toContain("Referência: E12345");
+  });
+
+  it("paid shows 'Baixa manual' when the invoice has no endToEndId (manual settle)", async () => {
+    seedTenant();
+    fake.admin.rows("user_roles").push({ user_id: ADMIN_USER, tenant_id: TENANT, role: "admin" });
+    getUserByIdMock().mockImplementation(() => ({
+      data: { user: { email: "admin@casa.com" } },
+      error: null,
+    }));
+    seedInvoice({
+      id: "inv-manual",
+      status: "paid",
+      paid_via: "manual",
+      paid_at: "2026-10-22T14:00:00.000Z",
+      payment_charge_id: null,
+    });
+
+    await sendBillingEmail("inv-manual", "paid", { now: INSIDE_WINDOW });
+
+    const html = callInfobipEmail.mock.calls.at(-1)?.[0].html as string;
+    // Fix round 1, Ruling T10 (item 8): "Referência:", not "Comprovante:".
+    expect(html).toContain("Referência: Baixa manual");
+    expect(html).not.toContain("Comprovante");
+  });
+
   it("the e-mail body links to the Plano e créditos button", async () => {
     seedTenant();
     seedInvoice();
@@ -453,6 +562,72 @@ describe("sendPendingBillingEmails", () => {
     ]);
   });
 
+  it("skips due_today for an invoice whose issued e-mail was sent earlier the same day (upfront, issued today = due today)", async () => {
+    seedTenant();
+    seedInvoice({ id: "upfront", due_date: "2026-10-22" });
+    seedRolesAndUsers();
+    // 'issued' already sent earlier today (same Brasília day as INSIDE_WINDOW).
+    fake.admin.rows("billing_email_log").push({
+      invoice_id: "upfront",
+      kind: "issued",
+      recipients: 3,
+      sent_at: new Date(INSIDE_WINDOW.getTime() - 60_000).toISOString(),
+    });
+
+    const result = await sendPendingBillingEmails({ now: INSIDE_WINDOW });
+
+    // 'issued' is already logged (so not re-sent) and 'due_today' is skipped
+    // by the same-day rule: nothing new is sent for this invoice.
+    expect(result).toBe(0);
+    expect(fake.admin.rows("billing_email_log").filter((r) => r.kind === "due_today")).toHaveLength(
+      0,
+    );
+  });
+
+  it("still sends due_today when 'issued' was sent on an earlier day", async () => {
+    seedTenant();
+    seedInvoice({ id: "aged", due_date: "2026-10-22" });
+    seedRolesAndUsers();
+    fake.admin.rows("billing_email_log").push({
+      invoice_id: "aged",
+      kind: "issued",
+      recipients: 3,
+      sent_at: "2026-10-18T13:00:00.000Z",
+    });
+
+    const result = await sendPendingBillingEmails({ now: INSIDE_WINDOW });
+
+    expect(result).toBe(1);
+    expect(fake.admin.rows("billing_email_log").filter((r) => r.kind === "due_today")).toEqual([
+      expect.objectContaining({ invoice_id: "aged" }),
+    ]);
+  });
+
+  // Fix round 1, Ruling T10 (item 9): the same-day skip rule
+  // (`issuedTodayInvoiceIds`) only looks at an EXISTING 'issued' log row —
+  // if every recipient's 'issued' send failed, `sendBillingEmail` rolls that
+  // row back (see module header), so this invoice must not be mistaken for
+  // "already got its one e-mail today" and `due_today` must still go out.
+  it("a failed 'issued' send (log row rolled back) does not suppress 'due_today' for the same invoice", async () => {
+    seedTenant();
+    seedInvoice({ id: "upfront-fail", due_date: "2026-10-22" });
+    seedRolesAndUsers();
+    callInfobipEmail.mockImplementation(async (input: { idempotencyKey?: string }) => {
+      const isIssued = (input.idempotencyKey ?? "").includes(":issued:");
+      return isIssued
+        ? { ok: false, status: 500, body: {}, idempotencyKey: input.idempotencyKey ?? "k" }
+        : { ok: true, status: 200, body: {}, idempotencyKey: input.idempotencyKey ?? "k" };
+    });
+
+    const result = await sendPendingBillingEmails({ now: INSIDE_WINDOW });
+
+    expect(fake.admin.rows("billing_email_log").filter((r) => r.kind === "issued")).toHaveLength(0);
+    expect(fake.admin.rows("billing_email_log").filter((r) => r.kind === "due_today")).toEqual([
+      expect.objectContaining({ invoice_id: "upfront-fail" }),
+    ]);
+    expect(result).toBe(1);
+  });
+
   it("never sends 'locked' without enforcement, but does with it", async () => {
     seedTenant();
     fake.admin.rows("tenant_billing").push({ tenant_id: TENANT, access_state: "locked_unpaid" });
@@ -491,6 +666,33 @@ describe("sendPendingBillingEmails", () => {
     expect(result).toBe(1);
     const paidLogs = fake.admin.rows("billing_email_log").filter((r) => r.kind === "paid");
     expect(paidLogs).toEqual([expect.objectContaining({ invoice_id: "paid-recent" })]);
+  });
+
+  // Final fix m8: a manual settle backdated past the 48h window (paid_at old,
+  // updated_at = the settle itself) still gets the e-mail from the sweep.
+  it("sends paid for a backdated settle whose paid_at is old but was changed in the last 48h", async () => {
+    seedTenant();
+    seedRolesAndUsers();
+    seedInvoice({
+      id: "paid-backdated",
+      status: "paid",
+      paid_via: "manual",
+      paid_at: new Date(INSIDE_WINDOW.getTime() - 60 * 60_000 * 24 * 10).toISOString(),
+      updated_at: new Date(INSIDE_WINDOW.getTime() - 60 * 60_000).toISOString(),
+    });
+    seedInvoice({
+      id: "paid-long-ago",
+      status: "paid",
+      paid_via: "manual",
+      paid_at: new Date(INSIDE_WINDOW.getTime() - 60 * 60_000 * 24 * 10).toISOString(),
+      updated_at: new Date(INSIDE_WINDOW.getTime() - 60 * 60_000 * 24 * 9).toISOString(),
+    });
+
+    const result = await sendPendingBillingEmails({ now: INSIDE_WINDOW });
+
+    expect(result).toBe(1);
+    const paidLogs = fake.admin.rows("billing_email_log").filter((r) => r.kind === "paid");
+    expect(paidLogs).toEqual([expect.objectContaining({ invoice_id: "paid-backdated" })]);
   });
 
   it("never sends paid for an invoice settled by a 100% discount (full_discount)", async () => {

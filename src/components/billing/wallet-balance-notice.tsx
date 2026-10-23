@@ -11,15 +11,18 @@ export function WalletBalanceNotice({
   exempt,
   smsUnitPrice,
   canBuy = false,
+  threshold,
   className,
 }: {
   balance: number;
   exempt: boolean;
   smsUnitPrice: number | null;
   canBuy?: boolean;
+  /** The house's low-balance threshold (`wallet_summary.low_balance_threshold`). */
+  threshold?: number | null;
   className?: string;
 }) {
-  const notice = walletBalanceNotice({ balance, exempt, smsUnitPrice, canBuy });
+  const notice = walletBalanceNotice({ balance, exempt, smsUnitPrice, canBuy, threshold });
   if (!notice) return null;
   return (
     <Alert

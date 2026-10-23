@@ -85,6 +85,7 @@ vi.mock("@/integrations/supabase/client.server", () => {
       or: () => builder,
       order: () => builder,
       limit: () => builder,
+      range: () => builder,
       maybeSingle: async () => {
         const r = result();
         return { ...r, data: Array.isArray(r.data) ? (r.data[0] ?? null) : r.data };
@@ -273,7 +274,18 @@ describe("queue workers exclude demo tenants before reading their queues", () =>
         created_at: old,
       },
     ];
+    state.tables.wallet_ledger = [
+      {
+        id: "wl-demo",
+        tenant_id: DEMO,
+        entry_type: "usage_reservation",
+        reference_type: "voice_call",
+        reference_id: "voice:demo",
+        created_at: new Date(Date.now() - 30 * 60 * 60_000).toISOString(),
+      },
+    ];
     const result = await reconcileChannelCallbacks();
+    expect(result.voiceBilling.checked).toBe(0);
     expect(result.voice.audited).toBe(0);
     expect(result.email.audited).toBe(0);
     expect(result.sms.audited).toBe(0);

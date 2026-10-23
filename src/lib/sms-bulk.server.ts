@@ -658,14 +658,16 @@ export async function sendSmsBatch(items: SmsBatchItem[]): Promise<SmsBatchResul
           deliveryKey: item.deliveryKey,
         });
         const alreadySent = "alreadySent" in r && r.alreadySent === true;
-        const providerAccount =
-          !r.ok && (r as { errorKind?: unknown }).errorKind === "provider_account";
+        const errorKind = r.ok ? undefined : (r as { errorKind?: unknown }).errorKind;
+        const providerAccount = errorKind === "provider_account";
+        const noBalance = errorKind === "insufficient_balance";
         outcomes[index] = {
           deliveryKey: item.deliveryKey,
           status: r.ok ? (alreadySent ? "already_sent" : "accepted") : "failed",
           ok: r.ok,
           retryable: providerAccount,
           ...(providerAccount ? { errorKind: "provider_account" as const } : {}),
+          ...(noBalance ? { errorKind: "insufficient_balance" as const } : {}),
           error: r.ok ? undefined : (r as { error?: string }).error,
         };
       },
@@ -811,11 +813,14 @@ export async function sendSmsBatch(items: SmsBatchItem[]): Promise<SmsBatchResul
         billedUnits,
       );
       if (!reservation.ok) {
+        // reserveSmsCreditForDelivery only returns ok:false for the house's
+        // own wallet refusal (any other error throws).
         outcomes[c.index] = {
           deliveryKey: c.item.deliveryKey,
           status: "failed",
           ok: false,
           retryable: false,
+          errorKind: "insufficient_balance",
           error: reservation.error,
         };
         failLogs.push(

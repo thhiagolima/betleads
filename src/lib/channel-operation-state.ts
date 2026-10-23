@@ -21,7 +21,7 @@ const HISTORY_DESTINATION: Record<ChannelOperation, string> = {
   voice: "/ligacoes#historico",
 };
 
-/** Reason shown for a cancelled or failed campaign (null for any other status). */
+/** Reason shown for a cancelled, failed or paused campaign (null for any other status). */
 export function campaignStopReason(
   status: string | null | undefined,
   lastError: string | null | undefined,
@@ -35,7 +35,8 @@ export function campaignStopReason(
       ? `Cancelada manualmente em ${new Date(updatedAt).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", dateStyle: "short", timeStyle: "short" })}.`
       : "Cancelada manualmente.";
   }
-  if (["falhou", "failed", "error", "rejected"].includes(normalized)) return lastError || null;
+  if (["falhou", "failed", "error", "rejected", "pausada"].includes(normalized))
+    return lastError || null;
   return null;
 }
 

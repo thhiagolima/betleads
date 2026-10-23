@@ -30,8 +30,18 @@ import {
   isFinishedCampaignStatus,
   type VoiceQueueItem,
 } from "@/lib/channel-operation-state";
-import { cancelScheduledSmsCampaign, listScheduledSmsCampaigns } from "@/lib/sms.functions";
-import { listEmailCampaigns } from "@/lib/email.functions";
+import {
+  cancelScheduledSmsCampaign,
+  listScheduledSmsCampaigns,
+  resumeSmsCampaign,
+} from "@/lib/sms.functions";
+import { listEmailCampaigns, sendEmailCampaignNow } from "@/lib/email.functions";
+import {
+  EMAIL_CAMPAIGN_RESEND_NOTE,
+  alreadySentSuffix,
+  campaignPausedForBalanceMessage,
+  type EmailCampaignRunResult,
+} from "@/lib/email-campaign-messages";
 import { CampaignBlockedBadge } from "@/components/house-config/campaign-blocked-badge";
 import { listCallQueue } from "@/lib/calls.functions";
 import { deleteCampaignDraft, listCampaignDrafts } from "@/lib/campaign-drafts.functions";
@@ -68,6 +78,8 @@ type Campaign = {
   updated_at?: string | null;
   channel: "sms" | "email" | "voice";
   cancellable?: boolean;
+  /** SMS paused for lack of balance: "Retomar" puts it back in the queue. */
+  resumable?: boolean;
 };
 
 type EmailCampaignRow = {
@@ -95,6 +107,8 @@ export function CampaignsHub() {
   const listEmailCampaignsFn = useServerFn(listEmailCampaigns);
   const listCallQueueFn = useServerFn(listCallQueue);
   const cancelCampaign = useServerFn(cancelScheduledSmsCampaign);
+  const resumeCampaign = useServerFn(resumeSmsCampaign);
+  const sendEmailNow = useServerFn(sendEmailCampaignNow);
   const listDrafts = useServerFn(listCampaignDrafts);
   const deleteDraftFn = useServerFn(deleteCampaignDraft);
   const [composerOpen, setComposerOpen] = useState(false);
@@ -146,6 +160,35 @@ export function CampaignsHub() {
     },
     onError: (error: Error) => toast.error(error.message),
   });
+  const resume = useMutation({
+    mutationFn: (id: string) => resumeCampaign({ data: { id } }),
+    onSuccess: () => {
+      toast.success("Campanha retomada. Se ainda faltar saldo, ela volta a pausar.");
+      queryClient.invalidateQueries({ queryKey: ["sms-scheduled-campaigns"] });
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+  // PG3: resuming a paused e-mail campaign is the same send-now run, which
+  // skips the recipients this campaign already reached.
+  const resumeEmail = useMutation({
+    mutationFn: async (id: string) => {
+      const toastId = toast.loading("Enviando campanha…");
+      try {
+        const r = (await sendEmailNow({ data: { campaignId: id } })) as EmailCampaignRunResult;
+        if (r.pausadaPorSaldo) {
+          toast.warning(campaignPausedForBalanceMessage(r), { id: toastId });
+        } else {
+          toast.success(
+            `Campanha enviada: ${r.enviados ?? 0} ok, ${r.pendentes ?? 0} pendentes, ${r.falhas ?? 0} falhas (${r.total ?? 0} destinatários).${alreadySentSuffix(r)}`,
+            { id: toastId },
+          );
+        }
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Erro no envio", { id: toastId });
+      }
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["email-campaigns"] }),
+  });
   const removeDraft = useMutation({
     mutationFn: (id: string) => deleteDraftFn({ data: { id } }),
     onSuccess: () => {
@@ -159,7 +202,8 @@ export function CampaignsHub() {
     (campaign) => ({
       ...campaign,
       channel: "sms" as const,
-      cancellable: campaign.status === "agendada",
+      cancellable: campaign.status === "agendada" || campaign.status === "pausada",
+      resumable: campaign.status === "pausada",
     }),
   );
   const emailRows: Campaign[] = ((emailCampaigns.data?.items ?? []) as EmailCampaignRow[]).map(
@@ -179,6 +223,7 @@ export function CampaignsHub() {
         has_planned_total: false,
         channel: "email" as const,
         cancellable: false,
+        resumable: campaign.status === "pausada",
       };
     },
   );
@@ -496,7 +541,7 @@ export function CampaignsHub() {
                       : "—"
                   }
                 />
-                <div className="flex justify-end gap-1">
+                <div className="flex flex-wrap justify-end gap-1">
                   {campaign.has_report === false ? null : (
                     <Button size="sm" variant="outline" asChild>
                       <Link
@@ -530,6 +575,33 @@ export function CampaignsHub() {
                       <a href={operation.actionTo}>{operation.actionLabel}</a>
                     </Button>
                   )}
+                  {campaign.resumable && campaign.channel === "sms" ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={resume.isPending}
+                      onClick={() => resume.mutate(campaign.id)}
+                    >
+                      Retomar
+                    </Button>
+                  ) : null}
+                  {campaign.resumable && campaign.channel === "email" ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={resumeEmail.isPending}
+                      onClick={async () => {
+                        const confirmed = await requestConfirmation({
+                          title: `Retomar “${campaign.name}”?`,
+                          description: `Os e-mails restantes serão enviados imediatamente. ${EMAIL_CAMPAIGN_RESEND_NOTE}`,
+                          confirmLabel: "Retomar campanha",
+                        });
+                        if (confirmed) resumeEmail.mutate(campaign.id);
+                      }}
+                    >
+                      Retomar
+                    </Button>
+                  ) : null}
                 </div>
               </div>
             );

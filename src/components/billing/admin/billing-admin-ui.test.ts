@@ -8,6 +8,7 @@ import {
   validateDiscountDateRange,
   validateFixedDiscountAmount,
   validateManualSettleAmount,
+  validateManualSettlePaidAt,
   validatePercentDiscount,
   validatePixFeeFixedCents,
   validatePixFeePercent,
@@ -91,6 +92,48 @@ describe("validateManualSettleAmount", () => {
     expect(validateManualSettleAmount("0").valid).toBe(false);
     expect(validateManualSettleAmount("-5").valid).toBe(false);
     expect(validateManualSettleAmount("abc").valid).toBe(false);
+  });
+});
+
+describe("validateManualSettlePaidAt", () => {
+  const TODAY = "2026-10-23";
+
+  it("accepts an empty value (server defaults to today)", () => {
+    expect(validateManualSettlePaidAt("", TODAY).valid).toBe(true);
+  });
+
+  it("accepts a past date", () => {
+    expect(validateManualSettlePaidAt("2026-10-01", TODAY).valid).toBe(true);
+  });
+
+  it("accepts today", () => {
+    expect(validateManualSettlePaidAt(TODAY, TODAY).valid).toBe(true);
+  });
+
+  it("refuses a future date", () => {
+    const result = validateManualSettlePaidAt("2026-10-24", TODAY);
+    expect(result.valid).toBe(false);
+    expect(result.message).toBe("A data do pagamento não pode ser no futuro.");
+  });
+
+  it("refuses a date that does not exist on the calendar", () => {
+    expect(validateManualSettlePaidAt("2026-02-30", TODAY).valid).toBe(false);
+  });
+
+  // Fix round 1, Ruling T10 (item 2) — lower bound: the invoice's issue day.
+  it("accepts a date with no issuedOnBRT given (back-compat, no lower bound)", () => {
+    expect(validateManualSettlePaidAt("2026-10-01", TODAY).valid).toBe(true);
+  });
+
+  it("accepts a date on or after the invoice's issue day", () => {
+    expect(validateManualSettlePaidAt("2026-10-05", TODAY, "2026-10-05").valid).toBe(true);
+    expect(validateManualSettlePaidAt("2026-10-10", TODAY, "2026-10-05").valid).toBe(true);
+  });
+
+  it("refuses a date before the invoice's issue day", () => {
+    const result = validateManualSettlePaidAt("2026-10-04", TODAY, "2026-10-05");
+    expect(result.valid).toBe(false);
+    expect(result.message).toBe("A data do pagamento não pode ser anterior à emissão da fatura.");
   });
 });
 

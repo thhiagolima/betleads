@@ -19,6 +19,8 @@ import {
   type WalletPriceRow,
 } from "@/components/billing/wallet-usage-panels";
 import { WalletBalanceNotice } from "@/components/billing/wallet-balance-notice";
+import { LowBalanceThresholdCard } from "@/components/billing/low-balance-threshold-card";
+import { walletNoticeInputFromPortal } from "@/lib/billing/wallet-notice";
 import { BuyCreditsDialog } from "@/components/billing/buy-credits-dialog";
 import { PixPaymentDialog, type PixChargePayload } from "@/components/billing/pix-payment-dialog";
 import { Button } from "@/components/ui/button";
@@ -221,6 +223,7 @@ function PlanoECreditosPage() {
   const prices = summary.prices ?? {};
   const monthUsage = summary.month_usage ?? [];
   const canBuy = Boolean((data as { canBuy?: boolean }).canBuy);
+  const lowBalanceThreshold = walletNoticeInputFromPortal(data).threshold;
 
   const badge = planStatusBadge({
     state: overview.state as Parameters<typeof planStatusBadge>[0]["state"],
@@ -322,6 +325,7 @@ function PlanoECreditosPage() {
         exempt={Boolean(summary.exempt)}
         smsUnitPrice={prices.sms?.unit_price == null ? null : Number(prices.sms.unit_price)}
         canBuy={canBuy}
+        threshold={lowBalanceThreshold}
       />
 
       <BuyCreditsDialog open={buyOpen} onOpenChange={setBuyOpen} tenantId={tenantId} />
@@ -383,6 +387,15 @@ function PlanoECreditosPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Exempt and demo houses never get the alert, so the setting is hidden there. */}
+      {!summary.exempt && !isDemo && (
+        <LowBalanceThresholdCard
+          tenantId={tenantId}
+          threshold={lowBalanceThreshold}
+          canEdit={overview.canPay}
+        />
+      )}
 
       {/* Bloco 3: Faturas (ruling 6 — escondido quando não há nenhuma) */}
       {overview.invoices.length > 0 && (

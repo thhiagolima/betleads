@@ -112,6 +112,21 @@ export type RunBillingCycleOptions = {
    * `issuedInvoiceIds.length`, same as before this task.
    */
   sendEmails?: (events: BillingCycleEvents) => Promise<number | void>;
+  /**
+   * PG3 Task 8's low-balance sweep (`sendLowBalanceAlerts`,
+   * wallet-alerts.server.ts), wired by the cron route. Runs every hour
+   * regardless of `BILLING_INVOICES_ENABLED` (the wallet is live on its
+   * own); it returns how many houses were e-mailed. Defaults to a no-op so
+   * this module never imports the e-mail code.
+   */
+  sendWalletAlerts?: () => Promise<number | void>;
+  /**
+   * PG3 final fix I2: releases voice holds without a final event
+   * (`settleStaleVoiceReservations`, infobip-voice-reconciliation.server.ts),
+   * wired by the cron route. Runs every hour, not flag-gated; returns its
+   * counters (`settled` is reported). Defaults to a no-op.
+   */
+  settleVoiceReservations?: () => Promise<{ settled: number } | void>;
 };
 
 export type RunBillingCycleResult = {
@@ -127,6 +142,10 @@ export type RunBillingCycleResult = {
    */
   issued: number;
   errors: number;
+  /** Houses e-mailed by the low-balance sweep this run (0 when not wired). */
+  walletAlerts: number;
+  /** Voice reservations settled by the hourly voice stage (0 when not wired). */
+  voiceSettled: number;
   /**
    * One line per failed stage of the run (generation, house listing), e.g.
    * `"list_tenants: timeout"`. A failed stage never stops the later ones:
@@ -188,13 +207,16 @@ async function refreshOneTenant(tenantId: string, counters: { refreshed: number;
  * `BILLING_INVOICES_ENABLED === "true"`) → refresh every non-exempt house's
  * access state (always, flag or not, and even if generation itself failed —
  * ruling: refresh always happens) → notify `sendEmails` (Task 5) about what
- * was issued, also flag-gated. `sendEmails` defaults to a no-op until Task 5
+ * was issued, also flag-gated → the low-balance sweep (PG3 Task 8, always)
+ * → the stale voice settle (PG3 final fix I2, always). `sendEmails` defaults to a no-op until Task 5
  * wires the real e-mail pipeline.
  */
 export async function runBillingCycle(
   opts: RunBillingCycleOptions = {},
 ): Promise<RunBillingCycleResult> {
   const sendEmails = opts.sendEmails ?? (async () => undefined);
+  const sendWalletAlerts = opts.sendWalletAlerts ?? (async () => undefined);
+  const settleVoiceReservations = opts.settleVoiceReservations ?? (async () => undefined);
   const counters = { refreshed: 0, errors: 0 };
   const failures: string[] = [];
   let issuedInvoiceIds: string[] = [];
@@ -233,8 +255,41 @@ export async function runBillingCycle(
 
   let issued = 0;
   if (isBillingInvoicesEnabled()) {
-    const sent = await sendEmails({ issuedInvoiceIds });
-    issued = typeof sent === "number" ? sent : issuedInvoiceIds.length;
+    // A failed e-mail sweep is recorded like the other stages and never
+    // skips the low-balance sweep below.
+    try {
+      const sent = await sendEmails({ issuedInvoiceIds });
+      issued = typeof sent === "number" ? sent : issuedInvoiceIds.length;
+    } catch (err) {
+      counters.errors += 1;
+      failures.push(`emails: ${errorMessage(err)}`);
+      console.error("[billing/invoices] billing e-mail sweep failed", { error: errorMessage(err) });
+    }
+  }
+
+  // Low-balance alerts (PG3 Task 8): not flag-gated, and a failure here is
+  // recorded like any other stage without failing the run.
+  let walletAlerts = 0;
+  try {
+    const alerted = await sendWalletAlerts();
+    walletAlerts = typeof alerted === "number" ? alerted : 0;
+  } catch (err) {
+    counters.errors += 1;
+    failures.push(`wallet_alerts: ${errorMessage(err)}`);
+    console.error("[billing/invoices] low balance sweep failed", { error: errorMessage(err) });
+  }
+
+  // Voice holds (PG3 final fix I2): a never-answered call releases its
+  // reservation after 60 minutes instead of waiting for the daily job. Its
+  // own stage: a failure is recorded and never fails the run.
+  let voiceSettled = 0;
+  try {
+    const counts = await settleVoiceReservations();
+    voiceSettled = counts ? counts.settled : 0;
+  } catch (err) {
+    counters.errors += 1;
+    failures.push(`voice_settle: ${errorMessage(err)}`);
+    console.error("[billing/invoices] stale voice settle failed", { error: errorMessage(err) });
   }
 
   return {
@@ -242,6 +297,8 @@ export async function runBillingCycle(
     refreshed: counters.refreshed,
     issued,
     errors: counters.errors,
+    walletAlerts,
+    voiceSettled,
     failures,
   };
 }

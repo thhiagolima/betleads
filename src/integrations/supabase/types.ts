@@ -648,6 +648,7 @@ export type Database = {
       }
       billing_price_book: {
         Row: {
+          charge_unanswered_blocks: number
           created_at: string
           created_by: string | null
           free_monthly_units: number
@@ -657,6 +658,7 @@ export type Database = {
           valid_from: string
         }
         Insert: {
+          charge_unanswered_blocks?: number
           created_at?: string
           created_by?: string | null
           free_monthly_units?: number
@@ -666,6 +668,7 @@ export type Database = {
           valid_from: string
         }
         Update: {
+          charge_unanswered_blocks?: number
           created_at?: string
           created_by?: string | null
           free_monthly_units?: number
@@ -1192,6 +1195,10 @@ export type Database = {
       call_history: {
         Row: {
           audio_url: string | null
+          billed_amount: number | null
+          billed_blocks: number | null
+          billing_reference_id: string | null
+          billing_settled_at: string | null
           call_queue_id: string | null
           created_at: string
           duration_seconds: number | null
@@ -1212,6 +1219,10 @@ export type Database = {
         }
         Insert: {
           audio_url?: string | null
+          billed_amount?: number | null
+          billed_blocks?: number | null
+          billing_reference_id?: string | null
+          billing_settled_at?: string | null
           call_queue_id?: string | null
           created_at?: string
           duration_seconds?: number | null
@@ -1232,6 +1243,10 @@ export type Database = {
         }
         Update: {
           audio_url?: string | null
+          billed_amount?: number | null
+          billed_blocks?: number | null
+          billing_reference_id?: string | null
+          billing_settled_at?: string | null
           call_queue_id?: string | null
           created_at?: string
           duration_seconds?: number | null
@@ -2552,6 +2567,8 @@ export type Database = {
       email_send_logs: {
         Row: {
           automation_id: string | null
+          billed_amount: number | null
+          billing_reference_id: string | null
           block_index: number | null
           campaign_id: string | null
           created_at: string
@@ -2570,6 +2587,8 @@ export type Database = {
         }
         Insert: {
           automation_id?: string | null
+          billed_amount?: number | null
+          billing_reference_id?: string | null
           block_index?: number | null
           campaign_id?: string | null
           created_at?: string
@@ -2588,6 +2607,8 @@ export type Database = {
         }
         Update: {
           automation_id?: string | null
+          billed_amount?: number | null
+          billing_reference_id?: string | null
           block_index?: number | null
           campaign_id?: string | null
           created_at?: string
@@ -7889,12 +7910,14 @@ export type Database = {
       }
       admin_set_price: {
         Args: {
+          _charge_unanswered_blocks?: number
           _free_monthly_units?: number
           _item: string
           _provider_unit_cost?: number
           _unit_price: number
         }
         Returns: {
+          charge_unanswered_blocks: number
           created_at: string
           created_by: string | null
           free_monthly_units: number
@@ -7982,6 +8005,7 @@ export type Database = {
           _invoice: string
           _note: string | null
           _paid_amount_cents: number | null
+          _paid_at?: string | null
           _receipt: string | null
         }
         Returns: Json
@@ -8623,6 +8647,26 @@ export type Database = {
           _reference_type: string
           _tenant: string
           _units: number
+        }
+        Returns: Json
+      }
+      wallet_settle: {
+        Args: {
+          _actual_units: number
+          _idempotency_key: string
+          _reason: string
+          _reference_id: string
+          _tenant: string
+        }
+        Returns: Json
+      }
+      wallet_settle_voice: {
+        Args: {
+          _answered: boolean
+          _duration_seconds: number
+          _idempotency_key: string
+          _reference_id: string
+          _tenant: string
         }
         Returns: Json
       }

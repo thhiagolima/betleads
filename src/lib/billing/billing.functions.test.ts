@@ -15,7 +15,9 @@ import {
   getInvoiceReceiptFor,
   getPlanOverviewFor,
   getTenantEffectivePriceFor,
+  lowBalanceThresholdInput,
   payInvoiceFor,
+  setLowBalanceThresholdFor,
 } from "./billing.functions";
 
 const TENANT = "00000000-0000-4000-8000-00000000a0a0";
@@ -504,5 +506,64 @@ describe("getInvoiceReceiptFor", () => {
     await expect(
       getInvoiceReceiptFor(ctxFor(HOUSE_ADMIN), { tenantId: TENANT, invoiceId: "inv-cross-tenant" }),
     ).rejects.toThrow("Fatura não encontrada.");
+  });
+});
+
+describe("setLowBalanceThresholdFor", () => {
+  beforeEach(() => {
+    userDb.onRpc("billing_set_low_balance_threshold", (args) => ({
+      data: { tenant_id: args._tenant, low_balance_threshold: args._value },
+      error: null,
+    }));
+  });
+
+  it("sets the house threshold through the caller's own client", async () => {
+    const rpc = vi.fn((args: Record<string, unknown>) => ({
+      data: { tenant_id: args._tenant, low_balance_threshold: 350 },
+      error: null,
+    }));
+    userDb.onRpc("billing_set_low_balance_threshold", rpc);
+    const result = await setLowBalanceThresholdFor(ctxFor(HOUSE_ADMIN), {
+      tenantId: TENANT,
+      value: 350,
+    });
+    expect(rpc).toHaveBeenCalledWith({ _tenant: TENANT, _value: 350 });
+    expect(result).toEqual({ ok: true, lowBalanceThreshold: 350 });
+  });
+
+  it("refuses a member before calling the RPC", async () => {
+    const rpc = vi.fn(() => ({ data: null, error: null }));
+    userDb.onRpc("billing_set_low_balance_threshold", rpc);
+    await expect(
+      setLowBalanceThresholdFor(ctxFor(MEMBER), { tenantId: TENANT, value: 300 }),
+    ).rejects.toThrow("Só o administrador ou gestor da casa pode alterar o limite de saldo baixo.");
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("lets the superadmin set it", async () => {
+    await expect(
+      setLowBalanceThresholdFor(ctxFor(SUPER_ADMIN), { tenantId: TENANT, value: 0 }),
+    ).resolves.toEqual({ ok: true, lowBalanceThreshold: 0 });
+  });
+
+  it("maps the SQL errors to pt-BR", async () => {
+    userDb.onRpc("billing_set_low_balance_threshold", () => ({
+      data: null,
+      error: { message: "invalid_threshold" },
+    }));
+    await expect(
+      setLowBalanceThresholdFor(ctxFor(HOUSE_ADMIN), { tenantId: TENANT, value: 10 }),
+    ).rejects.toThrow("Informe um valor entre R$ 0 e R$ 100.000.");
+  });
+
+  it("validates the input: 0 to 100000, at most 2 decimals", () => {
+    expect(lowBalanceThresholdInput.parse({ tenantId: TENANT, value: 0 }).value).toBe(0);
+    expect(lowBalanceThresholdInput.parse({ tenantId: TENANT, value: 100000 }).value).toBe(100000);
+    expect(lowBalanceThresholdInput.parse({ tenantId: TENANT, value: 199.99 }).value).toBe(199.99);
+    expect(() => lowBalanceThresholdInput.parse({ tenantId: TENANT, value: -1 })).toThrow();
+    expect(() => lowBalanceThresholdInput.parse({ tenantId: TENANT, value: 100000.01 })).toThrow();
+    expect(() => lowBalanceThresholdInput.parse({ tenantId: TENANT, value: 10.555 })).toThrow();
+    expect(() => lowBalanceThresholdInput.parse({ tenantId: TENANT, value: Number.NaN })).toThrow();
+    expect(() => lowBalanceThresholdInput.parse({ tenantId: TENANT })).toThrow();
   });
 });
