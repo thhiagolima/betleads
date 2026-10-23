@@ -26,7 +26,7 @@ vi.mock("./tenant-access.server", () => ({
   resolveOperationalTenantId: vi.fn(async () => "00000000-0000-4000-8000-000000000001"),
 }));
 
-import { bulkDispatchCallsFor } from "./calls.functions";
+import { bulkDispatchCallsFor } from "./calls-bulk.server";
 
 const targets = ["5511900000001", "5511900000002", "5511900000003", "5511900000004"].map(
   (phone_number) => ({ lead_id: null, phone_number }),
