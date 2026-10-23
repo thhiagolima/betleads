@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { recordBillingSignal } from "@/lib/billing/billing-signals.server";
 import { maskDocumentsDeep } from "@/lib/billing/payer";
 import { confirmChargeFromUpper } from "@/lib/billing/payment-charges.server";
 import { verifyUpperSignature } from "@/lib/billing/upper-webhook";
@@ -86,6 +87,10 @@ async function handlePost(request: Request): Promise<Response> {
   const nowSec = Math.floor(Date.now() / 1000);
   const verification = verifyUpperSignature(rawBody, signatureHeader, secret, nowSec);
   if (!verification.ok) {
+    // PG6-03: nothing is written to payment_webhook_events (an unsigned
+    // event_id must never block the real one), but the billing health
+    // monitor counts it. Reason only; never the header or the body.
+    void recordBillingSignal("webhook_invalid_signature", verification.reason);
     return Response.json({ ok: false, error: verification.reason }, { status: 400 });
   }
 

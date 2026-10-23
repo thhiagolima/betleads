@@ -2,6 +2,8 @@
 // charges used for credit top-ups. Never import this from client code: the
 // API key must stay on the server.
 
+import { recordBillingSignal, upperErrorSignal } from "./billing-signals.server";
+
 export type UpperChargeStatus =
   | "PENDING"
   | "ACTIVE"
@@ -237,6 +239,10 @@ async function upperRequest(method: string, path: string, body?: unknown): Promi
     const errorBody = (parsed ?? {}) as UpperErrorBody;
     const code = errorBody.code ?? null;
     const message = errorBody.message || `Upper respondeu ${response.status}.`;
+    // PG6-03: 401 / FEATURE_DISABLED block every charge; leave a trace for the
+    // billing health monitor. Fire-and-forget, never changes the error thrown.
+    const signal = upperErrorSignal(response.status, code);
+    if (signal) void recordBillingSignal(signal, `${response.status} ${code ?? ""}`.trim());
     throw new UpperError(message, {
       status: response.status,
       code,

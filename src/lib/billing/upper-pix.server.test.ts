@@ -1,5 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// PG6-03: the client records 401/FEATURE_DISABLED as billing signals.
+const { recordBillingSignal } = vi.hoisted(() => ({
+  recordBillingSignal: vi.fn(async () => undefined),
+}));
+vi.mock("./billing-signals.server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./billing-signals.server")>();
+  return { ...actual, recordBillingSignal };
+});
+
 const ORIGINAL_ENV = { ...process.env };
 
 function setConfigured() {
@@ -49,6 +58,7 @@ describe("upper-pix.server", () => {
     setConfigured();
     const mod = await import("./upper-pix.server");
     mod.__resetUpperRateLimiterForTests();
+    recordBillingSignal.mockClear();
     vi.useRealTimers();
   });
 
@@ -113,6 +123,26 @@ describe("upper-pix.server", () => {
       retryable: false,
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("records a billing signal for 401 and 403 FEATURE_DISABLED, never for other errors", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(errorResponse(401, "INVALID_API_KEY", "Chave de API inválida"))
+      .mockResolvedValueOnce(errorResponse(403, "FEATURE_DISABLED", "Recurso desabilitado"))
+      .mockResolvedValueOnce(errorResponse(422, "VALIDATION", "Inválido"));
+    vi.stubGlobal("fetch", fetchMock);
+    const { getUpperCharge } = await import("./upper-pix.server");
+
+    await expect(getUpperCharge("bl-1")).rejects.toMatchObject({ status: 401 });
+    await expect(getUpperCharge("bl-2")).rejects.toMatchObject({ status: 403 });
+    await expect(getUpperCharge("bl-3")).rejects.toMatchObject({ status: 422 });
+
+    expect(recordBillingSignal).toHaveBeenCalledTimes(2);
+    expect(recordBillingSignal).toHaveBeenNthCalledWith(1, "upper_unauthorized", "401 INVALID_API_KEY");
+    expect(recordBillingSignal).toHaveBeenNthCalledWith(2, "upper_feature_disabled", "403 FEATURE_DISABLED");
+    // Never the API key.
+    expect(JSON.stringify(recordBillingSignal.mock.calls)).not.toContain("secret-upper-key");
   });
 
   it("502 on create retries once with the same body and returns the 2nd response", async () => {
