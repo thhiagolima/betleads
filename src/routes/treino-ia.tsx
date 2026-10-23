@@ -1,8 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useLocation, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -12,6 +11,7 @@ import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { Trash2, Plus, ThumbsDown, ThumbsUp, Download } from "lucide-react";
 import { Page, PageHeader } from "@/components/ui-premium/page-header";
+import { PageTabs } from "@/components/ui-premium/page-tabs";
 import { requestConfirmation } from "@/components/system-dialog-host";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
@@ -59,26 +59,33 @@ type Feedback = {
 };
 type LogRow = { id: string; pergunta: string; resposta: string; created_at: string };
 
+const VIEWS = [
+  { value: "exemplos", label: "Exemplos" },
+  { value: "assuntos", label: "Assuntos e sinônimos" },
+  { value: "avaliacoes", label: "Avaliações" },
+] as const;
+type View = (typeof VIEWS)[number]["value"];
+
 function TreinoIA() {
+  const navigate = useNavigate();
+  const hash = useLocation({ select: (location) => location.hash.replace(/^#/, "") });
+  const view: View = VIEWS.find((item) => item.value === hash)?.value ?? "exemplos";
+  const setView = (next: View) =>
+    void navigate({ to: "/treino-ia", hash: next === "exemplos" ? undefined : next });
   return (
     <Page>
-      <PageHeader subtitle="Ensine a IA com exemplos, regras e feedback — tudo refletido nas próximas respostas." />
-      <Tabs defaultValue="exemplos">
-        <TabsList>
-          <TabsTrigger value="exemplos">Exemplos</TabsTrigger>
-          <TabsTrigger value="intents">Intents & Sinônimos</TabsTrigger>
-          <TabsTrigger value="feedback">Feedback</TabsTrigger>
-        </TabsList>
-        <TabsContent value="exemplos">
-          <ExemplosTab />
-        </TabsContent>
-        <TabsContent value="intents">
-          <IntentsTab />
-        </TabsContent>
-        <TabsContent value="feedback">
-          <FeedbackTab />
-        </TabsContent>
-      </Tabs>
+      <PageHeader subtitle="Ensine o assistente com exemplos de resposta, palavras da casa e as avaliações da equipe." />
+      <PageTabs
+        value={view}
+        onValueChange={setView}
+        label="Seções de Configurar IA"
+        items={VIEWS}
+      />
+      <div role="tabpanel" aria-labelledby={`tab-${view}`}>
+        {view === "exemplos" && <ExemplosTab />}
+        {view === "assuntos" && <IntentsTab />}
+        {view === "avaliacoes" && <FeedbackTab />}
+      </div>
     </Page>
   );
 }
@@ -162,23 +169,26 @@ function ExemplosTab() {
           <CardTitle>Novo exemplo</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="grid sm:grid-cols-[1fr_180px] gap-2">
+          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_180px]">
             <Input
               value={pergunta}
               onChange={(e) => setPergunta(e.target.value)}
-              placeholder="Pergunta (ex: top 5 depositantes de hoje do Queiroz)"
+              placeholder="Pergunta (ex.: os 5 que mais depositaram hoje)"
+              aria-label="Pergunta"
             />
             <Input
               value={intent}
               onChange={(e) => setIntent(e.target.value)}
-              placeholder="Intent (opcional)"
+              placeholder="Assunto (opcional)"
+              aria-label="Assunto (opcional)"
             />
           </div>
           <Textarea
             value={resposta}
             onChange={(e) => setResposta(e.target.value)}
             rows={3}
-            placeholder="Resposta ideal — pode usar markdown"
+            placeholder="Resposta ideal (aceita **negrito** e listas)"
+            aria-label="Resposta ideal"
           />
           <div className="flex justify-between gap-2">
             <DemoDisabledTooltip active={isDemo}>
@@ -210,13 +220,15 @@ function ExemplosTab() {
               <button
                 key={l.id}
                 onClick={() => importFromLog(l)}
-                className="w-full text-left p-2 rounded border border-border/40 hover:bg-muted/30 text-xs"
+                className="w-full rounded-lg border border-border/40 p-2 text-left text-meta hover:bg-muted/30"
               >
                 <p className="font-medium truncate">{l.pergunta}</p>
                 <p className="text-muted-foreground truncate">{l.resposta?.slice(0, 120)}</p>
               </button>
             ))}
-            {!logs.length && <p className="text-xs text-muted-foreground">Nenhum log ainda.</p>}
+            {!logs.length && (
+              <p className="text-meta text-muted-foreground">Nenhuma pergunta ainda.</p>
+            )}
           </CardContent>
         </Card>
       )}
@@ -231,7 +243,7 @@ function ExemplosTab() {
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium">{it.pergunta}</p>
-                  <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                  <p className="text-meta text-muted-foreground mt-1 line-clamp-2">
                     {it.resposta_ideal}
                   </p>
                   <div className="flex flex-wrap gap-1.5 mt-2">
@@ -276,7 +288,7 @@ function ExemplosTab() {
             </div>
           ))}
           {!items.length && (
-            <p className="text-xs text-muted-foreground">
+            <p className="text-meta text-muted-foreground">
               {isDemo ? DEMO_EMPTY_STATE_TEXT : "Nenhum exemplo ainda."}
             </p>
           )}
@@ -316,7 +328,8 @@ function IntentsTab() {
     load();
   }
   async function addSyn() {
-    if (!novoTermo.trim() || !novoCanonico.trim()) return toast.error("Preencha termo e canônico");
+    if (!novoTermo.trim() || !novoCanonico.trim())
+      return toast.error("Preencha a palavra da casa e o termo conhecido");
     await supabase.from("ai_synonyms").insert({
       termo: novoTermo.trim(),
       canonico: novoCanonico.trim(),
@@ -335,7 +348,7 @@ function IntentsTab() {
     <div className="grid md:grid-cols-2 gap-4">
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle>Intents ({intents.length})</CardTitle>
+          <CardTitle>Assuntos que o assistente entende ({intents.length})</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2 max-h-[600px] overflow-y-auto">
           {intents.map((i) => (
@@ -343,7 +356,7 @@ function IntentsTab() {
               <div className="flex items-start justify-between gap-2">
                 <div className="flex-1">
                   <p className="text-sm font-medium">{i.nome}</p>
-                  <p className="text-xs text-muted-foreground">{i.descricao}</p>
+                  <p className="text-meta text-muted-foreground">{i.descricao}</p>
                   <div className="flex flex-wrap gap-1 mt-2">
                     {i.palavras_chave?.slice(0, 6).map((k, idx) => (
                       <Badge key={idx} variant="outline" className="text-meta">
@@ -353,12 +366,12 @@ function IntentsTab() {
                   </div>
                   {i.campo_alvo && (
                     <p className="text-meta text-muted-foreground mt-1.5">
-                      campo: <code>{i.campo_alvo}</code> {i.operador && `(${i.operador})`} · limite{" "}
-                      {i.limite_padrao}
+                      Ordena por <code>{i.campo_alvo}</code> · mostra até {i.limite_padrao}
                     </p>
                   )}
                 </div>
                 <Switch
+                  aria-label={`${i.ativo ? "Desligar" : "Ligar"} ${i.nome}`}
                   checked={i.ativo}
                   disabled={isDemo}
                   onCheckedChange={() => toggleIntent(i)}
@@ -375,27 +388,34 @@ function IntentsTab() {
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="space-y-2 p-3 rounded border border-border/40 bg-muted/20">
-            <Label className="text-xs">Adicionar sinônimo</Label>
-            <div className="grid grid-cols-[1fr_1fr_100px] gap-2">
+            <Label className="text-label">Adicionar sinônimo</Label>
+            <p className="text-meta text-muted-foreground">
+              Uma palavra da casa e o termo que o assistente já conhece. Ex.: “banca” →
+              saldo_carteira.
+            </p>
+            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_110px]">
               <Input
                 value={novoTermo}
                 onChange={(e) => setNovoTermo(e.target.value)}
-                placeholder="banca"
+                placeholder="Palavra da casa (ex.: banca)"
+                aria-label="Palavra da casa"
               />
               <Input
                 value={novoCanonico}
                 onChange={(e) => setNovoCanonico(e.target.value)}
-                placeholder="saldo_carteira"
+                placeholder="Termo conhecido (ex.: saldo_carteira)"
+                aria-label="Termo que o assistente conhece"
               />
               <select
                 value={novoTipo}
                 onChange={(e) => setNovoTipo(e.target.value)}
-                className="bg-background border border-input rounded-md px-2 text-sm"
+                aria-label="Tipo"
+                className="h-10 rounded-lg border border-input bg-background px-2 text-body"
               >
-                <option value="geral">geral</option>
-                <option value="campo">campo</option>
-                <option value="expert">expert</option>
-                <option value="periodo">período</option>
+                <option value="geral">Geral</option>
+                <option value="campo">Dado do jogador</option>
+                <option value="expert">Expert</option>
+                <option value="periodo">Período</option>
               </select>
             </div>
             <DemoDisabledTooltip active={isDemo}>
@@ -409,14 +429,14 @@ function IntentsTab() {
             {syns.map((s) => (
               <div
                 key={s.id}
-                className="flex items-center gap-2 text-xs border border-border/30 rounded px-2 py-1.5"
+                className="flex items-center gap-2 rounded-lg border border-border/30 px-2 py-1.5 text-meta"
               >
                 <Badge variant="outline" className="text-meta">
                   {s.tipo}
                 </Badge>
                 <span className="font-medium">{s.termo}</span>
                 <span className="text-muted-foreground">→</span>
-                <code className="text-emerald-400">{s.canonico}</code>
+                <code className="text-success">{s.canonico}</code>
                 <div className="ml-auto flex items-center gap-1">
                   <Switch
                     checked={s.ativo}
@@ -500,13 +520,13 @@ function FeedbackTab() {
         </Card>
         <Card>
           <CardContent className="p-4">
-            <p className="text-label text-muted-foreground">👍 Boas</p>
+            <p className="text-label text-muted-foreground">Respostas boas</p>
             <p className="text-kpi mt-1 text-success">{stats.good}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
-            <p className="text-label text-muted-foreground">👎 Ruins</p>
+            <p className="text-label text-muted-foreground">Respostas ruins</p>
             <p className="text-kpi mt-1 text-danger">{stats.bad}</p>
           </CardContent>
         </Card>
@@ -514,11 +534,11 @@ function FeedbackTab() {
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle>Feedbacks recentes</CardTitle>
+          <CardTitle>Avaliações recentes</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
           {items.map((f) => (
-            <div key={f.id} className="rounded border border-border/40 p-3 text-xs">
+            <div key={f.id} className="rounded-lg border border-border/40 p-3 text-meta">
               <div className="flex items-start gap-2">
                 {f.rating === "good" ? (
                   <ThumbsUp className="h-3.5 w-3.5 text-success mt-0.5" />
@@ -545,10 +565,10 @@ function FeedbackTab() {
             </div>
           ))}
           {!items.length && (
-            <p className="text-xs text-muted-foreground">
+            <p className="text-meta text-muted-foreground">
               {isDemo
                 ? DEMO_EMPTY_STATE_TEXT
-                : "Nenhum feedback ainda. Use 👍/👎 nas respostas da IA."}
+                : "Nenhuma avaliação ainda. Avalie as respostas no Assistente IA (👍 ou 👎)."}
             </p>
           )}
         </CardContent>

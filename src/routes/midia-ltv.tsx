@@ -301,11 +301,13 @@ function Kpi({
   value,
   detail,
   tone = "default",
+  className,
 }: {
   title: string;
   value: string;
   detail: string;
   tone?: "default" | "success" | "info";
+  className?: string;
 }) {
   const icon =
     tone === "success" ? (
@@ -322,6 +324,7 @@ function Kpi({
       hint={detail}
       icon={icon}
       accent={tone === "success" ? "success" : "primary"}
+      className={className}
     />
   );
 }
@@ -503,7 +506,7 @@ function VisualizacaoSection({
         {lastSync
           ? `, última leitura em ${new Date(lastSync).toLocaleString("pt-BR")}`
           : ", aguardando a primeira leitura"}
-        . Cadastros, FTD e depósitos: webhook da casa.
+        . Cadastros, 1º depósito e depósitos: integração da casa.
       </p>
 
       {/* AL0-06: sai quando a conferência da AL1 com a casa piloto for aceita. */}
@@ -528,7 +531,7 @@ function VisualizacaoSection({
         >
           <strong>Contas em outra moeda:</strong>{" "}
           {spendOther.map((row) => money(row.spend, row.currency)).join(" · ")}. Esse gasto fica
-          fora do investido, do ROAS e do custo por FTD, que estão em reais.
+          fora do investido, do ROAS e do custo por 1º depósito, que estão em reais.
         </div>
       )}
 
@@ -550,12 +553,12 @@ function VisualizacaoSection({
             {num(totals?.orphanPlayers)} cadastros marcados sem anúncio correspondente nas contas
             conectadas
           </strong>
-          : {brl(orphanRevenue)} de depósitos e {num(orphanFtd)} FTD sem gasto importado. Veja os
-          detalhes na aba Diagnóstico.
+          : {brl(orphanRevenue)} de depósitos e {num(orphanFtd)} primeiros depósitos sem gasto
+          importado. Veja os detalhes na aba Diagnóstico.
         </div>
       )}
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-5">
         <Kpi
           title="Investido no período"
           value={brl(totals?.spend)}
@@ -568,9 +571,9 @@ function VisualizacaoSection({
           tone="info"
         />
         <Kpi
-          title="Custo por FTD"
+          title="Custo por 1º depósito"
           value={totals?.cpaFtd == null ? "-" : brl2(totals.cpaFtd)}
-          detail={`${num(totals?.paidFtd)} FTD de anúncio · ${num(totals?.ftd)} na casa`}
+          detail={`${num(totals?.paidFtd)} vindos de anúncio · ${num(totals?.ftd)} na casa`}
         />
         <Kpi
           title="Custo por cadastro"
@@ -582,32 +585,32 @@ function VisualizacaoSection({
           value={brl(totals?.net)}
           detail={`${brl(totals?.revenue)} depositados − ${brl(totals?.withdrawals)} sacados`}
           tone="success"
+          className="col-span-2 xl:col-span-1"
         />
       </div>
 
-      <div className="rounded-lg bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+      <p className="text-meta text-muted-foreground">
+        Como o ROAS é calculado:{" "}
         <strong className="text-foreground">{brl(totals?.ftdRevenue)}</strong> em{" "}
         {num(totals?.paidFtd)} primeiros depósitos
-        <span className="px-2">+</span>
+        <span className="px-1">+</span>
         <strong className="text-foreground">{brl(totals?.redepositRevenue)}</strong> de redepósito
-        <span className="px-2">−</span>
+        <span className="px-1">−</span>
         <strong className="text-foreground">{brl(totals?.withdrawals)}</strong> de saques
-        <span className="px-2">=</span>
+        <span className="px-1">=</span>
         <strong className="text-success">{brl(totals?.net)}</strong> líquidos
-        <span className="px-2">÷</span>
+        <span className="px-1">÷</span>
         <strong className="text-foreground">{brl(totals?.spend)}</strong> investidos
-        <span className="px-2">=</span>
-        <strong className="text-success">{ratio(totals?.roas)}</strong>
-        <span className="float-right hidden text-muted-foreground lg:inline">
-          jogadores cadastrados no período por anúncio · horário de Brasília
-        </span>
-      </div>
+        <span className="px-1">=</span>
+        <strong className="text-success">{ratio(totals?.roas)}</strong>. Conta os jogadores que se
+        cadastraram no período por um anúncio (horário de Brasília).
+      </p>
 
       <Tabs value={reportView} onValueChange={(value) => setReportView(value as typeof reportView)}>
         <TabsList className="app-scrollbar h-auto max-w-full justify-start overflow-x-auto">
-          <TabsTrigger value="creatives">Criativos</TabsTrigger>
-          <TabsTrigger value="audiences">Públicos</TabsTrigger>
-          <TabsTrigger value="campaigns">Campanhas</TabsTrigger>
+          <TabsTrigger value="creatives">Por criativo</TabsTrigger>
+          <TabsTrigger value="audiences">Por público da Meta</TabsTrigger>
+          <TabsTrigger value="campaigns">Por campanha da Meta</TabsTrigger>
           <TabsTrigger value="evolution">Evolução</TabsTrigger>
           <TabsTrigger value="diagnostics">Diagnóstico</TabsTrigger>
         </TabsList>
@@ -647,7 +650,7 @@ function VisualizacaoSection({
             formatter={brl}
           />
           <DailyChart
-            title="FTD de anúncio por dia"
+            title="1º depósito de anúncio por dia"
             subtitle={`${range.days} dias`}
             data={data?.daily ?? []}
             dataKey="ftd"
@@ -798,7 +801,7 @@ function MoneyMapCard({ rows }: { rows: MoneyRow[] }) {
   return (
     <DataCard
       title="Onde o dinheiro está"
-      description="Participação nos depósitos do período (FTD e redepósito), por anúncio"
+      description="Participação nos depósitos do período (1º depósito e redepósito), por anúncio"
     >
       {rows.length === 0 ? (
         <EmptyState
@@ -908,8 +911,8 @@ function BusinessHeads() {
     <>
       <TableHead className="text-right">Cadastros</TableHead>
       <TableHead className="text-right">Custo por cadastro</TableHead>
-      <TableHead className="text-right">FTD</TableHead>
-      <TableHead className="text-right">Custo por FTD</TableHead>
+      <TableHead className="text-right">1º dep.</TableHead>
+      <TableHead className="text-right">Custo por 1º dep.</TableHead>
       <TableHead className="text-right">Depósito líquido</TableHead>
       <TableHead className="text-right">ROAS líquido</TableHead>
     </>
@@ -1140,7 +1143,7 @@ function OrphanAttributionTable({
               <TableHead>Conjunto</TableHead>
               <TableHead>Origem</TableHead>
               <TableHead className="text-right">Jogadores</TableHead>
-              <TableHead className="text-right">FTD</TableHead>
+              <TableHead className="text-right">1º dep.</TableHead>
               <TableHead className="text-right">Depósitos</TableHead>
               <TableHead className="text-right">Investido</TableHead>
               <TableHead className="text-right">ROAS</TableHead>
@@ -1220,8 +1223,8 @@ function CreativeTable({
                   <TableHead className="text-right">Investido</TableHead>
                   <TableHead className="text-right">Cliques no link</TableHead>
                   <TableHead className="text-right">Cadastros</TableHead>
-                  <TableHead className="text-right">FTD</TableHead>
-                  <TableHead className="text-right">Custo por FTD</TableHead>
+                  <TableHead className="text-right">1º dep.</TableHead>
+                  <TableHead className="text-right">Custo por 1º dep.</TableHead>
                   <TableHead className="text-right">Depósito líquido</TableHead>
                   <TableHead className="text-right">ROAS líquido</TableHead>
                 </TableRow>
@@ -1298,10 +1301,10 @@ function CreativeTable({
               </TableBody>
             </Table>
           </div>
-          <p className="text-sm text-muted-foreground">
-            Gasto, impressões e cliques vêm da Meta. Cadastros, FTD e depósitos vêm do webhook da
-            casa, só de jogadores cadastrados no período que foram ligados a este anúncio. Jogadores
-            ligados só à campanha aparecem na aba Campanhas.
+          <p className="text-meta text-muted-foreground">
+            Gasto, impressões e cliques vêm da Meta. Cadastros, 1º depósito e depósitos vêm da
+            integração da casa, só de jogadores cadastrados no período que foram ligados a este
+            anúncio. Jogadores ligados só à campanha aparecem em “Por campanha da Meta”.
           </p>
         </div>
       )}

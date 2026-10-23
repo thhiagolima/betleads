@@ -1,54 +1,53 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { POLL_INTERVALS, UpdatedAgo } from "@/hooks/use-updated-ago";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { useActiveTenant } from "@/hooks/use-active-tenant";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { brl, timeAgo } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import { describeEventType, type EventTypeDisplay } from "@/lib/webhook-events";
 import {
-  LogIn,
-  LogOut,
+  Activity,
   ArrowDownToLine,
   ArrowUpFromLine,
   Dice5,
-  UserPlus,
   Gamepad2,
-  Activity,
   Gift,
+  LogIn,
+  LogOut,
+  UserPlus,
 } from "lucide-react";
+import { DataCard } from "@/components/ui-premium/data-card";
+import { EmptyState } from "@/components/ui-premium/empty-state";
 import { Page, PageHeader } from "@/components/ui-premium/page-header";
 
 export const Route = createFileRoute("/eventos")({
   component: EventosPage,
 });
 
-type EventStyle = { icon: React.ElementType; color: string };
+// Neutral icons; colour only where it means something (money in/out, failure).
+type EventStyle = { icon: React.ElementType; tone: string };
 
-const NEUTRAL_STYLE: EventStyle = {
-  icon: Activity,
-  color: "text-zinc-400 bg-zinc-500/15 border-zinc-500/30",
-};
-const FAILED_COLOR = "text-danger bg-danger/15 border-danger/30";
+const NEUTRAL = "bg-secondary text-muted-foreground";
+const NEUTRAL_STYLE: EventStyle = { icon: Activity, tone: NEUTRAL };
+const FAILED_TONE = "bg-danger/10 text-danger";
 
 const SLUG_STYLES: Record<string, EventStyle> = {
-  login: { icon: LogIn, color: "text-sky-400 bg-sky-500/15 border-sky-500/30" },
-  logout: { icon: LogOut, color: "text-zinc-400 bg-zinc-500/15 border-zinc-500/30" },
-  cadastro: { icon: UserPlus, color: "text-primary bg-primary/15 border-primary/30" },
-  aposta: { icon: Dice5, color: "text-violet-400 bg-violet-500/15 border-violet-500/30" },
-  bet: { icon: Dice5, color: "text-violet-400 bg-violet-500/15 border-violet-500/30" },
+  login: { icon: LogIn, tone: NEUTRAL },
+  logout: { icon: LogOut, tone: NEUTRAL },
+  cadastro: { icon: UserPlus, tone: NEUTRAL },
+  aposta: { icon: Dice5, tone: NEUTRAL },
+  bet: { icon: Dice5, tone: NEUTRAL },
 };
 
 const CATEGORY_STYLES: Record<NonNullable<EventTypeDisplay["categoria"]>, EventStyle> = {
-  Usuário: { icon: UserPlus, color: "text-primary bg-primary/15 border-primary/30" },
-  Depósito: {
-    icon: ArrowDownToLine,
-    color: "text-emerald-400 bg-emerald-500/15 border-emerald-500/30",
-  },
-  Saque: { icon: ArrowUpFromLine, color: "text-amber-400 bg-amber-500/15 border-amber-500/30" },
-  Jogo: { icon: Gamepad2, color: "text-fuchsia-400 bg-fuchsia-500/15 border-fuchsia-500/30" },
-  Bônus: { icon: Gift, color: "text-rose-400 bg-rose-500/15 border-rose-500/30" },
+  Usuário: { icon: UserPlus, tone: NEUTRAL },
+  Depósito: { icon: ArrowDownToLine, tone: "bg-success/10 text-success" },
+  Saque: { icon: ArrowUpFromLine, tone: "bg-warning/10 text-warning" },
+  Jogo: { icon: Gamepad2, tone: NEUTRAL },
+  Bônus: { icon: Gift, tone: NEUTRAL },
 };
 
 /** Label from WEBHOOK_EVENTS (single source); unknown types show as a neutral "Evento". */
@@ -59,18 +58,23 @@ function eventConfig(tipo: string | null | undefined) {
     (display.categoria ? CATEGORY_STYLES[display.categoria] : NEUTRAL_STYLE);
   return {
     icon: style.icon,
-    color: display.failed ? FAILED_COLOR : style.color,
+    tone: display.failed ? FAILED_TONE : style.tone,
     label: display.label,
   };
 }
 
 function EventosPage() {
-  const { data, isLoading, dataUpdatedAt } = useQuery({
-    queryKey: ["events"],
+  // The feed belongs to the house chosen in the header, even for people who see several.
+  const { active } = useActiveTenant();
+  const tenantId = active?.id ?? null;
+  const { data, isLoading, isError, refetch, dataUpdatedAt } = useQuery({
+    queryKey: ["events", tenantId],
+    enabled: Boolean(tenantId),
     queryFn: async () => {
       const { data, error } = await supabase
         .from("events")
         .select("id, tipo, valor, metadata, created_at, players(nome, player_external_id)")
+        .eq("tenant_id", tenantId!)
         .order("created_at", { ascending: false })
         .limit(100);
       if (error) throw error;
@@ -82,76 +86,92 @@ function EventosPage() {
     refetchInterval: POLL_INTERVALS.liveList,
     refetchOnWindowFocus: true,
   });
+  const events = data ?? [];
+  const loading = isLoading || !tenantId;
 
   return (
-    <Page>
-      <PageHeader subtitle="Atividade recente dos players — logins, depósitos, jogos e mais" />
-      <Card className="border-border/50 bg-card/60 backdrop-blur">
-        <CardContent className="p-0">
-          <div className="flex items-center justify-between border-b border-border/60 px-5 py-3">
-            <div className="flex items-center gap-2 text-sm">
-              <span className="h-2 w-2 rounded-full bg-success animate-pulse" />
-              Atualização automática a cada 15 s
-            </div>
-            <div className="flex items-center gap-3 text-xs text-muted-foreground">
-              <UpdatedAgo ts={dataUpdatedAt} />
-              <span>{data?.length ?? 0} eventos recentes</span>
-            </div>
+    <Page className="max-w-5xl">
+      <PageHeader subtitle="O que os jogadores fizeram por último: cadastros, logins, depósitos, saques e jogos." />
+      <DataCard
+        title="Últimos 100 eventos"
+        description={
+          <>
+            Atualiza sozinho a cada 15 s · <UpdatedAgo ts={dataUpdatedAt} />
+          </>
+        }
+        bodyClassName="p-0 sm:p-0"
+      >
+        {loading ? (
+          <div className="space-y-2 p-4 sm:p-5" aria-busy="true" aria-label="Carregando eventos">
+            {Array.from({ length: 8 }, (_, i) => (
+              <Skeleton key={i} className="h-12 w-full rounded-lg" />
+            ))}
           </div>
-          <div className="max-h-[calc(100vh-220px)] overflow-y-auto divide-y divide-border/40">
-            {isLoading &&
-              Array.from({ length: 10 }).map((_, i) => (
-                <div key={i} className="px-5 py-3">
-                  <Skeleton className="h-10 w-full" />
-                </div>
-              ))}
-            {(data ?? []).map((e: any) => {
+        ) : isError ? (
+          <EmptyState
+            title="Não foi possível carregar os eventos"
+            description="Tente novamente em instantes."
+            action={
+              <Button size="sm" variant="outline" onClick={() => void refetch()}>
+                Tentar novamente
+              </Button>
+            }
+          />
+        ) : events.length === 0 ? (
+          <EmptyState
+            icon={<Activity />}
+            title="Nenhum evento recebido ainda"
+            description="Os eventos chegam quando a plataforma de apostas está conectada."
+            action={
+              <Button size="sm" variant="outline" asChild>
+                <Link to="/webhooks">Abrir Integrações</Link>
+              </Button>
+            }
+          />
+        ) : (
+          <ul className="divide-y divide-border">
+            {events.map((e: any) => {
               const cfg = eventConfig(e.tipo);
               const Icon = cfg.icon;
               return (
-                <div
-                  key={e.id}
-                  className="flex items-center gap-4 px-5 py-3 hover:bg-muted/30 transition-colors"
-                >
+                <li key={e.id} className="flex items-center gap-3 px-4 py-3 sm:gap-4 sm:px-5">
                   <div
-                    className={`flex h-9 w-9 items-center justify-center rounded-lg border ${cfg.color}`}
+                    className={cn(
+                      "flex size-9 shrink-0 items-center justify-center rounded-lg",
+                      cfg.tone,
+                    )}
+                    aria-hidden="true"
                   >
-                    <Icon className="h-4 w-4" />
+                    <Icon className="size-4" />
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 text-sm">
-                      <span className="font-medium truncate">
-                        {e.players?.nome ?? "Player desconhecido"}
+                  <div className="min-w-0 flex-1">
+                    <p className="flex flex-wrap items-baseline gap-x-2 text-body">
+                      <span className="truncate font-medium">
+                        {e.players?.nome ?? "Jogador sem cadastro"}
                       </span>
-                      <Badge
-                        variant="outline"
-                        className={`text-meta py-0 ${cfg.color}`}
-                        title={e.tipo ?? undefined}
-                      >
-                        {cfg.label}
-                      </Badge>
+                      <span className="text-muted-foreground">{cfg.label}</span>
                       {e.metadata?.jogo && (
-                        <span className="text-xs text-muted-foreground">· {e.metadata.jogo}</span>
+                        <span className="truncate text-meta text-muted-foreground">
+                          · {e.metadata.jogo}
+                        </span>
                       )}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      {e.players?.player_external_id ?? ""} · {timeAgo(e.created_at)}
-                    </div>
+                    </p>
+                    <p className="text-meta text-muted-foreground">
+                      {e.players?.player_external_id ? `ID ${e.players.player_external_id} · ` : ""}
+                      {timeAgo(e.created_at)}
+                    </p>
                   </div>
                   {e.valor != null && (
-                    <div className="text-sm font-semibold tabular-nums">{brl(Number(e.valor))}</div>
+                    <p className="shrink-0 text-body font-semibold tabular-nums">
+                      {brl(Number(e.valor))}
+                    </p>
                   )}
-                </div>
+                </li>
               );
             })}
-            {!isLoading && (data ?? []).length === 0 && (
-              <div className="p-10 text-center text-sm text-muted-foreground">
-                Nenhum evento registrado ainda. Conecte um webhook para começar.
-              </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+          </ul>
+        )}
+      </DataCard>
     </Page>
   );
 }
