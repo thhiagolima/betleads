@@ -3,7 +3,8 @@
 // of 403 FEATURE_DISABLED or 401). Each call increments an hourly counter in
 // `billing_monitor_signals` through `billing_record_signal` (service_role
 // RPC, migration 20261024100400), which the billing health monitor
-// (billing-health.server.ts) reads.
+// (billing-health.server.ts) reads. `upper_unavailable` covers Upper 5xx,
+// timeouts and network errors.
 //
 // Fire-and-forget and never throws: monitoring must never change what the
 // webhook answers or how an Upper call fails. The detail is a short reason or
@@ -12,7 +13,10 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 
 export type BillingSignalCode =
-  "webhook_invalid_signature" | "upper_feature_disabled" | "upper_unauthorized";
+  | "webhook_invalid_signature"
+  | "upper_feature_disabled"
+  | "upper_unauthorized"
+  | "upper_unavailable";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type LooseDb = any;
@@ -53,5 +57,7 @@ export function recordBillingSignal(code: BillingSignalCode, detail: string | nu
 export function upperErrorSignal(status: number, code: string | null): BillingSignalCode | null {
   if (code === "FEATURE_DISABLED") return "upper_feature_disabled";
   if (status === 401 || code === "INVALID_API_KEY") return "upper_unauthorized";
+  // Upper down: any 5xx, or a timeout/network failure (status 0).
+  if (status >= 500 || code === "TIMEOUT" || code === "NETWORK_ERROR") return "upper_unavailable";
   return null;
 }

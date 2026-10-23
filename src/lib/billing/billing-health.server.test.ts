@@ -129,6 +129,24 @@ describe("evaluateBillingHealth", () => {
     expect(byCode.charge_paid_not_credited.message).toMatch(/10 min/);
   });
 
+  it("flags upper_unavailable (critical) only from 3 events in the window", () => {
+    const at = (count: number) =>
+      evaluateBillingHealth(
+        healthySnapshot({
+          signals: {
+            upper_unavailable: { count, last_at: "2026-10-23T11:58:00Z", last_detail: "TIMEOUT" },
+          },
+        }),
+        { now: NOW, windowHours: 1 },
+      );
+    expect(at(2)).toEqual([]);
+    const findings = at(3);
+    expect(codes(findings)).toEqual(["upper_unavailable"]);
+    expect(findings[0].severity).toBe("critical");
+    expect(findings[0].message).toMatch(/fora do ar|indisponível/);
+    expect(findings[0].lastAt).toBe("2026-10-23T11:58:00Z");
+  });
+
   it("flags billing jobs whose last OK run is older than 3x their interval, or that never ran", () => {
     const fresh = evaluateBillingHealth(
       healthySnapshot({
@@ -299,6 +317,20 @@ describe("runBillingHealthStage", () => {
     expect(lines).toContain("webhook_invalid_signature");
     expect(lines).toContain("upper_unauthorized");
     expect(lines).toContain("upper_feature_disabled");
+  });
+
+  it("upper_unavailable alerts but never suppresses the heartbeat", async () => {
+    fake.admin.onRpc("billing_health_snapshot", () => ({
+      data: healthySnapshot({
+        signals: {
+          upper_unavailable: { count: 5, last_at: "2026-10-23T11:59:00Z", last_detail: "503" },
+        },
+      }),
+      error: null,
+    }));
+    await runBillingHealthStage({ now: NOW });
+    expect(pingHeartbeat).toHaveBeenCalledWith("billing-health", true);
+    expect(String(errorSpy.mock.calls[0][0])).toContain("upper_unavailable");
   });
 
   it("signal findings alert only on events newer than the previous run", async () => {

@@ -183,6 +183,41 @@ describe("upper-pix.server", () => {
     await assertion;
   });
 
+  it("records upper_unavailable on 5xx, network errors and timeouts (fire-and-forget)", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(errorResponse(503, "UNAVAILABLE", "Fora do ar"))
+      .mockRejectedValueOnce(new TypeError("fetch failed"))
+      .mockImplementationOnce((_url: string, init: RequestInit) => {
+        return new Promise((_resolve, reject) => {
+          init.signal?.addEventListener("abort", () => {
+            const err = new Error("aborted");
+            err.name = "AbortError";
+            reject(err);
+          });
+        });
+      })
+      .mockResolvedValueOnce(errorResponse(404, "NOT_FOUND", "Não existe"));
+    vi.stubGlobal("fetch", fetchMock);
+    const { getUpperCharge } = await import("./upper-pix.server");
+
+    await expect(getUpperCharge("bl-1")).rejects.toMatchObject({ status: 503 });
+    await expect(getUpperCharge("bl-2")).rejects.toMatchObject({ code: "NETWORK_ERROR" });
+    vi.useFakeTimers();
+    const timedOut = getUpperCharge("bl-3");
+    const assertion = expect(timedOut).rejects.toMatchObject({ code: "TIMEOUT" });
+    await vi.advanceTimersByTimeAsync(10_001);
+    await assertion;
+    vi.useRealTimers();
+    await expect(getUpperCharge("bl-4")).rejects.toMatchObject({ status: 404 });
+
+    expect(recordBillingSignal.mock.calls).toEqual([
+      ["upper_unavailable", "503 UNAVAILABLE"],
+      ["upper_unavailable", "NETWORK_ERROR"],
+      ["upper_unavailable", "TIMEOUT"],
+    ]);
+  });
+
   it("sends the Authorization: Bearer <key> header", async () => {
     const fetchMock = vi.fn().mockResolvedValue(okResponse(chargeBody()));
     vi.stubGlobal("fetch", fetchMock);

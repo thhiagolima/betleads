@@ -12,6 +12,8 @@
 //   wallet_ledger_mismatch       critical  billing_wallet_integrity()
 //   upper_feature_disabled       critical  billing_monitor_signals (upper-pix client)
 //   upper_unauthorized           critical  billing_monitor_signals (upper-pix client)
+//   upper_unavailable            critical  billing_monitor_signals (upper-pix client): 3+
+//                                          timeouts, network errors or 5xx in the window
 //   reconcile_cron_stale         critical  dispatcher_runs job billing-reconcile (5 min)
 //   billing_cycle_cron_stale     critical  dispatcher_runs job billing-cycle (1 h)
 //   billing_health_check_failed  critical  the snapshot itself could not be read
@@ -42,6 +44,7 @@ export type BillingHealthCode =
   | "wallet_ledger_mismatch"
   | "upper_feature_disabled"
   | "upper_unauthorized"
+  | "upper_unavailable"
   | "reconcile_cron_stale"
   | "billing_cycle_cron_stale"
   | "billing_health_check_failed"
@@ -66,7 +69,11 @@ export const SIGNAL_FINDING_CODES: ReadonlySet<BillingHealthCode> = new Set<Bill
   "webhook_invalid_signature",
   "upper_feature_disabled",
   "upper_unauthorized",
+  "upper_unavailable",
 ]);
+
+/** Upper timeouts/network errors/5xx alert from this many events in the window. */
+export const UPPER_UNAVAILABLE_THRESHOLD = 3;
 
 export type BillingHealthReport = {
   ok: boolean;
@@ -213,6 +220,16 @@ export function evaluateBillingHealth(
       severity: "critical",
       message: `A Upper recusou a chave de API (401) ${unauthorized.count} ${plural(unauthorized.count, "vez", "vezes")} ${window}.`,
       lastAt: unauthorized.last_at,
+    });
+  }
+
+  const unavailable = signalCount(snapshot, "upper_unavailable");
+  if (unavailable && unavailable.count >= UPPER_UNAVAILABLE_THRESHOLD) {
+    findings.push({
+      code: "upper_unavailable",
+      severity: "critical",
+      message: `A Upper parece fora do ar: ${unavailable.count} falhas (tempo esgotado, rede ou erro 5xx) ${window}. Pix indisponível para as casas.`,
+      lastAt: unavailable.last_at,
     });
   }
 
@@ -392,7 +409,7 @@ export async function runBillingHealthStage(
 
 const FORBIDDEN_MESSAGE = "Apenas o super admin pode realizar esta ação.";
 
-async function assertSuperAdmin(userId: string): Promise<void> {
+export async function assertSuperAdmin(userId: string): Promise<void> {
   const { data, error } = await (supabaseAdmin as LooseDb).rpc("is_super_admin", {
     _user_id: userId,
   });
