@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { AlertTriangle, ArrowLeft, ChevronLeft, ChevronRight, Download, X } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight, Download, Pencil } from "lucide-react";
 import {
   UNRESOLVED_REASON_HINT,
   UNRESOLVED_REASON_LABEL,
@@ -20,6 +20,7 @@ import {
 import { TRIGGER_NAMES, type TriggerType } from "@/lib/triggers";
 import { campaignStopReason, getChannelOperationState } from "@/lib/channel-operation-state";
 import { Button } from "@/components/ui/button";
+import { Page, PageHeader } from "@/components/ui-premium/page-header";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
@@ -75,6 +76,52 @@ const dateTime = (value?: string | null) =>
         minute: "2-digit",
       })
     : "—";
+const day = (value?: string | null) =>
+  value ? new Date(value).toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" }) : null;
+
+const CHANNEL_LABEL: Record<string, string> = {
+  sms: "SMS",
+  email: "E-mail",
+  voice: "Voz",
+  whatsapp: "WhatsApp",
+};
+const JOURNEY_STATUS_LABEL: Record<string, string> = {
+  active: "Ativa",
+  paused: "Pausada",
+  draft: "Rascunho",
+  archived: "Arquivada",
+};
+const SEND_STATUS_LABEL: Record<string, string> = {
+  sent: "enviado",
+  delivered: "entregue",
+  prepared: "preparado",
+  pending: "pendente",
+  queued: "na fila",
+  skipped: "não enviado",
+  failed: "falhou",
+  cancelled: "cancelado",
+};
+const STEP_TYPE_LABEL: Record<string, string> = {
+  sms: "SMS",
+  email: "E-mail",
+  voice: "Voz",
+  whatsapp: "WhatsApp",
+};
+const ptLabel = (map: Record<string, string>, value?: string | null) =>
+  value ? (map[value.toLowerCase()] ?? value) : "—";
+
+/** The single way out of a report: back to the list it was opened from. */
+function BackLink({ sourceType }: { sourceType: "campaign" | "journey" }) {
+  return (
+    <Button variant="outline" size="sm" asChild>
+      {sourceType === "campaign" ? (
+        <Link to="/campanhas">Voltar para Campanhas</Link>
+      ) : (
+        <Link to="/automacoes">Voltar para Automações</Link>
+      )}
+    </Button>
+  );
+}
 
 export function ConversionReport({
   sourceType,
@@ -129,21 +176,28 @@ export function ConversionReport({
     (sourceType === "journey" && journeyDetails.isLoading) ||
     (!isVoice && conversionEnabled && query.isLoading)
   )
-    return <ReportState>Carregando relatório…</ReportState>;
+    return <ReportState sourceType={sourceType}>Carregando relatório…</ReportState>;
   if (sourceType === "campaign" && campaignDetails.isError)
-    return <ReportState>Não foi possível carregar o relatório.</ReportState>;
+    return (
+      <ReportState sourceType={sourceType}>Não foi possível carregar o relatório.</ReportState>
+    );
   if (sourceType === "journey" && journeyDetails.isError)
-    return <ReportState>Não foi possível carregar o relatório.</ReportState>;
+    return (
+      <ReportState sourceType={sourceType}>Não foi possível carregar o relatório.</ReportState>
+    );
 
   if (sourceType === "campaign" && isVoice && campaignDetails.data)
     return <VoiceCampaignReport details={campaignDetails.data} />;
 
   if (query.isError || !query.data)
-    return <ReportState>Não foi possível carregar o relatório.</ReportState>;
+    return (
+      <ReportState sourceType={sourceType}>Não foi possível carregar o relatório.</ReportState>
+    );
 
   if (sourceType === "journey")
     return (
       <JourneyReport
+        journeyId={sourceId}
         data={query.data}
         details={journeyDetails.data}
         drilldown={drilldown.data}
@@ -173,7 +227,9 @@ function VoiceCampaignReport({
   const campaign = details.campaign;
   const voice = details.voice;
   if (!campaign || campaign.channel !== "voice" || !voice)
-    return <ReportState>Não foi possível carregar o relatório de voz.</ReportState>;
+    return (
+      <ReportState sourceType="campaign">Não foi possível carregar o relatório de voz.</ReportState>
+    );
 
   const status = voiceStatusLabel(voice.queueStatus, voice.providerStatus);
   const answeredLabel = voice.answered
@@ -183,95 +239,90 @@ function VoiceCampaignReport({
       : "Aguardando";
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-background/95 backdrop-blur-sm">
-      <main className="mx-auto min-h-full max-w-5xl border-x border-border/70 bg-background shadow-2xl">
-        <header className="sticky top-0 z-20 flex items-start justify-between gap-4 border-b border-border/70 bg-background/95 px-5 py-4 backdrop-blur">
-          <div className="min-w-0">
-            <div className="mb-1 flex items-center gap-2">
-              <Link
-                to="/campanhas"
-                className="text-muted-foreground hover:text-foreground"
-                aria-label="Voltar"
-              >
-                <ArrowLeft className="size-4" />
-              </Link>
-              <h1 className="truncate text-base font-bold">{campaign.name}</h1>
-            </div>
-            <p className="text-xs text-sky-400">Relatório operacional da ligação de voz</p>
+    <Page>
+      <PageHeader
+        title={campaign.name}
+        subtitle={campaignSubtitle(campaign)}
+        actions={<BackLink sourceType="campaign" />}
+      />
+
+      <div className="space-y-4">
+        <section className="grid gap-3 rounded-xl bg-card/60 p-3 sm:grid-cols-2 lg:grid-cols-4">
+          <TimelineValue label="Criada em" value={dateTime(campaign.createdAt)} />
+          <TimelineValue label="Agendada para" value={dateTime(campaign.scheduledAt)} />
+          <TimelineValue label="Tentativa iniciada" value={dateTime(voice.attemptedAt)} />
+          <TimelineValue label="Canal" value="Infobip Voice" />
+        </section>
+
+        <section className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+          <Metric label="Status" value={status} />
+          <Metric label="Atendida" value={answeredLabel} accent={voice.answered} />
+          <Metric
+            label="Tempo de chamada"
+            value={formatCallDuration(voice.durationSeconds)}
+            hint={voice.durationSeconds === null ? "não informado pelo provedor" : undefined}
+          />
+          <Metric
+            label="Tentativas"
+            value={number(Math.max(voice.attempts, voice.attemptedAt ? 1 : 0))}
+          />
+        </section>
+
+        {voice.error ? (
+          <section className="rounded-xl border border-danger/30 bg-danger/5 p-4">
+            <p className="text-xs text-danger">Motivo da falha</p>
+            <p className="mt-1 text-sm font-semibold">{voice.error}</p>
+          </section>
+        ) : null}
+
+        <section className="rounded-2xl border border-border/80 p-4">
+          <h2 className="mb-3 text-section">Resultado da ligação</h2>
+          <div className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
+            <VoiceDetail label="Destinatário" value={voice.playerName ?? "Não identificado"} />
+            <VoiceDetail label="Telefone" value={voice.phone ?? "Não informado"} />
+            <VoiceDetail label="Resultado" value={voiceResultLabel(voice.result)} />
+            <VoiceDetail label="Status no provedor" value={voice.providerStatus ?? "—"} />
+            <VoiceDetail label="Provedor" value={voice.provider ?? "Infobip"} />
+            <VoiceDetail
+              label="Código HTTP do provedor"
+              value={voice.providerStatusCode === null ? "—" : String(voice.providerStatusCode)}
+            />
           </div>
-          <Button variant="ghost" size="icon" asChild>
-            <Link to="/campanhas" aria-label="Fechar relatório">
-              <X className="size-4" />
-            </Link>
-          </Button>
-        </header>
+        </section>
 
-        <div className="space-y-4 p-4 sm:p-5">
-          <section className="grid gap-3 rounded-xl bg-card/60 p-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
-            <TimelineValue label="Criada em" value={dateTime(campaign.createdAt)} />
-            <TimelineValue label="Agendada para" value={dateTime(campaign.scheduledAt)} />
-            <TimelineValue label="Tentativa iniciada" value={dateTime(voice.attemptedAt)} />
-            <TimelineValue label="Canal" value="Infobip Voice" />
-          </section>
+        <section>
+          <h2 className="mb-2 text-section">Conteúdo da ligação</h2>
+          <div className="rounded-xl border bg-card/40 p-3 text-sm font-medium">
+            {campaign.content ?? "O conteúdo original não está disponível para esta ligação."}
+          </div>
+        </section>
 
-          <section className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-            <Metric label="Status" value={status} />
-            <Metric label="Atendida" value={answeredLabel} accent={voice.answered} />
-            <Metric
-              label="Tempo de chamada"
-              value={formatCallDuration(voice.durationSeconds)}
-              hint={voice.durationSeconds === null ? "não informado pelo provedor" : undefined}
-            />
-            <Metric
-              label="Tentativas"
-              value={number(Math.max(voice.attempts, voice.attemptedAt ? 1 : 0))}
-            />
-          </section>
-
-          {voice.error ? (
-            <section className="rounded-xl border border-danger/30 bg-danger/5 p-4">
-              <p className="text-xs text-danger">Motivo da falha</p>
-              <p className="mt-1 text-sm font-semibold">{voice.error}</p>
-            </section>
-          ) : null}
-
-          <section className="rounded-2xl border border-border/80 p-4">
-            <h2 className="mb-3 text-sm font-semibold">Resultado da ligação</h2>
-            <div className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
-              <VoiceDetail label="Destinatário" value={voice.playerName ?? "Não identificado"} />
-              <VoiceDetail label="Telefone" value={voice.phone ?? "Não informado"} />
-              <VoiceDetail label="Resultado" value={voiceResultLabel(voice.result)} />
-              <VoiceDetail label="Status no provedor" value={voice.providerStatus ?? "—"} />
-              <VoiceDetail label="Provedor" value={voice.provider ?? "Infobip"} />
-              <VoiceDetail
-                label="Código HTTP do provedor"
-                value={voice.providerStatusCode === null ? "—" : String(voice.providerStatusCode)}
-              />
-            </div>
-          </section>
-
-          <section>
-            <h2 className="mb-2 text-sm font-semibold">Conteúdo da ligação</h2>
-            <div className="rounded-xl border bg-card/40 p-3 text-sm font-medium">
-              {campaign.content ?? "O conteúdo original não está disponível para esta ligação."}
-            </div>
-          </section>
-
-          {voice.providerCallId ? (
-            <p className="text-xs text-muted-foreground">
-              Identificador no provedor: <span className="font-mono">{voice.providerCallId}</span>
-            </p>
-          ) : null}
-        </div>
-      </main>
-    </div>
+        {voice.providerCallId ? (
+          <p className="text-xs text-muted-foreground">
+            Identificador no provedor: <span className="font-mono">{voice.providerCallId}</span>
+          </p>
+        ) : null}
+      </div>
+    </Page>
   );
+}
+
+function campaignSubtitle(campaign: {
+  channel?: string | null;
+  scheduledAt?: string | null;
+  createdAt?: string | null;
+}) {
+  const parts = ["Relatório da campanha"];
+  if (campaign.channel) parts.push(ptLabel(CHANNEL_LABEL, campaign.channel));
+  const when = day(campaign.scheduledAt) ?? day(campaign.createdAt);
+  if (when) parts.push(when);
+  return parts.join(" · ");
 }
 
 function VoiceDetail({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-xl bg-card/60 p-3">
-      <p className="text-xs text-sky-300">{label}</p>
+      <p className="text-label text-muted-foreground">{label}</p>
       <p className="mt-1 break-words font-semibold">{value}</p>
     </div>
   );
@@ -349,341 +400,319 @@ function CampaignReport({
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-background/95 backdrop-blur-sm">
-      <main className="mx-auto min-h-full max-w-5xl border-x border-border/70 bg-background shadow-2xl">
-        <header className="sticky top-0 z-20 flex items-start justify-between gap-4 border-b border-border/70 bg-background/95 px-5 py-4 backdrop-blur">
-          <div className="min-w-0">
-            <div className="mb-1 flex items-center gap-2">
-              <Link
-                to="/campanhas"
-                className="text-muted-foreground hover:text-foreground"
-                aria-label="Voltar"
-              >
-                <ArrowLeft className="size-4" />
-              </Link>
-              <h1 className="truncate text-base font-bold">
-                {campaign?.name ?? "Relatório da campanha"}
-              </h1>
-            </div>
-            <p className="text-xs text-sky-400">
-              {depositors
-                ? depositors === 1
-                  ? "1 jogador depositou após a campanha"
-                  : `${number(depositors)} jogadores depositaram após a campanha`
-                : `${number(audience)} destinatários no público`}
+    <Page>
+      <PageHeader
+        title={campaign?.name ?? "Relatório da campanha"}
+        subtitle={campaign ? campaignSubtitle(campaign) : "Relatório da campanha"}
+        actions={<BackLink sourceType="campaign" />}
+      />
+
+      <div className="space-y-4">
+        <p className="text-body text-muted-foreground">
+          {depositors
+            ? depositors === 1
+              ? "1 jogador depositou após a campanha"
+              : `${number(depositors)} jogadores depositaram após a campanha`
+            : `${number(audience)} destinatários no público`}
+        </p>
+        {stopReason && campaign ? (
+          <section className="rounded-xl border border-border bg-muted/40 p-3 text-sm">
+            <p className="font-semibold">
+              {getChannelOperationState(campaign.status, campaign.channel).label}
+            </p>
+            <p className="mt-1 text-muted-foreground">{stopReason}</p>
+          </section>
+        ) : null}
+        <section className="grid gap-3 rounded-xl bg-card/60 p-3 text-xs sm:grid-cols-3 lg:grid-cols-5">
+          <TimelineValue label="Criada em" value={dateTime(campaign?.createdAt)} />
+          <TimelineValue label="Disparo iniciado" value={dateTime(campaign?.scheduledAt)} />
+          <TimelineValue label="Disparo concluído" value={dateTime(campaign?.finishedAt)} />
+          <TimelineValue
+            label="Atribuição"
+            value="até 7 dias após o clique"
+            className="sm:col-span-2"
+          />
+          <TimelineValue
+            label="Medição"
+            value="link curto — clique é contado"
+            className="sm:col-span-2 lg:col-span-3"
+          />
+        </section>
+
+        {alerts.map((alert) => (
+          <div
+            key={alert.code}
+            className="flex gap-2 rounded-lg border border-warning/30 bg-warning/5 p-3 text-sm"
+          >
+            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
+            {alert.message}
+          </div>
+        ))}
+        {globalAttributionHealth?.count ? (
+          <div className="rounded-lg border border-info/30 bg-info/5 p-3 text-sm">
+            <p className="font-semibold">Saúde geral da integração</p>
+            <p className="mt-1 text-muted-foreground">
+              {number(globalAttributionHealth.count)} evento(s) da operação chegaram sem origem
+              identificada nas últimas {globalAttributionHealth.periodHours} horas. Indicador geral,
+              não relacionado a esta campanha.
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {Object.entries(globalAttributionHealth.reasons)
+                .map(([reason, count]) => `${reason}: ${number(count)}`)
+                .join(" · ")}
             </p>
           </div>
-          <Button variant="ghost" size="icon" asChild>
-            <Link to="/campanhas" aria-label="Fechar relatório">
-              <X className="size-4" />
-            </Link>
-          </Button>
-        </header>
+        ) : null}
 
-        <div className="space-y-4 p-4 sm:p-5">
-          {stopReason && campaign ? (
-            <section className="rounded-xl border border-border bg-muted/40 p-3 text-sm">
-              <p className="font-semibold">
-                {getChannelOperationState(campaign.status, campaign.channel).label}
-              </p>
-              <p className="mt-1 text-muted-foreground">{stopReason}</p>
-            </section>
-          ) : null}
-          <section className="grid gap-3 rounded-xl bg-card/60 p-3 text-xs sm:grid-cols-3 lg:grid-cols-5">
-            <TimelineValue label="Criada em" value={dateTime(campaign?.createdAt)} />
-            <TimelineValue label="Disparo iniciado" value={dateTime(campaign?.scheduledAt)} />
-            <TimelineValue label="Disparo concluído" value={dateTime(campaign?.finishedAt)} />
-            <TimelineValue
-              label="Atribuição"
-              value="até 7 dias após o clique"
-              className="sm:col-span-2"
-            />
-            <TimelineValue
-              label="Medição"
-              value="link curto — clique é contado"
-              className="sm:col-span-2 lg:col-span-3"
-            />
-          </section>
-
-          {alerts.map((alert) => (
-            <div
-              key={alert.code}
-              className="flex gap-2 rounded-lg border border-warning/30 bg-warning/5 p-3 text-sm"
-            >
-              <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
-              {alert.message}
-            </div>
-          ))}
-          {globalAttributionHealth?.count ? (
-            <div className="rounded-lg border border-sky-500/30 bg-sky-500/5 p-3 text-sm">
-              <p className="font-semibold">Saúde geral da integração</p>
-              <p className="mt-1 text-muted-foreground">
-                {number(globalAttributionHealth.count)} evento(s) da operação chegaram sem origem
-                identificada nas últimas {globalAttributionHealth.periodHours} horas. Indicador
-                geral, não relacionado a esta campanha.
-              </p>
-              <p className="mt-1 text-xs text-sky-300">
-                {Object.entries(globalAttributionHealth.reasons)
-                  .map(([reason, count]) => `${reason}: ${number(count)}`)
-                  .join(" · ")}
-              </p>
-            </div>
-          ) : null}
-
-          {campaign?.failed || failureReasons.length > 0 ? (
-            <section className="rounded-2xl border border-border/80 p-4">
-              <h2 className="mb-3 text-sm font-semibold">Por que não saiu</h2>
-              <div className="space-y-2">
-                {failureReasons.length ? (
-                  failureReasons.slice(0, 4).map(([reason, count]) => (
-                    <div key={reason} className="rounded-xl bg-card/60 p-3">
-                      <p className="text-sm font-semibold">
-                        <span className="mr-2 text-sky-300">{number(count)}</span>
-                        {reason}
-                      </p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Este envio não foi aceito ou concluído pelo provedor.
-                      </p>
-                    </div>
-                  ))
-                ) : (
-                  <div className="rounded-xl bg-card/60 p-3">
+        {campaign?.failed || failureReasons.length > 0 ? (
+          <section className="rounded-2xl border border-border/80 p-4">
+            <h2 className="mb-3 text-section">Por que não saiu</h2>
+            <div className="space-y-2">
+              {failureReasons.length ? (
+                failureReasons.slice(0, 4).map(([reason, count]) => (
+                  <div key={reason} className="rounded-xl bg-card/60 p-3">
                     <p className="text-sm font-semibold">
-                      <span className="mr-2 text-sky-300">{number(campaign?.failed ?? 0)}</span>Não
-                      enviados
+                      <span className="mr-2 text-muted-foreground">{number(count)}</span>
+                      {reason}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      O provedor não retornou um motivo individual para estes destinatários.
+                      Este envio não foi aceito ou concluído pelo provedor.
                     </p>
                   </div>
-                )}
-              </div>
-            </section>
-          ) : null}
-
-          {details?.unresolved && details.unresolved.total > 0 ? (
-            <UnresolvedRecipientsCard
-              sourceId={sourceId}
-              unresolved={details.unresolved}
-              canExport={Boolean(data.canViewSensitive)}
-            />
-          ) : null}
-
-          <section className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
-            <Metric label="Enviados" value={number(data.sent)} />
-            <Metric label="Deduplicados" value={number(data.deduplicated)} />
-            {showDelivered ? <Metric label="Entregues" value={number(delivered)} /> : null}
-            <Metric
-              label="Clicaram"
-              value={data.clicked === null ? "—" : number(clicked)}
-              hint={
-                reached
-                  ? `${percent(clicked, reached)} ${delivered ? "de quem recebeu" : "dos enviados"}`
-                  : undefined
-              }
-            />
-            <Metric label="Cadastros" value={number(data.registered)} hint="jogadores" />
-            <Metric
-              label="Login ou jogo"
-              value={number(data.loginOrGame)}
-              hint={clicked ? `${percent(data.loginOrGame, clicked)} de quem clicou` : "jogadores"}
-            />
-            <Metric label="Primeiro depósito" value={number(data.ftd)} hint="jogadores" accent />
-            <Metric
-              label="Depositaram"
-              value={number(depositors)}
-              hint={clicked ? `${percent(depositors, clicked)} de quem clicou` : undefined}
-              accent
-            />
-          </section>
-
-          <section className="rounded-xl border border-success/10 bg-success/10 p-4">
-            <p className="text-xs text-success">Total da campanha, desde o disparo</p>
-            <p className="mt-1 text-2xl font-bold text-success">{money(directRevenue)}</p>
-            <p className="mt-1 text-xs text-sky-300">
-              de {number(depositors)}{" "}
-              {depositors === 1 ? "jogador atribuído" : "jogadores atribuídos"} pelo último clique
-              em até 7 dias
-            </p>
-            <ActiveNote players={data.activeDepositors} revenue={data.activeRevenue} />
-            {data.assistedRevenue > 0 ? (
-              <p className="mt-2 text-xs text-muted-foreground">
-                Receita assistida, separada: {money(data.assistedRevenue)}
-              </p>
-            ) : null}
-          </section>
-
-          <section className="grid gap-2 sm:grid-cols-3">
-            <Metric
-              label={campaign?.channel === "email" ? "Consumo de e-mail" : "Custo em SMS"}
-              value={smsCost === null ? `${number(data.sent)} envios` : money(smsCost)}
-              hint={
-                smsCost === null
-                  ? "custo financeiro indisponível"
-                  : `${number(data.sent)} envios × ${money(data.smsPrice ?? 0)}`
-              }
-            />
-            <Metric
-              label="Retorno"
-              value={smsCost ? `${ratio(directRevenue / smsCost)}x` : "—"}
-              hint={smsCost ? "total da campanha ÷ custo em SMS" : "sem custo de envio"}
-            />
-            <Metric
-              label="Receita média por jogador que voltou"
-              value={depositors ? money(revenuePerPlayer) : "—"}
-              hint={`${number(depositors)} ${depositors === 1 ? "jogador atribuído" : "jogadores atribuídos"}`}
-            />
-          </section>
-
-          <section>
-            <div className="mb-2 flex items-center justify-between gap-3">
-              <h2 className="text-sm font-semibold">A mensagem que foi enviada</h2>
-              <Button size="sm" asChild>
-                <a href="/campanhas?newCampaign=1">Usar</a>
-              </Button>
-            </div>
-            <div className="rounded-xl border bg-card/40 p-3 text-sm font-medium">
-              {campaign?.content ?? "O conteúdo original não está disponível para esta campanha."}
-            </div>
-            <p className="mt-2 text-xs text-sky-300">
-              Os links saíram encurtados e medidos. “Usar” abre uma nova campanha sem alterar esta.
-            </p>
-          </section>
-
-          <section>
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-sm font-semibold">Destinatários</h2>
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={!data.canViewSensitive}
-                onClick={() => void downloadRecipients(sourceId)}
-              >
-                <Download className="mr-1.5 size-4" /> Baixar CSV
-              </Button>
-            </div>
-            <div className="mb-3 flex flex-wrap gap-1.5">
-              <FilterButton active={filter === "all"} onClick={() => setActiveFilter("all")}>
-                Todos {number(audience)}
-              </FilterButton>
-              <FilterButton active={filter === "sent"} onClick={() => setActiveFilter("sent")}>
-                Enviados {number(data.sent)}
-              </FilterButton>
-              {showDelivered ? (
-                <FilterButton
-                  active={filter === "delivered"}
-                  onClick={() => setActiveFilter("delivered")}
-                >
-                  Entregues {number(delivered)}
-                </FilterButton>
-              ) : null}
-              <FilterButton
-                active={filter === "clicked"}
-                onClick={() => setActiveFilter("clicked")}
-              >
-                Clicaram {number(clicked)}
-              </FilterButton>
-              <FilterButton
-                active={filter === "not-clicked"}
-                onClick={() => setActiveFilter("not-clicked")}
-              >
-                Não clicaram {number(notClicked)}
-              </FilterButton>
-              <FilterButton
-                active={filter === "registered"}
-                onClick={() => setActiveFilter("registered")}
-              >
-                Cadastros {number(data.registered)}
-              </FilterButton>
-              <FilterButton
-                active={filter === "engaged"}
-                onClick={() => setActiveFilter("engaged")}
-              >
-                Login ou jogo {number(data.loginOrGame)}
-              </FilterButton>
-              <FilterButton
-                active={filter === "first-deposit"}
-                onClick={() => setActiveFilter("first-deposit")}
-                tone="green"
-              >
-                Primeiro depósito {number(data.ftd)}
-              </FilterButton>
-              <FilterButton
-                active={filter === "deposited"}
-                onClick={() => setActiveFilter("deposited")}
-                tone="green"
-              >
-                Depositaram {number(depositors)}
-              </FilterButton>
-              <FilterButton
-                active={filter === "clicked-no-deposit"}
-                onClick={() => setActiveFilter("clicked-no-deposit")}
-                tone="orange"
-              >
-                Clicaram e não depositaram {number(clickedNoDeposit)}
-              </FilterButton>
-            </div>
-            {listIsPartial && details ? (
-              <p className="mb-3 text-xs text-muted-foreground">
-                Os números dos filtros são da campanha inteira. A lista abaixo mostra só os
-                primeiros {number(details.recipientsShown)} de {number(audience)} destinatários; o
-                CSV traz todos.
-              </p>
-            ) : null}
-
-            {detailsError ? (
-              <div className="rounded-xl border p-5 text-sm text-muted-foreground">
-                Os totais estão disponíveis, mas não foi possível carregar a lista individual.
-              </div>
-            ) : recipients.length === 0 ? (
-              <div className="rounded-xl border p-5 text-sm text-muted-foreground">
-                Esta campanha não possui destinatários rastreáveis individualmente.
-              </div>
-            ) : (
-              <>
-                <RecipientTable rows={visible} />
-                <div className="flex flex-wrap items-center justify-between gap-3 py-3 text-xs text-sky-300">
-                  <span>
-                    {number(filtered.length)} linhas · página {page} de {pages}
-                  </span>
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={page === 1}
-                      onClick={() => setPage((value) => value - 1)}
-                    >
-                      <ChevronLeft className="mr-1 size-4" />
-                      Anterior
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={page === pages}
-                      onClick={() => setPage((value) => value + 1)}
-                    >
-                      Próxima
-                      <ChevronRight className="ml-1 size-4" />
-                    </Button>
-                  </div>
+                ))
+              ) : (
+                <div className="rounded-xl bg-card/60 p-3">
+                  <p className="text-sm font-semibold">
+                    <span className="mr-2 text-muted-foreground">
+                      {number(campaign?.failed ?? 0)}
+                    </span>
+                    Não enviados
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    O provedor não retornou um motivo individual para estes destinatários.
+                  </p>
                 </div>
-              </>
-            )}
+              )}
+            </div>
           </section>
+        ) : null}
 
-          {recipients.some((row) => row.depositAt) ? (
-            <section>
-              <h2 className="mb-2 text-sm font-semibold">Quem clicou e depositou</h2>
-              <ConversionTable rows={recipients.filter((row) => row.depositAt)} />
-              <p className="mt-3 text-xs text-sky-300">
-                A atribuição exige vínculo individual com o clique; depósitos sem esse vínculo não
-                inflam este resultado.
-              </p>
-            </section>
+        {details?.unresolved && details.unresolved.total > 0 ? (
+          <UnresolvedRecipientsCard
+            sourceId={sourceId}
+            unresolved={details.unresolved}
+            canExport={Boolean(data.canViewSensitive)}
+          />
+        ) : null}
+
+        <section className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
+          <Metric label="Enviados" value={number(data.sent)} />
+          <Metric label="Deduplicados" value={number(data.deduplicated)} />
+          {showDelivered ? <Metric label="Entregues" value={number(delivered)} /> : null}
+          <Metric
+            label="Clicaram"
+            value={data.clicked === null ? "—" : number(clicked)}
+            hint={
+              reached
+                ? `${percent(clicked, reached)} ${delivered ? "de quem recebeu" : "dos enviados"}`
+                : undefined
+            }
+          />
+          <Metric label="Cadastros" value={number(data.registered)} hint="jogadores" />
+          <Metric
+            label="Login ou jogo"
+            value={number(data.loginOrGame)}
+            hint={clicked ? `${percent(data.loginOrGame, clicked)} de quem clicou` : "jogadores"}
+          />
+          <Metric label="Primeiro depósito" value={number(data.ftd)} hint="jogadores" accent />
+          <Metric
+            label="Depositaram"
+            value={number(depositors)}
+            hint={clicked ? `${percent(depositors, clicked)} de quem clicou` : undefined}
+            accent
+          />
+        </section>
+
+        <section className="rounded-xl border border-success/10 bg-success/10 p-4">
+          <p className="text-label text-success">Total da campanha, desde o disparo</p>
+          <p className="mt-1 text-kpi tabular-nums text-success">{money(directRevenue)}</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            de {number(depositors)}{" "}
+            {depositors === 1 ? "jogador atribuído" : "jogadores atribuídos"} pelo último clique em
+            até 7 dias
+          </p>
+          <ActiveNote players={data.activeDepositors} revenue={data.activeRevenue} />
+          {data.assistedRevenue > 0 ? (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Receita assistida, separada: {money(data.assistedRevenue)}
+            </p>
           ) : null}
-        </div>
-      </main>
-    </div>
+        </section>
+
+        <section className="grid gap-2 sm:grid-cols-3">
+          <Metric
+            label={campaign?.channel === "email" ? "Consumo de e-mail" : "Custo em SMS"}
+            value={smsCost === null ? `${number(data.sent)} envios` : money(smsCost)}
+            hint={
+              smsCost === null
+                ? "custo financeiro indisponível"
+                : `${number(data.sent)} envios × ${money(data.smsPrice ?? 0)}`
+            }
+          />
+          <Metric
+            label="Retorno"
+            value={smsCost ? `${ratio(directRevenue / smsCost)}x` : "—"}
+            hint={smsCost ? "total da campanha ÷ custo em SMS" : "sem custo de envio"}
+          />
+          <Metric
+            label="Receita média por jogador que voltou"
+            value={depositors ? money(revenuePerPlayer) : "—"}
+            hint={`${number(depositors)} ${depositors === 1 ? "jogador atribuído" : "jogadores atribuídos"}`}
+          />
+        </section>
+
+        <section>
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <h2 className="text-section">A mensagem que foi enviada</h2>
+            <Button size="sm" asChild>
+              <a href="/campanhas?newCampaign=1">Usar</a>
+            </Button>
+          </div>
+          <div className="rounded-xl border bg-card/40 p-3 text-sm font-medium">
+            {campaign?.content ?? "O conteúdo original não está disponível para esta campanha."}
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Os links saíram encurtados e medidos. “Usar” abre uma nova campanha sem alterar esta.
+          </p>
+        </section>
+
+        <section>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-section">Destinatários</h2>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={!data.canViewSensitive}
+              onClick={() => void downloadRecipients(sourceId)}
+            >
+              <Download className="mr-1.5 size-4" /> Baixar CSV
+            </Button>
+          </div>
+          <div className="mb-3 flex flex-wrap gap-1.5">
+            <FilterButton active={filter === "all"} onClick={() => setActiveFilter("all")}>
+              Todos {number(audience)}
+            </FilterButton>
+            <FilterButton active={filter === "sent"} onClick={() => setActiveFilter("sent")}>
+              Enviados {number(data.sent)}
+            </FilterButton>
+            {showDelivered ? (
+              <FilterButton
+                active={filter === "delivered"}
+                onClick={() => setActiveFilter("delivered")}
+              >
+                Entregues {number(delivered)}
+              </FilterButton>
+            ) : null}
+            <FilterButton active={filter === "clicked"} onClick={() => setActiveFilter("clicked")}>
+              Clicaram {number(clicked)}
+            </FilterButton>
+            <FilterButton
+              active={filter === "not-clicked"}
+              onClick={() => setActiveFilter("not-clicked")}
+            >
+              Não clicaram {number(notClicked)}
+            </FilterButton>
+            <FilterButton
+              active={filter === "registered"}
+              onClick={() => setActiveFilter("registered")}
+            >
+              Cadastros {number(data.registered)}
+            </FilterButton>
+            <FilterButton active={filter === "engaged"} onClick={() => setActiveFilter("engaged")}>
+              Login ou jogo {number(data.loginOrGame)}
+            </FilterButton>
+            <FilterButton
+              active={filter === "first-deposit"}
+              onClick={() => setActiveFilter("first-deposit")}
+              tone="green"
+            >
+              Primeiro depósito {number(data.ftd)}
+            </FilterButton>
+            <FilterButton
+              active={filter === "deposited"}
+              onClick={() => setActiveFilter("deposited")}
+              tone="green"
+            >
+              Depositaram {number(depositors)}
+            </FilterButton>
+            <FilterButton
+              active={filter === "clicked-no-deposit"}
+              onClick={() => setActiveFilter("clicked-no-deposit")}
+              tone="orange"
+            >
+              Clicaram e não depositaram {number(clickedNoDeposit)}
+            </FilterButton>
+          </div>
+          {listIsPartial && details ? (
+            <p className="mb-3 text-xs text-muted-foreground">
+              Os números dos filtros são da campanha inteira. A lista abaixo mostra só os primeiros{" "}
+              {number(details.recipientsShown)} de {number(audience)} destinatários; o CSV traz
+              todos.
+            </p>
+          ) : null}
+
+          {detailsError ? (
+            <div className="rounded-xl border p-5 text-sm text-muted-foreground">
+              Os totais estão disponíveis, mas não foi possível carregar a lista individual.
+            </div>
+          ) : recipients.length === 0 ? (
+            <div className="rounded-xl border p-5 text-sm text-muted-foreground">
+              Esta campanha não possui destinatários rastreáveis individualmente.
+            </div>
+          ) : (
+            <>
+              <RecipientTable rows={visible} />
+              <div className="flex flex-wrap items-center justify-between gap-3 py-3 text-xs text-muted-foreground">
+                <span>
+                  {number(filtered.length)} linhas · página {page} de {pages}
+                </span>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={page === 1}
+                    onClick={() => setPage((value) => value - 1)}
+                  >
+                    <ChevronLeft className="mr-1 size-4" />
+                    Anterior
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={page === pages}
+                    onClick={() => setPage((value) => value + 1)}
+                  >
+                    Próxima
+                    <ChevronRight className="ml-1 size-4" />
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
+        </section>
+
+        {recipients.some((row) => row.depositAt) ? (
+          <section>
+            <h2 className="mb-2 text-section">Quem clicou e depositou</h2>
+            <ConversionTable rows={recipients.filter((row) => row.depositAt)} />
+            <p className="mt-3 text-xs text-muted-foreground">
+              A atribuição exige vínculo individual com o clique; depósitos sem esse vínculo não
+              inflam este resultado.
+            </p>
+          </section>
+        ) : null}
+      </div>
+    </Page>
   );
 }
 
@@ -710,7 +739,7 @@ function UnresolvedRecipientsCard({
     >
       <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
         <div>
-          <h2 id="unresolved-recipients-title" className="text-sm font-semibold">
+          <h2 id="unresolved-recipients-title" className="text-section">
             Não enviados ({number(unresolved.total)})
           </h2>
           <p className="mt-1 text-xs text-muted-foreground">
@@ -748,7 +777,7 @@ function UnresolvedRecipientsCard({
       </div>
       {unresolved.sample.length > 0 ? (
         <details className="mt-3 text-xs">
-          <summary className="cursor-pointer text-sky-300">
+          <summary className="cursor-pointer text-muted-foreground">
             Ver os primeiros {number(unresolved.sample.length)}
           </summary>
           <ul className="mt-2 grid gap-1 sm:grid-cols-2 lg:grid-cols-3">
@@ -780,7 +809,7 @@ function RecipientTable({ rows }: { rows: Recipient[] }) {
     <div className="overflow-x-auto rounded-2xl border">
       <table className="w-full min-w-[1180px] text-xs">
         <thead>
-          <tr className="border-b text-left text-sky-200">
+          <tr className="border-b text-left text-muted-foreground">
             <th className="p-3">Jogador</th>
             <th className="p-3">Envio</th>
             <th className="p-3">Clique</th>
@@ -797,19 +826,21 @@ function RecipientTable({ rows }: { rows: Recipient[] }) {
             <tr key={row.id} className="border-b last:border-0">
               <td className="p-3">
                 <strong className="block max-w-48 truncate text-sm">{row.playerName}</strong>
-                <span className="text-sky-300">
-                  {row.deliveryStatus === "delivered" ? "entregue" : row.sendStatus}
+                <span className="text-muted-foreground">
+                  {row.deliveryStatus === "delivered"
+                    ? "entregue"
+                    : ptLabel(SEND_STATUS_LABEL, row.sendStatus)}
                 </span>
               </td>
-              <td className="p-3 text-sky-300">{dateTime(row.sentAt)}</td>
-              <td className={cn("p-3", row.clicked && "font-medium text-blue-400")}>
+              <td className="p-3 text-muted-foreground">{dateTime(row.sentAt)}</td>
+              <td className={cn("p-3", row.clicked && "font-medium text-primary")}>
                 {dateTime(row.clickedAt)}
               </td>
               <td className="p-3 text-right font-semibold">{row.clickCount || "—"}</td>
-              <td className="p-3 text-sky-300">{dateTime(row.registeredAt)}</td>
-              <td className="p-3 text-sky-300">{dateTime(row.loginOrGameAt)}</td>
-              <td className="p-3 text-sky-300">{dateTime(row.firstDepositAt)}</td>
-              <td className="p-3 text-sky-300">
+              <td className="p-3 text-muted-foreground">{dateTime(row.registeredAt)}</td>
+              <td className="p-3 text-muted-foreground">{dateTime(row.loginOrGameAt)}</td>
+              <td className="p-3 text-muted-foreground">{dateTime(row.firstDepositAt)}</td>
+              <td className="p-3 text-muted-foreground">
                 {row.activeDepositAt ? (
                   <span className="text-muted-foreground">
                     {dateTime(row.activeDepositAt)} · já ativo
@@ -853,7 +884,7 @@ function ConversionTable({ rows }: { rows: Recipient[] }) {
     <div className="overflow-x-auto rounded-2xl border">
       <table className="w-full min-w-[680px] text-xs">
         <thead>
-          <tr className="border-b text-left text-sky-200">
+          <tr className="border-b text-left text-muted-foreground">
             <th className="p-3">Jogador</th>
             <th className="p-3">Clicou</th>
             <th className="p-3">Depositou</th>
@@ -871,14 +902,14 @@ function ConversionTable({ rows }: { rows: Recipient[] }) {
               <tr key={row.id} className="border-b last:border-0">
                 <td className="p-3">
                   <strong className="block text-sm">{row.playerName}</strong>
-                  <span className="text-sky-300">
+                  <span className="text-muted-foreground">
                     {number(row.historicalDepositCount)} depósitos no histórico ·{" "}
                     {money(row.historicalDepositValue)}
                   </span>
                 </td>
-                <td className="p-3 text-sky-300">{dateTime(row.clickedAt)}</td>
+                <td className="p-3 text-muted-foreground">{dateTime(row.clickedAt)}</td>
                 <td className="p-3 font-semibold">{dateTime(row.depositAt)}</td>
-                <td className="p-3 text-sky-300">{formatElapsed(elapsed)}</td>
+                <td className="p-3 text-muted-foreground">{formatElapsed(elapsed)}</td>
                 <td className="p-3 text-right font-bold text-success">{money(row.depositValue)}</td>
               </tr>
             );
@@ -890,6 +921,7 @@ function ConversionTable({ rows }: { rows: Recipient[] }) {
 }
 
 function JourneyReport({
+  journeyId,
   data,
   details,
   drilldown,
@@ -897,6 +929,7 @@ function JourneyReport({
   alerts,
   globalAttributionHealth,
 }: {
+  journeyId: string;
   data: Awaited<ReturnType<typeof getConversionReport>>;
   details: Awaited<ReturnType<typeof getJourneyReportDetails>> | undefined;
   drilldown: Awaited<ReturnType<typeof getConversionDrilldown>> | undefined;
@@ -949,275 +982,273 @@ function JourneyReport({
     : "Não informado";
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-background/95 backdrop-blur-sm">
-      <main className="mx-auto min-h-full max-w-6xl border-x border-border/70 bg-background shadow-2xl">
-        <header className="sticky top-0 z-20 flex items-start justify-between gap-4 border-b border-border/70 bg-background/95 px-5 py-4 backdrop-blur">
-          <div className="min-w-0">
-            <div className="mb-1 flex items-center gap-2">
-              <Link
-                to="/jornadas"
-                className="text-muted-foreground hover:text-foreground"
-                aria-label="Voltar para jornadas"
-              >
-                <ArrowLeft className="size-4" />
-              </Link>
-              <h1 className="truncate text-base font-bold">
-                {journey?.name ?? "Relatório da jornada"}
-              </h1>
-            </div>
-            <p className="text-xs text-sky-400">
-              {rotatesCopies ? "Resultado de cada copy" : "Resultado de cada etapa"} · atribuição
-              por último clique em até 7 dias
+    <Page>
+      <PageHeader
+        title={journey?.name ?? "Relatório da jornada"}
+        subtitle={
+          journey?.status
+            ? `Relatório da jornada · ${ptLabel(JOURNEY_STATUS_LABEL, journey.status)}`
+            : "Relatório da jornada"
+        }
+        actions={
+          <>
+            {journeyId ? (
+              <Button variant="outline" size="sm" asChild>
+                <Link to="/jornadas/$journeyId" params={{ journeyId }}>
+                  <Pencil className="mr-1.5 size-4" aria-hidden="true" />
+                  Editar jornada
+                </Link>
+              </Button>
+            ) : null}
+            <BackLink sourceType="journey" />
+          </>
+        }
+      />
+
+      <div className="space-y-4">
+        <p className="text-body text-muted-foreground">
+          {rotatesCopies ? "Resultado por mensagem" : "Resultado por etapa"} · atribuição por último
+          clique em até 7 dias
+        </p>
+        <section className="rounded-xl border bg-card/40 p-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full border bg-secondary px-2.5 py-1 text-xs font-semibold text-foreground">
+              Evento: {triggerName}
+            </span>
+            {journey?.status ? (
+              <span className="rounded-full border bg-secondary px-2.5 py-1 text-xs text-muted-foreground">
+                {ptLabel(JOURNEY_STATUS_LABEL, journey.status)}
+              </span>
+            ) : null}
+          </div>
+          {journey?.description ? (
+            <p className="mt-3 text-sm text-muted-foreground">{journey.description}</p>
+          ) : null}
+        </section>
+
+        {alerts.map((alert) => (
+          <div
+            className="rounded-lg border border-warning/40 bg-warning/5 p-3 text-sm"
+            key={alert.code}
+          >
+            {alert.message}
+          </div>
+        ))}
+        {globalAttributionHealth?.count ? (
+          <div className="rounded-lg border border-info/30 bg-info/5 p-3 text-sm">
+            <strong>Saúde geral da integração:</strong> {number(globalAttributionHealth.count)}{" "}
+            evento(s) da operação sem origem identificada nas últimas{" "}
+            {globalAttributionHealth.periodHours} horas. Indicador geral, não relacionado a esta
+            jornada.
+          </div>
+        ) : null}
+        {data.truncated || details?.metrics?.truncated ? (
+          <p className="text-xs text-muted-foreground">
+            Volume muito alto: alguns números abaixo consideram apenas os primeiros 100 mil
+            registros.
+          </p>
+        ) : null}
+        {sent7d > 0 && data.trackedSent === 0 ? (
+          <div className="rounded-lg border border-warning/40 bg-warning/5 p-3 text-sm text-foreground">
+            Esta jornada enviou mensagens, mas nenhuma continha link rastreável. Por isso clique,
+            depósito atribuído e recuperado permanecem em zero; não é falha de sincronização.
+          </div>
+        ) : null}
+        {data.observedClicked && data.observedClicked > (data.clicked ?? 0) ? (
+          <div className="rounded-lg border border-info/30 bg-info/5 p-3 text-sm text-muted-foreground">
+            O Short.io observou {number(data.observedClicked)} clique(s), mas apenas{" "}
+            {number(data.clicked ?? 0)}
+            foi(ram) confirmado(s) pelo redirecionamento próprio. Os observados não entram em
+            atribuição.
+          </div>
+        ) : null}
+
+        <section className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+          <Metric label="Entraram (7 dias)" value={number(details?.metrics?.entered7d ?? 0)} />
+          <Metric label="Em andamento" value={number(details?.metrics?.inProgress ?? 0)} />
+          <Metric label="Enviados 7d" value={number(sent7d)} />
+          <Metric
+            label="Enviados rastreados"
+            value={number(data.trackedSent)}
+            hint="Desde o início, com link rastreado — inclui etapas hoje desativadas"
+          />
+          <Metric label="Clicaram" value={data.clicked === null ? "—" : number(data.clicked)} />
+          <Metric label="Depósitos atribuídos" value={number(deposits)} />
+          <Metric label="Recuperado pelo CRM" value={money(recovered)} accent />
+        </section>
+        <ActiveNote players={data.activeDepositors} revenue={data.activeRevenue} />
+
+        <section className="rounded-2xl border border-border/80">
+          <div className="border-b px-4 py-3">
+            <h2 className="text-section">Etapas</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Envios vêm da execução da jornada; cliques, depósitos e valor recuperado usam o
+              vínculo rastreado de cada etapa.
             </p>
           </div>
-          <Button variant="ghost" size="icon" asChild>
-            <Link to="/jornadas" aria-label="Fechar relatório">
-              <X className="size-4" />
-            </Link>
-          </Button>
-        </header>
-
-        <div className="space-y-4 p-4 sm:p-5">
-          <section className="rounded-xl border bg-card/40 p-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">
-                Evento: {triggerName}
-              </span>
-              {journey?.status ? (
-                <span className="rounded-full border px-2.5 py-1 text-xs capitalize text-muted-foreground">
-                  {journey.status}
-                </span>
-              ) : null}
-            </div>
-            {journey?.description ? (
-              <p className="mt-3 text-sm text-muted-foreground">{journey.description}</p>
-            ) : null}
-          </section>
-
-          {alerts.map((alert) => (
-            <div
-              className="rounded-lg border border-warning/40 bg-warning/5 p-3 text-sm"
-              key={alert.code}
-            >
-              {alert.message}
-            </div>
-          ))}
-          {globalAttributionHealth?.count ? (
-            <div className="rounded-lg border border-sky-500/30 bg-sky-500/5 p-3 text-sm">
-              <strong>Saúde geral da integração:</strong> {number(globalAttributionHealth.count)}{" "}
-              evento(s) da operação sem origem identificada nas últimas{" "}
-              {globalAttributionHealth.periodHours} horas. Indicador geral, não relacionado a esta
-              jornada.
-            </div>
-          ) : null}
-          {data.truncated || details?.metrics?.truncated ? (
-            <p className="text-xs text-muted-foreground">
-              Volume muito alto: alguns números abaixo consideram apenas os primeiros 100 mil
-              registros.
-            </p>
-          ) : null}
-          {sent7d > 0 && data.trackedSent === 0 ? (
-            <div className="rounded-lg border border-warning/40 bg-warning/5 p-3 text-sm text-amber-100">
-              Esta jornada enviou mensagens, mas nenhuma continha link rastreável. Por isso clique,
-              depósito atribuído e recuperado permanecem em zero; não é falha de sincronização.
-            </div>
-          ) : null}
-          {data.observedClicked && data.observedClicked > (data.clicked ?? 0) ? (
-            <div className="rounded-lg border border-sky-500/30 bg-sky-500/5 p-3 text-sm text-muted-foreground">
-              O Short.io observou {number(data.observedClicked)} clique(s), mas apenas{" "}
-              {number(data.clicked ?? 0)}
-              foi(ram) confirmado(s) pelo redirecionamento próprio. Os observados não entram em
-              atribuição.
-            </div>
-          ) : null}
-
-          <section className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
-            <Metric label="Entraram (7 dias)" value={number(details?.metrics?.entered7d ?? 0)} />
-            <Metric label="Em andamento" value={number(details?.metrics?.inProgress ?? 0)} />
-            <Metric label="Enviados 7d" value={number(sent7d)} />
-            <Metric
-              label="Enviados rastreados"
-              value={number(data.trackedSent)}
-              hint="Desde o início, com link rastreado — inclui etapas hoje desativadas"
-            />
-            <Metric label="Clicaram" value={data.clicked === null ? "—" : number(data.clicked)} />
-            <Metric label="Depósitos atribuídos" value={number(deposits)} />
-            <Metric label="Recuperado pelo CRM" value={money(recovered)} accent />
-          </section>
-          <ActiveNote players={data.activeDepositors} revenue={data.activeRevenue} />
-
-          <section className="rounded-2xl border border-border/80">
-            <div className="border-b px-4 py-3">
-              <h2 className="font-semibold">Os degraus — resultado de cada etapa</h2>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Envios vêm da execução da jornada; cliques, depósitos e valor recuperado usam o
-                vínculo rastreado de cada etapa.
-              </p>
-            </div>
-            {stepRows.length ? (
-              <TooltipProvider delayDuration={150}>
-                <div className="divide-y divide-border/70">
-                  {stepRows.map((step, index) => (
-                    <div key={step.id} className="space-y-3 p-4">
-                      <div className="flex flex-wrap items-center gap-2 text-sm">
-                        <span className="grid size-6 place-items-center rounded-full bg-muted text-xs font-bold">
-                          {index + 1}
-                        </span>
-                        <span className="rounded-full border border-sky-500/30 bg-sky-500/5 px-2 py-0.5 text-xs font-semibold uppercase text-sky-300">
-                          {step.step_type}
-                        </span>
-                        <strong>{step.label || `Etapa ${index + 1}`}</strong>
-                        <span className="text-xs text-muted-foreground">
-                          {formatJourneyDelay(step.waitSeconds)}
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
-                        <JourneyStepMetric
-                          label="Neste degrau agora"
-                          value={step.current}
-                          hint="Leads que já entraram e aguardam o envio ou o próximo passo deste degrau"
-                        />
-                        <JourneyStepMetric label="Enviados 7d" value={step.sent7d} />
-                        <JourneyStepMetric label="Enviados total" value={step.sent} />
-                        {step.step_type === "sms" || step.step_type === "email" ? null : (
-                          <JourneyStepMetric label="Entregues" value={step.delivered} />
-                        )}
-                        <JourneyStepMetric label="Clicaram" value={step.clicked} />
-                        <JourneyStepMetric label="Depósitos atribuídos" value={step.deposits} />
-                        <JourneyStepMetric
-                          label="Recuperado pelo CRM"
-                          value={step.recovered}
-                          currency
-                          accent
-                        />
-                      </div>
-                      {step.copies.length > 1 || step.variants.length ? (
-                        <JourneyCopyTable
-                          copies={step.copies}
-                          variants={step.variants}
-                          withoutVariant={step.withoutVariant}
-                        />
-                      ) : null}
+          {stepRows.length ? (
+            <TooltipProvider delayDuration={150}>
+              <div className="divide-y divide-border/70">
+                {stepRows.map((step, index) => (
+                  <div key={step.id} className="space-y-3 p-4">
+                    <div className="flex flex-wrap items-center gap-2 text-sm">
+                      <span className="grid size-6 place-items-center rounded-full bg-muted text-xs font-bold">
+                        {index + 1}
+                      </span>
+                      <span className="rounded-full border bg-secondary px-2 py-0.5 text-xs font-semibold text-muted-foreground">
+                        {ptLabel(STEP_TYPE_LABEL, step.step_type)}
+                      </span>
+                      <strong>{step.label || `Etapa ${index + 1}`}</strong>
+                      <span className="text-xs text-muted-foreground">
+                        {formatJourneyDelay(step.waitSeconds)}
+                      </span>
                     </div>
-                  ))}
-                  {retiredSteps.length ? (
-                    <div className="space-y-2 bg-muted/20 p-4">
-                      <p className="text-label font-semibold text-muted-foreground">
-                        Etapas desativadas — histórico
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        Etapas que enviaram mensagens e depois foram desligadas. O resultado delas
-                        continua contando no total da jornada.
-                      </p>
-                      <div className="overflow-x-auto">
-                        <table className="w-full min-w-[520px] text-sm">
-                          <thead className="text-xs text-muted-foreground">
-                            <tr className="text-left">
-                              <th className="py-1.5 pr-3 font-medium">Etapa</th>
-                              <th className="py-1.5 pr-3 text-right font-medium">Enviados</th>
-                              <th className="py-1.5 pr-3 text-right font-medium">Clicaram</th>
-                              <th className="py-1.5 pr-3 text-right font-medium">Depósitos</th>
-                              <th className="py-1.5 text-right font-medium">Recuperado</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-border/50">
-                            {retiredSteps.map((step) => (
-                              <tr key={step.stepId} className="text-muted-foreground">
-                                <td className="py-1.5 pr-3">
-                                  {step.label || `Etapa na posição ${step.stepPosition}`}
-                                </td>
-                                <td className="py-1.5 pr-3 text-right">{number(step.sent)}</td>
-                                <td className="py-1.5 pr-3 text-right">{number(step.clicked)}</td>
-                                <td className="py-1.5 pr-3 text-right">{number(step.deposits)}</td>
-                                <td className="py-1.5 text-right">{money(step.recovered)}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+                      <JourneyStepMetric
+                        label="Nesta etapa agora"
+                        value={step.current}
+                        hint="Leads que já entraram e aguardam o envio ou o próximo passo desta etapa"
+                      />
+                      <JourneyStepMetric label="Enviados 7d" value={step.sent7d} />
+                      <JourneyStepMetric label="Enviados total" value={step.sent} />
+                      {step.step_type === "sms" || step.step_type === "email" ? null : (
+                        <JourneyStepMetric label="Entregues" value={step.delivered} />
+                      )}
+                      <JourneyStepMetric label="Clicaram" value={step.clicked} />
+                      <JourneyStepMetric label="Depósitos atribuídos" value={step.deposits} />
+                      <JourneyStepMetric
+                        label="Recuperado pelo CRM"
+                        value={step.recovered}
+                        currency
+                        accent
+                      />
                     </div>
-                  ) : null}
-                  {unassigned.deposits > 0 ? (
-                    <p className="px-4 py-3 text-xs text-muted-foreground">
-                      Sem degrau identificado: {number(unassigned.deposits)} depósito(s) ·{" "}
-                      {money(unassigned.recovered)} — o envio de origem não corresponde a nenhuma
-                      etapa da jornada.
+                    {step.copies.length > 1 || step.variants.length ? (
+                      <JourneyCopyTable
+                        copies={step.copies}
+                        variants={step.variants}
+                        withoutVariant={step.withoutVariant}
+                      />
+                    ) : null}
+                  </div>
+                ))}
+                {retiredSteps.length ? (
+                  <div className="space-y-2 bg-muted/20 p-4">
+                    <p className="text-label font-semibold text-muted-foreground">
+                      Etapas desativadas — histórico
                     </p>
-                  ) : null}
-                </div>
-              </TooltipProvider>
-            ) : (
-              <p className="p-5 text-sm text-muted-foreground">
-                Esta jornada ainda não possui etapas de comunicação configuradas.
-              </p>
-            )}
-          </section>
-
-          {failed ? (
-            <p className="text-xs text-warning">
-              {number(failed)} execução(ões) falharam ou foram canceladas nas etapas acima.
+                    <p className="text-xs text-muted-foreground">
+                      Etapas que enviaram mensagens e depois foram desligadas. O resultado delas
+                      continua contando no total da jornada.
+                    </p>
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[520px] text-sm">
+                        <thead className="text-xs text-muted-foreground">
+                          <tr className="text-left">
+                            <th className="py-1.5 pr-3 font-medium">Etapa</th>
+                            <th className="py-1.5 pr-3 text-right font-medium">Enviados</th>
+                            <th className="py-1.5 pr-3 text-right font-medium">Clicaram</th>
+                            <th className="py-1.5 pr-3 text-right font-medium">Depósitos</th>
+                            <th className="py-1.5 text-right font-medium">Recuperado</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border/50">
+                          {retiredSteps.map((step) => (
+                            <tr key={step.stepId} className="text-muted-foreground">
+                              <td className="py-1.5 pr-3">
+                                {step.label || `Etapa na posição ${step.stepPosition}`}
+                              </td>
+                              <td className="py-1.5 pr-3 text-right">{number(step.sent)}</td>
+                              <td className="py-1.5 pr-3 text-right">{number(step.clicked)}</td>
+                              <td className="py-1.5 pr-3 text-right">{number(step.deposits)}</td>
+                              <td className="py-1.5 text-right">{money(step.recovered)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : null}
+                {unassigned.deposits > 0 ? (
+                  <p className="px-4 py-3 text-xs text-muted-foreground">
+                    Sem etapa identificada: {number(unassigned.deposits)} depósito(s) ·{" "}
+                    {money(unassigned.recovered)} — o envio de origem não corresponde a nenhuma
+                    etapa da jornada.
+                  </p>
+                ) : null}
+              </div>
+            </TooltipProvider>
+          ) : (
+            <p className="p-5 text-sm text-muted-foreground">
+              Esta jornada ainda não possui etapas de comunicação configuradas.
             </p>
-          ) : null}
+          )}
+        </section>
 
-          <section className="rounded-2xl border border-border/80">
-            <div className="border-b px-4 py-3">
-              <h2 className="font-semibold">Leads rastreados</h2>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Clique, login e depósito só aparecem quando pertencem ao mesmo envio rastreado.
+        {failed ? (
+          <p className="text-xs text-warning">
+            {number(failed)} execução(ões) falharam ou foram canceladas nas etapas acima.
+          </p>
+        ) : null}
+
+        <section className="rounded-2xl border border-border/80">
+          <div className="border-b px-4 py-3">
+            <h2 className="text-section">Leads rastreados</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Clique, login e depósito só aparecem quando pertencem ao mesmo envio rastreado.
+            </p>
+          </div>
+          {!drilldown ? (
+            <div className="p-4">
+              <p className="text-sm text-muted-foreground">
+                Carregue os detalhes individuais sob demanda para não atrasar o relatório.
               </p>
+              <Button className="mt-3" size="sm" variant="outline" onClick={onLoadDrilldown}>
+                Carregar leads rastreados
+              </Button>
             </div>
-            {!drilldown ? (
-              <div className="p-4">
-                <p className="text-sm text-muted-foreground">
-                  Carregue os detalhes individuais sob demanda para não atrasar o relatório.
-                </p>
-                <Button className="mt-3" size="sm" variant="outline" onClick={onLoadDrilldown}>
-                  Carregar leads rastreados
-                </Button>
-              </div>
-            ) : drilldown.rows.length === 0 ? (
-              <p className="p-4 text-sm text-muted-foreground">
-                Ainda não há envios rastreáveis nesta jornada.
-              </p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[760px] text-left text-xs">
-                  <thead className="border-b text-muted-foreground">
-                    <tr>
-                      <th className="px-4 py-3 font-medium">Lead</th>
-                      <th className="px-4 py-3 font-medium">Enviado</th>
-                      <th className="px-4 py-3 font-medium">Clicou</th>
-                      <th className="px-4 py-3 font-medium">Login/jogo</th>
-                      <th className="px-4 py-3 font-medium">Depósito</th>
+          ) : drilldown.rows.length === 0 ? (
+            <p className="p-4 text-sm text-muted-foreground">
+              Ainda não há envios rastreáveis nesta jornada.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[760px] text-left text-xs">
+                <thead className="border-b text-muted-foreground">
+                  <tr>
+                    <th className="px-4 py-3 font-medium">Lead</th>
+                    <th className="px-4 py-3 font-medium">Enviado</th>
+                    <th className="px-4 py-3 font-medium">Clicou</th>
+                    <th className="px-4 py-3 font-medium">Login/jogo</th>
+                    <th className="px-4 py-3 font-medium">Depósito</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/70">
+                  {drilldown.rows.map((row, index) => (
+                    <tr key={`${row.playerId}-${row.sentAt}-${index}`}>
+                      <td className="px-4 py-3">
+                        <p className="font-medium">{row.playerName}</p>
+                        <p className="text-muted-foreground">{row.contact ?? "—"}</p>
+                      </td>
+                      <td className="px-4 py-3">{dateTime(row.sentAt)}</td>
+                      <td className="px-4 py-3">{dateTime(row.clickedAt)}</td>
+                      <td className="px-4 py-3">{dateTime(row.loginAt)}</td>
+                      <td className="px-4 py-3">
+                        {row.depositedAt
+                          ? `${dateTime(row.depositedAt)} · ${money(row.depositValue)}${
+                              row.alreadyActive ? " · já ativo, não conta" : ""
+                            }`
+                          : "—"}
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border/70">
-                    {drilldown.rows.map((row, index) => (
-                      <tr key={`${row.playerId}-${row.sentAt}-${index}`}>
-                        <td className="px-4 py-3">
-                          <p className="font-medium">{row.playerName}</p>
-                          <p className="text-muted-foreground">{row.contact ?? "—"}</p>
-                        </td>
-                        <td className="px-4 py-3">{dateTime(row.sentAt)}</td>
-                        <td className="px-4 py-3">{dateTime(row.clickedAt)}</td>
-                        <td className="px-4 py-3">{dateTime(row.loginAt)}</td>
-                        <td className="px-4 py-3">
-                          {row.depositedAt
-                            ? `${dateTime(row.depositedAt)} · ${money(row.depositValue)}${
-                                row.alreadyActive ? " · já ativo, não conta" : ""
-                              }`
-                            : "—"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-        </div>
-      </main>
-    </div>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      </div>
+    </Page>
   );
 }
 
@@ -1243,15 +1274,15 @@ function JourneyCopyTable({
   const empty = { sent: 0, clicked: 0, deposits: 0, recovered: 0 };
   const rows = indexes.map((index) => ({
     key: String(index),
-    name: `Copy ${index + 1}`,
-    text: copies[index] ?? "Copy removida",
+    name: `Mensagem ${index + 1}`,
+    text: copies[index] ?? "Mensagem removida",
     ...(byIndex.get(index) ?? empty),
   }));
   if (withoutVariant && (withoutVariant.sent > 0 || withoutVariant.deposits > 0))
     rows.push({
       key: "none",
-      name: "Sem copy registrada",
-      text: "Envios anteriores à rotação de copys",
+      name: "Sem mensagem registrada",
+      text: "Envios anteriores à rotação de mensagens",
       ...withoutVariant,
     });
   const rate = (row: { sent: number; clicked: number }) =>
@@ -1261,7 +1292,7 @@ function JourneyCopyTable({
       <table className="w-full min-w-[640px] text-sm">
         <thead className="bg-muted/30 text-xs text-muted-foreground">
           <tr className="text-left">
-            <th className="px-3 py-2 font-medium">Copy (rotação)</th>
+            <th className="px-3 py-2 font-medium">Mensagem (rotação)</th>
             <th className="px-3 py-2 text-right font-medium">Enviados</th>
             <th className="px-3 py-2 text-right font-medium">Clicaram</th>
             <th className="px-3 py-2 text-right font-medium">Taxa de clique</th>
@@ -1323,7 +1354,7 @@ function JourneyStepMetric({
       ) : (
         <p className="text-meta text-muted-foreground">{label}</p>
       )}
-      <p className={cn("mt-0.5 font-bold", accent && "text-success")}>
+      <p className={cn("mt-0.5 font-semibold tabular-nums", accent && "text-success")}>
         {currency ? money(value) : number(value)}
       </p>
     </div>
@@ -1343,9 +1374,9 @@ function Metric({
 }) {
   return (
     <div className={cn("rounded-xl bg-card/60 p-3", accent && "bg-success/10")}>
-      <p className={cn("text-xs text-sky-300", accent && "text-success")}>{label}</p>
-      <p className={cn("mt-1 text-xl font-bold", accent && "text-success")}>{value}</p>
-      {hint ? <p className="text-xs text-sky-300">{hint}</p> : null}
+      <p className={cn("text-label text-muted-foreground", accent && "text-success")}>{label}</p>
+      <p className={cn("mt-1 text-kpi-sm tabular-nums", accent && "text-success")}>{value}</p>
+      {hint ? <p className="text-meta text-muted-foreground">{hint}</p> : null}
     </div>
   );
 }
@@ -1361,32 +1392,35 @@ function TimelineValue({
 }) {
   return (
     <div className={className}>
-      <p className="text-sky-300">{label}</p>
-      <p className="font-semibold text-foreground">{value}</p>
+      <p className="text-label text-muted-foreground">{label}</p>
+      <p className="text-body font-semibold text-foreground">{value}</p>
     </div>
   );
 }
 
 function FilterButton({
   active,
-  tone = "blue",
+  tone = "neutral",
   onClick,
   children,
 }: {
   active: boolean;
-  tone?: "blue" | "green" | "orange";
+  tone?: "neutral" | "green" | "orange";
   onClick: () => void;
   children: React.ReactNode;
 }) {
   return (
     <button
       type="button"
+      aria-pressed={active}
       onClick={onClick}
       className={cn(
         "rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors",
-        active ? "border-blue-500 bg-blue-600 text-white" : "bg-card/60 hover:bg-card",
+        active
+          ? "border-border bg-secondary text-foreground"
+          : "bg-card/60 text-muted-foreground hover:bg-card hover:text-foreground",
         tone === "green" && !active && "border-success/30 text-success",
-        tone === "orange" && !active && "border-orange-500/30 text-orange-400",
+        tone === "orange" && !active && "border-warning/30 text-warning",
       )}
     >
       {children}
@@ -1394,11 +1428,23 @@ function FilterButton({
   );
 }
 
-function ReportState({ children }: { children: React.ReactNode }) {
+function ReportState({
+  sourceType,
+  children,
+}: {
+  sourceType: "campaign" | "journey";
+  children: React.ReactNode;
+}) {
   return (
-    <main className="fixed inset-0 z-50 grid place-items-center bg-background/95 p-6 text-sm text-muted-foreground">
-      {children}
-    </main>
+    <Page>
+      <PageHeader actions={<BackLink sourceType={sourceType} />} />
+      <div
+        role="status"
+        className="grid place-items-center rounded-xl border border-border bg-card p-10 text-body text-muted-foreground"
+      >
+        {children}
+      </div>
+    </Page>
   );
 }
 

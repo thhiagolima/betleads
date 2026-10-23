@@ -18,6 +18,13 @@ import { listCallScripts, deleteCallScript } from "@/lib/calls.functions";
 import { ScriptFormDialog } from "./script-form-dialog";
 import { requestConfirmation } from "@/components/system-dialog-host";
 
+const SCRIPT_STATUS_LABEL: Record<string, string> = {
+  active: "Ativo",
+  draft: "Rascunho",
+  archived: "Arquivado",
+  inactive: "Inativo",
+};
+
 export function ScriptsTab() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
@@ -48,10 +55,11 @@ export function ScriptsTab() {
         <div>
           <CardTitle className="flex items-center gap-2">
             <FileText className="h-5 w-5 text-primary" />
-            Templates
+            Roteiros
           </CardTitle>
           <CardDescription>
-            Crie templates de fala reutilizáveis. O gatilho é definido depois, no Fluxo.
+            Textos de fala reutilizáveis, lidos com voz gerada. Quando ligar é definido na campanha
+            ou na automação.
           </CardDescription>
         </div>
         <Button
@@ -60,7 +68,7 @@ export function ScriptsTab() {
             setDialogOpen(true);
           }}
         >
-          <Plus className="mr-2 h-4 w-4" /> Novo template
+          <Plus className="mr-2 h-4 w-4" /> Novo roteiro
         </Button>
       </CardHeader>
       <CardContent>
@@ -69,7 +77,7 @@ export function ScriptsTab() {
         ) : scripts.length === 0 ? (
           <div className="py-12 text-center">
             <FileText className="mx-auto mb-3 h-10 w-10 text-muted-foreground" />
-            <p className="text-sm text-muted-foreground">Nenhum template criado ainda.</p>
+            <p className="text-sm text-muted-foreground">Nenhum roteiro criado ainda.</p>
           </div>
         ) : (
           <Table>
@@ -97,7 +105,7 @@ export function ScriptsTab() {
                             : "outline"
                       }
                     >
-                      {s.status}
+                      {SCRIPT_STATUS_LABEL[s.status] ?? s.status}
                     </Badge>
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
@@ -123,8 +131,8 @@ export function ScriptsTab() {
                         const confirmed = await requestConfirmation({
                           title: `Excluir “${s.name}”?`,
                           description:
-                            "O template de fala será removido e não poderá ser usado em novos fluxos.",
-                          confirmLabel: "Excluir template",
+                            "O roteiro será removido e não poderá ser usado em novas ligações.",
+                          confirmLabel: "Excluir roteiro",
                           destructive: true,
                         });
                         if (confirmed) delMut.mutate(s.id);

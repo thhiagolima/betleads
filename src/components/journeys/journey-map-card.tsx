@@ -1,5 +1,7 @@
 import { Link } from "@tanstack/react-router";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Route } from "lucide-react";
+
+import { EmptyState } from "@/components/ui-premium/empty-state";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,10 +9,19 @@ import { buildJourneyMap, type MapJourney } from "@/lib/journey-map";
 
 const STATUS_LABEL: Record<string, string> = { paused: "desligada", draft: "rascunho" };
 
-/** P3: the tenant's journeys as lanes a player goes through, with who is in each. */
+/** P3: the house's journeys as lanes a player goes through, with who is in each. */
 export function JourneyMapCard({ journeys }: { journeys: MapJourney[] }) {
   const lanes = buildJourneyMap(journeys);
-  if (lanes.length === 0) return null;
+  if (lanes.length === 0)
+    return (
+      <Card>
+        <EmptyState
+          icon={<Route />}
+          title="Nenhuma jornada no mapa"
+          description="Crie uma jornada para ver aqui como elas se encaixam e quantos jogadores estão em cada uma."
+        />
+      </Card>
+    );
   return (
     <Card>
       <CardHeader>

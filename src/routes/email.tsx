@@ -1,33 +1,34 @@
-import { createFileRoute, useLocation, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { Link, createFileRoute } from "@tanstack/react-router";
+import { useMemo, useState } from "react";
 import {
-  Send,
-  Eye,
-  MousePointerClick,
-  XCircle,
-  AlertTriangle,
-  Megaphone,
-  TrendingUp,
-  Server,
-  ShieldCheck,
-  Activity,
-  Plus,
-  Pencil,
   Copy,
-  Trash2,
-  Pause,
-  Play,
-  Workflow,
-  Star,
   LayoutTemplate,
+  MoreHorizontal,
+  Pause,
+  Pencil,
+  Play,
+  Plus,
+  Trash2,
+  Workflow,
 } from "lucide-react";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { toast } from "sonner";
+import { useServerFn } from "@tanstack/react-start";
+import { useQuery } from "@tanstack/react-query";
+
+import { ChannelPage } from "@/components/channels/channel-page";
+import {
+  ChannelBlock,
+  ChannelOverview,
+  ChannelSendsChart,
+  useChannelPeriod,
+} from "@/components/channels/channel-overview";
 import { HistoryShell } from "@/components/history/history-shell";
+import { StatusBadge } from "@/components/history/status-badge";
+import { emailEventStatus } from "@/components/history/email-event-status";
+import { HomeCard, MetricRow } from "@/components/home/home-cards";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -36,30 +37,17 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  ResponsiveContainer,
-  AreaChart,
-  Area,
-  CartesianGrid,
-  XAxis,
-  YAxis,
-  Tooltip,
-  Legend,
-  LineChart,
-  Line,
-  BarChart,
-  Bar,
-} from "recharts";
-import { toast } from "sonner";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { CHART_COLORS, chartAxisProps, chartGridProps, chartTooltipProps } from "@/lib/chart-theme";
+import { CHART_COLORS } from "@/lib/chart-theme";
 import { num } from "@/lib/format";
-import { MetricCard, EmptyState } from "@/components/ui-premium";
-import { Page, PageHeader } from "@/components/ui-premium/page-header";
-import { SendWindowCard } from "@/components/send-window-card";
-import { ProvidersPausedBanner } from "@/components/providers-paused-banner";
+import { EmptyState } from "@/components/ui-premium";
 import { requestConfirmation } from "@/components/system-dialog-host";
-import { useServerFn } from "@tanstack/react-start";
-import { useQuery } from "@tanstack/react-query";
 import {
   listEmailCampaigns,
   listEmailTemplates,
@@ -69,12 +57,6 @@ import {
   getEmailDashboard,
 } from "@/lib/email.functions";
 import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
-import {
-  DashboardDateRangePicker,
-  defaultTodayRange,
-  rangeToKey,
-  type DashboardRange,
-} from "@/components/dashboard-date-range-picker";
 import { TemplateEditorDialog } from "@/components/email/template-editor-dialog";
 import { QuickEditorDialog } from "@/components/email/quick-editor-dialog";
 
@@ -133,90 +115,39 @@ type Campanha = {
 // ============================================================
 
 function EmailPage() {
-  const navigate = useNavigate();
-  const hash = useLocation({ select: (l) => l.hash });
-  const VALID = ["dashboard", "templates", "historico"] as const;
-  const legacySettings = ["remetentes", "smtp", "configuracoes"].includes(hash);
-  const current = legacySettings
-    ? "dashboard"
-    : (VALID as readonly string[]).includes(hash)
-      ? hash
-      : "dashboard";
-
-  useEffect(() => {
-    if (hash === "campanhas") {
-      void navigate({ to: "/campanhas", search: { newChannel: "email" } as never, replace: true });
-    }
-    if (hash === "automacoes") {
-      void navigate({ to: "/automacoes", replace: true });
-    }
-    if (legacySettings) {
-      void navigate({ to: "/email", hash: "dashboard", replace: true });
-    }
-  }, [hash, legacySettings, navigate]);
-
   return (
-    <Page>
-      <PageHeader
-        subtitle="Saúde do canal, entregas, templates e histórico"
-        actions={
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              onClick={() =>
-                void navigate({ to: "/campanhas", search: { newChannel: "email" } as never })
-              }
-            >
-              <Plus className="mr-1.5 h-3.5 w-3.5" /> Criar campanha
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => void navigate({ to: "/automacoes" })}
-            >
-              <Workflow className="mr-1.5 h-3.5 w-3.5" /> Automações
-            </Button>
-          </div>
-        }
-      />
-
-      <SendWindowCard compact />
-
-      <ProvidersPausedBanner channel="email" />
-
-      <Tabs
-        value={current}
-        onValueChange={(v) => navigate({ to: "/email", hash: v, replace: true })}
-        className="w-full"
-      >
-        <TabsList className="hidden">
-          <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
-          <TabsTrigger value="templates">Templates</TabsTrigger>
-          <TabsTrigger value="historico">Histórico</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="dashboard" className="mt-2">
-          <DashboardTab />
-        </TabsContent>
-        <TabsContent value="templates" className="mt-2">
+    <ChannelPage
+      channel="email"
+      subtitle="Envios, templates e histórico do canal de email."
+      actions={
+        <Button asChild variant="outline" className="h-9">
+          <Link to="/automacoes">
+            <Workflow className="size-4" aria-hidden="true" />
+            Automações
+          </Link>
+        </Button>
+      }
+    >
+      {(tab) =>
+        tab === "templates" ? (
           <TemplatesTab />
-        </TabsContent>
-        <TabsContent value="historico" className="mt-2">
+        ) : tab === "historico" ? (
           <HistoricoTab />
-        </TabsContent>
-      </Tabs>
-    </Page>
+        ) : (
+          <DashboardTab />
+        )
+      }
+    </ChannelPage>
   );
 }
 
 // ============================================================
-// Dashboard
+// Visão geral
 // ============================================================
 
 function DashboardTab() {
-  const [range, setRange] = useState<DashboardRange>(() => defaultTodayRange());
-  const rk = rangeToKey(range);
-  const sameDay = rk.from === rk.to;
+  const period = useChannelPeriod();
+  const { query } = period;
   const fn = useServerFn(getEmailDashboard);
   useRealtimeInvalidate(
     "email-dashboard-realtime",
@@ -229,266 +160,111 @@ function DashboardTab() {
     ],
     [["email-dashboard"]],
   );
-  const { data, isLoading } = useQuery({
-    queryKey: ["email-dashboard", rk.from, rk.to],
-    queryFn: () => fn({ data: rk }),
-    refetchInterval: 10_000,
+  const { data, isLoading, isFetching, dataUpdatedAt } = useQuery({
+    queryKey: ["email-dashboard", query.from, query.to],
+    queryFn: () => fn({ data: { from: query.from, to: query.to } }),
+    refetchInterval: query.includesToday ? 10_000 : false,
+    placeholderData: (previous) => previous,
   });
   const totals = data?.totals;
-  const today = data?.today;
   const health = data?.health;
   const events = data?.recent_events ?? [];
-  const fmtDay = (iso: string) => {
-    const d = new Date(iso + "T00:00:00");
-    if (sameDay) return d.toLocaleTimeString("pt-BR", { hour: "2-digit" });
-    return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
-  };
-  const v = (n?: number) => (isLoading ? "…" : String(n ?? 0));
-  const todayIsoLocal = (() => {
-    const d = new Date();
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    return `${y}-${m}-${day}`;
-  })();
-  const lastDayLabel = (() => {
-    if (rk.to === todayIsoLocal) return "hoje";
-    const d = new Date(rk.to + "T00:00:00");
-    return `em ${d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}`;
-  })();
-  // Em range de vários dias, o card mostra o total do PERÍODO.
-  const sentHeadline = sameDay ? (today?.sent ?? 0) : (totals?.sent ?? 0);
-  const sentHeadlineLabel = sameDay ? `Enviados ${lastDayLabel}` : "Enviados no período";
-  const uniqHeadline = sameDay
-    ? ((today as any)?.unique_recipients ?? 0)
-    : ((totals as any)?.unique_recipients ?? 0);
-  const sentHeadlineHint = sameDay
-    ? `Período: ${totals?.sent ?? 0} · ${uniqHeadline} emails únicos`
-    : `${(lastDayLabel[0]?.toUpperCase() ?? "") + lastDayLabel.slice(1)}: ${today?.sent ?? 0} · ${uniqHeadline} emails únicos`;
+  const queued = (totals?.pending ?? 0) + (totals?.queue_due ?? 0);
+  const activeCampaigns = totals?.active_campaigns ?? 0;
+  const bounced = totals?.bounced ?? 0;
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-section">Visão geral</h2>
-          <p className="text-xs text-muted-foreground">
-            Métricas operacionais atualizadas em tempo real
-          </p>
-        </div>
-        <DashboardDateRangePicker range={range} onChange={setRange} />
-      </div>
-
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
-        <MetricCard
-          label={sentHeadlineLabel}
-          value={isLoading ? "…" : String(sentHeadline)}
-          icon={<Send className="h-4 w-4" />}
-          accent="primary"
-          hint={sentHeadlineHint}
+    <ChannelOverview
+      period={period}
+      updatedAt={dataUpdatedAt}
+      isFetching={isFetching}
+      isLoading={isLoading}
+      // No "Entregues" or delivery rate: the email provider does not confirm delivery.
+      kpis={[
+        {
+          title: "Enviados",
+          value: num(totals?.sent ?? 0),
+          detail: `para ${num(totals?.unique_recipients ?? 0)} endereços diferentes`,
+        },
+        {
+          title: "Falhas",
+          value: num(totals?.failed ?? 0),
+          detail: bounced > 0 ? `${num(bounced)} devolvidos pelo destino` : "não saíram",
+        },
+        {
+          title: "Na fila",
+          value: num(queued),
+          detail:
+            activeCampaigns > 0
+              ? `${num(activeCampaigns)} campanha(s) ativa(s)`
+              : "aguardando envio agora",
+        },
+        // The email dashboard does not count clicks yet (the server returns 0).
+        { title: "Cliques", value: "—", detail: "contagem de cliques ainda não disponível" },
+      ]}
+      chart={
+        <ChannelSendsChart
+          historyChannel="email"
+          period={period}
+          daily={data?.by_day}
+          series={[
+            { key: "enviados", label: "Enviados", color: CHART_COLORS.primary },
+            { key: "falharam", label: "Falhas", color: CHART_COLORS.danger },
+          ]}
         />
-        <MetricCard
-          label="Abertos"
-          value={v(totals?.opens)}
-          icon={<Eye className="h-4 w-4" />}
-          accent="ai"
-        />
-        <MetricCard
-          label="Cliques"
-          value={v(totals?.clicks)}
-          icon={<MousePointerClick className="h-4 w-4" />}
-          accent="primary"
-        />
-        <MetricCard
-          label="Falharam"
-          value={v(totals?.failed)}
-          icon={<XCircle className="h-4 w-4" />}
-          accent="danger"
-        />
-        <MetricCard
-          label="Bounces"
-          value={v(totals?.bounced)}
-          icon={<AlertTriangle className="h-4 w-4" />}
-          accent="warning"
-        />
-        <MetricCard
-          label="Campanhas ativas"
-          value={v(totals?.active_campaigns)}
-          icon={<Megaphone className="h-4 w-4" />}
-          accent="primary"
-        />
-        <MetricCard
-          label="Conversões pós-email"
-          value={v(totals?.conversions)}
-          icon={<TrendingUp className="h-4 w-4" />}
-          accent="success"
-          hint="depósitos em 72h"
-        />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle>
-              Envios por dia —{" "}
-              {sameDay
-                ? new Date(rk.from + "T00:00:00").toLocaleDateString("pt-BR")
-                : `${new Date(rk.from + "T00:00:00").toLocaleDateString("pt-BR")} - ${new Date(rk.to + "T00:00:00").toLocaleDateString("pt-BR")}`}
-            </CardTitle>
-            {/* No "Entregues": the provider does not confirm delivery (same rule as SMS). */}
-            <CardDescription>Emails enviados no período</CardDescription>
-          </CardHeader>
-          <CardContent className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={data?.by_day ?? []}>
-                <defs>
-                  <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={CHART_COLORS.primary} stopOpacity={0.28} />
-                    <stop offset="100%" stopColor={CHART_COLORS.primary} stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid {...chartGridProps} />
-                <XAxis dataKey="date" tickFormatter={fmtDay} {...chartAxisProps} />
-                <YAxis {...chartAxisProps} />
-                <Tooltip {...chartTooltipProps} labelFormatter={(v) => fmtDay(String(v))} />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Area
-                  type="monotone"
-                  dataKey="enviados"
-                  stroke={CHART_COLORS.primary}
-                  fill="url(#g1)"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Saúde do envio</CardTitle>
-            <CardDescription>Status do remetente e infraestrutura</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <HealthRow
-              icon={<ShieldCheck className="h-4 w-4" />}
-              label="Saúde do domínio"
-              value={health?.sender_configured ? "Configurada" : "Não configurada"}
-              tone={health?.sender_configured ? "ok" : "warn"}
+      }
+    >
+      <ChannelBlock title="Saúde do envio" description="Remetente, capacidade e últimos envios.">
+        <div className="grid gap-x-8 md:grid-cols-2">
+          <div>
+            <MetricRow
+              label="Domínio do remetente"
+              value={!health ? "—" : health.sender_configured ? "Configurado" : "Não configurado"}
+              valueClassName={
+                !health ? undefined : health.sender_configured ? "text-success" : "text-warning"
+              }
             />
-            <HealthRow
-              icon={<Star className="h-4 w-4" />}
-              label="Reputação do remetente"
-              value="—"
-              tone="muted"
-            />
-            <HealthRow
-              icon={<Server className="h-4 w-4" />}
+            <MetricRow
               label="Capacidade de envio"
-              value={health?.channel_active ? "Disponível" : "Indisponível"}
-              tone={health?.channel_active ? "ok" : "danger"}
+              value={!health ? "—" : health.channel_active ? "Disponível" : "Indisponível"}
+              valueClassName={
+                !health ? undefined : health.channel_active ? "text-success" : "text-danger"
+              }
             />
-            <Separator />
-            <div className="text-xs text-muted-foreground">
-              <Activity className="inline h-3 w-3 mr-1" /> Últimos eventos
-            </div>
+            <MetricRow label="Campanhas ativas" value={num(activeCampaigns)} />
+            <MetricRow
+              label="Depositaram em até 72h após o email"
+              value={num(totals?.conversions ?? 0)}
+            />
+          </div>
+          <div className="mt-4 md:mt-0">
+            <p className="py-2.5 text-[13.5px] text-muted-foreground">Últimos envios</p>
             {events.length === 0 ? (
-              <EmptyState
-                icon={<Activity className="h-5 w-5" />}
-                title="Sem eventos ainda"
-                description="Quando começar a enviar, os eventos aparecem aqui."
-                className="py-6"
-              />
+              <p className="py-4 text-sm text-muted-foreground">
+                Quando começar a enviar, os envios aparecem aqui.
+              </p>
             ) : (
-              <div className="space-y-1.5 max-h-40 overflow-auto pr-1">
-                {events.map((e) => (
-                  <div key={e.id} className="flex items-center justify-between text-xs gap-2">
-                    <span className="truncate text-foreground/80" title={e.to_email}>
-                      {e.to_email}
-                    </span>
-                    <span
-                      className={cn(
-                        "shrink-0 rounded px-1.5 py-0.5 border text-meta",
-                        e.status === "sent" || e.status === "delivered"
-                          ? "border-success/30 text-success bg-success/10"
-                          : e.status === "failed" || e.status === "dlq" || e.status === "error"
-                            ? "border-danger/30 text-danger bg-danger/10"
-                            : "border-border text-muted-foreground bg-muted/30",
-                      )}
+              <ul className="max-h-56 overflow-auto pr-1">
+                {events.map((event) => {
+                  const status = emailEventStatus(event.status);
+                  return (
+                    <li
+                      key={event.id}
+                      className="flex items-center justify-between gap-2 border-b border-border/70 py-2 text-[13px] last:border-b-0"
                     >
-                      {e.status}
-                    </span>
-                  </div>
-                ))}
-              </div>
+                      <span className="truncate text-foreground/85" title={event.to_email}>
+                        {event.to_email}
+                      </span>
+                      <StatusBadge color={status.color} label={status.label} title={event.error} />
+                    </li>
+                  );
+                })}
+              </ul>
             )}
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Card>
-          <CardHeader>
-            <CardTitle>Falhas no período</CardTitle>
-          </CardHeader>
-          <CardContent className="h-56">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={data?.by_day ?? []}>
-                <CartesianGrid {...chartGridProps} />
-                <XAxis dataKey="date" tickFormatter={fmtDay} {...chartAxisProps} />
-                <YAxis {...chartAxisProps} />
-                <Tooltip {...chartTooltipProps} labelFormatter={(v) => fmtDay(String(v))} />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Line type="monotone" dataKey="falharam" stroke={CHART_COLORS.danger} />
-              </LineChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Conversões após email</CardTitle>
-          </CardHeader>
-          <CardContent className="h-56">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={data?.conversions_by_day ?? []}>
-                <CartesianGrid {...chartGridProps} />
-                <XAxis dataKey="date" tickFormatter={fmtDay} {...chartAxisProps} />
-                <YAxis {...chartAxisProps} />
-                <Tooltip {...chartTooltipProps} labelFormatter={(v) => fmtDay(String(v))} />
-                <Bar dataKey="conversoes" fill={CHART_COLORS.primary} radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-function HealthRow({
-  icon,
-  label,
-  value,
-  tone,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  tone: "ok" | "warn" | "danger" | "muted";
-}) {
-  const toneCls = {
-    ok: "text-success",
-    warn: "text-warning",
-    danger: "text-danger",
-    muted: "text-muted-foreground",
-  }[tone];
-  return (
-    <div className="flex items-center justify-between text-sm">
-      <div className="flex items-center gap-2 text-muted-foreground">
-        <span className={toneCls}>{icon}</span>
-        {label}
-      </div>
-      <span className={cn("text-xs font-medium", toneCls)}>{value}</span>
-    </div>
+          </div>
+        </div>
+      </ChannelBlock>
+    </ChannelOverview>
   );
 }
 
@@ -637,20 +413,17 @@ function TemplatesTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-section">Templates</h2>
-          <p className="text-xs text-muted-foreground">
-            Modelos reutilizáveis para campanhas e automações
-          </p>
-        </div>
-        <Button onClick={novo} className="gap-2">
-          <Plus className="h-4 w-4" /> Novo template
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-body text-muted-foreground">
+          Modelos reutilizáveis para campanhas e automações.
+        </p>
+        <Button onClick={novo} className="h-9">
+          <Plus className="size-4" aria-hidden="true" /> Novo template
         </Button>
       </div>
 
       {items.length === 0 ? (
-        <Card className="p-10">
+        <HomeCard className="p-10">
           <EmptyState
             icon={<LayoutTemplate className="h-6 w-6" />}
             title="Crie seu primeiro template"
@@ -661,124 +434,126 @@ function TemplatesTab() {
               </Button>
             }
           />
-        </Card>
+        </HomeCard>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 gap-3 sm:gap-4 md:grid-cols-2 xl:grid-cols-3">
           {items.map((t) => (
-            <Card key={t.id}>
-              <CardHeader className="pb-3">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <CardTitle className="truncate">{t.nome || "Sem nome"}</CardTitle>
-                    <CardDescription className="truncate">
-                      {t.assunto || "(sem assunto)"}
-                    </CardDescription>
-                  </div>
-                  <Badge
-                    className={
-                      t.lifecycleStatus === "published"
-                        ? "bg-success/15 text-success border-success/30"
-                        : t.lifecycleStatus === "draft"
-                          ? "bg-warning/15 text-warning border-warning/30"
-                          : "bg-muted text-muted-foreground"
-                    }
-                  >
-                    {t.lifecycleStatus === "published"
-                      ? "publicado"
+            <HomeCard
+              key={t.id}
+              className={cn("flex flex-col p-4 sm:p-5", !t.ativo && "opacity-70")}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <h3 className="truncate text-[15px] font-semibold">{t.nome || "Sem nome"}</h3>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {t.assunto || "(sem assunto)"}
+                  </p>
+                </div>
+                <Badge
+                  className={cn(
+                    "shrink-0",
+                    t.lifecycleStatus === "published"
+                      ? "bg-success/15 text-success border-success/30"
                       : t.lifecycleStatus === "draft"
-                        ? "rascunho"
-                        : "arquivado"}
+                        ? "bg-warning/15 text-warning border-warning/30"
+                        : "bg-muted text-muted-foreground",
+                  )}
+                >
+                  {t.lifecycleStatus === "published"
+                    ? "publicado"
+                    : t.lifecycleStatus === "draft"
+                      ? "rascunho"
+                      : "arquivado"}
+                </Badge>
+              </div>
+              <p className="mt-2 line-clamp-3 min-h-[3em] text-xs text-muted-foreground">
+                {t.preheader || t.corpo || "Sem conteúdo ainda."}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                <Badge variant="outline" className="text-meta">
+                  {t.categoria}
+                </Badge>
+                {t.tags.map((tag) => (
+                  <Badge
+                    key={tag}
+                    variant="outline"
+                    className="text-meta border-accent/30 text-accent"
+                  >
+                    #{tag}
                   </Badge>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="text-xs text-muted-foreground line-clamp-3 min-h-[3em]">
-                  {t.preheader || t.corpo || "Sem conteúdo ainda."}
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  <Badge variant="outline" className="text-meta">
-                    {t.categoria}
-                  </Badge>
-                  {t.tags.map((tag) => (
-                    <Badge
-                      key={tag}
-                      variant="outline"
-                      className="text-meta border-accent/30 text-accent"
-                    >
-                      #{tag}
-                    </Badge>
-                  ))}
-                </div>
-                {(() => {
-                  const report = reportByTemplate.get(t.id) ?? {
-                    enviados: 0,
-                    entregues: 0,
-                    cliques: 0,
-                    descadastros: 0,
-                    falhas: 0,
-                  };
-                  return (
-                    <div className="grid grid-cols-3 gap-2 rounded-md bg-muted/40 p-2 text-meta text-muted-foreground">
-                      <span>
-                        <b className="text-foreground">{num(report.enviados)}</b> envios
-                      </span>
-                      <span>
-                        <b className="text-foreground">{num(report.cliques)}</b> cliques
-                      </span>
-                      <span>
-                        <b className="text-foreground">{num(report.descadastros)}</b> descad.
-                      </span>
-                      <span>
-                        <b className="text-foreground">{num(report.falhas)}</b> falhas
-                      </span>
-                    </div>
-                  );
-                })()}
-                <Separator />
-                <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span>
-                    v{t.version ?? 1} · Atualizado {t.atualizadoEm}
-                  </span>
-                  <div className="flex items-center gap-0.5">
-                    <IconButton
-                      label="Prévia do template"
-                      icon={<Eye className="h-3.5 w-3.5" />}
-                      onClick={() => toast.info("Preview em breve")}
-                    />
-                    <IconButton
-                      label="Editar template"
-                      icon={<Pencil className="h-3.5 w-3.5" />}
-                      onClick={() => {
-                        setEditing(t);
-                        setOpen(true);
-                      }}
-                    />
-                    <IconButton
-                      label="Duplicar template"
-                      icon={<Copy className="h-3.5 w-3.5" />}
-                      onClick={() => duplicar(t)}
-                    />
-                    <IconButton
-                      label={t.ativo ? "Pausar template" : "Reativar template"}
-                      icon={
-                        t.ativo ? (
-                          <Pause className="h-3.5 w-3.5" />
-                        ) : (
-                          <Play className="h-3.5 w-3.5" />
-                        )
-                      }
-                      onClick={() => togglePause(t)}
-                    />
-                    <IconButton
-                      label="Excluir template"
-                      className="text-danger"
-                      icon={<Trash2 className="h-3.5 w-3.5" />}
-                      onClick={() => excluir(t.id)}
-                    />
+                ))}
+              </div>
+              {(() => {
+                const report = reportByTemplate.get(t.id) ?? {
+                  enviados: 0,
+                  entregues: 0,
+                  cliques: 0,
+                  descadastros: 0,
+                  falhas: 0,
+                };
+                return (
+                  <div className="mt-3 grid grid-cols-3 gap-2 rounded-lg bg-muted/40 p-2 text-meta text-muted-foreground">
+                    <span>
+                      <b className="text-foreground">{num(report.enviados)}</b> envios
+                    </span>
+                    <span>
+                      <b className="text-foreground">{num(report.falhas)}</b> falhas
+                    </span>
+                    <span>
+                      <b className="text-foreground">{num(report.descadastros)}</b> descad.
+                    </span>
                   </div>
+                );
+              })()}
+              <div className="mt-4 flex items-center justify-between gap-2 lg:mt-auto lg:pt-4">
+                <span className="min-w-0 truncate text-xs text-muted-foreground">
+                  v{t.version ?? 1} · atualizado {t.atualizadoEm}
+                </span>
+                <div className="flex shrink-0 items-center gap-1">
+                  <Button
+                    variant="outline"
+                    className="h-9"
+                    onClick={() => {
+                      setEditing(t);
+                      setOpen(true);
+                    }}
+                  >
+                    <Pencil className="size-3.5" aria-hidden="true" />
+                    Editar
+                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <IconButton
+                        label={`Mais ações de ${t.nome || "template"}`}
+                        icon={<MoreHorizontal className="size-4" />}
+                      />
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onSelect={() => void duplicar(t)}>
+                        <Copy className="size-4" aria-hidden="true" />
+                        Duplicar
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => void togglePause(t)}>
+                        {t.ativo ? (
+                          <Pause className="size-4" aria-hidden="true" />
+                        ) : (
+                          <Play className="size-4" aria-hidden="true" />
+                        )}
+                        {t.ativo ? "Pausar" : "Reativar"}
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        className="text-danger focus:text-danger"
+                        onSelect={() => void excluir(t.id)}
+                      >
+                        <Trash2 className="size-4" aria-hidden="true" />
+                        Excluir
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+            </HomeCard>
           ))}
         </div>
       )}
@@ -849,8 +624,7 @@ function HistoricoTab() {
     <HistoryShell
       channel="email"
       options={{
-        title: "Histórico de emails",
-        subtitle: "Eventos de envio, automações e falhas.",
+        subtitle: "Envios de campanhas e automações, com as falhas.",
         showStep: false,
       }}
     />

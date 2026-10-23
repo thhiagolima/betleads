@@ -40,7 +40,7 @@ export function LeadSelector({ value, onChange }: Props) {
         <div className="flex items-center gap-2">
           <Sparkles className="h-4 w-4 text-primary" />
           <Label htmlFor="fake-lead" className="cursor-pointer text-sm">
-            Usar lead de teste (Pedro Silva)
+            Usar jogador de teste (Pedro Silva)
           </Label>
         </div>
         <Switch
@@ -64,7 +64,7 @@ export function LeadSelector({ value, onChange }: Props) {
                 <User className="h-4 w-4" />
                 {value && !value.fake
                   ? `${value.nome}${value.telefone ? ` — ${value.telefone}` : ""}`
-                  : "Selecionar lead real..."}
+                  : "Selecionar jogador real..."}
               </span>
               <ChevronsUpDown className="h-4 w-4 opacity-50" />
             </Button>
@@ -84,7 +84,7 @@ export function LeadSelector({ value, onChange }: Props) {
               )}
               {!isLoading && (data?.players ?? []).length === 0 && (
                 <p className="px-3 py-4 text-center text-xs text-muted-foreground">
-                  Nenhum lead encontrado
+                  Nenhum jogador encontrado
                 </p>
               )}
               {(data?.players ?? []).map((p: any) => {

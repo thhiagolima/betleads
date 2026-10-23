@@ -12,6 +12,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import type { DateRange } from "react-day-picker";
 import {
   Select,
   SelectContent,
@@ -55,6 +56,11 @@ import {
   type HistoryRow,
   type FlowSummaryItem,
 } from "@/lib/history.functions";
+import { historyWindow } from "@/components/channels/channel-period";
+import { PeriodPicker } from "@/components/home/period-picker";
+import { periodRange, type PeriodPreset } from "@/lib/home-dashboard";
+import { brtDayKey } from "@/lib/tz";
+
 import { StatusBadge } from "./status-badge";
 
 const CHANNEL_LABEL: Record<ChannelKey, string> = {
@@ -71,51 +77,10 @@ const HISTORY_POLL = {
   refetchOnWindowFocus: true,
 } as const;
 
-const RANGE_OPTIONS = [
-  { value: "today", label: "Hoje" },
-  { value: "yesterday", label: "Ontem" },
-  { value: "7d", label: "Últimos 7 dias" },
-  { value: "30d", label: "Últimos 30 dias" },
-];
-// Sem opção "Tudo": as funções de servidor (history.functions.ts) tratam
-// `from: null` como "hoje"/"24 h"/"7 dias", então "Tudo" mostraria um recorte
-// diferente do que promete. Volta quando o servidor aceitar janela sem início.
-
-// Janelas abertas ("hoje", "7 dias", "30 dias") mandam `to: null`: o
-// servidor usa "agora" (mesma semântica de antes, inclusive a janela anterior
-// do delta). Antes o `to` era `new Date()` a cada render, o que mudava a
-// queryKey a cada render e fazia cada resposta disparar uma nova busca.
-// O `from` é estável dentro do dia (o componente memoiza por range + dia).
-function rangeIso(value: string): {
-  from: string | null;
-  to: string | null;
-  bucket: "hour" | "day";
-} {
-  if (value === "today") {
-    const d = new Date();
-    d.setHours(0, 0, 0, 0);
-    return { from: d.toISOString(), to: null, bucket: "hour" };
-  }
-  if (value === "yesterday") {
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-    start.setDate(start.getDate() - 1);
-    const end = new Date(start);
-    end.setDate(end.getDate() + 1);
-    return { from: start.toISOString(), to: end.toISOString(), bucket: "hour" };
-  }
-  if (value === "7d")
-    return {
-      from: new Date(Date.now() - 7 * 86400000).toISOString(),
-      to: null,
-      bucket: "day",
-    };
-  return {
-    from: new Date(Date.now() - 30 * 86400000).toISOString(),
-    to: null,
-    bucket: "day",
-  };
-}
+// O período usa o mesmo PeriodPicker do Início (dias no horário de Brasília).
+// Janelas que chegam até hoje mandam `to: null`: o servidor usa "agora"
+// (inclusive para a janela anterior do delta), e a queryKey fica estável entre
+// renders. Ver historyWindow em channels/channel-period.
 
 function formatRelative(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -166,7 +131,8 @@ export function HistoryShell({
   options?: HistoryShellOptions;
 }) {
   const qc = useQueryClient();
-  const [range, setRange] = useState("today");
+  const [preset, setPreset] = useState<PeriodPreset>("today");
+  const [range, setRange] = useState<DateRange | undefined>(() => periodRange("today"));
   const [flowId, setFlowId] = useState<string>("all");
   const [step, setStep] = useState<string>("all");
   const [status, setStatus] = useState<string>("all");
@@ -191,10 +157,10 @@ export function HistoryShell({
     setStep("all");
   }, [flowId]);
 
-  // Recalcula só quando muda o período ou o dia (virada da meia-noite).
-  const dayKey = new Date().toDateString();
+  // Recalcula só quando muda o período ou o dia (virada da meia-noite em Brasília).
+  const dayKey = brtDayKey(new Date());
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const iso = useMemo(() => rangeIso(range), [range, dayKey]);
+  const iso = useMemo(() => historyWindow(range), [range, dayKey]);
   const showFlow = options.showFlow !== false;
   const showStep = options.showStep !== false;
   const showDirection = channel === "whatsapp";
@@ -272,7 +238,7 @@ export function HistoryShell({
   // acima fazem polling a cada 60 s (só com a aba visível) e ao voltar o foco.
 
   const cards = options.cardLabels ?? {
-    total: "Disparos",
+    total: "Envios",
     success: showsDelivery ? "Entregues" : "Enviados",
     failed: "Falhas",
     pending: "Pendentes",
@@ -310,35 +276,29 @@ export function HistoryShell({
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          {options.title && <h2 className="text-section">{options.title}</h2>}
-          <p className="mt-0.5 text-xs text-muted-foreground">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <PeriodPicker
+          preset={preset}
+          range={range}
+          onChange={(nextPreset, nextRange) => {
+            setPreset(nextPreset);
+            setRange(nextRange);
+          }}
+        />
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <p className="text-xs text-muted-foreground">
             {options.subtitle ? `${options.subtitle} · ` : ""}
-            Último disparo:{" "}
+            Último envio:{" "}
             <span className="text-foreground">{formatRelative(stats.data?.lastDispatchAt)}</span>
           </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Select value={range} onValueChange={setRange}>
-            <SelectTrigger className="h-9 w-[160px]">
-              <SelectValue placeholder="Período" />
-            </SelectTrigger>
-            <SelectContent>
-              {RANGE_OPTIONS.map((o) => (
-                <SelectItem key={o.value} value={o.value}>
-                  {o.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
           <UpdatedAgo ts={stats.dataUpdatedAt} className="hidden sm:inline" />
-          <Button variant="outline" size="sm" onClick={refresh} className="gap-1.5">
+          <Button variant="outline" onClick={refresh} className="h-9 gap-1.5">
             <RefreshCw className={`h-3.5 w-3.5 ${stats.isFetching ? "animate-spin" : ""}`} />
             Atualizar
           </Button>
         </div>
       </div>
+      {options.title && <h2 className="text-section">{options.title}</h2>}
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
@@ -377,7 +337,7 @@ export function HistoryShell({
           <CardContent className="p-3">
             <div className="mb-1 flex items-center justify-between px-1">
               <p className="text-label text-muted-foreground">
-                Disparos por {iso.bucket === "hour" ? "hora" : "dia"}
+                Envios por {iso.bucket === "hour" ? "hora" : "dia"}
               </p>
               <p className="text-meta text-muted-foreground">
                 {(timeline.data?.points ?? [])
@@ -416,9 +376,9 @@ export function HistoryShell({
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <div>
-              <CardTitle>Top fluxos no período</CardTitle>
+              <CardTitle>Jornadas com mais envios</CardTitle>
               <p className="text-meta text-muted-foreground">
-                Clique num fluxo para filtrar a tabela abaixo.
+                Clique numa jornada para filtrar a tabela abaixo.
               </p>
             </div>
             {flowId !== "all" && (
@@ -450,10 +410,10 @@ export function HistoryShell({
           {showFlow ? (
             <Select value={flowId} onValueChange={setFlowId}>
               <SelectTrigger>
-                <SelectValue placeholder="Fluxo" />
+                <SelectValue placeholder="Jornada" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Todos os fluxos</SelectItem>
+                <SelectItem value="all">Todas as jornadas</SelectItem>
                 {(flows.data?.flows ?? []).map((f) => (
                   <SelectItem key={f.id} value={f.id}>
                     {f.name}
@@ -479,7 +439,7 @@ export function HistoryShell({
             <Select value={step} onValueChange={setStep} disabled={flowId === "all"}>
               <SelectTrigger>
                 <SelectValue
-                  placeholder={flowId === "all" ? "Selecione um fluxo" : "Dia do fluxo"}
+                  placeholder={flowId === "all" ? "Selecione uma jornada" : "Dia da jornada"}
                 />
               </SelectTrigger>
               <SelectContent>
@@ -529,7 +489,7 @@ export function HistoryShell({
               <p className="text-muted-foreground">
                 {filtersActive
                   ? "Nenhum registro com esses filtros."
-                  : "Nenhum disparo nesse período."}
+                  : "Nenhum envio nesse período."}
               </p>
               {filtersActive && (
                 <Button variant="outline" size="sm" onClick={clearFilters}>
@@ -542,10 +502,10 @@ export function HistoryShell({
               <TableHeader>
                 <TableRow>
                   <TableHead>Data</TableHead>
-                  <TableHead>Lead</TableHead>
+                  <TableHead>Jogador</TableHead>
                   <TableHead>Contato</TableHead>
                   <TableHead>Mensagem</TableHead>
-                  {showFlow && <TableHead>Fluxo</TableHead>}
+                  {showFlow && <TableHead>Jornada</TableHead>}
                   {showStep && <TableHead>Dia</TableHead>}
                   <TableHead>Status</TableHead>
                   <TableHead>Conv.</TableHead>
@@ -639,12 +599,12 @@ export function HistoryShell({
                 </SheetDescription>
               </SheetHeader>
               <div className="mt-6 space-y-4 text-sm">
-                <DetailField label="Lead">{openRow.lead_name ?? "—"}</DetailField>
+                <DetailField label="Jogador">{openRow.lead_name ?? "—"}</DetailField>
                 <DetailField label="Contato">
                   <span className="font-mono text-xs">{openRow.contact}</span>
                 </DetailField>
-                <DetailField label="Fluxo">{openRow.flow_name ?? "—"}</DetailField>
-                <DetailField label="Dia do fluxo">{openRow.step ?? "—"}</DetailField>
+                <DetailField label="Jornada">{openRow.flow_name ?? "—"}</DetailField>
+                <DetailField label="Dia da jornada">{openRow.step ?? "—"}</DetailField>
                 <DetailField label="Template / assunto">{openRow.template ?? "—"}</DetailField>
                 <DetailField label="Mensagem">
                   <pre className="max-h-60 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 text-xs">
@@ -660,7 +620,7 @@ export function HistoryShell({
                 )}
                 {openRow.converted && (
                   <div className="rounded-md border border-success/20 bg-success/5 p-3 text-xs text-success">
-                    Lead converteu (depósito em até 72h após o contato).
+                    O jogador depositou em até 72h após o contato.
                   </div>
                 )}
               </div>
@@ -672,7 +632,7 @@ export function HistoryShell({
                     className="gap-1"
                     onClick={() => window.open(`/players?focus=${openRow.player_id}`, "_blank")}
                   >
-                    <ExternalLink className="h-3.5 w-3.5" /> Ver player
+                    <ExternalLink className="h-3.5 w-3.5" /> Ver jogador
                   </Button>
                 )}
                 {openRow.message && (
@@ -768,12 +728,12 @@ function FlowRanking({
   showsDelivery: boolean;
 }) {
   if (loading && items.length === 0) {
-    return <p className="p-6 text-center text-xs text-muted-foreground">Carregando fluxos…</p>;
+    return <p className="p-6 text-center text-xs text-muted-foreground">Carregando jornadas…</p>;
   }
   if (items.length === 0) {
     return (
       <p className="p-6 text-center text-xs text-muted-foreground">
-        Nenhum disparo por fluxo no período.
+        Nenhum envio por jornada no período.
       </p>
     );
   }
@@ -782,7 +742,7 @@ function FlowRanking({
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead>Fluxo</TableHead>
+          <TableHead>Jornada</TableHead>
           <TableHead className="text-right">Envios</TableHead>
           <TableHead className="text-right">{showsDelivery ? "Sucesso" : "Enviados"}</TableHead>
           {showsDelivery && <TableHead className="text-right">% entrega</TableHead>}

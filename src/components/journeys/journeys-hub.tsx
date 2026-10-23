@@ -3,8 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, useNavigate } from "@tanstack/react-router";
 import {
-  ChevronRight,
   CircleDollarSign,
+  Inbox,
   Info,
   Mail,
   MessageSquare,
@@ -34,6 +34,9 @@ import {
 } from "@/lib/journeys.functions";
 import { EXPRESS_JOURNEY_HINT } from "@/lib/journey-express";
 import { JourneyMapCard } from "@/components/journeys/journey-map-card";
+import { FlowsTab } from "@/components/ligacoes/flows-tab";
+import { EmptyState } from "@/components/ui-premium/empty-state";
+import { PageTabs } from "@/components/ui-premium/page-tabs";
 import { requestConfirmation } from "@/components/system-dialog-host";
 import {
   activationAsksEntryScope,
@@ -120,9 +123,7 @@ export function JourneysHub() {
   const saveContactLimitsFn = useServerFn(saveJourneyContactLimits);
   const [filter, setFilter] = useState<"all" | Journey["status"]>("all");
   const [search, setSearch] = useState("");
-  const [view, setView] = useState<"journeys" | "map" | "queue" | "conflicts" | "failures">(
-    "journeys",
-  );
+  const [view, setView] = useState<HubView>("journeys");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
   const [dailyMessageLimit, setDailyMessageLimit] = useState("");
@@ -156,7 +157,7 @@ export function JourneysHub() {
   const operations = useQuery({
     queryKey: ["journey-operations"],
     queryFn: () => operationsFn(),
-    enabled: view !== "journeys" && view !== "map",
+    enabled: view === "queue" || view === "failures" || view === "conflicts",
   });
   const contactLimits = useQuery({
     queryKey: ["journey-contact-limits"],
@@ -316,22 +317,23 @@ export function JourneysHub() {
       { recovered: 0, sent: 0, queued: 0 },
     );
   }, [journeys.data?.journeys]);
+  const operationItems = ((operations.data?.items ?? []) as Array<{ status: string }>).filter(
+    (item) =>
+      view === "failures"
+        ? item.status === "failed"
+        : view === "conflicts"
+          ? item.status === "paused_by_priority"
+          : item.status !== "failed" && item.status !== "paused_by_priority",
+  );
+  const pausedByPriority = Number(operations.data?.summary?.pausedByPriority ?? 0);
   return (
     <Page>
       <PageHeader
         subtitle="Sequências individuais que combinam SMS, e-mail e voz com esperas e regras de saída."
         actions={
-          <>
-            <Button
-              variant="outline"
-              onClick={() => toast.message("Importacao de modelo em breve.")}
-            >
-              Importar modelo
-            </Button>
-            <Button onClick={() => setNewOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" /> Nova jornada
-            </Button>
-          </>
+          <Button onClick={() => setNewOpen(true)}>
+            <Plus className="mr-2 h-4 w-4" /> Nova jornada
+          </Button>
         }
       />
       {/* Period selector (Hoje/7/30 dias) hidden: list_journey_metrics has no
@@ -377,88 +379,58 @@ export function JourneysHub() {
           <Route className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
           <span>
             Campanhas são disparos pontuais. Jornadas entram por gatilho e avançam pessoa a pessoa.
-            Etapas de voz usam um áudio ativo da biblioteca da tenant.
+            Etapas de voz usam um áudio ativo da biblioteca da casa. Fluxos de voz ficam na aba
+            própria.
           </span>
         </CardContent>
       </Card>
-      <div className="flex flex-wrap gap-2">
-        {(["all", "draft", "active", "paused"] as const).map((item) => (
-          <Button
-            key={item}
-            size="sm"
-            variant={filter === item ? "default" : "outline"}
-            onClick={() => setFilter(item)}
-          >
-            {item === "all" ? "Todas" : labels[item]}
-          </Button>
-        ))}
-      </div>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="inline-flex rounded-lg bg-muted p-1 text-sm">
-          <button
-            className={
-              view === "journeys"
-                ? "rounded-md bg-background px-3 py-2 font-medium shadow-sm"
-                : "px-3 py-2 text-muted-foreground"
-            }
-            onClick={() => setView("journeys")}
-          >
-            Jornadas
-          </button>
-          <button
-            className={
-              view === "map"
-                ? "rounded-md bg-background px-3 py-2 font-medium shadow-sm"
-                : "px-3 py-2 text-muted-foreground"
-            }
-            onClick={() => setView("map")}
-          >
-            Mapa
-          </button>
-          <button
-            className={
-              view === "queue"
-                ? "rounded-md bg-background px-3 py-2 font-medium shadow-sm"
-                : "px-3 py-2 text-muted-foreground"
-            }
-            onClick={() => setView("queue")}
-          >
-            Fila de envio
-          </button>
-          <button
-            className={
-              view === "failures"
-                ? "rounded-md bg-background px-3 py-2 font-medium shadow-sm"
-                : "px-3 py-2 text-muted-foreground"
-            }
-            onClick={() => setView("failures")}
-          >
-            Falhas
-          </button>
-          <button
-            className={
-              view === "conflicts"
-                ? "rounded-md bg-background px-3 py-2 font-medium shadow-sm"
-                : "px-3 py-2 text-muted-foreground"
-            }
-            onClick={() => setView("conflicts")}
-          >
-            Conflitos
-            {Number(operations.data?.summary?.pausedByPriority ?? 0) > 0 && (
-              <span className="ml-1.5 rounded-full bg-warning/15 px-1.5 py-0.5 text-xs text-warning">
-                {operations.data?.summary?.pausedByPriority}
-              </span>
-            )}
-          </button>
-        </div>
+        <PageTabs
+          value={view}
+          onValueChange={setView}
+          label="Seções de Automações"
+          items={HUB_VIEWS.map((item) => ({
+            value: item.value,
+            label:
+              item.value === "conflicts" && pausedByPriority > 0
+                ? `${item.label} (${pausedByPriority.toLocaleString("pt-BR")})`
+                : item.label,
+          }))}
+        />
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => void openContactSettings()}>
-            Configuracoes
+            Configurações
           </Button>
           <Button variant="outline" size="sm" onClick={() => setInfoOpen(true)}>
-            Informacoes
+            Informações
           </Button>
+        </div>
+      </div>
+      {view === "journeys" && (
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div
+            role="group"
+            aria-label="Filtrar por status"
+            className="flex max-w-full gap-0.5 overflow-x-auto rounded-xl border border-border bg-card p-[3px] [scrollbar-width:none]"
+          >
+            {(["all", "draft", "active", "paused"] as const).map((item) => (
+              <button
+                key={item}
+                type="button"
+                aria-pressed={filter === item}
+                onClick={() => setFilter(item)}
+                className={
+                  filter === item
+                    ? "h-9 shrink-0 rounded-lg bg-secondary px-3 text-[13px] font-medium text-foreground"
+                    : "h-9 shrink-0 rounded-lg px-3 text-[13px] font-medium text-muted-foreground hover:text-foreground"
+                }
+              >
+                {item === "all" ? "Todas" : labels[item]}
+              </button>
+            ))}
+          </div>
           <label className="relative block">
+            <span className="sr-only">Buscar jornada</span>
             <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
             <input
               className="h-10 w-full rounded-md border bg-background pl-9 pr-3 text-sm sm:w-72"
@@ -468,8 +440,8 @@ export function JourneysHub() {
             />
           </label>
         </div>
-      </div>
-      {view !== "journeys" && view !== "map" && (
+      )}
+      {(view === "queue" || view === "failures" || view === "conflicts") && (
         <Card>
           <CardHeader>
             <CardTitle>
@@ -479,20 +451,30 @@ export function JourneysHub() {
                   ? "Conflitos e pausas"
                   : "Falhas"}
             </CardTitle>
-            <CardDescription>
-              {
-                (operations.data?.items ?? []).filter((item: { status: string }) =>
-                  view === "failures"
-                    ? item.status === "failed"
-                    : view === "conflicts"
-                      ? item.status === "paused_by_priority"
-                      : item.status !== "failed" && item.status !== "paused_by_priority",
-                ).length
-              }{" "}
-              registro(s)
-            </CardDescription>
+            <CardDescription>{operationItems.length} registro(s)</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
+            {operations.isLoading ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">Carregando…</p>
+            ) : operationItems.length === 0 ? (
+              <EmptyState
+                icon={<Inbox />}
+                title={
+                  view === "queue"
+                    ? "Fila de envio vazia"
+                    : view === "conflicts"
+                      ? "Nenhum conflito agora"
+                      : "Nenhuma falha registrada"
+                }
+                description={
+                  view === "queue"
+                    ? "Nenhum jogador aguardando envio nas jornadas."
+                    : view === "conflicts"
+                      ? "Nenhum jogador pausado por prioridade entre jornadas."
+                      : "Nenhum envio de jornada falhou."
+                }
+              />
+            ) : null}
             {(operations.data?.items ?? [])
               .filter((item: { status: string }) =>
                 view === "failures"
@@ -542,6 +524,7 @@ export function JourneysHub() {
           </CardContent>
         </Card>
       )}
+      {view === "flows" && <FlowsTab />}
       {view === "map" && (
         <JourneyMapCard
           journeys={((journeys.data?.journeys ?? []) as Journey[]).map((journey) => ({
@@ -1021,18 +1004,18 @@ export function JourneysHub() {
       <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Configuracoes</DialogTitle>
+            <DialogTitle>Configurações</DialogTitle>
             <DialogDescription>Vale para todas as jornadas, em todos os canais.</DialogDescription>
           </DialogHeader>
           <div className="rounded-2xl border p-5">
             <h3 className="font-semibold">Limite de mensagens por pessoa</h3>
             <p className="mt-1 text-sm text-muted-foreground">
-              Os limites das jornadas incluem os envios de SMS e e-mail já registrados no tenant. Em
+              Os limites das jornadas incluem os envios de SMS e e-mail já registrados na casa. Em
               branco, não há limite.
             </p>
             <div className="mt-5 grid gap-3 sm:grid-cols-2">
               <label className="text-sm font-medium">
-                Maximo em 24 h
+                Máximo em 24 h
                 <Input
                   className="mt-1"
                   inputMode="numeric"
@@ -1042,7 +1025,7 @@ export function JourneysHub() {
                 />
               </label>
               <label className="text-sm font-medium">
-                Maximo em 7 dias
+                Máximo em 7 dias
                 <Input
                   className="mt-1"
                   inputMode="numeric"
@@ -1053,8 +1036,8 @@ export function JourneysHub() {
               </label>
             </div>
             <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
-              A contagem considera mensagens ja enviadas em cada canal. Mensagens ainda agendadas
-              nao entram no limite.
+              A contagem considera mensagens já enviadas em cada canal. Mensagens ainda agendadas
+              não entram no limite.
             </p>
           </div>
           <DialogFooter>
@@ -1070,7 +1053,7 @@ export function JourneysHub() {
       <Dialog open={infoOpen} onOpenChange={setInfoOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Como a conta e feita</DialogTitle>
+            <DialogTitle>Como a conta é feita</DialogTitle>
             <DialogDescription>
               O que entra em Recuperado pelo CRM e o que fica de fora.
             </DialogDescription>
@@ -1091,7 +1074,7 @@ export function JourneysHub() {
             </p>
             <p>
               Quem deposita em qualquer etapa sai da jornada na hora. Jogadores que pediram para
-              sair nao voltam a receber comunicacoes.
+              sair não voltam a receber comunicações.
             </p>
           </div>
         </DialogContent>
@@ -1101,7 +1084,7 @@ export function JourneysHub() {
           <DialogHeader>
             <DialogTitle>Nova jornada</DialogTitle>
             <DialogDescription>
-              Escolha o gatilho. Os degraus são montados na tela seguinte.
+              Escolha o gatilho. As etapas são montadas na tela seguinte.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -1196,6 +1179,16 @@ export function JourneysHub() {
   );
 }
 const labels = { draft: "Rascunho", active: "Ativa", paused: "Pausada", archived: "Arquivada" };
+
+type HubView = "journeys" | "map" | "queue" | "failures" | "conflicts" | "flows";
+const HUB_VIEWS: ReadonlyArray<{ value: HubView; label: string }> = [
+  { value: "journeys", label: "Jornadas" },
+  { value: "map", label: "Mapa" },
+  { value: "queue", label: "Fila de envio" },
+  { value: "failures", label: "Falhas" },
+  { value: "conflicts", label: "Conflitos" },
+  { value: "flows", label: "Fluxos de voz" },
+];
 
 const channelNames = { wait: "espera", sms: "sms", email: "e-mail", voice: "voz", end: "fim" };
 const channelStyles = {

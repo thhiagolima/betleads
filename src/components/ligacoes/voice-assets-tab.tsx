@@ -195,7 +195,7 @@ export function VoiceAssetsTab() {
                 <p className="font-medium">{asset.name}</p>
                 <Badge variant="outline">
                   {asset.source === "tts"
-                    ? "TTS"
+                    ? "Voz gerada"
                     : asset.source === "import"
                       ? "Importado"
                       : "Upload"}
