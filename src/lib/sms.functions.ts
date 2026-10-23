@@ -53,7 +53,11 @@ import {
   resolveCampaignRecipients,
   type CampaignDb,
 } from "./campaign-recipients.server";
-import { reserveUsage, refundUsage } from "./billing/wallet.server";
+import {
+  deliveryBillingReference,
+  reserveForDelivery,
+  refundForDelivery,
+} from "./billing/wallet.server";
 import { countSmsSegments } from "./sms-segments";
 
 const DEFAULT_SHORT_BRASIL_SINGLE_URL = "http://lp01-short.painelsms.com/bot/single-sms.php";
@@ -609,24 +613,11 @@ async function resolveBillingTenantId(args: {
   return data?.tenant_id ?? null;
 }
 
-async function reserveSmsCredit(tenantId: string, referenceId: string, units: number) {
-  const reservation = await reserveUsage(supabaseAdmin, {
-    tenantId,
-    item: "sms",
-    units,
-    referenceType: "sms_send",
-    referenceId,
-    idempotencyKey: `sms-reserve:${referenceId}`,
-  });
-  if (!reservation.ok) return reservation;
-  return { ok: true as const, data: reservation };
-}
-
 export async function refundSmsCredit(tenantId: string, referenceId: string, reason: string) {
-  await refundUsage(supabaseAdmin, {
+  await refundForDelivery(supabaseAdmin, {
     tenantId,
     referenceId,
-    idempotencyKey: `sms-refund:${referenceId}`,
+    prefix: "sms",
     reason,
   });
 }
@@ -639,20 +630,14 @@ export const SMS_BILLING_MAX_GENERATIONS = 20;
  * a retry only moves to the next generation after the previous charge was
  * refunded, so "provider accepted -> commit failed -> retry" never charges twice
  * and a retry after a refunded rejection is still charged once.
+ *
+ * Thin wrapper over the generic `deliveryBillingReference` (PG3 Task 2,
+ * src/lib/billing/wallet.server.ts): SMS keeps the `delivery:` reference
+ * prefix (not `sms:`) because production's ledger rows are already keyed
+ * that way.
  */
 export function smsBillingReference(deliveryKey: string, generation: number): string {
-  return generation === 0 ? `delivery:${deliveryKey}` : `delivery:${deliveryKey}:${generation}`;
-}
-
-async function smsCreditWasRefunded(tenantId: string, referenceId: string): Promise<boolean> {
-  const { data, error } = await (supabaseAdmin as any)
-    .from("wallet_ledger")
-    .select("id")
-    .eq("tenant_id", tenantId)
-    .eq("idempotency_key", `sms-refund:${referenceId}`)
-    .limit(1);
-  if (error) throw new Error(error.message);
-  return Array.isArray(data) && data.length > 0;
+  return deliveryBillingReference("sms", deliveryKey, generation);
 }
 
 /**
@@ -664,6 +649,11 @@ async function smsCreditWasRefunded(tenantId: string, referenceId: string): Prom
  * non-empty send is always billed at least 1 unit (wallet_reserve rejects
  * _units = 0 with invalid_units), so the caller's segment count is clamped
  * to a 1-unit floor here.
+ *
+ * Thin wrapper over the generic `reserveForDelivery` (PG3 Task 2): keeps the
+ * pre-existing `{ok, referenceId, error}` shape (rather than the generic
+ * function's `{ok, referenceId, amount, balance}` / `{ok, referenceId,
+ * reason, balance?}`) so every existing caller and test stays untouched.
  */
 export async function reserveSmsCreditForDelivery(
   tenantId: string,
@@ -671,23 +661,17 @@ export async function reserveSmsCreditForDelivery(
   segments: number,
 ): Promise<{ ok: true; referenceId: string } | { ok: false; referenceId: string; error: string }> {
   const units = Math.max(1, segments);
-  if (!deliveryKey) {
-    const referenceId = crypto.randomUUID();
-    const reservation = await reserveSmsCredit(tenantId, referenceId, units);
-    return reservation.ok
-      ? { ok: true, referenceId }
-      : { ok: false, referenceId, error: reservation.error };
-  }
-  for (let generation = 0; generation < SMS_BILLING_MAX_GENERATIONS; generation++) {
-    const referenceId = smsBillingReference(deliveryKey, generation);
-    const reservation = await reserveSmsCredit(tenantId, referenceId, units);
-    if (!reservation.ok) return { ok: false, referenceId, error: reservation.error };
-    const idempotent = (reservation.data as { idempotent?: boolean } | null)?.idempotent === true;
-    if (!idempotent) return { ok: true, referenceId };
-    if (!(await smsCreditWasRefunded(tenantId, referenceId))) return { ok: true, referenceId };
-  }
-  console.warn("SMS delivery exceeded deterministic billing generations", { deliveryKey });
-  return reserveSmsCreditForDelivery(tenantId, null, segments);
+  const reservation = await reserveForDelivery(supabaseAdmin, {
+    tenantId,
+    item: "sms",
+    prefix: "sms",
+    deliveryKey,
+    units,
+    referenceType: "sms_send",
+  });
+  return reservation.ok
+    ? { ok: true, referenceId: reservation.referenceId }
+    : { ok: false, referenceId: reservation.referenceId, error: reservation.reason };
 }
 
 /** Log of a previous send of this delivery that the provider already accepted. */
