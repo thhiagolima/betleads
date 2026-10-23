@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   ACCOUNT_LINKS,
+  EXPERT_MOBILE_TABS,
   ROUTE_META,
   activeMobileTab,
   activeNavKey,
@@ -97,6 +98,13 @@ describe("active nav item", () => {
     expect(activeMobileTab("/campanhas")).toBe("Ações");
     expect(activeMobileTab("/gamificacao")).toBe("Jogadores");
     expect(activeMobileTab("/sms")).toBeNull();
+  });
+
+  it("maps the expert mobile tabs when given EXPERT_MOBILE_TABS", () => {
+    expect(activeMobileTab("/expert", EXPERT_MOBILE_TABS)).toBe("Início");
+    expect(activeMobileTab("/expert/leads", EXPERT_MOBILE_TABS)).toBe("Leads");
+    // No regression: the default still resolves the house tabs.
+    expect(activeMobileTab("/players/1")).toBe("Jogadores");
   });
 });
 

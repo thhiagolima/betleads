@@ -17,8 +17,8 @@ export function MobileTabBar({
 }) {
   const { role } = useShellNav();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const current = activeMobileTab(pathname);
   const tabs = role === "expert" ? EXPERT_MOBILE_TABS : MOBILE_TABS;
+  const current = activeMobileTab(pathname, tabs);
 
   return (
     <nav

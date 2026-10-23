@@ -28,7 +28,11 @@ import {
  * breadcrumb/title of every route. Routes left out of the menu on purpose
  * still get a title here: some are reached from inside pages (jornadas,
  * eventos, créditos SMS), others are parked until they are redesigned
- * (Oportunidades, Experts, WhatsApp — the last one redirects).
+ * (Oportunidades, WhatsApp — the last one redirects). Experts is not
+ * parked: it is an admin/super-admin-only link under Jogadores. The
+ * expert role itself gets a separate, dedicated set of sections/tabs
+ * (EXPERT_SECTIONS / EXPERT_MOBILE_TABS) instead of a filtered view of
+ * the house shell.
  */
 
 export type ShellRole = "admin" | "gestor" | "member" | "super_admin" | "expert";
@@ -326,13 +330,17 @@ export function activeNavKey(pathname: string, hash: string): string | null {
   return best?.key ?? null;
 }
 
-export function activeMobileTab(pathname: string): string | null {
-  const tab = MOBILE_TABS.find(
-    (candidate) =>
-      candidate.to &&
-      [candidate.to, ...(candidate.alsoActiveOn ?? [])].some((prefix) =>
-        isPathUnder(pathname, prefix),
-      ),
-  );
-  return tab?.title ?? null;
+export function activeMobileTab(pathname: string, tabs: MobileTab[] = MOBILE_TABS): string | null {
+  // Longest-prefix wins, so e.g. "/expert/leads" lights "Leads" and not
+  // "Início" even though "/expert" is also a prefix of it.
+  let best: { title: string; length: number } | null = null;
+  for (const candidate of tabs) {
+    if (!candidate.to) continue;
+    const prefixes = [candidate.to, ...(candidate.alsoActiveOn ?? [])];
+    const matched = prefixes.filter((prefix) => isPathUnder(pathname, prefix));
+    if (matched.length === 0) continue;
+    const length = Math.max(...matched.map((prefix) => prefix.length));
+    if (!best || length > best.length) best = { title: candidate.title, length };
+  }
+  return best?.title ?? null;
 }
