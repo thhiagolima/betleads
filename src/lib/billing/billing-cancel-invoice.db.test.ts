@@ -251,6 +251,48 @@ describe("billing_admin_cancel_invoice: upfront invoice is reissued", () => {
   });
 });
 
+describe("billing_admin_cancel_invoice: never-paid house counts as activation", () => {
+  it("canceling the reissued (no longer upfront) invoice of a never-paid house keeps the cycle and reissues", async () => {
+    await setToday("2026-11-03");
+    const tenant = await createHouse("enterprise");
+    const upfront = await openInvoiceOf(tenant);
+    await cancel(upfront!.id);
+    await generate();
+    const reissued = await openInvoiceOf(tenant);
+    expect(reissued).toMatchObject({ upfront: false, cycle_due_date: "2026-11-03" });
+
+    // Until the next hourly run there is no open invoice, so the phase reads
+    // `ok` (same as canceling an upfront invoice); the run below reissues it.
+    const result = await cancel(reissued!.id);
+    expect(result).toMatchObject({ next_due_date: "2026-11-03" });
+
+    await generate();
+    const again = await openInvoiceOf(tenant);
+    expect(again).toMatchObject({ cycle_due_date: "2026-11-03", due_date: "2026-11-03" });
+    expect(again!.id).not.toBe(reissued!.id);
+    expect(await billingOf(tenant)).toEqual({
+      access_state: "awaiting_first_payment",
+      next_due_date: "2026-11-03",
+    });
+  });
+});
+
+describe("billing_admin_cancel_invoice: late cancel", () => {
+  it("clamps the advanced date to today, so the next invoice is issued today and due today", async () => {
+    const { tenant, invoice } = await houseWithOpenInvoiceDueNov5();
+    // Canceled on 20/12: cycle 05/11 + 1 month = 05/12 is already past.
+    await setToday("2026-12-20");
+    const result = await cancel(invoice.id);
+    expect(result).toMatchObject({ next_due_date: "2026-12-20", access_state: "ok" });
+
+    await generate();
+    expect(await openInvoiceOf(tenant)).toMatchObject({
+      cycle_due_date: "2026-12-20",
+      due_date: "2026-12-20",
+    });
+  });
+});
+
 describe("billing_admin_cancel_invoice: permissions", () => {
   it("refuses a non super admin and changes nothing", async () => {
     const { tenant, invoice } = await houseWithOpenInvoiceDueNov5();

@@ -462,7 +462,10 @@ describe("adminManualSettleFor", () => {
 
 describe("adminCancelInvoiceFor", () => {
   it("regular invoice: cancels open Pix charges, cancels the invoice, and says the month is skipped", async () => {
-    fake.admin.rows("billing_invoices").push({ id: INVOICE, tenant_id: TENANT, status: "open", upfront: false });
+    fake.admin.rows("billing_invoices").push(
+      { id: INVOICE, tenant_id: TENANT, status: "open", upfront: false },
+      { id: "00000000-0000-4000-8000-0000000000c1", tenant_id: TENANT, status: "paid", upfront: true },
+    );
     userDb.onRpc("billing_admin_cancel_invoice", () => rpcOk(TENANT, { next_due_date: "2026-12-05" }));
     const result = await adminCancelInvoiceFor(ctxFor(SUPER_ADMIN), {
       invoiceId: INVOICE,
@@ -487,6 +490,21 @@ describe("adminCancelInvoiceFor", () => {
     );
   });
 
+  it("never-paid house: a non-upfront invoice counts as activation (reissue message)", async () => {
+    fake.admin.rows("billing_invoices").push(
+      { id: INVOICE, tenant_id: TENANT, status: "open", upfront: false },
+      { id: "00000000-0000-4000-8000-0000000000c1", tenant_id: TENANT, status: "canceled", upfront: true },
+      // Another house's payment does not count.
+      { id: "00000000-0000-4000-8000-0000000000c2", tenant_id: OTHER_TENANT, status: "paid", upfront: false },
+    );
+    userDb.onRpc("billing_admin_cancel_invoice", () => rpcOk(TENANT, { next_due_date: "2026-11-03" }));
+    const result = await adminCancelInvoiceFor(ctxFor(SUPER_ADMIN), {
+      invoiceId: INVOICE,
+      reason: "fatura gerada por engano",
+    });
+    expect(result.message).toBe(CANCEL_UPFRONT_INVOICE_MESSAGE);
+  });
+
   it("refuses a non-super-admin before touching Pix or the invoice", async () => {
     fake.admin.rows("billing_invoices").push({ id: INVOICE, tenant_id: TENANT, status: "open", upfront: false });
     await expect(
@@ -505,13 +523,13 @@ describe("adminCancelInvoiceFor", () => {
 
 describe("cancelInvoiceMessage", () => {
   it("regular invoice: DD/MM/AAAA of the next due date", () => {
-    expect(cancelInvoiceMessage({ upfront: false, nextDueDate: "2027-01-31" })).toBe(
+    expect(cancelInvoiceMessage({ activation: false, nextDueDate: "2027-01-31" })).toBe(
       "Fatura cancelada. Este mês não será cobrado; a próxima fatura vence em 31/01/2027.",
     );
   });
 
-  it("upfront invoice: reissue message", () => {
-    expect(cancelInvoiceMessage({ upfront: true, nextDueDate: "2026-11-02" })).toBe(
+  it("activation invoice: reissue message", () => {
+    expect(cancelInvoiceMessage({ activation: true, nextDueDate: "2026-11-02" })).toBe(
       "Fatura de ativação cancelada. Ela será reemitida na próxima rodada com o valor atual.",
     );
   });

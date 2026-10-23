@@ -548,9 +548,10 @@ export const adminManualSettle = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => adminManualSettleFor(context as ServerContext, data));
 
 // Canceling a regular monthly invoice skips that month: the SQL moves the
-// cycle forward and the next invoice is the next cycle's. An `upfront`
-// (activation, pay-before-use) invoice keeps next_due_date and the hourly
-// job reissues it with the current amount.
+// cycle forward and the next invoice is the next cycle's. An activation
+// invoice (`upfront`, or any invoice of a house that never paid one, same
+// rule as the SQL) keeps next_due_date and the hourly job reissues it with
+// the current amount.
 export const CANCEL_UPFRONT_INVOICE_MESSAGE =
   "Fatura de ativação cancelada. Ela será reemitida na próxima rodada com o valor atual.";
 
@@ -564,8 +565,8 @@ function formatBrtDate(yyyyMmDd: string): string {
   });
 }
 
-export function cancelInvoiceMessage(input: { upfront: boolean; nextDueDate: string | null }): string {
-  if (input.upfront) return CANCEL_UPFRONT_INVOICE_MESSAGE;
+export function cancelInvoiceMessage(input: { activation: boolean; nextDueDate: string | null }): string {
+  if (input.activation) return CANCEL_UPFRONT_INVOICE_MESSAGE;
   if (!input.nextDueDate) return "Fatura cancelada. Este mês não será cobrado.";
   return `Fatura cancelada. Este mês não será cobrado; a próxima fatura vence em ${formatBrtDate(input.nextDueDate)}.`;
 }
@@ -580,13 +581,26 @@ export async function adminCancelInvoiceFor(ctx: ServerContext, data: unknown) {
   await assertSuperAdmin(ctx.userId);
 
   // The message depends on the invoice type, read before the cancel.
-  const { data: invoice, error: invoiceError } = await looseDb(supabaseAdmin)
-    .from<{ id: string; upfront: boolean }>("billing_invoices")
-    .select("id,upfront")
+  const sb = looseDb(supabaseAdmin);
+  const { data: invoice, error: invoiceError } = await sb
+    .from<{ id: string; tenant_id: string; upfront: boolean }>("billing_invoices")
+    .select("id,tenant_id,upfront")
     .eq("id", input.invoiceId)
     .maybeSingle();
   if (invoiceError) throw new Error(invoiceError.message);
   if (!invoice) throw new Error(BILLING_ADMIN_ERROR_MESSAGES.invoice_not_found);
+  let activation = invoice.upfront === true;
+  if (!activation) {
+    const { data: paid, error: paidError } = await sb
+      .from<{ id: string }>("billing_invoices")
+      .select("id")
+      .eq("tenant_id", invoice.tenant_id)
+      .eq("status", "paid")
+      .limit(1);
+    if (paidError) throw new Error(paidError.message);
+    // Awaiting the builder (no maybeSingle) yields the row array.
+    activation = ((paid ?? []) as unknown as unknown[]).length === 0;
+  }
 
   const cancel = await cancelOpenPixBestEffort(input.invoiceId);
 
@@ -601,12 +615,12 @@ export async function adminCancelInvoiceFor(ctx: ServerContext, data: unknown) {
     actorUserId: ctx.userId,
     action: "billing.cancel_invoice",
     reason: input.reason,
-    metadata: { invoiceId: input.invoiceId, upfront: invoice.upfront === true, pixCancel: cancel },
+    metadata: { invoiceId: input.invoiceId, activation, pixCancel: cancel },
   });
   return {
     ...result,
     message: cancelInvoiceMessage({
-      upfront: invoice.upfront === true,
+      activation,
       nextDueDate: result.next_due_date ?? null,
     }),
   };

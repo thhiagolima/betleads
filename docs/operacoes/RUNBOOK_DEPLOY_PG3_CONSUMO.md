@@ -84,9 +84,11 @@ assinaturas.
 
 Recria `billing_admin_cancel_invoice(uuid, text)` (mesma assinatura, mesmos
 grants). Fatura mensal cancelada não é mais reemitida: o mês não é cobrado e
-`next_due_date` vai para `cycle_due_date` + 1 mês (ou fica no dia trocado por
-"Trocar dia de vencimento", se ainda no futuro). Fatura `upfront` (ativação)
-continua como antes: `next_due_date` não muda e o job da hora a reemite.
+`next_due_date` vai para `cycle_due_date` + 1 mês, nunca antes de hoje (ou
+fica no dia trocado por "Trocar dia de vencimento", se ainda no futuro).
+Fatura de ativação (`upfront`, ou qualquer fatura de casa que nunca pagou
+nenhuma) continua como antes: `next_due_date` não muda e o job da hora a
+reemite.
 
 **Resultado:**
 

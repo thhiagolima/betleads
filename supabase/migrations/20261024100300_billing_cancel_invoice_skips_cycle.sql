@@ -5,16 +5,19 @@
 -- de produto: fatura cancelada não é reemitida. O mês não é cobrado, o ciclo
 -- anda e a próxima fatura é a do ciclo seguinte.
 --
--- Exceção: a fatura `upfront` (ativação, "paga antes de usar", de casa que
--- nunca pagou ou acabou de ser descongelada) mantém o comportamento antigo:
--- next_due_date não muda e o job da hora a reemite na próxima rodada.
+-- Exceção: a fatura de ativação mantém o comportamento antigo:
+-- next_due_date não muda e o job da hora a reemite na próxima rodada. Conta
+-- como ativação a fatura `upfront` ("paga antes de usar", de casa que vira
+-- pagante ou é descongelada) e qualquer fatura de casa que nunca pagou
+-- nenhuma (a reemissão do job sai sem `upfront`).
 --
 -- Regra do próximo vencimento (a mesma de `billing_settle_invoice`, sem o
 -- caso de recomeço pelo dia do pagamento):
 -- - se o superadmin já trocou o dia do ciclo com a fatura aberta
 --   (`billing_admin_set_cycle_day`: next_due_date diferente do
 --   cycle_due_date da fatura e ainda no futuro), esse dia é mantido;
--- - senão: cycle_due_date + 1 mês.
+-- - senão: cycle_due_date + 1 mês, nunca antes de hoje (cancelamento
+--   atrasado: a próxima fatura sai hoje e vence hoje, nunca já vencida).
 --
 -- `billing_admin_lock_open_invoice` confere superadmin e trava a linha de
 -- tenant_billing (for update) e a fatura, nessa ordem, antes de exigir
@@ -30,6 +33,7 @@ as $$
 declare
   v_inv public.billing_invoices%rowtype;
   v_next_due date;
+  v_today date := public.billing_today();
 begin
   v_inv := public.billing_admin_lock_open_invoice(_invoice);
 
@@ -39,7 +43,11 @@ begin
          updated_at = now()
    where id = v_inv.id;
 
-  if not v_inv.upfront then
+  if not v_inv.upfront
+     and exists (
+       select 1 from public.billing_invoices
+       where tenant_id = v_inv.tenant_id and status = 'paid'
+     ) then
     select next_due_date into v_next_due
     from public.tenant_billing
     where tenant_id = v_inv.tenant_id;
@@ -47,10 +55,10 @@ begin
     if not (
       v_next_due is not null
       and v_next_due is distinct from v_inv.cycle_due_date
-      and v_next_due > public.billing_today()
+      and v_next_due > v_today
     ) then
       update public.tenant_billing
-         set next_due_date = public.billing_add_months(v_inv.cycle_due_date, 1),
+         set next_due_date = greatest(public.billing_add_months(v_inv.cycle_due_date, 1), v_today),
              updated_at = now()
        where tenant_id = v_inv.tenant_id;
     end if;
