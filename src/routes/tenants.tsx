@@ -1,29 +1,13 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useLocation, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useMemo, useState } from "react";
-import {
-  Activity,
-  Building2,
-  Clock3,
-  CreditCard,
-  FileClock,
-  Plus,
-  Receipt,
-  Save,
-  Search,
-  Settings2,
-  ShieldCheck,
-  Trash2,
-  UserPlus,
-  Users,
-  Wallet,
-} from "lucide-react";
+import { useActiveTenant } from "@/hooks/use-active-tenant";
+import { Building2, Plus, Save, Search, Settings2, Trash2, UserPlus, Wallet } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -42,7 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { IconButton } from "@/components/ui/icon-button";
 import {
   Table,
   TableBody,
@@ -83,7 +67,10 @@ import {
 } from "@/lib/format";
 import { requestConfirmation } from "@/components/system-dialog-host";
 import { Page, PageHeader } from "@/components/ui-premium/page-header";
-import { MetricCard as DashboardMetricCard } from "@/components/ui-premium/metric-card";
+import { MetricCard } from "@/components/ui-premium/metric-card";
+import { DataCard } from "@/components/ui-premium/data-card";
+import { EmptyState } from "@/components/ui-premium/empty-state";
+import { PageTabs } from "@/components/ui-premium/page-tabs";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 
@@ -202,11 +189,112 @@ function cents(value: number | null | undefined) {
   return brl((value ?? 0) / 100);
 }
 
+const STATUS_LABEL: Record<TenantRow["status"], string> = {
+  active: "Ativa",
+  trial: "Teste",
+  suspended: "Suspensa",
+  canceled: "Cancelada",
+};
+
+const PLANO_LABEL: Record<TenantRow["plano"], string> = {
+  starter: "Starter",
+  pro: "Pro",
+  enterprise: "Enterprise",
+  interno: "Interno",
+};
+
+const ORDER_STATUS_LABEL: Record<string, string> = {
+  paid: "Pago",
+  pending: "Pendente",
+  open: "Em aberto",
+  processing: "Processando",
+  canceled: "Cancelado",
+  cancelled: "Cancelado",
+  failed: "Falhou",
+  expired: "Expirado",
+  refunded: "Reembolsado",
+};
+
+const AUDIT_ACTION_LABEL: Record<string, string> = {
+  "tenant.created": "Casa criada",
+  "tenant.updated": "Dados da casa alterados",
+  "tenant.renamed": "Casa renomeada",
+  "tenant_user.added": "Pessoa adicionada à equipe",
+  "tenant_user.removed": "Pessoa removida da equipe",
+  "tenant_user.role_changed": "Papel alterado",
+  "user_membership.removed": "Acesso removido",
+  "user.created": "Login criado",
+  "user.deleted": "Login excluído",
+  "tenant_wallet.adjusted": "Saldo ajustado",
+  "tenant_price.set": "Preço individual definido",
+  "tenant_price.cleared": "Preço individual removido",
+  "tenant_sms.pricing_set": "Preço de SMS definido",
+  "billing.extend_due": "Vencimento prorrogado",
+  "billing.set_block": "Bloqueio de cobrança alterado",
+  "billing.manual_settle": "Fatura quitada manualmente",
+  "billing.set_frozen": "Cobrança congelada ou retomada",
+  "billing.set_cycle_day": "Dia de cobrança alterado",
+  "billing.set_custom_price": "Mensalidade personalizada",
+  "billing.set_continuous_discount": "Desconto contínuo alterado",
+  "billing.resend_email": "E-mail de cobrança reenviado",
+  "billing.low_balance_threshold.update": "Aviso de saldo baixo alterado",
+  "billing.free_days": "Dias grátis concedidos",
+  "billing.cancel_invoice": "Fatura cancelada",
+  "sms_campaign.resumed": "Campanha de SMS retomada",
+  "sms_campaign.cancelled": "Campanha de SMS cancelada",
+  "webhook.credentials_rotated": "Credenciais da integração trocadas",
+  "webhook.hmac_secret_provisioned": "Chave de segurança da integração criada",
+  "webhook.hmac_enforcement_changed": "Verificação de segurança da integração alterada",
+  "channel.stuck_reprocessed": "Envios travados reprocessados",
+  "journeys.provider_outage_requeued": "Envios reenfileirados após falha do provedor",
+};
+
+const ENTITY_TYPE_LABEL: Record<string, string> = {
+  tenant: "Casa",
+  tenant_wallet: "Saldo",
+  tenant_billing: "Cobrança",
+  tenant_sms_pricing: "Preço de SMS",
+  tenant_price_override: "Preço individual",
+  tenant_user: "Equipe",
+  user_role: "Papel",
+  sms_campaign: "Campanha de SMS",
+  channel_operation: "Envios",
+};
+
+/** Turns an internal code (snake_case / dotted) into readable text. */
+function humanize(value: string) {
+  const text = value.replace(/[._]+/g, " ").trim().toLowerCase();
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function labelFrom(map: Record<string, string>, value: string | null | undefined) {
+  if (!value) return "-";
+  return map[value] ?? humanize(value);
+}
+
 function statusBadge(status: TenantRow["status"]) {
-  if (status === "active") return <Badge className="bg-success/15 text-success">ativo</Badge>;
-  if (status === "trial") return <Badge className="bg-info/15 text-info">trial</Badge>;
-  if (status === "suspended") return <Badge className="bg-warning/15 text-warning">suspenso</Badge>;
-  return <Badge variant="destructive">cancelado</Badge>;
+  const label = labelFrom(STATUS_LABEL, status).toLowerCase();
+  if (status === "active") return <Badge className="bg-success/15 text-success">{label}</Badge>;
+  if (status === "trial") return <Badge className="bg-info/15 text-info">{label}</Badge>;
+  if (status === "suspended") return <Badge className="bg-warning/15 text-warning">{label}</Badge>;
+  return <Badge variant="destructive">{label}</Badge>;
+}
+
+const WORKSPACE_TABS = [
+  { value: "overview", label: "Visão geral", hash: "visao-geral" },
+  { value: "users", label: "Equipe", hash: "equipe" },
+  { value: "credits", label: "Saldo SMS", hash: "saldo" },
+  { value: "billing", label: "Cobrança", hash: "cobranca" },
+  { value: "reports", label: "Relatórios", hash: "relatorios" },
+  { value: "audit", label: "Histórico", hash: "historico" },
+  { value: "settings", label: "Configuração", hash: "configuracao" },
+] as const;
+
+type WorkspaceTab = (typeof WORKSPACE_TABS)[number]["value"];
+
+function tabFromHash(hash: string): WorkspaceTab {
+  const clean = hash.replace(/^#/, "");
+  return WORKSPACE_TABS.find((item) => item.hash === clean)?.value ?? "overview";
 }
 
 function TenantsPage() {
@@ -214,22 +302,20 @@ function TenantsPage() {
   const consoleFn = useServerFn(getTenantManagementConsole);
   const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  // House admins have no picker here: the page follows the house chosen in the header.
+  const { active: headerTenant } = useActiveTenant();
+  const requestedTenantId = selectedTenantId ?? headerTenant?.id ?? null;
 
   const { data, isLoading } = useQuery({
-    queryKey: ["tenants-console", selectedTenantId],
-    queryFn: () => consoleFn({ data: { tenantId: selectedTenantId } }),
+    queryKey: ["tenants-console", requestedTenantId],
+    queryFn: () => consoleFn({ data: { tenantId: requestedTenantId } }),
   });
 
   const consoleData = data as ConsoleData | undefined;
+  const isSuperAdmin = !!consoleData?.isSuperAdmin;
   const tenants = useMemo(() => consoleData?.tenants ?? [], [consoleData?.tenants]);
   const detail = consoleData?.detail ?? null;
-  const activeTenantId = consoleData?.selectedTenantId ?? selectedTenantId;
-
-  useEffect(() => {
-    if (!selectedTenantId && consoleData?.selectedTenantId) {
-      setSelectedTenantId(consoleData.selectedTenantId);
-    }
-  }, [consoleData?.selectedTenantId, selectedTenantId]);
+  const activeTenantId = consoleData?.selectedTenantId ?? requestedTenantId;
 
   const filteredTenants = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -242,11 +328,40 @@ function TenantsPage() {
     );
   }, [search, tenants]);
 
+  const workspace = detail ? (
+    <TenantWorkspace
+      detail={detail}
+      isSuperAdmin={isSuperAdmin}
+      canManage={!!consoleData?.canManage}
+    />
+  ) : (
+    <DataCard>
+      {isLoading ? (
+        <div className="flex min-h-64 items-center justify-center text-body text-muted-foreground">
+          Carregando...
+        </div>
+      ) : (
+        <EmptyState
+          icon={<Building2 />}
+          title={isSuperAdmin ? "Nenhuma casa selecionada" : "Nenhuma casa encontrada"}
+          description={
+            isSuperAdmin
+              ? "Escolha uma casa na lista ou crie uma nova para começar."
+              : "Sua conta ainda não está ligada a nenhuma casa."
+          }
+        />
+      )}
+    </DataCard>
+  );
+
   return (
     <Page>
       <PageHeader
-        title={consoleData?.isSuperAdmin ? "Contas" : "Conta e equipe"}
-        subtitle="Gestão de contas, usuários, saldo, relatórios e auditoria da operação."
+        subtitle={
+          isSuperAdmin
+            ? "Todas as casas da plataforma: dados, equipe, saldo, cobrança e histórico."
+            : "Dados da sua casa, quem faz parte da equipe, saldo e histórico de alterações."
+        }
         actions={
           <>
             <Button
@@ -255,27 +370,22 @@ function TenantsPage() {
             >
               Atualizar
             </Button>
-            {consoleData?.isSuperAdmin && <CreateTenantDialog />}
+            {isSuperAdmin && <CreateTenantDialog />}
           </>
         }
       />
 
-      <div className="grid gap-4 xl:grid-cols-[330px_1fr]">
-        <Card className="h-fit">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <ShieldCheck className="h-4 w-4 text-primary" />
-              Contas
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
+      {isSuperAdmin ? (
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,330px)_minmax(0,1fr)]">
+          <DataCard title="Casas" className="h-fit" bodyClassName="space-y-3">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 className="pl-9"
-                placeholder="Buscar tenant"
+                placeholder="Buscar casa"
+                aria-label="Buscar casa"
               />
             </div>
             <div className="max-h-[620px] space-y-2 overflow-y-auto pr-1">
@@ -290,6 +400,7 @@ function TenantsPage() {
                     key={tenant.id}
                     type="button"
                     onClick={() => setSelectedTenantId(tenant.id)}
+                    aria-pressed={active}
                     className={`w-full rounded-lg border p-3 text-left transition ${
                       active
                         ? "border-primary/60 bg-primary/10"
@@ -297,47 +408,34 @@ function TenantsPage() {
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="truncate font-semibold">{tenant.nome}</div>
-                        <div className="truncate text-xs text-muted-foreground">{tenant.slug}</div>
-                      </div>
-                      <div className="flex items-center gap-1">
+                      <div className="min-w-0 truncate text-body font-semibold">{tenant.nome}</div>
+                      <div className="flex shrink-0 items-center gap-1">
                         {tenant.is_demo && (
-                          <Badge className="bg-violet-500/15 text-violet-300">demo</Badge>
+                          <Badge className="bg-violet-500/15 text-violet-300">demonstração</Badge>
                         )}
                         {statusBadge(tenant.status)}
                       </div>
                     </div>
-                    <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
-                      <span>{tenant.plano}</span>
+                    <div className="mt-2 flex items-center justify-between text-meta text-muted-foreground">
+                      <span>Plano {labelFrom(PLANO_LABEL, tenant.plano)}</span>
                       <span>{tenant.crm_model === "CRM_EXPERT" ? "Expert" : "Plataforma"}</span>
                     </div>
                   </button>
                 );
               })}
               {!isLoading && !filteredTenants.length && (
-                <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-                  Nenhum tenant encontrado.
+                <div className="rounded-lg border border-dashed p-6 text-center text-body text-muted-foreground">
+                  Nenhuma casa encontrada.
                 </div>
               )}
             </div>
-          </CardContent>
-        </Card>
+          </DataCard>
 
-        {detail ? (
-          <TenantWorkspace
-            detail={detail}
-            isSuperAdmin={!!consoleData?.isSuperAdmin}
-            canManage={!!consoleData?.canManage}
-          />
-        ) : (
-          <Card className="min-h-96">
-            <CardContent className="flex h-96 items-center justify-center text-muted-foreground">
-              {isLoading ? "Carregando tenants..." : "Selecione ou crie um tenant para começar."}
-            </CardContent>
-          </Card>
-        )}
-      </div>
+          {workspace}
+        </div>
+      ) : (
+        workspace
+      )}
     </Page>
   );
 }
@@ -351,96 +449,58 @@ function TenantWorkspace({
   isSuperAdmin: boolean;
   canManage: boolean;
 }) {
-  const tenant = detail.tenant;
+  const navigate = useNavigate();
+  // Active tab lives in the URL hash (#equipe, #saldo…), pushed to the history
+  // so Voltar returns to the previous tab.
+  const hash = useLocation({ select: (location) => location.hash });
+  const tab = tabFromHash(hash);
+  const setTab = (next: WorkspaceTab) => {
+    void navigate({
+      to: "/tenants",
+      hash: WORKSPACE_TABS.find((item) => item.value === next)?.hash ?? "visao-geral",
+    });
+  };
+
   const balance = Number(detail.sms.summary.balance ?? 0);
   const used = Number(detail.sms.summary.lifetime_used ?? 0);
   const purchased = Number(detail.sms.summary.lifetime_purchased ?? 0);
 
+  // Summary numbers live only in this row; the tabs below don't repeat them.
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 space-y-4">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard
-          icon={Users}
-          label="Usuários"
+          label="Equipe"
           value={num(detail.users.length)}
-          hint={tenant.plano}
+          hint={detail.users.length === 1 ? "pessoa com acesso" : "pessoas com acesso"}
         />
         <MetricCard
-          icon={Wallet}
           label="Saldo"
           value={brl(balance)}
-          hint={`${brl(used)} consumidos`}
+          hint={`${detail.sms.summary.exempt ? "Isenta · " : ""}${brl(used)} consumidos até hoje`}
         />
         <MetricCard
-          icon={Activity}
-          label="Players"
+          label="Jogadores"
           value={num(detail.reports.players_total)}
-          hint={`${num(detail.reports.webhooks_30d)} webhooks em 30 dias`}
+          hint="na base da casa"
         />
-        <MetricCard
-          icon={CreditCard}
-          label="Comprado"
-          value={brl(purchased)}
-          hint={`Status: ${tenant.status}`}
-        />
+        <MetricCard label="Comprado" value={brl(purchased)} hint="total desde o início" />
       </div>
 
-      <Tabs defaultValue="overview" className="space-y-4">
-        <TabsList className="flex h-auto flex-wrap justify-start">
-          <TabsTrigger value="overview">Visão geral</TabsTrigger>
-          <TabsTrigger value="users">Usuários</TabsTrigger>
-          <TabsTrigger value="credits">Saldo SMS</TabsTrigger>
-          <TabsTrigger value="billing">Cobrança</TabsTrigger>
-          <TabsTrigger value="reports">Relatórios</TabsTrigger>
-          <TabsTrigger value="audit">Auditoria</TabsTrigger>
-          <TabsTrigger value="settings">Configuração</TabsTrigger>
-        </TabsList>
+      <PageTabs value={tab} onValueChange={setTab} items={WORKSPACE_TABS} label="Seções da conta" />
 
-        <TabsContent value="overview">
-          <OverviewTab detail={detail} isSuperAdmin={isSuperAdmin} />
-        </TabsContent>
-        <TabsContent value="users">
+      <div role="tabpanel" aria-labelledby={`tab-${tab}`}>
+        {tab === "overview" && <OverviewTab detail={detail} isSuperAdmin={isSuperAdmin} />}
+        {tab === "users" && (
           <UsersTab detail={detail} isSuperAdmin={isSuperAdmin} canManage={canManage} />
-        </TabsContent>
-        <TabsContent value="credits">
-          <CreditsTab detail={detail} isSuperAdmin={isSuperAdmin} />
-        </TabsContent>
-        <TabsContent value="billing">
-          <BillingTab detail={detail} isSuperAdmin={isSuperAdmin} />
-        </TabsContent>
-        <TabsContent value="reports">
-          <ReportsTab detail={detail} />
-        </TabsContent>
-        <TabsContent value="audit">
-          <AuditTab detail={detail} />
-        </TabsContent>
-        <TabsContent value="settings">
-          <SettingsTab detail={detail} isSuperAdmin={isSuperAdmin} />
-        </TabsContent>
-      </Tabs>
+        )}
+        {tab === "credits" && <CreditsTab detail={detail} isSuperAdmin={isSuperAdmin} />}
+        {tab === "billing" && <BillingTab detail={detail} isSuperAdmin={isSuperAdmin} />}
+        {tab === "reports" && <ReportsTab detail={detail} />}
+        {tab === "audit" && <AuditTab detail={detail} />}
+        {tab === "settings" && <SettingsTab detail={detail} isSuperAdmin={isSuperAdmin} />}
+      </div>
     </div>
-  );
-}
-
-function MetricCard({
-  icon: Icon,
-  label,
-  value,
-  hint,
-}: {
-  icon: typeof Users;
-  label: string;
-  value: string;
-  hint: string;
-}) {
-  return (
-    <DashboardMetricCard
-      label={label}
-      value={value}
-      hint={hint}
-      icon={<Icon className="h-4 w-4" />}
-      accent="primary"
-    />
   );
 }
 
@@ -450,85 +510,58 @@ function OverviewTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAd
   const margin = Number(pricing.unit_price ?? 0) - Number(pricing.provider_unit_cost ?? 0);
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[1fr_0.8fr]">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Building2 className="h-5 w-5 text-primary" />
-            Identidade do tenant
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2">
-          <Info label="Nome" value={tenant.nome} />
-          <Info label="Slug" value={tenant.slug} mono />
-          <Info label="Status" value={statusBadge(tenant.status)} />
-          <Info label="Plano" value={tenant.plano} />
-          <Info
-            label="Modelo CRM"
-            value={tenant.crm_model === "CRM_EXPERT" ? "CRM Expert" : "CRM Plataforma"}
-          />
-          <Info label="Criado em" value={fmtDate(tenant.created_at)} />
-        </CardContent>
-      </Card>
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.8fr)]">
+      <DataCard title="Dados da casa" bodyClassName="grid gap-4 sm:grid-cols-2">
+        <Info label="Nome" value={tenant.nome} />
+        <Info label="Status" value={statusBadge(tenant.status)} />
+        <Info label="Plano" value={labelFrom(PLANO_LABEL, tenant.plano)} />
+        <Info
+          label="Modelo CRM"
+          value={tenant.crm_model === "CRM_EXPERT" ? "CRM Expert" : "CRM Plataforma"}
+        />
+        <Info label="Criada em" value={fmtDate(tenant.created_at)} />
+      </DataCard>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Settings2 className="h-5 w-5 text-primary" />
-            Saúde operacional
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <HealthLine label="Saldo" ok={Number(detail.sms.summary.balance ?? 0) > 0} />
-          <HealthLine
-            label="Usuário administrador"
-            ok={detail.users.some((user) => user.role === "admin")}
-          />
-          <HealthLine label="Meta conectada" ok={detail.reports.meta_accounts > 0} />
-          <HealthLine label="Webhooks chegando" ok={detail.reports.webhooks_30d > 0} />
-          {isSuperAdmin && (
-            <div className="rounded-lg border border-border/70 p-3 text-sm">
-              <div className="text-muted-foreground">Margem estimada por SMS</div>
-              <div
-                className={margin >= 0 ? "font-semibold text-success" : "font-semibold text-danger"}
-              >
-                {brlUnitPrice(margin)}
-              </div>
+      <DataCard title="Saúde operacional" bodyClassName="space-y-3">
+        <HealthLine label="Saldo disponível" ok={Number(detail.sms.summary.balance ?? 0) > 0} />
+        <HealthLine
+          label="Administrador na equipe"
+          ok={detail.users.some((user) => user.role === "admin")}
+        />
+        <HealthLine label="Meta conectada" ok={detail.reports.meta_accounts > 0} />
+        <HealthLine label="Eventos da casa chegando" ok={detail.reports.webhooks_30d > 0} />
+        {isSuperAdmin && (
+          <div className="rounded-lg border border-border/70 p-3 text-body">
+            <div className="text-muted-foreground">Margem estimada por SMS</div>
+            <div
+              className={margin >= 0 ? "font-semibold text-success" : "font-semibold text-danger"}
+            >
+              {brlUnitPrice(margin)}
             </div>
-          )}
-          {!isSuperAdmin && (
-            <p className="text-xs text-muted-foreground">
-              Alterações financeiras e status do tenant ficam restritas ao superadmin.
-            </p>
-          )}
-        </CardContent>
-      </Card>
+          </div>
+        )}
+        {!isSuperAdmin && (
+          <p className="text-meta text-muted-foreground">
+            Mudanças de status, plano e valores da casa são feitas pela equipe da plataforma.
+          </p>
+        )}
+      </DataCard>
     </div>
   );
 }
 
-function Info({
-  label,
-  value,
-  mono = false,
-}: {
-  label: string;
-  value: React.ReactNode;
-  mono?: boolean;
-}) {
+function Info({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="rounded-lg border border-border/70 p-3">
       <div className="text-label text-muted-foreground">{label}</div>
-      <div className={`mt-1 break-words font-medium ${mono ? "font-mono text-xs" : ""}`}>
-        {value}
-      </div>
+      <div className="mt-1 break-words text-body font-medium">{value}</div>
     </div>
   );
 }
 
 function HealthLine({ label, ok }: { label: string; ok: boolean }) {
   return (
-    <div className="flex items-center justify-between rounded-lg border border-border/70 px-3 py-2 text-sm">
+    <div className="flex items-center justify-between gap-2 rounded-lg border border-border/70 px-3 py-2 text-body">
       <span>{label}</span>
       <Badge className={ok ? "bg-success/15 text-success" : "bg-warning/15 text-warning"}>
         {ok ? "ok" : "atenção"}
@@ -547,69 +580,61 @@ function UsersTab({
   canManage: boolean;
 }) {
   return (
-    <Card>
-      <CardHeader className="flex-row items-center justify-between gap-4">
-        <div>
-          <CardTitle className="flex items-center gap-2">
-            <Users className="h-5 w-5 text-primary" />
-            Usuários do tenant
-          </CardTitle>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Adicione operadores e mantenha papéis separados da role global de superadmin.
-          </p>
-        </div>
-        {canManage && <AddUserDialog tenantId={detail.tenant.id} isSuperAdmin={isSuperAdmin} />}
-      </CardHeader>
-      <CardContent className="overflow-x-auto p-0">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Usuário</TableHead>
-              <TableHead>Papel</TableHead>
-              <TableHead>Último login</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="text-right">Ações</TableHead>
+    <DataCard
+      title="Equipe"
+      description="Quem tem acesso a esta casa e o que cada pessoa pode fazer."
+      actions={
+        canManage ? (
+          <AddUserDialog tenantId={detail.tenant.id} isSuperAdmin={isSuperAdmin} />
+        ) : undefined
+      }
+      bodyClassName="overflow-x-auto p-0 sm:p-0 pt-3 sm:pt-3"
+    >
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Pessoa</TableHead>
+            <TableHead>Papel</TableHead>
+            <TableHead>Último acesso</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead className="text-right">Ações</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {detail.users.map((user) => (
+            <TableRow key={user.id}>
+              <TableCell className="font-medium">{user.email ?? "Sem e-mail cadastrado"}</TableCell>
+              <TableCell>
+                <RoleSelect
+                  tenantId={detail.tenant.id}
+                  user={user}
+                  isSuperAdmin={isSuperAdmin}
+                  canManage={canManage}
+                />
+              </TableCell>
+              <TableCell className="whitespace-nowrap">{fmtDate(user.last_sign_in_at)}</TableCell>
+              <TableCell>
+                {user.banned_until && new Date(user.banned_until) > new Date() ? (
+                  <Badge variant="destructive">bloqueado</Badge>
+                ) : (
+                  <Badge className="bg-success/15 text-success">ativo</Badge>
+                )}
+              </TableCell>
+              <TableCell className="text-right">
+                {canManage && <RemoveUserButton tenantId={detail.tenant.id} user={user} />}
+              </TableCell>
             </TableRow>
-          </TableHeader>
-          <TableBody>
-            {detail.users.map((user) => (
-              <TableRow key={user.id}>
-                <TableCell>
-                  <div className="font-medium">{user.email ?? user.user_id}</div>
-                  <div className="font-mono text-xs text-muted-foreground">{user.user_id}</div>
-                </TableCell>
-                <TableCell>
-                  <RoleSelect
-                    tenantId={detail.tenant.id}
-                    user={user}
-                    isSuperAdmin={isSuperAdmin}
-                    canManage={canManage}
-                  />
-                </TableCell>
-                <TableCell>{fmtDate(user.last_sign_in_at)}</TableCell>
-                <TableCell>
-                  {user.banned_until && new Date(user.banned_until) > new Date() ? (
-                    <Badge variant="destructive">bloqueado</Badge>
-                  ) : (
-                    <Badge className="bg-success/15 text-success">ativo</Badge>
-                  )}
-                </TableCell>
-                <TableCell className="text-right">
-                  {canManage && <RemoveUserButton tenantId={detail.tenant.id} user={user} />}
-                </TableCell>
-              </TableRow>
-            ))}
-            {!detail.users.length && (
-              <TableRow>
-                <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
-                  Nenhum usuário vinculado.
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
+          ))}
+          {!detail.users.length && (
+            <TableRow>
+              <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                Ninguém na equipe ainda.
+              </TableCell>
+            </TableRow>
+          )}
+        </TableBody>
+      </Table>
+    </DataCard>
   );
 }
 
@@ -632,7 +657,7 @@ function AddUserDialog({ tenantId, isSuperAdmin }: { tenantId: string; isSuperAd
         },
       }),
     onSuccess: () => {
-      toast.success("Usuário vinculado ao tenant");
+      toast.success("Pessoa adicionada à equipe");
       setOpen(false);
       setEmail("");
       setPassword("");
@@ -647,21 +672,21 @@ function AddUserDialog({ tenantId, isSuperAdmin }: { tenantId: string; isSuperAd
         <DialogTrigger asChild>
           <Button className="gap-2" disabled={isDemo}>
             <UserPlus className="h-4 w-4" />
-            Adicionar usuário
+            Adicionar pessoa
           </Button>
         </DialogTrigger>
       </DemoDisabledTooltip>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Adicionar usuário ao tenant</DialogTitle>
+          <DialogTitle>Adicionar pessoa à equipe</DialogTitle>
           <DialogDescription>
-            Se o email ainda não existir, uma conta será criada. Senha vazia envia convite pelo
-            Supabase.
+            Se o e-mail ainda não tiver login, ele será criado. Sem senha, a pessoa recebe um
+            convite por e-mail.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <div className="space-y-2">
-            <Label>Email</Label>
+            <Label>E-mail</Label>
             <Input type="email" value={email} onChange={(event) => setEmail(event.target.value)} />
           </div>
           <div className="space-y-2">
@@ -751,33 +776,29 @@ function RemoveUserButton({ tenantId, user }: { tenantId: string; user: TenantUs
   const mut = useMutation({
     mutationFn: () => fn({ data: { tenantId, membershipId: user.id } }),
     onSuccess: () => {
-      toast.success("Usuário removido do tenant");
+      toast.success("Pessoa removida da equipe");
       qc.invalidateQueries({ queryKey: ["tenants-console"] });
     },
     onError: (error: Error) => toast.error(error.message),
   });
 
-  const label = user.email ?? "este usuário";
+  const label = user.email ?? "esta pessoa";
   return (
     <DemoDisabledTooltip active={isDemo}>
-      <Button
-        size="sm"
-        variant="ghost"
+      <IconButton
+        label={`Remover ${label} da equipe`}
         disabled={isDemo || mut.isPending}
-        aria-label={`Remover ${label} da conta`}
-        title={`Remover ${label} da conta`}
+        icon={<Trash2 className="h-4 w-4 text-danger" />}
         onClick={async () => {
           const confirmed = await requestConfirmation({
-            title: "Remover usuário da conta?",
-            description: `${label} perde o acesso a esta conta imediatamente. O login continua existindo e a pessoa pode ser convidada de novo depois.`,
-            confirmLabel: "Remover usuário",
+            title: "Remover pessoa da equipe?",
+            description: `${label} perde o acesso a esta casa imediatamente. O login continua existindo e a pessoa pode ser convidada de novo depois.`,
+            confirmLabel: "Remover",
             destructive: true,
           });
           if (confirmed) mut.mutate();
         }}
-      >
-        <Trash2 className="h-4 w-4 text-danger" />
-      </Button>
+      />
     </DemoDisabledTooltip>
   );
 }
@@ -790,11 +811,11 @@ function RemoveUserButton({ tenantId, user }: { tenantId: string; user: TenantUs
 function BillingTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAdmin: boolean }) {
   if (!isSuperAdmin) {
     return (
-      <Card>
-        <CardContent className="py-8 text-center text-sm text-muted-foreground">
-          A cobrança desta casa é restrita ao superadmin.
-        </CardContent>
-      </Card>
+      <DataCard>
+        <p className="py-4 text-center text-body text-muted-foreground">
+          A cobrança desta casa é gerenciada pela equipe da plataforma.
+        </p>
+      </DataCard>
     );
   }
   return (
@@ -810,50 +831,31 @@ function BillingTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAdm
 
 function CreditsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAdmin: boolean }) {
   const pricing = detail.sms.pricing;
-  const balance = Number(detail.sms.summary.balance ?? 0);
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Card>
-          <CardContent className="p-5">
-            <div className="flex items-center gap-2 text-label text-muted-foreground">
-              Saldo disponível
-              {detail.sms.summary.exempt && (
-                <Badge className="bg-success/15 text-success">Isenta</Badge>
-              )}
-            </div>
-            <div className="mt-2 text-kpi">{brl(balance)}</div>
-            <div className="mt-1 text-sm text-muted-foreground">
-              {brl(Number(detail.sms.summary.lifetime_used ?? 0))} consumidos historicamente
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-5">
-            <div className="text-label text-muted-foreground">Preço venda/SMS</div>
-            <div className="mt-2 text-kpi">{brlUnitPrice(Number(pricing.unit_price ?? 0))}</div>
-            {isSuperAdmin && (
-              <div className="mt-1 text-sm text-muted-foreground">
-                custo fornecedor {brlUnitPrice(Number(pricing.provider_unit_cost ?? 0))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="flex h-full items-center gap-2 p-5">
-            {isSuperAdmin ? (
-              <>
-                <AdjustCreditsDialog tenant={detail.tenant} />
-                <PricingDialog tenant={detail.tenant} pricing={pricing} />
-              </>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                Ajustes manuais e preço individual são restritos ao superadmin.
-              </p>
-            )}
-          </CardContent>
-        </Card>
+      <div className="grid gap-4 md:grid-cols-2">
+        <MetricCard
+          label="Preço por SMS"
+          value={brlUnitPrice(Number(pricing.unit_price ?? 0))}
+          hint={
+            isSuperAdmin
+              ? `custo do fornecedor ${brlUnitPrice(Number(pricing.provider_unit_cost ?? 0))}`
+              : undefined
+          }
+        />
+        <DataCard bodyClassName="flex h-full flex-wrap items-center gap-2">
+          {isSuperAdmin ? (
+            <>
+              <AdjustCreditsDialog tenant={detail.tenant} />
+              <PricingDialog tenant={detail.tenant} pricing={pricing} />
+            </>
+          ) : (
+            <p className="text-body text-muted-foreground">
+              Ajustes de saldo e preço individual são feitos pela equipe da plataforma.
+            </p>
+          )}
+        </DataCard>
       </div>
 
       <MonthUsageCard
@@ -863,105 +865,87 @@ function CreditsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAdm
 
       <CurrentPricesCard prices={detail.sms.summary.prices ?? {}} />
 
-      <div className="grid gap-4 xl:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <FileClock className="h-5 w-5 text-primary" />
-              Extrato
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="overflow-x-auto p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Quando</TableHead>
-                  <TableHead>Tipo</TableHead>
-                  <TableHead>Canal</TableHead>
-                  <TableHead className="text-right">Valor</TableHead>
-                  <TableHead className="text-right">Saldo</TableHead>
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <DataCard title="Extrato" bodyClassName="overflow-x-auto p-0 pt-3 sm:p-0 sm:pt-3">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Quando</TableHead>
+                <TableHead>Tipo</TableHead>
+                <TableHead>Canal</TableHead>
+                <TableHead className="text-right">Valor</TableHead>
+                <TableHead className="text-right">Saldo</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {detail.sms.ledger.map((entry) => (
+                <TableRow key={entry.id}>
+                  <TableCell className="whitespace-nowrap">{fmtDate(entry.created_at)}</TableCell>
+                  <TableCell>
+                    <div className="font-medium">{walletEntryTypeLabel(entry.entry_type)}</div>
+                    <div className="max-w-56 truncate text-meta text-muted-foreground">
+                      {entry.reason ?? "-"}
+                    </div>
+                  </TableCell>
+                  <TableCell>{billingItemLabel(entry.item)}</TableCell>
+                  <TableCell
+                    className={`text-right font-semibold ${ledgerAmountTone(Number(entry.amount))}`}
+                  >
+                    {Number(entry.amount) > 0 ? "+" : ""}
+                    {brl(Number(entry.amount))}
+                  </TableCell>
+                  <TableCell className="text-right">{brl(Number(entry.balance_after))}</TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {detail.sms.ledger.map((entry) => (
-                  <TableRow key={entry.id}>
-                    <TableCell>{fmtDate(entry.created_at)}</TableCell>
-                    <TableCell>
-                      <div className="font-medium">{walletEntryTypeLabel(entry.entry_type)}</div>
-                      <div className="max-w-56 truncate text-xs text-muted-foreground">
-                        {entry.reason ?? "-"}
-                      </div>
-                    </TableCell>
-                    <TableCell>{billingItemLabel(entry.item)}</TableCell>
-                    <TableCell
-                      className={`text-right font-semibold ${ledgerAmountTone(Number(entry.amount))}`}
-                    >
-                      {Number(entry.amount) > 0 ? "+" : ""}
-                      {brl(Number(entry.amount))}
-                    </TableCell>
-                    <TableCell className="text-right">{brl(Number(entry.balance_after))}</TableCell>
-                  </TableRow>
-                ))}
-                {!detail.sms.ledger.length && (
-                  <TableRow>
-                    <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
-                      Nenhuma movimentação ainda.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+              ))}
+              {!detail.sms.ledger.length && (
+                <TableRow>
+                  <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                    Nenhuma movimentação ainda.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </DataCard>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Receipt className="h-5 w-5 text-primary" />
-              Pedidos de compra
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="overflow-x-auto p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Pedido</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Créditos</TableHead>
-                  <TableHead className="text-right">Valor</TableHead>
+        <DataCard title="Pedidos de compra" bodyClassName="overflow-x-auto p-0 pt-3 sm:p-0 sm:pt-3">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Pedido</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="text-right">Créditos</TableHead>
+                <TableHead className="text-right">Valor</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {detail.sms.orders.map((order) => (
+                <TableRow key={order.id}>
+                  <TableCell>
+                    <div className="font-mono text-meta">{order.id.slice(0, 8)}</div>
+                    <div className="whitespace-nowrap text-meta text-muted-foreground">
+                      {fmtDate(order.created_at)}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={order.status === "paid" ? "default" : "secondary"}>
+                      {labelFrom(ORDER_STATUS_LABEL, order.status)}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-right">{num(Number(order.credits))}</TableCell>
+                  <TableCell className="text-right">{cents(Number(order.amount_cents))}</TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {detail.sms.orders.map((order) => (
-                  <TableRow key={order.id}>
-                    <TableCell>
-                      <div className="font-mono text-xs">{order.id.slice(0, 8)}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {fmtDate(order.created_at)}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={order.status === "paid" ? "default" : "secondary"}>
-                        {order.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right">{num(Number(order.credits))}</TableCell>
-                    <TableCell className="text-right">
-                      {cents(Number(order.amount_cents))}
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {!detail.sms.orders.length && (
-                  <TableRow>
-                    <TableCell colSpan={4} className="py-8 text-center text-muted-foreground">
-                      Nenhum pedido de crédito.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+              ))}
+              {!detail.sms.orders.length && (
+                <TableRow>
+                  <TableCell colSpan={4} className="py-8 text-center text-muted-foreground">
+                    Nenhum pedido de crédito.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </DataCard>
       </div>
     </div>
   );
@@ -972,7 +956,7 @@ function AdjustCreditsDialog({ tenant }: { tenant: TenantRow }) {
   const fn = useServerFn(adminAdjustSmsCredits);
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState("50");
-  const [reason, setReason] = useState("Ajuste manual via área de tenants");
+  const [reason, setReason] = useState("Ajuste manual pela área de contas");
   const mut = useMutation({
     mutationFn: () => fn({ data: { tenantId: tenant.id, amount: Number(amount), reason } }),
     onSuccess: () => {
@@ -1000,7 +984,7 @@ function AdjustCreditsDialog({ tenant }: { tenant: TenantRow }) {
         </DialogHeader>
         <div className="space-y-3">
           <div className="space-y-2">
-            <Label>Tenant</Label>
+            <Label>Casa</Label>
             <Input value={tenant.nome} readOnly />
           </div>
           <div className="space-y-2">
@@ -1115,93 +1099,82 @@ function PricingDialog({
 
 function ReportsTab({ detail }: { detail: TenantDetail }) {
   const items = [
-    { label: "Players totais", value: detail.reports.players_total },
     { label: "SMS enviados em 30 dias", value: detail.reports.sms_30d },
-    { label: "Emails enviados em 30 dias", value: detail.reports.email_30d },
+    { label: "E-mails enviados em 30 dias", value: detail.reports.email_30d },
     { label: "Ligações em 30 dias", value: detail.reports.calls_30d },
-    { label: "Webhooks em 30 dias", value: detail.reports.webhooks_30d },
+    { label: "Eventos recebidos em 30 dias", value: detail.reports.webhooks_30d },
     { label: "Contas Meta conectadas", value: detail.reports.meta_accounts },
   ];
 
   return (
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
       {items.map((item) => (
-        <Card key={item.label}>
-          <CardContent className="p-5">
-            <div className="text-label text-muted-foreground">{item.label}</div>
-            <div className="mt-2 text-kpi">{num(item.value)}</div>
-          </CardContent>
-        </Card>
+        <MetricCard key={item.label} label={item.label} value={num(item.value)} />
       ))}
     </div>
   );
 }
 
 function AuditTab({ detail }: { detail: TenantDetail }) {
+  const emailByUserId = new Map(
+    detail.users.filter((user) => user.email).map((user) => [user.user_id, user.email]),
+  );
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Clock3 className="h-5 w-5 text-primary" />
-          Histórico de alterações
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="overflow-x-auto p-0">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Quando</TableHead>
-              <TableHead>Ação</TableHead>
-              <TableHead>Entidade</TableHead>
-              <TableHead>Usuário</TableHead>
-              <TableHead>Detalhes</TableHead>
+    <DataCard
+      title="Histórico de alterações"
+      bodyClassName="overflow-x-auto p-0 pt-3 sm:p-0 sm:pt-3"
+    >
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Quando</TableHead>
+            <TableHead>Ação</TableHead>
+            <TableHead>O que mudou</TableHead>
+            <TableHead>Quem</TableHead>
+            <TableHead>Detalhes</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {detail.audit.map((entry) => (
+            <TableRow key={entry.id}>
+              <TableCell className="whitespace-nowrap">{fmtDate(entry.created_at)}</TableCell>
+              <TableCell>
+                <Badge variant="secondary">{labelFrom(AUDIT_ACTION_LABEL, entry.action)}</Badge>
+              </TableCell>
+              <TableCell>{labelFrom(ENTITY_TYPE_LABEL, entry.entity_type)}</TableCell>
+              <TableCell className="text-meta">
+                {entry.actor_user_id
+                  ? (emailByUserId.get(entry.actor_user_id) ?? "Equipe da plataforma")
+                  : "Sistema"}
+              </TableCell>
+              <TableCell>
+                <details className="max-w-xl">
+                  <summary className="cursor-pointer text-primary">ver detalhes</summary>
+                  <pre className="mt-2 max-h-72 overflow-auto rounded-md bg-muted/30 p-3 text-meta">
+                    {JSON.stringify(
+                      {
+                        antes: entry.before_data,
+                        depois: entry.after_data,
+                        contexto: entry.metadata,
+                      },
+                      null,
+                      2,
+                    )}
+                  </pre>
+                </details>
+              </TableCell>
             </TableRow>
-          </TableHeader>
-          <TableBody>
-            {detail.audit.map((entry) => (
-              <TableRow key={entry.id}>
-                <TableCell>{fmtDate(entry.created_at)}</TableCell>
-                <TableCell>
-                  <Badge variant="secondary">{entry.action}</Badge>
-                </TableCell>
-                <TableCell>
-                  <div>{entry.entity_type}</div>
-                  <div className="font-mono text-xs text-muted-foreground">
-                    {entry.entity_id ?? "-"}
-                  </div>
-                </TableCell>
-                <TableCell className="font-mono text-xs">
-                  {entry.actor_user_id ?? "sistema"}
-                </TableCell>
-                <TableCell>
-                  <details className="max-w-xl">
-                    <summary className="cursor-pointer text-primary">ver JSON</summary>
-                    <pre className="mt-2 max-h-72 overflow-auto rounded-md bg-muted/30 p-3 text-xs">
-                      {JSON.stringify(
-                        {
-                          before: entry.before_data,
-                          after: entry.after_data,
-                          metadata: entry.metadata,
-                        },
-                        null,
-                        2,
-                      )}
-                    </pre>
-                  </details>
-                </TableCell>
-              </TableRow>
-            ))}
-            {!detail.audit.length && (
-              <TableRow>
-                <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
-                  Nenhuma alteração administrativa registrada.
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
+          ))}
+          {!detail.audit.length && (
+            <TableRow>
+              <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                Nenhuma alteração administrativa registrada.
+              </TableCell>
+            </TableRow>
+          )}
+        </TableBody>
+      </Table>
+    </DataCard>
   );
 }
 
@@ -1237,122 +1210,110 @@ function SettingsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAd
     mutationFn: () =>
       fn({ data: { tenantId: tenant.id, ...form, planReason: planReason.trim() || undefined } }),
     onSuccess: () => {
-      toast.success("Tenant atualizado");
+      toast.success("Casa atualizada");
       qc.invalidateQueries({ queryKey: ["tenants-console"] });
     },
     onError: (error: Error) => toast.error(error.message),
   });
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Settings2 className="h-5 w-5 text-primary" />
-          Configuração do tenant
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid gap-4 md:grid-cols-2">
-          <div className="space-y-2">
-            <Label>Nome</Label>
-            <Input
-              value={form.nome}
-              onChange={(event) => setForm((prev) => ({ ...prev, nome: event.target.value }))}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label>Slug</Label>
-            <Input value={tenant.slug} readOnly className="font-mono text-xs" />
-          </div>
-          <div className="space-y-2">
-            <Label>Status</Label>
-            <Select
-              value={form.status}
-              disabled={!isSuperAdmin}
-              onValueChange={(value) =>
-                setForm((prev) => ({ ...prev, status: value as TenantRow["status"] }))
-              }
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="active">Ativo</SelectItem>
-                <SelectItem value="trial">Trial</SelectItem>
-                <SelectItem value="suspended">Suspenso</SelectItem>
-                <SelectItem value="canceled">Cancelado</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <Label>Plano</Label>
-            <Select
-              value={form.plano}
-              disabled={!isSuperAdmin}
-              onValueChange={(value) =>
-                setForm((prev) => ({ ...prev, plano: value as TenantRow["plano"] }))
-              }
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="starter">Starter</SelectItem>
-                <SelectItem value="pro">Pro</SelectItem>
-                <SelectItem value="enterprise">Enterprise</SelectItem>
-                <SelectItem value="interno">Interno</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <Label>Modelo CRM</Label>
-            <Select
-              value={form.crm_model}
-              disabled={!isSuperAdmin}
-              onValueChange={(value) =>
-                setForm((prev) => ({
-                  ...prev,
-                  crm_model: value as NonNullable<TenantRow["crm_model"]>,
-                }))
-              }
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="CRM_PLATAFORMA">CRM Plataforma</SelectItem>
-                <SelectItem value="CRM_EXPERT">CRM Expert</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+    <DataCard title="Configuração da casa" bodyClassName="space-y-4">
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="space-y-2">
+          <Label>Nome</Label>
+          <Input
+            value={form.nome}
+            onChange={(event) => setForm((prev) => ({ ...prev, nome: event.target.value }))}
+          />
         </div>
-        {planTouchesInterno && (
-          <div className="space-y-2">
-            <Label>Motivo da troca de plano</Label>
-            <Input
-              value={planReason}
-              onChange={(event) => setPlanReason(event.target.value)}
-              placeholder="Por que esta casa está entrando/saindo do plano interno?"
-            />
-          </div>
-        )}
-        <DemoDisabledTooltip active={isDemo}>
-          <Button
-            className="gap-2"
-            disabled={
-              isDemo ||
-              mut.isPending ||
-              !form.nome.trim() ||
-              (planTouchesInterno && planReason.trim().length < 5)
+        <div className="space-y-2">
+          <Label>Status</Label>
+          <Select
+            value={form.status}
+            disabled={!isSuperAdmin}
+            onValueChange={(value) =>
+              setForm((prev) => ({ ...prev, status: value as TenantRow["status"] }))
             }
-            onClick={() => mut.mutate()}
           >
-            <Save className="h-4 w-4" />
-            Salvar configuração
-          </Button>
-        </DemoDisabledTooltip>
-      </CardContent>
-    </Card>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="active">Ativa</SelectItem>
+              <SelectItem value="trial">Teste</SelectItem>
+              <SelectItem value="suspended">Suspensa</SelectItem>
+              <SelectItem value="canceled">Cancelada</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label>Plano</Label>
+          <Select
+            value={form.plano}
+            disabled={!isSuperAdmin}
+            onValueChange={(value) =>
+              setForm((prev) => ({ ...prev, plano: value as TenantRow["plano"] }))
+            }
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="starter">Starter</SelectItem>
+              <SelectItem value="pro">Pro</SelectItem>
+              <SelectItem value="enterprise">Enterprise</SelectItem>
+              <SelectItem value="interno">Interno</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label>Modelo CRM</Label>
+          <Select
+            value={form.crm_model}
+            disabled={!isSuperAdmin}
+            onValueChange={(value) =>
+              setForm((prev) => ({
+                ...prev,
+                crm_model: value as NonNullable<TenantRow["crm_model"]>,
+              }))
+            }
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="CRM_PLATAFORMA">CRM Plataforma</SelectItem>
+              <SelectItem value="CRM_EXPERT">CRM Expert</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      {planTouchesInterno && (
+        <div className="space-y-2">
+          <Label>Motivo da troca de plano</Label>
+          <Input
+            value={planReason}
+            onChange={(event) => setPlanReason(event.target.value)}
+            placeholder="Por que esta casa está entrando/saindo do plano interno?"
+          />
+        </div>
+      )}
+      <DemoDisabledTooltip active={isDemo}>
+        <Button
+          className="gap-2"
+          disabled={
+            isDemo ||
+            mut.isPending ||
+            !form.nome.trim() ||
+            (planTouchesInterno && planReason.trim().length < 5)
+          }
+          onClick={() => mut.mutate()}
+        >
+          <Save className="h-4 w-4" />
+          Salvar configuração
+        </Button>
+      </DemoDisabledTooltip>
+    </DataCard>
   );
 }
 
@@ -1381,7 +1342,7 @@ function CreateTenantDialog() {
         },
       }),
     onSuccess: () => {
-      toast.success("Tenant criado");
+      toast.success("Casa criada");
       setOpen(false);
       setForm({
         nome: "",
@@ -1401,14 +1362,14 @@ function CreateTenantDialog() {
       <DialogTrigger asChild>
         <Button className="gap-2">
           <Plus className="h-4 w-4" />
-          Novo tenant
+          Nova casa
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Criar tenant</DialogTitle>
+          <DialogTitle>Nova casa</DialogTitle>
           <DialogDescription>
-            Cria uma conta isolada. Usuários e saldo podem ser vinculados depois.
+            Cria uma casa separada das demais. Equipe e saldo podem ser configurados depois.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
@@ -1420,22 +1381,22 @@ function CreateTenantDialog() {
             />
           </div>
           <div className="space-y-2">
-            <Label>Slug opcional</Label>
+            <Label>Endereço curto (opcional)</Label>
             <Input
               value={form.slug}
               onChange={(event) => setForm((prev) => ({ ...prev, slug: event.target.value }))}
             />
           </div>
           <div className="space-y-2">
-            <Label>Email do admin inicial</Label>
+            <Label>E-mail do primeiro administrador</Label>
             <Input
               type="email"
               value={form.adminEmail}
               onChange={(event) => setForm((prev) => ({ ...prev, adminEmail: event.target.value }))}
               placeholder="admin@empresa.com"
             />
-            <p className="text-xs text-muted-foreground">
-              O usuário precisa já existir no sistema.
+            <p className="text-meta text-muted-foreground">
+              A pessoa precisa já ter login no sistema.
             </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -1451,10 +1412,10 @@ function CreateTenantDialog() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="trial">Trial</SelectItem>
-                  <SelectItem value="active">Ativo</SelectItem>
-                  <SelectItem value="suspended">Suspenso</SelectItem>
-                  <SelectItem value="canceled">Cancelado</SelectItem>
+                  <SelectItem value="trial">Teste</SelectItem>
+                  <SelectItem value="active">Ativa</SelectItem>
+                  <SelectItem value="suspended">Suspensa</SelectItem>
+                  <SelectItem value="canceled">Cancelada</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -1487,7 +1448,7 @@ function CreateTenantDialog() {
             disabled={mut.isPending || form.nome.trim().length < 2 || !form.adminEmail.trim()}
             onClick={() => mut.mutate()}
           >
-            Criar tenant
+            Criar casa
           </Button>
         </DialogFooter>
       </DialogContent>

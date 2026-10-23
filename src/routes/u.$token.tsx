@@ -14,10 +14,20 @@ export const lookupUnsubscribe = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: row } = await supabaseAdmin
       .from("email_unsubscribe_tokens")
-      .select("email, used_at")
+      .select("email, used_at, tenant_id")
       .eq("token", data.token)
       .maybeSingle();
     if (!row) return { ok: false as const, reason: "not_found" as const };
+    // The player must know which house they are leaving (F-30).
+    let house: string | null = null;
+    if (row.tenant_id) {
+      const { data: tenant } = await supabaseAdmin
+        .from("tenants")
+        .select("nome")
+        .eq("id", row.tenant_id)
+        .maybeSingle();
+      house = tenant?.nome?.trim() || null;
+    }
     // mascarando o email no retorno (j***@dominio.com)
     const email = row.email as string;
     const [u, dom] = email.split("@");
@@ -28,6 +38,7 @@ export const lookupUnsubscribe = createServerFn({ method: "POST" })
       ok: true as const,
       masked,
       alreadyUsed: !!row.used_at,
+      house,
     };
   });
 
@@ -44,7 +55,7 @@ export const confirmUnsubscribe = createServerFn({ method: "POST" })
 
 export const Route = createFileRoute("/u/$token")({
   head: () => ({
-    meta: [{ title: "Descadastrar email" }, { name: "robots", content: "noindex,nofollow" }],
+    meta: [{ title: "Descadastrar e-mail" }, { name: "robots", content: "noindex,nofollow" }],
   }),
   loader: async ({ params }) => lookupUnsubscribe({ data: { token: params.token } }),
   component: UnsubscribePage,
@@ -71,20 +82,22 @@ function UnsubscribePage() {
   if (!initial.ok) {
     return (
       <Shell>
-        <h1 style={H1}>Link inválido</h1>
-        <p style={P}>Este link de descadastro não foi encontrado ou expirou.</p>
+        <h1 className={H1}>Link inválido</h1>
+        <p className={P}>Este link de descadastro não foi encontrado ou expirou.</p>
       </Shell>
     );
   }
 
+  const from = initial.house ? `de ${initial.house}` : "desta casa";
+
   if (state === "done") {
     return (
       <Shell>
-        <h1 style={H1}>Pronto, você foi descadastrado</h1>
-        <p style={P}>
-          O email <b>{initial.masked}</b> não receberá mais nossas mensagens.
+        <h1 className={H1}>Pronto, você foi descadastrado</h1>
+        <p className={P}>
+          O e-mail <b>{initial.masked}</b> não receberá mais e-mails {from}.
         </p>
-        <p style={{ ...P, color: "#6b7280", fontSize: 13 }}>
+        <p className="text-[13px] leading-relaxed text-zinc-500">
           Pode levar alguns minutos para mensagens já enfileiradas pararem por completo.
         </p>
       </Shell>
@@ -93,56 +106,37 @@ function UnsubscribePage() {
 
   return (
     <Shell>
-      <h1 style={H1}>Confirmar descadastro</h1>
-      <p style={P}>
-        Você quer parar de receber emails em <b>{initial.masked}</b>?
+      <h1 className={H1}>Confirmar descadastro</h1>
+      <p className={P}>
+        Você quer parar de receber e-mails {from} em <b>{initial.masked}</b>?
       </p>
-      <button onClick={handle} disabled={state === "loading"} style={BTN}>
+      <button
+        type="button"
+        onClick={handle}
+        disabled={state === "loading"}
+        className="h-10 rounded-lg bg-zinc-900 px-4 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+      >
         {state === "loading" ? "Processando…" : "Sim, me descadastrar"}
       </button>
       {state === "error" && (
-        <p style={{ ...P, color: "#b91c1c" }}>Algo deu errado. Tente recarregar a página.</p>
+        <p role="alert" className="mt-4 text-sm text-red-700">
+          Algo deu errado. Tente recarregar a página.
+        </p>
       )}
     </Shell>
   );
 }
 
-const SHELL: React.CSSProperties = {
-  minHeight: "100vh",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  padding: 24,
-  background: "#f9fafb",
-  fontFamily: "-apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif",
-  color: "#111827",
-};
-const CARD: React.CSSProperties = {
-  maxWidth: 440,
-  width: "100%",
-  background: "#ffffff",
-  border: "1px solid #e5e7eb",
-  borderRadius: 12,
-  padding: 32,
-  boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
-};
-const H1: React.CSSProperties = { fontSize: 20, fontWeight: 600, margin: "0 0 12px" };
-const P: React.CSSProperties = { fontSize: 14, lineHeight: 1.6, margin: "0 0 16px" };
-const BTN: React.CSSProperties = {
-  background: "#111827",
-  color: "#ffffff",
-  border: "none",
-  padding: "10px 16px",
-  borderRadius: 8,
-  fontSize: 14,
-  fontWeight: 500,
-  cursor: "pointer",
-};
+// Public page opened from an e-mail: light and neutral, outside the CRM theme.
+const H1 = "mb-3 text-xl font-semibold";
+const P = "mb-4 text-sm leading-relaxed";
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div style={SHELL}>
-      <div style={CARD}>{children}</div>
+    <div className="flex min-h-screen items-center justify-center bg-zinc-50 p-6 font-sans text-zinc-900">
+      <div className="w-full max-w-[440px] rounded-xl border border-zinc-200 bg-white p-8 shadow-sm">
+        {children}
+      </div>
     </div>
   );
 }

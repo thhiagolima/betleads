@@ -92,8 +92,13 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
         </header>
         <BillingBanner />
-        <DemoBanner />
-        <ProviderAuthBanner />
+        {/* Same width as the page content (Page: max-w-[1600px]). */}
+        <div className="px-4 sm:px-6">
+          <div className="mx-auto w-full max-w-[1600px]">
+            <DemoBanner />
+            <ProviderAuthBanner />
+          </div>
+        </div>
         <main
           aria-label={meta.title}
           className="flex-1 overflow-x-hidden p-4 pb-[calc(76px+env(safe-area-inset-bottom))] animate-fade-in sm:p-6 sm:pb-[calc(76px+env(safe-area-inset-bottom))] md:pb-6"

@@ -1,14 +1,14 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useLocation, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
-import { BILLING_ITEM_LABEL } from "@/lib/format";
+import { BILLING_ITEM_LABEL, num } from "@/lib/format";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { IconButton } from "@/components/ui/icon-button";
 import {
   Select,
   SelectContent,
@@ -48,6 +48,9 @@ import { toast } from "sonner";
 import { useIsSuperAdmin } from "@/hooks/use-is-super-admin";
 import { requestConfirmation } from "@/components/system-dialog-host";
 import { Page, PageHeader } from "@/components/ui-premium/page-header";
+import { PageTabs } from "@/components/ui-premium/page-tabs";
+import { MetricCard } from "@/components/ui-premium/metric-card";
+import { ChannelObservabilityPanel } from "@/components/admin/channel-observability-panel";
 import {
   adminCreateUser,
   adminDeleteUser,
@@ -77,20 +80,15 @@ import {
 import { BillingCsvDownloadCard } from "@/components/billing/admin/billing-csv-download";
 import { PixFeeFormCard } from "@/components/billing/admin/pix-fee-form";
 import {
-  Activity,
   Ban,
   CheckCircle2,
   Copy,
-  CreditCard,
-  DollarSign,
-  Landmark,
   LogIn,
   Plus,
   Receipt,
   Settings2,
   ShieldCheck,
   Trash2,
-  Users,
   Wallet,
   RadioTower,
 } from "lucide-react";
@@ -131,8 +129,60 @@ function fmtDate(d: string | null) {
   return new Date(d).toLocaleString("pt-BR");
 }
 
+type AdminView =
+  "metrics" | "users" | "pricing" | "sms-credits" | "billing" | "channels" | "integrations";
+
+const ADMIN_VIEWS: ReadonlyArray<{ value: AdminView; label: string; hash: string }> = [
+  { value: "metrics", label: "Métricas", hash: "metricas" },
+  { value: "users", label: "Usuários", hash: "usuarios" },
+  { value: "pricing", label: "Preços", hash: "precos" },
+  { value: "sms-credits", label: "Saldo", hash: "saldo" },
+  { value: "billing", label: "Faturamento", hash: "faturamento" },
+  { value: "channels", label: "Canais", hash: "canais" },
+  { value: "integrations", label: "Integrações", hash: "integracoes" },
+];
+
+function viewFromHash(hash: string): AdminView {
+  const clean = hash.replace(/^#/, "");
+  return ADMIN_VIEWS.find((item) => item.hash === clean)?.value ?? "metrics";
+}
+
+const ROLE_LABEL: Record<string, string> = {
+  admin: "Admin",
+  gestor: "Gestor",
+  member: "Membro",
+};
+
+const ORDER_STATUS_LABEL: Record<string, string> = {
+  pending: "pendente",
+  paid: "pago",
+  canceled: "cancelado",
+  expired: "expirado",
+  failed: "falhou",
+};
+
+const INTEGRATION_CHANNEL_LABEL: Record<string, string> = {
+  sms: "SMS",
+  email: "E-mail",
+  "e-mail": "E-mail",
+  voice: "Voz",
+  voz: "Voz",
+  call: "Voz",
+};
+
 function AdminPage() {
   const { loading, isSuperAdmin } = useIsSuperAdmin();
+  const navigate = useNavigate();
+  // Active tab lives in the URL hash (#metricas, #usuarios…), pushed to the
+  // history so Voltar returns to the previous tab.
+  const hash = useLocation({ select: (location) => location.hash });
+  const view = viewFromHash(hash);
+  const setView = (next: AdminView) => {
+    void navigate({
+      to: "/admin",
+      hash: ADMIN_VIEWS.find((item) => item.value === next)?.hash ?? "metricas",
+    });
+  };
 
   if (loading) {
     return (
@@ -160,47 +210,22 @@ function AdminPage() {
     <Page>
       <PageHeader subtitle="Veja gastos, métricas e gerencie usuários da plataforma." />
 
-      <Tabs defaultValue="users" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="users" className="gap-2">
-            <Users className="h-4 w-4" /> Usuários
-          </TabsTrigger>
-          <TabsTrigger value="metrics" className="gap-2">
-            <Activity className="h-4 w-4" /> Métricas
-          </TabsTrigger>
-          <TabsTrigger value="pricing" className="gap-2">
-            <DollarSign className="h-4 w-4" /> Preços
-          </TabsTrigger>
-          <TabsTrigger value="sms-credits" className="gap-2">
-            <CreditCard className="h-4 w-4" /> Saldo
-          </TabsTrigger>
-          <TabsTrigger value="billing" className="gap-2">
-            <Landmark className="h-4 w-4" /> Faturamento
-          </TabsTrigger>
-          <TabsTrigger value="integrations" className="gap-2">
-            <RadioTower className="h-4 w-4" /> Integrações
-          </TabsTrigger>
-        </TabsList>
+      <PageTabs
+        value={view}
+        onValueChange={setView}
+        label="Seções da administração"
+        items={ADMIN_VIEWS}
+      />
 
-        <TabsContent value="users">
-          <UsersTab />
-        </TabsContent>
-        <TabsContent value="metrics">
-          <MetricsTab />
-        </TabsContent>
-        <TabsContent value="pricing">
-          <PricingTab />
-        </TabsContent>
-        <TabsContent value="sms-credits">
-          <BalanceAdminTab />
-        </TabsContent>
-        <TabsContent value="billing">
-          <BillingTab />
-        </TabsContent>
-        <TabsContent value="integrations">
-          <AdminIntegrationsTab />
-        </TabsContent>
-      </Tabs>
+      <div role="tabpanel" aria-labelledby={`tab-${view}`} className="space-y-4">
+        {view === "metrics" && <MetricsTab />}
+        {view === "users" && <UsersTab />}
+        {view === "pricing" && <PricingTab />}
+        {view === "sms-credits" && <BalanceAdminTab />}
+        {view === "billing" && <BillingTab />}
+        {view === "channels" && <ChannelObservabilityPanel />}
+        {view === "integrations" && <AdminIntegrationsTab />}
+      </div>
     </Page>
   );
 }
@@ -248,8 +273,10 @@ function AdminIntegrationsTab() {
             <div key={item.channel} className="space-y-3 rounded-lg border border-border/70 p-4">
               <div className="flex items-center justify-between gap-2">
                 <div>
-                  <p className="font-medium">{item.channel}</p>
-                  <p className="text-xs text-muted-foreground">{item.provider}</p>
+                  <p className="font-medium">
+                    {INTEGRATION_CHANNEL_LABEL[item.channel.toLowerCase()] ?? item.channel}
+                  </p>
+                  <p className="text-meta text-muted-foreground">{item.provider}</p>
                 </div>
                 <Badge variant={item.configured ? "default" : "destructive"}>
                   {item.configured ? "configurado" : "incompleto"}
@@ -257,24 +284,21 @@ function AdminIntegrationsTab() {
               </div>
               <div className="space-y-1">
                 <Label>Endpoint</Label>
-                <Input readOnly value={item.endpoint} className="font-mono text-xs" />
+                <Input readOnly value={item.endpoint} className="font-mono text-meta" />
               </div>
               <div className="space-y-1">
                 <Label>Callback</Label>
                 <div className="flex gap-2">
-                  <Input readOnly value={item.callbackUrl} className="font-mono text-xs" />
-                  <Button
-                    size="icon"
+                  <Input readOnly value={item.callbackUrl} className="font-mono text-meta" />
+                  <IconButton
                     variant="outline"
-                    aria-label="Copiar callback"
-                    title="Copiar callback"
+                    label="Copiar callback"
+                    icon={<Copy className="h-4 w-4" />}
                     onClick={() => {
                       navigator.clipboard.writeText(item.callbackUrl);
                       toast.success("Callback copiado");
                     }}
-                  >
-                    <Copy className="h-4 w-4" />
-                  </Button>
+                  />
                 </div>
               </div>
             </div>
@@ -327,10 +351,10 @@ function UsersTab() {
                   <TableRow key={u.user_id}>
                     <TableCell>
                       <div className="font-medium">{u.email ?? "—"}</div>
-                      <div className="text-xs text-muted-foreground">
+                      <div className="text-meta text-muted-foreground">
                         {u.tenant_nome ?? "sem conta"} · cadastrado em {fmtDate(u.created_at)}
                       </div>
-                      <div className="text-xs text-muted-foreground">
+                      <div className="text-meta text-muted-foreground">
                         último login: {fmtDate(u.last_sign_in_at)}
                       </div>
                     </TableCell>
@@ -342,16 +366,21 @@ function UsersTab() {
                       )}
                     </TableCell>
                     <TableCell className="text-right">
-                      <div>{Number(u.sms_count)}</div>
-                      <div className="text-xs text-muted-foreground">{brl(u.sms_cost)}</div>
+                      <div>{num(Number(u.sms_count))}</div>
+                      <div className="text-meta text-muted-foreground">{brl(u.sms_cost)}</div>
                     </TableCell>
                     <TableCell className="text-right">
-                      <div>{Number(u.call_minutes).toFixed(1)}</div>
-                      <div className="text-xs text-muted-foreground">{brl(u.call_cost)}</div>
+                      <div>
+                        {Number(u.call_minutes).toLocaleString("pt-BR", {
+                          minimumFractionDigits: 1,
+                          maximumFractionDigits: 1,
+                        })}
+                      </div>
+                      <div className="text-meta text-muted-foreground">{brl(u.call_cost)}</div>
                     </TableCell>
                     <TableCell className="text-right">
-                      <div>{Number(u.email_count)}</div>
-                      <div className="text-xs text-muted-foreground">{brl(u.email_cost)}</div>
+                      <div>{num(Number(u.email_count))}</div>
+                      <div className="text-meta text-muted-foreground">{brl(u.email_cost)}</div>
                     </TableCell>
                     <TableCell className="text-right font-semibold">{brl(u.total_cost)}</TableCell>
                     <TableCell>
@@ -421,30 +450,26 @@ function ManageAccessButton({ userId, email }: { userId: string; email: string }
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button
-          size="sm"
-          variant="ghost"
-          title="Gerenciar acessos"
-          aria-label={`Gerenciar acessos de ${email}`}
-        >
-          <Settings2 className="h-4 w-4" />
-        </Button>
+        <IconButton
+          label={`Gerenciar acessos de ${email}`}
+          icon={<Settings2 className="h-4 w-4" />}
+        />
       </DialogTrigger>
       <DialogContent className="max-w-xl">
         <DialogHeader>
           <DialogTitle>Acessos de {email}</DialogTitle>
-          <DialogDescription>Defina os tenants e privilégios desta conta.</DialogDescription>
+          <DialogDescription>Defina as casas e os privilégios desta conta.</DialogDescription>
         </DialogHeader>
         {isLoading ? (
           <p className="text-sm text-muted-foreground">Carregando acessos...</p>
         ) : (
           <div className="space-y-4">
             <div className="space-y-2 rounded-lg border border-border/60 p-3">
-              <p className="text-sm font-medium">Adicionar tenant</p>
-              <div className="grid gap-2 sm:grid-cols-[1fr_130px_auto]">
+              <p className="text-sm font-medium">Adicionar casa</p>
+              <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_130px_auto]">
                 <Select value={tenantId} onValueChange={setTenantId}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Selecione um tenant" />
+                    <SelectValue placeholder="Selecione uma casa" />
                   </SelectTrigger>
                   <SelectContent>
                     {(data?.tenants ?? [])
@@ -484,7 +509,9 @@ function ManageAccessButton({ userId, email }: { userId: string; email: string }
                     <p className="truncate text-sm font-medium">
                       {membership.tenant?.nome ?? membership.tenant_id}
                     </p>
-                    <p className="text-xs text-muted-foreground">{membership.role}</p>
+                    <p className="text-meta text-muted-foreground">
+                      {ROLE_LABEL[membership.role ?? ""] ?? membership.role}
+                    </p>
                   </div>
                   <Select
                     value={membership.role}
@@ -513,11 +540,10 @@ function ManageAccessButton({ userId, email }: { userId: string; email: string }
                       <SelectItem value="admin">Admin</SelectItem>
                     </SelectContent>
                   </Select>
-                  <Button
-                    size="sm"
-                    variant="ghost"
+                  <IconButton
                     disabled={membership.role === "admin" || removeMut.isPending}
-                    aria-label={`Remover acesso a ${membership.tenant?.nome ?? "esta conta"}`}
+                    label={`Remover acesso a ${membership.tenant?.nome ?? "esta conta"}`}
+                    icon={<Trash2 className="h-4 w-4 text-destructive" />}
                     onClick={async () => {
                       const tenantName = membership.tenant?.nome ?? "esta conta";
                       const confirmed = await requestConfirmation({
@@ -528,13 +554,11 @@ function ManageAccessButton({ userId, email }: { userId: string; email: string }
                       });
                       if (confirmed) removeMut.mutate(membership.tenant_id!);
                     }}
-                  >
-                    <Trash2 className="h-4 w-4 text-destructive" />
-                  </Button>
+                  />
                 </div>
               ))}
               {!data?.memberships?.length && (
-                <p className="text-sm text-muted-foreground">Sem vínculos de tenant.</p>
+                <p className="text-sm text-muted-foreground">Sem vínculo com nenhuma casa.</p>
               )}
             </div>
           </div>
@@ -576,10 +600,6 @@ function CreateUserDialog({ onCreated }: { onCreated: () => void }) {
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
-          <div className="hidden">
-            <Label htmlFor="dn">Nome da conta</Label>
-            <Input id="dn" value="" onChange={() => {}} placeholder="Ex: Casa do João" />
-          </div>
           <div>
             <Label htmlFor="em">Email</Label>
             <Input id="em" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
@@ -624,16 +644,12 @@ function ImpersonateButton({ userId, email }: { userId: string; email: string })
   });
   return (
     <>
-      <Button
-        size="sm"
-        variant="ghost"
-        title="Entrar como"
-        aria-label={`Entrar como ${email}`}
+      <IconButton
+        label={`Entrar como ${email}`}
+        icon={<LogIn className="h-4 w-4" />}
         onClick={() => mut.mutate()}
         disabled={mut.isPending}
-      >
-        <LogIn className="h-4 w-4" />
-      </Button>
+      />
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
           <DialogHeader>
@@ -649,7 +665,7 @@ function ImpersonateButton({ userId, email }: { userId: string; email: string })
               <textarea
                 readOnly
                 value={link}
-                className="w-full h-24 text-xs p-2 rounded-md border bg-muted/30 font-mono"
+                className="w-full h-24 text-meta p-2 rounded-md border bg-muted/30 font-mono"
               />
               <div className="flex gap-2">
                 <Button
@@ -697,11 +713,11 @@ function ToggleActiveButton({
     onError: (e: Error) => toast.error(e.message),
   });
   return (
-    <Button
-      size="sm"
-      variant="ghost"
-      title={banned ? "Reativar" : "Desativar"}
-      aria-label={banned ? `Reativar ${email || "usuário"}` : `Desativar ${email || "usuário"}`}
+    <IconButton
+      label={banned ? `Reativar ${email || "usuário"}` : `Desativar ${email || "usuário"}`}
+      icon={
+        banned ? <CheckCircle2 className="h-4 w-4 text-success" /> : <Ban className="h-4 w-4" />
+      }
       onClick={async () => {
         if (!banned) {
           const confirmed = await requestConfirmation({
@@ -716,9 +732,7 @@ function ToggleActiveButton({
         mut.mutate();
       }}
       disabled={mut.isPending}
-    >
-      {banned ? <CheckCircle2 className="h-4 w-4 text-success" /> : <Ban className="h-4 w-4" />}
-    </Button>
+    />
   );
 }
 
@@ -736,9 +750,7 @@ function DeleteUserButton({ userId, email }: { userId: string; email: string }) 
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
-        <Button size="sm" variant="ghost" title="Excluir" aria-label={`Excluir ${email}`}>
-          <Trash2 className="h-4 w-4 text-danger" />
-        </Button>
+        <IconButton label={`Excluir ${email}`} icon={<Trash2 className="h-4 w-4 text-danger" />} />
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
@@ -845,7 +857,7 @@ function BalanceAdminTab() {
                 <TableRow key={row.tenant_id}>
                   <TableCell>
                     <div className="font-medium">{row.tenant_name ?? "Sem nome"}</div>
-                    <div className="text-xs text-muted-foreground font-mono">{row.tenant_id}</div>
+                    <div className="text-meta text-muted-foreground font-mono">{row.tenant_id}</div>
                     <div className="mt-1 flex gap-1">
                       {row.exempt && <Badge className="bg-success/15 text-success">Isenta</Badge>}
                       {row.has_custom_pricing && (
@@ -1084,7 +1096,7 @@ function SmsCreditOrdersCard({ orders }: { orders: SmsCreditOrderRow[] }) {
           <TableHeader>
             <TableRow>
               <TableHead>Pedido</TableHead>
-              <TableHead>Tenant</TableHead>
+              <TableHead>Casa</TableHead>
               <TableHead className="text-right">Créditos</TableHead>
               <TableHead className="text-right">Valor</TableHead>
               <TableHead>Status</TableHead>
@@ -1094,17 +1106,17 @@ function SmsCreditOrdersCard({ orders }: { orders: SmsCreditOrderRow[] }) {
           <TableBody>
             {orders.map((order) => (
               <TableRow key={order.id}>
-                <TableCell className="font-mono text-xs">{order.id.slice(0, 8)}</TableCell>
+                <TableCell className="font-mono text-meta">{order.id.slice(0, 8)}</TableCell>
                 <TableCell>{orderTenantName(order)}</TableCell>
-                <TableCell className="text-right">
-                  {Number(order.credits).toLocaleString("pt-BR")}
-                </TableCell>
+                <TableCell className="text-right">{num(Number(order.credits))}</TableCell>
                 <TableCell className="text-right">{centsAdmin(order.amount_cents)}</TableCell>
                 <TableCell>
                   {order.status === "paid" ? (
                     <Badge className="bg-success/15 text-success">pago</Badge>
                   ) : (
-                    <Badge variant="secondary">{order.status}</Badge>
+                    <Badge variant="secondary">
+                      {ORDER_STATUS_LABEL[order.status] ?? order.status}
+                    </Badge>
                   )}
                 </TableCell>
                 <TableCell>{fmtDate(order.created_at)}</TableCell>
@@ -1131,32 +1143,36 @@ function MetricsTab() {
     queryFn: () => fn({ data: {} }),
   });
   const m = (data?.metrics ?? {}) as Record<string, number>;
-  const items: Array<{ label: string; value: string }> = [
-    { label: "Usuários totais", value: String(m.total_users ?? 0) },
-    { label: "Usuários ativos (30d)", value: String(m.active_users_30d ?? 0) },
-    { label: "Tentativas de SMS (30d)", value: String(m.sms_total ?? 0) },
+  const items: Array<{ label: string; value: string; hint?: string }> = [
+    { label: "Usuários totais", value: num(m.total_users) },
+    { label: "Usuários ativos (30d)", value: num(m.active_users_30d) },
+    { label: "Tentativas de SMS (30d)", value: num(m.sms_total) },
     // `sms_delivered` counts status in (sent, delivered, ...): accepted by the
     // provider, not confirmed delivery (the provider does not report it).
-    { label: "SMS enviados (30d)", value: String(m.sms_delivered ?? 0) },
-    { label: "Ligações (30d)", value: String(m.call_total ?? 0) },
-    { label: "Tentativas de email (30d)", value: String(m.email_total ?? 0) },
-    { label: "Emails enviados (30d)", value: String(m.email_delivered ?? 0) },
+    {
+      label: "SMS aceitos (30d)",
+      value: num(m.sms_delivered),
+      hint: "Aceitos pelo provedor; a entrega não é confirmada",
+    },
+    { label: "Ligações (30d)", value: num(m.call_total) },
+    { label: "Tentativas de e-mail (30d)", value: num(m.email_total) },
+    {
+      label: "E-mails aceitos (30d)",
+      value: num(m.email_delivered),
+      hint: "Aceitos pelo provedor; a entrega não é confirmada",
+    },
   ];
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
       {isLoading
-        ? Array.from({ length: 7 }).map((_, i) => <Card key={i} className="animate-pulse h-24" />)
+        ? Array.from({ length: 7 }).map((_, i) => (
+            <div
+              key={i}
+              className="h-28 animate-pulse rounded-2xl border border-border bg-card/80"
+            />
+          ))
         : items.map((it) => (
-            <Card key={it.label}>
-              <CardHeader className="pb-1">
-                <CardTitle className="text-label text-muted-foreground font-medium">
-                  {it.label}
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-kpi">{it.value}</div>
-              </CardContent>
-            </Card>
+            <MetricCard key={it.label} label={it.label} value={it.value} hint={it.hint} />
           ))}
     </div>
   );
@@ -1250,13 +1266,13 @@ function PricingRow({ row, onSaved }: { row: PriceBookRow; onSaved: () => void }
       <CardContent
         className={
           isVoice
-            ? "grid gap-3 p-4 sm:grid-cols-[1fr_repeat(4,0.8fr)_auto] sm:items-end"
-            : "grid gap-3 p-4 sm:grid-cols-[1fr_repeat(3,0.8fr)_auto] sm:items-end"
+            ? "grid gap-3 p-4 sm:grid-cols-[minmax(0,1fr)_repeat(4,minmax(0,0.8fr))_auto] sm:items-end"
+            : "grid gap-3 p-4 sm:grid-cols-[minmax(0,1fr)_repeat(3,minmax(0,0.8fr))_auto] sm:items-end"
         }
       >
         <div className="font-medium">{BILLING_ITEM_LABEL[row.item]}</div>
         <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">Preço de venda (R$)</Label>
+          <Label className="text-meta text-muted-foreground">Preço de venda (R$)</Label>
           <Input
             type="number"
             step="0.0001"
@@ -1266,7 +1282,7 @@ function PricingRow({ row, onSaved }: { row: PriceBookRow; onSaved: () => void }
           />
         </div>
         <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">Custo fornecedor (R$)</Label>
+          <Label className="text-meta text-muted-foreground">Custo fornecedor (R$)</Label>
           <Input
             type="number"
             step="0.0001"
@@ -1276,7 +1292,7 @@ function PricingRow({ row, onSaved }: { row: PriceBookRow; onSaved: () => void }
           />
         </div>
         <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">Franquia mensal</Label>
+          <Label className="text-meta text-muted-foreground">Franquia mensal</Label>
           <Input
             type="number"
             step="1"
@@ -1288,7 +1304,7 @@ function PricingRow({ row, onSaved }: { row: PriceBookRow; onSaved: () => void }
         {isVoice && (
           <div className="space-y-1">
             <Label
-              className="text-xs text-muted-foreground"
+              className="text-meta text-muted-foreground"
               title="Blocos de 30 s cobrados quando a chamada não é atendida (0 = grátis)"
             >
               Blocos se não atender
@@ -1302,7 +1318,7 @@ function PricingRow({ row, onSaved }: { row: PriceBookRow; onSaved: () => void }
               aria-invalid={unansweredInvalid || undefined}
             />
             {unansweredInvalid && unansweredBlocks.trim() !== "" && (
-              <p className="text-xs text-destructive">{UNANSWERED_BLOCKS_ERROR}</p>
+              <p className="text-meta text-destructive">{UNANSWERED_BLOCKS_ERROR}</p>
             )}
           </div>
         )}

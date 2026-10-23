@@ -46,12 +46,12 @@ export function LinksOverview() {
         )}
       </div>
 
-      <p className="text-xs text-muted-foreground">
+      <p className="text-meta text-muted-foreground">
         {lastSync ? (
           <>
             {syncTs ? `Atualizado ${syncAgo} · ` : ""}
             {num(lastSync.links_processed)} links lidos ·{" "}
-            {syncStatusLabels[lastSync.status ?? ""] ?? lastSync.status ?? "sem estado"}
+            {syncStatusLabels[lastSync.status ?? ""] ?? "leitura sem estado"}
             {lastSync.error ? ` · ${lastSync.error}` : ""}
           </>
         ) : (
@@ -60,7 +60,7 @@ export function LinksOverview() {
       </p>
 
       <HomeCard className="p-4 sm:p-5">
-        <h2 className="text-[15px] font-semibold">Por canal e origem</h2>
+        <h2 className="text-section font-semibold">Por canal e origem</h2>
         <div className="mt-2">
           {overview.isLoading ? (
             <div className="space-y-2 py-2">

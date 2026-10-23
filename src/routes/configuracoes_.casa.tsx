@@ -3,46 +3,52 @@
 // Visible to every tenant member (read); writes are gated per-section by
 // `canEdit` from `getHouseConfig` (tenant admin, non-demo). Reused by Task
 // 11's setup wizard via each section's `variant="wizard"`.
-import { createFileRoute } from "@tanstack/react-router";
-import { Building2 } from "lucide-react";
+// Not nested under /configuracoes (that page has no <Outlet>).
+import { createFileRoute, useLocation, useNavigate } from "@tanstack/react-router";
 
-import { PageHeader } from "@/components/ui-premium";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Page, PageHeader } from "@/components/ui-premium/page-header";
+import { PageTabs } from "@/components/ui-premium/page-tabs";
 import { DomainsSection } from "@/components/house-config/domains-section";
 import { EmailSendersSection } from "@/components/house-config/email-senders-section";
 import { HouseSiteSection } from "@/components/house-config/house-site-section";
 
 export const Route = createFileRoute("/configuracoes_/casa")({ component: HouseConfigPage });
 
+const VIEWS = [
+  { value: "casa", label: "Casa" },
+  { value: "encurtador", label: "Encurtador" },
+  { value: "email", label: "E-mail" },
+] as const;
+type View = (typeof VIEWS)[number]["value"];
+
 function HouseConfigPage() {
+  const navigate = useNavigate();
+  const hash = useLocation({ select: (location) => location.hash.replace(/^#/, "") });
+  const view: View = VIEWS.find((item) => item.value === hash)?.value ?? "casa";
+  const setView = (next: View) =>
+    void navigate({ to: "/configuracoes/casa", hash: next === "casa" ? undefined : next });
+
   return (
-    <div className="space-y-6 max-w-5xl">
-      <PageHeader
-        title="Configuração da casa"
-        subtitle="URL da casa, domínios de encurtador e de e-mail, e remetentes."
-        icon={<Building2 className="h-5 w-5 text-primary-foreground" />}
+    <Page className="max-w-5xl">
+      <PageHeader subtitle="Endereço da casa, domínios do encurtador e de e-mail, e remetentes." />
+
+      <PageTabs
+        value={view}
+        onValueChange={setView}
+        label="Seções da configuração da casa"
+        items={VIEWS}
       />
 
-      <Tabs defaultValue="casa">
-        <TabsList>
-          <TabsTrigger value="casa">Casa</TabsTrigger>
-          <TabsTrigger value="encurtador">Encurtador</TabsTrigger>
-          <TabsTrigger value="email">E-mail</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="casa" className="mt-4">
-          <HouseSiteSection />
-        </TabsContent>
-
-        <TabsContent value="encurtador" className="mt-4">
-          <DomainsSection kind="shortener" />
-        </TabsContent>
-
-        <TabsContent value="email" className="mt-4 space-y-4">
-          <DomainsSection kind="email" />
-          <EmailSendersSection />
-        </TabsContent>
-      </Tabs>
-    </div>
+      <div role="tabpanel" aria-labelledby={`tab-${view}`} className="space-y-4">
+        {view === "casa" && <HouseSiteSection />}
+        {view === "encurtador" && <DomainsSection kind="shortener" />}
+        {view === "email" && (
+          <>
+            <DomainsSection kind="email" />
+            <EmailSendersSection />
+          </>
+        )}
+      </div>
+    </Page>
   );
 }
