@@ -17,7 +17,7 @@
 // the relevant window (no longer open/due/locked/within 48h of being paid).
 
 import { brl } from "../format";
-import { brtDayKey } from "@/lib/tz";
+import { brtDayKey, brtDayStart } from "@/lib/tz";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { isBillingEnforcementEnabled } from "@/lib/tenant-access.server";
 
@@ -150,7 +150,7 @@ function emailBodyText(
       const paidDateDDMM = invoice.paid_at ? formatDDMM(brtDayKey(new Date(invoice.paid_at))) : "-";
       const periodStartDDMM = formatDDMM(invoice.period_start);
       const periodEndDDMM = formatDDMM(invoice.period_end);
-      return `Recebemos o pagamento da sua mensalidade de ${amount} em ${paidDateDDMM}, referente ao período de ${periodStartDDMM} a ${periodEndDDMM}. Comprovante: ${endToEndOrManual}. Obrigado!`;
+      return `Recebemos o pagamento da sua mensalidade de ${amount} em ${paidDateDDMM}, referente ao período de ${periodStartDDMM} a ${periodEndDDMM}. Referência: ${endToEndOrManual}. Obrigado!`;
     }
   }
 }
@@ -414,11 +414,15 @@ async function findIssuedCandidates(): Promise<string[]> {
  * issued, so without this it would get both `issued` ("vence hoje") and
  * `due_today` on the same day — decision 14 wants only the former.
  */
-async function issuedTodayInvoiceIds(today: string): Promise<Set<string>> {
+async function issuedTodayInvoiceIds(today: string, now: Date): Promise<Set<string>> {
+  // Fix round 1 (Ruling T10): bounded to today's Brasília day instead of
+  // scanning every 'issued' log row ever written — `brtDayStart(now)` is the
+  // start of `today` in BRT, expressed as a UTC instant.
   const { data, error } = await supabaseAdmin
     .from("billing_email_log")
     .select("invoice_id, sent_at")
-    .eq("kind", "issued");
+    .eq("kind", "issued")
+    .gte("sent_at", brtDayStart(now).toISOString());
   if (error) throw new Error(error.message);
   const ids = ((data ?? []) as Array<{ invoice_id: string; sent_at: string }>)
     .filter((row) => brtDayKey(new Date(row.sent_at)) === today)
@@ -436,7 +440,7 @@ async function findDueTodayCandidates(now: Date): Promise<string[]> {
   const [{ data, error }, sent, issuedToday] = await Promise.all([
     supabaseAdmin.from("billing_invoices").select("id").eq("status", "open").eq("due_date", today),
     sentInvoiceIds("due_today"),
-    issuedTodayInvoiceIds(today),
+    issuedTodayInvoiceIds(today, now),
   ]);
   if (error) throw new Error(error.message);
   return withoutSent((data ?? []) as Array<{ id: string }>, sent).filter(

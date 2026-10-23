@@ -98,6 +98,7 @@ export const BILLING_ADMIN_ERROR_MESSAGES: Record<string, string> = {
   invalid_amount: "Valor inválido.",
   invalid_date: "Data inválida.",
   invalid_via: "Forma de pagamento inválida.",
+  invalid_paid_at: "A data do pagamento não pode ser anterior à emissão da fatura.",
 };
 
 function translateBillingError(error: DbError): Error {
@@ -141,6 +142,19 @@ const reasonSchema = z
 /** Shared `YYYY-MM-DD` validator (minor m4): same shape/message everywhere a plain date string
  * comes in — `nextDueDate`, and the continuous discount's `startsOn`/`endsOn`. */
 const dateStrSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Data inválida.");
+
+/** True only for a `YYYY-MM-DD` that is a real calendar date (rejects e.g. 2026-02-30) — same
+ * check as the client's `validateCalendarDate` (billing-admin-ui.ts), kept in sync by hand since
+ * one is a pure client helper and the other a zod refinement. */
+function isRealCalendarDate(value: string): boolean {
+  const [y, m, d] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  return date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d;
+}
+
+/** Fix round 1 (Ruling T10): `paidAt` must be shaped AND a real calendar date — the server never
+ * forwards an impossible date like 2026-02-30 to the DB. */
+const paidAtSchema = dateStrSchema.refine(isRealCalendarDate, "Essa data não existe no calendário.");
 
 // ---------------------------------------------------------------------------
 // Audit (tenant_audit_logs, action = "billing.<ação>")
@@ -456,8 +470,10 @@ export const adminManualSettleInput = z.object({
   // day. Empty/omitted keeps today's behaviour (paid_at = now(), set by the
   // SQL function when `_paid_at` is null). A future date is harmless to
   // accept here — `billing_settle_invoice` clamps it to `<= now()` — but the
-  // dialog already blocks it client-side (`validateManualSettlePaidAt`).
-  paidAt: dateStrSchema.nullable().optional(),
+  // dialog already blocks it client-side (`validateManualSettlePaidAt`). A
+  // date earlier than the invoice's own issue day is rejected by the SQL
+  // function (`invalid_paid_at`, mapped above).
+  paidAt: paidAtSchema.nullable().optional(),
   reason: reasonSchema,
 });
 
@@ -475,7 +491,12 @@ export async function adminManualSettleFor(ctx: ServerContext, data: unknown) {
   // a later payment of it at Upper is not a second payment of a paid invoice.
   const cancel = await cancelOpenPixBestEffort(input.invoiceId);
 
-  const paidAt = input.paidAt ? paidAtNoonBrtIso(input.paidAt) : null;
+  // Fix round 1 (Ruling T10): `paidAt === today (BRT)` sends null so the SQL
+  // function records `paid_at = now()` exactly like the "no date given" case
+  // — a same-day payment should carry today's actual time, not a synthetic
+  // 12:00 for a day that already has a real "now".
+  const paidAt =
+    input.paidAt && input.paidAt !== brtDayKey(new Date()) ? paidAtNoonBrtIso(input.paidAt) : null;
   const result = unwrap<{ tenant_id: string; invoice_id: string }>(
     await looseDb(ctx.supabase).rpc("billing_admin_manual_settle", {
       _invoice: input.invoiceId,
@@ -499,6 +520,22 @@ export async function adminManualSettleFor(ctx: ServerContext, data: unknown) {
       pixCancel: cancel,
     },
   });
+
+  // Fix round 1 (Ruling T10): a manual settle is a real payment, so it gets
+  // the same 'paid' e-mail a Pix payment does. Best-effort — the invoice is
+  // already settled and audited above; a mail failure here must never
+  // surface as a failed settle. `sendBillingEmail`'s own log row
+  // (invoice_id, kind) makes this idempotent against a retry/resend, so
+  // nothing special is needed here beyond catching and logging.
+  try {
+    await sendBillingEmail(result.invoice_id, "paid");
+  } catch (err) {
+    console.error("[billing-admin] could not send the 'paid' e-mail after a manual settle", {
+      invoiceId: result.invoice_id,
+      error: errorMessage(err),
+    });
+  }
+
   return result;
 }
 
@@ -1324,6 +1361,9 @@ export type AdminBillingOpenInvoice = {
   dueDate: string;
   /** Narrowed from `access_state` — only the phases an open invoice can be in. */
   phase: "due_soon" | "overdue" | "locked_unpaid" | "awaiting_first_payment" | "open";
+  /** `created_at`'s Brasília calendar day (fix round 1, Ruling T10): the manual-settle dialog's
+   * `paidAt` lower bound — the SQL function rejects a payment date earlier than this. */
+  issuedOn: string;
 };
 
 export type AdminBillingContinuousDiscount = {
@@ -1366,7 +1406,13 @@ type TenantBillingListRow = {
   discount_starts_on: string | null;
   discount_ends_on: string | null;
 };
-type OpenInvoiceListRow = { id: string; tenant_id: string; amount_cents: number | string; due_date: string };
+type OpenInvoiceListRow = {
+  id: string;
+  tenant_id: string;
+  amount_cents: number | string;
+  due_date: string;
+  created_at: string;
+};
 
 /** Only `due_soon`/`overdue`/`locked_unpaid`/`awaiting_first_payment` describe an open
  * invoice's own phase; any other access_state (ok, exempt, frozen, locked_manual) just
@@ -1401,7 +1447,10 @@ export async function adminBillingTenantListFor(ctx: ServerContext): Promise<Adm
       "tenant_id",
     ),
     selectAllPages<OpenInvoiceListRow>("billing_admin_tenant_list_open_invoices", () =>
-      sb.from("billing_invoices").select("id,tenant_id,amount_cents,due_date").eq("status", "open"),
+      sb
+        .from("billing_invoices")
+        .select("id,tenant_id,amount_cents,due_date,created_at")
+        .eq("status", "open"),
     ),
   ]);
   for (const res of [tenantsPaged, tbPaged, openInvPaged]) {
@@ -1432,6 +1481,7 @@ export async function adminBillingTenantListFor(ctx: ServerContext): Promise<Adm
             amountCents: Number(openInv.amount_cents),
             dueDate: openInv.due_date,
             phase: invoicePhaseFor(accessState),
+            issuedOn: brtDayKey(new Date(openInv.created_at)),
           }
         : null,
       customPriceCents: tb?.custom_price_cents != null ? Number(tb.custom_price_cents) : null,

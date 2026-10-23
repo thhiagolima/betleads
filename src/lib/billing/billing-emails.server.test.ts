@@ -451,7 +451,7 @@ describe("sendBillingEmail", () => {
     const html = callInfobipEmail.mock.calls.at(-1)?.[0].html as string;
     expect(html).toContain("em 22/10");
     expect(html).toContain("05/10 a 04/11");
-    expect(html).toContain("E12345");
+    expect(html).toContain("Referência: E12345");
   });
 
   it("paid shows 'Baixa manual' when the invoice has no endToEndId (manual settle)", async () => {
@@ -472,7 +472,9 @@ describe("sendBillingEmail", () => {
     await sendBillingEmail("inv-manual", "paid", { now: INSIDE_WINDOW });
 
     const html = callInfobipEmail.mock.calls.at(-1)?.[0].html as string;
-    expect(html).toContain("Baixa manual");
+    // Fix round 1, Ruling T10 (item 8): "Referência:", not "Comprovante:".
+    expect(html).toContain("Referência: Baixa manual");
+    expect(html).not.toContain("Comprovante");
   });
 
   it("the e-mail body links to the Plano e créditos button", async () => {
@@ -597,6 +599,31 @@ describe("sendPendingBillingEmails", () => {
     expect(fake.admin.rows("billing_email_log").filter((r) => r.kind === "due_today")).toEqual([
       expect.objectContaining({ invoice_id: "aged" }),
     ]);
+  });
+
+  // Fix round 1, Ruling T10 (item 9): the same-day skip rule
+  // (`issuedTodayInvoiceIds`) only looks at an EXISTING 'issued' log row —
+  // if every recipient's 'issued' send failed, `sendBillingEmail` rolls that
+  // row back (see module header), so this invoice must not be mistaken for
+  // "already got its one e-mail today" and `due_today` must still go out.
+  it("a failed 'issued' send (log row rolled back) does not suppress 'due_today' for the same invoice", async () => {
+    seedTenant();
+    seedInvoice({ id: "upfront-fail", due_date: "2026-10-22" });
+    seedRolesAndUsers();
+    callInfobipEmail.mockImplementation(async (input: { idempotencyKey?: string }) => {
+      const isIssued = (input.idempotencyKey ?? "").includes(":issued:");
+      return isIssued
+        ? { ok: false, status: 500, body: {}, idempotencyKey: input.idempotencyKey ?? "k" }
+        : { ok: true, status: 200, body: {}, idempotencyKey: input.idempotencyKey ?? "k" };
+    });
+
+    const result = await sendPendingBillingEmails({ now: INSIDE_WINDOW });
+
+    expect(fake.admin.rows("billing_email_log").filter((r) => r.kind === "issued")).toHaveLength(0);
+    expect(fake.admin.rows("billing_email_log").filter((r) => r.kind === "due_today")).toEqual([
+      expect.objectContaining({ invoice_id: "upfront-fail" }),
+    ]);
+    expect(result).toBe(1);
   });
 
   it("never sends 'locked' without enforcement, but does with it", async () => {

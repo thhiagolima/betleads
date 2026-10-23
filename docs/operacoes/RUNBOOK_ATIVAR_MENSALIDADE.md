@@ -264,6 +264,7 @@ drop function if exists public.billing_admin_set_custom_price(uuid, bigint);
 drop function if exists public.billing_admin_set_frozen(uuid, boolean);
 drop function if exists public.billing_admin_set_cycle_day(uuid, date);
 drop function if exists public.billing_admin_cancel_invoice(uuid, text);
+drop function if exists public.billing_admin_manual_settle(uuid, bigint, text, text, timestamptz);
 drop function if exists public.billing_admin_manual_settle(uuid, bigint, text, text);
 drop function if exists public.billing_admin_set_continuous_discount(uuid, text, numeric, date, date);
 drop function if exists public.billing_admin_one_off_discount(uuid, text, numeric);

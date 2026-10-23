@@ -119,6 +119,22 @@ describe("validateManualSettlePaidAt", () => {
   it("refuses a date that does not exist on the calendar", () => {
     expect(validateManualSettlePaidAt("2026-02-30", TODAY).valid).toBe(false);
   });
+
+  // Fix round 1, Ruling T10 (item 2) — lower bound: the invoice's issue day.
+  it("accepts a date with no issuedOnBRT given (back-compat, no lower bound)", () => {
+    expect(validateManualSettlePaidAt("2026-10-01", TODAY).valid).toBe(true);
+  });
+
+  it("accepts a date on or after the invoice's issue day", () => {
+    expect(validateManualSettlePaidAt("2026-10-05", TODAY, "2026-10-05").valid).toBe(true);
+    expect(validateManualSettlePaidAt("2026-10-10", TODAY, "2026-10-05").valid).toBe(true);
+  });
+
+  it("refuses a date before the invoice's issue day", () => {
+    const result = validateManualSettlePaidAt("2026-10-04", TODAY, "2026-10-05");
+    expect(result.valid).toBe(false);
+    expect(result.message).toBe("A data do pagamento não pode ser anterior à emissão da fatura.");
+  });
 });
 
 describe("validatePercentDiscount", () => {

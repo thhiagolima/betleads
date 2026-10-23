@@ -17,6 +17,7 @@ vi.mock("./billing-emails.server", () => ({ sendBillingEmail }));
 vi.mock("@/lib/tenant-access.server", () => ({ listDemoTenantIds: vi.fn(async () => [] as string[]) }));
 
 import { createFakeDb } from "@/lib/sms-bulk.test-support";
+import { brtDayKey } from "@/lib/tz";
 import {
   adminApplyInvoiceDiscountFor,
   adminBillingDashboardFor,
@@ -352,6 +353,108 @@ describe("adminManualSettleFor", () => {
     const metadata = fake.admin.rows("tenant_audit_logs")[0].metadata as Record<string, unknown>;
     expect(metadata.pixCancel).toMatchObject({ attempted: true, ok: false });
   });
+
+  // Fix round 1, Ruling T10 — item 1.
+  it("sends the 'paid' e-mail best-effort after a successful settle", async () => {
+    userDb.onRpc("billing_admin_manual_settle", () => ({
+      data: { ok: true, tenant_id: TENANT, invoice_id: INVOICE },
+      error: null,
+    }));
+    await adminManualSettleFor(ctxFor(SUPER_ADMIN), {
+      invoiceId: INVOICE,
+      note: "Pago via TED",
+      receipt: "comprovante-123",
+      reason: "pagamento fora do Pix",
+    });
+    expect(sendBillingEmail).toHaveBeenCalledWith(INVOICE, "paid");
+  });
+
+  it("still returns the settle result when sending the 'paid' e-mail fails (logs, never throws)", async () => {
+    sendBillingEmail.mockRejectedValueOnce(new Error("infobip down"));
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    userDb.onRpc("billing_admin_manual_settle", () => ({
+      data: { ok: true, tenant_id: TENANT, invoice_id: INVOICE },
+      error: null,
+    }));
+    const result = await adminManualSettleFor(ctxFor(SUPER_ADMIN), {
+      invoiceId: INVOICE,
+      note: "Pago via TED",
+      receipt: "comprovante-123",
+      reason: "pagamento fora do Pix",
+    });
+    expect(result).toMatchObject({ tenant_id: TENANT });
+    expect(errorSpy).toHaveBeenCalledWith(
+      "[billing-admin] could not send the 'paid' e-mail after a manual settle",
+      expect.objectContaining({ invoiceId: INVOICE }),
+    );
+  });
+
+  it("sends the 'paid' e-mail even when the settle is backdated more than 48h (the hourly sweep's lookback would otherwise miss it)", async () => {
+    userDb.onRpc("billing_admin_manual_settle", () => ({
+      data: { ok: true, tenant_id: TENANT, invoice_id: INVOICE },
+      error: null,
+    }));
+    await adminManualSettleFor(ctxFor(SUPER_ADMIN), {
+      invoiceId: INVOICE,
+      note: "Pago via TED",
+      receipt: "comprovante-123",
+      reason: "pagamento fora do Pix",
+      paidAt: "2026-01-01", // far more than 48h in the past.
+    });
+    expect(sendBillingEmail).toHaveBeenCalledWith(INVOICE, "paid");
+  });
+
+  // Fix round 1, Ruling T10 — item 2 (server-side mapped error).
+  it("translates invalid_paid_at to the pt-BR message", async () => {
+    userDb.onRpc("billing_admin_manual_settle", () => ({
+      data: null,
+      error: { message: "invalid_paid_at" },
+    }));
+    await expect(
+      adminManualSettleFor(ctxFor(SUPER_ADMIN), {
+        invoiceId: INVOICE,
+        note: "Pago via TED",
+        receipt: "comprovante-123",
+        reason: "pagamento fora do Pix",
+        paidAt: "2026-01-01",
+      }),
+    ).rejects.toThrow("A data do pagamento não pode ser anterior à emissão da fatura.");
+  });
+
+  // Fix round 1, Ruling T10 — item 3 (zod rejects an impossible calendar date before the RPC).
+  it("rejects an impossible calendar date (2026-02-30) for paidAt without calling the RPC", async () => {
+    userDb.onRpc("billing_admin_manual_settle", () => ({
+      data: { ok: true, tenant_id: TENANT, invoice_id: INVOICE },
+      error: null,
+    }));
+    await expect(
+      adminManualSettleFor(ctxFor(SUPER_ADMIN), {
+        invoiceId: INVOICE,
+        note: "Pago via TED",
+        receipt: "comprovante-123",
+        reason: "pagamento fora do Pix",
+        paidAt: "2026-02-30",
+      }),
+    ).rejects.toThrow();
+  });
+
+  // Fix round 1, Ruling T10 — item 4.
+  it("sends null (paid_at = now()) when paidAt is today's Brasília day", async () => {
+    let capturedArgs: Record<string, unknown> | undefined;
+    userDb.onRpc("billing_admin_manual_settle", (args) => {
+      capturedArgs = args;
+      return { data: { ok: true, tenant_id: TENANT, invoice_id: INVOICE }, error: null };
+    });
+    const todayBRT = brtDayKey(new Date());
+    await adminManualSettleFor(ctxFor(SUPER_ADMIN), {
+      invoiceId: INVOICE,
+      note: "Pago via TED",
+      receipt: "comprovante-123",
+      reason: "pagamento fora do Pix",
+      paidAt: todayBRT,
+    });
+    expect(capturedArgs?._paid_at).toBeNull();
+  });
 });
 
 describe("adminCancelInvoiceFor", () => {
@@ -625,6 +728,7 @@ describe("adminBillingTenantListFor", () => {
       status: "open",
       amount_cents: 315000,
       due_date: "2026-11-05",
+      created_at: "2026-10-05T14:00:00.000Z",
     });
 
     const rows = await adminBillingTenantListFor(ctxFor(SUPER_ADMIN));
@@ -641,7 +745,13 @@ describe("adminBillingTenantListFor", () => {
       nextDueDate: "2026-11-05",
       customPriceCents: 350000,
       continuousDiscount: { kind: "percent", value: 10, startsOn: null, endsOn: null },
-      openInvoice: { id: INVOICE, amountCents: 315000, dueDate: "2026-11-05", phase: "overdue" },
+      openInvoice: {
+        id: INVOICE,
+        amountCents: 315000,
+        dueDate: "2026-11-05",
+        phase: "overdue",
+        issuedOn: "2026-10-05",
+      },
     });
 
     const exempt = rows.find((r) => r.tenantId === OTHER_TENANT);

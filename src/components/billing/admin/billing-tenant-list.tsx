@@ -64,7 +64,11 @@ function TenantActionsRow({ row }: { row: AdminBillingTenantRow }) {
       <GrantFreeDaysAction tenantId={row.tenantId} onDone={onDone} />
       <ApplyInvoiceDiscountAction invoiceId={invoiceId} onDone={onDone} />
       <SetContinuousDiscountAction tenantId={row.tenantId} onDone={onDone} />
-      <ManualSettleAction invoiceId={invoiceId} onDone={onDone} />
+      <ManualSettleAction
+        invoiceId={invoiceId}
+        issuedOn={row.openInvoice?.issuedOn ?? null}
+        onDone={onDone}
+      />
       <CancelInvoiceAction invoiceId={invoiceId} onDone={onDone} />
       <SetCycleDayAction tenantId={row.tenantId} onDone={onDone} />
       <SetFrozenAction tenantId={row.tenantId} frozen={row.frozen} onDone={onDone} />

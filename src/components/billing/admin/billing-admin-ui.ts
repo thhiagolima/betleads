@@ -105,16 +105,29 @@ export function validateManualSettleAmount(raw: string): FieldValidation {
   return VALID;
 }
 
-/** "Dar baixa manual" — data do pagamento (PG3 Task 10): opcional (vazio = hoje, resolvido pelo
- * servidor); quando preenchida, precisa ser uma data de calendário real e não pode estar no
- * futuro. `todayBRT` (YYYY-MM-DD) é passada pelo chamador — este módulo é puro e nunca lê o
- * relógio — e a comparação é lexicográfica, válida porque ambos os lados são YYYY-MM-DD. */
-export function validateManualSettlePaidAt(raw: string, todayBRT: string): FieldValidation {
+/** "Dar baixa manual" — data do pagamento (PG3 Task 10; lower bound added in fix round 1,
+ * Ruling T10): opcional (vazio = hoje, resolvido pelo servidor); quando preenchida, precisa ser
+ * uma data de calendário real, não pode estar no futuro, e não pode ser anterior ao dia de
+ * emissão da fatura (mesma regra que a função SQL aplica — `invalid_paid_at`). `todayBRT` and
+ * `issuedOnBRT` (both YYYY-MM-DD) are passed by the caller — this module is pure and never reads
+ * the clock or the invoice — and every comparison is lexicographic, valid because both sides are
+ * YYYY-MM-DD. `issuedOnBRT` is optional so existing callers that don't have it yet still compile. */
+export function validateManualSettlePaidAt(
+  raw: string,
+  todayBRT: string,
+  issuedOnBRT?: string,
+): FieldValidation {
   if (raw.trim() === "") return VALID;
   const calendar = validateCalendarDate(raw);
   if (!calendar.valid) return calendar;
   if (raw > todayBRT) {
     return { valid: false, message: "A data do pagamento não pode ser no futuro." };
+  }
+  if (issuedOnBRT != null && raw < issuedOnBRT) {
+    return {
+      valid: false,
+      message: "A data do pagamento não pode ser anterior à emissão da fatura.",
+    };
   }
   return VALID;
 }

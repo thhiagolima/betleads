@@ -369,9 +369,13 @@ export function SetContinuousDiscountAction({
 
 export function ManualSettleAction({
   invoiceId,
+  issuedOn,
   onDone,
 }: {
   invoiceId: string | null;
+  /** The open invoice's issue day (BRT, YYYY-MM-DD) — the payment date can never be earlier
+   * than this (fix round 1, Ruling T10). Null when there is no open invoice (trigger disabled). */
+  issuedOn: string | null;
   onDone: OnDone;
 }) {
   const todayBRT = brtDayKey(new Date());
@@ -385,7 +389,7 @@ export function ManualSettleAction({
   const paidAtId = useId();
   const mut = useBillingAction(adminManualSettle);
   const amountValidation = validateManualSettleAmount(paidAmount);
-  const paidAtValidation = validateManualSettlePaidAt(paidAt, todayBRT);
+  const paidAtValidation = validateManualSettlePaidAt(paidAt, todayBRT, issuedOn ?? undefined);
   const valid =
     amountValidation.valid &&
     paidAtValidation.valid &&
@@ -440,6 +444,7 @@ export function ManualSettleAction({
         <Input
           id={paidAtId}
           type="date"
+          min={issuedOn ?? undefined}
           max={todayBRT}
           value={paidAt}
           onChange={(e) => setPaidAt(e.target.value)}

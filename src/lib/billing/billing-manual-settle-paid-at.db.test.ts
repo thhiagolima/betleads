@@ -133,6 +133,23 @@ async function paidAtAndVia(invoice: string): Promise<{ paid_at: string; paid_vi
   );
 }
 
+// `billing_invoices.created_at` defaults to the REAL wall clock (`now()`),
+// never the fixed `test.now` clock (that only drives `billing_now()` /
+// `billing_today()`), so the invoice's issue day for the `_paid_at` lower
+// bound must be read back from the row, not assumed from `setToday`.
+async function issueDayBRT(invoice: string): Promise<string> {
+  return scalar<string>(
+    `select (created_at at time zone 'America/Sao_Paulo')::date::text v
+     from public.billing_invoices where id = $1`,
+    [invoice],
+  );
+}
+
+/** The calendar day immediately before `yyyyMmDd` (plain date arithmetic). */
+async function dayBefore(yyyyMmDd: string): Promise<string> {
+  return scalar<string>(`select (date '${yyyyMmDd}' - interval '1 day')::date::text v`);
+}
+
 async function manualSettle(invoice: string, paidAt: string | null): Promise<void> {
   await admin(
     "select public.billing_admin_manual_settle($1, $2, $3, $4, $5)",
@@ -185,6 +202,33 @@ describe("billing_admin_manual_settle with _paid_at", () => {
 
     const row = await paidAtAndVia(invoice!.id);
     expect(row.paid_at).toBe("2026-11-10 12:00:00");
+  });
+
+  it("rejects a _paid_at earlier than the invoice's own issue day", async () => {
+    await setToday("2026-11-10");
+    const tenant = await createHouse("enterprise");
+    const invoice = await openInvoiceOf(tenant);
+    const issueDay = await issueDayBRT(invoice!.id);
+    const prevDay = await dayBefore(issueDay);
+
+    // A payment "received" the day before the invoice existed makes no
+    // sense. `created_at` is the real wall clock, so the day before IT
+    // (not the fixed test clock's "today") is what must be rejected.
+    await expect(manualSettle(invoice!.id, `${prevDay} 23:59:00-03`)).rejects.toThrow(
+      /invalid_paid_at/,
+    );
+  });
+
+  it("accepts a _paid_at exactly on the invoice's issue day", async () => {
+    await setToday("2026-11-10");
+    const tenant = await createHouse("enterprise");
+    const invoice = await openInvoiceOf(tenant);
+    const issueDay = await issueDayBRT(invoice!.id);
+
+    await manualSettle(invoice!.id, `${issueDay} 08:00:00-03`);
+
+    const row = await paidAtAndVia(invoice!.id);
+    expect(row.paid_via).toBe("manual");
   });
 
   it("the next due date is counted from the payment date, not from today — paid while locked", async () => {

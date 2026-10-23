@@ -13,6 +13,14 @@
 -- settled while `locked_unpaid` with a past `_paid_at` restarts its cycle
 -- from that day, not from today.
 --
+-- Fix round 1 (Ruling T10): `_paid_at`, when given, can never be earlier
+-- than the invoice's own issue day (its `created_at`, as a Brasília
+-- calendar date) — a manual settle backdated before the invoice existed
+-- makes no sense and would let `billing_settle_invoice`'s "paid while
+-- locked restarts the cycle from the payment day" rule compute a next due
+-- date earlier than the invoice itself. Raises `invalid_paid_at`, mapped to
+-- a pt-BR message on the TS side (billing-admin.functions.ts).
+--
 -- Grants are redone exactly as the original: revoke from public/anon, grant
 -- to authenticated and service_role (the superadmin check stays inside
 -- `billing_admin_lock_open_invoice`, via `is_super_admin()`).
@@ -34,11 +42,19 @@ as $$
 declare
   v_inv public.billing_invoices%rowtype;
   v_result jsonb;
+  v_issue_day date;
 begin
   v_inv := public.billing_admin_lock_open_invoice(_invoice);
 
   if _paid_amount_cents is not null and _paid_amount_cents < 0 then
     raise exception 'invalid_amount';
+  end if;
+
+  if _paid_at is not null then
+    v_issue_day := (v_inv.created_at at time zone 'America/Sao_Paulo')::date;
+    if (_paid_at at time zone 'America/Sao_Paulo')::date < v_issue_day then
+      raise exception 'invalid_paid_at';
+    end if;
   end if;
 
   v_result := public.billing_settle_invoice(
@@ -51,3 +67,5 @@ $$;
 
 revoke execute on function public.billing_admin_manual_settle(uuid, bigint, text, text, timestamptz) from public, anon;
 grant execute on function public.billing_admin_manual_settle(uuid, bigint, text, text, timestamptz) to authenticated, service_role;
+
+notify pgrst, 'reload schema';
