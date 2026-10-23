@@ -17,7 +17,8 @@ import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const root = resolve(__dirname, "../..");
-const migration = (file: string) => readFileSync(resolve(root, "supabase/migrations", file), "utf8");
+const migration = (file: string) =>
+  readFileSync(resolve(root, "supabase/migrations", file), "utf8");
 const MIGRATION_ROLE = migration("20261025100000_add_expert_app_role.sql");
 const MIGRATION_MODEL = migration("20261025100100_expert_model.sql");
 const MIGRATION_RLS = migration("20261025100200_expert_rls.sql");
@@ -168,8 +169,11 @@ create table public.players (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null references public.tenants(id) on delete cascade,
   affiliate_id text,
-  expert text
+  expert text,
+  ftd_em timestamptz
 );
+-- Prod-equivalent tenant_id-leading index (20260610212336_af971463-…).
+CREATE INDEX players_tenant_ftd_idx ON public.players (tenant_id, ftd_em);
 alter table public.players enable row level security;
 CREATE POLICY players_tenant_rls ON public.players
   AS PERMISSIVE FOR ALL TO authenticated
@@ -179,8 +183,11 @@ CREATE POLICY players_tenant_rls ON public.players
 create table public.deposits (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null references public.tenants(id) on delete cascade,
-  player_id uuid references public.players(id) on delete cascade
+  player_id uuid references public.players(id) on delete cascade,
+  created_at timestamptz not null default now()
 );
+-- Prod-equivalent index (20260610212336_af971463-…).
+CREATE INDEX deposits_tenant_player_created_idx ON public.deposits (tenant_id, player_id, created_at DESC);
 alter table public.deposits enable row level security;
 CREATE POLICY deposits_tenant_select ON public.deposits
   AS PERMISSIVE FOR SELECT TO authenticated
@@ -193,8 +200,11 @@ CREATE POLICY deposits_super_admin_write ON public.deposits
 create table public.withdrawals (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null references public.tenants(id) on delete cascade,
-  player_id uuid references public.players(id) on delete cascade
+  player_id uuid references public.players(id) on delete cascade,
+  created_at timestamptz not null default now()
 );
+-- Prod-equivalent index (20261002170000_optimize_analytics_queries.sql).
+CREATE INDEX withdrawals_tenant_player_created_idx ON public.withdrawals (tenant_id, player_id, created_at desc);
 alter table public.withdrawals enable row level security;
 CREATE POLICY withdrawals_tenant_select ON public.withdrawals
   AS PERMISSIVE FOR SELECT TO authenticated
@@ -254,9 +264,16 @@ const TOTAL_A = "00000000-0000-4000-8000-0000000000e2";
 const RESTRITO_VAZIO_A = "00000000-0000-4000-8000-0000000000e3";
 const INATIVO_A = "00000000-0000-4000-8000-0000000000e4";
 const INATIVO_TOTAL_A = "00000000-0000-4000-8000-0000000000e5";
+// Active experts row linked to the user, but no user_roles 'expert' row.
+const SEM_ROLE_A = "00000000-0000-4000-8000-0000000000e6";
+// user_roles 'expert' row, but no experts row linked to the user.
+const SEM_VINCULO_A = "00000000-0000-4000-8000-0000000000e7";
+// Total expert of both house A and house B.
+const DUAS_CASAS = "00000000-0000-4000-8000-0000000000e8";
 
 let db: PGlite;
 let playerAff1A: string;
+let playerAff1B: string;
 
 type Row = Record<string, unknown>;
 
@@ -289,21 +306,25 @@ async function addExpert(
   tipo: "restrito" | "total",
   ativo: boolean,
   affiliateIds: string[],
+  opts: { tenant?: string; withRole?: boolean; linkUser?: boolean; newUser?: boolean } = {},
 ) {
-  await db.query(`insert into auth.users (id) values ($1)`, [userId]);
-  await db.query(`insert into public.user_roles (user_id, tenant_id, role) values ($1, $2, 'expert')`, [
-    userId,
-    TENANT_A,
-  ]);
+  const { tenant = TENANT_A, withRole = true, linkUser = true, newUser = true } = opts;
+  if (newUser) await db.query(`insert into auth.users (id) values ($1)`, [userId]);
+  if (withRole) {
+    await db.query(
+      `insert into public.user_roles (user_id, tenant_id, role) values ($1, $2, 'expert')`,
+      [userId, tenant],
+    );
+  }
   const { rows } = await db.query<{ id: string }>(
     `insert into public.experts (tenant_id, nome, user_id, tipo, ativo)
      values ($1, $2, $3, $4, $5) returning id`,
-    [TENANT_A, nome, userId, tipo, ativo],
+    [tenant, nome, linkUser ? userId : null, tipo, ativo],
   );
   for (const affiliateId of affiliateIds) {
     await db.query(
       `insert into public.expert_affiliates (tenant_id, expert_id, affiliate_id) values ($1, $2, $3)`,
-      [TENANT_A, rows[0].id, affiliateId],
+      [tenant, rows[0].id, affiliateId],
     );
   }
 }
@@ -321,10 +342,10 @@ beforeAll(async () => {
   ]);
 
   await db.query(`insert into auth.users (id) values ($1)`, [ADMIN_A]);
-  await db.query(`insert into public.user_roles (user_id, tenant_id, role) values ($1, $2, 'admin')`, [
-    ADMIN_A,
-    TENANT_A,
-  ]);
+  await db.query(
+    `insert into public.user_roles (user_id, tenant_id, role) values ($1, $2, 'admin')`,
+    [ADMIN_A, TENANT_A],
+  );
 
   // An affiliate id belongs to one expert per house (unique (tenant_id,
   // affiliate_id)), so the deactivated restricted expert owns AFF2, which
@@ -334,6 +355,13 @@ beforeAll(async () => {
   await addExpert(RESTRITO_VAZIO_A, "Restrito Vazio", "restrito", true, []);
   await addExpert(INATIVO_A, "Inativo", "restrito", false, ["AFF2"]);
   await addExpert(INATIVO_TOTAL_A, "Inativo Total", "total", false, []);
+  await addExpert(SEM_ROLE_A, "Sem Papel", "total", true, [], { withRole: false });
+  await addExpert(SEM_VINCULO_A, "Sem Vinculo", "total", true, [], { linkUser: false });
+  await addExpert(DUAS_CASAS, "Duas Casas A", "total", true, []);
+  await addExpert(DUAS_CASAS, "Duas Casas B", "total", true, [], {
+    tenant: TENANT_B,
+    newUser: false,
+  });
 
   const { rows: playersA } = await db.query<{ id: string; affiliate_id: string | null }>(
     `insert into public.players (tenant_id, affiliate_id) values ($1, 'AFF1'), ($1, 'AFF2'), ($1, null)
@@ -345,10 +373,17 @@ beforeAll(async () => {
     `insert into public.players (tenant_id, affiliate_id) values ($1, 'AFF1') returning id`,
     [TENANT_B],
   );
+  playerAff1B = playersB[0].id;
 
   for (const p of playersA) {
-    await db.query(`insert into public.deposits (tenant_id, player_id) values ($1, $2)`, [TENANT_A, p.id]);
-    await db.query(`insert into public.withdrawals (tenant_id, player_id) values ($1, $2)`, [TENANT_A, p.id]);
+    await db.query(`insert into public.deposits (tenant_id, player_id) values ($1, $2)`, [
+      TENANT_A,
+      p.id,
+    ]);
+    await db.query(`insert into public.withdrawals (tenant_id, player_id) values ($1, $2)`, [
+      TENANT_A,
+      p.id,
+    ]);
   }
   await db.query(`insert into public.deposits (tenant_id, player_id) values ($1, $2)`, [
     TENANT_B,
@@ -358,7 +393,10 @@ beforeAll(async () => {
     TENANT_B,
     playersB[0].id,
   ]);
-  await db.query(`insert into public.sms_campaigns (tenant_id) values ($1), ($2)`, [TENANT_A, TENANT_B]);
+  await db.query(`insert into public.sms_campaigns (tenant_id) values ($1), ($2)`, [
+    TENANT_A,
+    TENANT_B,
+  ]);
 });
 
 afterAll(async () => {
@@ -373,7 +411,10 @@ describe("expert RLS", () => {
     );
     expect(players).toEqual([{ id: playerAff1A, tenant_id: TENANT_A }]);
 
-    const deposits = await asUser<{ player_id: string }>(RESTRITO_A, `select player_id from public.deposits`);
+    const deposits = await asUser<{ player_id: string }>(
+      RESTRITO_A,
+      `select player_id from public.deposits`,
+    );
     expect(deposits).toEqual([{ player_id: playerAff1A }]);
 
     const withdrawals = await asUser<{ player_id: string }>(
@@ -384,15 +425,23 @@ describe("expert RLS", () => {
   });
 
   it("total expert sees all players of the house and none of other houses", async () => {
-    const players = await asUser<{ tenant_id: string }>(TOTAL_A, `select tenant_id from public.players`);
+    const players = await asUser<{ tenant_id: string }>(
+      TOTAL_A,
+      `select tenant_id from public.players`,
+    );
     expect(players).toHaveLength(3);
     expect(players.every((p) => p.tenant_id === TENANT_A)).toBe(true);
 
     // Same result with its own house as the active tenant.
-    const withHeader = await asUser(TOTAL_A, `select id from public.players`, { activeTenant: TENANT_A });
+    const withHeader = await asUser(TOTAL_A, `select id from public.players`, {
+      activeTenant: TENANT_A,
+    });
     expect(withHeader).toHaveLength(3);
 
-    const deposits = await asUser<{ tenant_id: string }>(TOTAL_A, `select tenant_id from public.deposits`);
+    const deposits = await asUser<{ tenant_id: string }>(
+      TOTAL_A,
+      `select tenant_id from public.deposits`,
+    );
     expect(deposits).toHaveLength(3);
     expect(deposits.every((d) => d.tenant_id === TENANT_A)).toBe(true);
   });
@@ -433,22 +482,31 @@ describe("expert RLS", () => {
   });
 
   it("expert with x-active-tenant of another house sees nothing", async () => {
-    expect(await asUser(TOTAL_A, `select id from public.players`, { activeTenant: TENANT_B })).toHaveLength(0);
-    expect(await asUser(TOTAL_A, `select id from public.deposits`, { activeTenant: TENANT_B })).toHaveLength(
-      0,
-    );
+    expect(
+      await asUser(TOTAL_A, `select id from public.players`, { activeTenant: TENANT_B }),
+    ).toHaveLength(0);
+    expect(
+      await asUser(TOTAL_A, `select id from public.deposits`, { activeTenant: TENANT_B }),
+    ).toHaveLength(0);
   });
 
   it("admin of the house still sees all players", async () => {
-    const players = await asUser<{ tenant_id: string }>(ADMIN_A, `select tenant_id from public.players`);
+    const players = await asUser<{ tenant_id: string }>(
+      ADMIN_A,
+      `select tenant_id from public.players`,
+    );
     expect(players).toHaveLength(3);
     expect(players.every((p) => p.tenant_id === TENANT_A)).toBe(true);
     expect(await asUser(ADMIN_A, `select id from public.deposits`)).toHaveLength(3);
-    expect(await asUser(ADMIN_A, `select id from public.experts`)).toHaveLength(5);
+    // Every experts row of house A (DUAS_CASAS also has one in house B).
+    expect(await asUser(ADMIN_A, `select id from public.experts`)).toHaveLength(8);
   });
 
   it("expert sees own experts row only", async () => {
-    const experts = await asUser<{ user_id: string }>(RESTRITO_A, `select user_id from public.experts`);
+    const experts = await asUser<{ user_id: string }>(
+      RESTRITO_A,
+      `select user_id from public.experts`,
+    );
     expect(experts).toEqual([{ user_id: RESTRITO_A }]);
 
     const affiliates = await asUser<{ affiliate_id: string }>(
@@ -456,5 +514,101 @@ describe("expert RLS", () => {
       `select affiliate_id from public.expert_affiliates`,
     );
     expect(affiliates).toEqual([{ affiliate_id: "AFF1" }]);
+  });
+
+  it("expert without the user_roles expert row sees nothing", async () => {
+    expect(await asUser(SEM_ROLE_A, `select id from public.players`)).toHaveLength(0);
+    expect(await asUser(SEM_ROLE_A, `select id from public.deposits`)).toHaveLength(0);
+  });
+
+  it("expert role without a linked experts row sees nothing", async () => {
+    expect(await asUser(SEM_VINCULO_A, `select id from public.players`)).toHaveLength(0);
+    expect(await asUser(SEM_VINCULO_A, `select id from public.deposits`)).toHaveLength(0);
+  });
+
+  it("expert of two houses sees the first house by default and the header house otherwise", async () => {
+    // TENANT_A < TENANT_B, so without a header the active house is A.
+    const noHeader = await asUser<{ tenant_id: string }>(
+      DUAS_CASAS,
+      `select tenant_id from public.players`,
+    );
+    expect(noHeader).toHaveLength(3);
+    expect(noHeader.every((p) => p.tenant_id === TENANT_A)).toBe(true);
+
+    const headerB = await asUser<{ id: string }>(DUAS_CASAS, `select id from public.players`, {
+      activeTenant: TENANT_B,
+    });
+    expect(headerB).toEqual([{ id: playerAff1B }]);
+  });
+
+  it("expert cannot write players, deposits or withdrawals", async () => {
+    await expect(
+      asUser(
+        TOTAL_A,
+        `insert into public.players (tenant_id, affiliate_id) values ('${TENANT_A}', 'AFFW')`,
+      ),
+    ).rejects.toThrow(/row-level security/);
+    await expect(
+      asUser(
+        TOTAL_A,
+        `insert into public.deposits (tenant_id, player_id) values ('${TENANT_A}', '${playerAff1A}')`,
+      ),
+    ).rejects.toThrow(/row-level security/);
+    await expect(
+      asUser(
+        TOTAL_A,
+        `insert into public.withdrawals (tenant_id, player_id) values ('${TENANT_A}', '${playerAff1A}')`,
+      ),
+    ).rejects.toThrow(/row-level security/);
+
+    // No UPDATE policy admits an expert, so Postgres silently matches no
+    // rows (no error): assert nothing was touched.
+    const updated = await asUser<{ id: string }>(
+      TOTAL_A,
+      `update public.players set expert = 'Hack' where id = '${playerAff1A}' returning id`,
+    );
+    expect(updated).toHaveLength(0);
+    const { rows } = await db.query<{ expert: string | null }>(
+      `select expert from public.players where id = $1`,
+      [playerAff1A],
+    );
+    expect(rows[0].expert).toBeNull();
+  });
+
+  it("expert policies keep the tenant_id index usable for non-experts", async () => {
+    // Measured in PGlite (20 extra houses x 500 players, ANALYZE, as admin_A),
+    // EXPLAIN ANALYZE of `select * from players where tenant_id = A`, the
+    // shape every app query has:
+    //   Index Scan using players_tenant_ftd_idx on players
+    //     Index Cond: (tenant_id = A)
+    //     Filter: ((InitPlan 1) OR (tenant_id = (InitPlan 2)) OR
+    //              ((tenant_id = (InitPlan 3)) AND ((InitPlan 4) IS NOT NULL)
+    //               AND expert_can_see_player(tenant_id, affiliate_id)))
+    //     InitPlan 3 / InitPlan 4 (current_expert_tenant_id): never executed
+    // Same plan and cost as with no expert policy at all. Note that an
+    // unfiltered `select * from players` is a Seq Scan even WITHOUT any expert
+    // policy: players_tenant_rls's own `(select is_super_admin()) OR …` arm
+    // cannot drive an index, so that case is not asserted here.
+    await db.exec(`
+      insert into public.tenants (id, nome)
+        select ('00000000-0000-4000-8000-0000000001' || lpad(g::text, 2, '0'))::uuid, 'Casa ' || g
+        from generate_series(1, 20) g;
+      insert into public.players (tenant_id, affiliate_id)
+        select ('00000000-0000-4000-8000-0000000001' || lpad(g::text, 2, '0'))::uuid, 'X' || (n % 7)
+        from generate_series(1, 20) g, generate_series(1, 500) n;
+      analyze public.players;
+    `);
+    const plan = await asUser<{ "QUERY PLAN": string }>(
+      ADMIN_A,
+      `explain select * from public.players where tenant_id = '${TENANT_A}'`,
+    );
+    const text = plan.map((r) => r["QUERY PLAN"]).join("\n");
+    expect(text).not.toContain("Seq Scan on players");
+    expect(text).toMatch(
+      /Index Scan using players_tenant_ftd_idx|Bitmap Index Scan on players_tenant_ftd_idx/,
+    );
+
+    // Still only house A's three players for the admin.
+    expect(await asUser(ADMIN_A, `select id from public.players`)).toHaveLength(3);
   });
 });

@@ -17,11 +17,15 @@
 -- the house and an experts row with user_id = auth.uid() and ativo = true.
 --
 -- Performance: players has ~35k rows per big house, and permissive policies
--- are OR-ed together for every caller, admins included. The tenant
--- comparisons are wrapped in coalesce(..., false) so that, for a non-expert
--- (current_expert_tenant_id() IS NULL), the AND short-circuits on false
--- instead of continuing on NULL and calling the per-row helper / EXISTS for
--- every row. Semantics are unchanged (NULL and false both deny in USING).
+-- are OR-ed together for every caller, admins included. Each expert policy
+-- is "tenant_id = (select current_expert_tenant_id()) AND (select
+-- current_expert_tenant_id()) IS NOT NULL AND ...":
+--   * the bare tenant_id = (InitPlan) comparison stays an indexable
+--     condition the planner can combine with the other tenant arms (a
+--     coalesce(...) wrapper would hide it from the planner);
+--   * for a non-expert (current_expert_tenant_id() IS NULL) the comparison is
+--     NULL, which does not stop an AND; the IS NOT NULL arm is false and
+--     does, so the per-row helper / EXISTS never runs for non-experts.
 
 begin;
 
@@ -135,7 +139,8 @@ drop policy if exists players_expert_select on public.players;
 create policy players_expert_select on public.players
   as permissive for select to authenticated
   using (
-    coalesce(tenant_id = (select public.current_expert_tenant_id()), false)
+    tenant_id = (select public.current_expert_tenant_id())
+    and (select public.current_expert_tenant_id()) is not null
     and public.expert_can_see_player(tenant_id, affiliate_id)
   );
 
@@ -145,7 +150,8 @@ drop policy if exists deposits_expert_select on public.deposits;
 create policy deposits_expert_select on public.deposits
   as permissive for select to authenticated
   using (
-    coalesce(tenant_id = (select public.current_expert_tenant_id()), false)
+    tenant_id = (select public.current_expert_tenant_id())
+    and (select public.current_expert_tenant_id()) is not null
     and exists (select 1 from public.players p where p.id = player_id)
   );
 
@@ -153,7 +159,8 @@ drop policy if exists withdrawals_expert_select on public.withdrawals;
 create policy withdrawals_expert_select on public.withdrawals
   as permissive for select to authenticated
   using (
-    coalesce(tenant_id = (select public.current_expert_tenant_id()), false)
+    tenant_id = (select public.current_expert_tenant_id())
+    and (select public.current_expert_tenant_id()) is not null
     and exists (select 1 from public.players p where p.id = player_id)
   );
 
