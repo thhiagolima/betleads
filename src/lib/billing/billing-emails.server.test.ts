@@ -72,6 +72,8 @@ function seedInvoice(overrides: Record<string, unknown> = {}) {
     period_start: "2026-10-05",
     period_end: "2026-11-04",
     payment_charge_id: null,
+    // An old last-change date by default; the paid lookback also reads it.
+    updated_at: "2026-01-01T00:00:00.000Z",
     ...overrides,
   };
   fake.admin.rows("billing_invoices").push(row);
@@ -664,6 +666,33 @@ describe("sendPendingBillingEmails", () => {
     expect(result).toBe(1);
     const paidLogs = fake.admin.rows("billing_email_log").filter((r) => r.kind === "paid");
     expect(paidLogs).toEqual([expect.objectContaining({ invoice_id: "paid-recent" })]);
+  });
+
+  // Final fix m8: a manual settle backdated past the 48h window (paid_at old,
+  // updated_at = the settle itself) still gets the e-mail from the sweep.
+  it("sends paid for a backdated settle whose paid_at is old but was changed in the last 48h", async () => {
+    seedTenant();
+    seedRolesAndUsers();
+    seedInvoice({
+      id: "paid-backdated",
+      status: "paid",
+      paid_via: "manual",
+      paid_at: new Date(INSIDE_WINDOW.getTime() - 60 * 60_000 * 24 * 10).toISOString(),
+      updated_at: new Date(INSIDE_WINDOW.getTime() - 60 * 60_000).toISOString(),
+    });
+    seedInvoice({
+      id: "paid-long-ago",
+      status: "paid",
+      paid_via: "manual",
+      paid_at: new Date(INSIDE_WINDOW.getTime() - 60 * 60_000 * 24 * 10).toISOString(),
+      updated_at: new Date(INSIDE_WINDOW.getTime() - 60 * 60_000 * 24 * 9).toISOString(),
+    });
+
+    const result = await sendPendingBillingEmails({ now: INSIDE_WINDOW });
+
+    expect(result).toBe(1);
+    const paidLogs = fake.admin.rows("billing_email_log").filter((r) => r.kind === "paid");
+    expect(paidLogs).toEqual([expect.objectContaining({ invoice_id: "paid-backdated" })]);
   });
 
   it("never sends paid for an invoice settled by a 100% discount (full_discount)", async () => {

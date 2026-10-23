@@ -472,23 +472,33 @@ async function findLockedCandidates(): Promise<string[]> {
   return withoutSent((data ?? []) as Array<{ id: string }>, sent);
 }
 
-/** Invoices paid in the last 48h with no `paid` log yet. */
+/** Invoices paid (or settled) in the last 48h with no `paid` log yet. */
 async function findPaidCandidates(now: Date): Promise<string[]> {
   const cutoff = new Date(now.getTime() - PAID_LOOKBACK_MS).toISOString();
-  const [{ data, error }, sent] = await Promise.all([
-    // A 100% discount settles the invoice as 'full_discount': nothing was
-    // paid, so no "pagamento confirmado" e-mail. Every paid invoice has a
-    // paid_via (the settle always sets it), so neq never drops a real payment.
+  // A 100% discount settles the invoice as 'full_discount': nothing was
+  // paid, so no "pagamento confirmado" e-mail. Every paid invoice has a
+  // paid_via (the settle always sets it), so neq never drops a real payment.
+  const paidSince = (column: "paid_at" | "updated_at") =>
     supabaseAdmin
       .from("billing_invoices")
       .select("id")
       .eq("status", "paid")
       .neq("paid_via", "full_discount")
-      .gte("paid_at", cutoff),
+      .gte(column, cutoff);
+  // Final fix m8: greatest(paid_at, updated_at) >= cutoff, as two reads. A
+  // manual settle backdated past the window has an old paid_at but its
+  // updated_at is the settle itself, so the sweep still sends it later.
+  const [byPaidAt, byUpdatedAt, sent] = await Promise.all([
+    paidSince("paid_at"),
+    paidSince("updated_at"),
     sentInvoiceIds("paid"),
   ]);
-  if (error) throw new Error(error.message);
-  return withoutSent((data ?? []) as Array<{ id: string }>, sent);
+  if (byPaidAt.error) throw new Error(byPaidAt.error.message);
+  if (byUpdatedAt.error) throw new Error(byUpdatedAt.error.message);
+  const rows = new Map<string, { id: string }>();
+  for (const row of [...(byPaidAt.data ?? []), ...(byUpdatedAt.data ?? [])] as Array<{ id: string }>)
+    rows.set(row.id, row);
+  return withoutSent([...rows.values()], sent);
 }
 
 async function sendForKind(

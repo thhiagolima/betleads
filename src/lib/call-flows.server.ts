@@ -303,7 +303,7 @@ async function executeCallBlock(progress: any, block: any, player: any): Promise
       { reason: "saldo_insuficiente" },
     );
     await scheduleNext(progress, block);
-    // PG3 Task 7: hourly "Saldo esgotado" e-mail; never breaks the dispatcher.
+    // PG3 Task 7: hourly "Saldo insuficiente" e-mail; never breaks the dispatcher.
     await notifyNoBalance(progress.tenant_id).catch((alertError: unknown) =>
       console.error("[call-flow] no balance alert failed", {
         tenantId: progress.tenant_id,

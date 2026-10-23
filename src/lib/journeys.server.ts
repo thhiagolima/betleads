@@ -1231,7 +1231,7 @@ async function finishOwnExecution(
  * - skip    (the HOUSE's wallet had no balance, PG3 decision 6): the step
  *           is skipped with reason `saldo_insuficiente` and the journey
  *           advances to the next step now. No retry, no attempt consumed;
- *           the house gets the hourly "Saldo esgotado" alert.
+ *           the house gets the hourly "Saldo insuficiente" alert.
  * - fail    : the journey's max_attempts/backoff policy; a misconfigured
  *           provider (missing credentials) is also reported to Sentry.
  */
@@ -1275,7 +1275,7 @@ async function handleItemFailure(row: ClaimedRow, ctx: DispatchContext, error: u
       reason: "saldo_insuficiente",
       attempt_consumed: false,
     });
-    // PG3 Task 7: hourly "Saldo esgotado" e-mail; never breaks the dispatcher.
+    // PG3 Task 7: hourly "Saldo insuficiente" e-mail; never breaks the dispatcher.
     await notifyNoBalance(row.tenant_id).catch((alertError: unknown) =>
       console.error("[journey dispatcher] no balance alert failed", {
         tenantId: row.tenant_id,

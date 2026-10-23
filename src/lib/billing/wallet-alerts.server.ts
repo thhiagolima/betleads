@@ -14,7 +14,7 @@
 //   its admins/owners/gestores, only inside the 08:00-20:00 Brasília window.
 // - `notifyNoBalance` (Task 7) is called by the senders (journeys, SMS/e-mail
 //   flows, call flows) when the house wallet refused a send: at most one
-//   "Saldo esgotado" e-mail per hour per house ('no_balance', '1 hour').
+//   "Saldo insuficiente" e-mail per hour per house ('no_balance', '1 hour').
 //   Outside the window it does not claim, so the next refusal inside the
 //   window claims instead. Never throws into the caller.
 //
@@ -231,12 +231,27 @@ async function isTenantExempt(tenantId: string): Promise<boolean> {
   return data === true;
 }
 
-function noBalanceEmail(houseName: string) {
-  const subject = "Saldo esgotado — envios pausados";
+/** Current wallet balance in BRL; 0 when the house has no wallet row yet. */
+async function readWalletBalance(tenantId: string): Promise<number> {
+  const { data, error } = await supabaseAdmin
+    .from("tenant_wallets")
+    .select("balance")
+    .eq("tenant_id", tenantId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  const balance = Number((data as { balance?: number | string } | null)?.balance ?? 0);
+  return Number.isFinite(balance) ? balance : 0;
+}
+
+// Final fix m1: the refusal often happens with some balance left (below the
+// price of one send), so the copy says "insuficiente" and shows the balance.
+function noBalanceEmail(houseName: string, balance: number) {
+  const subject = "Saldo insuficiente — alguns envios pausados";
   const body =
-    `O saldo de créditos da casa ${escapeHtml(houseName)} acabou. ` +
-    "SMS e voz estão pausados: jornadas e automações pulam esses envios até você adicionar créditos. " +
-    "O e-mail segue só dentro da franquia mensal gratuita.";
+    `O saldo de créditos da casa ${escapeHtml(houseName)} não cobre mais alguns envios. ` +
+    `O saldo atual é de ${moneyText(balance)}. ` +
+    "SMS e voz precisam de saldo: jornadas e automações pulam esses envios e campanhas de SMS ficam pausadas até você adicionar créditos. " +
+    "O e-mail continua dentro da franquia mensal gratuita.";
   const html = `<!doctype html>
 <html>
   <body style="margin:0; padding:24px; background:#f5f5f5; font-family:Arial,Helvetica,sans-serif;">
@@ -268,7 +283,8 @@ async function sendNoBalanceAlert(tenantId: string, now: Date): Promise<boolean>
 
   const recipients = await getPayerEmails(tenantId);
   if (recipients.length === 0) return false;
-  const { subject, html } = noBalanceEmail(tenant.nome?.trim() || "sua casa");
+  const balance = await readWalletBalance(tenantId);
+  const { subject, html } = noBalanceEmail(tenant.nome?.trim() || "sua casa", balance);
   // One key per BRT hour: a provider retry of the same send is deduplicated.
   const hour = `${brtDayKey(now)}T${String((now.getUTCHours() + 21) % 24).padStart(2, "0")}`;
   let accepted = 0;

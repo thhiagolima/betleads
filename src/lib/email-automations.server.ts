@@ -840,7 +840,7 @@ export async function runEmailFlowDispatcher({
       );
       rescheduled++;
       await applySendFailure(plan, result.status, true, true, WALLET_INSUFFICIENT_RETRY_MS);
-      // PG3 Task 7: hourly "Saldo esgotado" e-mail; never breaks the dispatcher.
+      // PG3 Task 7: hourly "Saldo insuficiente" e-mail; never breaks the dispatcher.
       await notifyNoBalance(plan.lead.tenant_id).catch((alertError: unknown) =>
         console.error("[email-automations] no balance alert failed", {
           tenantId: plan.lead.tenant_id,

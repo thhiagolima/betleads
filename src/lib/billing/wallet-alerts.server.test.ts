@@ -249,6 +249,7 @@ describe("notifyNoBalance (Task 7: a send refused for lack of balance)", () => {
 
   it("claims 'no_balance' for 1 hour and e-mails the admins/gestores", async () => {
     seedHouse(HOUSE_A);
+    fake.admin.rows("tenant_wallets").push({ tenant_id: HOUSE_A, balance: 0.05 });
     const claim = claimOncePerInterval();
 
     await expect(notifyNoBalance(HOUSE_A, { now: INSIDE_WINDOW })).resolves.toBe(true);
@@ -262,13 +263,22 @@ describe("notifyNoBalance (Task 7: a send refused for lack of balance)", () => {
     const recipients = callInfobipEmail.mock.calls.map((call) => call[0].to).sort();
     expect(recipients).toEqual(["admin@casa-a.com", "gestor@casa-a.com"]);
     const sent = callInfobipEmail.mock.calls[0][0];
-    expect(sent.subject).toBe("Saldo esgotado — envios pausados");
+    // Final fix m1: the balance is often not zero, just below one send.
+    expect(sent.subject).toBe("Saldo insuficiente — alguns envios pausados");
     expect(sent.html).toContain("https://betleads.io/plano-e-creditos");
-    expect(sent.html).toContain("SMS e voz estão pausados");
-    expect(sent.html).toContain("e-mail segue só dentro da franquia mensal gratuita");
+    expect(sent.html).toContain("O saldo atual é de R$ 0,05");
+    expect(sent.html).toContain("SMS e voz precisam de saldo");
+    expect(sent.html).toContain("e-mail continua dentro da franquia mensal gratuita");
     expect(sent.html).toContain("Casa &lt;A&gt;");
     expect(sent.html).not.toContain(String.fromCharCode(160));
     expect(sent.idempotencyKey).toMatch(/^wallet-alert:no_balance:/);
+  });
+
+  it("a house with no wallet row reads as R$ 0,00", async () => {
+    seedHouse(HOUSE_A);
+    claimOncePerInterval();
+    await expect(notifyNoBalance(HOUSE_A, { now: INSIDE_WINDOW })).resolves.toBe(true);
+    expect(callInfobipEmail.mock.calls[0][0].html).toContain("O saldo atual é de R$ 0,00");
   });
 
   it("two failures within the hour send 1 alert", async () => {

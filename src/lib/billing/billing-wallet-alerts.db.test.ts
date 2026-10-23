@@ -57,6 +57,11 @@ insert into public.tenants (id, slug, plano, is_demo, status) values
   ('${SUSPENDED}', 'casa-suspensa', 'starter', false, 'suspended'),
   ('${THIRD}', 'casa-c', 'starter', false, 'trial');
 update public.tenants set nome = slug;
+-- Subset of 20261023100000's tenant_billing (final fix m7 reads access_state).
+create table public.tenant_billing (
+  tenant_id uuid primary key references public.tenants(id) on delete cascade,
+  access_state text not null default 'ok'
+);
 create type public.app_role as enum ('admin', 'user', 'super_admin', 'owner', 'member', 'gestor');
 create table public.user_roles (
   id uuid primary key default gen_random_uuid(),
@@ -102,6 +107,7 @@ beforeEach(async () => {
   await db.exec(`
     truncate public.wallet_alerts;
     truncate public.tenant_audit_logs;
+    truncate public.tenant_billing;
     truncate public.wallet_ledger cascade;
     delete from public.tenant_wallets;
   `);
@@ -336,6 +342,27 @@ describe("billing_low_balance_candidates", () => {
     await setBalance(INTERNO, 1);
     await setBalance(SUSPENDED, 1);
     expect(await candidates()).toEqual([]);
+  });
+
+  // Final fix m7: a house locked by billing cannot send anyway; the alert
+  // would only add noise next to the invoice e-mails.
+  it("never lists a house locked by billing (locked_unpaid, locked_manual, frozen)", async () => {
+    await setBalance(NORMAL, 10);
+    await setBalance(OTHER, 10);
+    await setBalance(THIRD, 10);
+    await db.exec(`
+      insert into public.tenant_billing (tenant_id, access_state) values
+        ('${NORMAL}', 'locked_unpaid'), ('${OTHER}', 'locked_manual'), ('${THIRD}', 'frozen');
+    `);
+    expect(await candidates()).toEqual([]);
+    await db.exec(`
+      update public.tenant_billing set access_state = 'overdue' where tenant_id = '${NORMAL}';
+      update public.tenant_billing set access_state = 'due_soon' where tenant_id = '${OTHER}';
+      delete from public.tenant_billing where tenant_id = '${THIRD}';
+    `);
+    expect((await candidates()).map((row) => row.tenant_id).sort()).toEqual(
+      [NORMAL, OTHER, THIRD].sort(),
+    );
   });
 
   it("never lists a house at zero balance (the no-balance alert owns it)", async () => {

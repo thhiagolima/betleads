@@ -731,7 +731,7 @@ async function runSmsFlowBatch({
         })
         .eq("id", item.lead.id);
       rescheduled++;
-      // PG3 Task 7: hourly "Saldo esgotado" e-mail; never breaks the dispatcher.
+      // PG3 Task 7: hourly "Saldo insuficiente" e-mail; never breaks the dispatcher.
       await notifyNoBalance(item.lead.tenant_id).catch((alertError: unknown) =>
         console.error("[sms-dispatcher] no balance alert failed", {
           tenantId: item.lead.tenant_id,
@@ -1115,7 +1115,7 @@ async function dispatchClaimedSmsCampaigns(campaigns: SmsCampaignRow[], run: Job
         stopReason = r.stopReason;
       if (r.stopReason === "insufficient_balance") {
         // PG3 final fix I3: paused for this house only; hourly "Saldo
-        // esgotado" e-mail, which never breaks the dispatcher.
+        // insuficiente" e-mail, which never breaks the dispatcher.
         await notifyNoBalance(c.tenant_id).catch((alertError: unknown) =>
           console.error("[sms-campaigns] no balance alert failed", {
             tenantId: c.tenant_id,

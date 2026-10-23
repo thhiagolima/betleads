@@ -145,7 +145,10 @@ $$;
 -- Casas que devem receber o alerta de saldo baixo agora (o throttle de 24 h
 -- fica em billing_claim_wallet_alert). Só casas com carteira: uma casa que
 -- nunca teve carteira nunca usou canal pago e não recebe alerta. Saldo zero
--- fica de fora: é o alerta 'no_balance' (Task 7). Paginação por keyset: a
+-- fica de fora: é o alerta 'no_balance' (Task 7). Casa bloqueada pela
+-- cobrança (tenant_billing.access_state locked_unpaid, locked_manual ou
+-- frozen) também fica de fora: não envia nada de qualquer jeito, e o alerta
+-- só faria ruído ao lado dos e-mails da fatura. Paginação por keyset: a
 -- próxima página passa como `_after` o último tenant_id recebido; `_limit`
 -- vai de 1 a 1000 (o teto do PostgREST).
 create or replace function public.billing_low_balance_candidates(
@@ -183,6 +186,11 @@ begin
     and coalesce(t.is_demo, false) = false
     and t.status in ('active', 'trial')
     and not public.billing_tenant_exempt(w.tenant_id)
+    and not exists (
+      select 1 from public.tenant_billing tb
+      where tb.tenant_id = w.tenant_id
+        and tb.access_state in ('locked_unpaid', 'locked_manual', 'frozen')
+    )
   order by w.tenant_id
   limit _limit;
 end;
