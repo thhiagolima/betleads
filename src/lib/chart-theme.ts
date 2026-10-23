@@ -52,3 +52,9 @@ export const chartGridProps = {
   stroke: "var(--color-border)",
   vertical: false,
 } as const;
+
+/** Spread on <Legend>: Recharts defaults to 16px. */
+export const chartLegendProps = {
+  wrapperStyle: { fontSize: 12, paddingTop: 8 },
+  iconSize: 10,
+} as const;

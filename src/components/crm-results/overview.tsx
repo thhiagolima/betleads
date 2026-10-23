@@ -15,7 +15,13 @@ import {
 import { buildRecommendations } from "@/lib/crm-recommendations";
 import type { CrmSource } from "@/lib/crm-results";
 import { brl, num } from "@/lib/format";
-import { CHART_COLORS, chartAxisProps, chartGridProps, chartTooltipProps } from "@/lib/chart-theme";
+import {
+  CHART_COLORS,
+  chartAxisProps,
+  chartGridProps,
+  chartLegendProps,
+  chartTooltipProps,
+} from "@/lib/chart-theme";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { RecommendationList } from "./recommendations";
@@ -250,7 +256,7 @@ function DailyChart({ data }: { data: Data }) {
               {...chartTooltipProps}
               formatter={(value: number, name: string) => [brl(Number(value)), names[name] ?? name]}
             />
-            <Legend formatter={(name: string) => names[name] ?? name} />
+            <Legend {...chartLegendProps} formatter={(name: string) => names[name] ?? name} />
             <Bar
               dataKey="cost"
               fill={CHART_COLORS.warning}

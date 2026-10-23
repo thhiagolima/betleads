@@ -15,7 +15,13 @@ import {
 import { getCrmRetention } from "@/lib/crm-results.functions";
 import { PLAYER_STATE_LABELS, RECOVERABLE_STATES } from "@/lib/crm-results";
 import { brl, num } from "@/lib/format";
-import { CHART_COLORS, chartAxisProps, chartGridProps, chartTooltipProps } from "@/lib/chart-theme";
+import {
+  CHART_COLORS,
+  chartAxisProps,
+  chartGridProps,
+  chartLegendProps,
+  chartTooltipProps,
+} from "@/lib/chart-theme";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -232,7 +238,10 @@ function Lifecycle({ retention }: { retention: Retention }) {
                     PLAYER_STATE_LABELS[name] ?? name,
                   ]}
                 />
-                <Legend formatter={(name: string) => PLAYER_STATE_LABELS[name] ?? name} />
+                <Legend
+                  {...chartLegendProps}
+                  formatter={(name: string) => PLAYER_STATE_LABELS[name] ?? name}
+                />
                 <Line dataKey="ativo" stroke={CHART_COLORS.success} strokeWidth={2} dot={false} />
                 <Line
                   dataKey="esfriando"
