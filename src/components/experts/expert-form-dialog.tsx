@@ -35,6 +35,43 @@ type ExpertEnvioModo = "livre" | "aprovacao";
 
 type UnassignedAffiliate = { affiliateId: string; leads: number };
 
+const AFFILIATE_ID_MAX_LENGTH = 64;
+const AFFILIATE_IDS_MAX_COUNT = 20;
+const NOME_MIN_LENGTH = 2;
+const NOME_MAX_LENGTH = 80;
+const PRAZO_MIN = 1;
+const PRAZO_MAX = 30;
+
+/** Mirrors `saveExpertInput` (src/lib/experts-admin.functions.ts) so an
+ * invalid value never reaches the server and surfaces its raw English Zod
+ * message in a toast — every rejection here gets a short pt-BR hint instead. */
+function nomeError(nome: string): string | null {
+  const trimmed = nome.trim();
+  if (!trimmed) return null; // empty just disables Salvar, no hint needed yet
+  if (trimmed.length < NOME_MIN_LENGTH) return "O nome precisa ter pelo menos 2 caracteres.";
+  if (trimmed.length > NOME_MAX_LENGTH) return "O nome pode ter até 80 caracteres.";
+  return null;
+}
+
+function tetoMensalError(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null; // empty = sem teto, valid
+  const value = Number(trimmed.replace(",", "."));
+  if (!Number.isFinite(value) || value < 0) {
+    return "Informe um valor válido (ou deixe vazio para sem teto).";
+  }
+  return null;
+}
+
+function assumirPrazoDiasError(raw: string): string | null {
+  const trimmed = raw.trim();
+  const value = Number(trimmed);
+  if (!trimmed || !Number.isInteger(value) || value < PRAZO_MIN || value > PRAZO_MAX) {
+    return "Use um número inteiro de 1 a 30.";
+  }
+  return null;
+}
+
 export function ExpertFormDialog({
   open,
   onOpenChange,
@@ -57,6 +94,7 @@ export function ExpertFormDialog({
   const [tipo, setTipo] = useState<ExpertTipo>("restrito");
   const [affiliateIds, setAffiliateIds] = useState<string[]>([]);
   const [affiliateInput, setAffiliateInput] = useState("");
+  const [affiliateHint, setAffiliateHint] = useState<string | null>(null);
   const [envioModo, setEnvioModo] = useState<ExpertEnvioModo>("livre");
   const [tetoMensal, setTetoMensal] = useState("");
   const [assumirPrazoDias, setAssumirPrazoDias] = useState("3");
@@ -67,15 +105,26 @@ export function ExpertFormDialog({
     setTipo(expert?.tipo ?? "restrito");
     setAffiliateIds(expert?.affiliateIds ?? (initialAffiliateId ? [initialAffiliateId] : []));
     setAffiliateInput("");
+    setAffiliateHint(null);
     setEnvioModo(expert?.envioModo ?? "livre");
     setTetoMensal(expert?.tetoMensal != null ? String(expert.tetoMensal) : "");
     setAssumirPrazoDias(String(expert?.assumirPrazoDias ?? 3));
   }, [open, expert, initialAffiliateId]);
 
+  const nomeHint = nomeError(nome);
+  const tetoHint = tetoMensalError(tetoMensal);
+  const prazoHint = assumirPrazoDiasError(assumirPrazoDias);
+  const canSave =
+    !!nome.trim() &&
+    !nomeHint &&
+    !tetoHint &&
+    !prazoHint &&
+    affiliateIds.length <= AFFILIATE_IDS_MAX_COUNT;
+
   const save = useMutation({
     mutationFn: () => {
-      const prazo = Number.parseInt(assumirPrazoDias, 10);
-      const teto = tetoMensal.trim() ? Number(tetoMensal.replace(",", ".")) : null;
+      const teto = tetoMensal.trim() ? Number(tetoMensal.trim().replace(",", ".")) : null;
+      const prazo = Number(assumirPrazoDias.trim());
       return saveFn({
         data: {
           id: expert?.id,
@@ -84,7 +133,7 @@ export function ExpertFormDialog({
           affiliateIds,
           envioModo,
           tetoMensal: teto,
-          assumirPrazoDias: Number.isFinite(prazo) ? prazo : 3,
+          assumirPrazoDias: prazo,
         },
       });
     },
@@ -98,10 +147,19 @@ export function ExpertFormDialog({
   });
 
   function addAffiliateId(id: string) {
-    const value = id.trim();
-    if (!value || affiliateIds.includes(value)) return;
+    const value = id.trim().slice(0, AFFILIATE_ID_MAX_LENGTH);
+    if (!value) return;
+    if (affiliateIds.includes(value)) {
+      setAffiliateHint("Esse ID já foi adicionado.");
+      return;
+    }
+    if (affiliateIds.length >= AFFILIATE_IDS_MAX_COUNT) {
+      setAffiliateHint("Máximo de 20 IDs de afiliado.");
+      return;
+    }
     setAffiliateIds((prev) => [...prev, value]);
     setAffiliateInput("");
+    setAffiliateHint(null);
   }
 
   function removeAffiliateId(id: string) {
@@ -128,7 +186,13 @@ export function ExpertFormDialog({
         <div className="space-y-4">
           <div className="space-y-2">
             <Label>Nome</Label>
-            <Input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="ex: Queiroz" />
+            <Input
+              value={nome}
+              onChange={(e) => setNome(e.target.value)}
+              placeholder="ex: Queiroz"
+              maxLength={NOME_MAX_LENGTH}
+            />
+            {nomeHint && <p className="text-xs text-destructive">{nomeHint}</p>}
           </div>
 
           <div className="space-y-2">
@@ -167,7 +231,10 @@ export function ExpertFormDialog({
             </div>
             <Input
               value={affiliateInput}
-              onChange={(e) => setAffiliateInput(e.target.value)}
+              onChange={(e) => {
+                setAffiliateInput(e.target.value.slice(0, AFFILIATE_ID_MAX_LENGTH));
+                setAffiliateHint(null);
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   e.preventDefault();
@@ -175,7 +242,16 @@ export function ExpertFormDialog({
                 }
               }}
               placeholder="digite o ID e pressione Enter"
+              maxLength={AFFILIATE_ID_MAX_LENGTH}
+              disabled={affiliateIds.length >= AFFILIATE_IDS_MAX_COUNT}
             />
+            {affiliateHint ? (
+              <p className="text-xs text-destructive">{affiliateHint}</p>
+            ) : (
+              affiliateIds.length >= AFFILIATE_IDS_MAX_COUNT && (
+                <p className="text-xs text-muted-foreground">Máximo de 20 IDs de afiliado.</p>
+              )
+            )}
             {suggestions.length > 0 && (
               <div className="flex flex-wrap gap-1.5">
                 {suggestions.slice(0, 8).map((s) => (
@@ -216,6 +292,7 @@ export function ExpertFormDialog({
                 onChange={(e) => setTetoMensal(e.target.value)}
                 placeholder="vazio = sem teto"
               />
+              {tetoHint && <p className="text-xs text-destructive">{tetoHint}</p>}
             </div>
           </div>
           <p className="text-xs text-muted-foreground">
@@ -226,18 +303,19 @@ export function ExpertFormDialog({
             <Label>Prazo para assumir lead (dias)</Label>
             <Input
               type="number"
-              min={1}
-              max={30}
+              min={PRAZO_MIN}
+              max={PRAZO_MAX}
               value={assumirPrazoDias}
               onChange={(e) => setAssumirPrazoDias(e.target.value)}
             />
+            {prazoHint && <p className="text-xs text-destructive">{prazoHint}</p>}
           </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancelar
           </Button>
-          <Button disabled={!nome.trim() || save.isPending} onClick={() => save.mutate()}>
+          <Button disabled={!canSave || save.isPending} onClick={() => save.mutate()}>
             {save.isPending ? "Salvando…" : "Salvar"}
           </Button>
         </DialogFooter>
