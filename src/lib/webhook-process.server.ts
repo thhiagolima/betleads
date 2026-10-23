@@ -11,52 +11,12 @@ export function getServiceClient(): SupabaseClient | null {
   });
 }
 
-// Casa de onde os CRMs Expert recebem os eventos espelhados, salvo quando o
-// tenant Expert declara outra em metadata.source_tenant_id.
-const DEFAULT_EXPERT_SOURCE_TENANT_ID = "00000000-0000-0000-0000-000000000001";
-
-type ExpertTenantRow = { id: string; metadata: unknown };
-
-/**
- * Tenants CRM Expert que devem receber o evento. Cada casa tem o próprio
- * token de webhook e controla o payload, então só a casa de origem do Expert
- * pode alimentá-lo; senão qualquer casa injetaria leads num Expert apenas
- * enviando o affiliate id dele.
- */
-export function expertMirrorTargets(
-  experts: ExpertTenantRow[],
-  sourceTenantId: string,
-  affiliateId: string | null,
-): string[] {
-  if (!affiliateId) return [];
-  return experts
-    .filter((t) => {
-      if (t.id === sourceTenantId) return false;
-      const meta = (t.metadata ?? {}) as {
-        expert_affiliate_ids?: unknown;
-        source_tenant_id?: unknown;
-      };
-      const source =
-        typeof meta.source_tenant_id === "string" && meta.source_tenant_id
-          ? meta.source_tenant_id
-          : DEFAULT_EXPERT_SOURCE_TENANT_ID;
-      if (source !== sourceTenantId) return false;
-      const ids = Array.isArray(meta.expert_affiliate_ids)
-        ? meta.expert_affiliate_ids
-            .map((v) => (typeof v === "string" ? v.trim() : ""))
-            .filter((v) => v.length > 0)
-        : [];
-      return ids.includes(affiliateId);
-    })
-    .map((t) => t.id);
-}
-
 export async function processWebhookEvent(
   sb: SupabaseClient,
   tenantId: string,
   evento: string,
   payload: Record<string, unknown>,
-  options: { mirror?: boolean; existingLogId?: string } = { mirror: true },
+  options: { existingLogId?: string } = {},
 ): Promise<Response> {
   let logId = options.existingLogId;
   let receiptClaimed = false;
@@ -1015,89 +975,6 @@ export async function processWebhookEvent(
     // never blocks or fails the webhook (errors are logged and reported).
     if (eventEntryTriggers(evento).length) {
       void enrollPlayerOnEvent(tenantId, playerId, evento);
-    }
-
-    // Espelhamento para CRMs Expert.
-    // Quando um evento chega no tenant principal (CRM_PLATAFORMA) e o
-    // affiliate_id do lead está na allowlist de algum tenant CRM_EXPERT,
-    // o mesmo evento é reprocessado nesse tenant — assim o CRM Expert
-    // só recebe leads dele e ignora todo o resto automaticamente.
-    if (options.mirror !== false) {
-      try {
-        const data2 = (payload.data ?? payload.player ?? payload.user ?? payload) as Record<
-          string,
-          unknown
-        >;
-        const aff = asRecord(data2.affiliate);
-        let affId =
-          firstString(
-            aff.referredBy,
-            aff.affiliate_id,
-            data2.affiliate_id,
-            data2.axioAffId,
-            data2.axio_aff_id,
-          ) ?? null;
-        if (typeof affId === "string") affId = affId.trim() || null;
-        // Fallback: eventos financeiros (deposito-aprovado, saque-*, cashback-pago,
-        // jogo-iniciado, logout) normalmente NÃO trazem o bloco `affiliate` no
-        // payload — só vem `userId`. Sem affiliate_id o mirror não dispara e
-        // o CRM Expert nunca recebe esses eventos. Resolve via lookup do player
-        // no tenant de origem usando qualquer um dos IDs externos disponíveis.
-        if (!affId) {
-          const candidates = [
-            data2.userId,
-            data2.external_id,
-            (data2 as { user_id?: unknown }).user_id,
-            data2.id,
-            payload.user_id,
-            payload.player_id,
-            payload.userId,
-            payload.external_id,
-          ]
-            .map((v) => (typeof v === "string" ? v.trim() : v))
-            .filter((v): v is string => typeof v === "string" && v.length > 0);
-          for (const ext of candidates) {
-            const { data: playerRow } = await sb
-              .from("players")
-              .select("affiliate_id")
-              .eq("tenant_id", tenantId)
-              .eq("player_external_id", ext)
-              .maybeSingle();
-            const found = (playerRow?.affiliate_id as string | undefined) ?? null;
-            if (found && found.trim().length > 0) {
-              affId = found.trim();
-              break;
-            }
-          }
-          if (!affId) {
-            console.warn("[webhook] mirror skipped — no affiliate_id resolved", {
-              tenantId,
-              evento,
-              externalCandidates: candidates,
-            });
-          }
-        }
-        if (affId) {
-          // A demo tenant is a frozen snapshot: it never receives mirrored
-          // events, even when its metadata declares the affiliate id.
-          const { data: experts } = await sb
-            .from("tenants")
-            .select("id, metadata, crm_model, is_demo")
-            .eq("crm_model", "CRM_EXPERT")
-            .eq("is_demo", false);
-          for (const targetId of expertMirrorTargets(
-            (experts ?? []) as ExpertTenantRow[],
-            tenantId,
-            affId,
-          )) {
-            await processWebhookEvent(sb, targetId, evento, payload, {
-              mirror: false,
-            });
-          }
-        }
-      } catch (mirrorErr) {
-        console.error("[webhook] mirror to CRM_EXPERT failed", mirrorErr);
-      }
     }
 
     return Response.json({ ok: true, evento });

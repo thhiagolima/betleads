@@ -625,7 +625,9 @@ const createTenantInput = z.object({
   adminEmail: z.string().email().max(255),
   status: tenantStatus.default("trial"),
   plano: tenantPlan.default("starter"),
-  crm_model: crmModel.default("CRM_PLATAFORMA"),
+  // Criação de casa só aceita o modelo vigente; CRM_EXPERT foi descontinuado
+  // (Task 3 da Área do Expert) e só sobrevive em casas legadas já nesse modelo.
+  crm_model: z.enum(["CRM_PLATAFORMA"]).default("CRM_PLATAFORMA"),
 });
 
 export const adminCreateTenant = createServerFn({ method: "POST" })
@@ -704,6 +706,15 @@ export async function updateTenantSettingsFor(
     .maybeSingle();
   if (beforeErr) throw new Error(beforeErr.message);
   if (!before) throw new Error("Tenant não encontrado");
+
+  // CRM_EXPERT foi descontinuado (Task 3 da Área do Expert): só continua
+  // existindo em casas legadas que já estavam nesse modelo. Mudar uma casa
+  // atual *para* CRM_EXPERT não é permitido; manter o valor já vigente é.
+  if (data.crm_model === "CRM_EXPERT" && before.crm_model !== "CRM_EXPERT") {
+    throw new Error(
+      "O modelo CRM Expert foi descontinuado. Cadastre experts dentro da casa, em Experts.",
+    );
+  }
 
   // Only the super admin can actually change `plano` (the `patch` below
   // omits it otherwise, and `tenants_plan_guard` enforces the same rule at

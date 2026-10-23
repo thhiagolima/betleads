@@ -1321,7 +1321,11 @@ function SettingsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAd
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="CRM_PLATAFORMA">CRM Plataforma</SelectItem>
-                <SelectItem value="CRM_EXPERT">CRM Expert</SelectItem>
+                {tenant.crm_model === "CRM_EXPERT" && (
+                  <SelectItem value="CRM_EXPERT" disabled>
+                    CRM Expert (descontinuado)
+                  </SelectItem>
+                )}
               </SelectContent>
             </Select>
           </div>

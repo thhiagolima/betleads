@@ -1,7 +1,7 @@
 // Task 8 — demo tenants are a frozen, anonymized snapshot: nothing outside
 // may write into one, and nothing it receives may leave it. This covers the
-// INBOUND side (house webhook, Evolution webhook, CRM Expert mirror, click
-// redirect, unsubscribe token) — the outbound/send side is Tasks 5-7.
+// INBOUND side (house webhook, Evolution webhook, click redirect,
+// unsubscribe token) — the outbound/send side is Tasks 5-7.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createFakeDb } from "./sms-bulk.test-support";
 
@@ -44,7 +44,7 @@ vi.mock("@/lib/observability/sentry.server", () => ({
 }));
 
 import { __resetDemoTenantCacheForTests } from "./tenant-access.server";
-import { expertMirrorTargets, processWebhookEvent } from "./webhook-process.server";
+import { processWebhookEvent } from "./webhook-process.server";
 import {
   DEMO_CLICK_REDIRECT_URL,
   resetClickLimitersForTests,
@@ -57,9 +57,6 @@ import { confirmUnsubscribeFor } from "@/routes/u.$token";
 
 const DEMO = "00000000-0000-4000-8000-0000000000d1";
 const NORMAL = "00000000-0000-4000-8000-0000000000a1";
-const SOURCE = "00000000-0000-0000-0000-000000000001"; // default CRM Expert mirror source
-const EXPERT_DEMO = "00000000-0000-4000-8000-0000000000e1";
-const EXPERT_NORMAL = "00000000-0000-4000-8000-0000000000e2";
 
 beforeEach(() => {
   fake.db.reset();
@@ -145,58 +142,7 @@ describe("house webhook rejects a demo tenant (403, no writes)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 2) CRM Expert mirror never targets a demo tenant
-// ---------------------------------------------------------------------------
-describe("CRM Expert mirror excludes demo tenants", () => {
-  it("a demo expert matching the affiliate id is never mirrored into; a non-demo match still is", async () => {
-    fake.db.rows("tenants").push(
-      { id: SOURCE, crm_model: "CRM_PLATAFORMA", is_demo: false, metadata: {} },
-      {
-        id: EXPERT_DEMO,
-        crm_model: "CRM_EXPERT",
-        is_demo: true,
-        metadata: { expert_affiliate_ids: ["aff-1"] },
-      },
-      {
-        id: EXPERT_NORMAL,
-        crm_model: "CRM_EXPERT",
-        is_demo: false,
-        metadata: { expert_affiliate_ids: ["aff-1"] },
-      },
-    );
-    fake.db.rows("players").push({
-      id: "player-1",
-      player_external_id: "user-1",
-      tenant_id: SOURCE,
-      affiliate_id: null,
-      expert: null,
-    });
-    fake.db.onRpc("claim_webhook_event", () => ({ data: true, error: null }));
-
-    const payload = {
-      eventId: "evt-mirror-1",
-      data: { userId: "user-1", affiliate: { affiliate_id: "aff-1" } },
-    };
-    const res = await processWebhookEvent(fake.db.client as any, SOURCE, "login", payload);
-    expect(res.status).toBe(200);
-
-    // The demo expert never received any write at all.
-    for (const table of ["webhook_logs", "players", "events", "sessions"]) {
-      expect(fake.db.rows(table).some((row: any) => row.tenant_id === EXPERT_DEMO)).toBe(false);
-    }
-    // Control: the non-demo expert with the same matching affiliate id DID get mirrored.
-    expect(fake.db.rows("players").some((row: any) => row.tenant_id === EXPERT_NORMAL)).toBe(true);
-  });
-
-  it("expertMirrorTargets itself never returns the source tenant or a non-matching affiliate", () => {
-    const experts = [{ id: EXPERT_NORMAL, metadata: { expert_affiliate_ids: ["aff-1"] } }];
-    expect(expertMirrorTargets(experts, SOURCE, "aff-1")).toEqual([EXPERT_NORMAL]);
-    expect(expertMirrorTargets(experts, SOURCE, "aff-2")).toEqual([]);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 3) Evolution webhook: ignore (200, no writes) for a demo-owned instance
+// 2) Evolution webhook: ignore (200, no writes) for a demo-owned instance
 // ---------------------------------------------------------------------------
 describe("Evolution webhook ignores a demo tenant's instance (200, no writes)", () => {
   type Handler = (input: { request: Request }) => Promise<Response>;
@@ -281,7 +227,7 @@ describe("Evolution webhook ignores a demo tenant's instance (200, no writes)", 
 });
 
 // ---------------------------------------------------------------------------
-// 4) Click redirect: a demo tracking_token writes nothing and goes neutral
+// 3) Click redirect: a demo tracking_token writes nothing and goes neutral
 // ---------------------------------------------------------------------------
 describe("click redirect never records a demo tenant's click", () => {
   const token = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
@@ -390,7 +336,7 @@ describe("click redirect never records a demo tenant's click", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 5) Unsubscribe token: a demo tenant writes nothing but still answers ok
+// 4) Unsubscribe token: a demo tenant writes nothing but still answers ok
 // ---------------------------------------------------------------------------
 describe("unsubscribe confirmation writes nothing for a demo tenant", () => {
   const confirm = (token: string) => confirmUnsubscribeFor({ token });
