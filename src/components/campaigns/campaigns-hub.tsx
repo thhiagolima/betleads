@@ -1,26 +1,22 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { BarChart3, Plus, RotateCw, Search, Send, Trash2, Workflow } from "lucide-react";
+import { Megaphone, Plus, Search, Send, Trash2, X } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
 
 import { ChannelCampaignComposer } from "@/components/campaigns/channel-campaign-composer";
-import { ChannelObservabilityPanel } from "@/components/campaigns/channel-observability-panel";
 import { IndividualSmsDialog } from "@/components/campaigns/individual-sms-dialog";
+import { HomeCard, KpiCard } from "@/components/home/home-cards";
+import { SegmentedFilter } from "@/components/players/segmented-filter";
 import { requestConfirmation } from "@/components/system-dialog-host";
-import { MetricCard } from "@/components/ui-premium/metric-card";
+import { EmptyState } from "@/components/ui-premium/empty-state";
 import { PageHeader } from "@/components/ui-premium/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { num } from "@/lib/format";
 import {
@@ -48,6 +44,29 @@ import { listCallQueue } from "@/lib/calls.functions";
 import { deleteCampaignDraft, listCampaignDrafts } from "@/lib/campaign-drafts.functions";
 
 type CampaignStatus = "todos" | "agendadas" | "enviando" | "finalizadas";
+
+const STATUS_FILTERS: ReadonlyArray<{ value: CampaignStatus; label: string }> = [
+  { value: "todos", label: "Todas" },
+  { value: "agendadas", label: "Agendadas" },
+  { value: "enviando", label: "Enviando" },
+  { value: "finalizadas", label: "Finalizadas" },
+];
+
+const CHANNEL_LABEL: Record<"sms" | "email" | "voice", string> = {
+  sms: "SMS",
+  email: "E-mail",
+  voice: "Voz",
+};
+
+/** KPIs cover the same window the SMS list is fetched with (listScheduledSmsCampaigns). */
+const KPI_WINDOW_DAYS = 30;
+
+function matchesStatus(filter: CampaignStatus, status: string) {
+  if (filter === "todos") return true;
+  if (filter === "agendadas") return ["agendada", "scheduled"].includes(status);
+  if (filter === "enviando") return status === "enviando";
+  return isFinishedCampaignStatus(status);
+}
 type Campaign = {
   id: string;
   name: string | null;
@@ -252,365 +271,273 @@ export function CampaignsHub() {
     (a, b) => new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime(),
   );
   const normalizedSearch = search.trim().toLowerCase();
-  const rows = all.filter((campaign) => {
-    const statusMatches =
-      status === "todos" ||
-      (status === "agendadas" && ["agendada", "scheduled"].includes(campaign.status)) ||
-      (status === "enviando" && campaign.status === "enviando") ||
-      (status === "finalizadas" && isFinishedCampaignStatus(campaign.status));
-    return (
-      statusMatches &&
+  const rows = all.filter(
+    (campaign) =>
+      matchesStatus(status, campaign.status) &&
       (!normalizedSearch ||
         String(campaign.name ?? "")
           .toLowerCase()
-          .includes(normalizedSearch))
-    );
-  });
-  const sent = all.reduce((sum, campaign) => sum + Number(campaign.sent_count ?? 0), 0);
-  const failed = all.reduce((sum, campaign) => sum + Number(campaign.failed_count ?? 0), 0);
+          .includes(normalizedSearch)),
+  );
+  const statusCounts = Object.fromEntries(
+    STATUS_FILTERS.map((item) => [
+      item.value,
+      all.filter((campaign) => matchesStatus(item.value, campaign.status)).length,
+    ]),
+  ) as Record<CampaignStatus, number>;
+
+  // D-01/KPIs: one explicit window for every channel (the SMS list is already
+  // limited to it; e-mail and voice are cut here so the totals mean the same thing).
+  const kpiSince = Date.now() - KPI_WINDOW_DAYS * 86_400_000;
+  const recent = all.filter((campaign) => new Date(campaign.scheduled_at).getTime() >= kpiSince);
+  const sent = recent.reduce((sum, campaign) => sum + Number(campaign.sent_count ?? 0), 0);
+  const failed = recent.reduce((sum, campaign) => sum + Number(campaign.failed_count ?? 0), 0);
   const queued = all.filter((campaign) =>
     ["agendada", "enviando"].includes(campaign.status),
   ).length;
 
+  // D-26: skeleton only before the first answer; the 30s refetch is silent.
+  const firstLoad =
+    (campaigns.isLoading && !campaigns.data) ||
+    (emailCampaigns.isLoading && !emailCampaigns.data) ||
+    (voiceQueue.isLoading && !voiceQueue.data);
+  const draftItems = (drafts.data?.items ?? []) as DraftSummary[];
+
+  const openNewCampaign = () => {
+    setActiveDraftId(null);
+    setInitialAudienceId("");
+    setInitialChannel("sms");
+    setComposerOpen(true);
+  };
+
   return (
-    <div className="space-y-5">
+    <>
       <PageHeader
-        subtitle="Crie, acompanhe e agende disparos para os seus públicos salvos."
+        subtitle="Envie SMS, e-mail ou voz para um público e acompanhe o resultado de cada envio."
         actions={
           <>
-            <Button variant="outline" asChild>
-              <Link to="/resultados">
-                <BarChart3 className="mr-2 h-4 w-4" />
-                Resultados
-              </Link>
+            <Button variant="outline" onClick={() => setIndividualOpen(true)}>
+              <Send /> Envio de teste
             </Button>
-            <Button variant="outline" asChild>
-              <Link to="/automacoes">
-                <Workflow className="mr-2 h-4 w-4" />
-                Automações
-              </Link>
+            <Button onClick={openNewCampaign}>
+              <Plus /> Nova campanha
             </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button>
-                  <Plus className="mr-2 h-4 w-4" /> Criar
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem
-                  onClick={() => {
-                    setActiveDraftId(null);
-                    setInitialAudienceId("");
-                    setInitialChannel("sms");
-                    setComposerOpen(true);
-                  }}
-                >
-                  <Plus className="mr-2 h-4 w-4" /> Campanha
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setIndividualOpen(true)}>
-                  <Send className="mr-2 h-4 w-4" /> Envio individual / teste
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link to="/automacoes">
-                    <Workflow className="mr-2 h-4 w-4" /> Automação
-                  </Link>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
           </>
         }
       />
-      {(drafts.data?.items?.length ?? 0) > 0 && (
-        <Card className="border-primary/25 bg-primary/[0.03]">
-          <CardContent className="p-0">
-            <div className="border-b border-border/60 px-4 py-3">
-              <h2 className="text-section">Rascunhos</h2>
-              <p className="text-xs text-muted-foreground">
-                Campanhas salvas automaticamente e disponíveis para continuar.
-              </p>
-            </div>
-            {(drafts.data!.items as DraftSummary[]).map((draft) => (
-              <div
-                key={draft.id}
-                className="flex flex-wrap items-center justify-between gap-3 border-b border-border/50 px-4 py-3 last:border-0"
-              >
-                <div>
-                  <p className="font-medium">{draft.name || "Campanha sem nome"}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {draft.channel === "email"
-                      ? "E-mail"
-                      : draft.channel === "voice"
-                        ? "Voz"
-                        : "SMS"}
-                    {" · "}editado em {new Date(draft.updatedAt).toLocaleString("pt-BR")}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    size="sm"
-                    onClick={() => {
-                      setActiveDraftId(draft.id);
-                      setInitialChannel(draft.channel);
-                      setComposerOpen(true);
-                    }}
-                  >
-                    Continuar edição
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    aria-label={`Excluir rascunho ${draft.name || "sem nome"}`}
-                    disabled={removeDraft.isPending}
-                    onClick={async () => {
-                      const confirmed = await requestConfirmation({
-                        title: "Excluir rascunho?",
-                        description: `O rascunho "${draft.name || "Campanha sem nome"}" será apagado e não poderá ser recuperado.`,
-                        confirmLabel: "Excluir rascunho",
-                        destructive: true,
-                      });
-                      if (confirmed) removeDraft.mutate(draft.id);
-                    }}
-                  >
-                    <Trash2 className="size-4" />
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      )}
+
       <div className="grid gap-3 sm:grid-cols-3">
-        <MetricCard label="Enviados" value={num(sent)} hint="nas campanhas listadas" />
-        <MetricCard label="Falhas" value={num(failed)} hint="rejeitados ou inválidos" />
-        <MetricCard label="Em envio" value={num(queued)} hint="agendadas ou processando" />
+        <KpiCard
+          title="Enviados"
+          value={firstLoad ? "—" : num(sent)}
+          detail={`Campanhas dos últimos ${KPI_WINDOW_DAYS} dias`}
+        />
+        <KpiCard
+          title="Falhas"
+          value={firstLoad ? "—" : num(failed)}
+          detail={`Recusados ou inválidos, últimos ${KPI_WINDOW_DAYS} dias`}
+        />
+        <KpiCard
+          title="Em envio"
+          value={firstLoad ? "—" : num(queued)}
+          detail="Campanhas agendadas ou enviando agora"
+        />
       </div>
-      <ChannelObservabilityPanel />
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex rounded-lg border border-border/70 bg-card/60 p-1">
-          {(["todos", "agendadas", "enviando", "finalizadas"] as CampaignStatus[]).map((value) => (
-            <Button
-              key={value}
-              size="sm"
-              variant={status === value ? "default" : "ghost"}
-              onClick={() => setStatus(value)}
-              className="capitalize"
-            >
-              {value}
-            </Button>
-          ))}
-        </div>
-        <div className="relative w-full sm:w-72">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            className="pl-9"
-            placeholder="Buscar campanha..."
-          />
-        </div>
-      </div>
-      <Card
-        className="relative overflow-hidden border-border/70 bg-card/70"
-        aria-busy={campaigns.isFetching || emailCampaigns.isFetching}
-      >
-        {campaigns.isFetching && !campaigns.isLoading && (
-          <div
-            className="absolute inset-x-0 top-0 z-10 flex items-center justify-center border-b border-primary/20 bg-primary/10 px-3 py-1.5 text-xs text-primary"
-            role="status"
-          >
-            <RotateCw className="mr-2 h-3.5 w-3.5 animate-spin" />
-            Atualizando campanhas...
+
+      {draftItems.length > 0 && (
+        <HomeCard>
+          <div className="border-b border-border px-4 py-3">
+            <h2 className="text-section">Rascunhos</h2>
+            <p className="text-meta text-muted-foreground">
+              Salvos automaticamente enquanto você edita.
+            </p>
           </div>
-        )}
-        <CardContent
-          className={cn(
-            "p-0",
-            (campaigns.isFetching || emailCampaigns.isFetching) &&
-              !(campaigns.isLoading || emailCampaigns.isLoading) &&
-              "opacity-60 transition-opacity",
-          )}
-        >
-          {campaigns.isLoading && (
-            <p className="p-6 text-sm text-muted-foreground">Carregando campanhas…</p>
-          )}
-          {!campaigns.isLoading && rows.length === 0 && (
-            <div className="flex flex-col items-center justify-center gap-3 p-10 text-center">
-              <div>
-                <p className="font-medium">
-                  {all.length === 0
-                    ? "Nenhuma campanha criada ainda"
-                    : "Nenhuma campanha corresponde aos filtros"}
-                </p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {all.length === 0
-                    ? "Comece escolhendo o canal, a audiência e o conteúdo do primeiro disparo."
-                    : "Ajuste a busca ou o status para visualizar outras campanhas."}
-                </p>
-              </div>
-              {all.length === 0 ? (
-                <Button
-                  onClick={() => {
-                    setInitialChannel("sms");
-                    setActiveDraftId(null);
-                    setInitialAudienceId("");
-                    setComposerOpen(true);
-                  }}
+          <ul>
+            {draftItems.map((draft) => {
+              const draftName = draft.name || "Campanha sem nome";
+              return (
+                <li
+                  key={draft.id}
+                  className="flex items-center justify-between gap-3 border-b border-border/70 px-4 py-2.5 last:border-b-0"
                 >
-                  <Plus className="mr-2 h-4 w-4" />
-                  Criar primeira campanha
-                </Button>
-              ) : (
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setSearch("");
-                    setStatus("todos");
-                  }}
-                >
-                  Limpar filtros
-                </Button>
-              )}
-            </div>
-          )}
-          {rows.map((campaign) => {
-            const total = Number(campaign.total_count ?? 0);
-            const delivered = Number(campaign.sent_count ?? 0);
-            const deduplicated = Number(campaign.deduplicated_count ?? 0);
-            const isVoice = campaign.channel === "voice";
-            const completed = isVoice
-              ? Number(campaign.finished_count ?? 0)
-              : delivered + deduplicated + Number(campaign.failed_count ?? 0);
-            const hasPlannedTotal = campaign.has_planned_total ?? total > 0;
-            const operation = getChannelOperationState(campaign.status, campaign.channel);
-            const reason =
-              campaignStopReason(campaign.status, campaign.last_error, campaign.updated_at) ??
-              campaign.blocked_reason ??
-              null;
-            return (
-              <div
-                key={campaign.id}
-                className="grid gap-3 border-b border-border/50 px-4 py-3 last:border-0 md:grid-cols-[minmax(220px,1fr)_100px_100px_80px_90px_150px] md:items-center"
-              >
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <p className="truncate font-medium">{campaign.name}</p>
-                    <Badge variant="outline" className={operation.tone}>
-                      {operation.label}
-                    </Badge>
-                    <CampaignBlockedBadge reason={campaign.blocked_reason} />
-                    {Number(campaign.unresolved_count ?? 0) > 0 ? (
-                      <Badge
-                        variant="outline"
-                        className="shrink-0 border-warning/40 text-warning"
-                        title="Destinatários sem cadastro, com telefone inválido ou sem consentimento. Veja o motivo no relatório."
-                      >
-                        {num(Number(campaign.unresolved_count))} não enviados
-                      </Badge>
-                    ) : null}
-                  </div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {campaign.channel === "sms"
-                      ? "SMS"
-                      : campaign.channel === "email"
-                        ? "E-mail"
-                        : "Voz"}{" "}
-                    · {num(total)} destinatários ·{" "}
-                    {campaign.date_is_creation
-                      ? `criada em ${new Date(campaign.scheduled_at).toLocaleDateString("pt-BR")}`
-                      : new Date(campaign.scheduled_at).toLocaleString("pt-BR")}
-                  </p>
-                  {reason ? (
-                    <p className="mt-1 text-xs text-foreground/80">
-                      <span className="font-medium">Motivo:</span> {reason}
+                  <div className="min-w-0">
+                    <p className="truncate text-body font-medium">{draftName}</p>
+                    <p className="text-meta text-muted-foreground">
+                      {CHANNEL_LABEL[draft.channel]} · editado em{" "}
+                      {new Date(draft.updatedAt).toLocaleString("pt-BR", {
+                        dateStyle: "short",
+                        timeStyle: "short",
+                      })}
                     </p>
-                  ) : null}
-                  <p className="mt-1 text-xs text-muted-foreground">{operation.nextAction}</p>
-                </div>
-                <CampaignMetric label="Enviados" value={num(delivered)} />
-                {isVoice ? (
-                  <CampaignMetric
-                    label="Concluídas"
-                    value={num(Number(campaign.completed_count ?? 0))}
-                  />
-                ) : (
-                  <CampaignMetric label="Deduplicados" value={num(deduplicated)} />
-                )}
-                <CampaignMetric label="Falhas" value={num(campaign.failed_count ?? 0)} />
-                <CampaignMetric
-                  label="Progresso"
-                  value={
-                    hasPlannedTotal && total > 0
-                      ? `${Math.min(100, Math.round((completed / total) * 100))}%`
-                      : "—"
-                  }
-                />
-                <div className="flex flex-wrap justify-end gap-1">
-                  {campaign.has_report === false ? null : (
-                    <Button size="sm" variant="outline" asChild>
-                      <Link
-                        to="/campanhas/$campaignId/relatorio"
-                        params={{ campaignId: campaign.id }}
-                      >
-                        Relatório
-                      </Link>
-                    </Button>
-                  )}
-                  {campaign.cancellable ? (
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
                     <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={cancel.isPending}
+                      variant="outline"
+                      onClick={() => {
+                        setActiveDraftId(draft.id);
+                        setInitialChannel(draft.channel);
+                        setComposerOpen(true);
+                      }}
+                    >
+                      Continuar
+                    </Button>
+                    <IconButton
+                      label={`Excluir rascunho ${draftName}`}
+                      icon={<Trash2 />}
+                      disabled={removeDraft.isPending}
                       onClick={async () => {
                         const confirmed = await requestConfirmation({
-                          title: "Cancelar o envio desta campanha?",
-                          description: `Os envios ainda não feitos de "${campaign.name}" serão cancelados e a campanha não poderá ser retomada. O que já foi enviado não é desfeito.`,
-                          confirmLabel: "Cancelar envio",
-                          cancelLabel: "Manter campanha",
+                          title: "Excluir rascunho?",
+                          description: `O rascunho "${draftName}" será apagado e não poderá ser recuperado.`,
+                          confirmLabel: "Excluir rascunho",
                           destructive: true,
                         });
-                        if (confirmed) cancel.mutate(campaign.id);
+                        if (confirmed) removeDraft.mutate(draft.id);
                       }}
-                    >
-                      Cancelar envio
+                    />
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </HomeCard>
+      )}
+
+      <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+        <SegmentedFilter
+          label="Status da campanha"
+          value={status}
+          onValueChange={setStatus}
+          items={STATUS_FILTERS.map((item) => ({
+            ...item,
+            count: firstLoad ? null : statusCounts[item.value],
+          }))}
+        />
+        <div className="relative w-full lg:w-72">
+          <Search
+            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+            aria-hidden="true"
+          />
+          <Input
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            aria-label="Buscar campanha pelo nome"
+            placeholder="Buscar campanha"
+            className="h-10 bg-card pl-9 pr-10"
+          />
+          {search && (
+            <button
+              type="button"
+              aria-label="Limpar busca"
+              onClick={() => setSearch("")}
+              className="absolute right-1 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      <HomeCard className="overflow-hidden">
+        {/* D-05: a grid only from xl up (with minmax(0,…) and sideways scroll as a
+            safety net); below xl every campaign is a stacked row. */}
+        <div className="overflow-x-auto">
+          <div className="xl:min-w-[920px]">
+            <div
+              className={cn(ROW_GRID, "hidden border-b border-border py-2.5 xl:grid")}
+              aria-hidden="true"
+            >
+              <span className="text-meta text-muted-foreground">Campanha</span>
+              <span className="text-meta text-muted-foreground">Status</span>
+              <span className="text-right text-meta text-muted-foreground">Enviados</span>
+              <span className="text-right text-meta text-muted-foreground">Falhas</span>
+              <span className="text-right text-meta text-muted-foreground">Progresso</span>
+              <span className="sr-only">Ações</span>
+            </div>
+
+            {firstLoad && (
+              <div className="divide-y divide-border/70" aria-label="Carregando campanhas">
+                {Array.from({ length: 4 }).map((_, index) => (
+                  <div key={index} className="space-y-2 px-4 py-4">
+                    <Skeleton className="h-4 w-56 max-w-full" />
+                    <Skeleton className="h-3 w-40 max-w-full" />
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {!firstLoad && rows.length === 0 && (
+              <EmptyState
+                icon={<Megaphone />}
+                title={
+                  all.length === 0
+                    ? "Nenhuma campanha ainda"
+                    : "Nenhuma campanha corresponde aos filtros"
+                }
+                description={
+                  all.length === 0
+                    ? "Escolha o canal, o público e a mensagem do primeiro envio."
+                    : "Ajuste a busca ou o status para ver outras campanhas."
+                }
+                action={
+                  all.length === 0 ? (
+                    <Button onClick={openNewCampaign}>
+                      <Plus /> Nova campanha
                     </Button>
                   ) : (
-                    <Button size="sm" variant="ghost" asChild>
-                      <a href={operation.actionTo}>{operation.actionLabel}</a>
-                    </Button>
-                  )}
-                  {campaign.resumable && campaign.channel === "sms" ? (
                     <Button
-                      size="sm"
                       variant="outline"
-                      disabled={resume.isPending}
-                      onClick={() => resume.mutate(campaign.id)}
-                    >
-                      Retomar
-                    </Button>
-                  ) : null}
-                  {campaign.resumable && campaign.channel === "email" ? (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={resumeEmail.isPending}
-                      onClick={async () => {
-                        const confirmed = await requestConfirmation({
-                          title: `Retomar “${campaign.name}”?`,
-                          description: `Os e-mails restantes serão enviados imediatamente. ${EMAIL_CAMPAIGN_RESEND_NOTE}`,
-                          confirmLabel: "Retomar campanha",
-                        });
-                        if (confirmed) resumeEmail.mutate(campaign.id);
+                      onClick={() => {
+                        setSearch("");
+                        setStatus("todos");
                       }}
                     >
-                      Retomar
+                      Limpar filtros
                     </Button>
-                  ) : null}
-                </div>
-              </div>
-            );
-          })}
-        </CardContent>
-      </Card>
+                  )
+                }
+              />
+            )}
+
+            {!firstLoad && rows.length > 0 && (
+              <ul>
+                {rows.map((campaign) => (
+                  <CampaignRow
+                    key={`${campaign.channel}-${campaign.id}`}
+                    campaign={campaign}
+                    cancelPending={cancel.isPending}
+                    resumePending={resume.isPending || resumeEmail.isPending}
+                    onCancel={async () => {
+                      const confirmed = await requestConfirmation({
+                        title: "Cancelar o envio desta campanha?",
+                        description: `Os envios ainda não feitos de "${campaign.name}" serão cancelados e a campanha não poderá ser retomada. O que já foi enviado não é desfeito.`,
+                        confirmLabel: "Cancelar envio",
+                        cancelLabel: "Manter campanha",
+                        destructive: true,
+                      });
+                      if (confirmed) cancel.mutate(campaign.id);
+                    }}
+                    onResume={async () => {
+                      if (campaign.channel === "sms") {
+                        resume.mutate(campaign.id);
+                        return;
+                      }
+                      const confirmed = await requestConfirmation({
+                        title: `Retomar “${campaign.name}”?`,
+                        description: `Os e-mails restantes serão enviados imediatamente. ${EMAIL_CAMPAIGN_RESEND_NOTE}`,
+                        confirmLabel: "Retomar campanha",
+                      });
+                      if (confirmed) resumeEmail.mutate(campaign.id);
+                    }}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      </HomeCard>
+
       <ChannelCampaignComposer
         open={composerOpen}
         onOpenChange={setComposerOpen}
@@ -625,7 +552,127 @@ export function CampaignsHub() {
         }}
       />
       <IndividualSmsDialog open={individualOpen} onOpenChange={setIndividualOpen} />
+    </>
+  );
+}
+
+const ROW_GRID =
+  "xl:grid xl:grid-cols-[minmax(0,1fr)_minmax(0,10rem)_minmax(0,6rem)_minmax(0,6rem)_minmax(0,6rem)_minmax(0,13rem)] xl:items-center xl:gap-4 px-4";
+
+function CampaignRow({
+  campaign,
+  cancelPending,
+  resumePending,
+  onCancel,
+  onResume,
+}: {
+  campaign: Campaign;
+  cancelPending: boolean;
+  resumePending: boolean;
+  onCancel: () => void;
+  onResume: () => void;
+}) {
+  const total = Number(campaign.total_count ?? 0);
+  const sentCount = Number(campaign.sent_count ?? 0);
+  const repeated = Number(campaign.deduplicated_count ?? 0);
+  const isVoice = campaign.channel === "voice";
+  const done = isVoice
+    ? Number(campaign.finished_count ?? 0)
+    : sentCount + repeated + Number(campaign.failed_count ?? 0);
+  const hasPlannedTotal = campaign.has_planned_total ?? total > 0;
+  const progress =
+    hasPlannedTotal && total > 0 ? `${Math.min(100, Math.round((done / total) * 100))}%` : "—";
+  const operation = getChannelOperationState(campaign.status, campaign.channel);
+  const reason =
+    campaignStopReason(campaign.status, campaign.last_error, campaign.updated_at) ??
+    campaign.blocked_reason ??
+    null;
+  const unresolved = Number(campaign.unresolved_count ?? 0);
+  const pausedForBalance = campaign.channel === "sms" && campaign.status === "pausada";
+  const when = campaign.date_is_creation
+    ? `criada em ${new Date(campaign.scheduled_at).toLocaleDateString("pt-BR")}`
+    : new Date(campaign.scheduled_at).toLocaleString("pt-BR", {
+        dateStyle: "short",
+        timeStyle: "short",
+      });
+  const meta = [
+    CHANNEL_LABEL[campaign.channel],
+    `${num(total)} ${total === 1 ? "destinatário" : "destinatários"}`,
+    when,
+    isVoice ? `${num(Number(campaign.completed_count ?? 0))} concluídas` : null,
+    repeated > 0 ? `${num(repeated)} repetidos ignorados` : null,
+  ].filter(Boolean);
+
+  const status = (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <Badge variant="outline" className={cn("shrink-0", operation.tone)}>
+        {operation.label}
+      </Badge>
+      <CampaignBlockedBadge reason={campaign.blocked_reason} />
+      {unresolved > 0 ? (
+        <Badge
+          variant="outline"
+          className="shrink-0 border-warning/40 text-warning"
+          title="Destinatários sem cadastro, com telefone inválido ou sem consentimento. Veja o motivo no relatório."
+        >
+          {num(unresolved)} não enviados
+        </Badge>
+      ) : null}
     </div>
+  );
+
+  return (
+    <li
+      className={cn(
+        ROW_GRID,
+        "flex flex-col gap-2.5 border-b border-border/70 py-3.5 last:border-b-0",
+      )}
+    >
+      <div className="min-w-0">
+        <div className="flex items-start justify-between gap-3 xl:block">
+          <p className="min-w-0 truncate text-body font-medium">
+            {campaign.name || "Campanha sem nome"}
+          </p>
+          <div className="shrink-0 xl:hidden">{status}</div>
+        </div>
+        <p className="mt-0.5 text-meta text-muted-foreground">{meta.join(" · ")}</p>
+        {reason ? (
+          <p className="mt-1 text-meta text-foreground/80">
+            <span className="font-medium">Motivo:</span> {reason}
+          </p>
+        ) : null}
+      </div>
+      <div className="hidden xl:block">{status}</div>
+      <dl className="flex flex-wrap gap-x-5 gap-y-1 xl:contents">
+        <CampaignMetric label="Enviados" value={num(sentCount)} />
+        <CampaignMetric label="Falhas" value={num(campaign.failed_count ?? 0)} />
+        <CampaignMetric label="Progresso" value={progress} />
+      </dl>
+      <div className="flex flex-wrap gap-2 xl:justify-end">
+        {campaign.has_report === false ? null : (
+          <Button size="sm" variant="outline" asChild>
+            <Link to="/campanhas/$campaignId/relatorio" params={{ campaignId: campaign.id }}>
+              Relatório
+            </Link>
+          </Button>
+        )}
+        {campaign.resumable && (campaign.channel === "sms" || campaign.channel === "email") ? (
+          <Button size="sm" variant="outline" disabled={resumePending} onClick={onResume}>
+            Retomar
+          </Button>
+        ) : null}
+        {pausedForBalance ? (
+          <Button size="sm" variant="ghost" asChild>
+            <Link to="/plano-e-creditos">Ver saldo</Link>
+          </Button>
+        ) : null}
+        {campaign.cancellable ? (
+          <Button size="sm" variant="ghost" disabled={cancelPending} onClick={onCancel}>
+            Cancelar
+          </Button>
+        ) : null}
+      </div>
+    </li>
   );
 }
 
@@ -639,9 +686,9 @@ function parsePtBrDate(value: string | null | undefined): string | null {
 
 function CampaignMetric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="text-xs text-muted-foreground">
-      {label}
-      <strong className="block text-sm text-foreground">{value}</strong>
+    <div className="flex items-baseline gap-1.5 text-meta xl:block xl:text-right">
+      <dt className="text-muted-foreground xl:sr-only">{label}</dt>
+      <dd className="font-semibold tabular-nums text-foreground xl:text-body">{value}</dd>
     </div>
   );
 }

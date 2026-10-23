@@ -1,5 +1,6 @@
 // Pure helpers of the journey editor (kept apart so they can be unit tested).
 
+import { EXIT_REASON_LABELS } from "@/lib/player-journeys";
 import { TRIGGER_NAMES } from "@/lib/triggers";
 
 /** Config keys of an SMS step the editor does not edit (links, variations). */
@@ -88,7 +89,7 @@ export function emailStepIdsForConfig(fields: {
   };
 }
 
-/** Activity fields an inactivity journey can watch (same values the new-journey dialog saves). */
+/** Activity fields an inactivity journey can watch (values saved in trigger_config.field). */
 export const INACTIVITY_FIELDS = {
   ultimo_login: "Login",
   ultimo_jogo: "Jogo",
@@ -118,4 +119,106 @@ export function journeyTriggerLabel(
     return `${INACTIVITY_TRIGGER_NAME}: sem ${field.toLowerCase()} há ${inactivityHoursText(hours)}`;
   }
   return TRIGGER_NAMES[trigger as keyof typeof TRIGGER_NAMES] ?? trigger;
+}
+
+/** Status names shown in Automações and in the editor (same words as the Ativar/Pausar actions). */
+export const JOURNEY_STATUS_LABELS = {
+  draft: "Rascunho",
+  active: "Ativa",
+  paused: "Pausada",
+  archived: "Arquivada",
+} as const;
+
+export function journeyStatusLabel(status: string | null | undefined): string {
+  return JOURNEY_STATUS_LABELS[status as keyof typeof JOURNEY_STATUS_LABELS] ?? "Rascunho";
+}
+
+/** Players inside a journey right now. Players enter the moment they qualify,
+ * so "inside" = active + waiting + paused by priority (one rule for hub, map and editor). */
+export function journeyInProgress(byStatus: Record<string, number> | null | undefined): number {
+  return (
+    Number(byStatus?.active ?? 0) +
+    Number(byStatus?.waiting ?? 0) +
+    Number(byStatus?.paused_by_priority ?? 0)
+  );
+}
+
+// Override/extend the player page labels with the Automações vocabulary (Pausar, not Desligar).
+const EXTRA_EXIT_REASON_LABELS: Record<string, string> = {
+  journey_paused_closed: "encerrada ao pausar a jornada",
+  duplicate_lower_priority: "entrada duplicada em jornada de menor prioridade",
+  lock_expired_recovered: "envio retomado após travamento",
+};
+
+/** Readable (pt-BR) exit reason. Known keys are translated; anything else is
+ * a failure message written by the dispatcher and is shown as is. */
+export function journeyExitReasonLabel(reason: string | null | undefined): string | null {
+  if (!reason) return null;
+  const label = EXTRA_EXIT_REASON_LABELS[reason] ?? EXIT_REASON_LABELS[reason];
+  if (label) return label.charAt(0).toUpperCase() + label.slice(1);
+  return reason;
+}
+
+const PRIORITY_PAUSE_REASON_LABELS: Record<string, string> = {
+  lower_priority_due_message: "outra jornada de maior prioridade tinha mensagem para enviar",
+};
+
+export function priorityPauseReasonLabel(reason: string | null | undefined): string | null {
+  if (!reason) return null;
+  return PRIORITY_PAUSE_REASON_LABELS[reason] ?? null;
+}
+
+/** Who may enter a journey after meeting the trigger (entry_rules.audience; see audienceMatches). */
+export const JOURNEY_AUDIENCES = {
+  "system:all-leads": {
+    label: "Todos os jogadores da casa",
+    description: "Qualquer jogador que cumprir o gatilho entra, ativo ou não.",
+  },
+  all_active: {
+    label: "Só jogadores ativos",
+    description: "Entra quem cumprir o gatilho e estiver com status ativo.",
+  },
+  vip: {
+    label: "Só VIP",
+    description: "Entra quem cumprir o gatilho e estiver marcado como VIP.",
+  },
+  manual: {
+    label: "Ninguém automaticamente",
+    description: "Ninguém entra pelo gatilho; só por entrada manual ou API.",
+  },
+} as const;
+
+export function journeyAudienceDescription(audience: string): string {
+  const known = JOURNEY_AUDIENCES[audience as keyof typeof JOURNEY_AUDIENCES];
+  return known?.description ?? "Público personalizado salvo nesta jornada.";
+}
+
+/** Units of a wait step in the editor; the step is saved in seconds (delay_seconds). */
+export const WAIT_UNITS = {
+  minutes: { label: "minutos", seconds: 60 },
+  hours: { label: "horas", seconds: 3600 },
+  days: { label: "dias", seconds: 86400 },
+} as const;
+export type WaitUnit = keyof typeof WAIT_UNITS;
+
+/** Saved delay_seconds -> amount + unit to show: the largest unit that divides it
+ * exactly (86400 -> 1 dia, 5400 -> 90 minutos); a value below 1 minute shows in minutes. */
+export function splitWaitSeconds(seconds: number): { amount: string; unit: WaitUnit } {
+  const value = Number.isFinite(seconds) && seconds > 0 ? seconds : 0;
+  if (value > 0 && value % WAIT_UNITS.days.seconds === 0)
+    return { amount: String(value / WAIT_UNITS.days.seconds), unit: "days" };
+  if (value > 0 && value % WAIT_UNITS.hours.seconds === 0)
+    return { amount: String(value / WAIT_UNITS.hours.seconds), unit: "hours" };
+  const minutes = value / WAIT_UNITS.minutes.seconds;
+  return {
+    amount: String(Number.isInteger(minutes) ? minutes : Number(minutes.toFixed(2))),
+    unit: "minutes",
+  };
+}
+
+/** Amount typed in the editor (accepts "1,5") + unit -> seconds, or null when not a positive number. */
+export function waitToSeconds(amount: string, unit: WaitUnit): number | null {
+  const value = Number(amount.trim().replace(",", "."));
+  if (!amount.trim() || !Number.isFinite(value) || value <= 0) return null;
+  return Math.round(value * WAIT_UNITS[unit].seconds);
 }

@@ -84,12 +84,12 @@ export function getChannelOperationState(
 
   if (["agendada", "scheduled"].includes(normalized)) {
     return {
-      label: "Pronto para enviar",
-      description: "A campanha está revisada e aguardará o horário definido.",
+      label: "Agendada",
+      description: "A campanha está revisada e aguarda o horário definido.",
       nextAction: "Confira o horário e acompanhe o disparo.",
       actionLabel: "Ver campanhas",
       actionTo: "/campanhas",
-      tone: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+      tone: "border-info/30 bg-info/10 text-info",
     };
   }
 
@@ -100,18 +100,18 @@ export function getChannelOperationState(
       nextAction: "Verifique a configuração e o status do provedor.",
       actionLabel: "Ver configurações",
       actionTo: SETTINGS_DESTINATION[channel],
-      tone: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+      tone: "border-warning/30 bg-warning/10 text-warning",
     };
   }
 
   if (["retry", "retrying", "retry_scheduled", "rate_limited"].includes(normalized)) {
     return {
-      label: "Em retentativa",
+      label: "Tentando de novo",
       description: "Uma tentativa anterior não foi concluída e o sistema tentará novamente.",
       nextAction: "Acompanhe a fila; revise o provedor se a retentativa falhar.",
       actionLabel: "Ver histórico",
       actionTo: HISTORY_DESTINATION[channel],
-      tone: "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300",
+      tone: "border-info/30 bg-info/10 text-info",
     };
   }
 
@@ -119,18 +119,18 @@ export function getChannelOperationState(
     ["paused", "pausada", "paused_limit", "limit_reached", "quota_exceeded"].includes(normalized)
   ) {
     return {
-      label: "Pausado por limite",
+      label: channel === "voice" ? "Pausada por limite" : "Pausada",
       description:
         channel === "voice"
-          ? "O envio respeita o cooldown e o limite de contato de voz nas últimas 24 horas."
+          ? "As ligações respeitam o intervalo entre contatos e o limite de ligações por jogador em 24 horas."
           : "O envio foi interrompido para respeitar um limite de saldo, volume ou janela.",
       nextAction:
         channel === "voice"
-          ? "A chamada será liberada quando a política de contato permitir."
+          ? "A ligação sai quando o limite de contato permitir."
           : "Revise os limites do canal antes de retomar.",
       actionLabel: channel === "sms" ? "Ver saldo" : "Ver configurações",
       actionTo: channel === "sms" ? "/plano-e-creditos" : SETTINGS_DESTINATION[channel],
-      tone: "border-orange-500/30 bg-orange-500/10 text-orange-700 dark:text-orange-300",
+      tone: "border-warning/30 bg-warning/10 text-warning",
     };
   }
 
@@ -147,12 +147,12 @@ export function getChannelOperationState(
 
   if (["failed", "falhou", "error", "rejected"].includes(normalized)) {
     return {
-      label: "Ação necessária",
+      label: "Falhou",
       description: "O envio não foi concluído e precisa de revisão antes de uma nova tentativa.",
       nextAction: "Revise destinatários, conteúdo e configuração do canal.",
       actionLabel: "Abrir histórico",
       actionTo: HISTORY_DESTINATION[channel],
-      tone: "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300",
+      tone: "border-danger/30 bg-danger/10 text-danger",
     };
   }
 
@@ -162,12 +162,12 @@ export function getChannelOperationState(
     )
   ) {
     return {
-      label: "Em processamento",
+      label: "Enviando",
       description: "O provedor está processando os destinatários desta campanha.",
-      nextAction: "Acompanhe as atualizações de entrega.",
+      nextAction: "Acompanhe os envios no relatório da campanha.",
       actionLabel: "Ver histórico",
       actionTo: HISTORY_DESTINATION[channel],
-      tone: "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300",
+      tone: "border-info/30 bg-info/10 text-info",
     };
   }
 
@@ -182,12 +182,12 @@ export function getChannelOperationState(
       nextAction: "Consulte os resultados e as falhas no histórico.",
       actionLabel: "Ver histórico",
       actionTo: HISTORY_DESTINATION[channel],
-      tone: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+      tone: "border-success/30 bg-success/10 text-success",
     };
   }
 
   return {
-    label: "Ação necessária",
+    label: "Status desconhecido",
     description: "O estado recebido não pôde ser classificado automaticamente.",
     nextAction: "Atualize a lista ou consulte o histórico do canal.",
     actionLabel: "Ver histórico",
