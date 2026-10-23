@@ -213,8 +213,13 @@ type Template = {
 type CampStatus = "rascunho" | "agendada" | "enviando" | "pausada" | "concluida";
 
 /** PG3: the run stopped at the first e-mail the house's wallet refused. */
-function campaignPausedForBalanceMessage(r: { enviados: number; total: number }) {
-  return `Campanha pausada por saldo insuficiente: ${r.enviados} de ${r.total} e-mails enviados. Recarregue a carteira e envie novamente.`;
+function campaignPausedForBalanceMessage(r: { enviados: number; total: number; jaEnviados?: number }) {
+  return `Campanha pausada por saldo insuficiente: ${(r.jaEnviados ?? 0) + r.enviados} de ${r.total} e-mails enviados. Recarregue a carteira e envie novamente.`;
+}
+
+/** Recipients a re-run skipped because this campaign already reached them. */
+function alreadySentSuffix(r: { jaEnviados?: number }) {
+  return r.jaEnviados ? ` ${r.jaEnviados} já tinham recebido e não receberam de novo.` : "";
 }
 type Campanha = {
   id: string;
@@ -1785,7 +1790,7 @@ function CampanhasTab() {
     if (
       !(await requestConfirmation({
         title: `Disparar “${c.nome}” agora?`,
-        description: `As mensagens serão enviadas imediatamente para o segmento “${c.segmento}”.`,
+        description: `As mensagens serão enviadas imediatamente para o segmento “${c.segmento}”. Quem já recebeu esta campanha não recebe de novo.`,
         confirmLabel: "Disparar campanha",
       }))
     )
@@ -1797,7 +1802,7 @@ function CampanhasTab() {
         toast.warning(campaignPausedForBalanceMessage(r), { id: tid });
       } else {
         toast.success(
-          `Campanha enviada: ${r.enviados} ok, ${r.pendentes ?? 0} pendentes, ${r.falhas} falhas (${r.total} destinatários).`,
+          `Campanha enviada: ${r.enviados} ok, ${r.pendentes ?? 0} pendentes, ${r.falhas} falhas (${r.total} destinatários).${alreadySentSuffix(r)}`,
           { id: tid },
         );
       }
@@ -1912,7 +1917,9 @@ function CampanhasTab() {
                               <Pause className="h-4 w-4 mr-2" /> Pausar
                             </DropdownMenuItem>
                           ) : (
-                            <DropdownMenuItem onClick={() => setStatus(c.id, "enviando")}>
+                            // Resume = the same send-now run, which skips the
+                            // recipients this campaign already reached.
+                            <DropdownMenuItem onClick={() => enviarAgora(c)}>
                               <Play className="h-4 w-4 mr-2" /> Retomar
                             </DropdownMenuItem>
                           )}

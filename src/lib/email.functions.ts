@@ -736,7 +736,7 @@ export const updateEmailCampaignStatus = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { error } = await context.supabase
       .from("email_campaigns")
-      .update({ status: data.status, blocked_reason: null })
+      .update(emailCampaignStatusPatch(data.status))
       .eq("id", data.id);
     if (error) throw new Error(error.message);
     return { ok: true };
@@ -1000,19 +1000,36 @@ export async function runCampaignSend(campaignId: string) {
     );
   }
 
+  // A re-run (after "pausada por saldo", "Retomar" or a second "Enviar
+  // agora") never re-sends — nor re-charges — a recipient this campaign
+  // already reached. Pending/error rows are retried.
+  const reached = await loadCampaignReachedRecipients(campaignId);
+  const isReached = (p: { id?: string | null; email?: string | null }) =>
+    p.id
+      ? reached.playerIds.has(p.id)
+      : reached.emails.has(String(p.email ?? "").trim().toLowerCase());
+  const remaining = players.filter((p) => !isReached(p));
+  const jaEnviados = players.length - remaining.length;
+  const stats = (sent: number, failed: number) => ({
+    enviados: jaEnviados + sent,
+    entregues: 0,
+    abertos: 0,
+    cliques: 0,
+    falhas: failed,
+    total: players.length,
+  });
+
+  if (remaining.length === 0) {
+    await supabaseAdmin
+      .from("email_campaigns")
+      .update({ status: "concluida", blocked_reason: null, stats: stats(0, 0) })
+      .eq("id", campaignId);
+    return { enviados: 0, falhas: 0, pendentes: 0, total: players.length, jaEnviados, pausadaPorSaldo: false };
+  }
+
   await supabaseAdmin
     .from("email_campaigns")
-    .update({
-      status: "enviando",
-      stats: {
-        enviados: 0,
-        entregues: 0,
-        abertos: 0,
-        cliques: 0,
-        falhas: 0,
-        total: players.length,
-      },
-    })
+    .update({ status: "enviando", stats: stats(0, 0) })
     .eq("id", campaignId);
 
   let enviados = 0;
@@ -1025,14 +1042,16 @@ export async function runCampaignSend(campaignId: string) {
 
   const house = await loadHouseLinks(camp.tenant_id);
 
-  for (const p of players) {
+  for (const p of remaining) {
     if (!p.email) continue;
+    // Known once the provider answered: the throw-path log row keeps it.
+    let r: Awaited<ReturnType<typeof sendInfobipEmail>> | null = null;
     try {
       // Campaigns are not frequency-capped (the contact limit is for journeys).
       const vars = buildPlayerVariables(p, house);
       const subject = renderTemplate(tpl.subject ?? "", vars, house);
       const html = renderTemplate(tpl.body_html ?? "", vars, house);
-      const r = await sendInfobipEmail({
+      r = await sendInfobipEmail({
         to: p.email,
         from: sender.fromEmail,
         fromName: sender.fromName,
@@ -1103,6 +1122,7 @@ export async function runCampaignSend(campaignId: string) {
         player_id: p.id,
         campaign_id: campaignId,
         tenant_id: camp.tenant_id,
+        ...(r ? emailBillingColumns(r) : {}),
         provider_response: { error: String((err as any)?.message ?? err) } as never,
       });
     }
@@ -1110,16 +1130,7 @@ export async function runCampaignSend(campaignId: string) {
     if ((enviados + falhas) % 25 === 0) {
       await supabaseAdmin
         .from("email_campaigns")
-        .update({
-          stats: {
-            enviados,
-            entregues: 0,
-            abertos: 0,
-            cliques: 0,
-            falhas,
-            total: players.length,
-          },
-        })
+        .update({ stats: stats(enviados, falhas) })
         .eq("id", campaignId);
     }
     // small breath to avoid bursts
@@ -1133,18 +1144,51 @@ export async function runCampaignSend(campaignId: string) {
       // definitiva porque o provedor pode aceitar o próximo retry.
       status: pausadaPorSaldo ? "pausada" : "concluida",
       ...(pausadaPorSaldo ? { blocked_reason: EMAIL_CAMPAIGN_NO_BALANCE_MESSAGE } : {}),
-      stats: {
-        enviados,
-        entregues: 0,
-        abertos: 0,
-        cliques: 0,
-        falhas,
-        total: players.length,
-      },
+      stats: stats(enviados, falhas),
     })
     .eq("id", campaignId);
 
-  return { enviados, falhas, pendentes, total: players.length, pausadaPorSaldo };
+  return { enviados, falhas, pendentes, total: players.length, jaEnviados, pausadaPorSaldo };
+}
+
+/**
+ * Recipients this campaign already reached: a log row marked sent/delivered,
+ * or with sent_at (a later bounce keeps it). Pending/error rows are not
+ * reached, so a re-run retries them. Extra addresses without a player are
+ * matched by their lowercased e-mail. A failed read throws (fail closed:
+ * never risk re-sending a whole campaign).
+ */
+async function loadCampaignReachedRecipients(campaignId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("email_send_logs")
+    .select("player_id, to_email, status, sent_at")
+    .eq("campaign_id", campaignId);
+  if (error) throw new Error(error.message);
+  const playerIds = new Set<string>();
+  const emails = new Set<string>();
+  for (const row of data ?? []) {
+    const reached = row.status === "sent" || row.status === "delivered" || row.sent_at != null;
+    if (!reached) continue;
+    if (row.player_id) playerIds.add(row.player_id);
+    const email = String(row.to_email ?? "").trim().toLowerCase();
+    if (email) emails.add(email);
+  }
+  return { playerIds, emails };
+}
+
+/**
+ * Columns written when a house changes a campaign's status by hand. Pausing
+ * also releases the run lock (locked_at/locked_by) so the campaign is never
+ * left claimed while paused.
+ */
+export function emailCampaignStatusPatch(
+  status: "rascunho" | "agendada" | "enviando" | "pausada" | "concluida",
+) {
+  return {
+    status,
+    blocked_reason: null,
+    ...(status === "pausada" ? { locked_at: null, locked_by: null } : {}),
+  };
 }
 
 /** blocked_reason of an e-mail campaign paused because the house ran out of balance. */
