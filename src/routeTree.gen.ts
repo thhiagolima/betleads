@@ -40,7 +40,7 @@ import { Route as AutomacoesEmailRouteImport } from './routes/automacoes.email'
 import { Route as AutomacoesLigacoesRouteImport } from './routes/automacoes.ligacoes'
 import { Route as AutomacoesSmsRouteImport } from './routes/automacoes.sms'
 import { Route as AutomacoesWhatsappRouteImport } from './routes/automacoes.whatsapp'
-import { Route as ConfiguracoesCasaRouteImport } from './routes/configuracoes.casa'
+import { Route as ConfiguracoesCasaRouteImport } from './routes/configuracoes_.casa'
 import { Route as JornadasJourneyIdRouteImport } from './routes/jornadas.$journeyId'
 import { Route as JornadasNovaRouteImport } from './routes/jornadas.nova'
 import { Route as LinksConfiguracoesRouteImport } from './routes/links.configuracoes'
@@ -241,9 +241,9 @@ const AutomacoesWhatsappRoute = AutomacoesWhatsappRouteImport.update({
   getParentRoute: () => AutomacoesRoute,
 } as any)
 const ConfiguracoesCasaRoute = ConfiguracoesCasaRouteImport.update({
-  id: '/casa',
-  path: '/casa',
-  getParentRoute: () => ConfiguracoesRoute,
+  id: '/configuracoes_/casa',
+  path: '/configuracoes/casa',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const JornadasJourneyIdRoute = JornadasJourneyIdRouteImport.update({
   id: '/$journeyId',
@@ -491,7 +491,7 @@ export interface FileRoutesByFullPath {
   '/alertas': typeof AlertasRoute
   '/automacoes': typeof AutomacoesRouteWithChildren
   '/campanhas': typeof CampanhasRouteWithChildren
-  '/configuracoes': typeof ConfiguracoesRouteWithChildren
+  '/configuracoes': typeof ConfiguracoesRoute
   '/consentimentos': typeof ConsentimentosRoute
   '/creditos-sms': typeof CreditosSmsRoute
   '/email': typeof EmailRoute
@@ -568,7 +568,7 @@ export interface FileRoutesByTo {
   '/alertas': typeof AlertasRoute
   '/automacoes': typeof AutomacoesRouteWithChildren
   '/campanhas': typeof CampanhasRouteWithChildren
-  '/configuracoes': typeof ConfiguracoesRouteWithChildren
+  '/configuracoes': typeof ConfiguracoesRoute
   '/consentimentos': typeof ConsentimentosRoute
   '/creditos-sms': typeof CreditosSmsRoute
   '/email': typeof EmailRoute
@@ -646,7 +646,7 @@ export interface FileRoutesById {
   '/alertas': typeof AlertasRoute
   '/automacoes': typeof AutomacoesRouteWithChildren
   '/campanhas': typeof CampanhasRouteWithChildren
-  '/configuracoes': typeof ConfiguracoesRouteWithChildren
+  '/configuracoes': typeof ConfiguracoesRoute
   '/consentimentos': typeof ConsentimentosRoute
   '/creditos-sms': typeof CreditosSmsRoute
   '/email': typeof EmailRoute
@@ -672,7 +672,7 @@ export interface FileRoutesById {
   '/automacoes/ligacoes': typeof AutomacoesLigacoesRoute
   '/automacoes/sms': typeof AutomacoesSmsRoute
   '/automacoes/whatsapp': typeof AutomacoesWhatsappRoute
-  '/configuracoes/casa': typeof ConfiguracoesCasaRoute
+  '/configuracoes_/casa': typeof ConfiguracoesCasaRoute
   '/jornadas/$journeyId': typeof JornadasJourneyIdRoute
   '/jornadas/nova': typeof JornadasNovaRoute
   '/links/configuracoes': typeof LinksConfiguracoesRoute
@@ -905,7 +905,7 @@ export interface FileRouteTypes {
     | '/automacoes/ligacoes'
     | '/automacoes/sms'
     | '/automacoes/whatsapp'
-    | '/configuracoes/casa'
+    | '/configuracoes_/casa'
     | '/jornadas/$journeyId'
     | '/jornadas/nova'
     | '/links/configuracoes'
@@ -957,7 +957,7 @@ export interface RootRouteChildren {
   AlertasRoute: typeof AlertasRoute
   AutomacoesRoute: typeof AutomacoesRouteWithChildren
   CampanhasRoute: typeof CampanhasRouteWithChildren
-  ConfiguracoesRoute: typeof ConfiguracoesRouteWithChildren
+  ConfiguracoesRoute: typeof ConfiguracoesRoute
   ConsentimentosRoute: typeof ConsentimentosRoute
   CreditosSmsRoute: typeof CreditosSmsRoute
   EmailRoute: typeof EmailRoute
@@ -979,6 +979,7 @@ export interface RootRouteChildren {
   TreinoIaRoute: typeof TreinoIaRoute
   WebhooksRoute: typeof WebhooksRoute
   WhatsappRoute: typeof WhatsappRoute
+  ConfiguracoesCasaRoute: typeof ConfiguracoesCasaRoute
   RelatoriosConversaoRoute: typeof RelatoriosConversaoRoute
   ResultadosCompararRoute: typeof ResultadosCompararRoute
   UTokenRoute: typeof UTokenRoute
@@ -1236,12 +1237,12 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AutomacoesWhatsappRouteImport
       parentRoute: typeof AutomacoesRoute
     }
-    '/configuracoes/casa': {
-      id: '/configuracoes/casa'
-      path: '/casa'
+    '/configuracoes_/casa': {
+      id: '/configuracoes_/casa'
+      path: '/configuracoes/casa'
       fullPath: '/configuracoes/casa'
       preLoaderRoute: typeof ConfiguracoesCasaRouteImport
-      parentRoute: typeof ConfiguracoesRoute
+      parentRoute: typeof rootRouteImport
     }
     '/jornadas/$journeyId': {
       id: '/jornadas/$journeyId'
@@ -1577,18 +1578,6 @@ const CampanhasRouteWithChildren = CampanhasRoute._addFileChildren(
   CampanhasRouteChildren,
 )
 
-interface ConfiguracoesRouteChildren {
-  ConfiguracoesCasaRoute: typeof ConfiguracoesCasaRoute
-}
-
-const ConfiguracoesRouteChildren: ConfiguracoesRouteChildren = {
-  ConfiguracoesCasaRoute: ConfiguracoesCasaRoute,
-}
-
-const ConfiguracoesRouteWithChildren = ConfiguracoesRoute._addFileChildren(
-  ConfiguracoesRouteChildren,
-)
-
 interface JornadasRouteChildren {
   JornadasJourneyIdRoute: typeof JornadasJourneyIdRoute
   JornadasNovaRoute: typeof JornadasNovaRoute
@@ -1642,7 +1631,7 @@ const rootRouteChildren: RootRouteChildren = {
   AlertasRoute: AlertasRoute,
   AutomacoesRoute: AutomacoesRouteWithChildren,
   CampanhasRoute: CampanhasRouteWithChildren,
-  ConfiguracoesRoute: ConfiguracoesRouteWithChildren,
+  ConfiguracoesRoute: ConfiguracoesRoute,
   ConsentimentosRoute: ConsentimentosRoute,
   CreditosSmsRoute: CreditosSmsRoute,
   EmailRoute: EmailRoute,
@@ -1664,6 +1653,7 @@ const rootRouteChildren: RootRouteChildren = {
   TreinoIaRoute: TreinoIaRoute,
   WebhooksRoute: WebhooksRoute,
   WhatsappRoute: WhatsappRoute,
+  ConfiguracoesCasaRoute: ConfiguracoesCasaRoute,
   RelatoriosConversaoRoute: RelatoriosConversaoRoute,
   ResultadosCompararRoute: ResultadosCompararRoute,
   UTokenRoute: UTokenRoute,

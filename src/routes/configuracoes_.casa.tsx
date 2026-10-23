@@ -12,7 +12,7 @@ import { DomainsSection } from "@/components/house-config/domains-section";
 import { EmailSendersSection } from "@/components/house-config/email-senders-section";
 import { HouseSiteSection } from "@/components/house-config/house-site-section";
 
-export const Route = createFileRoute("/configuracoes/casa")({ component: HouseConfigPage });
+export const Route = createFileRoute("/configuracoes_/casa")({ component: HouseConfigPage });
 
 function HouseConfigPage() {
   return (
