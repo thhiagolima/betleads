@@ -19,7 +19,6 @@ import {
   Play,
   Workflow,
   Star,
-  CheckCircle2,
   LayoutTemplate,
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -288,17 +287,6 @@ function DashboardTab() {
           hint={sentHeadlineHint}
         />
         <MetricCard
-          label="Entregues"
-          value={v(totals?.delivered)}
-          icon={<CheckCircle2 className="h-4 w-4" />}
-          accent="success"
-          hint={
-            totals && totals.sent > 0
-              ? `${Math.round((totals.delivered / totals.sent) * 100)}% taxa`
-              : "—"
-          }
-        />
-        <MetricCard
           label="Abertos"
           value={v(totals?.opens)}
           icon={<Eye className="h-4 w-4" />}
@@ -341,12 +329,13 @@ function DashboardTab() {
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle>
-              Envios x Entregas —{" "}
+              Envios por dia —{" "}
               {sameDay
                 ? new Date(rk.from + "T00:00:00").toLocaleDateString("pt-BR")
                 : `${new Date(rk.from + "T00:00:00").toLocaleDateString("pt-BR")} - ${new Date(rk.to + "T00:00:00").toLocaleDateString("pt-BR")}`}
             </CardTitle>
-            <CardDescription>Volume de envios e taxa de entrega</CardDescription>
+            {/* No "Entregues": the provider does not confirm delivery (same rule as SMS). */}
+            <CardDescription>Emails enviados no período</CardDescription>
           </CardHeader>
           <CardContent className="h-64">
             <ResponsiveContainer width="100%" height="100%">
@@ -367,12 +356,6 @@ function DashboardTab() {
                   dataKey="enviados"
                   stroke={CHART_COLORS.primary}
                   fill="url(#g1)"
-                />
-                <Area
-                  type="monotone"
-                  dataKey="entregues"
-                  stroke={CHART_COLORS.orange}
-                  fillOpacity={0}
                 />
               </AreaChart>
             </ResponsiveContainer>
@@ -738,9 +721,6 @@ function TemplatesTab() {
                     <div className="grid grid-cols-3 gap-2 rounded-md bg-muted/40 p-2 text-meta text-muted-foreground">
                       <span>
                         <b className="text-foreground">{num(report.enviados)}</b> envios
-                      </span>
-                      <span>
-                        <b className="text-foreground">{num(report.entregues)}</b> entregas
                       </span>
                       <span>
                         <b className="text-foreground">{num(report.cliques)}</b> cliques

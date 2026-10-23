@@ -309,7 +309,9 @@ function CampaignReport({
   // Without delivery receipts the click rate falls back to the sent messages.
   const reached = delivered || data.sent;
   // SMS (Short Brasil) never confirms delivery: show only sent and failed.
-  const showDelivered = campaign?.channel !== "sms" && data.delivered !== null;
+  // SMS and email providers do not confirm delivery; only voice has a real outcome.
+  const showDelivered =
+    campaign?.channel !== "sms" && campaign?.channel !== "email" && data.delivered !== null;
   const notClicked = Math.max(0, reached - clicked);
   const clickedNoDeposit = Math.max(0, clicked - depositors - activeDepositors);
   const audience = campaign?.total || campaign?.audience || details?.trackedDeliveries || data.sent;
@@ -1077,7 +1079,7 @@ function JourneyReport({
                         />
                         <JourneyStepMetric label="Enviados 7d" value={step.sent7d} />
                         <JourneyStepMetric label="Enviados total" value={step.sent} />
-                        {step.step_type === "sms" ? null : (
+                        {step.step_type === "sms" || step.step_type === "email" ? null : (
                           <JourneyStepMetric label="Entregues" value={step.delivered} />
                         )}
                         <JourneyStepMetric label="Clicaram" value={step.clicked} />

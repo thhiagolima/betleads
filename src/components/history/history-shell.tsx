@@ -135,8 +135,9 @@ function formatRelative(iso: string | null | undefined): string {
 // Brasil não informa status (nenhum SMS é marcado entregue), então para SMS o
 // "sucesso" é só "aceito pelo provedor" — mostramos Enviados, sem taxa de entrega.
 const CHANNEL_SHOWS_DELIVERY: Record<ChannelKey, boolean> = {
+  // SMS and email providers do not confirm delivery: show sent and failed only.
   sms: false,
-  email: true,
+  email: false,
   calls: true,
   whatsapp: true,
 };
