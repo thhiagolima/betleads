@@ -71,6 +71,10 @@ const EXPERT_COLUMNS =
 
 const NOT_ADMIN_MESSAGE = "Apenas o admin da casa gerencia experts.";
 const EXPERT_NOT_FOUND = "Expert não encontrado.";
+const EXPERT_ALREADY_LINKED =
+  "Este expert já tem acesso. Remova o acesso antes de convidar outra pessoa.";
+const DEMO_USER_EXPERT_MESSAGE =
+  "Este e-mail pertence a um usuário de demonstração e não pode ser expert.";
 
 const ROLE_LABELS: Record<string, string> = {
   admin: "Admin",
@@ -194,9 +198,7 @@ export async function listExpertsFor(ctx: ServerContext): Promise<ExpertAdminRow
 
 export const listUnassignedAffiliates = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) =>
-    listUnassignedAffiliatesFor(context as unknown as ServerContext),
-  );
+  .handler(async ({ context }) => listUnassignedAffiliatesFor(context as unknown as ServerContext));
 
 export async function listUnassignedAffiliatesFor(
   ctx: ServerContext,
@@ -228,9 +230,7 @@ const saveExpertInput = z.object({
 export const saveExpert = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => saveExpertInput.parse(data))
-  .handler(async ({ data, context }) =>
-    saveExpertFor(context as unknown as ServerContext, data),
-  );
+  .handler(async ({ data, context }) => saveExpertFor(context as unknown as ServerContext, data));
 
 function affiliateTakenMessage(affiliateId: string | null) {
   return affiliateId
@@ -303,20 +303,13 @@ const inviteExpertInput = z.object({
 export const inviteExpert = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => inviteExpertInput.parse(data))
-  .handler(async ({ data, context }) =>
-    inviteExpertFor(context as unknown as ServerContext, data),
-  );
+  .handler(async ({ data, context }) => inviteExpertFor(context as unknown as ServerContext, data));
 
-export async function inviteExpertFor(
-  ctx: ServerContext,
-  data: z.input<typeof inviteExpertInput>,
-) {
+export async function inviteExpertFor(ctx: ServerContext, data: z.input<typeof inviteExpertInput>) {
   const input = inviteExpertInput.parse(data);
   const tenantId = await requireExpertAdminWriteTenant(ctx);
   const expert = await loadExpert(tenantId, input.expertId);
-  if (expert.user_id) {
-    throw new Error("Este expert já tem acesso. Remova o acesso antes de convidar outra pessoa.");
-  }
+  if (expert.user_id) throw new Error(EXPERT_ALREADY_LINKED);
 
   const email = input.email.toLowerCase();
   // An invite is only sent for an e-mail with no auth user yet, and such a
@@ -352,17 +345,36 @@ export async function inviteExpertFor(
     .insert({ user_id: userId, tenant_id: tenantId, role: "expert" })
     .select("id")
     .single();
-  if (roleErr) throw new Error(roleErr.message);
+  if (roleErr) {
+    // The demo-user role trigger (20261018130000_demo_user_guard_role_cast).
+    if ((roleErr.message ?? "").includes("DEMO_USER_ROLE_BLOCKED")) {
+      throw new Error(DEMO_USER_EXPERT_MESSAGE);
+    }
+    throw new Error(roleErr.message);
+  }
+  const membershipId = (membership as { id: string }).id;
 
-  const { error: linkErr } = await db()
+  // Link only while the expert is still unlinked: two concurrent invites
+  // both pass the check above, and only one may win.
+  const { data: linked, error: linkErr } = await db()
     .from("experts")
     .update({ user_id: userId })
     .eq("id", expert.id)
-    .eq("tenant_id", tenantId);
-  if (linkErr) {
+    .eq("tenant_id", tenantId)
+    .is("user_id", null)
+    .select("id");
+  if (linkErr || ((linked ?? []) as unknown[]).length === 0) {
     // Undo the role so the person is not left as an expert of no expert.
-    await db().from("user_roles").delete().eq("id", (membership as { id: string }).id);
-    throw new Error(linkErr.message);
+    const { error: undoErr } = await db().from("user_roles").delete().eq("id", membershipId);
+    if (undoErr) {
+      console.error("[experts-admin] failed to undo the expert role of a failed invite", {
+        tenantId,
+        expertId: expert.id,
+        membershipId,
+        cause: undoErr,
+      });
+    }
+    throw new Error(linkErr ? linkErr.message : EXPERT_ALREADY_LINKED);
   }
 
   await auditTenant({
@@ -434,10 +446,7 @@ export const setExpertActive = createServerFn({ method: "POST" })
     setExpertActiveFor(context as unknown as ServerContext, data),
   );
 
-export async function setExpertActiveFor(
-  ctx: ServerContext,
-  data: z.input<typeof setActiveInput>,
-) {
+export async function setExpertActiveFor(ctx: ServerContext, data: z.input<typeof setActiveInput>) {
   const input = setActiveInput.parse(data);
   const tenantId = await requireExpertAdminWriteTenant(ctx);
   const expert = await loadExpert(tenantId, input.expertId);
@@ -464,9 +473,7 @@ export async function setExpertActiveFor(
 export const deleteExpert = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => expertIdInput.parse(data))
-  .handler(async ({ data, context }) =>
-    deleteExpertFor(context as unknown as ServerContext, data),
-  );
+  .handler(async ({ data, context }) => deleteExpertFor(context as unknown as ServerContext, data));
 
 export async function deleteExpertFor(ctx: ServerContext, data: z.input<typeof expertIdInput>) {
   const input = expertIdInput.parse(data);

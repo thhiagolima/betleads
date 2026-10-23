@@ -7,6 +7,9 @@ const fake = vi.hoisted(() => ({
   admin: null as unknown as ReturnType<typeof createFakeDb>,
   authUsers: [] as Array<{ id: string; email: string; last_sign_in_at?: string | null }>,
   invited: [] as Array<{ email: string; options: unknown }>,
+  // Runs inside inviteUserByEmail: lets a test act "concurrently" between
+  // the invite's checks and its writes.
+  onInvite: null as null | (() => void),
 }));
 
 vi.mock("@/integrations/supabase/client.server", async () => {
@@ -26,6 +29,7 @@ vi.mock("@/integrations/supabase/client.server", async () => {
           },
           inviteUserByEmail: async (email: string, options: unknown) => {
             fake.invited.push({ email, options });
+            fake.onInvite?.();
             const user = { id: `invited-${fake.invited.length}`, email, last_sign_in_at: null };
             fake.authUsers.push(user);
             return { data: { user }, error: null };
@@ -100,6 +104,7 @@ beforeEach(() => {
   fake.admin.reset();
   fake.authUsers.length = 0;
   fake.invited.length = 0;
+  fake.onInvite = null;
   __resetDemoTenantCacheForTests();
   fake.admin.rows("tenants").push({ id: TENANT, nome: "Casa", status: "active", is_demo: false });
   fake.admin.onRpc("is_super_admin", (args) => ({ data: args._user_id === SUPER, error: null }));
@@ -176,7 +181,9 @@ describe("experts admin server functions", () => {
   it("invite refuses an email that already has a role in the house", async () => {
     addExpert();
     fake.authUsers.push({ id: GESTOR, email: "gestor@casa.com" });
-    fake.admin.rows("user_roles").push({ id: "r1", user_id: GESTOR, tenant_id: TENANT, role: "gestor" });
+    fake.admin
+      .rows("user_roles")
+      .push({ id: "r1", user_id: GESTOR, tenant_id: TENANT, role: "gestor" });
     await expect(
       inviteExpertFor(ctxFor(ADMIN), { expertId: EXPERT_ID, email: "Gestor@Casa.com" }),
     ).rejects.toThrow(
@@ -197,9 +204,7 @@ describe("experts admin server functions", () => {
     addExpert({ user_id: GESTOR });
     await expect(
       inviteExpertFor(ctxFor(ADMIN), { expertId: EXPERT_ID, email: "novo@casa.com" }),
-    ).rejects.toThrow(
-      "Este expert já tem acesso. Remova o acesso antes de convidar outra pessoa.",
-    );
+    ).rejects.toThrow("Este expert já tem acesso. Remova o acesso antes de convidar outra pessoa.");
   });
 
   it("invite inserts expert role and links user_id", async () => {
@@ -220,6 +225,54 @@ describe("experts admin server functions", () => {
     expect(fake.admin.rows("tenant_audit_logs").map((r) => r.action)).toEqual(["expert.invited"]);
   });
 
+  it("invite loses a race to a concurrent invite: no orphan expert role", async () => {
+    addExpert();
+    // Another admin's invite links the expert after this one passed its
+    // "not linked yet" check.
+    fake.onInvite = () => {
+      fake.admin.rows("experts")[0].user_id = "u-other-invite";
+    };
+    await expect(
+      inviteExpertFor(ctxFor(ADMIN), { expertId: EXPERT_ID, email: "novo@casa.com" }),
+    ).rejects.toThrow("Este expert já tem acesso. Remova o acesso antes de convidar outra pessoa.");
+    expect(fake.admin.rows("user_roles")).toEqual([]);
+    expect(fake.admin.rows("experts")[0].user_id).toBe("u-other-invite");
+    expect(fake.admin.rows("tenant_audit_logs")).toEqual([]);
+  });
+
+  it("logs when undoing the role of a lost invite race fails", async () => {
+    addExpert();
+    fake.onInvite = () => {
+      fake.admin.rows("experts")[0].user_id = "u-other-invite";
+    };
+    fake.admin.failNext("user_roles", "delete", "network down");
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await expect(
+        inviteExpertFor(ctxFor(ADMIN), { expertId: EXPERT_ID, email: "novo@casa.com" }),
+      ).rejects.toThrow("Este expert já tem acesso.");
+      expect(log).toHaveBeenCalledWith(
+        "[experts-admin] failed to undo the expert role of a failed invite",
+        expect.objectContaining({ expertId: EXPERT_ID, cause: { message: "network down" } }),
+      );
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it("invite maps the demo-user role guard to a pt-BR message", async () => {
+    addExpert();
+    fake.admin.failNext(
+      "user_roles",
+      "insert",
+      "DEMO_USER_ROLE_BLOCKED: demo users may only hold gestor/member roles in a demo tenant",
+    );
+    await expect(
+      inviteExpertFor(ctxFor(ADMIN), { expertId: EXPERT_ID, email: "demo@casa.com" }),
+    ).rejects.toThrow("Este e-mail pertence a um usuário de demonstração e não pode ser expert.");
+    expect(fake.admin.rows("experts")[0].user_id).toBeNull();
+  });
+
   it("acesso is convite_pendente before first sign-in and inativo when deactivated", async () => {
     addExpert({ user_id: "u-expert" });
     fake.authUsers.push({ id: "u-expert", email: "e@casa.com", last_sign_in_at: null });
@@ -229,10 +282,12 @@ describe("experts admin server functions", () => {
       expert_id: EXPERT_ID,
       affiliate_id: "abc123",
     });
-    fake.admin.rows("players").push(
-      { id: "p1", tenant_id: TENANT, affiliate_id: "abc123" },
-      { id: "p2", tenant_id: TENANT, affiliate_id: "other" },
-    );
+    fake.admin
+      .rows("players")
+      .push(
+        { id: "p1", tenant_id: TENANT, affiliate_id: "abc123" },
+        { id: "p2", tenant_id: TENANT, affiliate_id: "other" },
+      );
 
     const [row] = await listExpertsFor(ctxFor(ADMIN));
     expect(row).toMatchObject({
