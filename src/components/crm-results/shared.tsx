@@ -1,6 +1,8 @@
 import { Info } from "lucide-react";
 
+import { cn } from "@/lib/utils";
 import { ratio } from "./format";
+import { PERIODS, type PeriodKey } from "./search";
 
 const decimal = (value: number, digits: number) =>
   value.toLocaleString("pt-BR", { minimumFractionDigits: digits, maximumFractionDigits: digits });
@@ -116,5 +118,39 @@ export function EmptyCard({ children }: { children: React.ReactNode }) {
     <Card>
       <CardContent className="p-6 text-sm text-muted-foreground">{children}</CardContent>
     </Card>
+  );
+}
+
+/** Hoje / Ontem / 7 / 30 / 90 dias, with the Início period picker look. */
+export function CentralPeriodPicker({
+  value,
+  onChange,
+}: {
+  value: PeriodKey;
+  onChange: (value: PeriodKey) => void;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label="Período"
+      className="flex w-fit max-w-full gap-0.5 overflow-x-auto rounded-xl border border-border bg-card p-[3px] [scrollbar-width:none]"
+    >
+      {PERIODS.map((item) => (
+        <button
+          key={item.key}
+          type="button"
+          aria-pressed={value === item.key}
+          onClick={() => onChange(item.key)}
+          className={cn(
+            "h-9 shrink-0 whitespace-nowrap rounded-lg px-3 text-[13px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+            value === item.key
+              ? "bg-secondary text-foreground"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {item.label}
+        </button>
+      ))}
+    </div>
   );
 }

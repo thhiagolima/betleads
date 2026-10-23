@@ -328,7 +328,7 @@ export const getPlayersPage = createServerFn({ method: "POST" })
       dateTo,
     } = data;
     const supabase = context.supabase;
-    const tenantId = await resolveCurrentTenantId((supabase as any));
+    const tenantId = await resolveCurrentTenantId(supabase as any);
     const behaviorFilters = Array.from(
       new Set((rawBehaviorFilters ?? []).filter((value) => typeof value === "string" && value)),
     );
@@ -854,41 +854,40 @@ export const getPlayersFilteredExternalIds = createServerFn({ method: "POST" })
     },
   );
 
-export const getPlayersFilteredSmsAudience = createServerFn({ method: "POST" })
+/** Teto da seleção "filtro atual" enviada para campanha (mesmo do público de seleção). */
+export const PLAYERS_SELECTION_LIMIT = 50_000;
+
+/**
+ * Ids internos dos jogadores do filtro atual, para virar público de seleção.
+ * Corta nos 50 mil primeiros por data de cadastro (mais antigos primeiro) e
+ * avisa (`truncated`).
+ */
+export const getPlayersFilteredPlayerIds = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: IdsInput) => data)
   .handler(
-    async ({
-      data,
-      context,
-    }): Promise<{
-      recipients: Array<{ phone: string; playerId: string }>;
-      missingPhone: number;
-      total: number;
-    }> => {
-      const built = await buildFilteredPlayersQuery(context.supabase, data, "id,telefone");
-      if (built.empty) return { recipients: [], missingPhone: 0, total: 0 };
-      const q = built.q;
+    async ({ data, context }): Promise<{ ids: string[]; total: number; truncated: boolean }> => {
+      const built = await buildFilteredPlayersQuery(context.supabase, data, "id");
+      if (built.empty) return { ids: [], total: 0, truncated: false };
+      // Ordem estável entre as páginas e explicável no aviso de corte: os mais
+      // antigos por data de cadastro primeiro (id desempata).
+      const q = built.q.order("created_at", { ascending: true }).order("id", { ascending: true });
 
-      const recipients: Array<{ phone: string; playerId: string }> = [];
-      let missingPhone = 0;
-      let total = 0;
       const PAGE = 1000;
-      for (let from = 0; ; from += PAGE) {
-        const { data: chunk, count, error } = await q.range(from, from + PAGE - 1);
+      const seen = new Set<string>();
+      let total = 0;
+      for (let from = 0; from < PLAYERS_SELECTION_LIMIT; from += PAGE) {
+        const to = Math.min(from + PAGE, PLAYERS_SELECTION_LIMIT) - 1;
+        const { data: chunk, count, error } = await q.range(from, to);
         if (error) throw new Error(error.message);
-        const batch = (chunk ?? []) as Array<{ id: string; telefone: string | null }>;
-        for (const row of batch) {
-          const phone = (row.telefone ?? "").replace(/\D/g, "");
-          if (phone.length >= 10) recipients.push({ phone, playerId: row.id });
-          else missingPhone += 1;
-        }
+        const batch = (chunk ?? []) as Array<{ id: string }>;
+        for (const row of batch) if (row.id) seen.add(row.id);
         if (count != null) total = count;
-        if (batch.length < PAGE) break;
-        if (recipients.length + missingPhone >= 50000) break;
+        if (batch.length < to - from + 1) break;
       }
-
-      return { recipients, missingPhone, total: total || recipients.length + missingPhone };
+      const ids = Array.from(seen);
+      total = Math.max(total, ids.length);
+      return { ids, total, truncated: total > ids.length };
     },
   );
 

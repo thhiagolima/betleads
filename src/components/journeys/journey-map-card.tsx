@@ -7,7 +7,11 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { buildJourneyMap, type MapJourney } from "@/lib/journey-map";
 
-const STATUS_LABEL: Record<string, string> = { paused: "desligada", draft: "rascunho" };
+const STATUS_LABEL: Record<string, string> = {
+  paused: "pausada",
+  draft: "rascunho",
+  archived: "arquivada",
+};
 
 /** P3: the house's journeys as lanes a player goes through, with who is in each. */
 export function JourneyMapCard({ journeys }: { journeys: MapJourney[] }) {
@@ -25,10 +29,10 @@ export function JourneyMapCard({ journeys }: { journeys: MapJourney[] }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Mapa das réguas</CardTitle>
+        <CardTitle>Mapa das jornadas</CardTitle>
         <CardDescription>
           Como as jornadas se encaixam e quantos jogadores estão em cada uma agora. Jornadas
-          desligadas ou em rascunho aparecem esmaecidas.
+          pausadas ou em rascunho aparecem esmaecidas.
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-x-6 gap-y-5 lg:grid-cols-2">

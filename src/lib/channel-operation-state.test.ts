@@ -1,25 +1,30 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  audienceFromSearch,
   campaignStopReason,
   getChannelOperationState,
   groupVoiceQueueItems,
   isFinishedCampaignStatus,
+  isPausedCampaignStatus,
 } from "./channel-operation-state";
 
 describe("getChannelOperationState", () => {
   it("traduz os estados operacionais exigidos em linguagem de produto", () => {
-    expect(getChannelOperationState("agendada", "sms").label).toBe("Pronto para enviar");
+    expect(getChannelOperationState("agendada", "sms").label).toBe("Agendada");
     expect(getChannelOperationState("audio_ready", "voice").label).toBe("Aguardando provedor");
-    expect(getChannelOperationState("retrying", "email").label).toBe("Em retentativa");
-    expect(getChannelOperationState("paused_limit", "sms").label).toBe("Pausado por limite");
-    expect(getChannelOperationState("failed", "email").label).toBe("Ação necessária");
+    expect(getChannelOperationState("retrying", "email").label).toBe("Tentando de novo");
+    expect(getChannelOperationState("paused_limit", "sms").label).toBe("Pausada");
+    expect(getChannelOperationState("paused_limit", "voice").label).toBe("Pausada por limite");
+    expect(getChannelOperationState("enviando", "sms").label).toBe("Enviando");
+    expect(getChannelOperationState("failed", "email").label).toBe("Falhou");
+    expect(getChannelOperationState("???", "email").label).toBe("Status desconhecido");
   });
 
   it("rascunho não aparece como pronto para enviar", () => {
     expect(getChannelOperationState("rascunho", "email").label).toBe("Rascunho");
     expect(getChannelOperationState("draft", "sms").label).toBe("Rascunho");
-    expect(getChannelOperationState("scheduled", "sms").label).toBe("Pronto para enviar");
+    expect(getChannelOperationState("scheduled", "sms").label).toBe("Agendada");
   });
 
   it("finalizadas incluem voz concluída e excluem pausadas", () => {
@@ -47,7 +52,16 @@ describe("getChannelOperationState", () => {
     }
   });
 
-  it("campanha cancelada não aparece como ação necessária", () => {
+  it("nenhum rótulo ou próxima ação fala em entrega (provedor não confirma)", () => {
+    for (const status of ["agendada", "enviando", "enviado", "pausada", "failed", "x"]) {
+      for (const channel of ["sms", "email", "voice"] as const) {
+        const state = getChannelOperationState(status, channel);
+        expect(`${state.label} ${state.description} ${state.nextAction}`).not.toMatch(/entreg/i);
+      }
+    }
+  });
+
+  it("campanha cancelada não aparece como falha", () => {
     expect(getChannelOperationState("cancelada", "sms").label).toBe("Cancelada");
     expect(getChannelOperationState("cancelled", "voice").label).toBe("Cancelada");
   });
@@ -135,5 +149,41 @@ describe("groupVoiceQueueItems", () => {
     ).toBe("paused_limit");
     expect(status([{ id: "a", status: "failed", scheduled_at: at(-1) }])).toBe("falhou");
     expect(status([{ id: "a", status: "cancelled", scheduled_at: at(-1) }])).toBe("cancelada");
+  });
+});
+
+describe("isPausedCampaignStatus", () => {
+  it("covers SMS/e-mail 'pausada' and the voice paused states", () => {
+    for (const status of ["pausada", "Pausada ", "paused", "paused_limit"]) {
+      expect(isPausedCampaignStatus(status)).toBe(true);
+    }
+    for (const status of [
+      "agendada",
+      "enviando",
+      "concluida",
+      "falhou",
+      "cancelada",
+      "",
+      null,
+      undefined,
+    ]) {
+      expect(isPausedCampaignStatus(status)).toBe(false);
+    }
+  });
+});
+
+describe("audienceFromSearch", () => {
+  it("keeps system and saved audience ids from Públicos and Níveis", () => {
+    expect(audienceFromSearch("system:all-leads")).toBe("system:all-leads");
+    expect(audienceFromSearch("system:level:gold")).toBe("system:level:gold");
+    expect(audienceFromSearch("3f9a1c2b-1111-4222-8333-944455556666")).toBe(
+      "3f9a1c2b-1111-4222-8333-944455556666",
+    );
+  });
+
+  it("drops anything else", () => {
+    expect(audienceFromSearch(null)).toBe("");
+    expect(audienceFromSearch("<script>")).toBe("");
+    expect(audienceFromSearch("system:")).toBe("");
   });
 });

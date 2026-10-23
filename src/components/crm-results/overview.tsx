@@ -1,4 +1,5 @@
 import { AlertTriangle, ChevronRight, Clock, TrendingUp } from "lucide-react";
+import { useState } from "react";
 import {
   Bar,
   CartesianGrid,
@@ -14,7 +15,13 @@ import {
 import { buildRecommendations } from "@/lib/crm-recommendations";
 import type { CrmSource } from "@/lib/crm-results";
 import { brl, num } from "@/lib/format";
-import { CHART_COLORS, chartAxisProps, chartGridProps, chartTooltipProps } from "@/lib/chart-theme";
+import {
+  CHART_COLORS,
+  chartAxisProps,
+  chartGridProps,
+  chartLegendProps,
+  chartTooltipProps,
+} from "@/lib/chart-theme";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { RecommendationList } from "./recommendations";
@@ -26,19 +33,18 @@ import { Delta, EmptyCard, InfoTip, Kpi } from "./shared";
 export function Overview({
   data,
   onOpenOrigin,
-  onOpenRecommendations,
 }: {
   data: Data;
   onOpenOrigin: (name: string) => void;
-  onOpenRecommendations: () => void;
 }) {
+  const [showAllRecommendations, setShowAllRecommendations] = useState(false);
   const { totals } = data;
   const previous = data.previous.totals;
   if (totals.sent === 0 && totals.directPlayers === 0 && totals.influencedPlayers === 0)
     return (
       <EmptyCard>
         Nenhum envio de jornada ou campanha neste período. Os resultados aparecem até 10 minutos
-        depois dos primeiros envios. Retenção e aquisição continuam na aba “Base de jogadores”.
+        depois dos primeiros envios. Retenção e cadastros ficam em Aquisição e LTV, aba “Retenção”.
       </EmptyCard>
     );
 
@@ -193,13 +199,20 @@ export function Overview({
           <CardHeader className="flex-row items-center justify-between space-y-0">
             <CardTitle>O que fazer agora</CardTitle>
             {recommendations.length > 3 && (
-              <Button size="sm" variant="ghost" onClick={onOpenRecommendations}>
-                Ver todas ({recommendations.length})
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-expanded={showAllRecommendations}
+                onClick={() => setShowAllRecommendations((value) => !value)}
+              >
+                {showAllRecommendations ? "Ver menos" : `Ver todas (${recommendations.length})`}
               </Button>
             )}
           </CardHeader>
           <CardContent>
-            <RecommendationList items={recommendations.slice(0, 3)} />
+            <RecommendationList
+              items={showAllRecommendations ? recommendations : recommendations.slice(0, 3)}
+            />
           </CardContent>
         </Card>
       )}
@@ -243,7 +256,7 @@ function DailyChart({ data }: { data: Data }) {
               {...chartTooltipProps}
               formatter={(value: number, name: string) => [brl(Number(value)), names[name] ?? name]}
             />
-            <Legend formatter={(name: string) => names[name] ?? name} />
+            <Legend {...chartLegendProps} formatter={(name: string) => names[name] ?? name} />
             <Bar
               dataKey="cost"
               fill={CHART_COLORS.warning}

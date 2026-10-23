@@ -922,7 +922,9 @@ export async function adminBillingDashboardFor(ctx: ServerContext): Promise<Admi
       .from("payment_charges")
       .select("id", { count: "exact", head: true })
       .eq("needs_review", true)
-      .is("credited_at", null),
+      .is("credited_at", null)
+      // Resolved via "Resolver revisão" (PG6-03) no longer counts.
+      .is("review_resolved_at", null),
   ]);
 
   for (const res of [tenantsRes, tbRes, plansRes, reviewRes]) {

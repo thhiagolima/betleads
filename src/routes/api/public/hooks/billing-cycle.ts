@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import { sendPendingBillingEmails } from "@/lib/billing/billing-emails.server";
+import { purgeOldWebhookBodies } from "@/lib/billing/billing-retention.server";
 import { runBillingCycle } from "@/lib/billing/invoices.server";
 import { sendLowBalanceAlerts } from "@/lib/billing/wallet-alerts.server";
 import { settleStaleVoiceReservations } from "@/lib/infobip-voice-reconciliation.server";
@@ -15,6 +16,22 @@ import { withJobRun } from "@/lib/observability/job-monitor.server";
 // invoices this very run generated. It also runs the hourly low-balance
 // e-mail sweep (PG3 Task 8, `sendLowBalanceAlerts`) and releases stale voice
 // holds (PG3 final fix I2, `settleStaleVoiceReservations`).
+//
+// After the run is closed (success or failure), an isolated stage nulls the
+// raw body/headers of Upper webhook events older than 90 days (scope §8,
+// `purgeOldWebhookBodies`). It never changes this response.
+
+async function retentionStage(): Promise<number | null> {
+  try {
+    const result = await purgeOldWebhookBodies();
+    return result.ok ? result.purged : null;
+  } catch (error) {
+    console.error("[billing-cycle] retention stage failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
 
 export const Route = createFileRoute("/api/public/hooks/billing-cycle")({
   server: {
@@ -25,8 +42,9 @@ export const Route = createFileRoute("/api/public/hooks/billing-cycle")({
         } catch (response) {
           return response as Response;
         }
+        let counters: Awaited<ReturnType<typeof runBillingCycle>>;
         try {
-          const counters = await withJobRun("billing-cycle", {}, async (run) => {
+          counters = await withJobRun("billing-cycle", {}, async (run) => {
             const result = await runBillingCycle({
               sendEmails: () => sendPendingBillingEmails(),
               sendWalletAlerts: () => sendLowBalanceAlerts(),
@@ -39,13 +57,15 @@ export const Route = createFileRoute("/api/public/hooks/billing-cycle")({
             });
             return result;
           });
-          return Response.json({ ok: true, ...counters });
         } catch (error) {
+          await retentionStage();
           return Response.json(
             { ok: false, error: error instanceof Error ? error.message : String(error) },
             { status: 500 },
           );
         }
+        const purged = await retentionStage();
+        return Response.json({ ok: true, ...counters, webhook_bodies_purged: purged });
       },
     },
   },

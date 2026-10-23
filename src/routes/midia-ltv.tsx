@@ -1,4 +1,4 @@
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute, useLocation, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import {
@@ -36,6 +36,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Page, PageHeader } from "@/components/ui-premium/page-header";
+import { PageTabs } from "@/components/ui-premium/page-tabs";
+import { RetentionPanel } from "@/components/crm-results/retention";
 import { CHART_COLORS, chartAxisProps, chartGridProps, chartTooltipStyle } from "@/lib/chart-theme";
 import { DataCard } from "@/components/ui-premium/data-card";
 import { EmptyState } from "@/components/ui-premium/empty-state";
@@ -147,7 +149,18 @@ function syncStatusLabel(status: MetaSyncRun["status"]) {
   return "cancelada";
 }
 
+const VIEWS = [
+  { value: "midia", label: "Mídia" },
+  { value: "retencao", label: "Retenção" },
+] as const;
+type View = (typeof VIEWS)[number]["value"];
+
 function MediaLtvPage() {
+  const navigate = useNavigate();
+  const hash = useLocation({ select: (location) => location.hash.replace(/^#/, "") });
+  const view: View = hash === "retencao" ? "retencao" : "midia";
+  const setView = (next: View) =>
+    void navigate({ to: "/midia-ltv", hash: next === "midia" ? undefined : next });
   const qc = useQueryClient();
   const fetchOverview = useServerFn(getMarketingOverview);
   const requestMetaSync = useServerFn(enqueueMetaSync);
@@ -208,9 +221,9 @@ function MediaLtvPage() {
   return (
     <Page>
       <PageHeader
-        subtitle="Cada jogador carrega o anúncio que o trouxe. Veja quem trouxe cadastro barato e quem trouxe dinheiro."
+        subtitle="Cada jogador carrega o anúncio que o trouxe. Veja quem trouxe cadastro barato, quem trouxe dinheiro e quem continua depositando."
         actions={
-          noMetaConnection ? (
+          view === "midia" && noMetaConnection ? (
             <Button asChild size="sm" className="gap-2">
               <Link to="/webhooks" hash="meta">
                 <Target className="h-3.5 w-3.5" />
@@ -221,7 +234,20 @@ function MediaLtvPage() {
         }
       />
 
-      {error && (
+      <PageTabs
+        value={view}
+        onValueChange={setView}
+        label="Seções de Aquisição e LTV"
+        items={VIEWS}
+      />
+
+      {view === "retencao" && (
+        <div role="tabpanel" aria-labelledby="tab-retencao">
+          <RetentionPanel />
+        </div>
+      )}
+
+      {view === "midia" && error && (
         <div
           role="alert"
           className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm text-warning"
@@ -243,27 +269,29 @@ function MediaLtvPage() {
         </div>
       )}
 
-      <VisualizacaoSection
-        range={range}
-        period={period}
-        customRange={customRange}
-        onPeriodChange={(value) => {
-          setPeriod(value);
-          setCustomRange(null);
-        }}
-        onCustomRangeChange={setCustomRange}
-        data={data}
-        isLoading={isLoading}
-        metaSummary={metaSummary}
-        syncPending={
-          syncMetaMutation.isPending ||
-          metaSyncRuns.some(
-            (run: MetaSyncRun) => run.status === "queued" || run.status === "running",
-          )
-        }
-        onSync={() => syncMetaMutation.mutate()}
-        syncRuns={metaSyncRuns as MetaSyncRun[]}
-      />
+      {view === "midia" && (
+        <VisualizacaoSection
+          range={range}
+          period={period}
+          customRange={customRange}
+          onPeriodChange={(value) => {
+            setPeriod(value);
+            setCustomRange(null);
+          }}
+          onCustomRangeChange={setCustomRange}
+          data={data}
+          isLoading={isLoading}
+          metaSummary={metaSummary}
+          syncPending={
+            syncMetaMutation.isPending ||
+            metaSyncRuns.some(
+              (run: MetaSyncRun) => run.status === "queued" || run.status === "running",
+            )
+          }
+          onSync={() => syncMetaMutation.mutate()}
+          syncRuns={metaSyncRuns as MetaSyncRun[]}
+        />
+      )}
     </Page>
   );
 }

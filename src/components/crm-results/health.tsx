@@ -16,6 +16,14 @@ const minutesSince = (data: Data) =>
     ? Math.round((Date.now() - new Date(data.health.updatedAt).getTime()) / 60_000)
     : null;
 
+/** "12 min", "3 h", "4 dias": long gaps in minutes are unreadable. */
+export function agoLabel(minutes: number) {
+  if (minutes < 60) return `${num(minutes)} min`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${num(hours)} h`;
+  return `${num(Math.round(hours / 24))} dias`;
+}
+
 /**
  * Header pill for data health (C-10): fresh and consistent shows green; stale
  * data or a failed daily check shows amber. Opens the details in a side panel.
@@ -36,7 +44,7 @@ export function HealthIndicator({ data }: { data: Data }) {
             ? "Sem atualização"
             : failed
               ? "Divergência nos dados"
-              : `Atualizado há ${num(minutes)} min`}
+              : `Atualizado há ${agoLabel(minutes)}`}
         </Button>
       </SheetTrigger>
       <SheetContent className="w-full overflow-y-auto sm:max-w-lg">
@@ -69,7 +77,7 @@ function HealthDetails({ data }: { data: Data }) {
         label="Última atualização"
         value={
           updated
-            ? `${updated.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })} (há ${num(minutesAgo ?? 0)} min)`
+            ? `${updated.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })} (há ${agoLabel(minutesAgo ?? 0)})`
             : "sem atualização"
         }
       />

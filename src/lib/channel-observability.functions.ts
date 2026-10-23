@@ -24,7 +24,15 @@ export type ChannelObservability = {
   sent24h: number;
   delivered24h: number;
   failed24h: number;
+  /**
+   * Share of the last 24h attempts counted in `delivered24h`. What it means
+   * depends on `deliveryMetric`: SMS (Short Brasil) and e-mail (Infobip) never
+   * confirm delivery, so for them it is "accepted by the provider"; for voice
+   * it is answered/completed calls.
+   */
   deliveryRate: number;
+  /** How to read `delivered24h`/`deliveryRate` (label them accordingly). */
+  deliveryMetric: ChannelDeliveryMetric;
   errorRate: number;
   lastWorkerAt: string | null;
   workerDelayMinutes: number | null;
@@ -32,6 +40,13 @@ export type ChannelObservability = {
   /** Global provider circuit breaker (SMS only); null when closed/unavailable. */
   providerBreaker: ProviderBreakerView | null;
 };
+
+export type ChannelDeliveryMetric = "accepted" | "answered";
+
+/** SMS and e-mail providers only acknowledge the send; voice reports answered calls. */
+export function channelDeliveryMetric(channel: ObservabilityChannel): ChannelDeliveryMetric {
+  return channel === "voice" ? "answered" : "accepted";
+}
 
 export type ProviderBreakerView = {
   state: "open" | "half_open";
@@ -51,7 +66,9 @@ type BreakerRow = {
 };
 
 /** Admin banner text for an open/half-open breaker row (pure; null when closed). */
-export function providerBreakerView(row: BreakerRow | null | undefined): ProviderBreakerView | null {
+export function providerBreakerView(
+  row: BreakerRow | null | undefined,
+): ProviderBreakerView | null {
   if (!row || (row.state !== "open" && row.state !== "half_open")) return null;
   const retryAt =
     row.state === "half_open" && row.probe_started_at
@@ -69,11 +86,13 @@ export function providerBreakerView(row: BreakerRow | null | undefined): Provide
 /** Fail-soft: the table only exists after migration 20261015123000. */
 async function loadBreakerRows(): Promise<BreakerRow[]> {
   try {
-    const { data, error } = await (supabaseAdmin as unknown as {
-      from: (t: string) => {
-        select: (c: string) => PromiseLike<{ data: unknown; error: { message: string } | null }>;
-      };
-    })
+    const { data, error } = await (
+      supabaseAdmin as unknown as {
+        from: (t: string) => {
+          select: (c: string) => PromiseLike<{ data: unknown; error: { message: string } | null }>;
+        };
+      }
+    )
       .from("provider_circuit_breakers")
       .select("channel,state,reason,first_opened_at,backoff_until,probe_started_at");
     if (error) return [];
@@ -109,17 +128,20 @@ function rate(values: number, total: number) {
 
 export function summarizeChannelDelivery(channel: ObservabilityChannel, rows: StatusRow[]) {
   const failedStates = new Set(["failed", "falhou", "error", "rejected", "cancelled"]);
-  const deliveredStates = new Set(["delivered", "completed", "answered", "sent", "enviado"]);
+  // SMS/e-mail: "sent" only means the provider accepted it (no delivery
+  // receipt ever arrives), so `delivered` here is "accepted". Voice has no
+  // "delivered" callback; an answered/completed call is the operational
+  // equivalent, and a merely dispatched call ("sent") does not count.
+  const deliveredStates =
+    channel === "voice"
+      ? new Set(["completed", "answered"])
+      : new Set(["delivered", "completed", "answered", "sent", "enviado"]);
   let failed = 0;
   let delivered = 0;
   for (const row of rows) {
     const status = String(row.delivery_status ?? row.status ?? "").toLowerCase();
     if (failedStates.has(status)) failed += 1;
     if (deliveredStates.has(status)) delivered += 1;
-  }
-  // Voz não possui um callback "delivered"; chamada concluída/atendida é o equivalente operacional.
-  if (channel === "voice" && delivered === 0) {
-    delivered = rows.filter((row) => ["completed", "answered"].includes(row.status)).length;
   }
   return { total: rows.length, failed, delivered };
 }
@@ -302,8 +324,7 @@ export const getChannelObservability = createServerFn({ method: "GET" })
           breakerRows.find((row) => aliases.includes(row.channel)),
         );
         const providerError =
-          breaker?.message ??
-          (backoffActive ? (providerRate?.last_provider_error ?? null) : null);
+          breaker?.message ?? (backoffActive ? (providerRate?.last_provider_error ?? null) : null);
         return {
           channel,
           provider: channel === "sms" ? "Short Brasil" : "Infobip",
@@ -318,6 +339,7 @@ export const getChannelObservability = createServerFn({ method: "GET" })
           delivered24h: logs[channel].delivered,
           failed24h: logs[channel].failed,
           deliveryRate: rate(logs[channel].delivered, logs[channel].total),
+          deliveryMetric: channelDeliveryMetric(channel),
           errorRate: rate(logs[channel].failed, logs[channel].total),
           lastWorkerAt: lastRun?.started_at ?? null,
           workerDelayMinutes,

@@ -43,6 +43,7 @@ UPPER_API_BASE=https://api.uppersc.com.br
 UPPER_API_KEY=<upper-pix_in-only-api-key>
 UPPER_WEBHOOK_SECRET=<strong-random-webhook-secret>
 BETTERSTACK_HEARTBEAT_BILLING_RECONCILE=<better-stack-heartbeat-url>
+BETTERSTACK_HEARTBEAT_BILLING_HEALTH=<better-stack-heartbeat-url>
 BILLING_INVOICES_ENABLED=false
 BILLING_ENFORCEMENT_ENABLED=false
 PLATFORM_EMAIL_FROM=no-reply@betleads.io
@@ -68,6 +69,14 @@ Compra de créditos por Pix (PG2) via a Upper:
   para a conciliacao (`POST /api/public/hooks/billing-reconcile`, job
   `billing-reconcile`, cron `*/5 * * * *`). Periodo 5 min, tolerancia 10 min.
   Vazio = sem ping. Ver `docs/RUNBOOK_OBSERVABILIDADE.md`.
+- `BETTERSTACK_HEARTBEAT_BILLING_HEALTH`: URL do heartbeat da saude da
+  cobranca (PG6-03), checada no mesmo request da conciliacao (job
+  `billing-health`). So faz ping quando nao ha problema critico de estado
+  (crons, cobranca paga sem credito, carteira x razao); sem ping =
+  conciliacao parada ou cobranca com problema. Assinatura invalida e erros
+  401/FEATURE_DISABLED da Upper alertam, mas nao seguram o ping. Periodo 5
+  min, tolerancia 10 min. Os achados vao para o Sentry quando `SENTRY_DSN`
+  esta configurado; senao, para o log com o prefixo `[billing-alert]`.
 
 Nenhuma dessas variaveis deve ser logada; a chave e o segredo ficam apenas no
 servidor.

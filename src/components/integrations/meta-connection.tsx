@@ -89,7 +89,9 @@ export function MetaConnectionPanel({ meta }: { meta?: MarketingIntegration }) {
       qc.invalidateQueries({ queryKey: ["marketing-overview"] });
     },
     onError: (e) =>
-      toast.error(e instanceof Error ? e.message : "Não foi possível validar o token Meta"),
+      toast.error(
+        e instanceof Error ? e.message : "Não foi possível validar a chave de acesso da Meta",
+      ),
   });
 
   const metaSelectionMutation = useMutation({
@@ -171,7 +173,7 @@ export function MetaConnectionPanel({ meta }: { meta?: MarketingIntegration }) {
             value={houseUrl}
             onChange={(e) => setHouseUrl(e.target.value)}
           />
-          <p className="text-xs text-muted-foreground">
+          <p className="text-meta text-muted-foreground">
             O <code>utm_id</code> leva o ID do anúncio. É ele que liga cada cadastro ao anúncio
             certo, mesmo quando dois anúncios têm o mesmo nome.
           </p>
@@ -213,7 +215,7 @@ function CopyBlock({ title, value, onCopy }: { title: string; value: string; onC
           Copiar
         </Button>
       </div>
-      <pre className="overflow-auto rounded-md bg-background/70 p-3 text-xs text-primary">
+      <pre className="overflow-auto rounded-md bg-background/70 p-3 text-meta text-primary">
         {value}
       </pre>
     </div>
@@ -302,7 +304,7 @@ function MetaConnectionWizard({
             >
               <span
                 className={cn(
-                  "flex h-6 w-6 items-center justify-center rounded-full bg-muted text-xs font-bold",
+                  "flex h-6 w-6 items-center justify-center rounded-full bg-muted text-meta font-bold",
                   active && "bg-primary text-primary-foreground",
                   complete && "bg-success/20 text-success",
                 )}
@@ -324,18 +326,18 @@ function MetaConnectionWizard({
         <div className="mt-4 rounded-xl border border-warning/30 bg-warning/10 p-4 text-sm">
           <p className="font-semibold text-warning">Conexão antiga precisa ser substituída</p>
           <p className="mt-1 text-muted-foreground">
-            A integração anterior usava o app compartilhado da plataforma. Gere um token no app da
-            sua operação e conecte abaixo; os dados já importados serão preservados.
+            A integração anterior usava o app compartilhado da plataforma. Gere uma chave de acesso
+            no app da sua operação e conecte abaixo; os dados já importados serão preservados.
           </p>
         </div>
       )}
       {showGuide && (
-        <div className="mt-3 grid gap-2 text-xs text-muted-foreground md:grid-cols-2">
+        <div className="mt-3 grid gap-2 text-meta text-muted-foreground md:grid-cols-2">
           {[
             "Abra as Configurações do negócio no Business Manager.",
             "Crie um Usuário do Sistema para esta operação.",
             "Atribua somente as contas de anúncio necessárias.",
-            "Gere um token no app da operação com ads_read.",
+            "Gere a chave de acesso (na Meta, “Gerar token”) no app da operação, com a permissão ads_read.",
           ].map((step, index) => (
             <div key={step} className="flex gap-2 rounded-lg bg-muted/40 p-3">
               <span className="font-bold text-primary">{index + 1}</span>
@@ -352,8 +354,8 @@ function MetaConnectionWizard({
               <p className="font-semibold">
                 {connections.length ? "Atualizar credencial" : "Conectar sua conta Meta"}
               </p>
-              <p className="text-xs text-muted-foreground">
-                O token é criptografado no servidor e não volta a aparecer.
+              <p className="text-meta text-muted-foreground">
+                A chave de acesso fica guardada de forma criptografada e não volta a aparecer.
               </p>
             </div>
             {connections.length > 0 && (
@@ -370,7 +372,7 @@ function MetaConnectionWizard({
             )}
           </div>
           <Label className="mt-4 block" htmlFor="meta-system-token">
-            Token do Usuário do Sistema
+            Chave de acesso do Usuário do Sistema
           </Label>
           <Input
             id="meta-system-token"
@@ -400,7 +402,7 @@ function MetaConnectionWizard({
               ) : (
                 <ShieldCheck className="h-4 w-4" />
               )}
-              Validar token e buscar contas
+              Validar acesso e buscar contas
             </Button>
           </DemoDisabledTooltip>
         </div>
@@ -411,12 +413,12 @@ function MetaConnectionWizard({
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="font-semibold">Conexões encontradas</p>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-meta text-muted-foreground">
                 Revise a origem antes de escolher as contas de anúncio.
               </p>
             </div>
             <Button variant="outline" size="sm" onClick={() => setShowTokenForm(true)}>
-              Atualizar token
+              Atualizar chave de acesso
             </Button>
           </div>
           <div className="grid gap-3 lg:grid-cols-2">
@@ -435,14 +437,14 @@ function MetaConnectionWizard({
                     <p className="truncate font-semibold">
                       {connection.connection_label ?? connection.app_name ?? "Conta Meta"}
                     </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      App {connection.app_name ?? connection.app_id ?? "identificado"} · token{" "}
+                    <p className="mt-1 text-meta text-muted-foreground">
+                      App {connection.app_name ?? connection.app_id ?? "identificado"} · chave{" "}
                       {connection.token_hint ?? "protegido"}
                     </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
+                    <p className="mt-1 text-meta text-muted-foreground">
                       Usuário: {connection.meta_user_name ?? "Usuário do Sistema"}
                     </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
+                    <p className="mt-1 text-meta text-muted-foreground">
                       {connection.auth_type === "system_user_token"
                         ? "App próprio da operação"
                         : "Conexão antiga do app compartilhado"}
@@ -451,7 +453,7 @@ function MetaConnectionWizard({
                   <StatusBadge status={connection.status} />
                 </div>
                 {connection.last_error && (
-                  <p className="mt-3 rounded-md bg-danger/10 px-3 py-2 text-xs text-danger">
+                  <p className="mt-3 rounded-md bg-danger/10 px-3 py-2 text-meta text-danger">
                     {connection.last_error}
                   </p>
                 )}
@@ -492,7 +494,7 @@ function MetaConnectionWizard({
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="font-semibold">Contas que entram nos relatórios</p>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-meta text-muted-foreground">
                   Somente as contas marcadas serão sincronizadas.
                 </p>
               </div>
@@ -520,11 +522,11 @@ function MetaConnectionWizard({
                     <span className="block truncate text-sm font-semibold">
                       {account.name ?? account.account_id}
                     </span>
-                    <span className="text-xs text-muted-foreground">
+                    <span className="text-meta text-muted-foreground">
                       {account.meta_ad_account_id}
                     </span>
                   </span>
-                  <span className="text-xs text-muted-foreground">{account.currency ?? ""}</span>
+                  <span className="text-meta text-muted-foreground">{account.currency ?? ""}</span>
                   <Badge
                     variant="outline"
                     className={cn(
@@ -578,8 +580,8 @@ function MetaConnectionWizard({
           <AlertDialogHeader>
             <AlertDialogTitle>Desconectar esta conta Meta?</AlertDialogTitle>
             <AlertDialogDescription>
-              O token armazenado será removido e as contas vinculadas deixarão de sincronizar. Os
-              relatórios já importados serão preservados.
+              A chave de acesso guardada será removida e as contas vinculadas deixarão de
+              sincronizar. Os relatórios já importados serão preservados.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

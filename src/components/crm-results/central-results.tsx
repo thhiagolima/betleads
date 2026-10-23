@@ -16,23 +16,25 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Page, PageHeader } from "@/components/ui-premium/page-header";
-import { BasePlayers } from "./base-players";
+import { PageTabs } from "@/components/ui-premium/page-tabs";
 import { HealthIndicator } from "./health";
 import { Holdout } from "./holdout";
 import { Origins } from "./origins";
-import { Recommendations } from "./recommendations";
 import { type Data, periodLabel } from "./format";
 import { Overview } from "./overview";
-import { EmptyCard } from "./shared";
+import { SpendByState } from "./retention";
+import { CentralPeriodPicker, EmptyCard } from "./shared";
 import { PERIODS, TABS, type CentralSearch, type PeriodKey, type TabKey } from "./search";
 
 export function CentralResults() {
   const search = useSearch({ from: "/resultados" });
   const navigate = useNavigate({ from: "/resultados" });
   const period = PERIODS.find((item) => item.key === search.periodo) ?? PERIODS[3];
-  const tab = search.aba ?? "visao";
+  // Retired tabs ("recomendacoes", "base") fall back to the overview.
+  const tab: TabKey = TABS.some((item) => item.key === search.aba)
+    ? (search.aba as TabKey)
+    : "visao";
   const setSearch = (next: Partial<CentralSearch>, replace = false) =>
     void navigate({ search: (current) => ({ ...current, ...next }), replace });
 
@@ -83,27 +85,7 @@ export function CentralResults() {
             </>
           }
         />
-        <div
-          className="inline-flex rounded-lg bg-muted p-1 text-sm"
-          role="group"
-          aria-label="Período"
-        >
-          {PERIODS.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              aria-pressed={period.key === item.key}
-              onClick={() => setSearch({ periodo: item.key })}
-              className={
-                period.key === item.key
-                  ? "rounded-md bg-background px-3 py-1.5 font-medium shadow-sm"
-                  : "px-3 py-1.5 text-muted-foreground hover:text-foreground"
-              }
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
+        <CentralPeriodPicker value={period.key} onChange={(key) => setSearch({ periodo: key })} />
       </div>
 
       {query.isLoading ? (
@@ -113,42 +95,33 @@ export function CentralResults() {
           Não foi possível carregar os resultados. Tente novamente em instantes.
         </EmptyCard>
       ) : (
-        <Tabs
-          value={tab}
-          onValueChange={(value) => setSearch({ aba: value as TabKey })}
-          className="space-y-4"
-        >
-          <TabsList className="flex h-auto w-full justify-start overflow-x-auto">
-            {TABS.map((item) => (
-              <TabsTrigger key={item.key} value={item.key}>
-                {item.label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-          <TabsContent value="visao">
-            <Overview
-              data={query.data}
-              onOpenOrigin={(name) => setSearch({ aba: "origens", busca: name })}
-              onOpenRecommendations={() => setSearch({ aba: "recomendacoes" })}
-            />
-          </TabsContent>
-          <TabsContent value="origens">
-            <Origins
-              data={query.data}
-              search={search.busca ?? ""}
-              onSearch={(value) => setSearch({ busca: value || undefined }, true)}
-            />
-          </TabsContent>
-          <TabsContent value="base">
-            <BasePlayers data={query.data} />
-          </TabsContent>
-          <TabsContent value="controle">
-            <Holdout data={query.data} />
-          </TabsContent>
-          <TabsContent value="recomendacoes">
-            <Recommendations data={query.data} />
-          </TabsContent>
-        </Tabs>
+        <div className="space-y-4">
+          <PageTabs
+            value={tab}
+            onValueChange={(value) => setSearch({ aba: value })}
+            label="Seções dos resultados"
+            items={TABS.map((item) => ({ value: item.key, label: item.label }))}
+          />
+          <div role="tabpanel" aria-labelledby={`tab-${tab}`}>
+            {tab === "visao" && (
+              <Overview
+                data={query.data}
+                onOpenOrigin={(name) => setSearch({ aba: "origens", busca: name })}
+              />
+            )}
+            {tab === "origens" && (
+              <div className="space-y-4">
+                <Origins
+                  data={query.data}
+                  search={search.busca ?? ""}
+                  onSearch={(value) => setSearch({ busca: value || undefined }, true)}
+                />
+                <SpendByState data={query.data} />
+              </div>
+            )}
+            {tab === "controle" && <Holdout data={query.data} />}
+          </div>
+        </div>
       )}
     </Page>
   );

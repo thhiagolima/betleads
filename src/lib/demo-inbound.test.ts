@@ -53,7 +53,7 @@ import {
 } from "./click-tracking.server";
 import { Route as WebhookRoute } from "@/routes/api/public/webhook.$token.$evento";
 import { Route as EvolutionRoute } from "@/routes/api/public/evolution-webhook";
-import { confirmUnsubscribeFor } from "@/routes/u.$token";
+import { confirmUnsubscribeFor } from "@/lib/unsubscribe.server";
 
 const DEMO = "00000000-0000-4000-8000-0000000000d1";
 const NORMAL = "00000000-0000-4000-8000-0000000000a1";

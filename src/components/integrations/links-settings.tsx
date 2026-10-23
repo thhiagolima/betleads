@@ -71,7 +71,7 @@ export function LinksSettings() {
 
   return (
     <HomeCard className="p-4 sm:p-5">
-      <h2 className="text-[15px] font-semibold">Configuração</h2>
+      <h2 className="text-section font-semibold">Configuração</h2>
       <p className="mt-1 text-sm text-muted-foreground">
         Os links das mensagens viram links curtos para contar os cliques de cada jogador.
       </p>
@@ -95,7 +95,7 @@ export function LinksSettings() {
             defaultValue={(s.allowed_destination_hosts ?? []).join(", ")}
             placeholder="site.com, app.site.com"
           />
-          <p className="text-xs text-muted-foreground">
+          <p className="text-meta text-muted-foreground">
             Só links para estes sites são encurtados. Separe por vírgula. Em branco, vale para
             qualquer site.
           </p>
@@ -110,7 +110,7 @@ export function LinksSettings() {
             max="3650"
             defaultValue={s.default_ttl_days ?? ""}
           />
-          <p className="text-xs text-muted-foreground">Em branco, o link não expira.</p>
+          <p className="text-meta text-muted-foreground">Em branco, o link não expira.</p>
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="shortio-fallback">Se o encurtador falhar</Label>

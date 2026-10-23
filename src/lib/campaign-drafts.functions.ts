@@ -3,15 +3,17 @@ import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import type { Json } from "@/integrations/supabase/types";
+import { campaignAudienceCriteriaInput } from "@/lib/sms-audience-criteria";
 import { resolveCurrentTenantId } from "@/lib/tenant-access.server";
 import { dbUuid } from "@/lib/zod-helpers";
 
 const channelSchema = z.enum(["sms", "email", "voice"]);
-const draftPayloadSchema = z.object({
+/** Exportado para testes. */
+export const draftPayloadSchema = z.object({
   channel: channelSchema,
   name: z.string().max(160).default(""),
   audienceId: z.string().max(160).nullable().optional(),
-  audienceCriteria: z.record(z.string(), z.unknown()).nullable().optional(),
+  audienceCriteria: campaignAudienceCriteriaInput.nullable().optional(),
   assetId: z.string().max(200).nullable().optional(),
   assetKind: z.string().max(40).nullable().optional(),
   assetSnapshot: z.record(z.string(), z.unknown()).nullable().optional(),
