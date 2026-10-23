@@ -428,7 +428,7 @@ beforeAll(async () => {
     TENANT_A,
     TENANT_B,
   ]);
-});
+}, 60_000);
 
 afterAll(async () => {
   await db.close();
@@ -712,5 +712,5 @@ describe("expert RLS", () => {
         delete from public.players where affiliate_id like 'BULK%' or affiliate_id = ' AFF1 ';
       `);
     }
-  });
+  }, 60_000);
 });

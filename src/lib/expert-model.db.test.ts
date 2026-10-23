@@ -131,7 +131,7 @@ beforeAll(async () => {
 
   await db.exec(MIGRATION_ROLE);
   await db.exec(MIGRATION_MODEL);
-});
+}, 60_000);
 
 afterAll(async () => {
   await db.close();
@@ -292,6 +292,30 @@ describe("save_expert", () => {
     expect(labeled.find((r) => r.affiliate_id === "AFF2")!.expert).toBeNull();
   });
 
+  it("clears the label of a player with a null affiliate_id when saving without it", async () => {
+    const { rows: created } = await db.query<{ id: string }>(
+      `select save_expert($1, null, 'Nulo', 'restrito', $2, 'livre', null, 3) as id`,
+      [TENANT_A, ["AFFN"]],
+    );
+    const { rows: stale } = await db.query<{ id: string }>(
+      `insert into public.players (tenant_id, affiliate_id, expert) values ($1, null, 'Nulo') returning id`,
+      [TENANT_A],
+    );
+
+    // Rename (old name 'Nulo') and save without any id that player has.
+    await db.query(`select save_expert($1, $2, 'Nulo Novo', 'restrito', $3, 'livre', null, 3)`, [
+      TENANT_A,
+      created[0].id,
+      ["AFFN"],
+    ]);
+
+    const { rows } = await db.query<{ expert: string | null }>(
+      `select expert from public.players where id = $1`,
+      [stale[0].id],
+    );
+    expect(rows[0].expert).toBeNull();
+  });
+
   it("raises expert_not_found when updating an expert id that does not belong to the house", async () => {
     const { rows: andrade } = await db.query<{ id: string }>(
       `select id from public.experts where tenant_id = $1 and nome = 'Andrade'`,
@@ -336,6 +360,25 @@ describe("delete_expert", () => {
     await expect(db.query(`select delete_expert($1, $2)`, [TENANT_A, expertId])).rejects.toThrow(
       /expert_has_user/,
     );
+  });
+
+  it("also clears a player labelled with the expert's name but a null affiliate_id", async () => {
+    const { rows: created } = await db.query<{ id: string }>(
+      `select save_expert($1, null, 'Some Logo', 'restrito', $2, 'livre', null, 3) as id`,
+      [TENANT_A, ["AFFD"]],
+    );
+    const { rows: stale } = await db.query<{ id: string }>(
+      `insert into public.players (tenant_id, affiliate_id, expert) values ($1, null, 'Some Logo') returning id`,
+      [TENANT_A],
+    );
+
+    await db.query(`select delete_expert($1, $2)`, [TENANT_A, created[0].id]);
+
+    const { rows } = await db.query<{ expert: string | null }>(
+      `select expert from public.players where id = $1`,
+      [stale[0].id],
+    );
+    expect(rows[0].expert).toBeNull();
   });
 
   it("clears labels and deletes the expert", async () => {

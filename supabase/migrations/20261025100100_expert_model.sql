@@ -284,7 +284,9 @@ begin
   set expert = null
   where tenant_id = _tenant
     and expert in (v_old_nome, _nome)
-    and not (btrim(affiliate_id) = any(v_ids));
+    -- coalesce: a null affiliate_id makes the comparison NULL, and
+    -- "not NULL" would keep a stale label.
+    and not coalesce(btrim(affiliate_id) = any(v_ids), false);
 
   return v_expert_id;
 end;
@@ -303,9 +305,10 @@ set search_path = public, pg_temp
 as $$
 declare
   v_user_id uuid;
+  v_nome text;
 begin
-  select user_id
-  into v_user_id
+  select user_id, nome
+  into v_user_id, v_nome
   from public.experts
   where id = _expert_id and tenant_id = _tenant;
 
@@ -317,11 +320,19 @@ begin
     raise exception 'expert_has_user';
   end if;
 
+  -- By affiliate id, and by name too (unique per house): a player labelled
+  -- with this expert but with a null/other affiliate_id is cleared as well.
   update public.players p
   set expert = null
   where p.tenant_id = _tenant
-    and btrim(p.affiliate_id) in (
-      select affiliate_id from public.expert_affiliates where expert_id = _expert_id
+    and (
+      p.expert = v_nome
+      or coalesce(
+        btrim(p.affiliate_id) in (
+          select affiliate_id from public.expert_affiliates where expert_id = _expert_id
+        ),
+        false
+      )
     );
 
   -- expert_affiliates rows for this expert cascade-delete with it.
