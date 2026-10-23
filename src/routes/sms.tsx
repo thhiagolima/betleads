@@ -15,6 +15,7 @@ import { SmsTemplatesPanel } from "@/components/sms/sms-templates-panel";
 import { useActiveTenant } from "@/hooks/use-active-tenant";
 import { POLL_INTERVALS } from "@/hooks/use-updated-ago";
 import { getBillingPrices } from "@/lib/billing/billing.functions";
+import { walletNoticeInputFromPortal } from "@/lib/billing/wallet-notice";
 import { CHART_COLORS } from "@/lib/chart-theme";
 import { brl, num } from "@/lib/format";
 import { getSmsCreditPortal } from "@/lib/sms-credits.functions";
@@ -120,6 +121,7 @@ function SmsOverview({ onOpenHistory }: { onOpenHistory: () => void }) {
             exempt={exempt}
             smsUnitPrice={smsUnitPrice}
             canBuy={canBuyCredits}
+            threshold={walletNoticeInputFromPortal(credits.data).threshold}
           />
         ) : null
       }

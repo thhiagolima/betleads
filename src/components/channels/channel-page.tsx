@@ -2,6 +2,7 @@ import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { Plus } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
 
+import { ActiveTenantWalletNotice } from "@/components/billing/active-tenant-wallet-notice";
 import { ProvidersPausedBanner } from "@/components/providers-paused-banner";
 import { SendWindowCard } from "@/components/send-window-card";
 import { Button } from "@/components/ui/button";
@@ -26,7 +27,7 @@ const NEW_CAMPAIGN_CHANNEL: Record<ChannelId, "sms" | "email" | "voice"> = {
 
 /**
  * The shell shared by SMS, Email and Voz: header, channel status strip
- * (paused banner, then send window), visible tabs synced with the URL hash,
+ * (paused banner, wallet notice, then send window), visible tabs synced with the URL hash,
  * then the active tab. Clicking a tab pushes a history entry, so the browser
  * "back" button goes back to the previous tab.
  */
@@ -85,6 +86,9 @@ export function ChannelPage<C extends ChannelId>({
         }
       />
       <ProvidersPausedBanner channel={PAUSE_CHANNEL[channel]} />
+      {/* PG3: empty/low balance for the active house, with its own threshold.
+          SMS already shows it in its overview, next to the balance KPI. */}
+      {channel === "sms" ? null : <ActiveTenantWalletNotice />}
       <SendWindowCard compact />
       <PageTabs
         value={tab}
