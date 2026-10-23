@@ -473,6 +473,71 @@ describe("wallet_settle: e-mail franchise", () => {
   });
 });
 
+describe("wallet_settle: franchise straddle", () => {
+  it("1 free + 1 paid e-mail settled at 0 returns exactly R$ 0,002 and 1 franchise unit", async () => {
+    await asSuperAdmin(() =>
+      db.query("select public.admin_set_price($1, $2, $3, $4)", ["email", 0.002, null, 1]),
+    );
+    try {
+      const tenant = await freshTenant();
+      const reserved = await reserve(tenant, "email", 2, "mail-straddle");
+      expect(Number(reserved.amount)).toBeCloseTo(-0.002, 4);
+
+      const result = await settle(tenant, "mail-straddle", 0, "settle:mail-straddle");
+      expect(result).toMatchObject({
+        ok: true,
+        billed_units: 0,
+        units_returned: 2,
+        free_units_returned: 1,
+      });
+      expect(Number(result.amount)).toBe(0.002);
+      expect(Number(result.billed_amount)).toBe(0);
+      expect(await balanceOf(tenant)).toBe(10);
+
+      const { rows } = await db.query<{ amount: string; units: number; free_units: number }>(
+        `select amount::text, units, free_units from public.wallet_ledger
+         where tenant_id = $1 and entry_type = 'usage_refund'`,
+        [tenant],
+      );
+      expect(rows).toEqual([{ amount: "0.0020", units: 2, free_units: 1 }]);
+      const [month] = await usage(tenant, "email");
+      expect(month).toEqual({ units: 0, free_units_used: 0, billed_amount: 0 });
+    } finally {
+      await asSuperAdmin(() =>
+        db.query("select public.admin_set_price($1, $2, $3, $4)", ["email", 0.002, null, 100000]),
+      );
+    }
+  });
+});
+
+describe("wallet_settle: no drift between balance and ledger", () => {
+  it("reserve, settle, replay and a refund attempt leave balance = ledger sum", async () => {
+    const tenant = await freshTenant();
+    await reserve(tenant, "voice_30s", 5, "call-drift");
+    const first = await settleVoice(tenant, "call-drift", 61, true, "settle:drift");
+    expect(first).toMatchObject({ ok: true, idempotent: false });
+    const replay = await settleVoice(tenant, "call-drift", 61, true, "settle:drift");
+    expect(replay).toMatchObject({ ok: true, idempotent: true });
+    const refused = await refund(tenant, "call-drift", "refund:drift");
+    expect(refused).toMatchObject({ ok: false, reason: "already_refunded" });
+
+    const { rows: drift } = await asSuperAdmin(() =>
+      db.query<{ tenant_id: string }>("select tenant_id from public.billing_wallet_integrity()"),
+    );
+    expect(drift.find((r) => r.tenant_id === tenant)).toBeUndefined();
+
+    const { rows } = await db.query<{ balance: string; ledger_sum: string }>(
+      `select w.balance::text,
+              (select coalesce(sum(amount), 0) from public.wallet_ledger l
+               where l.tenant_id = w.tenant_id)::text ledger_sum
+       from public.tenant_wallets w where w.tenant_id = $1`,
+      [tenant],
+    );
+    expect(Number(rows[0].balance)).toBe(Number(rows[0].ledger_sum));
+    expect(Number(rows[0].balance)).toBeCloseTo(9.73, 4);
+  });
+});
+
 describe("wallet_settle: month boundary", () => {
   it("reserved on 31/10 and settled on 01/11 decrements October, never November", async () => {
     const tenant = await freshTenant();

@@ -1208,6 +1208,8 @@ function PricingTab() {
   );
 }
 
+const UNANSWERED_BLOCKS_ERROR = "Informe um número inteiro.";
+
 function PricingRow({ row, onSaved }: { row: PriceBookRow; onSaved: () => void }) {
   const [unitPrice, setUnitPrice] = useState(String(row.unit_price));
   const [providerCost, setProviderCost] = useState(
@@ -1218,18 +1220,23 @@ function PricingRow({ row, onSaved }: { row: PriceBookRow; onSaved: () => void }
   const [unansweredBlocks, setUnansweredBlocks] = useState(
     String(row.charge_unanswered_blocks ?? 0),
   );
+  // Só inteiros >= 0 (blocos de 30 s). Validado aqui para a mensagem sair em
+  // pt-BR em vez do texto em inglês do zod no servidor.
+  const unansweredInvalid = isVoice && !/^d+$/.test(unansweredBlocks.trim());
   const fn = useServerFn(setPricing);
   const mut = useMutation({
-    mutationFn: () =>
-      fn({
+    mutationFn: () => {
+      if (unansweredInvalid) throw new Error(UNANSWERED_BLOCKS_ERROR);
+      return fn({
         data: {
           item: row.item,
           unit_price: Number(unitPrice),
           provider_unit_cost: providerCost.trim() === "" ? null : Number(providerCost),
           free_monthly_units: Number(freeUnits),
-          ...(isVoice ? { charge_unanswered_blocks: Number(unansweredBlocks) } : {}),
+          ...(isVoice ? { charge_unanswered_blocks: Number(unansweredBlocks.trim()) } : {}),
         },
-      }),
+      });
+    },
     onSuccess: () => {
       toast.success("Preço atualizado");
       onSaved();
@@ -1290,12 +1297,16 @@ function PricingRow({ row, onSaved }: { row: PriceBookRow; onSaved: () => void }
               min="0"
               value={unansweredBlocks}
               onChange={(e) => setUnansweredBlocks(e.target.value)}
+              aria-invalid={unansweredInvalid || undefined}
             />
+            {unansweredInvalid && unansweredBlocks.trim() !== "" && (
+              <p className="text-xs text-destructive">{UNANSWERED_BLOCKS_ERROR}</p>
+            )}
           </div>
         )}
         <Button
           onClick={() => mut.mutate()}
-          disabled={mut.isPending || unitPrice === "" || (isVoice && unansweredBlocks === "")}
+          disabled={mut.isPending || unitPrice === "" || unansweredInvalid}
         >
           {mut.isPending ? "Salvando…" : "Salvar"}
         </Button>
