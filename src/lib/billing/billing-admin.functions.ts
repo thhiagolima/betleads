@@ -550,10 +550,10 @@ export const adminManualSettle = createServerFn({ method: "POST" })
 // Canceling a regular monthly invoice skips that month: the SQL moves the
 // cycle forward and the next invoice is the next cycle's. An activation
 // invoice (`upfront`, or any invoice of a house that never paid one, same
-// rule as the SQL) keeps next_due_date and the hourly job reissues it with
-// the current amount.
+// rule as the SQL) keeps next_due_date and the SQL reissues it in the same
+// call, with the current amount.
 export const CANCEL_UPFRONT_INVOICE_MESSAGE =
-  "Fatura de ativação cancelada. Ela será reemitida na próxima rodada com o valor atual.";
+  "Fatura de ativação cancelada e reemitida com o valor atual.";
 
 /** DD/MM/AAAA (Brasília) for a YYYY-MM-DD date. */
 function formatBrtDate(yyyyMmDd: string): string {

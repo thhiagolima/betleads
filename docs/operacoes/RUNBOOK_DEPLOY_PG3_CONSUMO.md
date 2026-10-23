@@ -87,8 +87,8 @@ grants). Fatura mensal cancelada não é mais reemitida: o mês não é cobrado 
 `next_due_date` vai para `cycle_due_date` + 1 mês, nunca antes de hoje (ou
 fica no dia trocado por "Trocar dia de vencimento", se ainda no futuro).
 Fatura de ativação (`upfront`, ou qualquer fatura de casa que nunca pagou
-nenhuma) continua como antes: `next_due_date` não muda e o job da hora a
-reemite.
+nenhuma) não pula o mês: `next_due_date` não muda e a própria função a
+reemite na hora (com o mesmo `upfront`), sem esperar o job da hora.
 
 **Resultado:**
 

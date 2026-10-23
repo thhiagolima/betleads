@@ -231,8 +231,8 @@ describe("billing_admin_cancel_invoice: regular invoice skips the month", () => 
   });
 });
 
-describe("billing_admin_cancel_invoice: upfront invoice is reissued", () => {
-  it("keeps next_due_date and the generator reissues for the same cycle", async () => {
+describe("billing_admin_cancel_invoice: activation invoice is reissued immediately", () => {
+  it("never-paid house: keeps next_due_date and reissues an upfront invoice in the same call", async () => {
     await setToday("2026-11-02");
     const tenant = await createHouse("enterprise");
     const upfront = await openInvoiceOf(tenant);
@@ -240,36 +240,60 @@ describe("billing_admin_cancel_invoice: upfront invoice is reissued", () => {
     expect((await billingOf(tenant)).next_due_date).toBe("2026-11-02");
 
     const result = await cancel(upfront!.id);
-    expect(result).toMatchObject({ ok: true, tenant_id: tenant, next_due_date: "2026-11-02" });
-    expect((await billingOf(tenant)).next_due_date).toBe("2026-11-02");
-
-    const created = await generate();
+    expect(result).toMatchObject({
+      ok: true,
+      tenant_id: tenant,
+      next_due_date: "2026-11-02",
+      access_state: "awaiting_first_payment",
+    });
     const reissued = await openInvoiceOf(tenant);
-    expect(created).toContain(reissued!.id);
-    expect(reissued).toMatchObject({ cycle_due_date: "2026-11-02", due_date: "2026-11-02" });
+    expect(reissued).toMatchObject({ upfront: true, cycle_due_date: "2026-11-02", due_date: "2026-11-02" });
     expect(reissued!.id).not.toBe(upfront!.id);
-  });
-});
+    expect(await billingOf(tenant)).toEqual({
+      access_state: "awaiting_first_payment",
+      next_due_date: "2026-11-02",
+    });
 
-describe("billing_admin_cancel_invoice: never-paid house counts as activation", () => {
-  it("canceling the reissued (no longer upfront) invoice of a never-paid house keeps the cycle and reissues", async () => {
+    // The hourly run has nothing left to issue.
+    expect(await generate()).toEqual([]);
+  });
+
+  it("house with paid history and an upfront invoice (unfrozen): keeps next_due_date, reissues as upfront", async () => {
+    const { tenant } = await houseWithOpenInvoiceDueNov5();
+    await admin("select public.billing_admin_set_frozen($1, true)", [tenant]);
+    await setToday("2027-01-10");
+    await admin("select public.billing_admin_set_frozen($1, false)", [tenant]);
+    const upfront = await openInvoiceOf(tenant);
+    expect(upfront).toMatchObject({ upfront: true, cycle_due_date: "2027-01-10" });
+    expect(await scalar<number>(
+      "select count(*)::int v from public.billing_invoices where tenant_id = $1 and status = 'paid'",
+      [tenant],
+    )).toBe(1);
+
+    const result = await cancel(upfront!.id);
+    expect(result).toMatchObject({ next_due_date: "2027-01-10", access_state: "awaiting_first_payment" });
+    const reissued = await openInvoiceOf(tenant);
+    expect(reissued).toMatchObject({ upfront: true, cycle_due_date: "2027-01-10", due_date: "2027-01-10" });
+    expect(reissued!.id).not.toBe(upfront!.id);
+    expect(await billingOf(tenant)).toEqual({
+      access_state: "awaiting_first_payment",
+      next_due_date: "2027-01-10",
+    });
+  });
+
+  it("never-paid house with a non-upfront open invoice counts as activation and is reissued as is", async () => {
     await setToday("2026-11-03");
     const tenant = await createHouse("enterprise");
-    const upfront = await openInvoiceOf(tenant);
-    await cancel(upfront!.id);
-    await generate();
+    const first = await openInvoiceOf(tenant);
+    // Simulates an invoice reissued by the hourly job before this migration
+    // (billing_issue_invoice without _upfront).
+    await db.query("update public.billing_invoices set upfront = false where id = $1", [first!.id]);
+
+    const result = await cancel(first!.id);
+    expect(result).toMatchObject({ next_due_date: "2026-11-03", access_state: "awaiting_first_payment" });
     const reissued = await openInvoiceOf(tenant);
-    expect(reissued).toMatchObject({ upfront: false, cycle_due_date: "2026-11-03" });
-
-    // Until the next hourly run there is no open invoice, so the phase reads
-    // `ok` (same as canceling an upfront invoice); the run below reissues it.
-    const result = await cancel(reissued!.id);
-    expect(result).toMatchObject({ next_due_date: "2026-11-03" });
-
-    await generate();
-    const again = await openInvoiceOf(tenant);
-    expect(again).toMatchObject({ cycle_due_date: "2026-11-03", due_date: "2026-11-03" });
-    expect(again!.id).not.toBe(reissued!.id);
+    expect(reissued).toMatchObject({ upfront: false, cycle_due_date: "2026-11-03", due_date: "2026-11-03" });
+    expect(reissued!.id).not.toBe(first!.id);
     expect(await billingOf(tenant)).toEqual({
       access_state: "awaiting_first_payment",
       next_due_date: "2026-11-03",
@@ -278,7 +302,7 @@ describe("billing_admin_cancel_invoice: never-paid house counts as activation", 
 });
 
 describe("billing_admin_cancel_invoice: late cancel", () => {
-  it("clamps the advanced date to today, so the next invoice is issued today and due today", async () => {
+  it("clamps the advanced date to today: the next invoice is issued today, due today, read as overdue (grace)", async () => {
     const { tenant, invoice } = await houseWithOpenInvoiceDueNov5();
     // Canceled on 20/12: cycle 05/11 + 1 month = 05/12 is already past.
     await setToday("2026-12-20");
@@ -290,6 +314,8 @@ describe("billing_admin_cancel_invoice: late cancel", () => {
       cycle_due_date: "2026-12-20",
       due_date: "2026-12-20",
     });
+    // Due today = the `overdue` phase (3-day grace before locked_unpaid).
+    expect((await billingOf(tenant)).access_state).toBe("overdue");
   });
 });
 

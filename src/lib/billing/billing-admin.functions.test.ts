@@ -477,8 +477,11 @@ describe("adminCancelInvoiceFor", () => {
     );
   });
 
-  it("upfront invoice: says it will be reissued", async () => {
-    fake.admin.rows("billing_invoices").push({ id: INVOICE, tenant_id: TENANT, status: "open", upfront: true });
+  it("upfront invoice of a house with paid history: activation message (upfront short-circuits)", async () => {
+    fake.admin.rows("billing_invoices").push(
+      { id: INVOICE, tenant_id: TENANT, status: "open", upfront: true },
+      { id: "00000000-0000-4000-8000-0000000000c1", tenant_id: TENANT, status: "paid", upfront: false },
+    );
     userDb.onRpc("billing_admin_cancel_invoice", () => rpcOk(TENANT, { next_due_date: "2026-11-02" }));
     const result = await adminCancelInvoiceFor(ctxFor(SUPER_ADMIN), {
       invoiceId: INVOICE,
@@ -486,7 +489,7 @@ describe("adminCancelInvoiceFor", () => {
     });
     expect(result.message).toBe(CANCEL_UPFRONT_INVOICE_MESSAGE);
     expect(result.message).toBe(
-      "Fatura de ativação cancelada. Ela será reemitida na próxima rodada com o valor atual.",
+      "Fatura de ativação cancelada e reemitida com o valor atual.",
     );
   });
 
@@ -530,7 +533,7 @@ describe("cancelInvoiceMessage", () => {
 
   it("activation invoice: reissue message", () => {
     expect(cancelInvoiceMessage({ activation: true, nextDueDate: "2026-11-02" })).toBe(
-      "Fatura de ativação cancelada. Ela será reemitida na próxima rodada com o valor atual.",
+      "Fatura de ativação cancelada e reemitida com o valor atual.",
     );
   });
 });
