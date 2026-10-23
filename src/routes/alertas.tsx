@@ -531,7 +531,7 @@ function AlertRow({
 
       {/* Ação recomendada + outras ações */}
       {principal && (
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             size="sm"
             className="h-9 flex-1 gap-1.5"

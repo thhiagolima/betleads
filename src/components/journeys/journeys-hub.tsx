@@ -339,7 +339,7 @@ export function JourneysHub() {
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <OverviewCard
           icon={CircleDollarSign}
-          label="Recuperado atribuído"
+          label="Recuperado pelo CRM"
           value={overview.recovered.toLocaleString("pt-BR", {
             style: "currency",
             currency: "BRL",
@@ -368,7 +368,7 @@ export function JourneysHub() {
           value={((journeys.data?.journeys ?? []) as Journey[])
             .filter((journey) => journey.status === "active")
             .length.toLocaleString("pt-BR")}
-          detail="Em execucao neste momento"
+          detail="Em execução neste momento"
           color="slate"
         />
       </div>
@@ -640,7 +640,7 @@ export function JourneysHub() {
                       />
                       <JourneyMetric label="Enviados" value={sent.toLocaleString("pt-BR")} />
                       <JourneyMetric
-                        label="Recuperado atribuído"
+                        label="Recuperado pelo CRM"
                         hint={ATTRIBUTED_RECOVERY_HINT}
                         value={Number(metrics.recovered ?? 0).toLocaleString("pt-BR", {
                           style: "currency",
@@ -1072,7 +1072,7 @@ export function JourneysHub() {
           <DialogHeader>
             <DialogTitle>Como a conta e feita</DialogTitle>
             <DialogDescription>
-              O que entra em Recuperado atribuído e o que fica de fora.
+              O que entra em Recuperado pelo CRM e o que fica de fora.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 text-sm leading-relaxed text-muted-foreground">
@@ -1294,7 +1294,7 @@ function JourneyMetric({
 }) {
   return (
     <div className="text-right">
-      <p className="flex items-center justify-end gap-1 whitespace-nowrap text-xs text-muted-foreground">
+      <p className="flex items-center justify-end gap-1 text-meta text-muted-foreground">
         {label}
         {hint ? (
           <TooltipProvider delayDuration={150}>

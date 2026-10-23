@@ -1001,7 +1001,7 @@ export function JourneyEditor({
           </div>
         </section>
         <section className="space-y-3">
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <JourneyFieldTitle
               helpId="sequence"
               activeHelp={activeHelp}
@@ -1010,7 +1010,7 @@ export function JourneyEditor({
             >
               Sequência
             </JourneyFieldTitle>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button type="button" size="sm" variant="outline" onClick={() => add("wait")}>
                 <Clock3 className="mr-1 h-4 w-4" /> Espera
               </Button>
