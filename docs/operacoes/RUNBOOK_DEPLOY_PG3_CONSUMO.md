@@ -18,22 +18,26 @@ conectar.
 
 Pré-requisito: a mensalidade (`20261023100000`/`20261023100100`, ver
 `RUNBOOK_ATIVAR_MENSALIDADE.md`) já está aplicada — a `20261024100200`
-substitui `billing_admin_manual_settle`, criada pela `20261023100000`.
+substitui `billing_admin_manual_settle` e a `20261024100300` substitui
+`billing_admin_cancel_invoice`, ambas criadas pela `20261023100000`.
 
 ---
 
 ## Visão geral da ordem (não pule nem inverta)
 
-**As 3 migrations do PG3 têm que ser aplicadas ANTES do deploy do código.**
+**As 4 migrations do PG3 têm que ser aplicadas ANTES do deploy do código.**
 O código novo chama `wallet_settle`, `wallet_settle_voice`,
 `billing_claim_wallet_alert`, `billing_low_balance_candidates`,
 `billing_set_low_balance_threshold` e grava colunas novas em `call_history` e
 `email_send_logs`. Sem as migrations, todo envio de voz e de e-mail que tenta
-reservar/liquidar falha, e a tela de saldo quebra.
+reservar/liquidar falha, e a tela de saldo quebra. Sem a `20261024100300`,
+o aviso de "Cancelar fatura" diria que o mês não será cobrado, mas o banco
+ainda reemitiria a fatura.
 
 1. Migration `20261024100000_billing_wallet_settle.sql` (Passo 1).
 2. Migration `20261024100100_billing_wallet_alerts.sql` (Passo 2).
 3. Migration `20261024100200_billing_manual_settle_paid_at.sql` (Passo 3).
+   Depois, `20261024100300_billing_cancel_invoice_skips_cycle.sql` (Passo 3b).
 4. Verificação (Passo 4).
 5. Deploy (Passo 5).
 6. Monitoramento (Passo 6).
@@ -76,6 +80,16 @@ assinaturas.
 
 **Resultado:**
 
+## Passo 3b — Migration `20261024100300` (requer autorização)
+
+Recria `billing_admin_cancel_invoice(uuid, text)` (mesma assinatura, mesmos
+grants). Fatura mensal cancelada não é mais reemitida: o mês não é cobrado e
+`next_due_date` vai para `cycle_due_date` + 1 mês (ou fica no dia trocado por
+"Trocar dia de vencimento", se ainda no futuro). Fatura `upfront` (ativação)
+continua como antes: `next_due_date` não muda e o job da hora a reemite.
+
+**Resultado:**
+
 ## Passo 4 — Verificação (só leitura)
 
 ```sql
@@ -108,6 +122,12 @@ select pg_get_function_identity_arguments(oid) from pg_proc
 where proname = 'billing_admin_manual_settle';
 ```
 Esperado: uma linha terminando em `_paid_at timestamp with time zone`.
+
+```sql
+select prosrc like '%billing_add_months(v_inv.cycle_due_date, 1)%' as pula_mes
+from pg_proc where proname = 'billing_admin_cancel_invoice';
+```
+Esperado: uma linha, `pula_mes = true`.
 
 ```sql
 select pg_get_constraintdef(oid) from pg_constraint
@@ -154,7 +174,7 @@ o PG0-05 (configurar `notifyUrl` / relatório de entrega de voz).
 
 ## Passo 7 — Rollback
 
-Voltar o código para o deploy anterior basta. Os objetos das 3 migrations são
+Voltar o código para o deploy anterior basta. Os objetos das 4 migrations são
 aditivos e seguros com o código antigo:
 
 - funções novas não são chamadas pelo código antigo;
@@ -165,7 +185,11 @@ aditivos e seguros com o código antigo:
 - `admin_set_price` e `billing_admin_manual_settle` mantêm os parâmetros
   antigos e só ganham um último parâmetro com default, então as chamadas do
   código antigo (por nome) continuam resolvendo;
-- `wallet_summary` devolve os mesmos campos de antes mais o limite.
+- `wallet_summary` devolve os mesmos campos de antes mais o limite;
+- `billing_admin_cancel_invoice` mantém assinatura e retorno. Só a regra muda
+  (fatura mensal cancelada pula o mês); com o código antigo, o aviso depois de
+  cancelar ainda fala em reemissão, mas o mês é pulado. Para voltar à regra
+  antiga, reaplicar a definição da função que está na `20261023100000`.
 
 Não há necessidade de desfazer as migrations. Reservas de voz/e-mail abertas
 no momento do rollback ficam no ledger; ao voltar o código novo, a

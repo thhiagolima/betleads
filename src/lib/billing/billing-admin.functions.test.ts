@@ -35,7 +35,8 @@ import {
   adminSetPixFeeFor,
   adminSetTenantBlockFor,
   adminTenantBillingHistoryFor,
-  CANCEL_INVOICE_MESSAGE,
+  CANCEL_UPFRONT_INVOICE_MESSAGE,
+  cancelInvoiceMessage,
 } from "./billing-admin.functions";
 
 const TENANT = "00000000-0000-4000-8000-0000000000aa";
@@ -460,14 +461,59 @@ describe("adminManualSettleFor", () => {
 });
 
 describe("adminCancelInvoiceFor", () => {
-  it("cancels open Pix charges, cancels the invoice, and returns the fixed reissue message", async () => {
-    userDb.onRpc("billing_admin_cancel_invoice", () => rpcOk(TENANT));
+  it("regular invoice: cancels open Pix charges, cancels the invoice, and says the month is skipped", async () => {
+    fake.admin.rows("billing_invoices").push({ id: INVOICE, tenant_id: TENANT, status: "open", upfront: false });
+    userDb.onRpc("billing_admin_cancel_invoice", () => rpcOk(TENANT, { next_due_date: "2026-12-05" }));
     const result = await adminCancelInvoiceFor(ctxFor(SUPER_ADMIN), {
       invoiceId: INVOICE,
       reason: "fatura gerada por engano",
     });
     expect(cancelOpenInvoiceCharges).toHaveBeenCalledWith(INVOICE);
-    expect(result.message).toBe(CANCEL_INVOICE_MESSAGE);
+    expect(result.message).toBe(
+      "Fatura cancelada. Este mês não será cobrado; a próxima fatura vence em 05/12/2026.",
+    );
+  });
+
+  it("upfront invoice: says it will be reissued", async () => {
+    fake.admin.rows("billing_invoices").push({ id: INVOICE, tenant_id: TENANT, status: "open", upfront: true });
+    userDb.onRpc("billing_admin_cancel_invoice", () => rpcOk(TENANT, { next_due_date: "2026-11-02" }));
+    const result = await adminCancelInvoiceFor(ctxFor(SUPER_ADMIN), {
+      invoiceId: INVOICE,
+      reason: "fatura gerada por engano",
+    });
+    expect(result.message).toBe(CANCEL_UPFRONT_INVOICE_MESSAGE);
+    expect(result.message).toBe(
+      "Fatura de ativação cancelada. Ela será reemitida na próxima rodada com o valor atual.",
+    );
+  });
+
+  it("refuses a non-super-admin before touching Pix or the invoice", async () => {
+    fake.admin.rows("billing_invoices").push({ id: INVOICE, tenant_id: TENANT, status: "open", upfront: false });
+    await expect(
+      adminCancelInvoiceFor(ctxFor(PLAIN_USER), { invoiceId: INVOICE, reason: "fatura gerada por engano" }),
+    ).rejects.toThrow("Apenas o super admin pode realizar esta ação.");
+    expect(cancelOpenInvoiceCharges).not.toHaveBeenCalled();
+  });
+
+  it("translates a missing invoice", async () => {
+    await expect(
+      adminCancelInvoiceFor(ctxFor(SUPER_ADMIN), { invoiceId: INVOICE, reason: "fatura gerada por engano" }),
+    ).rejects.toThrow("Fatura não encontrada.");
+    expect(cancelOpenInvoiceCharges).not.toHaveBeenCalled();
+  });
+});
+
+describe("cancelInvoiceMessage", () => {
+  it("regular invoice: DD/MM/AAAA of the next due date", () => {
+    expect(cancelInvoiceMessage({ upfront: false, nextDueDate: "2027-01-31" })).toBe(
+      "Fatura cancelada. Este mês não será cobrado; a próxima fatura vence em 31/01/2027.",
+    );
+  });
+
+  it("upfront invoice: reissue message", () => {
+    expect(cancelInvoiceMessage({ upfront: true, nextDueDate: "2026-11-02" })).toBe(
+      "Fatura de ativação cancelada. Ela será reemitida na próxima rodada com o valor atual.",
+    );
   });
 });
 

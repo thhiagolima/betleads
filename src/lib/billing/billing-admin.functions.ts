@@ -547,8 +547,28 @@ export const adminManualSettle = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => adminManualSettleInput.parse(data))
   .handler(async ({ data, context }) => adminManualSettleFor(context as ServerContext, data));
 
-export const CANCEL_INVOICE_MESSAGE =
-  "Fatura cancelada. Ela será reemitida na próxima rodada com o valor atual; para não cobrar este mês, use um desconto de 100%.";
+// Canceling a regular monthly invoice skips that month: the SQL moves the
+// cycle forward and the next invoice is the next cycle's. An `upfront`
+// (activation, pay-before-use) invoice keeps next_due_date and the hourly
+// job reissues it with the current amount.
+export const CANCEL_UPFRONT_INVOICE_MESSAGE =
+  "Fatura de ativação cancelada. Ela será reemitida na próxima rodada com o valor atual.";
+
+/** DD/MM/AAAA (Brasília) for a YYYY-MM-DD date. */
+function formatBrtDate(yyyyMmDd: string): string {
+  return parseBrtDayStart(yyyyMmDd).toLocaleDateString("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+}
+
+export function cancelInvoiceMessage(input: { upfront: boolean; nextDueDate: string | null }): string {
+  if (input.upfront) return CANCEL_UPFRONT_INVOICE_MESSAGE;
+  if (!input.nextDueDate) return "Fatura cancelada. Este mês não será cobrado.";
+  return `Fatura cancelada. Este mês não será cobrado; a próxima fatura vence em ${formatBrtDate(input.nextDueDate)}.`;
+}
 
 export const adminCancelInvoiceInput = z.object({
   invoiceId: dbUuid(),
@@ -559,9 +579,18 @@ export async function adminCancelInvoiceFor(ctx: ServerContext, data: unknown) {
   const input = adminCancelInvoiceInput.parse(data);
   await assertSuperAdmin(ctx.userId);
 
+  // The message depends on the invoice type, read before the cancel.
+  const { data: invoice, error: invoiceError } = await looseDb(supabaseAdmin)
+    .from<{ id: string; upfront: boolean }>("billing_invoices")
+    .select("id,upfront")
+    .eq("id", input.invoiceId)
+    .maybeSingle();
+  if (invoiceError) throw new Error(invoiceError.message);
+  if (!invoice) throw new Error(BILLING_ADMIN_ERROR_MESSAGES.invoice_not_found);
+
   const cancel = await cancelOpenPixBestEffort(input.invoiceId);
 
-  const result = unwrap<{ tenant_id: string }>(
+  const result = unwrap<BillingAdminResult>(
     await looseDb(ctx.supabase).rpc("billing_admin_cancel_invoice", {
       _invoice: input.invoiceId,
       _reason: input.reason,
@@ -572,9 +601,15 @@ export async function adminCancelInvoiceFor(ctx: ServerContext, data: unknown) {
     actorUserId: ctx.userId,
     action: "billing.cancel_invoice",
     reason: input.reason,
-    metadata: { invoiceId: input.invoiceId, pixCancel: cancel },
+    metadata: { invoiceId: input.invoiceId, upfront: invoice.upfront === true, pixCancel: cancel },
   });
-  return { ...result, message: CANCEL_INVOICE_MESSAGE };
+  return {
+    ...result,
+    message: cancelInvoiceMessage({
+      upfront: invoice.upfront === true,
+      nextDueDate: result.next_due_date ?? null,
+    }),
+  };
 }
 
 export const adminCancelInvoice = createServerFn({ method: "POST" })

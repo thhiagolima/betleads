@@ -482,7 +482,7 @@ export function CancelInvoiceAction({
       triggerLabel="Cancelar fatura"
       triggerVariant="destructive"
       title="Cancelar fatura"
-      description="Fatura em aberto gerada por engano. Cancela o Pix na Upper, se houver."
+      description="Fatura em aberto gerada por engano. Cancela o Pix na Upper, se houver. Fatura mensal: o mês não é cobrado e a próxima fatura é a do ciclo seguinte. Fatura de ativação: é reemitida na próxima rodada."
       disabledTrigger={!invoiceId}
       pending={mut.isPending}
       // m8: "Cancelar" here would read as cancelling the invoice itself, not dismissing the
