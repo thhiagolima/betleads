@@ -1166,6 +1166,7 @@ type PriceBookRow = {
   unit_price: number;
   provider_unit_cost: number | null;
   free_monthly_units: number;
+  charge_unanswered_blocks: number;
 };
 
 function PricingTab() {
@@ -1213,6 +1214,10 @@ function PricingRow({ row, onSaved }: { row: PriceBookRow; onSaved: () => void }
     row.provider_unit_cost == null ? "" : String(row.provider_unit_cost),
   );
   const [freeUnits, setFreeUnits] = useState(String(row.free_monthly_units));
+  const isVoice = row.item === "voice_30s";
+  const [unansweredBlocks, setUnansweredBlocks] = useState(
+    String(row.charge_unanswered_blocks ?? 0),
+  );
   const fn = useServerFn(setPricing);
   const mut = useMutation({
     mutationFn: () =>
@@ -1222,6 +1227,7 @@ function PricingRow({ row, onSaved }: { row: PriceBookRow; onSaved: () => void }
           unit_price: Number(unitPrice),
           provider_unit_cost: providerCost.trim() === "" ? null : Number(providerCost),
           free_monthly_units: Number(freeUnits),
+          ...(isVoice ? { charge_unanswered_blocks: Number(unansweredBlocks) } : {}),
         },
       }),
     onSuccess: () => {
@@ -1232,7 +1238,13 @@ function PricingRow({ row, onSaved }: { row: PriceBookRow; onSaved: () => void }
   });
   return (
     <Card>
-      <CardContent className="grid gap-3 p-4 sm:grid-cols-[1fr_repeat(3,0.8fr)_auto] sm:items-end">
+      <CardContent
+        className={
+          isVoice
+            ? "grid gap-3 p-4 sm:grid-cols-[1fr_repeat(4,0.8fr)_auto] sm:items-end"
+            : "grid gap-3 p-4 sm:grid-cols-[1fr_repeat(3,0.8fr)_auto] sm:items-end"
+        }
+      >
         <div className="font-medium">{BILLING_ITEM_LABEL[row.item]}</div>
         <div className="space-y-1">
           <Label className="text-xs text-muted-foreground">Preço de venda (R$)</Label>
@@ -1264,7 +1276,27 @@ function PricingRow({ row, onSaved }: { row: PriceBookRow; onSaved: () => void }
             onChange={(e) => setFreeUnits(e.target.value)}
           />
         </div>
-        <Button onClick={() => mut.mutate()} disabled={mut.isPending || unitPrice === ""}>
+        {isVoice && (
+          <div className="space-y-1">
+            <Label
+              className="text-xs text-muted-foreground"
+              title="Blocos de 30 s cobrados quando a chamada não é atendida (0 = grátis)"
+            >
+              Blocos se não atender
+            </Label>
+            <Input
+              type="number"
+              step="1"
+              min="0"
+              value={unansweredBlocks}
+              onChange={(e) => setUnansweredBlocks(e.target.value)}
+            />
+          </div>
+        )}
+        <Button
+          onClick={() => mut.mutate()}
+          disabled={mut.isPending || unitPrice === "" || (isVoice && unansweredBlocks === "")}
+        >
           {mut.isPending ? "Salvando…" : "Salvar"}
         </Button>
       </CardContent>
