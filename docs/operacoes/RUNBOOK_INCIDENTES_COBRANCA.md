@@ -246,8 +246,13 @@ continuou pagável sim/não):** _______________________________________________
 
 ### Como se percebe
 
-**Não existe um código de alerta próprio para "Upper fora do ar".** Os sinais
-são indiretos:
+- Alerta **`upper_unavailable`** (crítico, de evento): 3 ou mais falhas da
+  Upper (tempo esgotado, erro de rede ou resposta 5xx) na última hora, contadas
+  pelo cliente da Upper em `billing_monitor_signals`. Vai para o Sentry ou para
+  o log `[billing-alert]`, mas não segura o heartbeat `billing-health`. Uma ou
+  duas falhas isoladas não alertam.
+
+Outros sinais:
 
 - Casas relatam "Não foi possível gerar o Pix agora. Tente de novo em
   instantes." ao pagar a mensalidade ou comprar créditos.
@@ -405,8 +410,10 @@ _______________________________________________
   vai para o Sentry e não segura o heartbeat.
 - `payment_webhook_events.outcome = 'needs_review'`.
 - A casa diz que pagou e a fatura continua em aberto, ou o saldo não subiu.
-- **Caso travado (C, abaixo):** alerta **`charge_paid_not_credited`**
-  (crítico) que não some sozinho e segura o heartbeat `billing-health`.
+- **Caso travado (C, só sem a migration `20261024100500`):** alerta
+  **`charge_paid_not_credited`** (crítico) que não some sozinho e segura o
+  heartbeat `billing-health`. Com a migration aplicada, o caso C cai em
+  `charge_needs_review` como os outros.
 
 ### Os casos
 
@@ -415,7 +422,7 @@ _______________________________________________
 | A | fatura ou créditos | `paid_amount_cents` diferente de `amount_cents` (ou nulo) na cobrança: a casa pagou outro valor | o código, ao gravar o retorno da Upper (`recordChargeSnapshot`) |
 | B1 | fatura | a fatura foi repreçada depois do Pix gerado (desconto, preço próprio) e o cancelamento do Pix antigo falhou: `billing_invoices.amount_cents` diferente de `payment_charges.amount_cents` (motivo `amount_mismatch`) | `billing_credit_paid_charge` |
 | B2 | fatura | Pix pago para fatura que já não está aberta, ou seja, já paga (pagamento em dobro) ou cancelada (motivo `invoice_not_open`), ou que não existe (`invoice_not_found`) | `billing_credit_paid_charge` |
-| C | créditos | o valor do pedido (`credit_topup_orders.amount_cents`) é diferente do valor da cobrança. A RPC responde `amount_mismatch` **mas não marca `needs_review`** | ninguém: fica travado |
+| C | créditos | o valor do pedido (`credit_topup_orders.amount_cents`) é diferente do valor da cobrança (motivo `amount_mismatch`) | `billing_credit_paid_charge`, desde a migration `20261024100500`. Antes dela ninguém marcava e a cobrança ficava travada (ver "Caso C" abaixo) |
 
 ### Diagnóstico (só leitura)
 
@@ -438,10 +445,331 @@ join public.tenants t on t.id = c.tenant_id
 left join public.billing_invoices i on c.kind = 'invoice' and i.id = c.ref_id
 left join public.credit_topup_orders o on c.kind = 'credit_topup' and o.id = c.ref_id
 where c.needs_review = true and c.credited_at is null
+  and c.review_resolved_at is null
 order by c.paid_at;
 ```
 
-O caso travado (C), que **não** aparece na consulta acima:
+O caso travado (C), que **não** aparece na consulta acima (só acontece sem a
+migration `20261024100500`):
+```sql
+select c.id, t.slug, c.external_id, c.amount_cents, c.paid_amount_cents, c.paid_at,
+       o.id as order_id, o.status as order_status, o.amount_cents as order_amount
+from public.payment_charges c
+join public.tenants t on t.id = c.tenant_id
+left join public.credit_topup_orders o on o.id = c.ref_id and o.tenant_id = c.tenant_id
+where c.kind = 'credit_topup'
+  and c.status = 'PAID' and c.credited_at is null and c.needs_review = false
+order by c.paid_at;
+```
+Se `order_id` vier nulo, o pedido não existe e a RPC lança
+`topup_order_not_found`. Os logs mostram `[billing-reconcile] error crediting
+locally-paid charge`, e a correção é a mesma do caso C. Se `order_amount` for
+igual a `amount_cents`, não é o caso C: vá para a seção 4.
+
+Confira também que o valor pago bate com o painel da Upper (procure pelo
+`external_id`) e que não houve crédito ou baixa anterior para o mesmo
+pagamento:
+```sql
+select created_at, entry_type, amount, reason, idempotency_key
+from public.wallet_ledger
+where tenant_id = '<tenant_id>'
+  and (idempotency_key = 'charge:' || '<charge_id>'
+       or (entry_type = 'manual_adjustment' and reason ilike '%' || '<external_id>' || '%'))
+order by created_at;
+```
+
+### Correção
+
+Primeiro **fale com a casa** e decida com ela, e com o responsável quando
+envolver devolução, o destino do dinheiro. Depois aplique uma das opções.
+
+**Fatura (casos A, B1 e B2):**
+
+| Situação | Opção |
+|---|---|
+| Pagou **a mais**, ou o valor certo de uma fatura repreçada (B1), e a fatura segue aberta | **"Dar baixa manual"** na fatura (escrita — requer autorização) com o valor recebido = `paid_amount_cents`, a data do pagamento = `paid_at` da cobrança, o comprovante = `external_id` e o endToEndId, e uma nota explicando. O excedente, se houver: devolver por fora ou creditar como saldo (linha abaixo), conforme combinado |
+| Pagou **a menos** e a fatura segue aberta | (1) a casa completa por fora e você dá a baixa manual com o **total recebido**, citando os dois comprovantes; ou (2) devolve por fora e a casa paga um Pix novo (o botão "Pagar" gera outro). Não dê baixa manual com valor menor sem decisão do responsável: ela libera a casa como paga |
+| Fatura já paga ou cancelada (B2): pagamento em dobro | Devolver por fora, ou, com o acordo da casa, **creditar como saldo**: `/admin` → aba "Saldo" → **"Ajustar saldo"** (escrita — requer autorização) com o valor pago e o motivo "Pix `<external_id>` pago em dobro, convertido em créditos" |
+
+**Créditos (casos A e C):**
+
+| Situação | Opção |
+|---|---|
+| A casa quer o saldo | **"Ajustar saldo"** (escrita — requer autorização) com o valor **efetivamente pago** (`paid_amount_cents / 100`), motivo "Pix `<external_id>` revisado". Confira antes, com a consulta do `wallet_ledger`, que não existe crédito para essa cobrança |
+| A casa quer o dinheiro de volta | Devolver por fora, pelo canal financeiro. Nada muda no saldo |
+
+**Caso C (créditos):** com a migration `20261024100500` aplicada, a própria
+RPC marca `needs_review` e o caso segue o fluxo normal da tabela acima
+(creditar o que a casa pagou via "Ajustar saldo", com o valor da cobrança,
+`paid_amount_cents`, ou devolver) e depois "Resolver revisão". **Abra um bug**
+mesmo assim: pedido e cobrança com valores diferentes não deveriam existir
+(`createCreditTopupFor` grava os dois com o mesmo valor). Guarde os ids no
+ticket.
+
+Sem a migration (cobrança `PAID`, sem `credited_at`, `needs_review = false`
+e o pedido com outro valor): aplique a migration
+`20261024100500_billing_review_and_retention.sql` (escrita — requer
+autorização). Na próxima conciliação a RPC marca a revisão e o alerta passa
+de `charge_paid_not_credited` (crítico) para `charge_needs_review` (aviso).
+Não faça mais o `update ... set needs_review = true` à mão.
+
+**Fechar a revisão: botão "Resolver"** (escrita pelo painel — requer
+autorização). Em Admin → Faturamento → "Saúde da cobrança", a lista
+"Cobranças aguardando revisão" tem um botão **"Resolver"** por cobrança. O
+diálogo pede o resultado e um motivo (obrigatório, mínimo 5 caracteres):
+
+- **"Creditado manualmente"** (`creditado_manual`): o dinheiro já entrou por
+  "Ajustar saldo" (créditos) ou pela baixa manual (fatura). Faça o crédito ou
+  a baixa **antes** de resolver.
+- **"Devolvido fora do sistema"** (`devolvido`): o dinheiro foi devolvido à
+  casa pelo canal financeiro.
+
+O botão chama `billing_resolve_charge_review`, que grava
+`review_resolved_at`, `review_resolved_by`, `review_outcome` e `review_note`
+na cobrança e uma linha `billing.resolve_charge_review` em
+`tenant_audit_logs`. **Não** preenche `credited_at`, não credita, não dá baixa
+e não apaga nada; `needs_review` continua `true` como marca histórica. A
+cobrança some de `charge_needs_review` e da lista. Use sempre o botão: o
+`update ... set credited_at` manual das versões anteriores deste runbook não
+deve mais ser usado (com créditos devolvidos ele contava como receita um
+dinheiro que saiu).
+
+Conferir depois (só leitura):
+```sql
+select review_resolved_at, review_resolved_by, review_outcome, review_note
+from public.payment_charges where id = '<charge_id>';
+select created_at, actor_user_id, metadata
+from public.tenant_audit_logs
+where entity_id = '<charge_id>' and action = 'billing.resolve_charge_review';
+```
+
+### O que NÃO fazer
+
+- Não cole a chave nova nem a velha em ticket, chat, e-mail ou print. Não a
+  imprima com `echo` nem com `console.log(process.env.UPPER_API_KEY)`.
+- Não crie a chave nova com `pix_out` nem com "todos os escopos".
+- Não desligue o cron de conciliação nem remova o webhook "por segurança": é
+  isso que credita os pagamentos feitos durante a troca.
+- Não ligue `BILLING_GATEWAY_ENABLED=false` achando que isso protege a chave.
+  Só esconde a compra de créditos. A chave continua válida até ser revogada.
+- Não marque como pagas, à mão, cobranças que a casa diz ter pago durante a
+  troca. Espere a conciliação com a chave nova.
+
+**Resultado (janela de exposição, escopo da chave vazada, hora da revogação,
+hora da chave nova no ar, segredo do webhook trocado sim/não, QR antigo
+continuou pagável sim/não):** _______________________________________________
+
+---
+
+## 2. Upper fora do ar
+
+### Como se percebe
+
+- Alerta **`upper_unavailable`** (crítico, de evento): 3 ou mais falhas da
+  Upper (tempo esgotado, erro de rede ou resposta 5xx) na última hora, contadas
+  pelo cliente da Upper em `billing_monitor_signals`. Vai para o Sentry ou para
+  o log `[billing-alert]`, mas não segura o heartbeat `billing-health`. Uma ou
+  duas falhas isoladas não alertam.
+
+Outros sinais:
+
+- Casas relatam "Não foi possível gerar o Pix agora. Tente de novo em
+  instantes." ao pagar a mensalidade ou comprar créditos.
+- `dispatcher_runs` do `billing-reconcile` com `status = 'partial'` e
+  `errors > 0` em execuções seguidas. Nos logs do container:
+  `[billing-reconcile] error reconciling charge`, com `code` `TIMEOUT`,
+  `NETWORK_ERROR` ou status 5xx.
+- Cobranças novas nascendo `FAILED`, com `last_error` como `TIMEOUT (0)`,
+  `NETWORK_ERROR (0)` ou `… (5xx)`.
+- `upper_feature_disabled` indica outra coisa: a Upper desligou o Pix da conta
+  (KYC/conta), não uma queda. Nesse caso a compra de créditos mostra "Compra
+  por Pix indisponível no momento." O tratamento para a casa é o mesmo; a
+  conversa com a Upper é outra.
+
+### Diagnóstico (só leitura)
+
+1. Confirme com a Upper (status, suporte) que a queda é deles e peça uma
+   previsão. Anote no Resultado.
+2. Falhas recentes:
+   ```sql
+   select id, tenant_id, kind, external_id, status, last_error, created_at
+   from public.payment_charges
+   where status = 'FAILED'
+     and created_at > now() - interval '6 hours'
+   order by created_at desc;
+
+   select status, started_at, claimed, sent, errors
+   from public.dispatcher_runs
+   where job = 'billing-reconcile'
+   order by started_at desc
+   limit 6;
+   ```
+3. Casas que podem ser bloqueadas durante a queda (fatura aberta perto ou
+   depois do vencimento):
+   ```sql
+   select t.slug, tb.access_state, i.id as invoice_id, i.due_date, i.amount_cents,
+          i.upfront, i.due_date + 3 as ultimo_dia_carencia
+   from public.tenant_billing tb
+   join public.tenants t on t.id = tb.tenant_id
+   join public.billing_invoices i on i.tenant_id = tb.tenant_id and i.status = 'open'
+   where tb.access_state in ('due_soon', 'overdue', 'locked_unpaid', 'awaiting_first_payment')
+   order by i.due_date;
+   ```
+   Lembrete da regra (`billing_invoice_phase`): faixa amarela de `due_date − 5`
+   até a véspera; vermelha de `due_date` até `due_date + 3`; `locked_unpaid` a
+   partir de `due_date + 4`. O estado é recalculado pelo job da hora (minuto
+   7). Só bloqueia de fato com `BILLING_ENFORCEMENT_ENABLED=true`.
+4. Pix ainda aberto da fatura de cada casa afetada (vai importar na baixa
+   manual):
+   ```sql
+   select id, external_id, status, amount_cents, expires_at
+   from public.payment_charges
+   where kind = 'invoice' and ref_id = '<invoice_id>'
+     and status in ('PENDING', 'ACTIVE');
+   ```
+
+### Correção
+
+**a) Evitar bloquear casa por causa da queda.** Escolha pela duração prevista:
+
+- **Queda curta, poucas casas perto do bloqueio:** console → `/admin` → aba
+  "Faturamento" → casa → **"Estender prazo"** (escrita — requer autorização).
+  Isso soma 1 a 31 dias ao `due_date` **só desta fatura**. A faixa e o
+  bloqueio seguem a data nova, e o ciclo seguinte não muda. Use o tempo da
+  queda mais 1 ou 2 dias de folga. Motivo, por exemplo: "Upper fora do ar em
+  DD/MM, prazo estendido". Uma casa já em `locked_unpaid` é liberada na hora se
+  a nova data a tirar da carência vencida.
+- **Queda longa ou muitas casas:** desligar o bloqueio globalmente,
+  `BILLING_ENFORCEMENT_ENABLED=false` no `.env` da VPS e
+  `docker compose up -d --force-recreate crm` (escrita — requer autorização).
+  Faturas e e-mails continuam; ninguém é bloqueado por falta de pagamento
+  (`frozen` e `locked_manual` continuam bloqueando). Religue quando a Upper
+  voltar e as casas tiverem tido tempo de pagar.
+- **"Dar dias grátis" não é ferramenta de queda.** Ele empurra o ciclo inteiro
+  e dá dias sem cobrar, o que é uma concessão comercial. Só use se o
+  responsável decidir compensar as casas.
+- **Casa em `awaiting_first_payment`** (fatura de ativação, `upfront`):
+  estender o prazo **não libera**, porque a fatura de ativação bloqueia
+  enquanto estiver aberta, qualquer que seja a data. Ou ela espera a Upper
+  voltar, ou paga por fora (item b).
+
+**b) A casa precisa pagar agora: recebimento manual fora do sistema.**
+
+1. A casa paga pelo canal financeiro oficial da BetLeads, fora do sistema (não
+   pelo QR do CRM). Confirme o crédito na conta antes de qualquer baixa.
+2. Console → `/admin` → aba "Faturamento" → casa → **"Dar baixa manual"**
+   (escrita — requer autorização):
+   - **Valor recebido:** o valor que de fato entrou. Vazio usa o valor da
+     fatura.
+   - **Data do pagamento:** o dia em que o dinheiro entrou, não o dia da baixa.
+     Não pode ser anterior à emissão da fatura (`invalid_paid_at`) nem futura.
+     Ela importa: se a casa pagou enquanto estava bloqueada, o próximo
+     vencimento é contado a partir dessa data.
+   - **Nota:** por exemplo "Upper fora do ar, Pix recebido por fora".
+   - **Comprovante:** endToEndId do Pix ou referência bancária. Nunca CPF/CNPJ
+     completo.
+   - **Motivo:** obrigatório, com 5 ou mais caracteres.
+3. **Efeito:** a fatura fica `paid` com `paid_via = 'manual'`, o ciclo anda, o
+   `access_state` é recalculado e o e-mail "Pagamento confirmado" sai. A casa
+   desbloqueia em segundos. Para quem já está com a tela aberta, pode levar até
+   1 min; recarregar a página resolve.
+
+**c) O Pix que ficou aberto.** Antes de dar a baixa, o console tenta cancelar
+na Upper o Pix aberto da fatura. **Com a Upper fora do ar, esse cancelamento
+falha:** a falha fica em `metadata.pixCancel` da auditoria
+(`billing.manual_settle`, `ok = false`) e a baixa segue assim mesmo. A
+cobrança continua `ACTIVE` no nosso banco e **o QR antigo pode continuar
+pagável** até `expires_at` (Pix de fatura vale até 23:59 de `due_date + 3`,
+com mínimo de 1 h e máximo de 7 dias).
+
+- **Avise a casa por escrito para não pagar o QR antigo.**
+- Quando a Upper voltar, confira a cobrança (consulta 4 do diagnóstico). Se
+  ainda estiver `ACTIVE`, deixe vencer: a conciliação a marca `EXPIRED` cerca
+  de 10 min depois de `expires_at`. Não há botão para cancelar só uma cobrança
+  de fatura já paga.
+- Se a casa pagar o QR antigo mesmo assim, o pagamento vai para revisão
+  (`needs_review`, motivo `invoice_not_open`). Trate pela seção 3, caso B2
+  (devolver ou virar créditos).
+
+**d) Créditos durante a queda.** A casa também não consegue comprar créditos.
+Se ela ficar sem saldo e precisar enviar, receba por fora e credite em
+`/admin` → aba "Saldo" → **"Ajustar saldo"** (escrita — requer autorização),
+com motivo citando a referência do pagamento. Antes, confira que não houve
+ajuste igual (consulta de auditoria no topo, `tenant_wallet.adjusted`).
+
+**e) Quando a Upper voltar.** Confira `dispatcher_runs` (`errors = 0`), peça
+às casas que falharam para gerar o Pix de novo e, se desligou, religue
+`BILLING_ENFORCEMENT_ENABLED` (escrita — requer autorização).
+
+### O que NÃO fazer
+
+- Não desligue `BILLING_INVOICES_ENABLED` por causa da queda: isso para a
+  emissão de faturas novas e os e-mails de cobrança. Se o objetivo é não
+  bloquear, desligue só o enforcement.
+- Não dê baixa manual sem o dinheiro confirmado na conta, nem "para liberar
+  enquanto paga". Para liberar sem pagamento, use "Estender prazo".
+- Não dê baixa manual numa fatura cujo Pix pode já ter sido pago na Upper.
+  Veja a seção 4, passo 1.
+- Não use "Dar dias grátis" como remédio de queda sem decisão do responsável.
+- Não marque cobranças `FAILED` como pagas nem mude o `status` delas à mão.
+
+**Resultado (início e fim da queda, previsão da Upper, casas com prazo
+estendido, enforcement desligado sim/não e quando religou, baixas manuais
+feitas com o comprovante de cada uma, Pix antigos que ficaram abertos):**
+_______________________________________________
+
+---
+
+## 3. Pagamento com valor diferente da fatura (ou do pedido de créditos)
+
+### Como se percebe
+
+- Alerta **`charge_needs_review`** (aviso, não crítico): aparece em Admin →
+  Faturamento → "Saúde da cobrança" e no painel ("pagamentos em revisão"). Não
+  vai para o Sentry e não segura o heartbeat.
+- `payment_webhook_events.outcome = 'needs_review'`.
+- A casa diz que pagou e a fatura continua em aberto, ou o saldo não subiu.
+- **Caso travado (C, só sem a migration `20261024100500`):** alerta
+  **`charge_paid_not_credited`** (crítico) que não some sozinho e segura o
+  heartbeat `billing-health`. Com a migration aplicada, o caso C cai em
+  `charge_needs_review` como os outros.
+
+### Os casos
+
+| Caso | Tipo | O que aconteceu | Quem marca a revisão |
+|---|---|---|---|
+| A | fatura ou créditos | `paid_amount_cents` diferente de `amount_cents` (ou nulo) na cobrança: a casa pagou outro valor | o código, ao gravar o retorno da Upper (`recordChargeSnapshot`) |
+| B1 | fatura | a fatura foi repreçada depois do Pix gerado (desconto, preço próprio) e o cancelamento do Pix antigo falhou: `billing_invoices.amount_cents` diferente de `payment_charges.amount_cents` (motivo `amount_mismatch`) | `billing_credit_paid_charge` |
+| B2 | fatura | Pix pago para fatura que já não está aberta, ou seja, já paga (pagamento em dobro) ou cancelada (motivo `invoice_not_open`), ou que não existe (`invoice_not_found`) | `billing_credit_paid_charge` |
+| C | créditos | o valor do pedido (`credit_topup_orders.amount_cents`) é diferente do valor da cobrança (motivo `amount_mismatch`) | `billing_credit_paid_charge`, desde a migration `20261024100500`. Antes dela ninguém marcava e a cobrança ficava travada (ver "Caso C" abaixo) |
+
+### Diagnóstico (só leitura)
+
+Cobranças em revisão, com o motivo provável:
+```sql
+select c.id, t.slug, c.kind, c.external_id, c.status,
+       c.amount_cents, c.paid_amount_cents, c.paid_at,
+       i.id as invoice_id, i.status as invoice_status, i.amount_cents as invoice_amount,
+       o.id as order_id, o.status as order_status, o.amount_cents as order_amount,
+       case
+         when c.paid_amount_cents is distinct from c.amount_cents then 'A: valor pago diferente do cobrado'
+         when c.kind = 'invoice' and i.id is null then 'B2: fatura não encontrada'
+         when c.kind = 'invoice' and i.status <> 'open' then 'B2: fatura ' || i.status
+         when c.kind = 'invoice' and i.amount_cents <> c.amount_cents then 'B1: fatura repreçada'
+         when c.kind = 'credit_topup' and o.amount_cents <> c.amount_cents then 'C: pedido diferente da cobrança'
+         else 'outro: ver last_error e eventos'
+       end as motivo
+from public.payment_charges c
+join public.tenants t on t.id = c.tenant_id
+left join public.billing_invoices i on c.kind = 'invoice' and i.id = c.ref_id
+left join public.credit_topup_orders o on c.kind = 'credit_topup' and o.id = c.ref_id
+where c.needs_review = true and c.credited_at is null
+  and c.review_resolved_at is null
+order by c.paid_at;
+```
+
+O caso travado (C), que **não** aparece na consulta acima (só acontece sem a
+migration `20261024100500`):
 ```sql
 select c.id, t.slug, c.external_id, c.amount_cents, c.paid_amount_cents, c.paid_at,
        o.id as order_id, o.status as order_status, o.amount_cents as order_amount
@@ -556,7 +884,9 @@ preenchido nem com `needs_review = true`.
   (`needs_review`) e não resolve nada.
 - Não credite por "Ajustar saldo" sem antes conferir no `wallet_ledger` que o
   mesmo pagamento não foi creditado. O ajuste não tem trava de duplicidade.
-- Não feche a revisão de créditos devolvidos (ver acima).
+- Não feche a revisão com `update` à mão: use o botão "Resolver" (ver acima).
+- Não resolva como "Creditado manualmente" antes de o crédito ou a baixa
+  existirem de fato.
 
 **Resultado (cobrança, caso A/B1/B2/C, decisão combinada com a casa, ação
 feita e o comprovante da devolução, se houve):**
@@ -608,6 +938,9 @@ from public.payment_webhook_events
 where raw_body like '%' || '<external_id>' || '%'
 order by received_at;
 ```
+Eventos com mais de 90 dias não têm mais `raw_body` nem `headers` (retenção,
+ver seção 5): para eles, busque pelo horário (`received_at`) e pelo
+`outcome`.
 - Nenhum evento: o webhook não chegou (Upper, URL, assinatura). Veja se há
   `webhook_invalid_signature` no painel. A conciliação cobre.
 - `error` preenchido e `processed_at` nulo: o processamento falhou; a Upper
@@ -760,20 +1093,23 @@ conciliação a cada 5 min. Os críticos vão para o Sentry (fingerprint
 `[billing-alert]` (no máximo 1 vez por hora por código). O painel fica em
 Admin → Faturamento → "Saúde da cobrança" (últimas 24 h). O heartbeat
 `billing-health` do Better Stack para de receber ping enquanto houver achado
-crítico de estado (todos os críticos, exceto os 3 de evento:
-`webhook_invalid_signature`, `upper_feature_disabled` e `upper_unauthorized`).
+crítico de estado (todos os críticos, exceto os 4 de evento:
+`webhook_invalid_signature`, `upper_feature_disabled`, `upper_unauthorized` e
+`upper_unavailable`). Os de evento só alertam quando há evento novo desde a
+execução anterior.
 
 | Código | Severidade | O que quer dizer | Primeira ação |
 |---|---|---|---|
 | `webhook_invalid_signature` | crítico (evento) | A rota do webhook recusou (`400`) callbacks sem assinatura válida. O motivo vai em `last_detail`: `missing`, `malformed`, `stale` (mais de 5 min de diferença) ou `mismatch` | Logo após trocar o segredo é esperado (seção 1). `stale` em tudo: conferir o relógio da VPS (`date -u`). `mismatch` sem troca recente: conferir que o segredo do painel da Upper e o do `.env` são iguais, sem ler os valores em canal aberto. Muitos `missing`/`malformed` de origem estranha: alguém sondando a rota; nada é creditado sem GET na Upper |
 | `charge_paid_not_credited` | crítico | Cobrança `PAID` há mais de 10 min sem `credited_at` e fora de revisão | Seção 4, passos 3 e 4. Se não sai depois da conciliação voltar: caso C da seção 3 |
-| `charge_needs_review` | aviso | Cobrança paga com valor diferente, ou para fatura fechada ou inexistente | Seção 3 |
+| `charge_needs_review` | aviso | Cobrança paga com valor diferente (fatura ou créditos), ou para fatura fechada ou inexistente, ainda não resolvida | Seção 3: corrigir e depois "Resolver" |
 | `wallet_ledger_mismatch` | crítico | Alguma carteira com `balance` diferente da soma do `wallet_ledger` | Ler `select * from public.billing_wallet_integrity();` e anotar casas e diferenças. **Não corrigir o saldo à mão** nem com "Ajustar saldo" antes de saber a causa; escalar para quem conhece o código (o saldo só muda por `wallet_mutation`) |
 | `upper_feature_disabled` | crítico (evento) | A Upper respondeu `403 FEATURE_DISABLED`: o Pix está desligado na conta (KYC/conta) | Falar com a Upper. Para as casas, mesmo tratamento da seção 2 |
 | `upper_unauthorized` | crítico (evento) | A Upper recusou a chave (`401`) | Confirmar se alguém revogou ou trocou a chave. Se não foi planejado: seção 1. Se a chave foi trocada: conferir `!!process.env.UPPER_API_KEY` e se o container foi recriado |
+| `upper_unavailable` | crítico (evento) | 3 ou mais falhas da Upper (tempo esgotado, rede ou 5xx) na janela | Seção 2 |
 | `reconcile_cron_stale` | crítico | A conciliação não conclui há mais de 15 min (ou nunca concluiu) | `select jobname, schedule, active from cron.job where jobname = 'betleads-billing-reconcile';` e `select status_code, left(content::text, 200), created from net._http_response order by created desc limit 5;`. `401` indica `CRON_SECRET` diferente entre o Vault e a VPS; erro de rede indica container ou DNS. Ver `RUNBOOK_ATIVAR_PIX_UPPER.md`, Passo 5 |
 | `billing_cycle_cron_stale` | crítico | O job da hora (`billing-cycle`) não conclui há mais de 3 h. Sem ele não saem faturas, e-mails, alertas de saldo nem recálculo de estado (o bloqueio e a faixa amarela não aparecem) | Mesmas consultas, com `betleads-billing-cycle` e `dispatcher_runs.job = 'billing-cycle'`. Ver `RUNBOOK_ATIVAR_MENSALIDADE.md`, Passo 5 |
-| `billing_health_check_failed` | crítico | A própria checagem não conseguiu ler `billing_health_snapshot` | Logs por `[billing-health] snapshot failed`. Conferir se a migration `20261024100400_billing_health_monitor.sql` está aplicada e se o banco responde |
+| `billing_health_check_failed` | crítico | A própria checagem não conseguiu ler `billing_health_snapshot` | Logs por `[billing-health] snapshot failed`. Conferir se as migrations `20261024100400_billing_health_monitor.sql` e `20261024100500_billing_review_and_retention.sql` estão aplicadas e se o banco responde |
 | `billing_alert_test` | crítico (sintético) | Disparado pelo botão "Testar alerta" | Nada a corrigir. Só confirma que o alerta chega (aceite da PG6-03) |
 
 Sinais crus, para ver quando e quantos (só leitura):
@@ -783,6 +1119,18 @@ from public.billing_monitor_signals
 order by last_at desc
 limit 20;
 ```
+
+### Retenção do corpo dos webhooks (escopo §8)
+
+O ciclo da hora (`billing-cycle`), depois de fechar a execução, apaga (põe
+`null`) `raw_body` e `headers` de `payment_webhook_events` com mais de 90 dias,
+em lotes de 1000 (até 5 lotes por hora), pela função
+`billing_purge_webhook_bodies` (migration `20261024100500`). A linha continua
+(`event_id`, `event`, `delivery_id`, `signature_valid`, `received_at`,
+`processed_at`, `outcome`, `error`); `payment_charges` nunca é tocada. O
+número de linhas limpas vai em `webhook_bodies_purged` na resposta do job
+(`null` = a etapa falhou; ver `[billing-retention]` nos logs). Uma falha aqui
+não afeta o ciclo.
 
 **Resultado (código, hora, primeira ação, causa encontrada):**
 _______________________________________________
