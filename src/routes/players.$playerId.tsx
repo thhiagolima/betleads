@@ -36,6 +36,7 @@ import { getPlayerDetail, type PlayerDetail } from "@/lib/player-detail.function
 import { getPlayerLinkHistory } from "@/lib/shortio.functions";
 import { nextPrecallCopy } from "@/lib/precall-copy";
 import { cn } from "@/lib/utils";
+import { describeEventType } from "@/lib/webhook-events";
 
 export const Route = createFileRoute("/players/$playerId")({
   component: PlayerDetailPage,
@@ -556,7 +557,14 @@ function TimelineItem({ item }: { item: PlayerDetail["timeline"][number] }) {
       ? `Contato · ${alertTypeLabel(item.label.replace(/^Follow-up - /, ""))}`
       : item.type === "event"
         ? eventLabel(item.label)
-        : item.label;
+        : item.type === "sms"
+          ? smsTimelineLabel(item.label)
+          : item.label;
+  // Provider event codes ("auth.login.success") are not for people; hide them.
+  const description =
+    item.description && !/^[a-z0-9_]+(\.[a-z0-9_]+)+$/i.test(item.description.trim())
+      ? item.description
+      : null;
   const status = recordStatusLabel(item.status);
   return (
     <li className="grid grid-cols-[10px_minmax(0,1fr)_auto] gap-3 py-2.5">
@@ -566,8 +574,8 @@ function TimelineItem({ item }: { item: PlayerDetail["timeline"][number] }) {
       />
       <div className="min-w-0">
         <p className="truncate text-body font-medium">{label}</p>
-        {item.description && (
-          <p className="mt-0.5 truncate text-label text-muted-foreground">{item.description}</p>
+        {description && (
+          <p className="mt-0.5 truncate text-label text-muted-foreground">{description}</p>
         )}
         {status && item.type !== "followup" && (
           <p className="mt-0.5 text-meta text-muted-foreground">{status}</p>
@@ -585,7 +593,19 @@ function TimelineItem({ item }: { item: PlayerDetail["timeline"][number] }) {
   );
 }
 
+/** "SMS - journey:<uuid>" → "SMS de jornada"; keeps readable trigger names. */
+function smsTimelineLabel(label: string) {
+  const trigger = label.replace(/^SMS - /, "");
+  if (trigger === label) return label;
+  if (/^journey[:_]/i.test(trigger)) return "SMS de jornada";
+  if (/^campaign[:_]/i.test(trigger)) return "SMS de campanha";
+  if (/^[0-9a-f-]{20,}$/i.test(trigger) || /[:][0-9a-f-]{20,}/i.test(trigger)) return "SMS enviado";
+  return label;
+}
+
 function eventLabel(value: string) {
+  const known = describeEventType(value);
+  if (known.categoria) return known.label;
   const text = value.replace(/[_-]+/g, " ").trim();
   return text ? text.charAt(0).toUpperCase() + text.slice(1) : "Evento";
 }
