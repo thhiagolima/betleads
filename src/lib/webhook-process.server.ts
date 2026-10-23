@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { attributeFromLastFirstPartyClick } from "./conversion-attribution.server";
+import { lookupExpertName, type SupabaseLike } from "./expert-lookup.server";
 import { enrollPlayerOnEvent, eventEntryTriggers } from "./journey-scanner.server";
 
 export function getServiceClient(): SupabaseClient | null {
@@ -118,16 +119,7 @@ export async function processWebhookEvent(
         data.axio_aff_id,
       ) ?? null;
 
-    let expertNome: string | null = null;
-    if (affiliateId) {
-      const { data: exp } = await sb
-        .from("experts")
-        .select("nome")
-        .eq("affiliate_id", affiliateId)
-        .eq("tenant_id", tenantId)
-        .maybeSingle();
-      expertNome = exp?.nome ?? null;
-    }
+    const expertNome = await lookupExpertName(sb as unknown as SupabaseLike, tenantId, affiliateId);
 
     const externalId = resolveExternalId(evento, payload, data);
     const signupEvent = isSignupEvent(evento, payload);
