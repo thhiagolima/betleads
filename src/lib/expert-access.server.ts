@@ -9,7 +9,8 @@
 // anteriores ao codegen.
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { assertTenantCanOperate } from "@/lib/tenant-access.server";
+import { TenantBillingLockedError } from "@/lib/billing/billing-locked-error";
+import { assertTenantCanOperate, TENANT_BLOCKED_MESSAGE } from "@/lib/tenant-access.server";
 
 export type ExpertTipo = "restrito" | "total";
 
@@ -57,7 +58,9 @@ export async function resolveExpertContext(
   if (roleErr) throw new Error(roleErr.message);
 
   const expertTenantIds = Array.from(
-    new Set(((roleRows ?? []) as Array<{ tenant_id: string }>).map((r) => r.tenant_id).filter(Boolean)),
+    new Set(
+      ((roleRows ?? []) as Array<{ tenant_id: string }>).map((r) => r.tenant_id).filter(Boolean),
+    ),
   );
   if (expertTenantIds.length === 0) return null;
 
@@ -69,9 +72,9 @@ export async function resolveExpertContext(
     .in("tenant_id", expertTenantIds);
   if (expertErr) throw new Error(expertErr.message);
 
-  const candidates = ((expertRows ?? []) as ExpertRow[]).slice().sort((a, b) =>
-    a.tenant_id < b.tenant_id ? -1 : a.tenant_id > b.tenant_id ? 1 : 0,
-  );
+  const candidates = ((expertRows ?? []) as ExpertRow[])
+    .slice()
+    .sort((a, b) => (a.tenant_id < b.tenant_id ? -1 : a.tenant_id > b.tenant_id ? 1 : 0));
   if (candidates.length === 0) return null;
 
   let chosen: ExpertRow | undefined;
@@ -122,9 +125,25 @@ export async function requireExpertContext(
 
   try {
     await assertTenantCanOperate(ctx.tenantId);
-  } catch {
-    throw new ExpertAccessError("Esta casa está indisponível no momento.");
+  } catch (err) {
+    // Only the known refusals (suspended/canceled house, monthly-fee lock)
+    // become the friendly message; a DB/network failure is not "unavailable".
+    if (isHouseUnavailableError(err)) {
+      throw new ExpertAccessError("Esta casa está indisponível no momento.");
+    }
+    console.error("[expert-access] tenant status check failed", {
+      tenantId: ctx.tenantId,
+      cause: err,
+    });
+    throw err;
   }
 
   return ctx;
+}
+
+function isHouseUnavailableError(err: unknown) {
+  return (
+    err instanceof TenantBillingLockedError ||
+    (err instanceof Error && err.message === TENANT_BLOCKED_MESSAGE)
+  );
 }

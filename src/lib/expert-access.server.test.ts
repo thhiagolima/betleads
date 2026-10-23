@@ -8,7 +8,16 @@ vi.mock("@/integrations/supabase/client.server", async () => {
   return { supabaseAdmin: fake.admin.client };
 });
 
+vi.mock("@/lib/tenant-access.server", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/tenant-access.server")>(
+    "@/lib/tenant-access.server",
+  );
+  return { ...actual, assertTenantCanOperate: vi.fn(actual.assertTenantCanOperate) };
+});
+
+import { TenantBillingLockedError } from "@/lib/billing/billing-locked-error";
 import { createFakeDb } from "@/lib/sms-bulk.test-support";
+import { assertTenantCanOperate } from "@/lib/tenant-access.server";
 import { ExpertAccessError, requireExpertContext, resolveExpertContext } from "./expert-access.server";
 
 const USER = "00000000-0000-4000-8000-000000000001";
@@ -91,5 +100,33 @@ describe("requireExpertContext", () => {
     await expect(requireExpertContext(USER)).rejects.toThrow(
       "Esta casa está indisponível no momento.",
     );
+  });
+});
+
+describe("requireExpertContext: which tenant errors mean 'unavailable'", () => {
+  it("maps a billing lock to the unavailable message", async () => {
+    seedExpertHouse(TENANT_1, { nome: "Fulano" });
+    vi.mocked(assertTenantCanOperate).mockRejectedValueOnce(new TenantBillingLockedError());
+    await expect(requireExpertContext(USER)).rejects.toThrow(
+      new ExpertAccessError("Esta casa está indisponível no momento."),
+    );
+  });
+
+  it("rethrows (and logs) a DB/network failure instead of masking it", async () => {
+    seedExpertHouse(TENANT_1, { nome: "Fulano" });
+    const failure = new Error("connection reset by peer");
+    vi.mocked(assertTenantCanOperate).mockRejectedValueOnce(failure);
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const err = await requireExpertContext(USER).catch((e: unknown) => e);
+      expect(err).toBe(failure);
+      expect(err).not.toBeInstanceOf(ExpertAccessError);
+      expect(log).toHaveBeenCalledWith(
+        "[expert-access] tenant status check failed",
+        expect.objectContaining({ tenantId: TENANT_1, cause: failure }),
+      );
+    } finally {
+      log.mockRestore();
+    }
   });
 });

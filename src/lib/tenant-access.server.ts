@@ -66,7 +66,7 @@ export function isBillingEnforcementEnabled(): boolean {
   if (!enforcementWithoutInvoicesReported) {
     enforcementWithoutInvoicesReported = true;
     console.error(
-      "[billing] BILLING_ENFORCEMENT_ENABLED=true is ignored: BILLING_INVOICES_ENABLED is not \"true\". No house is locked for an unpaid invoice.",
+      '[billing] BILLING_ENFORCEMENT_ENABLED=true is ignored: BILLING_INVOICES_ENABLED is not "true". No house is locked for an unpaid invoice.',
     );
   }
   return false;
@@ -83,6 +83,10 @@ function hasEffectiveBillingLock(tenant: TenantStatusRow | null): boolean {
 }
 
 const blockedOperationalStatuses = new Set(["suspended", "canceled"]);
+
+/** Message of the error `assertTenantCanOperate` throws for a suspended/canceled tenant. */
+export const TENANT_BLOCKED_MESSAGE =
+  "Tenant bloqueado para operacoes. Regularize a conta antes de continuar.";
 
 // In-memory cache for the guard lookups (send/action guards), 5s TTL. A miss
 // or an unknown tenant is never cached as "allowed" — only resolved rows are
@@ -202,7 +206,11 @@ export async function assertCallerNotBillingLocked(
   tenantId: string,
   superAdmin: boolean | null = null,
 ) {
-  await assertNotBillingLockedForCaller(supabase, await getCachedTenantStatus(tenantId), superAdmin);
+  await assertNotBillingLockedForCaller(
+    supabase,
+    await getCachedTenantStatus(tenantId),
+    superAdmin,
+  );
 }
 
 /**
@@ -315,7 +323,7 @@ export async function getTenantStatus(tenantId: string) {
 export async function assertTenantCanOperate(tenantId: string, actor?: RpcClient) {
   const tenant = await getTenantStatus(tenantId);
   if (tenant.status && blockedOperationalStatuses.has(tenant.status)) {
-    throw new Error("Tenant bloqueado para operacoes. Regularize a conta antes de continuar.");
+    throw new Error(TENANT_BLOCKED_MESSAGE);
   }
   if (hasEffectiveBillingLock(tenant)) {
     if (!actor || !(await callerIsSuperAdmin(actor))) throw new TenantBillingLockedError();
@@ -360,7 +368,7 @@ export async function assertTenantCanSendExternally(tenantId: string | null | un
   if (!tenant) throw new DemoTenantBlockedError("DEMO_SEND_BLOCKED");
   if (tenant.is_demo) throw new DemoTenantBlockedError("DEMO_SEND_BLOCKED");
   if (tenant.status && blockedOperationalStatuses.has(tenant.status)) {
-    throw new Error("Tenant bloqueado para operacoes. Regularize a conta antes de continuar.");
+    throw new Error(TENANT_BLOCKED_MESSAGE);
   }
   if (hasEffectiveBillingLock(tenant)) throw new TenantBillingLockedError();
 }
