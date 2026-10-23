@@ -17,6 +17,7 @@ import { resolveOperationalTenantId, resolveTenantForBilling } from "../tenant-a
 import { isBillingEnforcementEnabled, isTenantPayer, requireTenantPayer } from "./billing-state.server";
 import { billingView, type BillingRole } from "./billing-view";
 import { createInvoicePayment } from "./invoices.server";
+import { getEndToEndOrExternalId } from "./payment-reference.server";
 import { brtDayKey } from "../tz";
 
 type ServerContext = {
@@ -577,18 +578,10 @@ export async function getInvoiceReceiptFor(
   if (!invoice || invoice.tenant_id !== tenantId) throw new Error(INVOICE_NOT_FOUND_MESSAGE);
   if (invoice.status !== "paid") throw new Error(INVOICE_NOT_PAID_MESSAGE);
 
-  let endToEndOrExternalId: string | null = null;
-  if (invoice.payment_charge_id) {
-    const { data: chargeRow, error: chargeError } = await looseDb(supabaseAdmin)
-      .from<{ external_id: string; last_provider_payload: Json | null }>("payment_charges")
-      .select("external_id,last_provider_payload")
-      .eq("id", invoice.payment_charge_id)
-      .maybeSingle();
-    if (chargeError) throw new Error(chargeError.message);
-    const payload = chargeRow?.last_provider_payload as { endToEndId?: unknown } | null;
-    const endToEnd = payload && typeof payload.endToEndId === "string" ? payload.endToEndId : null;
-    endToEndOrExternalId = endToEnd ?? chargeRow?.external_id ?? null;
-  }
+  const endToEndOrExternalId = await getEndToEndOrExternalId(
+    supabaseAdmin,
+    invoice.payment_charge_id,
+  );
 
   const [year, month] = invoice.cycle_due_date.split("-");
   return {

@@ -24,6 +24,7 @@ import { isBillingEnforcementEnabled } from "@/lib/tenant-access.server";
 import { callInfobipEmail } from "../infobip-email.server";
 import { isBillingInvoicesEnabled } from "./invoices.server";
 import { PAYER_ROLES } from "./billing-state.server";
+import { getEndToEndOrExternalId } from "./payment-reference.server";
 
 export type BillingEmailKind = "issued" | "due_today" | "locked" | "paid";
 
@@ -89,16 +90,36 @@ function formatDDMM(yyyyMmDd: string): string {
   return `${d}/${m}`;
 }
 
+/** `yyyyMmDd` plus `days` calendar days (plain date arithmetic, no timezone). */
+function addDays(yyyyMmDd: string, days: number): string {
+  const [y, m, d] = yyyyMmDd.split("-").map(Number);
+  const shifted = new Date(Date.UTC(y, m - 1, d + days));
+  return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, "0")}-${String(
+    shifted.getUTCDate(),
+  ).padStart(2, "0")}`;
+}
+
 // `brl()` inserts a NBSP between "R$" and the number; normalized to a plain
 // space for e-mail HTML (same approach as billing-view.ts's `money()`).
 function moneyBRL(amountCents: number): string {
   return brl(amountCents / 100).replace(new RegExp(String.fromCharCode(160), "g"), " ");
 }
 
-function emailSubject(kind: BillingEmailKind, dueDateDDMM: string): string {
+// The lock guard (migration 20261023100000) locks at `due_date + 3`: the
+// grace period's last day is one day before that, i.e. `due_date + 3`
+// itself is still within grace (locked only strictly after it). The copy
+// below tells the house to pay by that same day to avoid the lock.
+function graceEndDDMM(dueDate: string): string {
+  return formatDDMM(addDays(dueDate, 3));
+}
+
+function emailSubject(kind: BillingEmailKind, invoice: InvoiceEmailRow, dueToday: boolean): string {
+  const dueDateDDMM = formatDDMM(invoice.due_date);
   switch (kind) {
     case "issued":
-      return `Sua mensalidade BetLeads vence em ${dueDateDDMM}`;
+      return dueToday
+        ? "Sua mensalidade BetLeads vence hoje"
+        : `Sua mensalidade BetLeads vence em ${dueDateDDMM}`;
     case "due_today":
       return "Sua mensalidade BetLeads vence hoje";
     case "locked":
@@ -108,23 +129,39 @@ function emailSubject(kind: BillingEmailKind, dueDateDDMM: string): string {
   }
 }
 
-function emailBodyText(kind: BillingEmailKind, amount: string, dueDateDDMM: string): string {
+function emailBodyText(
+  kind: BillingEmailKind,
+  invoice: InvoiceEmailRow,
+  dueToday: boolean,
+  endToEndOrManual: string,
+): string {
+  const amount = moneyBRL(invoice.amount_cents);
+  const dueDateDDMM = formatDDMM(invoice.due_date);
   switch (kind) {
     case "issued":
-      return `Sua mensalidade de ${amount} vence em ${dueDateDDMM}. Pague por Pix para manter tudo funcionando.`;
+      return dueToday
+        ? `Sua mensalidade de ${amount} vence hoje. Pague por Pix para manter tudo funcionando.`
+        : `Sua mensalidade de ${amount} vence em ${dueDateDDMM}. Pague por Pix para manter tudo funcionando.`;
     case "due_today":
-      return `Sua mensalidade de ${amount} vence hoje. Pague por Pix para manter tudo funcionando.`;
+      return `Sua mensalidade de ${amount} vence hoje. Pague até ${graceEndDDMM(invoice.due_date)} para evitar o bloqueio (3 dias de carência).`;
     case "locked":
-      return `A mensalidade de ${amount} venceu em ${dueDateDDMM}. O acesso ao CRM foi suspenso por falta de pagamento. Pague por Pix e o acesso volta na hora.`;
-    case "paid":
-      return `Recebemos o pagamento da sua mensalidade de ${amount}. Obrigado!`;
+      return `A mensalidade de ${amount} venceu em ${dueDateDDMM}. O acesso ao CRM foi suspenso por falta de pagamento. Pararam: SMS, voz, e-mail, jornadas e campanhas. Seguem chegando: cadastros e depósitos dos jogadores. Seu saldo continua guardado. Pague por Pix e o acesso volta na hora.`;
+    case "paid": {
+      const paidDateDDMM = invoice.paid_at ? formatDDMM(brtDayKey(new Date(invoice.paid_at))) : "-";
+      const periodStartDDMM = formatDDMM(invoice.period_start);
+      const periodEndDDMM = formatDDMM(invoice.period_end);
+      return `Recebemos o pagamento da sua mensalidade de ${amount} em ${paidDateDDMM}, referente ao período de ${periodStartDDMM} a ${periodEndDDMM}. Comprovante: ${endToEndOrManual}. Obrigado!`;
+    }
   }
 }
 
-function emailHtml(kind: BillingEmailKind, invoice: InvoiceEmailRow): string {
-  const dueDateDDMM = formatDDMM(invoice.due_date);
-  const amount = moneyBRL(invoice.amount_cents);
-  const bodyText = emailBodyText(kind, amount, dueDateDDMM);
+async function emailHtml(kind: BillingEmailKind, invoice: InvoiceEmailRow, now: Date): Promise<string> {
+  const dueToday = invoice.due_date === brtDayKey(now);
+  const endToEndOrManual =
+    kind === "paid"
+      ? (await getEndToEndOrExternalId(supabaseAdmin, invoice.payment_charge_id)) ?? "Baixa manual"
+      : "";
+  const bodyText = emailBodyText(kind, invoice, dueToday, endToEndOrManual);
   return `<!doctype html>
 <html>
   <body style="margin:0; padding:24px; background:#f5f5f5; font-family:Arial,Helvetica,sans-serif;">
@@ -149,12 +186,17 @@ type InvoiceEmailRow = {
   amount_cents: number;
   status: string;
   paid_at: string | null;
+  period_start: string;
+  period_end: string;
+  payment_charge_id: string | null;
 };
 
 async function getInvoiceForEmail(invoiceId: string): Promise<InvoiceEmailRow | null> {
   const { data, error } = await supabaseAdmin
     .from("billing_invoices")
-    .select("id, tenant_id, due_date, amount_cents, status, paid_at")
+    .select(
+      "id, tenant_id, due_date, amount_cents, status, paid_at, period_start, period_end, payment_charge_id",
+    )
     .eq("id", invoiceId)
     .maybeSingle();
   if (error) throw new Error(error.message);
@@ -283,8 +325,9 @@ export async function sendBillingEmail(
   if (!shouldSend) return { sent: false, recipients: recipients.length };
   if (recipients.length === 0) return { sent: true, recipients: 0 };
 
-  const subject = emailSubject(kind, formatDDMM(invoice.due_date));
-  const html = emailHtml(kind, invoice);
+  const dueToday = invoice.due_date === brtDayKey(now);
+  const subject = emailSubject(kind, invoice, dueToday);
+  const html = await emailHtml(kind, invoice, now);
 
   let sentCount = 0;
   for (const [index, to] of recipients.entries()) {
@@ -365,15 +408,40 @@ async function findIssuedCandidates(): Promise<string[]> {
   return withoutSent((data ?? []) as Array<{ id: string }>, sent);
 }
 
-/** Open invoices due today (Brasília) with no `due_today` log yet. */
+/**
+ * Invoice ids whose `issued` e-mail was sent on the Brasília day `today`
+ * (any time within it). An upfront invoice is due the same day it is
+ * issued, so without this it would get both `issued` ("vence hoje") and
+ * `due_today` on the same day — decision 14 wants only the former.
+ */
+async function issuedTodayInvoiceIds(today: string): Promise<Set<string>> {
+  const { data, error } = await supabaseAdmin
+    .from("billing_email_log")
+    .select("invoice_id, sent_at")
+    .eq("kind", "issued");
+  if (error) throw new Error(error.message);
+  const ids = ((data ?? []) as Array<{ invoice_id: string; sent_at: string }>)
+    .filter((row) => brtDayKey(new Date(row.sent_at)) === today)
+    .map((row) => row.invoice_id);
+  return new Set(ids);
+}
+
+/**
+ * Open invoices due today (Brasília) with no `due_today` log yet, excluding
+ * any invoice whose `issued` e-mail was sent earlier today (see
+ * `issuedTodayInvoiceIds`): that invoice already got today's one e-mail.
+ */
 async function findDueTodayCandidates(now: Date): Promise<string[]> {
   const today = brtDayKey(now);
-  const [{ data, error }, sent] = await Promise.all([
+  const [{ data, error }, sent, issuedToday] = await Promise.all([
     supabaseAdmin.from("billing_invoices").select("id").eq("status", "open").eq("due_date", today),
     sentInvoiceIds("due_today"),
+    issuedTodayInvoiceIds(today),
   ]);
   if (error) throw new Error(error.message);
-  return withoutSent((data ?? []) as Array<{ id: string }>, sent);
+  return withoutSent((data ?? []) as Array<{ id: string }>, sent).filter(
+    (id) => !issuedToday.has(id),
+  );
 }
 
 /** Open invoices of houses in `locked_unpaid` with no `locked` log yet. */
