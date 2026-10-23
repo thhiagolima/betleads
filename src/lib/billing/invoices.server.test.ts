@@ -194,6 +194,22 @@ describe("runBillingCycle", () => {
     expect(result.failures).toEqual([]);
   });
 
+  it("a failed billing e-mail sweep is recorded and the low-balance sweep still runs", async () => {
+    seedTenantBilling();
+    fake.admin.onRpc("billing_refresh_access_state", () => ({ data: "ok", error: null }));
+    fake.admin.onRpc("billing_generate_due_invoices", () => ({ data: ["inv-1"], error: null }));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const sendEmails = vi.fn().mockRejectedValue(new Error("infobip down"));
+    const sendWalletAlerts = vi.fn().mockResolvedValue(1);
+
+    const result = await runBillingCycle({ sendEmails, sendWalletAlerts });
+
+    expect(sendWalletAlerts).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ generated: 1, refreshed: 1, issued: 0, walletAlerts: 1 });
+    expect(result.errors).toBe(1);
+    expect(result.failures).toEqual(["emails: infobip down"]);
+  });
+
   it("records a failed low-balance sweep without failing the cycle", async () => {
     seedTenantBilling();
     fake.admin.onRpc("billing_refresh_access_state", () => ({ data: "ok", error: null }));

@@ -51,22 +51,22 @@ describe("walletBalanceNotice", () => {
   it("without canBuy, keeps the current support-only text", () => {
     const notice = walletBalanceNotice({ balance: 0, exempt: false, smsUnitPrice: 0.08, canBuy: false });
     expect(notice?.text).toBe(
-      "Os envios de SMS, voz e e-mail estão bloqueados até entrar saldo. A compra por Pix chega em breve; enquanto isso, fale com o suporte para adicionar saldo.",
+      "SMS e voz ficam bloqueados até entrar saldo; e-mail segue só dentro da franquia mensal. A compra por Pix chega em breve; enquanto isso, fale com o suporte para adicionar saldo.",
     );
     const low = walletBalanceNotice({ balance: 50, exempt: false, smsUnitPrice: 0.08, canBuy: false });
     expect(low?.text).toBe(
-      "Quando o saldo acabar, os envios de SMS, voz e e-mail param. A compra por Pix chega em breve; enquanto isso, fale com o suporte para adicionar saldo.",
+      "Quando o saldo acabar, SMS e voz ficam bloqueados; e-mail segue só dentro da franquia mensal. A compra por Pix chega em breve; enquanto isso, fale com o suporte para adicionar saldo.",
     );
   });
 
   it("with canBuy, the text ends pointing (page-neutral) to the Pix purchase in Saldo e consumo", () => {
     const empty = walletBalanceNotice({ balance: 0, exempt: false, smsUnitPrice: 0.08, canBuy: true });
     expect(empty?.text).toBe(
-      "Os envios de SMS, voz e e-mail estão bloqueados até entrar saldo. Compre créditos por Pix em Saldo e consumo.",
+      "SMS e voz ficam bloqueados até entrar saldo; e-mail segue só dentro da franquia mensal. Compre créditos por Pix em Saldo e consumo.",
     );
     const low = walletBalanceNotice({ balance: 50, exempt: false, smsUnitPrice: 0.08, canBuy: true });
     expect(low?.text).toBe(
-      "Quando o saldo acabar, os envios de SMS, voz e e-mail param. Compre créditos por Pix em Saldo e consumo.",
+      "Quando o saldo acabar, SMS e voz ficam bloqueados; e-mail segue só dentro da franquia mensal. Compre créditos por Pix em Saldo e consumo.",
     );
   });
 

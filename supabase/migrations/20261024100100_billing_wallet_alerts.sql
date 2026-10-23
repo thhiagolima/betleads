@@ -15,8 +15,11 @@
 -- * `billing_set_low_balance_threshold(_tenant, _value)`: pagador da casa
 --   (admin/owner/gestor com has_tenant_access) ou superadmin; 0 a 100000;
 --   grava tenant_audit_logs.
--- * `billing_low_balance_candidates()`: casas ativas/trial, não demo, não
---   isentas, com carteira e saldo < limite. Só service_role.
+-- * `billing_low_balance_candidates(_after, _limit)`: casas ativas/trial,
+--   não demo, não isentas, com carteira e 0 < saldo < limite (saldo zero é
+--   do alerta 'no_balance' da Task 7). Paginada por tenant_id (keyset), para
+--   nunca ser cortada em silêncio pelo teto de 1000 linhas do PostgREST.
+--   Só service_role.
 -- * `wallet_summary` passa a devolver `low_balance_threshold`.
 
 alter table public.tenant_wallets
@@ -141,8 +144,14 @@ $$;
 
 -- Casas que devem receber o alerta de saldo baixo agora (o throttle de 24 h
 -- fica em billing_claim_wallet_alert). Só casas com carteira: uma casa que
--- nunca teve carteira nunca usou canal pago e não recebe alerta.
-create or replace function public.billing_low_balance_candidates()
+-- nunca teve carteira nunca usou canal pago e não recebe alerta. Saldo zero
+-- fica de fora: é o alerta 'no_balance' (Task 7). Paginação por keyset: a
+-- próxima página passa como `_after` o último tenant_id recebido; `_limit`
+-- vai de 1 a 1000 (o teto do PostgREST).
+create or replace function public.billing_low_balance_candidates(
+  _after uuid default null,
+  _limit integer default 500
+)
 returns table (
   tenant_id uuid,
   tenant_name text,
@@ -160,15 +169,22 @@ begin
     raise exception 'forbidden';
   end if;
 
+  if _limit is null or _limit < 1 or _limit > 1000 then
+    raise exception 'invalid_limit';
+  end if;
+
   return query
   select w.tenant_id, t.nome::text, w.balance::numeric, w.low_balance_threshold::numeric
   from public.tenant_wallets w
   join public.tenants t on t.id = w.tenant_id
-  where w.balance < w.low_balance_threshold
+  where w.balance > 0
+    and w.balance < w.low_balance_threshold
+    and (_after is null or w.tenant_id > _after)
     and coalesce(t.is_demo, false) = false
     and t.status in ('active', 'trial')
     and not public.billing_tenant_exempt(w.tenant_id)
-  order by w.tenant_id;
+  order by w.tenant_id
+  limit _limit;
 end;
 $$;
 
@@ -245,8 +261,8 @@ grant execute on function public.billing_claim_wallet_alert(uuid, text, interval
 revoke execute on function public.billing_set_low_balance_threshold(uuid, numeric) from public, anon;
 grant execute on function public.billing_set_low_balance_threshold(uuid, numeric) to authenticated;
 
-revoke execute on function public.billing_low_balance_candidates() from public, anon, authenticated;
-grant execute on function public.billing_low_balance_candidates() to service_role;
+revoke execute on function public.billing_low_balance_candidates(uuid, integer) from public, anon, authenticated;
+grant execute on function public.billing_low_balance_candidates(uuid, integer) to service_role;
 
 revoke execute on function public.wallet_summary(uuid) from public, anon;
 grant execute on function public.wallet_summary(uuid) to authenticated, service_role;

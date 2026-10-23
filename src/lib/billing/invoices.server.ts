@@ -244,8 +244,16 @@ export async function runBillingCycle(
 
   let issued = 0;
   if (isBillingInvoicesEnabled()) {
-    const sent = await sendEmails({ issuedInvoiceIds });
-    issued = typeof sent === "number" ? sent : issuedInvoiceIds.length;
+    // A failed e-mail sweep is recorded like the other stages and never
+    // skips the low-balance sweep below.
+    try {
+      const sent = await sendEmails({ issuedInvoiceIds });
+      issued = typeof sent === "number" ? sent : issuedInvoiceIds.length;
+    } catch (err) {
+      counters.errors += 1;
+      failures.push(`emails: ${errorMessage(err)}`);
+      console.error("[billing/invoices] billing e-mail sweep failed", { error: errorMessage(err) });
+    }
   }
 
   // Low-balance alerts (PG3 Task 8): not flag-gated, and a failure here is

@@ -42,14 +42,14 @@ export function walletBalanceNotice(args: {
     return {
       kind: "empty",
       title: "Seu saldo acabou",
-      text: `Os envios de SMS, voz e e-mail estão bloqueados até entrar saldo. ${closing}`,
+      text: `SMS e voz ficam bloqueados até entrar saldo; e-mail segue só dentro da franquia mensal. ${closing}`,
     };
   }
   if (args.balance < effectiveLowBalanceThreshold(args.threshold)) {
     return {
       kind: "low",
       title: "Saldo baixo",
-      text: `Quando o saldo acabar, os envios de SMS, voz e e-mail param. ${closing}`,
+      text: `Quando o saldo acabar, SMS e voz ficam bloqueados; e-mail segue só dentro da franquia mensal. ${closing}`,
     };
   }
   return null;

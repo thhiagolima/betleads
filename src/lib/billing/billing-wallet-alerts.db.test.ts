@@ -36,9 +36,11 @@ const ALERTS_MIGRATION = readMigration(
   "supabase/migrations/20261024100100_billing_wallet_alerts.sql",
 );
 
-// Second paying house, and an inactive one.
-const OTHER = "00000000-0000-4000-8000-0000000000f1";
-const SUSPENDED = "00000000-0000-4000-8000-0000000000f2";
+// Paying (non-exempt) houses added here: the shared seed's pixpgf/pixreals/
+// forrandobet become plano 'interno' (exempt) in the price-book migration.
+const OTHER = "00000000-0000-4000-8000-0000000000b1";
+const SUSPENDED = "00000000-0000-4000-8000-0000000000b2";
+const THIRD = "00000000-0000-4000-8000-0000000000b3";
 
 const ADMIN_USER = "00000000-0000-4000-8000-00000000a001";
 const OWNER_USER = "00000000-0000-4000-8000-00000000a002";
@@ -50,8 +52,11 @@ const OTHER_HOUSE_ADMIN = "00000000-0000-4000-8000-00000000a005";
 const EXTRA_STUBS = `
 alter table public.tenants add column nome text;
 alter table public.tenants add column status text not null default 'active';
+insert into public.tenants (id, slug, plano, is_demo, status) values
+  ('${OTHER}', 'casa-b', 'starter', false, 'active'),
+  ('${SUSPENDED}', 'casa-suspensa', 'starter', false, 'suspended'),
+  ('${THIRD}', 'casa-c', 'starter', false, 'trial');
 update public.tenants set nome = slug;
-update public.tenants set status = 'suspended' where id = '${SUSPENDED}';
 create type public.app_role as enum ('admin', 'user', 'super_admin', 'owner', 'member', 'gestor');
 create table public.user_roles (
   id uuid primary key default gen_random_uuid(),
@@ -80,6 +85,11 @@ beforeAll(async () => {
   await db.exec(PRICE_BOOK_MIGRATION);
   await db.exec(WALLET_MIGRATION);
   await db.exec(ALERTS_MIGRATION);
+  // The price-book migration also makes the demo house 'interno'; put it back
+  // on a paying plan so the demo filter is tested on its own.
+  await db.exec(
+    `set test.super = 'on'; update public.tenants set plano = 'starter' where id = '${INTERNO}'; set test.super = 'off';`,
+  );
   await resetSession(db);
 }, 60_000);
 
@@ -153,14 +163,14 @@ async function setThresholdAs(
   return as({ "test.uid": uid, ...extra }, () => setThreshold(tenant, value));
 }
 
-async function candidates() {
+async function candidates(after: string | null = null, limit = 500) {
   return asService(async () => {
     const { rows } = await db.query<{
       tenant_id: string;
       tenant_name: string;
       balance: string;
       low_balance_threshold: string;
-    }>("select * from public.billing_low_balance_candidates()");
+    }>("select * from public.billing_low_balance_candidates($1::uuid, $2::int)", [after, limit]);
     return rows;
   });
 }
@@ -328,10 +338,36 @@ describe("billing_low_balance_candidates", () => {
     expect(await candidates()).toEqual([]);
   });
 
+  it("never lists a house at zero balance (the no-balance alert owns it)", async () => {
+    // A wallet row with balance 0 (created by the setter), and one drained to 0.
+    await setThresholdAs(ADMIN_USER, NORMAL, 200);
+    await setBalance(OTHER, 50);
+    await setBalance(OTHER, -50);
+    expect(await candidates()).toEqual([]);
+    await setBalance(NORMAL, 0.01);
+    expect((await candidates()).map((row) => row.tenant_id)).toEqual([NORMAL]);
+  });
+
+  it("pages by tenant_id (keyset) so the list is never silently capped", async () => {
+    await setBalance(NORMAL, 10);
+    await setBalance(OTHER, 10);
+    await setBalance(THIRD, 10);
+    const first = await candidates(null, 2);
+    expect(first.map((row) => row.tenant_id)).toEqual([NORMAL, OTHER]);
+    const second = await candidates(OTHER, 2);
+    expect(second.map((row) => row.tenant_id)).toEqual([THIRD]);
+    expect(await candidates(THIRD, 2)).toEqual([]);
+  });
+
+  it("rejects a limit outside 1-1000", async () => {
+    await expect(candidates(null, 0)).rejects.toThrow(/invalid_limit/);
+    await expect(candidates(null, 1001)).rejects.toThrow(/invalid_limit/);
+  });
+
   it("is service_role only", async () => {
     await expect(
       as({ "test.super": "on" }, () =>
-        db.query("select * from public.billing_low_balance_candidates()"),
+        db.query("select * from public.billing_low_balance_candidates(null, 500)"),
       ),
     ).rejects.toThrow(/forbidden/);
   });

@@ -16,6 +16,7 @@ vi.mock("../infobip-email.server", () => ({ callInfobipEmail }));
 
 import { createFakeDb } from "@/lib/sms-bulk.test-support";
 import {
+  CANDIDATES_PAGE_SIZE,
   claimWalletAlert,
   LOW_BALANCE_ALERT_INTERVAL,
   sendLowBalanceAlerts,
@@ -66,7 +67,15 @@ function candidatesRpc(
     low_balance_threshold: number;
   }>,
 ) {
-  const rpc = vi.fn(() => ({ data: rows, error: null }));
+  // Emulates the SQL keyset paging: tenant_id order, `_after`, `_limit`.
+  const sorted = [...rows].sort((a, b) => a.tenant_id.localeCompare(b.tenant_id));
+  const rpc = vi.fn((args: Record<string, unknown>) => {
+    const after = (args._after as string | null) ?? null;
+    const page = sorted
+      .filter((row) => after === null || row.tenant_id > after)
+      .slice(0, args._limit as number);
+    return { data: page, error: null };
+  });
   fake.admin.onRpc("billing_low_balance_candidates", rpc);
   return rpc;
 }
@@ -145,11 +154,35 @@ describe("sendLowBalanceAlerts", () => {
     expect(sent.html).toContain("R$ 199,99");
     expect(sent.html).toContain("R$ 200,00");
     expect(sent.html).toContain("https://betleads.io/plano-e-creditos");
-    expect(sent.html).toContain("SMS, voz e e-mail");
+    expect(sent.html).toContain(
+      "SMS e voz ficam bloqueados; e-mail segue só dentro da franquia mensal.",
+    );
     expect(sent.html).toContain("Casa &lt;A&gt;");
     expect(sent.html).not.toContain("<A>");
     expect(sent.html).not.toContain(String.fromCharCode(160));
     expect(sent.idempotencyKey).toMatch(/^wallet-alert:low_balance:/);
+  });
+
+  it("pages through every candidate, past PostgREST's 1000-row cap", async () => {
+    const rows = Array.from({ length: 1201 }, (_, i) => ({
+      tenant_id: `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`,
+      tenant_name: `Casa ${i}`,
+      balance: 5,
+      low_balance_threshold: 200,
+    }));
+    const rpc = candidatesRpc(rows);
+    const claim = vi.fn(() => ({ data: false, error: null }));
+    fake.admin.onRpc("billing_claim_wallet_alert", claim);
+
+    await expect(sendLowBalanceAlerts({ now: INSIDE_WINDOW })).resolves.toBe(0);
+
+    expect(CANDIDATES_PAGE_SIZE).toBe(500);
+    expect(claim).toHaveBeenCalledTimes(1201);
+    expect(rpc.mock.calls.map((call) => call[0])).toEqual([
+      { _after: null, _limit: 500 },
+      { _after: rows[499].tenant_id, _limit: 500 },
+      { _after: rows[999].tenant_id, _limit: 500 },
+    ]);
   });
 
   it("one house failing does not stop the next", async () => {

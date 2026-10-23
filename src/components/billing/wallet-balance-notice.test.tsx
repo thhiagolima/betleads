@@ -42,7 +42,7 @@ describe("WalletBalanceNotice", () => {
       <WalletBalanceNotice balance={450} exempt={false} smsUnitPrice={0.08} threshold={500} />,
     );
     expect(below).toContain("Saldo baixo");
-    expect(below).toContain("SMS, voz e e-mail");
+    expect(below).toContain("SMS e voz ficam bloqueados; e-mail segue só dentro da franquia mensal.");
     const above = renderToStaticMarkup(
       <WalletBalanceNotice balance={150} exempt={false} smsUnitPrice={0.08} threshold={100} />,
     );

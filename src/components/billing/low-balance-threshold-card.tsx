@@ -34,14 +34,19 @@ export function LowBalanceThresholdCard({
   const qc = useQueryClient();
   const setFn = useServerFn(setLowBalanceThreshold);
   const current = effectiveLowBalanceThreshold(threshold);
-  const [draft, setDraft] = useState<string | null>(null);
+  // The draft belongs to the house it was typed for: switching houses in the
+  // header drops it, so another house's value is never shown or saved.
+  const [draftState, setDraftState] = useState<{ tenantId: string | null; text: string } | null>(
+    null,
+  );
+  const draft = draftState && draftState.tenantId === tenantId ? draftState.text : null;
   const text = draft ?? thresholdInputText(current);
   const parsed = parseThresholdInput(text);
 
   const mutation = useMutation({
-    mutationFn: (value: number) => setFn({ data: { tenantId, value } }),
+    mutationFn: (input: { tenantId: string | null; value: number }) => setFn({ data: input }),
     onSuccess: async () => {
-      setDraft(null);
+      setDraftState(null);
       toast.success("Limite de saldo baixo salvo.");
       await qc.invalidateQueries({ queryKey: ["sms-credits"] });
     },
@@ -67,7 +72,7 @@ export function LowBalanceThresholdCard({
             className="flex flex-wrap items-end gap-2"
             onSubmit={(event) => {
               event.preventDefault();
-              if (parsed != null) mutation.mutate(parsed);
+              if (parsed != null) mutation.mutate({ tenantId, value: parsed });
             }}
           >
             <div className="space-y-1">
@@ -77,7 +82,7 @@ export function LowBalanceThresholdCard({
                 inputMode="decimal"
                 className="w-40"
                 value={text}
-                onChange={(event) => setDraft(event.target.value)}
+                onChange={(event) => setDraftState({ tenantId, text: event.target.value })}
                 aria-invalid={parsed == null}
               />
             </div>

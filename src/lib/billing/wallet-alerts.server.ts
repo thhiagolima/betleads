@@ -8,7 +8,8 @@
 //   no-balance alert ('no_balance', '1 hour').
 // - `sendLowBalanceAlerts` is the hourly sweep `runBillingCycle` runs (wired
 //   by the billing-cycle cron route): every active, non-demo, non-exempt
-//   house whose balance is below its own threshold
+//   house whose balance is above zero and below its own threshold (zero is
+//   Task 7's 'no_balance' alert)
 //   (`billing_low_balance_candidates`) gets at most one e-mail per 24 h, to
 //   its admins/owners/gestores, only inside the 08:00-20:00 Brasília window.
 //
@@ -32,6 +33,9 @@ export type WalletAlertInterval = string;
 
 export const LOW_BALANCE_ALERT_KIND: WalletAlertKind = "low_balance";
 export const LOW_BALANCE_ALERT_INTERVAL: WalletAlertInterval = "24 hours";
+
+/** Rows per `billing_low_balance_candidates` page (the RPC accepts 1-1000). */
+export const CANDIDATES_PAGE_SIZE = 500;
 
 const PLAN_CREDITS_URL = "https://betleads.io/plano-e-creditos";
 
@@ -87,7 +91,8 @@ function lowBalanceEmail(houseName: string, balance: number, threshold: number) 
   const body =
     `O saldo de créditos da casa ${escapeHtml(houseName)} está em ${moneyText(balance)}, ` +
     `abaixo do limite de alerta de ${moneyText(threshold)}. Quando o saldo acabar, ` +
-    "os envios de SMS, voz e e-mail param. Adicione créditos para manter tudo funcionando.";
+    "SMS e voz ficam bloqueados; e-mail segue só dentro da franquia mensal. " +
+    "Adicione créditos para manter tudo funcionando.";
   const html = `<!doctype html>
 <html>
   <body style="margin:0; padding:24px; background:#f5f5f5; font-family:Arial,Helvetica,sans-serif;">
@@ -162,22 +167,32 @@ export async function sendLowBalanceAlerts(opts: { now?: Date } = {}): Promise<n
   const now = opts.now ?? new Date();
   if (!isWithinBillingEmailWindow(now)) return 0;
 
-  const { data, error } = await rpcDb().rpc<LowBalanceCandidate[]>(
-    "billing_low_balance_candidates",
-    {},
-  );
-  if (error) throw new Error(error.message);
-
   let sent = 0;
-  for (const candidate of data ?? []) {
-    try {
-      if (await alertOneHouse(candidate, now)) sent += 1;
-    } catch (err) {
-      console.error("[wallet-alerts] low balance alert failed", {
-        tenantId: candidate.tenant_id,
-        error: errorMessage(err),
-      });
+  let after: string | null = null;
+  // Keyset paging (`_after` = last tenant_id seen) so the list is never
+  // silently capped at PostgREST's 1000 rows. The guard only stops an
+  // endless loop if a stub ever ignores `_after`.
+  for (let guard = 0; guard < 10_000; guard += 1) {
+    const result: DbResult<LowBalanceCandidate[]> = await rpcDb().rpc<LowBalanceCandidate[]>(
+      "billing_low_balance_candidates",
+      { _after: after, _limit: CANDIDATES_PAGE_SIZE },
+    );
+    if (result.error) throw new Error(result.error.message);
+    const page: LowBalanceCandidate[] = result.data ?? [];
+
+    for (const candidate of page) {
+      try {
+        if (await alertOneHouse(candidate, now)) sent += 1;
+      } catch (err) {
+        console.error("[wallet-alerts] low balance alert failed", {
+          tenantId: candidate.tenant_id,
+          error: errorMessage(err),
+        });
+      }
     }
+
+    if (page.length < CANDIDATES_PAGE_SIZE) break;
+    after = page[page.length - 1].tenant_id;
   }
   return sent;
 }
