@@ -1,5 +1,6 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { listDemoTenantIds } from "./tenant-access.server";
+import { settleVoiceHistory, voiceCallAnswered } from "./voice-billing.server";
 
 const MIN_AGE_MS = 15 * 60_000;
 const MAX_AGE_MS = 3 * 24 * 60 * 60_000;
@@ -156,6 +157,145 @@ export async function reconcilePendingShortBrasilSms(limit = 500, demoTenantIds?
   return result;
 }
 
+// --- PG3 Task 5: settle voice reservations without a final event ----------
+
+/** A reservation is settled here only after the provider had 24 h to report. */
+const VOICE_SETTLE_AFTER_MS = 24 * 60 * 60_000;
+/**
+ * How far back the daily job looks. Wider than one day so a few missed runs
+ * still settle everything; bounded so the scan never reads the whole ledger.
+ */
+const VOICE_SETTLE_LOOKBACK_MS = 14 * 24 * 60 * 60_000;
+const VOICE_SETTLE_PAGE_SIZE = 500;
+/** Ids/references per `.in()` filter, to keep the PostgREST URL short. */
+const IN_CHUNK = 100;
+/** Upper bound on pages per run (500 * 200 = 100k reservations). */
+const VOICE_SETTLE_MAX_PAGES = 200;
+
+type StaleReservation = { id: string; tenant_id: string; reference_id: string | null };
+type BillingHistoryRow = {
+  id: string;
+  tenant_id: string;
+  billing_reference_id: string | null;
+  status: string | null;
+  duration_seconds: number | null;
+  provider_response: unknown;
+  created_at: string;
+};
+
+function chunks<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+/**
+ * How a reservation without a final event is settled (spec decision 4):
+ *   * no call_history row (its insert failed): unanswered;
+ *   * 'pending': the CML was never fetched, so nobody answered: unanswered;
+ *   * 'answered': the CML was fetched, the duration is unknown: keep the cap;
+ *   * any other status: the final event WAS processed but its settlement
+ *     failed; use what it recorded (answered per voiceCallAnswered, with the
+ *     stored duration; null keeps the cap).
+ */
+function staleSettlement(row: BillingHistoryRow | undefined): {
+  answered: boolean;
+  durationSeconds: number | null;
+} {
+  if (!row || row.status === "pending") return { answered: false, durationSeconds: null };
+  if (row.status === "answered") return { answered: true, durationSeconds: null };
+  return { answered: voiceCallAnswered(row), durationSeconds: row.duration_seconds ?? null };
+}
+
+/**
+ * Settles every `voice_call` reservation older than 24 h that has no
+ * reversing usage_refund (no settlement and no refund yet). Keyed by the
+ * ledger, not by call_history, so a call whose history insert failed is
+ * still settled. The settlement key is the one the final event uses, so a
+ * late event after this only replays the stored result.
+ */
+export async function settleStaleVoiceReservations(
+  demoTenantIds?: string[],
+  options: { pageSize?: number } = {},
+) {
+  const now = Date.now();
+  const pageSize = options.pageSize ?? VOICE_SETTLE_PAGE_SIZE;
+  const demoFilter = await demoTenantFilter(demoTenantIds);
+  const counts = { checked: 0, settled: 0, skipped: 0, failed: 0 };
+
+  for (let page = 0; page < VOICE_SETTLE_MAX_PAGES; page++) {
+    let query = supabaseAdmin
+      .from("wallet_ledger")
+      .select("id, tenant_id, reference_id")
+      .eq("entry_type", "usage_reservation")
+      .eq("reference_type", "voice_call")
+      .lte("created_at", new Date(now - VOICE_SETTLE_AFTER_MS).toISOString())
+      .gte("created_at", new Date(now - VOICE_SETTLE_LOOKBACK_MS).toISOString());
+    if (demoFilter) query = query.not("tenant_id", "in", demoFilter);
+    // Offset pagination is stable here: settling adds refund rows but never
+    // removes or reorders the reservations this query reads.
+    const { data, error } = await query
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(page * pageSize, page * pageSize + pageSize - 1);
+    if (error) throw error;
+    const reservations = (data ?? []) as StaleReservation[];
+    if (reservations.length === 0) break;
+
+    const reversed = new Set<string>();
+    for (const ids of chunks(reservations.map((r) => r.id), IN_CHUNK)) {
+      const { data: refunds, error: refundError } = await supabaseAdmin
+        .from("wallet_ledger")
+        .select("reverses_ledger_id")
+        .eq("entry_type", "usage_refund")
+        .in("reverses_ledger_id", ids);
+      if (refundError) throw refundError;
+      for (const refund of refunds ?? []) {
+        if (refund.reverses_ledger_id) reversed.add(refund.reverses_ledger_id);
+      }
+    }
+    const open = reservations.filter((r) => !reversed.has(r.id) && r.reference_id);
+
+    const historyByKey = new Map<string, BillingHistoryRow>();
+    const refs = [...new Set(open.map((r) => r.reference_id as string))];
+    for (const chunk of chunks(refs, IN_CHUNK)) {
+      const { data: rows, error: historyError } = await supabaseAdmin
+        .from("call_history")
+        .select("id, tenant_id, billing_reference_id, status, duration_seconds, provider_response, created_at")
+        .in("billing_reference_id", chunk);
+      if (historyError) throw historyError;
+      for (const row of (rows ?? []) as BillingHistoryRow[]) {
+        const key = `${row.tenant_id}|${row.billing_reference_id}`;
+        const current = historyByKey.get(key);
+        // One row per reference is the norm; on duplicates keep the latest.
+        if (!current || row.created_at > current.created_at) historyByKey.set(key, row);
+      }
+    }
+
+    for (const reservation of open) {
+      counts.checked += 1;
+      const referenceId = reservation.reference_id as string;
+      const row = historyByKey.get(`${reservation.tenant_id}|${referenceId}`);
+      const result = await settleVoiceHistory({
+        tenantId: reservation.tenant_id,
+        referenceId,
+        historyId: row?.id ?? null,
+        ...staleSettlement(row),
+      });
+      if (!result) counts.failed += 1;
+      else if (result.ok) counts.settled += 1;
+      else counts.skipped += 1;
+    }
+
+    if (reservations.length < pageSize) break;
+  }
+
+  if (counts.checked > 0) {
+    console.warn("[infobip voice reconciliation] reservas de voz liquidadas sem evento final", counts);
+  }
+  return counts;
+}
+
 export async function reconcileChannelCallbacks() {
   const demoTenantIds = await listDemoTenantIds();
   const [voice, email, sms] = await Promise.all([
@@ -163,5 +303,7 @@ export async function reconcileChannelCallbacks() {
     reconcilePendingInfobipEmails(500, demoTenantIds),
     reconcilePendingShortBrasilSms(500, demoTenantIds),
   ]);
-  return { voice, email, sms };
+  // After the audit: it only touches provider_response, never the bill.
+  const voiceBilling = await settleStaleVoiceReservations(demoTenantIds);
+  return { voice, email, sms, voiceBilling };
 }

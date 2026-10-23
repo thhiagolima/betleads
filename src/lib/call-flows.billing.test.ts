@@ -111,4 +111,24 @@ describe("call flow call block wallet reservation", () => {
     expect(fake.db.rows("call_history")).toEqual([]);
     expect(progress()).toMatchObject({ status: "active", current_block_index: 1, attempts_on_block: 0 });
   });
+
+  it("a failed call_history insert is logged with the reference and correlation; the call still counts", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    voice.callInfobipVoice.mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: { callId: "call-1" },
+      idempotencyKey: "key-1",
+      providerCallId: "call-1",
+      billing: { referenceId: "voice:key-1", units: 2 },
+    });
+    fake.db.failNext("call_history", "insert", "insert failed");
+    await advanceProgress("prog-1");
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining("call_history"),
+      expect.objectContaining({ referenceId: "voice:key-1", correlationId: "key-1" }),
+    );
+    expect(progress()).toMatchObject({ status: "waiting" });
+    consoleError.mockRestore();
+  });
 });

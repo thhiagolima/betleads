@@ -385,6 +385,22 @@ describe("wallet_settle: idempotency and single reversal", () => {
     });
   });
 
+  it("another house cannot settle a reservation it does not own (PG3 Task 5, addendum c)", async () => {
+    const owner = await freshTenant();
+    const intruder = await freshTenant();
+    await reserve(owner, "voice_30s", 5, "call-cross");
+    expect(await settleVoice(intruder, "call-cross", 0, false, "voice-settle:call-cross")).toEqual({
+      ok: false,
+      reason: "reservation_not_found",
+    });
+    // Nothing moved for either house; the owner can still settle it.
+    expect(await balanceOf(owner)).toBeCloseTo(9.55, 4);
+    expect(await balanceOf(intruder)).toBeCloseTo(10, 4);
+    const own = await settleVoice(owner, "call-cross", 0, false, "voice-settle:call-cross");
+    expect(own).toMatchObject({ ok: true, idempotent: false, blocks: 0 });
+    expect(await balanceOf(owner)).toBeCloseTo(10, 4);
+  });
+
   it("refuses a key already used by another ledger row instead of replaying it", async () => {
     const tenant = await freshTenant();
     await reserve(tenant, "voice_30s", 5, "call-keyclash");

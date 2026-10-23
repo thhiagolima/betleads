@@ -5,6 +5,7 @@
 import { createHash } from "crypto";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { evaluateVoiceContactPolicy } from "./consent.server";
+import { logCallHistoryInsertError } from "./voice-history-log";
 import { callInfobipVoice, normalizeE164BR } from "./infobip-voice.server";
 import { assertTenantNotDemoForSend, listDemoTenantIds } from "./tenant-access.server";
 import { isDemoBlockedError } from "./demo-tenant";
@@ -264,6 +265,34 @@ export function buildProviderPayload(
   return replace(template) as Record<string, unknown>;
 }
 
+function positiveSeconds(value: unknown): number | null {
+  const seconds = Number(value);
+  return value != null && Number.isFinite(seconds) && seconds > 0 ? seconds : null;
+}
+
+/**
+ * Duration of a queued call's generated audio (call_queue.audio_generation_id),
+ * used as the reservation's maxSeconds. Null when unknown; never throws (the
+ * env default is a safe cap).
+ */
+export async function audioGenerationSeconds(
+  client: unknown,
+  tenantId: string,
+  audioGenerationId: string,
+): Promise<number | null> {
+  try {
+    const { data } = await (client as typeof supabaseAdmin)
+      .from("call_audio_generations")
+      .select("duration_seconds")
+      .eq("id", audioGenerationId)
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+    return positiveSeconds(data?.duration_seconds);
+  } catch {
+    return null;
+  }
+}
+
 /** Copy shown when the house's wallet refuses a call's reservation. */
 export const VOICE_INSUFFICIENT_BALANCE_MESSAGE = "Saldo insuficiente";
 
@@ -306,7 +335,7 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
   let query = supabaseAdmin
     .from("call_queue")
     .select(
-      "id,tenant_id,lead_id,script_id,voice_asset_id,phone_number,audio_url,status,scheduled_at",
+      "id,tenant_id,lead_id,script_id,voice_asset_id,audio_generation_id,phone_number,audio_url,status,scheduled_at",
     )
     .eq("status", "audio_ready")
     .lte("scheduled_at", now)
@@ -358,10 +387,13 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
       // Fixed-library assets receive a fresh signed URL at dispatch time, so a
       // campaign scheduled for later does not rely on the URL created at draft time.
       let audioUrl = item.audio_url;
+      // PG3: the audio's known duration sizes the wallet reservation; null
+      // falls back to VOICE_MAX_CALL_SECONDS inside callInfobipVoice.
+      let maxSeconds: number | null = null;
       if (item.voice_asset_id) {
         const { data: asset } = await supabaseAdmin
           .from("journey_voice_assets")
-          .select("storage_path,is_archived")
+          .select("storage_path,is_archived,duration_seconds")
           .eq("id", item.voice_asset_id)
           .eq("tenant_id", item.tenant_id)
           .maybeSingle();
@@ -373,6 +405,14 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
         if (signError || !signed?.signedUrl)
           throw new Error("Não foi possível preparar o áudio para a ligação.");
         audioUrl = signed.signedUrl;
+        maxSeconds = positiveSeconds(asset.duration_seconds);
+      }
+      if (maxSeconds == null && item.audio_generation_id) {
+        maxSeconds = await audioGenerationSeconds(
+          supabaseAdmin,
+          item.tenant_id,
+          item.audio_generation_id,
+        );
       }
       let content: Parameters<typeof callInfobipVoice>[1];
       let renderedText: string | null = null;
@@ -392,9 +432,11 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
       }
 
       // No idempotency key: each dispatch attempt is its own call, so the
-      // wallet reference is `voice:<fresh uuid>` and the cap is the
-      // VOICE_MAX_CALL_SECONDS default.
-      const result = await callInfobipVoice(to, content, { tenantId: item.tenant_id });
+      // wallet reference is `voice:<fresh uuid>`.
+      const result = await callInfobipVoice(to, content, {
+        tenantId: item.tenant_id,
+        maxSeconds,
+      });
       const outcome = classifyVoiceDispatchResult(result);
       if (outcome === "insufficient_balance") {
         // Final for this item: never re-queued (no call was placed, nothing
@@ -427,7 +469,7 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
         continue;
       }
 
-      await supabaseAdmin.from("call_history").insert({
+      const { error: historyInsertError } = await supabaseAdmin.from("call_history").insert({
         tenant_id: item.tenant_id,
         lead_id: item.lead_id,
         script_id: item.script_id,
@@ -447,6 +489,7 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
         error_message: result.ok ? null : JSON.stringify(result.body).slice(0, 1000),
         billing_reference_id: result.billing?.referenceId ?? null,
       } as never);
+      if (historyInsertError) logCallHistoryInsertError("queue", historyInsertError, result);
       await supabaseAdmin
         .from("call_queue")
         .update({

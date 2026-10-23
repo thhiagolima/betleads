@@ -1,6 +1,7 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { EmailDomainNotVerifiedError, resolveSender, sendInfobipEmail } from "./email-send.server";
 import { callInfobipVoice, normalizeE164BR } from "./infobip-voice.server";
+import { logCallHistoryInsertError } from "./voice-history-log";
 import { sendSmsInternal } from "./sms.functions";
 import { buildPlayerVariables, renderTemplate } from "./template-vars.server";
 import { loadHouseLinks } from "./house-links.server";
@@ -963,7 +964,7 @@ async function deliverStep(
       // The call is ongoing: keep the concurrency permit until the event
       // callback reports the end (I3) or concurrency_hold_seconds elapse.
       gate.keepPermit = Boolean(gate.admission.permitId);
-      await supabaseAdmin.from("call_history").insert({
+      const { error: historyInsertError } = await supabaseAdmin.from("call_history").insert({
         tenant_id: enrollment.tenant_id,
         lead_id: enrollment.player_id,
         audio_url: signed.signedUrl,
@@ -981,6 +982,7 @@ async function deliverStep(
         to_phone: to,
         billing_reference_id: result.billing?.referenceId ?? null,
       });
+      if (historyInsertError) logCallHistoryInsertError("journey", historyInsertError, result);
     }
     await finishExecution(run.id, {
       status: "sent",

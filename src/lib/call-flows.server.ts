@@ -11,6 +11,7 @@ import {
   type LeadLike,
 } from "./calls.server";
 import { callInfobipVoice, normalizeE164BR } from "./infobip-voice.server";
+import { logCallHistoryInsertError } from "./voice-history-log";
 import { sendSmsInternal } from "./sms.functions";
 import { buildPlayerVariables } from "./template-vars.server";
 import { loadHouseLinks } from "./house-links.server";
@@ -309,7 +310,7 @@ async function executeCallBlock(progress: any, block: any, player: any): Promise
   }
 
   // 5. registra histórico (linka com progress via provider_call_id)
-  await supabaseAdmin.from("call_history").insert({
+  const { error: historyInsertError } = await supabaseAdmin.from("call_history").insert({
     lead_id: progress.player_id,
     script_id: scriptId,
     audio_url: null,
@@ -328,6 +329,7 @@ async function executeCallBlock(progress: any, block: any, player: any): Promise
     rendered_text: renderedText,
     billing_reference_id: result.billing?.referenceId ?? null,
   } as any);
+  if (historyInsertError) logCallHistoryInsertError("call_flow", historyInsertError, result);
 
   // 6. atualiza progress (aguardando callback do provedor)
   // Em auth error mantém o progress ATIVO e reagenda em 10min — nada some.

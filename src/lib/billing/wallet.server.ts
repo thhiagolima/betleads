@@ -278,3 +278,148 @@ export async function refundForDelivery(client: unknown, args: RefundForDelivery
     reason: args.reason,
   });
 }
+
+// --- PG3 Task 5: voice settlement -----------------------------------------
+//
+// A call reserves its cap before dialing (Task 4, reference `voice:<key>[:gen]`,
+// reference_type `voice_call`). The final provider event, or the 24 h
+// reconciliation when that event never comes, settles it by real use through
+// `wallet_settle_voice` (Task 3). Both use the same key, so whichever runs
+// second gets the stored result back and nothing is charged twice.
+
+/** Idempotency key of a voice settlement: one per reservation, shared by every settler. */
+export function voiceSettleKey(referenceId: string): string {
+  return `voice-settle:${referenceId}`;
+}
+
+export const VOICE_RESERVATION_REFERENCE_TYPE = "voice_call";
+
+export type SettleVoiceCallArgs = {
+  tenantId: string;
+  referenceId: string;
+  /** Seconds reported by the provider; null when the event carried none. */
+  durationSeconds: number | null;
+  answered: boolean;
+};
+
+export type SettleVoiceCallResult =
+  | {
+      ok: true;
+      idempotent: boolean;
+      /** call_history.billed_blocks */
+      blocks: number;
+      /** call_history.billed_amount: what the call cost, after the return. */
+      billedAmount: number;
+      /** What went back to the wallet. */
+      amount: number;
+      balance: number;
+    }
+  | { ok: false; reason: string };
+
+type LedgerLookup = {
+  from: (table: string) => {
+    select: (columns: string) => {
+      eq: (
+        column: string,
+        value: unknown,
+      ) => {
+        eq: (
+          column: string,
+          value: unknown,
+        ) => {
+          eq: (column: string, value: unknown) => { limit: (n: number) => Promise<DbResult<unknown[]>> };
+        };
+      };
+    };
+  };
+};
+
+/**
+ * Settles a voice call's reservation by real use. Before the RPC it checks
+ * that the reference is a `voice_call` reservation of THIS house: the RPC
+ * already scopes by tenant (another house's reference is "not found"), and
+ * this also refuses an SMS/e-mail reference handed in by mistake.
+ *
+ * `answered` with a null duration keeps the cap (spec decision 3, the SQL's
+ * dedicated branch). Refusals come back as `ok: false` and are logged here:
+ * `already_reversed`/`already_refunded` (refunded on a timeout, or settled
+ * before) at info level; `idempotency_key_conflict` as a programming error.
+ * An RPC error (`invalid_item`, `invalid_duration`, DB down) is thrown.
+ */
+export async function settleVoiceCall(
+  client: unknown,
+  args: SettleVoiceCallArgs,
+): Promise<SettleVoiceCallResult> {
+  const context = { tenantId: args.tenantId, referenceId: args.referenceId };
+  const { data: rows, error: lookupError } = await (client as LedgerLookup)
+    .from("wallet_ledger")
+    .select("reference_type, item")
+    .eq("tenant_id", args.tenantId)
+    .eq("reference_id", args.referenceId)
+    .eq("entry_type", "usage_reservation")
+    .limit(1);
+  if (lookupError) throw new Error(lookupError.message);
+  const reservation = (Array.isArray(rows) ? rows[0] : null) as
+    | { reference_type?: string | null }
+    | null
+    | undefined;
+  if (!reservation) {
+    console.warn("[wallet] liquidação de voz sem reserva", context);
+    return { ok: false, reason: "reservation_not_found" };
+  }
+  if (reservation.reference_type !== VOICE_RESERVATION_REFERENCE_TYPE) {
+    console.error("[wallet] liquidação de voz recusada: a reserva não é de ligação", {
+      ...context,
+      referenceType: reservation.reference_type ?? null,
+    });
+    return { ok: false, reason: "invalid_reference_type" };
+  }
+
+  const duration =
+    args.durationSeconds == null || !Number.isFinite(args.durationSeconds)
+      ? null
+      : Math.max(0, Math.round(args.durationSeconds));
+  const { data, error } = await looseDb(client).rpc("wallet_settle_voice", {
+    _tenant: args.tenantId,
+    _reference_id: args.referenceId,
+    _duration_seconds: duration,
+    _answered: args.answered,
+    _idempotency_key: voiceSettleKey(args.referenceId),
+  });
+  if (error) throw new Error(String(error.message ?? ""));
+
+  const result = (data ?? {}) as {
+    ok?: boolean;
+    reason?: string;
+    idempotent?: boolean;
+    blocks?: number;
+    billed_units?: number;
+    billed_amount?: number | string;
+    amount?: number | string;
+    balance?: number | string;
+  };
+  if (result.ok !== true) {
+    const reason = result.reason ?? "unknown";
+    if (reason === "already_reversed" || reason === "already_refunded") {
+      console.info("[wallet] liquidação de voz ignorada: reserva já revertida", { ...context, reason });
+    } else if (reason === "idempotency_key_conflict") {
+      console.error("[wallet] liquidação de voz: chave em conflito (erro de programação)", {
+        ...context,
+        key: voiceSettleKey(args.referenceId),
+      });
+    } else if (reason === "reservation_not_found") {
+      console.warn("[wallet] liquidação de voz sem reserva", context);
+    } else {
+      console.error("[wallet] liquidação de voz recusada", { ...context, reason });
+    }
+    return { ok: false, reason };
+  }
+  return {
+    ok: true,
+    idempotent: result.idempotent === true,
+    blocks: Number(result.blocks ?? result.billed_units ?? 0),
+    billedAmount: Number(result.billed_amount ?? 0),
+    amount: Number(result.amount ?? 0),
+    balance: Number(result.balance ?? 0),
+  };
+}

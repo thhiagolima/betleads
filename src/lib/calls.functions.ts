@@ -2,11 +2,14 @@
 // Apenas declarações de createServerFn + imports — toda lógica fica em calls.server.ts.
 
 import { createServerFn } from "@tanstack/react-start";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/integrations/supabase/types";
 import { dbUuid } from "@/lib/zod-helpers";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import {
+  audioGenerationSeconds,
   callElevenLabs,
   classifyVoiceDispatchResult,
   computeAudioHash,
@@ -21,6 +24,7 @@ import {
   type VoiceSettings,
 } from "./calls.server";
 import { callInfobipVoice, normalizeE164BR } from "./infobip-voice.server";
+import { logCallHistoryInsertError } from "./voice-history-log";
 import { evaluateVoiceContactPolicy } from "./consent.server";
 import {
   assertTenantNotDemoForSend,
@@ -677,7 +681,7 @@ export const dispatchCallQueueItem = createServerFn({ method: "POST" })
 
     const { data: q, error: qErr } = await supabase
       .from("call_queue")
-      .select("id, phone_number, audio_url, lead_id, script_id, status")
+      .select("id, phone_number, audio_url, lead_id, script_id, status, audio_generation_id")
       .eq("id", data.call_queue_id)
       .maybeSingle();
     if (qErr) throw new Error(qErr.message);
@@ -741,7 +745,11 @@ export const dispatchCallQueueItem = createServerFn({ method: "POST" })
     } else {
       content = { type: "audio", audioUrl: q.audio_url! };
     }
-    const result = await callInfobipVoice(to, content, { tenantId });
+    // PG3: the generated audio's duration, when known, sizes the reservation.
+    const maxSeconds = q.audio_generation_id
+      ? await audioGenerationSeconds(supabase, tenantId, q.audio_generation_id)
+      : null;
+    const result = await callInfobipVoice(to, content, { tenantId, maxSeconds });
     const outcome = classifyVoiceDispatchResult(result);
 
     // Carteira da casa sem saldo (checado ANTES da regra transitória: status 0
@@ -793,7 +801,7 @@ export const dispatchCallQueueItem = createServerFn({ method: "POST" })
     }
 
     const historyStatus = result.ok ? "pending" : "failed";
-    await supabase.from("call_history").insert({
+    const { error: historyInsertError } = await supabase.from("call_history").insert({
       lead_id: q.lead_id,
       call_queue_id: q.id,
       script_id: q.script_id,
@@ -818,6 +826,7 @@ export const dispatchCallQueueItem = createServerFn({ method: "POST" })
       tenant_id: tenantId,
       billing_reference_id: result.billing?.referenceId ?? null,
     } as any);
+    if (historyInsertError) logCallHistoryInsertError("manual", historyInsertError, result);
 
     await supabase
       .from("call_queue")
@@ -838,168 +847,202 @@ export const dispatchCallQueueItem = createServerFn({ method: "POST" })
 // ============================================================
 // ENVIO EM MASSA
 // ============================================================
-export const bulkDispatchCalls = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((input) =>
-    z
-      .object({
-        script_id: dbUuid().optional(),
-        asset_id: dbUuid().optional(),
-        campaign_name: z.string().max(120).optional(),
-        scheduled_at: z.string().datetime().optional(),
-        targets: z
-          .array(
-            z.object({
-              lead_id: dbUuid().nullable().optional(),
-              phone_number: z.string().max(40).nullable().optional(),
-            }),
-          )
-          .min(1)
-          .max(200),
-      })
-      .refine((value) => Boolean(value.script_id) !== Boolean(value.asset_id), {
-        message: "Selecione um script TTS ou um áudio fixo da biblioteca.",
-      })
-      .parse(input),
-  )
-  .handler(async ({ data, context }) => {
-    const { supabase } = context;
-    const tenantId = await resolveOperationalTenantId(supabase);
-    const scheduledAt = data.scheduled_at ? new Date(data.scheduled_at) : null;
-    if (scheduledAt && !Number.isFinite(scheduledAt.getTime())) {
-      throw new Error("Data de agendamento de voz inválida.");
-    }
-    const isScheduled = Boolean(scheduledAt && scheduledAt.getTime() > Date.now());
-    let fixedAudioUrl: string | null = null;
-    if (data.asset_id) {
-      const { data: asset, error: assetError } = await (supabaseAdmin as any)
-        .from("journey_voice_assets")
-        .select("storage_path, is_archived")
-        .eq("id", data.asset_id)
-        .eq("tenant_id", tenantId)
+const bulkDispatchCallsInput = z
+  .object({
+    script_id: dbUuid().optional(),
+    asset_id: dbUuid().optional(),
+    campaign_name: z.string().max(120).optional(),
+    scheduled_at: z.string().datetime().optional(),
+    targets: z
+      .array(
+        z.object({
+          lead_id: dbUuid().nullable().optional(),
+          phone_number: z.string().max(40).nullable().optional(),
+        }),
+      )
+      .min(1)
+      .max(200),
+  })
+  .refine((value) => Boolean(value.script_id) !== Boolean(value.asset_id), {
+    message: "Selecione um script TTS ou um áudio fixo da biblioteca.",
+  });
+
+/** Targets left out after the house ran out of balance in "Disparar agora". */
+const VOICE_NOT_ATTEMPTED_MESSAGE = "Não tentado: saldo insuficiente";
+
+export type BulkDispatchCallsInput = z.infer<typeof bulkDispatchCallsInput>;
+
+/** Body of `bulkDispatchCalls` (the `*For` convention keeps it unit testable). */
+export async function bulkDispatchCallsFor(
+  supabase: SupabaseClient<Database>,
+  data: BulkDispatchCallsInput,
+) {
+  const tenantId = await resolveOperationalTenantId(supabase);
+  const scheduledAt = data.scheduled_at ? new Date(data.scheduled_at) : null;
+  if (scheduledAt && !Number.isFinite(scheduledAt.getTime())) {
+    throw new Error("Data de agendamento de voz inválida.");
+  }
+  const isScheduled = Boolean(scheduledAt && scheduledAt.getTime() > Date.now());
+  let fixedAudioUrl: string | null = null;
+  if (data.asset_id) {
+    const { data: asset, error: assetError } = await (supabaseAdmin as any)
+      .from("journey_voice_assets")
+      .select("storage_path, is_archived")
+      .eq("id", data.asset_id)
+      .eq("tenant_id", tenantId)
+      .single();
+    if (assetError || !asset || asset.is_archived)
+      throw new Error("Áudio fixo não está disponível na biblioteca.");
+    const { data: signed, error: signedError } = await supabaseAdmin.storage
+      .from("call-audios")
+      .createSignedUrl(asset.storage_path, 3600);
+    if (signedError || !signed?.signedUrl)
+      throw new Error(signedError?.message ?? "Não foi possível preparar o áudio fixo.");
+    fixedAudioUrl = signed.signedUrl;
+  }
+  const results: Array<{
+    ok: boolean;
+    lead_id: string | null;
+    phone: string | null;
+    error?: string;
+    not_attempted?: boolean;
+  }> = [];
+  let queued = 0;
+  let pending = 0;
+  let failed = 0;
+  let notAttempted = 0;
+
+  for (let index = 0; index < data.targets.length; index++) {
+    const target = data.targets[index];
+    let queueId: string | null = null;
+    try {
+      // 1. cria item na fila
+      const { data: q, error: qErr } = await supabase
+        .from("call_queue")
+        .insert({
+          lead_id: target.lead_id ?? null,
+          script_id: data.script_id ?? null,
+          voice_asset_id: data.asset_id ?? null,
+          trigger_name: data.campaign_name ?? null,
+          phone_number: target.phone_number ?? null,
+          scheduled_at: scheduledAt?.toISOString() ?? new Date().toISOString(),
+          status: "pending_audio",
+        })
+        .select("id")
         .single();
-      if (assetError || !asset || asset.is_archived)
-        throw new Error("Áudio fixo não está disponível na biblioteca.");
-      const { data: signed, error: signedError } = await supabaseAdmin.storage
-        .from("call-audios")
-        .createSignedUrl(asset.storage_path, 3600);
-      if (signedError || !signed?.signedUrl)
-        throw new Error(signedError?.message ?? "Não foi possível preparar o áudio fixo.");
-      fixedAudioUrl = signed.signedUrl;
-    }
-    const results: Array<{
-      ok: boolean;
-      lead_id: string | null;
-      phone: string | null;
-      error?: string;
-    }> = [];
-    let queued = 0;
-    let pending = 0;
-    let failed = 0;
+      if (qErr) throw new Error(qErr.message);
+      queueId = q.id;
 
-    for (const target of data.targets) {
-      let queueId: string | null = null;
-      try {
-        // 1. cria item na fila
-        const { data: q, error: qErr } = await supabase
-          .from("call_queue")
-          .insert({
-            lead_id: target.lead_id ?? null,
-            script_id: data.script_id ?? null,
-            voice_asset_id: data.asset_id ?? null,
-            trigger_name: data.campaign_name ?? null,
-            phone_number: target.phone_number ?? null,
-            scheduled_at: scheduledAt?.toISOString() ?? new Date().toISOString(),
-            status: "pending_audio",
-          })
-          .select("id")
-          .single();
-        if (qErr) throw new Error(qErr.message);
-        queueId = q.id;
+      // Scripts são sintetizados pela Infobip quando a chamada é atendida.
+      // Arquivos da biblioteca continuam usando URL assinada e a ação CML `play`.
+      await supabase
+        .from("call_queue")
+        .update({
+          status: "audio_ready",
+          audio_generation_id: null,
+          audio_url: fixedAudioUrl,
+        })
+        .eq("id", q.id);
 
-        // Scripts são sintetizados pela Infobip quando a chamada é atendida.
-        // Arquivos da biblioteca continuam usando URL assinada e a ação CML `play`.
-        await supabase
-          .from("call_queue")
-          .update({
-            status: "audio_ready",
-            audio_generation_id: null,
-            audio_url: fixedAudioUrl,
-          })
-          .eq("id", q.id);
+      if (isScheduled) {
+        pending += 1;
+        results.push({
+          ok: true,
+          lead_id: target.lead_id ?? null,
+          phone: target.phone_number ?? null,
+        });
+        continue;
+      }
 
-        if (isScheduled) {
-          pending += 1;
-          results.push({
-            ok: true,
-            lead_id: target.lead_id ?? null,
-            phone: target.phone_number ?? null,
-          });
-          continue;
-        }
-
-        // 4. dispara
-        const dispatchResult = await runVoiceQueueDispatcher(1, q.id);
-        if (dispatchResult.insufficientBalance > 0) {
-          // The dispatcher already marked the item failed (saldo_insuficiente);
-          // reported as-is, without the catch below overwriting that status.
-          failed += 1;
-          results.push({
-            ok: false,
-            lead_id: target.lead_id ?? null,
-            phone: target.phone_number ?? null,
-            error: VOICE_INSUFFICIENT_BALANCE_MESSAGE,
-          });
-          continue;
-        }
-        if (dispatchResult.failed > 0) {
-          throw new Error(
-            "Não foi possível concluir o envio de voz. Consulte o histórico para os detalhes.",
-          );
-        }
-        if (dispatchResult.deferred > 0) {
-          pending += 1;
-          results.push({
-            ok: true,
-            lead_id: target.lead_id ?? null,
-            phone: target.phone_number ?? null,
-            error: "Ligação adiada pela política de contato ou disponibilidade do provedor.",
-          });
-        } else {
-          queued += 1;
-          results.push({
-            ok: true,
-            lead_id: target.lead_id ?? null,
-            phone: target.phone_number ?? null,
-          });
-        }
-      } catch (err) {
+      // 4. dispara
+      const dispatchResult = await runVoiceQueueDispatcher(1, q.id);
+      if (dispatchResult.insufficientBalance > 0) {
+        // The dispatcher already marked the item failed (saldo_insuficiente);
+        // reported as-is, without the catch below overwriting that status.
         failed += 1;
-        const msg = err instanceof Error ? err.message : String(err);
-        // Registra a falha no item criado para que a fila não o apresente
-        // como se estivesse aguardando o provedor.
-        if (queueId) {
-          await supabase
-            .from("call_queue")
-            .update({
-              status: "failed",
-              provider_status: "dispatch_preparation_failed",
-              provider_response: { stage: "dispatch_preparation", error: msg } as any,
-            } as any)
-            .eq("id", queueId);
-        }
         results.push({
           ok: false,
           lead_id: target.lead_id ?? null,
           phone: target.phone_number ?? null,
-          error: msg,
+          error: VOICE_INSUFFICIENT_BALANCE_MESSAGE,
+        });
+        // PG3: the house's wallet is empty, so every next target would be
+        // refused too. Stop here; the rest is reported, never queued.
+        for (const rest of data.targets.slice(index + 1)) {
+          notAttempted += 1;
+          results.push({
+            ok: false,
+            lead_id: rest.lead_id ?? null,
+            phone: rest.phone_number ?? null,
+            error: VOICE_NOT_ATTEMPTED_MESSAGE,
+            not_attempted: true,
+          });
+        }
+        break;
+      }
+      if (dispatchResult.failed > 0) {
+        throw new Error(
+          "Não foi possível concluir o envio de voz. Consulte o histórico para os detalhes.",
+        );
+      }
+      if (dispatchResult.deferred > 0) {
+        pending += 1;
+        results.push({
+          ok: true,
+          lead_id: target.lead_id ?? null,
+          phone: target.phone_number ?? null,
+          error: "Ligação adiada pela política de contato ou disponibilidade do provedor.",
+        });
+      } else {
+        queued += 1;
+        results.push({
+          ok: true,
+          lead_id: target.lead_id ?? null,
+          phone: target.phone_number ?? null,
         });
       }
+    } catch (err) {
+      failed += 1;
+      const msg = err instanceof Error ? err.message : String(err);
+      // Registra a falha no item criado para que a fila não o apresente
+      // como se estivesse aguardando o provedor.
+      if (queueId) {
+        await supabase
+          .from("call_queue")
+          .update({
+            status: "failed",
+            provider_status: "dispatch_preparation_failed",
+            provider_response: { stage: "dispatch_preparation", error: msg } as any,
+          } as any)
+          .eq("id", queueId);
+      }
+      results.push({
+        ok: false,
+        lead_id: target.lead_id ?? null,
+        phone: target.phone_number ?? null,
+        error: msg,
+      });
     }
+  }
 
-    console.log(`[calls] bulk dispatch: total=${data.targets.length} ok=${queued} fail=${failed}`);
-    return { total: data.targets.length, queued, pending, failed, scheduled: isScheduled, results };
-  });
+  console.log(
+    `[calls] bulk dispatch: total=${data.targets.length} ok=${queued} fail=${failed} not_attempted=${notAttempted}`,
+  );
+  return {
+    total: data.targets.length,
+    queued,
+    pending,
+    failed,
+    notAttempted,
+    scheduled: isScheduled,
+    results,
+  };
+}
+
+export const bulkDispatchCalls = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) => bulkDispatchCallsInput.parse(input))
+  .handler(async ({ data, context }) => bulkDispatchCallsFor(context.supabase, data));
 
 // ============================================================
 // DASHBOARD

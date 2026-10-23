@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { timingSafeEqual } from "crypto";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { handleCallCompletion } from "@/lib/call-flows.server";
+import { settleVoiceHistory, voiceCallAnswered } from "@/lib/voice-billing.server";
 
 function authorized(request: Request): boolean {
   const expected = process.env.INFOBIP_VOICE_CALLBACK_TOKEN;
@@ -42,6 +43,9 @@ function durationOf(payload: Record<string, unknown>): number | null {
     "callDuration",
     "call_duration_seconds",
   );
+  // No duration in the event is null, not 0: an answered call without one is
+  // charged the cap (PG3 decision 3), while 0 s counts as unanswered.
+  if (value == null || value === "") return null;
   const seconds = typeof value === "number" ? value : Number(value);
   return Number.isFinite(seconds) && seconds >= 0 ? Math.round(seconds) : null;
 }
@@ -99,6 +103,20 @@ async function releaseVoicePermit(providerResponse: Record<string, unknown>): Pr
   }
 }
 
+const HISTORY_COLUMNS =
+  "id, call_queue_id, provider_call_id, provider_response, tenant_id, status, billing_reference_id, billing_settled_at";
+
+type HistoryRow = {
+  id: string;
+  call_queue_id: string | null;
+  provider_call_id: string | null;
+  provider_response: unknown;
+  tenant_id?: string | null;
+  status?: string | null;
+  billing_reference_id?: string | null;
+  billing_settled_at?: string | null;
+};
+
 export const Route = createFileRoute("/api/public/infobip/voice/events")({
   server: {
     handlers: {
@@ -116,26 +134,26 @@ export const Route = createFileRoute("/api/public/infobip/voice/events")({
           return Response.json({ ok: true, skipped: "missing_correlation" });
         const result = completion(payload);
         const duration = durationOf(payload);
-        let history = null;
+        let history: HistoryRow | null = null;
         if (callId) {
           const { data } = await supabaseAdmin
             .from("call_history")
-            .select("id, call_queue_id, provider_call_id, provider_response")
+            .select(HISTORY_COLUMNS)
             .eq("provider_call_id", callId)
             .order("created_at", { ascending: false })
             .limit(1)
             .maybeSingle();
-          history = data;
+          history = data as HistoryRow | null;
         }
         if (!history && correlation) {
           const { data } = await supabaseAdmin
             .from("call_history")
-            .select("id, call_queue_id, provider_call_id, provider_response")
+            .select(HISTORY_COLUMNS)
             .contains("provider_response", { correlation_id: correlation })
             .order("created_at", { ascending: false })
             .limit(1)
             .maybeSingle();
-          history = data;
+          history = data as HistoryRow | null;
         }
         const previous =
           history?.provider_response && typeof history.provider_response === "object"
@@ -178,6 +196,20 @@ export const Route = createFileRoute("/api/public/infobip/voice/events")({
           if (queueUpdateError) throw queueUpdateError;
         }
         if (result && result !== "answered") {
+          // PG3: the final event settles the call's reservation by real use.
+          // A repeated final event finds billing_settled_at and does nothing;
+          // if two race, the shared key makes the second a replay.
+          if (history?.billing_reference_id && history.tenant_id && !history.billing_settled_at) {
+            await settleVoiceHistory({
+              tenantId: history.tenant_id,
+              referenceId: history.billing_reference_id,
+              historyId: history.id,
+              durationSeconds: duration,
+              // The status read BEFORE this event's update: 'answered' means
+              // the CML was fetched (cml.ts) or an earlier ANSWERED event came.
+              answered: voiceCallAnswered(history),
+            });
+          }
           await releaseVoicePermit(previous);
           await handleCallCompletion({
             providerCallId: callId ?? history?.provider_call_id ?? correlation ?? "",

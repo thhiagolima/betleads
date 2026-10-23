@@ -632,6 +632,47 @@ describe("runJourneyDispatcher", () => {
     ]);
   });
 
+  it("voice: a failed call_history insert is logged with reference and correlation; the step still counts as sent (PG3 Task 5)", async () => {
+    seed(["e1"]);
+    fake.tables.journey_steps = [
+      {
+        id: "step-0",
+        journey_id: JOURNEY,
+        position: 0,
+        step_type: "voice",
+        is_enabled: true,
+        config: { asset_id: "a1" },
+      },
+    ];
+    fake.tables.journey_voice_assets = [{ id: "a1", tenant_id: TENANT, storage_path: "x.mp3" }];
+    const signed = vi.spyOn(fake.client.storage, "from").mockReturnValue({
+      createSignedUrl: async () => ({ data: { signedUrl: "https://a/x.mp3" }, error: null }),
+    } as never);
+    const originalFrom = fake.client.from;
+    const from = vi.spyOn(fake.client, "from").mockImplementation(((table: string) =>
+      table === "call_history"
+        ? { insert: async () => ({ error: { message: "insert failed" } }) }
+        : originalFrom(table)) as never);
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    voice.callInfobipVoice.mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: { callId: "call-1" },
+      idempotencyKey: "key-1",
+      providerCallId: "call-1",
+      billing: { referenceId: "voice:key-1", units: 2 },
+    });
+    const result = await runJourneyDispatcher(1000);
+    signed.mockRestore();
+    from.mockRestore();
+    expect(result).toMatchObject({ processed: 1, failed: 0 });
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining("call_history"),
+      expect.objectContaining({ referenceId: "voice:key-1", correlationId: "key-1" }),
+    );
+    consoleError.mockRestore();
+  });
+
   it("voice: passes the wallet refusal through as errorKind insufficient_balance (PG3 Task 4)", async () => {
     seed(["e1"]);
     fake.tables.journey_steps = [

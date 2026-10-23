@@ -13,7 +13,15 @@ const voice = vi.hoisted(() => ({ callInfobipVoice: vi.fn() }));
 vi.mock("@/integrations/supabase/client.server", async () => {
   const { createFakeDb } = await import("./sms-bulk.test-support");
   fake.db = createFakeDb();
-  return { supabaseAdmin: fake.db.client };
+  const storage = {
+    from: () => ({
+      createSignedUrl: async (path: string) => ({
+        data: { signedUrl: `https://signed.example/${path}` },
+        error: null,
+      }),
+    }),
+  };
+  return { supabaseAdmin: { ...fake.db.client, storage } };
 });
 vi.mock("./infobip-voice.server", () => ({
   callInfobipVoice: voice.callInfobipVoice,
@@ -127,5 +135,90 @@ describe("runVoiceQueueDispatcher wallet refusal", () => {
     expect(fake.db.rows("call_history")).toEqual([
       expect.objectContaining({ call_queue_id: "q1", billing_reference_id: "voice:key-1" }),
     ]);
+  });
+
+  it("a failed call_history insert is logged with the reference and correlation; the dispatch still counts", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    seedQueueItem();
+    voice.callInfobipVoice.mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: { callId: "call-1" },
+      idempotencyKey: "key-1",
+      providerCallId: "call-1",
+      billing: { referenceId: "voice:key-1", units: 5 },
+    });
+    fake.db.failNext("call_history", "insert", "insert failed");
+    const result = await runVoiceQueueDispatcher(10);
+    expect(result).toMatchObject({ dispatched: 1, failed: 0 });
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining("call_history"),
+      expect.objectContaining({ referenceId: "voice:key-1", correlationId: "key-1" }),
+    );
+    expect(queueItem()).toMatchObject({ status: "waiting_provider" });
+    consoleError.mockRestore();
+  });
+});
+
+describe("runVoiceQueueDispatcher reservation cap (addendum d)", () => {
+  it("uses the queued audio generation's duration as maxSeconds", async () => {
+    seedQueueItem();
+    Object.assign(queueItem(), { audio_generation_id: "gen-1" });
+    fake.db.rows("call_audio_generations").push({ id: "gen-1", tenant_id: TENANT, duration_seconds: 42 });
+    voice.callInfobipVoice.mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: {},
+      idempotencyKey: "key-1",
+      providerCallId: "call-1",
+    });
+    await runVoiceQueueDispatcher(10);
+    expect(voice.callInfobipVoice).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.anything(),
+      expect.objectContaining({ tenantId: TENANT, maxSeconds: 42 }),
+    );
+  });
+
+  it("uses the library asset's duration for a fixed audio", async () => {
+    seedQueueItem();
+    Object.assign(queueItem(), { voice_asset_id: "asset-1" });
+    fake.db.rows("journey_voice_assets").push({
+      id: "asset-1",
+      tenant_id: TENANT,
+      storage_path: "a.mp3",
+      is_archived: false,
+      duration_seconds: 33,
+    });
+    voice.callInfobipVoice.mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: {},
+      idempotencyKey: "key-1",
+      providerCallId: "call-1",
+    });
+    await runVoiceQueueDispatcher(10);
+    expect(voice.callInfobipVoice).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.anything(),
+      expect.objectContaining({ maxSeconds: 33 }),
+    );
+  });
+
+  it("without a known duration passes null (the env default applies)", async () => {
+    seedQueueItem();
+    voice.callInfobipVoice.mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: {},
+      idempotencyKey: "key-1",
+      providerCallId: "call-1",
+    });
+    await runVoiceQueueDispatcher(10);
+    expect(voice.callInfobipVoice).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.anything(),
+      expect.objectContaining({ maxSeconds: null }),
+    );
   });
 });
