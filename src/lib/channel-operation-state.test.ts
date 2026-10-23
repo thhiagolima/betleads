@@ -6,6 +6,7 @@ import {
   getChannelOperationState,
   groupVoiceQueueItems,
   isFinishedCampaignStatus,
+  isPausedCampaignStatus,
 } from "./channel-operation-state";
 
 describe("getChannelOperationState", () => {
@@ -148,6 +149,26 @@ describe("groupVoiceQueueItems", () => {
     ).toBe("paused_limit");
     expect(status([{ id: "a", status: "failed", scheduled_at: at(-1) }])).toBe("falhou");
     expect(status([{ id: "a", status: "cancelled", scheduled_at: at(-1) }])).toBe("cancelada");
+  });
+});
+
+describe("isPausedCampaignStatus", () => {
+  it("covers SMS/e-mail 'pausada' and the voice paused states", () => {
+    for (const status of ["pausada", "Pausada ", "paused", "paused_limit"]) {
+      expect(isPausedCampaignStatus(status)).toBe(true);
+    }
+    for (const status of [
+      "agendada",
+      "enviando",
+      "concluida",
+      "falhou",
+      "cancelada",
+      "",
+      null,
+      undefined,
+    ]) {
+      expect(isPausedCampaignStatus(status)).toBe(false);
+    }
   });
 });
 

@@ -65,6 +65,13 @@ export function isFinishedCampaignStatus(status: string | null | undefined): boo
   return FINISHED_STATUSES.includes((status ?? "").trim().toLowerCase());
 }
 
+const PAUSED_STATUSES = ["pausada", "paused", "paused_limit"];
+
+/** True for a paused campaign (SMS/e-mail "pausada", voice "paused"/"paused_limit"). */
+export function isPausedCampaignStatus(status: string | null | undefined): boolean {
+  return PAUSED_STATUSES.includes((status ?? "").trim().toLowerCase());
+}
+
 export function getChannelOperationState(
   status: string | null | undefined,
   channel: ChannelOperation,

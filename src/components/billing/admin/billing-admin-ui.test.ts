@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   adminBillingDashboardCards,
   adminTenantSituationLabel,
+  billingAlertTestMessage,
+  billingHealthSummary,
   canSubmitReason,
   validateCalendarDate,
   validateDiscountDateRange,
@@ -224,5 +226,31 @@ describe("validatePixFeeFixedCents", () => {
     expect(validatePixFeeFixedCents("1001").valid).toBe(false);
     expect(validatePixFeeFixedCents("1.5").valid).toBe(false);
     expect(validatePixFeeFixedCents("").valid).toBe(false);
+  });
+});
+
+describe("billing health card (PG6-03)", () => {
+  it("summarizes an all-clear report in green", () => {
+    expect(billingHealthSummary({ ok: true, findings: [] })).toEqual({
+      tone: "ok",
+      title: "Tudo certo com a cobrança",
+    });
+  });
+
+  it("is a warning with only warnings, critical with any critical finding", () => {
+    expect(
+      billingHealthSummary({ ok: true, findings: [{ severity: "warning" }] }),
+    ).toMatchObject({ tone: "warning" });
+    expect(
+      billingHealthSummary({ ok: false, findings: [{ severity: "warning" }, { severity: "critical" }] }),
+    ).toEqual({ tone: "critical", title: "1 problema crítico na cobrança" });
+    expect(
+      billingHealthSummary({ ok: false, findings: [{ severity: "critical" }, { severity: "critical" }] }),
+    ).toMatchObject({ title: "2 problemas críticos na cobrança" });
+  });
+
+  it("tells where the test alert went", () => {
+    expect(billingAlertTestMessage("sentry")).toMatch(/Sentry/);
+    expect(billingAlertTestMessage("log")).toMatch(/\[billing-alert\]/);
   });
 });

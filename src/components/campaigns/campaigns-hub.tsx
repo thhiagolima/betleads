@@ -25,6 +25,7 @@ import {
   getChannelOperationState,
   groupVoiceQueueItems,
   isFinishedCampaignStatus,
+  isPausedCampaignStatus,
   type VoiceQueueItem,
 } from "@/lib/channel-operation-state";
 import {
@@ -43,12 +44,13 @@ import { CampaignBlockedBadge } from "@/components/house-config/campaign-blocked
 import { listCallQueue } from "@/lib/calls.functions";
 import { deleteCampaignDraft, listCampaignDrafts } from "@/lib/campaign-drafts.functions";
 
-type CampaignStatus = "todos" | "agendadas" | "enviando" | "finalizadas";
+type CampaignStatus = "todos" | "agendadas" | "enviando" | "pausadas" | "finalizadas";
 
 const STATUS_FILTERS: ReadonlyArray<{ value: CampaignStatus; label: string }> = [
   { value: "todos", label: "Todas" },
   { value: "agendadas", label: "Agendadas" },
   { value: "enviando", label: "Enviando" },
+  { value: "pausadas", label: "Pausadas" },
   { value: "finalizadas", label: "Finalizadas" },
 ];
 
@@ -65,6 +67,8 @@ function matchesStatus(filter: CampaignStatus, status: string) {
   if (filter === "todos") return true;
   if (filter === "agendadas") return ["agendada", "scheduled"].includes(status);
   if (filter === "enviando") return status === "enviando";
+  // SMS/e-mail "pausada" (e.g. paused for balance) and voice "paused"/"paused_limit".
+  if (filter === "pausadas") return isPausedCampaignStatus(status);
   return isFinishedCampaignStatus(status);
 }
 type Campaign = {

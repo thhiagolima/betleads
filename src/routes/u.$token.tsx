@@ -21,7 +21,9 @@ export const lookupUnsubscribe = createServerFn({ method: "POST" })
     // mascarando o email no retorno (j***@dominio.com)
     const email = row.email as string;
     const [u, dom] = email.split("@");
-    const masked = u ? `${u[0]}${"*".repeat(Math.max(1, u.length - 2))}${u.slice(-1)}@${dom}` : email;
+    const masked = u
+      ? `${u[0]}${"*".repeat(Math.max(1, u.length - 2))}${u.slice(-1)}@${dom}`
+      : email;
     return {
       ok: true as const,
       masked,
@@ -29,53 +31,20 @@ export const lookupUnsubscribe = createServerFn({ method: "POST" })
     };
   });
 
-// Plain function behind the server fn: calling it directly (instead of
-// through the createServerFn/SSR-RPC wrapper) is what lets tests exercise
-// this logic without a request context.
-export async function confirmUnsubscribeFor(data: { token: string }) {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { suppressEmail } = await import("@/lib/email-deliverability.server");
-  const { checkDemoTenant } = await import("@/lib/tenant-access.server");
-  const { data: row } = await supabaseAdmin
-    .from("email_unsubscribe_tokens")
-    .select("email, tenant_id, used_at")
-    .eq("token", data.token)
-    .maybeSingle();
-  if (!row) return { ok: false as const, reason: "not_found" as const };
-  // Demo tenant: render the normal confirmation UI but write nothing — no
-  // suppression, token not marked used. R11: a lookup failure here is never
-  // treated as "not demo" (that would suppress/mark-used on an unverified
-  // tenant) — it propagates and surfaces as the route's existing error/
-  // retry state instead of the success page.
-  const tenantId = (row.tenant_id as string | null) ?? null;
-  if (tenantId && (await checkDemoTenant(tenantId)) === "demo") {
-    return { ok: true as const };
-  }
-  // Suprime antes de marcar o token: se a supressão falhar, o link continua
-  // válido para uma nova tentativa em vez de mostrar "concluído" sem efeito.
-  await suppressEmail(row.email as string, "unsubscribe", tenantId, "user clicked unsubscribe link");
-  if (!row.used_at) {
-    const { error } = await supabaseAdmin
-      .from("email_unsubscribe_tokens")
-      .update({ used_at: new Date().toISOString() })
-      .eq("token", data.token);
-    if (error) throw new Error(`Falha ao registrar o descadastro: ${error.message}`);
-  }
-  return { ok: true as const };
-}
-
 export const confirmUnsubscribe = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => TokenInput.parse(d))
-  .handler(async ({ data }) => confirmUnsubscribeFor(data));
+  .handler(async ({ data }) => {
+    // Server-only logic lives in unsubscribe.server.ts, imported only here so
+    // client.server and friends never reach the client bundle.
+    const { confirmUnsubscribeFor } = await import("@/lib/unsubscribe.server");
+    return confirmUnsubscribeFor(data);
+  });
 
 // ---- rota ----
 
 export const Route = createFileRoute("/u/$token")({
   head: () => ({
-    meta: [
-      { title: "Descadastrar email" },
-      { name: "robots", content: "noindex,nofollow" },
-    ],
+    meta: [{ title: "Descadastrar email" }, { name: "robots", content: "noindex,nofollow" }],
   }),
   loader: async ({ params }) => lookupUnsubscribe({ data: { token: params.token } }),
   component: UnsubscribePage,
@@ -132,9 +101,7 @@ function UnsubscribePage() {
         {state === "loading" ? "Processando…" : "Sim, me descadastrar"}
       </button>
       {state === "error" && (
-        <p style={{ ...P, color: "#b91c1c" }}>
-          Algo deu errado. Tente recarregar a página.
-        </p>
+        <p style={{ ...P, color: "#b91c1c" }}>Algo deu errado. Tente recarregar a página.</p>
       )}
     </Shell>
   );

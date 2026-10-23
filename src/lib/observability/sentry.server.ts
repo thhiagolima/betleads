@@ -20,7 +20,14 @@ export type ServerCaptureContext = {
   tenantId?: string | null;
   tags?: Record<string, TagValue>;
   extra?: Record<string, unknown>;
+  /** Groups repeated events into one Sentry issue (e.g. ["billing-alert", code]). */
+  fingerprint?: string[];
 };
+
+/** True when the server Sentry client is initialized (SENTRY_DSN set, instrument.mjs loaded). */
+export function isServerSentryActive(): boolean {
+  return isSentryActive();
+}
 
 function isSentryActive(): boolean {
   try {
@@ -33,6 +40,7 @@ function isSentryActive(): boolean {
 type ScopeLike = {
   setTag: (key: string, value: string | number | boolean) => unknown;
   setExtras: (extras: Record<string, unknown>) => unknown;
+  setFingerprint: (fingerprint: string[]) => unknown;
 };
 
 function applyContext(scope: ScopeLike, context: ServerCaptureContext | undefined): void {
@@ -44,6 +52,9 @@ function applyContext(scope: ScopeLike, context: ServerCaptureContext | undefine
       if (value === null || value === undefined) continue;
       scope.setTag(key, value);
     }
+  }
+  if (context.fingerprint && context.fingerprint.length > 0) {
+    scope.setFingerprint(context.fingerprint);
   }
   if (context.extra) {
     // beforeSend scrubs again, but never hand raw payloads to the SDK.

@@ -69,6 +69,7 @@ import {
 } from "@/lib/billing/billing.functions";
 import { adminAdjustSmsCredits, adminSmsCreditConsole } from "@/lib/sms-credits.functions";
 import { BillingDashboardPanel } from "@/components/billing/admin/billing-dashboard-panel";
+import { BillingHealthCard } from "@/components/billing/admin/billing-health-card";
 import {
   BILLING_DASHBOARD_QUERY_KEY,
   BillingTenantListCard,
@@ -209,6 +210,7 @@ function BillingTab() {
   return (
     <div className="space-y-4">
       <BillingDashboardPanel queryKey={BILLING_DASHBOARD_QUERY_KEY} />
+      <BillingHealthCard />
       <BillingTenantListCard />
       <div className="grid gap-4 lg:grid-cols-2">
         <BillingCsvDownloadCard />

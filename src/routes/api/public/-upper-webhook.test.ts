@@ -16,6 +16,11 @@ vi.mock("@/integrations/supabase/client.server", async () => {
 const { confirmChargeFromUpper } = vi.hoisted(() => ({ confirmChargeFromUpper: vi.fn() }));
 vi.mock("@/lib/billing/payment-charges.server", () => ({ confirmChargeFromUpper }));
 
+const { recordBillingSignal } = vi.hoisted(() => ({
+  recordBillingSignal: vi.fn(async () => undefined),
+}));
+vi.mock("@/lib/billing/billing-signals.server", () => ({ recordBillingSignal }));
+
 import { createFakeDb } from "@/lib/sms-bulk.test-support";
 import { Route } from "./upper/webhook";
 
@@ -50,6 +55,7 @@ function signedPost(bodyObj: unknown, extraHeaders: Record<string, string> = {})
 beforeEach(() => {
   fake.admin.reset();
   confirmChargeFromUpper.mockReset();
+  recordBillingSignal.mockClear();
   confirmChargeFromUpper.mockResolvedValue({ outcome: "credited" });
   vi.stubEnv("UPPER_WEBHOOK_SECRET", SECRET);
 });
@@ -66,6 +72,20 @@ describe("POST /api/public/upper/webhook", () => {
     expect(response.status).toBe(400);
     expect(fake.admin.rows("payment_webhook_events")).toHaveLength(0);
     expect(confirmChargeFromUpper).not.toHaveBeenCalled();
+  });
+
+  it("records an invalid-signature billing signal (reason only) on a bad or missing signature", async () => {
+    const body = JSON.stringify({ id: "evt-bad-sig-2", event: "charge.paid" });
+    await post(body, { "x-upper-signature": "t=1,v1=" + "0".repeat(64) });
+    await post(body);
+    expect(recordBillingSignal).toHaveBeenCalledTimes(2);
+    expect(recordBillingSignal).toHaveBeenNthCalledWith(1, "webhook_invalid_signature", "mismatch");
+    expect(recordBillingSignal).toHaveBeenNthCalledWith(2, "webhook_invalid_signature", "missing");
+  });
+
+  it("does not record a signal for a valid signature", async () => {
+    await signedPost({ id: "evt-valid-no-signal", event: "ping" });
+    expect(recordBillingSignal).not.toHaveBeenCalled();
   });
 
   it("answers 500 when UPPER_WEBHOOK_SECRET is not configured", async () => {

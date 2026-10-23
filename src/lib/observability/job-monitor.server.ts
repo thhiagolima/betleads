@@ -19,6 +19,7 @@
 //   webhook_replay          BETTERSTACK_HEARTBEAT_WEBHOOK_REPLAY
 //   shortio_sync            BETTERSTACK_HEARTBEAT_SHORTIO_SYNC
 //   recovery                BETTERSTACK_HEARTBEAT_RECOVERY
+//   billing-health          BETTERSTACK_HEARTBEAT_BILLING_HEALTH (ping only, billing-health.server.ts)
 //   (any other job name)    BETTERSTACK_HEARTBEAT_<JOB in upper snake case>
 //
 // Success (status succeeded/partial) pings `<url>`; failure pings `<url>/fail`.
