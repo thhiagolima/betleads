@@ -167,6 +167,11 @@ export function BulkCallTab() {
         failed: res.failed,
         results: (res.results ?? []) as DispatchResult[],
       });
+      // PG3: the run stops at the first "Saldo insuficiente"; the rest is
+      // reported apart (it was never queued nor dialed).
+      const notAttempted = Number(res.notAttempted ?? 0);
+      const notAttemptedNote =
+        notAttempted > 0 ? `, ${notAttempted} não tentadas por saldo insuficiente` : "";
       if (res.failed === 0 && (res.pending ?? 0) === 0) {
         toast.success(`${res.queued} ligações disparadas`);
       } else if (res.failed === 0) {
@@ -174,11 +179,11 @@ export function BulkCallTab() {
       } else if (res.queued === 0) {
         const firstErr = (res.results ?? []).find((r: DispatchResult) => !r.ok);
         const parsed = parseProviderError(firstErr?.error);
-        toast.error(`Falha em todas (${res.failed})`, {
+        toast.error(`Falha em todas (${res.failed})${notAttemptedNote}`, {
           description: parsed.message,
         });
       } else {
-        toast.warning(`${res.queued} disparadas, ${res.failed} falharam`);
+        toast.warning(`${res.queued} disparadas, ${res.failed} falharam${notAttemptedNote}`);
       }
     },
     onError: (e: any) => toast.error(e?.message ?? "Falha no disparo em massa"),

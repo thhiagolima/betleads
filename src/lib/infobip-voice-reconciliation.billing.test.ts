@@ -150,6 +150,26 @@ describe("settleStaleVoiceReservations", () => {
     });
   });
 
+  it("final event processed: a completed call with a duration but no CML record is answered", async () => {
+    reservation("voice:final-dur");
+    history("voice:final-dur", { status: "completed", result: "completed", duration_seconds: 50 });
+    await settleStaleVoiceReservations();
+    expect(wallet.settleVoiceCall).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ answered: true, durationSeconds: 50 }),
+    );
+  });
+
+  it("final event processed: busy with a duration stays unanswered", async () => {
+    reservation("voice:final-busy");
+    history("voice:final-busy", { status: "failed", result: "busy", duration_seconds: 12 });
+    await settleStaleVoiceReservations();
+    expect(wallet.settleVoiceCall).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ answered: false }),
+    );
+  });
+
   it("skips reservations already reversed, younger than 24 h, of other items, or of demo houses", async () => {
     const refunded = reservation("voice:refunded");
     fake.db.rows("wallet_ledger").push({

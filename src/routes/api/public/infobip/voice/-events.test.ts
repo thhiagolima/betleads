@@ -360,6 +360,57 @@ describe("Infobip voice event callback", () => {
       );
     });
 
+    it("completed with a duration but no CML record counts as answered, with a warning (fix 1)", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      from
+        .mockReturnValueOnce(billedHistory({ status: "pending" }))
+        .mockReturnValueOnce(updateQuery())
+        .mockReturnValueOnce(updateQuery());
+      settleVoiceCall.mockResolvedValue(settledResult(2, 0.18));
+      await send({ status: "COMPLETED", duration: 45 });
+      expect(settleVoiceCall).toHaveBeenCalledWith(expect.anything(), {
+        tenantId: TENANT,
+        referenceId: REF,
+        durationSeconds: 45,
+        answered: true,
+      });
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("divergem"),
+        expect.objectContaining({ callId: "provider-call" }),
+      );
+    });
+
+    it("a CML record with a 0 s completion still counts as answered, with a warning (fix 1)", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      from
+        .mockReturnValueOnce(billedHistory({ status: "answered" }))
+        .mockReturnValueOnce(updateQuery())
+        .mockReturnValueOnce(updateQuery());
+      settleVoiceCall.mockResolvedValue(settledResult(0, 0));
+      await send({ status: "COMPLETED", duration: 0 });
+      expect(settleVoiceCall).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ answered: true, durationSeconds: 0 }),
+      );
+      expect(warn).toHaveBeenCalled();
+    });
+
+    it.each(["BUSY", "NO_ANSWER", "FAILED"])(
+      "%s with a duration stays unanswered (fix 1)",
+      async (status) => {
+        from
+          .mockReturnValueOnce(billedHistory({ status: "pending" }))
+          .mockReturnValueOnce(updateQuery())
+          .mockReturnValueOnce(updateQuery());
+        settleVoiceCall.mockResolvedValue(settledResult(0, 0));
+        await send({ status, duration: 25 });
+        expect(settleVoiceCall).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({ answered: false }),
+        );
+      },
+    );
+
     it("an intermediate ANSWERED event never settles", async () => {
       from.mockReturnValueOnce(billedHistory()).mockReturnValueOnce(updateQuery());
       await send({ status: "ANSWERED" });
@@ -393,6 +444,149 @@ describe("Infobip voice event callback", () => {
       await send({ status: "COMPLETED", duration: 40 });
       expect(handleCallCompletion).toHaveBeenCalled();
       expect(console.error).toHaveBeenCalled();
+    });
+  });
+
+  describe("Infobip delivery-report shape (fix 2)", () => {
+    const TENANT = "00000000-0000-4000-8000-000000000001";
+    const REF = "voice:key-1";
+
+    // Fixture modelled on Infobip's voice delivery report (results[]).
+    function report(overrides: Record<string, unknown> = {}) {
+      return {
+        results: [
+          {
+            bulkId: "bulk-1",
+            messageId: "provider-call",
+            to: "5511999999999",
+            sentAt: "2026-10-22T12:00:00.000+0000",
+            doneAt: "2026-10-22T12:01:00.000+0000",
+            status: {
+              groupId: 3,
+              groupName: "DELIVERED",
+              id: 5,
+              name: "DELIVERED_TO_HANDSET",
+              description: "Message delivered to handset",
+            },
+            error: { groupId: 0, groupName: "OK", id: 5000, name: "NO_ERROR", permanent: false },
+            voiceCall: {
+              feature: "Voice-Message",
+              startTime: "2026-10-22T12:00:10.000+0000",
+              endTime: "2026-10-22T12:00:52.000+0000",
+              duration: 42,
+              chargedDuration: 60,
+            },
+            ...overrides,
+          },
+        ],
+      };
+    }
+
+    function lookupFor(status = "pending") {
+      return historyLookup({
+        id: "history-report",
+        call_queue_id: null,
+        provider_call_id: "provider-call",
+        provider_response: {},
+        tenant_id: TENANT,
+        status,
+        billing_reference_id: REF,
+        billing_settled_at: null,
+      });
+    }
+
+    async function sendReport(body: Record<string, unknown>) {
+      const response = await post({
+        request: new Request(
+          "https://betleads.io/api/public/infobip/voice/events?token=callback-secret",
+          { method: "POST", body: JSON.stringify(body) },
+        ),
+      });
+      expect(response.status).toBe(200);
+      return response.json();
+    }
+
+    beforeEach(() => {
+      vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      settleVoiceCall.mockResolvedValue({
+        ok: true,
+        idempotent: false,
+        blocks: 0,
+        billedAmount: 0,
+        amount: 0,
+        balance: 10,
+      });
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("DELIVERED with a duration: completed, correlated by messageId, settled as answered", async () => {
+      const lookup = lookupFor("answered");
+      const historyUpdate = updateQuery();
+      from.mockReturnValueOnce(lookup).mockReturnValueOnce(historyUpdate).mockReturnValueOnce(updateQuery());
+      const body = await sendReport(report());
+      expect(body).toMatchObject({ matched: true, status: "completed", duration_seconds: 42 });
+      expect(lookup.eq).toHaveBeenCalledWith("provider_call_id", "provider-call");
+      expect(historyUpdate.update).toHaveBeenCalledWith(
+        expect.objectContaining({ status: "completed", result: "completed", duration_seconds: 42, error_message: null }),
+      );
+      expect(settleVoiceCall).toHaveBeenCalledWith(expect.anything(), {
+        tenantId: TENANT,
+        referenceId: REF,
+        durationSeconds: 42,
+        answered: true,
+      });
+      expect(handleCallCompletion).toHaveBeenCalledWith({
+        providerCallId: "provider-call",
+        status: "completed",
+        durationSeconds: 42,
+      });
+    });
+
+    it("a callId in the report wins over messageId", async () => {
+      const lookup = lookupFor();
+      from.mockReturnValueOnce(lookup).mockReturnValueOnce(updateQuery()).mockReturnValueOnce(updateQuery());
+      await sendReport(report({ callId: "call-xyz" }));
+      expect(lookup.eq).toHaveBeenCalledWith("provider_call_id", "call-xyz");
+    });
+
+    it.each([
+      [{ status: { groupName: "UNDELIVERABLE", name: "UNDELIVERABLE_NOT_DELIVERED" }, error: { name: "NO_ANSWER" } }, "not_answered"],
+      [{ status: { groupName: "UNDELIVERABLE", name: "UNDELIVERABLE_NOT_DELIVERED" }, error: { name: "USER_BUSY" } }, "busy"],
+      [{ status: { groupName: "REJECTED", name: "REJECTED_NETWORK" }, error: { name: "EC_ABSENT_SUBSCRIBER" } }, "failed"],
+      [{ status: { groupName: "EXPIRED", name: "EXPIRED_EXPIRED" }, error: { name: "NO_ERROR" } }, "failed"],
+      [{ status: { groupName: "DELIVERED", name: "DELIVERED_TO_HANDSET" }, error: { name: "NO_ANSWER" } }, "not_answered"],
+    ])("%j maps to %s and settles as unanswered", async (overrides, expected) => {
+      from.mockReturnValueOnce(lookupFor()).mockReturnValueOnce(updateQuery()).mockReturnValueOnce(updateQuery());
+      const body = await sendReport(
+        report({ ...overrides, voiceCall: { duration: 0, startTime: null, endTime: null } }),
+      );
+      expect(body).toMatchObject({ status: expected, duration_seconds: 0 });
+      expect(settleVoiceCall).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ answered: false }),
+      );
+    });
+
+    it("DELIVERED with 0 s and no CML record is a completed, unanswered call", async () => {
+      from.mockReturnValueOnce(lookupFor()).mockReturnValueOnce(updateQuery()).mockReturnValueOnce(updateQuery());
+      const body = await sendReport(report({ voiceCall: { duration: 0 } }));
+      expect(body).toMatchObject({ status: "completed", duration_seconds: 0 });
+      expect(settleVoiceCall).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ answered: false, durationSeconds: 0 }),
+      );
+    });
+
+    it("PENDING is not a final event: no settlement", async () => {
+      from.mockReturnValueOnce(lookupFor()).mockReturnValueOnce(updateQuery());
+      const body = await sendReport(
+        report({ status: { groupName: "PENDING", name: "PENDING_ENROUTE" }, voiceCall: undefined }),
+      );
+      expect(body).toMatchObject({ status: null });
+      expect(settleVoiceCall).not.toHaveBeenCalled();
     });
   });
 });

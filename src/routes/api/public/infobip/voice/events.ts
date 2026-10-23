@@ -81,6 +81,150 @@ function errorOf(payload: Record<string, unknown>): string | null {
   return typeof error === "string" && error.trim() ? error.slice(0, 1000) : null;
 }
 
+// --- Infobip delivery-report shape (PG3 Task 5 fix 1) ----------------------
+//
+// Besides the flat event shapes above, Infobip may POST a voice delivery
+// report: `{ results: [{ callId?, messageId?, status: { groupName, name },
+// voiceCall: { duration, startTime, endTime }, error: { name } }] }`. It is
+// parsed defensively here; the flat shapes keep their parser unchanged.
+
+type DeliveryReport = Record<string, unknown>;
+
+function deliveryReportOf(payload: Record<string, unknown>): DeliveryReport | null {
+  const results = payload.results;
+  if (!Array.isArray(results) || results.length === 0) return null;
+  const first = results[0];
+  return first && typeof first === "object" && !Array.isArray(first)
+    ? (first as DeliveryReport)
+    : null;
+}
+
+function objectAt(source: DeliveryReport, key: string): Record<string, unknown> {
+  const value = source[key];
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function upper(value: unknown): string {
+  return typeof value === "string" ? value.toUpperCase() : "";
+}
+
+function reportCallId(report: DeliveryReport): string | null {
+  for (const key of ["callId", "messageId"]) {
+    const value = report[key];
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return null;
+}
+
+function reportCorrelation(report: DeliveryReport): string | null {
+  for (const key of ["callbackData", "customData", "externalId"]) {
+    const value = report[key];
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return null;
+}
+
+function reportDuration(report: DeliveryReport): number | null {
+  const value = objectAt(report, "voiceCall").duration;
+  if (value == null || value === "") return null;
+  const seconds = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(seconds) && seconds >= 0 ? Math.round(seconds) : null;
+}
+
+/**
+ * The error name decides first (NO_ANSWER / BUSY can come with any group);
+ * then the status group: DELIVERED (or an answered-like name) is a completed
+ * call, whose duration decides whether it was answered; REJECTED,
+ * UNDELIVERABLE and EXPIRED are unanswered; PENDING is not final.
+ */
+function reportCompletion(report: DeliveryReport): string | null {
+  const status = objectAt(report, "status");
+  const group = upper(status.groupName);
+  const name = upper(status.name);
+  const errorName = upper(objectAt(report, "error").name);
+  if (errorName.includes("BUSY") || name.includes("BUSY")) return "busy";
+  if (
+    errorName.includes("NO_ANSWER") ||
+    errorName.includes("NOT_ANSWERED") ||
+    name.includes("NO_ANSWER") ||
+    name.includes("NOT_ANSWERED")
+  )
+    return "not_answered";
+  if (group === "REJECTED" || group === "UNDELIVERABLE" || group === "EXPIRED") return "failed";
+  if (group === "DELIVERED" || name.includes("ANSWERED") || name.includes("ESTABLISHED"))
+    return "completed";
+  if (group === "PENDING") return null;
+  return null;
+}
+
+function reportError(report: DeliveryReport): string | null {
+  const error = objectAt(report, "error");
+  const name = upper(error.name);
+  if (!name || name === "NO_ERROR") return null;
+  const description = typeof error.description === "string" ? error.description : "";
+  return `${name}${description ? `: ${description}` : ""}`.slice(0, 1000);
+}
+
+type ParsedEvent = {
+  callId: string | null;
+  payloadCorrelation: string | null;
+  result: string | null;
+  duration: number | null;
+  error: string | null;
+};
+
+function parseEvent(payload: Record<string, unknown>): ParsedEvent {
+  const report = deliveryReportOf(payload);
+  if (report) {
+    return {
+      callId: reportCallId(report),
+      payloadCorrelation: reportCorrelation(report),
+      result: reportCompletion(report),
+      duration: reportDuration(report),
+      error: reportError(report),
+    };
+  }
+  return {
+    callId: callIdOf(payload),
+    payloadCorrelation: null,
+    result: completion(payload),
+    duration: durationOf(payload),
+    error: errorOf(payload),
+  };
+}
+
+/**
+ * Whether a final event's call was answered (fix round 1): the CML record
+ * (voiceCallAnswered) OR a completed call with a positive duration. busy /
+ * not_answered / failed never count by duration. A disagreement between the
+ * two signals is logged so the rule can be checked against real traffic.
+ */
+function finalAnswered(
+  history: HistoryRow,
+  result: string,
+  duration: number | null,
+  callId: string | null,
+): boolean {
+  const cml = voiceCallAnswered(history);
+  const completedWithDuration = result === "completed" && duration != null && duration > 0;
+  const disagree =
+    (completedWithDuration && !cml) ||
+    (cml && result !== "completed") ||
+    (cml && result === "completed" && duration === 0);
+  if (disagree) {
+    console.warn("[infobip voice events] sinais de atendimento divergem", {
+      callId: callId ?? history.provider_call_id ?? null,
+      historyId: history.id,
+      result,
+      durationSeconds: duration,
+      cmlAnswered: cml,
+    });
+  }
+  return cml || completedWithDuration;
+}
+
 /**
  * The journey dispatcher keeps a voice concurrency permit while the call is
  * ongoing (channel_concurrency_permits, see channel-budget.server.ts) and
@@ -128,12 +272,16 @@ export const Route = createFileRoute("/api/public/infobip/voice/events")({
         } catch {
           return Response.json({ error: "invalid json" }, { status: 400 });
         }
-        const callId = callIdOf(payload);
-        const correlation = correlationOf(request, payload);
+        const parsed = parseEvent(payload);
+        const callId = parsed.callId;
+        const correlation =
+          new URL(request.url).searchParams.get("correlation") ||
+          parsed.payloadCorrelation ||
+          correlationOf(request, payload);
         if (!callId && !correlation)
           return Response.json({ ok: true, skipped: "missing_correlation" });
-        const result = completion(payload);
-        const duration = durationOf(payload);
+        const result = parsed.result;
+        const duration = parsed.duration;
         let history: HistoryRow | null = null;
         if (callId) {
           const { data } = await supabaseAdmin
@@ -172,7 +320,7 @@ export const Route = createFileRoute("/api/public/infobip/voice/events")({
           update.status =
             result === "answered" ? "answered" : result === "completed" ? "completed" : "failed";
           update.result = result;
-          update.error_message = errorOf(payload);
+          update.error_message = parsed.error;
         }
         if (duration != null) update.duration_seconds = duration;
         const { error: historyUpdateError } = await supabaseAdmin
@@ -205,9 +353,10 @@ export const Route = createFileRoute("/api/public/infobip/voice/events")({
               referenceId: history.billing_reference_id,
               historyId: history.id,
               durationSeconds: duration,
-              // The status read BEFORE this event's update: 'answered' means
-              // the CML was fetched (cml.ts) or an earlier ANSWERED event came.
-              answered: voiceCallAnswered(history),
+              // The status read BEFORE this event's update ('answered' means
+              // the CML was fetched, cml.ts, or an earlier ANSWERED event
+              // came) or a completed call with a positive duration.
+              answered: finalAnswered(history, result, duration, callId),
             });
           }
           await releaseVoicePermit(previous);

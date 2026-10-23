@@ -178,6 +178,7 @@ type BillingHistoryRow = {
   tenant_id: string;
   billing_reference_id: string | null;
   status: string | null;
+  result?: string | null;
   duration_seconds: number | null;
   provider_response: unknown;
   created_at: string;
@@ -195,8 +196,8 @@ function chunks<T>(items: T[], size: number): T[][] {
  *   * 'pending': the CML was never fetched, so nobody answered: unanswered;
  *   * 'answered': the CML was fetched, the duration is unknown: keep the cap;
  *   * any other status: the final event WAS processed but its settlement
- *     failed; use what it recorded (answered per voiceCallAnswered, with the
- *     stored duration; null keeps the cap).
+ *     failed; use what it recorded (answered per voiceCallAnswered or a
+ *     completed result with a positive duration; null duration keeps the cap).
  */
 function staleSettlement(row: BillingHistoryRow | undefined): {
   answered: boolean;
@@ -204,7 +205,14 @@ function staleSettlement(row: BillingHistoryRow | undefined): {
 } {
   if (!row || row.status === "pending") return { answered: false, durationSeconds: null };
   if (row.status === "answered") return { answered: true, durationSeconds: null };
-  return { answered: voiceCallAnswered(row), durationSeconds: row.duration_seconds ?? null };
+  // Same rule as the final event (events.ts, fix round 1): the CML record or
+  // a completed call with a positive duration.
+  const completedWithDuration =
+    row.result === "completed" && row.duration_seconds != null && row.duration_seconds > 0;
+  return {
+    answered: voiceCallAnswered(row) || completedWithDuration,
+    durationSeconds: row.duration_seconds ?? null,
+  };
 }
 
 /**
@@ -261,7 +269,7 @@ export async function settleStaleVoiceReservations(
     for (const chunk of chunks(refs, IN_CHUNK)) {
       const { data: rows, error: historyError } = await supabaseAdmin
         .from("call_history")
-        .select("id, tenant_id, billing_reference_id, status, duration_seconds, provider_response, created_at")
+        .select("id, tenant_id, billing_reference_id, status, result, duration_seconds, provider_response, created_at")
         .in("billing_reference_id", chunk);
       if (historyError) throw historyError;
       for (const row of (rows ?? []) as BillingHistoryRow[]) {
