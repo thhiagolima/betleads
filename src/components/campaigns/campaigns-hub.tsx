@@ -173,7 +173,7 @@ export function CampaignsHub() {
     (campaign) => ({
       ...campaign,
       channel: "sms" as const,
-      cancellable: campaign.status === "agendada",
+      cancellable: campaign.status === "agendada" || campaign.status === "pausada",
       resumable: campaign.status === "pausada",
     }),
   );

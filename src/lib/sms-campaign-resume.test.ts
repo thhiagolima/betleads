@@ -1,7 +1,10 @@
 // PG3 final fix I3 — "Retomar" on an SMS campaign paused for lack of balance.
 import { describe, expect, it } from "vitest";
 import { createFakeDb } from "./sms-bulk.test-support";
-import { resumePausedSmsCampaign } from "./sms-campaign-dispatch.server";
+import {
+  cancelSmsCampaignRow,
+  resumePausedSmsCampaign,
+} from "./sms-campaign-dispatch.server";
 
 const TENANT = "00000000-0000-4000-8000-000000000001";
 const OTHER = "00000000-0000-4000-8000-000000000002";
@@ -48,3 +51,38 @@ describe("resumePausedSmsCampaign", () => {
     expect(db.rows("sms_campaigns")[0]).toMatchObject({ status: "pausada" });
   });
 });
+
+// Ruling (final-2): a paused campaign can also be cancelled.
+describe("cancelSmsCampaignRow", () => {
+  const reason = "Cancelada manualmente por a@b.com em 23/10/2026 10:00.";
+
+  it.each(["agendada", "pausada"])("cancels a '%s' campaign and returns its previous status", async (status) => {
+    const db = seed(status);
+    const result = await cancelSmsCampaignRow(db.client, {
+      tenantId: TENANT,
+      campaignId: "camp-1",
+      lastError: reason,
+    });
+    expect(result).toMatchObject({ previousStatus: status, row: { id: "camp-1" } });
+    expect(db.rows("sms_campaigns")[0]).toMatchObject({ status: "cancelada", last_error: reason });
+  });
+
+  it.each(["enviando", "enviado", "falhou", "cancelada"])("refuses a '%s' campaign", async (status) => {
+    const db = seed(status);
+    const result = await cancelSmsCampaignRow(db.client, {
+      tenantId: TENANT,
+      campaignId: "camp-1",
+      lastError: reason,
+    });
+    expect(result).toBeNull();
+    expect(db.rows("sms_campaigns")[0].status).toBe(status);
+  });
+
+  it("never cancels another house's campaign", async () => {
+    const db = seed("pausada", OTHER);
+    expect(
+      await cancelSmsCampaignRow(db.client, { tenantId: TENANT, campaignId: "camp-1", lastError: reason }),
+    ).toBeNull();
+  });
+});
+

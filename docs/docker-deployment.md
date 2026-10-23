@@ -97,9 +97,13 @@ servidor.
 
 ## Reserva de saldo das ligacoes (PG3)
 
+Deploy do PG3 (3 migrations antes do deploy, verificacao e rollback): ver
+`docs/operacoes/RUNBOOK_DEPLOY_PG3_CONSUMO.md`.
+
 Antes de discar, cada ligacao reserva blocos de 30 s da carteira da casa
 (`voice_30s`): `ceil((cap + 10) / 30)` blocos. Sem saldo, a ligacao nao e
-feita ("Saldo insuficiente") e o item nao volta para a fila.
+feita ("Saldo insuficiente"): na fila de voz, os itens da casa continuam
+prontos e voltam 15 min depois; no "Disparar agora", o item falha.
 
 - `VOICE_MAX_CALL_SECONDS`: cap em segundos das ligacoes sem limite conhecido
   (fila de voz e disparo manual). Padrao `120` (5 blocos). Jornadas usam a

@@ -461,6 +461,29 @@ describe("processSmsCampaignTick with sendBatch (ENV-10 bulk)", () => {
     expect(w.batches[1]).toHaveLength(4);
   });
 
+  // Ruling (final-2): an earlier failure in the same batch never replaces
+  // the pause reason.
+  it("no balance after a rejected recipient: the pause reason stays Saldo insuficiente", async () => {
+    const w = batchWorld();
+    let call = 0;
+    w.setBehaviour((key) => {
+      call++;
+      if (call === 1) return { ok: false, error: "rejeitado pelo provedor" };
+      if (call === 2) return { ok: true, pendingConfirmation: true, error: "timeout" };
+      if (call === 3) return { ok: false, insufficientBalance: true, error: "Saldo insuficiente" };
+      w.state.accepted.add(key);
+      return { ok: true };
+    });
+    const r = await processSmsCampaignTick(campaign(recipients(5)), w.deps, { deadline: 45_000 });
+    expect(r).toMatchObject({ status: "pausada", stopReason: "insufficient_balance", failed: 1 });
+    const cursorPatch = w.state.patches.find((p) => "sent_cursor" in p)!;
+    expect(cursorPatch).toMatchObject({ sent_cursor: 2, last_error: "Saldo insuficiente" });
+    expect(lastPatch(w.state.patches)).toMatchObject({
+      status: "pausada",
+      last_error: "Saldo insuficiente",
+    });
+  });
+
   // Final fix I3: the house's wallet refused the reservation.
   it("no balance mid-batch: pauses at that recipient, not failed; resume dedupes the rest", async () => {
     const w = batchWorld();

@@ -59,7 +59,7 @@ import {
   refundForDelivery,
 } from "./billing/wallet.server";
 import { countSmsSegments } from "./sms-segments";
-import { resumePausedSmsCampaign } from "./sms-campaign-dispatch.server";
+import { cancelSmsCampaignRow, resumePausedSmsCampaign } from "./sms-campaign-dispatch.server";
 
 const DEFAULT_SHORT_BRASIL_SINGLE_URL = "http://lp01-short.painelsms.com/bot/single-sms.php";
 const DEFAULT_SHORT_BRASIL_BULK_URL = "http://lp01-short.painelsms.com/bot/bulk-sms.php";
@@ -2238,23 +2238,21 @@ export const cancelScheduledSmsCampaign = createServerFn({ method: "POST" })
       dateStyle: "short",
       timeStyle: "short",
     });
-    const { data: updated, error } = await context.supabase
-      .from("sms_campaigns")
-      .update({ status: "cancelada", last_error: `Cancelada manualmente por ${actor} em ${when}.` })
-      .eq("id", data.id)
-      .eq("tenant_id", tenantId)
-      .eq("status", "agendada")
-      .select("id, name, scheduled_at, total_count")
-      .maybeSingle();
-    if (error) throw new Error(error.message);
-    if (!updated) throw new Error("Campanha não pode mais ser cancelada");
+    // 'agendada' or (Ruling final-2) 'pausada' por saldo.
+    const cancelled = await cancelSmsCampaignRow(context.supabase, {
+      tenantId,
+      campaignId: data.id,
+      lastError: `Cancelada manualmente por ${actor} em ${when}.`,
+    });
+    if (!cancelled) throw new Error("Campanha não pode mais ser cancelada");
+    const updated = cancelled.row;
     const { error: auditError } = await supabaseAdmin.from("tenant_audit_logs").insert({
       tenant_id: tenantId,
       actor_user_id: context.userId,
       action: "sms_campaign.cancelled",
       entity_type: "sms_campaign",
       entity_id: data.id,
-      before_data: { status: "agendada" } as Json,
+      before_data: { status: cancelled.previousStatus } as Json,
       after_data: { status: "cancelada" } as Json,
       metadata: { ...updated, actor_email: actor, cancelled_at: cancelledAt.toISOString() } as Json,
     });

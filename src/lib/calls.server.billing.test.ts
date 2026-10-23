@@ -84,9 +84,8 @@ describe("classifyVoiceDispatchResult", () => {
 describe("runVoiceQueueDispatcher wallet refusal", () => {
   // Coordinator ruling: a wallet refusal never fails a queue item. It stays
   // untouched (audio_ready) and is dialed once the house has balance again.
-  it("an insufficient_balance call stays audio_ready, untouched, and is dialed after a top-up", async () => {
+  it("an insufficient_balance call stays audio_ready (pushed 15 min) and is dialed after a top-up", async () => {
     seedQueueItem();
-    const before = { ...queueItem() };
     voice.callInfobipVoice.mockResolvedValue({
       ok: false,
       status: 0,
@@ -97,8 +96,15 @@ describe("runVoiceQueueDispatcher wallet refusal", () => {
     });
     const result = await runVoiceQueueDispatcher(10);
     expect(result).toMatchObject({ dispatched: 0, deferred: 0, failed: 0, insufficientBalance: 1 });
-    expect(queueItem()).toEqual(before);
+    expect(queueItem()).toMatchObject({ status: "audio_ready", provider_status: "saldo_insuficiente" });
+    expect(Date.parse(String(queueItem().scheduled_at))).toBeGreaterThan(Date.now() + 14 * 60_000);
     expect(fake.db.rows("call_history")).toHaveLength(0);
+
+    // Not due again until the push expires; then dialed once there is balance.
+    voice.callInfobipVoice.mockClear();
+    await runVoiceQueueDispatcher(10);
+    expect(voice.callInfobipVoice).not.toHaveBeenCalled();
+    queueItem().scheduled_at = new Date(Date.now() - 1_000).toISOString();
 
     voice.callInfobipVoice.mockResolvedValue({
       ok: true,
@@ -150,25 +156,82 @@ describe("runVoiceQueueDispatcher wallet refusal", () => {
     );
 
     const byId = (id: string) => fake.db.rows("call_queue").find((r) => r.id === id)!;
-    const aBefore = ["a1", "a2", "a3"].map((id) => ({ ...byId(id) }));
 
     // Two ticks while A has no balance: A loses zero queue items.
     for (let tick = 1; tick <= 2; tick++) {
       voice.callInfobipVoice.mockClear();
       const result = await runVoiceQueueDispatcher(10);
       const tenantsCalled = voice.callInfobipVoice.mock.calls.map((call) => call[2].tenantId);
-      // One refused attempt per tick for A, then the rest of A is skipped.
-      expect(tenantsCalled.filter((t) => t === TENANT)).toHaveLength(1);
-      expect(result).toMatchObject({ failed: 0, insufficientBalance: 1, skippedNoBalance: 2 });
       if (tick === 1) {
+        // One refused attempt for A, then the rest of A is skipped.
+        expect(tenantsCalled.filter((t) => t === TENANT)).toHaveLength(1);
         expect(tenantsCalled.filter((t) => t === OTHER)).toHaveLength(2);
-        expect(result).toMatchObject({ dispatched: 2 });
+        expect(result).toMatchObject({
+          dispatched: 2,
+          failed: 0,
+          insufficientBalance: 1,
+          skippedNoBalance: 2,
+        });
+      } else {
+        // A's items were pushed 15 min: not due in the next tick.
+        expect(tenantsCalled).toHaveLength(0);
       }
-      expect(["a1", "a2", "a3"].map((id) => byId(id))).toEqual(aBefore);
+      for (const id of ["a1", "a2", "a3"]) {
+        expect(byId(id)).toMatchObject({ status: "audio_ready", provider_status: "saldo_insuficiente" });
+      }
     }
     expect(fake.db.rows("call_queue").filter((r) => r.status === "failed")).toHaveLength(0);
     expect(byId("b1").status).toBe("waiting_provider");
     expect(byId("b2").status).toBe("waiting_provider");
+  });
+
+  // Ruling (final-2): a broke house holding >= limit due items older than
+  // everyone else's must never starve the other houses.
+  it("a broke house with >= limit older items never starves house B", async () => {
+    const OTHER = "00000000-0000-4000-8000-000000000002";
+    const LIMIT = 3;
+    const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000).toISOString();
+    const item = (id: string, tenantId: string, minutesAgo: number) => ({
+      id,
+      tenant_id: tenantId,
+      lead_id: null,
+      script_id: null,
+      voice_asset_id: null,
+      phone_number: "5511999999999",
+      audio_url: "https://audio.example/a.mp3",
+      status: "audio_ready",
+      scheduled_at: at(minutesAgo),
+    });
+    for (let i = 0; i < LIMIT + 2; i++) fake.db.rows("call_queue").push(item(`a${i}`, TENANT, 60 - i));
+    fake.db.rows("call_queue").push(item("b1", OTHER, 5), item("b2", OTHER, 4));
+    voice.callInfobipVoice.mockImplementation(async (_to: string, _c: unknown, opts: { tenantId: string }) =>
+      opts.tenantId === TENANT
+        ? {
+            ok: false,
+            status: 0,
+            body: {},
+            idempotencyKey: "k",
+            providerCallId: null,
+            errorKind: "insufficient_balance",
+          }
+        : { ok: true, status: 200, body: {}, idempotencyKey: `k-${Math.random()}`, providerCallId: "c" },
+    );
+
+    // Tick 1: the select is all A (oldest); A is refused and every due A
+    // item is pushed 15 min in one update.
+    await runVoiceQueueDispatcher(LIMIT);
+    // Tick 2: B's items are now at the head and get dialed.
+    await runVoiceQueueDispatcher(LIMIT);
+
+    const rows = fake.db.rows("call_queue");
+    expect(rows.find((r) => r.id === "b1")!.status).toBe("waiting_provider");
+    expect(rows.find((r) => r.id === "b2")!.status).toBe("waiting_provider");
+    const aRows = rows.filter((r) => r.tenant_id === TENANT);
+    expect(aRows).toHaveLength(LIMIT + 2);
+    for (const r of aRows) {
+      expect(r).toMatchObject({ status: "audio_ready", provider_status: "saldo_insuficiente" });
+      expect(Date.parse(String(r.scheduled_at))).toBeGreaterThan(Date.now() + 14 * 60_000);
+    }
   });
 
   it("control: a transport status 0 without errorKind is still re-queued", async () => {

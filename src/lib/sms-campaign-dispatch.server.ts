@@ -516,6 +516,9 @@ export async function processSmsCampaignTick(
         if (o?.error) lastError = o.error;
       }
     }
+    // Ruling (final-2): an earlier failure or pending confirmation in this
+    // batch must not replace the pause reason.
+    if (stop === "insufficient_balance") lastError = SMS_CAMPAIGN_NO_BALANCE_MESSAGE;
     result.sent += batchSent;
     result.deduplicated += batchDedup;
     result.failed += batchFailed;
@@ -600,4 +603,50 @@ export async function resumePausedSmsCampaign(
     .select("id");
   if (error) throw new Error(error.message);
   return Array.isArray(data) && data.length > 0;
+}
+
+type LooseQuery = PromiseLike<{ data: unknown; error: { message: string } | null }> & {
+  select: (columns: string) => LooseQuery;
+  update: (patch: Record<string, unknown>) => LooseQuery;
+  eq: (col: string, value: unknown) => LooseQuery;
+  maybeSingle: () => PromiseLike<{ data: unknown; error: { message: string } | null }>;
+};
+
+/** Statuses a house can still cancel: nothing sent yet, or paused for balance. */
+const CANCELLABLE_SMS_CAMPAIGN_STATUSES = ["agendada", "pausada"];
+
+export type CancelledSmsCampaign = {
+  previousStatus: string;
+  row: { id: string; name: string | null; scheduled_at: string | null; total_count: number | null };
+};
+
+/**
+ * Cancels an 'agendada' or (Ruling final-2) 'pausada' campaign of this house,
+ * keeping the reason in last_error. The update is guarded by the status just
+ * read, so a campaign the dispatcher claimed in between is never cancelled.
+ * Returns null when the campaign is not cancellable.
+ */
+export async function cancelSmsCampaignRow(
+  db: unknown,
+  args: { tenantId: string; campaignId: string; lastError: string },
+): Promise<CancelledSmsCampaign | null> {
+  const from = () => (db as { from: (table: string) => LooseQuery }).from("sms_campaigns");
+  const { data: current, error: readError } = await from()
+    .select("id, status")
+    .eq("id", args.campaignId)
+    .eq("tenant_id", args.tenantId)
+    .maybeSingle();
+  if (readError) throw new Error(readError.message);
+  const previousStatus = (current as { status?: string } | null)?.status;
+  if (!previousStatus || !CANCELLABLE_SMS_CAMPAIGN_STATUSES.includes(previousStatus)) return null;
+  const { data: updated, error } = await from()
+    .update({ status: "cancelada", last_error: args.lastError })
+    .eq("id", args.campaignId)
+    .eq("tenant_id", args.tenantId)
+    .eq("status", previousStatus)
+    .select("id, name, scheduled_at, total_count")
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!updated) return null;
+  return { previousStatus, row: updated as CancelledSmsCampaign["row"] };
 }

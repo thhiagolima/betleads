@@ -296,6 +296,9 @@ export async function audioGenerationSeconds(
 /** Copy shown when the house's wallet refuses a call's reservation. */
 export const VOICE_INSUFFICIENT_BALANCE_MESSAGE = "Saldo insuficiente";
 
+/** How far a house's due items move when its wallet refuses a call. */
+const VOICE_NO_BALANCE_RETRY_MS = 15 * 60_000;
+
 export type VoiceDispatchOutcome = "ok" | "insufficient_balance" | "transient" | "failed";
 
 /**
@@ -448,12 +451,29 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
       });
       const outcome = classifyVoiceDispatchResult(result);
       if (outcome === "insufficient_balance") {
-        // No call was placed and nothing was reserved. The item is left
-        // untouched (still audio_ready, no attempt consumed), like the
-        // house's other items this tick: it is dialed on a later tick once
-        // the house has balance again. Never failed for lack of balance.
+        // No call was placed and nothing was reserved. Never failed for lack
+        // of balance and no attempt consumed: every due audio_ready item of
+        // this house stays ready but moves 15 min out, in one update, so a
+        // broke house holding the oldest items never fills the head of this
+        // select (order by scheduled_at, limit) and starves other houses
+        // (Ruling final-2). Dialed on a later tick once there is balance.
         insufficientBalance++;
         noBalanceTenants.add(item.tenant_id);
+        const { error: pushError } = await supabaseAdmin
+          .from("call_queue")
+          .update({
+            provider_status: "saldo_insuficiente",
+            scheduled_at: new Date(Date.now() + VOICE_NO_BALANCE_RETRY_MS).toISOString(),
+          } as never)
+          .eq("tenant_id", item.tenant_id)
+          .eq("status", "audio_ready")
+          .lte("scheduled_at", now);
+        if (pushError) {
+          console.error("[voice-queue] could not push a house's items without balance", {
+            tenantId: item.tenant_id,
+            error: pushError.message,
+          });
+        }
         continue;
       }
       if (outcome === "transient") {

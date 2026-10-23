@@ -957,9 +957,24 @@ export async function bulkDispatchCallsFor(
       // 4. dispara
       const dispatchResult = await runVoiceQueueDispatcher(1, q.id);
       if (dispatchResult.insufficientBalance > 0) {
-        // The dispatcher left the item untouched (still audio_ready, dialed
-        // once the house has balance again); reported as not sent here,
-        // without the catch below marking it failed.
+        // The queue dispatcher keeps a refused item ready (pushed 15 min),
+        // but a "Disparar agora" call must never be dialed by surprise after
+        // a later top-up (Ruling final-2): only here it is failed with
+        // saldo_insuficiente. Scheduled queue items keep waiting.
+        const { error: failError } = await supabase
+          .from("call_queue")
+          .update({
+            status: "failed",
+            provider_status: "saldo_insuficiente",
+            provider_response: { error: VOICE_INSUFFICIENT_BALANCE_MESSAGE } as any,
+          } as any)
+          .eq("id", q.id);
+        if (failError) {
+          console.error("[calls] could not fail a dispatch-now item without balance", {
+            queueId: q.id,
+            error: failError.message,
+          });
+        }
         failed += 1;
         results.push({
           ok: false,

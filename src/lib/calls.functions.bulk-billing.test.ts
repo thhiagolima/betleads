@@ -61,4 +61,33 @@ describe("bulkDispatchCalls without balance", () => {
       expect.objectContaining({ ok: false, phone: "5511900000004", not_attempted: true }),
     ]);
   });
+
+  // Ruling (final-2): a "Disparar agora" item refused for lack of balance is
+  // failed (saldo_insuficiente), so it is never dialed by surprise after a
+  // later top-up. Only this path; scheduled queue items keep waiting.
+  it("marks the refused dispatch-now item failed with saldo_insuficiente", async () => {
+    calls.runVoiceQueueDispatcher
+      .mockResolvedValueOnce({ dispatched: 1, deferred: 0, failed: 0, insufficientBalance: 0 })
+      .mockResolvedValueOnce({ dispatched: 0, deferred: 0, failed: 0, insufficientBalance: 1 });
+
+    await bulkDispatchCallsFor(fake.db.client as never, {
+      script_id: "00000000-0000-4000-8000-0000000000aa",
+      targets,
+    });
+
+    const [first, refused] = fake.db.rows("call_queue");
+    expect(first.status).toBe("audio_ready");
+    expect(refused).toMatchObject({ status: "failed", provider_status: "saldo_insuficiente" });
+  });
+
+  it("a scheduled bulk send is only queued (never dispatched now, never failed)", async () => {
+    const result = await bulkDispatchCallsFor(fake.db.client as never, {
+      script_id: "00000000-0000-4000-8000-0000000000aa",
+      targets: targets.slice(0, 2),
+      scheduled_at: new Date(Date.now() + 60 * 60_000).toISOString(),
+    });
+    expect(calls.runVoiceQueueDispatcher).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ failed: 0 });
+    expect(fake.db.rows("call_queue").every((r) => r.status === "audio_ready")).toBe(true);
+  });
 });
