@@ -8005,6 +8005,7 @@ export type Database = {
           _invoice: string
           _note: string | null
           _paid_amount_cents: number | null
+          _paid_at?: string | null
           _receipt: string | null
         }
         Returns: Json

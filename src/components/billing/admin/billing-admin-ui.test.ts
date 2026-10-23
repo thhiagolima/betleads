@@ -8,6 +8,7 @@ import {
   validateDiscountDateRange,
   validateFixedDiscountAmount,
   validateManualSettleAmount,
+  validateManualSettlePaidAt,
   validatePercentDiscount,
   validatePixFeeFixedCents,
   validatePixFeePercent,
@@ -91,6 +92,32 @@ describe("validateManualSettleAmount", () => {
     expect(validateManualSettleAmount("0").valid).toBe(false);
     expect(validateManualSettleAmount("-5").valid).toBe(false);
     expect(validateManualSettleAmount("abc").valid).toBe(false);
+  });
+});
+
+describe("validateManualSettlePaidAt", () => {
+  const TODAY = "2026-10-23";
+
+  it("accepts an empty value (server defaults to today)", () => {
+    expect(validateManualSettlePaidAt("", TODAY).valid).toBe(true);
+  });
+
+  it("accepts a past date", () => {
+    expect(validateManualSettlePaidAt("2026-10-01", TODAY).valid).toBe(true);
+  });
+
+  it("accepts today", () => {
+    expect(validateManualSettlePaidAt(TODAY, TODAY).valid).toBe(true);
+  });
+
+  it("refuses a future date", () => {
+    const result = validateManualSettlePaidAt("2026-10-24", TODAY);
+    expect(result.valid).toBe(false);
+    expect(result.message).toBe("A data do pagamento não pode ser no futuro.");
+  });
+
+  it("refuses a date that does not exist on the calendar", () => {
+    expect(validateManualSettlePaidAt("2026-02-30", TODAY).valid).toBe(false);
   });
 });
 

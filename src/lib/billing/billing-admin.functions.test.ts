@@ -302,6 +302,40 @@ describe("adminManualSettleFor", () => {
     expect(metadata.pixCancel).toEqual({ attempted: true, ok: true, canceled: 1, failed: [] });
   });
 
+  it("passes paidAt through as 12:00 BRT of that day, and audits it", async () => {
+    let capturedArgs: Record<string, unknown> | undefined;
+    userDb.onRpc("billing_admin_manual_settle", (args) => {
+      capturedArgs = args;
+      return { data: { ok: true, tenant_id: TENANT, invoice_id: INVOICE }, error: null };
+    });
+    await adminManualSettleFor(ctxFor(SUPER_ADMIN), {
+      invoiceId: INVOICE,
+      note: "Pago via TED",
+      receipt: "comprovante-123",
+      reason: "pagamento fora do Pix",
+      paidAt: "2026-11-08",
+    });
+    // 2026-11-08 12:00 BRT = 2026-11-08T15:00:00.000Z.
+    expect(capturedArgs?._paid_at).toBe("2026-11-08T15:00:00.000Z");
+    const metadata = fake.admin.rows("tenant_audit_logs")[0].metadata as Record<string, unknown>;
+    expect(metadata.paidAt).toBe("2026-11-08");
+  });
+
+  it("omits paidAt (null) when not given, keeping today's behaviour", async () => {
+    let capturedArgs: Record<string, unknown> | undefined;
+    userDb.onRpc("billing_admin_manual_settle", (args) => {
+      capturedArgs = args;
+      return { data: { ok: true, tenant_id: TENANT, invoice_id: INVOICE }, error: null };
+    });
+    await adminManualSettleFor(ctxFor(SUPER_ADMIN), {
+      invoiceId: INVOICE,
+      note: "Pago via TED",
+      receipt: "comprovante-123",
+      reason: "pagamento fora do Pix",
+    });
+    expect(capturedArgs?._paid_at).toBeNull();
+  });
+
   it("still settles when the Upper cancel fails, recording it in the audit", async () => {
     cancelOpenInvoiceCharges.mockRejectedValueOnce(new Error("upper down"));
     userDb.onRpc("billing_admin_manual_settle", () => ({

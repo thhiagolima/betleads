@@ -452,8 +452,20 @@ export const adminManualSettleInput = z.object({
   paidAmountCents: z.number().int().min(0).nullable().optional(),
   note: z.string().trim().min(1).max(500),
   receipt: z.string().trim().min(1).max(2000),
+  // Optional (PG3 Task 10): YYYY-MM-DD, interpreted as 12:00 BRT on that
+  // day. Empty/omitted keeps today's behaviour (paid_at = now(), set by the
+  // SQL function when `_paid_at` is null). A future date is harmless to
+  // accept here — `billing_settle_invoice` clamps it to `<= now()` — but the
+  // dialog already blocks it client-side (`validateManualSettlePaidAt`).
+  paidAt: dateStrSchema.nullable().optional(),
   reason: reasonSchema,
 });
+
+/** `paidAt` (YYYY-MM-DD) as an ISO instant at 12:00 BRT of that day — the
+ * fixed hour sidesteps any "which minute" ambiguity for a date-only input. */
+function paidAtNoonBrtIso(yyyyMmDd: string): string {
+  return new Date(parseBrtDayStart(yyyyMmDd).getTime() + 12 * 60 * 60_000).toISOString();
+}
 
 export async function adminManualSettleFor(ctx: ServerContext, data: unknown) {
   const input = adminManualSettleInput.parse(data);
@@ -463,12 +475,14 @@ export async function adminManualSettleFor(ctx: ServerContext, data: unknown) {
   // a later payment of it at Upper is not a second payment of a paid invoice.
   const cancel = await cancelOpenPixBestEffort(input.invoiceId);
 
+  const paidAt = input.paidAt ? paidAtNoonBrtIso(input.paidAt) : null;
   const result = unwrap<{ tenant_id: string; invoice_id: string }>(
     await looseDb(ctx.supabase).rpc("billing_admin_manual_settle", {
       _invoice: input.invoiceId,
       _paid_amount_cents: input.paidAmountCents ?? null,
       _note: input.note,
       _receipt: input.receipt,
+      _paid_at: paidAt,
     }),
   );
   await auditBillingAction({
@@ -481,6 +495,7 @@ export async function adminManualSettleFor(ctx: ServerContext, data: unknown) {
       paidAmountCents: input.paidAmountCents ?? null,
       note: input.note,
       receipt: input.receipt,
+      paidAt: input.paidAt ?? null,
       pixCancel: cancel,
     },
   });

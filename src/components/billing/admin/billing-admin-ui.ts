@@ -105,6 +105,20 @@ export function validateManualSettleAmount(raw: string): FieldValidation {
   return VALID;
 }
 
+/** "Dar baixa manual" — data do pagamento (PG3 Task 10): opcional (vazio = hoje, resolvido pelo
+ * servidor); quando preenchida, precisa ser uma data de calendário real e não pode estar no
+ * futuro. `todayBRT` (YYYY-MM-DD) é passada pelo chamador — este módulo é puro e nunca lê o
+ * relógio — e a comparação é lexicográfica, válida porque ambos os lados são YYYY-MM-DD. */
+export function validateManualSettlePaidAt(raw: string, todayBRT: string): FieldValidation {
+  if (raw.trim() === "") return VALID;
+  const calendar = validateCalendarDate(raw);
+  if (!calendar.valid) return calendar;
+  if (raw > todayBRT) {
+    return { valid: false, message: "A data do pagamento não pode ser no futuro." };
+  }
+  return VALID;
+}
+
 /** Desconto percentual (pontual ou contínuo): 0 (exclusivo) a 100. */
 export function validatePercentDiscount(raw: string): FieldValidation {
   const n = Number(raw);
