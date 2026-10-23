@@ -561,8 +561,13 @@ export function ChannelCampaignComposer({
   }, [serializedDraft, open, initialDraftId, draftQuery.data]);
 
   const submit = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (confirmedCount?: number) => {
       if (!name.trim()) throw new Error("Informe o nome da campanha.");
+      // The audience changed after the typed confirmation: ask again for the new count.
+      if (requiresTypedConfirmation(sendableRecipients) && confirmedCount !== sendableRecipients)
+        throw new Error(
+          "A quantidade de destinatários mudou depois da confirmação. Nada foi enviado; confirme de novo.",
+        );
       if (!audience || recipients === 0)
         throw new Error("Escolha um público com destinatários elegíveis.");
       if (invalidVariables.length)
@@ -698,6 +703,9 @@ export function ChannelCampaignComposer({
 
   const confirmAndSubmit = async () => {
     setSubmitAttempted(true);
+    // The audience is still being (re)calculated: the count on screen is not final.
+    if (audienceMutation.isPending || smsRecipientPreview.isFetching) return;
+    let confirmedCount: number | undefined;
     if (validationIssues.length === 0 && requiresTypedConfirmation(sendableRecipients)) {
       const count = sendableRecipients;
       const typed = await requestTextInput({
@@ -712,8 +720,9 @@ export function ChannelCampaignComposer({
         toast.error("O número digitado não confere. Nada foi enviado.");
         return;
       }
+      confirmedCount = count;
     }
-    submit.mutate();
+    submit.mutate(confirmedCount);
   };
 
   const MetaIcon = channelMeta[channel].icon;
@@ -1222,6 +1231,8 @@ export function ChannelCampaignComposer({
             className="h-auto min-h-9 w-full whitespace-normal py-2 sm:w-auto"
             disabled={
               submit.isPending ||
+              audienceMutation.isPending ||
+              smsRecipientPreview.isFetching ||
               !draftId ||
               draftState === "dirty" ||
               draftState === "saving" ||
@@ -1324,7 +1335,10 @@ function UnresolvedRecipientsNotice({
       </ul>
       <p className="mt-1">
         {/* The sendable count is shown once, in the summary (D-36). */}
-        Os demais recebem normalmente. A lista fica no relatório da campanha, em “Não enviados”.
+        {preview.resolved > 0
+          ? "Os demais recebem normalmente."
+          : "Nenhum destinatário desta lista pode receber."}{" "}
+        A lista fica no relatório da campanha, em “Não enviados”.
         {preview.duplicates > 0
           ? ` ${num(preview.duplicates)} repetido(s) recebem uma única vez.`
           : ""}

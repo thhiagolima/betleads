@@ -414,10 +414,6 @@ export function JourneyEditor({
       steps.forEach((s, index) => {
         if (s.kind === "wait" && waitToSeconds(s.amount, s.unit) === null)
           throw new Error(`Informe o tempo de espera da etapa ${index + 1}.`);
-        if (s.kind === "voice" && s.assetId && !/^\d{10,15}$/.test(s.callerId))
-          throw new Error(
-            `Informe o número de origem da etapa ${index + 1} (10 a 15 dígitos, com DDI e DDD).`,
-          );
       });
       const body = steps.flatMap((s): JourneyStepInput[] =>
         s.kind === "wait"
@@ -491,7 +487,8 @@ export function JourneyEditor({
                       step_type: "voice",
                       config: {
                         asset_id: s.assetId,
-                        caller_id: s.callerId,
+                        // Hidden field: only an old step's valid number is kept.
+                        ...(/^\d{10,15}$/.test(s.callerId) ? { caller_id: s.callerId } : {}),
                         max_attempts: 1,
                         retry_delay_seconds: 86400,
                       },
@@ -1045,22 +1042,6 @@ export function JourneyEditor({
                       />
                     </label>
                   </div>
-                  <Field
-                    id={`step-${i}-caller`}
-                    label="Número de origem"
-                    hint="Obrigatório para salvar a etapa (só dígitos, com 55 e DDD). Hoje as ligações saem pelo número de voz da plataforma; este número fica gravado na etapa, mas não muda quem aparece para o jogador."
-                  >
-                    <Input
-                      id={`step-${i}-caller`}
-                      className="h-10 max-w-xs"
-                      inputMode="numeric"
-                      value={s.callerId}
-                      onChange={(e) =>
-                        change(i, { ...s, callerId: e.target.value.replace(/\D/g, "") })
-                      }
-                      placeholder="55DDNÚMERO"
-                    />
-                  </Field>
                 </div>
               )}
             </li>
