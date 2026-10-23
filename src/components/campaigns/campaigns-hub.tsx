@@ -24,6 +24,7 @@ import {
 import { cn } from "@/lib/utils";
 import { num } from "@/lib/format";
 import {
+  audienceFromSearch,
   campaignStopReason,
   getChannelOperationState,
   groupVoiceQueueItems,
@@ -128,7 +129,9 @@ export function CampaignsHub() {
       setComposerOpen(true);
     } else if (params.get("newCampaign") === "1") {
       setInitialChannel("sms");
-      setInitialAudienceId(params.get("audience") === "system:all-leads" ? "system:all-leads" : "");
+      // Any audience id the composer lists (system audiences and saved ones);
+      // the composer ignores an id it does not know. Was limited to all-leads (D-04).
+      setInitialAudienceId(audienceFromSearch(params.get("audience")));
       setComposerOpen(true);
     }
   }, []);

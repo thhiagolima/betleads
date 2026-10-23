@@ -40,7 +40,10 @@ import {
 import type { LinkTrackingContext } from "./shortio.server";
 import { conversionFunnelSnapshot } from "./conversion-funnel";
 import { campaignShortDomainColumn } from "./campaign-refs.server";
-import { normalizeSmsAudienceCriteria } from "./sms-audience-criteria";
+import {
+  campaignAudienceCriteriaInput,
+  normalizeSmsAudienceCriteria,
+} from "./sms-audience-criteria";
 import {
   campaignDeliveryKey,
   countUnresolvedByReason,
@@ -2004,7 +2007,8 @@ export const resendFailedSms = createServerFn({ method: "POST" })
 // Campanhas de SMS agendadas (envio em massa com horário programado)
 // ============================================================
 
-const ScheduleBulkSchema = z.object({
+/** Exportado para testes. */
+export const ScheduleBulkSchema = z.object({
   phones: z.array(z.string().min(8).max(20)).min(0).max(20000).optional().default([]),
   recipients: z
     .array(
@@ -2026,7 +2030,7 @@ const ScheduleBulkSchema = z.object({
   conversionObjective: z.enum(["acquisition", "conversion", "reactivation"]).default("conversion"),
   enabledFunnelSteps: z.array(z.string().max(80)).max(10).optional(),
   /** Saved audience rule: recipients are recalculated by the worker at send time. */
-  audienceCriteria: z.record(z.string(), z.unknown()).optional(),
+  audienceCriteria: campaignAudienceCriteriaInput.optional(),
   /** tenant_domains shortener for this campaign's links. */
   shortDomainId: dbUuid().nullable().optional(),
 });
@@ -2141,7 +2145,9 @@ export const scheduleBulkSms = createServerFn({ method: "POST" })
       data.audienceCriteria
         ? {
             ...campaignRow,
-            audience_criteria: normalizeSmsAudienceCriteria(data.audienceCriteria) as unknown as Json,
+            audience_criteria: normalizeSmsAudienceCriteria(
+              data.audienceCriteria,
+            ) as unknown as Json,
           }
         : campaignRow,
     );

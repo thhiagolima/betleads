@@ -279,7 +279,11 @@ export function detectAlerts(p: PlayerLike): Alerta[] {
       tipo: "abandono_vip",
       titulo: "VIP recuperável",
       prioridade: "critico",
-      motivo: `VIP sem login há ${Math.floor(diasLogin)} dias. Total depositado: ${formatBRL(dep)}.`,
+      motivo: `${
+        Number.isFinite(diasLogin)
+          ? `VIP sem login há ${Math.floor(diasLogin)} dias.`
+          : "VIP sem nenhum login registrado."
+      } Total depositado: ${formatBRL(dep)}.`,
       impacto:
         "VIPs concentram a maior parte da receita. Cada dia sem contato aumenta a chance de migração para a concorrência.",
       acaoRecomendada: "whatsapp",
@@ -291,7 +295,9 @@ export function detectAlerts(p: PlayerLike): Alerta[] {
       tipo: "vip_sem_atividade",
       titulo: "VIP esfriando",
       prioridade: "alto",
-      motivo: `VIP sem jogar há ${Math.floor(diasJogo)} dias.`,
+      motivo: Number.isFinite(diasJogo)
+        ? `VIP sem jogar há ${Math.floor(diasJogo)} dias.`
+        : "VIP sem nenhum jogo registrado.",
       impacto:
         "Janela ideal para reengajar antes que o player desacelere de vez. Ainda fácil de recuperar.",
       acaoRecomendada: "whatsapp",

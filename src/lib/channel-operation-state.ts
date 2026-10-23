@@ -348,3 +348,16 @@ export function groupVoiceQueueItems(
 
   return groups;
 }
+
+/**
+ * Audience id passed in `/campanhas?newCampaign=1&audience=…` (Públicos, Níveis).
+ * Accepts system audiences (`system:…`) and saved ones (uuid); anything else is
+ * dropped so a malformed link opens the composer without a preselected audience.
+ */
+export function audienceFromSearch(raw: string | null | undefined): string {
+  const value = (raw ?? "").trim();
+  if (!value || value.length > 120) return "";
+  if (/^system:[a-z0-9:_-]+$/i.test(value)) return value;
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) return value;
+  return "";
+}

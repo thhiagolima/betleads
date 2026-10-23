@@ -9,6 +9,12 @@ import {
 } from "./player-rules";
 import { lastActivityMs } from "./player-activity";
 import { levelForTotal, thresholdsFromSettingsRow, type LevelSlug } from "./player-level";
+import {
+  daysWithoutDeposit,
+  playerSituation,
+  situationSettingsFromRow,
+  type PlayerSituation,
+} from "./player-situation";
 
 // Status de sms_send_logs.status que contam como SMS enviado (aceito pelo
 // provedor). A Short Brasil não confirma entrega, então a ficha não mostra
@@ -26,6 +32,9 @@ export type PlayerDetail = {
   player: DbRow;
   /** Nível pelas faixas de gamification_settings da casa (mesma regra da lista). */
   level: LevelSlug;
+  /** Situação pela mesma regra e dias configurados que a lista de Jogadores usa. */
+  situation: PlayerSituation;
+  days_without_deposit: number | null;
   metrics: {
     saldo_total: number;
     lucro: number;
@@ -79,7 +88,7 @@ export const getPlayerDetail = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<PlayerDetail> => {
     const supabase = context.supabase as any;
     const { playerId } = data;
-    if (!playerId) throw new Error("Player nao informado.");
+    if (!playerId) throw new Error("Jogador não informado.");
 
     const { data: player, error: playerError } = await supabase
       .from("players")
@@ -88,7 +97,7 @@ export const getPlayerDetail = createServerFn({ method: "POST" })
       .single();
 
     if (playerError) throw new Error(playerError.message);
-    if (!player) throw new Error("Player nao encontrado.");
+    if (!player) throw new Error("Jogador não encontrado.");
 
     const tenantId = player.tenant_id as string;
     const since90 = new Date(Date.now() - 90 * 86400000).toISOString();
@@ -175,7 +184,7 @@ export const getPlayerDetail = createServerFn({ method: "POST" })
         .limit(20000),
       supabase
         .from("gamification_settings")
-        .select("level_thresholds")
+        .select("level_thresholds,cooling_after_days,sleeping_after_days")
         .eq("tenant_id", tenantId)
         .maybeSingle(),
       // Contagens do histórico inteiro (a lista smsLogs acima vem limitada a 80).
@@ -244,9 +253,13 @@ export const getPlayerDetail = createServerFn({ method: "POST" })
       settingsRes.error ? null : settingsRes.data?.level_thresholds,
     );
 
+    const situationSettings = situationSettingsFromRow(settingsRes.error ? null : settingsRes.data);
+
     return {
       player,
       level: levelForTotal(player.total_depositado, thresholds),
+      situation: playerSituation(player, situationSettings),
+      days_without_deposit: daysWithoutDeposit(player),
       metrics: {
         saldo_total: Number(player.saldo_carteira ?? 0) + Number(player.saldo_bonus ?? 0),
         lucro: Number(player.total_depositado ?? 0) - Number(player.total_sacado ?? 0),
@@ -410,7 +423,7 @@ function buildTimeline(args: {
       id: `session:${session.id}`,
       type: "session",
       label: "Login",
-      description: session.duracao_segundos ? `${session.duracao_segundos}s de sessao` : null,
+      description: session.duracao_segundos ? `${session.duracao_segundos}s de sessão` : null,
       amount: null,
       status: null,
       at: session.iniciado_em,

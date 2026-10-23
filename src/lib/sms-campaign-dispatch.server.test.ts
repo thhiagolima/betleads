@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { campaignDeliveryKey } from "./campaign-recipients";
+import { resolveAudienceForTenant } from "./sms-audience-selection.server";
+import { createFakeDb } from "./sms-bulk.test-support";
 import {
   MAX_ZERO_GRANTS,
   processSmsCampaignTick,
@@ -191,6 +193,50 @@ describe("processSmsCampaignTick", () => {
     expect(r.stopReason).toBe("resolution_error");
     expect(state.sendCalls).toHaveLength(0);
     expect(lastPatch(state.patches)).toMatchObject({ status: "enviando", locked_by: null });
+  });
+
+  it("selection audience deleted after scheduling → campaign fails closed, nothing sent", async () => {
+    const { state, deps } = world();
+    deps.resolveAudiencePhones = async () => {
+      throw Object.assign(
+        new Error("O público de seleção desta campanha foi excluído; nada será enviado."),
+        {
+          permanentAudienceError: true,
+        },
+      );
+    };
+    const c = campaign([{ phone: phone(10), playerId: "p-old" }], {
+      audience_criteria: {
+        timing: "selection",
+        audienceId: "00000000-0000-4000-8000-0000000c0001",
+      },
+      audience_resolved_at: null,
+    });
+    const r = await processSmsCampaignTick(c, deps, { deadline: 45_000 });
+    expect(r.status).toBe("falhou");
+    expect(state.sendCalls).toHaveLength(0);
+    expect(lastPatch(state.patches)).toMatchObject({
+      status: "falhou",
+      recipients: [],
+      locked_by: null,
+    });
+    expect(String(lastPatch(state.patches).last_error)).toContain("excluído");
+  });
+
+  it("corrupted audience_criteria → campaign fails closed (permanent), nothing sent", async () => {
+    const { state, deps } = world();
+    const db = createFakeDb();
+    deps.resolveAudiencePhones = async (tenantId, criteria) =>
+      (await resolveAudienceForTenant(db.client, tenantId, criteria)).phones;
+    const c = campaign([{ phone: phone(10), playerId: "p-old" }], {
+      audience_criteria: { timing: "selection", playerIds: "corrompido" },
+      audience_resolved_at: null,
+    });
+    const r = await processSmsCampaignTick(c, deps, { deadline: 45_000 });
+    expect(r.status).toBe("falhou");
+    expect(state.sendCalls).toHaveLength(0);
+    expect(lastPatch(state.patches)).toMatchObject({ status: "falhou", locked_by: null });
+    expect(String(lastPatch(state.patches).last_error)).toContain("inválido");
   });
 
   it("dedupes by (campaign, player), not by rendered content", async () => {

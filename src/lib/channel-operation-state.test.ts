@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  audienceFromSearch,
   campaignStopReason,
   getChannelOperationState,
   groupVoiceQueueItems,
@@ -156,5 +157,21 @@ describe("isPausedCampaignStatus", () => {
     ]) {
       expect(isPausedCampaignStatus(status)).toBe(false);
     }
+  });
+});
+
+describe("audienceFromSearch", () => {
+  it("keeps system and saved audience ids from Públicos and Níveis", () => {
+    expect(audienceFromSearch("system:all-leads")).toBe("system:all-leads");
+    expect(audienceFromSearch("system:level:gold")).toBe("system:level:gold");
+    expect(audienceFromSearch("3f9a1c2b-1111-4222-8333-944455556666")).toBe(
+      "3f9a1c2b-1111-4222-8333-944455556666",
+    );
+  });
+
+  it("drops anything else", () => {
+    expect(audienceFromSearch(null)).toBe("");
+    expect(audienceFromSearch("<script>")).toBe("");
+    expect(audienceFromSearch("system:")).toBe("");
   });
 });
