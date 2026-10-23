@@ -44,7 +44,12 @@ const emailConfigSchema = z.object({
 });
 const voiceConfigSchema = z.object({
   asset_id: z.string().uuid(),
-  caller_id: z.string().regex(/^\d{10,15}$/),
+  // Not used for sending (calls go out through the platform's voice number); kept
+  // optional so steps saved with a number keep it.
+  caller_id: z
+    .string()
+    .regex(/^\d{10,15}$/)
+    .optional(),
   max_attempts: z.number().int().min(1).max(5).default(1),
   retry_delay_seconds: z
     .number()

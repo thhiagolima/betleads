@@ -240,10 +240,10 @@ export function IndividualSmsDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-xl overflow-y-auto overscroll-contain">
         <DialogHeader>
-          <DialogTitle>Envio individual / teste</DialogTitle>
+          <DialogTitle>Envio de teste</DialogTitle>
           <DialogDescription>
-            Não é uma campanha. O envio respeita consentimento, janela de contato e fica registrado
-            no histórico.
+            Envia para um único número ou e-mail, sem criar campanha. Respeita consentimento e
+            janela de contato e fica registrado no histórico.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
@@ -360,7 +360,7 @@ export function IndividualSmsDialog({
                   variant={voiceMode === "script" ? "default" : "outline"}
                   onClick={() => setVoiceMode("script")}
                 >
-                  Script TTS
+                  Roteiro (voz gerada)
                 </Button>
                 <Button
                   type="button"
@@ -368,10 +368,10 @@ export function IndividualSmsDialog({
                   variant={voiceMode === "asset" ? "default" : "outline"}
                   onClick={() => setVoiceMode("asset")}
                 >
-                  Áudio fixo
+                  Áudio gravado
                 </Button>
               </div>
-              <Label>{voiceMode === "script" ? "Script aprovado" : "Áudio da biblioteca"}</Label>
+              <Label>{voiceMode === "script" ? "Roteiro aprovado" : "Áudio da biblioteca"}</Label>
               <Select
                 value={voiceMode === "script" ? scriptId : voiceAssetId}
                 onValueChange={voiceMode === "script" ? setScriptId : setVoiceAssetId}
@@ -477,9 +477,7 @@ export function IndividualSmsDialog({
                 {channel === "sms" && (
                   <span className="text-xs text-muted-foreground">
                     {previewContent.length} caracteres · {parts} segmento{parts === 1 ? "" : "s"}
-                    {smsExempt
-                      ? " · casa isenta"
-                      : smsCost != null && ` · ${brl(smsCost)}`}
+                    {smsExempt ? " · casa isenta" : smsCost != null && ` · ${brl(smsCost)}`}
                   </span>
                 )}
               </div>
