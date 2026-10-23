@@ -225,6 +225,12 @@ export const ROUTE_META: Record<string, RouteMeta> = {
   "/treino-ia": { section: "IA", title: "Configurar IA" },
   "/experts": { section: "Jogadores", title: "Experts" },
   "/expert": { section: "Expert", title: "Início" },
+  // The generated route tree's `FileRoutesByFullPath` keeps the trailing
+  // slash for a nested index route ("/expert/" is `expert.index.tsx`'s
+  // typed full path); `resolveRouteMeta` never looks this entry up at
+  // runtime (it strips the trailing slash first), but the
+  // "every route has a title" test walks that interface verbatim.
+  "/expert/": { section: "Expert", title: "Início" },
   "/expert/leads": { section: "Expert", title: "Leads" },
   "/webhooks": { section: "Configurações", title: "Integrações" },
   "/consentimentos": { section: "Canais", title: "Consentimentos" },

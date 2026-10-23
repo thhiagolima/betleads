@@ -16,10 +16,6 @@ import { useGlobalRealtimeStatus } from "@/hooks/use-realtime-invalidate";
 import { isExpertAllowedPath, resolveRouteMeta } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 
-// /expert and /expert/leads land in Task 9, so the typed route map does not
-// know this path yet; this constant is the one place that cast lives.
-const EXPERT_HOME = "/expert" as Parameters<ReturnType<typeof useNavigate>>[0]["to"];
-
 function RealtimeIndicator() {
   const rt = useGlobalRealtimeStatus();
   const meta =
@@ -56,7 +52,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   }, [pathname]);
 
   useEffect(() => {
-    if (redirectingToExpert) navigate({ to: EXPERT_HOME, replace: true });
+    if (redirectingToExpert) navigate({ to: "/expert", replace: true });
   }, [redirectingToExpert, navigate]);
 
   useEffect(() => {
