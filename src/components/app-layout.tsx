@@ -13,7 +13,7 @@ import { useSidebarCollapsed } from "@/components/shell/sidebar-collapse";
 import { useShellNav } from "@/components/shell/use-shell-nav";
 import { TenantStatusGate } from "@/components/tenant-status-gate";
 import { useGlobalRealtimeStatus } from "@/hooks/use-realtime-invalidate";
-import { isExpertAllowedPath, resolveRouteMeta } from "@/lib/navigation";
+import { resolveRouteMeta, shellContentState } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 
 function RealtimeIndicator() {
@@ -43,9 +43,10 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const meta = resolveRouteMeta(pathname);
-  const { role } = useShellNav();
+  const { role, roleLoading } = useShellNav();
   const navigate = useNavigate();
-  const redirectingToExpert = role === "expert" && !isExpertAllowedPath(pathname);
+  const contentState = shellContentState(role, roleLoading, pathname);
+  const redirectingToExpert = contentState === "redirect_expert";
 
   useEffect(() => {
     setMenuOpen(false);
@@ -104,7 +105,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           aria-label={meta.title}
           className="flex-1 overflow-x-hidden p-4 pb-[calc(76px+env(safe-area-inset-bottom))] animate-fade-in sm:p-6 sm:pb-[calc(76px+env(safe-area-inset-bottom))] md:pb-6"
         >
-          {redirectingToExpert ? null : <TenantStatusGate>{children}</TenantStatusGate>}
+          {contentState === "render" ? <TenantStatusGate>{children}</TenantStatusGate> : null}
         </main>
       </div>
 

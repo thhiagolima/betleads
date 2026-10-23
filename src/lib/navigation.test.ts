@@ -11,6 +11,7 @@ import {
   canSee,
   isExpertAllowedPath,
   resolveRouteMeta,
+  shellContentState,
   visibleSections,
 } from "./navigation";
 
@@ -155,9 +156,11 @@ describe("visible sections", () => {
 
 describe("expert role", () => {
   function linkPaths(sections: ReturnType<typeof visibleSections>) {
-    return sections.flatMap((section) =>
-      section.items.flatMap((item) => (item.kind === "group" ? item.children : [item])),
-    ).map((item) => item.to);
+    return sections
+      .flatMap((section) =>
+        section.items.flatMap((item) => (item.kind === "group" ? item.children : [item])),
+      )
+      .map((item) => item.to);
   }
 
   it("expert sees only the expert section", () => {
@@ -184,6 +187,22 @@ describe("expert role", () => {
     expect(isExpertAllowedPath("/expert/leads")).toBe(true);
     expect(isExpertAllowedPath("/players")).toBe(false);
     expect(isExpertAllowedPath("/experts")).toBe(false);
+  });
+
+  it("shellContentState mounts no house route until the role is known", () => {
+    // Role still loading: a house route renders nothing (an expert would
+    // otherwise fire house server functions before the redirect).
+    expect(shellContentState(null, true, "/players")).toBe("waiting_role");
+    expect(shellContentState(null, true, "/")).toBe("waiting_role");
+    // Expert routes never wait.
+    expect(shellContentState(null, true, "/expert")).toBe("render");
+    expect(shellContentState("expert", false, "/expert/leads")).toBe("render");
+    // Known expert on a house route: redirect, never render the page.
+    expect(shellContentState("expert", false, "/players")).toBe("redirect_expert");
+    // Every other role (or no role after loading) behaves as before.
+    for (const role of ["admin", "gestor", "member", "super_admin", null] as const) {
+      expect(shellContentState(role, false, "/players")).toBe("render");
+    }
   });
 
   it("/experts is active under Jogadores", () => {

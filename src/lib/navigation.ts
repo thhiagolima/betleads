@@ -304,6 +304,26 @@ export function isExpertAllowedPath(pathname: string): boolean {
   return isPathUnder(pathname, "/expert");
 }
 
+/**
+ * What the shell's main area shows. Until the active house's role is known,
+ * a house route renders nothing: otherwise a pure expert landing on it would
+ * mount that page (and fire its house server functions) before the redirect
+ * to /expert. Expert routes render right away; once the role is known (or
+ * its lookup failed, role null), every role behaves as before.
+ */
+export type ShellContentState = "waiting_role" | "redirect_expert" | "render";
+
+export function shellContentState(
+  role: ShellRole | null,
+  roleLoading: boolean,
+  pathname: string,
+): ShellContentState {
+  if (isExpertAllowedPath(pathname)) return "render";
+  if (roleLoading) return "waiting_role";
+  if (role === "expert") return "redirect_expert";
+  return "render";
+}
+
 export function navLinkKey(item: Pick<NavLink, "to" | "hash">) {
   return item.hash ? `${item.to}#${item.hash}` : item.to;
 }
