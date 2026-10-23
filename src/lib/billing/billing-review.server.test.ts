@@ -116,6 +116,12 @@ describe("adminResolveChargeReviewFor", () => {
     expect(rpc).not.toHaveBeenCalled();
   });
 
+  it("checks the super admin before validating input", async () => {
+    await expect(
+      adminResolveChargeReviewFor({ userId: PLAIN_USER }, { chargeId: "x", outcome: "?" }),
+    ).rejects.toThrow(/super admin/);
+  });
+
   it("validates outcome and a reason of 5+ characters", async () => {
     await expect(
       adminResolveChargeReviewFor(

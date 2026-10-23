@@ -101,8 +101,8 @@ export async function adminResolveChargeReviewFor(
   ctx: { userId: string },
   data: unknown,
 ): Promise<{ ok: true }> {
-  const input = resolveChargeReviewInput.parse(data);
   await assertSuperAdmin(ctx.userId);
+  const input = resolveChargeReviewInput.parse(data);
   const { error } = await (supabaseAdmin as LooseDb).rpc("billing_resolve_charge_review", {
     _charge_id: input.chargeId,
     _outcome: input.outcome,

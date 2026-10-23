@@ -683,8 +683,10 @@ describe("adminBillingDashboardFor", () => {
       access_state: "locked_unpaid",
     });
     fake.admin.rows("payment_charges").push(
-      { id: "c1", needs_review: true, credited_at: null },
-      { id: "c2", needs_review: true, credited_at: "2026-10-01T00:00:00Z" },
+      { id: "c1", needs_review: true, credited_at: null, review_resolved_at: null },
+      { id: "c2", needs_review: true, credited_at: "2026-10-01T00:00:00Z", review_resolved_at: null },
+      // Resolved via "Resolver revisão" (PG6-03): no longer counts.
+      { id: "c3", needs_review: true, credited_at: null, review_resolved_at: "2026-10-23T12:00:00Z" },
     );
     const result = await adminBillingDashboardFor(ctxFor(SUPER_ADMIN));
     expect(result.lockedUnpaid).toBe(1);
