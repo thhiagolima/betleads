@@ -15,6 +15,7 @@ import {
   type BillingRole,
 } from "@/lib/billing/billing-view";
 import { cancelOpenInvoiceCharges } from "@/lib/billing/invoices.server";
+import { HOUSE_MEMBER_ROLES } from "@/lib/house-member-roles";
 import { assertTenantNotDemo, isBillingEnforcementEnabled } from "@/lib/tenant-access.server";
 import { dbUuid } from "@/lib/zod-helpers";
 
@@ -77,8 +78,7 @@ type TenantMemberRow = {
   created_at: string;
 };
 
-const EXPERT_MEMBER_GUARD =
-  "Esta pessoa é expert desta casa. Gerencie o acesso dela em Experts.";
+const EXPERT_MEMBER_GUARD = "Esta pessoa é expert desta casa. Gerencie o acesso dela em Experts.";
 
 type TenantAssignableRole = "admin" | "gestor" | "member";
 type ServerContext = {
@@ -153,10 +153,13 @@ async function getAccessibleTenants(ctx: ServerContext) {
     return { superAdmin, tenants: data ?? [] };
   }
 
+  // Team roles only: an `expert` row must never open the house console
+  // (team, wallet, ledger, audit log...), which is read via supabaseAdmin.
   const { data: roles, error: rolesErr } = await db()
     .from<TenantMemberRow[]>("user_roles")
     .select("tenant_id")
     .eq("user_id", ctx.userId)
+    .in("role", [...HOUSE_MEMBER_ROLES])
     .not("tenant_id", "is", null);
   if (rolesErr) throw new Error(rolesErr.message);
 
@@ -430,7 +433,15 @@ async function buildTenantDetail(
 
   const walletSummary = (walletSummaryRes.data ?? {}) as {
     exempt?: boolean;
-    prices?: Record<string, { unit_price?: number; provider_unit_cost?: number; free_monthly_units?: number; source?: string }>;
+    prices?: Record<
+      string,
+      {
+        unit_price?: number;
+        provider_unit_cost?: number;
+        free_monthly_units?: number;
+        source?: string;
+      }
+    >;
   };
   const smsPrice = walletSummary.prices?.sms ?? {};
   const pricing = {
@@ -787,9 +798,7 @@ export async function updateTenantSettingsFor(
     .single();
   if (error) throw new Error(error.message);
 
-  const pixCancel = openInvoiceBefore
-    ? await cancelPixOfClosedInvoice(openInvoiceBefore)
-    : null;
+  const pixCancel = openInvoiceBefore ? await cancelPixOfClosedInvoice(openInvoiceBefore) : null;
 
   await auditTenant({
     tenantId: data.tenantId,

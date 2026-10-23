@@ -33,6 +33,8 @@ vi.mock("@/lib/tenant-access.server", () => ({
 import { createFakeDb } from "./sms-bulk.test-support";
 import {
   addUserToTenantFor,
+  getTenantManagementConsoleFor,
+  getTenantSwitcherFor,
   removeUserFromTenantFor,
   updateTenantUserRoleFor,
 } from "./tenants.functions";
@@ -51,10 +53,12 @@ beforeEach(() => {
   fake.authUsers.length = 0;
   fake.authUsers.push({ id: EXPERT_USER, email: "expert@casa.com" });
   fake.admin.onRpc("is_super_admin", () => ({ data: false, error: null }));
-  fake.admin.rows("user_roles").push(
-    { id: "admin-membership", user_id: ADMIN, tenant_id: TENANT, role: "admin" },
-    { id: EXPERT_MEMBERSHIP, user_id: EXPERT_USER, tenant_id: TENANT, role: "expert" },
-  );
+  fake.admin
+    .rows("user_roles")
+    .push(
+      { id: "admin-membership", user_id: ADMIN, tenant_id: TENANT, role: "admin" },
+      { id: EXPERT_MEMBERSHIP, user_id: EXPERT_USER, tenant_id: TENANT, role: "expert" },
+    );
 });
 
 describe("team management refuses expert members", () => {
@@ -81,5 +85,49 @@ describe("team management refuses expert members", () => {
       addUserToTenantFor(ctx, { tenantId: TENANT, email: "expert@casa.com", role: "member" }),
     ).rejects.toThrow(GUARD);
     expect(fake.admin.rows("user_roles")[1].role).toBe("expert");
+  });
+});
+
+describe("an expert is not a house member for the house console", () => {
+  const expertCtx = { userId: EXPERT_USER, supabase: {} } as unknown as Ctx;
+
+  beforeEach(() => {
+    fake.admin.rows("tenants").push({
+      id: TENANT,
+      nome: "Casa A",
+      slug: "casa-a",
+      status: "active",
+      plano: "pro",
+      crm_model: "CRM_PLATAFORMA",
+      limits: {},
+      metadata: {},
+      created_at: "2026-10-01T00:00:00Z",
+      updated_at: null,
+      is_demo: false,
+    });
+  });
+
+  it("does not list the expert's house in the console (getAccessibleTenants)", async () => {
+    const result = await getTenantManagementConsoleFor(expertCtx, { tenantId: null });
+    expect(result.tenants).toEqual([]);
+    expect(result.selectedTenantId).toBeNull();
+    expect(result.detail).toBeNull();
+  });
+
+  it("refuses the console detail of the expert's own house", async () => {
+    await expect(getTenantManagementConsoleFor(expertCtx, { tenantId: TENANT })).rejects.toThrow(
+      "Tenant sem acesso",
+    );
+  });
+
+  it("still lists the house in the switcher with role expert", async () => {
+    const result = await getTenantSwitcherFor(expertCtx);
+    expect(result.tenants).toEqual([expect.objectContaining({ id: TENANT, role: "expert" })]);
+  });
+
+  it("the console still works for a team admin of the same house", async () => {
+    fake.admin.onRpc("wallet_summary", () => ({ data: { balance: 0 }, error: null }));
+    const result = await getTenantManagementConsoleFor(ctx, { tenantId: null });
+    expect(result.tenants.map((t) => t.id)).toEqual([TENANT]);
   });
 });
