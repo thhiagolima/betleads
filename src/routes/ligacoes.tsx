@@ -4,6 +4,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageHeader } from "@/components/ui-premium";
 import { SendWindowCard } from "@/components/send-window-card";
 import { ProvidersPausedBanner } from "@/components/providers-paused-banner";
+import { ActiveTenantWalletNotice } from "@/components/billing/active-tenant-wallet-notice";
 import { ScriptsTab } from "@/components/ligacoes/scripts-tab";
 import { QueueTab } from "@/components/ligacoes/queue-tab";
 import { HistoryShell } from "@/components/history/history-shell";
@@ -40,6 +41,7 @@ function LigacoesPage() {
         subtitle="Envie áudios e acompanhe a disponibilidade e a fila de chamadas."
       />
       <ProvidersPausedBanner channel="call" />
+      <ActiveTenantWalletNotice />
 
       <SendWindowCard compact />
 

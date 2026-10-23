@@ -36,4 +36,16 @@ describe("WalletBalanceNotice", () => {
     );
     expect(html).toBe("");
   });
+
+  it("warns below the house's own threshold", () => {
+    const below = renderToStaticMarkup(
+      <WalletBalanceNotice balance={450} exempt={false} smsUnitPrice={0.08} threshold={500} />,
+    );
+    expect(below).toContain("Saldo baixo");
+    expect(below).toContain("SMS, voz e e-mail");
+    const above = renderToStaticMarkup(
+      <WalletBalanceNotice balance={150} exempt={false} smsUnitPrice={0.08} threshold={100} />,
+    );
+    expect(above).toBe("");
+  });
 });

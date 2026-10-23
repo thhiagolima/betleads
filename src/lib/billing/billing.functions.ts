@@ -477,6 +477,58 @@ export const payInvoice = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => payInvoiceInput.parse(data))
   .handler(async ({ data, context }) => payInvoiceFor(context as ServerContext, data));
 
+const NOT_THRESHOLD_EDITOR_MESSAGE =
+  "Só o administrador ou gestor da casa pode alterar o limite de saldo baixo.";
+const INVALID_THRESHOLD_MESSAGE = "Informe um valor entre R$ 0 e R$ 100.000.";
+const THRESHOLD_SAVE_FAILED_MESSAGE = "Não foi possível salvar o limite agora. Tente de novo.";
+
+export const lowBalanceThresholdInput = z.object({
+  tenantId: dbUuid().optional().nullable(),
+  value: z
+    .number()
+    .finite()
+    .min(0)
+    .max(100000)
+    .refine((value) => Math.abs(Math.round(value * 100) - value * 100) < 1e-6, {
+      message: "No máximo 2 casas decimais.",
+    }),
+});
+
+/**
+ * Body of `setLowBalanceThreshold` (PG3 Task 8), exported for tests. The
+ * house's payers (admin, owner, gestor) and the superadmin may change it.
+ * `billing_set_low_balance_threshold` re-checks the role, enforces 0-100000
+ * and writes the audit row; it runs on the caller's own client because it
+ * reads `auth.uid()`.
+ */
+export async function setLowBalanceThresholdFor(
+  ctx: ServerContext,
+  data: z.infer<typeof lowBalanceThresholdInput>,
+) {
+  const tenantId = await resolveTenantForBilling(
+    ctx.supabase as unknown as Parameters<typeof resolveTenantForBilling>[0],
+    ctx.userId,
+    data.tenantId,
+  );
+  await requireTenantPayer(ctx.supabase, tenantId, NOT_THRESHOLD_EDITOR_MESSAGE, ctx.userId);
+
+  const { data: row, error } = await looseDb(ctx.supabase).rpc<{
+    low_balance_threshold?: number | string;
+  }>("billing_set_low_balance_threshold", { _tenant: tenantId, _value: data.value });
+  if (error) {
+    if (error.message.includes("invalid_threshold")) throw new Error(INVALID_THRESHOLD_MESSAGE);
+    if (error.message.includes("forbidden")) throw new Error(NOT_THRESHOLD_EDITOR_MESSAGE);
+    console.error("[billing] billing_set_low_balance_threshold failed", error.message);
+    throw new Error(THRESHOLD_SAVE_FAILED_MESSAGE);
+  }
+  return { ok: true as const, lowBalanceThreshold: Number(row?.low_balance_threshold ?? data.value) };
+}
+
+export const setLowBalanceThreshold = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => lowBalanceThresholdInput.parse(data))
+  .handler(async ({ data, context }) => setLowBalanceThresholdFor(context as ServerContext, data));
+
 const invoiceReceiptInput = z.object({
   tenantId: dbUuid().optional().nullable(),
   invoiceId: dbUuid(),

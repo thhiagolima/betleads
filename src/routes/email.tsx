@@ -91,6 +91,7 @@ import { num } from "@/lib/format";
 import { MetricCard, EmptyState, PageHeader } from "@/components/ui-premium";
 import { SendWindowCard } from "@/components/send-window-card";
 import { ProvidersPausedBanner } from "@/components/providers-paused-banner";
+import { ActiveTenantWalletNotice } from "@/components/billing/active-tenant-wallet-notice";
 import { requestConfirmation, requestTextInput } from "@/components/system-dialog-host";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery } from "@tanstack/react-query";
@@ -361,6 +362,8 @@ function EmailPage() {
       <SendWindowCard compact />
 
       <ProvidersPausedBanner channel="email" />
+
+      <ActiveTenantWalletNotice />
 
       <Tabs
         value={current}

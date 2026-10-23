@@ -112,6 +112,14 @@ export type RunBillingCycleOptions = {
    * `issuedInvoiceIds.length`, same as before this task.
    */
   sendEmails?: (events: BillingCycleEvents) => Promise<number | void>;
+  /**
+   * PG3 Task 8's low-balance sweep (`sendLowBalanceAlerts`,
+   * wallet-alerts.server.ts), wired by the cron route. Runs every hour
+   * regardless of `BILLING_INVOICES_ENABLED` (the wallet is live on its
+   * own); it returns how many houses were e-mailed. Defaults to a no-op so
+   * this module never imports the e-mail code.
+   */
+  sendWalletAlerts?: () => Promise<number | void>;
 };
 
 export type RunBillingCycleResult = {
@@ -127,6 +135,8 @@ export type RunBillingCycleResult = {
    */
   issued: number;
   errors: number;
+  /** Houses e-mailed by the low-balance sweep this run (0 when not wired). */
+  walletAlerts: number;
   /**
    * One line per failed stage of the run (generation, house listing), e.g.
    * `"list_tenants: timeout"`. A failed stage never stops the later ones:
@@ -188,13 +198,14 @@ async function refreshOneTenant(tenantId: string, counters: { refreshed: number;
  * `BILLING_INVOICES_ENABLED === "true"`) → refresh every non-exempt house's
  * access state (always, flag or not, and even if generation itself failed —
  * ruling: refresh always happens) → notify `sendEmails` (Task 5) about what
- * was issued, also flag-gated. `sendEmails` defaults to a no-op until Task 5
+ * was issued, also flag-gated → the low-balance sweep (PG3 Task 8, always). `sendEmails` defaults to a no-op until Task 5
  * wires the real e-mail pipeline.
  */
 export async function runBillingCycle(
   opts: RunBillingCycleOptions = {},
 ): Promise<RunBillingCycleResult> {
   const sendEmails = opts.sendEmails ?? (async () => undefined);
+  const sendWalletAlerts = opts.sendWalletAlerts ?? (async () => undefined);
   const counters = { refreshed: 0, errors: 0 };
   const failures: string[] = [];
   let issuedInvoiceIds: string[] = [];
@@ -237,11 +248,24 @@ export async function runBillingCycle(
     issued = typeof sent === "number" ? sent : issuedInvoiceIds.length;
   }
 
+  // Low-balance alerts (PG3 Task 8): not flag-gated, and a failure here is
+  // recorded like any other stage without failing the run.
+  let walletAlerts = 0;
+  try {
+    const alerted = await sendWalletAlerts();
+    walletAlerts = typeof alerted === "number" ? alerted : 0;
+  } catch (err) {
+    counters.errors += 1;
+    failures.push(`wallet_alerts: ${errorMessage(err)}`);
+    console.error("[billing/invoices] low balance sweep failed", { error: errorMessage(err) });
+  }
+
   return {
     generated: issuedInvoiceIds.length,
     refreshed: counters.refreshed,
     issued,
     errors: counters.errors,
+    walletAlerts,
     failures,
   };
 }

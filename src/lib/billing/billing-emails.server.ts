@@ -176,7 +176,7 @@ async function getTenantForEmail(tenantId: string): Promise<TenantEmailRow | nul
 }
 
 /** Distinct e-mails of the house's `admin`/`owner`/`gestor` users; never `member`/`user`. */
-async function getPayerEmails(tenantId: string): Promise<string[]> {
+export async function getPayerEmails(tenantId: string): Promise<string[]> {
   const { data, error } = await supabaseAdmin
     .from("user_roles")
     .select("user_id, role")

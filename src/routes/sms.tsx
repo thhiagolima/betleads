@@ -68,6 +68,7 @@ import { getBillingPrices } from "@/lib/billing/billing.functions";
 import { countSmsSegments } from "@/lib/sms-segments";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { WalletBalanceNotice } from "@/components/billing/wallet-balance-notice";
+import { walletNoticeInputFromPortal } from "@/lib/billing/wallet-notice";
 import { useActiveTenant } from "@/hooks/use-active-tenant";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import { DEMO_SEND_BLOCKED_TEXT } from "@/lib/demo-tenant";
@@ -514,6 +515,7 @@ function SmsCompactWorkspace({
           exempt={exempt}
           smsUnitPrice={smsUnitPrice}
           canBuy={canBuyCredits}
+          threshold={walletNoticeInputFromPortal(credits.data).threshold}
         />
       ) : null}
 
@@ -1153,6 +1155,7 @@ function SmsHomePanel() {
           exempt={exempt}
           smsUnitPrice={smsUnitPrice}
           canBuy={canBuyCredits}
+          threshold={walletNoticeInputFromPortal(credits.data).threshold}
         />
       ) : null}
 

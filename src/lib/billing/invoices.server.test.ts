@@ -181,6 +181,35 @@ describe("runBillingCycle", () => {
     expect(sendEmails).toHaveBeenCalledWith({ issuedInvoiceIds: [] });
   });
 
+  it("runs the low-balance sweep every hour, even with the invoice flag off", async () => {
+    process.env.BILLING_INVOICES_ENABLED = "false";
+    seedTenantBilling();
+    fake.admin.onRpc("billing_refresh_access_state", () => ({ data: "ok", error: null }));
+    const sendWalletAlerts = vi.fn().mockResolvedValue(2);
+
+    const result = await runBillingCycle({ sendWalletAlerts });
+
+    expect(sendWalletAlerts).toHaveBeenCalledTimes(1);
+    expect(result.walletAlerts).toBe(2);
+    expect(result.failures).toEqual([]);
+  });
+
+  it("records a failed low-balance sweep without failing the cycle", async () => {
+    seedTenantBilling();
+    fake.admin.onRpc("billing_refresh_access_state", () => ({ data: "ok", error: null }));
+    fake.admin.onRpc("billing_generate_due_invoices", () => ({ data: [], error: null }));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const sendEmails = vi.fn().mockResolvedValue(0);
+    const sendWalletAlerts = vi.fn().mockRejectedValue(new Error("candidates timeout"));
+
+    const result = await runBillingCycle({ sendEmails, sendWalletAlerts });
+
+    expect(sendEmails).toHaveBeenCalledTimes(1);
+    expect(result.walletAlerts).toBe(0);
+    expect(result.errors).toBe(1);
+    expect(result.failures).toEqual(["wallet_alerts: candidates timeout"]);
+  });
+
   it("still sends the e-mail sweep and reports the failure when listing the houses fails", async () => {
     fake.admin.onRpc("billing_generate_due_invoices", () => ({ data: ["new-invoice-1"], error: null }));
     const refreshRpc = vi.fn(() => ({ data: "ok", error: null }));
