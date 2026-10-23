@@ -207,6 +207,15 @@ function unresolvedOf(targets: CampaignTarget[]): UnresolvedRecipient[] {
  *    in batches; each send carries a stable (campaign, player) delivery key;
  * 3. persists the cursor and counters AFTER each batch was sent.
  */
+/** Erro de público que não se resolve com nova tentativa (marcado por `permanentAudienceError`). */
+function isPermanentAudienceError(error: unknown) {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { permanentAudienceError?: unknown }).permanentAudienceError === true
+  );
+}
+
 export async function processSmsCampaignTick(
   c: SmsCampaignRow,
   deps: CampaignDispatchDeps,
@@ -234,6 +243,20 @@ export async function processSmsCampaignTick(
     try {
       phones = await deps.resolveAudiencePhones(c.tenant_id, c.audience_criteria);
     } catch (error) {
+      // Ex.: o público de seleção foi excluído depois do agendamento. Tentar de
+      // novo não resolve: a campanha falha (fechado, nada é enviado).
+      if (isPermanentAudienceError(error)) {
+        await deps.updateCampaign(c, {
+          status: "falhou",
+          recipients: [],
+          total_count: 0,
+          audience_resolved_at: new Date(deps.now()).toISOString(),
+          last_error: error instanceof Error ? error.message : String(error),
+          locked_at: null,
+          locked_by: null,
+        });
+        return { ...result, status: "falhou", stopReason: "no_recipients" };
+      }
       await deps.updateCampaign(c, {
         status: "enviando",
         last_error: `Falha ao recalcular o público: ${error instanceof Error ? error.message : String(error)}`,

@@ -28,7 +28,7 @@ import {
 } from "./dispatch-pause-insufficient.server";
 import { pingHeartbeat, startJobRun, type JobRunHandle } from "./observability/job-monitor.server";
 import { SMS_CAMPAIGN_RUN_BUDGET_MS, SMS_CAMPAIGN_TICK_SECONDS } from "./campaign-recipients";
-import { normalizeSmsAudienceCriteria } from "./sms-audience-criteria";
+import { resolveAudienceForTenant, type SelectionDb } from "./sms-audience-selection.server";
 import {
   findAcceptedDeliveryKeys,
   persistCampaignUnresolved,
@@ -920,12 +920,14 @@ function campaignDeps(): CampaignDispatchDeps {
     },
     acquireSendBudget: acquireCampaignSendBudget,
     async resolveAudiencePhones(tenantId, criteria) {
-      const { data, error } = await supabaseAdmin.rpc("resolve_sms_audience_v2", {
-        _tenant: tenantId,
-        _criteria: normalizeSmsAudienceCriteria(criteria),
-      });
-      if (error) throw new Error(error.message);
-      if (!data) throw new Error("Sem acesso aos jogadores desta conta.");
+      // Mesmo avaliador do compositor: seleção carrega a lista do público pelo
+      // id + casa; regras vão ao RPC de sempre. Critério corrompido → erro
+      // permanente (a campanha falha, sem reenvio).
+      const data = await resolveAudienceForTenant(
+        supabaseAdmin as unknown as SelectionDb,
+        tenantId,
+        criteria,
+      );
       const phones = (data as { phones?: unknown }).phones;
       return Array.isArray(phones) ? phones.filter((p): p is string => typeof p === "string") : [];
     },

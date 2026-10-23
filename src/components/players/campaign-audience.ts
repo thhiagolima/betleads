@@ -1,43 +1,51 @@
 import { toast } from "sonner";
-
-export type CampaignRecipient = { phone: string; playerId?: string };
+import { createSelectionAudience } from "@/lib/sms-audience-crud.functions";
 
 /**
- * Hands an audience of players to the campaign composer: stores the draft that
- * /campanhas?newCampaign=1&draft=players reads and opens the composer.
- * Same draft the Jogadores list has always written (D-04).
+ * Hands a selection of players to the campaign composer: saves it as a
+ * selection audience ("Seleção de Jogadores · dd/mm hh:mm", criteria =
+ * player ids of the active house) and opens
+ * /campanhas?newCampaign=1&audience=<id> with it selected.
+ * Returns false when nothing was opened (empty selection or server error).
  */
-export function openCampaignWithAudience(args: {
-  label: string;
-  recipients: CampaignRecipient[];
-  missingPhone: number;
-}) {
-  const unique = new Map<string, CampaignRecipient>();
-  for (const recipient of args.recipients) {
-    const phone = recipient.phone.replace(/\D/g, "");
-    if (phone.length >= 10 && !unique.has(phone)) unique.set(phone, { ...recipient, phone });
+export async function openCampaignWithAudience(args: {
+  playerIds: string[];
+  /** Shown when the filter had more players than the selection cap. */
+  truncatedFrom?: number;
+}): Promise<boolean> {
+  const playerIds = Array.from(new Set(args.playerIds.filter(Boolean)));
+  if (playerIds.length === 0) {
+    toast.error("Nenhum jogador selecionado.");
+    return false;
   }
-  const recipients = Array.from(unique.values());
-  if (recipients.length === 0) {
-    toast.error("Nenhum jogador com telefone válido neste público.");
-    return;
+  try {
+    const created = await createSelectionAudience({ data: { playerIds } });
+    const count = created.playerCount;
+    const ready =
+      count === 1
+        ? "1 jogador pronto para a campanha."
+        : `${count.toLocaleString("pt-BR")} jogadores prontos para a campanha.`;
+    const notes: string[] = [];
+    if (args.truncatedFrom && args.truncatedFrom > playerIds.length)
+      notes.push(
+        `O filtro tem ${args.truncatedFrom.toLocaleString("pt-BR")} jogadores; foram usados os ${playerIds.length.toLocaleString("pt-BR")} primeiros por data de cadastro (mais antigos primeiro).`,
+      );
+    if (created.discarded > 0)
+      notes.push(
+        `${created.discarded.toLocaleString("pt-BR")} não pertencem a esta casa e ficaram de fora.`,
+      );
+    if (notes.length) toast.warning(ready, { description: notes.join(" ") });
+    else toast.success(ready);
+    window.location.assign(`/campanhas?newCampaign=1&audience=${encodeURIComponent(created.id)}`);
+    return true;
+  } catch (error) {
+    toast.error(
+      error instanceof Error && error.message
+        ? error.message
+        : "Não foi possível preparar o público da campanha.",
+    );
+    return false;
   }
-  window.localStorage.setItem(
-    "betleads:campaignAudienceDraft",
-    JSON.stringify({
-      source: "players",
-      label: args.label,
-      recipients,
-      missingPhone: args.missingPhone,
-      createdAt: new Date().toISOString(),
-    }),
-  );
-  toast.success(
-    recipients.length === 1
-      ? "1 jogador pronto para a campanha."
-      : `${recipients.length.toLocaleString("pt-BR")} jogadores prontos para a campanha.`,
-  );
-  window.location.assign("/campanhas?newCampaign=1&draft=players");
 }
 
 /** Copies text, with a textarea fallback for browsers without the async clipboard. */

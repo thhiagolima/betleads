@@ -1,5 +1,10 @@
 import { LEVEL_LABEL } from "@/lib/player-level";
-import type { SmsAudienceCriteria } from "@/lib/sms-audience-criteria";
+import {
+  isSelectionAudience,
+  selectionAudienceLabel,
+  selectionCountOf,
+  type SmsAudienceCriteria,
+} from "@/lib/sms-audience-criteria";
 
 const TIMING_LABEL: Record<string, string> = {
   cooling: "Esfriando",
@@ -12,6 +17,8 @@ const TIMING_LABEL: Record<string, string> = {
 /** Resumo das regras de um público salvo, em etiquetas neutras. */
 export function criteriaLabels(criteria: SmsAudienceCriteria): string[] {
   const labels: string[] = [];
+  const selection = isSelectionAudience(criteria);
+  if (selection) labels.push(selectionAudienceLabel(selectionCountOf(criteria)));
   if (criteria.activity.deposit === "never") labels.push("Nunca depositou");
   if (criteria.activity.deposit === "yes") labels.push("Já depositou");
   if (criteria.activity.pixUnpaid) labels.push("Gerou PIX e não pagou");
@@ -26,6 +33,6 @@ export function criteriaLabels(criteria: SmsAudienceCriteria): string[] {
   if (criteria.daysWithoutLogin) labels.push(`${criteria.daysWithoutLogin}+ dias sem entrar`);
   if (criteria.daysSinceRegistration)
     labels.push(`${criteria.daysSinceRegistration}+ dias de cadastro`);
-  if (labels.length === 0) labels.push("Todos com telefone válido");
+  if (labels.length === 0 && !selection) labels.push("Todos com telefone válido");
   return labels;
 }

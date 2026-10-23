@@ -22,6 +22,7 @@ import { resolveSmsCampaignAudience } from "@/lib/sms-audiences.functions";
 import {
   describeSmsAudience,
   EMPTY_SMS_AUDIENCE,
+  isSelectionAudience,
   normalizeSmsAudienceCriteria,
   SYSTEM_SMS_AUDIENCES,
   type SmsAudienceCriteria,
@@ -114,6 +115,7 @@ function PublicosPage() {
 
   function edit(row: AudienceRow) {
     setEditingId(row.id);
+    // Público de seleção: só renomear; a lista de jogadores não se mistura com regras.
     setName(row.name);
     setDescription(row.description ?? "");
     setCriteria(normalizeSmsAudienceCriteria(row.criteria));
@@ -146,6 +148,7 @@ function PublicosPage() {
   }
 
   const calculating = previewWaiting || preview.isPending;
+  const editingSelection = isSelectionAudience(criteria);
   const facets = preview.data?.facets;
   const neverDeposited = criteria.activity.deposit === "never";
   const savedAudiences = (audiences.data ?? []) as AudienceRow[];
@@ -186,155 +189,164 @@ function PublicosPage() {
             />
           </div>
 
-          <RuleGroup
-            title="O que o jogador fez"
-            help="Escolhas incompatíveis se substituem; as demais podem ser combinadas."
-          >
-            <RuleChip
-              label="Nunca depositou"
-              count={facets?.activity.depositNever}
-              loading={calculating}
-              active={criteria.activity.deposit === "never"}
-              onClick={() => setActivity("deposit", "never")}
-            />
-            <RuleChip
-              label="Já depositou"
-              count={facets?.activity.depositYes}
-              loading={calculating}
-              active={criteria.activity.deposit === "yes"}
-              onClick={() => setActivity("deposit", "yes")}
-            />
-            <RuleChip
-              label="Gerou PIX e não pagou"
-              count={facets?.activity.pixUnpaid}
-              loading={calculating}
-              active={criteria.activity.pixUnpaid}
-              onClick={() => setActivity("pixUnpaid", true)}
-            />
-            <RuleChip
-              label="Já sacou"
-              count={facets?.activity.withdrawalYes}
-              loading={calculating}
-              active={criteria.activity.withdrawal === "yes"}
-              onClick={() => setActivity("withdrawal", "yes")}
-            />
-            <RuleChip
-              label="Nunca sacou"
-              count={facets?.activity.withdrawalNever}
-              loading={calculating}
-              active={criteria.activity.withdrawal === "never"}
-              onClick={() => setActivity("withdrawal", "never")}
-            />
-            <RuleChip
-              label="Saque pendente"
-              count={facets?.activity.withdrawalPending}
-              loading={calculating}
-              active={criteria.activity.withdrawalPending}
-              onClick={() => setActivity("withdrawalPending", true)}
-            />
-            <RuleChip
-              label="Recebeu cashback"
-              count={facets?.activity.cashback}
-              loading={calculating}
-              active={criteria.activity.cashback}
-              onClick={() => setActivity("cashback", true)}
-            />
-          </RuleGroup>
-
-          {!neverDeposited && (
-            <RuleGroup title="Nível" help="Pode ser combinado com o tempo sem depositar.">
-              {LEVEL_RULES.map((rule) => (
+          {editingSelection ? (
+            <p className="rounded-xl border border-border bg-secondary/40 p-3.5 text-body text-muted-foreground">
+              Público de seleção: {describeSmsAudience(criteria)} em Jogadores. As regras não se
+              aplicam a ele; você pode alterar o nome e a descrição ou excluí-lo.
+            </p>
+          ) : (
+            <>
+              <RuleGroup
+                title="O que o jogador fez"
+                help="Escolhas incompatíveis se substituem; as demais podem ser combinadas."
+              >
                 <RuleChip
-                  key={rule.value}
-                  label={rule.label}
-                  count={facets?.levels?.[rule.value]}
+                  label="Nunca depositou"
+                  count={facets?.activity.depositNever}
                   loading={calculating}
-                  active={criteria.level === rule.value}
-                  onClick={() =>
-                    setCriteria((current) => ({
-                      ...current,
-                      level: current.level === rule.value ? null : rule.value,
-                    }))
+                  active={criteria.activity.deposit === "never"}
+                  onClick={() => setActivity("deposit", "never")}
+                />
+                <RuleChip
+                  label="Já depositou"
+                  count={facets?.activity.depositYes}
+                  loading={calculating}
+                  active={criteria.activity.deposit === "yes"}
+                  onClick={() => setActivity("deposit", "yes")}
+                />
+                <RuleChip
+                  label="Gerou PIX e não pagou"
+                  count={facets?.activity.pixUnpaid}
+                  loading={calculating}
+                  active={criteria.activity.pixUnpaid}
+                  onClick={() => setActivity("pixUnpaid", true)}
+                />
+                <RuleChip
+                  label="Já sacou"
+                  count={facets?.activity.withdrawalYes}
+                  loading={calculating}
+                  active={criteria.activity.withdrawal === "yes"}
+                  onClick={() => setActivity("withdrawal", "yes")}
+                />
+                <RuleChip
+                  label="Nunca sacou"
+                  count={facets?.activity.withdrawalNever}
+                  loading={calculating}
+                  active={criteria.activity.withdrawal === "never"}
+                  onClick={() => setActivity("withdrawal", "never")}
+                />
+                <RuleChip
+                  label="Saque pendente"
+                  count={facets?.activity.withdrawalPending}
+                  loading={calculating}
+                  active={criteria.activity.withdrawalPending}
+                  onClick={() => setActivity("withdrawalPending", true)}
+                />
+                <RuleChip
+                  label="Recebeu cashback"
+                  count={facets?.activity.cashback}
+                  loading={calculating}
+                  active={criteria.activity.cashback}
+                  onClick={() => setActivity("cashback", true)}
+                />
+              </RuleGroup>
+
+              {!neverDeposited && (
+                <RuleGroup title="Nível" help="Pode ser combinado com o tempo sem depositar.">
+                  {LEVEL_RULES.map((rule) => (
+                    <RuleChip
+                      key={rule.value}
+                      label={rule.label}
+                      count={facets?.levels?.[rule.value]}
+                      loading={calculating}
+                      active={criteria.level === rule.value}
+                      onClick={() =>
+                        setCriteria((current) => ({
+                          ...current,
+                          level: current.level === rule.value ? null : rule.value,
+                        }))
+                      }
+                    />
+                  ))}
+                </RuleGroup>
+              )}
+
+              {!neverDeposited && (
+                <RuleGroup title="Tempo sem depositar" help="Escolha uma faixa ou informe os dias.">
+                  {TIMING_RULES.map((rule) => (
+                    <RuleChip
+                      key={rule.value}
+                      label={rule.label}
+                      count={facets?.timings?.[rule.value]}
+                      loading={calculating}
+                      active={criteria.timing === rule.value}
+                      onClick={() =>
+                        setCriteria((current) => ({
+                          ...current,
+                          timing: current.timing === rule.value ? "any" : rule.value,
+                        }))
+                      }
+                    />
+                  ))}
+                  <div className="flex items-center gap-1.5">
+                    <Input
+                      className="h-10 w-24 sm:h-8"
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      aria-label="Dias sem depositar"
+                      value={criteria.timing === "custom" ? criteria.customDays : ""}
+                      placeholder="Dias"
+                      onChange={(event) => {
+                        const raw = event.target.value;
+                        setCriteria((current) =>
+                          raw === ""
+                            ? { ...current, timing: "any" }
+                            : {
+                                ...current,
+                                timing: "custom",
+                                customDays: Math.max(1, Number(raw) || 1),
+                              },
+                        );
+                      }}
+                    />
+                    {criteria.timing === "custom" ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="h-10 px-2 text-meta sm:h-8"
+                        onClick={() => setCriteria((current) => ({ ...current, timing: "any" }))}
+                      >
+                        <X className="size-3.5" aria-hidden="true" />
+                        Limpar
+                      </Button>
+                    ) : (
+                      <span className="text-meta text-muted-foreground">dias ou mais</span>
+                    )}
+                  </div>
+                </RuleGroup>
+              )}
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <NumberRule
+                  id="days-without-login"
+                  label="Dias sem entrar"
+                  value={criteria.daysWithoutLogin}
+                  onChange={(value) =>
+                    setCriteria((current) => ({ ...current, daysWithoutLogin: value }))
                   }
                 />
-              ))}
-            </RuleGroup>
-          )}
-
-          {!neverDeposited && (
-            <RuleGroup title="Tempo sem depositar" help="Escolha uma faixa ou informe os dias.">
-              {TIMING_RULES.map((rule) => (
-                <RuleChip
-                  key={rule.value}
-                  label={rule.label}
-                  count={facets?.timings?.[rule.value]}
-                  loading={calculating}
-                  active={criteria.timing === rule.value}
-                  onClick={() =>
-                    setCriteria((current) => ({
-                      ...current,
-                      timing: current.timing === rule.value ? "any" : rule.value,
-                    }))
+                <NumberRule
+                  id="days-since-registration"
+                  label="Dias desde o cadastro"
+                  value={criteria.daysSinceRegistration}
+                  onChange={(value) =>
+                    setCriteria((current) => ({ ...current, daysSinceRegistration: value }))
                   }
                 />
-              ))}
-              <div className="flex items-center gap-1.5">
-                <Input
-                  className="h-10 w-24 sm:h-8"
-                  type="number"
-                  inputMode="numeric"
-                  min={1}
-                  aria-label="Dias sem depositar"
-                  value={criteria.timing === "custom" ? criteria.customDays : ""}
-                  placeholder="Dias"
-                  onChange={(event) => {
-                    const raw = event.target.value;
-                    setCriteria((current) =>
-                      raw === ""
-                        ? { ...current, timing: "any" }
-                        : {
-                            ...current,
-                            timing: "custom",
-                            customDays: Math.max(1, Number(raw) || 1),
-                          },
-                    );
-                  }}
-                />
-                {criteria.timing === "custom" ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="h-10 px-2 text-meta sm:h-8"
-                    onClick={() => setCriteria((current) => ({ ...current, timing: "any" }))}
-                  >
-                    <X className="size-3.5" aria-hidden="true" />
-                    Limpar
-                  </Button>
-                ) : (
-                  <span className="text-meta text-muted-foreground">dias ou mais</span>
-                )}
               </div>
-            </RuleGroup>
+            </>
           )}
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            <NumberRule
-              id="days-without-login"
-              label="Dias sem entrar"
-              value={criteria.daysWithoutLogin}
-              onChange={(value) =>
-                setCriteria((current) => ({ ...current, daysWithoutLogin: value }))
-              }
-            />
-            <NumberRule
-              id="days-since-registration"
-              label="Dias desde o cadastro"
-              value={criteria.daysSinceRegistration}
-              onChange={(value) =>
-                setCriteria((current) => ({ ...current, daysSinceRegistration: value }))
-              }
-            />
-          </div>
 
           <div
             className="relative overflow-hidden rounded-xl border border-border bg-secondary/40 p-3.5"
@@ -348,7 +360,9 @@ function PublicosPage() {
               )}
               {calculating
                 ? "Calculando público…"
-                : `${(preview.data?.total ?? 0).toLocaleString("pt-BR")} jogadores atendem a estas regras`}
+                : editingSelection
+                  ? `${(preview.data?.total ?? 0).toLocaleString("pt-BR")} jogadores da seleção nesta casa`
+                  : `${(preview.data?.total ?? 0).toLocaleString("pt-BR")} jogadores atendem a estas regras`}
             </div>
             <p className="mt-1.5 text-meta text-muted-foreground">
               {describeSmsAudience(criteria)}
@@ -422,42 +436,51 @@ function PublicosPage() {
               </p>
             )}
             <div className="space-y-2">
-              {savedAudiences.map((audience) => (
-                <AudienceCard
-                  key={audience.id}
-                  audienceId={audience.id}
-                  name={audience.name}
-                  description={audience.description}
-                  labels={criteriaLabels(normalizeSmsAudienceCriteria(audience.criteria))}
-                  menu={[
-                    {
-                      label: "Editar",
-                      icon: <Pencil className="size-4" aria-hidden="true" />,
-                      onSelect: () => edit(audience),
-                    },
-                    {
-                      label: "Duplicar",
-                      icon: <Copy className="size-4" aria-hidden="true" />,
-                      onSelect: () => duplicate(audience),
-                    },
-                    {
-                      label: "Excluir",
-                      icon: <Trash2 className="size-4" aria-hidden="true" />,
-                      destructive: true,
-                      onSelect: async () => {
-                        const confirmed = await requestConfirmation({
-                          title: `Excluir “${audience.name}”?`,
-                          description:
-                            "O público será removido da sua lista. Campanhas já enviadas não serão alteradas.",
-                          confirmLabel: "Excluir público",
-                          destructive: true,
-                        });
-                        if (confirmed) remove.mutate(audience.id);
+              {savedAudiences.map((audience) => {
+                const audienceCriteria = normalizeSmsAudienceCriteria(audience.criteria);
+                const selection = isSelectionAudience(audienceCriteria);
+                return (
+                  <AudienceCard
+                    key={audience.id}
+                    audienceId={audience.id}
+                    name={audience.name}
+                    description={audience.description}
+                    labels={criteriaLabels(audienceCriteria)}
+                    menu={[
+                      {
+                        label: selection ? "Renomear" : "Editar",
+                        icon: <Pencil className="size-4" aria-hidden="true" />,
+                        onSelect: () => edit(audience),
                       },
-                    },
-                  ]}
-                />
-              ))}
+                      // Duplicar abre o editor de regras; não vale para uma lista de jogadores.
+                      ...(selection
+                        ? []
+                        : [
+                            {
+                              label: "Duplicar",
+                              icon: <Copy className="size-4" aria-hidden="true" />,
+                              onSelect: () => duplicate(audience),
+                            },
+                          ]),
+                      {
+                        label: "Excluir",
+                        icon: <Trash2 className="size-4" aria-hidden="true" />,
+                        destructive: true,
+                        onSelect: async () => {
+                          const confirmed = await requestConfirmation({
+                            title: `Excluir “${audience.name}”?`,
+                            description:
+                              "O público será removido da sua lista. Campanhas já enviadas não serão alteradas.",
+                            confirmLabel: "Excluir público",
+                            destructive: true,
+                          });
+                          if (confirmed) remove.mutate(audience.id);
+                        },
+                      },
+                    ]}
+                  />
+                );
+              })}
             </div>
           </section>
 

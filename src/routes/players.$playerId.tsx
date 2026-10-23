@@ -80,6 +80,7 @@ function PlayerDetailPage() {
   const [messageOpen, setMessageOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [idCopied, setIdCopied] = useState(false);
+  const [campaignBusy, setCampaignBusy] = useState(false);
 
   if (isLoading) return <DetailSkeleton />;
 
@@ -171,15 +172,12 @@ function PlayerDetailPage() {
             </Button>
             <Button
               className={actionClass}
-              disabled={!phone}
-              title={phone ? undefined : "Jogador sem telefone cadastrado"}
-              onClick={() =>
-                openCampaignWithAudience({
-                  label: p.nome,
-                  recipients: [{ phone, playerId: p.id }],
-                  missingPhone: 0,
-                })
-              }
+              disabled={campaignBusy}
+              onClick={async () => {
+                setCampaignBusy(true);
+                const opened = await openCampaignWithAudience({ playerIds: [p.id] });
+                if (!opened) setCampaignBusy(false);
+              }}
             >
               <MessageSquareText className="h-4 w-4" />
               Usar na campanha

@@ -103,7 +103,7 @@ import { getAlertPlayerIdsByTipo } from "@/lib/alert-ids.functions";
 import {
   getPlayersPage,
   getPlayersFilteredExternalIds,
-  getPlayersFilteredSmsAudience,
+  getPlayersFilteredPlayerIds,
   getPlayersFilteredExport,
   type PlayerRow,
 } from "@/lib/players-list.functions";
@@ -1219,7 +1219,7 @@ function PlayersPage() {
     }
   }
 
-  const fetchSmsAudience = useServerFn(getPlayersFilteredSmsAudience);
+  const fetchFilteredPlayerIds = useServerFn(getPlayersFilteredPlayerIds);
   const [buildingAudience, setBuildingAudience] = useState(false);
 
   const selectedFilterLabel =
@@ -1412,29 +1412,20 @@ function PlayersPage() {
     gamification?.settings ?? DEFAULT_PLAYER_GAMIFICATION;
 
   async function sendToSmsAudience(mode: "selected" | "filter") {
-    if (mode === "selected") {
-      const rows = selectedRows();
-      openCampaignWithAudience({
-        label: `${selectedIds.size} selecionados em ${selectedFilterLabel}`,
-        recipients: rows.map((p) => ({ phone: p.telefone ?? "", playerId: p.id })),
-        missingPhone: Math.max(0, selectedIds.size - rows.filter((p) => p.telefone).length),
-      });
-      return;
-    }
-
     setBuildingAudience(true);
     try {
-      if (isLocalAlertFilter) {
-        const rows = localAlertData?.rows ?? [];
-        openCampaignWithAudience({
-          label: selectedFilterLabel,
-          recipients: rows.map((p) => ({ phone: p.telefone ?? "", playerId: p.id })),
-          missingPhone: rows.filter((p) => !p.telefone).length,
-        });
+      if (mode === "selected") {
+        await openCampaignWithAudience({ playerIds: Array.from(selectedIds) });
         return;
       }
 
-      const res = await fetchSmsAudience({
+      if (isLocalAlertFilter) {
+        const rows = localAlertData?.rows ?? [];
+        await openCampaignWithAudience({ playerIds: rows.map((p) => p.id) });
+        return;
+      }
+
+      const res = await fetchFilteredPlayerIds({
         data: {
           filter,
           behaviorFilters,
@@ -1448,10 +1439,9 @@ function PlayersPage() {
           dateTo: dateToIso,
         },
       });
-      openCampaignWithAudience({
-        label: selectedFilterLabel,
-        recipients: res.recipients.map((r) => ({ phone: r.phone, playerId: r.playerId })),
-        missingPhone: res.missingPhone,
+      await openCampaignWithAudience({
+        playerIds: res.ids,
+        truncatedFrom: res.truncated ? res.total : undefined,
       });
     } catch (e: unknown) {
       toast.error(getErrorMessage(e, "Não foi possível montar o público"));
@@ -1739,6 +1729,7 @@ function PlayersPage() {
                     <Button
                       size="sm"
                       className="h-10 sm:h-9"
+                      disabled={buildingAudience}
                       onClick={() => sendToSmsAudience("selected")}
                     >
                       <MessageSquareText className="h-4 w-4" />
