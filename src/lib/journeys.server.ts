@@ -8,6 +8,7 @@ import {
 import { callInfobipVoice, normalizeE164BR } from "./infobip-voice.server";
 import { logCallHistoryInsertError } from "./voice-history-log";
 import { sendSmsInternal } from "./sms.functions";
+import { notifyNoBalance } from "./billing/wallet-alerts.server";
 import { buildPlayerVariables, renderTemplate } from "./template-vars.server";
 import { loadHouseLinks } from "./house-links.server";
 import { detectTriggersForPlayer } from "./triggers.server";
@@ -1044,6 +1045,8 @@ type DispatchCounters = {
   leaseLost: number;
   /** SMS items held back (no attempt consumed) because the provider breaker is open. */
   providerSuspended: number;
+  /** Steps skipped because the house wallet had no balance (PG3 decision 6). */
+  skippedNoBalance: number;
 };
 
 /**
@@ -1225,6 +1228,10 @@ async function finishOwnExecution(
  *           execution stays `claimed`, so reserve_journey_delivery answers
  *           `in_flight` for 15 min; the item waits 15 min and an attempt is
  *           consumed; at max_attempts the enrollment fails.
+ * - skip    (the HOUSE's wallet had no balance, PG3 decision 6): the step
+ *           is skipped with reason `saldo_insuficiente` and the journey
+ *           advances to the next step now. No retry, no attempt consumed;
+ *           the house gets the hourly "Saldo esgotado" alert.
  * - fail    : the journey's max_attempts/backoff policy; a misconfigured
  *           provider (missing credentials) is also reported to Sentry.
  */
@@ -1246,6 +1253,37 @@ async function handleItemFailure(row: ClaimedRow, ctx: DispatchContext, error: u
     return;
   }
   const enrollment = enrollmentRaw as EnrollmentRow & Record<string, unknown>;
+
+  if (decision.kind === "skip") {
+    ctx.counters.skippedNoBalance++;
+    const position = Number(enrollment.current_position ?? 0);
+    await finishOwnExecution(ctx, row.id, {
+      status: "skipped",
+      provider: "wallet",
+      error: message.slice(0, 1000),
+      completed_at: nowIso(),
+    });
+    await release(enrollment, ctx, {
+      status: "active",
+      current_position: position + 1,
+      next_run_at: nowIso(),
+      attempts: 0,
+    });
+    await event(enrollment, "step_skipped", {
+      channel: error instanceof ProviderSendError ? error.channel : (row.step_type ?? null),
+      step_position: position,
+      reason: "saldo_insuficiente",
+      attempt_consumed: false,
+    });
+    // PG3 Task 7: hourly "Saldo esgotado" e-mail; never breaks the dispatcher.
+    await notifyNoBalance(row.tenant_id).catch((alertError: unknown) =>
+      console.error("[journey dispatcher] no balance alert failed", {
+        tenantId: row.tenant_id,
+        error: alertError instanceof Error ? alertError.message : String(alertError),
+      }),
+    );
+    return;
+  }
 
   if (decision.kind === "provider_account") {
     // The provider refused the ACCOUNT (101/505, 401/402/403): every lead would
@@ -1475,6 +1513,7 @@ async function runJourneyDispatcherMonitored(limit: number, run: JobRunHandle) {
       outcomeUnknown: 0,
       leaseLost: 0,
       providerSuspended: 0,
+      skippedNoBalance: 0,
     },
     executions: new Map(),
     exhausted: new Map(),
@@ -1658,6 +1697,7 @@ async function runJourneyDispatcherMonitored(limit: number, run: JobRunHandle) {
       outcomeUnknown: ctx.counters.outcomeUnknown,
       leaseLost: ctx.counters.leaseLost,
       providerSuspended: ctx.counters.providerSuspended,
+      skippedNoBalance: ctx.counters.skippedNoBalance,
       smsBreaker: ctx.sms.mode,
       stopReason,
       scannerSeparated: true,

@@ -241,13 +241,13 @@ describe("classifyProviderFailure (B1 matrix)", () => {
     }
   });
 
-  it("explicit errorKind insufficient_balance (house wallet) is an interim no-cost defer, same 15 min, until Task 7's skip-and-advance", () => {
+  it("explicit errorKind insufficient_balance (house wallet) is a skip: no retry, no attempt (PG3 Task 7)", () => {
     expect(
       classifyProviderFailure(sendError(402, { errorKind: "insufficient_balance" })),
     ).toEqual({
-      kind: "defer",
+      kind: "skip",
       reason: "insufficient_balance",
-      retryAfterMs: CREDIT_DEFER_MS,
+      retryAfterMs: 0,
     });
   });
 

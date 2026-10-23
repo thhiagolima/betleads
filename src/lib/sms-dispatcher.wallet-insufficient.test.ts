@@ -82,6 +82,7 @@ vi.mock("./sms.functions", () => ({
   sendSmsInternal: vi.fn(),
   renderSmsVariables: vi.fn((content: string) => content),
 }));
+vi.mock("./billing/wallet-alerts.server", () => ({ notifyNoBalance: vi.fn(async () => false) }));
 vi.mock("./dispatch-pause-insufficient.server", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./dispatch-pause-insufficient.server")>()),
   pauseChannelForInsufficientFunds: vi.fn(async () => undefined),
@@ -91,6 +92,7 @@ import { runSmsDispatcher } from "./sms-dispatcher.server";
 import { sendSmsInternal } from "./sms.functions";
 import { pauseChannelForInsufficientFunds } from "./dispatch-pause-insufficient.server";
 import { registerThrottle } from "./dispatch-rate.server";
+import { notifyNoBalance } from "./billing/wallet-alerts.server";
 
 const TENANT_A = "00000000-0000-4000-8000-00000000000a";
 const TENANT_B = "00000000-0000-4000-8000-00000000000b";
@@ -198,6 +200,23 @@ describe("SMS flow dispatcher — wallet refusal stays per-house (PG3 Task 1)", 
     const nextRunAtMs = Date.parse(String(leadA.next_run_at));
     expect(nextRunAtMs).toBeGreaterThanOrEqual(before + 15 * 60_000 - 1_000);
     expect(nextRunAtMs).toBeLessThanOrEqual(before + 15 * 60_000 + 10_000);
+    // PG3 Task 7: only the broke house is alerted.
+    expect(notifyNoBalance).toHaveBeenCalledWith(TENANT_A);
+    expect(notifyNoBalance).not.toHaveBeenCalledWith(TENANT_B);
+  });
+
+  it("an alert failure never breaks the skip", async () => {
+    seedTwoLeads();
+    vi.mocked(notifyNoBalance).mockRejectedValueOnce(new Error("alert down"));
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.mocked(sendSmsInternal).mockImplementation(async (args) =>
+      args.tenantId === TENANT_A
+        ? ({ ok: false, status: 402, error: "Saldo insuficiente", errorKind: "insufficient_balance" } as any)
+        : ({ ok: true, status: 200, response: "{}" } as any),
+    );
+    const result = await runSmsDispatcher({ limit: 10 });
+    expect(result).toMatchObject({ processed: 1 });
+    expect(leadById("lead-a")).toMatchObject({ current_step_index: 0, attempts: 0 });
   });
 
   it("a real provider 402 (no errorKind) still pauses the channel globally", async () => {

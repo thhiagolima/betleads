@@ -65,6 +65,7 @@ vi.mock("./dispatch-rate.server", () => ({
   recordRun: vi.fn(async () => undefined),
   registerThrottle: vi.fn(async () => undefined),
 }));
+vi.mock("./billing/wallet-alerts.server", () => ({ notifyNoBalance: vi.fn(async () => false) }));
 vi.mock("./dispatch-pause-insufficient.server", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./dispatch-pause-insufficient.server")>()),
   pauseChannelForInsufficientFunds: vi.fn(async () => undefined),
@@ -74,6 +75,7 @@ import { runEmailFlowDispatcher } from "./email-automations.server";
 import { resolveSender, sendInfobipEmail } from "./email-send.server";
 import { pauseChannelForInsufficientFunds } from "./dispatch-pause-insufficient.server";
 import { registerThrottle } from "./dispatch-rate.server";
+import { notifyNoBalance } from "./billing/wallet-alerts.server";
 
 const A = "00000000-0000-4000-8000-00000000000a";
 const B = "00000000-0000-4000-8000-00000000000b";
@@ -222,6 +224,26 @@ describe("email flow dispatcher — wallet refusal stays per-house (PG3 Task 1 f
       event: "skipped_insufficient_balance",
       detail: { reason: "saldo_insuficiente" },
     });
+    // PG3 Task 7: the house is alerted (throttled to 1/hour inside notifyNoBalance).
+    expect(notifyNoBalance).toHaveBeenCalledWith(lead.tenant_id);
+  });
+
+  it("an alert failure never breaks the skip", async () => {
+    seed("tpl-a", "p-a");
+    vi.mocked(notifyNoBalance).mockRejectedValueOnce(new Error("alert down"));
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.mocked(sendInfobipEmail).mockResolvedValueOnce({
+      ok: false,
+      status: 402,
+      body: { error: "Saldo insuficiente" },
+      idempotencyKey: "k",
+      temporary: false,
+      errorKind: "insufficient_balance",
+    } as any);
+    await runEmailFlowDispatcher({ onlyLeadId: "lead-1" });
+    const lead = state.tables.email_flow_leads[0];
+    expect(lead.status).toBe("running");
+    expect(lead.attempts).toBe(0);
   });
 
   it("a real provider 402 (no errorKind) still pauses the channel globally", async () => {

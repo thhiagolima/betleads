@@ -24,6 +24,8 @@ vi.mock("./consent.server", () => ({
 }));
 vi.mock("./send-window.server", () => ({ deferIfOutsideWindow: vi.fn(async () => null) }));
 vi.mock("./tenant-access.server", () => ({ listDemoTenantIds: vi.fn(async () => []) }));
+const alerts = vi.hoisted(() => ({ notifyNoBalance: vi.fn(async () => false) }));
+vi.mock("./billing/wallet-alerts.server", () => ({ notifyNoBalance: alerts.notifyNoBalance }));
 
 import { advanceProgress } from "./call-flows.server";
 
@@ -110,6 +112,8 @@ describe("call flow call block wallet reservation", () => {
     expect(history().some((row) => row.event_type === "call_dispatched")).toBe(false);
     expect(fake.db.rows("call_history")).toEqual([]);
     expect(progress()).toMatchObject({ status: "active", current_block_index: 1, attempts_on_block: 0 });
+    // PG3 Task 7: the house is alerted (throttled inside notifyNoBalance).
+    expect(alerts.notifyNoBalance).toHaveBeenCalledWith(TENANT);
   });
 
   it("a failed call_history insert is logged with the reference and correlation; the call still counts", async () => {

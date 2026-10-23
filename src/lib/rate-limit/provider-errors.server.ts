@@ -16,16 +16,17 @@
 //             `provider_account`). Not the lead's fault: never consumes an
 //             attempt, never fails the item, no MAX_NO_COST_DEFERS cap. The
 //             item waits for the SMS circuit breaker (sms-provider-breaker).
+//   skip    : the HOUSE's own wallet refused the send (errorKind
+//             `insufficient_balance`, set by the wallet reservation before
+//             the provider is ever called). Nothing was sent nor charged.
+//             Journeys skip the step (`saldo_insuficiente`) and advance: no
+//             retry, no attempt consumed (spec decision 6).
 //   fail    : definitely not accepted (invalid recipient, 4xx, request never
 //             left: DNS/ECONNREFUSED) or provider misconfigured (missing
 //             credentials) -> the caller's normal attempts/backoff policy.
 //
-// `insufficient_balance` (errorKind set explicitly by the wallet-reservation
-// layer, e.g. sendSmsInternal's early 402 before the provider is ever
-// called) is an INTERIM `defer`, same shape as the generic 402 sniff below
-// (15 min, no attempt consumed, same MAX_NO_COST_DEFERS cap): Task 7 will
-// replace this with a journey skip-and-advance. Only the explicit errorKind
-// means "the HOUSE's own wallet" — the generic 402 / "insufficient funds"
+// Only the explicit `insufficient_balance` errorKind (`skip`) means "the
+// HOUSE's own wallet" — the generic 402 / "insufficient funds"
 // body sniff (no errorKind at all, e.g. a provider that answers 402 for its
 // own account, such as Infobip voice/e-mail) keeps its original
 // `insufficient_credit` classification; conflating the two would treat a
@@ -41,7 +42,7 @@ import { isProviderErrorKind, type ProviderErrorKind } from "./transport-errors"
 
 export type { ProviderErrorKind } from "./transport-errors";
 
-export type ProviderFailureKind = "defer" | "unknown" | "fail" | "provider_account";
+export type ProviderFailureKind = "defer" | "unknown" | "fail" | "provider_account" | "skip";
 
 export type ProviderFailureDecision = {
   kind: ProviderFailureKind;
@@ -132,11 +133,10 @@ export function classifyProviderFailure(error: unknown): ProviderFailureDecision
       };
     }
     // The HOUSE's own wallet refused the reservation (checked before the
-    // generic 402/insufficient-funds body sniffing below): interim no-cost
-    // defer, same as the generic sniff, until Task 7 replaces this with a
-    // journey skip-and-advance.
+    // generic 402/insufficient-funds body sniffing below, and before
+    // status 0, which voice uses for it): skip, never retried.
     if (error.errorKind === "insufficient_balance") {
-      return { kind: "defer", reason: "insufficient_balance", retryAfterMs: CREDIT_DEFER_MS };
+      return { kind: "skip", reason: "insufficient_balance", retryAfterMs: 0 };
     }
     if (error.errorKind === "misconfigured") {
       return { kind: "fail", reason: "provider_misconfigured", retryAfterMs: 0 };

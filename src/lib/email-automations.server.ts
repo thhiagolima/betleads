@@ -11,6 +11,7 @@ import {
 import { buildPlayerVariables, renderTemplate } from "./template-vars.server";
 import { loadHouseLinks } from "./house-links.server";
 import { deferIfOutsideWindow } from "./send-window.server";
+import { notifyNoBalance } from "./billing/wallet-alerts.server";
 import {
   consumeBudget,
   countQueuePending,
@@ -839,6 +840,13 @@ export async function runEmailFlowDispatcher({
       );
       rescheduled++;
       await applySendFailure(plan, result.status, true, true, WALLET_INSUFFICIENT_RETRY_MS);
+      // PG3 Task 7: hourly "Saldo esgotado" e-mail; never breaks the dispatcher.
+      await notifyNoBalance(plan.lead.tenant_id).catch((alertError: unknown) =>
+        console.error("[email-automations] no balance alert failed", {
+          tenantId: plan.lead.tenant_id,
+          error: alertError instanceof Error ? alertError.message : String(alertError),
+        }),
+      );
       return;
     }
 

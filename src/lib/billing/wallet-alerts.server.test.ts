@@ -19,6 +19,9 @@ import {
   CANDIDATES_PAGE_SIZE,
   claimWalletAlert,
   LOW_BALANCE_ALERT_INTERVAL,
+  NO_BALANCE_ALERT_INTERVAL,
+  notifyNoBalance,
+  resetNoBalanceAlertMemo,
   sendLowBalanceAlerts,
 } from "./wallet-alerts.server";
 
@@ -85,6 +88,7 @@ beforeEach(() => {
   callInfobipEmail.mockReset();
   callInfobipEmail.mockResolvedValue({ ok: true, status: 200, idempotencyKey: "k" });
   seedUsers();
+  resetNoBalanceAlertMemo();
 });
 
 afterEach(() => {
@@ -218,5 +222,122 @@ describe("sendLowBalanceAlerts", () => {
       error: { message: "timeout" },
     }));
     await expect(sendLowBalanceAlerts({ now: INSIDE_WINDOW })).rejects.toThrow("timeout");
+  });
+});
+
+describe("notifyNoBalance (Task 7: a send refused for lack of balance)", () => {
+  function seedHouse(id: string, extra: Record<string, unknown> = {}) {
+    fake.admin.rows("tenants").push({ id, nome: "Casa <A>", is_demo: false, ...extra });
+  }
+
+  /** Emulates billing_claim_wallet_alert: true once per (tenant, kind) until reset. */
+  function claimOncePerInterval() {
+    const claimed = new Set<string>();
+    const claim = vi.fn((args: Record<string, unknown>) => {
+      const key = `${args._tenant}:${args._kind}`;
+      if (claimed.has(key)) return { data: false, error: null };
+      claimed.add(key);
+      return { data: true, error: null };
+    });
+    fake.admin.onRpc("billing_claim_wallet_alert", claim);
+    return claim;
+  }
+
+  beforeEach(() => {
+    fake.admin.onRpc("billing_tenant_exempt", () => ({ data: false, error: null }));
+  });
+
+  it("claims 'no_balance' for 1 hour and e-mails the admins/gestores", async () => {
+    seedHouse(HOUSE_A);
+    const claim = claimOncePerInterval();
+
+    await expect(notifyNoBalance(HOUSE_A, { now: INSIDE_WINDOW })).resolves.toBe(true);
+
+    expect(NO_BALANCE_ALERT_INTERVAL).toBe("1 hour");
+    expect(claim).toHaveBeenCalledWith({
+      _tenant: HOUSE_A,
+      _kind: "no_balance",
+      _interval: "1 hour",
+    });
+    const recipients = callInfobipEmail.mock.calls.map((call) => call[0].to).sort();
+    expect(recipients).toEqual(["admin@casa-a.com", "gestor@casa-a.com"]);
+    const sent = callInfobipEmail.mock.calls[0][0];
+    expect(sent.subject).toBe("Saldo esgotado — envios pausados");
+    expect(sent.html).toContain("https://betleads.io/plano-e-creditos");
+    expect(sent.html).toContain("SMS e voz estão pausados");
+    expect(sent.html).toContain("e-mail segue só dentro da franquia mensal gratuita");
+    expect(sent.html).toContain("Casa &lt;A&gt;");
+    expect(sent.html).not.toContain(String.fromCharCode(160));
+    expect(sent.idempotencyKey).toMatch(/^wallet-alert:no_balance:/);
+  });
+
+  it("two failures within the hour send 1 alert", async () => {
+    seedHouse(HOUSE_A);
+    claimOncePerInterval();
+
+    await expect(notifyNoBalance(HOUSE_A, { now: INSIDE_WINDOW })).resolves.toBe(true);
+    const later = new Date(INSIDE_WINDOW.getTime() + 10 * 60_000);
+    await expect(notifyNoBalance(HOUSE_A, { now: later })).resolves.toBe(false);
+
+    expect(callInfobipEmail).toHaveBeenCalledTimes(2); // one e-mail, two recipients
+  });
+
+  it("outside the 08:00-20:00 window: 0 alerts and no claim, so a failure inside the window still claims", async () => {
+    seedHouse(HOUSE_A);
+    const claim = claimOncePerInterval();
+
+    await expect(notifyNoBalance(HOUSE_A, { now: OUTSIDE_WINDOW })).resolves.toBe(false);
+    expect(claim).not.toHaveBeenCalled();
+    expect(callInfobipEmail).not.toHaveBeenCalled();
+
+    const nextMorning = new Date("2026-10-24T12:00:00.000Z"); // 09:00 BRT
+    await expect(notifyNoBalance(HOUSE_A, { now: nextMorning })).resolves.toBe(true);
+    expect(claim).toHaveBeenCalledTimes(1);
+  });
+
+  it("a demo house never alerts", async () => {
+    seedHouse(HOUSE_A, { is_demo: true });
+    const claim = claimOncePerInterval();
+    await expect(notifyNoBalance(HOUSE_A, { now: INSIDE_WINDOW })).resolves.toBe(false);
+    expect(claim).not.toHaveBeenCalled();
+    expect(callInfobipEmail).not.toHaveBeenCalled();
+  });
+
+  it("an exempt house never alerts", async () => {
+    seedHouse(HOUSE_A);
+    fake.admin.onRpc("billing_tenant_exempt", () => ({ data: true, error: null }));
+    const claim = claimOncePerInterval();
+    await expect(notifyNoBalance(HOUSE_A, { now: INSIDE_WINDOW })).resolves.toBe(false);
+    expect(claim).not.toHaveBeenCalled();
+    expect(callInfobipEmail).not.toHaveBeenCalled();
+  });
+
+  it("never throws: a DB or provider failure is logged and returns false", async () => {
+    seedHouse(HOUSE_A);
+    fake.admin.onRpc("billing_claim_wallet_alert", () => ({
+      data: null,
+      error: { message: "db down" },
+    }));
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    await expect(notifyNoBalance(HOUSE_A, { now: INSIDE_WINDOW })).resolves.toBe(false);
+    expect(logged).toHaveBeenCalled();
+
+    resetNoBalanceAlertMemo();
+    claimOncePerInterval();
+    callInfobipEmail.mockRejectedValue(new Error("smtp down"));
+    await expect(notifyNoBalance(HOUSE_A, { now: INSIDE_WINDOW })).resolves.toBe(false);
+  });
+
+  it("a burst of failures from one house asks the database once per minute at most", async () => {
+    seedHouse(HOUSE_A);
+    const claim = vi.fn(() => ({ data: false, error: null }));
+    fake.admin.onRpc("billing_claim_wallet_alert", claim);
+
+    for (let i = 0; i < 50; i += 1) {
+      await notifyNoBalance(HOUSE_A, { now: new Date(INSIDE_WINDOW.getTime() + i * 1000) });
+    }
+    expect(claim).toHaveBeenCalledTimes(1);
+    await notifyNoBalance(HOUSE_A, { now: new Date(INSIDE_WINDOW.getTime() + 61_000) });
+    expect(claim).toHaveBeenCalledTimes(2);
   });
 });

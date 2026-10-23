@@ -51,6 +51,7 @@ import {
   type SmsSendGate,
 } from "./sms-provider-breaker.server";
 import { PROVIDER_ACCOUNT_DEFER_MS } from "./rate-limit/provider-errors.server";
+import { notifyNoBalance } from "./billing/wallet-alerts.server";
 
 const SMS_CAMPAIGN_JOB = "sms_campaign_dispatch";
 /** Per-lead backoff when the house's own wallet has no balance (never a global pause). */
@@ -730,6 +731,13 @@ async function runSmsFlowBatch({
         })
         .eq("id", item.lead.id);
       rescheduled++;
+      // PG3 Task 7: hourly "Saldo esgotado" e-mail; never breaks the dispatcher.
+      await notifyNoBalance(item.lead.tenant_id).catch((alertError: unknown) =>
+        console.error("[sms-dispatcher] no balance alert failed", {
+          tenantId: item.lead.tenant_id,
+          error: alertError instanceof Error ? alertError.message : String(alertError),
+        }),
+      );
     } else if ((r as { errorKind?: unknown }).errorKind === "provider_account") {
       // Account refused (101/505, 401/402/403): not the lead's fault. Same
       // step, attempts unchanged, back when the breaker allows a new try.

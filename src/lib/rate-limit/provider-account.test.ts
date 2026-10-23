@@ -62,7 +62,7 @@ describe("classifyProviderFailure — provider_account", () => {
     });
   });
 
-  it("errorKind insufficient_balance (set by the wallet reservation, the HOUSE's own wallet) is an interim no-cost defer, not final, until Task 7's skip-and-advance", () => {
+  it("errorKind insufficient_balance (set by the wallet reservation, the HOUSE's own wallet) is a skip (journey advances, no retry, no attempt), never a provider-level defer (PG3 Task 7)", () => {
     const walletRefusal = new ProviderSendError({
       channel: "sms",
       message: "Saldo insuficiente",
@@ -70,9 +70,9 @@ describe("classifyProviderFailure — provider_account", () => {
       errorKind: "insufficient_balance",
     });
     expect(classifyProviderFailure(walletRefusal)).toEqual({
-      kind: "defer",
+      kind: "skip",
       reason: "insufficient_balance",
-      retryAfterMs: CREDIT_DEFER_MS,
+      retryAfterMs: 0,
     });
   });
 

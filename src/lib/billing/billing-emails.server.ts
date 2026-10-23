@@ -163,7 +163,7 @@ async function getInvoiceForEmail(invoiceId: string): Promise<InvoiceEmailRow | 
 
 type TenantEmailRow = { id: string; nome: string | null; is_demo: boolean | null };
 
-async function getTenantForEmail(tenantId: string): Promise<TenantEmailRow | null> {
+export async function getTenantForEmail(tenantId: string): Promise<TenantEmailRow | null> {
   // `is_demo` is not yet in the generated Supabase types; same cast used
   // throughout tenant-access.server.ts for this column.
   const { data, error } = await (supabaseAdmin as any)

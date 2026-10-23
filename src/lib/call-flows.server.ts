@@ -18,6 +18,7 @@ import { loadHouseLinks } from "./house-links.server";
 import { deferIfOutsideWindow } from "./send-window.server";
 import { evaluateVoiceContactPolicy } from "./consent.server";
 import { listDemoTenantIds } from "./tenant-access.server";
+import { notifyNoBalance } from "./billing/wallet-alerts.server";
 
 type Json = Record<string, unknown>;
 
@@ -302,6 +303,13 @@ async function executeCallBlock(progress: any, block: any, player: any): Promise
       { reason: "saldo_insuficiente" },
     );
     await scheduleNext(progress, block);
+    // PG3 Task 7: hourly "Saldo esgotado" e-mail; never breaks the dispatcher.
+    await notifyNoBalance(progress.tenant_id).catch((alertError: unknown) =>
+      console.error("[call-flow] no balance alert failed", {
+        tenantId: progress.tenant_id,
+        error: alertError instanceof Error ? alertError.message : String(alertError),
+      }),
+    );
     return;
   }
   const isAuthError = result.status === 401 || result.status === 403;
