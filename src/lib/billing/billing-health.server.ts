@@ -25,8 +25,11 @@
 // the server Sentry client is active, otherwise to console.error with the
 // fixed `[billing-alert]` prefix for Better Stack log alerts. The
 // `billing-health` Better Stack heartbeat
-// (BETTERSTACK_HEARTBEAT_BILLING_HEALTH) is pinged only when the check
-// passes, so a missing ping means the job stopped or the check failed.
+// (BETTERSTACK_HEARTBEAT_BILLING_HEALTH) is pinged only when no job/DB-state
+// finding is critical, so a missing ping means the job stopped or billing
+// state is wrong. Signal findings (invalid webhook signature, Upper 401 /
+// FEATURE_DISABLED) alert only on new events and never gate the heartbeat.
+// Without Sentry, each code is logged at most once per hour per process.
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { pingHeartbeat } from "@/lib/observability/job-monitor.server";
@@ -50,7 +53,20 @@ export type BillingHealthFinding = {
   code: BillingHealthCode;
   severity: BillingHealthSeverity;
   message: string;
+  /** Signal findings only: time of the most recent event (no secret). */
+  lastAt?: string | null;
 };
+
+/**
+ * Findings built from event counters (billing_monitor_signals). They alert
+ * only on events newer than the previous stage run and never gate the
+ * heartbeat: the heartbeat reflects job/DB state only.
+ */
+export const SIGNAL_FINDING_CODES: ReadonlySet<BillingHealthCode> = new Set<BillingHealthCode>([
+  "webhook_invalid_signature",
+  "upper_feature_disabled",
+  "upper_unauthorized",
+]);
 
 export type BillingHealthReport = {
   ok: boolean;
@@ -145,6 +161,7 @@ export function evaluateBillingHealth(
         `${invalid.count} ${plural(invalid.count, "webhook da Upper recusado", "webhooks da Upper recusados")} ` +
         `por assinatura inválida ${window}` +
         (reason ? ` (último motivo: ${reason}).` : "."),
+      lastAt: invalid.last_at,
     });
   }
 
@@ -185,6 +202,7 @@ export function evaluateBillingHealth(
       code: "upper_feature_disabled",
       severity: "critical",
       message: `A Upper respondeu FEATURE_DISABLED ${featureDisabled.count} ${plural(featureDisabled.count, "vez", "vezes")} ${window}: o Pix está desabilitado na conta.`,
+      lastAt: featureDisabled.last_at,
     });
   }
 
@@ -194,6 +212,7 @@ export function evaluateBillingHealth(
       code: "upper_unauthorized",
       severity: "critical",
       message: `A Upper recusou a chave de API (401) ${unauthorized.count} ${plural(unauthorized.count, "vez", "vezes")} ${window}.`,
+      lastAt: unauthorized.last_at,
     });
   }
 
@@ -266,13 +285,34 @@ export async function checkBillingHealth(
 
 export type BillingAlertChannel = "sentry" | "log" | "none";
 
+/** Without Sentry, a persistent code is logged at most once per this period per process. */
+export const LOG_DEDUPE_MS = 60 * MINUTE_MS;
+/** Signal findings alert only on events newer than the previous run (fallback: this long ago). */
+export const SIGNAL_FRESH_FALLBACK_MS = 5 * MINUTE_MS;
+
+const lastLoggedAt = new Map<string, number>();
+let lastStageAt: number | null = null;
+
+/** Test hook: reset the in-memory dedupe map and signal cursor. */
+export function __resetBillingHealthStateForTests(): void {
+  lastLoggedAt.clear();
+  lastStageAt = null;
+}
+
 /**
- * Reports critical findings. Sentry when active (one issue per code), else
- * console.error with BILLING_ALERT_LOG_PREFIX. Never throws.
+ * Reports critical findings. Sentry when active (one issue per code, grouped
+ * by fingerprint), else console.error with BILLING_ALERT_LOG_PREFIX, each code
+ * at most once per LOG_DEDUPE_MS per process (`dedupe: false` bypasses it,
+ * for the superadmin test alert). Never throws.
  */
-export function reportBillingAlerts(findings: BillingHealthFinding[]): BillingAlertChannel {
+export function reportBillingAlerts(
+  findings: BillingHealthFinding[],
+  opts: { now?: Date; dedupe?: boolean } = {},
+): BillingAlertChannel {
   const critical = findings.filter((f) => f.severity === "critical");
   if (critical.length === 0) return "none";
+  const nowMs = (opts.now ?? new Date()).getTime();
+  const dedupe = opts.dedupe !== false;
   let useSentry = false;
   try {
     useSentry = isServerSentryActive();
@@ -292,6 +332,9 @@ export function reportBillingAlerts(findings: BillingHealthFinding[]): BillingAl
           },
         );
       } else {
+        const last = lastLoggedAt.get(finding.code);
+        if (dedupe && last !== undefined && nowMs - last < LOG_DEDUPE_MS) continue;
+        lastLoggedAt.set(finding.code, nowMs);
         console.error(`${BILLING_ALERT_LOG_PREFIX} ${finding.code} ${finding.message}`);
       }
     } catch {
@@ -301,17 +344,41 @@ export function reportBillingAlerts(findings: BillingHealthFinding[]): BillingAl
   return useSentry ? "sentry" : "log";
 }
 
+/** Critical findings that gate the heartbeat: job/DB state, never event counters. */
+export function heartbeatBlockingFindings(
+  findings: BillingHealthFinding[],
+): BillingHealthFinding[] {
+  return findings.filter((f) => f.severity === "critical" && !SIGNAL_FINDING_CODES.has(f.code));
+}
+
 /**
  * Isolated stage of the 5-minute reconcile job: check, alert, heartbeat.
+ *
+ * - State findings (cron stale, paid not credited, wallet mismatch, check
+ *   failed) alert every run (log deduped) and suppress the heartbeat.
+ * - Signal findings alert only when their last event is newer than the
+ *   previous run of this stage in this process (or than 5 min ago after a
+ *   restart), and never suppress the heartbeat.
+ *
  * Never throws.
  */
 export async function runBillingHealthStage(
   opts: { now?: Date } = {},
 ): Promise<BillingHealthReport | null> {
   try {
-    const report = await checkBillingHealth({ windowHours: JOB_WINDOW_HOURS, now: opts.now });
-    reportBillingAlerts(report.findings);
-    if (report.ok) void pingHeartbeat(BILLING_HEALTH_HEARTBEAT_JOB, true);
+    const now = opts.now ?? new Date();
+    const since = lastStageAt ?? now.getTime() - SIGNAL_FRESH_FALLBACK_MS;
+    lastStageAt = now.getTime();
+    const report = await checkBillingHealth({ windowHours: JOB_WINDOW_HOURS, now });
+    const alertable = report.findings.filter((f) => {
+      if (!SIGNAL_FINDING_CODES.has(f.code)) return true;
+      const lastAtMs = f.lastAt ? new Date(f.lastAt).getTime() : Number.NaN;
+      return Number.isFinite(lastAtMs) && lastAtMs > since;
+    });
+    reportBillingAlerts(alertable, { now });
+    if (heartbeatBlockingFindings(report.findings).length === 0) {
+      void pingHeartbeat(BILLING_HEALTH_HEARTBEAT_JOB, true);
+    }
     return report;
   } catch (error) {
     console.error("[billing-health] stage failed", { error: errorText(error) });
@@ -342,12 +409,15 @@ export async function adminTestBillingAlertFor(ctx: {
   userId: string;
 }): Promise<{ channel: BillingAlertChannel }> {
   await assertSuperAdmin(ctx.userId);
-  const channel = reportBillingAlerts([
-    {
-      code: "billing_alert_test",
-      severity: "critical",
-      message: "Alerta de teste da cobrança disparado pelo super admin. Nada a corrigir.",
-    },
-  ]);
+  const channel = reportBillingAlerts(
+    [
+      {
+        code: "billing_alert_test",
+        severity: "critical",
+        message: "Alerta de teste da cobrança disparado pelo super admin. Nada a corrigir.",
+      },
+    ],
+    { dedupe: false },
+  );
   return { channel };
 }

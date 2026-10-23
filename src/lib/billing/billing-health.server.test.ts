@@ -22,6 +22,7 @@ vi.mock("@/lib/observability/job-monitor.server", () => ({ pingHeartbeat }));
 
 import { createFakeDb } from "@/lib/sms-bulk.test-support";
 import {
+  __resetBillingHealthStateForTests,
   adminBillingHealthFor,
   adminTestBillingAlertFor,
   BILLING_ALERT_LOG_PREFIX,
@@ -65,6 +66,7 @@ beforeEach(() => {
   sentry.active = false;
   sentry.captureServerMessage.mockClear();
   pingHeartbeat.mockClear();
+  __resetBillingHealthStateForTests();
   errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
 });
 
@@ -221,6 +223,32 @@ describe("reportBillingAlerts", () => {
     expect(context.tags.alert_code).toBe("wallet_ledger_mismatch");
   });
 
+  it("without Sentry, logs a persistent code at most once per hour per process", () => {
+    const t0 = new Date("2026-10-23T12:00:00Z");
+    reportBillingAlerts([critical], { now: t0 });
+    reportBillingAlerts([critical], { now: new Date(t0.getTime() + 5 * 60_000) });
+    reportBillingAlerts([critical], { now: new Date(t0.getTime() + 59 * 60_000) });
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    reportBillingAlerts([critical], { now: new Date(t0.getTime() + 60 * 60_000) });
+    expect(errorSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("dedupes per code, and dedupe:false always logs", () => {
+    const other = { ...critical, code: "reconcile_cron_stale" as const };
+    reportBillingAlerts([critical], { now: NOW });
+    reportBillingAlerts([critical, other], { now: NOW });
+    expect(errorSpy).toHaveBeenCalledTimes(2);
+    reportBillingAlerts([critical], { now: NOW, dedupe: false });
+    expect(errorSpy).toHaveBeenCalledTimes(3);
+  });
+
+  it("Sentry keeps every event (grouped by fingerprint), no in-process dedupe", () => {
+    sentry.active = true;
+    reportBillingAlerts([critical], { now: NOW });
+    reportBillingAlerts([critical], { now: NOW });
+    expect(sentry.captureServerMessage).toHaveBeenCalledTimes(2);
+  });
+
   it("does nothing without critical findings", () => {
     expect(reportBillingAlerts([warning])).toBe("none");
     expect(errorSpy).not.toHaveBeenCalled();
@@ -247,6 +275,74 @@ describe("runBillingHealthStage", () => {
     expect(report?.ok).toBe(false);
     expect(pingHeartbeat).not.toHaveBeenCalled();
     expect(String(errorSpy.mock.calls[0][0])).toContain("charge_paid_not_credited");
+  });
+
+  it("signal findings alert but never suppress the heartbeat", async () => {
+    fake.admin.onRpc("billing_health_snapshot", () => ({
+      data: healthySnapshot({
+        signals: {
+          webhook_invalid_signature: {
+            count: 1,
+            last_at: "2026-10-23T11:58:00Z",
+            last_detail: "mismatch",
+          },
+          upper_unauthorized: { count: 1, last_at: "2026-10-23T11:59:00Z", last_detail: "401" },
+          upper_feature_disabled: { count: 1, last_at: "2026-10-23T11:59:30Z", last_detail: "403" },
+        },
+      }),
+      error: null,
+    }));
+    const report = await runBillingHealthStage({ now: NOW });
+    expect(report?.ok).toBe(false);
+    expect(pingHeartbeat).toHaveBeenCalledWith("billing-health", true);
+    const lines = errorSpy.mock.calls.map((c: unknown[]) => String(c[0])).join(" | ");
+    expect(lines).toContain("webhook_invalid_signature");
+    expect(lines).toContain("upper_unauthorized");
+    expect(lines).toContain("upper_feature_disabled");
+  });
+
+  it("signal findings alert only on events newer than the previous run", async () => {
+    let lastAt = "2026-10-23T11:40:00Z"; // older than 5 min before the first run
+    fake.admin.onRpc("billing_health_snapshot", () => ({
+      data: healthySnapshot({
+        signals: {
+          webhook_invalid_signature: { count: 1, last_at: lastAt, last_detail: "mismatch" },
+        },
+      }),
+      error: null,
+    }));
+    sentry.active = true; // no log dedupe in the way: count raw alerts
+
+    await runBillingHealthStage({ now: NOW });
+    expect(sentry.captureServerMessage).not.toHaveBeenCalled();
+
+    lastAt = "2026-10-23T12:02:00Z"; // new event between runs
+    await runBillingHealthStage({ now: new Date("2026-10-23T12:05:00Z") });
+    expect(sentry.captureServerMessage).toHaveBeenCalledTimes(1);
+
+    // Same counter, no new event: still in the 1 h window, but no new alert.
+    await runBillingHealthStage({ now: new Date("2026-10-23T12:10:00Z") });
+    expect(sentry.captureServerMessage).toHaveBeenCalledTimes(1);
+    expect(pingHeartbeat).toHaveBeenCalledTimes(3);
+  });
+
+  it("state findings keep alerting each run while signal ones are quiet", async () => {
+    fake.admin.onRpc("billing_health_snapshot", () => ({
+      data: healthySnapshot({
+        wallet_mismatch: { count: 1, tenant_ids: ["t"] },
+        signals: {
+          upper_unauthorized: { count: 1, last_at: "2026-10-23T10:00:00Z", last_detail: "401" },
+        },
+      }),
+      error: null,
+    }));
+    sentry.active = true;
+    await runBillingHealthStage({ now: NOW });
+    await runBillingHealthStage({ now: new Date("2026-10-23T12:05:00Z") });
+    const sent = sentry.captureServerMessage.mock.calls.map((c: unknown[]) => String(c[0]));
+    expect(sent).toHaveLength(2);
+    expect(sent.every((m) => m.includes("wallet_ledger_mismatch"))).toBe(true);
+    expect(pingHeartbeat).not.toHaveBeenCalled();
   });
 
   it("never throws, even when the RPC itself throws", async () => {
