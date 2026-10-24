@@ -232,6 +232,7 @@ export const ROUTE_META: Record<string, RouteMeta> = {
   // "every route has a title" test walks that interface verbatim.
   "/expert/": { section: "Expert", title: "Início" },
   "/expert/leads": { section: "Expert", title: "Leads" },
+  "/expert/leads/$playerId": { section: "Expert", title: "Ficha do lead" },
   "/webhooks": { section: "Configurações", title: "Integrações" },
   "/consentimentos": { section: "Canais", title: "Consentimentos" },
   "/configuracoes/casa": { section: "Configurações", title: "Configuração da casa" },
@@ -329,7 +330,10 @@ export function navLinkKey(item: Pick<NavLink, "to" | "hash">) {
 }
 
 function allLinks(): NavLink[] {
-  return SIDEBAR_SECTIONS.flatMap((section) =>
+  // The expert's own sections are included so their links light up too
+  // ("/expert/leads/$playerId" keeps "Leads" active); their paths never
+  // overlap a house link ("/experts" is a different segment).
+  return [...SIDEBAR_SECTIONS, ...EXPERT_SECTIONS].flatMap((section) =>
     section.items.flatMap((item) => (item.kind === "group" ? item.children : [item])),
   );
 }

@@ -104,6 +104,7 @@ describe("active nav item", () => {
   it("maps the expert mobile tabs when given EXPERT_MOBILE_TABS", () => {
     expect(activeMobileTab("/expert", EXPERT_MOBILE_TABS)).toBe("Início");
     expect(activeMobileTab("/expert/leads", EXPERT_MOBILE_TABS)).toBe("Leads");
+    expect(activeMobileTab("/expert/leads/abc", EXPERT_MOBILE_TABS)).toBe("Leads");
     // No regression: the default still resolves the house tabs.
     expect(activeMobileTab("/players/1")).toBe("Jogadores");
   });
@@ -213,5 +214,15 @@ describe("expert role", () => {
       true,
     );
     expect(activeNavKey("/experts", "")).toBe("/experts");
+  });
+
+  it("the lead sheet keeps Leads active and has its own title", () => {
+    expect(activeNavKey("/expert", "")).toBe("/expert");
+    expect(activeNavKey("/expert/leads", "")).toBe("/expert/leads");
+    expect(activeNavKey("/expert/leads/abc", "")).toBe("/expert/leads");
+    expect(resolveRouteMeta("/expert/leads/abc")).toEqual({
+      section: "Expert",
+      title: "Ficha do lead",
+    });
   });
 });

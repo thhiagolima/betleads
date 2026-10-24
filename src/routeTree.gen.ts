@@ -55,6 +55,7 @@ import { Route as ApiPublicEvolutionWebhookRouteImport } from './routes/api/publ
 import { Route as ApiPublicHealthRouteImport } from './routes/api/public/health'
 import { Route as ApiPublicSmsWebhookRouteImport } from './routes/api/public/sms-webhook'
 import { Route as CampanhasCampaignIdRelatorioRouteImport } from './routes/campanhas.$campaignId.relatorio'
+import { Route as ExpertLeadsPlayerIdRouteImport } from './routes/expert.leads.$playerId'
 import { Route as JornadasJourneyIdRelatorioRouteImport } from './routes/jornadas.$journeyId_.relatorio'
 import { Route as ApiPublicAutomationsDispatchRouteImport } from './routes/api/public/automations/dispatch'
 import { Route as ApiPublicAutomationsEvaluateRouteImport } from './routes/api/public/automations/evaluate'
@@ -319,6 +320,11 @@ const CampanhasCampaignIdRelatorioRoute =
     path: '/$campaignId/relatorio',
     getParentRoute: () => CampanhasRoute,
   } as any)
+const ExpertLeadsPlayerIdRoute = ExpertLeadsPlayerIdRouteImport.update({
+  id: '/$playerId',
+  path: '/$playerId',
+  getParentRoute: () => ExpertLeadsRoute,
+} as any)
 const JornadasJourneyIdRelatorioRoute =
   JornadasJourneyIdRelatorioRouteImport.update({
     id: '/$journeyId_/relatorio',
@@ -530,7 +536,7 @@ export interface FileRoutesByFullPath {
   '/automacoes/sms': typeof AutomacoesSmsRoute
   '/automacoes/whatsapp': typeof AutomacoesWhatsappRoute
   '/configuracoes/casa': typeof ConfiguracoesCasaRoute
-  '/expert/leads': typeof ExpertLeadsRoute
+  '/expert/leads': typeof ExpertLeadsRouteWithChildren
   '/jornadas/$journeyId': typeof JornadasJourneyIdRoute
   '/jornadas/nova': typeof JornadasNovaRoute
   '/links/configuracoes': typeof LinksConfiguracoesRoute
@@ -544,6 +550,7 @@ export interface FileRoutesByFullPath {
   '/api/public/health': typeof ApiPublicHealthRoute
   '/api/public/sms-webhook': typeof ApiPublicSmsWebhookRoute
   '/campanhas/$campaignId/relatorio': typeof CampanhasCampaignIdRelatorioRoute
+  '/expert/leads/$playerId': typeof ExpertLeadsPlayerIdRoute
   '/jornadas/$journeyId/relatorio': typeof JornadasJourneyIdRelatorioRoute
   '/api/public/automations/dispatch': typeof ApiPublicAutomationsDispatchRoute
   '/api/public/automations/evaluate': typeof ApiPublicAutomationsEvaluateRoute
@@ -609,7 +616,7 @@ export interface FileRoutesByTo {
   '/automacoes/sms': typeof AutomacoesSmsRoute
   '/automacoes/whatsapp': typeof AutomacoesWhatsappRoute
   '/configuracoes/casa': typeof ConfiguracoesCasaRoute
-  '/expert/leads': typeof ExpertLeadsRoute
+  '/expert/leads': typeof ExpertLeadsRouteWithChildren
   '/jornadas/$journeyId': typeof JornadasJourneyIdRoute
   '/jornadas/nova': typeof JornadasNovaRoute
   '/links/configuracoes': typeof LinksConfiguracoesRoute
@@ -623,6 +630,7 @@ export interface FileRoutesByTo {
   '/api/public/health': typeof ApiPublicHealthRoute
   '/api/public/sms-webhook': typeof ApiPublicSmsWebhookRoute
   '/campanhas/$campaignId/relatorio': typeof CampanhasCampaignIdRelatorioRoute
+  '/expert/leads/$playerId': typeof ExpertLeadsPlayerIdRoute
   '/jornadas/$journeyId/relatorio': typeof JornadasJourneyIdRelatorioRoute
   '/api/public/automations/dispatch': typeof ApiPublicAutomationsDispatchRoute
   '/api/public/automations/evaluate': typeof ApiPublicAutomationsEvaluateRoute
@@ -689,7 +697,7 @@ export interface FileRoutesById {
   '/automacoes/sms': typeof AutomacoesSmsRoute
   '/automacoes/whatsapp': typeof AutomacoesWhatsappRoute
   '/configuracoes_/casa': typeof ConfiguracoesCasaRoute
-  '/expert/leads': typeof ExpertLeadsRoute
+  '/expert/leads': typeof ExpertLeadsRouteWithChildren
   '/jornadas/$journeyId': typeof JornadasJourneyIdRoute
   '/jornadas/nova': typeof JornadasNovaRoute
   '/links/configuracoes': typeof LinksConfiguracoesRoute
@@ -703,6 +711,7 @@ export interface FileRoutesById {
   '/api/public/health': typeof ApiPublicHealthRoute
   '/api/public/sms-webhook': typeof ApiPublicSmsWebhookRoute
   '/campanhas/$campaignId/relatorio': typeof CampanhasCampaignIdRelatorioRoute
+  '/expert/leads/$playerId': typeof ExpertLeadsPlayerIdRoute
   '/jornadas/$journeyId_/relatorio': typeof JornadasJourneyIdRelatorioRoute
   '/api/public/automations/dispatch': typeof ApiPublicAutomationsDispatchRoute
   '/api/public/automations/evaluate': typeof ApiPublicAutomationsEvaluateRoute
@@ -784,6 +793,7 @@ export interface FileRouteTypes {
     | '/api/public/health'
     | '/api/public/sms-webhook'
     | '/campanhas/$campaignId/relatorio'
+    | '/expert/leads/$playerId'
     | '/jornadas/$journeyId/relatorio'
     | '/api/public/automations/dispatch'
     | '/api/public/automations/evaluate'
@@ -863,6 +873,7 @@ export interface FileRouteTypes {
     | '/api/public/health'
     | '/api/public/sms-webhook'
     | '/campanhas/$campaignId/relatorio'
+    | '/expert/leads/$playerId'
     | '/jornadas/$journeyId/relatorio'
     | '/api/public/automations/dispatch'
     | '/api/public/automations/evaluate'
@@ -942,6 +953,7 @@ export interface FileRouteTypes {
     | '/api/public/health'
     | '/api/public/sms-webhook'
     | '/campanhas/$campaignId/relatorio'
+    | '/expert/leads/$playerId'
     | '/jornadas/$journeyId_/relatorio'
     | '/api/public/automations/dispatch'
     | '/api/public/automations/evaluate'
@@ -1004,7 +1016,7 @@ export interface RootRouteChildren {
   WebhooksRoute: typeof WebhooksRoute
   WhatsappRoute: typeof WhatsappRoute
   ConfiguracoesCasaRoute: typeof ConfiguracoesCasaRoute
-  ExpertLeadsRoute: typeof ExpertLeadsRoute
+  ExpertLeadsRoute: typeof ExpertLeadsRouteWithChildren
   RelatoriosConversaoRoute: typeof RelatoriosConversaoRoute
   ResultadosCompararRoute: typeof ResultadosCompararRoute
   UTokenRoute: typeof UTokenRoute
@@ -1368,6 +1380,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CampanhasCampaignIdRelatorioRouteImport
       parentRoute: typeof CampanhasRoute
     }
+    '/expert/leads/$playerId': {
+      id: '/expert/leads/$playerId'
+      path: '/$playerId'
+      fullPath: '/expert/leads/$playerId'
+      preLoaderRoute: typeof ExpertLeadsPlayerIdRouteImport
+      parentRoute: typeof ExpertLeadsRoute
+    }
     '/jornadas/$journeyId_/relatorio': {
       id: '/jornadas/$journeyId_/relatorio'
       path: '/$journeyId/relatorio'
@@ -1665,6 +1684,18 @@ const SmsRouteChildren: SmsRouteChildren = {
 
 const SmsRouteWithChildren = SmsRoute._addFileChildren(SmsRouteChildren)
 
+interface ExpertLeadsRouteChildren {
+  ExpertLeadsPlayerIdRoute: typeof ExpertLeadsPlayerIdRoute
+}
+
+const ExpertLeadsRouteChildren: ExpertLeadsRouteChildren = {
+  ExpertLeadsPlayerIdRoute: ExpertLeadsPlayerIdRoute,
+}
+
+const ExpertLeadsRouteWithChildren = ExpertLeadsRoute._addFileChildren(
+  ExpertLeadsRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
@@ -1694,7 +1725,7 @@ const rootRouteChildren: RootRouteChildren = {
   WebhooksRoute: WebhooksRoute,
   WhatsappRoute: WhatsappRoute,
   ConfiguracoesCasaRoute: ConfiguracoesCasaRoute,
-  ExpertLeadsRoute: ExpertLeadsRoute,
+  ExpertLeadsRoute: ExpertLeadsRouteWithChildren,
   RelatoriosConversaoRoute: RelatoriosConversaoRoute,
   ResultadosCompararRoute: ResultadosCompararRoute,
   UTokenRoute: UTokenRoute,
