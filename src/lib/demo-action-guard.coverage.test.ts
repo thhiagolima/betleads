@@ -170,6 +170,12 @@ const entries: Entry[] = [
   { file: "tenants.functions.ts", name: "addUserToTenantFor", kind: "function" },
   { file: "tenants.functions.ts", name: "updateTenantUserRoleFor", kind: "function" },
   { file: "tenants.functions.ts", name: "removeUserFromTenantFor", kind: "function" },
+  { file: "finance.functions.ts", name: "saveFinanceDaysFor", kind: "function" },
+  { file: "finance.functions.ts", name: "saveOtherCostFor", kind: "function" },
+  { file: "finance.functions.ts", name: "deleteOtherCostFor", kind: "function" },
+  { file: "finance.functions.ts", name: "setFinanceRatesFor", kind: "function" },
+  { file: "finance.functions.ts", name: "setFinanceViewerFor", kind: "function" },
+  { file: "finance.functions.ts", name: "setTenantGoalFor", kind: "function" },
 ];
 
 // Read-only webhook actions that must keep working for a demo tenant
