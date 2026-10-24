@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ChannelBadge } from "@/components/identity/identity-badge";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Megaphone, Plus, Search, Send, Trash2, X } from "lucide-react";
@@ -53,12 +54,6 @@ const STATUS_FILTERS: ReadonlyArray<{ value: CampaignStatus; label: string }> = 
   { value: "pausadas", label: "Pausadas" },
   { value: "finalizadas", label: "Finalizadas" },
 ];
-
-const CHANNEL_LABEL: Record<"sms" | "email" | "voice", string> = {
-  sms: "SMS",
-  email: "E-mail",
-  voice: "Voz",
-};
 
 /** KPIs cover the same window the SMS list is fetched with (listScheduledSmsCampaigns). */
 const KPI_WINDOW_DAYS = 30;
@@ -366,8 +361,9 @@ export function CampaignsHub() {
                 >
                   <div className="min-w-0">
                     <p className="truncate text-body font-medium">{draftName}</p>
-                    <p className="text-meta text-muted-foreground">
-                      {CHANNEL_LABEL[draft.channel]} · editado em{" "}
+                    <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-muted-foreground">
+                      <ChannelBadge channel={draft.channel} className="py-0" />
+                      editado em{" "}
                       {new Date(draft.updatedAt).toLocaleString("pt-BR", {
                         dateStyle: "short",
                         timeStyle: "short",
@@ -600,7 +596,6 @@ function CampaignRow({
         timeStyle: "short",
       });
   const meta = [
-    CHANNEL_LABEL[campaign.channel],
     `${num(total)} ${total === 1 ? "destinatário" : "destinatários"}`,
     when,
     isVoice ? `${num(Number(campaign.completed_count ?? 0))} concluídas` : null,
@@ -639,7 +634,10 @@ function CampaignRow({
           </p>
           <div className="shrink-0 xl:hidden">{status}</div>
         </div>
-        <p className="mt-0.5 text-meta text-muted-foreground">{meta.join(" · ")}</p>
+        <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-muted-foreground">
+          <ChannelBadge channel={campaign.channel} className="py-0" />
+          <span>{meta.join(" · ")}</span>
+        </p>
         {reason ? (
           <p className="mt-1 text-meta text-foreground/80">
             <span className="font-medium">Motivo:</span> {reason}

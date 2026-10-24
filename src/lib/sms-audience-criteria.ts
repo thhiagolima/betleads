@@ -89,8 +89,8 @@ export const SYSTEM_SMS_AUDIENCES: Array<{
 }> = [
   {
     id: "system:all-leads",
-    name: "Todos os leads",
-    description: "Todos os jogadores cadastrados neste tenant.",
+    name: "Todos os jogadores",
+    description: "Todos os jogadores cadastrados na casa.",
     criteria: EMPTY_SMS_AUDIENCE,
   },
   {

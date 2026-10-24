@@ -22,6 +22,8 @@ import { Page, PageHeader } from "@/components/ui-premium/page-header";
 import { PlayerContactHistoryDialog } from "@/components/history/player-contact-history";
 import { EnviarPeloWhatsAppDialog } from "@/components/whatsapp/send-dialog";
 import { LevelBadge } from "@/components/players/level-badge";
+import { IdentityIcon } from "@/components/identity/identity-badge";
+import { CHANNEL_IDENTITY, EVENT_IDENTITY, LEVEL_IDENTITY } from "@/components/identity/identity";
 import { SituationText } from "@/components/players/situation-text";
 import { PlayerJourneysCard } from "@/components/players/player-journeys-card";
 import { copyToClipboard, openCampaignWithAudience } from "@/components/players/campaign-audience";
@@ -130,6 +132,7 @@ function PlayerDetailPage() {
     <Page>
       <PageHeader
         title={p.nome}
+        leading={<IdentityIcon tone={LEVEL_IDENTITY[data.level]} size="lg" className="mt-0.5" />}
         subtitle={
           <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
             <LevelBadge level={data.level} />
@@ -608,12 +611,14 @@ function eventLabel(value: string) {
   return text ? text.charAt(0).toUpperCase() + text.slice(1) : "Evento";
 }
 
+/** Same colours as Eventos and the channel badges (identity colours). */
 function timelineDot(type: string) {
-  if (type === "deposit" || type === "cashback") return "bg-success";
-  if (type === "withdrawal") return "bg-danger";
-  if (type === "sms" || type === "followup") return "bg-primary";
-  if (type === "session") return "bg-info";
-  return "bg-warning";
+  if (type === "deposit") return EVENT_IDENTITY.deposit.dot;
+  if (type === "cashback") return EVENT_IDENTITY.bonus.dot;
+  if (type === "withdrawal") return EVENT_IDENTITY.withdrawal.dot;
+  if (type === "sms" || type === "followup") return CHANNEL_IDENTITY.sms.dot;
+  if (type === "session") return EVENT_IDENTITY.login.dot;
+  return EVENT_IDENTITY.other.dot;
 }
 
 function mediaBasis(basis: PlayerDetail["media"]["spend_basis"]) {

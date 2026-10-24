@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { CHANNEL_IDENTITY } from "@/components/identity/identity";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { AlertTriangle, CheckCircle2, Mail, MessageSquare, Phone, Plus } from "lucide-react";
@@ -1179,7 +1180,10 @@ export function ChannelCampaignComposer({
               aria-label="Resumo da campanha"
             >
               <h3 className="flex items-center gap-2 text-section">
-                <MetaIcon className="size-4 text-muted-foreground" aria-hidden="true" />
+                <MetaIcon
+                  className={cn("size-4", CHANNEL_IDENTITY[channel].text)}
+                  aria-hidden="true"
+                />
                 Resumo · {channelMeta[channel].label}
               </h3>
               <div>

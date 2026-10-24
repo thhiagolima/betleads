@@ -1,3 +1,4 @@
+import type React from "react";
 import { cn } from "@/lib/utils";
 
 export type SegmentedFilterItem<T extends string> = {
@@ -5,6 +6,8 @@ export type SegmentedFilterItem<T extends string> = {
   label: string;
   /** Shown after the label when known. */
   count?: number | null;
+  /** Identity mark before the label (e.g. the level icon in its colour). */
+  marker?: React.ReactNode;
 };
 
 /**
@@ -49,6 +52,7 @@ export function SegmentedFilter<T extends string>({
                 : "text-muted-foreground hover:text-foreground",
             )}
           >
+            {item.marker}
             {item.label}
             {item.count != null && (
               <span className="tabular-nums text-muted-foreground">

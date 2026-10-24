@@ -13,6 +13,8 @@ interface PageHeaderProps {
   /** @deprecated Ignored together with `icon`. */
   iconClassName?: string;
   actions?: ReactNode;
+  /** Identity mark left of the title (e.g. the player's level icon on the ficha). */
+  leading?: ReactNode;
   className?: string;
 }
 
@@ -20,7 +22,7 @@ interface PageHeaderProps {
  * The one page header: h1 + optional subtitle on the left, actions on the right.
  * Same type as the Início (26px bold, 13.5px muted subtitle that wraps).
  */
-export function PageHeader({ title, subtitle, actions, className }: PageHeaderProps) {
+export function PageHeader({ title, subtitle, actions, leading, className }: PageHeaderProps) {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const resolvedTitle = title ?? resolveRouteMeta(pathname).title;
   return (
@@ -30,9 +32,12 @@ export function PageHeader({ title, subtitle, actions, className }: PageHeaderPr
         className,
       )}
     >
-      <div className="min-w-0">
-        <h1 className="text-2xl font-bold tracking-tight sm:text-title">{resolvedTitle}</h1>
-        {subtitle && <p className="mt-1 text-body text-muted-foreground">{subtitle}</p>}
+      <div className="flex min-w-0 items-start gap-3">
+        {leading}
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold tracking-tight sm:text-title">{resolvedTitle}</h1>
+          {subtitle && <div className="mt-1 text-body text-muted-foreground">{subtitle}</div>}
+        </div>
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2 sm:justify-end">{actions}</div>}
     </header>

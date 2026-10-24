@@ -60,6 +60,7 @@ import { HomeCard, KpiCard } from "@/components/home/home-cards";
 import { LevelBadge } from "@/components/players/level-badge";
 import { SituationText } from "@/components/players/situation-text";
 import { SegmentedFilter } from "@/components/players/segmented-filter";
+import { LEVEL_IDENTITY } from "@/components/identity/identity";
 import { alertTypeLabel } from "@/components/players/player-labels";
 import { copyToClipboard, openCampaignWithAudience } from "@/components/players/campaign-audience";
 import {
@@ -1678,11 +1679,20 @@ function PlayersPage() {
                 }
                 items={[
                   { value: "todos", label: "Todos os níveis" },
-                  ...PAID_LEVELS.map((level) => ({
-                    value: level,
-                    label: LEVEL_LABEL[level],
-                    count: contextualLevelCounts?.get(level) ?? null,
-                  })),
+                  ...PAID_LEVELS.map((level) => {
+                    const LevelIcon = LEVEL_IDENTITY[level].icon;
+                    return {
+                      value: level,
+                      label: LEVEL_LABEL[level],
+                      marker: (
+                        <LevelIcon
+                          className={`size-3.5 ${LEVEL_IDENTITY[level].text}`}
+                          aria-hidden="true"
+                        />
+                      ),
+                      count: contextualLevelCounts?.get(level) ?? null,
+                    };
+                  }),
                 ]}
               />
             </div>

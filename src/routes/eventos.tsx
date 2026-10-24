@@ -7,19 +7,10 @@ import { useActiveTenant } from "@/hooks/use-active-tenant";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { brl, timeAgo } from "@/lib/format";
-import { cn } from "@/lib/utils";
 import { describeEventType, type EventTypeDisplay } from "@/lib/webhook-events";
-import {
-  Activity,
-  ArrowDownToLine,
-  ArrowUpFromLine,
-  Dice5,
-  Gamepad2,
-  Gift,
-  LogIn,
-  LogOut,
-  UserPlus,
-} from "lucide-react";
+import { IdentityIcon } from "@/components/identity/identity-badge";
+import { EVENT_IDENTITY, type EventKind } from "@/components/identity/identity";
+import { Activity } from "lucide-react";
 import { DataCard } from "@/components/ui-premium/data-card";
 import { EmptyState } from "@/components/ui-premium/empty-state";
 import { Page, PageHeader } from "@/components/ui-premium/page-header";
@@ -28,40 +19,32 @@ export const Route = createFileRoute("/eventos")({
   component: EventosPage,
 });
 
-// Neutral icons; colour only where it means something (money in/out, failure).
-type EventStyle = { icon: React.ElementType; tone: string };
-
-const NEUTRAL = "bg-secondary text-muted-foreground";
-const NEUTRAL_STYLE: EventStyle = { icon: Activity, tone: NEUTRAL };
-const FAILED_TONE = "bg-danger/10 text-danger";
-
-const SLUG_STYLES: Record<string, EventStyle> = {
-  login: { icon: LogIn, tone: NEUTRAL },
-  logout: { icon: LogOut, tone: NEUTRAL },
-  cadastro: { icon: UserPlus, tone: NEUTRAL },
-  aposta: { icon: Dice5, tone: NEUTRAL },
-  bet: { icon: Dice5, tone: NEUTRAL },
+// Identity colours: one colour + icon per event kind, the same as the ficha's
+// timeline and the audience filter groups (deposit green, withdrawal blue…).
+const SLUG_KIND: Record<string, EventKind> = {
+  login: "login",
+  logout: "logout",
+  cadastro: "signup",
+  aposta: "bet",
+  bet: "bet",
 };
 
-const CATEGORY_STYLES: Record<NonNullable<EventTypeDisplay["categoria"]>, EventStyle> = {
-  Usuário: { icon: UserPlus, tone: NEUTRAL },
-  Depósito: { icon: ArrowDownToLine, tone: "bg-success/10 text-success" },
-  Saque: { icon: ArrowUpFromLine, tone: "bg-warning/10 text-warning" },
-  Jogo: { icon: Gamepad2, tone: NEUTRAL },
-  Bônus: { icon: Gift, tone: NEUTRAL },
+const CATEGORY_KIND: Record<NonNullable<EventTypeDisplay["categoria"]>, EventKind> = {
+  Usuário: "signup",
+  Depósito: "deposit",
+  Saque: "withdrawal",
+  Jogo: "bet",
+  Bônus: "bonus",
 };
 
 /** Label from WEBHOOK_EVENTS (single source); unknown types show as a neutral "Evento". */
 function eventConfig(tipo: string | null | undefined) {
   const display = describeEventType(tipo);
-  const style =
-    SLUG_STYLES[(tipo ?? "").trim().toLowerCase()] ??
-    (display.categoria ? CATEGORY_STYLES[display.categoria] : NEUTRAL_STYLE);
-  return {
-    icon: style.icon,
-    tone: display.failed ? FAILED_TONE : style.tone,
-    label: display.label,
-  };
+  const kind: EventKind = display.failed
+    ? "failed"
+    : (SLUG_KIND[(tipo ?? "").trim().toLowerCase()] ??
+      (display.categoria ? CATEGORY_KIND[display.categoria] : "other"));
+  return { tone: EVENT_IDENTITY[kind], label: display.label };
 }
 
 function EventosPage() {
@@ -137,24 +120,15 @@ function EventosPage() {
             <ul className="divide-y divide-border">
               {visible.map((e: any) => {
                 const cfg = eventConfig(e.tipo);
-                const Icon = cfg.icon;
                 return (
                   <li key={e.id} className="flex items-center gap-3 px-4 py-3 sm:gap-4 sm:px-5">
-                    <div
-                      className={cn(
-                        "flex size-9 shrink-0 items-center justify-center rounded-lg",
-                        cfg.tone,
-                      )}
-                      aria-hidden="true"
-                    >
-                      <Icon className="size-4" />
-                    </div>
+                    <IdentityIcon tone={cfg.tone} />
                     <div className="min-w-0 flex-1">
                       <p className="flex flex-wrap items-baseline gap-x-2 text-body">
                         <span className="truncate font-medium">
                           {e.players?.nome ?? "Jogador sem cadastro"}
                         </span>
-                        <span className="text-muted-foreground">{cfg.label}</span>
+                        <span className={cfg.tone.text}>{cfg.label}</span>
                         {e.metadata?.jogo && (
                           <span className="truncate text-meta text-muted-foreground">
                             · {e.metadata.jogo}

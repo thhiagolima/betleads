@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { CHANNEL_IDENTITY } from "@/components/identity/identity";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
@@ -981,11 +982,19 @@ function OperationRow({ item }: { item: OperationItem }) {
 }
 
 const channelNames = { wait: "espera", sms: "SMS", email: "e-mail", voice: "voz", end: "fim" };
+// Identity colours: the same channel colour as campaigns and the player's history.
 const channelStyles = {
   wait: "",
-  sms: "border-blue-500/30 text-blue-500",
-  email: "border-violet-500/30 text-violet-500",
-  voice: "border-emerald-500/30 text-emerald-500",
+  sms: `${CHANNEL_IDENTITY.sms.border} ${CHANNEL_IDENTITY.sms.text}`,
+  email: `${CHANNEL_IDENTITY.email.border} ${CHANNEL_IDENTITY.email.text}`,
+  voice: `${CHANNEL_IDENTITY.voice.border} ${CHANNEL_IDENTITY.voice.text}`,
+  end: "",
+};
+const channelDots = {
+  wait: "",
+  sms: CHANNEL_IDENTITY.sms.dot,
+  email: CHANNEL_IDENTITY.email.dot,
+  voice: CHANNEL_IDENTITY.voice.dot,
   end: "",
 };
 
@@ -1022,7 +1031,7 @@ function JourneyStepSummary({ steps }: { steps: Journey["journey_steps"] }) {
         {Object.entries(byChannel).map(([channel, count]) => (
           <span
             key={channel}
-            className={`rounded-full border px-2 py-0.5 text-xs font-medium ${channelStyles[channel as keyof typeof channelStyles]}`}
+            className={`rounded-md border px-2 py-0.5 text-meta font-semibold ${channelStyles[channel as keyof typeof channelStyles]}`}
           >
             {count} {channelNames[channel as keyof typeof channelNames]}
           </span>
@@ -1043,7 +1052,7 @@ function JourneyStepSummary({ steps }: { steps: Journey["journey_steps"] }) {
           ) : (
             <span
               key={step.id}
-              className={`h-2 w-2 rounded-full border ${channelStyles[step.step_type]}`}
+              className={`h-2 w-2 rounded-full ${channelDots[step.step_type]}`}
               aria-hidden="true"
             />
           ),

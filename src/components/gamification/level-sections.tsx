@@ -28,6 +28,8 @@ import {
 } from "@/components/gamification/level-rules";
 import { LevelBadge } from "@/components/players/level-badge";
 import { LEVEL_TONE } from "@/components/players/player-tones";
+import { LEVEL_IDENTITY } from "@/components/identity/identity";
+import type { LevelSlug } from "@/lib/player-level";
 import { SituationText } from "@/components/players/situation-text";
 
 const PLAYERS_SEARCH = { id: undefined, focus: undefined };
@@ -56,7 +58,13 @@ export function LevelStrip({ data }: { data: GamificationData }) {
       <div className="grid grid-cols-[repeat(6,minmax(140px,1fr))] gap-3">
         {data.levels.map((level) => (
           <HomeCard key={level.slug} className="flex flex-col p-3.5 sm:p-4">
-            <h3 className={cn("text-label font-semibold", LEVEL_TONE[level.slug].text)}>
+            <h3
+              className={cn(
+                "flex items-center gap-1.5 text-label font-semibold",
+                LEVEL_TONE[level.slug].text,
+              )}
+            >
+              <LevelIcon level={level.slug} />
               {level.label}
             </h3>
             <p className="mt-1.5 text-kpi-sm tabular-nums">{num(level.count)}</p>
@@ -334,4 +342,9 @@ function DaysField({
       </div>
     </div>
   );
+}
+
+function LevelIcon({ level }: { level: LevelSlug }) {
+  const Icon = LEVEL_IDENTITY[level].icon;
+  return <Icon className="size-3.5 shrink-0" aria-hidden="true" />;
 }

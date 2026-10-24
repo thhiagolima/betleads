@@ -13,38 +13,50 @@ import {
 import { IconButton } from "@/components/ui/icon-button";
 import { cn } from "@/lib/utils";
 
-/** Grupo de regras: título `text-label` e chips neutros. */
+/** Grupo de regras: título `text-label` (com a bolinha da cor do grupo, se houver). */
 export function RuleGroup({
   title,
   help,
+  dot,
   children,
 }: {
   title: string;
   help?: string;
+  /** Classe de cor do grupo (FILTER_GROUP_DOT). */
+  dot?: string;
   children: ReactNode;
 }) {
   return (
     <fieldset className="space-y-2">
-      <legend className="text-label font-semibold">{title}</legend>
+      <legend className="flex items-center gap-1.5 text-label font-semibold">
+        {dot && <span className={cn("size-2 rounded-full", dot)} aria-hidden="true" />}
+        {title}
+      </legend>
       {help && <p className="-mt-1 text-meta text-muted-foreground">{help}</p>}
       <div className="flex flex-wrap gap-2">{children}</div>
     </fieldset>
   );
 }
 
-/** Chip de regra: neutro com contagem; só o ativo fica em `primary`. */
+/** Chip de regra com contagem: marcador na cor do tipo; o ativo fica em `primary`. */
 export function RuleChip({
   active,
   onClick,
   label,
   count,
   loading,
+  dot,
+  marker,
 }: {
   active: boolean;
   onClick: () => void;
   label: string;
   count?: number;
   loading?: boolean;
+  /** Classe de cor da bolinha (tipo do filtro). */
+  dot?: string;
+  /** Marcador próprio (ex.: ícone do nível), no lugar da bolinha. */
+  marker?: ReactNode;
 }) {
   return (
     <button
@@ -52,12 +64,14 @@ export function RuleChip({
       aria-pressed={active}
       onClick={onClick}
       className={cn(
-        "inline-flex h-10 items-center gap-1.5 rounded-full border px-3 text-[13px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring sm:h-8",
+        "inline-flex h-10 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 text-[13px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring sm:h-8",
         active
           ? "border-primary bg-primary/15 text-primary"
           : "border-border bg-background/40 text-foreground hover:bg-secondary",
       )}
     >
+      {marker ??
+        (dot && <span className={cn("size-2 shrink-0 rounded-full", dot)} aria-hidden="true" />)}
       <span>{label}</span>
       <span
         className={cn(

@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { FILTER_GROUP_DOT, INACTIVITY_DOT, LEVEL_IDENTITY } from "@/components/identity/identity";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useRef, useState } from "react";
@@ -54,6 +55,13 @@ const TIMING_RULES: Array<{ value: Timing; label: string }> = [
   { value: "inactive30", label: "30+ dias" },
   { value: "inactive90", label: "90+ dias" },
 ];
+
+/** Level icon in the level colour, as on the player list. */
+function LevelMarker({ level }: { level: Level }) {
+  const tone = LEVEL_IDENTITY[level];
+  const Icon = tone.icon;
+  return <Icon className={`size-3.5 shrink-0 ${tone.text}`} aria-hidden="true" />;
+}
 
 function PublicosPage() {
   const qc = useQueryClient();
@@ -196,60 +204,78 @@ function PublicosPage() {
             </p>
           ) : (
             <>
-              <RuleGroup
-                title="O que o jogador fez"
-                help="Escolhas incompatíveis se substituem; as demais podem ser combinadas."
-              >
-                <RuleChip
-                  label="Nunca depositou"
-                  count={facets?.activity.depositNever}
-                  loading={calculating}
-                  active={criteria.activity.deposit === "never"}
-                  onClick={() => setActivity("deposit", "never")}
-                />
-                <RuleChip
-                  label="Já depositou"
-                  count={facets?.activity.depositYes}
-                  loading={calculating}
-                  active={criteria.activity.deposit === "yes"}
-                  onClick={() => setActivity("deposit", "yes")}
-                />
-                <RuleChip
-                  label="Gerou PIX e não pagou"
-                  count={facets?.activity.pixUnpaid}
-                  loading={calculating}
-                  active={criteria.activity.pixUnpaid}
-                  onClick={() => setActivity("pixUnpaid", true)}
-                />
-                <RuleChip
-                  label="Já sacou"
-                  count={facets?.activity.withdrawalYes}
-                  loading={calculating}
-                  active={criteria.activity.withdrawal === "yes"}
-                  onClick={() => setActivity("withdrawal", "yes")}
-                />
-                <RuleChip
-                  label="Nunca sacou"
-                  count={facets?.activity.withdrawalNever}
-                  loading={calculating}
-                  active={criteria.activity.withdrawal === "never"}
-                  onClick={() => setActivity("withdrawal", "never")}
-                />
-                <RuleChip
-                  label="Saque pendente"
-                  count={facets?.activity.withdrawalPending}
-                  loading={calculating}
-                  active={criteria.activity.withdrawalPending}
-                  onClick={() => setActivity("withdrawalPending", true)}
-                />
-                <RuleChip
-                  label="Recebeu cashback"
-                  count={facets?.activity.cashback}
-                  loading={calculating}
-                  active={criteria.activity.cashback}
-                  onClick={() => setActivity("cashback", true)}
-                />
-              </RuleGroup>
+              <div className="space-y-2">
+                <p className="text-label font-semibold">O que o jogador fez</p>
+                <p className="-mt-1 text-meta text-muted-foreground">
+                  Escolhas incompatíveis se substituem; as demais podem ser combinadas.
+                </p>
+                <div className="grid gap-4 sm:grid-cols-[repeat(auto-fit,minmax(230px,1fr))]">
+                  <RuleGroup title="Depósito" dot={FILTER_GROUP_DOT.deposit}>
+                    <RuleChip
+                      label="Já depositou"
+                      dot={FILTER_GROUP_DOT.deposit}
+                      count={facets?.activity.depositYes}
+                      loading={calculating}
+                      active={criteria.activity.deposit === "yes"}
+                      onClick={() => setActivity("deposit", "yes")}
+                    />
+                    <RuleChip
+                      label="Nunca depositou"
+                      dot={FILTER_GROUP_DOT.signup}
+                      count={facets?.activity.depositNever}
+                      loading={calculating}
+                      active={criteria.activity.deposit === "never"}
+                      onClick={() => setActivity("deposit", "never")}
+                    />
+                  </RuleGroup>
+                  <RuleGroup title="Pendências" dot={FILTER_GROUP_DOT.pending}>
+                    <RuleChip
+                      label="Gerou PIX e não pagou"
+                      dot={FILTER_GROUP_DOT.pending}
+                      count={facets?.activity.pixUnpaid}
+                      loading={calculating}
+                      active={criteria.activity.pixUnpaid}
+                      onClick={() => setActivity("pixUnpaid", true)}
+                    />
+                    <RuleChip
+                      label="Saque pendente"
+                      dot={FILTER_GROUP_DOT.pending}
+                      count={facets?.activity.withdrawalPending}
+                      loading={calculating}
+                      active={criteria.activity.withdrawalPending}
+                      onClick={() => setActivity("withdrawalPending", true)}
+                    />
+                  </RuleGroup>
+                  <RuleGroup title="Saques" dot={FILTER_GROUP_DOT.withdrawal}>
+                    <RuleChip
+                      label="Já sacou"
+                      dot={FILTER_GROUP_DOT.withdrawal}
+                      count={facets?.activity.withdrawalYes}
+                      loading={calculating}
+                      active={criteria.activity.withdrawal === "yes"}
+                      onClick={() => setActivity("withdrawal", "yes")}
+                    />
+                    <RuleChip
+                      label="Nunca sacou"
+                      dot={`${FILTER_GROUP_DOT.withdrawal} opacity-40`}
+                      count={facets?.activity.withdrawalNever}
+                      loading={calculating}
+                      active={criteria.activity.withdrawal === "never"}
+                      onClick={() => setActivity("withdrawal", "never")}
+                    />
+                  </RuleGroup>
+                  <RuleGroup title="Bônus" dot={FILTER_GROUP_DOT.bonus}>
+                    <RuleChip
+                      label="Recebeu cashback"
+                      dot={FILTER_GROUP_DOT.bonus}
+                      count={facets?.activity.cashback}
+                      loading={calculating}
+                      active={criteria.activity.cashback}
+                      onClick={() => setActivity("cashback", true)}
+                    />
+                  </RuleGroup>
+                </div>
+              </div>
 
               {!neverDeposited && (
                 <RuleGroup title="Nível" help="Pode ser combinado com o tempo sem depositar.">
@@ -257,6 +283,7 @@ function PublicosPage() {
                     <RuleChip
                       key={rule.value}
                       label={rule.label}
+                      marker={<LevelMarker level={rule.value} />}
                       count={facets?.levels?.[rule.value]}
                       loading={calculating}
                       active={criteria.level === rule.value}
@@ -272,11 +299,16 @@ function PublicosPage() {
               )}
 
               {!neverDeposited && (
-                <RuleGroup title="Tempo sem depositar" help="Escolha uma faixa ou informe os dias.">
+                <RuleGroup
+                  title="Tempo sem depositar"
+                  help="Escolha uma faixa ou informe os dias. Quanto mais escura a bolinha, mais tempo parado."
+                  dot={FILTER_GROUP_DOT.inactivity}
+                >
                   {TIMING_RULES.map((rule) => (
                     <RuleChip
                       key={rule.value}
                       label={rule.label}
+                      dot={INACTIVITY_DOT[rule.value]}
                       count={facets?.timings?.[rule.value]}
                       loading={calculating}
                       active={criteria.timing === rule.value}

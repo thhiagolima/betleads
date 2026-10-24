@@ -1,21 +1,10 @@
+import { IdentityBadge } from "@/components/identity/identity-badge";
+import { LEVEL_IDENTITY } from "@/components/identity/identity";
 import { LEVEL_LABEL, type LevelSlug } from "@/lib/player-level";
-import { cn } from "@/lib/utils";
 
-import { LEVEL_TONE } from "./player-tones";
-
-/** Level of a player as a small outlined badge ("Ouro", "Black VIP"…). Inline (span). */
+/** Level of a player: icon + name in the level's colour, thin border ("Ouro", "Black VIP"…). */
 export function LevelBadge({ level, className }: { level: LevelSlug; className?: string }) {
-  const tone = LEVEL_TONE[level];
   return (
-    <span
-      className={cn(
-        "inline-flex shrink-0 items-center whitespace-nowrap rounded-md border px-2 py-0.5 text-meta font-medium",
-        tone.border,
-        tone.text,
-        className,
-      )}
-    >
-      {LEVEL_LABEL[level]}
-    </span>
+    <IdentityBadge tone={LEVEL_IDENTITY[level]} label={LEVEL_LABEL[level]} className={className} />
   );
 }
