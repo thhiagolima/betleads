@@ -313,14 +313,35 @@ describe("finance_days", () => {
       insert into public.players (id, tenant_id, ftd_em) values
         ('${player}', '${TENANT_A}', '2026-03-05 15:00:00Z');
 
+      -- The pending deposit is EARLIEST in time: if the status='aprovado'
+      -- filter were missing, it (999) would win instead of the first
+      -- approved deposit (50).
       insert into public.deposits (id, tenant_id, player_id, valor, status, created_at) values
+        ('00000000-0000-4000-8000-0000000202b3', '${TENANT_A}', '${player}', 999, 'pendente', '2026-03-05 15:00:00Z'),
         ('00000000-0000-4000-8000-0000000202b1', '${TENANT_A}', '${player}', 50, 'aprovado', '2026-03-05 15:05:00Z'),
-        ('00000000-0000-4000-8000-0000000202b2', '${TENANT_A}', '${player}', 100, 'aprovado', '2026-03-05 16:00:00Z'),
-        ('00000000-0000-4000-8000-0000000202b3', '${TENANT_A}', '${player}', 999, 'pendente', '2026-03-05 16:30:00Z');
+        ('00000000-0000-4000-8000-0000000202b2', '${TENANT_A}', '${player}', 100, 'aprovado', '2026-03-05 16:00:00Z');
     `);
 
     const rows = await financeDays([TENANT_A], "2026-03-05", "2026-03-05");
     expect(Number(rows[0].ftd_deposit_amount)).toBe(50);
+  });
+
+  it("orders by coalesce(completed_at, created_at), not created_at alone", async () => {
+    const player = "00000000-0000-4000-8000-0000000202c1";
+    await db.exec(`
+      insert into public.players (id, tenant_id, ftd_em) values
+        ('${player}', '${TENANT_A}', '2026-03-06 15:00:00Z');
+
+      -- Created earlier but completed later (200) vs created later but
+      -- completed earlier (300): the first APPROVED deposit by completion
+      -- time is 300, not 200 (which created_at alone would pick).
+      insert into public.deposits (id, tenant_id, player_id, valor, status, created_at, completed_at) values
+        ('00000000-0000-4000-8000-0000000202c2', '${TENANT_A}', '${player}', 200, 'aprovado', '2026-03-06 10:00:00Z', '2026-03-06 12:00:00Z'),
+        ('00000000-0000-4000-8000-0000000202c3', '${TENANT_A}', '${player}', 300, 'aprovado', '2026-03-06 11:00:00Z', '2026-03-06 10:30:00Z');
+    `);
+
+    const rows = await financeDays([TENANT_A], "2026-03-06", "2026-03-06");
+    expect(Number(rows[0].ftd_deposit_amount)).toBe(300);
   });
 
   it("ftd day boundary is Sao Paulo", async () => {
@@ -338,6 +359,28 @@ describe("finance_days", () => {
     const day6 = rows.find((r) => isoDay(r.metric_date) === "2026-04-06");
     expect(Number(day5!.ftd_deposit_amount)).toBe(77);
     expect(Number(day6!.ftd_deposit_amount)).toBe(0);
+  });
+
+  it("excludes an FTD outside the requested window and one in an unrequested house", async () => {
+    const outsideWindowPlayer = "00000000-0000-4000-8000-0000000404a1";
+    const otherHousePlayer = "00000000-0000-4000-8000-0000000404a2";
+    await db.exec(`
+      -- Player with an FTD day well outside the [_from, _to] window below.
+      insert into public.players (id, tenant_id, ftd_em) values
+        ('${outsideWindowPlayer}', '${TENANT_A}', '2026-04-20 15:00:00Z');
+      insert into public.deposits (id, tenant_id, player_id, valor, status, created_at) values
+        ('00000000-0000-4000-8000-0000000404b1', '${TENANT_A}', '${outsideWindowPlayer}', 500, 'aprovado', '2026-04-20 15:05:00Z');
+
+      -- Player whose FTD falls inside the window but in a house (TENANT_B)
+      -- that is not in the requested _tenants array.
+      insert into public.players (id, tenant_id, ftd_em) values
+        ('${otherHousePlayer}', '${TENANT_B}', '2026-04-10 15:00:00Z');
+      insert into public.deposits (id, tenant_id, player_id, valor, status, created_at) values
+        ('00000000-0000-4000-8000-0000000404b2', '${TENANT_B}', '${otherHousePlayer}', 700, 'aprovado', '2026-04-10 15:05:00Z');
+    `);
+
+    const rows = await financeDays([TENANT_A], "2026-04-10", "2026-04-10");
+    expect(Number(rows[0].ftd_deposit_amount)).toBe(0);
   });
 });
 
@@ -368,17 +411,36 @@ describe("finance_goal_days", () => {
 });
 
 describe("RLS", () => {
-  it("authenticated gestor without grant reads no tenant_finance_daily rows", async () => {
+  it("authenticated gestor without grant reads no tenant_finance_daily rows, but the admin (positive control) reads it", async () => {
     await db.query(`
       insert into public.tenant_finance_daily (tenant_id, metric_date, ad_spend, ggr) values
         ('${TENANT_A}', '2026-06-01', 100, 50)
     `);
 
-    const { rows } = await asRole(
+    const { rows: noGrantRows } = await asRole(
       "authenticated",
       { sub: GESTOR_A_NO_GRANT, role: "authenticated" },
       `select * from public.tenant_finance_daily where tenant_id = '${TENANT_A}'`,
     );
-    expect(rows).toEqual([]);
+    expect(noGrantRows).toEqual([]);
+
+    const { rows: adminRows } = await asRole(
+      "authenticated",
+      { sub: ADMIN_A, role: "authenticated" },
+      `select * from public.tenant_finance_daily where tenant_id = '${TENANT_A}' and metric_date = '2026-06-01'`,
+    );
+    expect(adminRows).toHaveLength(1);
+  });
+});
+
+describe("function grants", () => {
+  it("anon cannot execute finance_days", async () => {
+    await expect(
+      asRole(
+        "anon",
+        undefined,
+        `select * from public.finance_days(array['${TENANT_A}']::uuid[], '2026-01-01', '2026-01-01')`,
+      ),
+    ).rejects.toThrow();
   });
 });

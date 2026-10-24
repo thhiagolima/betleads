@@ -97,6 +97,7 @@ as $$
     )
 $$;
 
+revoke all on function public.finance_can_view(uuid, uuid) from public, anon;
 grant execute on function public.finance_can_view(uuid, uuid) to authenticated, service_role;
 
 create or replace function public.finance_can_edit_values(_user uuid, _tenant uuid)
@@ -113,6 +114,7 @@ as $$
     )
 $$;
 
+revoke all on function public.finance_can_edit_values(uuid, uuid) from public, anon;
 grant execute on function public.finance_can_edit_values(uuid, uuid) to authenticated, service_role;
 
 create or replace function public.finance_can_edit_rates(_user uuid, _tenant uuid)
@@ -130,6 +132,7 @@ as $$
     or public.is_group_manager_of_tenant(_user, _tenant)
 $$;
 
+revoke all on function public.finance_can_edit_rates(uuid, uuid) from public, anon;
 grant execute on function public.finance_can_edit_rates(uuid, uuid) to authenticated, service_role;
 
 -- Same rule as finance_can_edit_rates (per the design doc's access matrix:
@@ -143,6 +146,7 @@ as $$
   select public.finance_can_edit_rates(_user, _tenant)
 $$;
 
+revoke all on function public.finance_can_manage_viewers(uuid, uuid) from public, anon;
 grant execute on function public.finance_can_manage_viewers(uuid, uuid) to authenticated, service_role;
 
 create or replace function public.finance_can_manage_goals(_user uuid, _tenant uuid)
@@ -156,6 +160,7 @@ as $$
     or public.is_group_manager_of_tenant(_user, _tenant)
 $$;
 
+revoke all on function public.finance_can_manage_goals(uuid, uuid) from public, anon;
 grant execute on function public.finance_can_manage_goals(uuid, uuid) to authenticated, service_role;
 
 -- ============================================================
@@ -243,26 +248,35 @@ as $$
   ),
   ftd_sums as (
     -- One row per house x FTD day: the first approved deposit of every
-    -- player whose ftd_em (Brasília day) falls on that day, summed.
+    -- player whose ftd_em (Brasília day) falls on that day, summed. Scoped
+    -- to the requested tenants and [_from, _to] window (in Brasília time)
+    -- so this never aggregates over the whole players table.
     select
       p.tenant_id,
       (p.ftd_em at time zone 'America/Sao_Paulo')::date as metric_date,
       sum(dep.valor) as ftd_deposit_amount
     from public.players p
     join lateral (
+      -- d.tenant_id = p.tenant_id lets this use the existing
+      -- deposits_tenant_player_status_idx (tenant_id, player_id, status)
+      -- instead of a player_id-only lookup.
       select d.valor
       from public.deposits d
-      where d.player_id = p.id and d.status = 'aprovado'
+      where d.tenant_id = p.tenant_id and d.player_id = p.id and d.status = 'aprovado'
       order by coalesce(d.completed_at, d.created_at)
       limit 1
     ) dep on true
-    where p.ftd_em is not null
+    where p.tenant_id = any(_tenants)
+      and p.ftd_em >= (_from::timestamp at time zone 'America/Sao_Paulo')
+      and p.ftd_em < ((_to + 1)::timestamp at time zone 'America/Sao_Paulo')
     group by p.tenant_id, (p.ftd_em at time zone 'America/Sao_Paulo')::date
   ),
   ad_suggested as (
     select tenant_id, metric_date, sum(spend) as ad_spend_suggested
     from public.marketing_ad_metrics_daily
     where provider = 'meta'
+      and tenant_id = any(_tenants)
+      and metric_date between _from and _to
     group by tenant_id, metric_date
   ),
   day_rates as (
@@ -356,14 +370,11 @@ $$;
 revoke all on function public.finance_goal_days(uuid[], date, date) from public, anon, authenticated;
 grant execute on function public.finance_goal_days(uuid[], date, date) to service_role;
 
--- ============================================================
--- Confirmed in production (read-only, via the pooler) on 2026-10-24: no
--- index on public.deposits leads with player_id (deposits_tenant_player_*
--- all lead with tenant_id), so the lateral above — one "first approved
--- deposit" lookup per player with a known FTD day — would seq-scan
--- deposits per call. This index is therefore created in production by this
--- migration.
--- ============================================================
-create index if not exists deposits_player_id_created_idx
-  on public.deposits (player_id, created_at)
-  where status = 'aprovado';
+-- No new index is added here: deposits_tenant_player_status_idx
+-- (tenant_id, player_id, status), created by
+-- 20261002173000_batch_daily_metric_refresh.sql, already covers the
+-- ftd_sums lateral above now that it filters on d.tenant_id = p.tenant_id
+-- too. A dedicated player_id-led index was considered (and confirmed
+-- absent via a read-only prod check on 2026-10-24) but was deliberately
+-- left out to avoid a write-locking index build on production's deposits
+-- table.
