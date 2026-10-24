@@ -71,8 +71,9 @@ async function ensureDemoGroup(client, { demoTenantId, seed }) {
 }
 
 /**
- * Seeds invented finance for the demo tenant: daily ad spend/GGR (the last
- * two days left pending, no GGR), a single fee-rate row and two goals (both
+ * Seeds invented finance for the demo tenant: daily ad spend/GGR (only the
+ * most recent day left pending, no GGR — normally today, which never grays a
+ * goal, so the demo shows goal colours), a single fee-rate row and two goals (both
  * from the earliest seeded day), two current-month "other costs", and the
  * "Grupo Demo" group with the demo house in it. If `demoUserIds` is given,
  * those users become managers of that group.
@@ -99,7 +100,7 @@ export async function seedDemoFinance(client, { demoTenantId, days = 60, seed = 
   if (!metricRows.length) return { days: 0, groupId };
 
   const sorted = [...metricRows].sort((a, b) => (a.metric_date < b.metric_date ? -1 : 1));
-  const pendingDates = new Set(sorted.slice(-2).map((m) => m.metric_date));
+  const pendingDates = new Set(sorted.slice(-1).map((m) => m.metric_date));
   const firstDate = sorted[0].metric_date;
 
   for (const m of sorted) {

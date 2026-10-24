@@ -66,10 +66,11 @@ describe("seedDemoFinance", () => {
     expect(firstDaily).toHaveLength(DAYS);
   });
 
-  it("last two days are pending (no GGR); every earlier day has one", async () => {
+  it("only the most recent day is pending (no GGR); every earlier day has one", async () => {
     const rows = await financeDaily();
-    const pending = rows.slice(-2);
-    const settled = rows.slice(0, -2);
+    const pending = rows.slice(-1);
+    const settled = rows.slice(0, -1);
+    expect(pending).toHaveLength(1);
     expect(pending.every((r) => r.ggr === null)).toBe(true);
     expect(settled.every((r) => r.ggr !== null)).toBe(true);
     // Ad spend is filled for every day, including the pending ones.
