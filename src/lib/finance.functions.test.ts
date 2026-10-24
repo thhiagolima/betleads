@@ -378,6 +378,21 @@ describe("viewer grants", () => {
     });
     expect(fake.admin.rows("tenant_finance_viewers")).toHaveLength(0);
   });
+
+  it("setFinanceViewer revokes a stale grant of someone no longer gestor", async () => {
+    // MEMBER_A was a liberated gestor and got demoted to member; the grant stayed.
+    fake.admin.rows("tenant_finance_viewers").push({ tenant_id: HOUSE_A, user_id: MEMBER_A });
+    const result = await setFinanceViewerFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      userId: MEMBER_A,
+      canView: false,
+    });
+    expect(result).toEqual({ ok: true, changed: true });
+    expect(fake.admin.rows("tenant_finance_viewers")).toHaveLength(0);
+    expect(fake.admin.rows("tenant_audit_logs")).toEqual([
+      expect.objectContaining({ action: "finance.viewer_changed", entity_id: MEMBER_A }),
+    ]);
+  });
 });
 
 describe("group overview", () => {
@@ -464,6 +479,40 @@ describe("group overview", () => {
     expect(custom.tenants.find((t) => t.id === HOUSE_A)!.current.otherCosts).toBeNull();
     expect(custom.totals.current.otherCosts).toBeNull();
     expect(custom.totals.previous.otherCosts).toBeNull();
+  });
+
+  it("overview: Mês preset with a week-shifted comparison leaves other costs out of it", async () => {
+    fake.admin
+      .rows("tenant_finance_other_costs")
+      .push(
+        { id: "c1", tenant_id: HOUSE_A, month: "2026-10-01", descricao: "CRM", valor: 40 },
+        { id: "c2", tenant_id: HOUSE_A, month: "2026-09-01", descricao: "CRM", valor: 150 },
+      );
+    const overview = await getGroupOverviewFor(ctxFor(G1_MANAGER), {
+      groupId: G1,
+      range: { from: "2026-10-01", to: "2026-10-24" },
+      compare: "last_week",
+      preset: "month",
+    });
+    expect(overview.compareRange).toEqual({ from: "2026-09-24", to: "2026-10-17" });
+    const a = overview.tenants.find((t) => t.id === HOUSE_A)!;
+    expect(a.current.otherCosts).toBe(40);
+    expect(a.previous.otherCosts).toBeNull();
+    expect(overview.totals.previous.otherCosts).toBeNull();
+  });
+
+  it("overview: Mês preset is not trusted for a range that is not month-to-date", async () => {
+    fake.admin
+      .rows("tenant_finance_other_costs")
+      .push({ id: "c1", tenant_id: HOUSE_A, month: "2026-10-01", descricao: "CRM", valor: 40 });
+    const overview = await getGroupOverviewFor(ctxFor(G1_MANAGER), {
+      groupId: G1,
+      range: { from: "2026-10-05", to: "2026-10-24" },
+      compare: "previous",
+      preset: "month",
+    });
+    expect(overview.tenants.find((t) => t.id === HOUSE_A)!.current.otherCosts).toBeNull();
+    expect(overview.totals.current.otherCosts).toBeNull();
   });
 
   it("overview: group manager of G1 cannot read G2", async () => {

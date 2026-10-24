@@ -659,15 +659,19 @@ export async function setFinanceViewerFor(
   await requirePermission("finance_can_manage_viewers", ctx.userId, data.tenantId);
   await assertTenantNotDemo(data.tenantId);
 
-  const { data: gestor, error: roleErr } = await db()
-    .from<{ user_id: string }>("user_roles")
-    .select("user_id")
-    .eq("tenant_id", data.tenantId)
-    .eq("user_id", data.userId)
-    .eq("role", "gestor")
-    .maybeSingle();
-  if (roleErr) throw new Error(roleErr.message);
-  if (!gestor) throw new Error("Só gestores da casa podem ser liberados");
+  // Only granting needs a current gestor; revoking must also clear a stale
+  // grant left behind after the person stopped being gestor of the house.
+  if (data.canView) {
+    const { data: gestor, error: roleErr } = await db()
+      .from<{ user_id: string }>("user_roles")
+      .select("user_id")
+      .eq("tenant_id", data.tenantId)
+      .eq("user_id", data.userId)
+      .eq("role", "gestor")
+      .maybeSingle();
+    if (roleErr) throw new Error(roleErr.message);
+    if (!gestor) throw new Error("Só gestores da casa podem ser liberados");
+  }
 
   const { data: grant, error: grantErr } = await db()
     .from<{ user_id: string }>("tenant_finance_viewers")
@@ -843,13 +847,23 @@ export async function getGroupOverviewFor(ctx: ServerContext, data: OverviewInpu
       : null;
 
   // Spec §5: other costs enter a window's result only for a closed calendar
-  // month, i.e. the "Mês" preset (also while in progress, and for its
-  // comparison window) or a range covering exactly one month.
-  const costMonthOf = (range: DateRange) =>
-    data.preset === "month" || isCalendarMonth(range) ? `${range.from.slice(0, 7)}-01` : null;
-  const costMonths = [data.range, previousRange]
-    .map(costMonthOf)
-    .filter((month): month is string => month !== null);
+  // month: a range covering exactly one month, or the "Mês" preset (also
+  // while in progress). The preset is only trusted when the range really is
+  // a month-to-date window, and its comparison window counts only for
+  // "previous" (the previous month to the same day), never a 7-day shift.
+  const monthToDate =
+    data.preset === "month" &&
+    data.range.from.endsWith("-01") &&
+    data.range.to.slice(0, 7) === data.range.from.slice(0, 7);
+  const monthOf = (range: DateRange) => `${range.from.slice(0, 7)}-01`;
+  const currentCostMonth = monthToDate || isCalendarMonth(data.range) ? monthOf(data.range) : null;
+  const previousCostMonth =
+    (monthToDate && data.compare === "previous") || isCalendarMonth(previousRange)
+      ? monthOf(previousRange)
+      : null;
+  const costMonths = [currentCostMonth, previousCostMonth].filter(
+    (month): month is string => month !== null,
+  );
 
   const [dayRows, goalRows, costRows] = await Promise.all([
     span ? fetchFinanceDays(tenantIds, span) : Promise.resolve([]),
@@ -868,16 +882,14 @@ export async function getGroupOverviewFor(ctx: ServerContext, data: OverviewInpu
   ]);
 
   const days = dayRows.map((row) => ({ tenantId: row.tenant_id, day: toFinanceDay(row) }));
-  const otherCostsFor = (tenantId: string, range: DateRange) => {
-    const month = costMonthOf(range);
-    return month === null
+  const otherCostsFor = (tenantIdsToSum: string[], month: string | null) =>
+    month === null
       ? null
       : round2(
           costRows
-            .filter((row) => row.tenant_id === tenantId && row.month === month)
+            .filter((row) => tenantIdsToSum.includes(row.tenant_id) && row.month === month)
             .reduce((total, row) => total + num(row.valor), 0),
         );
-  };
   const windowDays = (window: DateRange | null, tenantId?: string) =>
     days
       .filter((entry) => (tenantId ? entry.tenantId === tenantId : true))
@@ -888,11 +900,11 @@ export async function getGroupOverviewFor(ctx: ServerContext, data: OverviewInpu
   const rows = tenants.map((tenant) => {
     const currentSummary = summarize(
       windowDays(current, tenant.id),
-      otherCostsFor(tenant.id, data.range),
+      otherCostsFor([tenant.id], currentCostMonth),
     );
     const previousSummary = summarize(
       windowDays(previous, tenant.id),
-      otherCostsFor(tenant.id, previousRange),
+      otherCostsFor([tenant.id], previousCostMonth),
     );
     return {
       id: tenant.id,
@@ -909,12 +921,8 @@ export async function getGroupOverviewFor(ctx: ServerContext, data: OverviewInpu
     };
   });
 
-  const groupOtherCosts = (range: DateRange) =>
-    costMonthOf(range) !== null
-      ? round2(tenants.reduce((total, tenant) => total + (otherCostsFor(tenant.id, range) ?? 0), 0))
-      : null;
-  const totalOtherCurrent = groupOtherCosts(data.range);
-  const totalOtherPrevious = groupOtherCosts(previousRange);
+  const totalOtherCurrent = otherCostsFor(tenantIds, currentCostMonth);
+  const totalOtherPrevious = otherCostsFor(tenantIds, previousCostMonth);
 
   return {
     group: { id: group.id, nome: group.nome },
