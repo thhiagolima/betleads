@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useActiveGroup } from "@/hooks/use-active-group";
 import { useActiveTenant, type TenantOption } from "@/hooks/use-active-tenant";
-import { isGroupPath } from "@/lib/navigation";
+import { isGroupPath, tenantSwitcherMode } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 
 const roleLabel: Record<TenantOption["role"], string> = {
@@ -55,7 +55,8 @@ export function ActiveTenantSwitcher({ compact = false }: { compact?: boolean })
 
   const pending = tenants.find((tenant) => tenant.id === pendingTenantId) ?? null;
 
-  if (isLoading || (!active && !groups.length)) return null;
+  const mode = tenantSwitcherMode(tenants.length, groups.length);
+  if (isLoading || (!active && !groups.length) || mode === "hidden") return null;
 
   const currentLabel = onGroupRoute
     ? (activeGroup?.nome ?? active?.nome ?? "")
@@ -79,7 +80,7 @@ export function ActiveTenantSwitcher({ compact = false }: { compact?: boolean })
     </>
   );
 
-  if (tenants.length + groups.length < 2) {
+  if (mode === "static") {
     return (
       <div
         className="flex h-9 min-w-0 items-center gap-2 rounded-[10px] border border-border bg-card px-3 text-[13px]"

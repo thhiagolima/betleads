@@ -1,4 +1,4 @@
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { Link, Navigate, createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useMemo, useState } from "react";
@@ -31,6 +31,7 @@ import {
   trendDisplay,
   type PeriodPreset,
 } from "@/lib/home-dashboard";
+import { homeRedirect } from "@/lib/navigation";
 import { brtDayStart } from "@/lib/tz";
 import { cn } from "@/lib/utils";
 
@@ -333,6 +334,10 @@ function Dashboard() {
   );
 
   if (tenant.isLoading || (Boolean(tenantId) && isLoading)) return <DashboardSkeleton />;
+
+  // A group manager with no house role has nothing here: send them to the group panel.
+  const redirectTo = homeRedirect(tenant.tenants.length, tenant.data?.groups?.length ?? 0);
+  if (redirectTo) return <Navigate to={redirectTo} replace />;
 
   const loadError = tenant.error ?? error;
   if (loadError || !tenantId || !data) {

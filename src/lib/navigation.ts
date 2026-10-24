@@ -159,6 +159,25 @@ export function isGroupPath(pathname: string): boolean {
   return pathname === "/grupo" || pathname.startsWith("/grupo/");
 }
 
+/**
+ * How the header switcher renders. Any group means a menu: the switcher is
+ * the only way into /grupo, so a group manager with a single group (and no
+ * or one house) must still be able to open it.
+ */
+export function tenantSwitcherMode(
+  tenantCount: number,
+  groupCount: number,
+): "hidden" | "static" | "menu" {
+  if (tenantCount === 0 && groupCount === 0) return "hidden";
+  if (groupCount > 0 || tenantCount > 1) return "menu";
+  return "static";
+}
+
+/** Where "/" sends a user who has groups but no house (the house home is empty for them). */
+export function homeRedirect(tenantCount: number, groupCount: number): "/grupo" | null {
+  return tenantCount === 0 && groupCount > 0 ? "/grupo" : null;
+}
+
 export type MobileTab = { title: string; to?: string; icon: LucideIcon; alsoActiveOn?: string[] };
 
 export const MOBILE_TABS: MobileTab[] = [

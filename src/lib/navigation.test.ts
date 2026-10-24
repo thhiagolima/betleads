@@ -6,8 +6,10 @@ import {
   ROUTE_META,
   activeMobileTab,
   activeNavKey,
+  homeRedirect,
   isGroupPath,
   resolveRouteMeta,
+  tenantSwitcherMode,
   visibleSections,
 } from "./navigation";
 
@@ -130,5 +132,33 @@ describe("isGroupPath", () => {
     expect(isGroupPath("/grupos")).toBe(false);
     expect(isGroupPath("/grupo-x")).toBe(false);
     expect(isGroupPath("/")).toBe(false);
+  });
+});
+
+describe("tenantSwitcherMode", () => {
+  it("is a menu whenever there is a group, even a single one with no house", () => {
+    expect(tenantSwitcherMode(0, 1)).toBe("menu");
+    expect(tenantSwitcherMode(1, 1)).toBe("menu");
+  });
+
+  it("is static for a single house and no group, menu for two houses", () => {
+    expect(tenantSwitcherMode(1, 0)).toBe("static");
+    expect(tenantSwitcherMode(2, 0)).toBe("menu");
+  });
+
+  it("is hidden with nothing to show", () => {
+    expect(tenantSwitcherMode(0, 0)).toBe("hidden");
+  });
+});
+
+describe("homeRedirect", () => {
+  it("sends a group manager with no house to /grupo", () => {
+    expect(homeRedirect(0, 1)).toBe("/grupo");
+  });
+
+  it("keeps everyone with a house (or with nothing) on the home", () => {
+    expect(homeRedirect(1, 1)).toBeNull();
+    expect(homeRedirect(1, 0)).toBeNull();
+    expect(homeRedirect(0, 0)).toBeNull();
   });
 });
