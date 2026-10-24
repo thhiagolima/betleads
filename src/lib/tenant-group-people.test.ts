@@ -148,7 +148,7 @@ describe("group manager people rights (tenants.functions.ts)", () => {
         role: "admin",
         password: null,
       }),
-    ).rejects.toThrow("Apenas o super admin pode definir o admin do tenant");
+    ).rejects.toThrow("Apenas o super admin ou o gestor do grupo pode definir o admin da casa");
     await expect(
       addUserToTenantFor(ctxFor(HOUSE_ADMIN), {
         tenantId: IN_GROUP,
@@ -177,7 +177,7 @@ describe("group manager people rights (tenants.functions.ts)", () => {
         role: "gestor",
         password: null,
       }),
-    ).rejects.toThrow("Apenas o super admin pode alterar o admin do tenant");
+    ).rejects.toThrow("Apenas o super admin ou o gestor do grupo pode alterar o admin da casa");
     expect(fake.admin.rows("user_roles").find((r) => r.id === "role-second")?.role).toBe("admin");
   });
 
@@ -344,5 +344,42 @@ describe("getTenantSwitcherFor — groups and can_view_finance", () => {
       tenants: [],
       groups: [{ id: GROUP_A, nome: "Alfa", is_demo: false }],
     });
+  });
+
+  it("degrades gracefully when the finance and group RPCs fail", async () => {
+    fake.admin
+      .rows("user_roles")
+      .push({ id: "role-gm", user_id: GROUP_MANAGER, tenant_id: OUTSIDE, role: "gestor", created_at: "3" });
+    fake.admin.onRpc("group_ids_managed_by", () => ({ data: null, error: { message: "boom" } }));
+    fake.admin.onRpc("finance_can_view", () => ({ data: null, error: { message: "boom" } }));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = await getTenantSwitcherFor(ctxFor(GROUP_MANAGER));
+
+    expect(result.tenants).toEqual([
+      expect.objectContaining({ id: OUTSIDE, can_view_finance: false }),
+    ]);
+    expect(result.groups).toEqual([]);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("super admin can view every house's finance without a per-house RPC", async () => {
+    fake.admin.onRpc("group_ids_managed_by", () => ({ data: [], error: null }));
+    const financeCalls: unknown[] = [];
+    fake.admin.onRpc("finance_can_view", (args) => {
+      financeCalls.push(args);
+      return { data: false, error: null };
+    });
+
+    const result = await getTenantSwitcherFor(ctxFor(SUPER));
+
+    expect(result.tenants.map((t) => [t.id, t.can_view_finance]).sort()).toEqual(
+      [
+        [IN_GROUP, true],
+        [OUTSIDE, true],
+      ].sort(),
+    );
+    expect(financeCalls).toEqual([]);
   });
 });

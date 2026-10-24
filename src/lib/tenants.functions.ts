@@ -473,9 +473,24 @@ export async function getTenantSwitcherFor(ctx: ServerContext) {
     role: superAdmin ? "super_admin" : (roleByTenant.get(tenant.id) ?? "member"),
     is_demo: tenant.is_demo === true,
   }));
+  // The switcher is on every page: a failing finance/group lookup must only
+  // hide those entries, never break navigation. A super admin sees every
+  // house's finance, so no per-house RPC is needed.
   const [canViewFinance, groups] = await Promise.all([
-    Promise.all(options.map((tenant) => checkFinanceCanView(ctx.userId, tenant.id))),
-    listManagedGroups(ctx.userId),
+    Promise.all(
+      options.map((tenant) =>
+        superAdmin
+          ? true
+          : checkFinanceCanView(ctx.userId, tenant.id).catch((error: unknown) => {
+              console.warn("[tenant-switcher] finance_can_view failed", tenant.id, error);
+              return false;
+            }),
+      ),
+    ),
+    listManagedGroups(ctx.userId).catch((error: unknown) => {
+      console.warn("[tenant-switcher] managed groups lookup failed", error);
+      return [] as GroupOption[];
+    }),
   ]);
   const activeTenantId = options.some((tenant) => tenant.id === ctx.activeTenantId)
     ? ctx.activeTenantId
@@ -688,7 +703,7 @@ export async function addUserToTenantFor(ctx: ServerContext, data: z.infer<typeo
     throw new Error("Convites de tenant devem ser enviados por email, sem senha manual");
   }
   if (!actorCanSetAdmin && data.role === "admin") {
-    throw new Error("Apenas o super admin pode definir o admin do tenant");
+    throw new Error("Apenas o super admin ou o gestor do grupo pode definir o admin da casa");
   }
 
   const email = data.email.trim().toLowerCase();
@@ -730,7 +745,7 @@ export async function addUserToTenantFor(ctx: ServerContext, data: z.infer<typeo
     // Same admin rules as updateTenantUserRole: re-adding an existing admin
     // with another role is a demotion.
     if (!actorCanSetAdmin && existing.role === "admin") {
-      throw new Error("Apenas o super admin pode alterar o admin do tenant");
+      throw new Error("Apenas o super admin ou o gestor do grupo pode alterar o admin da casa");
     }
     if (existing.role === "admin" && (await countTenantAdmins(data.tenantId)) <= 1) {
       throw new Error("Nao e permitido remover o unico admin do tenant");
@@ -799,7 +814,7 @@ export async function updateTenantUserRoleFor(
   const actorCanSetAdmin = await checkActorCanSetAdmin(ctx, data.tenantId);
 
   if (!actorCanSetAdmin && data.role === "admin") {
-    throw new Error("Apenas o super admin pode definir o admin do tenant");
+    throw new Error("Apenas o super admin ou o gestor do grupo pode definir o admin da casa");
   }
 
   const { data: before, error: beforeErr } = await db()
@@ -812,7 +827,7 @@ export async function updateTenantUserRoleFor(
   if (!before) throw new Error("Vínculo não encontrado");
 
   if (!actorCanSetAdmin && before.role === "admin") {
-    throw new Error("Apenas o super admin pode alterar o admin do tenant");
+    throw new Error("Apenas o super admin ou o gestor do grupo pode alterar o admin da casa");
   }
   if (
     before.role === "admin" &&
@@ -881,7 +896,7 @@ export async function removeUserFromTenantFor(
 
   const actorCanSetAdmin = await checkActorCanSetAdmin(ctx, data.tenantId);
   if (!actorCanSetAdmin && before.role === "admin") {
-    throw new Error("Apenas o super admin pode remover o admin do tenant");
+    throw new Error("Apenas o super admin ou o gestor do grupo pode remover o admin da casa");
   }
   if (before.role === "admin" && (await countTenantAdmins(data.tenantId)) <= 1) {
     throw new Error("Nao e permitido remover o unico admin do tenant");
