@@ -43,7 +43,7 @@ vi.mock("@/lib/shortio.server", async () => {
 });
 
 import { DemoTenantBlockedError } from "@/lib/demo-tenant";
-import { ShortenerUnavailableError } from "@/lib/shortio.server";
+import { DestinationNotAllowedError, ShortenerUnavailableError } from "@/lib/shortio.server";
 import { createFakeDb } from "@/lib/sms-bulk.test-support";
 import { generateExpertLinkFor } from "./expert-links.functions";
 
@@ -200,5 +200,28 @@ describe("generateExpertLinkFor", () => {
       generateExpertLinkFor(CTX, { playerId: PLAYER, url: URL_OK, oferta: "Volta 50" }),
     ).rejects.toThrow("Não foi possível encurtar o link agora. Tente de novo.");
     expect(fake.admin.rows("expert_links")).toHaveLength(0);
+  });
+  it("maps DestinationNotAllowedError to the pt-BR message", async () => {
+    seedPlayer();
+    mockCreateLink.mockRejectedValue(new DestinationNotAllowedError());
+
+    await expect(
+      generateExpertLinkFor(CTX, { playerId: PLAYER, url: URL_OK, oferta: "Volta 50" }),
+    ).rejects.toThrow("Este link não é permitido pela casa. Use o link do backoffice da casa.");
+    expect(fake.admin.rows("expert_links")).toHaveLength(0);
+  });
+
+  it("two generations for the same lead and URL use distinct delivery keys", async () => {
+    seedPlayer();
+    const data = { playerId: PLAYER, url: URL_OK, oferta: "Volta 50" };
+    const a = await generateExpertLinkFor(CTX, data);
+    const b = await generateExpertLinkFor(CTX, data);
+
+    expect(a.id).not.toBe(b.id);
+    const keys = mockCreateLink.mock.calls.map(
+      (c) => (c[0] as { deliveryKey: string }).deliveryKey,
+    );
+    expect(keys).toEqual([`expert_links:${a.id}`, `expert_links:${b.id}`]);
+    expect(fake.admin.rows("expert_links")).toHaveLength(2);
   });
 });

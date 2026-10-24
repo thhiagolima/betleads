@@ -14,13 +14,19 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { requireExpertContext } from "@/lib/expert-access.server";
 import { loadVisibleLead } from "@/lib/expert-lead-access.server";
-import { createTrackedLinkForRecipient, ShortenerUnavailableError } from "@/lib/shortio.server";
+import {
+  createTrackedLinkForRecipient,
+  DestinationNotAllowedError,
+  ShortenerUnavailableError,
+} from "@/lib/shortio.server";
 import { assertTenantCanSendExternally } from "@/lib/tenant-access.server";
 
 const MAX_URL_LENGTH = 2048;
 const INVALID_URL = "Cole um link válido começando com http:// ou https://.";
 const INVALID_OFERTA = "Dê um nome à oferta (2 a 60 caracteres).";
 const SHORTENER_UNAVAILABLE = "Não foi possível encurtar o link agora. Tente de novo.";
+const DESTINATION_NOT_ALLOWED =
+  "Este link não é permitido pela casa. Use o link do backoffice da casa.";
 
 type ServerContext = {
   userId: string;
@@ -91,6 +97,7 @@ export async function generateExpertLinkFor(
     });
   } catch (error) {
     if (error instanceof ShortenerUnavailableError) throw new Error(SHORTENER_UNAVAILABLE);
+    if (error instanceof DestinationNotAllowedError) throw new Error(DESTINATION_NOT_ALLOWED);
     throw error;
   }
 

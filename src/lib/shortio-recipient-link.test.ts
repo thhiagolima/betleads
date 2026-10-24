@@ -23,6 +23,7 @@ import { verifyClickTokenSignature } from "./click-tracking.server";
 import {
   __resetShortenerDomainCacheForTests,
   createTrackedLinkForRecipient,
+  DestinationNotAllowedError,
   ShortenerUnavailableError,
 } from "./shortio.server";
 
@@ -172,5 +173,86 @@ describe("createTrackedLinkForRecipient", () => {
       send_status: "sent",
     });
     expect(typeof dispatch.sent_at).toBe("string");
+  });
+  it("two generations for the same lead and URL create distinct dispatches", async () => {
+    seedSettings();
+    const first = await createTrackedLinkForRecipient(INPUT);
+    const second = await createTrackedLinkForRecipient({
+      ...INPUT,
+      deliveryKey: "expert_links:22222222-2222-4222-8222-222222222222",
+    });
+
+    const dispatches = fake.db.rows("link_dispatches");
+    expect(dispatches).toHaveLength(2);
+    expect(first.dispatchId).not.toBe(second.dispatchId);
+    expect(first.trackingToken).not.toBe(second.trackingToken);
+    expect(dispatches[0].idempotency_key).not.toBe(dispatches[1].idempotency_key);
+    expect(first.sentUrl).not.toBe(second.sentUrl);
+  });
+
+  it("refuses a protected destination before any Short.io call or write", async () => {
+    seedSettings();
+    await expect(
+      createTrackedLinkForRecipient({ ...INPUT, originalUrl: "https://casa.bet/login?token=abc" }),
+    ).rejects.toBeInstanceOf(DestinationNotAllowedError);
+    expect(shortioCalls).toHaveLength(0);
+    expect(fake.db.rows("link_dispatches")).toHaveLength(0);
+    expect(fake.db.rows("tracked_links")).toHaveLength(0);
+  });
+
+  it("refuses a host outside the house allowlist", async () => {
+    seedSettings({ allowed_destination_hosts: ["casa.bet"] });
+    await expect(
+      createTrackedLinkForRecipient({ ...INPUT, originalUrl: "https://outra.bet/bonus" }),
+    ).rejects.toBeInstanceOf(DestinationNotAllowedError);
+    expect(shortioCalls).toHaveLength(0);
+    expect(fake.db.rows("link_dispatches")).toHaveLength(0);
+    expect(fake.db.rows("tracked_links")).toHaveLength(0);
+  });
+
+  it("accepts a host inside the house allowlist (subdomains included)", async () => {
+    seedSettings({ allowed_destination_hosts: ["CASA.bet"] });
+    const result = await createTrackedLinkForRecipient({
+      ...INPUT,
+      originalUrl: "https://app.casa.bet/bonus",
+    });
+    expect(result.shortened).toBe(true);
+    expect(fake.db.rows("link_dispatches")).toHaveLength(1);
+  });
+
+  it("accepts any http(s) host when the allowlist is empty", async () => {
+    seedSettings({ enabled: false, allowed_destination_hosts: [] });
+    const result = await createTrackedLinkForRecipient({
+      ...INPUT,
+      originalUrl: "http://qualquer.example/oferta",
+    });
+    expect(result.shortened).toBe(false);
+    expect(fake.db.rows("link_dispatches")[0].original_url).toBe("http://qualquer.example/oferta");
+  });
+
+  it("a dispatch write failure throws ShortenerUnavailableError and leaves no dispatch", async () => {
+    seedSettings();
+    fake.db.failNext("link_dispatches", "upsert", "db down");
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await expect(createTrackedLinkForRecipient(INPUT)).rejects.toBeInstanceOf(
+      ShortenerUnavailableError,
+    );
+    expect(fake.db.rows("link_dispatches")).toHaveLength(0);
+    error.mockRestore();
+  });
+
+  it("a shortener domain lookup failure throws ShortenerUnavailableError", async () => {
+    seedSettings();
+    fake.db.failNext("tenant_domains", "select", "db down");
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await expect(createTrackedLinkForRecipient(INPUT)).rejects.toBeInstanceOf(
+      ShortenerUnavailableError,
+    );
+    expect(shortioCalls).toHaveLength(0);
+    expect(fake.db.rows("link_dispatches")).toHaveLength(0);
+    expect(fake.db.rows("tracked_links")).toHaveLength(0);
+    error.mockRestore();
   });
 });
