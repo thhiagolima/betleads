@@ -288,3 +288,55 @@ describe("RLS", () => {
     expect(rows).toEqual([{ id: GROUP_1 }]);
   });
 });
+
+describe("function privileges", () => {
+  it("anon cannot execute group_ids_managed_by", async () => {
+    await expect(
+      asRole("anon", undefined, `select * from public.group_ids_managed_by('${MANAGER_G1}')`),
+    ).rejects.toThrow(/permission denied/);
+  });
+
+  it("authenticated cannot execute group_tenant_ids", async () => {
+    await expect(
+      asRole(
+        "authenticated",
+        { sub: MANAGER_G1, role: "authenticated" },
+        `select * from public.group_tenant_ids('${GROUP_1}')`,
+      ),
+    ).rejects.toThrow(/permission denied/);
+  });
+
+  it("authenticated cannot execute is_group_manager_of_tenant", async () => {
+    await expect(
+      asRole(
+        "authenticated",
+        { sub: MANAGER_G1, role: "authenticated" },
+        `select public.is_group_manager_of_tenant('${MANAGER_G1}', '${NORMAL_TENANT_1}')`,
+      ),
+    ).rejects.toThrow(/permission denied/);
+  });
+
+  it("anon cannot execute can_view_group", async () => {
+    await expect(
+      asRole("anon", undefined, `select public.can_view_group('${MANAGER_G1}', '${GROUP_1}')`),
+    ).rejects.toThrow(/permission denied/);
+  });
+
+  it("service_role can execute group_ids_managed_by", async () => {
+    const { rows } = await asRole(
+      "service_role",
+      undefined,
+      `select * from public.group_ids_managed_by('${MANAGER_G1_G2}')`,
+    );
+    expect(rows).toHaveLength(2);
+  });
+
+  it("RLS on tenant_groups still works for an authenticated manager of two groups", async () => {
+    const { rows } = await asRole(
+      "authenticated",
+      { sub: MANAGER_G1_G2, role: "authenticated" },
+      `select id from public.tenant_groups order by id`,
+    );
+    expect(rows).toEqual([{ id: GROUP_1 }, { id: GROUP_2 }]);
+  });
+});

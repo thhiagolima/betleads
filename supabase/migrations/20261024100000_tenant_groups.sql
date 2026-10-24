@@ -116,7 +116,11 @@ create trigger trg_tenant_group_managers_demo_user
   execute function public.guard_tenant_group_managers_demo_user();
 
 -- Access helpers: all groups for a super admin, otherwise the groups a user
--- actually manages via tenant_group_managers.
+-- actually manages via tenant_group_managers. group_ids_managed_by,
+-- is_group_manager_of_tenant and group_tenant_ids take an arbitrary _user /
+-- _group, so they are service_role only (no enumeration from the client);
+-- the RLS policies and finance_can_* reach them through SECURITY DEFINER
+-- wrappers (can_view_group, finance_can_*) that run as the owner.
 create or replace function public.group_ids_managed_by(_user uuid)
 returns setof uuid
 language sql
@@ -129,7 +133,8 @@ as $$
   where user_id = _user and not public.is_super_admin(_user)
 $$;
 
-grant execute on function public.group_ids_managed_by(uuid) to authenticated, service_role;
+revoke all on function public.group_ids_managed_by(uuid) from public, anon, authenticated;
+grant execute on function public.group_ids_managed_by(uuid) to service_role;
 
 create or replace function public.can_view_group(_user uuid, _group uuid)
 returns boolean
@@ -142,6 +147,7 @@ as $$
   )
 $$;
 
+revoke all on function public.can_view_group(uuid, uuid) from public, anon;
 grant execute on function public.can_view_group(uuid, uuid) to authenticated, service_role;
 
 -- Only a real group manager counts here: super admin deliberately does not,
@@ -161,7 +167,8 @@ as $$
   )
 $$;
 
-grant execute on function public.is_group_manager_of_tenant(uuid, uuid) to authenticated, service_role;
+revoke all on function public.is_group_manager_of_tenant(uuid, uuid) from public, anon, authenticated;
+grant execute on function public.is_group_manager_of_tenant(uuid, uuid) to service_role;
 
 create or replace function public.group_tenant_ids(_group uuid)
 returns setof uuid
@@ -172,7 +179,8 @@ as $$
   select tenant_id from public.tenant_group_tenants where group_id = _group
 $$;
 
-grant execute on function public.group_tenant_ids(uuid) to authenticated, service_role;
+revoke all on function public.group_tenant_ids(uuid) from public, anon, authenticated;
+grant execute on function public.group_tenant_ids(uuid) to service_role;
 
 -- RLS: read-only for authenticated, scoped to groups the caller manages (or
 -- all of them for a super admin, via group_ids_managed_by). Only
