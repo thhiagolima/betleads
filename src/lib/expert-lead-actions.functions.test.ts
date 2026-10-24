@@ -133,6 +133,32 @@ describe("scheduleExpertFollowupFor", () => {
     expect(result.id).toBeTruthy();
     expect(fake.admin.rows("expert_lead_followups")).toHaveLength(1);
   });
+
+  it("refuses an impossible calendar date", async () => {
+    seedPlayer(PLAYER);
+    vi.setSystemTime(new Date("2026-01-10T12:00:00Z"));
+
+    for (const dueDate of ["2026-02-31", "2026-13-01", "2026-04-31"]) {
+      await expect(scheduleExpertFollowupFor(CTX, { playerId: PLAYER, dueDate })).rejects.toThrow(
+        "Data inválida.",
+      );
+    }
+    expect(fake.admin.rows("expert_lead_followups")).toHaveLength(0);
+
+    await expect(
+      scheduleExpertFollowupFor(CTX, { playerId: PLAYER, dueDate: "2026-02-28" }),
+    ).resolves.toMatchObject({ id: expect.any(String) });
+  });
+
+  it("refuses an out-of-reach lead and writes nothing", async () => {
+    seedPlayer(PLAYER, "OUTRO");
+    mockRequireExpertContext.mockResolvedValue({ ...EXPERT, tipo: "restrito" });
+
+    await expect(
+      scheduleExpertFollowupFor(CTX, { playerId: PLAYER, dueDate: "2999-01-01" }),
+    ).rejects.toThrow("Lead não encontrado.");
+    expect(fake.admin.rows("expert_lead_followups")).toHaveLength(0);
+  });
 });
 
 describe("listExpertFollowupsDueFor", () => {
@@ -229,6 +255,26 @@ describe("listExpertFollowupsDueFor", () => {
   });
 });
 
+describe("listExpertFollowupsDueFor limit", () => {
+  it("reads at most 200 due followups", async () => {
+    seedPlayer(PLAYER);
+    const rows = fake.admin.rows("expert_lead_followups");
+    for (let i = 0; i < 205; i++) {
+      rows.push({
+        id: `f${i}`,
+        tenant_id: TENANT,
+        expert_id: ME,
+        player_id: PLAYER,
+        due_date: "2026-01-01",
+        nota: null,
+        done_at: null,
+      });
+    }
+
+    expect(await listExpertFollowupsDueFor(CTX)).toHaveLength(200);
+  });
+});
+
 describe("completeExpertFollowupFor", () => {
   it("complete only affects the caller's own followup", async () => {
     const OWN_FOLLOWUP = "00000000-0000-4000-8000-0000000000c1";
@@ -286,6 +332,23 @@ describe("claimExpertLeadFor", () => {
     );
   });
 
+  it("refuses an out-of-reach lead without calling the rpc", async () => {
+    fake.admin.rows("players").push({
+      id: PLAYER,
+      tenant_id: "00000000-0000-4000-8000-0000000000a9",
+      nome: "De outra casa",
+      affiliate_id: "AFF1",
+      created_at: "2026-10-01T00:00:00Z",
+    });
+    const rpc = vi.fn();
+    fake.admin.onRpc("claim_expert_lead", rpc);
+
+    await expect(claimExpertLeadFor(CTX, { playerId: PLAYER })).rejects.toThrow(
+      "Lead não encontrado.",
+    );
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
   it("restricted expert cannot claim", async () => {
     seedPlayer(PLAYER);
     mockRequireExpertContext.mockResolvedValue({ ...EXPERT, tipo: "restrito" });
@@ -313,6 +376,18 @@ describe("claimExpertLeadFor", () => {
 });
 
 describe("releaseExpertLeadFor", () => {
+  it("refuses an out-of-reach lead without calling the rpc", async () => {
+    seedPlayer(PLAYER, "OUTRO");
+    mockRequireExpertContext.mockResolvedValue({ ...EXPERT, tipo: "restrito" });
+    const rpc = vi.fn();
+    fake.admin.onRpc("release_expert_lead", rpc);
+
+    await expect(releaseExpertLeadFor(CTX, { playerId: PLAYER })).rejects.toThrow(
+      "Lead não encontrado.",
+    );
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
   it("releases the caller's own claim", async () => {
     seedPlayer(PLAYER);
     const rpc = vi.fn(() => ({ data: null, error: null }));

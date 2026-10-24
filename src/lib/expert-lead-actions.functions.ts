@@ -95,9 +95,19 @@ export type ScheduleExpertFollowupInput = {
   nota?: string;
 };
 
+/** "aaaa-mm-dd" que existe no calendário (recusa 2026-02-31, 2026-13-01). */
+function isCalendarDate(value: string): boolean {
+  const [y, m, d] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  return date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d;
+}
+
 const scheduleFollowupInput = z.object({
   playerId: dbUuid(),
-  dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Data inválida."),
+  dueDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Data inválida.")
+    .refine(isCalendarDate, "Data inválida."),
   nota: z.string().max(1000).optional(),
 });
 
@@ -198,13 +208,9 @@ type PlayerRow = {
 
 export const listExpertFollowupsDue = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) =>
-    listExpertFollowupsDueFor(context as unknown as ServerContext),
-  );
+  .handler(async ({ context }) => listExpertFollowupsDueFor(context as unknown as ServerContext));
 
-export async function listExpertFollowupsDueFor(
-  ctx: ServerContext,
-): Promise<ExpertFollowupDue[]> {
+export async function listExpertFollowupsDueFor(ctx: ServerContext): Promise<ExpertFollowupDue[]> {
   const expert = await requireExpertContext(ctx.userId, ctx.activeTenantId);
   const today = brtDayKey(new Date());
 
@@ -215,7 +221,8 @@ export async function listExpertFollowupsDueFor(
     .eq("expert_id", expert.expertId)
     .is("done_at", null)
     .lte("due_date", today)
-    .order("due_date", { ascending: true });
+    .order("due_date", { ascending: true })
+    .limit(200);
   if (error) throw new Error(error.message);
 
   const followups = (rows ?? []) as FollowupRow[];
@@ -229,9 +236,7 @@ export async function listExpertFollowupsDueFor(
     .in("id", playerIds);
   if (playerError) throw new Error(playerError.message);
 
-  const playersById = new Map(
-    ((playerRows ?? []) as PlayerRow[]).map((p) => [p.id, p] as const),
-  );
+  const playersById = new Map(((playerRows ?? []) as PlayerRow[]).map((p) => [p.id, p] as const));
 
   return followups
     .filter((f) => {
@@ -296,7 +301,9 @@ export async function claimExpertLeadFor(
   const row = ((rpcRows ?? []) as ClaimLeadRow[])[0];
   if (!row) throw new Error(CLAIM_FAILED);
   if (!row.claimed) {
-    throw new Error(`Lead já assumido por ${row.expert_nome} até ${formatBrtDdMm(row.expires_at)}.`);
+    throw new Error(
+      `Lead já assumido por ${row.expert_nome} até ${formatBrtDdMm(row.expires_at)}.`,
+    );
   }
 
   return { claimed: true, expertNome: row.expert_nome, expiresAt: row.expires_at };
