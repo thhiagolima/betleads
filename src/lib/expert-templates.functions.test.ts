@@ -339,6 +339,73 @@ describe("renderExpertMessageFor", () => {
     ).rejects.toThrow("Gere o link da oferta antes de usar {link}.");
   });
 
+  it("render fills {expert}/{nome_expert} with the expert's name", async () => {
+    seedPlayer();
+
+    const result = await renderExpertMessageFor(CTX, {
+      playerId: PLAYER,
+      conteudo: "Aqui é {expert} ({nome_expert})",
+    });
+
+    expect(result.texto).toBe("Aqui é Eu (Eu)");
+    expect(result.texto).not.toContain("Equipe BETLEADS");
+    expect(result.variaveisNaoSuportadas).toEqual([]);
+  });
+
+  it("render leaves unsupported variables literal and lists them", async () => {
+    seedPlayer();
+
+    const result = await renderExpertMessageFor(CTX, {
+      playerId: PLAYER,
+      conteudo:
+        "Oi {nome}, saldo {saldo} / {saldo_atual}, e-mail {email}, status {status_lead}, " +
+        "login {ultimo_login} ({dias_sem_login}), jogo {ultimo_jogo} ({dias_sem_jogar}), " +
+        "push {id_push} {platform_user_id} {saldo} {inexistente}",
+    });
+
+    expect(result.texto).toContain("Oi Maria Silva");
+    expect(result.texto).not.toContain("R$ 0,00");
+    expect(result.texto).not.toContain("ativo");
+    expect(result.texto).not.toContain("há algum tempo");
+    expect(result.texto).toContain("{saldo}");
+    expect(result.texto).toContain("{email}");
+    expect(result.variaveisNaoSuportadas).toEqual([
+      "{saldo}",
+      "{saldo_atual}",
+      "{email}",
+      "{status_lead}",
+      "{ultimo_login}",
+      "{dias_sem_login}",
+      "{ultimo_jogo}",
+      "{dias_sem_jogar}",
+      "{id_push}",
+      "{platform_user_id}",
+      "{inexistente}",
+    ]);
+  });
+
+  it("render treats house links as unsupported when the house has no site URL", async () => {
+    seedPlayer();
+
+    const semSite = await renderExpertMessageFor(CTX, {
+      playerId: PLAYER,
+      conteudo: "Entre: {link_login}",
+    });
+    expect(semSite.texto).toBe("Entre: {link_login}");
+    expect(semSite.variaveisNaoSuportadas).toEqual(["{link_login}"]);
+
+    mockLoadHouseLinks.mockResolvedValue({
+      siteUrl: "https://casa.example",
+      quickLinks: { login: "https://casa.example/login" },
+    });
+    const comSite = await renderExpertMessageFor(CTX, {
+      playerId: PLAYER,
+      conteudo: "Entre: {link_login}",
+    });
+    expect(comSite.texto).toBe("Entre: https://casa.example/login");
+    expect(comSite.variaveisNaoSuportadas).toEqual([]);
+  });
+
   it("render refuses a lead outside reach", async () => {
     seedPlayer("OUTRO");
     mockRequireExpertContext.mockResolvedValue({ ...EXPERT, tipo: "restrito" });

@@ -17,6 +17,10 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { ExpertAccessError, requireExpertContext } from "@/lib/expert-access.server";
 import { loadVisibleLead, type VisibleLead } from "@/lib/expert-lead-access.server";
 import { loadHouseLinks } from "@/lib/house-links.server";
+import {
+  isExpertSupportedVariable,
+  unsupportedExpertVariables,
+} from "@/lib/expert-template-variables";
 import { buildPlayerVariables, renderTemplate, type PlayerVarsInput } from "@/lib/template-vars.server";
 import { dbUuid } from "@/lib/zod-helpers";
 
@@ -267,12 +271,15 @@ export const renderExpertMessage = createServerFn({ method: "POST" })
     renderExpertMessageFor(context as unknown as ServerContext, data),
   );
 
-/** Monta `PlayerVarsInput` a partir do que `VisibleLead` carrega. Campos que
- * `VisibleLead` não tem (login/jogo, e-mail, saldo de carteira, status, nome
- * do expert) ficam `undefined` e caem nos defaults de `buildPlayerVariables`
- * — nunca se amplia `VisibleLead` para colunas sensíveis por causa disto. */
-function leadToPlayerVars(lead: VisibleLead): PlayerVarsInput {
+/** Monta `PlayerVarsInput` a partir do que `VisibleLead` carrega, mais o
+ * nome do expert. Campos que `VisibleLead` não tem (login/jogo, e-mail, saldo
+ * de carteira, status) não são carregados — nunca se amplia `VisibleLead`
+ * para colunas sensíveis por causa disto; as variáveis correspondentes são
+ * removidas antes de renderizar (`expert-template-variables.ts`) e ficam
+ * literais, bloqueando o envio. */
+function leadToPlayerVars(lead: VisibleLead, expertNome: string): PlayerVarsInput {
   return {
+    expert: expertNome,
     nome: lead.nome,
     telefone: lead.telefone,
     ultimo_deposito: lead.ultimo_deposito,
@@ -288,7 +295,7 @@ function leadToPlayerVars(lead: VisibleLead): PlayerVarsInput {
 export async function renderExpertMessageFor(
   ctx: ServerContext,
   data: RenderExpertMessageInput,
-): Promise<{ texto: string; faltaLink: boolean }> {
+): Promise<{ texto: string; faltaLink: boolean; variaveisNaoSuportadas: string[] }> {
   const input = renderMessageInput.parse(data);
   const expert = await requireExpertContext(ctx.userId, ctx.activeTenantId);
   const lead = await loadVisibleLead(expert, input.playerId);
@@ -306,7 +313,12 @@ export async function renderExpertMessageFor(
   }
 
   const house = await loadHouseLinks(expert.tenantId);
-  const vars = buildPlayerVariables(leadToPlayerVars(lead), house);
+  const vars = buildPlayerVariables(leadToPlayerVars(lead, expert.nome), house);
+  const houseHasSite = !!house?.siteUrl;
+  // Variável que só sairia com o valor padrão inventado fica literal.
+  for (const key of Object.keys(vars)) {
+    if (key !== "link" && !isExpertSupportedVariable(key, { houseHasSite })) delete vars[key];
+  }
   if (input.link) {
     vars.link = input.link;
   } else {
@@ -315,6 +327,7 @@ export async function renderExpertMessageFor(
 
   const texto = renderTemplate(input.conteudo, vars, house);
   const faltaLink = input.conteudo.includes("{link}") && !input.link;
+  const variaveisNaoSuportadas = unsupportedExpertVariables(input.conteudo, { houseHasSite });
 
-  return { texto, faltaLink };
+  return { texto, faltaLink, variaveisNaoSuportadas };
 }

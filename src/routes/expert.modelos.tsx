@@ -2,9 +2,9 @@
 // seus próprios modelos de WhatsApp e pode copiar, só para leitura, os
 // `sms_templates` ativos da casa (`listExpertTemplates`, `saveExpertTemplate`,
 // `deleteExpertTemplate`, `copyHouseTemplate`, Task 4). A ajuda de variáveis
-// lista só as que `renderExpertMessage` de fato preenche a partir do lead
-// (`leadToPlayerVars` -> `buildPlayerVariables`, `template-vars.server.ts`):
-// nome/telefone/depósitos/categoria/cashback, mais `{link}` — tratado aqui
+// lista só as que `renderExpertMessage` de fato preenche a partir do lead e
+// do expert (`EXPERT_SUPPORTED_VARIABLE_KEYS`, `expert-template-variables.ts`):
+// nome/telefone/depósitos/categoria/cashback/nome do expert, mais `{link}` — tratado aqui
 // à parte porque não vem de `buildPlayerVariables`, e sim do link gerado na
 // ficha do lead.
 import { useEffect, useState } from "react";
@@ -37,6 +37,10 @@ import {
   saveExpertTemplate,
   type ExpertTemplate,
 } from "@/lib/expert-templates.functions";
+import {
+  EXPERT_HOUSE_LINK_VARIABLE_KEYS,
+  EXPERT_SUPPORTED_VARIABLE_KEYS,
+} from "@/lib/expert-template-variables";
 import { variablesForChannel } from "@/lib/message-variables";
 
 export const Route = createFileRoute("/expert/modelos")({
@@ -49,37 +53,12 @@ const NOME_MIN = 2;
 const NOME_MAX = 60;
 const CONTEUDO_MAX = 1000;
 
-/** Chaves que `buildPlayerVariables` de fato preenche a partir do que
- * `leadToPlayerVars` envia (nome, telefone, depósitos, saque, vip/risco e
- * cashback) — as demais variáveis do catálogo (saldo, e-mail, último login,
- * último jogo, status, expert, IDs de push, variáveis de ligação) ficam
- * sempre no valor padrão genérico porque a ficha do lead do expert nunca
- * carrega esses dados. `link_login`/`link_deposito` entram aqui também:
- * `renderExpertMessage` passa `loadHouseLinks(expert.tenantId)` para
- * `buildPlayerVariables`, então os dois sempre renderizam uma URL real da
- * casa — mas, diferente de `{link}`, não são o link gerado nesta sessão, e
- * por isso o clique neles não é rastreado para o expert. */
-const FILLED_VARIABLE_KEYS = new Set([
-  "primeiro_nome",
-  "nome",
-  "telefone",
-  "ultimo_deposito",
-  "dias_sem_depositar",
-  "total_depositado",
-  "total_sacado",
-  "lucro",
-  "categoria",
-  "cashback_valor",
-  "cashback_amount",
-  "cashback_pago_em",
-  "link_login",
-  "link_deposito",
-]);
-
-/** Variáveis preenchidas com um link da casa, não com o link rastreado
- * gerado na ficha — mostradas com o aviso de que o clique não conta para o
- * expert, para que ele prefira `{link}`. */
-const HOUSE_LINK_VARIABLE_KEYS = new Set(["link_login", "link_deposito"]);
+/** Variáveis que `renderExpertMessage` preenche com dado real — a mesma
+ * lista do servidor (`expert-template-variables.ts`). `link_login`/
+ * `link_deposito` são links da casa: diferente de `{link}`, o clique neles
+ * não é rastreado para o expert. */
+const FILLED_VARIABLE_KEYS = new Set<string>(EXPERT_SUPPORTED_VARIABLE_KEYS);
+const HOUSE_LINK_VARIABLE_KEYS = new Set<string>(EXPERT_HOUSE_LINK_VARIABLE_KEYS);
 const HOUSE_LINK_NOTE = "link da casa — não conta clique para você";
 
 function nomeError(nome: string): string | null {

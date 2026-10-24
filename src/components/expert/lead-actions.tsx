@@ -28,6 +28,10 @@ import { HomeCard } from "@/components/home/home-cards";
 import { suggestExpertApproach } from "@/lib/expert-ai.functions";
 import { generateExpertLink } from "@/lib/expert-links.functions";
 import type { ExpertLeadSheet } from "@/lib/expert-lead-sheet";
+import {
+  unsupportedExpertVariables,
+  unsupportedVariablesMessage,
+} from "@/lib/expert-template-variables";
 import { listExpertTemplates, renderExpertMessage } from "@/lib/expert-templates.functions";
 import { normalizeBrazilianPhone } from "@/lib/phone-normalization";
 
@@ -123,11 +127,31 @@ export function LeadActions({
   }
 
   const missingLink = text.includes("{link}") && !link;
-  const messageReady = text.trim().length > 0 && !missingLink;
+  // Checagem local (para desabilitar já ao digitar) e a do servidor, que
+  // também sabe se a casa tem URL do site para {link_login}/{link_deposito}.
+  const [serverUnsupported, setServerUnsupported] = useState<{
+    text: string;
+    tokens: string[];
+  } | null>(null);
+  const localUnsupported = unsupportedExpertVariables(text);
+  const unsupported =
+    localUnsupported.length > 0
+      ? localUnsupported
+      : serverUnsupported?.text === text
+        ? serverUnsupported.tokens
+        : [];
+  const messageReady = text.trim().length > 0 && !missingLink && unsupported.length === 0;
 
   const renderFn = useServerFn(renderExpertMessage);
   const render = useMutation({
-    mutationFn: () => renderFn({ data: { playerId, conteudo: text, link: link?.sentUrl } }),
+    mutationFn: async () => {
+      const result = await renderFn({ data: { playerId, conteudo: text, link: link?.sentUrl } });
+      if (result.variaveisNaoSuportadas.length > 0) {
+        setServerUnsupported({ text, tokens: result.variaveisNaoSuportadas });
+        throw new Error(unsupportedVariablesMessage(result.variaveisNaoSuportadas));
+      }
+      return result;
+    },
   });
 
   async function openWhatsApp() {
@@ -290,6 +314,9 @@ export function LeadActions({
           <p className="text-label text-warning">
             Gere o link da oferta para preencher {"{link}"}.
           </p>
+        )}
+        {unsupported.length > 0 && (
+          <p className="text-label text-warning">{unsupportedVariablesMessage(unsupported)}</p>
         )}
         <div className="flex flex-col gap-2 sm:flex-row">
           <Button
