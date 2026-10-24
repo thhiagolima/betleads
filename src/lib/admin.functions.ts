@@ -1,8 +1,8 @@
 // Server functions de Super Admin: gerenciamento de usuários, preços e impersonação.
 import { createServerFn } from "@tanstack/react-start";
+import { auditAdminAction } from "@/lib/admin-audit.server";
 import { dbUuid } from "@/lib/zod-helpers";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import type { Json } from "@/integrations/supabase/types";
 import { z } from "zod";
 
 async function assertSuperAdmin(userId: string) {
@@ -10,26 +10,6 @@ async function assertSuperAdmin(userId: string) {
   const { data, error } = await supabaseAdmin.rpc("is_super_admin", { _user_id: userId });
   if (error) throw new Error(error.message);
   if (!data) throw new Error("Apenas o super admin pode realizar esta ação");
-}
-
-async function auditAdminAction(args: {
-  actorUserId: string;
-  action: string;
-  targetUserId?: string | null;
-  tenantId?: string | null;
-  before?: unknown;
-  after?: unknown;
-}) {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { error } = await supabaseAdmin.from("admin_audit_logs").insert({
-    actor_user_id: args.actorUserId,
-    action: args.action,
-    target_user_id: args.targetUserId ?? null,
-    tenant_id: args.tenantId ?? null,
-    before_data: (args.before ?? null) as Json,
-    after_data: (args.after ?? null) as Json,
-  });
-  if (error) console.warn("[admin] audit failed", error.message);
 }
 
 export const adminGetSmsProviderConfig = createServerFn({ method: "GET" })

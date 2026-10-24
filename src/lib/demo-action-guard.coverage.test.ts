@@ -23,6 +23,9 @@
 //   exported `addUserToTenantFor(ctx, data)` (mirroring the existing
 //   whatsapp.functions.ts `*For` convention) so the demo guard is directly
 //   unit-testable, matching the brief's required behavioral test.
+//   `updateTenantSettings`, `updateTenantUserRole` and `removeUserFromTenant`
+//   were later extracted the same way (`*For`, grupos de casas Task 4), so
+//   their guards are checked in those function bodies.
 // - whatsapp-proxies.functions.ts: `createWhatsappProxy`, `updateWhatsappProxy`,
 //   `deleteWhatsappProxy` and `testWhatsappProxy` act on `whatsapp_proxies`,
 //   a global table with no `tenant_id` column (platform/admin-role resource,
@@ -163,10 +166,10 @@ const entries: Entry[] = [
   { file: "webhooks.functions.ts", name: "setMyWebhookHmacEnforcement", kind: "handler" },
   { file: "webhooks.functions.ts", name: "getMyWebhookToken", kind: "handler" },
   { file: "shortio.functions.ts", name: "saveShortioSettings", kind: "handler" },
-  { file: "tenants.functions.ts", name: "updateTenantSettings", kind: "handler" },
+  { file: "tenants.functions.ts", name: "updateTenantSettingsFor", kind: "function" },
   { file: "tenants.functions.ts", name: "addUserToTenantFor", kind: "function" },
-  { file: "tenants.functions.ts", name: "updateTenantUserRole", kind: "handler" },
-  { file: "tenants.functions.ts", name: "removeUserFromTenant", kind: "handler" },
+  { file: "tenants.functions.ts", name: "updateTenantUserRoleFor", kind: "function" },
+  { file: "tenants.functions.ts", name: "removeUserFromTenantFor", kind: "function" },
 ];
 
 // Read-only webhook actions that must keep working for a demo tenant
