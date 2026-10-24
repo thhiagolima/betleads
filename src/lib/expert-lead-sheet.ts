@@ -62,6 +62,60 @@ export type ExpertLeadSheet = {
   podeAssumir: boolean;
 };
 
+// ------------------------------------------------------------- masking
+
+const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g;
+const URL_RE = /\b(?:https?:\/\/|www\.)\S+/gi;
+// Link curto sem esquema: "bmkt.click/abc", "sub.dominio.com.br/x".
+const BARE_LINK_RE = /\b(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}\/\S*/g;
+const CPF_FORMATTED_RE = /(?<!\d)\d{3}\.\d{3}\.\d{3}-\d{2}(?!\d)/g;
+const CPF_DIGITS_RE = /(?<!\d)\d{11}(?!\d)/g;
+
+// Mesmo número que `brl()` de template-vars.server.ts produz, sem o "R$".
+const brlNumber = new Intl.NumberFormat("pt-BR", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Mascara, no servidor, o texto já renderizado de um SMS/e-mail da casa antes
+ * de ele ir para o expert: os modelos da casa podem conter {email}, {saldo},
+ * {saldo_atual} e o link pessoal do lead. Troca links por "[link]", e-mails
+ * por "[e-mail]", CPFs (formatado ou 11 dígitos seguidos) por "[cpf]" e cada
+ * valor de saldo informado — no formato de `template-vars.server.ts`
+ * ("R$ 1.234,56", com ou sem "R$") — por "[saldo]". O resto fica intacto.
+ */
+export function maskHouseMessageText(
+  text: string | null,
+  options: { saldoValues?: number[] } = {},
+): string | null {
+  if (text == null) return null;
+  let masked = text
+    .replace(EMAIL_RE, "[e-mail]")
+    .replace(URL_RE, "[link]")
+    .replace(BARE_LINK_RE, "[link]")
+    .replace(CPF_FORMATTED_RE, "[cpf]")
+    .replace(CPF_DIGITS_RE, "[cpf]");
+
+  const amounts = new Set(
+    (options.saldoValues ?? [])
+      .filter((v) => Number.isFinite(v))
+      .map((v) => brlNumber.format(Math.abs(v))),
+  );
+  for (const amount of amounts) {
+    const re = new RegExp(
+      String.raw`-?(?:R\$\s*)?-?(?<![\d.,])${escapeRegExp(amount)}(?!\d|[.,]\d)`,
+      "g",
+    );
+    masked = masked.replace(re, "[saldo]");
+  }
+  return masked;
+}
+
 const SMS_DETAIL_MAX = 160;
 
 function truncate(text: string | null, max: number): string | null {

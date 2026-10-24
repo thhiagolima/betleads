@@ -17,7 +17,11 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { requireExpertContext } from "@/lib/expert-access.server";
 import { isExpertAffiliate, loadVisibleLead } from "@/lib/expert-lead-access.server";
-import { buildExpertTimeline, type ExpertLeadSheet } from "@/lib/expert-lead-sheet";
+import {
+  buildExpertTimeline,
+  maskHouseMessageText,
+  type ExpertLeadSheet,
+} from "@/lib/expert-lead-sheet";
 import { depositCountFor } from "@/lib/player-deposit-count";
 import { levelForTotal, thresholdsFromSettingsRow } from "@/lib/player-level";
 import {
@@ -57,6 +61,7 @@ type FollowupRow = {
   nota: string | null;
   created_at: string;
 };
+type WalletRow = { saldo_carteira: number | null; saldo_bonus: number | null };
 type ClaimRow = { expert_id: string; expires_at: string };
 type HolderRow = { id: string; nome: string; ativo: boolean; tipo: string };
 
@@ -103,6 +108,7 @@ export async function getExpertLeadSheetFor(
     pendingRes,
     claimRes,
     settingsRes,
+    walletRes,
   ] = await Promise.all([
     scoped("deposits", "id,valor,created_at")
       .eq("status", "aprovado")
@@ -155,6 +161,14 @@ export async function getExpertLeadSheetFor(
       .select("level_thresholds,cooling_after_days,sleeping_after_days")
       .eq("tenant_id", tenantId)
       .maybeSingle(),
+    // Saldo da carteira: lido SÓ para mascarar {saldo}/{saldo_atual} já
+    // renderizados nos SMS/e-mails da casa — nunca sai na ficha.
+    db
+      .from("players")
+      .select("saldo_carteira,saldo_bonus")
+      .eq("tenant_id", tenantId)
+      .eq("id", playerId)
+      .maybeSingle(),
   ]);
 
   const deposits = rowsOf<MoneyRow>(depositsRes);
@@ -171,6 +185,12 @@ export async function getExpertLeadSheetFor(
   const contacts = rowsOf<ContactRow>(contactsRes);
   const followups = rowsOf<FollowupRow>(followupsRes);
   if (claimRes.error) throw new Error(claimRes.error.message);
+  if (walletRes.error) throw new Error(walletRes.error.message);
+  const wallet = walletRes.data as WalletRow | null;
+  const saldoCarteira = Number(wallet?.saldo_carteira ?? 0);
+  // template-vars formata {saldo}/{saldo_atual} a partir de saldo_carteira;
+  // carteira + bônus entra por garantia, caso a casa mostre o saldo total.
+  const saldoValues = [saldoCarteira, saldoCarteira + Number(wallet?.saldo_bonus ?? 0)];
 
   const [clickedAtByDispatch, claim] = await Promise.all([
     loadFirstClicks(db, tenantId, links),
@@ -200,8 +220,16 @@ export async function getExpertLeadSheetFor(
       valor: Number(c.cashback_amount ?? 0),
       at: c.paid_at ?? c.created_at,
     })),
-    sms: sms.map((s) => ({ id: s.id, content: s.content, at: s.created_at })),
-    emails: emails.map((e) => ({ id: e.id, subject: e.subject, at: e.sent_at ?? e.created_at })),
+    sms: sms.map((s) => ({
+      id: s.id,
+      content: maskHouseMessageText(s.content, { saldoValues }),
+      at: s.created_at,
+    })),
+    emails: emails.map((e) => ({
+      id: e.id,
+      subject: maskHouseMessageText(e.subject, { saldoValues }),
+      at: e.sent_at ?? e.created_at,
+    })),
     links: links.map((l) => ({
       id: l.id,
       oferta: l.oferta,

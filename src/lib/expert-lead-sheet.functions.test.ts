@@ -43,6 +43,7 @@ vi.mock("@/lib/expert-access.server", async () => {
 
 import { createFakeDb } from "@/lib/sms-bulk.test-support";
 import { playerSituation } from "./player-situation";
+import { buildPlayerVariables } from "./template-vars.server";
 import { getExpertLeadSheetFor } from "./expert-lead-sheet.functions";
 
 const TENANT = "00000000-0000-4000-8000-0000000000a1";
@@ -184,31 +185,29 @@ describe("getExpertLeadSheetFor", () => {
 
   it("depositos matches the player detail: imported count wins over missing deposit rows", async () => {
     seedPlayer({ total_depositado: 500, ftd_em: iso(-30), ultimo_deposito: iso(-1) });
-    fake.admin
-      .rows("player_attributions")
-      .push(
-        {
-          id: "a-old",
-          tenant_id: TENANT,
-          player_id: PLAYER,
-          captured_at: iso(-60),
-          raw_payload: { normalized: { depositos: 1 } },
-        },
-        {
-          id: "a-new",
-          tenant_id: TENANT,
-          player_id: PLAYER,
-          captured_at: iso(-30),
-          raw_payload: { normalized: { depositos: 5 } },
-        },
-        {
-          id: "a-x",
-          tenant_id: "other",
-          player_id: PLAYER,
-          captured_at: iso(-1),
-          raw_payload: { normalized: { depositos: 99 } },
-        },
-      );
+    fake.admin.rows("player_attributions").push(
+      {
+        id: "a-old",
+        tenant_id: TENANT,
+        player_id: PLAYER,
+        captured_at: iso(-60),
+        raw_payload: { normalized: { depositos: 1 } },
+      },
+      {
+        id: "a-new",
+        tenant_id: TENANT,
+        player_id: PLAYER,
+        captured_at: iso(-30),
+        raw_payload: { normalized: { depositos: 5 } },
+      },
+      {
+        id: "a-x",
+        tenant_id: "other",
+        player_id: PLAYER,
+        captured_at: iso(-1),
+        raw_payload: { normalized: { depositos: 99 } },
+      },
+    );
 
     const sheet = await getExpertLeadSheetFor(CTX, { playerId: PLAYER });
     expect(sheet.lead.depositos).toBe(5);
@@ -218,34 +217,32 @@ describe("getExpertLeadSheetFor", () => {
 
   it("deposits with null status count as approved, like the player detail", async () => {
     seedPlayer({ total_depositado: 90, ftd_em: iso(-5) });
-    fake.admin
-      .rows("deposits")
-      .push(
-        {
-          id: "d1",
-          tenant_id: TENANT,
-          player_id: PLAYER,
-          valor: 30,
-          status: "aprovado",
-          created_at: iso(-5),
-        },
-        {
-          id: "d2",
-          tenant_id: TENANT,
-          player_id: PLAYER,
-          valor: 30,
-          status: null,
-          created_at: iso(-4),
-        },
-        {
-          id: "d3",
-          tenant_id: TENANT,
-          player_id: PLAYER,
-          valor: 30,
-          status: "recusado",
-          created_at: iso(-3),
-        },
-      );
+    fake.admin.rows("deposits").push(
+      {
+        id: "d1",
+        tenant_id: TENANT,
+        player_id: PLAYER,
+        valor: 30,
+        status: "aprovado",
+        created_at: iso(-5),
+      },
+      {
+        id: "d2",
+        tenant_id: TENANT,
+        player_id: PLAYER,
+        valor: 30,
+        status: null,
+        created_at: iso(-4),
+      },
+      {
+        id: "d3",
+        tenant_id: TENANT,
+        player_id: PLAYER,
+        valor: 30,
+        status: "recusado",
+        created_at: iso(-3),
+      },
+    );
     const sheet = await getExpertLeadSheetFor(CTX, { playerId: PLAYER });
     expect(sheet.lead.depositos).toBe(2);
     expect(sheet.lead.ticketMedio).toBe(45);
@@ -478,5 +475,39 @@ describe("getExpertLeadSheetFor", () => {
       column: "id",
       value: ["ld1"],
     });
+  });
+
+  it("house SMS/e-mail text reaches the expert masked (no e-mail, saldo, CPF or link)", async () => {
+    seedPlayer({ saldo_carteira: 87.35, saldo_bonus: 12.65, email: "maria@exemplo.com" });
+    const vars = buildPlayerVariables({ saldo_carteira: 87.35, email: "maria@exemplo.com" });
+    fake.admin.rows("sms_send_logs").push({
+      id: "s1",
+      tenant_id: TENANT,
+      player_id: PLAYER,
+      status: "sent",
+      content: `Maria, saldo ${vars.saldo} (${vars.saldo_atual}) em ${vars.email}. CPF 123.456.789-09: bmkt.click/xYz`,
+      created_at: iso(-1),
+    });
+    fake.admin.rows("email_send_logs").push({
+      id: "m1",
+      tenant_id: TENANT,
+      player_id: PLAYER,
+      status: "sent",
+      subject: `${vars.email}, seu saldo total é R$ 100,00`,
+      created_at: iso(-2),
+    });
+
+    const sheet = await getExpertLeadSheetFor(CTX, { playerId: PLAYER });
+    const sms = sheet.timeline.find((i) => i.id === "sms_casa:s1");
+    const email = sheet.timeline.find((i) => i.id === "email_casa:m1");
+    expect(sms?.detalhe).toBe("Maria, saldo [saldo] ([saldo]) em [e-mail]. CPF [cpf]: [link]");
+    expect(email?.detalhe).toBe("[e-mail], seu saldo total é [saldo]");
+
+    const json = JSON.stringify(sheet);
+    expect(json).not.toContain("maria@exemplo.com");
+    expect(json).not.toContain("87,35");
+    expect(json).not.toContain("87.35");
+    expect(json).not.toContain("100,00");
+    expect(json).not.toContain("saldo_carteira");
   });
 });

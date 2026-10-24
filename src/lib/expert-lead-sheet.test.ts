@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { buildExpertTimeline, type ExpertTimelineSources } from "./expert-lead-sheet";
+import {
+  buildExpertTimeline,
+  maskHouseMessageText,
+  type ExpertTimelineSources,
+} from "./expert-lead-sheet";
+import { buildPlayerVariables } from "./template-vars.server";
 
 function emptySources(): ExpertTimelineSources {
   return {
@@ -114,5 +119,44 @@ describe("buildExpertTimeline", () => {
 
   it("empty sources give an empty timeline", () => {
     expect(buildExpertTimeline(emptySources())).toEqual([]);
+  });
+});
+
+describe("maskHouseMessageText", () => {
+  it("masks e-mail addresses", () => {
+    expect(maskHouseMessageText("Confirme maria.silva+1@gmail.com.br hoje")).toBe(
+      "Confirme [e-mail] hoje",
+    );
+  });
+
+  it("masks formatted and digit-only CPFs", () => {
+    expect(maskHouseMessageText("CPF 123.456.789-09 ou 12345678909.")).toBe("CPF [cpf] ou [cpf].");
+  });
+
+  it("masks URLs and bare short links", () => {
+    expect(
+      maskHouseMessageText(
+        "Acesse https://casa.com/r?u=abc, www.casa.com/x ou bmkt.click/Ab12 agora",
+      ),
+    ).toBe("Acesse [link] [link] ou [link] agora");
+  });
+
+  it("masks the wallet balance formatted like template-vars", () => {
+    const vars = buildPlayerVariables({ saldo_carteira: 1234.5 });
+    const text = `Seu saldo: ${vars.saldo}. Total ${vars.saldo_atual}; ou R$ 1.234,50 ou 1.234,50`;
+    expect(maskHouseMessageText(text, { saldoValues: [1234.5] })).toBe(
+      "Seu saldo: [saldo]. Total [saldo]; ou [saldo] ou [saldo]",
+    );
+  });
+
+  it("does not mask other amounts or a balance embedded in a larger number", () => {
+    const text = "Deposite R$ 50,00 e ganhe R$ 150,00 ou 50,005";
+    expect(maskHouseMessageText(text, { saldoValues: [0.5, 10] })).toBe(text);
+  });
+
+  it("leaves other text intact", () => {
+    const text = "Oi Maria, sexta tem cashback de 10%! Responda SAIR p/ sair.";
+    expect(maskHouseMessageText(text, { saldoValues: [37.9] })).toBe(text);
+    expect(maskHouseMessageText(null)).toBeNull();
   });
 });
