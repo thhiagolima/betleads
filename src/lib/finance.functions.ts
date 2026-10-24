@@ -16,6 +16,7 @@ import {
   compareRange,
   computeDay,
   evaluateGoal,
+  isWholeMonth,
   presetRange,
   round2,
   summarize,
@@ -149,9 +150,16 @@ function daysInclusive(range: DateRange) {
   return (Date.parse(range.to) - Date.parse(range.from)) / 86_400_000 + 1;
 }
 
-/** True when the range is exactly one calendar month (1st to last day). */
-function isCalendarMonth(range: DateRange) {
-  return range.from.endsWith("-01") && range.to === lastDayOfMonth(range.from);
+/**
+ * A rate/goal change starts today or later (spec §10, "o passado não é
+ * recalculado"); defaults to today.
+ */
+function notInThePast(validFrom: string | undefined) {
+  const today = todaySaoPaulo();
+  if (validFrom !== undefined && validFrom < today) {
+    throw new Error("A data de início não pode ser no passado");
+  }
+  return validFrom ?? today;
 }
 
 /** The range cut at today (São Paulo); null when it starts in the future. */
@@ -218,6 +226,7 @@ function evaluateGoals(
   goalRows: GoalDayRow[],
   summary: PeriodSummary,
   range: DateRange,
+  today: string,
 ): GoalEvaluation[] {
   const byMetric = new Map<GoalMetric, GoalDay[]>();
   for (const row of goalRows) {
@@ -233,7 +242,7 @@ function evaluateGoals(
   }
   return GOAL_METRICS.map((metric) => {
     const goalDays = byMetric.get(metric);
-    return goalDays ? evaluateGoal(goalDays, summary, range) : null;
+    return goalDays ? evaluateGoal(goalDays, summary, range, today) : null;
   }).filter((goal): goal is GoalEvaluation => goal !== null);
 }
 
@@ -313,6 +322,7 @@ export async function getTenantFinanceMonthFor(
   const summary = summarize(
     days,
     round2(otherCosts.reduce((total, cost) => total + cost.valor, 0)),
+    today,
   );
 
   const history = [...(ratesRes.data ?? [])]
@@ -345,7 +355,7 @@ export async function getTenantFinanceMonthFor(
       history,
     },
     viewers: canManageViewers ? await listViewers(tenantId) : [],
-    goals: range ? evaluateGoals(goalRows, summary, range) : [],
+    goals: range ? evaluateGoals(goalRows, summary, range, today) : [],
     permissions: { canEditValues, canEditRates, canManageViewers, canManageGoals },
   };
 }
@@ -606,7 +616,7 @@ export async function setFinanceRatesFor(ctx: ServerContext, data: z.infer<typeo
   await requirePermission("finance_can_edit_rates", ctx.userId, data.tenantId);
   await assertTenantNotDemo(data.tenantId);
 
-  const validFrom = data.validFrom ?? todaySaoPaulo();
+  const validFrom = notInThePast(data.validFrom);
   const { data: before, error: beforeErr } = await db()
     .from<RateRow>("tenant_finance_rates")
     .select("tenant_id,valid_from,ggr_fee_pct,movement_fee_pct")
@@ -728,7 +738,7 @@ export async function setTenantGoalFor(ctx: ServerContext, data: z.infer<typeof 
   await requirePermission("finance_can_manage_goals", ctx.userId, data.tenantId);
   await assertTenantNotDemo(data.tenantId);
 
-  const validFrom = data.validFrom ?? todaySaoPaulo();
+  const validFrom = notInThePast(data.validFrom);
   const { data: before, error: beforeErr } = await db()
     .from<GoalRow>("tenant_goals")
     .select("tenant_id,metric,valid_from,direction,daily_value")
@@ -911,9 +921,9 @@ export async function getGroupOverviewFor(ctx: ServerContext, data: OverviewInpu
     data.range.from.endsWith("-01") &&
     data.range.to.slice(0, 7) === data.range.from.slice(0, 7);
   const monthOf = (range: DateRange) => `${range.from.slice(0, 7)}-01`;
-  const currentCostMonth = monthToDate || isCalendarMonth(data.range) ? monthOf(data.range) : null;
+  const currentCostMonth = monthToDate || isWholeMonth(data.range) ? monthOf(data.range) : null;
   const previousCostMonth =
-    (monthToDate && data.compare === "previous") || isCalendarMonth(previousRange)
+    (monthToDate && data.compare === "previous") || isWholeMonth(previousRange)
       ? monthOf(previousRange)
       : null;
   const costMonths = [currentCostMonth, previousCostMonth].filter(
@@ -956,10 +966,12 @@ export async function getGroupOverviewFor(ctx: ServerContext, data: OverviewInpu
     const currentSummary = summarize(
       windowDays(current, tenant.id),
       otherCostsFor([tenant.id], currentCostMonth),
+      today,
     );
     const previousSummary = summarize(
       windowDays(previous, tenant.id),
       otherCostsFor([tenant.id], previousCostMonth),
+      today,
     );
     return {
       id: tenant.id,
@@ -971,6 +983,7 @@ export async function getGroupOverviewFor(ctx: ServerContext, data: OverviewInpu
             goalRows.filter((row) => row.tenant_id === tenant.id),
             currentSummary,
             current,
+            today,
           )
         : [],
     };
@@ -984,8 +997,8 @@ export async function getGroupOverviewFor(ctx: ServerContext, data: OverviewInpu
     range: data.range,
     compareRange: previousRange,
     totals: {
-      current: summarize(windowDays(current), totalOtherCurrent),
-      previous: summarize(windowDays(previous), totalOtherPrevious),
+      current: summarize(windowDays(current), totalOtherCurrent, today),
+      previous: summarize(windowDays(previous), totalOtherPrevious, today),
     },
     tenants: rows,
   };

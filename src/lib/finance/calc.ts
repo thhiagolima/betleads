@@ -69,8 +69,22 @@ export function computeDay(d: FinanceDayInput): FinanceDay {
   };
 }
 
-export function summarize(days: FinanceDay[], otherCosts: number | null): PeriodSummary {
+/**
+ * Period totals. `today` ("YYYY-MM-DD", São Paulo) is passed explicitly so
+ * this stays pure: today is expected to be incomplete, so a pending today is
+ * not counted in `pendingDays` (it only sets `pendingToday`). Money results
+ * (Net, Resultado) still sum only complete days. `pendingDays` counts
+ * distinct dates, so a summary over several houses never counts a day twice.
+ */
+export function summarize(
+  days: FinanceDay[],
+  otherCosts: number | null,
+  today?: string,
+): PeriodSummary {
   const completeDays = days.filter((d) => !d.pending);
+  const pendingDates = new Set(days.filter((d) => d.pending).map((d) => d.date));
+  const pendingToday = today !== undefined && pendingDates.has(today);
+  if (today !== undefined) pendingDates.delete(today);
 
   const registrations = sumBy(days, (d) => d.registrations);
   const ftds = sumBy(days, (d) => d.ftds);
@@ -94,7 +108,8 @@ export function summarize(days: FinanceDay[], otherCosts: number | null): Period
 
   return {
     days: days.length,
-    pendingDays: days.length - completeDays.length,
+    pendingDays: pendingDates.size,
+    pendingToday,
     registrations,
     ftds,
     ftdDepositAmount,
@@ -112,6 +127,13 @@ export function summarize(days: FinanceDay[], otherCosts: number | null): Period
     costPerFtd,
     avgDailyCashResult,
   };
+}
+
+/** Daily average of Anúncios over the days that have it filled (spec §5); null when none. */
+export function averageFilledAdSpend(days: FinanceDay[]): number | null {
+  const filled = days.filter((d) => d.adSpend !== null);
+  if (filled.length === 0) return null;
+  return round2(filled.reduce((total, d) => total + (d.adSpend as number), 0) / filled.length);
 }
 
 export function metricValue(s: PeriodSummary, m: GoalMetric): number | null {
@@ -172,19 +194,29 @@ export function evaluateGoal(
   goalDays: GoalDay[],
   summary: PeriodSummary,
   range: DateRange,
+  today?: string,
 ): GoalEvaluation | null {
   if (goalDays.length === 0) return null;
 
   const metric = goalDays[0].metric;
   const lastDay = lastGoalDayUpTo(goalDays, range.to);
   const direction = lastDay.direction;
+  // A pending today is left out of a manual metric's value (only complete
+  // days are summed), so its goal day is left out of the target too.
+  const targetDays =
+    dependsOnManual(metric) && summary.pendingToday && today !== undefined
+      ? goalDays.filter((d) => d.date !== today)
+      : goalDays;
   const target = isSumMetric(metric)
-    ? round2(goalDays.reduce((total, d) => total + d.dailyValue, 0))
+    ? round2(targetDays.reduce((total, d) => total + d.dailyValue, 0))
     : lastDay.dailyValue;
   const value = metricValue(summary, metric);
 
+  // Gray while a past day is pending, or when the only goal day is a
+  // pending today (nothing complete to judge yet).
   const status: GoalStatus =
-    (dependsOnManual(metric) && summary.pendingDays > 0) || value === null
+    (dependsOnManual(metric) && (summary.pendingDays > 0 || targetDays.length === 0)) ||
+    value === null
       ? "gray"
       : goalStatusForBand(direction, target, value);
 
@@ -254,13 +286,22 @@ export function presetRange(p: Exclude<PeriodPreset, "custom">, now: Date): Date
   }
 }
 
+/** True when the range is exactly one calendar month (1st to last day). */
+export function isWholeMonth(r: DateRange): boolean {
+  const { y, m, d } = parseDateParts(r.from);
+  return d === 1 && r.to === endOfMonth(y, m);
+}
+
 export function compareRange(r: DateRange, mode: CompareMode, preset: PeriodPreset): DateRange {
   if (mode === "last_week" || mode === "same_weekday_last_week") {
     return { from: addDays(r.from, -7), to: addDays(r.to, -7) };
   }
 
   // mode === "previous"
-  if (preset === "month") {
+  // The "Mês" preset, or any range that is exactly one calendar month,
+  // compares with the previous calendar month (cut at the same day only while
+  // the current month is in progress).
+  if (preset === "month" || isWholeMonth(r)) {
     const { y, m } = parseDateParts(r.from);
     let prevYear = y;
     let prevMonth = m - 1;
@@ -270,7 +311,7 @@ export function compareRange(r: DateRange, mode: CompareMode, preset: PeriodPres
     }
     const prevFrom = `${prevYear}-${String(prevMonth).padStart(2, "0")}-01`;
     const lastDayOfPrevMonth = endOfMonth(prevYear, prevMonth);
-    const sameDayNumber = parseDateParts(r.to).d;
+    const sameDayNumber = isWholeMonth(r) ? 31 : parseDateParts(r.to).d;
     const lastDayNumber = parseDateParts(lastDayOfPrevMonth).d;
     const prevTo =
       sameDayNumber <= lastDayNumber
@@ -285,7 +326,14 @@ export function compareRange(r: DateRange, mode: CompareMode, preset: PeriodPres
   return { from, to };
 }
 
+/** Relative change; divides by |prev| so improving from a negative is positive. */
 export function pctChange(cur: number | null, prev: number | null): number | null {
   if (cur === null || prev === null || prev === 0) return null;
-  return (cur - prev) / prev;
+  return (cur - prev) / Math.abs(prev);
+}
+
+/** Difference of two ratios (e.g. ROI) in percentage points: 0.3 vs 0.2 → 10. */
+export function ppChange(cur: number | null, prev: number | null): number | null {
+  if (cur === null || prev === null) return null;
+  return (cur - prev) * 100;
 }

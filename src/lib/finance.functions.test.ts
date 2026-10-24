@@ -18,7 +18,9 @@ import {
   getGroupOverviewFor,
   getTenantFinanceMonthFor,
   saveFinanceDaysFor,
+  setFinanceRatesFor,
   setFinanceViewerFor,
+  setTenantGoalFor,
 } from "./finance.functions";
 import { createFakeDb } from "./sms-bulk.test-support";
 import { __resetDemoTenantCacheForTests } from "./tenant-access.server";
@@ -408,6 +410,7 @@ describe("group overview", () => {
         { id: "c2", tenant_id: HOUSE_A, month: "2026-09-01", descricao: "SMS", valor: 50 },
         { id: "c3", tenant_id: HOUSE_B, month: "2026-09-01", descricao: "CRM", valor: 25 },
         { id: "c4", tenant_id: HOUSE_C, month: "2026-09-01", descricao: "CRM", valor: 999 },
+        { id: "c5", tenant_id: HOUSE_A, month: "2026-08-01", descricao: "CRM", valor: 40 },
       );
 
     const full = await getGroupOverviewFor(ctxFor(G1_MANAGER), {
@@ -419,17 +422,20 @@ describe("group overview", () => {
     expect(financeDaysCalls).toHaveLength(1);
     expect(financeDaysCalls[0]).toEqual({
       _tenants: [HOUSE_A, HOUSE_B],
-      _from: "2026-08-02",
+      _from: "2026-08-01",
       _to: "2026-09-30",
     });
-    expect(full.compareRange).toEqual({ from: "2026-08-02", to: "2026-08-31" });
+    // A custom range that is exactly a calendar month compares with the
+    // whole previous month, whose other costs then count too.
+    expect(full.compareRange).toEqual({ from: "2026-08-01", to: "2026-08-31" });
     const a = full.tenants.find((t) => t.id === HOUSE_A)!;
     expect(a.current.otherCosts).toBe(150);
     expect(a.current.cashResult).toBe(1000 - 100 - 150);
-    expect(a.previous.otherCosts).toBeNull();
+    expect(a.previous.otherCosts).toBe(40);
+    expect(a.previous.cashResult).toBe(400 - 100 - 40);
     expect(full.tenants.find((t) => t.id === HOUSE_B)!.current.otherCosts).toBe(25);
     expect(full.totals.current.otherCosts).toBe(175);
-    expect(full.totals.previous.otherCosts).toBeNull();
+    expect(full.totals.previous.otherCosts).toBe(40);
 
     const partial = await getGroupOverviewFor(ctxFor(G1_MANAGER), {
       groupId: G1,
@@ -561,5 +567,81 @@ describe("group overview", () => {
     ]);
     expect(b.goals).toEqual([]);
     expect(overview.compareRange).toEqual({ from: "2026-10-16", to: "2026-10-16" });
+  });
+
+  it("overview: a pending today neither counts as pending nor grays a goal", async () => {
+    financeDayRows.push(
+      dayRow(HOUSE_A, "2026-10-23", { deposit_amount: 300, ad_spend: 100, ggr: 0 }),
+      dayRow(HOUSE_A, "2026-10-24", { deposit_amount: 50 }),
+      dayRow(HOUSE_B, "2026-10-23", { deposit_amount: 300, ad_spend: 100, ggr: 0 }),
+      dayRow(HOUSE_B, "2026-10-24", { deposit_amount: 50 }),
+    );
+    goalDayRows.push(
+      ...["2026-10-23", "2026-10-24"].map((date) => ({
+        tenant_id: HOUSE_A,
+        metric_date: date,
+        metric: "cash_result",
+        direction: "gte",
+        daily_value: 150,
+      })),
+    );
+
+    const overview = await getGroupOverviewFor(ctxFor(SUPER), {
+      groupId: G1,
+      range: { from: "2026-10-23", to: "2026-10-24" },
+      compare: "previous",
+      preset: "custom",
+    });
+
+    const a = overview.tenants.find((t) => t.id === HOUSE_A)!;
+    expect(a.current.pendingDays).toBe(0);
+    expect(a.current.cashResult).toBe(200);
+    expect(a.goals).toEqual([
+      { metric: "cash_result", direction: "gte", target: 150, value: 200, status: "green" },
+    ]);
+    expect(overview.totals.current.pendingDays).toBe(0);
+  });
+});
+
+describe("validFrom is never in the past", () => {
+  it("setFinanceRates rejects a past validFrom and accepts today", async () => {
+    await expect(
+      setFinanceRatesFor(ctxFor(ADMIN_A), {
+        tenantId: HOUSE_A,
+        validFrom: "2026-10-23",
+        ggrFeePct: 15,
+        movementFeePct: 2,
+      }),
+    ).rejects.toThrow("A data de início não pode ser no passado");
+    expect(fake.admin.rows("tenant_finance_rates")).toHaveLength(0);
+
+    const res = await setFinanceRatesFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      validFrom: "2026-10-24",
+      ggrFeePct: 15,
+      movementFeePct: 2,
+    });
+    expect(res.validFrom).toBe("2026-10-24");
+  });
+
+  it("setTenantGoal rejects a past validFrom and defaults to today", async () => {
+    await expect(
+      setTenantGoalFor(ctxFor(G1_MANAGER), {
+        tenantId: HOUSE_A,
+        metric: "ftds",
+        direction: "gte",
+        dailyValue: 10,
+        validFrom: "2026-10-01",
+      }),
+    ).rejects.toThrow("A data de início não pode ser no passado");
+    expect(fake.admin.rows("tenant_goals")).toHaveLength(0);
+
+    const res = await setTenantGoalFor(ctxFor(G1_MANAGER), {
+      tenantId: HOUSE_A,
+      metric: "ftds",
+      direction: "gte",
+      dailyValue: 10,
+    });
+    expect(res.validFrom).toBe("2026-10-24");
   });
 });

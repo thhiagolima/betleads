@@ -39,7 +39,10 @@ export type FinanceDay = FinanceDayInput & {
 
 export type PeriodSummary = {
   days: number;
+  /** Distinct pending dates, not counting today (expected to be incomplete). */
   pendingDays: number;
+  /** True when today ("today" passed to summarize) has a pending house-day. */
+  pendingToday: boolean;
   registrations: number;
   ftds: number;
   ftdDepositAmount: number;

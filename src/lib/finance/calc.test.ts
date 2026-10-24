@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 import fixtureDays from "./__fixtures__/pixreals-outubro.json";
 import {
+  averageFilledAdSpend,
   compareRange,
   computeDay,
   dependsOnManual,
   evaluateGoal,
   isSumMetric,
+  isWholeMonth,
   metricValue,
   pctChange,
+  ppChange,
   presetRange,
   round2,
   summarize,
@@ -163,6 +166,77 @@ describe("summarize", () => {
     expect(ftdsGoal?.status).not.toBe("gray");
   });
 
+  it("a pending today is not a pending day", () => {
+    const day = (date: string, ggr: number | null) =>
+      computeDay({
+        date,
+        registrations: 10,
+        ftds: 1,
+        ftdDepositAmount: 100,
+        depositAmount: 1000,
+        withdrawalAmount: 200,
+        adSpend: 50,
+        adSpendSuggested: null,
+        ggr,
+        ggrFeePct: 16,
+        movementFeePct: 2.7,
+      });
+    const days = [day("2026-10-23", 500), day("2026-10-24", null)];
+
+    const withToday = summarize(days, null, "2026-10-24");
+    expect(withToday.pendingDays).toBe(0);
+    expect(withToday.pendingToday).toBe(true);
+    // Resultado still sums only the complete day (10-23: 616).
+    expect(withToday.cashResult).toBeCloseTo(616, 2);
+
+    const withoutToday = summarize(days, null);
+    expect(withoutToday.pendingDays).toBe(1);
+    expect(withoutToday.pendingToday).toBe(false);
+
+    const range = { from: "2026-10-23", to: "2026-10-24" };
+    const goalDays: GoalDay[] = [
+      { date: "2026-10-23", metric: "cash_result", direction: "gte", dailyValue: 600 },
+      { date: "2026-10-24", metric: "cash_result", direction: "gte", dailyValue: 600 },
+    ];
+    const goal = evaluateGoal(goalDays, withToday, range, "2026-10-24");
+    // Not gray, and today's goal day is left out of the target like its value.
+    expect(goal?.status).toBe("green");
+    expect(goal?.target).toBe(600);
+
+    const onlyToday = evaluateGoal(
+      [goalDays[1]],
+      summarize([days[1]], null, "2026-10-24"),
+      { from: "2026-10-24", to: "2026-10-24" },
+      "2026-10-24",
+    );
+    expect(onlyToday?.status).toBe("gray");
+  });
+
+  it("pendingDays counts distinct dates across houses", () => {
+    const pendingDay = (date: string) =>
+      computeDay({
+        date,
+        registrations: 0,
+        ftds: 0,
+        ftdDepositAmount: 0,
+        depositAmount: 0,
+        withdrawalAmount: 0,
+        adSpend: null,
+        adSpendSuggested: null,
+        ggr: null,
+        ggrFeePct: 16,
+        movementFeePct: 2.7,
+      });
+    const days = [
+      pendingDay("2026-10-22"),
+      pendingDay("2026-10-22"),
+      pendingDay("2026-10-23"),
+      pendingDay("2026-10-24"),
+      pendingDay("2026-10-24"),
+    ];
+    expect(summarize(days, null, "2026-10-24").pendingDays).toBe(2);
+  });
+
   it("other costs only reduce the period result when provided", () => {
     const days = rows.slice(0, 3).map((row) => computeDay(toInput(row)));
     const withoutCosts = summarize(days, null);
@@ -177,10 +251,34 @@ describe("summarize", () => {
   });
 });
 
+describe("averageFilledAdSpend", () => {
+  it("divides by the days with Anúncios filled, not by every day", () => {
+    const day = (date: string, adSpend: number | null) =>
+      computeDay({
+        date,
+        registrations: 0,
+        ftds: 0,
+        ftdDepositAmount: 0,
+        depositAmount: 0,
+        withdrawalAmount: 0,
+        adSpend,
+        adSpendSuggested: null,
+        ggr: null,
+        ggrFeePct: 16,
+        movementFeePct: 2.7,
+      });
+    expect(
+      averageFilledAdSpend([day("2026-10-01", 100), day("2026-10-02", null), day("2026-10-03", 50)]),
+    ).toBe(75);
+    expect(averageFilledAdSpend([day("2026-10-01", null)])).toBeNull();
+  });
+});
+
 describe("goals", () => {
   const baseSummary: PeriodSummary = {
     days: 1,
     pendingDays: 0,
+    pendingToday: false,
     registrations: 0,
     ftds: 0,
     ftdDepositAmount: 0,
@@ -260,6 +358,7 @@ describe("metricValue, isSumMetric, dependsOnManual", () => {
     const summary: PeriodSummary = {
       days: 1,
       pendingDays: 0,
+      pendingToday: false,
       registrations: 5,
       ftds: 2,
       ftdDepositAmount: 10,
@@ -352,6 +451,15 @@ describe("compareRange", () => {
     ).toEqual({ from: "2026-09-01", to: "2026-09-24" });
   });
 
+  it("previous: a custom range that is exactly a calendar month compares with the whole previous month", () => {
+    expect(
+      compareRange({ from: "2026-09-01", to: "2026-09-30" }, "previous", "custom"),
+    ).toEqual({ from: "2026-08-01", to: "2026-08-31" });
+    expect(
+      compareRange({ from: "2026-03-01", to: "2026-03-31" }, "previous", "custom"),
+    ).toEqual({ from: "2026-02-01", to: "2026-02-28" });
+  });
+
   it("last_week shifts the window back 7 days", () => {
     expect(
       compareRange({ from: "2026-10-24", to: "2026-10-24" }, "last_week", "today"),
@@ -367,5 +475,31 @@ describe("pctChange", () => {
   it("is null when prev is null or 0", () => {
     expect(pctChange(10, null)).toBeNull();
     expect(pctChange(10, 0)).toBeNull();
+  });
+
+  it("improving from a negative previous is positive", () => {
+    expect(pctChange(500, -1000)).toBeCloseTo(1.5, 6);
+    expect(pctChange(-1500, -1000)).toBeCloseTo(-0.5, 6);
+  });
+});
+
+describe("ppChange", () => {
+  it("is the difference in percentage points", () => {
+    expect(ppChange(0.3, 0.177)).toBeCloseTo(12.3, 6);
+    expect(ppChange(-0.1, 0.2)).toBeCloseTo(-30, 6);
+  });
+
+  it("is null when either side is null", () => {
+    expect(ppChange(null, 0.2)).toBeNull();
+    expect(ppChange(0.2, null)).toBeNull();
+  });
+});
+
+describe("isWholeMonth", () => {
+  it("is true only for the 1st to the last day of one month", () => {
+    expect(isWholeMonth({ from: "2026-09-01", to: "2026-09-30" })).toBe(true);
+    expect(isWholeMonth({ from: "2026-02-01", to: "2026-02-28" })).toBe(true);
+    expect(isWholeMonth({ from: "2026-09-01", to: "2026-09-29" })).toBe(false);
+    expect(isWholeMonth({ from: "2026-09-02", to: "2026-09-30" })).toBe(false);
   });
 });
