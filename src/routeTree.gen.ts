@@ -22,6 +22,7 @@ import { Route as EventosRouteImport } from './routes/eventos'
 import { Route as ExpertsRouteImport } from './routes/experts'
 import { Route as FinanceiroRouteImport } from './routes/financeiro'
 import { Route as GamificacaoRouteImport } from './routes/gamificacao'
+import { Route as GrupoRouteImport } from './routes/grupo'
 import { Route as InteligenciaRouteImport } from './routes/inteligencia'
 import { Route as JornadasRouteImport } from './routes/jornadas'
 import { Route as LigacoesRouteImport } from './routes/ligacoes'
@@ -41,6 +42,9 @@ import { Route as AutomacoesLigacoesRouteImport } from './routes/automacoes.liga
 import { Route as AutomacoesSmsRouteImport } from './routes/automacoes.sms'
 import { Route as AutomacoesWhatsappRouteImport } from './routes/automacoes.whatsapp'
 import { Route as ConfiguracoesCasaRouteImport } from './routes/configuracoes.casa'
+import { Route as GrupoCasaRouteImport } from './routes/grupo_.casa'
+import { Route as GrupoMetasRouteImport } from './routes/grupo_.metas'
+import { Route as GrupoPessoasRouteImport } from './routes/grupo_.pessoas'
 import { Route as JornadasJourneyIdRouteImport } from './routes/jornadas.$journeyId'
 import { Route as JornadasNovaRouteImport } from './routes/jornadas.nova'
 import { Route as LinksConfiguracoesRouteImport } from './routes/links.configuracoes'
@@ -147,6 +151,11 @@ const GamificacaoRoute = GamificacaoRouteImport.update({
   path: '/gamificacao',
   getParentRoute: () => rootRouteImport,
 } as any)
+const GrupoRoute = GrupoRouteImport.update({
+  id: '/grupo',
+  path: '/grupo',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const InteligenciaRoute = InteligenciaRouteImport.update({
   id: '/inteligencia',
   path: '/inteligencia',
@@ -241,6 +250,21 @@ const ConfiguracoesCasaRoute = ConfiguracoesCasaRouteImport.update({
   id: '/casa',
   path: '/casa',
   getParentRoute: () => ConfiguracoesRoute,
+} as any)
+const GrupoCasaRoute = GrupoCasaRouteImport.update({
+  id: '/grupo_/casa',
+  path: '/grupo/casa',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GrupoMetasRoute = GrupoMetasRouteImport.update({
+  id: '/grupo_/metas',
+  path: '/grupo/metas',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GrupoPessoasRoute = GrupoPessoasRouteImport.update({
+  id: '/grupo_/pessoas',
+  path: '/grupo/pessoas',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const JornadasJourneyIdRoute = JornadasJourneyIdRouteImport.update({
   id: '/$journeyId',
@@ -479,6 +503,7 @@ export interface FileRoutesByFullPath {
   '/experts': typeof ExpertsRoute
   '/financeiro': typeof FinanceiroRoute
   '/gamificacao': typeof GamificacaoRoute
+  '/grupo': typeof GrupoRoute
   '/inteligencia': typeof InteligenciaRoute
   '/jornadas': typeof JornadasRouteWithChildren
   '/ligacoes': typeof LigacoesRoute
@@ -498,6 +523,9 @@ export interface FileRoutesByFullPath {
   '/automacoes/sms': typeof AutomacoesSmsRoute
   '/automacoes/whatsapp': typeof AutomacoesWhatsappRoute
   '/configuracoes/casa': typeof ConfiguracoesCasaRoute
+  '/grupo/casa': typeof GrupoCasaRoute
+  '/grupo/metas': typeof GrupoMetasRoute
+  '/grupo/pessoas': typeof GrupoPessoasRoute
   '/jornadas/$journeyId': typeof JornadasJourneyIdRoute
   '/jornadas/nova': typeof JornadasNovaRoute
   '/links/configuracoes': typeof LinksConfiguracoesRoute
@@ -553,6 +581,7 @@ export interface FileRoutesByTo {
   '/experts': typeof ExpertsRoute
   '/financeiro': typeof FinanceiroRoute
   '/gamificacao': typeof GamificacaoRoute
+  '/grupo': typeof GrupoRoute
   '/inteligencia': typeof InteligenciaRoute
   '/jornadas': typeof JornadasRouteWithChildren
   '/ligacoes': typeof LigacoesRoute
@@ -572,6 +601,9 @@ export interface FileRoutesByTo {
   '/automacoes/sms': typeof AutomacoesSmsRoute
   '/automacoes/whatsapp': typeof AutomacoesWhatsappRoute
   '/configuracoes/casa': typeof ConfiguracoesCasaRoute
+  '/grupo/casa': typeof GrupoCasaRoute
+  '/grupo/metas': typeof GrupoMetasRoute
+  '/grupo/pessoas': typeof GrupoPessoasRoute
   '/jornadas/$journeyId': typeof JornadasJourneyIdRoute
   '/jornadas/nova': typeof JornadasNovaRoute
   '/links/configuracoes': typeof LinksConfiguracoesRoute
@@ -628,6 +660,7 @@ export interface FileRoutesById {
   '/experts': typeof ExpertsRoute
   '/financeiro': typeof FinanceiroRoute
   '/gamificacao': typeof GamificacaoRoute
+  '/grupo': typeof GrupoRoute
   '/inteligencia': typeof InteligenciaRoute
   '/jornadas': typeof JornadasRouteWithChildren
   '/ligacoes': typeof LigacoesRoute
@@ -647,6 +680,9 @@ export interface FileRoutesById {
   '/automacoes/sms': typeof AutomacoesSmsRoute
   '/automacoes/whatsapp': typeof AutomacoesWhatsappRoute
   '/configuracoes/casa': typeof ConfiguracoesCasaRoute
+  '/grupo_/casa': typeof GrupoCasaRoute
+  '/grupo_/metas': typeof GrupoMetasRoute
+  '/grupo_/pessoas': typeof GrupoPessoasRoute
   '/jornadas/$journeyId': typeof JornadasJourneyIdRoute
   '/jornadas/nova': typeof JornadasNovaRoute
   '/links/configuracoes': typeof LinksConfiguracoesRoute
@@ -704,6 +740,7 @@ export interface FileRouteTypes {
     | '/experts'
     | '/financeiro'
     | '/gamificacao'
+    | '/grupo'
     | '/inteligencia'
     | '/jornadas'
     | '/ligacoes'
@@ -723,6 +760,9 @@ export interface FileRouteTypes {
     | '/automacoes/sms'
     | '/automacoes/whatsapp'
     | '/configuracoes/casa'
+    | '/grupo/casa'
+    | '/grupo/metas'
+    | '/grupo/pessoas'
     | '/jornadas/$journeyId'
     | '/jornadas/nova'
     | '/links/configuracoes'
@@ -778,6 +818,7 @@ export interface FileRouteTypes {
     | '/experts'
     | '/financeiro'
     | '/gamificacao'
+    | '/grupo'
     | '/inteligencia'
     | '/jornadas'
     | '/ligacoes'
@@ -797,6 +838,9 @@ export interface FileRouteTypes {
     | '/automacoes/sms'
     | '/automacoes/whatsapp'
     | '/configuracoes/casa'
+    | '/grupo/casa'
+    | '/grupo/metas'
+    | '/grupo/pessoas'
     | '/jornadas/$journeyId'
     | '/jornadas/nova'
     | '/links/configuracoes'
@@ -852,6 +896,7 @@ export interface FileRouteTypes {
     | '/experts'
     | '/financeiro'
     | '/gamificacao'
+    | '/grupo'
     | '/inteligencia'
     | '/jornadas'
     | '/ligacoes'
@@ -871,6 +916,9 @@ export interface FileRouteTypes {
     | '/automacoes/sms'
     | '/automacoes/whatsapp'
     | '/configuracoes/casa'
+    | '/grupo_/casa'
+    | '/grupo_/metas'
+    | '/grupo_/pessoas'
     | '/jornadas/$journeyId'
     | '/jornadas/nova'
     | '/links/configuracoes'
@@ -927,6 +975,7 @@ export interface RootRouteChildren {
   ExpertsRoute: typeof ExpertsRoute
   FinanceiroRoute: typeof FinanceiroRoute
   GamificacaoRoute: typeof GamificacaoRoute
+  GrupoRoute: typeof GrupoRoute
   InteligenciaRoute: typeof InteligenciaRoute
   JornadasRoute: typeof JornadasRouteWithChildren
   LigacoesRoute: typeof LigacoesRoute
@@ -941,6 +990,9 @@ export interface RootRouteChildren {
   TreinoIaRoute: typeof TreinoIaRoute
   WebhooksRoute: typeof WebhooksRoute
   WhatsappRoute: typeof WhatsappRoute
+  GrupoCasaRoute: typeof GrupoCasaRoute
+  GrupoMetasRoute: typeof GrupoMetasRoute
+  GrupoPessoasRoute: typeof GrupoPessoasRoute
   RelatoriosConversaoRoute: typeof RelatoriosConversaoRoute
   ResultadosCompararRoute: typeof ResultadosCompararRoute
   UTokenRoute: typeof UTokenRoute
@@ -1067,6 +1119,13 @@ declare module '@tanstack/react-router' {
       path: '/gamificacao'
       fullPath: '/gamificacao'
       preLoaderRoute: typeof GamificacaoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/grupo': {
+      id: '/grupo'
+      path: '/grupo'
+      fullPath: '/grupo'
+      preLoaderRoute: typeof GrupoRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/inteligencia': {
@@ -1201,6 +1260,27 @@ declare module '@tanstack/react-router' {
       fullPath: '/configuracoes/casa'
       preLoaderRoute: typeof ConfiguracoesCasaRouteImport
       parentRoute: typeof ConfiguracoesRoute
+    }
+    '/grupo_/casa': {
+      id: '/grupo_/casa'
+      path: '/grupo/casa'
+      fullPath: '/grupo/casa'
+      preLoaderRoute: typeof GrupoCasaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/grupo_/metas': {
+      id: '/grupo_/metas'
+      path: '/grupo/metas'
+      fullPath: '/grupo/metas'
+      preLoaderRoute: typeof GrupoMetasRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/grupo_/pessoas': {
+      id: '/grupo_/pessoas'
+      path: '/grupo/pessoas'
+      fullPath: '/grupo/pessoas'
+      preLoaderRoute: typeof GrupoPessoasRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/jornadas/$journeyId': {
       id: '/jornadas/$journeyId'
@@ -1588,6 +1668,7 @@ const rootRouteChildren: RootRouteChildren = {
   ExpertsRoute: ExpertsRoute,
   FinanceiroRoute: FinanceiroRoute,
   GamificacaoRoute: GamificacaoRoute,
+  GrupoRoute: GrupoRoute,
   InteligenciaRoute: InteligenciaRoute,
   JornadasRoute: JornadasRouteWithChildren,
   LigacoesRoute: LigacoesRoute,
@@ -1602,6 +1683,9 @@ const rootRouteChildren: RootRouteChildren = {
   TreinoIaRoute: TreinoIaRoute,
   WebhooksRoute: WebhooksRoute,
   WhatsappRoute: WhatsappRoute,
+  GrupoCasaRoute: GrupoCasaRoute,
+  GrupoMetasRoute: GrupoMetasRoute,
+  GrupoPessoasRoute: GrupoPessoasRoute,
   RelatoriosConversaoRoute: RelatoriosConversaoRoute,
   ResultadosCompararRoute: ResultadosCompararRoute,
   UTokenRoute: UTokenRoute,

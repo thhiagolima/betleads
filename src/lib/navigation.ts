@@ -139,6 +139,24 @@ export const ACCOUNT_LINKS: NavLink[] = [
   link("Conta e equipe", "/tenants", Building2, { requires: "not_super_admin" }),
 ];
 
+/** Menu shown instead of SIDEBAR_SECTIONS while on a /grupo* route (Task 7, spec §4/§6). */
+export const GROUP_SECTIONS: NavSection[] = [
+  { items: [link("Painel do grupo", "/grupo", Trophy)] },
+  {
+    label: "Grupo",
+    items: [
+      link("Metas", "/grupo/metas", Target),
+      link("Pessoas", "/grupo/pessoas", Users),
+    ],
+  },
+  { items: [link("Voltar às casas", "/", Home)] },
+];
+
+/** `/grupo` and every `/grupo/...` path (not `/grupos`). */
+export function isGroupPath(pathname: string): boolean {
+  return pathname === "/grupo" || pathname.startsWith("/grupo/");
+}
+
 export type MobileTab = { title: string; to?: string; icon: LucideIcon; alsoActiveOn?: string[] };
 
 export const MOBILE_TABS: MobileTab[] = [
@@ -204,6 +222,10 @@ export const ROUTE_META: Record<string, RouteMeta> = {
   "/configuracoes": { section: "Configurações", title: "Configurações" },
   "/tenants": { section: "Conta", title: "Conta e equipe" },
   "/admin": { section: "Administração", title: "Visão da plataforma" },
+  "/grupo": { section: "Grupo", title: "Painel do grupo" },
+  "/grupo/casa": { section: "Grupo", title: "Financeiro da casa" },
+  "/grupo/metas": { section: "Grupo", title: "Metas do grupo" },
+  "/grupo/pessoas": { section: "Grupo", title: "Pessoas do grupo" },
 };
 
 const FALLBACK_META: RouteMeta = { section: "BETLEADS", title: "BETLEADS" };
@@ -269,7 +291,7 @@ export function navLinkKey(item: Pick<NavLink, "to" | "hash">) {
 }
 
 function allLinks(): NavLink[] {
-  const fromSections = SIDEBAR_SECTIONS.flatMap((section) =>
+  const fromSections = [...SIDEBAR_SECTIONS, ...GROUP_SECTIONS].flatMap((section) =>
     section.items.flatMap((item) => (item.kind === "group" ? item.children : [item])),
   );
   return [...fromSections, ...SIDEBAR_FOOTER];

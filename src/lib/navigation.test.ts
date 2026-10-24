@@ -6,6 +6,7 @@ import {
   ROUTE_META,
   activeMobileTab,
   activeNavKey,
+  isGroupPath,
   resolveRouteMeta,
   visibleSections,
 } from "./navigation";
@@ -114,5 +115,20 @@ describe("visible sections", () => {
     expect(financeLinks("member", false, true)).toContain("/financeiro");
     expect(financeLinks(null, false, true)).toContain("/financeiro");
     expect(financeLinks("super_admin", true, false)).toContain("/financeiro");
+  });
+});
+
+describe("isGroupPath", () => {
+  it("matches /grupo and every /grupo/... path", () => {
+    expect(isGroupPath("/grupo")).toBe(true);
+    expect(isGroupPath("/grupo/metas")).toBe(true);
+    expect(isGroupPath("/grupo/casa")).toBe(true);
+    expect(isGroupPath("/grupo/pessoas")).toBe(true);
+  });
+
+  it("does not match a path that merely starts with the same letters", () => {
+    expect(isGroupPath("/grupos")).toBe(false);
+    expect(isGroupPath("/grupo-x")).toBe(false);
+    expect(isGroupPath("/")).toBe(false);
   });
 });

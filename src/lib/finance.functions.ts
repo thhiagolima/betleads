@@ -772,6 +772,61 @@ export const setTenantGoal = createServerFn({ method: "POST" })
     setTenantGoalFor(context as unknown as ServerContext, data),
   );
 
+const tenantIdInput = z.object({ tenantId: dbUuid() });
+
+export type TenantGoalCurrent = {
+  metric: GoalMetric;
+  direction: GoalDirection;
+  dailyValue: number | null;
+  validFrom: string | null;
+};
+
+/**
+ * The goal in force today for every metric (Task 7 /grupo/metas editor):
+ * the most recent `tenant_goals` row with `valid_from <= today`, per metric.
+ * A metric with no row at all comes back with `dailyValue: null` ("sem
+ * meta"). Read-only — added for this task because neither
+ * `getTenantFinanceMonth` nor `getGroupOverview` exposes the raw goal value
+ * outside of a date range's evaluation.
+ */
+export async function getTenantGoalsFor(
+  ctx: ServerContext,
+  data: z.infer<typeof tenantIdInput>,
+): Promise<TenantGoalCurrent[]> {
+  await requirePermission("finance_can_view", ctx.userId, data.tenantId);
+
+  const { data: rows, error } = await db()
+    .from<GoalRow[]>("tenant_goals")
+    .select("tenant_id,metric,valid_from,direction,daily_value")
+    .eq("tenant_id", data.tenantId)
+    .order("valid_from", { ascending: false });
+  if (error) throw new Error(error.message);
+
+  const today = todaySaoPaulo();
+  const byMetric = new Map<GoalMetric, GoalRow>();
+  for (const row of rows ?? []) {
+    if (row.valid_from > today) continue;
+    if (!byMetric.has(row.metric)) byMetric.set(row.metric, row);
+  }
+
+  return GOAL_METRICS.map((metric) => {
+    const row = byMetric.get(metric);
+    return {
+      metric,
+      direction: row?.direction ?? "gte",
+      dailyValue: row ? numOrNull(row.daily_value) : null,
+      validFrom: row?.valid_from ?? null,
+    };
+  });
+}
+
+export const getTenantGoals = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => tenantIdInput.parse(data))
+  .handler(async ({ data, context }) =>
+    getTenantGoalsFor(context as unknown as ServerContext, data),
+  );
+
 // ─── Group overview ─────────────────────────────────────────────────────────
 
 const dateRange = z
