@@ -130,6 +130,17 @@ A planilha cobra a taxa de movimentação sobre o **Net também**, além de dep�
 replicado exatamente como está, **inclusive com Net negativo**. Nesse caso a parcela fica negativa
 e melhora o resultado. Foi confirmado pelo usuário e não deve ser "corrigido".
 
+### Preenchimento retroativo
+
+Os valores manuais (GGR, anúncios e outros custos do mês) **não** precisam ser lançados no próprio
+dia. O admin pode preencher ou corrigir qualquer dia ou mês passado, a qualquer momento.
+- Não há trava de mês fechado.
+- Um lançamento retroativo atualiza na hora o dia, os totais, o placar, as comparações e a cor
+  das metas. Ele usa a taxa e a meta que valiam **naquele dia**.
+- A tela facilita o lançamento em lote: dá para editar vários dias seguidos na grade do mês, sem
+  abrir dia por dia.
+- Toda alteração fica na auditoria, com quem alterou, o valor antes e o valor depois.
+
 ### Dias pendentes
 
 Igual à planilha, onde o Net fica em branco enquanto falta o GGR:
@@ -262,6 +273,7 @@ Os totais do grupo somam as casas. Custos por unidade e ROI são recalculados a 
 - Quando admin e gestor de grupo mexem nas mesmas pessoas, vale a última alteração, e tudo fica
   na auditoria.
 - Grupo demo só com casas demo, com dados financeiros inventados no seed e no reset.
+- Não há trava de mês fechado, e qualquer valor passado pode ser corrigido (com auditoria).
 
 ## 11. Decidido pelo usuário (registro)
 
@@ -281,3 +293,4 @@ Os totais do grupo somam as casas. Custos por unidade e ROI são recalculados a 
 - As metas são por casa, mudam quando o gestor altera, e as cores seguem verde, amarelo até 20%
   e vermelho.
 - A casa demo entra num grupo.
+- Os dados manuais podem ser preenchidos retroativamente, a qualquer momento.
