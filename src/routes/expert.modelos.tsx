@@ -54,7 +54,11 @@ const CONTEUDO_MAX = 1000;
  * cashback) — as demais variáveis do catálogo (saldo, e-mail, último login,
  * último jogo, status, expert, IDs de push, variáveis de ligação) ficam
  * sempre no valor padrão genérico porque a ficha do lead do expert nunca
- * carrega esses dados. */
+ * carrega esses dados. `link_login`/`link_deposito` entram aqui também:
+ * `renderExpertMessage` passa `loadHouseLinks(expert.tenantId)` para
+ * `buildPlayerVariables`, então os dois sempre renderizam uma URL real da
+ * casa — mas, diferente de `{link}`, não são o link gerado nesta sessão, e
+ * por isso o clique neles não é rastreado para o expert. */
 const FILLED_VARIABLE_KEYS = new Set([
   "primeiro_nome",
   "nome",
@@ -68,13 +72,29 @@ const FILLED_VARIABLE_KEYS = new Set([
   "cashback_valor",
   "cashback_amount",
   "cashback_pago_em",
+  "link_login",
+  "link_deposito",
 ]);
+
+/** Variáveis preenchidas com um link da casa, não com o link rastreado
+ * gerado na ficha — mostradas com o aviso de que o clique não conta para o
+ * expert, para que ele prefira `{link}`. */
+const HOUSE_LINK_VARIABLE_KEYS = new Set(["link_login", "link_deposito"]);
+const HOUSE_LINK_NOTE = "link da casa — não conta clique para você";
 
 function nomeError(nome: string): string | null {
   const trimmed = nome.trim();
   if (!trimmed) return null; // vazio só desabilita Salvar, sem dica ainda
   if (trimmed.length < NOME_MIN) return "O nome precisa ter pelo menos 2 caracteres.";
   if (trimmed.length > NOME_MAX) return "O nome pode ter até 60 caracteres.";
+  return null;
+}
+
+function conteudoError(conteudo: string): string | null {
+  if (!conteudo) return null; // vazio só desabilita Salvar, sem dica ainda
+  if (!conteudo.trim() || conteudo.trim().length > CONTEUDO_MAX) {
+    return "O texto precisa ter de 1 a 1000 caracteres.";
+  }
   return null;
 }
 
@@ -101,7 +121,9 @@ function TemplateFormDialog({
   }, [open, template]);
 
   const nomeHint = nomeError(nome);
-  const canSave = nome.trim().length >= NOME_MIN && !nomeHint && conteudo.trim().length > 0;
+  const conteudoHint = conteudoError(conteudo);
+  const canSave =
+    nome.trim().length >= NOME_MIN && !nomeHint && conteudo.trim().length > 0 && !conteudoHint;
 
   const save = useMutation({
     mutationFn: () =>
@@ -142,9 +164,16 @@ function TemplateFormDialog({
               onChange={(event) => setConteudo(event.target.value)}
               placeholder="Use {primeiro_nome}, {link} e outras variáveis da lista abaixo."
             />
-            <p className="text-right text-label text-muted-foreground">
-              {conteudo.length}/{CONTEUDO_MAX}
-            </p>
+            <div className="flex items-start justify-between gap-2">
+              {conteudoHint ? (
+                <p className="text-label text-destructive">{conteudoHint}</p>
+              ) : (
+                <span />
+              )}
+              <p className="shrink-0 text-label text-muted-foreground">
+                {conteudo.length}/{CONTEUDO_MAX}
+              </p>
+            </div>
           </div>
         </div>
         <DialogFooter>
@@ -332,6 +361,9 @@ function ExpertTemplatesPage() {
               <li key={variable.key} className="rounded-md border border-border/70 px-3 py-2">
                 <code className="text-label font-medium">{`{${variable.key}}`}</code>
                 <p className="text-label text-muted-foreground">{variable.label}</p>
+                {HOUSE_LINK_VARIABLE_KEYS.has(variable.key) && (
+                  <p className="text-label text-muted-foreground">{HOUSE_LINK_NOTE}</p>
+                )}
               </li>
             ))}
           </ul>
