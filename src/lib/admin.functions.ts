@@ -2,6 +2,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { dbUuid } from "@/lib/zod-helpers";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { EXPERT_MEMBER_GUARD } from "@/lib/house-member-roles";
 import type { Json } from "@/integrations/supabase/types";
 import { z } from "zod";
 
@@ -267,10 +268,7 @@ type LooseRpcClient = {
  * `auth.uid()` is null, `is_super_admin()` is false, and the call fails with
  * `forbidden` even for a real super admin.
  */
-export async function setPricingFor(
-  ctx: PricingServerContext,
-  data: z.infer<typeof pricingInput>,
-) {
+export async function setPricingFor(ctx: PricingServerContext, data: z.infer<typeof pricingInput>) {
   await assertSuperAdmin(ctx.userId);
   const args: Record<string, unknown> = {
     _item: data.item,
@@ -432,81 +430,96 @@ export const adminGetUserAccesses = createServerFn({ method: "POST" })
 export const adminAssignUserToTenant = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => membershipInput.parse(data))
-  .handler(async ({ data, context }) => {
-    await assertSuperAdmin(context.userId);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: before, error: beforeErr } = await supabaseAdmin
-      .from("user_roles")
-      .select("id,user_id,tenant_id,role")
-      .eq("user_id", data.user_id)
-      .eq("tenant_id", data.tenant_id)
-      .maybeSingle();
-    if (beforeErr) throw new Error(beforeErr.message);
-    if (before?.role === "admin" && data.role !== "admin") {
-      throw new Error(
-        "Transfira a administração para outro usuário antes de rebaixar o admin atual",
-      );
-    }
-    if (data.role === "admin" && before?.role !== "admin") {
-      const { data: currentAdmin, error: adminErr } = await supabaseAdmin
-        .from("user_roles")
-        .select("id,user_id")
-        .eq("tenant_id", data.tenant_id)
-        .eq("role", "admin")
-        .maybeSingle();
-      if (adminErr) throw new Error(adminErr.message);
-      if (currentAdmin) {
-        throw new Error("Este tenant já possui um admin. Use a transferência de administração.");
-      }
-    }
+  .handler(async ({ data, context }) => adminAssignUserToTenantFor(context, data));
 
-    const request = before
-      ? supabaseAdmin.from("user_roles").update({ role: data.role }).eq("id", before.id)
-      : supabaseAdmin
-          .from("user_roles")
-          .insert({ user_id: data.user_id, tenant_id: data.tenant_id, role: data.role });
-    const { error } = await request;
-    if (error) throw new Error(error.message);
-    await auditAdminAction({
-      actorUserId: context.userId,
-      action: before ? "user_membership.updated" : "user_membership.created",
-      targetUserId: data.user_id,
-      tenantId: data.tenant_id,
-      before,
-      after: data,
-    });
-    return { ok: true };
+type AdminContext = { userId: string };
+
+// Body of `adminAssignUserToTenant`, exported so its guards are unit-testable.
+export async function adminAssignUserToTenantFor(
+  context: AdminContext,
+  data: z.infer<typeof membershipInput>,
+) {
+  await assertSuperAdmin(context.userId);
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data: before, error: beforeErr } = await supabaseAdmin
+    .from("user_roles")
+    .select("id,user_id,tenant_id,role")
+    .eq("user_id", data.user_id)
+    .eq("tenant_id", data.tenant_id)
+    .maybeSingle();
+  if (beforeErr) throw new Error(beforeErr.message);
+  // An expert's role is tied to its `experts.user_id`; changing it here
+  // would leave that link behind. Experts are managed only in Experts.
+  if ((before?.role as string | undefined) === "expert") throw new Error(EXPERT_MEMBER_GUARD);
+  if (before?.role === "admin" && data.role !== "admin") {
+    throw new Error("Transfira a administração para outro usuário antes de rebaixar o admin atual");
+  }
+  if (data.role === "admin" && before?.role !== "admin") {
+    const { data: currentAdmin, error: adminErr } = await supabaseAdmin
+      .from("user_roles")
+      .select("id,user_id")
+      .eq("tenant_id", data.tenant_id)
+      .eq("role", "admin")
+      .maybeSingle();
+    if (adminErr) throw new Error(adminErr.message);
+    if (currentAdmin) {
+      throw new Error("Este tenant já possui um admin. Use a transferência de administração.");
+    }
+  }
+
+  const request = before
+    ? supabaseAdmin.from("user_roles").update({ role: data.role }).eq("id", before.id)
+    : supabaseAdmin
+        .from("user_roles")
+        .insert({ user_id: data.user_id, tenant_id: data.tenant_id, role: data.role });
+  const { error } = await request;
+  if (error) throw new Error(error.message);
+  await auditAdminAction({
+    actorUserId: context.userId,
+    action: before ? "user_membership.updated" : "user_membership.created",
+    targetUserId: data.user_id,
+    tenantId: data.tenant_id,
+    before,
+    after: data,
   });
+  return { ok: true };
+}
 
 const removeMembershipInput = z.object({ user_id: dbUuid(), tenant_id: dbUuid() });
 
 export const adminRemoveUserFromTenant = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => removeMembershipInput.parse(data))
-  .handler(async ({ data, context }) => {
-    await assertSuperAdmin(context.userId);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: before, error: beforeErr } = await supabaseAdmin
-      .from("user_roles")
-      .select("id,user_id,tenant_id,role")
-      .eq("user_id", data.user_id)
-      .eq("tenant_id", data.tenant_id)
-      .maybeSingle();
-    if (beforeErr) throw new Error(beforeErr.message);
-    if (!before) throw new Error("Vínculo não encontrado");
-    if (before.role === "admin")
-      throw new Error("Defina outro admin antes de remover este vínculo");
-    const { error } = await supabaseAdmin.from("user_roles").delete().eq("id", before.id);
-    if (error) throw new Error(error.message);
-    await auditAdminAction({
-      actorUserId: context.userId,
-      action: "user_membership.removed",
-      targetUserId: data.user_id,
-      tenantId: data.tenant_id,
-      before,
-    });
-    return { ok: true };
+  .handler(async ({ data, context }) => adminRemoveUserFromTenantFor(context, data));
+
+// Body of `adminRemoveUserFromTenant`, exported so its guards are unit-testable.
+export async function adminRemoveUserFromTenantFor(
+  context: AdminContext,
+  data: z.infer<typeof removeMembershipInput>,
+) {
+  await assertSuperAdmin(context.userId);
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data: before, error: beforeErr } = await supabaseAdmin
+    .from("user_roles")
+    .select("id,user_id,tenant_id,role")
+    .eq("user_id", data.user_id)
+    .eq("tenant_id", data.tenant_id)
+    .maybeSingle();
+  if (beforeErr) throw new Error(beforeErr.message);
+  if (!before) throw new Error("Vínculo não encontrado");
+  if ((before.role as string) === "expert") throw new Error(EXPERT_MEMBER_GUARD);
+  if (before.role === "admin") throw new Error("Defina outro admin antes de remover este vínculo");
+  const { error } = await supabaseAdmin.from("user_roles").delete().eq("id", before.id);
+  if (error) throw new Error(error.message);
+  await auditAdminAction({
+    actorUserId: context.userId,
+    action: "user_membership.removed",
+    targetUserId: data.user_id,
+    tenantId: data.tenant_id,
+    before,
   });
+  return { ok: true };
+}
 
 // ─── Gerar link de "Entrar como" ────────────────────────────────────────────
 const impersonateInput = z.object({ user_id: dbUuid() });

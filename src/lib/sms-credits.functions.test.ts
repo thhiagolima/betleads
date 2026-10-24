@@ -12,10 +12,9 @@ vi.mock("@/integrations/supabase/client.server", async () => {
 });
 
 vi.mock("@/lib/tenant-access.server", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/lib/tenant-access.server")>(
-      "@/lib/tenant-access.server",
-    );
+  const actual = await vi.importActual<typeof import("@/lib/tenant-access.server")>(
+    "@/lib/tenant-access.server",
+  );
   return {
     ...actual,
     assertTenantNotDemo: vi.fn(async () => {}),
@@ -161,17 +160,27 @@ describe("getSmsCreditPortalFor canBuy", () => {
       data: { balance: 100, lifetime_purchased: 200, lifetime_used: 100, exempt: false },
       error: null,
     }));
-    userDb.rows("user_roles").push(
-      { user_id: HOUSE_ADMIN, tenant_id: TENANT, role: "admin" },
-      { user_id: HOUSE_GESTOR, tenant_id: TENANT, role: "gestor" },
-      { user_id: HOUSE_MEMBER, tenant_id: TENANT, role: "member" },
-    );
+    userDb
+      .rows("user_roles")
+      .push(
+        { user_id: HOUSE_ADMIN, tenant_id: TENANT, role: "admin" },
+        { user_id: HOUSE_GESTOR, tenant_id: TENANT, role: "gestor" },
+        { user_id: HOUSE_MEMBER, tenant_id: TENANT, role: "member" },
+      );
   });
 
   afterEach(() => {
     delete process.env.BILLING_GATEWAY_ENABLED;
     delete process.env.BILLING_ENFORCEMENT_ENABLED;
     delete process.env.BILLING_INVOICES_ENABLED;
+  });
+
+  it("refuses an expert of the house who asks for it by id (experts are not team)", async () => {
+    const EXPERT = "00000000-0000-4000-8000-0000000000be";
+    userDb.rows("user_roles").push({ user_id: EXPERT, tenant_id: TENANT, role: "expert" });
+    await expect(getSmsCreditPortalFor(ctxFor(EXPERT), { tenantId: TENANT })).rejects.toThrow(
+      "Tenant sem acesso",
+    );
   });
 
   it("is false when the gateway is off, even for an admin of a paying house", async () => {
@@ -235,10 +244,12 @@ describe("createSmsCreditCheckoutFor", () => {
 
 describe("adminSmsCreditConsoleFor", () => {
   it("lists tenant wallets (excluding demo) and keeps old orders read-only", async () => {
-    fake.admin.rows("tenants").push(
-      { id: TENANT, nome: "Casa Normal", slug: "normal", plano: "pro" },
-      { id: "demo-tenant", nome: "Casa Demo", slug: "demo", plano: "starter" },
-    );
+    fake.admin
+      .rows("tenants")
+      .push(
+        { id: TENANT, nome: "Casa Normal", slug: "normal", plano: "pro" },
+        { id: "demo-tenant", nome: "Casa Demo", slug: "demo", plano: "starter" },
+      );
     fake.admin.rows("tenant_wallets").push({
       tenant_id: TENANT,
       balance: 120.5,
@@ -257,14 +268,18 @@ describe("adminSmsCreditConsoleFor", () => {
   });
 
   it("has_custom_pricing reflects the CURRENT override, not 'ever had one'", async () => {
-    fake.admin.rows("tenants").push({ id: TENANT, nome: "Casa Normal", slug: "normal", plano: "pro" });
+    fake.admin
+      .rows("tenants")
+      .push({ id: TENANT, nome: "Casa Normal", slug: "normal", plano: "pro" });
     // An override was set, then cleared (the clear writes a newer row with
     // unit_price = null) — the badge must be OFF, not stuck on from the
     // first row.
-    fake.admin.rows("tenant_price_overrides").push(
-      { tenant_id: TENANT, item: "sms", unit_price: 0.07, valid_from: "2026-01-01T00:00:00Z" },
-      { tenant_id: TENANT, item: "sms", unit_price: null, valid_from: "2026-02-01T00:00:00Z" },
-    );
+    fake.admin
+      .rows("tenant_price_overrides")
+      .push(
+        { tenant_id: TENANT, item: "sms", unit_price: 0.07, valid_from: "2026-01-01T00:00:00Z" },
+        { tenant_id: TENANT, item: "sms", unit_price: null, valid_from: "2026-02-01T00:00:00Z" },
+      );
     const result = await adminSmsCreditConsoleFor(ctxFor(SUPER_ADMIN) as never);
     expect(result.wallets.find((w) => w.tenant_id === TENANT)).toMatchObject({
       has_custom_pricing: false,
@@ -272,7 +287,9 @@ describe("adminSmsCreditConsoleFor", () => {
   });
 
   it("has_custom_pricing is ON when the latest row for an item is a live override", async () => {
-    fake.admin.rows("tenants").push({ id: TENANT, nome: "Casa Normal", slug: "normal", plano: "pro" });
+    fake.admin
+      .rows("tenants")
+      .push({ id: TENANT, nome: "Casa Normal", slug: "normal", plano: "pro" });
     fake.admin.rows("tenant_price_overrides").push({
       tenant_id: TENANT,
       item: "email",

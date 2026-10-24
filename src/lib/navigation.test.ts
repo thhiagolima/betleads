@@ -3,10 +3,15 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  ACCOUNT_LINKS,
+  EXPERT_MOBILE_TABS,
   ROUTE_META,
   activeMobileTab,
   activeNavKey,
+  canSee,
+  isExpertAllowedPath,
   resolveRouteMeta,
+  shellContentState,
   visibleSections,
 } from "./navigation";
 
@@ -95,6 +100,13 @@ describe("active nav item", () => {
     expect(activeMobileTab("/gamificacao")).toBe("Jogadores");
     expect(activeMobileTab("/sms")).toBeNull();
   });
+
+  it("maps the expert mobile tabs when given EXPERT_MOBILE_TABS", () => {
+    expect(activeMobileTab("/expert", EXPERT_MOBILE_TABS)).toBe("Início");
+    expect(activeMobileTab("/expert/leads", EXPERT_MOBILE_TABS)).toBe("Leads");
+    // No regression: the default still resolves the house tabs.
+    expect(activeMobileTab("/players/1")).toBe("Jogadores");
+  });
 });
 
 describe("visible sections", () => {
@@ -135,10 +147,71 @@ describe("visible sections", () => {
       )
       .map((item) => item.title);
     expect(titles).not.toContain("Oportunidades");
-    expect(titles).not.toContain("Experts");
   });
 
   it("hides IA while the role is unknown", () => {
     expect(labels(null, false)).not.toContain("IA");
+  });
+});
+
+describe("expert role", () => {
+  function linkPaths(sections: ReturnType<typeof visibleSections>) {
+    return sections
+      .flatMap((section) =>
+        section.items.flatMap((item) => (item.kind === "group" ? item.children : [item])),
+      )
+      .map((item) => item.to);
+  }
+
+  it("expert sees only the expert section", () => {
+    expect(linkPaths(visibleSections("expert", false))).toEqual(["/expert", "/expert/leads"]);
+  });
+
+  it("expert has no account/team links", () => {
+    const links = ACCOUNT_LINKS.filter((item) => canSee(item, "expert", false));
+    expect(links).toHaveLength(0);
+  });
+
+  it("Experts admin link is visible to admin and super_admin, hidden to gestor, member and expert", () => {
+    const hasExpertsLink = (role: Parameters<typeof visibleSections>[0], superAdmin: boolean) =>
+      linkPaths(visibleSections(role, superAdmin)).includes("/experts");
+    expect(hasExpertsLink("admin", false)).toBe(true);
+    expect(hasExpertsLink("super_admin", true)).toBe(true);
+    expect(hasExpertsLink("gestor", false)).toBe(false);
+    expect(hasExpertsLink("member", false)).toBe(false);
+    expect(hasExpertsLink("expert", false)).toBe(false);
+  });
+
+  it("isExpertAllowedPath allows expert and auth routes and blocks house routes", () => {
+    expect(isExpertAllowedPath("/expert")).toBe(true);
+    expect(isExpertAllowedPath("/expert/leads")).toBe(true);
+    expect(isExpertAllowedPath("/players")).toBe(false);
+    expect(isExpertAllowedPath("/experts")).toBe(false);
+  });
+
+  it("shellContentState mounts no house route until the role is known", () => {
+    // Role still loading: a house route renders nothing (an expert would
+    // otherwise fire house server functions before the redirect).
+    expect(shellContentState(null, true, "/players")).toBe("waiting_role");
+    expect(shellContentState(null, true, "/")).toBe("waiting_role");
+    // Expert routes never wait.
+    expect(shellContentState(null, true, "/expert")).toBe("render");
+    expect(shellContentState("expert", false, "/expert/leads")).toBe("render");
+    // Known expert on a house route: redirect, never render the page.
+    expect(shellContentState("expert", false, "/players")).toBe("redirect_expert");
+    // Every other role (or no role after loading) behaves as before.
+    for (const role of ["admin", "gestor", "member", "super_admin", null] as const) {
+      expect(shellContentState(role, false, "/players")).toBe("render");
+    }
+  });
+
+  it("/experts is active under Jogadores", () => {
+    const jogadores = visibleSections("admin", false).find(
+      (section) => section.label === "Jogadores",
+    );
+    expect(jogadores?.items.some((item) => item.kind === "link" && item.to === "/experts")).toBe(
+      true,
+    );
+    expect(activeNavKey("/experts", "")).toBe("/experts");
   });
 });

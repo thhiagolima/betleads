@@ -151,6 +151,7 @@ const ROLE_LABEL: Record<string, string> = {
   admin: "Admin",
   gestor: "Gestor",
   member: "Membro",
+  expert: "Expert",
 };
 
 const ORDER_STATUS_LABEL: Record<string, string> = {
@@ -511,10 +512,14 @@ function ManageAccessButton({ userId, email }: { userId: string; email: string }
                     </p>
                     <p className="text-meta text-muted-foreground">
                       {ROLE_LABEL[membership.role ?? ""] ?? membership.role}
+                      {(membership.role as string) === "expert" && " · Gerencie em Experts"}
                     </p>
                   </div>
                   <Select
                     value={membership.role}
+                    // Expert memberships are managed only in Experts (the
+                    // server refuses with EXPERT_MEMBER_GUARD).
+                    disabled={(membership.role as string) === "expert"}
                     onValueChange={(value) => {
                       setTenantId(membership.tenant_id!);
                       setRole(value as typeof role);
@@ -541,7 +546,11 @@ function ManageAccessButton({ userId, email }: { userId: string; email: string }
                     </SelectContent>
                   </Select>
                   <IconButton
-                    disabled={membership.role === "admin" || removeMut.isPending}
+                    disabled={
+                      membership.role === "admin" ||
+                      (membership.role as string) === "expert" ||
+                      removeMut.isPending
+                    }
                     label={`Remover acesso a ${membership.tenant?.nome ?? "esta conta"}`}
                     icon={<Trash2 className="h-4 w-4 text-destructive" />}
                     onClick={async () => {

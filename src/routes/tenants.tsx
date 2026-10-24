@@ -93,7 +93,7 @@ type TenantRow = {
 type TenantUser = {
   id: string;
   user_id: string;
-  role: "admin" | "gestor" | "member";
+  role: "admin" | "gestor" | "member" | "expert";
   created_at: string;
   email: string | null;
   last_sign_in_at: string | null;
@@ -178,6 +178,7 @@ const ROLE_LABEL: Record<TenantUser["role"], string> = {
   admin: "admin",
   gestor: "gestor",
   member: "membro",
+  expert: "Expert",
 };
 
 function fmtDate(value: string | null | undefined) {
@@ -749,6 +750,20 @@ function RoleSelect({
     onError: (error: Error) => toast.error(error.message),
   });
 
+  // The server refuses to change an expert's role here (`EXPERT_MEMBER_GUARD`
+  // in tenants.functions.ts) — the control stays disabled with a hint
+  // pointing at the screen that actually manages it.
+  if (user.role === "expert") {
+    return (
+      <div className="space-y-1">
+        <div className="w-44 rounded-md border border-input bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+          {ROLE_LABEL.expert}
+        </div>
+        <p className="text-xs text-muted-foreground">Gerencie em Experts</p>
+      </div>
+    );
+  }
+
   return (
     <Select
       value={user.role}
@@ -783,6 +798,22 @@ function RemoveUserButton({ tenantId, user }: { tenantId: string; user: TenantUs
   });
 
   const label = user.email ?? "esta pessoa";
+
+  // Same server-side guard as `RoleSelect`: an expert's membership is
+  // removed from Experts (via `removeExpertAccess`), not here.
+  if (user.role === "expert") {
+    return (
+      <div className="flex flex-col items-end gap-0.5">
+        <IconButton
+          label={`Remover ${label} da equipe`}
+          disabled
+          icon={<Trash2 className="h-4 w-4 text-muted-foreground" />}
+        />
+        <p className="text-xs text-muted-foreground">Gerencie em Experts</p>
+      </div>
+    );
+  }
+
   return (
     <DemoDisabledTooltip active={isDemo}>
       <IconButton
@@ -1283,7 +1314,11 @@ function SettingsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAd
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="CRM_PLATAFORMA">CRM Plataforma</SelectItem>
-              <SelectItem value="CRM_EXPERT">CRM Expert</SelectItem>
+              {tenant.crm_model === "CRM_EXPERT" && (
+                <SelectItem value="CRM_EXPERT" disabled>
+                  CRM Expert (descontinuado)
+                </SelectItem>
+              )}
             </SelectContent>
           </Select>
         </div>

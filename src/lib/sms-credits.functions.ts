@@ -6,6 +6,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import type { Json } from "@/integrations/supabase/types";
 import { isBillingLockedFor, isTenantPayer } from "@/lib/billing/billing-state.server";
 import { isBillingGatewayEnabled } from "@/lib/billing/topup.functions";
+import { HOUSE_MEMBER_ROLES } from "@/lib/house-member-roles";
 import {
   checkDemoTenant,
   listDemoTenantIds,
@@ -122,6 +123,7 @@ async function resolveTenantId(context: ServerContext, requestedTenantId?: strin
       .select("tenant_id")
       .eq("user_id", context.userId)
       .eq("tenant_id", requestedTenantId)
+      .in("role", [...HOUSE_MEMBER_ROLES])
       .limit(1);
     if (error) throw new Error(error.message);
     if (!data?.length) throw new Error("Tenant sem acesso");
@@ -309,22 +311,26 @@ export async function adminSmsCreditConsoleFor(ctx: ServerContext) {
 
   const demoIds = new Set(demoTenantIds);
   const walletByTenant = new Map(
-    ((walletsRes.data ?? []) as Array<{
-      tenant_id: string;
-      balance: number;
-      lifetime_purchased: number;
-      lifetime_used: number;
-    }>).map((row) => [row.tenant_id, row]),
+    (
+      (walletsRes.data ?? []) as Array<{
+        tenant_id: string;
+        balance: number;
+        lifetime_purchased: number;
+        lifetime_used: number;
+      }>
+    ).map((row) => [row.tenant_id, row]),
   );
   const currentOverrides = currentOverrideItemsByTenant(
     (overridesRes.data ?? []) as TenantPriceOverrideRow[],
   );
 
-  const wallets: WalletTenantRow[] = ((tenantsRes.data ?? []) as Array<{
-    id: string;
-    nome: string | null;
-    plano: string | null;
-  }>)
+  const wallets: WalletTenantRow[] = (
+    (tenantsRes.data ?? []) as Array<{
+      id: string;
+      nome: string | null;
+      plano: string | null;
+    }>
+  )
     .filter((tenant) => !demoIds.has(tenant.id))
     .map((tenant) => {
       const wallet = walletByTenant.get(tenant.id);

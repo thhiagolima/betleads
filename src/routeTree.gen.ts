@@ -41,6 +41,8 @@ import { Route as AutomacoesLigacoesRouteImport } from './routes/automacoes.liga
 import { Route as AutomacoesSmsRouteImport } from './routes/automacoes.sms'
 import { Route as AutomacoesWhatsappRouteImport } from './routes/automacoes.whatsapp'
 import { Route as ConfiguracoesCasaRouteImport } from './routes/configuracoes_.casa'
+import { Route as ExpertIndexRouteImport } from './routes/expert.index'
+import { Route as ExpertLeadsRouteImport } from './routes/expert.leads'
 import { Route as JornadasJourneyIdRouteImport } from './routes/jornadas.$journeyId'
 import { Route as JornadasNovaRouteImport } from './routes/jornadas.nova'
 import { Route as LinksConfiguracoesRouteImport } from './routes/links.configuracoes'
@@ -243,6 +245,16 @@ const AutomacoesWhatsappRoute = AutomacoesWhatsappRouteImport.update({
 const ConfiguracoesCasaRoute = ConfiguracoesCasaRouteImport.update({
   id: '/configuracoes_/casa',
   path: '/configuracoes/casa',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ExpertIndexRoute = ExpertIndexRouteImport.update({
+  id: '/expert/',
+  path: '/expert/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ExpertLeadsRoute = ExpertLeadsRouteImport.update({
+  id: '/expert/leads',
+  path: '/expert/leads',
   getParentRoute: () => rootRouteImport,
 } as any)
 const JornadasJourneyIdRoute = JornadasJourneyIdRouteImport.update({
@@ -518,6 +530,7 @@ export interface FileRoutesByFullPath {
   '/automacoes/sms': typeof AutomacoesSmsRoute
   '/automacoes/whatsapp': typeof AutomacoesWhatsappRoute
   '/configuracoes/casa': typeof ConfiguracoesCasaRoute
+  '/expert/leads': typeof ExpertLeadsRoute
   '/jornadas/$journeyId': typeof JornadasJourneyIdRoute
   '/jornadas/nova': typeof JornadasNovaRoute
   '/links/configuracoes': typeof LinksConfiguracoesRoute
@@ -526,6 +539,7 @@ export interface FileRoutesByFullPath {
   '/resultados/comparar': typeof ResultadosCompararRoute
   '/sms/templates': typeof SmsTemplatesRoute
   '/u/$token': typeof UTokenRoute
+  '/expert/': typeof ExpertIndexRoute
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
   '/api/public/health': typeof ApiPublicHealthRoute
   '/api/public/sms-webhook': typeof ApiPublicSmsWebhookRoute
@@ -595,6 +609,7 @@ export interface FileRoutesByTo {
   '/automacoes/sms': typeof AutomacoesSmsRoute
   '/automacoes/whatsapp': typeof AutomacoesWhatsappRoute
   '/configuracoes/casa': typeof ConfiguracoesCasaRoute
+  '/expert/leads': typeof ExpertLeadsRoute
   '/jornadas/$journeyId': typeof JornadasJourneyIdRoute
   '/jornadas/nova': typeof JornadasNovaRoute
   '/links/configuracoes': typeof LinksConfiguracoesRoute
@@ -603,6 +618,7 @@ export interface FileRoutesByTo {
   '/resultados/comparar': typeof ResultadosCompararRoute
   '/sms/templates': typeof SmsTemplatesRoute
   '/u/$token': typeof UTokenRoute
+  '/expert': typeof ExpertIndexRoute
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
   '/api/public/health': typeof ApiPublicHealthRoute
   '/api/public/sms-webhook': typeof ApiPublicSmsWebhookRoute
@@ -673,6 +689,7 @@ export interface FileRoutesById {
   '/automacoes/sms': typeof AutomacoesSmsRoute
   '/automacoes/whatsapp': typeof AutomacoesWhatsappRoute
   '/configuracoes_/casa': typeof ConfiguracoesCasaRoute
+  '/expert/leads': typeof ExpertLeadsRoute
   '/jornadas/$journeyId': typeof JornadasJourneyIdRoute
   '/jornadas/nova': typeof JornadasNovaRoute
   '/links/configuracoes': typeof LinksConfiguracoesRoute
@@ -681,6 +698,7 @@ export interface FileRoutesById {
   '/resultados_/comparar': typeof ResultadosCompararRoute
   '/sms/templates': typeof SmsTemplatesRoute
   '/u/$token': typeof UTokenRoute
+  '/expert/': typeof ExpertIndexRoute
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
   '/api/public/health': typeof ApiPublicHealthRoute
   '/api/public/sms-webhook': typeof ApiPublicSmsWebhookRoute
@@ -752,6 +770,7 @@ export interface FileRouteTypes {
     | '/automacoes/sms'
     | '/automacoes/whatsapp'
     | '/configuracoes/casa'
+    | '/expert/leads'
     | '/jornadas/$journeyId'
     | '/jornadas/nova'
     | '/links/configuracoes'
@@ -760,6 +779,7 @@ export interface FileRouteTypes {
     | '/resultados/comparar'
     | '/sms/templates'
     | '/u/$token'
+    | '/expert/'
     | '/api/public/evolution-webhook'
     | '/api/public/health'
     | '/api/public/sms-webhook'
@@ -829,6 +849,7 @@ export interface FileRouteTypes {
     | '/automacoes/sms'
     | '/automacoes/whatsapp'
     | '/configuracoes/casa'
+    | '/expert/leads'
     | '/jornadas/$journeyId'
     | '/jornadas/nova'
     | '/links/configuracoes'
@@ -837,6 +858,7 @@ export interface FileRouteTypes {
     | '/resultados/comparar'
     | '/sms/templates'
     | '/u/$token'
+    | '/expert'
     | '/api/public/evolution-webhook'
     | '/api/public/health'
     | '/api/public/sms-webhook'
@@ -906,6 +928,7 @@ export interface FileRouteTypes {
     | '/automacoes/sms'
     | '/automacoes/whatsapp'
     | '/configuracoes_/casa'
+    | '/expert/leads'
     | '/jornadas/$journeyId'
     | '/jornadas/nova'
     | '/links/configuracoes'
@@ -914,6 +937,7 @@ export interface FileRouteTypes {
     | '/resultados_/comparar'
     | '/sms/templates'
     | '/u/$token'
+    | '/expert/'
     | '/api/public/evolution-webhook'
     | '/api/public/health'
     | '/api/public/sms-webhook'
@@ -980,9 +1004,11 @@ export interface RootRouteChildren {
   WebhooksRoute: typeof WebhooksRoute
   WhatsappRoute: typeof WhatsappRoute
   ConfiguracoesCasaRoute: typeof ConfiguracoesCasaRoute
+  ExpertLeadsRoute: typeof ExpertLeadsRoute
   RelatoriosConversaoRoute: typeof RelatoriosConversaoRoute
   ResultadosCompararRoute: typeof ResultadosCompararRoute
   UTokenRoute: typeof UTokenRoute
+  ExpertIndexRoute: typeof ExpertIndexRoute
   ApiPublicEvolutionWebhookRoute: typeof ApiPublicEvolutionWebhookRoute
   ApiPublicHealthRoute: typeof ApiPublicHealthRoute
   ApiPublicSmsWebhookRoute: typeof ApiPublicSmsWebhookRoute
@@ -1242,6 +1268,20 @@ declare module '@tanstack/react-router' {
       path: '/configuracoes/casa'
       fullPath: '/configuracoes/casa'
       preLoaderRoute: typeof ConfiguracoesCasaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/expert/': {
+      id: '/expert/'
+      path: '/expert'
+      fullPath: '/expert/'
+      preLoaderRoute: typeof ExpertIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/expert/leads': {
+      id: '/expert/leads'
+      path: '/expert/leads'
+      fullPath: '/expert/leads'
+      preLoaderRoute: typeof ExpertLeadsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/jornadas/$journeyId': {
@@ -1654,9 +1694,11 @@ const rootRouteChildren: RootRouteChildren = {
   WebhooksRoute: WebhooksRoute,
   WhatsappRoute: WhatsappRoute,
   ConfiguracoesCasaRoute: ConfiguracoesCasaRoute,
+  ExpertLeadsRoute: ExpertLeadsRoute,
   RelatoriosConversaoRoute: RelatoriosConversaoRoute,
   ResultadosCompararRoute: ResultadosCompararRoute,
   UTokenRoute: UTokenRoute,
+  ExpertIndexRoute: ExpertIndexRoute,
   ApiPublicEvolutionWebhookRoute: ApiPublicEvolutionWebhookRoute,
   ApiPublicHealthRoute: ApiPublicHealthRoute,
   ApiPublicSmsWebhookRoute: ApiPublicSmsWebhookRoute,

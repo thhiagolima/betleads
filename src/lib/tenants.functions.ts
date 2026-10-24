@@ -15,6 +15,7 @@ import {
   type BillingRole,
 } from "@/lib/billing/billing-view";
 import { cancelOpenInvoiceCharges } from "@/lib/billing/invoices.server";
+import { EXPERT_MEMBER_GUARD, HOUSE_MEMBER_ROLES } from "@/lib/house-member-roles";
 import { assertTenantNotDemo, isBillingEnforcementEnabled } from "@/lib/tenant-access.server";
 import { dbUuid } from "@/lib/zod-helpers";
 
@@ -71,7 +72,9 @@ type TenantMemberRow = {
   id: string;
   user_id: string;
   tenant_id: string;
-  role: TenantAssignableRole;
+  // `expert` rows live in user_roles too (Área do Expert), but are managed
+  // only in Experts — never assigned from the team screen.
+  role: TenantAssignableRole | "expert";
   created_at: string;
 };
 
@@ -148,10 +151,13 @@ async function getAccessibleTenants(ctx: ServerContext) {
     return { superAdmin, tenants: data ?? [] };
   }
 
+  // Team roles only: an `expert` row must never open the house console
+  // (team, wallet, ledger, audit log...), which is read via supabaseAdmin.
   const { data: roles, error: rolesErr } = await db()
     .from<TenantMemberRow[]>("user_roles")
     .select("tenant_id")
     .eq("user_id", ctx.userId)
+    .in("role", [...HOUSE_MEMBER_ROLES])
     .not("tenant_id", "is", null);
   if (rolesErr) throw new Error(rolesErr.message);
 
@@ -226,7 +232,37 @@ async function findAuthUserByEmail(email: string) {
   return null;
 }
 
-async function auditTenant(args: {
+/**
+ * Finds the auth user for `email`, or creates one: an e-mail invite
+ * (`inviteUserByEmail`) by default, or — only when `password` is given — a
+ * confirmed user with that password who must change it on first sign-in.
+ * Shared by the team screen (`addUserToTenantFor`) and Experts
+ * (`inviteExpertFor`). An existing user is reused as-is (`created: false`).
+ */
+export async function findOrInviteUserByEmail(
+  email: string,
+  opts: { invitedBy: string; tenantId: string; password?: string | null },
+): Promise<{ userId: string; created: boolean }> {
+  const normalized = email.trim().toLowerCase();
+  const existing = await findAuthUserByEmail(normalized);
+  if (existing) return { userId: existing.id, created: false };
+
+  const metadata = { invited_by: opts.invitedBy, tenant_id: opts.tenantId };
+  const createRes = opts.password
+    ? await supabaseAdmin.auth.admin.createUser({
+        email: normalized,
+        password: opts.password,
+        email_confirm: true,
+        user_metadata: metadata,
+        app_metadata: { force_password_change: true },
+      })
+    : await supabaseAdmin.auth.admin.inviteUserByEmail(normalized, { data: metadata });
+  if (createRes.error) throw new Error(createRes.error.message);
+  if (!createRes.data.user) throw new Error("Falha ao criar usuário");
+  return { userId: createRes.data.user.id, created: true };
+}
+
+export async function auditTenant(args: {
   tenantId: string;
   actorUserId: string;
   action: string;
@@ -395,7 +431,15 @@ async function buildTenantDetail(
 
   const walletSummary = (walletSummaryRes.data ?? {}) as {
     exempt?: boolean;
-    prices?: Record<string, { unit_price?: number; provider_unit_cost?: number; free_monthly_units?: number; source?: string }>;
+    prices?: Record<
+      string,
+      {
+        unit_price?: number;
+        provider_unit_cost?: number;
+        free_monthly_units?: number;
+        source?: string;
+      }
+    >;
   };
   const smsPrice = walletSummary.prices?.sms ?? {};
   const pricing = {
@@ -625,7 +669,9 @@ const createTenantInput = z.object({
   adminEmail: z.string().email().max(255),
   status: tenantStatus.default("trial"),
   plano: tenantPlan.default("starter"),
-  crm_model: crmModel.default("CRM_PLATAFORMA"),
+  // Criação de casa só aceita o modelo vigente; CRM_EXPERT foi descontinuado
+  // (Task 3 da Área do Expert) e só sobrevive em casas legadas já nesse modelo.
+  crm_model: z.enum(["CRM_PLATAFORMA"]).default("CRM_PLATAFORMA"),
 });
 
 export const adminCreateTenant = createServerFn({ method: "POST" })
@@ -705,6 +751,15 @@ export async function updateTenantSettingsFor(
   if (beforeErr) throw new Error(beforeErr.message);
   if (!before) throw new Error("Tenant não encontrado");
 
+  // CRM_EXPERT foi descontinuado (Task 3 da Área do Expert): só continua
+  // existindo em casas legadas que já estavam nesse modelo. Mudar uma casa
+  // atual *para* CRM_EXPERT não é permitido; manter o valor já vigente é.
+  if (data.crm_model === "CRM_EXPERT" && before.crm_model !== "CRM_EXPERT") {
+    throw new Error(
+      "O modelo CRM Expert foi descontinuado. Cadastre experts dentro da casa, em Experts.",
+    );
+  }
+
   // Only the super admin can actually change `plano` (the `patch` below
   // omits it otherwise, and `tenants_plan_guard` enforces the same rule at
   // the DB level), so the reason is only ever required on that branch.
@@ -741,9 +796,7 @@ export async function updateTenantSettingsFor(
     .single();
   if (error) throw new Error(error.message);
 
-  const pixCancel = openInvoiceBefore
-    ? await cancelPixOfClosedInvoice(openInvoiceBefore)
-    : null;
+  const pixCancel = openInvoiceBefore ? await cancelPixOfClosedInvoice(openInvoiceBefore) : null;
 
   await auditTenant({
     tenantId: data.tenantId,
@@ -836,28 +889,13 @@ export async function addUserToTenantFor(ctx: ServerContext, data: z.infer<typeo
   }
 
   const email = data.email.trim().toLowerCase();
-  let user = await findAuthUserByEmail(email);
-  let created = false;
+  const { userId, created } = await findOrInviteUserByEmail(email, {
+    invitedBy: ctx.userId,
+    tenantId: data.tenantId,
+    password: data.password,
+  });
 
-  if (!user) {
-    const createRes = data.password
-      ? await supabaseAdmin.auth.admin.createUser({
-          email,
-          password: data.password,
-          email_confirm: true,
-          user_metadata: { invited_by: ctx.userId, tenant_id: data.tenantId },
-          app_metadata: { force_password_change: true },
-        })
-      : await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
-          data: { invited_by: ctx.userId, tenant_id: data.tenantId },
-        });
-    if (createRes.error) throw new Error(createRes.error.message);
-    if (!createRes.data.user) throw new Error("Falha ao criar usuário");
-    user = createRes.data.user;
-    created = true;
-  }
-
-  if (!actorIsSuperAdmin && (await checkSuperAdmin(user.id))) {
+  if (!actorIsSuperAdmin && (await checkSuperAdmin(userId))) {
     throw new Error("Não é permitido vincular um superadmin global por esta área");
   }
 
@@ -865,11 +903,12 @@ export async function addUserToTenantFor(ctx: ServerContext, data: z.infer<typeo
     .from<TenantMemberRow>("user_roles")
     .select("id,user_id,tenant_id,role,created_at")
     .eq("tenant_id", data.tenantId)
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .maybeSingle();
   if (existingErr) throw new Error(existingErr.message);
 
   if (existing) {
+    if (existing.role === "expert") throw new Error(EXPERT_MEMBER_GUARD);
     if (existing.role === data.role) return { ok: true, created, existing: true };
     const { error } = await db()
       .from("user_roles")
@@ -891,7 +930,7 @@ export async function addUserToTenantFor(ctx: ServerContext, data: z.infer<typeo
   const { data: membership, error } = await db()
     .from<TenantMemberRow>("user_roles")
     .insert({
-      user_id: user.id,
+      user_id: userId,
       tenant_id: data.tenantId,
       role: data.role,
     })
@@ -904,7 +943,7 @@ export async function addUserToTenantFor(ctx: ServerContext, data: z.infer<typeo
     actorUserId: ctx.userId,
     action: "tenant_user.added",
     entityType: "user_role",
-    entityId: membership?.id ?? user.id,
+    entityId: membership?.id ?? userId,
     after: { ...membership, email },
     metadata: { auth_user_created: created },
   });
@@ -921,57 +960,65 @@ const updateUserRoleInput = z.object({
 export const updateTenantUserRole = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => updateUserRoleInput.parse(data))
-  .handler(async ({ data, context }) => {
-    const ctx = context as unknown as ServerContext;
-    await requireTenantManager(ctx, data.tenantId);
-    await assertTenantNotDemo(data.tenantId);
-    const actorIsSuperAdmin = await checkSuperAdmin(ctx.userId);
+  .handler(async ({ data, context }) =>
+    updateTenantUserRoleFor(context as unknown as ServerContext, data),
+  );
 
-    if (!actorIsSuperAdmin && data.role === "admin") {
-      throw new Error("Apenas o super admin pode definir o admin do tenant");
-    }
+// Body of `updateTenantUserRole`, exported so its guards are unit-testable.
+export async function updateTenantUserRoleFor(
+  ctx: ServerContext,
+  data: z.infer<typeof updateUserRoleInput>,
+) {
+  await requireTenantManager(ctx, data.tenantId);
+  await assertTenantNotDemo(data.tenantId);
+  const actorIsSuperAdmin = await checkSuperAdmin(ctx.userId);
 
-    const { data: before, error: beforeErr } = await db()
-      .from<TenantMemberRow>("user_roles")
-      .select("id,user_id,tenant_id,role,created_at")
-      .eq("id", data.membershipId)
-      .eq("tenant_id", data.tenantId)
-      .maybeSingle();
-    if (beforeErr) throw new Error(beforeErr.message);
-    if (!before) throw new Error("Vínculo não encontrado");
+  if (!actorIsSuperAdmin && data.role === "admin") {
+    throw new Error("Apenas o super admin pode definir o admin do tenant");
+  }
 
-    if (!actorIsSuperAdmin && before.role === "admin") {
-      throw new Error("Apenas o super admin pode alterar o admin do tenant");
-    }
-    if (
-      before.role === "admin" &&
-      data.role !== "admin" &&
-      (await countTenantAdmins(data.tenantId)) <= 1
-    ) {
-      throw new Error("Nao e permitido remover o unico admin do tenant");
-    }
+  const { data: before, error: beforeErr } = await db()
+    .from<TenantMemberRow>("user_roles")
+    .select("id,user_id,tenant_id,role,created_at")
+    .eq("id", data.membershipId)
+    .eq("tenant_id", data.tenantId)
+    .maybeSingle();
+  if (beforeErr) throw new Error(beforeErr.message);
+  if (!before) throw new Error("Vínculo não encontrado");
+  if (before.role === "expert") throw new Error(EXPERT_MEMBER_GUARD);
 
-    const { data: after, error } = await db()
-      .from<TenantMemberRow>("user_roles")
-      .update({ role: data.role })
-      .eq("id", data.membershipId)
-      .eq("tenant_id", data.tenantId)
-      .select("id,user_id,tenant_id,role,created_at")
-      .single();
-    if (error) throw new Error(error.message);
+  if (!actorIsSuperAdmin && before.role === "admin") {
+    throw new Error("Apenas o super admin pode alterar o admin do tenant");
+  }
+  if (
+    before.role === "admin" &&
+    data.role !== "admin" &&
+    (await countTenantAdmins(data.tenantId)) <= 1
+  ) {
+    throw new Error("Nao e permitido remover o unico admin do tenant");
+  }
 
-    await auditTenant({
-      tenantId: data.tenantId,
-      actorUserId: ctx.userId,
-      action: "tenant_user.role_changed",
-      entityType: "user_role",
-      entityId: data.membershipId,
-      before,
-      after,
-    });
+  const { data: after, error } = await db()
+    .from<TenantMemberRow>("user_roles")
+    .update({ role: data.role })
+    .eq("id", data.membershipId)
+    .eq("tenant_id", data.tenantId)
+    .select("id,user_id,tenant_id,role,created_at")
+    .single();
+  if (error) throw new Error(error.message);
 
-    return { ok: true };
+  await auditTenant({
+    tenantId: data.tenantId,
+    actorUserId: ctx.userId,
+    action: "tenant_user.role_changed",
+    entityType: "user_role",
+    entityId: data.membershipId,
+    before,
+    after,
   });
+
+  return { ok: true };
+}
 
 const removeUserInput = z.object({
   tenantId: dbUuid(),
@@ -981,49 +1028,57 @@ const removeUserInput = z.object({
 export const removeUserFromTenant = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => removeUserInput.parse(data))
-  .handler(async ({ data, context }) => {
-    const ctx = context as unknown as ServerContext;
-    await requireTenantManager(ctx, data.tenantId);
-    await assertTenantNotDemo(data.tenantId);
+  .handler(async ({ data, context }) =>
+    removeUserFromTenantFor(context as unknown as ServerContext, data),
+  );
 
-    const { data: memberships, error: listErr } = await db()
-      .from<TenantMemberRow[]>("user_roles")
-      .select("id,user_id,tenant_id,role,created_at")
-      .eq("tenant_id", data.tenantId);
-    if (listErr) throw new Error(listErr.message);
-    if ((memberships ?? []).length <= 1) {
-      throw new Error("Não é permitido remover o último usuário do tenant");
-    }
+// Body of `removeUserFromTenant`, exported so its guards are unit-testable.
+export async function removeUserFromTenantFor(
+  ctx: ServerContext,
+  data: z.infer<typeof removeUserInput>,
+) {
+  await requireTenantManager(ctx, data.tenantId);
+  await assertTenantNotDemo(data.tenantId);
 
-    const before = (memberships ?? []).find((row) => row.id === data.membershipId);
-    if (!before) throw new Error("Vínculo não encontrado");
-    if (before.user_id === ctx.userId) {
-      throw new Error("Você não pode remover seu próprio acesso por aqui");
-    }
+  const { data: memberships, error: listErr } = await db()
+    .from<TenantMemberRow[]>("user_roles")
+    .select("id,user_id,tenant_id,role,created_at")
+    .eq("tenant_id", data.tenantId);
+  if (listErr) throw new Error(listErr.message);
+  if ((memberships ?? []).length <= 1) {
+    throw new Error("Não é permitido remover o último usuário do tenant");
+  }
 
-    const actorIsSuperAdmin = await checkSuperAdmin(ctx.userId);
-    if (!actorIsSuperAdmin && before.role === "admin") {
-      throw new Error("Apenas o super admin pode remover o admin do tenant");
-    }
-    if (before.role === "admin" && (await countTenantAdmins(data.tenantId)) <= 1) {
-      throw new Error("Nao e permitido remover o unico admin do tenant");
-    }
+  const before = (memberships ?? []).find((row) => row.id === data.membershipId);
+  if (!before) throw new Error("Vínculo não encontrado");
+  if (before.role === "expert") throw new Error(EXPERT_MEMBER_GUARD);
+  if (before.user_id === ctx.userId) {
+    throw new Error("Você não pode remover seu próprio acesso por aqui");
+  }
 
-    const { error } = await db()
-      .from("user_roles")
-      .delete()
-      .eq("id", data.membershipId)
-      .eq("tenant_id", data.tenantId);
-    if (error) throw new Error(error.message);
+  const actorIsSuperAdmin = await checkSuperAdmin(ctx.userId);
+  if (!actorIsSuperAdmin && before.role === "admin") {
+    throw new Error("Apenas o super admin pode remover o admin do tenant");
+  }
+  if (before.role === "admin" && (await countTenantAdmins(data.tenantId)) <= 1) {
+    throw new Error("Nao e permitido remover o unico admin do tenant");
+  }
 
-    await auditTenant({
-      tenantId: data.tenantId,
-      actorUserId: ctx.userId,
-      action: "tenant_user.removed",
-      entityType: "user_role",
-      entityId: data.membershipId,
-      before,
-    });
+  const { error } = await db()
+    .from("user_roles")
+    .delete()
+    .eq("id", data.membershipId)
+    .eq("tenant_id", data.tenantId);
+  if (error) throw new Error(error.message);
 
-    return { ok: true };
+  await auditTenant({
+    tenantId: data.tenantId,
+    actorUserId: ctx.userId,
+    action: "tenant_user.removed",
+    entityType: "user_role",
+    entityId: data.membershipId,
+    before,
   });
+
+  return { ok: true };
+}

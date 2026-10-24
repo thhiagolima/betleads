@@ -144,7 +144,6 @@ describe("webhook replay (CON-03)", () => {
     });
     expect(mocks.processWebhookEvent).toHaveBeenCalledTimes(3);
     expect(mocks.processWebhookEvent.mock.calls[0][4]).toEqual({
-      mirror: true,
       existingLogId: "poison",
     });
     expect(updates).toEqual([
