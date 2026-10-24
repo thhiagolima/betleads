@@ -190,23 +190,11 @@
 }
 
 @layer base {
-  /* Legacy names, neutralised: the redesign has no glow. Remove once unused. */
-  .glow-blue {
-    box-shadow: none;
-  }
-  .text-neon {
-    color: var(--color-primary);
-  }
   .bg-app-gradient {
     background:
       radial-gradient(ellipse 80% 50% at 50% -10%, oklch(0.72 0.19 235 / 0.12), transparent 60%),
       radial-gradient(ellipse 60% 40% at 90% 110%, oklch(0.6 0.22 270 / 0.08), transparent 60%),
       var(--color-background);
-  }
-  /* Legacy card class: now the same surface as the redesign card. */
-  .card-premium {
-    background: color-mix(in oklab, var(--color-card) 80%, transparent);
-    border: 1px solid var(--color-border);
   }
   .pulse-realtime {
     animation: pulse-realtime 2s ease-in-out infinite;
