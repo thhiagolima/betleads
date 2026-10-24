@@ -10,6 +10,8 @@
 // after REBUILT_TABLES, in the same transaction as the rest of the clone).
 import { createHash } from "node:crypto";
 
+import { makeFaker } from "./anonymize.mjs";
+
 const DEMO_GROUP_NAME = "Grupo Demo";
 const OTHER_COSTS = [
   { descricao: "CRM", valor: 1500 },
@@ -18,21 +20,23 @@ const OTHER_COSTS = [
 
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 
-/** Deterministic RFC-4122-shaped (v3-like) uuid from an arbitrary string key. */
+/**
+ * Deterministic RFC-4122-shaped (v3-like) uuid from an arbitrary string key.
+ * `makeFaker` (anonymize.mjs) only draws numbers/picks from a seed — it has
+ * no uuid shape of its own, and `demoUuid` there requires its input to
+ * already BE a uuid (it remaps real ids, it doesn't mint synthetic ones) —
+ * so this stays a small, separate helper rather than reusing either.
+ */
 function seededUuid(key) {
   const h = createHash("md5").update(String(key)).digest("hex");
   const variant = "89ab"[parseInt(h[16], 16) & 3];
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-3${h.slice(13, 16)}-${variant}${h.slice(17, 20)}-${h.slice(20, 32)}`;
 }
 
-/** Deterministic uniform [0, 1) from a string key (sha256, first 4 bytes). */
-function uniform01(key) {
-  const digest = createHash("sha256").update(String(key)).digest();
-  return digest.readUInt32BE(0) / 2 ** 32;
-}
-
+/** Deterministic uniform [min, max) from a string key, drawn from the same
+ * seeded faker `clone-core.mjs` uses for fake players/phones elsewhere. */
 function uniform(min, max, key) {
-  return min + (max - min) * uniform01(key);
+  return min + (max - min) * (makeFaker(key).uint() / 2 ** 32);
 }
 
 /** Finds (or creates) the demo group and makes sure it holds the demo tenant. */

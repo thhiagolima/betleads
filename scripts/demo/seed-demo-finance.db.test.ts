@@ -151,4 +151,34 @@ describe("seedDemoFinance", () => {
       { descricao: "SMS", valor: "800.00" },
     ]);
   });
+
+  it("demoUserIds become managers of the demo group", async () => {
+    const userId = "6a1d2c3b-0000-4000-8000-00000000da01";
+    await db.query(
+      `insert into auth.users (id, email, raw_app_meta_data) values ($1, 'demo+x@betleads.io', '{"is_demo_user":true}'::jsonb)`,
+      [userId],
+    );
+
+    await seedDemoFinance(db, { demoTenantId: DEMO, days: DAYS, demoUserIds: [userId] });
+
+    const { rows: group } = await db.query<{ id: string }>(
+      `select tg.id from public.tenant_groups tg
+         join public.tenant_group_tenants gt on gt.group_id = tg.id
+        where gt.tenant_id = $1`,
+      [DEMO],
+    );
+    const { rows: managers } = await db.query<{ group_id: string; user_id: string }>(
+      `select group_id, user_id from public.tenant_group_managers where group_id = $1`,
+      [group[0].id],
+    );
+    expect(managers).toEqual([{ group_id: group[0].id, user_id: userId }]);
+
+    // Rerunning (as a reseed would) doesn't duplicate the manager row.
+    await seedDemoFinance(db, { demoTenantId: DEMO, days: DAYS, demoUserIds: [userId] });
+    const { rows: again } = await db.query<{ n: number }>(
+      `select count(*)::int as n from public.tenant_group_managers where group_id = $1`,
+      [group[0].id],
+    );
+    expect(again[0].n).toBe(1);
+  });
 });
