@@ -426,6 +426,46 @@ describe("group overview", () => {
     expect(partial.totals.current.otherCosts).toBeNull();
   });
 
+  it("overview: Mês preset in progress includes the month's other costs", async () => {
+    financeDayRows.push(
+      dayRow(HOUSE_A, "2026-10-05", { deposit_amount: 1000, ad_spend: 100, ggr: 0 }),
+      dayRow(HOUSE_A, "2026-09-05", { deposit_amount: 500, ad_spend: 100, ggr: 0 }),
+    );
+    fake.admin
+      .rows("tenant_finance_other_costs")
+      .push(
+        { id: "c1", tenant_id: HOUSE_A, month: "2026-10-01", descricao: "CRM", valor: 40 },
+        { id: "c2", tenant_id: HOUSE_A, month: "2026-09-01", descricao: "CRM", valor: 150 },
+        { id: "c3", tenant_id: HOUSE_B, month: "2026-10-01", descricao: "SMS", valor: 10 },
+      );
+
+    const month = await getGroupOverviewFor(ctxFor(G1_MANAGER), {
+      groupId: G1,
+      range: { from: "2026-10-01", to: "2026-10-24" },
+      compare: "previous",
+      preset: "month",
+    });
+    expect(month.compareRange).toEqual({ from: "2026-09-01", to: "2026-09-24" });
+    const a = month.tenants.find((t) => t.id === HOUSE_A)!;
+    expect(a.current.otherCosts).toBe(40);
+    expect(a.current.cashResult).toBe(1000 - 100 - 40);
+    expect(a.previous.otherCosts).toBe(150);
+    expect(a.previous.cashResult).toBe(500 - 100 - 150);
+    expect(month.totals.current.otherCosts).toBe(50);
+    expect(month.totals.previous.otherCosts).toBe(150);
+
+    // The same window picked as "Personalizado" is not a closed month.
+    const custom = await getGroupOverviewFor(ctxFor(G1_MANAGER), {
+      groupId: G1,
+      range: { from: "2026-10-01", to: "2026-10-24" },
+      compare: "previous",
+      preset: "custom",
+    });
+    expect(custom.tenants.find((t) => t.id === HOUSE_A)!.current.otherCosts).toBeNull();
+    expect(custom.totals.current.otherCosts).toBeNull();
+    expect(custom.totals.previous.otherCosts).toBeNull();
+  });
+
   it("overview: group manager of G1 cannot read G2", async () => {
     await expect(
       getGroupOverviewFor(ctxFor(G1_MANAGER), {

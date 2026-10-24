@@ -792,8 +792,8 @@ type OverviewInput = {
 /**
  * Scoreboard of a group the caller manages (super admin: any group). One
  * finance_days call covers both windows; days after today are left out.
- * Other costs enter a window's result only when it is exactly a calendar
- * month. Group totals are summarize() over every house's days, so ratios
+ * Other costs enter a window's result only for the "Mês" preset or a range
+ * that is exactly a calendar month. Group totals are summarize() over every house's days, so ratios
  * (ROI, cost per unit) come from the sums, never from averaging houses.
  */
 export async function getGroupOverviewFor(ctx: ServerContext, data: OverviewInput) {
@@ -842,7 +842,14 @@ export async function getGroupOverviewFor(ctx: ServerContext, data: OverviewInpu
         }
       : null;
 
-  const costMonths = [data.range, previousRange].filter(isCalendarMonth).map((r) => r.from);
+  // Spec §5: other costs enter a window's result only for a closed calendar
+  // month, i.e. the "Mês" preset (also while in progress, and for its
+  // comparison window) or a range covering exactly one month.
+  const costMonthOf = (range: DateRange) =>
+    data.preset === "month" || isCalendarMonth(range) ? `${range.from.slice(0, 7)}-01` : null;
+  const costMonths = [data.range, previousRange]
+    .map(costMonthOf)
+    .filter((month): month is string => month !== null);
 
   const [dayRows, goalRows, costRows] = await Promise.all([
     span ? fetchFinanceDays(tenantIds, span) : Promise.resolve([]),
@@ -861,14 +868,16 @@ export async function getGroupOverviewFor(ctx: ServerContext, data: OverviewInpu
   ]);
 
   const days = dayRows.map((row) => ({ tenantId: row.tenant_id, day: toFinanceDay(row) }));
-  const otherCostsFor = (tenantId: string, range: DateRange) =>
-    isCalendarMonth(range)
-      ? round2(
+  const otherCostsFor = (tenantId: string, range: DateRange) => {
+    const month = costMonthOf(range);
+    return month === null
+      ? null
+      : round2(
           costRows
-            .filter((row) => row.tenant_id === tenantId && row.month === range.from)
+            .filter((row) => row.tenant_id === tenantId && row.month === month)
             .reduce((total, row) => total + num(row.valor), 0),
-        )
-      : null;
+        );
+  };
   const windowDays = (window: DateRange | null, tenantId?: string) =>
     days
       .filter((entry) => (tenantId ? entry.tenantId === tenantId : true))
@@ -901,7 +910,7 @@ export async function getGroupOverviewFor(ctx: ServerContext, data: OverviewInpu
   });
 
   const groupOtherCosts = (range: DateRange) =>
-    isCalendarMonth(range)
+    costMonthOf(range) !== null
       ? round2(tenants.reduce((total, tenant) => total + (otherCostsFor(tenant.id, range) ?? 0), 0))
       : null;
   const totalOtherCurrent = groupOtherCosts(data.range);
