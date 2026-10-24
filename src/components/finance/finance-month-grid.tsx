@@ -128,10 +128,6 @@ export function FinanceMonthView({
   }
 
   const { days, summary } = data;
-  const completeDays = days.filter((d) => !d.pending);
-  const rawCashResultTotal = round2(
-    completeDays.reduce((total, d) => total + (d.cashResult ?? 0), 0),
-  );
 
   return (
     <div className="space-y-4">
@@ -270,7 +266,7 @@ export function FinanceMonthView({
               <TableCell>{formatBRL(summary.withdrawalAmount)}</TableCell>
               <TableCell>{formatBRL(summary.net)}</TableCell>
               <TableCell>{formatBRL(summary.ggr)}</TableCell>
-              <TableCell>{formatBRL(rawCashResultTotal)}</TableCell>
+              <TableCell>{formatBRL(summary.cashResult)}</TableCell>
               <TableCell>{formatRatio(summary.roi)}</TableCell>
             </TableRow>
             <TableRow>
