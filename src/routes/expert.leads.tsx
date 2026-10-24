@@ -1,7 +1,8 @@
 // Área do Expert (Fase 1, Task 9): listagem de leads visíveis pelo expert
-// logado — busca por nome/telefone (com debounce) e paginação de 50.
+// logado — busca por nome/telefone (com debounce) e paginação de 50. Cada
+// linha abre a ficha do lead (/expert/leads/$playerId, rota filha).
 import { useEffect, useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
+import { Link, Outlet, createFileRoute, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { ChevronLeft, ChevronRight, Search } from "lucide-react";
@@ -24,8 +25,15 @@ import { brl } from "@/lib/format";
 import { getExpertHome, listExpertLeads } from "@/lib/expert-leads.functions";
 
 export const Route = createFileRoute("/expert/leads")({
-  component: ExpertLeadsPage,
+  component: ExpertLeadsRoute,
 });
+
+/** A ficha é rota filha: nela só o <Outlet />, sem montar (nem buscar) a lista. */
+function ExpertLeadsRoute() {
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const isSheetRoute = pathname.replace(/\/+$/, "") !== "/expert/leads";
+  return isSheetRoute ? <Outlet /> : <ExpertLeadsPage />;
+}
 
 function riscoBadge(risco: string) {
   if (!risco) return <span className="text-muted-foreground">—</span>;
@@ -39,6 +47,7 @@ function formatUltimoDeposito(value: string | null) {
 }
 
 function ExpertLeadsPage() {
+  const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [page, setPage] = useState(0);
@@ -119,8 +128,23 @@ function ExpertLeadsPage() {
             </TableHeader>
             <TableBody>
               {rows.map((row) => (
-                <TableRow key={row.id}>
-                  <TableCell className="font-medium">{row.nome}</TableCell>
+                <TableRow
+                  key={row.id}
+                  className="cursor-pointer"
+                  onClick={() =>
+                    void navigate({ to: "/expert/leads/$playerId", params: { playerId: row.id } })
+                  }
+                >
+                  <TableCell className="font-medium">
+                    <Link
+                      to="/expert/leads/$playerId"
+                      params={{ playerId: row.id }}
+                      className="hover:underline"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      {row.nome}
+                    </Link>
+                  </TableCell>
                   <TableCell>{row.telefone ?? "—"}</TableCell>
                   <TableCell>{row.diasSemDepositar ?? "—"}</TableCell>
                   <TableCell>{brl(row.totalDepositado)}</TableCell>

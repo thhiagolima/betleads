@@ -145,7 +145,11 @@ export const SIDEBAR_SECTIONS: NavSection[] = [
 export const EXPERT_SECTIONS: NavSection[] = [
   {
     label: "Expert",
-    items: [link("Início", "/expert", Home), link("Leads", "/expert/leads", Users)],
+    items: [
+      link("Início", "/expert", Home),
+      link("Leads", "/expert/leads", Users),
+      link("Modelos", "/expert/modelos", FileText),
+    ],
   },
 ];
 
@@ -159,6 +163,7 @@ export type MobileTab = { title: string; to?: string; icon: LucideIcon; alsoActi
 export const EXPERT_MOBILE_TABS: MobileTab[] = [
   { title: "Início", to: "/expert", icon: Home },
   { title: "Leads", to: "/expert/leads", icon: Users },
+  { title: "Modelos", to: "/expert/modelos", icon: FileText },
 ];
 
 export const MOBILE_TABS: MobileTab[] = [
@@ -232,6 +237,8 @@ export const ROUTE_META: Record<string, RouteMeta> = {
   // "every route has a title" test walks that interface verbatim.
   "/expert/": { section: "Expert", title: "Início" },
   "/expert/leads": { section: "Expert", title: "Leads" },
+  "/expert/leads/$playerId": { section: "Expert", title: "Ficha do lead" },
+  "/expert/modelos": { section: "Expert", title: "Modelos de mensagem" },
   "/webhooks": { section: "Configurações", title: "Integrações" },
   "/consentimentos": { section: "Canais", title: "Consentimentos" },
   "/configuracoes/casa": { section: "Configurações", title: "Configuração da casa" },
@@ -329,7 +336,10 @@ export function navLinkKey(item: Pick<NavLink, "to" | "hash">) {
 }
 
 function allLinks(): NavLink[] {
-  return SIDEBAR_SECTIONS.flatMap((section) =>
+  // The expert's own sections are included so their links light up too
+  // ("/expert/leads/$playerId" keeps "Leads" active); their paths never
+  // overlap a house link ("/experts" is a different segment).
+  return [...SIDEBAR_SECTIONS, ...EXPERT_SECTIONS].flatMap((section) =>
     section.items.flatMap((item) => (item.kind === "group" ? item.children : [item])),
   );
 }

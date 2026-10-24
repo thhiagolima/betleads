@@ -13,6 +13,7 @@ describe("link labels", () => {
     expect(linkSourceLabel("campaign")).toBe("Campanha");
     expect(linkSourceLabel("journey")).toBe("Automação");
     expect(linkSourceLabel("manual")).toBe("Envio manual");
+    expect(linkSourceLabel("expert")).toBe("Expert (WhatsApp manual)");
   });
 
   it("never shows a raw or empty value", () => {
