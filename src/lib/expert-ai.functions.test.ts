@@ -136,18 +136,30 @@ describe("suggestExpertApproachFor", () => {
     seedPlayer();
     const generate = okGenerate("isto não é json");
 
-    await expect(
-      suggestExpertApproachFor(CTX, { playerId: PLAYER }, { generate }),
-    ).rejects.toThrow("A IA não conseguiu sugerir agora. Tente de novo.");
+    await expect(suggestExpertApproachFor(CTX, { playerId: PLAYER }, { generate })).rejects.toThrow(
+      "A IA não conseguiu sugerir agora. Tente de novo.",
+    );
+  });
+
+  it("a throwing model call maps to the pt-BR retry message", async () => {
+    seedPlayer();
+    const generate = vi.fn(async () => {
+      throw new Error("gateway timeout");
+    });
+
+    await expect(suggestExpertApproachFor(CTX, { playerId: PLAYER }, { generate })).rejects.toThrow(
+      "A IA não conseguiu sugerir agora. Tente de novo.",
+    );
+    expect(generate).toHaveBeenCalledTimes(1);
   });
 
   it("model output missing oferta/mensagem maps to the pt-BR retry message", async () => {
     seedPlayer();
     const generate = okGenerate(JSON.stringify({ oferta: "Giros" }));
 
-    await expect(
-      suggestExpertApproachFor(CTX, { playerId: PLAYER }, { generate }),
-    ).rejects.toThrow("A IA não conseguiu sugerir agora. Tente de novo.");
+    await expect(suggestExpertApproachFor(CTX, { playerId: PLAYER }, { generate })).rejects.toThrow(
+      "A IA não conseguiu sugerir agora. Tente de novo.",
+    );
   });
 
   it("demo house is refused before calling the model", async () => {
@@ -167,9 +179,9 @@ describe("suggestExpertApproachFor", () => {
     mockRequireExpertContext.mockResolvedValue({ ...EXPERT, tipo: "restrito" });
     const generate = okGenerate('{"oferta":"x","mensagem":"y"}');
 
-    await expect(
-      suggestExpertApproachFor(CTX, { playerId: PLAYER }, { generate }),
-    ).rejects.toThrow("Lead não encontrado.");
+    await expect(suggestExpertApproachFor(CTX, { playerId: PLAYER }, { generate })).rejects.toThrow(
+      "Lead não encontrado.",
+    );
     expect(generate).not.toHaveBeenCalled();
   });
 });
