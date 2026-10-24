@@ -18,6 +18,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { requireExpertContext } from "@/lib/expert-access.server";
 import { isExpertAffiliate, loadVisibleLead } from "@/lib/expert-lead-access.server";
 import { buildExpertTimeline, type ExpertLeadSheet } from "@/lib/expert-lead-sheet";
+import { depositCountFor } from "@/lib/player-deposit-count";
 import { levelForTotal, thresholdsFromSettingsRow } from "@/lib/player-level";
 import {
   daysWithoutDeposit,
@@ -54,7 +55,6 @@ type FollowupRow = {
   id: string;
   due_date: string;
   nota: string | null;
-  done_at: string | null;
   created_at: string;
 };
 type ClaimRow = { expert_id: string; expires_at: string };
@@ -90,7 +90,9 @@ export async function getExpertLeadSheetFor(
 
   const [
     depositsRes,
-    depositCountRes,
+    approvedCountRes,
+    nullStatusCountRes,
+    attributionRes,
     withdrawalsRes,
     cashbacksRes,
     smsRes,
@@ -98,6 +100,7 @@ export async function getExpertLeadSheetFor(
     linksRes,
     contactsRes,
     followupsRes,
+    pendingRes,
     claimRes,
     settingsRes,
   ] = await Promise.all([
@@ -105,7 +108,13 @@ export async function getExpertLeadSheetFor(
       .eq("status", "aprovado")
       .order("created_at", { ascending: false })
       .limit(50),
+    // Mesma regra de contagem da ficha do jogador: status nulo ou 'aprovado'
+    // (duas contagens exatas somadas), combinada com o número importado.
     scoped("deposits", "id", { count: "exact", head: true }).eq("status", "aprovado"),
+    scoped("deposits", "id", { count: "exact", head: true }).is("status", null),
+    scoped("player_attributions", "raw_payload")
+      .order("captured_at", { ascending: false })
+      .limit(1),
     scoped("withdrawals", "id,valor,created_at")
       .eq("status", "aprovado")
       .order("created_at", { ascending: false })
@@ -129,10 +138,17 @@ export async function getExpertLeadSheetFor(
       .eq("expert_id", expert.expertId)
       .order("created_at", { ascending: false })
       .limit(50),
-    scoped("expert_lead_followups", "id,due_date,nota,done_at,created_at")
+    scoped("expert_lead_followups", "id,due_date,nota,created_at")
       .eq("expert_id", expert.expertId)
       .order("created_at", { ascending: false })
       .limit(50),
+    // Retornos pendentes em consulta própria: um pendente antigo não pode
+    // sumir atrás dos 50 retornos mais recentes.
+    scoped("expert_lead_followups", "id,due_date,nota")
+      .eq("expert_id", expert.expertId)
+      .is("done_at", null)
+      .order("due_date", { ascending: true })
+      .limit(20),
     scoped("expert_lead_claims", "expert_id,expires_at").maybeSingle(),
     db
       .from("gamification_settings")
@@ -142,7 +158,11 @@ export async function getExpertLeadSheetFor(
   ]);
 
   const deposits = rowsOf<MoneyRow>(depositsRes);
-  if (depositCountRes.error) throw new Error(depositCountRes.error.message);
+  for (const res of [approvedCountRes, nullStatusCountRes]) {
+    if (res.error) throw new Error(res.error.message);
+  }
+  const attribution = rowsOf<{ raw_payload: unknown }>(attributionRes)[0] ?? null;
+  const pending = rowsOf<{ id: string; due_date: string; nota: string | null }>(pendingRes);
   const withdrawals = rowsOf<MoneyRow>(withdrawalsRes);
   const cashbacks = rowsOf<CashbackRow>(cashbacksRes);
   const sms = rowsOf<SmsRow>(smsRes);
@@ -161,7 +181,10 @@ export async function getExpertLeadSheetFor(
   const settingsRow = settingsRes.error ? null : settingsRes.data;
   const situacao = playerSituation(lead, situationSettingsFromRow(settingsRow));
   const totalDepositado = Number(lead.total_depositado ?? 0);
-  const depositos = Number(depositCountRes.count ?? 0);
+  const depositos = depositCountFor({
+    approvedCount: Number(approvedCountRes.count ?? 0) + Number(nullStatusCountRes.count ?? 0),
+    importedRawPayload: attribution?.raw_payload,
+  });
   const latestDeposit = deposits[0];
   const saldoBonus = Number(lead.saldo_bonus ?? 0);
 
@@ -230,10 +253,7 @@ export async function getExpertLeadSheetFor(
     ],
     timeline,
     claim,
-    retornosPendentes: followups
-      .filter((f) => f.done_at == null)
-      .sort((a, b) => (a.due_date < b.due_date ? -1 : a.due_date > b.due_date ? 1 : 0))
-      .map((f) => ({ id: f.id, dueDate: f.due_date, nota: f.nota })),
+    retornosPendentes: pending.map((f) => ({ id: f.id, dueDate: f.due_date, nota: f.nota })),
     podeAssumir: expert.tipo === "total",
   };
 }

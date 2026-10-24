@@ -8,6 +8,7 @@ import {
   conversionScore,
 } from "./player-rules";
 import { lastActivityMs } from "./player-activity";
+import { depositCountFor } from "./player-deposit-count";
 import { levelForTotal, thresholdsFromSettingsRow, type LevelSlug } from "./player-level";
 import {
   daysWithoutDeposit,
@@ -227,15 +228,13 @@ export const getPlayerDetail = createServerFn({ method: "POST" })
     const attribution = ((attributionsRes.data ?? []) as DbRow[])[0] ?? null;
     const mediaRows = (mediaRes.data ?? []) as DbRow[];
 
-    const importedDepositCount = Number(
-      attribution?.raw_payload?.normalized?.depositos ??
-        attribution?.raw_payload?.raw?.depositos ??
-        0,
-    );
     const approvedDepositCount = deposits.filter(
       (d) => !d.status || d.status === "aprovado",
     ).length;
-    const depositCount = Math.max(approvedDepositCount, importedDepositCount || 0);
+    const depositCount = depositCountFor({
+      approvedCount: approvedDepositCount,
+      importedRawPayload: attribution?.raw_payload,
+    });
     const lastActivity = lastActivityMs(player);
     const media = summarizeMedia(player, attribution, mediaRows);
     const timeline = buildTimeline({

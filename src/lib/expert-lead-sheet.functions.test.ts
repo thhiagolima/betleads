@@ -182,64 +182,164 @@ describe("getExpertLeadSheetFor", () => {
     expect(sheet.timeline.map((i) => i.id)).toEqual(["cashback:c1", "deposito:d2", "deposito:d1"]);
   });
 
-  it("only the caller's contacts and followups are read", async () => {
-    seedPlayer();
+  it("depositos matches the player detail: imported count wins over missing deposit rows", async () => {
+    seedPlayer({ total_depositado: 500, ftd_em: iso(-30), ultimo_deposito: iso(-1) });
     fake.admin
-      .rows("expert_lead_contacts")
+      .rows("player_attributions")
       .push(
         {
-          id: "k1",
+          id: "a-old",
           tenant_id: TENANT,
-          expert_id: ME,
           player_id: PLAYER,
-          resultado: "chamei",
-          nota: "minha",
-          created_at: iso(-1),
+          captured_at: iso(-60),
+          raw_payload: { normalized: { depositos: 1 } },
         },
         {
-          id: "k2",
+          id: "a-new",
           tenant_id: TENANT,
-          expert_id: OTHER,
           player_id: PLAYER,
-          resultado: "respondeu",
-          nota: "dele",
-          created_at: iso(-1),
+          captured_at: iso(-30),
+          raw_payload: { normalized: { depositos: 5 } },
+        },
+        {
+          id: "a-x",
+          tenant_id: "other",
+          player_id: PLAYER,
+          captured_at: iso(-1),
+          raw_payload: { normalized: { depositos: 99 } },
         },
       );
+
+    const sheet = await getExpertLeadSheetFor(CTX, { playerId: PLAYER });
+    expect(sheet.lead.depositos).toBe(5);
+    expect(sheet.lead.ticketMedio).toBe(100);
+    expect(sheet.lead.ultimoDeposito).toBeNull();
+  });
+
+  it("deposits with null status count as approved, like the player detail", async () => {
+    seedPlayer({ total_depositado: 90, ftd_em: iso(-5) });
     fake.admin
-      .rows("expert_lead_followups")
+      .rows("deposits")
       .push(
         {
-          id: "f1",
+          id: "d1",
           tenant_id: TENANT,
-          expert_id: ME,
           player_id: PLAYER,
-          due_date: "2026-11-02",
-          nota: "eu",
-          done_at: null,
-          created_at: iso(-2),
-        },
-        {
-          id: "f2",
-          tenant_id: TENANT,
-          expert_id: OTHER,
-          player_id: PLAYER,
-          due_date: "2026-11-01",
-          nota: "outro",
-          done_at: null,
-          created_at: iso(-2),
-        },
-        {
-          id: "f3",
-          tenant_id: TENANT,
-          expert_id: ME,
-          player_id: PLAYER,
-          due_date: "2026-10-20",
-          nota: "feito",
-          done_at: iso(-1),
+          valor: 30,
+          status: "aprovado",
           created_at: iso(-5),
         },
+        {
+          id: "d2",
+          tenant_id: TENANT,
+          player_id: PLAYER,
+          valor: 30,
+          status: null,
+          created_at: iso(-4),
+        },
+        {
+          id: "d3",
+          tenant_id: TENANT,
+          player_id: PLAYER,
+          valor: 30,
+          status: "recusado",
+          created_at: iso(-3),
+        },
       );
+    const sheet = await getExpertLeadSheetFor(CTX, { playerId: PLAYER });
+    expect(sheet.lead.depositos).toBe(2);
+    expect(sheet.lead.ticketMedio).toBe(45);
+  });
+
+  it("an old pending return is listed even behind 50 newer followups", async () => {
+    seedPlayer();
+    const followups = fake.admin.rows("expert_lead_followups");
+    followups.push({
+      id: "old",
+      tenant_id: TENANT,
+      expert_id: ME,
+      player_id: PLAYER,
+      due_date: "2026-09-01",
+      nota: "antigo",
+      done_at: null,
+      created_at: iso(-90),
+    });
+    for (let i = 0; i < 55; i++) {
+      followups.push({
+        id: `done-${i}`,
+        tenant_id: TENANT,
+        expert_id: ME,
+        player_id: PLAYER,
+        due_date: "2026-10-01",
+        nota: null,
+        done_at: iso(-1),
+        created_at: iso(-10 + i / 100),
+      });
+    }
+    const sheet = await getExpertLeadSheetFor(CTX, { playerId: PLAYER });
+    expect(sheet.retornosPendentes).toEqual([{ id: "old", dueDate: "2026-09-01", nota: "antigo" }]);
+    expect(fake.filters).toContainEqual({
+      table: "expert_lead_followups",
+      method: "is",
+      column: "done_at",
+      value: null,
+    });
+  });
+
+  it("only the caller's contacts and followups are read", async () => {
+    seedPlayer();
+    fake.admin.rows("expert_lead_contacts").push(
+      {
+        id: "k1",
+        tenant_id: TENANT,
+        expert_id: ME,
+        player_id: PLAYER,
+        resultado: "chamei",
+        nota: "minha",
+        created_at: iso(-1),
+      },
+      {
+        id: "k2",
+        tenant_id: TENANT,
+        expert_id: OTHER,
+        player_id: PLAYER,
+        resultado: "respondeu",
+        nota: "dele",
+        created_at: iso(-1),
+      },
+    );
+    fake.admin.rows("expert_lead_followups").push(
+      {
+        id: "f1",
+        tenant_id: TENANT,
+        expert_id: ME,
+        player_id: PLAYER,
+        due_date: "2026-11-02",
+        nota: "eu",
+        done_at: null,
+        created_at: iso(-2),
+      },
+      {
+        id: "f2",
+        tenant_id: TENANT,
+        expert_id: OTHER,
+        player_id: PLAYER,
+        due_date: "2026-11-01",
+        nota: "outro",
+        done_at: null,
+        created_at: iso(-2),
+      },
+      {
+        id: "f3",
+        tenant_id: TENANT,
+        expert_id: ME,
+        player_id: PLAYER,
+        due_date: "2026-10-20",
+        nota: "feito",
+        done_at: iso(-1),
+        created_at: iso(-5),
+      },
+    );
 
     const sheet = await getExpertLeadSheetFor(CTX, { playerId: PLAYER });
 
@@ -308,26 +408,24 @@ describe("getExpertLeadSheetFor", () => {
       oferta: "Giros",
       created_at: iso(-2),
     });
-    fake.admin
-      .rows("sms_send_logs")
-      .push(
-        {
-          id: "s1",
-          tenant_id: TENANT,
-          player_id: PLAYER,
-          status: "sent",
-          content: "oi",
-          created_at: iso(-4),
-        },
-        {
-          id: "s2",
-          tenant_id: TENANT,
-          player_id: PLAYER,
-          status: "failed",
-          content: "x",
-          created_at: iso(-4),
-        },
-      );
+    fake.admin.rows("sms_send_logs").push(
+      {
+        id: "s1",
+        tenant_id: TENANT,
+        player_id: PLAYER,
+        status: "sent",
+        content: "oi",
+        created_at: iso(-4),
+      },
+      {
+        id: "s2",
+        tenant_id: TENANT,
+        player_id: PLAYER,
+        status: "failed",
+        content: "x",
+        created_at: iso(-4),
+      },
+    );
     fake.admin.rows("email_send_logs").push({
       id: "m1",
       tenant_id: TENANT,
@@ -361,6 +459,7 @@ describe("getExpertLeadSheetFor", () => {
       "expert_lead_contacts",
       "expert_lead_followups",
       "expert_lead_claims",
+      "player_attributions",
     ];
     for (const table of leadTables) {
       expect(fake.tables).toContain(table);
