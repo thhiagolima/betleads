@@ -64,6 +64,8 @@ begin
 end;
 $$;
 
+revoke all on function public.expert_lead_check_tenant() from public, anon, authenticated;
+
 -- 2. expert_links -------------------------------------------------------------
 
 create table if not exists public.expert_links (
@@ -261,8 +263,11 @@ begin
   -- Atomic in one statement: the WHERE guard is evaluated against whatever
   -- row is actually committed at conflict time. If it holds, the row is
   -- (re)claimed and RETURNING produces a row; if it doesn't (another
-  -- expert's claim is still active), nothing is written and RETURNING
-  -- produces none, which FOUND below detects.
+  -- expert's claim is still active, by an expert still tipo='total' and
+  -- ativo), nothing is written and RETURNING produces none, which FOUND
+  -- below detects. A holder whose expert row has since gone inactive or
+  -- restrito no longer counts as an active claim, so that row is treated
+  -- the same as an expired one and can be taken over.
   insert into public.expert_lead_claims (tenant_id, player_id, expert_id, claimed_at, expires_at)
   values (_tenant, _player_id, _expert_id, now(), v_new_expires)
   on conflict (tenant_id, player_id) do update
@@ -271,6 +276,12 @@ begin
       expires_at = excluded.expires_at
   where public.expert_lead_claims.expert_id = _expert_id
      or public.expert_lead_claims.expires_at <= now()
+     or not exists (
+       select 1 from public.experts x
+       where x.id = public.expert_lead_claims.expert_id
+         and x.ativo
+         and x.tipo = 'total'
+     )
   returning public.expert_lead_claims.expires_at
   into v_got_expires;
 

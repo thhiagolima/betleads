@@ -212,11 +212,18 @@ describe("claim_expert_lead", () => {
   });
 
   it("same expert renews the claim", async () => {
+    // Move the existing claim's deadline closer so the renewal is
+    // unambiguously later, not just "didn't move backwards".
+    await db.query(
+      `update public.expert_lead_claims set expires_at = now() + interval '1 hour' where tenant_id = $1 and player_id = $2`,
+      [TENANT_A, playerId],
+    );
     const { rows: before } = await db.query<{ expires_at: string }>(
       `select expires_at from public.expert_lead_claims where tenant_id = $1 and player_id = $2`,
       [TENANT_A, playerId],
     );
 
+    const renewedAt = Date.now();
     const { rows } = await db.query<{ expert_id: string; claimed: boolean; expires_at: string }>(
       `select * from claim_expert_lead($1, $2, $3)`,
       [TENANT_A, totalExpertId, playerId],
@@ -224,9 +231,10 @@ describe("claim_expert_lead", () => {
 
     expect(rows[0].claimed).toBe(true);
     expect(rows[0].expert_id).toBe(totalExpertId);
-    expect(new Date(rows[0].expires_at).getTime()).toBeGreaterThanOrEqual(
-      new Date(before[0].expires_at).getTime(),
-    );
+    const renewedExpiresMs = new Date(rows[0].expires_at).getTime();
+    expect(renewedExpiresMs).toBeGreaterThan(new Date(before[0].expires_at).getTime());
+    // assumir_prazo_dias = 1 for this expert.
+    expect(Math.abs(renewedExpiresMs - (renewedAt + 24 * 60 * 60 * 1000))).toBeLessThan(5000);
   });
 
   it("expired claim can be taken by another expert", async () => {
@@ -258,6 +266,51 @@ describe("claim_expert_lead", () => {
     await expect(
       db.query(`select * from claim_expert_lead($1, $2, $3)`, [TENANT_A, inactiveExpertId, playerId]),
     ).rejects.toThrow(/expert_claim_not_allowed/);
+  });
+
+  it("a holder who later became inactive/restricted no longer blocks the lead", async () => {
+    // Self-contained: its own player and experts, so it doesn't disturb the
+    // claim-state chain the surrounding tests depend on.
+    const { rows: holderExpert } = await db.query<{ save_expert: string }>(
+      `select save_expert($1, null, 'Titular Desativado', 'total', $2, 'livre', null, $3) as save_expert`,
+      [TENANT_A, [], 3],
+    );
+    const holderId = holderExpert[0].save_expert;
+
+    const { rows: challengerExpert } = await db.query<{ save_expert: string }>(
+      `select save_expert($1, null, 'Desafiante', 'total', $2, 'livre', null, $3) as save_expert`,
+      [TENANT_A, [], 3],
+    );
+    const challengerId = challengerExpert[0].save_expert;
+
+    const { rows: freshPlayer } = await db.query<{ id: string }>(
+      `insert into public.players (tenant_id) values ($1) returning id`,
+      [TENANT_A],
+    );
+    const freshPlayerId = freshPlayer[0].id;
+
+    const { rows: firstClaim } = await db.query<{ claimed: boolean }>(
+      `select * from claim_expert_lead($1, $2, $3)`,
+      [TENANT_A, holderId, freshPlayerId],
+    );
+    expect(firstClaim[0].claimed).toBe(true);
+
+    // The holder is still within its deadline, but is no longer an eligible
+    // expert (ativo turned false): it must not keep blocking the lead.
+    await db.query(`update public.experts set ativo = false where id = $1`, [holderId]);
+
+    const { rows } = await db.query<{ expert_id: string; claimed: boolean }>(
+      `select * from claim_expert_lead($1, $2, $3)`,
+      [TENANT_A, challengerId, freshPlayerId],
+    );
+    expect(rows[0].claimed).toBe(true);
+    expect(rows[0].expert_id).toBe(challengerId);
+
+    const { rows: stored } = await db.query<{ expert_id: string }>(
+      `select expert_id from public.expert_lead_claims where tenant_id = $1 and player_id = $2`,
+      [TENANT_A, freshPlayerId],
+    );
+    expect(stored[0].expert_id).toBe(challengerId);
   });
 });
 
@@ -315,7 +368,7 @@ describe("expert_lead_contacts", () => {
          values ($1, $2, $3, 'invalido')`,
         [TENANT_A, totalExpertId, playerId],
       ),
-    ).rejects.toThrow();
+    ).rejects.toThrow(/expert_lead_contacts_resultado_check/);
 
     await expect(
       db.query(
