@@ -29,6 +29,8 @@ import { getTenantGoals, setTenantGoal, type TenantGoalCurrent } from "@/lib/fin
 import type { GoalDirection, GoalMetric } from "@/lib/finance/types";
 import { getGroupPeople } from "@/lib/groups.functions";
 
+import { goalInputToValue, goalValueToInput, isPercentGoal } from "./goal-units";
+
 const METRIC_LABEL: Record<GoalMetric, string> = {
   registrations: "Cadastros",
   ftds: "FTDs",
@@ -64,10 +66,12 @@ function GoalRow({
   onSaved: () => void;
 }) {
   const [direction, setDirection] = useState<GoalDirection>(row.direction);
-  const [value, setValue] = useState(row.dailyValue === null ? "" : String(row.dailyValue));
+  // ROI is typed in % (30 = 30%) and stored as a fraction, see goal-units.
+  const [value, setValue] = useState(() => goalValueToInput(row.metric, row.dailyValue));
+  const today = todaySaoPauloLocal();
   // Always today: this is when a NEW change takes effect, not row.validFrom
   // (the currently-loaded goal's own effective date, shown read-only below).
-  const [validFrom, setValidFrom] = useState(todaySaoPauloLocal);
+  const [validFrom, setValidFrom] = useState(today);
   const fn = useServerFn(setTenantGoal);
 
   const mut = useMutation({
@@ -77,7 +81,7 @@ function GoalRow({
           tenantId,
           metric: row.metric,
           direction,
-          dailyValue: value.trim() === "" ? null : Number(value),
+          dailyValue: goalInputToValue(row.metric, value),
           validFrom,
         },
       }),
@@ -90,7 +94,10 @@ function GoalRow({
 
   return (
     <TableRow>
-      <TableCell>{METRIC_LABEL[row.metric]}</TableCell>
+      <TableCell>
+        {METRIC_LABEL[row.metric]}
+        {isPercentGoal(row.metric) && " (%)"}
+      </TableCell>
       <TableCell>
         <Select value={direction} onValueChange={(v) => setDirection(v as GoalDirection)}>
           <SelectTrigger className="w-20">
@@ -103,15 +110,18 @@ function GoalRow({
         </Select>
       </TableCell>
       <TableCell>
-        <Input
-          type="number"
-          step="0.01"
-          inputMode="decimal"
-          placeholder="sem meta"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          className="h-8 w-28"
-        />
+        <div className="flex items-center gap-1">
+          <Input
+            type="number"
+            step="0.01"
+            inputMode="decimal"
+            placeholder="sem meta"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            className="h-8 w-28"
+          />
+          {isPercentGoal(row.metric) && <span className="text-xs text-muted-foreground">%</span>}
+        </div>
         <p className="mt-1 text-[11px] text-muted-foreground">
           {row.validFrom ? `vigente desde ${formatDateBR(row.validFrom)}` : "sem meta atual"}
         </p>
@@ -119,6 +129,7 @@ function GoalRow({
       <TableCell>
         <Input
           type="date"
+          min={today}
           value={validFrom}
           onChange={(e) => setValidFrom(e.target.value)}
           className="h-8 w-40"

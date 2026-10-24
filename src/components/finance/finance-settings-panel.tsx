@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { formatPct } from "@/components/finance/format";
 import { currentMonth, financeMonthQueryKey } from "@/components/finance/finance-month-grid";
 import { getTenantFinanceMonth, setFinanceRates, setFinanceViewer } from "@/lib/finance.functions";
+import { presetRange } from "@/lib/finance/calc";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import { Button } from "@/components/ui/button";
@@ -25,9 +26,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-/** "YYYY-MM-DD" of today, matching the server's default `validFrom`. */
+/** "YYYY-MM-DD" of today in São Paulo, matching the server's default `validFrom`. */
 function today() {
-  return new Date().toISOString().slice(0, 10);
+  return presetRange("today", new Date()).from;
 }
 
 export function FinanceSettingsPanel({ tenantId }: { tenantId: string }) {
@@ -154,6 +155,7 @@ export function FinanceSettingsPanel({ tenantId }: { tenantId: string }) {
               <Label>Vale a partir de</Label>
               <Input
                 type="date"
+                min={today()}
                 value={validFrom}
                 onChange={(e) => setValidFrom(e.target.value)}
                 disabled={isDemo}

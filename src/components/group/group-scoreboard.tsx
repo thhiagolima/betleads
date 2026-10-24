@@ -7,8 +7,8 @@
 // "meta X" caption.
 import { useMemo, useState } from "react";
 
-import { formatBRL, formatInt, formatPct, formatRatio } from "@/components/finance/format";
-import { pctChange } from "@/lib/finance/calc";
+import { formatBRL, formatInt, formatPct, formatPp, formatRatio } from "@/components/finance/format";
+import { pctChange, ppChange } from "@/lib/finance/calc";
 import type { GoalEvaluation, GoalMetric, GoalStatus, PeriodSummary } from "@/lib/finance/types";
 import { cn } from "@/lib/utils";
 
@@ -93,12 +93,23 @@ export function sortScoreboardRows(
   });
 }
 
-function VariationLabel({ change, invert }: { change: number | null; invert?: boolean }) {
+/** A ratio column (ROI) varies in percentage points, never as a % of a ratio. */
+function VariationLabel({
+  column,
+  current,
+  previous,
+}: {
+  column: ColumnDef;
+  current: number | null;
+  previous: number | null;
+}) {
+  const ratio = column.format === "ratio";
+  const change = ratio ? ppChange(current, previous) : pctChange(current, previous);
   if (change === null) return null;
-  const good = invert ? change <= 0 : change >= 0;
+  const good = column.invert ? change <= 0 : change >= 0;
   return (
     <span className={cn("block text-[10px]", good ? "text-emerald-400" : "text-rose-400")}>
-      {change >= 0 ? "▲" : "▼"} {formatPct(Math.abs(change))}
+      {ratio ? formatPp(change) : `${change >= 0 ? "▲" : "▼"} ${formatPct(Math.abs(change))}`}
     </span>
   );
 }
@@ -167,7 +178,6 @@ export function GroupScoreboard({
                 {columns.map((column) => {
                   const goal = goalFor(row.goals, column.goalMetric);
                   const value = column.pick(row.current);
-                  const change = pctChange(value, column.pick(row.previous));
                   return (
                     <td
                       key={column.key}
@@ -177,7 +187,11 @@ export function GroupScoreboard({
                       )}
                     >
                       <span>{formatValue(column.format, value)}</span>
-                      <VariationLabel change={change} invert={column.invert} />
+                      <VariationLabel
+                        column={column}
+                        current={value}
+                        previous={column.pick(row.previous)}
+                      />
                       {goal && (
                         <span className="block text-[10px] opacity-60">
                           meta {formatValue(column.format, goal.target)}

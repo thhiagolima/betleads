@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatBRL, formatPct, formatRatio } from "./format";
+import { formatBRL, formatPct, formatPp, formatRatio } from "./format";
 
 describe("formatBRL", () => {
   it("formats money with two decimals and no NBSP", () => {
@@ -25,5 +25,17 @@ describe("formatPct", () => {
 describe("formatRatio", () => {
   it("formats null as n.a.", () => {
     expect(formatRatio(null)).toBe("n.a.");
+  });
+});
+
+describe("formatPp", () => {
+  it("formats a signed difference in percentage points", () => {
+    expect(formatPp(12.3)).toBe("+12,3 p.p.");
+    expect(formatPp(-4.25)).toBe("-4,3 p.p.");
+    expect(formatPp(0)).toBe("+0,0 p.p.");
+  });
+
+  it("formats null as n.a.", () => {
+    expect(formatPp(null)).toBe("n.a.");
   });
 });

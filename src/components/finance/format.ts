@@ -7,7 +7,7 @@ const NA = "n.a.";
 
 /** toLocaleString("pt-BR", {style:"currency"}) puts a NBSP after "R$"; normalize to a plain space. */
 function stripNbsp(value: string) {
-  return value.replace(/ /g, " ");
+  return value.replace(/[\u00a0\u202f]/g, " ");
 }
 
 export function formatBRL(value: number | null | undefined): string {
@@ -41,4 +41,14 @@ export function formatRatio(value: number | null | undefined): string {
 export function formatInt(value: number | null | undefined): string {
   if (value === null || value === undefined) return NA;
   return new Intl.NumberFormat("pt-BR").format(value);
+}
+
+/** A difference in percentage points (ROI vs ROI), signed: "+12,3 p.p.". */
+export function formatPp(value: number | null | undefined): string {
+  if (value === null || value === undefined) return NA;
+  const points = Math.abs(value).toLocaleString("pt-BR", {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  });
+  return `${value < 0 ? "-" : "+"}${stripNbsp(points)} p.p.`;
 }

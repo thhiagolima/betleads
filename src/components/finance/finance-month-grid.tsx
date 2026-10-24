@@ -11,7 +11,7 @@ import { toast } from "sonner";
 
 import { formatBRL, formatRatio } from "@/components/finance/format";
 import { num } from "@/lib/format";
-import { round2 } from "@/lib/finance/calc";
+import { averageFilledAdSpend, presetRange } from "@/lib/finance/calc";
 import type { FinanceDay } from "@/lib/finance/types";
 import { getTenantFinanceMonth, saveFinanceDays } from "@/lib/finance.functions";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
@@ -28,10 +28,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-/** "YYYY-MM" of the current month, in the viewer's local time (same as the input[type=month] widget). */
+/** "YYYY-MM" of the current month in São Paulo, the same day boundary as the server. */
 export function currentMonth() {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  return presetRange("today", new Date()).from.slice(0, 7);
 }
 
 export const financeMonthQueryKey = (tenantId: string, month: string) => [
@@ -90,7 +89,7 @@ export function FinanceMonthView({
   const effectiveGgr = (day: FinanceDay) =>
     edits[day.date]?.ggr ?? (day.ggr === null ? "" : String(day.ggr));
 
-  const useMetaSuggestion = (day: FinanceDay) => {
+  const applyMetaSuggestion = (day: FinanceDay) => {
     if (day.adSpendSuggested === null) return;
     setEdit(day.date, "adSpend", String(day.adSpendSuggested));
   };
@@ -211,7 +210,7 @@ export function FinanceMonthView({
                             className="h-8 w-8"
                             title="Usar valor da Meta"
                             disabled={isDemo}
-                            onClick={() => useMetaSuggestion(day)}
+                            onClick={() => applyMetaSuggestion(day)}
                           >
                             <Sparkles className="h-3.5 w-3.5" />
                           </Button>
@@ -272,11 +271,11 @@ export function FinanceMonthView({
             <TableRow>
               <TableCell className="text-muted-foreground">MÉDIA DIÁRIA</TableCell>
               <TableCell>
-                {formatBRL(summary.days ? round2(summary.adSpend / summary.days) : null)}
+                {formatBRL(averageFilledAdSpend(days))}
               </TableCell>
-              <TableCell colSpan={7} />
+              <TableCell colSpan={9} />
               <TableCell>{formatBRL(summary.avgDailyCashResult)}</TableCell>
-              <TableCell colSpan={2} />
+              <TableCell />
             </TableRow>
           </TableFooter>
         </Table>

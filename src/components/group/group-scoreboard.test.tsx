@@ -12,6 +12,7 @@ function summary(overrides: Partial<ScoreboardRow["current"]> = {}) {
   return {
     days: 1,
     pendingDays: 0,
+    pendingToday: false,
     registrations: 0,
     ftds: 0,
     ftdDepositAmount: 0,
@@ -83,6 +84,39 @@ describe("GroupScoreboard", () => {
     const html = renderToStaticMarkup(<GroupScoreboard rows={withPrevious} />);
 
     expect(html).toContain("10,0%");
+  });
+
+  it("renders the ROI variation in percentage points", () => {
+    const roiRows: ScoreboardRow[] = [
+      {
+        id: "a",
+        nome: "Sorte Alta",
+        current: summary({ roi: 0.3 }),
+        previous: summary({ roi: 0.177 }),
+        goals: [],
+      },
+    ];
+
+    const html = renderToStaticMarkup(<GroupScoreboard rows={roiRows} />);
+
+    expect(html).toContain("+12,3 p.p.");
+    expect(html).not.toContain("69,5%");
+  });
+
+  it("an improvement from a negative previous is shown as a rise", () => {
+    const negRows: ScoreboardRow[] = [
+      {
+        id: "a",
+        nome: "Sorte Alta",
+        current: summary({ cashResult: 500 }),
+        previous: summary({ cashResult: -1000 }),
+        goals: [],
+      },
+    ];
+
+    const html = renderToStaticMarkup(<GroupScoreboard rows={negRows} />);
+
+    expect(html).toContain("▲ 150,0%");
   });
 
   it("sorts descending on the first header click", () => {
