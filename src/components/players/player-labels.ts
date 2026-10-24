@@ -43,6 +43,7 @@ const LINK_SOURCE_LABEL: Record<string, string> = {
   campaign: "Campanha",
   journey: "Jornada",
   manual: "Envio manual",
+  expert: "Expert (WhatsApp manual)",
   sms_flow: "Fluxo de SMS",
   email_flow: "Fluxo de email",
   call_flow_sms: "SMS do fluxo de voz",

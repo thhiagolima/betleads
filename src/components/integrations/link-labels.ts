@@ -10,6 +10,7 @@ const SOURCE_LABELS: Record<string, string> = {
   campaign: "Campanha",
   journey: "Automação",
   manual: "Envio manual",
+  expert: "Expert (WhatsApp manual)",
 };
 
 function fallback(value: string | null | undefined): string {
