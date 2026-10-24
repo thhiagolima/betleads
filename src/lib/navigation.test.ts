@@ -95,4 +95,24 @@ describe("visible sections", () => {
   it("hides IA while the role is unknown", () => {
     expect(labels(null, false)).not.toContain("IA");
   });
+
+  it("finance link visible only with can_view_finance or super admin", () => {
+    const financeLinks = (
+      role: Parameters<typeof visibleSections>[0],
+      superAdmin: boolean,
+      canViewFinance?: boolean,
+    ) =>
+      visibleSections(role, superAdmin, canViewFinance)
+        .flatMap((section) => section.items)
+        .filter((item) => item.kind === "link")
+        .map((item) => item.to);
+
+    expect(financeLinks("admin", false)).not.toContain("/financeiro");
+    expect(financeLinks("admin", false, false)).not.toContain("/financeiro");
+    expect(financeLinks("admin", false, true)).toContain("/financeiro");
+    expect(financeLinks("gestor", false, true)).toContain("/financeiro");
+    expect(financeLinks("member", false, true)).toContain("/financeiro");
+    expect(financeLinks(null, false, true)).toContain("/financeiro");
+    expect(financeLinks("super_admin", true, false)).toContain("/financeiro");
+  });
 });

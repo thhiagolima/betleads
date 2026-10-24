@@ -6,5 +6,9 @@ export function useShellNav() {
   const { active } = useActiveTenant();
   const role = active?.role ?? null;
   const isSuperAdmin = role === "super_admin";
-  return { role, isSuperAdmin, sections: visibleSections(role, isSuperAdmin) };
+  return {
+    role,
+    isSuperAdmin,
+    sections: visibleSections(role, isSuperAdmin, active?.can_view_finance),
+  };
 }

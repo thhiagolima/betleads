@@ -20,6 +20,7 @@ import { Route as CreditosSmsRouteImport } from './routes/creditos-sms'
 import { Route as EmailRouteImport } from './routes/email'
 import { Route as EventosRouteImport } from './routes/eventos'
 import { Route as ExpertsRouteImport } from './routes/experts'
+import { Route as FinanceiroRouteImport } from './routes/financeiro'
 import { Route as GamificacaoRouteImport } from './routes/gamificacao'
 import { Route as InteligenciaRouteImport } from './routes/inteligencia'
 import { Route as JornadasRouteImport } from './routes/jornadas'
@@ -134,6 +135,11 @@ const EventosRoute = EventosRouteImport.update({
 const ExpertsRoute = ExpertsRouteImport.update({
   id: '/experts',
   path: '/experts',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FinanceiroRoute = FinanceiroRouteImport.update({
+  id: '/financeiro',
+  path: '/financeiro',
   getParentRoute: () => rootRouteImport,
 } as any)
 const GamificacaoRoute = GamificacaoRouteImport.update({
@@ -471,6 +477,7 @@ export interface FileRoutesByFullPath {
   '/email': typeof EmailRoute
   '/eventos': typeof EventosRoute
   '/experts': typeof ExpertsRoute
+  '/financeiro': typeof FinanceiroRoute
   '/gamificacao': typeof GamificacaoRoute
   '/inteligencia': typeof InteligenciaRoute
   '/jornadas': typeof JornadasRouteWithChildren
@@ -544,6 +551,7 @@ export interface FileRoutesByTo {
   '/email': typeof EmailRoute
   '/eventos': typeof EventosRoute
   '/experts': typeof ExpertsRoute
+  '/financeiro': typeof FinanceiroRoute
   '/gamificacao': typeof GamificacaoRoute
   '/inteligencia': typeof InteligenciaRoute
   '/jornadas': typeof JornadasRouteWithChildren
@@ -618,6 +626,7 @@ export interface FileRoutesById {
   '/email': typeof EmailRoute
   '/eventos': typeof EventosRoute
   '/experts': typeof ExpertsRoute
+  '/financeiro': typeof FinanceiroRoute
   '/gamificacao': typeof GamificacaoRoute
   '/inteligencia': typeof InteligenciaRoute
   '/jornadas': typeof JornadasRouteWithChildren
@@ -693,6 +702,7 @@ export interface FileRouteTypes {
     | '/email'
     | '/eventos'
     | '/experts'
+    | '/financeiro'
     | '/gamificacao'
     | '/inteligencia'
     | '/jornadas'
@@ -766,6 +776,7 @@ export interface FileRouteTypes {
     | '/email'
     | '/eventos'
     | '/experts'
+    | '/financeiro'
     | '/gamificacao'
     | '/inteligencia'
     | '/jornadas'
@@ -839,6 +850,7 @@ export interface FileRouteTypes {
     | '/email'
     | '/eventos'
     | '/experts'
+    | '/financeiro'
     | '/gamificacao'
     | '/inteligencia'
     | '/jornadas'
@@ -913,6 +925,7 @@ export interface RootRouteChildren {
   EmailRoute: typeof EmailRoute
   EventosRoute: typeof EventosRoute
   ExpertsRoute: typeof ExpertsRoute
+  FinanceiroRoute: typeof FinanceiroRoute
   GamificacaoRoute: typeof GamificacaoRoute
   InteligenciaRoute: typeof InteligenciaRoute
   JornadasRoute: typeof JornadasRouteWithChildren
@@ -1040,6 +1053,13 @@ declare module '@tanstack/react-router' {
       path: '/experts'
       fullPath: '/experts'
       preLoaderRoute: typeof ExpertsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/financeiro': {
+      id: '/financeiro'
+      path: '/financeiro'
+      fullPath: '/financeiro'
+      preLoaderRoute: typeof FinanceiroRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/gamificacao': {
@@ -1566,6 +1586,7 @@ const rootRouteChildren: RootRouteChildren = {
   EmailRoute: EmailRoute,
   EventosRoute: EventosRoute,
   ExpertsRoute: ExpertsRoute,
+  FinanceiroRoute: FinanceiroRoute,
   GamificacaoRoute: GamificacaoRoute,
   InteligenciaRoute: InteligenciaRoute,
   JornadasRoute: JornadasRouteWithChildren,

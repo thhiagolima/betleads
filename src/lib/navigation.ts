@@ -18,6 +18,7 @@ import {
   Trophy,
   TriangleAlert,
   Users,
+  Wallet,
   Workflow,
   type LucideIcon,
 } from "lucide-react";
@@ -33,7 +34,7 @@ export type ShellRole = "admin" | "gestor" | "member" | "super_admin";
 
 export type NavAccess = {
   /** Who sees the item. Defaults to everyone. */
-  requires?: "tenant_admin" | "super_admin" | "not_super_admin";
+  requires?: "tenant_admin" | "super_admin" | "not_super_admin" | "finance";
 };
 
 export type NavLink = NavAccess & {
@@ -70,6 +71,7 @@ export const SIDEBAR_SECTIONS: NavSection[] = [
     items: [
       link("Resultados do CRM", "/resultados", Target, { alsoActiveOn: ["/relatorios"] }),
       link("Aquisição e LTV", "/midia-ltv", BarChart3),
+      link("Financeiro", "/financeiro", Wallet, { requires: "finance" }),
     ],
   },
   {
@@ -167,6 +169,7 @@ export const ROUTE_META: Record<string, RouteMeta> = {
   "/resultados/comparar": { section: "Resultados", title: "Comparar casas" },
   "/relatorios/conversao": { section: "Resultados", title: "Relatório de conversão" },
   "/midia-ltv": { section: "Resultados", title: "Aquisição e LTV" },
+  "/financeiro": { section: "Resultados", title: "Financeiro" },
   "/players": { section: "Jogadores", title: "Jogadores" },
   "/players/$playerId": { section: "Jogadores", title: "Detalhe do jogador" },
   "/publicos": { section: "Jogadores", title: "Públicos" },
@@ -235,18 +238,28 @@ export function isPathUnder(pathname: string, to: string) {
   return pathname === to || pathname.startsWith(`${to}/`);
 }
 
-export function canSee(access: NavAccess, role: ShellRole | null, isSuperAdmin: boolean) {
+export function canSee(
+  access: NavAccess,
+  role: ShellRole | null,
+  isSuperAdmin: boolean,
+  canViewFinance = false,
+) {
   if (!access.requires) return true;
   if (access.requires === "super_admin") return isSuperAdmin;
   if (access.requires === "not_super_admin") return !isSuperAdmin;
+  if (access.requires === "finance") return isSuperAdmin || canViewFinance;
   return isSuperAdmin || role === "admin";
 }
 
-export function visibleSections(role: ShellRole | null, isSuperAdmin: boolean): NavSection[] {
-  return SIDEBAR_SECTIONS.filter((section) => canSee(section, role, isSuperAdmin))
+export function visibleSections(
+  role: ShellRole | null,
+  isSuperAdmin: boolean,
+  canViewFinance = false,
+): NavSection[] {
+  return SIDEBAR_SECTIONS.filter((section) => canSee(section, role, isSuperAdmin, canViewFinance))
     .map((section) => ({
       ...section,
-      items: section.items.filter((item) => canSee(item, role, isSuperAdmin)),
+      items: section.items.filter((item) => canSee(item, role, isSuperAdmin, canViewFinance)),
     }))
     .filter((section) => section.items.length > 0);
 }
