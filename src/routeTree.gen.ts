@@ -23,6 +23,7 @@ import { Route as ExpertsRouteImport } from './routes/experts'
 import { Route as FinanceiroRouteImport } from './routes/financeiro'
 import { Route as GamificacaoRouteImport } from './routes/gamificacao'
 import { Route as GrupoRouteImport } from './routes/grupo'
+import { Route as GruposRouteImport } from './routes/grupos'
 import { Route as InteligenciaRouteImport } from './routes/inteligencia'
 import { Route as JornadasRouteImport } from './routes/jornadas'
 import { Route as LigacoesRouteImport } from './routes/ligacoes'
@@ -154,6 +155,11 @@ const GamificacaoRoute = GamificacaoRouteImport.update({
 const GrupoRoute = GrupoRouteImport.update({
   id: '/grupo',
   path: '/grupo',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GruposRoute = GruposRouteImport.update({
+  id: '/grupos',
+  path: '/grupos',
   getParentRoute: () => rootRouteImport,
 } as any)
 const InteligenciaRoute = InteligenciaRouteImport.update({
@@ -504,6 +510,7 @@ export interface FileRoutesByFullPath {
   '/financeiro': typeof FinanceiroRoute
   '/gamificacao': typeof GamificacaoRoute
   '/grupo': typeof GrupoRoute
+  '/grupos': typeof GruposRoute
   '/inteligencia': typeof InteligenciaRoute
   '/jornadas': typeof JornadasRouteWithChildren
   '/ligacoes': typeof LigacoesRoute
@@ -582,6 +589,7 @@ export interface FileRoutesByTo {
   '/financeiro': typeof FinanceiroRoute
   '/gamificacao': typeof GamificacaoRoute
   '/grupo': typeof GrupoRoute
+  '/grupos': typeof GruposRoute
   '/inteligencia': typeof InteligenciaRoute
   '/jornadas': typeof JornadasRouteWithChildren
   '/ligacoes': typeof LigacoesRoute
@@ -661,6 +669,7 @@ export interface FileRoutesById {
   '/financeiro': typeof FinanceiroRoute
   '/gamificacao': typeof GamificacaoRoute
   '/grupo': typeof GrupoRoute
+  '/grupos': typeof GruposRoute
   '/inteligencia': typeof InteligenciaRoute
   '/jornadas': typeof JornadasRouteWithChildren
   '/ligacoes': typeof LigacoesRoute
@@ -741,6 +750,7 @@ export interface FileRouteTypes {
     | '/financeiro'
     | '/gamificacao'
     | '/grupo'
+    | '/grupos'
     | '/inteligencia'
     | '/jornadas'
     | '/ligacoes'
@@ -819,6 +829,7 @@ export interface FileRouteTypes {
     | '/financeiro'
     | '/gamificacao'
     | '/grupo'
+    | '/grupos'
     | '/inteligencia'
     | '/jornadas'
     | '/ligacoes'
@@ -897,6 +908,7 @@ export interface FileRouteTypes {
     | '/financeiro'
     | '/gamificacao'
     | '/grupo'
+    | '/grupos'
     | '/inteligencia'
     | '/jornadas'
     | '/ligacoes'
@@ -976,6 +988,7 @@ export interface RootRouteChildren {
   FinanceiroRoute: typeof FinanceiroRoute
   GamificacaoRoute: typeof GamificacaoRoute
   GrupoRoute: typeof GrupoRoute
+  GruposRoute: typeof GruposRoute
   InteligenciaRoute: typeof InteligenciaRoute
   JornadasRoute: typeof JornadasRouteWithChildren
   LigacoesRoute: typeof LigacoesRoute
@@ -1126,6 +1139,13 @@ declare module '@tanstack/react-router' {
       path: '/grupo'
       fullPath: '/grupo'
       preLoaderRoute: typeof GrupoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/grupos': {
+      id: '/grupos'
+      path: '/grupos'
+      fullPath: '/grupos'
+      preLoaderRoute: typeof GruposRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/inteligencia': {
@@ -1669,6 +1689,7 @@ const rootRouteChildren: RootRouteChildren = {
   FinanceiroRoute: FinanceiroRoute,
   GamificacaoRoute: GamificacaoRoute,
   GrupoRoute: GrupoRoute,
+  GruposRoute: GruposRoute,
   InteligenciaRoute: InteligenciaRoute,
   JornadasRoute: JornadasRouteWithChildren,
   LigacoesRoute: LigacoesRoute,

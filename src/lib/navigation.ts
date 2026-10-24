@@ -7,6 +7,7 @@ import {
   Megaphone,
   Menu,
   MessageSquare,
+  Network,
   Phone,
   PieChart,
   Plug,
@@ -122,6 +123,7 @@ export const SIDEBAR_SECTIONS: NavSection[] = [
     items: [
       link("Visão da plataforma", "/admin", ShieldCheck),
       link("Contas", "/tenants", Building2),
+      link("Grupos", "/grupos", Network),
     ],
   },
 ];
@@ -222,6 +224,7 @@ export const ROUTE_META: Record<string, RouteMeta> = {
   "/configuracoes": { section: "Configurações", title: "Configurações" },
   "/tenants": { section: "Conta", title: "Conta e equipe" },
   "/admin": { section: "Administração", title: "Visão da plataforma" },
+  "/grupos": { section: "Administração", title: "Grupos" },
   "/grupo": { section: "Grupo", title: "Painel do grupo" },
   "/grupo/casa": { section: "Grupo", title: "Financeiro da casa" },
   "/grupo/metas": { section: "Grupo", title: "Metas do grupo" },
