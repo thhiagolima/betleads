@@ -165,7 +165,11 @@ describe("expert role", () => {
   }
 
   it("expert sees only the expert section", () => {
-    expect(linkPaths(visibleSections("expert", false))).toEqual(["/expert", "/expert/leads"]);
+    expect(linkPaths(visibleSections("expert", false))).toEqual([
+      "/expert",
+      "/expert/leads",
+      "/expert/modelos",
+    ]);
   });
 
   it("expert has no account/team links", () => {

@@ -43,6 +43,7 @@ import { Route as AutomacoesWhatsappRouteImport } from './routes/automacoes.what
 import { Route as ConfiguracoesCasaRouteImport } from './routes/configuracoes_.casa'
 import { Route as ExpertIndexRouteImport } from './routes/expert.index'
 import { Route as ExpertLeadsRouteImport } from './routes/expert.leads'
+import { Route as ExpertModelosRouteImport } from './routes/expert.modelos'
 import { Route as JornadasJourneyIdRouteImport } from './routes/jornadas.$journeyId'
 import { Route as JornadasNovaRouteImport } from './routes/jornadas.nova'
 import { Route as LinksConfiguracoesRouteImport } from './routes/links.configuracoes'
@@ -256,6 +257,11 @@ const ExpertIndexRoute = ExpertIndexRouteImport.update({
 const ExpertLeadsRoute = ExpertLeadsRouteImport.update({
   id: '/expert/leads',
   path: '/expert/leads',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ExpertModelosRoute = ExpertModelosRouteImport.update({
+  id: '/expert/modelos',
+  path: '/expert/modelos',
   getParentRoute: () => rootRouteImport,
 } as any)
 const JornadasJourneyIdRoute = JornadasJourneyIdRouteImport.update({
@@ -537,6 +543,7 @@ export interface FileRoutesByFullPath {
   '/automacoes/whatsapp': typeof AutomacoesWhatsappRoute
   '/configuracoes/casa': typeof ConfiguracoesCasaRoute
   '/expert/leads': typeof ExpertLeadsRouteWithChildren
+  '/expert/modelos': typeof ExpertModelosRoute
   '/jornadas/$journeyId': typeof JornadasJourneyIdRoute
   '/jornadas/nova': typeof JornadasNovaRoute
   '/links/configuracoes': typeof LinksConfiguracoesRoute
@@ -617,6 +624,7 @@ export interface FileRoutesByTo {
   '/automacoes/whatsapp': typeof AutomacoesWhatsappRoute
   '/configuracoes/casa': typeof ConfiguracoesCasaRoute
   '/expert/leads': typeof ExpertLeadsRouteWithChildren
+  '/expert/modelos': typeof ExpertModelosRoute
   '/jornadas/$journeyId': typeof JornadasJourneyIdRoute
   '/jornadas/nova': typeof JornadasNovaRoute
   '/links/configuracoes': typeof LinksConfiguracoesRoute
@@ -698,6 +706,7 @@ export interface FileRoutesById {
   '/automacoes/whatsapp': typeof AutomacoesWhatsappRoute
   '/configuracoes_/casa': typeof ConfiguracoesCasaRoute
   '/expert/leads': typeof ExpertLeadsRouteWithChildren
+  '/expert/modelos': typeof ExpertModelosRoute
   '/jornadas/$journeyId': typeof JornadasJourneyIdRoute
   '/jornadas/nova': typeof JornadasNovaRoute
   '/links/configuracoes': typeof LinksConfiguracoesRoute
@@ -780,6 +789,7 @@ export interface FileRouteTypes {
     | '/automacoes/whatsapp'
     | '/configuracoes/casa'
     | '/expert/leads'
+    | '/expert/modelos'
     | '/jornadas/$journeyId'
     | '/jornadas/nova'
     | '/links/configuracoes'
@@ -860,6 +870,7 @@ export interface FileRouteTypes {
     | '/automacoes/whatsapp'
     | '/configuracoes/casa'
     | '/expert/leads'
+    | '/expert/modelos'
     | '/jornadas/$journeyId'
     | '/jornadas/nova'
     | '/links/configuracoes'
@@ -940,6 +951,7 @@ export interface FileRouteTypes {
     | '/automacoes/whatsapp'
     | '/configuracoes_/casa'
     | '/expert/leads'
+    | '/expert/modelos'
     | '/jornadas/$journeyId'
     | '/jornadas/nova'
     | '/links/configuracoes'
@@ -1017,6 +1029,7 @@ export interface RootRouteChildren {
   WhatsappRoute: typeof WhatsappRoute
   ConfiguracoesCasaRoute: typeof ConfiguracoesCasaRoute
   ExpertLeadsRoute: typeof ExpertLeadsRouteWithChildren
+  ExpertModelosRoute: typeof ExpertModelosRoute
   RelatoriosConversaoRoute: typeof RelatoriosConversaoRoute
   ResultadosCompararRoute: typeof ResultadosCompararRoute
   UTokenRoute: typeof UTokenRoute
@@ -1294,6 +1307,13 @@ declare module '@tanstack/react-router' {
       path: '/expert/leads'
       fullPath: '/expert/leads'
       preLoaderRoute: typeof ExpertLeadsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/expert/modelos': {
+      id: '/expert/modelos'
+      path: '/expert/modelos'
+      fullPath: '/expert/modelos'
+      preLoaderRoute: typeof ExpertModelosRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/jornadas/$journeyId': {
@@ -1726,6 +1746,7 @@ const rootRouteChildren: RootRouteChildren = {
   WhatsappRoute: WhatsappRoute,
   ConfiguracoesCasaRoute: ConfiguracoesCasaRoute,
   ExpertLeadsRoute: ExpertLeadsRouteWithChildren,
+  ExpertModelosRoute: ExpertModelosRoute,
   RelatoriosConversaoRoute: RelatoriosConversaoRoute,
   ResultadosCompararRoute: ResultadosCompararRoute,
   UTokenRoute: UTokenRoute,

@@ -145,7 +145,11 @@ export const SIDEBAR_SECTIONS: NavSection[] = [
 export const EXPERT_SECTIONS: NavSection[] = [
   {
     label: "Expert",
-    items: [link("Início", "/expert", Home), link("Leads", "/expert/leads", Users)],
+    items: [
+      link("Início", "/expert", Home),
+      link("Leads", "/expert/leads", Users),
+      link("Modelos", "/expert/modelos", FileText),
+    ],
   },
 ];
 
@@ -159,6 +163,7 @@ export type MobileTab = { title: string; to?: string; icon: LucideIcon; alsoActi
 export const EXPERT_MOBILE_TABS: MobileTab[] = [
   { title: "Início", to: "/expert", icon: Home },
   { title: "Leads", to: "/expert/leads", icon: Users },
+  { title: "Modelos", to: "/expert/modelos", icon: FileText },
 ];
 
 export const MOBILE_TABS: MobileTab[] = [
@@ -233,6 +238,7 @@ export const ROUTE_META: Record<string, RouteMeta> = {
   "/expert/": { section: "Expert", title: "Início" },
   "/expert/leads": { section: "Expert", title: "Leads" },
   "/expert/leads/$playerId": { section: "Expert", title: "Ficha do lead" },
+  "/expert/modelos": { section: "Expert", title: "Modelos de mensagem" },
   "/webhooks": { section: "Configurações", title: "Integrações" },
   "/consentimentos": { section: "Canais", title: "Consentimentos" },
   "/configuracoes/casa": { section: "Configurações", title: "Configuração da casa" },
