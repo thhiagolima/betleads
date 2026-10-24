@@ -36,3 +36,9 @@ export function formatPct(value: number | null | undefined): string {
 export function formatRatio(value: number | null | undefined): string {
   return formatPct(value);
 }
+
+/** An integer count (FTDs, cadastros) with pt-BR thousands separators ("1.234"). */
+export function formatInt(value: number | null | undefined): string {
+  if (value === null || value === undefined) return NA;
+  return new Intl.NumberFormat("pt-BR").format(value);
+}

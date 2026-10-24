@@ -69,7 +69,10 @@ export function GroupPeriodBar({
   };
 
   const setCustomRange = (dashboardRange: DashboardRange) => {
-    onChange({ preset: "custom", range: rangeToKey(dashboardRange), compare: value.compare });
+    const range = rangeToKey(dashboardRange);
+    const compare =
+      value.compare === "same_weekday_last_week" && !isOneDay(range) ? "previous" : value.compare;
+    onChange({ preset: "custom", range, compare });
   };
 
   return (

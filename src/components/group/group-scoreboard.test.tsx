@@ -6,7 +6,8 @@ import { GroupScoreboard, sortScoreboardRows, type ScoreboardRow } from "./group
 // No jsdom/testing-library in this repo (see src/components/demo-banner.test.tsx
 // for the same renderToStaticMarkup pattern); clicking a header toggles state
 // through `toggleSort`, which calls the exported `sortScoreboardRows` with
-// direction "desc" on the first click — exercised directly here.
+// direction "desc" on the first click, "asc" on the second — exercised
+// directly here.
 function summary(overrides: Partial<ScoreboardRow["current"]> = {}) {
   return {
     days: 1,
@@ -31,7 +32,17 @@ function summary(overrides: Partial<ScoreboardRow["current"]> = {}) {
   };
 }
 
+// Deliberately NOT in cashResult-desc order already (fix round 1, item 3):
+// a sort bug that leaves the input untouched would not have failed the old
+// fixture, which happened to already be desc-sorted by cashResult.
 const rows: ScoreboardRow[] = [
+  {
+    id: "c",
+    nome: "Sorte da Bet",
+    current: summary({ cashResult: -3500, ftds: 67 }),
+    previous: summary(),
+    goals: [{ metric: "ftds", direction: "gte", target: 80, value: 67, status: "yellow" }],
+  },
   {
     id: "a",
     nome: "Sorte Alta",
@@ -46,13 +57,6 @@ const rows: ScoreboardRow[] = [
     previous: summary(),
     goals: [{ metric: "ftds", direction: "gte", target: 100, value: 104, status: "green" }],
   },
-  {
-    id: "c",
-    nome: "Sorte da Bet",
-    current: summary({ cashResult: -3500, ftds: 67 }),
-    previous: summary(),
-    goals: [{ metric: "ftds", direction: "gte", target: 80, value: 67, status: "yellow" }],
-  },
 ];
 
 describe("GroupScoreboard", () => {
@@ -65,9 +69,42 @@ describe("GroupScoreboard", () => {
     expect(html).toContain("meta 100");
   });
 
-  it("sorts by result desc on header click (sortScoreboardRows, direction desc on first click)", () => {
+  it("renders the variation under a cell's value", () => {
+    const withPrevious: ScoreboardRow[] = [
+      {
+        id: "a",
+        nome: "Sorte Alta",
+        current: summary({ depositAmount: 1100 }),
+        previous: summary({ depositAmount: 1000 }),
+        goals: [],
+      },
+    ];
+
+    const html = renderToStaticMarkup(<GroupScoreboard rows={withPrevious} />);
+
+    expect(html).toContain("10,0%");
+  });
+
+  it("sorts descending on the first header click", () => {
     const sorted = sortScoreboardRows(rows, "cashResult", "desc");
 
     expect(sorted.map((row) => row.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("sorts ascending on the second header click", () => {
+    const sorted = sortScoreboardRows(rows, "cashResult", "asc");
+
+    expect(sorted.map((row) => row.id)).toEqual(["c", "b", "a"]);
+  });
+
+  it("always sorts rows with a null value last, in either direction", () => {
+    const withNull: ScoreboardRow[] = [
+      { id: "a", nome: "Sorte Alta", current: summary({ costPerFtd: 90 }), previous: summary(), goals: [] },
+      { id: "b", nome: "Pixreals", current: summary({ costPerFtd: 60 }), previous: summary(), goals: [] },
+      { id: "d", nome: "Casa Sem Custo", current: summary({ costPerFtd: null }), previous: summary(), goals: [] },
+    ];
+
+    expect(sortScoreboardRows(withNull, "costPerFtd", "desc").at(-1)?.id).toBe("d");
+    expect(sortScoreboardRows(withNull, "costPerFtd", "asc").at(-1)?.id).toBe("d");
   });
 });

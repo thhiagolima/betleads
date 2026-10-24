@@ -3,6 +3,13 @@
 // an empty value removes the goal from that date on. The house list comes
 // from getGroupPeople (already scoped to the group manager / super admin);
 // members are ignored here, only {id, nome} is used.
+//
+// "Vale a partir de" always defaults to TODAY (fix round 1, item 2): it is
+// the date a *new* change takes effect, not the date the currently-loaded
+// goal became effective. Prefilling it with the old `validFrom` meant saving
+// without touching that field silently upserted onto the historical row and
+// rewrote past evaluations. The goal's current effective date, if any, is
+// shown as read-only text instead.
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -42,6 +49,11 @@ function todaySaoPauloLocal() {
   }).format(new Date());
 }
 
+function formatDateBR(iso: string) {
+  const [y, m, d] = iso.split("-");
+  return `${d}/${m}/${y}`;
+}
+
 function GoalRow({
   tenantId,
   row,
@@ -53,7 +65,9 @@ function GoalRow({
 }) {
   const [direction, setDirection] = useState<GoalDirection>(row.direction);
   const [value, setValue] = useState(row.dailyValue === null ? "" : String(row.dailyValue));
-  const [validFrom, setValidFrom] = useState(row.validFrom ?? todaySaoPauloLocal());
+  // Always today: this is when a NEW change takes effect, not row.validFrom
+  // (the currently-loaded goal's own effective date, shown read-only below).
+  const [validFrom, setValidFrom] = useState(todaySaoPauloLocal);
   const fn = useServerFn(setTenantGoal);
 
   const mut = useMutation({
@@ -98,6 +112,9 @@ function GoalRow({
           onChange={(e) => setValue(e.target.value)}
           className="h-8 w-28"
         />
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          {row.validFrom ? `vigente desde ${formatDateBR(row.validFrom)}` : "sem meta atual"}
+        </p>
       </TableCell>
       <TableCell>
         <Input

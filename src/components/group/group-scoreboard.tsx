@@ -1,11 +1,14 @@
 // Layout A, approved mockup (spec §6):
 // .superpowers/brainstorm/5093-1792850661/content/painel-grupo.html — one row
 // per house, Depósitos/FTDs/Custo-FTD/Net/Resultado/ROI always visible,
-// Cadastros/GGR behind "mais colunas". A goal cell gets the green/yellow/
-// red/gray class from evaluateGoal (spec §7) plus a "meta X" caption.
+// Cadastros/GGR behind "mais colunas". Every cell shows the value and its
+// variation vs the compared window (fix round 1, item 1); a goal cell also
+// gets the green/yellow/red/gray class from evaluateGoal (spec §7) plus a
+// "meta X" caption.
 import { useMemo, useState } from "react";
 
-import { formatBRL, formatRatio } from "@/components/finance/format";
+import { formatBRL, formatInt, formatPct, formatRatio } from "@/components/finance/format";
+import { pctChange } from "@/lib/finance/calc";
 import type { GoalEvaluation, GoalMetric, GoalStatus, PeriodSummary } from "@/lib/finance/types";
 import { cn } from "@/lib/utils";
 
@@ -33,12 +36,14 @@ type ColumnDef = {
   goalMetric?: GoalMetric;
   format: "money" | "int" | "ratio";
   pick: (summary: PeriodSummary) => number | null;
+  /** True when an increase is bad (cost-shaped metric): variation color is inverted. */
+  invert?: boolean;
 };
 
 const CORE_COLUMNS: ColumnDef[] = [
   { key: "depositAmount", label: "Depósitos", goalMetric: "deposits", format: "money", pick: (s) => s.depositAmount },
   { key: "ftds", label: "FTDs", goalMetric: "ftds", format: "int", pick: (s) => s.ftds },
-  { key: "costPerFtd", label: "Custo/FTD", goalMetric: "cost_per_ftd", format: "money", pick: (s) => s.costPerFtd },
+  { key: "costPerFtd", label: "Custo/FTD", goalMetric: "cost_per_ftd", format: "money", pick: (s) => s.costPerFtd, invert: true },
   { key: "net", label: "Net", goalMetric: "net", format: "money", pick: (s) => s.net },
   { key: "cashResult", label: "Resultado", goalMetric: "cash_result", format: "money", pick: (s) => s.cashResult },
   { key: "roi", label: "ROI", goalMetric: "roi", format: "ratio", pick: (s) => s.roi },
@@ -55,13 +60,13 @@ export const GOAL_STATUS_CLASS: Record<GoalStatus, string> = {
   green: "bg-emerald-500/15 text-emerald-300",
   yellow: "bg-amber-500/15 text-amber-300",
   red: "bg-rose-500/15 text-rose-300",
-  gray: "",
+  gray: "bg-muted/40 text-muted-foreground",
 };
 
 function formatValue(format: ColumnDef["format"], value: number | null) {
   if (format === "money") return formatBRL(value);
   if (format === "ratio") return formatRatio(value);
-  return value === null ? "n.a." : String(value);
+  return formatInt(value);
 }
 
 function goalFor(goals: GoalEvaluation[], metric: GoalMetric | undefined) {
@@ -69,8 +74,8 @@ function goalFor(goals: GoalEvaluation[], metric: GoalMetric | undefined) {
   return goals.find((goal) => goal.metric === metric) ?? null;
 }
 
-/** Pure sort, exported for the "sorts by result desc on header click" test
- * and used by the header-click handler below; nulls always sort last. */
+/** Pure sort, exported for the scoreboard tests and used by the header-click
+ * handler below; nulls always sort last regardless of direction. */
 export function sortScoreboardRows(
   rows: ScoreboardRow[],
   column: ScoreboardColumnKey,
@@ -86,6 +91,16 @@ export function sortScoreboardRows(
     if (bv === null) return -1;
     return direction === "asc" ? av - bv : bv - av;
   });
+}
+
+function VariationLabel({ change, invert }: { change: number | null; invert?: boolean }) {
+  if (change === null) return null;
+  const good = invert ? change <= 0 : change >= 0;
+  return (
+    <span className={cn("block text-[10px]", good ? "text-emerald-400" : "text-rose-400")}>
+      {change >= 0 ? "▲" : "▼"} {formatPct(Math.abs(change))}
+    </span>
+  );
 }
 
 export function GroupScoreboard({
@@ -125,7 +140,7 @@ export function GroupScoreboard({
                 <th key={column.key} className="px-3 py-2 text-right">
                   <button
                     type="button"
-                    className="hover:text-foreground"
+                    className="rounded outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                     onClick={() => toggleSort(column.key)}
                   >
                     {column.label}
@@ -138,13 +153,21 @@ export function GroupScoreboard({
             {sortedRows.map((row) => (
               <tr
                 key={row.id}
-                className="cursor-pointer border-b border-border/20 last:border-0 hover:bg-foreground/[0.03]"
-                onClick={() => onRowClick?.(row.id)}
+                className="border-b border-border/20 last:border-0 hover:bg-foreground/[0.03]"
               >
-                <td className="px-3 py-2 font-medium">{row.nome}</td>
+                <td className="px-3 py-2 font-medium">
+                  <button
+                    type="button"
+                    className="rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    onClick={() => onRowClick?.(row.id)}
+                  >
+                    {row.nome}
+                  </button>
+                </td>
                 {columns.map((column) => {
                   const goal = goalFor(row.goals, column.goalMetric);
                   const value = column.pick(row.current);
+                  const change = pctChange(value, column.pick(row.previous));
                   return (
                     <td
                       key={column.key}
@@ -154,6 +177,7 @@ export function GroupScoreboard({
                       )}
                     >
                       <span>{formatValue(column.format, value)}</span>
+                      <VariationLabel change={change} invert={column.invert} />
                       {goal && (
                         <span className="block text-[10px] opacity-60">
                           meta {formatValue(column.format, goal.target)}
