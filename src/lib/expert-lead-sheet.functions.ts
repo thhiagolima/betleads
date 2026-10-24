@@ -125,7 +125,9 @@ export async function getExpertLeadSheetFor(
       .eq("status", "aprovado")
       .order("created_at", { ascending: false })
       .limit(50),
+    // Só cashback efetivamente pago (status vem do webhook; padrão 'paid').
     scoped("cashback_payments", "id,cashback_amount,paid_at,created_at")
+      .eq("status", "paid")
       .order("paid_at", { ascending: false })
       .limit(10),
     scoped("sms_send_logs", "id,content,created_at")
@@ -277,7 +279,7 @@ export async function getExpertLeadSheetFor(
         valor: Number(c.cashback_amount ?? 0),
         at: c.paid_at ?? c.created_at,
       })),
-      ...(saldoBonus > 0 ? [{ tipo: "bonus" as const, valor: saldoBonus, at: null }] : []),
+      ...(saldoBonus > 0 ? [{ tipo: "bonus_atual" as const, valor: saldoBonus, at: null }] : []),
     ],
     timeline,
     claim,

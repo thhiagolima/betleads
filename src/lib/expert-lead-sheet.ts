@@ -55,7 +55,9 @@ export type ExpertLeadSheet = {
     totalSacado: number;
     origemAfiliadoDoExpert: boolean;
   };
-  beneficios: Array<{ tipo: "cashback" | "bonus"; valor: number; at: string | null }>;
+  /** Cashbacks pagos e, à parte, o saldo de bônus atual (`bonus_atual`,
+   * sem data) — este não é um benefício recebido. */
+  beneficios: Array<{ tipo: "cashback" | "bonus_atual"; valor: number; at: string | null }>;
   timeline: ExpertTimelineItem[];
   claim: { expertNome: string; expiresAt: string; minha: boolean } | null;
   retornosPendentes: Array<{ id: string; dueDate: string; nota: string | null }>;

@@ -160,14 +160,26 @@ describe("getExpertLeadSheetFor", () => {
         created_at: iso(-1),
       },
     );
-    fake.admin.rows("cashback_payments").push({
-      id: "c1",
-      tenant_id: TENANT,
-      player_id: PLAYER,
-      cashback_amount: 7,
-      paid_at: iso(-2),
-      created_at: iso(-2),
-    });
+    fake.admin.rows("cashback_payments").push(
+      {
+        id: "c1",
+        tenant_id: TENANT,
+        player_id: PLAYER,
+        cashback_amount: 7,
+        status: "paid",
+        paid_at: iso(-2),
+        created_at: iso(-2),
+      },
+      {
+        id: "c2",
+        tenant_id: TENANT,
+        player_id: PLAYER,
+        cashback_amount: 99,
+        status: "pending",
+        paid_at: iso(-1),
+        created_at: iso(-1),
+      },
+    );
 
     const sheet = await getExpertLeadSheetFor(CTX, { playerId: PLAYER });
     expect(sheet.lead.depositos).toBe(2);
@@ -178,7 +190,7 @@ describe("getExpertLeadSheetFor", () => {
     expect(sheet.lead.situacaoLabel).toBe("Esfriando");
     expect(sheet.beneficios).toEqual([
       { tipo: "cashback", valor: 7, at: fake.admin.rows("cashback_payments")[0].paid_at },
-      { tipo: "bonus", valor: 15, at: null },
+      { tipo: "bonus_atual", valor: 15, at: null },
     ]);
     expect(sheet.timeline.map((i) => i.id)).toEqual(["cashback:c1", "deposito:d2", "deposito:d1"]);
   });

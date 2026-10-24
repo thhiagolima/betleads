@@ -80,32 +80,36 @@ export function LeadSheetStats({ lead }: { lead: ExpertLeadSheet["lead"] }) {
   );
 }
 
-const BENEFICIO_LABEL: Record<ExpertLeadSheet["beneficios"][number]["tipo"], string> = {
-  cashback: "Cashback",
-  bonus: "Bônus",
-};
-
 export function LeadBenefits({ beneficios }: { beneficios: ExpertLeadSheet["beneficios"] }) {
+  // O saldo de bônus atual não é um benefício recebido: aparece à parte.
+  const recebidos = beneficios.filter((b) => b.tipo === "cashback");
+  const bonusAtual = beneficios.find((b) => b.tipo === "bonus_atual");
   return (
     <HomeCard className="p-4 sm:p-5">
       <h2 className="text-section">Benefícios já recebidos</h2>
-      {beneficios.length === 0 ? (
+      {recebidos.length === 0 ? (
         <p className="mt-2 text-body text-muted-foreground">Nenhum benefício recebido ainda.</p>
       ) : (
         <ul className="mt-2 divide-y divide-border/70">
-          {beneficios.map((b, index) => (
+          {recebidos.map((b, index) => (
             <li
               key={`${b.tipo}:${b.at ?? "sem-data"}:${index}`}
               className="flex items-center justify-between gap-3 py-2.5 text-[13.5px]"
             >
               <span className="text-muted-foreground">
-                {BENEFICIO_LABEL[b.tipo]}
+                Cashback
                 {b.at && <span> · {formatBrtDate(b.at)}</span>}
               </span>
               <strong className="font-semibold tabular-nums">{brl(b.valor)}</strong>
             </li>
           ))}
         </ul>
+      )}
+      {bonusAtual && (
+        <div className="mt-2 flex items-center justify-between gap-3 border-t border-border/70 pt-2.5 text-[13.5px]">
+          <span className="text-muted-foreground">Saldo de bônus atual</span>
+          <strong className="font-semibold tabular-nums">{brl(bonusAtual.valor)}</strong>
+        </div>
       )}
     </HomeCard>
   );
