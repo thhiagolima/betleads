@@ -1,4 +1,5 @@
 import { Link, createFileRoute } from "@tanstack/react-router";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { POLL_INTERVALS, UpdatedAgo } from "@/hooks/use-updated-ago";
@@ -87,6 +88,9 @@ function EventosPage() {
     refetchOnWindowFocus: true,
   });
   const events = data ?? [];
+  // 100 rows make a very long page on a phone: show 30, the rest on demand.
+  const [showAll, setShowAll] = useState(false);
+  const visible = showAll ? events : events.slice(0, 30);
   const loading = isLoading || !tenantId;
 
   return (
@@ -129,47 +133,58 @@ function EventosPage() {
             }
           />
         ) : (
-          <ul className="divide-y divide-border">
-            {events.map((e: any) => {
-              const cfg = eventConfig(e.tipo);
-              const Icon = cfg.icon;
-              return (
-                <li key={e.id} className="flex items-center gap-3 px-4 py-3 sm:gap-4 sm:px-5">
-                  <div
-                    className={cn(
-                      "flex size-9 shrink-0 items-center justify-center rounded-lg",
-                      cfg.tone,
-                    )}
-                    aria-hidden="true"
-                  >
-                    <Icon className="size-4" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="flex flex-wrap items-baseline gap-x-2 text-body">
-                      <span className="truncate font-medium">
-                        {e.players?.nome ?? "Jogador sem cadastro"}
-                      </span>
-                      <span className="text-muted-foreground">{cfg.label}</span>
-                      {e.metadata?.jogo && (
-                        <span className="truncate text-meta text-muted-foreground">
-                          · {e.metadata.jogo}
-                        </span>
+          <>
+            <ul className="divide-y divide-border">
+              {visible.map((e: any) => {
+                const cfg = eventConfig(e.tipo);
+                const Icon = cfg.icon;
+                return (
+                  <li key={e.id} className="flex items-center gap-3 px-4 py-3 sm:gap-4 sm:px-5">
+                    <div
+                      className={cn(
+                        "flex size-9 shrink-0 items-center justify-center rounded-lg",
+                        cfg.tone,
                       )}
-                    </p>
-                    <p className="text-meta text-muted-foreground">
-                      {e.players?.player_external_id ? `ID ${e.players.player_external_id} · ` : ""}
-                      {timeAgo(e.created_at)}
-                    </p>
-                  </div>
-                  {e.valor != null && (
-                    <p className="shrink-0 text-body font-semibold tabular-nums">
-                      {brl(Number(e.valor))}
-                    </p>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
+                      aria-hidden="true"
+                    >
+                      <Icon className="size-4" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="flex flex-wrap items-baseline gap-x-2 text-body">
+                        <span className="truncate font-medium">
+                          {e.players?.nome ?? "Jogador sem cadastro"}
+                        </span>
+                        <span className="text-muted-foreground">{cfg.label}</span>
+                        {e.metadata?.jogo && (
+                          <span className="truncate text-meta text-muted-foreground">
+                            · {e.metadata.jogo}
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-meta text-muted-foreground">
+                        {e.players?.player_external_id
+                          ? `ID ${e.players.player_external_id} · `
+                          : ""}
+                        {timeAgo(e.created_at)}
+                      </p>
+                    </div>
+                    {e.valor != null && (
+                      <p className="shrink-0 text-body font-semibold tabular-nums">
+                        {brl(Number(e.valor))}
+                      </p>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+            {events.length > visible.length && (
+              <div className="border-t border-border p-3 text-center">
+                <Button size="sm" variant="ghost" onClick={() => setShowAll(true)}>
+                  Mostrar mais {events.length - visible.length}
+                </Button>
+              </div>
+            )}
+          </>
         )}
       </DataCard>
     </Page>

@@ -464,22 +464,35 @@ function VisualizacaoSection({
       )}
 
       <div className="flex flex-wrap items-center gap-2">
-        {(Object.keys(periodLabels) as PeriodPreset[]).map((key) => (
-          <Button
-            key={key}
-            variant={period === key ? "default" : "outline"}
-            className="h-11 px-5"
-            onClick={() => onPeriodChange(key)}
-          >
-            {periodLabels[key]}
-          </Button>
-        ))}
-        <div className="flex items-center gap-2 rounded-md border border-border/70 px-3 py-1.5">
-          <Calendar className="h-4 w-4 text-muted-foreground" />
+        {/* Same segmented look as the Início period picker. */}
+        <div
+          role="group"
+          aria-label="Período"
+          className="flex max-w-full gap-0.5 overflow-x-auto rounded-xl border border-border bg-card p-[3px] [scrollbar-width:none]"
+        >
+          {(Object.keys(periodLabels) as PeriodPreset[]).map((key) => (
+            <button
+              key={key}
+              type="button"
+              aria-pressed={!customRange && period === key}
+              onClick={() => onPeriodChange(key)}
+              className={cn(
+                "h-9 shrink-0 whitespace-nowrap rounded-lg px-3 text-[13px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+                !customRange && period === key
+                  ? "bg-secondary text-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {periodLabels[key]}
+            </button>
+          ))}
+        </div>
+        <div className="flex w-full items-center gap-2 rounded-xl border border-border px-3 py-1 sm:w-auto">
+          <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           <Input
             aria-label="Data inicial"
             type="date"
-            className="h-8 w-36 border-0 bg-transparent p-0"
+            className="h-8 w-full min-w-0 border-0 bg-transparent p-0 sm:w-36"
             value={customRange?.from ?? range.from}
             max={customRange?.to ?? range.to}
             onChange={(event) =>
@@ -490,7 +503,7 @@ function VisualizacaoSection({
           <Input
             aria-label="Data final"
             type="date"
-            className="h-8 w-36 border-0 bg-transparent p-0"
+            className="h-8 w-full min-w-0 border-0 bg-transparent p-0 sm:w-36"
             value={customRange?.to ?? range.to}
             min={customRange?.from ?? range.from}
             max={brtToday()}
@@ -501,7 +514,7 @@ function VisualizacaoSection({
         </div>
       </div>
 
-      <p className="text-sm text-muted-foreground">
+      <p className="text-meta text-muted-foreground">
         Gasto: Meta Ads, {num(selectedAccounts.length)} conta(s)
         {lastSync
           ? `, última leitura em ${new Date(lastSync).toLocaleString("pt-BR")}`
