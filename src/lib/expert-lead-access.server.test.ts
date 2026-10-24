@@ -26,7 +26,7 @@ vi.mock("@/integrations/supabase/client.server", async () => {
 
 import { createFakeDb } from "@/lib/sms-bulk.test-support";
 import type { ExpertContext } from "./expert-access.server";
-import { loadVisibleLead } from "./expert-lead-access.server";
+import { isExpertAffiliate, loadVisibleLead } from "./expert-lead-access.server";
 
 const TENANT = "00000000-0000-4000-8000-0000000000a1";
 const OTHER_TENANT = "00000000-0000-4000-8000-0000000000a2";
@@ -79,6 +79,14 @@ describe("loadVisibleLead", () => {
     const lead = await loadVisibleLead(RESTRICTED, PLAYER);
     expect(lead.id).toBe(PLAYER);
     expect(lead.nome).toBe("Maria");
+  });
+
+  it("isExpertAffiliate trims only spaces, like SQL btrim", () => {
+    expect(isExpertAffiliate(RESTRICTED, "  AFF1 ")).toBe(true);
+    expect(isExpertAffiliate({ ...RESTRICTED, affiliateIds: [" AFF1  "] }, "AFF1")).toBe(true);
+    expect(isExpertAffiliate(RESTRICTED, "\tAFF1")).toBe(false);
+    expect(isExpertAffiliate(RESTRICTED, "AFF1\n")).toBe(false);
+    expect(isExpertAffiliate(RESTRICTED, "   ")).toBe(false);
   });
 
   it("restricted expert gets 'Lead não encontrado.' for another affiliate", async () => {

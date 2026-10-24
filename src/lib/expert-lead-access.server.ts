@@ -34,16 +34,22 @@ export type VisibleLead = {
 
 const NOT_FOUND = "Lead não encontrado.";
 
+/** Tira só espaços das pontas, como o `btrim(x)` do SQL (RLS e
+ * current_expert_affiliate_ids) — tab/quebra de linha não são removidos. */
+function btrimSpaces(value: string): string {
+  return value.replace(/^ +| +$/g, "");
+}
+
 /** `affiliate_id` gravado no jogador, sem espaços nas pontas (null se vazio). */
 export function normalizedAffiliateId(value: string | null | undefined): string | null {
-  const trimmed = (value ?? "").trim();
+  const trimmed = btrimSpaces(value ?? "");
   return trimmed === "" ? null : trimmed;
 }
 
 /** O affiliate_id do lead é um dos vinculados ao expert? */
 export function isExpertAffiliate(expert: ExpertContext, affiliateId: string | null | undefined) {
   const id = normalizedAffiliateId(affiliateId);
-  return id != null && expert.affiliateIds.some((a) => a.trim() === id);
+  return id != null && expert.affiliateIds.some((a) => btrimSpaces(a) === id);
 }
 
 export async function loadVisibleLead(
