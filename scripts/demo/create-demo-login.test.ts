@@ -20,15 +20,25 @@ type FakeUser = {
   banned_until?: string;
 };
 
-function makeFakeClient(opts: { tenant?: { id: string; slug: string; is_demo: boolean } | null } = {}) {
+const DEMO_GROUP_ID = "99999999-8888-4777-8666-555555555555";
+
+function makeFakeClient(
+  opts: {
+    tenant?: { id: string; slug: string; is_demo: boolean } | null;
+    groupId?: string | null;
+  } = {},
+) {
   const tenant = "tenant" in opts ? opts.tenant : { id: DEMO_TENANT_ID, slug: "demo", is_demo: true };
+  const groupId = "groupId" in opts ? opts.groupId : null;
   const users = new Map<string, FakeUser>();
   const roles: { user_id: string; tenant_id: string; role: string }[] = [];
+  const managers: { group_id: string; user_id: string }[] = [];
   let nextId = 1;
 
   const client = {
     _users: users,
     _roles: roles,
+    _managers: managers,
     from(table: string) {
       if (table === "tenants") {
         return {
@@ -54,6 +64,23 @@ function makeFakeClient(opts: { tenant?: { id: string; slug: string; is_demo: bo
               return { data: null, error: null };
             },
           }),
+        };
+      }
+      if (table === "tenant_group_tenants") {
+        return {
+          select: () => ({
+            eq: (_col: string, _value: string) => ({
+              maybeSingle: async () => ({ data: groupId ? { group_id: groupId } : null, error: null }),
+            }),
+          }),
+        };
+      }
+      if (table === "tenant_group_managers") {
+        return {
+          insert: async (row: { group_id: string; user_id: string }) => {
+            managers.push(row);
+            return { data: row, error: null };
+          },
         };
       }
       throw new Error(`unexpected table ${table}`);
@@ -154,6 +181,19 @@ describe("createDemoLogin", () => {
       expect(role.tenant_id).toBe(DEMO_TENANT_ID);
       expect(role.role).toBe("gestor");
     }
+  });
+
+  it("adds the login as a manager of the demo group when one holds the demo tenant", async () => {
+    const client = makeFakeClient({ groupId: DEMO_GROUP_ID });
+    const result = await createDemoLogin(client as never, { label: "x" });
+    expect(client._managers).toEqual([{ group_id: DEMO_GROUP_ID, user_id: result.userId }]);
+  });
+
+  it("creates the login normally when no demo group exists yet", async () => {
+    const client = makeFakeClient({ groupId: null });
+    const result = await createDemoLogin(client as never, { label: "x" });
+    expect(client._managers).toEqual([]);
+    expect(result.userId).toBeTruthy();
   });
 });
 

@@ -453,12 +453,22 @@ export const NOT_CLONED = [
   "journey_level_outbox",
   "dispatch_pause_state",
   "campaign_drafts",
+  // Task 9: invented by seedDemoFinance after REBUILT_TABLES, not cloned from
+  // the source tenant (the source's real finance data never enters the demo).
+  "tenant_finance_daily",
+  "tenant_finance_other_costs",
+  "tenant_finance_rates",
+  "tenant_finance_viewers",
+  "tenant_goals",
 ];
 
-/** Tables whose demo rows survive a reset (logins and audit trail). */
+/** Tables whose demo rows survive a reset (logins, audit trail, and the
+ * demo group's membership — seedDemoFinance only ensures it when missing,
+ * so a reset must not wipe it away first). */
 export const KEEP_ON_RESET = (table) =>
   table === "tenants" ||
   table === "user_roles" ||
+  table === "tenant_group_tenants" ||
   /audit/.test(table) ||
   /^ops_backup_/.test(table);
 

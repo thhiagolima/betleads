@@ -54,6 +54,7 @@ import {
   isTextual,
 } from "./clone-plan.mjs";
 import { collectNeedles, publicColumns, scanTenant } from "./pii-scan.mjs";
+import { seedDemoFinance } from "./seed-demo-finance.mjs";
 import { lit, rewriteFunctionsSql, setSecretSql } from "./sql-rewrite.mjs";
 import { IMAGE_BUCKET, VOICE_BUCKET, placeholderLayout, readPlaceholders } from "./storage.mjs";
 
@@ -569,6 +570,13 @@ export async function buildDemo(
     step(`rebuilt ${table} (${days.length} day(s))`);
   }
   const rebuiltTables = rebuilt.map((r) => r.table);
+
+  if (columns.has("tenant_finance_daily")) {
+    // Task 9: deterministic by demoTenantId (not the run secret), so the
+    // invented numbers stay the same across resets.
+    await seedDemoFinance(client, { demoTenantId });
+    step("demo finance seeded");
+  }
 
   const { counts, problems } = await verify(client, {
     specs,
