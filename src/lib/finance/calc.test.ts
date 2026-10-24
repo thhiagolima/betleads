@@ -143,6 +143,8 @@ describe("summarize", () => {
     const summary = summarize(days, null);
     expect(summary.pendingDays).toBe(1);
     expect(summary.ftds).toBe(3);
+    // Only the 2 complete days (10-01: 616, 10-03: 749.2); the pending 10-02 is excluded.
+    expect(summary.cashResult).toBeCloseTo(1365.2, 2);
 
     const range = { from: "2026-10-01", to: "2026-10-03" };
 
