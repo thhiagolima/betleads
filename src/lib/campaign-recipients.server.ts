@@ -244,6 +244,96 @@ export async function resolveCampaignRecipients(
   return { resolved, unresolved, duplicates, assignments };
 }
 
+/** Canonical phones (of `phones`) that already belong to a player of the tenant. */
+export async function findRegisteredPhones(
+  db: CampaignDb,
+  tenantId: string,
+  phones: readonly string[],
+  chunkSize = RESOLUTION_CHUNK_SIZE,
+): Promise<Set<string>> {
+  const registered = new Set<string>();
+  await forEachChunk(Array.from(new Set(phones)), Math.max(1, chunkSize), async (part) => {
+    const { data, error } = await db
+      .from("players")
+      .select("telefone")
+      .eq("tenant_id", tenantId)
+      .in("telefone", part);
+    if (error) throw new Error(`Falha ao verificar jogadores da lista: ${error.message}`);
+    for (const row of (data ?? []) as Array<{ telefone: string | null }>) {
+      if (row.telefone) registered.add(row.telefone);
+    }
+  });
+  return registered;
+}
+
+export type ExternalListResolution = {
+  /** Sendable numbers (canonical `+55…`), input order, no duplicates. */
+  phones: string[];
+  unresolved: UnresolvedRecipient[];
+  duplicates: number;
+};
+
+/**
+ * Recipients of an SMS campaign to an external phone list. Nothing is written:
+ * a number that already belongs to a player is left out (`ja_jogador`, the list
+ * is for people who have not registered), an invalid one is reported, and an
+ * explicitly revoked SMS consent is honored like in player campaigns.
+ */
+export async function resolveExternalListRecipients(
+  db: CampaignDb,
+  tenantId: string,
+  rawPhones: readonly string[],
+  options: { chunkSize?: number } = {},
+): Promise<ExternalListResolution> {
+  const chunkSize = Math.max(1, options.chunkSize ?? RESOLUTION_CHUNK_SIZE);
+  const unresolved: UnresolvedRecipient[] = [];
+  const seen = new Set<string>();
+  const valid: string[] = [];
+  let duplicates = 0;
+  for (const raw of rawPhones) {
+    const phone = campaignPhoneKey(raw);
+    if (!phone) {
+      unresolved.push({
+        phone: String(raw ?? "")
+          .trim()
+          .slice(0, 40),
+        reason: "telefone_invalido",
+      });
+      continue;
+    }
+    if (seen.has(phone)) {
+      duplicates++;
+      continue;
+    }
+    seen.add(phone);
+    valid.push(phone);
+  }
+
+  const registered = await findRegisteredPhones(db, tenantId, valid, chunkSize);
+  const revoked = new Set<string>();
+  const subjects = valid.filter((p) => !registered.has(p)).map(smsConsentSubject);
+  await forEachChunk(subjects, chunkSize, async (part) => {
+    const { data, error } = await db
+      .from("channel_consents")
+      .select("subject")
+      .eq("tenant_id", tenantId)
+      .eq("channel", "sms")
+      .eq("status", "revoked")
+      .in("subject", part);
+    if (error) throw new Error(`Falha ao validar consentimento da campanha: ${error.message}`);
+    for (const row of (data ?? []) as Array<{ subject: string }>) revoked.add(row.subject);
+  });
+
+  const phones: string[] = [];
+  for (const phone of valid) {
+    if (registered.has(phone)) unresolved.push({ phone, reason: "ja_jogador" });
+    else if (revoked.has(smsConsentSubject(phone)))
+      unresolved.push({ phone, reason: "sem_consentimento" });
+    else phones.push(phone);
+  }
+  return { phones, unresolved, duplicates };
+}
+
 /** Column/relation not deployed yet (code may ship before the migration). */
 export function isMissingColumnError(error: { code?: string; message?: string } | null) {
   if (!error) return false;

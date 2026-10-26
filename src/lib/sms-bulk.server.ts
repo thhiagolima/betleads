@@ -82,7 +82,12 @@ export type SmsBatchItem = {
   linkTrackingEnabled?: boolean;
   linkTrackingOrigin?: Pick<
     LinkTrackingContext,
-    "sourceType" | "sourceId" | "journeyStepId" | "journeyStepPosition" | "shortDomainId"
+    | "sourceType"
+    | "sourceId"
+    | "journeyStepId"
+    | "journeyStepPosition"
+    | "shortDomainId"
+    | "recipientHash"
   >;
 };
 
@@ -781,6 +786,7 @@ export async function sendSmsBatch(items: SmsBatchItem[]): Promise<SmsBatchResul
         journeyStepPosition: c.item.linkTrackingOrigin?.journeyStepPosition ?? null,
         shortDomainId: c.item.linkTrackingOrigin?.shortDomainId ?? null,
         recipientPlayerId: c.item.playerId,
+        recipientHash: c.item.linkTrackingOrigin?.recipientHash ?? null,
         messageLogType: "sms_send_logs",
         messageLogId: logIds[k],
         deliveryKey: c.item.deliveryKey,

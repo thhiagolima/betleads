@@ -5,13 +5,14 @@ import { normalizeBrazilianPhone } from "./phone-normalization";
 
 /** Why a campaign recipient will not receive the message. */
 export type UnresolvedReason =
-  "sem_cadastro" | "telefone_invalido" | "sem_consentimento" | "grupo_controle";
+  "sem_cadastro" | "telefone_invalido" | "sem_consentimento" | "grupo_controle" | "ja_jogador";
 
 export const UNRESOLVED_REASONS: readonly UnresolvedReason[] = [
   "sem_cadastro",
   "telefone_invalido",
   "sem_consentimento",
   "grupo_controle",
+  "ja_jogador",
 ] as const;
 
 export const UNRESOLVED_REASON_LABEL: Record<UnresolvedReason, string> = {
@@ -19,6 +20,7 @@ export const UNRESOLVED_REASON_LABEL: Record<UnresolvedReason, string> = {
   telefone_invalido: "Telefone inválido",
   sem_consentimento: "Sem consentimento",
   grupo_controle: "Grupo de controle",
+  ja_jogador: "Já é jogador",
 };
 
 export const UNRESOLVED_REASON_HINT: Record<UnresolvedReason, string> = {
@@ -27,6 +29,8 @@ export const UNRESOLVED_REASON_HINT: Record<UnresolvedReason, string> = {
   sem_consentimento: "O destinatário revogou o consentimento para SMS.",
   grupo_controle:
     "O jogador está no grupo de controle de uma jornada e não recebe campanhas em massa enquanto o teste estiver aberto.",
+  ja_jogador:
+    "O número já pertence a um jogador desta casa. Campanhas para lista de números só vão para quem ainda não se cadastrou.",
 };
 
 export type UnresolvedRecipient = { phone: string; reason: UnresolvedReason };
@@ -70,6 +74,7 @@ export function countUnresolvedByReason(
     telefone_invalido: 0,
     sem_consentimento: 0,
     grupo_controle: 0,
+    ja_jogador: 0,
   };
   for (const item of unresolved) counts[item.reason] += 1;
   return counts;
