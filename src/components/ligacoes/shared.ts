@@ -59,11 +59,17 @@ export function buildVariablesClient(lead: LeadLite): Record<string, string> {
     nome: safe(lead.nome, "amigo"),
     telefone: safe(lead.telefone, ""),
     saldo: brl(lead.saldo_carteira ?? 0),
-    ultimo_login: lead.ultimo_login ? new Date(lead.ultimo_login).toLocaleDateString("pt-BR") : "há algum tempo",
+    ultimo_login: lead.ultimo_login
+      ? new Date(lead.ultimo_login).toLocaleDateString("pt-BR")
+      : "há algum tempo",
     dias_sem_login: dl == null ? "alguns dias" : String(dl),
-    ultimo_jogo: lead.ultimo_jogo ? new Date(lead.ultimo_jogo).toLocaleDateString("pt-BR") : "há algum tempo",
+    ultimo_jogo: lead.ultimo_jogo
+      ? new Date(lead.ultimo_jogo).toLocaleDateString("pt-BR")
+      : "há algum tempo",
     dias_sem_jogar: dj == null ? "alguns dias" : String(dj),
-    ultimo_deposito: lead.ultimo_deposito ? new Date(lead.ultimo_deposito).toLocaleDateString("pt-BR") : "há algum tempo",
+    ultimo_deposito: lead.ultimo_deposito
+      ? new Date(lead.ultimo_deposito).toLocaleDateString("pt-BR")
+      : "há algum tempo",
     dias_sem_depositar: dd == null ? "alguns dias" : String(dd),
     total_depositado: brl(lead.total_depositado ?? 0),
     categoria: lead.vip ? "VIP" : safe(lead.risco, "regular"),
@@ -91,7 +97,7 @@ export const SCRIPT_VARIABLES: { key: string; label: string }[] = [
   { key: "dias_sem_depositar", label: "Dias sem depositar" },
   { key: "total_depositado", label: "Total depositado" },
   { key: "categoria", label: "Categoria (VIP/Regular)" },
-  { key: "status_lead", label: "Status do lead" },
+  { key: "status_lead", label: "Status do jogador" },
   { key: "nome_expert", label: "Nome do expert" },
   { key: "link_deposito", label: "Link de depósito" },
   { key: "cashback_valor", label: "Cashback (R$)" },
@@ -142,11 +148,11 @@ export const HISTORY_STATUS_LABEL: Record<string, string> = {
 
 // Gatilhos oficiais BETLEADS (chave salva no banco -> label exibido)
 export const TRIGGER_OPTIONS: { value: string; label: string }[] = [
-  { value: "lead_cadastrado", label: "Lead cadastrado" },
+  { value: "lead_cadastrado", label: "Jogador cadastrado" },
   { value: "dinheiro_parado", label: "Dinheiro parado" },
   { value: "recuperacao_vip", label: "Recuperação VIP" },
   { value: "frequencia_de_queda", label: "Frequência de queda" },
-  { value: "lead_quente_esfriando", label: "Lead quente esfriando" },
+  { value: "lead_quente_esfriando", label: "Jogador quente esfriando" },
   { value: "receita_em_queda", label: "Receita em queda" },
   { value: "vip_esfriando", label: "VIP esfriando" },
   { value: "quase_vip", label: "Quase VIP" },

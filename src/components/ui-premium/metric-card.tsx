@@ -1,83 +1,48 @@
-import { ReactNode } from "react";
+import type { ReactNode } from "react";
+
 import { cn } from "@/lib/utils";
-import { TrendingUp, TrendingDown } from "lucide-react";
 
 interface MetricCardProps {
   label: string;
   value: ReactNode;
+  /** @deprecated Decorative icons are gone in the redesign; ignored. */
   icon?: ReactNode;
+  /**
+   * Change vs. the previous period. `positive` says whether the change is GOOD
+   * (not whether the number went up): it only picks the colour.
+   */
   delta?: { value: string; positive?: boolean };
   hint?: string;
+  /** @deprecated Kept for call sites; the card no longer has an accent colour. */
   accent?: "primary" | "success" | "warning" | "danger" | "ai";
   className?: string;
   children?: ReactNode;
 }
 
-const accentClasses: Record<NonNullable<MetricCardProps["accent"]>, string> = {
-  primary: "from-primary/15 to-primary/5 text-primary",
-  success: "from-emerald-500/15 to-emerald-500/5 text-emerald-400",
-  warning: "from-amber-500/15 to-amber-500/5 text-amber-400",
-  danger: "from-rose-500/15 to-rose-500/5 text-rose-400",
-  ai: "from-violet-500/15 to-violet-500/5 text-violet-400",
-};
-
-export function MetricCard({
-  label,
-  value,
-  icon,
-  delta,
-  hint,
-  accent = "primary",
-  className,
-  children,
-}: MetricCardProps) {
+/** Same look as the Início KPI card: 12.5px label, 28px number, 12px detail. */
+export function MetricCard({ label, value, delta, hint, className, children }: MetricCardProps) {
   return (
-    <div
+    <section
       className={cn(
-        "card-premium group relative flex min-h-[132px] flex-col overflow-hidden rounded-xl p-4 sm:p-5",
+        "flex flex-col rounded-2xl border border-border bg-card/80 p-4 sm:p-5",
         className,
       )}
     >
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-xs font-medium text-muted-foreground">{label}</p>
-          <div className="mt-2.5 text-2xl font-semibold tracking-[-0.03em] text-foreground tabular-nums sm:text-[1.75rem]">
-            {value}
-          </div>
-        </div>
-        {icon && (
-          <div
-            className={cn(
-              "flex size-9 shrink-0 items-center justify-center rounded-lg border border-border/50 bg-gradient-to-br transition-transform duration-200 group-hover:scale-105",
-              accentClasses[accent],
-            )}
-          >
-            {icon}
-          </div>
-        )}
+      <h3 className="truncate text-label font-normal text-muted-foreground">{label}</h3>
+      <div className="mt-1.5 text-2xl font-semibold tracking-[-0.03em] tabular-nums sm:text-kpi">
+        {value}
       </div>
       {(delta || hint) && (
-        <div className="mt-auto flex min-h-5 items-center gap-2 pt-3 text-xs text-muted-foreground">
+        <p className="mt-2 flex flex-wrap gap-x-1.5 text-meta text-muted-foreground">
           {delta && (
-            <span
-              className={cn(
-                "inline-flex items-center gap-1 font-medium",
-                delta.positive ? "text-emerald-400" : "text-rose-400",
-              )}
-            >
-              {delta.positive ? (
-                <TrendingUp className="h-3 w-3" />
-              ) : (
-                <TrendingDown className="h-3 w-3" />
-              )}
+            <span className={cn("font-semibold", delta.positive ? "text-success" : "text-danger")}>
               {delta.value}
             </span>
           )}
           {hint && <span>{hint}</span>}
-        </div>
+        </p>
       )}
       {children && <div className="mt-3">{children}</div>}
-    </div>
+    </section>
   );
 }

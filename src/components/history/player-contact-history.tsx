@@ -7,22 +7,16 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { MessageSquare, Mail, Phone, MessageCircle } from "lucide-react";
 import { getPlayerContactHistory, type ChannelKey } from "@/lib/history.functions";
+import { IdentityIcon } from "@/components/identity/identity-badge";
+import { CHANNEL_IDENTITY, CHANNEL_LABEL, type ChannelKind } from "@/components/identity/identity";
 import { StatusBadge } from "./status-badge";
 
-const ICONS: Record<ChannelKey, React.ReactNode> = {
-  whatsapp: <MessageCircle className="h-3.5 w-3.5 text-emerald-400" />,
-  sms: <MessageSquare className="h-3.5 w-3.5 text-sky-400" />,
-  email: <Mail className="h-3.5 w-3.5 text-amber-400" />,
-  calls: <Phone className="h-3.5 w-3.5 text-violet-400" />,
-};
-
-const LABEL: Record<ChannelKey, string> = {
-  whatsapp: "WhatsApp",
-  sms: "SMS",
-  email: "Email",
-  calls: "Ligação",
+const KIND: Record<ChannelKey, ChannelKind> = {
+  whatsapp: "whatsapp",
+  sms: "sms",
+  email: "email",
+  calls: "voice",
 };
 
 export function PlayerContactHistoryDialog({
@@ -50,7 +44,9 @@ export function PlayerContactHistoryDialog({
         <DialogHeader>
           <DialogTitle>Histórico de contatos</DialogTitle>
           <DialogDescription>
-            {playerName ? `Tudo que já foi enviado para ${playerName}.` : "Tudo que já foi enviado para esse lead."}
+            {playerName
+              ? `Tudo que já foi enviado para ${playerName}.`
+              : "Tudo que já foi enviado para esse lead."}
           </DialogDescription>
         </DialogHeader>
         {q.isLoading ? (
@@ -66,24 +62,20 @@ export function PlayerContactHistoryDialog({
                 key={i}
                 className="flex items-start gap-3 rounded-md border border-white/5 bg-muted/30 p-3"
               >
-                <div className="mt-0.5">{ICONS[it.channel]}</div>
+                <IdentityIcon tone={CHANNEL_IDENTITY[KIND[it.channel]]} size="sm" />
                 <div className="flex-1 min-w-0">
                   <div className="flex flex-wrap items-center gap-2 text-xs">
-                    <span className="font-medium">{LABEL[it.channel]}</span>
+                    <span className={`font-medium ${CHANNEL_IDENTITY[KIND[it.channel]].text}`}>
+                      {CHANNEL_LABEL[KIND[it.channel]]}
+                    </span>
                     <span className="text-muted-foreground">
                       {new Date(it.at).toLocaleString("pt-BR")}
                     </span>
                     <StatusBadge color={it.status_color} label={it.status_label} />
-                    {it.flow && (
-                      <span className="text-muted-foreground">· {it.flow}</span>
-                    )}
-                    {it.step && (
-                      <span className="text-muted-foreground">· {it.step}</span>
-                    )}
+                    {it.flow && <span className="text-muted-foreground">· {it.flow}</span>}
+                    {it.step && <span className="text-muted-foreground">· {it.step}</span>}
                   </div>
-                  <p className="mt-1 text-xs text-muted-foreground line-clamp-2">
-                    {it.preview}
-                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground line-clamp-2">{it.preview}</p>
                 </div>
               </li>
             ))}

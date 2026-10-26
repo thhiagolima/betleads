@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
+import { tenantReads } from "@/lib/active-tenant-filter";
 
 const ChannelSchema = z.enum(["sms", "email", "call"]);
 export type DispatchChannel = z.infer<typeof ChannelSchema>;
@@ -15,7 +16,8 @@ export type PauseRow = {
 export const getDispatchPauseState = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<Record<DispatchChannel, PauseRow>> => {
-    const { data, error } = await context.supabase
+    const reads = await tenantReads(context.supabase);
+    const { data, error } = await reads
       .from("dispatch_pause_state")
       .select("channel,paused,paused_at,reason");
     if (error) throw error;

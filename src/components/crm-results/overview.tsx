@@ -1,4 +1,5 @@
 import { AlertTriangle, ChevronRight, Clock, TrendingUp } from "lucide-react";
+import { useState } from "react";
 import {
   Bar,
   CartesianGrid,
@@ -14,6 +15,13 @@ import {
 import { buildRecommendations } from "@/lib/crm-recommendations";
 import type { CrmSource } from "@/lib/crm-results";
 import { brl, num } from "@/lib/format";
+import {
+  CHART_COLORS,
+  chartAxisProps,
+  chartGridProps,
+  chartLegendProps,
+  chartTooltipProps,
+} from "@/lib/chart-theme";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { RecommendationList } from "./recommendations";
@@ -25,19 +33,18 @@ import { Delta, EmptyCard, InfoTip, Kpi } from "./shared";
 export function Overview({
   data,
   onOpenOrigin,
-  onOpenRecommendations,
 }: {
   data: Data;
   onOpenOrigin: (name: string) => void;
-  onOpenRecommendations: () => void;
 }) {
+  const [showAllRecommendations, setShowAllRecommendations] = useState(false);
   const { totals } = data;
   const previous = data.previous.totals;
   if (totals.sent === 0 && totals.directPlayers === 0 && totals.influencedPlayers === 0)
     return (
       <EmptyCard>
         Nenhum envio de jornada ou campanha neste período. Os resultados aparecem até 10 minutos
-        depois dos primeiros envios. Retenção e aquisição continuam na aba “Base de jogadores”.
+        depois dos primeiros envios. Retenção e cadastros ficam em Aquisição e LTV, aba “Retenção”.
       </EmptyCard>
     );
 
@@ -64,8 +71,8 @@ export function Overview({
       <section aria-labelledby="click-title" className="space-y-3">
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div>
-            <h2 id="click-title" className="flex items-center gap-1.5 text-base font-semibold">
-              Conversão por clique
+            <h2 id="click-title" className="flex items-center gap-1.5 text-section">
+              Recuperado pelo CRM
               <InfoTip text="Jogadores que não depositavam havia 2+ dias (ou nunca depositaram), clicaram no link do SMS e depositaram em até 7 dias. Quem já estava ativo ia depositar de qualquer jeito e fica fora da conta. Conta jogadores, não depósitos: quem deposita 3 vezes conta 1, no dia do primeiro depósito. A taxa compara os cliques do período com quantos deles converteram." />
             </h2>
             <p className="text-sm text-muted-foreground">
@@ -81,7 +88,7 @@ export function Overview({
           )}
         </div>
 
-        <Card className="border-emerald-500/40 bg-emerald-500/[0.06]">
+        <Card className="border-success/40 bg-success/[0.06]">
           <CardContent className="flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:justify-between">
             <ol
               className="flex flex-wrap items-center gap-x-3 gap-y-2"
@@ -94,18 +101,16 @@ export function Overview({
                   )}
                   <div>
                     <p className="text-xs text-muted-foreground">{step.label}</p>
-                    <p className="text-xl font-semibold tabular-nums">{step.value}</p>
+                    <p className="text-kpi-sm tabular-nums">{step.value}</p>
                     {step.rate && <p className="text-xs text-muted-foreground">{step.rate}</p>}
                   </div>
                 </li>
               ))}
             </ol>
             <div className="lg:text-right">
-              <p className="text-sm text-muted-foreground">Valor convertido</p>
+              <p className="text-label text-muted-foreground">Valor recuperado pelo CRM</p>
               <div className="flex items-baseline gap-2 lg:justify-end">
-                <p className="text-3xl font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
-                  {brl(totals.directRevenue)}
-                </p>
+                <p className="text-kpi tabular-nums text-success">{brl(totals.directRevenue)}</p>
                 <Delta current={totals.directRevenue} previous={previous?.directRevenue} />
               </div>
             </div>
@@ -135,7 +140,7 @@ export function Overview({
           <Kpi
             label="Retorno"
             value={ratio(totals.clickRoi)}
-            detail="valor convertido ÷ custo"
+            detail="recuperado pelo CRM ÷ custo"
             delta={<Delta current={totals.clickRoi} previous={previous?.clickRoi} />}
           />
         </div>
@@ -160,12 +165,12 @@ export function Overview({
         <CardContent className="flex flex-col gap-3 p-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="space-y-0.5">
             <p className="flex items-center gap-1.5 text-sm font-medium">
-              Visão ampla: jogadores recuperados
+              Recuperados (visão ampla)
               <InfoTip text="Retornos, não pessoas: quem parou e voltou duas vezes no período conta duas. O valor é só o depósito de retorno. Voltar depois do SMS não prova que foi por causa dele; o efeito real está no Teste de controle." />
             </p>
             <p className="text-xs text-muted-foreground">
               Parados há 2+ dias que voltaram a depositar até 3 dias depois de um SMS, com ou sem
-              clique. Inclui boa parte das conversões por clique: não some os dois.
+              clique. Inclui boa parte do Recuperado pelo CRM: não some os dois.
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap gap-6 tabular-nums">
@@ -176,7 +181,7 @@ export function Overview({
               [ratio(totals.roi), "retorno"],
             ].map(([value, label]) => (
               <div key={label}>
-                <p className="text-lg font-semibold">{value}</p>
+                <p className="text-kpi-sm">{value}</p>
                 <p className="text-xs text-muted-foreground">{label}</p>
               </div>
             ))}
@@ -192,15 +197,22 @@ export function Overview({
       {recommendations.length > 0 && (
         <Card>
           <CardHeader className="flex-row items-center justify-between space-y-0">
-            <CardTitle className="text-base">O que fazer agora</CardTitle>
+            <CardTitle>O que fazer agora</CardTitle>
             {recommendations.length > 3 && (
-              <Button size="sm" variant="ghost" onClick={onOpenRecommendations}>
-                Ver todas ({recommendations.length})
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-expanded={showAllRecommendations}
+                onClick={() => setShowAllRecommendations((value) => !value)}
+              >
+                {showAllRecommendations ? "Ver menos" : `Ver todas (${recommendations.length})`}
               </Button>
             )}
           </CardHeader>
           <CardContent>
-            <RecommendationList items={recommendations.slice(0, 3)} />
+            <RecommendationList
+              items={showAllRecommendations ? recommendations : recommendations.slice(0, 3)}
+            />
           </CardContent>
         </Card>
       )}
@@ -225,40 +237,40 @@ function DailyChart({ data }: { data: Data }) {
   }));
   const names: Record<string, string> = {
     cost: "Custo em SMS",
-    converted: "Conversão por clique",
-    recovered: "Recuperado (visão ampla)",
+    converted: "Recuperado pelo CRM",
+    recovered: "Recuperados (visão ampla)",
   };
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Custo × conversão por dia</CardTitle>
-        <CardDescription>Valor convertido pelo dia do depósito.</CardDescription>
+        <CardTitle>Custo × recuperado pelo CRM por dia</CardTitle>
+        <CardDescription>Recuperado pelo CRM pelo dia do depósito.</CardDescription>
       </CardHeader>
       <CardContent className="h-72">
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart data={points}>
-            <CartesianGrid strokeOpacity={0.15} vertical={false} />
-            <XAxis dataKey="label" fontSize={12} tickLine={false} axisLine={false} />
-            <YAxis
-              fontSize={12}
-              tickLine={false}
-              axisLine={false}
-              width={80}
-              tickFormatter={(value) => brl(Number(value))}
-            />
+            <CartesianGrid {...chartGridProps} />
+            <XAxis dataKey="label" {...chartAxisProps} />
+            <YAxis {...chartAxisProps} width={80} tickFormatter={(value) => brl(Number(value))} />
             <Tooltip
+              {...chartTooltipProps}
               formatter={(value: number, name: string) => [brl(Number(value)), names[name] ?? name]}
             />
-            <Legend formatter={(name: string) => names[name] ?? name} />
-            <Bar dataKey="cost" fill="oklch(0.75 0.15 75 / 0.6)" radius={[4, 4, 0, 0]} />
+            <Legend {...chartLegendProps} formatter={(name: string) => names[name] ?? name} />
+            <Bar
+              dataKey="cost"
+              fill={CHART_COLORS.warning}
+              fillOpacity={0.6}
+              radius={[4, 4, 0, 0]}
+            />
             <Line
               dataKey="recovered"
-              stroke="oklch(0.6 0.03 260)"
+              stroke={CHART_COLORS.muted}
               strokeWidth={1.5}
               strokeDasharray="2 3"
               dot={false}
             />
-            <Line dataKey="converted" stroke="oklch(0.72 0.18 150)" strokeWidth={3} dot={false} />
+            <Line dataKey="converted" stroke={CHART_COLORS.success} strokeWidth={3} dot={false} />
           </ComposedChart>
         </ResponsiveContainer>
       </CardContent>
@@ -278,12 +290,12 @@ function Highlights({ data, onOpenOrigin }: { data: Data; onOpenOrigin: (name: s
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Destaques do período</CardTitle>
+        <CardTitle>Destaques do período</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
         {best ? (
           <p className="flex gap-2">
-            <TrendingUp className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" aria-hidden="true" />
+            <TrendingUp className="mt-0.5 h-4 w-4 shrink-0 text-success" aria-hidden="true" />
             <span>
               <button type="button" className={linkClass} onClick={() => onOpenOrigin(best.name)}>
                 {best.name}
@@ -299,7 +311,7 @@ function Highlights({ data, onOpenOrigin }: { data: Data; onOpenOrigin: (name: s
         )}
         {waste.length > 0 && (
           <p className="flex gap-2">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" aria-hidden="true" />
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
             <span>
               {waste.length === 1 ? (
                 <>
@@ -322,7 +334,7 @@ function Highlights({ data, onOpenOrigin }: { data: Data; onOpenOrigin: (name: s
         )}
         {activeShare != null && activeShare > 0.2 && (
           <p className="flex gap-2">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" aria-hidden="true" />
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
             <span>
               {pct(activeShare)} do custo ({brl(totals.costOnActive)}) foi para jogadores que já
               estavam ativos (depositaram há menos de 2 dias).

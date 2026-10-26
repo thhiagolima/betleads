@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { refundForDelivery, reserveForDelivery } from "./billing/wallet.server";
 import { requireBrazilianPhone } from "./phone-normalization";
 import { transportErrorKind, type ProviderErrorKind } from "./rate-limit/transport-errors";
 import { assertTenantNotDemoForSend } from "./tenant-access.server";
@@ -20,7 +21,34 @@ export type InfobipVoiceResult = {
   alreadySent?: boolean;
   /** Set when there is no provider response (B1): whether the call may exist. */
   errorKind?: ProviderErrorKind | null;
+  /**
+   * PG3 — the wallet reservation made for this call (`voice:<key>[:gen]`).
+   * Present whenever blocks were reserved, also on a failure (then already
+   * refunded). Callers persist `referenceId` in call_history.billing_reference_id.
+   */
+  billing?: { referenceId: string; units: number };
 };
+
+/** Default cap (seconds) of a call without a known audio/flow limit. */
+const DEFAULT_VOICE_MAX_CALL_SECONDS = 120;
+
+function positiveSeconds(value: unknown): number | null {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * Voice blocks reserved before dialing (PG3 spec, decision 2):
+ * `ceil((maxSeconds + 10) / 30)`. A missing or invalid cap falls back to
+ * `VOICE_MAX_CALL_SECONDS`, then to 120 s.
+ */
+export function voiceReservationUnits(maxSeconds?: number | null): number {
+  const seconds =
+    positiveSeconds(maxSeconds) ??
+    positiveSeconds(process.env.VOICE_MAX_CALL_SECONDS) ??
+    DEFAULT_VOICE_MAX_CALL_SECONDS;
+  return Math.ceil((seconds + 10) / 30);
+}
 
 export type InfobipVoiceOptions = {
   /**
@@ -30,6 +58,12 @@ export type InfobipVoiceOptions = {
    */
   idempotencyKey?: string | null;
   tenantId: string;
+  /**
+   * Longest expected call, in seconds: the audio duration (journeys) or the
+   * block's `max_call_seconds` (call flows). Sizes the wallet reservation;
+   * defaults to `VOICE_MAX_CALL_SECONDS` (120).
+   */
+  maxSeconds?: number | null;
 };
 
 export type InfobipVoiceContent =
@@ -133,6 +167,55 @@ export async function callInfobipVoice(
   // unknown or missing tenant never reaches Infobip. Checked here rather than
   // only in the top-level dispatcher so this also covers every call site.
   await assertTenantNotDemoForSend(options.tenantId);
+  // PG3: reserve the call's blocks from the house's wallet only after the
+  // guard (a demo or locked house never reserves) and before dialing. The
+  // delivery key is the caller's idempotency key, else the fresh uuid above,
+  // so a retry of a refunded attempt moves to the next generation. Any error
+  // other than "no balance" propagates (the call is not placed).
+  const units = voiceReservationUnits(options.maxSeconds);
+  const reservation = await reserveForDelivery(supabaseAdmin, {
+    tenantId: options.tenantId,
+    item: "voice_30s",
+    prefix: "voice",
+    deliveryKey: idempotencyKey,
+    units,
+    referenceType: "voice_call",
+  });
+  if (!reservation.ok) {
+    return {
+      ok: false,
+      status: 0,
+      body: { error: reservation.reason },
+      idempotencyKey,
+      providerCallId: null,
+      // The HOUSE's wallet refused: never dialed, never a global pause.
+      errorKind: "insufficient_balance",
+    };
+  }
+  const billing = { referenceId: reservation.referenceId, units };
+  const result = await placeCall(baseUrl, apiKey, from, to, callback, notifyUrl, idempotencyKey);
+  // Refund on ANY failure, including a timeout that may have placed the call
+  // (PG3 spec, decision 5 — same as SMS).
+  if (!result.ok) {
+    await refundForDelivery(supabaseAdmin, {
+      tenantId: options.tenantId,
+      referenceId: reservation.referenceId,
+      prefix: "voice",
+      reason: `infobip_voice_${result.status || result.errorKind || "error"}`,
+    });
+  }
+  return { ...result, billing };
+}
+
+async function placeCall(
+  baseUrl: string,
+  apiKey: string,
+  from: string,
+  to: string,
+  callback: string,
+  notifyUrl: string,
+  idempotencyKey: string,
+): Promise<InfobipVoiceResult> {
   try {
     const response = await fetch(`${baseUrl}/markuplanguage/1/create`, {
       method: "POST",

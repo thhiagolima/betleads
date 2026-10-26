@@ -1,6 +1,8 @@
 import { Info } from "lucide-react";
 
+import { cn } from "@/lib/utils";
 import { ratio } from "./format";
+import { PERIODS, type PeriodKey } from "./search";
 
 const decimal = (value: number, digits: number) =>
   value.toLocaleString("pt-BR", { minimumFractionDigits: digits, maximumFractionDigits: digits });
@@ -22,7 +24,7 @@ export function InfoTip({ text }: { text: string }) {
             <Info className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
         </TooltipTrigger>
-        <TooltipContent className="max-w-xs text-xs">{text}</TooltipContent>
+        <TooltipContent className="max-w-xs text-meta">{text}</TooltipContent>
       </Tooltip>
     </TooltipProvider>
   );
@@ -48,11 +50,7 @@ export function Delta({
   return (
     <span
       className={`text-xs font-medium ${
-        Math.abs(change) < 0.005
-          ? "text-muted-foreground"
-          : good
-            ? "text-emerald-600 dark:text-emerald-400"
-            : "text-red-600 dark:text-red-400"
+        Math.abs(change) < 0.005 ? "text-muted-foreground" : good ? "text-success" : "text-danger"
       }`}
     >
       {change >= 0 ? "▲" : "▼"} {decimal(Math.abs(change) * 100, 0)}%
@@ -77,12 +75,12 @@ export function Kpi({
   return (
     <Card>
       <CardContent className="space-y-1 p-4">
-        <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
+        <p className="flex items-center gap-1.5 text-label text-muted-foreground">
           {label}
           {info && <InfoTip text={info} />}
         </p>
         <div className="flex items-baseline gap-2">
-          <p className="text-2xl font-semibold tabular-nums">{value}</p>
+          <p className="text-kpi tabular-nums">{value}</p>
           {delta}
         </div>
         {detail && <p className="text-xs text-muted-foreground">{detail}</p>}
@@ -94,7 +92,7 @@ export function Kpi({
 /** Marks a card whose numbers do not follow the period filter (A-03). */
 export function NotPeriodBadge() {
   return (
-    <span className="ml-2 rounded-full border px-2 py-0.5 align-middle text-[10px] font-normal text-muted-foreground">
+    <span className="ml-2 rounded-full border px-2 py-0.5 align-middle text-meta font-normal text-muted-foreground">
       não muda com o período
     </span>
   );
@@ -107,17 +105,11 @@ export function RoiValue({ roi, smallSample }: { roi: number | null; smallSample
     return (
       <span className="text-muted-foreground" title="Menos de 5 jogadores convertidos">
         {ratio(roi)}
-        <span className="block text-[10px]">amostra pequena</span>
+        <span className="block text-meta">amostra pequena</span>
       </span>
     );
   return (
-    <span
-      className={`font-medium ${
-        roi >= 1 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"
-      }`}
-    >
-      {ratio(roi)}
-    </span>
+    <span className={`font-medium ${roi >= 1 ? "text-success" : "text-danger"}`}>{ratio(roi)}</span>
   );
 }
 
@@ -126,5 +118,39 @@ export function EmptyCard({ children }: { children: React.ReactNode }) {
     <Card>
       <CardContent className="p-6 text-sm text-muted-foreground">{children}</CardContent>
     </Card>
+  );
+}
+
+/** Hoje / Ontem / 7 / 30 / 90 dias, with the Início period picker look. */
+export function CentralPeriodPicker({
+  value,
+  onChange,
+}: {
+  value: PeriodKey;
+  onChange: (value: PeriodKey) => void;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label="Período"
+      className="flex w-fit max-w-full gap-0.5 overflow-x-auto rounded-xl border border-border bg-card p-[3px] [scrollbar-width:none]"
+    >
+      {PERIODS.map((item) => (
+        <button
+          key={item.key}
+          type="button"
+          aria-pressed={value === item.key}
+          onClick={() => onChange(item.key)}
+          className={cn(
+            "h-9 shrink-0 whitespace-nowrap rounded-lg px-3 text-[13px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+            value === item.key
+              ? "bg-secondary text-foreground"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {item.label}
+        </button>
+      ))}
+    </div>
   );
 }

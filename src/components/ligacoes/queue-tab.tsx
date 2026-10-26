@@ -2,13 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { ListOrdered, Loader2, Pause, Phone, Play, RefreshCw, X } from "lucide-react";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -103,9 +97,7 @@ export function QueueTab() {
               <ListOrdered className="h-5 w-5 text-primary" />
               Fila de ligações
             </CardTitle>
-            <CardDescription>
-              Itens preparados aguardando disponibilidade do canal.
-            </CardDescription>
+            <CardDescription>Itens preparados aguardando disponibilidade do canal.</CardDescription>
           </div>
           <Button
             size="sm"
@@ -127,9 +119,7 @@ export function QueueTab() {
         {isLoading ? (
           <p className="py-8 text-center text-sm text-muted-foreground">Carregando...</p>
         ) : items.length === 0 ? (
-          <p className="py-12 text-center text-sm text-muted-foreground">
-            Nenhum item na fila.
-          </p>
+          <p className="py-12 text-center text-sm text-muted-foreground">Nenhum item na fila.</p>
         ) : (
           <Table>
             <TableHeader>
@@ -145,9 +135,7 @@ export function QueueTab() {
               {items.map((it: any) => (
                 <TableRow key={it.id}>
                   <TableCell>
-                    <Badge variant="outline">
-                      {QUEUE_STATUS_LABEL[it.status] ?? it.status}
-                    </Badge>
+                    <Badge variant="outline">{QUEUE_STATUS_LABEL[it.status] ?? it.status}</Badge>
                   </TableCell>
                   <TableCell className="text-xs">{it.phone_number ?? "—"}</TableCell>
                   <TableCell>
@@ -168,6 +156,7 @@ export function QueueTab() {
                         onClick={() => dispatchMut.mutate(it.id)}
                         disabled={dispatchMut.isPending}
                         title="Disparar agora"
+                        aria-label="Disparar agora"
                       >
                         <Phone className="h-4 w-4 text-primary" />
                       </Button>
@@ -176,10 +165,9 @@ export function QueueTab() {
                       <Button
                         size="icon"
                         variant="ghost"
-                        onClick={() =>
-                          statusMut.mutate({ id: it.id, status: "audio_ready" })
-                        }
+                        onClick={() => statusMut.mutate({ id: it.id, status: "audio_ready" })}
                         title="Retomar"
+                        aria-label="Retomar"
                       >
                         <Play className="h-4 w-4" />
                       </Button>
@@ -187,10 +175,9 @@ export function QueueTab() {
                       <Button
                         size="icon"
                         variant="ghost"
-                        onClick={() =>
-                          statusMut.mutate({ id: it.id, status: "paused" })
-                        }
+                        onClick={() => statusMut.mutate({ id: it.id, status: "paused" })}
                         title="Pausar"
+                        aria-label="Pausar"
                         disabled={["cancelled", "completed", "failed"].includes(it.status)}
                       >
                         <Pause className="h-4 w-4" />
@@ -202,6 +189,7 @@ export function QueueTab() {
                       onClick={() => cancelMut.mutate(it.id)}
                       disabled={["cancelled", "completed"].includes(it.status)}
                       title="Cancelar"
+                      aria-label="Cancelar"
                     >
                       <X className="h-4 w-4 text-destructive" />
                     </Button>

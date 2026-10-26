@@ -33,17 +33,24 @@ export function AIFeedback({ aiLogId, pergunta, respostaSummary }: Props) {
     setSaving(true);
     try {
       await supabase.from("ai_feedback").insert({
-        ai_log_id: aiLogId, rating: "bad", motivo: motivo || null,
+        ai_log_id: aiLogId,
+        rating: "bad",
+        motivo: motivo || null,
       });
       if (respostaIdeal.trim()) {
         await supabase.from("ai_training_examples").insert({
-          pergunta, resposta_ideal: respostaIdeal.trim(),
-          fonte: "feedback", ai_log_id: aiLogId, ativo: false,
+          pergunta,
+          resposta_ideal: respostaIdeal.trim(),
+          fonte: "feedback",
+          ai_log_id: aiLogId,
+          ativo: false,
         });
       }
       setSent("bad");
       setShowBad(false);
-      toast.success(respostaIdeal ? "Exemplo salvo como rascunho em Treino IA" : "Feedback enviado");
+      toast.success(
+        respostaIdeal ? "Exemplo salvo como rascunho em Treino IA" : "Feedback enviado",
+      );
     } finally {
       setSaving(false);
     }
@@ -51,7 +58,7 @@ export function AIFeedback({ aiLogId, pergunta, respostaSummary }: Props) {
 
   if (sent) {
     return (
-      <div className="flex items-center gap-1.5 text-[11px] text-emerald-400 mt-1">
+      <div className="flex items-center gap-1.5 text-meta text-success mt-1">
         <Check className="h-3 w-3" /> feedback registrado
       </div>
     );
@@ -61,35 +68,43 @@ export function AIFeedback({ aiLogId, pergunta, respostaSummary }: Props) {
     <div className="mt-2 border-t border-border/30 pt-2">
       {!showBad ? (
         <div className="flex items-center justify-end gap-1 text-muted-foreground">
-          <span className="text-[11px] mr-1">Essa resposta ajudou?</span>
+          <span className="text-meta mr-1">Essa resposta ajudou?</span>
           <button
             onClick={sendGood}
-            className="p-1.5 rounded-md hover:bg-emerald-500/10 hover:text-emerald-400 transition-colors"
+            className="p-1.5 rounded-md hover:bg-success/10 hover:text-success transition-colors"
             title="Boa resposta"
+            aria-label="Boa resposta"
           >
-            <ThumbsUp className="h-3.5 w-3.5" />
+            <ThumbsUp className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
           <button
             onClick={() => setShowBad(true)}
-            className="p-1.5 rounded-md hover:bg-rose-500/10 hover:text-rose-400 transition-colors"
+            className="p-1.5 rounded-md hover:bg-danger/10 hover:text-danger transition-colors"
             title="Resposta ruim"
+            aria-label="Resposta ruim"
           >
-            <ThumbsDown className="h-3.5 w-3.5" />
+            <ThumbsDown className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
         </div>
       ) : (
-        <div className="space-y-2 rounded-lg border border-rose-500/30 bg-rose-500/5 p-3">
+        <div className="space-y-2 rounded-lg border border-danger/30 bg-danger/5 p-3">
           <p className="text-xs font-medium">O que estava errado?</p>
           <Textarea
-            value={motivo} onChange={(e) => setMotivo(e.target.value)}
+            value={motivo}
+            onChange={(e) => setMotivo(e.target.value)}
             placeholder="Ex: trouxe todos em vez de filtrar pelo expert..."
-            rows={2} className="text-xs"
+            rows={2}
+            className="text-xs"
           />
-          <p className="text-xs font-medium pt-1">Como deveria ter respondido? (vai virar exemplo de treino)</p>
+          <p className="text-xs font-medium pt-1">
+            Como deveria ter respondido? (vai virar exemplo de treino)
+          </p>
           <Textarea
-            value={respostaIdeal} onChange={(e) => setRespostaIdeal(e.target.value)}
+            value={respostaIdeal}
+            onChange={(e) => setRespostaIdeal(e.target.value)}
             placeholder="Resposta ideal em texto livre..."
-            rows={3} className="text-xs"
+            rows={3}
+            className="text-xs"
           />
           <div className="flex justify-end gap-2">
             <Button size="sm" variant="ghost" onClick={() => setShowBad(false)} disabled={saving}>

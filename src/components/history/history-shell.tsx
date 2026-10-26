@@ -12,6 +12,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import type { DateRange } from "react-day-picker";
 import {
   Select,
   SelectContent,
@@ -42,6 +43,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis } from "recharts";
+import { CHART_COLORS, chartTooltipProps } from "@/lib/chart-theme";
 import { POLL_INTERVALS, UpdatedAgo } from "@/hooks/use-updated-ago";
 import {
   getChannelHistory,
@@ -54,6 +56,11 @@ import {
   type HistoryRow,
   type FlowSummaryItem,
 } from "@/lib/history.functions";
+import { historyWindow } from "@/components/channels/channel-period";
+import { PeriodPicker } from "@/components/home/period-picker";
+import { periodRange, type PeriodPreset } from "@/lib/home-dashboard";
+import { brtDayKey } from "@/lib/tz";
+
 import { StatusBadge } from "./status-badge";
 
 const CHANNEL_LABEL: Record<ChannelKey, string> = {
@@ -70,55 +77,10 @@ const HISTORY_POLL = {
   refetchOnWindowFocus: true,
 } as const;
 
-const RANGE_OPTIONS = [
-  { value: "today", label: "Hoje" },
-  { value: "yesterday", label: "Ontem" },
-  { value: "7d", label: "Últimos 7 dias" },
-  { value: "30d", label: "Últimos 30 dias" },
-  { value: "all", label: "Tudo" },
-];
-
-// Janelas abertas ("hoje", "7 dias", "30 dias", "tudo") mandam `to: null`: o
-// servidor usa "agora" (mesma semântica de antes, inclusive a janela anterior
-// do delta). Antes o `to` era `new Date()` a cada render, o que mudava a
-// queryKey a cada render e fazia cada resposta disparar uma nova busca.
-// O `from` é estável dentro do dia (o componente memoiza por range + dia).
-function rangeIso(value: string): {
-  from: string | null;
-  to: string | null;
-  bucket: "hour" | "day";
-} {
-  if (value === "all")
-    return {
-      from: new Date(Date.now() - 30 * 86400000).toISOString(),
-      to: null,
-      bucket: "day",
-    };
-  if (value === "today") {
-    const d = new Date();
-    d.setHours(0, 0, 0, 0);
-    return { from: d.toISOString(), to: null, bucket: "hour" };
-  }
-  if (value === "yesterday") {
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-    start.setDate(start.getDate() - 1);
-    const end = new Date(start);
-    end.setDate(end.getDate() + 1);
-    return { from: start.toISOString(), to: end.toISOString(), bucket: "hour" };
-  }
-  if (value === "7d")
-    return {
-      from: new Date(Date.now() - 7 * 86400000).toISOString(),
-      to: null,
-      bucket: "day",
-    };
-  return {
-    from: new Date(Date.now() - 30 * 86400000).toISOString(),
-    to: null,
-    bucket: "day",
-  };
-}
+// O período usa o mesmo PeriodPicker do Início (dias no horário de Brasília).
+// Janelas que chegam até hoje mandam `to: null`: o servidor usa "agora"
+// (inclusive para a janela anterior do delta), e a queryKey fica estável entre
+// renders. Ver historyWindow em channels/channel-period.
 
 function formatRelative(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -134,7 +96,20 @@ function formatRelative(iso: string | null | undefined): string {
   return `há ${d}d`;
 }
 
+// Canais cujo provedor confirma entrega de verdade. O callback de SMS da Short
+// Brasil não informa status (nenhum SMS é marcado entregue), então para SMS o
+// "sucesso" é só "aceito pelo provedor" — mostramos Enviados, sem taxa de entrega.
+const CHANNEL_SHOWS_DELIVERY: Record<ChannelKey, boolean> = {
+  // SMS and email providers do not confirm delivery: show sent and failed only.
+  sms: false,
+  email: false,
+  calls: true,
+  whatsapp: true,
+};
+
 export interface HistoryShellOptions {
+  /** Sobrescreve CHANNEL_SHOWS_DELIVERY: exibe "Entregues" e taxa de entrega. */
+  showsDelivery?: boolean;
   showFlow?: boolean;
   showStep?: boolean;
   title?: string;
@@ -156,7 +131,8 @@ export function HistoryShell({
   options?: HistoryShellOptions;
 }) {
   const qc = useQueryClient();
-  const [range, setRange] = useState("today");
+  const [preset, setPreset] = useState<PeriodPreset>("today");
+  const [range, setRange] = useState<DateRange | undefined>(() => periodRange("today"));
   const [flowId, setFlowId] = useState<string>("all");
   const [step, setStep] = useState<string>("all");
   const [status, setStatus] = useState<string>("all");
@@ -181,13 +157,14 @@ export function HistoryShell({
     setStep("all");
   }, [flowId]);
 
-  // Recalcula só quando muda o período ou o dia (virada da meia-noite).
-  const dayKey = new Date().toDateString();
+  // Recalcula só quando muda o período ou o dia (virada da meia-noite em Brasília).
+  const dayKey = brtDayKey(new Date());
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const iso = useMemo(() => rangeIso(range), [range, dayKey]);
+  const iso = useMemo(() => historyWindow(range), [range, dayKey]);
   const showFlow = options.showFlow !== false;
   const showStep = options.showStep !== false;
   const showDirection = channel === "whatsapp";
+  const showsDelivery = options.showsDelivery ?? CHANNEL_SHOWS_DELIVERY[channel];
 
   const histFn = useServerFn(getChannelHistory);
   const statsFn = useServerFn(getChannelHistoryStats);
@@ -261,8 +238,8 @@ export function HistoryShell({
   // acima fazem polling a cada 60 s (só com a aba visível) e ao voltar o foco.
 
   const cards = options.cardLabels ?? {
-    total: "Disparos",
-    success: "Entregues",
+    total: "Envios",
+    success: showsDelivery ? "Entregues" : "Enviados",
     failed: "Falhas",
     pending: "Pendentes",
     conversions: "Conversões",
@@ -299,35 +276,29 @@ export function HistoryShell({
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          {options.title && <h2 className="text-lg font-semibold">{options.title}</h2>}
-          <p className="mt-0.5 text-xs text-muted-foreground">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <PeriodPicker
+          preset={preset}
+          range={range}
+          onChange={(nextPreset, nextRange) => {
+            setPreset(nextPreset);
+            setRange(nextRange);
+          }}
+        />
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <p className="text-xs text-muted-foreground">
             {options.subtitle ? `${options.subtitle} · ` : ""}
-            Último disparo:{" "}
+            Último envio:{" "}
             <span className="text-foreground">{formatRelative(stats.data?.lastDispatchAt)}</span>
           </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Select value={range} onValueChange={setRange}>
-            <SelectTrigger className="h-9 w-[160px]">
-              <SelectValue placeholder="Período" />
-            </SelectTrigger>
-            <SelectContent>
-              {RANGE_OPTIONS.map((o) => (
-                <SelectItem key={o.value} value={o.value}>
-                  {o.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
           <UpdatedAgo ts={stats.dataUpdatedAt} className="hidden sm:inline" />
-          <Button variant="outline" size="sm" onClick={refresh} className="gap-1.5">
+          <Button variant="outline" onClick={refresh} className="h-9 gap-1.5">
             <RefreshCw className={`h-3.5 w-3.5 ${stats.isFetching ? "animate-spin" : ""}`} />
             Atualizar
           </Button>
         </div>
       </div>
+      {options.title && <h2 className="text-section">{options.title}</h2>}
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
@@ -338,18 +309,18 @@ export function HistoryShell({
           deltaPct={deltaPct}
         />
         <StatCard
-          icon={<CheckCircle2 className="h-4 w-4 text-emerald-400" />}
+          icon={<CheckCircle2 className="h-4 w-4 text-success" />}
           label={cards.success}
           value={stats.data?.success}
-          subtitle={stats.data ? `${stats.data.deliveryRate}% taxa` : undefined}
+          subtitle={showsDelivery && stats.data ? `${stats.data.deliveryRate}% taxa` : undefined}
         />
         <StatCard
-          icon={<XCircle className="h-4 w-4 text-rose-400" />}
+          icon={<XCircle className="h-4 w-4 text-danger" />}
           label={cards.failed}
           value={stats.data?.failed}
         />
         <StatCard
-          icon={<Clock className="h-4 w-4 text-amber-400" />}
+          icon={<Clock className="h-4 w-4 text-warning" />}
           label={cards.pending}
           value={stats.data?.pending}
         />
@@ -362,13 +333,13 @@ export function HistoryShell({
 
       {/* Sparkline */}
       {(timeline.data?.points?.length ?? 0) > 1 && (
-        <Card className="border-0 card-premium">
+        <Card>
           <CardContent className="p-3">
             <div className="mb-1 flex items-center justify-between px-1">
-              <p className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                Disparos por {iso.bucket === "hour" ? "hora" : "dia"}
+              <p className="text-label text-muted-foreground">
+                Envios por {iso.bucket === "hour" ? "hora" : "dia"}
               </p>
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-meta text-muted-foreground">
                 {(timeline.data?.points ?? [])
                   .reduce((a, b) => a + b.count, 0)
                   .toLocaleString("pt-BR")}{" "}
@@ -382,13 +353,7 @@ export function HistoryShell({
               >
                 <XAxis dataKey="t" hide />
                 <Tooltip
-                  cursor={{ fill: "rgba(255,255,255,0.04)" }}
-                  contentStyle={{
-                    background: "rgba(15,15,20,0.95)",
-                    border: "1px solid rgba(255,255,255,0.1)",
-                    borderRadius: 6,
-                    fontSize: 11,
-                  }}
+                  {...chartTooltipProps}
                   labelFormatter={(v) =>
                     new Date(v as string).toLocaleString("pt-BR", {
                       day: "2-digit",
@@ -399,7 +364,7 @@ export function HistoryShell({
                   }
                   formatter={(v) => [`${v}`, "envios"]}
                 />
-                <Bar dataKey="count" fill="hsl(var(--primary))" radius={[2, 2, 0, 0]} />
+                <Bar dataKey="count" fill={CHART_COLORS.primary} radius={[2, 2, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
@@ -408,19 +373,19 @@ export function HistoryShell({
 
       {/* Top fluxos */}
       {showFlow && (
-        <Card className="border-0 card-premium">
+        <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <div>
-              <CardTitle className="text-sm">Top fluxos no período</CardTitle>
-              <p className="text-[11px] text-muted-foreground">
-                Clique num fluxo para filtrar a tabela abaixo.
+              <CardTitle>Jornadas com mais envios</CardTitle>
+              <p className="text-meta text-muted-foreground">
+                Clique numa jornada para filtrar a tabela abaixo.
               </p>
             </div>
             {flowId !== "all" && (
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-7 gap-1 text-xs"
+                className="gap-1 text-xs"
                 onClick={() => setFlowId("all")}
               >
                 Limpar seleção
@@ -433,21 +398,22 @@ export function HistoryShell({
               selectedId={flowId === "all" ? null : flowId}
               onSelect={(id) => setFlowId(id)}
               loading={summary.isLoading}
+              showsDelivery={showsDelivery}
             />
           </CardContent>
         </Card>
       )}
 
       {/* Filters */}
-      <Card className="border-0 card-premium">
+      <Card>
         <CardContent className="grid grid-cols-1 gap-2 p-3 md:grid-cols-5">
           {showFlow ? (
             <Select value={flowId} onValueChange={setFlowId}>
               <SelectTrigger>
-                <SelectValue placeholder="Fluxo" />
+                <SelectValue placeholder="Jornada" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Todos os fluxos</SelectItem>
+                <SelectItem value="all">Todas as jornadas</SelectItem>
                 {(flows.data?.flows ?? []).map((f) => (
                   <SelectItem key={f.id} value={f.id}>
                     {f.name}
@@ -473,7 +439,7 @@ export function HistoryShell({
             <Select value={step} onValueChange={setStep} disabled={flowId === "all"}>
               <SelectTrigger>
                 <SelectValue
-                  placeholder={flowId === "all" ? "Selecione um fluxo" : "Dia do fluxo"}
+                  placeholder={flowId === "all" ? "Selecione uma jornada" : "Dia da jornada"}
                 />
               </SelectTrigger>
               <SelectContent>
@@ -514,7 +480,7 @@ export function HistoryShell({
       </Card>
 
       {/* Table */}
-      <Card className="border-0 card-premium">
+      <Card>
         <CardContent className="overflow-x-auto p-0">
           {hist.isLoading && rows.length === 0 ? (
             <p className="p-10 text-center text-sm text-muted-foreground">Carregando…</p>
@@ -523,7 +489,7 @@ export function HistoryShell({
               <p className="text-muted-foreground">
                 {filtersActive
                   ? "Nenhum registro com esses filtros."
-                  : "Nenhum disparo nesse período."}
+                  : "Nenhum envio nesse período."}
               </p>
               {filtersActive && (
                 <Button variant="outline" size="sm" onClick={clearFilters}>
@@ -536,10 +502,10 @@ export function HistoryShell({
               <TableHeader>
                 <TableRow>
                   <TableHead>Data</TableHead>
-                  <TableHead>Lead</TableHead>
+                  <TableHead>Jogador</TableHead>
                   <TableHead>Contato</TableHead>
                   <TableHead>Mensagem</TableHead>
-                  {showFlow && <TableHead>Fluxo</TableHead>}
+                  {showFlow && <TableHead>Jornada</TableHead>}
                   {showStep && <TableHead>Dia</TableHead>}
                   <TableHead>Status</TableHead>
                   <TableHead>Conv.</TableHead>
@@ -548,7 +514,7 @@ export function HistoryShell({
               <TableBody>
                 {rows.map((r) => (
                   <TableRow key={r.id} className="cursor-pointer" onClick={() => setOpenRow(r)}>
-                    <TableCell className="whitespace-nowrap text-[11px] text-muted-foreground">
+                    <TableCell className="whitespace-nowrap text-meta text-muted-foreground">
                       {new Date(r.created_at).toLocaleString("pt-BR", {
                         day: "2-digit",
                         month: "2-digit",
@@ -559,7 +525,7 @@ export function HistoryShell({
                     <TableCell className="text-xs font-medium">
                       {r.lead_name ?? <span className="text-muted-foreground">—</span>}
                     </TableCell>
-                    <TableCell className="font-mono text-[11px] text-muted-foreground">
+                    <TableCell className="font-mono text-meta text-muted-foreground">
                       {r.contact}
                     </TableCell>
                     <TableCell className="max-w-[280px] truncate text-xs text-muted-foreground">
@@ -633,12 +599,12 @@ export function HistoryShell({
                 </SheetDescription>
               </SheetHeader>
               <div className="mt-6 space-y-4 text-sm">
-                <DetailField label="Lead">{openRow.lead_name ?? "—"}</DetailField>
+                <DetailField label="Jogador">{openRow.lead_name ?? "—"}</DetailField>
                 <DetailField label="Contato">
                   <span className="font-mono text-xs">{openRow.contact}</span>
                 </DetailField>
-                <DetailField label="Fluxo">{openRow.flow_name ?? "—"}</DetailField>
-                <DetailField label="Dia do fluxo">{openRow.step ?? "—"}</DetailField>
+                <DetailField label="Jornada">{openRow.flow_name ?? "—"}</DetailField>
+                <DetailField label="Dia da jornada">{openRow.step ?? "—"}</DetailField>
                 <DetailField label="Template / assunto">{openRow.template ?? "—"}</DetailField>
                 <DetailField label="Mensagem">
                   <pre className="max-h-60 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 text-xs">
@@ -647,14 +613,14 @@ export function HistoryShell({
                 </DetailField>
                 {openRow.error && (
                   <DetailField label="Falha no envio">
-                    <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-rose-500/10 p-2 text-xs text-rose-300">
+                    <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-danger/10 p-2 text-xs text-danger">
                       {openRow.error}
                     </pre>
                   </DetailField>
                 )}
                 {openRow.converted && (
-                  <div className="rounded-md border border-emerald-500/20 bg-emerald-500/5 p-3 text-xs text-emerald-300">
-                    Lead converteu (depósito em até 72h após o contato).
+                  <div className="rounded-md border border-success/20 bg-success/5 p-3 text-xs text-success">
+                    O jogador depositou em até 72h após o contato.
                   </div>
                 )}
               </div>
@@ -666,7 +632,7 @@ export function HistoryShell({
                     className="gap-1"
                     onClick={() => window.open(`/players?focus=${openRow.player_id}`, "_blank")}
                   >
-                    <ExternalLink className="h-3.5 w-3.5" /> Ver player
+                    <ExternalLink className="h-3.5 w-3.5" /> Ver jogador
                   </Button>
                 )}
                 {openRow.message && (
@@ -718,19 +684,19 @@ function StatCard({
   deltaPct?: number | null;
 }) {
   return (
-    <Card className="border-0 card-premium">
+    <Card>
       <CardContent className="flex items-center justify-between gap-3 p-4">
         <div className="min-w-0">
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
-          <p className="text-xl font-semibold tabular-nums">
+          <p className="text-label text-muted-foreground">{label}</p>
+          <p className="text-kpi-sm tabular-nums">
             {value == null ? "—" : value.toLocaleString("pt-BR")}
           </p>
           {subtitle ? (
-            <p className="text-[10px] text-muted-foreground">{subtitle}</p>
+            <p className="text-meta text-muted-foreground">{subtitle}</p>
           ) : deltaPct != null ? (
             <p
-              className={`flex items-center gap-0.5 text-[10px] ${
-                deltaPct >= 0 ? "text-emerald-400" : "text-rose-400"
+              className={`flex items-center gap-0.5 text-meta ${
+                deltaPct >= 0 ? "text-success" : "text-danger"
               }`}
             >
               {deltaPct >= 0 ? (
@@ -753,19 +719,21 @@ function FlowRanking({
   selectedId,
   onSelect,
   loading,
+  showsDelivery,
 }: {
   items: FlowSummaryItem[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   loading: boolean;
+  showsDelivery: boolean;
 }) {
   if (loading && items.length === 0) {
-    return <p className="p-6 text-center text-xs text-muted-foreground">Carregando fluxos…</p>;
+    return <p className="p-6 text-center text-xs text-muted-foreground">Carregando jornadas…</p>;
   }
   if (items.length === 0) {
     return (
       <p className="p-6 text-center text-xs text-muted-foreground">
-        Nenhum disparo por fluxo no período.
+        Nenhum envio por jornada no período.
       </p>
     );
   }
@@ -774,10 +742,10 @@ function FlowRanking({
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead>Fluxo</TableHead>
+          <TableHead>Jornada</TableHead>
           <TableHead className="text-right">Envios</TableHead>
-          <TableHead className="text-right">Sucesso</TableHead>
-          <TableHead className="text-right">% entrega</TableHead>
+          <TableHead className="text-right">{showsDelivery ? "Sucesso" : "Enviados"}</TableHead>
+          {showsDelivery && <TableHead className="text-right">% entrega</TableHead>}
           <TableHead className="text-right">Falhas</TableHead>
           <TableHead>Último</TableHead>
           <TableHead className="w-6"></TableHead>
@@ -803,16 +771,18 @@ function FlowRanking({
               <TableCell className="text-right text-xs tabular-nums">
                 {s.total.toLocaleString("pt-BR")}
               </TableCell>
-              <TableCell className="text-right text-xs tabular-nums text-emerald-300">
+              <TableCell className="text-right text-xs tabular-nums text-success">
                 {s.success.toLocaleString("pt-BR")}
               </TableCell>
-              <TableCell className="text-right text-xs tabular-nums text-muted-foreground">
-                {pct}%
-              </TableCell>
-              <TableCell className="text-right text-xs tabular-nums text-rose-300">
+              {showsDelivery && (
+                <TableCell className="text-right text-xs tabular-nums text-muted-foreground">
+                  {pct}%
+                </TableCell>
+              )}
+              <TableCell className="text-right text-xs tabular-nums text-danger">
                 {s.failed.toLocaleString("pt-BR")}
               </TableCell>
-              <TableCell className="text-[11px] text-muted-foreground">
+              <TableCell className="text-meta text-muted-foreground">
                 {formatRelative(s.last_at)}
               </TableCell>
               <TableCell>
@@ -829,7 +799,7 @@ function FlowRanking({
 function DetailField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <p className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
+      <p className="mb-1 text-label text-muted-foreground">{label}</p>
       <div>{children}</div>
     </div>
   );

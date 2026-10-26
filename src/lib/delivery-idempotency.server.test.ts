@@ -61,6 +61,13 @@ vi.mock("./shortio.server", () => ({
   markTrackedDispatchesFailed: vi.fn(async () => undefined),
 }));
 
+// PG3 Task 4: the wallet reservation has its own coverage
+// (infobip-voice.billing.test.ts); here it always succeeds.
+vi.mock("./billing/wallet.server", () => ({
+  reserveForDelivery: vi.fn(async () => ({ ok: true, referenceId: "voice:test", amount: 0, balance: 0 })),
+  refundForDelivery: vi.fn(async () => undefined),
+}));
+
 import { sendInfobipEmail } from "./email-send.server";
 import { callInfobipVoice } from "./infobip-voice.server";
 

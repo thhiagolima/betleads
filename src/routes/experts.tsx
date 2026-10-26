@@ -1,167 +1,340 @@
+// Admin "Experts" screen (Área do Expert, Fase 1, Task 8): lists the house's
+// experts, lets the admin create/edit, invite, remove access, deactivate and
+// delete them, and surfaces affiliate ids with no expert yet. Everything
+// goes through the Task 6 server functions — no direct Supabase writes from
+// the browser.
+import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
+import { Plus, UserPlus } from "lucide-react";
 import { toast } from "sonner";
-import { Trash2, UserCog } from "lucide-react";
-import { PageHeader } from "@/components/ui-premium";
-import { requestConfirmation } from "@/components/system-dialog-host";
 
-type Expert = {
-  id: string;
-  affiliate_id: string;
-  nome: string;
-  created_at: string;
-  count?: number;
-};
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Page, PageHeader } from "@/components/ui-premium/page-header";
+import { requestConfirmation } from "@/components/system-dialog-host";
+import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
+import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
+import {
+  deleteExpert,
+  listExperts,
+  listUnassignedAffiliates,
+  removeExpertAccess,
+  setExpertActive,
+} from "@/lib/experts-admin.functions";
+import type { ExpertAcesso, ExpertAdminRow } from "@/lib/experts-admin.functions";
+import {
+  EXPERTS_QUERY_KEY,
+  UNASSIGNED_AFFILIATES_QUERY_KEY,
+} from "@/components/experts/experts-query";
+import { ExpertFormDialog } from "@/components/experts/expert-form-dialog";
+import { ExpertInviteDialog } from "@/components/experts/expert-invite-dialog";
 
 export const Route = createFileRoute("/experts")({
   component: ExpertsPage,
 });
 
+const TIPO_LABEL: Record<ExpertAdminRow["tipo"], string> = {
+  restrito: "Restrito",
+  total: "Acesso total",
+};
+
+function acessoBadge(acesso: ExpertAcesso) {
+  switch (acesso) {
+    case "sem_acesso":
+      return <Badge variant="outline">Sem acesso</Badge>;
+    case "convite_pendente":
+      return <Badge className="bg-info/15 text-info">Convite pendente</Badge>;
+    case "ativo":
+      return <Badge className="bg-success/15 text-success">Ativo</Badge>;
+    case "inativo":
+      return <Badge variant="destructive">Inativo</Badge>;
+  }
+}
+
 function ExpertsPage() {
-  const [experts, setExperts] = useState<Expert[]>([]);
-  const [affId, setAffId] = useState("");
-  const [nome, setNome] = useState("");
-  const [loading, setLoading] = useState(false);
+  const isDemo = useIsDemoTenant();
+  const qc = useQueryClient();
 
-  async function load() {
-    const { data } = await supabase
-      .from("experts")
-      .select("*")
-      .order("nome");
-    if (!data) return setExperts([]);
-    // count players per affiliate
-    const enriched = await Promise.all(
-      data.map(async (e: Expert) => {
-        const { count } = await supabase
-          .from("players")
-          .select("*", { count: "exact", head: true })
-          .eq("affiliate_id", e.affiliate_id);
-        return { ...e, count: count ?? 0 };
-      }),
-    );
-    setExperts(enriched);
+  const listExpertsFn = useServerFn(listExperts);
+  const listUnassignedFn = useServerFn(listUnassignedAffiliates);
+  const removeAccessFn = useServerFn(removeExpertAccess);
+  const setActiveFn = useServerFn(setExpertActive);
+  const deleteExpertFn = useServerFn(deleteExpert);
+
+  const expertsQuery = useQuery({
+    queryKey: EXPERTS_QUERY_KEY,
+    queryFn: () => listExpertsFn(),
+  });
+  const unassignedQuery = useQuery({
+    queryKey: UNASSIGNED_AFFILIATES_QUERY_KEY,
+    queryFn: () => listUnassignedFn(),
+  });
+
+  const experts = expertsQuery.data ?? [];
+  const unassigned = unassignedQuery.data ?? [];
+
+  const [formOpen, setFormOpen] = useState(false);
+  const [editingExpert, setEditingExpert] = useState<ExpertAdminRow | null>(null);
+  const [prefillAffiliateId, setPrefillAffiliateId] = useState<string | null>(null);
+  const [inviteExpertRow, setInviteExpertRow] = useState<ExpertAdminRow | null>(null);
+
+  function refresh() {
+    qc.invalidateQueries({ queryKey: EXPERTS_QUERY_KEY });
+    qc.invalidateQueries({ queryKey: UNASSIGNED_AFFILIATES_QUERY_KEY });
   }
 
-  useEffect(() => {
-    load();
-  }, []);
+  const removeAccess = useMutation({
+    mutationFn: (expertId: string) => removeAccessFn({ data: { expertId } }),
+    onSuccess: () => {
+      toast.success("Acesso removido");
+      refresh();
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
 
-  async function add(e: React.FormEvent) {
-    e.preventDefault();
-    if (!affId.trim() || !nome.trim()) return;
-    setLoading(true);
-    const { error } = await supabase
-      .from("experts")
-      .insert({ affiliate_id: affId.trim(), nome: nome.trim() });
-    if (error) {
-      toast.error(error.message);
-    } else {
-      // backfill players already in DB for this affiliate
-      await supabase
-        .from("players")
-        .update({ expert: nome.trim() })
-        .eq("affiliate_id", affId.trim());
-      toast.success("Expert cadastrado");
-      setAffId("");
-      setNome("");
-      load();
-    }
-    setLoading(false);
+  const toggleActive = useMutation({
+    mutationFn: (vars: { expertId: string; ativo: boolean }) => setActiveFn({ data: vars }),
+    onSuccess: (_data, vars) => {
+      toast.success(vars.ativo ? "Expert ativado" : "Expert desativado");
+      refresh();
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+
+  const remove = useMutation({
+    mutationFn: (expertId: string) => deleteExpertFn({ data: { expertId } }),
+    onSuccess: () => {
+      toast.success("Expert excluído");
+      refresh();
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+
+  function openCreate(affiliateId?: string) {
+    setEditingExpert(null);
+    setPrefillAffiliateId(affiliateId ?? null);
+    setFormOpen(true);
   }
 
-  async function remove(id: string) {
-    await supabase.from("experts").delete().eq("id", id);
-    load();
+  function openEdit(expert: ExpertAdminRow) {
+    setEditingExpert(expert);
+    setPrefillAffiliateId(null);
+    setFormOpen(true);
   }
 
   return (
-    <div className="space-y-6">
+    <Page>
       <PageHeader
-        title="Experts / Afiliados"
-        subtitle="Mapeie IDs de afiliados às pessoas responsáveis. Novos cadastros são atribuídos automaticamente."
-        icon={<UserCog className="h-5 w-5 text-primary-foreground" />}
+        subtitle="Cadastre quem acompanha os leads da casa, por ID de afiliado ou com acesso total."
+        actions={
+          <DemoDisabledTooltip active={isDemo}>
+            <Button className="gap-2" disabled={isDemo} onClick={() => openCreate()}>
+              <Plus className="h-4 w-4" />
+              Novo expert
+            </Button>
+          </DemoDisabledTooltip>
+        }
       />
 
       <Card>
         <CardHeader>
-          <CardTitle>Adicionar expert</CardTitle>
+          <CardTitle>Experts ({experts.length})</CardTitle>
         </CardHeader>
         <CardContent>
-          <form onSubmit={add} className="grid gap-3 sm:grid-cols-[2fr_1fr_auto] sm:items-end">
-            <div className="space-y-1">
-              <Label>ID do afiliado</Label>
-              <Input
-                value={affId}
-                onChange={(e) => setAffId(e.target.value)}
-                placeholder="ex: 69cde3d75779177c6fed3c7c"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label>Nome do expert</Label>
-              <Input
-                value={nome}
-                onChange={(e) => setNome(e.target.value)}
-                placeholder="ex: Queiroz"
-              />
-            </div>
-            <Button type="submit" disabled={loading}>
-              Adicionar
-            </Button>
-          </form>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Expert</TableHead>
+                <TableHead>Tipo</TableHead>
+                <TableHead>IDs de afiliado</TableHead>
+                <TableHead>Leads</TableHead>
+                <TableHead>Acesso</TableHead>
+                <TableHead className="text-right">Ações</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {experts.map((expert) => (
+                <TableRow key={expert.id}>
+                  <TableCell className="font-medium">{expert.nome}</TableCell>
+                  <TableCell>{TIPO_LABEL[expert.tipo]}</TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-1">
+                      {expert.affiliateIds.map((id) => (
+                        <span
+                          key={id}
+                          className="rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 font-mono text-xs"
+                        >
+                          {id}
+                        </span>
+                      ))}
+                      {expert.affiliateIds.length === 0 && (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell>{expert.leads}</TableCell>
+                  <TableCell>{acessoBadge(expert.acesso)}</TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      <DemoDisabledTooltip active={isDemo}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={isDemo}
+                          onClick={() => openEdit(expert)}
+                        >
+                          Editar
+                        </Button>
+                      </DemoDisabledTooltip>
+
+                      {expert.acesso === "sem_acesso" && (
+                        <DemoDisabledTooltip active={isDemo}>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={isDemo}
+                            onClick={() => setInviteExpertRow(expert)}
+                          >
+                            Convidar
+                          </Button>
+                        </DemoDisabledTooltip>
+                      )}
+
+                      {expert.acesso !== "sem_acesso" && (
+                        <DemoDisabledTooltip active={isDemo}>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={isDemo || removeAccess.isPending}
+                            onClick={async () => {
+                              const confirmed = await requestConfirmation({
+                                title: `Remover o acesso de ${expert.nome}?`,
+                                description:
+                                  "A pessoa perde o acesso a esta casa imediatamente. O cadastro do expert continua existindo.",
+                                confirmLabel: "Remover acesso",
+                                destructive: true,
+                              });
+                              if (confirmed) removeAccess.mutate(expert.id);
+                            }}
+                          >
+                            Remover acesso
+                          </Button>
+                        </DemoDisabledTooltip>
+                      )}
+
+                      <DemoDisabledTooltip active={isDemo}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={isDemo || toggleActive.isPending}
+                          onClick={() =>
+                            toggleActive.mutate({ expertId: expert.id, ativo: !expert.ativo })
+                          }
+                        >
+                          {expert.ativo ? "Desativar" : "Ativar"}
+                        </Button>
+                      </DemoDisabledTooltip>
+
+                      {expert.acesso === "sem_acesso" && (
+                        <DemoDisabledTooltip active={isDemo}>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-destructive hover:text-destructive"
+                            disabled={isDemo || remove.isPending}
+                            onClick={async () => {
+                              const confirmed = await requestConfirmation({
+                                title: `Excluir o expert ${expert.nome}?`,
+                                description:
+                                  "O cadastro e os IDs de afiliado vinculados a ele deixam de existir. Esta ação não pode ser desfeita.",
+                                confirmLabel: "Excluir expert",
+                                destructive: true,
+                              });
+                              if (confirmed) remove.mutate(expert.id);
+                            }}
+                          >
+                            Excluir
+                          </Button>
+                        </DemoDisabledTooltip>
+                      )}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {experts.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+                    Nenhum expert cadastrado.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>Cadastrados ({experts.length})</CardTitle>
+          <CardTitle>IDs de afiliado sem expert</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="space-y-2">
-            {experts.map((e) => (
+            {unassigned.map((row) => (
               <div
-                key={e.id}
+                key={row.affiliateId}
                 className="flex items-center justify-between gap-3 rounded-md border border-border/60 p-3"
               >
                 <div className="min-w-0">
-                  <div className="font-medium">{e.nome}</div>
-                  <div className="truncate font-mono text-xs text-muted-foreground">
-                    {e.affiliate_id}
-                  </div>
+                  <div className="truncate font-mono text-xs">{row.affiliateId}</div>
+                  <div className="text-xs text-muted-foreground">{row.leads} leads</div>
                 </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-sm text-muted-foreground">
-                    {e.count ?? 0} players
-                  </span>
+                <DemoDisabledTooltip active={isDemo}>
                   <Button
-                    size="icon"
-                    variant="ghost"
-                    aria-label={`Excluir expert ${e.nome}`}
-                    onClick={async () => {
-                      const confirmed = await requestConfirmation({
-                        title: `Excluir o expert ${e.nome}?`,
-                        description: `O ID de afiliado ${e.affiliate_id} deixa de ser atribuído a ${e.nome} nos novos cadastros. Esta ação não pode ser desfeita.`,
-                        confirmLabel: "Excluir expert",
-                        destructive: true,
-                      });
-                      if (confirmed) void remove(e.id);
-                    }}
+                    size="sm"
+                    variant="outline"
+                    className="gap-1.5"
+                    disabled={isDemo}
+                    onClick={() => openCreate(row.affiliateId)}
                   >
-                    <Trash2 className="h-4 w-4" />
+                    <UserPlus className="h-3.5 w-3.5" />
+                    Criar expert
                   </Button>
-                </div>
+                </DemoDisabledTooltip>
               </div>
             ))}
-            {experts.length === 0 && (
-              <p className="text-sm text-muted-foreground">Nenhum expert cadastrado.</p>
+            {unassigned.length === 0 && (
+              <p className="text-sm text-muted-foreground">
+                Nenhum ID de afiliado sem expert.
+              </p>
             )}
           </div>
         </CardContent>
       </Card>
-    </div>
+
+      <ExpertFormDialog
+        open={formOpen}
+        onOpenChange={setFormOpen}
+        expert={editingExpert}
+        initialAffiliateId={prefillAffiliateId}
+        unassignedAffiliates={unassigned}
+      />
+      <ExpertInviteDialog
+        open={!!inviteExpertRow}
+        onOpenChange={(open) => !open && setInviteExpertRow(null)}
+        expertId={inviteExpertRow?.id ?? null}
+        expertNome={inviteExpertRow?.nome ?? ""}
+      />
+    </Page>
   );
 }

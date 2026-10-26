@@ -16,24 +16,38 @@
 //             `provider_account`). Not the lead's fault: never consumes an
 //             attempt, never fails the item, no MAX_NO_COST_DEFERS cap. The
 //             item waits for the SMS circuit breaker (sms-provider-breaker).
+//   skip    : the HOUSE's own wallet refused the send (errorKind
+//             `insufficient_balance`, set by the wallet reservation before
+//             the provider is ever called). Nothing was sent nor charged.
+//             Journeys skip the step (`saldo_insuficiente`) and advance: no
+//             retry, no attempt consumed (spec decision 6).
 //   fail    : definitely not accepted (invalid recipient, 4xx, request never
 //             left: DNS/ECONNREFUSED) or provider misconfigured (missing
 //             credentials) -> the caller's normal attempts/backoff policy.
 //
+// Only the explicit `insufficient_balance` errorKind (`skip`) means "the
+// HOUSE's own wallet" — the generic 402 / "insufficient funds"
+// body sniff (no errorKind at all, e.g. a provider that answers 402 for its
+// own account, such as Infobip voice/e-mail) keeps its original
+// `insufficient_credit` classification; conflating the two would treat a
+// provider-level refusal as if it were this one house's problem.
+//
 // Workers wrap a non-ok provider result in ProviderSendError so the status,
 // body and transport kind survive until the classification.
 
+import { isSendBlockedError } from "@/lib/billing/billing-locked-error";
 import { isInsufficientFunds } from "@/lib/dispatch-pause-insufficient.server";
 import { parseRetryAfter } from "@/lib/dispatch-rate.server";
 import { isProviderErrorKind, type ProviderErrorKind } from "./transport-errors";
 
 export type { ProviderErrorKind } from "./transport-errors";
 
-export type ProviderFailureKind = "defer" | "unknown" | "fail" | "provider_account";
+export type ProviderFailureKind = "defer" | "unknown" | "fail" | "provider_account" | "skip";
 
 export type ProviderFailureDecision = {
   kind: ProviderFailureKind;
   reason:
+    | "insufficient_balance"
     | "insufficient_credit"
     | "provider_account"
     | "provider_rate_limited"
@@ -42,6 +56,7 @@ export type ProviderFailureDecision = {
     | "outcome_unknown"
     | "provider_misconfigured"
     | "not_sent"
+    | "tenant_blocked"
     | "permanent_error";
   /** Delay before the item becomes due again (defer/unknown only). */
   retryAfterMs: number;
@@ -101,6 +116,14 @@ function parseBody(body: unknown): unknown {
 }
 
 export function classifyProviderFailure(error: unknown): ProviderFailureDecision {
+  // Refused by a tenant send guard (demo, or the house locked for the monthly
+  // fee): nothing reached the provider and no retry would get through. Final:
+  // callers must not spend further attempts on it (see journeys'
+  // handleItemFailure). Checked first: such a result carries status 0, which
+  // would otherwise read as "outcome unknown".
+  if (isSendBlockedError(error)) {
+    return { kind: "fail", reason: "tenant_blocked", retryAfterMs: 0 };
+  }
   if (error instanceof ProviderSendError) {
     if (error.errorKind === "provider_account") {
       return {
@@ -108,6 +131,12 @@ export function classifyProviderFailure(error: unknown): ProviderFailureDecision
         reason: "provider_account",
         retryAfterMs: PROVIDER_ACCOUNT_DEFER_MS,
       };
+    }
+    // The HOUSE's own wallet refused the reservation (checked before the
+    // generic 402/insufficient-funds body sniffing below, and before
+    // status 0, which voice uses for it): skip, never retried.
+    if (error.errorKind === "insufficient_balance") {
+      return { kind: "skip", reason: "insufficient_balance", retryAfterMs: 0 };
     }
     if (error.errorKind === "misconfigured") {
       return { kind: "fail", reason: "provider_misconfigured", retryAfterMs: 0 };

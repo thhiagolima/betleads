@@ -167,6 +167,11 @@ export function BulkCallTab() {
         failed: res.failed,
         results: (res.results ?? []) as DispatchResult[],
       });
+      // PG3: the run stops at the first "Saldo insuficiente"; the rest is
+      // reported apart (it was never queued nor dialed).
+      const notAttempted = Number(res.notAttempted ?? 0);
+      const notAttemptedNote =
+        notAttempted > 0 ? `, ${notAttempted} não tentadas por saldo insuficiente` : "";
       if (res.failed === 0 && (res.pending ?? 0) === 0) {
         toast.success(`${res.queued} ligações disparadas`);
       } else if (res.failed === 0) {
@@ -174,11 +179,11 @@ export function BulkCallTab() {
       } else if (res.queued === 0) {
         const firstErr = (res.results ?? []).find((r: DispatchResult) => !r.ok);
         const parsed = parseProviderError(firstErr?.error);
-        toast.error(`Falha em todas (${res.failed})`, {
+        toast.error(`Falha em todas (${res.failed})${notAttemptedNote}`, {
           description: parsed.message,
         });
       } else {
-        toast.warning(`${res.queued} disparadas, ${res.failed} falharam`);
+        toast.warning(`${res.queued} disparadas, ${res.failed} falharam${notAttemptedNote}`);
       }
     },
     onError: (e: any) => toast.error(e?.message ?? "Falha no disparo em massa"),
@@ -194,7 +199,7 @@ export function BulkCallTab() {
     const count = allTargets.length;
     const source =
       audioMode === "tts"
-        ? `script "${scripts.find((s: { id: string }) => s.id === scriptId)?.name ?? "selecionado"}"`
+        ? `roteiro "${scripts.find((s: { id: string }) => s.id === scriptId)?.name ?? "selecionado"}"`
         : `áudio "${assets.find((asset: { id: string }) => asset.id === assetId)?.name ?? "selecionado"}"`;
     const plural = count === 1 ? "ligação" : "ligações";
     const confirmed = await requestConfirmation({
@@ -211,13 +216,13 @@ export function BulkCallTab() {
       <div className="space-y-4 lg:col-span-2">
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
+            <CardTitle className="flex items-center gap-2">
               <Megaphone className="h-5 w-5 text-primary" />
               Envio em massa de ligações
             </CardTitle>
             <CardDescription>
-              Escolha um script e selecione vários leads — geramos o áudio (com cache) e preparamos
-              o disparo para cada um.
+              Escolha um roteiro e selecione vários jogadores: geramos o áudio de cada um e
+              preparamos as ligações.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
@@ -232,22 +237,22 @@ export function BulkCallTab() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="tts">Script dinâmico (TTS)</SelectItem>
+                    <SelectItem value="tts">Roteiro com voz gerada</SelectItem>
                     <SelectItem value="fixed">Áudio fixo da biblioteca</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <Label>{audioMode === "tts" ? "Script" : "Áudio reutilizável"}</Label>
+                <Label>{audioMode === "tts" ? "Roteiro" : "Áudio reutilizável"}</Label>
                 {audioMode === "tts" ? (
                   <Select value={scriptId} onValueChange={setScriptId}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Selecione um script..." />
+                      <SelectValue placeholder="Selecione um roteiro..." />
                     </SelectTrigger>
                     <SelectContent>
                       {scripts.length === 0 && (
                         <div className="px-3 py-2 text-xs text-muted-foreground">
-                          Nenhum script — crie um na aba Scripts.
+                          Nenhum roteiro: crie um na aba Áudios e roteiros.
                         </div>
                       )}
                       {scripts.map((s: any) => (
@@ -292,7 +297,7 @@ export function BulkCallTab() {
 
             <div className="space-y-2">
               <Label className="flex items-center gap-2">
-                <Search className="h-4 w-4" /> Buscar leads
+                <Search className="h-4 w-4" /> Buscar jogadores
               </Label>
               <Input
                 placeholder="Nome ou telefone..."
@@ -305,7 +310,7 @@ export function BulkCallTab() {
                 )}
                 {!isFetching && players.length === 0 && (
                   <p className="px-3 py-4 text-center text-xs text-muted-foreground">
-                    Nenhum lead encontrado
+                    Nenhum jogador encontrado
                   </p>
                 )}
                 {players.map((p: any) => {
@@ -346,8 +351,8 @@ export function BulkCallTab() {
                 onChange={(e) => setRawPhones(e.target.value)}
               />
               <p className="text-xs text-muted-foreground">
-                {phoneTargets.length} número(s) avulso(s) detectado(s). Sem lead_id — variáveis do
-                script viram placeholder.
+                {phoneTargets.length} número(s) avulso(s) detectado(s). Sem jogador vinculado, as
+                variáveis do roteiro ficam com o texto padrão.
               </p>
             </div>
           </CardContent>
@@ -355,7 +360,7 @@ export function BulkCallTab() {
 
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
+            <CardTitle className="flex items-center gap-2">
               <Users className="h-4 w-4" /> Destinatários ({allTargets.length})
             </CardTitle>
           </CardHeader>
@@ -371,14 +376,14 @@ export function BulkCallTab() {
                     <div className="min-w-0 flex-1">
                       <p className="truncate font-medium">{t.nome}</p>
                       <p className="truncate text-xs text-muted-foreground">
-                        {t.phone ?? "sem telefone"} {t.lead_id ? "· lead" : "· avulso"}
+                        {t.phone ?? "sem telefone"} {t.lead_id ? "· jogador" : "· avulso"}
                       </p>
                     </div>
                     {t.lead_id && (
                       <Button
                         size="icon"
                         variant="ghost"
-                        className="h-7 w-7"
+                        className="h-9 w-9"
                         aria-label={`Remover ${t.nome} dos destinatários`}
                         onClick={() => removeTarget(t.key)}
                       >
@@ -396,14 +401,18 @@ export function BulkCallTab() {
       <div className="space-y-4">
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Resumo do disparo</CardTitle>
+            <CardTitle>Resumo do disparo</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
-            <Row label="Script" value={scripts.find((s: any) => s.id === scriptId)?.name ?? "—"} />
+            <Row label="Roteiro" value={scripts.find((s: any) => s.id === scriptId)?.name ?? "—"} />
             <Row label="Destinatários" value={String(allTargets.length)} />
             <Row label="Canal" value="Voz" />
             <Separator />
-            <Button className="w-full gap-2" onClick={() => void confirmDispatch()} disabled={!canSend}>
+            <Button
+              className="w-full gap-2"
+              onClick={() => void confirmDispatch()}
+              disabled={!canSend}
+            >
               {bulkMut.isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
@@ -415,9 +424,9 @@ export function BulkCallTab() {
               <div className="rounded-lg border border-border bg-muted/30 p-3 text-xs">
                 <p className="mb-1 font-medium">Último disparo</p>
                 <p>Total: {lastResult.total}</p>
-                <p className="text-emerald-400">Disparadas: {lastResult.queued}</p>
-                <p className="text-amber-400">Pendentes: {lastResult.pending}</p>
-                <p className="text-rose-400">Falhas: {lastResult.failed}</p>
+                <p className="text-success">Disparadas: {lastResult.queued}</p>
+                <p className="text-warning">Pendentes: {lastResult.pending}</p>
+                <p className="text-danger">Falhas: {lastResult.failed}</p>
               </div>
             )}
             {lastResult && lastResult.failed > 0 && (
@@ -470,14 +479,14 @@ function FailureDetails({ results, targets }: { results: DispatchResult[]; targe
         </Alert>
       )}
       <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3">
-        <p className="mb-2 text-xs font-medium text-rose-400">
+        <p className="mb-2 text-xs font-medium text-danger">
           Falhas detalhadas ({failures.length})
         </p>
         <ul className="max-h-48 space-y-2 overflow-y-auto pr-1">
           {parsed.map((f, i) => (
             <li key={i} className="text-xs">
               <p className="font-medium">{nameFor(f)}</p>
-              <p className="text-rose-400/90 break-words">{f.parsed.message}</p>
+              <p className="text-danger/90 break-words">{f.parsed.message}</p>
             </li>
           ))}
         </ul>

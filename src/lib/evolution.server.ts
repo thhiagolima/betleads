@@ -1,7 +1,8 @@
 // Server-only HTTP wrapper for the Evolution API.
 // Never import from client code.
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { DemoTenantBlockedError, isDemoBlockedError } from "@/lib/demo-tenant";
+import { DemoTenantBlockedError } from "@/lib/demo-tenant";
+import { isSendBlockedError } from "@/lib/billing/billing-locked-error";
 import { assertTenantNotDemoForSend } from "@/lib/tenant-access.server";
 
 // The one call allowed without any tenant check: the bare instance listing,
@@ -239,8 +240,9 @@ export async function evolutionFetch(
 }
 
 export function isEvolutionConnectionClosed(error: unknown): boolean {
-  // A demo block is never a dropped session: it must propagate as-is.
-  if (isDemoBlockedError(error)) return false;
+  // A demo block or a billing lock is never a dropped session: it must
+  // propagate as-is.
+  if (isSendBlockedError(error)) return false;
   const raw = `${(error as any)?.rawBody ?? ""} ${(error as any)?.message ?? ""}`;
   return /Connection Closed|Precondition Required|statusCode"?:428/i.test(raw);
 }

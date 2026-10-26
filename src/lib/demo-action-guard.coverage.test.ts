@@ -157,13 +157,21 @@ const entries: Entry[] = [
   { file: "meta.functions.ts", name: "updateMetaAccountSelection", kind: "handler" },
   { file: "meta.functions.ts", name: "validateMetaConnection", kind: "handler" },
   { file: "meta.functions.ts", name: "disconnectMetaConnection", kind: "handler" },
-  { file: "sms-credits.functions.ts", name: "createSmsCreditCheckout", kind: "handler" },
+  // sms-credits.functions.ts: `createSmsCreditCheckout` and
+  // `adminMarkSmsCreditOrderPaid` were dead code (no screen called either
+  // one) and were removed in the PG1 final review. `createSmsCreditCheckoutFor`
+  // always throws "coming in PG2" before touching anything, for every tenant
+  // including the demo one, so there was nothing for `assertTenantNotDemo`
+  // to guard even while the wrapper existed.
   { file: "webhooks.functions.ts", name: "rotateMyWebhookCredentials", kind: "handler" },
   { file: "webhooks.functions.ts", name: "provisionMyWebhookHmacSecret", kind: "handler" },
   { file: "webhooks.functions.ts", name: "setMyWebhookHmacEnforcement", kind: "handler" },
   { file: "webhooks.functions.ts", name: "getMyWebhookToken", kind: "handler" },
   { file: "shortio.functions.ts", name: "saveShortioSettings", kind: "handler" },
-  { file: "tenants.functions.ts", name: "updateTenantSettings", kind: "handler" },
+  // `updateTenantSettings`'s handler was extracted into `updateTenantSettingsFor`
+  // (PG1 Task 8, same `*For` convention as `addUserToTenantFor` below) so the
+  // plan-reason rule is directly unit-testable; the guard moved with it.
+  { file: "tenants.functions.ts", name: "updateTenantSettingsFor", kind: "function" },
   { file: "tenants.functions.ts", name: "addUserToTenantFor", kind: "function" },
   { file: "tenants.functions.ts", name: "updateTenantUserRole", kind: "handler" },
   { file: "tenants.functions.ts", name: "removeUserFromTenant", kind: "handler" },

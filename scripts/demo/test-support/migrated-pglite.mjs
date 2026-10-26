@@ -96,6 +96,24 @@ async function build(files) {
   const failed = [];
   for (const { file, sql } of files) {
     try {
+      // 20261022100000 (PG1 Task 2) requires exactly 3 tenants with these
+      // slugs to already exist (they're exempt in production); seed
+      // placeholders right before it so its functions (billing_price_book,
+      // billing_report_unit_price, ...) actually get created here instead
+      // of failing "harmlessly" like the other production-tenant-seeding
+      // migrations below — later migrations (PG1 Task 6) call them at
+      // runtime, not just at apply time, so a harmless failure here would
+      // stop being harmless.
+      if (file === "20261022100000_billing_price_book.sql") {
+        await db.exec(`
+          insert into public.tenants (id, nome, slug, status, plano)
+          values
+            (gen_random_uuid(), 'PixPGF', 'pixpgf', 'active', 'starter'),
+            (gen_random_uuid(), 'PixReals', 'pixreals', 'active', 'starter'),
+            (gen_random_uuid(), 'ForrandoBet', 'forrandobet', 'active', 'starter')
+          on conflict (slug) do nothing;
+        `);
+      }
       await db.exec(sql.replace(/create extension[^;]*;/gi, ""));
     } catch (error) {
       failed.push({ file, error: String(error?.message ?? error).slice(0, 200) });

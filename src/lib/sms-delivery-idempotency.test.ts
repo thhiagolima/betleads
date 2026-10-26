@@ -16,7 +16,7 @@ vi.mock("@/integrations/supabase/client.server", () => {
   type Filter = (row: Row) => boolean;
   const tables: Record<string, () => Row[]> = {
     sms_send_logs: () => state.smsLogs,
-    sms_credit_ledger: () => state.ledger,
+    wallet_ledger: () => state.ledger,
     link_dispatches: () => [],
   };
   function from(table: string) {
@@ -57,23 +57,53 @@ vi.mock("@/integrations/supabase/client.server", () => {
     };
     return builder;
   }
-  function mutate(args: Row, delta: number, entryType: string) {
+  const UNIT_PRICE = 0.08;
+  function reserve(args: Row) {
     const existing = state.ledger.find(
       (row) => row.tenant_id === args._tenant && row.idempotency_key === args._idempotency_key,
     );
-    if (existing) return { data: { ok: true, idempotent: true }, error: null };
+    if (existing) return { data: { ok: true, idempotent: true, amount: existing.amount }, error: null };
+    const units = Number(args._units ?? 1);
+    const amount = -(units * UNIT_PRICE);
     state.ledger.push({
       tenant_id: args._tenant,
       idempotency_key: args._idempotency_key,
       reference_id: args._reference_id,
-      delta_credits: delta,
-      entry_type: entryType,
+      units,
+      amount,
+      entry_type: "usage_reservation",
+    });
+    return { data: { ok: true, idempotent: false, amount, exempt: false }, error: null };
+  }
+  function refund(args: Row) {
+    const existing = state.ledger.find(
+      (row) => row.tenant_id === args._tenant && row.idempotency_key === args._idempotency_key,
+    );
+    if (existing) return { data: { ok: true, idempotent: true }, error: null };
+    const reservation = state.ledger.find(
+      (row) =>
+        row.tenant_id === args._tenant &&
+        row.reference_id === args._reference_id &&
+        row.entry_type === "usage_reservation",
+    );
+    if (!reservation) return { data: { ok: false, reason: "reservation_not_found" }, error: null };
+    const alreadyRefunded = state.ledger.some(
+      (row) => row.entry_type === "usage_refund" && row.reference_id === args._reference_id,
+    );
+    if (alreadyRefunded) return { data: { ok: false, reason: "already_refunded" }, error: null };
+    state.ledger.push({
+      tenant_id: args._tenant,
+      idempotency_key: args._idempotency_key,
+      reference_id: args._reference_id,
+      units: reservation.units,
+      amount: -Number(reservation.amount),
+      entry_type: "usage_refund",
     });
     return { data: { ok: true, idempotent: false }, error: null };
   }
   async function rpc(fn: string, args: Row) {
-    if (fn === "reserve_sms_credits") return mutate(args, -1, "sms_reservation");
-    if (fn === "refund_sms_credits") return mutate(args, 1, "sms_refund");
+    if (fn === "wallet_reserve") return reserve(args);
+    if (fn === "wallet_refund") return refund(args);
     throw new Error(`unexpected rpc ${fn}`);
   }
   return { supabaseAdmin: { from, rpc } };
@@ -126,7 +156,9 @@ const send = () =>
   });
 
 const charged = () =>
-  state.ledger.reduce((sum, row) => sum - Number(row.delta_credits), 0);
+  state.ledger
+    .filter((row) => row.entry_type === "usage_reservation" || row.entry_type === "usage_refund")
+    .reduce((sum, row) => sum + Number(row.units) * (row.entry_type === "usage_refund" ? -1 : 1), 0);
 
 describe("SMS delivery idempotency (ENV-02)", () => {
   beforeEach(() => {
@@ -207,16 +239,16 @@ describe("SMS delivery idempotency (ENV-02)", () => {
   });
 
   it("without a delivery key every reservation is a new charge (campaigns unchanged)", async () => {
-    const a = await reserveSmsCreditForDelivery(TENANT, null);
-    const b = await reserveSmsCreditForDelivery(TENANT, undefined);
+    const a = await reserveSmsCreditForDelivery(TENANT, null, 1);
+    const b = await reserveSmsCreditForDelivery(TENANT, undefined, 1);
     expect(a.ok && b.ok).toBe(true);
     expect(a.referenceId).not.toBe(b.referenceId);
     expect(charged()).toBe(2);
   });
 
   it("reuses a non-refunded reservation for the same delivery key", async () => {
-    const a = await reserveSmsCreditForDelivery(TENANT, KEY);
-    const b = await reserveSmsCreditForDelivery(TENANT, KEY);
+    const a = await reserveSmsCreditForDelivery(TENANT, KEY, 1);
+    const b = await reserveSmsCreditForDelivery(TENANT, KEY, 1);
     expect(a).toEqual({ ok: true, referenceId: `delivery:${KEY}` });
     expect(b).toEqual(a);
     expect(charged()).toBe(1);

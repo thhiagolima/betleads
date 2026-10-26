@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { tenantReads } from "@/lib/active-tenant-filter";
 
 // Retorna os IDs dos players que disparam o gatilho "Queda de depósitos".
 // Faz a agregação direto no Postgres pra ser determinístico e não depender
@@ -7,6 +8,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 export const getQuedaDepositosPlayerIds = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<{ ids: string[] }> => {
+    const reads = await tenantReads(context.supabase);
     const now = Date.now();
     const iso7 = new Date(now - 7 * 86400000).toISOString();
     const iso14 = new Date(now - 14 * 86400000).toISOString();
@@ -19,7 +21,7 @@ export const getQuedaDepositosPlayerIds = createServerFn({ method: "GET" })
     type Row = { player_id: string | null; valor: number | string | null; created_at: string };
     const all: Row[] = [];
     for (let from = 0; ; from += PAGE) {
-      const { data, error } = await context.supabase
+      const { data, error } = await reads
         .from("deposits")
         .select("player_id,valor,created_at")
         .eq("status", "aprovado")

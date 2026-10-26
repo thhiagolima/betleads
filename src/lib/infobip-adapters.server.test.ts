@@ -6,6 +6,13 @@ vi.mock("./tenant-access.server", () => ({
   assertTenantNotDemoForSend: vi.fn(async () => undefined),
 }));
 
+// PG3 Task 4: the wallet reservation has its own coverage
+// (infobip-voice.billing.test.ts); here it always succeeds.
+vi.mock("./billing/wallet.server", () => ({
+  reserveForDelivery: vi.fn(async () => ({ ok: true, referenceId: "voice:test", amount: 0, balance: 0 })),
+  refundForDelivery: vi.fn(async () => undefined),
+}));
+
 import { callInfobipEmail } from "./infobip-email.server";
 import { callInfobipVoice, normalizeE164BR } from "./infobip-voice.server";
 

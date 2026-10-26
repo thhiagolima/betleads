@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { withServerResultCache } from "@/lib/server-result-cache";
+import { resolveCurrentTenantId } from "@/lib/tenant-access.server";
 
 export type PlayerFilterFacets = Record<string, number>;
 
@@ -24,9 +25,7 @@ export const getPlayerFilterFacets = createServerFn({ method: "POST" })
   .inputValidator((data: PlayerFilterFacetInput) => data)
   .handler(async ({ data, context }): Promise<PlayerFilterFacets> => {
     const supabase = context.supabase;
-    const { data: tenantId, error: tenantError } = await supabase.rpc("current_tenant_id");
-    if (tenantError) throw new Error(tenantError.message);
-    if (!tenantId) throw new Error("Conta atual não encontrada.");
+    const tenantId = await resolveCurrentTenantId(supabase);
 
     const status = data.gamificationStatus ?? null;
     const level = data.gamificationLevel ?? null;

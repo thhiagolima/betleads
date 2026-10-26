@@ -22,7 +22,7 @@ export function Holdout({ data }: { data: Data }) {
     <div className="space-y-4">
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Teste de controle</CardTitle>
+          <CardTitle>Teste de controle</CardTitle>
           <CardDescription>
             Uma parte sorteada dos jogadores que entram na jornada não recebe mensagens. Comparar a
             volta dos dois grupos em até 7 dias mostra o efeito real da jornada, sem contar quem
@@ -51,7 +51,7 @@ export function Holdout({ data }: { data: Data }) {
       {data.holdout.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Resultados</CardTitle>
+            <CardTitle>Resultados</CardTitle>
           </CardHeader>
           <CardContent className="overflow-x-auto p-0">
             <Table>
@@ -92,8 +92,8 @@ export function Holdout({ data }: { data: Data }) {
                               !row.significant
                                 ? ""
                                 : row.lift > 0
-                                  ? "font-medium text-emerald-600 dark:text-emerald-400"
-                                  : "font-medium text-red-600 dark:text-red-400"
+                                  ? "font-medium text-success"
+                                  : "font-medium text-danger"
                             }
                           >
                             {row.lift >= 0 ? "+" : ""}
@@ -119,14 +119,14 @@ export function Holdout({ data }: { data: Data }) {
                       ) : row.significant && (row.lift ?? 0) > 0 ? (
                         <Badge
                           variant="outline"
-                          className="border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                          className="border-success/40 bg-success/10 text-success"
                         >
                           traz jogadores de volta
                         </Badge>
                       ) : row.significant ? (
                         <Badge
                           variant="outline"
-                          className="border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-400"
+                          className="border-danger/40 bg-danger/10 text-danger"
                         >
                           pior que não enviar
                         </Badge>
@@ -145,7 +145,7 @@ export function Holdout({ data }: { data: Data }) {
       {pending.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Testes em andamento</CardTitle>
+            <CardTitle>Testes em andamento</CardTitle>
             <CardDescription>
               Ainda sem resultado: nenhum jogador destas jornadas completou os 7 dias. Para uma
               leitura confiável, cada grupo precisa de pelo menos {HOLDOUT_MIN_PLAYERS} jogadores.
@@ -158,17 +158,17 @@ export function Holdout({ data }: { data: Data }) {
                 <div key={journey.journeyId} className="space-y-3 rounded-lg border p-4">
                   <div className="flex items-start justify-between gap-2">
                     <p className="font-medium leading-tight">{journey.name}</p>
-                    <Badge variant="outline" className="shrink-0 text-[10px]">
+                    <Badge variant="outline" className="shrink-0 text-meta">
                       controle {journey.percent}%
                     </Badge>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-sm tabular-nums">
                     <div>
-                      <p className="text-lg font-semibold">{num(journey.treated)}</p>
+                      <p className="text-kpi-sm">{num(journey.treated)}</p>
                       <p className="text-xs text-muted-foreground">recebem mensagens</p>
                     </div>
                     <div>
-                      <p className="text-lg font-semibold">{num(journey.control)}</p>
+                      <p className="text-kpi-sm">{num(journey.control)}</p>
                       <p className="text-xs text-muted-foreground">no controle</p>
                     </div>
                   </div>

@@ -2,12 +2,10 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { assertTenantNotDemo } from "@/lib/tenant-access.server";
+import { assertTenantNotDemo, resolveCurrentTenantId } from "@/lib/tenant-access.server";
 
 async function getWebhookAccess(context: { supabase: any }) {
-  const { data: tenantId, error: tenantError } = await context.supabase.rpc("current_tenant_id");
-  if (tenantError) throw new Error(tenantError.message);
-  if (!tenantId) throw new Error("Tenant atual não encontrado.");
+  const tenantId = await resolveCurrentTenantId(context.supabase);
 
   const { data: canManage, error: accessError } = await context.supabase.rpc("is_tenant_admin", {
     _tenant: tenantId,

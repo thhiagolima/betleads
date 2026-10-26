@@ -1,11 +1,17 @@
-import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
+import {
+  createFileRoute,
+  Link,
+  Outlet,
+  useLocation,
+  useNavigate,
+  useRouterState,
+} from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { POLL_INTERVALS } from "@/hooks/use-updated-ago";
-import { Card, CardContent } from "@/components/ui/card";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -21,7 +27,6 @@ import {
   Crown,
   ChevronLeft,
   ChevronRight,
-  Download,
   ArrowUp,
   ArrowDown,
   ArrowUpDown,
@@ -29,16 +34,35 @@ import {
   Check,
   Calendar as CalendarIcon,
   X,
-  Eye,
   MessageSquareText,
-  RefreshCw,
+  MessageCircle,
+  History,
   Loader2,
+  MoreHorizontal,
   SlidersHorizontal,
+  Download,
+  Users,
 } from "lucide-react";
-import { MessageCircle } from "lucide-react";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Page, PageHeader } from "@/components/ui-premium/page-header";
+import { PageTabs } from "@/components/ui-premium/page-tabs";
+import { EmptyState } from "@/components/ui-premium/empty-state";
+import { HomeCard, KpiCard } from "@/components/home/home-cards";
+import { LevelBadge } from "@/components/players/level-badge";
+import { SituationText } from "@/components/players/situation-text";
+import { SegmentedFilter } from "@/components/players/segmented-filter";
+import { LEVEL_IDENTITY } from "@/components/identity/identity";
+import { alertTypeLabel } from "@/components/players/player-labels";
+import { copyToClipboard, openCampaignWithAudience } from "@/components/players/campaign-audience";
 import {
   Sheet,
   SheetContent,
@@ -58,6 +82,7 @@ import type { DateRange } from "react-day-picker";
 import { parseBrtDayStart, parseBrtDayEnd } from "@/lib/tz";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import {
   computeAlertsByPlayer,
   whatsappMessageFor,
@@ -79,9 +104,13 @@ import { getAlertPlayerIdsByTipo } from "@/lib/alert-ids.functions";
 import {
   getPlayersPage,
   getPlayersFilteredExternalIds,
-  getPlayersFilteredSmsAudience,
+  getPlayersFilteredPlayerIds,
+  getPlayersFilteredExport,
   type PlayerRow,
 } from "@/lib/players-list.functions";
+import { LEVEL_LABEL, levelForTotal } from "@/lib/player-level";
+import { playerSituation, SITUATION_LABEL, type PlayerSituation } from "@/lib/player-situation";
+import { playersCsv } from "@/lib/players-csv";
 import { getPlayerFilterFacets } from "@/lib/player-filter-facets.functions";
 import { getGamificationData, type LevelSlug } from "@/lib/gamification.functions";
 import {
@@ -109,7 +138,6 @@ type WhatsAppDialogPlayer = PlayerLike & Pick<PlayerRow, "id" | "nome" | "telefo
 const EMPTY_PLAYERS: Player[] = [];
 
 type PaidLevelSlug = Exclude<LevelSlug, "novice">;
-type PlayerSituation = "active" | "cooling" | "sleeping" | "no_deposit";
 type AdvancedFilterDraft = {
   filter: string;
   behaviorFilters: string[];
@@ -124,6 +152,7 @@ type PlayerGamificationSettings = {
   thresholds: Record<PaidLevelSlug, number>;
   coolingAfterDays: number;
   sleepingAfterDays: number;
+  vipMinLevel?: PaidLevelSlug;
 };
 
 const DEFAULT_PLAYER_GAMIFICATION: PlayerGamificationSettings = {
@@ -138,21 +167,23 @@ const DEFAULT_PLAYER_GAMIFICATION: PlayerGamificationSettings = {
   sleepingAfterDays: 7,
 };
 
-const levelBadgeMeta: Record<LevelSlug, { label: string; className: string }> = {
-  novice: { label: "Novato", className: "border-emerald-400/30 text-emerald-300" },
-  bronze: { label: "Bronze", className: "border-orange-400/30 text-orange-300" },
-  silver: { label: "Prata", className: "border-sky-200/30 text-sky-100" },
-  gold: { label: "Ouro", className: "border-amber-400/40 text-amber-300" },
-  diamond: { label: "Diamante", className: "border-cyan-300/40 text-cyan-200" },
-  black: { label: "Black VIP", className: "border-violet-300/40 text-violet-200" },
-};
+type PlayersView = "lista" | "acompanhamento";
+type FollowupQueue = "aguardando_conversao" | "convertido" | "nao_convertido";
 
-const situationBadgeMeta: Record<PlayerSituation, { label: string; className: string }> = {
-  active: { label: "Ativo", className: "text-emerald-400" },
-  cooling: { label: "Esfriando", className: "text-amber-400" },
-  sleeping: { label: "Dormindo", className: "text-rose-400" },
-  no_deposit: { label: "Sem depósito", className: "text-primary" },
-};
+const VIEW_TABS = [
+  { value: "lista", label: "Lista" },
+  { value: "acompanhamento", label: "Acompanhamento" },
+] as const;
+
+const FOLLOWUP_QUEUES: ReadonlyArray<{ value: FollowupQueue; label: string }> = [
+  { value: "aguardando_conversao", label: "Aguardando conversão" },
+  { value: "convertido", label: "Converteu" },
+  { value: "nao_convertido", label: "Não converteu" },
+];
+
+function viewFromHash(hash: string): PlayersView {
+  return hash.replace(/^#/, "") === "acompanhamento" ? "acompanhamento" : "lista";
+}
 
 const filters = [
   { id: "todos", label: "Todos" },
@@ -180,7 +211,6 @@ const filters = [
 const advancedFilterGroups = [
   {
     title: "Atividade e depósitos",
-    description: "Condições objetivas de atividade, depósito e saldo.",
     ids: [
       "recorrentes",
       "deposito_hoje",
@@ -192,7 +222,6 @@ const advancedFilterGroups = [
   },
   {
     title: "Valor e risco",
-    description: "Atalhos por valor acumulado e tempo sem atividade.",
     ids: [
       "vip",
       "quase_vip",
@@ -212,18 +241,18 @@ const BEHAVIOR_FILTER_IDS = new Set(
   filters.filter((item) => item.id !== "todos").map((item) => item.id),
 );
 
-// Chips que filtram por gatilho de alerta em tempo real
-// (mesma lógica da página /alertas — quando a gente manda mensagem o lead some daqui)
+// Sinais de oportunidade em tempo real (mesma lógica de /alertas — quando a
+// gente manda mensagem o jogador sai daqui).
 const alertFilters: { id: AlertaTipo; label: string }[] = [
   { id: "abandono_vip", label: "VIP recuperável" },
   { id: "vip_sem_atividade", label: "VIP esfriando" },
   { id: "queda_depositos", label: "Queda de depósitos" },
-  { id: "lead_quente_esfriando", label: "Lead quente esfriando" },
+  { id: "lead_quente_esfriando", label: "Quente esfriando" },
   { id: "proximo_vip", label: "Quase VIP" },
   { id: "alto_potencial", label: "Alto potencial" },
   { id: "player_reativado", label: "Reativado" },
   { id: "sequencia_depositos", label: "Em sequência" },
-  { id: "saldo_parado", label: "Saldo parado (alerta)" },
+  { id: "saldo_parado", label: "Saldo parado" },
   { id: "login_sem_deposito", label: "Logando sem depositar" },
   { id: "frequencia_caindo", label: "Frequência caindo" },
 ];
@@ -233,13 +262,7 @@ function filterDisplayLabel(filterId: string) {
   return (
     filters.find((item) => item.id === filterId)?.label ??
     alertFilters.find((item) => item.id === filterId)?.label ??
-    (filterId === "aguardando_conversao"
-      ? "Aguardando conversão"
-      : filterId === "convertido"
-        ? "Converteu"
-        : filterId === "nao_convertido"
-          ? "Não converteu"
-          : filterId)
+    alertTypeLabel(filterId)
   );
 }
 
@@ -247,26 +270,14 @@ function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
 
-const gamificationStatusFilters = [
-  { id: "todos", label: "Todos", tone: "text-muted-foreground" },
-  { id: "situacao_active", label: "Ativo", tone: "text-emerald-400" },
-  { id: "situacao_cooling", label: "Esfriando", tone: "text-amber-400" },
-  { id: "situacao_sleeping", label: "Dormindo", tone: "text-rose-400" },
-  { id: "situacao_no_deposit", label: "Sem depósito", tone: "text-primary" },
-];
-
-const gamificationLevelFilters: Array<{
-  id: string;
-  level: LevelSlug;
-  label: string;
-  tone: string;
-}> = [
-  { id: "nivel_bronze", level: "bronze", label: "Bronze", tone: "text-orange-400" },
-  { id: "nivel_silver", level: "silver", label: "Prata", tone: "text-sky-200" },
-  { id: "nivel_gold", level: "gold", label: "Ouro", tone: "text-amber-400" },
-  { id: "nivel_diamond", level: "diamond", label: "Diamante", tone: "text-cyan-300" },
-  { id: "nivel_black", level: "black", label: "Black VIP", tone: "text-violet-300" },
-];
+const SITUATIONS: PlayerSituation[] = ["active", "cooling", "sleeping", "no_deposit"];
+const SITUATION_FILTER_LABEL: Record<PlayerSituation, string> = {
+  active: "Ativos",
+  cooling: "Esfriando",
+  sleeping: "Dormindo",
+  no_deposit: "Sem depósito",
+};
+const PAID_LEVELS: PaidLevelSlug[] = ["bronze", "silver", "gold", "diamond", "black"];
 
 // Gatilhos calculados no servidor (SQL) — logins vêm da tabela events.
 const SERVER_ALERT_FILTERS = new Set<string>([
@@ -307,48 +318,34 @@ function defaultSortKey(
   return sortByDeposit.has(filter) ? "total_depositado" : "ultimo_login";
 }
 
-function riskDot(r: string) {
-  const c =
-    r === "alto"
-      ? "bg-red-500 shadow-red-500/60"
-      : r === "medio"
-        ? "bg-amber-400 shadow-amber-400/60"
-        : "bg-emerald-400 shadow-emerald-400/60";
-  return <span className={`inline-block h-2 w-2 rounded-full shadow-[0_0_8px] ${c}`} />;
+const RISK_LABEL: Record<string, string> = { alto: "alto", medio: "médio", baixo: "baixo" };
+
+function RiskDot({ risk }: { risk: string | null | undefined }) {
+  const value = risk ?? "baixo";
+  const color = value === "alto" ? "bg-danger" : value === "medio" ? "bg-warning" : "bg-success";
+  const label = `Risco ${RISK_LABEL[value] ?? value}`;
+  return (
+    <span
+      role="img"
+      aria-label={label}
+      title={label}
+      className={`inline-block h-2 w-2 shrink-0 rounded-full ${color}`}
+    />
+  );
 }
 
 function getPlayerLevel(
   player: Player,
   settings: PlayerGamificationSettings = DEFAULT_PLAYER_GAMIFICATION,
 ): LevelSlug {
-  const total = Number(player.total_depositado ?? 0);
-  const { thresholds } = settings;
-  if (total >= thresholds.black) return "black";
-  if (total >= thresholds.diamond) return "diamond";
-  if (total >= thresholds.gold) return "gold";
-  if (total >= thresholds.silver) return "silver";
-  if (total >= thresholds.bronze) return "bronze";
-  return "novice";
-}
-
-function daysSinceIso(value: string | null) {
-  if (!value) return null;
-  const timestamp = new Date(value).getTime();
-  if (!Number.isFinite(timestamp)) return null;
-  return Math.max(0, Math.floor((Date.now() - timestamp) / 86400000));
+  return levelForTotal(player.total_depositado, settings.thresholds);
 }
 
 function getPlayerSituation(
   player: Player,
   settings: PlayerGamificationSettings = DEFAULT_PLAYER_GAMIFICATION,
 ): PlayerSituation {
-  const total = Number(player.total_depositado ?? 0);
-  if (!player.ftd_em && total <= 0) return "no_deposit";
-  const daysWithoutDeposit = daysSinceIso(player.ultimo_deposito ?? player.ftd_em);
-  if (daysWithoutDeposit == null) return "no_deposit";
-  if (daysWithoutDeposit >= settings.sleepingAfterDays) return "sleeping";
-  if (daysWithoutDeposit >= settings.coolingAfterDays) return "cooling";
-  return "active";
+  return playerSituation(player, settings);
 }
 
 type SortKey =
@@ -361,6 +358,13 @@ type SortKey =
   | "saldo"
   | "status"
   | "origem";
+
+const MOBILE_SORTS: ReadonlyArray<{ value: string; label: string; key: SortKey | null }> = [
+  { value: "padrao", label: "Ordem padrão", key: null },
+  { value: "total_depositado", label: "Maior total depositado", key: "total_depositado" },
+  { value: "ultimo_deposito", label: "Último depósito mais recente", key: "ultimo_deposito" },
+  { value: "ultimo_login", label: "Último acesso mais recente", key: "ultimo_login" },
+];
 
 function PlayersPage() {
   const navigate = useNavigate();
@@ -389,9 +393,31 @@ function PlayersPage() {
   const [waMensagem, setWaMensagem] = useState<string>("");
   const [historyPlayer, setHistoryPlayer] = useState<{ id: string; nome: string } | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // Linhas selecionadas de qualquer página (a seleção sobrevive à troca de página).
+  const selectedRowCache = useRef(new Map<string, Player>());
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
   const [advancedDraft, setAdvancedDraft] = useState<AdvancedFilterDraft | null>(null);
+  const isMobile = useIsMobile();
+  // Busca visível na barra (C-05): aplica direto, com debounce, sem passar pela gaveta.
+  const [searchInput, setSearchInput] = useState("");
+  useEffect(() => {
+    const handle = window.setTimeout(() => setSearch(searchInput.trim()), 350);
+    return () => window.clearTimeout(handle);
+  }, [searchInput]);
+  // Lista principal x filas de acompanhamento (C-25), sincronizado com o hash.
+  const hash = useLocation({ select: (location) => location.hash });
+  const view = viewFromHash(hash);
+  const [followupQueue, setFollowupQueue] = useState<FollowupQueue>("aguardando_conversao");
+  const [selectionMode, setSelectionMode] = useState(false);
+
+  function setView(next: PlayersView) {
+    void navigate({
+      to: "/players",
+      search: { id: undefined, focus: undefined },
+      hash: next === "lista" ? "" : next,
+    });
+  }
 
   useEffect(() => {
     if (!linkedPlayerId || isDetailRoute) return;
@@ -442,13 +468,9 @@ function PlayersPage() {
         ).toISOString()
       : null;
   const hasDateRange = !!(dateFromIso && dateToIso);
+  // Só o que fica escondido na gaveta (situação, nível e busca já aparecem na barra).
   const advancedFilterCount =
-    Number(filter !== "todos") +
-    behaviorFilters.length +
-    Number(Boolean(selectedSituation)) +
-    Number(Boolean(selectedLevel)) +
-    Number(Boolean(search.trim())) +
-    Number(hasDateRange);
+    Number(filter !== "todos") + behaviorFilters.length + Number(hasDateRange);
   const sheetDraft: AdvancedFilterDraft = advancedDraft ?? {
     filter,
     behaviorFilters,
@@ -479,7 +501,6 @@ function PlayersPage() {
     sheetDraft.behaviorFilters.length +
     Number(Boolean(sheetDraft.situation)) +
     Number(Boolean(sheetDraft.level)) +
-    Number(Boolean(sheetDraft.search.trim())) +
     Number(draftHasDateRange);
 
   function fmtBr(d: Date) {
@@ -490,16 +511,17 @@ function PlayersPage() {
   const isQuedaFilter = filter === "queda_depositos";
   const isLqeFilter = filter === "lead_quente_esfriando";
   const isServerAlertFilter = SERVER_ALERT_FILTERS.has(filter);
-  const isPendingFilter = filter === "aguardando_conversao";
-  const isConvertedFilter = filter === "convertido";
-  const isNotConvertedFilter = filter === "nao_convertido";
+  const inFollowup = view === "acompanhamento";
+  const isPendingFilter = inFollowup && followupQueue === "aguardando_conversao";
+  const isConvertedFilter = inFollowup && followupQueue === "convertido";
+  const isNotConvertedFilter = inFollowup && followupQueue === "nao_convertido";
   const isOutcomeFilter = isConvertedFilter || isNotConvertedFilter;
 
   const fetchRecentFollowupKeys = useServerFn(listRecentFollowupKeys);
   const { data: recentFollowupData } = useQuery({
     queryKey: ["players-recent-followup-keys"],
     queryFn: () => fetchRecentFollowupKeys(),
-    // Sempre buscar — usado para o badge ⏳ em qualquer linha de player.
+    // Sempre buscar — usado para o selo "Aguardando" em qualquer linha da lista.
     enabled: true,
     staleTime: 15_000,
     refetchInterval: 60_000,
@@ -508,7 +530,7 @@ function PlayersPage() {
     () => new Set(recentFollowupData?.keys ?? []),
     [recentFollowupData],
   );
-  // Player IDs com QUALQUER followup pendente — pro badge ⏳ na linha.
+  // Player IDs com QUALQUER followup pendente — pro selo "Aguardando" na linha.
   const pendingPlayerIdsAny = useMemo(() => {
     const set = new Set<string>();
     for (const k of recentFollowupKeySet) set.add(k.split(":")[0]);
@@ -553,14 +575,14 @@ function PlayersPage() {
           converted,
         },
       });
-      toast.success(converted ? "Marcado como convertido" : "Marcado como sem resposta");
+      toast.success(converted ? "Marcado como convertido." : "Marcado como não convertido.");
       qc.invalidateQueries({ queryKey: ["players-pending-conversion"] });
       qc.invalidateQueries({ queryKey: ["players-recent-followup-keys"] });
       qc.invalidateQueries({ queryKey: ["players-alerts"] });
       qc.invalidateQueries({ queryKey: ["players-converted"] });
       qc.invalidateQueries({ queryKey: ["players-not-converted"] });
     } catch (e: unknown) {
-      toast.error(getErrorMessage(e, "Erro ao registrar desfecho"));
+      toast.error(getErrorMessage(e, "Não foi possível registrar o desfecho"));
     }
   }
 
@@ -574,7 +596,7 @@ function PlayersPage() {
     email: string | null;
   }) {
     if (!row.telefone) {
-      toast.error("Lead sem telefone cadastrado");
+      toast.error("Jogador sem telefone cadastrado.");
       return;
     }
     setWaMensagem(nextPrecallCopy({ fullName: row.nome, brand: tenantBrand ?? "" }));
@@ -750,6 +772,7 @@ function PlayersPage() {
     data: pageData,
     isLoading,
     isFetching: isFetchingPlayers,
+    isPlaceholderData,
   } = useQuery({
     queryKey: [
       "players-page",
@@ -998,7 +1021,17 @@ function PlayersPage() {
   // Limpa seleção quando muda filtro/busca — evita copiar IDs de outro conjunto.
   useEffect(() => {
     setSelectedIds(new Set());
-  }, [filter, selectedSituation, selectedLevel, search]);
+    selectedRowCache.current.clear();
+  }, [filter, behaviorFilters, selectedSituation, selectedLevel, search, dateFromIso, dateToIso]);
+
+  function selectedRows(): Player[] {
+    const visible = new Map(
+      (isLocalAlertFilter ? (localAlertData?.rows ?? []) : paged).map((p) => [p.id, p]),
+    );
+    return Array.from(selectedIds)
+      .map((id) => visible.get(id) ?? selectedRowCache.current.get(id))
+      .filter((p): p is Player => Boolean(p));
+  }
 
   // Linhas / totais — vêm do path local (4 alertas) ou da página do servidor.
   const paged: Player[] = isLocalAlertFilter ? (localPagedSlice?.page ?? []) : (data ?? []);
@@ -1006,94 +1039,85 @@ function PlayersPage() {
   const totalPages = Math.max(1, Math.ceil(filteredCount / pageSize));
   const currentPage = Math.min(page, totalPages);
 
-  const pageNumbers = useMemo(() => {
-    const pages: number[] = [];
-    const start = Math.max(1, currentPage - 2);
-    const end = Math.min(totalPages, start + 4);
-    const realStart = Math.max(1, end - 4);
-    for (let i = realStart; i <= end; i++) pages.push(i);
-    return pages;
-  }, [currentPage, totalPages]);
-
   const SortHeader = ({ k, label, align }: { k: SortKey; label: string; align?: "right" }) => {
     const active = sort?.key === k;
     const Icon = !active ? ArrowUpDown : sort!.dir === "desc" ? ArrowDown : ArrowUp;
     return (
       <button
+        type="button"
         onClick={() => toggleSort(k)}
-        className={`inline-flex items-center gap-1 hover:text-foreground transition-colors ${
-          active ? "text-primary" : ""
-        } ${align === "right" ? "justify-end w-full" : ""}`}
+        aria-label={`Ordenar por ${label.toLowerCase()}`}
+        className={`inline-flex items-center gap-1 transition-colors hover:text-foreground ${
+          active ? "text-foreground" : ""
+        } ${align === "right" ? "w-full justify-end" : ""}`}
       >
         {label}
-        <Icon className="h-3 w-3 opacity-70" />
+        <Icon className="h-3 w-3 opacity-70" aria-hidden="true" />
       </button>
     );
   };
 
-  const exportCsv = () => {
-    const rows = paged;
-    const headers = [
-      "nome",
-      "telefone",
-      "email",
-      "player_external_id",
-      "origem",
-      "expert",
-      "status",
-      "vip",
-      "ultimo_login",
-      "ultimo_jogo",
-      "ultimo_deposito",
-      "total_depositado",
-      "total_sacado",
-      "saldo",
-      "lucro",
-      "tags",
-    ];
-    const esc = (v: unknown) => {
-      const s = v === null || v === undefined ? "" : String(v);
-      return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-    };
-    const lines = [headers.join(",")];
-    for (const p of rows) {
-      const lucro = Number(p.total_depositado) - Number(p.total_sacado);
-      const saldo = Number(p.saldo_carteira ?? 0) + Number(p.saldo_bonus ?? 0);
-      lines.push(
-        [
-          p.nome,
-          p.telefone,
-          p.email,
-          p.player_external_id,
-          p.origem,
-          p.expert,
-          p.status,
-          p.vip ? "sim" : "nao",
-          p.ultimo_login,
-          p.ultimo_jogo,
-          p.ultimo_deposito,
-          p.total_depositado,
-          p.total_sacado,
-          saldo,
-          lucro,
-          (p.tags ?? []).join("|"),
-        ]
-          .map(esc)
-          .join(","),
+  // C-06: exporta o filtro inteiro, não só a página visível.
+  const fetchFilteredExport = useServerFn(getPlayersFilteredExport);
+  const [exportingCsv, setExportingCsv] = useState(false);
+  const exportCsv = async () => {
+    setExportingCsv(true);
+    try {
+      let rows: Player[] | Awaited<ReturnType<typeof fetchFilteredExport>>["rows"];
+      let truncatedNote = "";
+      if (isLocalAlertFilter) {
+        // Os 4 alertas calculados no navegador já têm a lista completa em memória.
+        rows = localAlertData?.rows ?? [];
+      } else {
+        const res = await fetchFilteredExport({
+          data: {
+            filter,
+            behaviorFilters,
+            behaviorOperator,
+            gamificationStatus: selectedSituation,
+            gamificationLevel: selectedLevel,
+            search,
+            idsIn: alertIdsForFilter,
+            dateField: hasDateRange ? dateField : null,
+            dateFrom: dateFromIso,
+            dateTo: dateToIso,
+            sortKey: sort?.key ?? defaultSortKey(filter),
+            sortDir: sort?.dir ?? "desc",
+          },
+        });
+        rows = res.rows;
+        if (res.truncated) {
+          truncatedNote = ` Limite de ${res.rows.length.toLocaleString("pt-BR")} de ${res.total.toLocaleString("pt-BR")} jogadores atingido; refine o filtro para exportar o resto.`;
+        }
+      }
+      if (rows.length === 0) {
+        toast.error("Nenhum jogador para exportar nesse filtro.");
+        return;
+      }
+      const csv = playersCsv(
+        rows,
+        gamification?.settings?.thresholds ?? DEFAULT_PLAYER_GAMIFICATION.thresholds,
       );
+      const blob = new Blob(["﻿" + csv], {
+        type: "text/csv;charset=utf-8;",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const ts = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = `jogadores_${filter}_${ts}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      const message = `${rows.length.toLocaleString("pt-BR")} jogadores exportados.${truncatedNote}`;
+      if (truncatedNote) toast.warning(message);
+      else toast.success(message);
+    } catch (e: unknown) {
+      toast.error(getErrorMessage(e, "Não foi possível exportar o CSV"));
+    } finally {
+      setExportingCsv(false);
     }
-    const blob = new Blob(["\ufeff" + lines.join("\n")], {
-      type: "text/csv;charset=utf-8;",
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    const ts = new Date().toISOString().slice(0, 10);
-    a.href = url;
-    a.download = `leads_${filter}_${ts}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
   };
 
   // ===== Copiar IDs Push (player_external_id) =====
@@ -1111,32 +1135,10 @@ function PlayersPage() {
     return out;
   }
 
-  async function copyToClipboard(text: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return true;
-    } catch {
-      // fallback
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.select();
-      try {
-        document.execCommand("copy");
-      } catch {
-        // navegador antigo bloqueou o fallback de copia
-      }
-      document.body.removeChild(ta);
-      return true;
-    }
-  }
-
   async function copyOneId(externalId: string | null | undefined, playerId?: string) {
     const v = (externalId ?? "").trim();
     if (!v) {
-      toast.error("Esse player não tem ID Push.");
+      toast.error("Este jogador não tem ID da plataforma.");
       return;
     }
     await copyToClipboard(v);
@@ -1148,20 +1150,17 @@ function PlayersPage() {
   }
 
   async function copySelectedIds() {
-    // Usa os IDs externos dos selecionados — buscamos no dataset visível.
-    const allRows: Player[] = isLocalAlertFilter ? (localAlertData?.rows ?? []) : (data ?? []);
-    const map = new Map(allRows.map((p) => [p.id, p.player_external_id]));
-    const externals = Array.from(selectedIds).map((id) => map.get(id) ?? null);
-    const ids = formatIds(externals);
+    // IDs externos dos selecionados (de qualquer página já vista).
+    const ids = formatIds(selectedRows().map((p) => p.player_external_id));
     const missing = selectedIds.size - ids.length;
     if (ids.length === 0) {
-      toast.error("Nenhum ID Push encontrado entre os selecionados.");
+      toast.error("Nenhum ID da plataforma entre os selecionados.");
       return;
     }
     await copyToClipboard(ids.join("\n"));
     toast.success(
       missing > 0
-        ? `${ids.length} IDs copiados. ${missing} players ignorados por não terem ID Push.`
+        ? `${ids.length} IDs copiados. ${missing} jogadores sem ID da plataforma ficaram de fora.`
         : `${ids.length} IDs copiados para a área de transferência.`,
     );
   }
@@ -1178,13 +1177,13 @@ function PlayersPage() {
         const ids = formatIds(rows.map((p) => p.player_external_id));
         const missing = rows.length - ids.length;
         if (ids.length === 0) {
-          toast.error("Nenhum ID Push encontrado nesse filtro.");
+          toast.error("Nenhum ID da plataforma neste filtro.");
           return;
         }
         await copyToClipboard(ids.join("\n"));
         toast.success(
           missing > 0
-            ? `${ids.length} IDs copiados. ${missing} players ignorados por não terem ID Push.`
+            ? `${ids.length} IDs copiados. ${missing} jogadores sem ID da plataforma ficaram de fora.`
             : `${ids.length} IDs copiados para a área de transferência.`,
         );
         return;
@@ -1205,82 +1204,68 @@ function PlayersPage() {
         },
       });
       if (res.ids.length === 0) {
-        toast.error("Nenhum ID Push encontrado nesse filtro.");
+        toast.error("Nenhum ID da plataforma neste filtro.");
         return;
       }
       await copyToClipboard(res.ids.join("\n"));
       toast.success(
         res.missing > 0
-          ? `${res.ids.length} IDs copiados. ${res.missing} players ignorados por não terem ID Push.`
+          ? `${res.ids.length} IDs copiados. ${res.missing} jogadores sem ID da plataforma ficaram de fora.`
           : `${res.ids.length} IDs copiados para a área de transferência.`,
       );
     } catch (e: unknown) {
-      toast.error(getErrorMessage(e, "Erro ao copiar IDs"));
+      toast.error(getErrorMessage(e, "Não foi possível copiar os IDs"));
     } finally {
       setCopyingFilter(false);
     }
   }
 
-  const fetchSmsAudience = useServerFn(getPlayersFilteredSmsAudience);
+  const fetchFilteredPlayerIds = useServerFn(getPlayersFilteredPlayerIds);
   const [buildingAudience, setBuildingAudience] = useState(false);
-
-  const baseFilterLabel =
-    filters.find((f) => f.id === filter)?.label ??
-    alertFilters.find((f) => f.id === filter)?.label ??
-    gamificationStatusFilters.find((f) => f.id === filter)?.label ??
-    gamificationLevelFilters.find((f) => f.id === filter)?.label ??
-    (filter === "aguardando_conversao"
-      ? "Aguardando conversão"
-      : filter === "convertido"
-        ? "Converteu"
-        : filter === "nao_convertido"
-          ? "Não converteu"
-          : filter);
 
   const selectedFilterLabel =
     [
-      filter === "todos" ? null : baseFilterLabel,
-      selectedSituation ? situationBadgeMeta[selectedSituation].label : null,
-      selectedLevel ? levelBadgeMeta[selectedLevel].label : null,
+      filter === "todos" ? null : filterDisplayLabel(filter),
+      ...behaviorFilters.map(filterDisplayLabel),
+      selectedSituation ? SITUATION_LABEL[selectedSituation] : null,
+      selectedLevel ? LEVEL_LABEL[selectedLevel] : null,
+      search ? `busca "${search}"` : null,
     ]
       .filter(Boolean)
-      .join(" + ") || "Todos";
+      .join(" + ") || "Todos os jogadores";
 
   const levelCounts = useMemo(() => {
     const map = new Map<LevelSlug, number>();
     for (const level of gamification?.levels ?? []) map.set(level.slug, level.count);
     return map;
   }, [gamification]);
-  const statusCounts: Record<string, number> = useMemo(() => {
-    const statuses: PlayerSituation[] = ["active", "cooling", "sleeping", "no_deposit"];
-    const countForStatus = (status: PlayerSituation) =>
-      selectedLevel
-        ? (gamification?.segmentCounts?.[status]?.[selectedLevel] ?? 0)
-        : (gamification?.totals?.[
-            status === "active"
-              ? "activeCount"
-              : status === "cooling"
-                ? "coolingCount"
-                : status === "sleeping"
-                  ? "sleepingCount"
-                  : "noDepositCount"
-          ] ?? 0);
-    return {
-      todos: gamification?.totals.players ?? totalCount,
-      ...Object.fromEntries(
-        statuses.map((status) => [`situacao_${status}`, countForStatus(status)]),
-      ),
+  const situationCounts = useMemo(() => {
+    if (!gamification) return null;
+    const totalsKey: Record<PlayerSituation, keyof typeof gamification.totals> = {
+      active: "activeCount",
+      cooling: "coolingCount",
+      sleeping: "sleepingCount",
+      no_deposit: "noDepositCount",
     };
-  }, [gamification, selectedLevel, totalCount]);
+    return Object.fromEntries(
+      SITUATIONS.map((status) => [
+        status,
+        selectedLevel
+          ? (gamification.segmentCounts?.[status]?.[selectedLevel] ?? 0)
+          : (gamification.totals?.[totalsKey[status]] ?? 0),
+      ]),
+    ) as Record<PlayerSituation, number>;
+  }, [gamification, selectedLevel]);
 
   const contextualLevelCounts = useMemo(() => {
+    if (!gamification) return null;
     const map = new Map<LevelSlug, number>();
-    for (const item of gamificationLevelFilters) {
+    for (const level of PAID_LEVELS) {
       map.set(
-        item.level,
+        level,
         selectedSituation
-          ? (gamification?.segmentCounts?.[selectedSituation]?.[item.level] ?? 0)
-          : (levelCounts.get(item.level) ?? 0),
+          ? (gamification.segmentCounts?.[selectedSituation]?.[level] ?? 0)
+          : (levelCounts.get(level) ?? 0),
       );
     }
     return map;
@@ -1306,22 +1291,26 @@ function PlayersPage() {
       : (levelCounts.get(level) ?? 0);
   }
 
-  function resetGamificationFilters() {
+  function selectSituation(situation: PlayerSituation | null) {
+    setSelectedSituation(situation);
+    // "Sem depósito" não combina com nível pago.
+    if (situation === "no_deposit") setSelectedLevel(null);
+  }
+
+  function selectLevel(level: PaidLevelSlug | null) {
+    setSelectedLevel(level);
+    if (level && selectedSituation === "no_deposit") setSelectedSituation(null);
+  }
+
+  function clearAllFilters() {
     setFilter("todos");
     setBehaviorFilters([]);
     setBehaviorOperator("and");
     setSelectedSituation(null);
     setSelectedLevel(null);
-  }
-
-  function selectSituation(situation: PlayerSituation) {
-    setSelectedSituation((current) => (current === situation ? null : situation));
-    if (situation === "no_deposit") setSelectedLevel(null);
-  }
-
-  function selectLevel(level: PaidLevelSlug) {
-    setSelectedLevel((current) => (current === level ? null : level));
-    if (selectedSituation === "no_deposit") setSelectedSituation(null);
+    setSearchInput("");
+    setSearch("");
+    setDateRange(undefined);
   }
 
   function openAdvancedFilters() {
@@ -1402,7 +1391,6 @@ function PlayersPage() {
             behaviorOperator: "and",
             situation: null,
             level: null,
-            search: "",
             dateRange: undefined,
           }
         : current,
@@ -1416,7 +1404,6 @@ function PlayersPage() {
     setBehaviorOperator(advancedDraft.behaviorOperator);
     setSelectedSituation(advancedDraft.situation);
     setSelectedLevel(advancedDraft.level);
-    setSearch(advancedDraft.search);
     setDateField(advancedDraft.dateField);
     setDateRange(advancedDraft.dateRange);
     closeAdvancedFilters();
@@ -1425,63 +1412,21 @@ function PlayersPage() {
   const playerGamificationSettings: PlayerGamificationSettings =
     gamification?.settings ?? DEFAULT_PLAYER_GAMIFICATION;
 
-  function openCampaignWithAudience(args: {
-    label: string;
-    recipients: Array<{ phone: string; playerId?: string }>;
-    missingPhone: number;
-  }) {
-    const unique = new Map<string, { phone: string; playerId?: string }>();
-    for (const recipient of args.recipients) {
-      const phone = recipient.phone.replace(/\D/g, "");
-      if (phone.length >= 10 && !unique.has(phone)) unique.set(phone, { ...recipient, phone });
-    }
-    const recipients = Array.from(unique.values());
-    if (recipients.length === 0) {
-      toast.error("Nenhum player com telefone válido neste público.");
-      return;
-    }
-    window.localStorage.setItem(
-      "betleads:campaignAudienceDraft",
-      JSON.stringify({
-        source: "players",
-        label: args.label,
-        recipients,
-        missingPhone: args.missingPhone,
-        createdAt: new Date().toISOString(),
-      }),
-    );
-    toast.success(
-      `${recipients.length.toLocaleString("pt-BR")} jogadores prontos para a campanha.`,
-    );
-    window.location.assign("/campanhas?newCampaign=1&draft=players");
-  }
-
   async function sendToSmsAudience(mode: "selected" | "filter") {
-    if (mode === "selected") {
-      const rows = (isLocalAlertFilter ? (localAlertData?.rows ?? []) : paged).filter((p) =>
-        selectedIds.has(p.id),
-      );
-      openCampaignWithAudience({
-        label: `${selectedIds.size} selecionados em ${selectedFilterLabel}`,
-        recipients: rows.map((p) => ({ phone: p.telefone ?? "", playerId: p.id })),
-        missingPhone: Math.max(0, selectedIds.size - rows.filter((p) => p.telefone).length),
-      });
-      return;
-    }
-
     setBuildingAudience(true);
     try {
-      if (isLocalAlertFilter) {
-        const rows = localAlertData?.rows ?? [];
-        openCampaignWithAudience({
-          label: selectedFilterLabel,
-          recipients: rows.map((p) => ({ phone: p.telefone ?? "", playerId: p.id })),
-          missingPhone: rows.filter((p) => !p.telefone).length,
-        });
+      if (mode === "selected") {
+        await openCampaignWithAudience({ playerIds: Array.from(selectedIds) });
         return;
       }
 
-      const res = await fetchSmsAudience({
+      if (isLocalAlertFilter) {
+        const rows = localAlertData?.rows ?? [];
+        await openCampaignWithAudience({ playerIds: rows.map((p) => p.id) });
+        return;
+      }
+
+      const res = await fetchFilteredPlayerIds({
         data: {
           filter,
           behaviorFilters,
@@ -1495,13 +1440,12 @@ function PlayersPage() {
           dateTo: dateToIso,
         },
       });
-      openCampaignWithAudience({
-        label: selectedFilterLabel,
-        recipients: res.recipients.map((r) => ({ phone: r.phone, playerId: r.playerId })),
-        missingPhone: res.missingPhone,
+      await openCampaignWithAudience({
+        playerIds: res.ids,
+        truncatedFrom: res.truncated ? res.total : undefined,
       });
     } catch (e: unknown) {
-      toast.error(getErrorMessage(e, "Erro ao montar público de SMS"));
+      toast.error(getErrorMessage(e, "Não foi possível montar o público"));
     } finally {
       setBuildingAudience(false);
     }
@@ -1509,1078 +1453,979 @@ function PlayersPage() {
 
   if (isDetailRoute) return <Outlet />;
 
+  const vipMinLevel = playerGamificationSettings.vipMinLevel ?? "diamond";
+  const vipLegend = `${LEVEL_LABEL[vipMinLevel]}${vipMinLevel === "black" ? "" : " ou acima"}, sem depositar há ${playerGamificationSettings.coolingAfterDays}+ dias`;
+  const depositorsShare =
+    gamification?.totals.players && gamification.totals.players > 0
+      ? `${Math.round((gamification.totals.depositors / gamification.totals.players) * 100)}% da base`
+      : undefined;
+  const pageStart = filteredCount === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+  const pageEnd = Math.min(filteredCount, currentPage * pageSize);
+  const allPageSelected = paged.length > 0 && paged.every((p) => selectedIds.has(p.id));
+  const mobileSortValue =
+    MOBILE_SORTS.find((item) => item.key && sort?.key === item.key && sort.dir === "desc")?.value ??
+    "padrao";
+  const drawerChips: Array<{ key: string; label: string; onRemove: () => void }> = [
+    ...(filter !== "todos"
+      ? [
+          {
+            key: `f:${filter}`,
+            label: filterDisplayLabel(filter),
+            onRemove: () => setFilter("todos"),
+          },
+        ]
+      : []),
+    ...behaviorFilters.map((id) => ({
+      key: `b:${id}`,
+      label: filterDisplayLabel(id),
+      onRemove: () => setBehaviorFilters((current) => current.filter((value) => value !== id)),
+    })),
+    ...(hasDateRange && dateRange?.from
+      ? [
+          {
+            key: "date",
+            label: `${dateField === "ftd_em" ? "FTD" : "Cadastro"}: ${
+              dateRange.to && dateRange.to.toDateString() !== dateRange.from.toDateString()
+                ? `${fmtBr(dateRange.from)} a ${fmtBr(dateRange.to)}`
+                : fmtBr(dateRange.from)
+            }`,
+            onRemove: () => setDateRange(undefined),
+          },
+        ]
+      : []),
+  ];
+  const hasAnyFilter =
+    drawerChips.length > 0 || Boolean(selectedSituation || selectedLevel || searchInput.trim());
+
+  function toggleSelected(player: Player, checked: boolean) {
+    if (checked) selectedRowCache.current.set(player.id, player);
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (checked) next.add(player.id);
+      else next.delete(player.id);
+      return next;
+    });
+  }
+
+  function togglePage(checked: boolean) {
+    if (checked) for (const p of paged) selectedRowCache.current.set(p.id, p);
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      for (const p of paged) {
+        if (checked) next.add(p.id);
+        else next.delete(p.id);
+      }
+      return next;
+    });
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set());
+    setSelectionMode(false);
+  }
+
+  const followupRows: Array<PendingConversionRow | OutcomeRow> =
+    (isPendingFilter
+      ? pendingData?.rows
+      : isConvertedFilter
+        ? convertedData?.rows
+        : notConvertedData?.rows) ?? [];
+  const followupLoading = isPendingFilter
+    ? pendingLoading
+    : isConvertedFilter
+      ? convertedLoading
+      : notConvertedLoading;
+
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="space-y-1">
-          <h1 className="text-3xl font-bold tracking-normal">Jogadores</h1>
-          <p className="text-sm text-muted-foreground">
-            A base viva da casa. Cada jogador tem um nível, uma situação e pode virar público de
-            SMS.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-9 px-3"
-            onClick={exportCsv}
-            disabled={filteredCount === 0}
-          >
-            <Download className="h-4 w-4" />
-            Exportar CSV
-          </Button>
-          <Button
-            size="sm"
-            className="h-9 px-3"
-            disabled={filteredCount === 0 || buildingAudience}
-            onClick={() => sendToSmsAudience("filter")}
-          >
-            <MessageSquareText className="h-4 w-4" />
-            Usar na campanha
-          </Button>
-          <Button
-            variant="outline"
-            size="icon"
-            className="h-9 w-9"
-            onClick={() => {
-              qc.invalidateQueries({ queryKey: ["players-page"] });
-              void refetchGamification();
-            }}
-            disabled={isLoading || isFetchingGamification}
-          >
-            <RefreshCw
-              className={`h-4 w-4 ${isLoading || isFetchingGamification ? "animate-spin" : ""}`}
-            />
-          </Button>
-        </div>
+    <Page>
+      <PageHeader
+        subtitle="A base da casa por nível e situação. Filtre e leve o público para uma campanha."
+        actions={
+          <>
+            <Button
+              className="h-11 px-4 sm:h-9"
+              disabled={filteredCount === 0 || buildingAudience}
+              onClick={() => sendToSmsAudience("filter")}
+            >
+              {buildingAudience ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <MessageSquareText className="h-4 w-4" />
+              )}
+              Usar na campanha
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <IconButton
+                  variant="outline"
+                  label="Mais ações"
+                  icon={<MoreHorizontal className="h-4 w-4" />}
+                />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuItem
+                  disabled={filteredCount === 0 || exportingCsv}
+                  onSelect={() => void exportCsv()}
+                >
+                  <Download className="h-4 w-4" />
+                  {exportingCsv ? "Exportando…" : "Exportar CSV"}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={filteredCount === 0 || copyingFilter}
+                  onSelect={() => void copyFilterIds()}
+                >
+                  <Copy className="h-4 w-4" />
+                  {copyingFilter ? "Copiando…" : "Copiar IDs da plataforma"}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </>
+        }
+      />
+
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <KpiCard
+          title="Jogadores"
+          value={(gamification?.totals.players ?? totalCount).toLocaleString("pt-BR")}
+        />
+        <KpiCard
+          title="Já depositaram"
+          value={(gamification?.totals.depositors ?? 0).toLocaleString("pt-BR")}
+          detail={depositorsShare}
+        />
+        <KpiCard title="Depositado no total" value={brl(gamification?.totals.deposited ?? 0)} />
+        <KpiCard
+          title="VIPs esfriando"
+          value={(gamification?.totals.stoppedVipCount ?? 0).toLocaleString("pt-BR")}
+          detail={vipLegend}
+        />
       </div>
 
-      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-        <Card className="border-border/70 bg-card/70">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Base total
-            </p>
-            <p className="mt-2 text-2xl font-bold text-primary">
-              {(gamification?.totals.players ?? totalCount).toLocaleString("pt-BR")}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">jogadores acompanhados</p>
-          </CardContent>
-        </Card>
-        <Card className="border-border/70 bg-card/70">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Já depositaram
-            </p>
-            <p className="mt-2 text-2xl font-bold">
-              {(gamification?.totals.depositors ?? 0).toLocaleString("pt-BR")}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {gamification?.totals.players
-                ? `${Math.round((gamification.totals.depositors / gamification.totals.players) * 100)}% da base`
-                : "aguardando dados"}
-            </p>
-          </CardContent>
-        </Card>
-        <Card className="border-border/70 bg-card/70">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Depositado no total
-            </p>
-            <p className="mt-2 text-2xl font-bold">{brl(gamification?.totals.deposited ?? 0)}</p>
-            <p className="mt-1 text-xs text-muted-foreground">soma das fichas importadas</p>
-          </CardContent>
-        </Card>
-        <Card className="border-border/70 bg-card/70">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              VIPs esfriando
-            </p>
-            <p className="mt-2 text-2xl font-bold">{gamification?.totals.stoppedVipCount ?? 0}</p>
-            <p className="mt-1 text-xs text-muted-foreground">Diamante para cima, parados</p>
-          </CardContent>
-        </Card>
-      </div>
+      <PageTabs
+        label="Jogadores"
+        value={view}
+        onValueChange={(next) => setView(next as PlayersView)}
+        items={VIEW_TABS}
+      />
 
-      <p className="text-sm text-muted-foreground">
-        As fichas abaixo contam os jogadores da base. A tabela mostra os maiores do filtro — use a
-        busca para achar qualquer outro.
-      </p>
-
-      <div className="space-y-3">
-        <div className="flex flex-wrap gap-2">
-          {gamificationStatusFilters.map((item) => (
-            <button
-              key={item.id}
-              onClick={() =>
-                item.id === "todos"
-                  ? resetGamificationFilters()
-                  : selectSituation(item.id.replace("situacao_", "") as PlayerSituation)
-              }
-              className={`inline-flex h-10 items-center gap-2 rounded-lg border px-4 text-sm font-semibold transition-colors ${
-                (
-                  item.id === "todos"
-                    ? filter === "todos" && !selectedSituation && !selectedLevel
-                    : selectedSituation === item.id.replace("situacao_", "")
-                )
-                  ? "border-primary/70 bg-primary text-primary-foreground"
-                  : "border-border/60 bg-card/70 hover:border-primary/50 hover:bg-primary/5"
-              }`}
-            >
-              <span
-                className={
-                  (
-                    item.id === "todos"
-                      ? filter === "todos" && !selectedSituation && !selectedLevel
-                      : selectedSituation === item.id.replace("situacao_", "")
-                  )
-                    ? "text-primary-foreground"
-                    : item.tone
-                }
-              >
-                {item.label}
-              </span>
-              <span
-                className={
-                  (
-                    item.id === "todos"
-                      ? filter === "todos" && !selectedSituation && !selectedLevel
-                      : selectedSituation === item.id.replace("situacao_", "")
-                  )
-                    ? "text-primary-foreground/80"
-                    : "text-muted-foreground"
-                }
-              >
-                {(statusCounts[item.id] ?? 0).toLocaleString("pt-BR")}
-              </span>
-            </button>
-          ))}
-          <span className="mx-1 hidden h-10 w-px bg-border/70 sm:block" />
-          {gamificationLevelFilters.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => selectLevel(item.level as PaidLevelSlug)}
-              className={`inline-flex h-10 items-center gap-2 rounded-lg border px-4 text-sm font-semibold transition-colors ${
-                selectedLevel === item.level
-                  ? "border-primary/70 bg-primary text-primary-foreground"
-                  : "border-border/60 bg-card/70 hover:border-primary/50 hover:bg-primary/5"
-              }`}
-            >
-              <span
-                className={selectedLevel === item.level ? "text-primary-foreground" : item.tone}
-              >
-                {item.label}
-              </span>
-              <span className="text-muted-foreground">
-                {(contextualLevelCounts.get(item.level) ?? 0).toLocaleString("pt-BR")}
-              </span>
-            </button>
-          ))}
-        </div>
-
-        <Button
-          type="button"
-          variant="outline"
-          className="h-10 gap-2 self-start"
-          onClick={openAdvancedFilters}
-        >
-          <SlidersHorizontal className="h-4 w-4" />
-          Mais filtros
-          {advancedFilterCount > 0 && (
-            <span className="rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-bold text-primary-foreground">
-              {advancedFilterCount}
-            </span>
-          )}
-        </Button>
-
-        <Sheet
-          open={advancedFiltersOpen}
-          onOpenChange={(open) => (open ? openAdvancedFilters() : closeAdvancedFilters())}
-        >
-          <SheetContent
-            side="right"
-            className="flex w-full flex-col overflow-y-auto p-0 sm:max-w-xl"
-          >
-            <SheetHeader className="border-b border-border/60 px-5 py-4 pr-12">
-              <SheetTitle>Filtros e alertas</SheetTitle>
-              <SheetDescription>
-                Monte a combinação desejada e aplique quando estiver pronto.
-              </SheetDescription>
-            </SheetHeader>
-            <div className="flex-1 space-y-5 px-5 py-4">
-              <Card className="border-primary/20 bg-primary/5">
-                <CardContent className="space-y-2 p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-xs font-semibold">Filtros selecionados</p>
-                    <span className="text-xs text-muted-foreground">
-                      {draftFilterCount === 0
-                        ? "Nenhum filtro"
-                        : `${draftFilterCount} ativo${draftFilterCount === 1 ? "" : "s"}`}
-                    </span>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    {canEstimateDraft
-                      ? isFetchingDraftEstimate
-                        ? "Calculando estimativa…"
-                        : `${(draftEstimate?.total ?? 0).toLocaleString("pt-BR")} jogadores serão exibidos.`
-                      : "A estimativa para alertas é calculada após aplicar o alerta."}
-                  </p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {sheetDraft.filter !== "todos" && (
-                      <Badge variant="secondary" className="gap-1">
-                        {filterDisplayLabel(sheetDraft.filter)}
-                        <button
-                          type="button"
-                          aria-label="Remover filtro"
-                          onClick={() => selectAdvancedFilter(sheetDraft.filter)}
-                          className="rounded-sm hover:text-foreground"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </Badge>
-                    )}
-                    {sheetDraft.behaviorFilters.map((behaviorFilter) => (
-                      <Badge key={behaviorFilter} variant="secondary" className="gap-1">
-                        {filterDisplayLabel(behaviorFilter)}
-                        <button
-                          type="button"
-                          aria-label="Remover filtro de comportamento"
-                          onClick={() => selectAdvancedBehavior(behaviorFilter)}
-                          className="rounded-sm hover:text-foreground"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </Badge>
-                    ))}
-                    {sheetDraft.situation && (
-                      <Badge variant="secondary" className="gap-1">
-                        {situationBadgeMeta[sheetDraft.situation].label}
-                        <button
-                          type="button"
-                          aria-label="Remover situação"
-                          onClick={() => selectDraftSituation(sheetDraft.situation!)}
-                          className="rounded-sm hover:text-foreground"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </Badge>
-                    )}
-                    {sheetDraft.level && (
-                      <Badge variant="secondary" className="gap-1">
-                        {levelBadgeMeta[sheetDraft.level].label}
-                        <button
-                          type="button"
-                          aria-label="Remover nível"
-                          onClick={() => selectDraftLevel(sheetDraft.level!)}
-                          className="rounded-sm hover:text-foreground"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </Badge>
-                    )}
-                    {sheetDraft.search.trim() && (
-                      <Badge variant="secondary">Busca: {sheetDraft.search}</Badge>
-                    )}
-                    {draftHasDateRange && <Badge variant="secondary">Período selecionado</Badge>}
-                    {draftFilterCount === 0 && (
-                      <span className="text-xs text-muted-foreground">
-                        A lista inteira será exibida.
-                      </span>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-              <div className="space-y-1">
-                <h3 className="text-sm font-semibold">Busca e período</h3>
-                <p className="text-xs text-muted-foreground">
-                  Procure por nome, telefone ou ID e delimite a janela de cadastro ou FTD.
-                </p>
+      {view === "lista" ? (
+        <>
+          <div className="space-y-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="relative w-full sm:max-w-md">
+                <Search
+                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+                  aria-hidden="true"
+                />
+                <Input
+                  type="search"
+                  value={searchInput}
+                  onChange={(event) => setSearchInput(event.target.value)}
+                  aria-label="Buscar jogador"
+                  placeholder="Buscar por nome, telefone, e-mail ou ID"
+                  className="h-10 bg-card pl-9 pr-10"
+                />
+                {searchInput && (
+                  <button
+                    type="button"
+                    aria-label="Limpar busca"
+                    onClick={() => {
+                      setSearchInput("");
+                      setSearch("");
+                    }}
+                    className="absolute right-1 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:text-foreground"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
               </div>
-              <div className="space-y-3">
-                <div>
-                  <h3 className="text-sm font-semibold">Nível e situação</h3>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Combine um nível com uma situação. Os números se recalculam entre essas duas
-                    escolhas; sem depósito não combina com nível pago.
-                  </p>
-                </div>
-                <div className="space-y-2">
-                  <p className="text-xs font-medium text-foreground">Situação</p>
-                  <div className="flex flex-wrap gap-2">
-                    {gamificationStatusFilters.slice(1).map((item) => {
-                      const situation = item.id.replace("situacao_", "") as PlayerSituation;
-                      return (
-                        <button
-                          key={item.id}
-                          type="button"
-                          onClick={() => selectDraftSituation(situation)}
-                          className={`rounded-full border px-3 py-1 text-xs transition-colors ${
-                            sheetDraft.situation === situation
-                              ? "border-primary/60 bg-primary/15 text-primary"
-                              : "border-border/60 text-muted-foreground hover:border-border hover:text-foreground"
-                          }`}
-                        >
-                          {item.label}{" "}
-                          <span className="ml-1 opacity-70">
-                            {draftStatusCount(situation).toLocaleString("pt-BR")}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <p className="text-xs font-medium text-foreground">Nível</p>
-                  <div className="flex flex-wrap gap-2">
-                    {gamificationLevelFilters.map((item) => (
-                      <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => selectDraftLevel(item.level as PaidLevelSlug)}
-                        className={`rounded-full border px-3 py-1 text-xs transition-colors ${
-                          sheetDraft.level === item.level
-                            ? "border-primary/60 bg-primary/15 text-primary"
-                            : "border-border/60 text-muted-foreground hover:border-border hover:text-foreground"
-                        }`}
-                      >
-                        {item.label}{" "}
-                        <span className="ml-1 opacity-70">
-                          {draftLevelCount(item.level as PaidLevelSlug).toLocaleString("pt-BR")}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <div className="space-y-3">
-                <div className="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-center">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      value={sheetDraft.search}
-                      onChange={(e) =>
-                        setAdvancedDraft((current) =>
-                          current ? { ...current, search: e.target.value } : current,
-                        )
-                      }
-                      placeholder="Nome, ID ou telefone"
-                      className="h-10 bg-background/70 pl-9"
-                    />
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Select
-                      value={sheetDraft.dateField}
-                      onValueChange={(v) =>
-                        setAdvancedDraft((current) =>
-                          current
-                            ? { ...current, dateField: v as "created_at" | "ftd_em" }
-                            : current,
-                        )
-                      }
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10 gap-2 self-start sm:self-auto"
+                onClick={openAdvancedFilters}
+              >
+                <SlidersHorizontal className="h-4 w-4" />
+                Mais filtros
+                {advancedFilterCount > 0 && (
+                  <span className="rounded-full bg-primary px-1.5 text-meta font-semibold text-primary-foreground">
+                    {advancedFilterCount}
+                  </span>
+                )}
+              </Button>
+            </div>
+
+            <div className="flex flex-col gap-2 lg:flex-row lg:flex-wrap lg:items-center">
+              <SegmentedFilter
+                label="Situação"
+                value={selectedSituation ?? "todos"}
+                onValueChange={(value) =>
+                  selectSituation(value === "todos" ? null : (value as PlayerSituation))
+                }
+                items={[
+                  { value: "todos", label: "Todas as situações" },
+                  ...SITUATIONS.map((situation) => ({
+                    value: situation,
+                    label: SITUATION_FILTER_LABEL[situation],
+                    count: situationCounts?.[situation] ?? null,
+                  })),
+                ]}
+              />
+              <SegmentedFilter
+                label="Nível"
+                value={selectedLevel ?? "todos"}
+                onValueChange={(value) =>
+                  selectLevel(value === "todos" ? null : (value as PaidLevelSlug))
+                }
+                items={[
+                  { value: "todos", label: "Todos os níveis" },
+                  ...PAID_LEVELS.map((level) => {
+                    const LevelIcon = LEVEL_IDENTITY[level].icon;
+                    return {
+                      value: level,
+                      label: LEVEL_LABEL[level],
+                      marker: (
+                        <LevelIcon
+                          className={`size-3.5 ${LEVEL_IDENTITY[level].text}`}
+                          aria-hidden="true"
+                        />
+                      ),
+                      count: contextualLevelCounts?.get(level) ?? null,
+                    };
+                  }),
+                ]}
+              />
+            </div>
+
+            {drawerChips.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2">
+                {drawerChips.map((chip) => (
+                  <span
+                    key={chip.key}
+                    className="inline-flex h-8 items-center gap-1 rounded-full border border-border bg-card pl-3 pr-1 text-label"
+                  >
+                    {chip.label}
+                    <button
+                      type="button"
+                      aria-label={`Remover filtro ${chip.label}`}
+                      onClick={chip.onRemove}
+                      className="inline-flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground"
                     >
-                      <SelectTrigger className="h-10 w-[170px] bg-background/70">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </span>
+                ))}
+                <button
+                  type="button"
+                  onClick={clearAllFilters}
+                  className="h-8 px-2 text-label text-primary hover:underline"
+                >
+                  Limpar tudo
+                </button>
+              </div>
+            )}
+          </div>
+
+          <HomeCard className="overflow-hidden">
+            <div className="flex min-h-14 flex-wrap items-center gap-2 border-b border-border/70 px-4 py-2.5 sm:px-5">
+              {selectedIds.size > 0 ? (
+                <>
+                  <p className="text-body font-semibold" aria-live="polite">
+                    {selectedIds.size === 1
+                      ? "1 selecionado"
+                      : `${selectedIds.size.toLocaleString("pt-BR")} selecionados`}
+                  </p>
+                  <div className="ml-auto flex flex-wrap items-center gap-2">
+                    <Button
+                      size="sm"
+                      className="h-10 sm:h-9"
+                      disabled={buildingAudience}
+                      onClick={() => sendToSmsAudience("selected")}
+                    >
+                      <MessageSquareText className="h-4 w-4" />
+                      Usar selecionados na campanha
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-10 sm:h-9"
+                      onClick={copySelectedIds}
+                    >
+                      <Copy className="h-4 w-4" />
+                      Copiar IDs
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-10 sm:h-9"
+                      onClick={clearSelection}
+                    >
+                      Limpar seleção
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="flex items-center gap-2 text-body" aria-live="polite">
+                    <span>
+                      <strong className="font-semibold tabular-nums">
+                        {filteredCount.toLocaleString("pt-BR")}
+                      </strong>{" "}
+                      {filteredCount === 1 ? "jogador" : "jogadores"}
+                    </span>
+                    {isFetchingPlayers && (
+                      <Loader2
+                        className="h-3.5 w-3.5 animate-spin text-muted-foreground"
+                        aria-label="Atualizando"
+                      />
+                    )}
+                  </p>
+                  <div className="ml-auto flex items-center gap-2 md:hidden">
+                    <Select
+                      value={mobileSortValue}
+                      onValueChange={(value) => {
+                        const key = MOBILE_SORTS.find((item) => item.value === value)?.key;
+                        setSort(key ? { key, dir: "desc" } : null);
+                      }}
+                    >
+                      <SelectTrigger className="h-10 w-[150px]" aria-label="Ordenar por">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="ftd_em">FTD (1º depósito)</SelectItem>
-                        <SelectItem value="created_at">Cadastro</SelectItem>
+                        {MOBILE_SORTS.map((item) => (
+                          <SelectItem key={item.value} value={item.value}>
+                            {item.label}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
-                    <Popover open={dateOpen} onOpenChange={setDateOpen}>
-                      <PopoverTrigger asChild>
-                        <Button variant="outline" className="h-10 gap-2">
-                          <CalendarIcon className="h-4 w-4" />
-                          {draftHasDateRange && sheetDraft.dateRange?.from
-                            ? sheetDraft.dateRange.to &&
-                              sheetDraft.dateRange.to.toDateString() !==
-                                sheetDraft.dateRange.from.toDateString()
-                              ? `${fmtBr(sheetDraft.dateRange.from)} - ${fmtBr(sheetDraft.dateRange.to)}`
-                              : fmtBr(sheetDraft.dateRange.from)
-                            : "Selecionar período"}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent align="end" className="w-auto p-0 pointer-events-auto">
-                        <div className="grid grid-cols-2 gap-2 border-b p-3">
-                          {[
-                            { label: "Hoje", days: 0 },
-                            { label: "7 dias", days: 6 },
-                            { label: "30 dias", days: 29 },
-                            { label: "90 dias", days: 89 },
-                          ].map((preset) => (
-                            <Button
-                              key={preset.label}
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => {
-                                const to = new Date();
-                                const from = new Date(Date.now() - preset.days * 86400000);
-                                setAdvancedDraft((current) =>
-                                  current ? { ...current, dateRange: { from, to } } : current,
-                                );
-                                setDateOpen(false);
-                              }}
-                            >
-                              {preset.label}
-                            </Button>
-                          ))}
-                        </div>
-                        <Calendar
-                          mode="range"
-                          selected={sheetDraft.dateRange}
-                          onSelect={(nextRange) =>
-                            setAdvancedDraft((current) =>
-                              current ? { ...current, dateRange: nextRange } : current,
-                            )
-                          }
-                          numberOfMonths={2}
-                          initialFocus
-                        />
-                      </PopoverContent>
-                    </Popover>
-                    {draftHasDateRange && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() =>
-                          setAdvancedDraft((current) =>
-                            current ? { ...current, dateRange: undefined } : current,
-                          )
-                        }
-                        className="h-10 gap-1"
-                      >
-                        <X className="h-3.5 w-3.5" />
-                        Limpar
-                      </Button>
-                    )}
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <div>
-                    <h3 className="text-sm font-semibold">Filtros de comportamento</h3>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Selecione mais de um atalho e escolha como as condições serão combinadas.
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-medium text-foreground">Combinar por</span>
-                    <div className="flex rounded-md border border-border/60 p-0.5">
-                      {(
-                        [
-                          ["and", "E (AND)"],
-                          ["or", "OU (OR)"],
-                        ] as const
-                      ).map(([operator, label]) => (
-                        <button
-                          key={operator}
-                          type="button"
-                          onClick={() =>
-                            setAdvancedDraft((current) =>
-                              current ? { ...current, behaviorOperator: operator } : current,
-                            )
-                          }
-                          className={`rounded px-2.5 py-1 text-xs transition-colors ${
-                            sheetDraft.behaviorOperator === operator
-                              ? "bg-primary text-primary-foreground"
-                              : "text-muted-foreground hover:text-foreground"
-                          }`}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="space-y-4">
-                    {advancedFilterGroups.map((group) => (
-                      <div key={group.title} className="space-y-2">
-                        <div>
-                          <p className="text-xs font-medium text-foreground">{group.title}</p>
-                          <p className="text-[11px] text-muted-foreground">
-                            {group.description} Os números mostram o tamanho atual de cada atalho.
-                          </p>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {group.ids.map((id) => {
-                            const item = filters.find((candidate) => candidate.id === id);
-                            if (!item) return null;
-                            return (
-                              <button
-                                key={item.id}
-                                onClick={() => selectAdvancedFilter(item.id)}
-                                className={`rounded-full border px-3 py-1 text-xs transition-colors ${
-                                  sheetDraft.behaviorFilters.includes(item.id)
-                                    ? "border-primary/60 bg-primary/15 text-primary"
-                                    : "border-border/60 text-muted-foreground hover:border-border hover:text-foreground"
-                                }`}
-                              >
-                                {item.label}
-                                <span className="ml-1 opacity-70">
-                                  {isFetchingPlayerFilterFacets
-                                    ? "…"
-                                    : (playerFilterFacets?.[item.id] ?? 0).toLocaleString("pt-BR")}
-                                </span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <Card className="border-border/50 bg-card/50">
-                  <CardContent className="space-y-2 p-3">
-                    <div>
-                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground/80">
-                        Alertas operacionais
-                      </div>
-                      <p className="mt-1 text-[11px] text-muted-foreground">
-                        Sinais priorizados para ação; podem cruzar os filtros acima, mas não os
-                        substituem. O quantitativo é calculado ao aplicar o alerta.
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {alertFilters.map((f) => (
-                        <button
-                          key={f.id}
-                          onClick={() => selectAdvancedFilter(f.id)}
-                          className={`rounded-full px-3 py-1 text-xs transition-colors border ${
-                            sheetDraft.filter === f.id
-                              ? "border-amber-400/60 bg-amber-400/15 text-amber-300"
-                              : "border-border/60 text-muted-foreground hover:text-foreground hover:border-border"
-                          }`}
-                        >
-                          {f.label}
-                        </button>
-                      ))}
-                      {[
-                        ["aguardando_conversao", "Aguardando conversão"],
-                        ["convertido", "Converteu"],
-                        ["nao_convertido", "Não converteu"],
-                      ].map(([id, label]) => (
-                        <button
-                          key={id}
-                          onClick={() => selectAdvancedFilter(id)}
-                          className={`rounded-full px-3 py-1 text-xs transition-colors border ${
-                            sheetDraft.filter === id
-                              ? "border-sky-400/60 bg-sky-400/15 text-sky-300"
-                              : "border-border/60 text-muted-foreground hover:text-foreground hover:border-border"
-                          }`}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-            </div>
-            <SheetFooter className="border-t border-border/60 px-5 py-3">
-              <Button
-                variant="ghost"
-                onClick={clearAdvancedDraft}
-                disabled={draftFilterCount === 0}
-              >
-                Limpar filtros
-              </Button>
-              <Button onClick={applyAdvancedFilters}>Ver jogadores</Button>
-            </SheetFooter>
-          </SheetContent>
-        </Sheet>
-      </div>
-      {isPendingFilter && (
-        <Card className="border-border/50 bg-card/60 backdrop-blur overflow-hidden">
-          <div className="border-b border-border/40 p-4">
-            <div className="text-sm font-medium">Aguardando conversão</div>
-            <div className="text-xs text-muted-foreground">
-              Leads contatados nos últimos 5 dias sem desfecho. Marque "Converteu" ou "Não
-              converteu" para tirar da fila.
-            </div>
-          </div>
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent border-border/60">
-                  <TableHead>Lead</TableHead>
-                  <TableHead>Contato</TableHead>
-                  <TableHead>Alerta original</TableHead>
-                  <TableHead>Enviado</TableHead>
-                  <TableHead className="text-right">Ações</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {pendingLoading && (
-                  <TableRow>
-                    <TableCell
-                      colSpan={5}
-                      className="text-center py-8 text-muted-foreground text-sm"
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-10"
+                      aria-pressed={selectionMode}
+                      onClick={() => setSelectionMode((current) => !current)}
+                      disabled={paged.length === 0}
                     >
-                      Carregando…
-                    </TableCell>
-                  </TableRow>
-                )}
-                {!pendingLoading && (pendingData?.rows ?? []).length === 0 && (
-                  <TableRow>
-                    <TableCell
-                      colSpan={5}
-                      className="text-center py-10 text-muted-foreground text-sm"
-                    >
-                      Nenhum lead aguardando conversão.
-                    </TableCell>
-                  </TableRow>
-                )}
-                {(pendingData?.rows ?? []).map((row) => (
-                  <TableRow
-                    key={`${row.player_id}:${row.alerta_tipo}`}
-                    className="border-border/40 hover:bg-muted/30"
-                  >
-                    <TableCell>
-                      <button
-                        type="button"
-                        onClick={() => setHistoryPlayer({ id: row.player_id, nome: row.nome })}
-                        className="font-medium text-left hover:text-primary"
-                      >
-                        {row.nome}
-                      </button>
-                      {row.converted_auto && (
-                        <div className="mt-0.5 text-[10px] uppercase tracking-wide text-emerald-400">
-                          depositou depois do contato
-                        </div>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-xs">
-                      <div>{row.telefone ?? "—"}</div>
-                      <div className="text-muted-foreground">{row.email ?? "—"}</div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant="outline"
-                        className="border-amber-400/40 text-amber-300 text-[10px]"
-                      >
-                        {row.alerta_tipo}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {timeAgo(row.sent_at)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="inline-flex gap-1.5">
-                        <button
-                          type="button"
-                          title="Enviar mensagem no WhatsApp"
-                          onClick={() => openWaFromRow(row)}
-                          className="inline-flex items-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-xs text-emerald-300 hover:bg-emerald-500/20"
-                        >
-                          <MessageCircle className="h-3 w-3" />
-                          Mensagem
-                        </button>
-                        <button
-                          onClick={() => handleMarkOutcome(row, true)}
-                          className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-300 hover:bg-emerald-500/20"
-                        >
-                          Converteu
-                        </button>
-                        <button
-                          onClick={() => handleMarkOutcome(row, false)}
-                          className="rounded-md border border-border/60 px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground hover:border-border"
-                        >
-                          Não converteu
-                        </button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </Card>
-      )}
+                      {selectionMode ? "Cancelar" : "Selecionar"}
+                    </Button>
+                  </div>
+                </>
+              )}
+            </div>
 
-      {isOutcomeFilter && (
-        <Card className="border-border/50 bg-card/60 backdrop-blur overflow-hidden">
-          <div className="border-b border-border/40 p-4">
-            <div className="text-sm font-medium">
-              {isConvertedFilter ? "Leads convertidos" : "Leads não convertidos"}
-            </div>
-            <div className="text-xs text-muted-foreground">
-              Desfechos marcados nos últimos 30 dias.
-            </div>
-          </div>
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent border-border/60">
-                  <TableHead>Lead</TableHead>
-                  <TableHead>Contato</TableHead>
-                  <TableHead>Alerta original</TableHead>
-                  <TableHead>Marcado</TableHead>
-                  <TableHead className="text-right">Ações</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(isConvertedFilter ? convertedLoading : notConvertedLoading) && (
-                  <TableRow>
-                    <TableCell
-                      colSpan={5}
-                      className="text-center py-8 text-muted-foreground text-sm"
-                    >
-                      Carregando…
-                    </TableCell>
-                  </TableRow>
-                )}
-                {(() => {
-                  const rows: OutcomeRow[] =
-                    (isConvertedFilter ? convertedData?.rows : notConvertedData?.rows) ?? [];
-                  const loading = isConvertedFilter ? convertedLoading : notConvertedLoading;
-                  if (!loading && rows.length === 0) {
-                    return (
-                      <TableRow>
-                        <TableCell
-                          colSpan={5}
-                          className="text-center py-10 text-muted-foreground text-sm"
-                        >
-                          {isConvertedFilter
-                            ? "Nenhum lead convertido ainda."
-                            : "Nenhum lead marcado como não convertido."}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  }
-                  return rows.map((row) => (
-                    <TableRow
-                      key={`${row.player_id}:${row.alerta_tipo}`}
-                      className="border-border/40 hover:bg-muted/30"
-                    >
-                      <TableCell>
-                        <button
-                          type="button"
-                          onClick={() => setHistoryPlayer({ id: row.player_id, nome: row.nome })}
-                          className="font-medium text-left hover:text-primary"
-                        >
-                          {row.nome}
-                        </button>
-                      </TableCell>
-                      <TableCell className="text-xs">
-                        <div>{row.telefone ?? "—"}</div>
-                        <div className="text-muted-foreground">{row.email ?? "—"}</div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          variant="outline"
-                          className={`text-[10px] ${isConvertedFilter ? "border-emerald-400/40 text-emerald-300" : "border-rose-400/40 text-rose-300"}`}
-                        >
-                          {row.alerta_tipo}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {timeAgo(row.outcome_at)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <button
-                          type="button"
-                          title="Enviar mensagem no WhatsApp"
-                          onClick={() => openWaFromRow(row)}
-                          className="inline-flex items-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-xs text-emerald-300 hover:bg-emerald-500/20"
-                        >
-                          <MessageCircle className="h-3 w-3" />
-                          Mensagem
-                        </button>
-                      </TableCell>
-                    </TableRow>
-                  ));
-                })()}
-              </TableBody>
-            </Table>
-          </div>
-        </Card>
-      )}
-
-      {!isPendingFilter && !isOutcomeFilter && (
-        <Card className="border-border/50 bg-card/60 backdrop-blur">
-          <CardContent className="p-3 flex flex-wrap items-center gap-3 text-xs">
-            <div className="text-muted-foreground">
-              Filtro: <span className="text-foreground font-medium">{selectedFilterLabel}</span>
-            </div>
-            <div className="text-muted-foreground">
-              Total: <span className="text-foreground font-medium">{filteredCount}</span>
-            </div>
-            <div className="text-muted-foreground">
-              Selecionados: <span className="text-foreground font-medium">{selectedIds.size}</span>
-            </div>
-            <div className="ml-auto flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => sendToSmsAudience("selected")}
-                disabled={selectedIds.size === 0}
-                className="inline-flex items-center gap-1.5 rounded-md border border-primary/50 bg-primary/10 px-3 py-1.5 text-xs text-primary hover:bg-primary/20 disabled:opacity-40 disabled:pointer-events-none"
-              >
-                <MessageSquareText className="h-3.5 w-3.5" />
-                Usar selecionados na campanha
-              </button>
-              <button
-                type="button"
-                onClick={copySelectedIds}
-                disabled={selectedIds.size === 0}
-                className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-background/60 px-3 py-1.5 text-xs hover:border-primary/60 hover:text-primary disabled:opacity-40 disabled:pointer-events-none"
-              >
-                <Copy className="h-3.5 w-3.5" />
-                Copiar IDs selecionados{selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}
-              </button>
-              <button
-                type="button"
-                onClick={copyFilterIds}
-                disabled={copyingFilter || filteredCount === 0}
-                className="inline-flex items-center gap-1.5 rounded-md border border-primary/50 bg-primary/10 px-3 py-1.5 text-xs text-primary hover:bg-primary/20 disabled:opacity-40 disabled:pointer-events-none"
-                title="Copia o player_external_id de todos os players desse filtro, prontos pra colar no campo Usuários Alvo da plataforma."
-              >
-                <Copy className="h-3.5 w-3.5" />
-                {copyingFilter ? "Copiando…" : "Copiar IDs do filtro atual"}
-              </button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {!isPendingFilter && !isOutcomeFilter && (
-        <Card className="relative border-border/50 bg-card/60 backdrop-blur overflow-hidden">
-          {isFetchingPlayers && !isLoading && (
-            <div className="absolute inset-0 z-20 flex min-h-48 items-center justify-center bg-background/75 backdrop-blur-[2px]">
-              <div className="flex items-center gap-2 rounded-lg border border-border/70 bg-card px-4 py-2 text-sm font-medium shadow-xl">
-                <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                Atualizando jogadores…
-              </div>
-            </div>
-          )}
-          <div className="overflow-x-auto">
-            <Table className="min-w-[980px]">
-              <TableHeader>
-                <TableRow className="hover:bg-transparent border-border/60">
-                  <TableHead className="w-8">
-                    <Checkbox
-                      checked={paged.length > 0 && paged.every((p) => selectedIds.has(p.id))}
-                      onCheckedChange={(v) => {
-                        setSelectedIds((cur) => {
-                          const next = new Set(cur);
-                          if (v) for (const p of paged) next.add(p.id);
-                          else for (const p of paged) next.delete(p.id);
-                          return next;
-                        });
-                      }}
-                      aria-label="Selecionar página"
-                    />
-                  </TableHead>
-                  <TableHead>Jogador</TableHead>
-                  <TableHead>Nível</TableHead>
-                  <TableHead>Situação</TableHead>
-                  <TableHead className="text-right">Depósitos</TableHead>
-                  <TableHead className="text-right">
-                    <SortHeader k="total_depositado" label="Total" align="right" />
-                  </TableHead>
-                  <TableHead>
-                    <SortHeader k="ultimo_deposito" label="Último depósito" />
-                  </TableHead>
-                  <TableHead>
-                    <SortHeader k="origem" label="Veio de" />
-                  </TableHead>
-                  <TableHead className="text-right">Ficha</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {isLoading &&
-                  Array.from({ length: 8 }).map((_, i) => (
-                    <TableRow key={i}>
-                      {Array.from({ length: 9 }).map((_, j) => (
-                        <TableCell key={j}>
-                          <Skeleton className="h-4 w-24" />
-                        </TableCell>
-                      ))}
-                    </TableRow>
-                  ))}
-                {paged.map((p) => {
-                  const extId = (p.player_external_id ?? "").trim();
-                  const level = levelBadgeMeta[getPlayerLevel(p, playerGamificationSettings)];
-                  const situation =
-                    situationBadgeMeta[getPlayerSituation(p, playerGamificationSettings)];
-                  const depositsCount = Number(p.deposits_count ?? 0);
-                  return (
-                    <TableRow key={p.id} className="border-border/40 hover:bg-muted/30">
-                      <TableCell className="w-8">
+            <div className={cn("transition-opacity", isPlaceholderData && "opacity-60")}>
+              {/* Desktop: tabela, com a coluna do nome fixa ao rolar para o lado. */}
+              <div className="hidden md:block">
+                <Table className="min-w-[880px]">
+                  <TableHeader>
+                    <TableRow className="border-border/60 hover:bg-transparent">
+                      <TableHead className="sticky left-0 z-10 w-10 bg-card">
                         <Checkbox
-                          checked={selectedIds.has(p.id)}
-                          onCheckedChange={(v) => {
-                            setSelectedIds((cur) => {
-                              const next = new Set(cur);
-                              if (v) next.add(p.id);
-                              else next.delete(p.id);
-                              return next;
-                            });
-                          }}
-                          aria-label={`Selecionar ${p.nome}`}
+                          checked={allPageSelected}
+                          onCheckedChange={(v) => togglePage(Boolean(v))}
+                          aria-label="Selecionar todos desta página"
                         />
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          {riskDot(p.risco)}
-                          <div className="flex flex-col">
+                      </TableHead>
+                      <TableHead className="sticky left-10 z-10 bg-card">Jogador</TableHead>
+                      <TableHead>Nível</TableHead>
+                      <TableHead>Situação</TableHead>
+                      <TableHead className="text-right">Depósitos</TableHead>
+                      <TableHead className="text-right">
+                        <SortHeader k="total_depositado" label="Total depositado" align="right" />
+                      </TableHead>
+                      <TableHead>
+                        <SortHeader k="ultimo_deposito" label="Último depósito" />
+                      </TableHead>
+                      <TableHead>
+                        <SortHeader k="origem" label="Veio de" />
+                      </TableHead>
+                      <TableHead className="w-12">
+                        <span className="sr-only">Abrir ficha</span>
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {isLoading &&
+                      Array.from({ length: 8 }).map((_, i) => (
+                        <TableRow key={i}>
+                          {Array.from({ length: 9 }).map((_, j) => (
+                            <TableCell key={j}>
+                              <Skeleton className="h-4 w-20" />
+                            </TableCell>
+                          ))}
+                        </TableRow>
+                      ))}
+                    {paged.map((p) => {
+                      const extId = (p.player_external_id ?? "").trim();
+                      const depositsCount = Number(p.deposits_count ?? 0);
+                      return (
+                        <TableRow key={p.id} className="group border-border/40">
+                          <TableCell className="sticky left-0 z-10 w-10 bg-card group-hover:bg-secondary">
+                            <Checkbox
+                              checked={selectedIds.has(p.id)}
+                              onCheckedChange={(v) => toggleSelected(p, Boolean(v))}
+                              aria-label={`Selecionar ${p.nome}`}
+                            />
+                          </TableCell>
+                          <TableCell className="sticky left-10 z-10 max-w-[280px] bg-card group-hover:bg-secondary">
+                            <div className="flex items-center gap-2">
+                              <RiskDot risk={p.risco} />
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1.5">
+                                  <Link
+                                    to="/players/$playerId"
+                                    params={{ playerId: p.id }}
+                                    search={{ id: undefined, focus: undefined }}
+                                    className="truncate font-medium hover:text-primary"
+                                  >
+                                    {p.nome}
+                                  </Link>
+                                  {p.vip && (
+                                    <Crown
+                                      className="h-3.5 w-3.5 shrink-0 text-amber-400"
+                                      aria-label="VIP"
+                                    />
+                                  )}
+                                  {pendingPlayerIdsAny.has(p.id) && <AwaitingBadge />}
+                                </div>
+                                {extId && (
+                                  <button
+                                    type="button"
+                                    onClick={() => copyOneId(extId, p.id)}
+                                    className="mt-0.5 inline-flex items-center gap-1 text-meta text-muted-foreground hover:text-primary"
+                                  >
+                                    {copiedId === p.id ? (
+                                      <Check className="h-3 w-3 text-success" aria-hidden="true" />
+                                    ) : (
+                                      <Copy className="h-3 w-3" aria-hidden="true" />
+                                    )}
+                                    {copiedId === p.id ? "ID copiado" : "Copiar ID"}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <LevelBadge level={getPlayerLevel(p, playerGamificationSettings)} />
+                          </TableCell>
+                          <TableCell>
+                            <SituationText
+                              situation={getPlayerSituation(p, playerGamificationSettings)}
+                              className="text-body"
+                            />
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {depositsCount.toLocaleString("pt-BR")}
+                          </TableCell>
+                          <TableCell className="text-right font-medium tabular-nums">
+                            {brl(p.total_depositado)}
+                          </TableCell>
+                          <TableCell className="text-label text-muted-foreground">
+                            {timeAgo(p.ultimo_deposito ?? p.ftd_em)}
+                          </TableCell>
+                          <TableCell>
+                            <div className="max-w-[240px]">
+                              <div className="truncate text-body">
+                                {p.expert || p.origem || "—"}
+                              </div>
+                              {(p.origem || p.tags?.[0]) && (
+                                <div className="truncate text-meta text-muted-foreground">
+                                  {[p.origem, p.tags?.[0]].filter(Boolean).join(" · ")}
+                                </div>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-right">
                             <Link
                               to="/players/$playerId"
                               params={{ playerId: p.id }}
                               search={{ id: undefined, focus: undefined }}
-                              className="font-medium flex items-center gap-1 text-left hover:text-primary"
-                              title="Abrir ficha do player"
+                              aria-label={`Abrir ficha de ${p.nome}`}
+                              title="Abrir ficha"
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground"
                             >
-                              {p.nome}
-                              {p.vip && <Crown className="h-3 w-3 text-amber-400" />}
-                              {pendingPlayerIdsAny.has(p.id) && (
-                                <span
-                                  title="Mensagem enviada — aguardando conversão"
-                                  className="ml-1 inline-flex items-center rounded-full border border-sky-400/50 bg-sky-400/10 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-sky-300"
-                                >
-                                  ⏳ aguardando
-                                </span>
-                              )}
+                              <ChevronRight className="h-4 w-4" />
                             </Link>
-                            <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
-                              {extId || "sem ID externo"}
-                              {extId && (
-                                <button
-                                  type="button"
-                                  title="Copiar ID Push"
-                                  onClick={() => copyOneId(extId, p.id)}
-                                  className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-primary/10 hover:text-primary"
-                                >
-                                  {copiedId === p.id ? (
-                                    <Check className="h-3 w-3 text-emerald-400" />
-                                  ) : (
-                                    <Copy className="h-3 w-3" />
-                                  )}
-                                </button>
-                              )}
-                            </span>
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className={level.className}>
-                          {level.label}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <span className={`text-sm font-medium ${situation.className}`}>
-                          {situation.label}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-right font-semibold">
-                        {depositsCount.toLocaleString("pt-BR")}
-                      </TableCell>
-                      <TableCell className="text-right font-medium">
-                        {brl(p.total_depositado)}
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {timeAgo(p.ultimo_deposito ?? p.ftd_em)}
-                      </TableCell>
-                      <TableCell>
-                        <div className="max-w-[280px]">
-                          <div className="truncate text-sm">{p.expert || p.origem || "—"}</div>
-                          <div className="truncate text-xs text-muted-foreground">
-                            {[p.origem, p.tags?.[0]].filter(Boolean).join(" · ") || "sem origem"}
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button variant="outline" size="sm" asChild className="h-8 gap-1.5">
-                          <Link
-                            to="/players/$playerId"
-                            params={{ playerId: p.id }}
-                            search={{ id: undefined, focus: undefined }}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {/* Celular: cartões; a linha inteira abre a ficha (ou seleciona). */}
+              <ul className="divide-y divide-border/60 md:hidden">
+                {isLoading &&
+                  Array.from({ length: 6 }).map((_, i) => (
+                    <li key={i} className="space-y-2 px-4 py-3">
+                      <Skeleton className="h-4 w-40" />
+                      <Skeleton className="h-3 w-56" />
+                    </li>
+                  ))}
+                {paged.map((p) => {
+                  const selected = selectedIds.has(p.id);
+                  const content = (
+                    <PlayerCardContent
+                      player={p}
+                      level={getPlayerLevel(p, playerGamificationSettings)}
+                      situation={getPlayerSituation(p, playerGamificationSettings)}
+                      awaiting={pendingPlayerIdsAny.has(p.id)}
+                    />
+                  );
+                  return (
+                    <li key={p.id}>
+                      {selectionMode ? (
+                        <button
+                          type="button"
+                          aria-pressed={selected}
+                          onClick={() => toggleSelected(p, !selected)}
+                          className={cn(
+                            "flex min-h-[60px] w-full items-center gap-3 px-4 py-3 text-left",
+                            selected && "bg-primary/10",
+                          )}
+                        >
+                          <span
+                            aria-hidden="true"
+                            className={cn(
+                              "flex h-5 w-5 shrink-0 items-center justify-center rounded border",
+                              selected
+                                ? "border-primary bg-primary text-primary-foreground"
+                                : "border-border",
+                            )}
                           >
-                            <Eye className="h-3.5 w-3.5" />
-                            Ficha
-                          </Link>
-                        </Button>
-                      </TableCell>
-                    </TableRow>
+                            {selected && <Check className="h-3.5 w-3.5" />}
+                          </span>
+                          {content}
+                        </button>
+                      ) : (
+                        <Link
+                          to="/players/$playerId"
+                          params={{ playerId: p.id }}
+                          search={{ id: undefined, focus: undefined }}
+                          className="flex min-h-[60px] w-full items-center gap-3 px-4 py-3 active:bg-secondary"
+                        >
+                          {content}
+                          <ChevronRight
+                            className="h-4 w-4 shrink-0 text-muted-foreground"
+                            aria-hidden="true"
+                          />
+                        </Link>
+                      )}
+                    </li>
                   );
                 })}
-                {!isLoading && filteredCount === 0 && (
-                  <TableRow>
-                    <TableCell
-                      colSpan={9}
-                      className="text-center py-10 text-muted-foreground text-sm"
-                    >
-                      Nenhum player encontrado com esses filtros.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </Card>
+              </ul>
+
+              {!isLoading && filteredCount === 0 && (
+                <EmptyState
+                  icon={<Users />}
+                  title="Nenhum jogador encontrado"
+                  description={
+                    hasAnyFilter
+                      ? "Nenhum jogador combina com a busca e os filtros escolhidos."
+                      : "Os jogadores aparecem aqui assim que a casa enviar o primeiro cadastro."
+                  }
+                  action={
+                    hasAnyFilter ? (
+                      <Button variant="outline" onClick={clearAllFilters}>
+                        Limpar filtros
+                      </Button>
+                    ) : undefined
+                  }
+                />
+              )}
+            </div>
+
+            {filteredCount > pageSize && (
+              <nav
+                aria-label="Paginação da lista de jogadores"
+                className="flex items-center gap-3 border-t border-border/70 px-4 py-2.5 sm:px-5"
+              >
+                <p className="hidden text-meta text-muted-foreground tabular-nums sm:block">
+                  {pageStart.toLocaleString("pt-BR")}–{pageEnd.toLocaleString("pt-BR")} de{" "}
+                  {filteredCount.toLocaleString("pt-BR")}
+                </p>
+                <div className="ml-auto flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-10 sm:h-9"
+                    aria-label="Página anterior"
+                    onClick={() => setPage(Math.max(1, currentPage - 1))}
+                    disabled={currentPage === 1}
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                    <span className="hidden sm:inline">Anterior</span>
+                  </Button>
+                  <span className="min-w-16 text-center text-label tabular-nums" aria-live="polite">
+                    {currentPage} de {totalPages}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-10 sm:h-9"
+                    aria-label="Próxima página"
+                    onClick={() => setPage(Math.min(totalPages, currentPage + 1))}
+                    disabled={currentPage === totalPages}
+                  >
+                    <span className="hidden sm:inline">Próxima</span>
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </nav>
+            )}
+          </HomeCard>
+        </>
+      ) : (
+        <section className="space-y-3" aria-label="Acompanhamento de contatos">
+          <p className="text-body text-muted-foreground">
+            Jogadores que receberam mensagem e o desfecho do contato. Marque se converteu para tirar
+            da fila.
+          </p>
+          <SegmentedFilter
+            label="Fila de acompanhamento"
+            value={followupQueue}
+            onValueChange={setFollowupQueue}
+            items={FOLLOWUP_QUEUES.map((queue) => ({
+              ...queue,
+              count:
+                queue.value === "aguardando_conversao"
+                  ? (pendingData?.rows.length ?? null)
+                  : queue.value === "convertido"
+                    ? (convertedData?.rows.length ?? null)
+                    : (notConvertedData?.rows.length ?? null),
+            }))}
+          />
+          <HomeCard className="overflow-hidden">
+            <div className="border-b border-border/70 px-4 py-3 sm:px-5">
+              <h2 className="text-section">
+                {FOLLOWUP_QUEUES.find((queue) => queue.value === followupQueue)?.label}
+              </h2>
+              <p className="mt-0.5 text-label text-muted-foreground">
+                {isPendingFilter
+                  ? "Contatados nos últimos 5 dias, ainda sem desfecho."
+                  : "Desfechos marcados nos últimos 30 dias."}
+              </p>
+            </div>
+            {followupLoading ? (
+              <div className="space-y-2 p-4">
+                <Skeleton className="h-12 w-full" />
+                <Skeleton className="h-12 w-full" />
+              </div>
+            ) : followupRows.length === 0 ? (
+              <EmptyState
+                icon={<History />}
+                title={
+                  isPendingFilter
+                    ? "Ninguém aguardando conversão"
+                    : isConvertedFilter
+                      ? "Nenhum jogador convertido ainda"
+                      : "Nenhum jogador marcado como não convertido"
+                }
+                description="Quando alguém receber mensagem por aqui, ele aparece nesta fila."
+              />
+            ) : (
+              <ul className="divide-y divide-border/60">
+                {followupRows.map((row) => (
+                  <li
+                    key={`${row.player_id}:${row.alerta_tipo}`}
+                    className="flex flex-col gap-3 px-4 py-3 sm:px-5 lg:flex-row lg:items-center"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Link
+                          to="/players/$playerId"
+                          params={{ playerId: row.player_id }}
+                          search={{ id: undefined, focus: undefined }}
+                          className="font-medium hover:text-primary"
+                        >
+                          {row.nome}
+                        </Link>
+                        <span
+                          className={cn(
+                            "inline-flex items-center rounded-md border px-2 py-0.5 text-meta",
+                            isPendingFilter
+                              ? "border-warning/40 text-warning"
+                              : isConvertedFilter
+                                ? "border-success/40 text-success"
+                                : "border-danger/40 text-danger",
+                          )}
+                        >
+                          {alertTypeLabel(row.alerta_tipo)}
+                        </span>
+                        {"converted_auto" in row && row.converted_auto && (
+                          <span className="text-meta text-success">
+                            depositou depois do contato
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-1 truncate text-meta text-muted-foreground">
+                        {[row.telefone, row.email].filter(Boolean).join(" · ") || "Sem contato"}
+                        {" · "}
+                        {isPendingFilter
+                          ? `contato ${timeAgo("sent_at" in row ? row.sent_at : null)}`
+                          : `marcado ${timeAgo("outcome_at" in row ? row.outcome_at : null)}`}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-10 sm:h-9"
+                        onClick={() => setHistoryPlayer({ id: row.player_id, nome: row.nome })}
+                      >
+                        <History className="h-4 w-4" />
+                        Histórico
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-10 sm:h-9"
+                        onClick={() => openWaFromRow(row)}
+                      >
+                        <MessageCircle className="h-4 w-4" />
+                        Mensagem
+                      </Button>
+                      {isPendingFilter && (
+                        <>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-10 border-success/40 text-success hover:bg-success/10 hover:text-success sm:h-9"
+                            onClick={() => handleMarkOutcome(row as PendingConversionRow, true)}
+                          >
+                            Converteu
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-10 sm:h-9"
+                            onClick={() => handleMarkOutcome(row as PendingConversionRow, false)}
+                          >
+                            Não converteu
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </HomeCard>
+        </section>
       )}
 
-      {!isPendingFilter && filteredCount > 0 && (
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="text-xs text-muted-foreground">
-            Mostrando {paged.length} de {filteredCount} usuários
-          </div>
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={currentPage === 1}
-              className="flex items-center gap-1 rounded-md border border-border/60 px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:border-border disabled:opacity-40 disabled:pointer-events-none"
-            >
-              <ChevronLeft className="h-3.5 w-3.5" />
-              Anterior
-            </button>
-            {pageNumbers[0] > 1 && (
-              <>
-                <button
-                  onClick={() => setPage(1)}
-                  className="h-8 w-8 rounded-md border border-border/60 text-xs text-muted-foreground hover:text-foreground hover:border-border"
+      <Sheet
+        open={advancedFiltersOpen}
+        onOpenChange={(open) => (open ? openAdvancedFilters() : closeAdvancedFilters())}
+      >
+        <SheetContent side="right" className="flex w-full flex-col p-0 sm:max-w-xl">
+          <SheetHeader className="border-b border-border/60 px-5 py-4 pr-12">
+            <SheetTitle>Mais filtros</SheetTitle>
+            <SheetDescription>
+              Combine período, situação, nível, comportamento e oportunidades.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="flex-1 space-y-6 overflow-y-auto px-5 py-4">
+            <DrawerSection title="Período">
+              <div className="flex flex-wrap items-center gap-2">
+                <Select
+                  value={sheetDraft.dateField}
+                  onValueChange={(v) =>
+                    setAdvancedDraft((current) =>
+                      current ? { ...current, dateField: v as "created_at" | "ftd_em" } : current,
+                    )
+                  }
                 >
-                  1
-                </button>
-                {pageNumbers[0] > 2 && (
-                  <span className="px-1 text-muted-foreground text-xs">…</span>
+                  <SelectTrigger className="h-10 w-[180px]" aria-label="Data usada no período">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ftd_em">FTD (1º depósito)</SelectItem>
+                    <SelectItem value="created_at">Cadastro</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Popover open={dateOpen} onOpenChange={setDateOpen}>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="h-10 gap-2">
+                      <CalendarIcon className="h-4 w-4" />
+                      {draftHasDateRange && sheetDraft.dateRange?.from
+                        ? sheetDraft.dateRange.to &&
+                          sheetDraft.dateRange.to.toDateString() !==
+                            sheetDraft.dateRange.from.toDateString()
+                          ? `${fmtBr(sheetDraft.dateRange.from)} a ${fmtBr(sheetDraft.dateRange.to)}`
+                          : fmtBr(sheetDraft.dateRange.from)
+                        : "Escolher período"}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent align="start" className="pointer-events-auto w-auto p-0">
+                    <div className="grid grid-cols-2 gap-2 border-b p-3">
+                      {[
+                        { label: "Hoje", days: 0 },
+                        { label: "7 dias", days: 6 },
+                        { label: "30 dias", days: 29 },
+                        { label: "90 dias", days: 89 },
+                      ].map((preset) => (
+                        <Button
+                          key={preset.label}
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            const to = new Date();
+                            const from = new Date(Date.now() - preset.days * 86400000);
+                            setAdvancedDraft((current) =>
+                              current ? { ...current, dateRange: { from, to } } : current,
+                            );
+                            setDateOpen(false);
+                          }}
+                        >
+                          {preset.label}
+                        </Button>
+                      ))}
+                    </div>
+                    <Calendar
+                      mode="range"
+                      selected={sheetDraft.dateRange}
+                      onSelect={(nextRange) =>
+                        setAdvancedDraft((current) =>
+                          current ? { ...current, dateRange: nextRange } : current,
+                        )
+                      }
+                      numberOfMonths={isMobile ? 1 : 2}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+                {draftHasDateRange && (
+                  <Button
+                    variant="ghost"
+                    onClick={() =>
+                      setAdvancedDraft((current) =>
+                        current ? { ...current, dateRange: undefined } : current,
+                      )
+                    }
+                    className="h-10 gap-1"
+                  >
+                    <X className="h-4 w-4" />
+                    Limpar período
+                  </Button>
                 )}
-              </>
-            )}
-            {pageNumbers.map((n) => (
-              <button
-                key={n}
-                onClick={() => setPage(n)}
-                className={`h-8 w-8 rounded-md border text-xs transition-colors ${
-                  n === currentPage
-                    ? "border-primary/60 bg-primary/15 text-primary font-medium"
-                    : "border-border/60 text-muted-foreground hover:text-foreground hover:border-border"
-                }`}
-              >
-                {n}
-              </button>
-            ))}
-            {pageNumbers[pageNumbers.length - 1] < totalPages && (
-              <>
-                {pageNumbers[pageNumbers.length - 1] < totalPages - 1 && (
-                  <span className="px-1 text-muted-foreground text-xs">…</span>
-                )}
-                <button
-                  onClick={() => setPage(totalPages)}
-                  className="h-8 w-8 rounded-md border border-border/60 text-xs text-muted-foreground hover:text-foreground hover:border-border"
-                >
-                  {totalPages}
-                </button>
-              </>
-            )}
-            <button
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={currentPage === totalPages}
-              className="flex items-center gap-1 rounded-md border border-border/60 px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:border-border disabled:opacity-40 disabled:pointer-events-none"
+              </div>
+            </DrawerSection>
+
+            <DrawerSection
+              title="Situação e nível"
+              description="Sem depósito não combina com nível pago."
             >
-              Próximo
-              <ChevronRight className="h-3.5 w-3.5" />
-            </button>
+              <ChipGroup label="Situação">
+                {SITUATIONS.map((situation) => (
+                  <FilterChip
+                    key={situation}
+                    active={sheetDraft.situation === situation}
+                    onClick={() => selectDraftSituation(situation)}
+                    count={gamification ? draftStatusCount(situation) : null}
+                  >
+                    {SITUATION_FILTER_LABEL[situation]}
+                  </FilterChip>
+                ))}
+              </ChipGroup>
+              <ChipGroup label="Nível">
+                {PAID_LEVELS.map((level) => (
+                  <FilterChip
+                    key={level}
+                    active={sheetDraft.level === level}
+                    onClick={() => selectDraftLevel(level)}
+                    count={gamification ? draftLevelCount(level) : null}
+                  >
+                    {LEVEL_LABEL[level]}
+                  </FilterChip>
+                ))}
+              </ChipGroup>
+            </DrawerSection>
+
+            <DrawerSection
+              title="Comportamento"
+              description="Escolha um ou mais atalhos. O número mostra quantos jogadores há em cada um."
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-label text-muted-foreground">Mostrar quem atende a</span>
+                <SegmentedFilter
+                  label="Como combinar as condições"
+                  value={sheetDraft.behaviorOperator}
+                  onValueChange={(operator) =>
+                    setAdvancedDraft((current) =>
+                      current ? { ...current, behaviorOperator: operator } : current,
+                    )
+                  }
+                  items={[
+                    { value: "and", label: "Todas as condições" },
+                    { value: "or", label: "Qualquer condição" },
+                  ]}
+                />
+              </div>
+              {advancedFilterGroups.map((group) => (
+                <ChipGroup key={group.title} label={group.title}>
+                  {group.ids.map((id) => {
+                    const item = filters.find((candidate) => candidate.id === id);
+                    if (!item) return null;
+                    return (
+                      <FilterChip
+                        key={item.id}
+                        active={sheetDraft.behaviorFilters.includes(item.id)}
+                        onClick={() => selectAdvancedFilter(item.id)}
+                        count={
+                          isFetchingPlayerFilterFacets && !playerFilterFacets
+                            ? null
+                            : (playerFilterFacets?.[item.id] ?? 0)
+                        }
+                      >
+                        {item.label}
+                      </FilterChip>
+                    );
+                  })}
+                </ChipGroup>
+              ))}
+            </DrawerSection>
+
+            <DrawerSection
+              title="Oportunidades"
+              description="Sinais para agir agora. Escolha um; a contagem aparece depois de aplicar."
+            >
+              <div className="flex flex-wrap gap-2">
+                {alertFilters.map((f) => (
+                  <FilterChip
+                    key={f.id}
+                    active={sheetDraft.filter === f.id}
+                    onClick={() => selectAdvancedFilter(f.id)}
+                  >
+                    {f.label}
+                  </FilterChip>
+                ))}
+              </div>
+            </DrawerSection>
           </div>
-        </div>
-      )}
+          <SheetFooter className="flex-row items-center gap-2 border-t border-border/60 px-5 py-3 sm:justify-between">
+            <Button
+              variant="ghost"
+              className="h-11 sm:h-10"
+              onClick={clearAdvancedDraft}
+              disabled={draftFilterCount === 0}
+            >
+              Limpar filtros
+            </Button>
+            <Button className="ml-auto h-11 sm:h-10" onClick={applyAdvancedFilters}>
+              {canEstimateDraft && !isFetchingDraftEstimate && draftEstimate
+                ? `Ver ${draftEstimate.total.toLocaleString("pt-BR")} ${
+                    draftEstimate.total === 1 ? "jogador" : "jogadores"
+                  }`
+                : "Ver jogadores"}
+            </Button>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
+
       {waDialog && (
         <EnviarPeloWhatsAppDialog
           open
@@ -2603,11 +2448,12 @@ function PlayersPage() {
                   })
           }
           onSent={async () => {
-            // Grava follow-up — assim o lead some do filtro de alerta atual
-            const tipo = waDialog.alerta?.tipo ?? (filter as string);
+            // Grava follow-up — assim o jogador sai do filtro de oportunidade atual.
+            // Nas filas de acompanhamento o tipo é a própria fila (como antes).
+            const tipo = waDialog.alerta?.tipo ?? (inFollowup ? followupQueue : filter);
             const pid = waDialog.player.id!;
             // Atualização otimista: já adiciona ao set de "pendentes" pra o
-            // lead sumir do chip de alerta no mesmo frame do clique.
+            // jogador sumir do filtro no mesmo frame do clique.
             qc.setQueryData<{ keys: string[] } | undefined>(
               ["players-recent-followup-keys"],
               (prev) => {
@@ -2637,6 +2483,107 @@ function PlayersPage() {
         playerId={historyPlayer?.id ?? null}
         playerName={historyPlayer?.nome}
       />
+    </Page>
+  );
+}
+
+function AwaitingBadge() {
+  return (
+    <span
+      title="Recebeu mensagem e ainda não teve desfecho"
+      className="inline-flex shrink-0 items-center rounded-md border border-info/40 px-1.5 py-0.5 text-meta text-info"
+    >
+      Aguardando
+    </span>
+  );
+}
+
+function PlayerCardContent({
+  player,
+  level,
+  situation,
+  awaiting,
+}: {
+  player: Player;
+  level: LevelSlug;
+  situation: PlayerSituation;
+  awaiting: boolean;
+}) {
+  return (
+    <div className="min-w-0 flex-1">
+      <div className="flex items-center gap-2">
+        <span className="truncate text-body font-medium">{player.nome}</span>
+        {player.vip && <Crown className="h-3.5 w-3.5 shrink-0 text-amber-400" aria-label="VIP" />}
+        {awaiting && <AwaitingBadge />}
+        <LevelBadge level={level} className="ml-auto" />
+      </div>
+      <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-meta text-muted-foreground">
+        <SituationText situation={situation} />
+        <span aria-hidden="true">·</span>
+        <span className="tabular-nums text-foreground/90">{brl(player.total_depositado)}</span>
+        <span aria-hidden="true">·</span>
+        <span>último depósito {timeAgo(player.ultimo_deposito ?? player.ftd_em)}</span>
+      </p>
     </div>
+  );
+}
+
+function DrawerSection({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="space-y-3">
+      <div>
+        <h3 className="text-section">{title}</h3>
+        {description && <p className="mt-0.5 text-label text-muted-foreground">{description}</p>}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function ChipGroup({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="space-y-2" role="group" aria-label={label}>
+      <p className="text-label font-medium text-foreground">{label}</p>
+      <div className="flex flex-wrap gap-2">{children}</div>
+    </div>
+  );
+}
+
+function FilterChip({
+  active,
+  onClick,
+  count,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  count?: number | null;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={cn(
+        "inline-flex h-9 items-center gap-1.5 rounded-full border px-3 text-label transition-colors",
+        active
+          ? "border-primary/60 bg-primary/15 text-foreground"
+          : "border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground",
+      )}
+    >
+      {children}
+      {count != null && (
+        <span className="tabular-nums text-muted-foreground">{count.toLocaleString("pt-BR")}</span>
+      )}
+    </button>
   );
 }

@@ -1,7 +1,8 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useLocation, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -16,19 +17,25 @@ import { toast } from "sonner";
 import {
   AlertCircle,
   Check,
+  ChevronDown,
   Copy,
   FileJson,
   Link2,
   ShieldAlert,
   Terminal,
-  Webhook as WebhookIcon,
 } from "lucide-react";
 import { useState } from "react";
-import { timeAgo } from "@/lib/format";
-import { WEBHOOK_EVENTS } from "@/lib/webhook-events";
-import { PageHeader } from "@/components/ui-premium/page-header";
+import { num, timeAgo } from "@/lib/format";
+import { WEBHOOK_EVENTS, describeEventType } from "@/lib/webhook-events";
+import { Page, PageHeader } from "@/components/ui-premium/page-header";
 import { DataCard } from "@/components/ui-premium/data-card";
+import { MetricCard } from "@/components/ui-premium/metric-card";
 import { EmptyState } from "@/components/ui-premium/empty-state";
+import { PageTabs } from "@/components/ui-premium/page-tabs";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { LinksOverview } from "@/components/integrations/links-overview";
+import { LinksSettings } from "@/components/integrations/links-settings";
+import { MetaConnectionPanel } from "@/components/integrations/meta-connection";
 import {
   getMyWebhookAccess,
   getMyWebhookHealth,
@@ -44,8 +51,48 @@ import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import { DEMO_EMPTY_STATE_TEXT } from "@/lib/demo-tenant";
 
 export const Route = createFileRoute("/webhooks")({
-  component: WebhooksPage,
+  component: IntegrationsPage,
 });
+
+const TABS = [
+  { value: "plataforma", label: "Plataforma de apostas" },
+  { value: "links", label: "Links curtos" },
+  { value: "meta", label: "Meta Ads" },
+] as const;
+type IntegrationTab = (typeof TABS)[number]["value"];
+
+function integrationTabFromHash(hash: string): IntegrationTab {
+  return TABS.some((tab) => tab.value === hash) ? (hash as IntegrationTab) : "plataforma";
+}
+
+function IntegrationsPage() {
+  const hash = useLocation({ select: (l) => l.hash });
+  const navigate = useNavigate();
+  const tab = integrationTabFromHash(hash);
+
+  return (
+    <Page>
+      <PageHeader subtitle="Conecte a plataforma de apostas, os links curtos e a Meta." />
+      <PageTabs
+        label="Integrações"
+        value={tab}
+        // Sem replace: cada aba vira uma entrada no histórico (o voltar do navegador funciona).
+        onValueChange={(value) => void navigate({ to: "/webhooks", hash: value })}
+        items={TABS}
+      />
+      <div role="tabpanel" aria-labelledby={`tab-${tab}`} className="space-y-4 sm:space-y-5">
+        {tab === "plataforma" && <PlatformSection />}
+        {tab === "links" && (
+          <>
+            <LinksOverview />
+            <LinksSettings />
+          </>
+        )}
+        {tab === "meta" && <MetaConnectionPanel />}
+      </div>
+    </Page>
+  );
+}
 
 function publicOrigin(): string {
   if (typeof window !== "undefined") {
@@ -60,6 +107,22 @@ function prettyJson(value: unknown): string {
   } catch {
     return String(value ?? "");
   }
+}
+
+const LOG_STATUS_LABELS: Record<string, string> = {
+  recebido: "recebido",
+  processado: "registrado",
+  duplicado: "repetido",
+  erro: "com erro",
+  sem_player: "jogador não encontrado",
+};
+
+function logStatusLabel(status: string | null | undefined): string {
+  return LOG_STATUS_LABELS[status ?? ""] ?? "situação desconhecida";
+}
+
+function eventLabel(evento: string | null | undefined): string {
+  return describeEventType(evento).label;
 }
 
 type WebhookLog = {
@@ -81,7 +144,7 @@ type WebhookHealth = {
   latest: Pick<WebhookLog, "created_at" | "evento" | "status"> | null;
 };
 
-function WebhooksPage() {
+function PlatformSection() {
   const isDemo = useIsDemoTenant();
   const fetchAccess = useServerFn(getMyWebhookAccess);
   const fetchToken = useServerFn(getMyWebhookToken);
@@ -99,6 +162,9 @@ function WebhooksPage() {
     queryFn: () => fetchToken(),
     enabled: Boolean(access?.canManage),
   });
+  // Disabled queries report isLoading=false, so "loading" alone would let a click through
+  // before we know whether a key exists (and rotate it without the confirmation).
+  const hmacUnknown = tokenLoading || !tokenInfo;
   const token = tokenInfo?.token ?? null;
   const legacy = Boolean(tokenInfo?.legacy);
   const origin = publicOrigin();
@@ -125,7 +191,9 @@ function WebhooksPage() {
     onSuccess: ({ secret }) => {
       setProvisionedSecret(secret);
       queryClient.invalidateQueries({ queryKey: ["my-webhook-token"] });
-      toast.success("Chave HMAC gerada. Configure-a na casa antes de ativar a exigência.");
+      toast.success(
+        "Chave gerada. Configure-a na plataforma da casa antes de exigir a assinatura.",
+      );
     },
     onError: (error: Error) => toast.error(error.message),
   });
@@ -133,7 +201,11 @@ function WebhooksPage() {
     mutationFn: (enforce: boolean) => setHmacEnforcement({ data: { enforce } }),
     onSuccess: ({ enforced }) => {
       queryClient.invalidateQueries({ queryKey: ["my-webhook-token"] });
-      toast.success(enforced ? "Assinatura HMAC passou a ser obrigatória." : "Exigência HMAC desativada.");
+      toast.success(
+        enforced
+          ? "A assinatura dos envios passou a ser obrigatória."
+          : "Os envios sem assinatura voltaram a ser aceitos.",
+      );
     },
     onError: (error: Error) => toast.error(error.message),
   });
@@ -141,59 +213,68 @@ function WebhooksPage() {
   // UX-02: as duas ações mudam o que a casa precisa enviar; uma chave errada
   // ou ausente faz depósitos e cadastros pararem de entrar.
   async function confirmRotate() {
-    if (tokenInfo?.hmacConfigured) {
-      const confirmed = await requestConfirmation({
-        title: "Rotacionar a chave HMAC?",
-        description: `A chave atual deixa de valer imediatamente e uma nova é gerada; ela aparece uma única vez, então copie-a. ${
-          tokenInfo.hmacEnforced
-            ? "A exigência de assinatura será desativada até você ativá-la de novo, e os webhooks passam a entrar sem verificação nesse intervalo. "
-            : ""
-        }Atualize a nova chave na plataforma da casa antes de exigir assinatura.`,
-        confirmLabel: "Rotacionar chave",
-        destructive: true,
-      });
-      if (!confirmed) return;
-    }
+    const confirmed = tokenInfo?.hmacConfigured
+      ? await requestConfirmation({
+          title: "Trocar a chave de assinatura?",
+          description: `A chave atual deixa de valer imediatamente e uma nova é gerada; ela aparece uma única vez, então copie-a. ${
+            tokenInfo.hmacEnforced
+              ? "A exigência de assinatura será desligada até você ativá-la de novo, e os envios da plataforma passam a entrar sem verificação nesse intervalo. "
+              : ""
+          }Atualize a nova chave na plataforma da casa antes de exigir assinatura.`,
+          confirmLabel: "Trocar chave",
+          destructive: true,
+        })
+      : await requestConfirmation({
+          title: "Gerar a chave de assinatura?",
+          description:
+            "A chave permite que a plataforma de apostas assine cada envio, provando que os dados vieram mesmo dela. Ela aparece uma única vez, então copie-a e entregue-a ao responsável pela integração. Gerar a chave não muda nada no recebimento até você exigir a assinatura.",
+          confirmLabel: "Gerar chave",
+        });
+    if (!confirmed) return;
     provision.mutate();
   }
 
   async function confirmEnforce() {
     const confirmed = await requestConfirmation({
-      title: "Exigir assinatura HMAC?",
+      title: "Exigir assinatura nos envios?",
       description:
-        "A partir de agora, todo webhook sem assinatura válida (cabeçalho x-webhook-signature) será rejeitado. Se a casa ainda não assina os envios com a chave atual, depósitos, cadastros e os demais eventos deixam de ser registrados até ela configurar a chave. Confirme com a casa antes de ativar.",
+        "A partir de agora, todo envio sem assinatura válida será recusado. Se a plataforma da casa ainda não assina os envios com a chave atual, depósitos, cadastros e os demais eventos deixam de ser registrados até ela configurar a chave. Confirme com a casa antes de ativar.",
       confirmLabel: "Exigir assinatura",
       destructive: true,
     });
     if (confirmed) enforceHmac.mutate(true);
   }
 
-  function copy(text: string) {
+  async function confirmAllowUnsigned() {
+    const confirmed = await requestConfirmation({
+      title: "Aceitar envios sem assinatura?",
+      description:
+        "Os envios da plataforma voltam a ser aceitos mesmo sem assinatura, ou seja, sem a verificação de que vieram dela. Use só enquanto a casa troca ou configura a chave, e volte a exigir a assinatura assim que possível.",
+      confirmLabel: "Aceitar sem assinatura",
+      destructive: true,
+    });
+    if (confirmed) enforceHmac.mutate(false);
+  }
+
+  function copy(text: string, message = "Endereço copiado") {
     navigator.clipboard.writeText(text);
     setCopiedUrl(text);
-    toast.success("URL copiada para a área de transferência");
+    toast.success(message);
     setTimeout(() => setCopiedUrl((c) => (c === text ? null : c)), 1800);
   }
 
   function copyPayload(payload: unknown) {
     navigator.clipboard.writeText(prettyJson(payload));
-    toast.success("Payload copiado");
+    toast.success("Dados copiados");
   }
 
   if (!accessLoading && access && !access.canManage) {
     return (
-      <div className="space-y-6">
-        <PageHeader
-          title="Integrações da operação"
-          subtitle="Conecte sua plataforma de apostas e acompanhe a entrada dos dados."
-          icon={<WebhookIcon className="h-5 w-5 text-primary-foreground" />}
-        />
-        <EmptyState
-          icon={<ShieldAlert className="h-5 w-5" />}
-          title="Acesso administrativo necessário"
-          description="URLs, assinaturas e payloads de webhook são restritos aos administradores da conta."
-        />
-      </div>
+      <EmptyState
+        icon={<ShieldAlert className="h-5 w-5" />}
+        title="Acesso administrativo necessário"
+        description="Os endereços e as chaves que a plataforma de apostas usa para enviar dados são vistos só pelos administradores da casa."
+      />
     );
   }
 
@@ -203,202 +284,172 @@ function WebhooksPage() {
   });
 
   const categorias = Array.from(new Set(WEBHOOK_EVENTS.map((e) => e.categoria)));
+  const attention = (health?.failed ?? 0) + (health?.ignored ?? 0);
+  const baseCopied = Boolean(baseUrl) && copiedUrl === baseUrl;
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Integrações da operação"
-        subtitle="Conecte sua plataforma de apostas e acompanhe a entrada dos dados."
-        icon={<WebhookIcon className="h-5 w-5 text-primary-foreground" />}
-      />
-
-      {
-        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 flex items-start gap-3">
-          <ShieldAlert className="h-4 w-4 text-amber-400 mt-0.5 shrink-0" />
-          <div className="text-xs text-amber-100/90 leading-relaxed">
-            <p className="font-semibold text-amber-200">URLs exclusivas da sua conta</p>
-            <p>
-              Cada usuário tem seu próprio conjunto de URLs com um token único. Não compartilhe —
-              qualquer pessoa com o link consegue gravar dados na sua conta.
-            </p>
-          </div>
-        </div>
-      }
-
-      <DataCard
-        title="Assinatura HMAC"
-        description="Ative somente depois de configurar a mesma chave na plataforma da casa."
-        icon={<ShieldAlert className="h-4 w-4" />}
-      >
-        <div className="flex flex-wrap items-center gap-3 text-sm">
-          <Badge variant="outline" className={tokenInfo?.hmacEnforced ? "border-emerald-500/40 text-emerald-400" : "border-amber-500/40 text-amber-300"}>
-            {tokenInfo?.hmacEnforced ? "assinatura obrigatória" : "assinatura ainda opcional"}
-          </Badge>
-          <span className="text-muted-foreground">
-            {tokenInfo?.hmacConfigured ? "Chave provisionada." : "Nenhuma chave provisionada."}
-          </span>
-          <DemoDisabledTooltip active={isDemo}>
-            <Button size="sm" variant="outline" disabled={isDemo || provision.isPending} onClick={() => void confirmRotate()}>
-              {provision.isPending ? "Gerando..." : tokenInfo?.hmacConfigured ? "Rotacionar chave" : "Gerar chave"}
-            </Button>
-          </DemoDisabledTooltip>
-          {tokenInfo?.hmacEnforced ? (
-            <DemoDisabledTooltip active={isDemo}>
-              <Button size="sm" variant="outline" disabled={isDemo || enforceHmac.isPending} onClick={() => enforceHmac.mutate(false)}>
-                Permitir transição
-              </Button>
-            </DemoDisabledTooltip>
-          ) : (
-            <DemoDisabledTooltip active={isDemo}>
-              <Button size="sm" disabled={isDemo || !tokenInfo?.hmacConfigured || enforceHmac.isPending} onClick={() => void confirmEnforce()}>
-                Exigir assinatura
-              </Button>
-            </DemoDisabledTooltip>
-          )}
-        </div>
-        {provisionedSecret ? (
-          <div className="mt-3 flex gap-2">
-            <Input value={provisionedSecret} readOnly className="font-mono text-xs" aria-label="Chave HMAC gerada" />
-            <Button size="sm" variant="outline" onClick={() => copy(provisionedSecret)}>
-              <Copy className="mr-1 h-3.5 w-3.5" /> Copiar
-            </Button>
-          </div>
-        ) : null}
-      </DataCard>
-
+    <>
       <section
-        className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5"
-        aria-label="Saúde dos webhooks nas últimas 24 horas"
+        className="grid grid-cols-2 gap-3 lg:grid-cols-4"
+        aria-label="Recebimentos da plataforma nas últimas 24 horas"
       >
-        <WebhookKpi
+        <MetricCard
           label="Recebidos"
-          value={health?.received}
-          loading={healthLoading}
-          detail="últimas 24 horas"
-        />
-        <WebhookKpi
-          label="Processados"
-          value={health?.processed}
-          loading={healthLoading}
-          tone="text-emerald-400"
-          detail="gravados com sucesso"
-        />
-        <WebhookKpi
-          label="Repetidos"
-          value={health?.duplicates}
-          loading={healthLoading}
-          tone="text-sky-300"
-          detail="ignorados com segurança"
-        />
-        <WebhookKpi
-          label="Precisam de atenção"
-          value={(health?.failed ?? 0) + (health?.ignored ?? 0)}
-          loading={healthLoading}
-          tone={
-            (health?.failed ?? 0) + (health?.ignored ?? 0) > 0
-              ? "text-amber-300"
-              : "text-emerald-400"
+          value={healthLoading ? <Skeleton className="h-7 w-16" /> : num(health?.received)}
+          hint={
+            health?.duplicates
+              ? `últimas 24 horas · ${num(health.duplicates)} repetidos, ignorados com segurança`
+              : "últimas 24 horas"
           }
-          detail={
+        />
+        <MetricCard
+          label="Registrados"
+          value={healthLoading ? <Skeleton className="h-7 w-16" /> : num(health?.processed)}
+          hint="gravados com sucesso"
+        />
+        <MetricCard
+          label="Precisam de atenção"
+          value={
+            healthLoading ? (
+              <Skeleton className="h-7 w-16" />
+            ) : (
+              <span className={attention > 0 ? "text-warning" : undefined}>{num(attention)}</span>
+            )
+          }
+          hint={
             (health?.failed ?? 0) > 0
-              ? `${health?.failed} com erro`
+              ? `${num(health?.failed)} com erro`
               : health?.ignored
-                ? `${health.ignored} sem jogador`
+                ? `${num(health.ignored)} sem jogador encontrado`
                 : "nenhum"
           }
         />
-        <WebhookKpi
-          label="Último evento"
-          value={health?.latest ? timeAgo(health.latest.created_at) : "—"}
-          loading={healthLoading}
-          detail={
-            health?.latest
-              ? `${health.latest.evento} · ${health.latest.status}`
-              : "aguardando integração"
+        <MetricCard
+          label="Último recebimento"
+          value={
+            healthLoading ? (
+              <Skeleton className="h-7 w-16" />
+            ) : health?.latest ? (
+              timeAgo(health.latest.created_at)
+            ) : (
+              "—"
+            )
           }
-          compact
+          hint={
+            health?.latest
+              ? `${eventLabel(health.latest.evento)} · ${logStatusLabel(health.latest.status)}`
+              : "aguardando a integração"
+          }
         />
       </section>
 
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="lg:col-span-2 space-y-4">
           <DataCard
-            title="URLs de integração"
-            description={`${WEBHOOK_EVENTS.length} endpoints disponíveis · 1 por evento`}
+            title="Endereços de integração"
+            description={`Um endereço por evento (${WEBHOOK_EVENTS.length} no total). São exclusivos da sua casa: quem tiver o endereço consegue enviar dados para ela.`}
             icon={<Link2 className="h-4 w-4" />}
           >
-            {!tokenLoading && !legacy && !token && (
-              <div className="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-200">
-                Não foi possível carregar o token da sua conta. Recarregue a página ou contate o
-                suporte.
+            {!tokenLoading &&
+              !legacy &&
+              !token &&
+              (isDemo ? (
+                <div className="mb-4 rounded-lg border border-border/60 bg-muted/40 p-3 text-label text-muted-foreground">
+                  {DEMO_EMPTY_STATE_TEXT}
+                </div>
+              ) : (
+                <div className="mb-4 rounded-lg border border-danger/30 bg-danger/10 p-3 text-label text-danger">
+                  Não foi possível carregar os endereços de integração da sua casa. Recarregue a
+                  página ou contate o suporte.
+                </div>
+              ))}
+            <div className="mb-5">
+              <p className="mb-1.5 text-label text-muted-foreground">
+                Endereço base (cada evento acrescenta o seu final)
+              </p>
+              <div className="flex gap-2">
+                {tokenLoading ? (
+                  <Skeleton className="h-9 flex-1 rounded-md" />
+                ) : (
+                  <Input
+                    value={baseUrl ?? ""}
+                    readOnly
+                    className="h-9 bg-background/60 font-mono text-meta"
+                    placeholder="endereço indisponível"
+                    aria-label="Endereço base de integração"
+                  />
+                )}
+                <IconButton
+                  variant="outline"
+                  label={baseCopied ? "Copiado" : "Copiar endereço base"}
+                  icon={
+                    baseCopied ? (
+                      <Check className="h-3.5 w-3.5" />
+                    ) : (
+                      <Copy className="h-3.5 w-3.5" />
+                    )
+                  }
+                  className={cn("shrink-0", baseCopied && "border-success/40 text-success")}
+                  onClick={() => baseUrl && copy(baseUrl)}
+                  disabled={!baseUrl}
+                />
               </div>
-            )}
+            </div>
             <div className="space-y-6">
               {categorias.map((cat) => (
                 <div key={cat}>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground mb-2.5">
-                    {cat}
-                  </p>
+                  <p className="text-label font-semibold text-muted-foreground mb-2.5">{cat}</p>
                   <div className="space-y-2">
                     {WEBHOOK_EVENTS.filter((e) => e.categoria === cat).map((ev) => {
                       const url = baseUrl ? `${baseUrl}/${ev.slug}` : "";
                       const last = lastByEvent.get(ev.slug);
-                      const copied = copiedUrl === url;
+                      const copied = Boolean(url) && copiedUrl === url;
                       return (
                         <div
                           key={ev.slug}
-                          className="rounded-lg border border-border/60 bg-background/30 p-3 transition-all hover:border-primary/30"
+                          className="flex items-center gap-3 rounded-lg border border-border/60 bg-background/30 p-3 transition-all hover:border-primary/30"
                         >
-                          <div className="flex items-start justify-between gap-2 mb-2">
-                            <div className="min-w-0">
-                              <p className="text-sm font-semibold truncate">{ev.label}</p>
-                              <p className="text-[11px] text-muted-foreground truncate">
-                                {ev.descricao}
-                              </p>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-baseline gap-x-2">
+                              <p className="text-body font-semibold">{ev.label}</p>
+                              <code className="truncate font-mono text-meta text-muted-foreground">
+                                /{ev.slug}
+                              </code>
                             </div>
-                            {last ? (
-                              <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 text-[10px] shrink-0">
-                                <span className="h-1 w-1 rounded-full bg-emerald-400 pulse-realtime mr-1" />
-                                ativo · {timeAgo(last)}
-                              </Badge>
-                            ) : (
-                              <Badge
-                                variant="outline"
-                                className="text-[10px] text-muted-foreground shrink-0"
-                              >
-                                aguardando
-                              </Badge>
-                            )}
+                            <p className="truncate text-meta text-muted-foreground">
+                              {ev.descricao}
+                            </p>
                           </div>
-                          <div className="flex gap-2">
-                            {tokenLoading ? (
-                              <Skeleton className="h-8 flex-1 rounded-md" />
-                            ) : (
-                              <Input
-                                value={url}
-                                readOnly
-                                className="bg-background/60 font-mono text-[11px] h-8"
-                                placeholder="token indisponível"
-                              />
-                            )}
-                            <Button
+                          {last ? (
+                            <Badge className="bg-success/15 text-success border-success/30 text-meta shrink-0">
+                              <span className="h-1 w-1 rounded-full bg-success pulse-realtime mr-1" />
+                              ativo · {timeAgo(last)}
+                            </Badge>
+                          ) : (
+                            <Badge
                               variant="outline"
-                              size="icon"
-                              className={cn(
-                                "h-8 w-8 shrink-0 transition-all",
-                                copied && "border-emerald-500/40 text-emerald-400",
-                              )}
-                              onClick={() => url && copy(url)}
-                              disabled={!url}
-                              title={copied ? "Copiado!" : "Copiar URL"}
+                              className="text-meta text-muted-foreground shrink-0"
                             >
-                              {copied ? (
+                              aguardando
+                            </Badge>
+                          )}
+                          <IconButton
+                            variant="outline"
+                            label={copied ? "Copiado" : `Copiar endereço de ${ev.label}`}
+                            icon={
+                              copied ? (
                                 <Check className="h-3.5 w-3.5" />
                               ) : (
                                 <Copy className="h-3.5 w-3.5" />
-                              )}
-                            </Button>
-                          </div>
+                              )
+                            }
+                            className={cn(
+                              "shrink-0 transition-all",
+                              copied && "border-success/40 text-success",
+                            )}
+                            onClick={() => url && copy(url)}
+                            disabled={!url}
+                          />
                         </div>
                       );
                     })}
@@ -410,7 +461,7 @@ function WebhooksPage() {
         </div>
 
         <DataCard
-          title="Console de logs"
+          title="Últimos recebimentos"
           description="Atualiza a cada 10s · últimos 50"
           icon={<Terminal className="h-4 w-4" />}
           bodyClassName="p-3"
@@ -429,45 +480,40 @@ function WebhooksPage() {
                   type="button"
                   onClick={() => setSelectedLog(l)}
                   className={cn(
-                    "w-full rounded-md border bg-background/40 p-2.5 text-left text-xs font-mono transition-colors",
+                    "w-full rounded-md border bg-background/40 p-2.5 text-left text-meta transition-colors",
                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60",
                     ok
-                      ? "border-emerald-500/15 hover:border-emerald-500/30"
-                      : "border-rose-500/20 hover:border-rose-500/40",
+                      ? "border-success/15 hover:border-success/30"
+                      : "border-danger/20 hover:border-danger/40",
                   )}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-semibold truncate">{l.evento}</span>
+                    <span className="font-semibold truncate">{eventLabel(l.evento)}</span>
                     {ok ? (
                       <span
-                        className={cn(
-                          "text-[10px] uppercase tracking-wider shrink-0",
-                          isDuplicate ? "text-sky-300" : "text-emerald-400",
-                        )}
+                        className={`text-meta shrink-0 ${isDuplicate ? "text-muted-foreground" : "text-success"}`}
                       >
-                        {l.status}
+                        {logStatusLabel(l.status)}
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 text-[10px] text-rose-400 uppercase tracking-wider shrink-0">
-                        <AlertCircle className="h-3 w-3" />
-                        {l.status}
+                      <span className="inline-flex items-center gap-1 text-meta text-danger shrink-0">
+                        <AlertCircle className="h-3 w-3" aria-hidden="true" />
+                        {logStatusLabel(l.status)}
                       </span>
                     )}
                   </div>
-                  <p className="mt-0.5 text-muted-foreground text-[10px]">
-                    {timeAgo(l.created_at)}
-                  </p>
+                  <p className="mt-0.5 text-muted-foreground text-meta">{timeAgo(l.created_at)}</p>
                 </button>
               );
             })}
             {!isLoading && logs.length === 0 && (
               <EmptyState
                 icon={<Terminal className="h-6 w-6" />}
-                title="Nenhum log ainda"
+                title="Nada recebido ainda"
                 description={
                   isDemo
                     ? DEMO_EMPTY_STATE_TEXT
-                    : "Os webhooks recebidos vão aparecer aqui em tempo real."
+                    : "Os dados enviados pela plataforma de apostas vão aparecer aqui em tempo real."
                 }
                 className="py-8"
               />
@@ -476,6 +522,98 @@ function WebhooksPage() {
         </DataCard>
       </div>
 
+      <Collapsible className="rounded-2xl border border-border bg-card/80">
+        <CollapsibleTrigger className="group flex w-full items-start justify-between gap-4 rounded-2xl px-4 py-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-5">
+          <div className="min-w-0">
+            <h2 className="text-section">Segurança avançada: assinatura dos envios</h2>
+            <p className="mt-0.5 text-label text-muted-foreground">
+              Garante que os dados vieram mesmo da plataforma. Ative somente depois de configurar a
+              mesma chave na plataforma da casa.
+            </p>
+          </div>
+          <ChevronDown
+            className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180"
+            aria-hidden="true"
+          />
+        </CollapsibleTrigger>
+        <CollapsibleContent className="px-4 pb-4 sm:px-5 sm:pb-5">
+          <div className="flex flex-wrap items-center gap-3 text-sm">
+            <Badge
+              variant="outline"
+              className={
+                tokenInfo?.hmacEnforced
+                  ? "border-success/40 text-success"
+                  : "border-warning/40 text-warning"
+              }
+            >
+              {tokenInfo?.hmacEnforced ? "assinatura obrigatória" : "assinatura ainda opcional"}
+            </Badge>
+            <span className="text-muted-foreground">
+              {tokenInfo?.hmacConfigured ? "Chave gerada." : "Nenhuma chave gerada."}
+            </span>
+            <DemoDisabledTooltip active={isDemo}>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={isDemo || hmacUnknown || provision.isPending}
+                onClick={() => void confirmRotate()}
+              >
+                {provision.isPending
+                  ? "Gerando..."
+                  : tokenInfo?.hmacConfigured
+                    ? "Trocar chave"
+                    : "Gerar chave"}
+              </Button>
+            </DemoDisabledTooltip>
+            {tokenInfo?.hmacEnforced ? (
+              <DemoDisabledTooltip active={isDemo}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={isDemo || hmacUnknown || enforceHmac.isPending}
+                  onClick={() => void confirmAllowUnsigned()}
+                >
+                  Aceitar sem assinatura por enquanto
+                </Button>
+              </DemoDisabledTooltip>
+            ) : (
+              <DemoDisabledTooltip active={isDemo}>
+                <Button
+                  size="sm"
+                  disabled={
+                    isDemo || hmacUnknown || !tokenInfo?.hmacConfigured || enforceHmac.isPending
+                  }
+                  onClick={() => void confirmEnforce()}
+                >
+                  Exigir assinatura
+                </Button>
+              </DemoDisabledTooltip>
+            )}
+          </div>
+          <p className="mt-3 text-meta text-muted-foreground">
+            Para o responsável pela integração: a assinatura (HMAC-SHA256 com a chave) vai no
+            cabeçalho <code className="font-mono text-foreground/85">x-webhook-signature</code>.
+          </p>
+          {provisionedSecret ? (
+            <div className="mt-3 flex gap-2">
+              <Input
+                value={provisionedSecret}
+                readOnly
+                className="font-mono text-meta"
+                aria-label="Chave de assinatura gerada"
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => copy(provisionedSecret, "Chave copiada")}
+              >
+                <Copy className="mr-1 h-3.5 w-3.5" /> Copiar
+              </Button>
+            </div>
+          ) : null}
+        </CollapsibleContent>
+      </Collapsible>
+
       <Dialog open={!!selectedLog} onOpenChange={(open) => !open && setSelectedLog(null)}>
         <DialogContent className="max-h-[88vh] max-w-4xl overflow-hidden p-0">
           {selectedLog && (
@@ -483,42 +621,39 @@ function WebhooksPage() {
               <DialogHeader className="border-b border-border/60 px-5 py-4">
                 <DialogTitle className="flex items-center gap-2">
                   <FileJson className="h-4 w-4 text-primary" />
-                  Detalhes do log
+                  Detalhes do recebimento
                 </DialogTitle>
                 <DialogDescription>
-                  {selectedLog.evento} Â· {new Date(selectedLog.created_at).toLocaleString("pt-BR")}
+                  {eventLabel(selectedLog.evento)} ·{" "}
+                  {new Date(selectedLog.created_at).toLocaleString("pt-BR")}
                 </DialogDescription>
               </DialogHeader>
 
               <div className="space-y-4 overflow-y-auto px-5 py-4">
                 <div className="grid gap-3 sm:grid-cols-3">
                   <div className="rounded-md border border-border/60 bg-background/40 p-3">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                      Evento
+                    <p className="text-label text-muted-foreground">Evento</p>
+                    <p className="mt-1 break-words text-sm font-semibold">
+                      {eventLabel(selectedLog.evento)}
                     </p>
-                    <p className="mt-1 break-words text-sm font-semibold">{selectedLog.evento}</p>
                   </div>
                   <div className="rounded-md border border-border/60 bg-background/40 p-3">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                      Status
-                    </p>
+                    <p className="text-label text-muted-foreground">Situação</p>
                     <p
                       className={cn(
                         "mt-1 text-sm font-semibold",
                         selectedLog.status === "duplicado"
-                          ? "text-sky-300"
+                          ? "text-muted-foreground"
                           : selectedLog.status === "processado" || selectedLog.status === "recebido"
-                            ? "text-emerald-400"
-                            : "text-rose-400",
+                            ? "text-success"
+                            : "text-danger",
                       )}
                     >
-                      {selectedLog.status}
+                      {logStatusLabel(selectedLog.status)}
                     </p>
                   </div>
                   <div className="rounded-md border border-border/60 bg-background/40 p-3">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                      Recebido
-                    </p>
+                    <p className="text-label text-muted-foreground">Recebido</p>
                     <p className="mt-1 text-sm font-semibold">
                       {new Date(selectedLog.created_at).toLocaleString("pt-BR")}
                     </p>
@@ -527,7 +662,7 @@ function WebhooksPage() {
 
                 <div className="rounded-md border border-border/60 bg-background/40">
                   <div className="flex items-center justify-between gap-3 border-b border-border/60 px-3 py-2">
-                    <p className="text-xs font-semibold">Payload recebido</p>
+                    <p className="text-label font-semibold">Dados recebidos</p>
                     <Button
                       variant="outline"
                       size="sm"
@@ -538,7 +673,7 @@ function WebhooksPage() {
                       Copiar
                     </Button>
                   </div>
-                  <pre className="max-h-[52vh] overflow-auto whitespace-pre-wrap break-words p-3 text-[11px] leading-relaxed text-muted-foreground">
+                  <pre className="max-h-[52vh] overflow-auto whitespace-pre-wrap break-words p-3 text-meta leading-relaxed text-muted-foreground">
                     {prettyJson(selectedLog.payload)}
                   </pre>
                 </div>
@@ -547,42 +682,6 @@ function WebhooksPage() {
           )}
         </DialogContent>
       </Dialog>
-    </div>
-  );
-}
-
-function WebhookKpi({
-  label,
-  value,
-  detail,
-  tone = "text-foreground",
-  loading,
-  compact = false,
-}: {
-  label: string;
-  value: number | string | undefined;
-  detail: string;
-  tone?: string;
-  loading: boolean;
-  compact?: boolean;
-}) {
-  return (
-    <div className="rounded-xl border border-border/60 bg-card/70 px-4 py-3">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-        {label}
-      </p>
-      {loading ? (
-        <Skeleton className="mt-2 h-7 w-16" />
-      ) : (
-        <p
-          className={cn("mt-1 text-2xl font-semibold tracking-tight", tone, compact && "text-base")}
-        >
-          {value ?? "—"}
-        </p>
-      )}
-      <p className="mt-1 truncate text-[11px] text-muted-foreground" title={detail}>
-        {detail}
-      </p>
-    </div>
+    </>
   );
 }

@@ -3,7 +3,8 @@ import { dbUuid } from "@/lib/zod-helpers";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { assertTenantNotDemo } from "./tenant-access.server";
+import { assertCallerNotBillingLocked, assertTenantNotDemo } from "./tenant-access.server";
+import { tenantReads } from "@/lib/active-tenant-filter";
 
 /**
  * `whatsapp_proxies` is a global, admin-role-gated table with no `tenant_id`
@@ -23,6 +24,8 @@ export async function guardCallerTenantNotDemo(supabase: {
   if (error) throw new Error(error.message);
   if (!tenantId) return;
   await assertTenantNotDemo(String(tenantId));
+  // A house locked for the monthly fee is refused for everyone but the superadmin.
+  await assertCallerNotBillingLocked(supabase, String(tenantId));
 }
 
 const protocolEnum = z.enum(["http", "https", "socks4", "socks5"]);
@@ -48,7 +51,8 @@ function shapePublic(row: any) {
 export const listWhatsappProxies = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data, error } = await context.supabase
+    const reads = await tenantReads(context.supabase);
+    const { data, error } = await reads
       .from("whatsapp_proxies")
       .select("*")
       .order("created_at", { ascending: false });

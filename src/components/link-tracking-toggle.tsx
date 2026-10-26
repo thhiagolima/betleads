@@ -50,15 +50,19 @@ export function LinkTrackingToggle({
             {!urls.length
               ? "Adicione uma URL à mensagem para que o encurtamento e a medição sejam aplicados no envio."
               : value
-              ? `Cada URL será substituída por um link como ${LINK_TRACKING_PREVIEW_URL} no envio.`
-              : "As URLs originais serão preservadas e nenhum rastreamento será criado."}
+                ? `Cada URL será substituída por um link como ${LINK_TRACKING_PREVIEW_URL} no envio.`
+                : "As URLs originais serão preservadas e nenhum rastreamento será criado."}
           </p>
           {channel === "sms" && (
             <p className="text-xs text-muted-foreground">
-              {value ? previewLength : originalLength} caracteres · {value ? previewParts : originalParts}{" "}
-              parte{(value ? previewParts : originalParts) === 1 ? "" : "s"}
+              {value ? previewLength : originalLength} caracteres ·{" "}
+              {value ? previewParts : originalParts} parte
+              {(value ? previewParts : originalParts) === 1 ? "" : "s"}
               {value && (previewLength !== originalLength || previewParts !== originalParts) && (
-                <> (original: {originalLength} caracteres · {originalParts} partes)</>
+                <>
+                  {" "}
+                  (original: {originalLength} caracteres · {originalParts} partes)
+                </>
               )}
             </p>
           )}

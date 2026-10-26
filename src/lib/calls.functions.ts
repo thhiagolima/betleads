@@ -5,26 +5,30 @@ import { createServerFn } from "@tanstack/react-start";
 import { dbUuid } from "@/lib/zod-helpers";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import {
+  audioGenerationSeconds,
   callElevenLabs,
+  classifyVoiceDispatchResult,
   computeAudioHash,
   DEFAULT_VOICE_SETTINGS,
   defaultVoiceId,
   FAKE_LEAD,
   renderCallScript,
-  runVoiceQueueDispatcher,
   uploadAudioToStorage,
+  VOICE_INSUFFICIENT_BALANCE_MESSAGE,
   type LeadLike,
   type VoiceSettings,
 } from "./calls.server";
 import { callInfobipVoice, normalizeE164BR } from "./infobip-voice.server";
+import { logCallHistoryInsertError } from "./voice-history-log";
+import { bulkDispatchCallsFor } from "./calls-bulk.server";
 import { evaluateVoiceContactPolicy } from "./consent.server";
 import {
   assertTenantNotDemoForSend,
   resolveCurrentTenantId,
   resolveOperationalTenantId,
 } from "./tenant-access.server";
+import { tenantReads } from "@/lib/active-tenant-filter";
 
 // ============================================================
 // Schemas
@@ -48,7 +52,8 @@ const ScriptStatusSchema = z.enum(["active", "inactive", "draft"]);
 export const listCallScripts = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data, error } = await context.supabase
+    const reads = await tenantReads(context.supabase);
+    const { data, error } = await reads
       .from("call_scripts")
       .select(
         "id, name, trigger_name, content, status, default_voice_id, voice_settings, version, created_at, updated_at",
@@ -498,16 +503,26 @@ export const listCallQueue = createServerFn({ method: "POST" })
       .object({
         status: z.string().max(40).optional(),
         limit: z.number().int().min(1).max(200).default(100),
+        // "queue" = next to be dialed (queue screen); "recent" = latest dispatches
+        // first, for the campaigns hub that groups them into campaigns.
+        order: z.enum(["queue", "recent"]).default("queue"),
       })
       .parse(input),
   )
   .handler(async ({ data, context }) => {
-    let q = context.supabase
+    const reads = await tenantReads(context.supabase);
+    let q = reads
       .from("call_queue")
-      .select("id, status, phone_number, audio_url, scheduled_at, provider_status")
-      .order("priority", { ascending: true })
-      .order("scheduled_at", { ascending: true })
+      // trigger_name/script/asset/created_at let the campaigns hub group one
+      // bulk dispatch into a single campaign row.
+      .select(
+        "id, status, phone_number, audio_url, scheduled_at, provider_status, trigger_name, script_id, voice_asset_id, created_at",
+      )
       .limit(data.limit);
+    q =
+      data.order === "recent"
+        ? q.order("created_at", { ascending: false })
+        : q.order("priority", { ascending: true }).order("scheduled_at", { ascending: true });
     if (data.status) q = q.eq("status", data.status as any);
     const { data: rows, error } = await q;
     if (error) throw new Error(error.message);
@@ -519,6 +534,10 @@ export const listCallQueue = createServerFn({ method: "POST" })
         audio_url: row.audio_url,
         scheduled_at: row.scheduled_at,
         provider_status: row.provider_status,
+        trigger_name: row.trigger_name,
+        script_id: row.script_id,
+        voice_asset_id: row.voice_asset_id,
+        created_at: row.created_at,
         retryable:
           row.status === "audio_ready" &&
           (row.provider_status === "provider_unavailable" || !row.provider_status),
@@ -540,7 +559,8 @@ export const listCallHistory = createServerFn({ method: "POST" })
       .parse(input),
   )
   .handler(async ({ data, context }) => {
-    let q = context.supabase
+    const reads = await tenantReads(context.supabase);
+    let q = reads
       .from("call_history")
       .select(
         "id, lead_id, script_id, call_queue_id, to_phone, status, duration_seconds, recording_url, created_at, error_message, provider, provider_call_id, provider_status_code, provider_response, audio_url, result",
@@ -570,7 +590,8 @@ export const listAudioGenerations = createServerFn({ method: "POST" })
       .parse(input),
   )
   .handler(async ({ data, context }) => {
-    let q = context.supabase
+    const reads = await tenantReads(context.supabase);
+    let q = reads
       .from("call_audio_generations")
       .select("id, lead_id, script_id, rendered_text, audio_url, generation_status, created_at")
       .order("created_at", { ascending: false })
@@ -596,7 +617,8 @@ export const listPlayersForCalls = createServerFn({ method: "POST" })
       .parse(input),
   )
   .handler(async ({ data, context }) => {
-    let q = context.supabase
+    const reads = await tenantReads(context.supabase);
+    let q = reads
       .from("players")
       .select("id, nome, telefone, saldo_carteira, status, vip")
       .order("updated_at", { ascending: false })
@@ -662,7 +684,7 @@ export const dispatchCallQueueItem = createServerFn({ method: "POST" })
 
     const { data: q, error: qErr } = await supabase
       .from("call_queue")
-      .select("id, phone_number, audio_url, lead_id, script_id, status")
+      .select("id, phone_number, audio_url, lead_id, script_id, status, audio_generation_id")
       .eq("id", data.call_queue_id)
       .maybeSingle();
     if (qErr) throw new Error(qErr.message);
@@ -726,20 +748,33 @@ export const dispatchCallQueueItem = createServerFn({ method: "POST" })
     } else {
       content = { type: "audio", audioUrl: q.audio_url! };
     }
-    const result = await callInfobipVoice(to, content, { tenantId });
+    // PG3: the generated audio's duration, when known, sizes the reservation.
+    const maxSeconds = q.audio_generation_id
+      ? await audioGenerationSeconds(supabase, tenantId, q.audio_generation_id)
+      : null;
+    const result = await callInfobipVoice(to, content, { tenantId, maxSeconds });
+    const outcome = classifyVoiceDispatchResult(result);
+
+    // Carteira da casa sem saldo (checado ANTES da regra transitória: status 0
+    // sozinho reenfileiraria o item para sempre). Nenhuma ligação foi feita
+    // nem reservada: falha final, sem registro no histórico.
+    if (outcome === "insufficient_balance") {
+      await supabase
+        .from("call_queue")
+        .update({
+          status: "failed",
+          provider_status: "saldo_insuficiente",
+          provider_response: { error: VOICE_INSUFFICIENT_BALANCE_MESSAGE } as any,
+          provider_request_id: result.idempotencyKey || null,
+        } as any)
+        .eq("id", q.id);
+      throw new Error(VOICE_INSUFFICIENT_BALANCE_MESSAGE);
+    }
 
     // 5xx ou body não-JSON (HTML) = falha transitória do provedor.
     // Preservamos o item em audio_ready com provider_status='provider_unavailable'
     // para retentar depois — não marcamos failed nem registramos no histórico.
-    const bodyAny = (result.body ?? {}) as any;
-    const isTransient =
-      !result.ok &&
-      (result.status === 0 ||
-        result.status === 429 ||
-        (result.status >= 500 && result.status <= 599) ||
-        bodyAny?.non_json === true);
-
-    if (isTransient) {
+    if (outcome === "transient") {
       const errMsg = `Infobip voice ${result.status}: ${JSON.stringify(result.body).slice(0, 400)}`;
       try {
         await supabase.rpc("register_provider_throttle", {
@@ -769,7 +804,7 @@ export const dispatchCallQueueItem = createServerFn({ method: "POST" })
     }
 
     const historyStatus = result.ok ? "pending" : "failed";
-    await supabase.from("call_history").insert({
+    const { error: historyInsertError } = await supabase.from("call_history").insert({
       lead_id: q.lead_id,
       call_queue_id: q.id,
       script_id: q.script_id,
@@ -780,14 +815,21 @@ export const dispatchCallQueueItem = createServerFn({ method: "POST" })
       provider_call_id: result.providerCallId ?? result.idempotencyKey ?? null,
       error_message: result.ok ? null : JSON.stringify(result.body).slice(0, 1000),
       provider_response: {
-        ...((result.body && typeof result.body === "object" && !Array.isArray(result.body)) ? result.body : {}),
+        ...(result.body && typeof result.body === "object" && !Array.isArray(result.body)
+          ? result.body
+          : {}),
         correlation_id: result.idempotencyKey,
-        cml: content.type === "tts" ? { type: "say", text: content.text, language: content.language ?? "pt" } : undefined,
+        cml:
+          content.type === "tts"
+            ? { type: "say", text: content.text, language: content.language ?? "pt" }
+            : undefined,
       } as any,
       provider_status_code: result.status,
       to_phone: to,
       tenant_id: tenantId,
+      billing_reference_id: result.billing?.referenceId ?? null,
     } as any);
+    if (historyInsertError) logCallHistoryInsertError("manual", historyInsertError, result);
 
     await supabase
       .from("call_queue")
@@ -808,154 +850,32 @@ export const dispatchCallQueueItem = createServerFn({ method: "POST" })
 // ============================================================
 // ENVIO EM MASSA
 // ============================================================
+const bulkDispatchCallsInput = z
+  .object({
+    script_id: dbUuid().optional(),
+    asset_id: dbUuid().optional(),
+    campaign_name: z.string().max(120).optional(),
+    scheduled_at: z.string().datetime().optional(),
+    targets: z
+      .array(
+        z.object({
+          lead_id: dbUuid().nullable().optional(),
+          phone_number: z.string().max(40).nullable().optional(),
+        }),
+      )
+      .min(1)
+      .max(200),
+  })
+  .refine((value) => Boolean(value.script_id) !== Boolean(value.asset_id), {
+    message: "Selecione um script TTS ou um áudio fixo da biblioteca.",
+  });
+
+export type BulkDispatchCallsInput = z.infer<typeof bulkDispatchCallsInput>;
+
 export const bulkDispatchCalls = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input) =>
-    z
-      .object({
-        script_id: dbUuid().optional(),
-        asset_id: dbUuid().optional(),
-        campaign_name: z.string().max(120).optional(),
-        scheduled_at: z.string().datetime().optional(),
-        targets: z
-          .array(
-            z.object({
-              lead_id: dbUuid().nullable().optional(),
-              phone_number: z.string().max(40).nullable().optional(),
-            }),
-          )
-          .min(1)
-          .max(200),
-      })
-      .refine((value) => Boolean(value.script_id) !== Boolean(value.asset_id), {
-        message: "Selecione um script TTS ou um áudio fixo da biblioteca.",
-      })
-      .parse(input),
-  )
-  .handler(async ({ data, context }) => {
-    const { supabase } = context;
-    const tenantId = await resolveOperationalTenantId(supabase);
-    const scheduledAt = data.scheduled_at ? new Date(data.scheduled_at) : null;
-    if (scheduledAt && !Number.isFinite(scheduledAt.getTime())) {
-      throw new Error("Data de agendamento de voz inválida.");
-    }
-    const isScheduled = Boolean(scheduledAt && scheduledAt.getTime() > Date.now());
-    let fixedAudioUrl: string | null = null;
-    if (data.asset_id) {
-      const { data: asset, error: assetError } = await (supabaseAdmin as any)
-        .from("journey_voice_assets")
-        .select("storage_path, is_archived")
-        .eq("id", data.asset_id)
-        .eq("tenant_id", tenantId)
-        .single();
-      if (assetError || !asset || asset.is_archived)
-        throw new Error("Áudio fixo não está disponível na biblioteca.");
-      const { data: signed, error: signedError } = await supabaseAdmin.storage
-        .from("call-audios")
-        .createSignedUrl(asset.storage_path, 3600);
-      if (signedError || !signed?.signedUrl)
-        throw new Error(signedError?.message ?? "Não foi possível preparar o áudio fixo.");
-      fixedAudioUrl = signed.signedUrl;
-    }
-    const results: Array<{
-      ok: boolean;
-      lead_id: string | null;
-      phone: string | null;
-      error?: string;
-    }> = [];
-    let queued = 0;
-    let pending = 0;
-    let failed = 0;
-
-    for (const target of data.targets) {
-      let queueId: string | null = null;
-      try {
-        // 1. cria item na fila
-        const { data: q, error: qErr } = await supabase
-          .from("call_queue")
-          .insert({
-            lead_id: target.lead_id ?? null,
-            script_id: data.script_id ?? null,
-            voice_asset_id: data.asset_id ?? null,
-            trigger_name: data.campaign_name ?? null,
-            phone_number: target.phone_number ?? null,
-            scheduled_at: scheduledAt?.toISOString() ?? new Date().toISOString(),
-            status: "pending_audio",
-          })
-          .select("id")
-          .single();
-        if (qErr) throw new Error(qErr.message);
-        queueId = q.id;
-
-        // Scripts são sintetizados pela Infobip quando a chamada é atendida.
-        // Arquivos da biblioteca continuam usando URL assinada e a ação CML `play`.
-        await supabase
-          .from("call_queue")
-          .update({
-            status: "audio_ready",
-            audio_generation_id: null,
-            audio_url: fixedAudioUrl,
-          })
-          .eq("id", q.id);
-
-        if (isScheduled) {
-          pending += 1;
-          results.push({
-            ok: true,
-            lead_id: target.lead_id ?? null,
-            phone: target.phone_number ?? null,
-          });
-          continue;
-        }
-
-        // 4. dispara
-        const dispatchResult = await runVoiceQueueDispatcher(1, q.id);
-        if (dispatchResult.failed > 0) {
-          throw new Error("Não foi possível concluir o envio de voz. Consulte o histórico para os detalhes.");
-        }
-        if (dispatchResult.deferred > 0) {
-          pending += 1;
-          results.push({
-            ok: true,
-            lead_id: target.lead_id ?? null,
-            phone: target.phone_number ?? null,
-            error: "Ligação adiada pela política de contato ou disponibilidade do provedor.",
-          });
-        } else {
-          queued += 1;
-          results.push({
-            ok: true,
-            lead_id: target.lead_id ?? null,
-            phone: target.phone_number ?? null,
-          });
-        }
-      } catch (err) {
-        failed += 1;
-        const msg = err instanceof Error ? err.message : String(err);
-        // Registra a falha no item criado para que a fila não o apresente
-        // como se estivesse aguardando o provedor.
-        if (queueId) {
-          await supabase
-            .from("call_queue")
-            .update({
-              status: "failed",
-              provider_status: "dispatch_preparation_failed",
-              provider_response: { stage: "dispatch_preparation", error: msg } as any,
-            } as any)
-            .eq("id", queueId);
-        }
-        results.push({
-          ok: false,
-          lead_id: target.lead_id ?? null,
-          phone: target.phone_number ?? null,
-          error: msg,
-        });
-      }
-    }
-
-    console.log(`[calls] bulk dispatch: total=${data.targets.length} ok=${queued} fail=${failed}`);
-    return { total: data.targets.length, queued, pending, failed, scheduled: isScheduled, results };
-  });
+  .inputValidator((input) => bulkDispatchCallsInput.parse(input))
+  .handler(async ({ data, context }) => bulkDispatchCallsFor(context.supabase, data));
 
 // ============================================================
 // DASHBOARD
@@ -979,10 +899,7 @@ export const getCallsDashboard = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const { supabase } = context;
-    const { data: tenantRow, error: tenantErr } = await supabase.rpc("current_tenant_id");
-    if (tenantErr) throw new Error(tenantErr.message);
-    const tenantId = tenantRow as string | null;
-    if (!tenantId) throw new Error("tenant não encontrado para o usuário");
+    const tenantId = await resolveCurrentTenantId(supabase);
     // Dias em BRT (America/Sao_Paulo) — mesmo critério dos outros dashboards.
     const { parseBrtDayStart, parseBrtDayEnd, brtDayStart, brtDayEnd } = await import("./tz");
     let sinceDate: Date;

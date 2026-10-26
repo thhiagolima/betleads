@@ -203,7 +203,7 @@ export const Route = createFileRoute("/api/public/hooks/webhook-replay")({
                   row.tenant_id,
                   row.evento,
                   (row.payload ?? {}) as Record<string, unknown>,
-                  { mirror: true, existingLogId: row.id },
+                  { existingLogId: row.id },
                 );
                 const result = (await response.json().catch(() => ({ ok: false }))) as {
                   ok?: boolean;

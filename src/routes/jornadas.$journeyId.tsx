@@ -12,11 +12,12 @@ function JourneyDetailPage() {
     queryFn: () => load({ data: { id: journeyId } }),
   });
   if (query.isLoading)
-    return <div className="p-6 text-sm text-muted-foreground">Carregando jornada…</div>;
-  if (!query.data)
-    return <div className="p-6 text-sm text-destructive">Jornada não encontrada.</div>;
+    return <div className="text-sm text-muted-foreground">Carregando jornada…</div>;
+  if (!query.data) return <div className="text-sm text-destructive">Jornada não encontrada.</div>;
   return (
     <JourneyEditor
+      // A save of an active journey opens its new draft revision: remount with its data.
+      key={journeyId}
       id={journeyId}
       initial={query.data.journey}
       initialSteps={query.data.steps}

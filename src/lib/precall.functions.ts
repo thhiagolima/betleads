@@ -2,6 +2,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { resolveOperationalTenantId } from "@/lib/tenant-access.server";
+import { tenantReads } from "@/lib/active-tenant-filter";
 
 type CreateCampaignInput = {
   nome: string;
@@ -15,7 +16,8 @@ type CreateCampaignInput = {
 export const listPrecallCampaigns = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data, error } = await context.supabase
+    const reads = await tenantReads(context.supabase);
+    const { data, error } = await reads
       .from("precall_campaigns")
       .select("*")
       .order("created_at", { ascending: false });
@@ -119,7 +121,8 @@ export const getPrecallCampaign = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: { id: string }) => d)
   .handler(async ({ data, context }) => {
-    const { data: camp, error } = await context.supabase
+    const reads = await tenantReads(context.supabase);
+    const { data: camp, error } = await reads
       .from("precall_campaigns")
       .select("*")
       .eq("id", data.id)
@@ -127,13 +130,13 @@ export const getPrecallCampaign = createServerFn({ method: "GET" })
     if (error) throw new Error(error.message);
     if (!camp) throw new Error("campanha não encontrada");
 
-    const { data: templates } = await context.supabase
+    const { data: templates } = await reads
       .from("precall_templates")
       .select("id, ordem, content")
       .eq("campaign_id", data.id)
       .order("ordem", { ascending: true });
 
-    const { data: leads } = await context.supabase
+    const { data: leads } = await reads
       .from("precall_leads")
       .select(
         "id, player_id, telefone_e164, status, scheduled_at, sent_at, responded_at, called_at, mensagem_enviada, resposta_texto, observacao, error",
@@ -146,7 +149,7 @@ export const getPrecallCampaign = createServerFn({ method: "GET" })
     const ids = (leads ?? []).map((l) => l.player_id).filter((x): x is string => !!x);
     const players = ids.length
       ? ((
-          await context.supabase
+          await reads
             .from("players")
             .select("id, nome, vip, total_depositado, ultimo_login")
             .in("id", ids)

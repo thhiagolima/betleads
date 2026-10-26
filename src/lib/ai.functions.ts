@@ -6,6 +6,9 @@ import { createLovableAiGatewayProvider } from "./ai-gateway";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { assertTenantNotDemoForSend, resolveCurrentTenantId } from "./tenant-access.server";
 
+/** Modelo da Lovable AI Gateway usado por toda a análise de IA do BETLEADS. */
+export const LOVABLE_MODEL_ID = "google/gemini-3-flash-preview";
+
 function getSupabase() {
   const url = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL!;
   const key =
@@ -89,7 +92,7 @@ ${JSON.stringify(ctx).slice(0, 60000)}`;
 
   try {
     const { text } = await generateText({
-      model: gateway("google/gemini-3-flash-preview"),
+      model: gateway(LOVABLE_MODEL_ID),
       system,
       prompt: data.pergunta,
     });
@@ -99,7 +102,7 @@ ${JSON.stringify(ctx).slice(0, 60000)}`;
       tenant_id: tenantId,
       pergunta: data.pergunta,
       resposta: text,
-      modelo: "google/gemini-3-flash-preview",
+      modelo: LOVABLE_MODEL_ID,
     });
 
     return { resposta: text, error: false };

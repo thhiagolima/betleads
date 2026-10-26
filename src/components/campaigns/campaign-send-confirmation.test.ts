@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { brl } from "@/lib/format";
 import {
   campaignRiskSignature,
   campaignSendLabel,
@@ -78,13 +79,38 @@ describe("typed confirmation", () => {
 });
 
 describe("send button label", () => {
-  it("states recipients and credits for SMS", () => {
+  it("states recipients and segments for SMS, without a price until it loads", () => {
     expect(campaignSendLabel({ channel: "sms", when: "now", recipients: 12430, cost: 12430 })).toBe(
-      "Enviar para 12.430 jogadores · 12.430 créditos",
+      "Enviar para 12.430 jogadores · 12.430 segmentos",
     );
     expect(campaignSendLabel({ channel: "sms", when: "schedule", recipients: 1, cost: 2 })).toBe(
-      "Agendar para 1 jogador · 2 créditos",
+      "Agendar para 1 jogador · 2 segmentos",
     );
+  });
+
+  it("states recipients, segments and price in R$ for SMS once the price loads", () => {
+    expect(
+      campaignSendLabel({
+        channel: "sms",
+        when: "now",
+        recipients: 2,
+        cost: 2,
+        smsUnitPrice: 0.08,
+      }),
+    ).toBe(`Enviar para 2 jogadores · 2 segmentos · ${brl(0.16)}`);
+  });
+
+  it("states 'Casa isenta' for an exempt house, without a price", () => {
+    expect(
+      campaignSendLabel({
+        channel: "sms",
+        when: "now",
+        recipients: 5,
+        cost: 5,
+        smsUnitPrice: 0.08,
+        smsExempt: true,
+      }),
+    ).toBe("Enviar para 5 jogadores · Casa isenta");
   });
 
   it("states calls for voice and only recipients for e-mail", () => {

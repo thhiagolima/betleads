@@ -1,7 +1,8 @@
 // shortio.functions: the links-settings upsert payload must never touch the
-// legacy shortio_settings.domain column (now managed via tenant_domains).
+// legacy shortio_settings.domain column (now managed via tenant_domains), and
+// the links overview turns the RPC rows into numbers.
 import { describe, expect, it } from "vitest";
-import { buildShortioSettingsUpsert } from "./shortio.functions";
+import { buildShortioSettingsUpsert, overviewFromRows } from "./shortio.functions";
 
 const base = {
   enabled: true,
@@ -28,5 +29,22 @@ describe("buildShortioSettingsUpsert", () => {
     expect(payload.tenant_id).toBe("t1");
     expect(payload.updated_by).toBe("u1");
     expect(payload.updated_at).toBe("2026-10-21T00:00:00.000Z");
+  });
+});
+
+describe("overviewFromRows", () => {
+  it("turns the RPC bigints into numbers and sums the totals", () => {
+    const out = overviewFromRows([
+      { channel: "sms", source_type: "campaign", sent: "90958", links: "90958", clicks: "2836" },
+      { channel: "sms", source_type: "journey", sent: "67493", links: "67493", clicks: "1429" },
+    ]);
+    expect(out.sent).toBe(158451);
+    expect(out.clicks).toBe(4265);
+    expect(out.rows[0]).toMatchObject({ sourceType: "campaign", sent: 90958, links: 90958 });
+    expect(out.rows[0].ctr).toBeCloseTo(2836 / 90958);
+  });
+
+  it("handles no dispatches", () => {
+    expect(overviewFromRows([])).toEqual({ rows: [], sent: 0, clicks: 0 });
   });
 });

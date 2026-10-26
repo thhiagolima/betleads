@@ -28,7 +28,7 @@ import {
 } from "./dispatch-pause-insufficient.server";
 import { pingHeartbeat, startJobRun, type JobRunHandle } from "./observability/job-monitor.server";
 import { SMS_CAMPAIGN_RUN_BUDGET_MS, SMS_CAMPAIGN_TICK_SECONDS } from "./campaign-recipients";
-import { normalizeSmsAudienceCriteria } from "./sms-audience-criteria";
+import { resolveAudienceForTenant, type SelectionDb } from "./sms-audience-selection.server";
 import {
   findAcceptedDeliveryKeys,
   persistCampaignUnresolved,
@@ -51,8 +51,11 @@ import {
   type SmsSendGate,
 } from "./sms-provider-breaker.server";
 import { PROVIDER_ACCOUNT_DEFER_MS } from "./rate-limit/provider-errors.server";
+import { notifyNoBalance } from "./billing/wallet-alerts.server";
 
 const SMS_CAMPAIGN_JOB = "sms_campaign_dispatch";
+/** Per-lead backoff when the house's own wallet has no balance (never a global pause). */
+const WALLET_INSUFFICIENT_RETRY_MS = 15 * 60_000;
 
 /**
  * Converte (entered_at, day_offset, "HH:MM") em instante UTC,
@@ -712,6 +715,29 @@ async function runSmsFlowBatch({
           .eq("id", item.lead.player_id);
       }
       processed++;
+    } else if ((r as { errorKind?: unknown }).errorKind === "insufficient_balance") {
+      // Wallet refusal for THIS house: skip only its own item, never the
+      // global channel. Checked before isInsufficientFunds() below, which
+      // would otherwise also match this same HTTP 402 and pause every
+      // tenant. attempts untouched; the lead simply comes back later.
+      lastProviderError =
+        `saldo_insuficiente: ${(r as { error?: string }).error ?? ""}`.slice(0, 800);
+      await supabaseAdmin
+        .from("sms_flow_leads")
+        .update({
+          next_run_at: new Date(Date.now() + WALLET_INSUFFICIENT_RETRY_MS).toISOString(),
+          locked_at: null,
+          locked_by: null,
+        })
+        .eq("id", item.lead.id);
+      rescheduled++;
+      // PG3 Task 7: hourly "Saldo insuficiente" e-mail; never breaks the dispatcher.
+      await notifyNoBalance(item.lead.tenant_id).catch((alertError: unknown) =>
+        console.error("[sms-dispatcher] no balance alert failed", {
+          tenantId: item.lead.tenant_id,
+          error: alertError instanceof Error ? alertError.message : String(alertError),
+        }),
+      );
     } else if ((r as { errorKind?: unknown }).errorKind === "provider_account") {
       // Account refused (101/505, 401/402/403): not the lead's fault. Same
       // step, attempts unchanged, back when the breaker allows a new try.
@@ -894,12 +920,14 @@ function campaignDeps(): CampaignDispatchDeps {
     },
     acquireSendBudget: acquireCampaignSendBudget,
     async resolveAudiencePhones(tenantId, criteria) {
-      const { data, error } = await supabaseAdmin.rpc("resolve_sms_audience_v2", {
-        _tenant: tenantId,
-        _criteria: normalizeSmsAudienceCriteria(criteria),
-      });
-      if (error) throw new Error(error.message);
-      if (!data) throw new Error("Sem acesso aos jogadores desta conta.");
+      // Mesmo avaliador do compositor: seleção carrega a lista do público pelo
+      // id + casa; regras vão ao RPC de sempre. Critério corrompido → erro
+      // permanente (a campanha falha, sem reenvio).
+      const data = await resolveAudienceForTenant(
+        supabaseAdmin as unknown as SelectionDb,
+        tenantId,
+        criteria,
+      );
       const phones = (data as { phones?: unknown }).phones;
       return Array.isArray(phones) ? phones.filter((p): p is string => typeof p === "string") : [];
     },
@@ -936,8 +964,8 @@ function campaignDeps(): CampaignDispatchDeps {
         },
         deliveryKey,
       });
-      const providerAccount =
-        !r.ok && (r as { errorKind?: unknown }).errorKind === "provider_account";
+      const errorKind = r.ok ? undefined : (r as { errorKind?: unknown }).errorKind;
+      const providerAccount = errorKind === "provider_account";
       return {
         ok: r.ok,
         alreadySent: "alreadySent" in r && r.alreadySent === true,
@@ -945,6 +973,8 @@ function campaignDeps(): CampaignDispatchDeps {
         // stops before this recipient and resends it later (same key).
         retryable: providerAccount,
         providerAccount,
+        // PG3 final fix I3: the house's wallet refused; the campaign pauses.
+        insufficientBalance: errorKind === "insufficient_balance",
         error: r.ok ? undefined : (r as { error?: string }).error,
       };
     },
@@ -980,6 +1010,7 @@ function campaignDeps(): CampaignDispatchDeps {
               pendingConfirmation: o.status === "pending_confirmation",
               retryable: o.retryable,
               providerAccount: o.errorKind === "provider_account",
+              insufficientBalance: o.errorKind === "insufficient_balance",
               error: o.ok && o.status !== "pending_confirmation" ? undefined : o.error,
             }));
           },
@@ -1084,6 +1115,16 @@ async function dispatchClaimedSmsCampaigns(campaigns: SmsCampaignRow[], run: Job
         r.stopReason === "provider_unavailable"
       )
         stopReason = r.stopReason;
+      if (r.stopReason === "insufficient_balance") {
+        // PG3 final fix I3: paused for this house only; hourly "Saldo
+        // insuficiente" e-mail, which never breaks the dispatcher.
+        await notifyNoBalance(c.tenant_id).catch((alertError: unknown) =>
+          console.error("[sms-campaigns] no balance alert failed", {
+            tenantId: c.tenant_id,
+            error: alertError instanceof Error ? alertError.message : String(alertError),
+          }),
+        );
+      }
     } catch (error) {
       console.error("[sms-campaigns] falha ao processar campanha", {
         campaignId: c.id,

@@ -11,12 +11,14 @@ import {
   type LeadLike,
 } from "./calls.server";
 import { callInfobipVoice, normalizeE164BR } from "./infobip-voice.server";
+import { logCallHistoryInsertError } from "./voice-history-log";
 import { sendSmsInternal } from "./sms.functions";
 import { buildPlayerVariables } from "./template-vars.server";
 import { loadHouseLinks } from "./house-links.server";
 import { deferIfOutsideWindow } from "./send-window.server";
 import { evaluateVoiceContactPolicy } from "./consent.server";
 import { listDemoTenantIds } from "./tenant-access.server";
+import { notifyNoBalance } from "./billing/wallet-alerts.server";
 
 type Json = Record<string, unknown>;
 
@@ -283,14 +285,40 @@ async function executeCallBlock(progress: any, block: any, player: any): Promise
 
   // 3. A Infobip sintetiza o script com CML `say` quando a ligação é atendida.
   const content = { type: "tts" as const, text: renderedText, language: "pt" };
-  const result = await callInfobipVoice(to, content, { tenantId: progress.tenant_id });
+  // PG3: the block's max_call_seconds sizes the wallet reservation.
+  const result = await callInfobipVoice(to, content, {
+    tenantId: progress.tenant_id,
+    maxSeconds: block.max_call_seconds ?? null,
+  });
+  if (result.errorKind === "insufficient_balance") {
+    // The house's wallet refused the reservation: nothing was dialed. Same
+    // treatment as other skips (no history row, attempt not consumed): the
+    // flow moves on to the next block.
+    await logEvent(
+      progress.id,
+      progress.flow_id,
+      progress.player_id,
+      progress.current_block_index,
+      "call_skipped",
+      { reason: "saldo_insuficiente" },
+    );
+    await scheduleNext(progress, block);
+    // PG3 Task 7: hourly "Saldo insuficiente" e-mail; never breaks the dispatcher.
+    await notifyNoBalance(progress.tenant_id).catch((alertError: unknown) =>
+      console.error("[call-flow] no balance alert failed", {
+        tenantId: progress.tenant_id,
+        error: alertError instanceof Error ? alertError.message : String(alertError),
+      }),
+    );
+    return;
+  }
   const isAuthError = result.status === 401 || result.status === 403;
   if (isAuthError) {
     console.warn(`[call-flow] auth_error ${result.status} — mantendo lead na fila, retry em 10min`);
   }
 
   // 5. registra histórico (linka com progress via provider_call_id)
-  await supabaseAdmin.from("call_history").insert({
+  const { error: historyInsertError } = await supabaseAdmin.from("call_history").insert({
     lead_id: progress.player_id,
     script_id: scriptId,
     audio_url: null,
@@ -307,7 +335,9 @@ async function executeCallBlock(progress: any, block: any, player: any): Promise
     tenant_id: progress.tenant_id,
     error_message: result.ok ? null : JSON.stringify(result.body).slice(0, 1000),
     rendered_text: renderedText,
+    billing_reference_id: result.billing?.referenceId ?? null,
   } as any);
+  if (historyInsertError) logCallHistoryInsertError("call_flow", historyInsertError, result);
 
   // 6. atualiza progress (aguardando callback do provedor)
   // Em auth error mantém o progress ATIVO e reagenda em 10min — nada some.

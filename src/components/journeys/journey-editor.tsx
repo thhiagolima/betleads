@@ -1,18 +1,19 @@
 import { type ReactNode, useState } from "react";
-import { useNavigate } from "@tanstack/react-router";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import {
   ArrowLeft,
   Clock3,
-  HelpCircle,
   Mail,
   MessageSquare,
+  Pause,
   Phone,
+  Play,
+  Plus,
   Save,
   Trash2,
   Upload,
-  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { listJourneys, saveJourney } from "@/lib/journeys.functions";
@@ -33,23 +34,54 @@ import {
   EmailBlockedNotice,
   ShortenerFallbackNotice,
 } from "@/components/house-config/composer-notices";
+import { requestConfirmation } from "@/components/system-dialog-host";
 import { supabase } from "@/integrations/supabase/client";
 import type { JourneyStepInput } from "@/lib/journeys.shared";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import {
+  INACTIVITY_FIELDS,
+  INACTIVITY_TRIGGER_NAME,
+  JOURNEY_AUDIENCES,
+  WAIT_UNITS,
+  type WaitUnit,
   emailStepFromConfig,
   emailStepIdsForConfig,
   fromBrtInput,
+  journeyAudienceDescription,
+  journeyInProgress,
+  journeyStatusLabel,
+  journeyTriggerLabel,
   smsExtra,
   smsExtraForTemplateChange,
+  splitWaitSeconds,
   toBrtInput,
+  waitToSeconds,
 } from "./journey-editor-config";
+import { useJourneyStatusControl } from "./journey-status-control";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Page, PageHeader } from "@/components/ui-premium/page-header";
 
 type Step =
-  | { kind: "wait"; seconds: number }
+  | { kind: "wait"; amount: string; unit: WaitUnit }
   | { kind: "sms"; templateId: string; content: string; extra?: Record<string, unknown> }
   | {
       kind: "email";
@@ -59,139 +91,158 @@ type Step =
     }
   | { kind: "voice"; assetId: string; callerId: string };
 type SavedStep = { step_type: string; config: Record<string, unknown>; is_enabled?: boolean };
+type ConflictPolicy = "coexist" | "pause_lower_priority" | "exclusive";
+type Option = { value: string; label: string };
 
-const JOURNEY_HELP = {
-  name: ["Nome", "Use um nome que deixe claro o objetivo da jornada para a equipe."],
-  description: [
-    "Descrição",
-    "Registre o contexto e a intenção da jornada. Ela não é enviada ao jogador.",
-  ],
-  trigger: [
-    "Gatilho de entrada",
-    "É o evento que coloca um jogador na jornada. Ele só entra se também fizer parte do público escolhido.",
-  ],
-  level: [
-    "Nível de destino",
-    "O jogador entra nesta jornada ao alcançar este nível. A jornada do nível anterior é encerrada automaticamente.",
-  ],
-  exit: [
-    "Gatilhos de saída",
-    "Marque os eventos que devem encerrar a jornada para evitar mensagens fora de contexto.",
-  ],
-  conflicts: [
-    "Conflitos",
-    "Define como esta jornada se comporta quando disputa a atenção do mesmo jogador com outra jornada.",
-  ],
-  family: [
-    "Família",
-    "Agrupa jornadas relacionadas. A família de níveis garante que o jogador fique em apenas um nível por vez.",
-  ],
-  priority: ["Prioridade", "Em uma disputa, o menor número vence. Prioridade 1 é a mais alta."],
-  policy: [
-    "Ao competir",
-    "Escolha se as jornadas podem coexistir ou se a menos prioritária deve aguardar.",
-  ],
-  audience: [
-    "Público",
-    "Define quem pode entrar depois de cumprir o gatilho. Consentimento e canal disponível ainda são verificados no envio.",
-  ],
-  reentry: ["Reentrada", "Define se o mesmo jogador pode voltar à jornada após sair dela."],
-  dailyLimit: [
-    "Limite diário",
-    "É o máximo de mensagens desta jornada por dia. Protege a operação contra envios em excesso.",
-  ],
-  cooldown: [
-    "Cooldown",
-    "É o intervalo mínimo antes de outra jornada enviar no mesmo canal. Não altera a espera entre etapas desta própria jornada.",
-  ],
-  holdout: [
-    "Grupo de controle",
-    "Uma parte sorteada dos jogadores que entram não recebe mensagens. Comparar quem recebeu com quem não recebeu mostra quanto a jornada realmente traz de volta. Esses jogadores ficam sem a régua.",
-  ],
-  endsAt: [
-    "Data de término",
-    "Opcional. A partir dela a jornada não recebe novos jogadores e encerra os que ainda estão nela. Sem data, os loops continuam até o jogador mudar de categoria.",
-  ],
-  window: [
-    "Janela de envio",
-    "Mensagens fora desse horário aguardam a próxima abertura da janela, no horário de Brasília.",
-  ],
-  sequence: [
-    "Sequência",
-    "Monte a ordem das esperas e mensagens. Cada etapa só ocorre depois que a etapa anterior termina.",
-  ],
-  wait: ["Espera", "Define quantos segundos a jornada aguarda antes da próxima etapa."],
-  sms: ["SMS", "Escolha um template aprovado. A jornada guarda uma cópia da versão usada."],
-  email: ["E-mail", "Escolha o template de e-mail que será enviado nesta etapa."],
-  voice: ["Voz", "Envie um áudio e selecione-o para fazer uma ligação automatizada."],
-} as const;
+const STEP_TITLES: Record<Step["kind"], string> = {
+  wait: "Aguardar",
+  sms: "Enviar SMS",
+  email: "Enviar e-mail",
+  voice: "Fazer ligação",
+};
 
-function JourneyHelp({
-  id,
-  activeId,
-  setActiveId,
+const LEVEL_OPTIONS: Option[] = [
+  { value: "bronze", label: "Bronze" },
+  { value: "silver", label: "Prata" },
+  { value: "gold", label: "Ouro" },
+  { value: "diamond", label: "Diamante" },
+  { value: "black", label: "Black VIP" },
+];
+const REENTRY_OPTIONS: Option[] = [
+  { value: "once", label: "Uma única vez" },
+  { value: "per_occurrence", label: "A cada ocorrência" },
+  { value: "after_cooldown", label: "Depois do intervalo entre jornadas" },
+  { value: "never", label: "Nunca reentrar" },
+];
+const AUDIENCE_OPTIONS: Option[] = (["system:all-leads", "all_active", "vip"] as const).map(
+  (value) => ({ value, label: JOURNEY_AUDIENCES[value].label }),
+);
+const HOLDOUT_OPTIONS: Option[] = [
+  { value: "0", label: "Desligado" },
+  { value: "5", label: "5% não recebem mensagens" },
+  { value: "10", label: "10% não recebem mensagens" },
+];
+const FAMILY_NONE = "none";
+const FAMILY_OPTIONS: Option[] = [
+  { value: FAMILY_NONE, label: "Sem família" },
+  { value: "progressao_niveis", label: "Progressão de níveis" },
+];
+const POLICY_OPTIONS: Option[] = [
+  { value: "coexist", label: "Permitir coexistência" },
+  { value: "pause_lower_priority", label: "Pausar a menor prioridade" },
+  { value: "exclusive", label: "Manter apenas esta família" },
+];
+const EXIT_RULE_OPTIONS = [
+  { key: "deposit", label: "Realizou depósito" },
+  { key: "first_deposit", label: "Fez o primeiro depósito" },
+  { key: "login", label: "Fez login" },
+  { key: "voltou_jogar", label: "Voltou a jogar" },
+];
+
+/** A neutral editor section: 15px title + one short help line (no "?" popovers). */
+function EditorSection({
+  title,
   help,
+  children,
 }: {
-  id: string;
-  activeId: string | null;
-  setActiveId: (id: string | null) => void;
-  help: readonly [string, string];
+  title: string;
+  help?: ReactNode;
+  children: ReactNode;
 }) {
   return (
-    <Popover open={activeId === id} onOpenChange={(open) => setActiveId(open ? id : null)}>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          aria-label={`Ajuda: ${help[0]}`}
-          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <HelpCircle className="h-4 w-4" />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent
-        align="start"
-        side="bottom"
-        collisionPadding={16}
-        className="w-[calc(100vw-2rem)] max-w-sm rounded-xl p-4"
-      >
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="font-semibold">{help[0]}</p>
-            <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{help[1]}</p>
-          </div>
-          <button
-            type="button"
-            aria-label="Fechar ajuda"
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md hover:bg-muted"
-            onClick={() => setActiveId(null)}
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-      </PopoverContent>
-    </Popover>
+    <section className="rounded-2xl border border-border bg-card/80 p-4 sm:p-5">
+      <h2 className="text-section">{title}</h2>
+      {help && <p className="mt-1 text-[12.5px] leading-relaxed text-muted-foreground">{help}</p>}
+      <div className="mt-4 space-y-4">{children}</div>
+    </section>
   );
 }
 
-function JourneyFieldTitle({
+function Field({
+  id,
+  label,
+  hint,
   children,
-  helpId,
-  activeHelp,
-  setActiveHelp,
-  help,
+  className,
 }: {
+  id: string;
+  label: string;
+  hint?: ReactNode;
   children: ReactNode;
-  helpId: string;
-  activeHelp: string | null;
-  setActiveHelp: (id: string | null) => void;
-  help: readonly [string, string];
+  className?: string;
 }) {
   return (
-    <div className="flex items-center justify-between gap-2">
-      <span>{children}</span>
-      <JourneyHelp id={helpId} activeId={activeHelp} setActiveId={setActiveHelp} help={help} />
+    <div className={className ? `space-y-1.5 ${className}` : "space-y-1.5"}>
+      <Label htmlFor={id}>{label}</Label>
+      {children}
+      {hint && <p className="text-[12.5px] leading-relaxed text-muted-foreground">{hint}</p>}
     </div>
   );
+}
+
+/** shadcn Select over string options; keeps an unknown saved value visible instead of hiding it. */
+function OptionSelect({
+  id,
+  value,
+  onChange,
+  options,
+  placeholder,
+  ariaLabel,
+}: {
+  id?: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: Option[];
+  placeholder?: string;
+  ariaLabel?: string;
+}) {
+  const known = value === "" || options.some((option) => option.value === value);
+  return (
+    <Select value={value} onValueChange={onChange}>
+      <SelectTrigger id={id} aria-label={ariaLabel} className="h-10">
+        <SelectValue placeholder={placeholder} />
+      </SelectTrigger>
+      <SelectContent>
+        {options.map((option) => (
+          <SelectItem key={option.value} value={option.value}>
+            {option.label}
+          </SelectItem>
+        ))}
+        {!known && <SelectItem value={value}>{value}</SelectItem>}
+      </SelectContent>
+    </Select>
+  );
+}
+
+function initialStep(s: SavedStep): Step[] {
+  if (s.step_type === "wait") {
+    return [{ kind: "wait", ...splitWaitSeconds(Number(s.config.delay_seconds ?? 3600)) }];
+  }
+  if (s.step_type === "sms") {
+    return [
+      {
+        kind: "sms",
+        templateId: String(s.config.template_id ?? ""),
+        content: String(
+          (s.config.template_snapshot as { content?: string } | undefined)?.content ??
+            s.config.content ??
+            "",
+        ),
+        extra: smsExtra(s.config),
+      },
+    ];
+  }
+  if (s.step_type === "email") return [{ kind: "email", ...emailStepFromConfig(s.config) }];
+  if (s.step_type === "voice") {
+    return [
+      {
+        kind: "voice",
+        assetId: String(s.config.asset_id ?? ""),
+        callerId: String(s.config.caller_id ?? ""),
+      },
+    ];
+  }
+  return [];
 }
 
 export function JourneyEditor({
@@ -205,6 +256,7 @@ export function JourneyEditor({
   initial?: {
     name: string;
     description: string | null;
+    status?: string;
     trigger_type: string;
     trigger_config?: Record<string, unknown>;
     entry_rules?: Record<string, unknown>;
@@ -215,36 +267,18 @@ export function JourneyEditor({
     holdout_percent?: number;
     conflict_family?: string | null;
     journey_priority?: number;
-    conflict_policy?: "coexist" | "pause_lower_priority" | "exclusive";
+    conflict_policy?: ConflictPolicy;
   };
   initialSteps?: SavedStep[];
   initialAudience?: string;
-  metrics?: {
-    total: number;
-    byStatus: Record<string, number>;
-    exits: Record<string, number>;
-    recovered: number;
-    sentByChannel: Record<string, number>;
-    cost: number;
-    roi: number | null;
-  };
+  /** Only `byStatus` is used (players inside the journey, for the Pausar dialog).
+   * The numbers themselves live in the journey report. */
+  metrics?: { byStatus: Record<string, number> };
 }) {
-  const draft =
-    !id && typeof window !== "undefined"
-      ? (() => {
-          try {
-            return JSON.parse(window.sessionStorage.getItem("journey-draft") ?? "null") as {
-              name?: string;
-              trigger?: string;
-              triggerConfig?: Record<string, unknown>;
-            } | null;
-          } catch {
-            return null;
-          }
-        })()
-      : null;
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const save = useServerFn(saveJourney);
+  const statusControl = useJourneyStatusControl();
   const listJourneysFn = useServerFn(listJourneys);
   const otherJourneys = useQuery({
     queryKey: ["journeys"],
@@ -298,11 +332,12 @@ export function JourneyEditor({
     },
     onError: (error: Error) => toast.error(error.message),
   });
-  const [name, setName] = useState(initial?.name ?? draft?.name ?? "");
+  const savedStatus = id ? (initial?.status ?? "draft") : "draft";
+  const [name, setName] = useState(initial?.name ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
-  const [trigger, setTrigger] = useState(initial?.trigger_type ?? draft?.trigger ?? "manual");
-  const [triggerConfig, setTriggerConfig] = useState(
-    initial?.trigger_config ?? draft?.triggerConfig ?? {},
+  const [trigger, setTrigger] = useState(initial?.trigger_type ?? "manual");
+  const [triggerConfig, setTriggerConfig] = useState<Record<string, unknown>>(
+    initial?.trigger_config ?? {},
   );
   const [dailyLimit, setDailyLimit] = useState(initial?.daily_limit ?? 1000);
   const [cooldownHours, setCooldownHours] = useState(initial?.cooldown_hours ?? 72);
@@ -310,10 +345,9 @@ export function JourneyEditor({
   const [holdoutPercent, setHoldoutPercent] = useState(initial?.holdout_percent ?? 0);
   const [conflictFamily, setConflictFamily] = useState(initial?.conflict_family ?? "");
   const [journeyPriority, setJourneyPriority] = useState(initial?.journey_priority ?? 4);
-  const [conflictPolicy, setConflictPolicy] = useState<
-    "coexist" | "pause_lower_priority" | "exclusive"
-  >(initial?.conflict_policy ?? "coexist");
-  const [activeHelp, setActiveHelp] = useState<string | null>(null);
+  const [conflictPolicy, setConflictPolicy] = useState<ConflictPolicy>(
+    initial?.conflict_policy ?? "coexist",
+  );
   const [windowStart, setWindowStart] = useState(
     String(initial?.entry_rules?.window_start ?? "08:00"),
   );
@@ -337,44 +371,58 @@ export function JourneyEditor({
     typeof initialLoopToPosition === "number" && initialEndIndex > initialLoopToPosition
       ? initialEndIndex - initialLoopToPosition
       : null;
-  const [steps, setSteps] = useState<Step[]>(() =>
-    enabledSteps.flatMap((s): Step[] =>
-      s.step_type === "wait"
-        ? [{ kind: "wait" as const, seconds: Number(s.config.delay_seconds ?? 3600) }]
-        : s.step_type === "sms"
-          ? [
-              {
-                kind: "sms" as const,
-                templateId: String(s.config.template_id ?? ""),
-                content: String(
-                  (s.config.template_snapshot as { content?: string } | undefined)?.content ??
-                    s.config.content ??
-                    "",
-                ),
-                extra: smsExtra(s.config),
-              },
-            ]
-          : s.step_type === "email"
-            ? [{ kind: "email" as const, ...emailStepFromConfig(s.config) }]
-            : s.step_type === "voice"
-              ? [
-                  {
-                    kind: "voice" as const,
-                    assetId: String(s.config.asset_id ?? ""),
-                    callerId: String(s.config.caller_id ?? "5511980465329"),
-                  },
-                ]
-              : [],
-    ),
-  );
+  const [steps, setSteps] = useState<Step[]>(() => enabledSteps.flatMap(initialStep));
+
+  // Unsaved changes: Ativar on a draft saves first; on a paused journey it warns.
+  const signature = JSON.stringify([
+    name,
+    description,
+    trigger,
+    triggerConfig,
+    dailyLimit,
+    cooldownHours,
+    endsAt,
+    holdoutPercent,
+    conflictFamily,
+    journeyPriority,
+    conflictPolicy,
+    windowStart,
+    windowEnd,
+    audience,
+    reentry,
+    exitRules,
+    steps,
+  ]);
+  const [savedSignature, setSavedSignature] = useState(signature);
+  const dirty = signature !== savedSignature;
+
   const mutation = useMutation({
-    mutationFn: () => {
+    mutationFn: (_signature: string) => {
+      if (!name.trim()) throw new Error("Dê um nome para a jornada.");
       if (trigger === "nivel_alterado" && !String(triggerConfig.level ?? "")) {
         throw new Error("Selecione o nível que inicia esta jornada.");
       }
+      if (trigger === "inactivity") {
+        const hours = Number(triggerConfig.hours);
+        if (!(String(triggerConfig.field ?? "") in INACTIVITY_FIELDS)) {
+          throw new Error("Escolha a atividade que a jornada observa.");
+        }
+        if (!Number.isInteger(hours) || hours < 1 || hours > 8760) {
+          throw new Error("Informe as horas sem atividade (de 1 a 8760).");
+        }
+      }
+      steps.forEach((s, index) => {
+        if (s.kind === "wait" && waitToSeconds(s.amount, s.unit) === null)
+          throw new Error(`Informe o tempo de espera da etapa ${index + 1}.`);
+      });
       const body = steps.flatMap((s): JourneyStepInput[] =>
         s.kind === "wait"
-          ? [{ step_type: "wait", config: { delay_seconds: Math.max(60, s.seconds) } }]
+          ? [
+              {
+                step_type: "wait",
+                config: { delay_seconds: Math.max(60, waitToSeconds(s.amount, s.unit) ?? 0) },
+              },
+            ]
           : s.kind === "sms"
             ? s.content.trim() && !s.templateId
               ? [{ step_type: "sms", config: { ...s.extra, content: s.content } }]
@@ -439,7 +487,8 @@ export function JourneyEditor({
                       step_type: "voice",
                       config: {
                         asset_id: s.assetId,
-                        caller_id: s.callerId,
+                        // Hidden field: only an old step's valid number is kept.
+                        ...(/^\d{10,15}$/.test(s.callerId) ? { caller_id: s.callerId } : {}),
                         max_attempts: 1,
                         retry_delay_seconds: 86400,
                       },
@@ -488,113 +537,187 @@ export function JourneyEditor({
         },
       });
     },
-    onSuccess: (r) => {
-      toast.success("Jornada salva como rascunho");
+    onSuccess: async (r, savedAs) => {
       if (!r.id) throw new Error("Jornada salva sem identificador");
-      window.sessionStorage.removeItem("journey-draft");
-      navigate({ to: "/automacoes" });
+      setSavedSignature(savedAs);
+      // save_journey_draft edits a draft in place; for an active or paused journey
+      // it creates a new draft revision and leaves the live version untouched.
+      const createdRevision = Boolean(id) && savedStatus !== "draft";
+      toast.success(
+        !id
+          ? "Jornada criada como rascunho. Ela só envia depois de ativada."
+          : createdRevision
+            ? `Alterações salvas numa revisão em rascunho. A versão ${journeyStatusLabel(savedStatus).toLowerCase()} continua igual.`
+            : "Rascunho salvo",
+      );
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["journeys"] }),
+        queryClient.invalidateQueries({ queryKey: ["journey", r.id] }),
+      ]);
+      if (r.id !== id) navigate({ to: "/jornadas/$journeyId", params: { journeyId: r.id } });
     },
     onError: (e: Error) => toast.error(e.message),
   });
+
+  const activate = async () => {
+    if (!id) return;
+    if (dirty && savedStatus === "draft") {
+      try {
+        await mutation.mutateAsync(signature);
+      } catch {
+        return;
+      }
+      statusControl.requestActivate({ id, name, trigger_type: trigger });
+      return;
+    }
+    if (dirty) {
+      const confirmed = await requestConfirmation({
+        title: "Ativar sem as alterações?",
+        description:
+          "As alterações que você fez aqui ainda não foram salvas e não entram na jornada. Para usá-las, salve (isso cria uma revisão em rascunho) e ative a revisão.",
+        confirmLabel: "Ativar versão salva",
+      });
+      if (!confirmed) return;
+    }
+    statusControl.requestActivate({
+      id,
+      name: initial?.name ?? name,
+      trigger_type: initial?.trigger_type ?? trigger,
+    });
+  };
+  const pause = () => {
+    if (!id) return;
+    statusControl.requestPause({
+      id,
+      name: initial?.name ?? name,
+      inProgress: journeyInProgress(metrics?.byStatus),
+    });
+  };
+
   const add = (kind: Step["kind"]) =>
     setSteps((all) => [
       ...all,
       kind === "wait"
-        ? { kind, seconds: 3600 }
+        ? { kind, amount: "1", unit: "hours" }
         : kind === "sms"
           ? { kind, templateId: "", content: "" }
           : kind === "email"
             ? { kind, templateId: "", senderId: null, shortDomainId: null }
-            : { kind, assetId: "", callerId: "5511980465329" },
+            : { kind, assetId: "", callerId: "" },
     ]);
   const change = (i: number, value: Step) =>
     setSteps((all) => all.map((s, n) => (n === i ? value : s)));
-  return (
-    <div className="mx-auto w-full max-w-3xl space-y-6 p-4 sm:p-6">
-      <Button variant="ghost" size="sm" onClick={() => navigate({ to: "/automacoes" })}>
-        <ArrowLeft className="mr-1 h-4 w-4" /> Jornadas
+
+  const statusAction = id ? (
+    savedStatus === "active" ? (
+      <Button
+        variant="outline"
+        className="h-11 md:h-9"
+        disabled={statusControl.isPending}
+        onClick={pause}
+      >
+        <Pause className="mr-1 h-4 w-4" aria-hidden="true" /> Pausar
       </Button>
-      <div>
-        <p className="text-xs font-medium uppercase tracking-[.18em] text-primary">
-          Jornadas multicanal
-        </p>
-        <h1 className="mt-1 text-2xl font-semibold">{id ? "Editar jornada" : "Nova jornada"}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">A jornada só envia após ser publicada.</p>
-      </div>
-      <div className="space-y-5 rounded-xl border p-5">
-        {metrics && (
-          <section className="rounded-lg border bg-muted/30 p-4 text-sm">
-            <div className="font-medium">Execução da jornada</div>
-            <div className="mt-2 flex flex-wrap gap-4 text-muted-foreground">
-              <span>{metrics.total} entradas</span>
-              <span>{metrics.byStatus.active ?? 0} em andamento</span>
-              <span>{metrics.byStatus.completed ?? 0} concluídas</span>
-              <span>{metrics.byStatus.failed ?? 0} falhas</span>
-            </div>
-            <div className="mt-3 grid gap-2 border-t pt-3 sm:grid-cols-3">
-              <span>
-                Enviados:{" "}
-                {Object.values(metrics.sentByChannel).reduce((sum, value) => sum + value, 0)}
-              </span>
-              <span>
-                Recuperado:{" "}
-                {metrics.recovered.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
-              </span>
-              <span>
-                Custo estimado:{" "}
-                {metrics.cost.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
-                {metrics.roi != null ? ` · ROI ${metrics.roi.toFixed(1)}x` : ""}
-              </span>
-            </div>
-            {Object.keys(metrics.exits).length > 0 && (
-              <div className="mt-3 border-t pt-3">
-                <p className="font-medium">Saídas por gatilho</p>
-                {Object.entries(metrics.exits).map(([reason, count]) => (
-                  <p key={reason} className="mt-1 text-muted-foreground">
-                    {reason}: {count}
-                  </p>
-                ))}
-              </div>
+    ) : savedStatus !== "archived" ? (
+      <Button
+        variant="outline"
+        className="h-11 md:h-9"
+        disabled={statusControl.isPending || mutation.isPending}
+        onClick={() => void activate()}
+      >
+        <Play className="mr-1 h-4 w-4" aria-hidden="true" />
+        {dirty && savedStatus === "draft" ? "Salvar e ativar" : "Ativar"}
+      </Button>
+    ) : null
+  ) : null;
+  const saveAction = (
+    <Button
+      className="h-11 md:h-9"
+      disabled={mutation.isPending}
+      onClick={() => mutation.mutate(signature)}
+    >
+      <Save className="mr-1 h-4 w-4" aria-hidden="true" />
+      {mutation.isPending ? "Salvando…" : "Salvar"}
+    </Button>
+  );
+
+  const conflictWarnings = journeyConflicts(
+    {
+      id: id ?? "new",
+      name,
+      status: "draft",
+      trigger_type: trigger,
+      trigger_config: triggerConfig,
+      exit_rules: exitRules,
+      conflict_family: conflictFamily || null,
+      journey_priority: journeyPriority,
+    },
+    ((otherJourneys.data?.journeys ?? []) as MapJourney[]).filter((journey) => journey.id !== id),
+  );
+
+  return (
+    <Page className="max-w-3xl">
+      <Button asChild variant="ghost" size="sm" className="-ml-2">
+        <Link to="/automacoes" hash="jornadas">
+          <ArrowLeft className="mr-1 h-4 w-4" aria-hidden="true" /> Automações
+        </Link>
+      </Button>
+      <PageHeader
+        title={id ? initial?.name || "Jornada" : "Nova jornada"}
+        subtitle={
+          <>
+            {journeyStatusLabel(savedStatus)} ·{" "}
+            {journeyTriggerLabel(
+              initial?.trigger_type ?? trigger,
+              initial?.trigger_config ?? triggerConfig,
             )}
-          </section>
-        )}
-        <div className="block text-sm font-medium">
-          <JourneyFieldTitle
-            helpId="name"
-            activeHelp={activeHelp}
-            setActiveHelp={setActiveHelp}
-            help={JOURNEY_HELP.name}
-          >
-            Nome
-          </JourneyFieldTitle>
-          <Input value={name} onChange={(e) => setName(e.target.value)} />
-        </div>
-        <div className="block text-sm font-medium">
-          <JourneyFieldTitle
-            helpId="description"
-            activeHelp={activeHelp}
-            setActiveHelp={setActiveHelp}
-            help={JOURNEY_HELP.description}
-          >
-            Descrição
-          </JourneyFieldTitle>
-          <Textarea value={description} onChange={(e) => setDescription(e.target.value)} />
-        </div>
-        <div className="block text-sm font-medium">
-          <JourneyFieldTitle
-            helpId="trigger"
-            activeHelp={activeHelp}
-            setActiveHelp={setActiveHelp}
-            help={JOURNEY_HELP.trigger}
-          >
-            Gatilho de entrada
-          </JourneyFieldTitle>
-          <select
-            className="mt-1 flex h-10 w-full rounded-md border bg-background px-3 text-sm"
+            {savedStatus === "draft" && " · só envia depois de ativada"}
+            {dirty && " · alterações não salvas"}
+          </>
+        }
+        actions={
+          <>
+            {id && (
+              <Button asChild variant="outline" className="h-11 md:h-9">
+                <Link to="/jornadas/$journeyId/relatorio" params={{ journeyId: id }}>
+                  Relatório
+                </Link>
+              </Button>
+            )}
+            <div className="hidden items-center gap-2 md:flex">
+              {statusAction}
+              {saveAction}
+            </div>
+          </>
+        }
+      />
+      {id && (savedStatus === "active" || savedStatus === "paused") && (
+        <p className="rounded-xl border border-border bg-card/80 px-4 py-3 text-[12.5px] leading-relaxed text-muted-foreground">
+          Esta jornada está {journeyStatusLabel(savedStatus).toLowerCase()}. Salvar cria uma revisão
+          em rascunho; a versão {journeyStatusLabel(savedStatus).toLowerCase()} continua como está
+          até você ativar a revisão.
+        </p>
+      )}
+
+      <EditorSection
+        title="Gatilho de entrada"
+        help="O que coloca o jogador na jornada. Ele só entra se também fizer parte do público escolhido abaixo."
+      >
+        <Field id="journey-trigger" label="Quando o jogador entra">
+          <Select
             value={trigger}
-            onChange={(e) => {
-              const nextTrigger = e.target.value;
+            onValueChange={(nextTrigger) => {
               setTrigger(nextTrigger);
+              if (nextTrigger === "inactivity") {
+                setTriggerConfig((current) => ({
+                  ...current,
+                  field:
+                    String(current.field ?? "") in INACTIVITY_FIELDS
+                      ? current.field
+                      : "ultimo_login",
+                  hours: Number(current.hours) > 0 ? current.hours : 168,
+                }));
+              }
               if (nextTrigger === "nivel_alterado") {
                 setConflictFamily("progressao_niveis");
                 setConflictPolicy("exclusive");
@@ -603,447 +726,244 @@ export function JourneyEditor({
               }
             }}
           >
-            <option value="manual">Entrada manual</option>
-            {Object.entries(TRIGGER_NAMES).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </div>
-        {trigger === "nivel_alterado" && (
-          <section className="rounded-lg border border-primary/30 bg-primary/5 p-4 text-sm">
-            <JourneyFieldTitle
-              helpId="level"
-              activeHelp={activeHelp}
-              setActiveHelp={setActiveHelp}
-              help={JOURNEY_HELP.level}
-            >
-              Nível de destino
-            </JourneyFieldTitle>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Ao atingir este nível, o jogador sai da jornada do nível anterior e entra nesta.
-            </p>
-            <select
-              className="mt-3 flex h-10 w-full max-w-sm rounded-md border bg-background px-3 text-sm"
-              value={String(triggerConfig.level ?? "")}
-              onChange={(event) =>
-                setTriggerConfig((current) => ({ ...current, level: event.target.value }))
-              }
-            >
-              <option value="">Selecione o nível</option>
-              <option value="bronze">Bronze</option>
-              <option value="silver">Prata</option>
-              <option value="gold">Ouro</option>
-              <option value="diamond">Diamante</option>
-              <option value="black">Black VIP</option>
-            </select>
-          </section>
-        )}
-        <section className="rounded-lg border p-4 text-sm">
-          <JourneyFieldTitle
-            helpId="exit"
-            activeHelp={activeHelp}
-            setActiveHelp={setActiveHelp}
-            help={JOURNEY_HELP.exit}
-          >
-            Gatilhos de saída
-          </JourneyFieldTitle>
-          <p className="mt-1 text-xs text-muted-foreground">
-            A jornada encerra para o jogador quando um destes eventos ocorre.
-          </p>
-          <div className="mt-3 grid gap-2 sm:grid-cols-2">
-            {[
-              { key: "deposit", label: "Realizou depósito" },
-              { key: "first_deposit", label: "Fez primeiro depósito" },
-              { key: "login", label: "Fez login" },
-              { key: "voltou_jogar", label: "Voltou a jogar" },
-            ].map((rule) => (
-              <label key={rule.key} className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={!!exitRules[rule.key]}
-                  onChange={(e) =>
-                    setExitRules((current) => ({ ...current, [rule.key]: e.target.checked }))
-                  }
-                />
-                {rule.label}
-              </label>
-            ))}
-          </div>
-          {trigger === "nivel_alterado" && (
-            <p className="mt-3 text-xs text-muted-foreground">
-              Jornadas de nível encerram sozinhas quando o jogador muda de nível, e ele entra na
-              jornada do novo nível a partir da primeira etapa.
-            </p>
-          )}
-        </section>
-        <section className="rounded-lg border p-4 text-sm">
-          <JourneyFieldTitle
-            helpId="conflicts"
-            activeHelp={activeHelp}
-            setActiveHelp={setActiveHelp}
-            help={JOURNEY_HELP.conflicts}
-          >
-            Conflitos entre jornadas
-          </JourneyFieldTitle>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Use uma família para definir como jornadas relacionadas se comportam para o mesmo
-            jogador.
-          </p>
-          {(() => {
-            const warnings = journeyConflicts(
-              {
-                id: id ?? "new",
-                name,
-                status: "draft",
-                trigger_type: trigger,
-                trigger_config: triggerConfig,
-                exit_rules: exitRules,
-                conflict_family: conflictFamily || null,
-                journey_priority: journeyPriority,
-              },
-              ((otherJourneys.data?.journeys ?? []) as MapJourney[]).filter(
-                (journey) => journey.id !== id,
-              ),
-            );
-            return warnings.length ? (
-              <ul
-                className="mt-3 space-y-1 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300"
-                role="status"
-              >
-                {warnings.map((warning) => (
-                  <li key={warning}>{warning}</li>
+            <SelectTrigger id="journey-trigger" className="h-10">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectLabel>Quando algo acontece</SelectLabel>
+                {Object.entries(TRIGGER_NAMES).map(([value, label]) => (
+                  <SelectItem key={value} value={value}>
+                    {label}
+                  </SelectItem>
                 ))}
-              </ul>
-            ) : null;
-          })()}
-          <div className="mt-3 grid gap-3 sm:grid-cols-3">
-            <div className="block text-xs text-muted-foreground">
-              <JourneyFieldTitle
-                helpId="family"
-                activeHelp={activeHelp}
-                setActiveHelp={setActiveHelp}
-                help={JOURNEY_HELP.family}
-              >
-                Família
-              </JourneyFieldTitle>
-              <select
-                className="mt-1 flex h-10 w-full rounded-md border bg-background px-3 text-sm"
-                value={conflictFamily}
-                onChange={(event) => setConflictFamily(event.target.value)}
-              >
-                <option value="">Sem família</option>
-                <option value="progressao_niveis">Progressão de níveis</option>
-              </select>
-            </div>
-            <div className="block text-xs text-muted-foreground">
-              <JourneyFieldTitle
-                helpId="priority"
-                activeHelp={activeHelp}
-                setActiveHelp={setActiveHelp}
-                help={JOURNEY_HELP.priority}
-              >
-                Prioridade (1 é maior)
-              </JourneyFieldTitle>
-              <Input
-                className="mt-1"
-                type="number"
-                min={1}
-                max={100}
-                value={journeyPriority}
-                onChange={(event) => setJourneyPriority(Number(event.target.value) || 1)}
-              />
-            </div>
-            <div className="block text-xs text-muted-foreground">
-              <JourneyFieldTitle
-                helpId="policy"
-                activeHelp={activeHelp}
-                setActiveHelp={setActiveHelp}
-                help={JOURNEY_HELP.policy}
-              >
-                Ao competir
-              </JourneyFieldTitle>
-              <select
-                className="mt-1 flex h-10 w-full rounded-md border bg-background px-3 text-sm"
-                value={conflictPolicy}
-                onChange={(event) =>
-                  setConflictPolicy(
-                    event.target.value as "coexist" | "pause_lower_priority" | "exclusive",
-                  )
-                }
-              >
-                <option value="coexist">Permitir coexistência</option>
-                <option value="pause_lower_priority">Pausar a menor prioridade</option>
-                <option value="exclusive">Manter apenas esta família</option>
-              </select>
-            </div>
-          </div>
-          <p className="mt-3 text-xs text-muted-foreground">
-            {conflictFamily === "progressao_niveis"
-              ? "Prévia: ao mudar de nível, a jornada anterior é encerrada antes da entrada na nova jornada."
-              : conflictPolicy === "pause_lower_priority"
-                ? "Prévia: para o mesmo canal, a jornada com menor número de prioridade segue; a outra aguarda."
-                : "Prévia: esta jornada não bloqueará outras jornadas."}
-          </p>
-        </section>
-        <section className="grid gap-4 rounded-lg border p-4 sm:grid-cols-2">
-          <div>
-            <JourneyFieldTitle
-              helpId="audience"
-              activeHelp={activeHelp}
-              setActiveHelp={setActiveHelp}
-              help={JOURNEY_HELP.audience}
-            >
-              Quem entra nesta jornada
-            </JourneyFieldTitle>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Todos os jogadores ativos que atingirem o gatilho, respeitando opt-out e
-              elegibilidade.
+              </SelectGroup>
+              <SelectGroup>
+                <SelectLabel>Quando nada acontece</SelectLabel>
+                <SelectItem value="inactivity">Tempo sem atividade</SelectItem>
+              </SelectGroup>
+              <SelectGroup>
+                <SelectLabel>Sem gatilho</SelectLabel>
+                <SelectItem value="manual">Entrada manual ou API</SelectItem>
+              </SelectGroup>
+              {trigger !== "manual" && trigger !== "inactivity" && !(trigger in TRIGGER_NAMES) && (
+                <SelectItem value={trigger}>{trigger}</SelectItem>
+              )}
+            </SelectContent>
+          </Select>
+        </Field>
+        {trigger === "inactivity" && (
+          <div className="space-y-2 border-t border-border pt-4">
+            <p className="text-[12.5px] text-muted-foreground">
+              {INACTIVITY_TRIGGER_NAME}: o jogador entra quando passa este tempo sem a atividade
+              escolhida.
             </p>
-            <select
-              className="mt-3 flex h-10 w-full rounded-md border bg-background px-3 text-sm"
-              value={audience}
-              onChange={(event) => setAudience(event.target.value)}
-            >
-              <option value="system:all-leads">Todos os leads do tenant</option>
-              <option value="all_active">Todos os jogadores ativos</option>
-              <option value="vip">Somente VIP</option>
-            </select>
-            <div className="mt-3 block text-xs text-muted-foreground">
-              <JourneyFieldTitle
-                helpId="reentry"
-                activeHelp={activeHelp}
-                setActiveHelp={setActiveHelp}
-                help={JOURNEY_HELP.reentry}
-              >
-                Reentrada
-              </JourneyFieldTitle>
-              <select
-                className="mt-1 flex h-10 w-full rounded-md border bg-background px-3 text-sm"
-                value={reentry}
-                onChange={(e) => setReentry(e.target.value)}
-              >
-                <option value="once">Uma única vez</option>
-                <option value="per_occurrence">A cada ocorrência</option>
-                <option value="after_cooldown">Após o cooldown</option>
-                <option value="never">Nunca reentrar</option>
-              </select>
-            </div>
-          </div>
-          <div>
-            <p className="font-medium">Proteção contra excesso</p>
-            <div className="mt-3 block text-xs text-muted-foreground">
-              <JourneyFieldTitle
-                helpId="daily-limit"
-                activeHelp={activeHelp}
-                setActiveHelp={setActiveHelp}
-                help={JOURNEY_HELP.dailyLimit}
-              >
-                Limite diário
-              </JourneyFieldTitle>
-              <Input
-                type="number"
-                min={1}
-                value={dailyLimit}
-                onChange={(e) => setDailyLimit(Number(e.target.value))}
-              />
-            </div>
-            <div className="mt-3 block text-xs text-muted-foreground">
-              <JourneyFieldTitle
-                helpId="cooldown"
-                activeHelp={activeHelp}
-                setActiveHelp={setActiveHelp}
-                help={JOURNEY_HELP.cooldown}
-              >
-                Cooldown (horas)
-              </JourneyFieldTitle>
-              <Input
-                type="number"
-                min={0}
-                value={cooldownHours}
-                onChange={(e) => setCooldownHours(Number(e.target.value))}
-              />
-            </div>
-            <div className="mt-3 block text-xs text-muted-foreground">
-              <JourneyFieldTitle
-                helpId="holdout"
-                activeHelp={activeHelp}
-                setActiveHelp={setActiveHelp}
-                help={JOURNEY_HELP.holdout}
-              >
-                Grupo de controle
-              </JourneyFieldTitle>
-              <select
-                className="flex h-10 w-full rounded-md border bg-background px-3 text-sm"
-                value={holdoutPercent}
-                onChange={(e) => setHoldoutPercent(Number(e.target.value))}
-                aria-label="Grupo de controle"
-              >
-                <option value={0}>Desligado</option>
-                <option value={5}>5% não recebem mensagens</option>
-                <option value={10}>10% não recebem mensagens</option>
-              </select>
-              <p className="mt-1">
-                {holdoutPercent
-                  ? `${holdoutPercent}% dos jogadores que entrarem ficam sem mensagens, para medir o efeito real em Resultados do CRM.`
-                  : "Sem grupo de controle: a jornada não mede o efeito incremental."}
-              </p>
-            </div>
-            <div className="mt-3 block text-xs text-muted-foreground">
-              <JourneyFieldTitle
-                helpId="ends-at"
-                activeHelp={activeHelp}
-                setActiveHelp={setActiveHelp}
-                help={JOURNEY_HELP.endsAt}
-              >
-                Data de término (opcional)
-              </JourneyFieldTitle>
-              <div className="flex items-center gap-2">
-                <Input
-                  type="datetime-local"
-                  value={endsAt}
-                  onChange={(e) => setEndsAt(e.target.value)}
-                  aria-label="Data de término, horário de Brasília"
+            <div className="grid gap-3 sm:max-w-md sm:grid-cols-2">
+              <Field id="inactivity-field" label="Sem atividade em">
+                <OptionSelect
+                  id="inactivity-field"
+                  value={String(triggerConfig.field ?? "ultimo_login")}
+                  onChange={(field) => setTriggerConfig((current) => ({ ...current, field }))}
+                  options={Object.entries(INACTIVITY_FIELDS).map(([value, label]) => ({
+                    value,
+                    label,
+                  }))}
                 />
-                {endsAt && (
-                  <Button type="button" variant="ghost" size="sm" onClick={() => setEndsAt("")}>
-                    Limpar
-                  </Button>
-                )}
-              </div>
-              <p className="mt-1">
-                {endsAt
-                  ? "Horário de Brasília. Depois dessa data ninguém entra e quem estiver na jornada sai."
-                  : "Sem data: a jornada roda até ser pausada ou arquivada."}
-              </p>
-            </div>
-          </div>
-        </section>
-        <section className="rounded-lg border p-4">
-          <JourneyFieldTitle
-            helpId="window"
-            activeHelp={activeHelp}
-            setActiveHelp={setActiveHelp}
-            help={JOURNEY_HELP.window}
-          >
-            Quando pode disparar
-          </JourneyFieldTitle>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Mensagens fora da janela aguardam a próxima abertura, no horário de Brasília.
-          </p>
-          <div className="mt-3 flex max-w-sm items-center gap-2">
-            <Input
-              type="time"
-              value={windowStart}
-              onChange={(e) => setWindowStart(e.target.value)}
-            />
-            <span>até</span>
-            <Input type="time" value={windowEnd} onChange={(e) => setWindowEnd(e.target.value)} />
-          </div>
-        </section>
-        <section className="space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <JourneyFieldTitle
-              helpId="sequence"
-              activeHelp={activeHelp}
-              setActiveHelp={setActiveHelp}
-              help={JOURNEY_HELP.sequence}
-            >
-              Sequência
-            </JourneyFieldTitle>
-            <div className="flex gap-2">
-              <Button type="button" size="sm" variant="outline" onClick={() => add("wait")}>
-                <Clock3 className="mr-1 h-4 w-4" /> Espera
-              </Button>
-              <Button type="button" size="sm" variant="outline" onClick={() => add("sms")}>
-                <MessageSquare className="mr-1 h-4 w-4" /> SMS
-              </Button>
-              <Button type="button" size="sm" variant="outline" onClick={() => add("email")}>
-                <Mail className="mr-1 h-4 w-4" /> E-mail
-              </Button>
-              <Button type="button" size="sm" variant="outline" onClick={() => add("voice")}>
-                <Phone className="mr-1 h-4 w-4" /> Voz
-              </Button>
-            </div>
-          </div>
-          {steps.map((s, i) => (
-            <div key={i} className="rounded-lg border p-4">
-              <div className="mb-2 flex items-center justify-between gap-2 font-medium">
-                <JourneyFieldTitle
-                  helpId={`step-${i}`}
-                  activeHelp={activeHelp}
-                  setActiveHelp={setActiveHelp}
-                  help={
-                    s.kind === "wait"
-                      ? JOURNEY_HELP.wait
-                      : s.kind === "sms"
-                        ? JOURNEY_HELP.sms
-                        : s.kind === "email"
-                          ? JOURNEY_HELP.email
-                          : JOURNEY_HELP.voice
+              </Field>
+              <Field id="inactivity-hours" label="Horas sem atividade">
+                <Input
+                  id="inactivity-hours"
+                  className="h-10"
+                  type="number"
+                  min={1}
+                  max={8760}
+                  value={String(triggerConfig.hours ?? "")}
+                  onChange={(event) =>
+                    setTriggerConfig((current) => ({
+                      ...current,
+                      hours: event.target.value === "" ? "" : Number(event.target.value),
+                    }))
                   }
-                >
-                  {s.kind === "wait"
-                    ? "Aguardar"
-                    : s.kind === "sms"
-                      ? "Enviar SMS"
-                      : s.kind === "email"
-                        ? "Enviar e-mail"
-                        : "Fazer ligação"}
-                </JourneyFieldTitle>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  aria-label="Remover etapa"
+                />
+              </Field>
+            </div>
+          </div>
+        )}
+        {trigger === "nivel_alterado" && (
+          <Field
+            id="journey-level"
+            label="Nível de destino"
+            hint="Ao atingir este nível, o jogador sai da jornada do nível anterior e entra nesta."
+            className="border-t border-border pt-4 sm:max-w-md"
+          >
+            <OptionSelect
+              id="journey-level"
+              value={String(triggerConfig.level ?? "")}
+              onChange={(level) => setTriggerConfig((current) => ({ ...current, level }))}
+              options={LEVEL_OPTIONS}
+              placeholder="Selecione o nível"
+            />
+          </Field>
+        )}
+      </EditorSection>
+
+      <EditorSection
+        title="Identificação"
+        help="O nome identifica a jornada para a equipe. A descrição registra o objetivo e não é enviada ao jogador."
+      >
+        <Field id="journey-name" label="Nome">
+          <Input
+            id="journey-name"
+            className="h-10"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Ex.: Sumiu depois do primeiro depósito"
+          />
+        </Field>
+        <Field id="journey-description" label="Descrição (opcional)">
+          <Textarea
+            id="journey-description"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+          />
+        </Field>
+      </EditorSection>
+
+      <EditorSection
+        title="Público"
+        help="Quem pode entrar depois de cumprir o gatilho. Consentimento e canal disponível são verificados em cada envio."
+      >
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field
+            id="journey-audience"
+            label="Quem entra"
+            hint={journeyAudienceDescription(audience)}
+          >
+            <OptionSelect
+              id="journey-audience"
+              value={audience}
+              onChange={setAudience}
+              options={
+                audience in JOURNEY_AUDIENCES &&
+                !AUDIENCE_OPTIONS.some((option) => option.value === audience)
+                  ? [
+                      ...AUDIENCE_OPTIONS,
+                      {
+                        value: audience,
+                        label: JOURNEY_AUDIENCES[audience as keyof typeof JOURNEY_AUDIENCES].label,
+                      },
+                    ]
+                  : AUDIENCE_OPTIONS
+              }
+            />
+          </Field>
+          <Field
+            id="journey-reentry"
+            label="Reentrada"
+            hint="Se o mesmo jogador pode voltar à jornada depois de sair dela."
+          >
+            <OptionSelect
+              id="journey-reentry"
+              value={reentry}
+              onChange={setReentry}
+              options={REENTRY_OPTIONS}
+            />
+          </Field>
+        </div>
+      </EditorSection>
+
+      <EditorSection
+        title="Etapas"
+        help="Cada etapa acontece depois que a anterior termina. SMS e e-mail usam templates ativos, e a jornada guarda uma cópia da versão usada para não mudar depois de ativada."
+      >
+        {steps.length === 0 && (
+          <p className="rounded-lg border border-dashed border-border p-4 text-center text-[13px] text-muted-foreground">
+            Nenhuma etapa ainda. Comece por uma espera ou por uma mensagem.
+          </p>
+        )}
+        <ol className="space-y-3">
+          {steps.map((s, i) => (
+            <li key={i} className="rounded-xl border border-border p-4">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <h3 className="text-[13.5px] font-semibold">
+                  {i + 1}. {STEP_TITLES[s.kind]}
+                </h3>
+                <IconButton
+                  label={`Remover a etapa ${i + 1}`}
+                  icon={<Trash2 className="h-4 w-4" aria-hidden="true" />}
+                  className="-my-2 text-muted-foreground hover:text-destructive"
                   onClick={() => setSteps((all) => all.filter((_, n) => n !== i))}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
+                />
               </div>
               {s.kind === "wait" ? (
-                <Input
-                  type="number"
-                  min={60}
-                  value={s.seconds}
-                  onChange={(e) => change(i, { kind: "wait", seconds: Number(e.target.value) })}
-                />
+                <div className="space-y-1.5">
+                  <Label htmlFor={`step-${i}-wait`}>Tempo de espera</Label>
+                  <div className="flex max-w-sm gap-2">
+                    <Input
+                      id={`step-${i}-wait`}
+                      className="h-10 w-28"
+                      inputMode="decimal"
+                      value={s.amount}
+                      onChange={(e) => change(i, { ...s, amount: e.target.value })}
+                    />
+                    <div className="flex-1">
+                      <OptionSelect
+                        ariaLabel="Unidade da espera"
+                        value={s.unit}
+                        onChange={(unit) => change(i, { ...s, unit: unit as WaitUnit })}
+                        options={Object.entries(WAIT_UNITS).map(([value, unit]) => ({
+                          value,
+                          label: unit.label,
+                        }))}
+                      />
+                    </div>
+                  </div>
+                  {(() => {
+                    const seconds = waitToSeconds(s.amount, s.unit);
+                    return seconds !== null && seconds < 60 ? (
+                      <p className="text-[12.5px] text-muted-foreground">
+                        O mínimo é 1 minuto; menos que isso é salvo como 1 minuto.
+                      </p>
+                    ) : null;
+                  })()}
+                </div>
               ) : s.kind === "sms" ? (
                 <div className="space-y-2">
-                  <select
-                    className="flex h-10 w-full rounded-md border bg-background px-3 text-sm"
+                  <Label htmlFor={`step-${i}-sms`}>Template de SMS</Label>
+                  <OptionSelect
+                    id={`step-${i}-sms`}
                     value={s.templateId}
-                    onChange={(event) => {
+                    placeholder="Selecione um template de SMS"
+                    onChange={(templateId) => {
                       const template = (smsTemplates.data?.items ?? []).find(
-                        (item) => item.id === event.target.value,
+                        (item) => item.id === templateId,
                       );
                       change(i, {
                         ...s,
-                        templateId: event.target.value,
+                        templateId,
                         content: template?.content ?? "",
                         extra: smsExtraForTemplateChange(s.extra),
                       });
                     }}
-                  >
-                    <option value="">Selecione um template SMS</option>
-                    {(smsTemplates.data?.items ?? [])
-                      .filter((template) => template.isActive)
-                      .map((template) => (
-                        <option key={template.id} value={template.id}>
-                          {template.name} · v{template.version}
-                        </option>
-                      ))}
-                  </select>
-                  <Textarea value={s.content} readOnly placeholder="Conteúdo do template" />
+                    options={(smsTemplates.data?.items ?? [])
+                      .filter((template) => template.isActive || template.id === s.templateId)
+                      .map((template) => ({
+                        value: template.id,
+                        label: `${template.name} · v${template.version}`,
+                      }))}
+                  />
+                  <Textarea
+                    value={s.content}
+                    readOnly
+                    aria-label="Conteúdo do template"
+                    placeholder="Conteúdo do template"
+                  />
                   {Array.isArray(s.extra?.variants) && s.extra.variants.length > 1 && (
-                    <p className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-300">
-                      Este passo sorteia entre {s.extra.variants.length} variações a cada envio; o
+                    <p className="rounded-md border border-warning/30 bg-warning/10 p-2 text-[12.5px] text-warning">
+                      Esta etapa sorteia entre {s.extra.variants.length} variações a cada envio; o
                       texto acima é a primeira. Escolher um template substitui todas.
                     </p>
                   )}
-                  <p className="text-xs text-muted-foreground">
-                    A jornada guarda uma cópia desta versão para não mudar após a publicação.
-                  </p>
                   <ShortenerFallbackNotice
                     isSuccess={composerOptions.isSuccess}
                     isError={composerOptions.isError}
@@ -1060,20 +980,16 @@ export function JourneyEditor({
                 </div>
               ) : s.kind === "email" ? (
                 <div className="space-y-2">
-                  <select
-                    className="flex h-10 w-full rounded-md border bg-background px-3 text-sm"
+                  <Label htmlFor={`step-${i}-email`}>Template de e-mail</Label>
+                  <OptionSelect
+                    id={`step-${i}-email`}
                     value={s.templateId}
-                    onChange={(e) => change(i, { ...s, templateId: e.target.value })}
-                  >
-                    <option value="">Selecione um template</option>
-                    {(templates.data?.items ?? [])
-                      .filter((t) => t.ativo)
-                      .map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.nome}
-                        </option>
-                      ))}
-                  </select>
+                    placeholder="Selecione um template de e-mail"
+                    onChange={(templateId) => change(i, { ...s, templateId })}
+                    options={(templates.data?.items ?? [])
+                      .filter((t) => t.ativo || t.id === s.templateId)
+                      .map((t) => ({ value: t.id, label: t.nome }))}
+                  />
                   <EmailBlockedNotice
                     isSuccess={composerOptions.isSuccess}
                     isError={composerOptions.isError}
@@ -1097,53 +1013,251 @@ export function JourneyEditor({
                   />
                 </div>
               ) : (
-                <div className="space-y-2">
-                  <label className="inline-flex cursor-pointer items-center rounded-md border px-3 py-2 text-sm hover:bg-muted">
-                    <Upload className="mr-2 h-4 w-4" />{" "}
-                    {uploadAudio.isPending ? "Enviando..." : "Enviar áudio"}
-                    <input
-                      className="sr-only"
-                      type="file"
-                      accept="audio/mpeg,audio/wav,audio/x-wav,audio/mp4,audio/ogg"
-                      disabled={uploadAudio.isPending}
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) uploadAudio.mutate(file);
-                        e.currentTarget.value = "";
-                      }}
+                <div className="space-y-3">
+                  <div className="space-y-2">
+                    <Label htmlFor={`step-${i}-voice`}>Áudio da ligação</Label>
+                    <OptionSelect
+                      id={`step-${i}-voice`}
+                      value={s.assetId}
+                      placeholder="Selecione um áudio enviado"
+                      onChange={(assetId) => change(i, { ...s, assetId })}
+                      options={voiceAssetRows.map((asset) => ({
+                        value: asset.id,
+                        label: asset.name,
+                      }))}
                     />
-                  </label>
-                  <select
-                    className="flex h-10 w-full rounded-md border bg-background px-3 text-sm"
-                    value={s.assetId}
-                    onChange={(e) => change(i, { ...s, assetId: e.target.value })}
-                  >
-                    <option value="">Selecione o áudio enviado</option>
-                    {voiceAssetRows.map((asset) => (
-                      <option key={asset.id} value={asset.id}>
-                        {asset.name}
-                      </option>
-                    ))}
-                  </select>
-                  <Input
-                    value={s.callerId}
-                    onChange={(e) =>
-                      change(i, { ...s, callerId: e.target.value.replace(/\D/g, "") })
-                    }
-                    placeholder="Número de origem"
-                  />
+                    <label className="inline-flex h-11 cursor-pointer items-center rounded-md border border-border px-3 text-sm hover:bg-muted md:h-9">
+                      <Upload className="mr-2 h-4 w-4" aria-hidden="true" />
+                      {uploadAudio.isPending ? "Enviando…" : "Enviar novo áudio"}
+                      <input
+                        className="sr-only"
+                        type="file"
+                        accept="audio/mpeg,audio/wav,audio/x-wav,audio/mp4,audio/ogg"
+                        disabled={uploadAudio.isPending}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) uploadAudio.mutate(file);
+                          e.currentTarget.value = "";
+                        }}
+                      />
+                    </label>
+                  </div>
                 </div>
               )}
+            </li>
+          ))}
+        </ol>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" className="h-11 w-full sm:w-auto md:h-9">
+              <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Adicionar etapa
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-52">
+            <DropdownMenuItem className="min-h-11 md:min-h-9" onSelect={() => add("wait")}>
+              <Clock3 className="mr-2 h-4 w-4" aria-hidden="true" /> Espera
+            </DropdownMenuItem>
+            <DropdownMenuItem className="min-h-11 md:min-h-9" onSelect={() => add("sms")}>
+              <MessageSquare className="mr-2 h-4 w-4" aria-hidden="true" /> SMS
+            </DropdownMenuItem>
+            <DropdownMenuItem className="min-h-11 md:min-h-9" onSelect={() => add("email")}>
+              <Mail className="mr-2 h-4 w-4" aria-hidden="true" /> E-mail
+            </DropdownMenuItem>
+            <DropdownMenuItem className="min-h-11 md:min-h-9" onSelect={() => add("voice")}>
+              <Phone className="mr-2 h-4 w-4" aria-hidden="true" /> Ligação (voz)
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <p className="rounded-lg border border-dashed border-border px-4 py-3 text-[13px] text-muted-foreground">
+          Fim da jornada
+          {loopTailLength !== null && ` · volta às últimas ${loopTailLength} etapa(s) em loop`}
+        </p>
+      </EditorSection>
+
+      <EditorSection
+        title="Saída"
+        help="A jornada encerra para o jogador quando um destes eventos acontece, para evitar mensagens fora de contexto."
+      >
+        <div className="grid gap-3 sm:grid-cols-2">
+          {EXIT_RULE_OPTIONS.map((rule) => (
+            <div key={rule.key} className="flex min-h-11 items-center gap-3 md:min-h-0">
+              <Checkbox
+                id={`exit-${rule.key}`}
+                checked={!!exitRules[rule.key]}
+                onCheckedChange={(checked) =>
+                  setExitRules((current) => ({ ...current, [rule.key]: checked === true }))
+                }
+              />
+              <Label htmlFor={`exit-${rule.key}`} className="cursor-pointer font-normal">
+                {rule.label}
+              </Label>
             </div>
           ))}
-          <div className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
-            Encerrar jornada
-          </div>
-        </section>
-        <Button disabled={!name.trim() || mutation.isPending} onClick={() => mutation.mutate()}>
-          <Save className="mr-2 h-4 w-4" /> Salvar rascunho
-        </Button>
+        </div>
+        {trigger === "nivel_alterado" && (
+          <p className="text-[12.5px] text-muted-foreground">
+            Jornadas de nível encerram sozinhas quando o jogador muda de nível, e ele entra na
+            jornada do novo nível a partir da primeira etapa.
+          </p>
+        )}
+      </EditorSection>
+
+      <EditorSection
+        title="Janela de envio"
+        help="Mensagens fora deste horário aguardam a próxima abertura, no horário de Brasília."
+      >
+        <div className="grid max-w-sm grid-cols-2 gap-3">
+          <Field id="window-start" label="De">
+            <Input
+              id="window-start"
+              className="h-10"
+              type="time"
+              value={windowStart}
+              onChange={(e) => setWindowStart(e.target.value)}
+            />
+          </Field>
+          <Field id="window-end" label="Até">
+            <Input
+              id="window-end"
+              className="h-10"
+              type="time"
+              value={windowEnd}
+              onChange={(e) => setWindowEnd(e.target.value)}
+            />
+          </Field>
+        </div>
+      </EditorSection>
+
+      <EditorSection
+        title="Limites e duração"
+        help="Protegem a operação contra envios em excesso. O intervalo entre jornadas não muda as esperas desta jornada."
+      >
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field id="daily-limit" label="Limite diário de mensagens">
+            <Input
+              id="daily-limit"
+              className="h-10"
+              type="number"
+              min={1}
+              value={dailyLimit}
+              onChange={(e) => setDailyLimit(Number(e.target.value))}
+            />
+          </Field>
+          <Field
+            id="cooldown-hours"
+            label="Intervalo entre jornadas (horas)"
+            hint="Tempo mínimo antes de outra jornada enviar no mesmo canal."
+          >
+            <Input
+              id="cooldown-hours"
+              className="h-10"
+              type="number"
+              min={0}
+              value={cooldownHours}
+              onChange={(e) => setCooldownHours(Number(e.target.value))}
+            />
+          </Field>
+          <Field
+            id="holdout"
+            label="Grupo de controle"
+            hint={
+              holdoutPercent
+                ? `${holdoutPercent}% dos jogadores que entrarem ficam sem mensagens, para medir o efeito real em Resultados do CRM.`
+                : "Sem grupo de controle: a jornada não mede o efeito incremental."
+            }
+          >
+            <OptionSelect
+              id="holdout"
+              value={String(holdoutPercent)}
+              onChange={(value) => setHoldoutPercent(Number(value))}
+              options={HOLDOUT_OPTIONS}
+            />
+          </Field>
+          <Field
+            id="ends-at"
+            label="Data de término (opcional)"
+            hint={
+              endsAt
+                ? "Horário de Brasília. Depois dessa data ninguém entra e quem estiver na jornada sai."
+                : "Sem data: a jornada roda até ser pausada ou arquivada."
+            }
+          >
+            <div className="flex items-center gap-2">
+              <Input
+                id="ends-at"
+                className="h-10"
+                type="datetime-local"
+                value={endsAt}
+                onChange={(e) => setEndsAt(e.target.value)}
+              />
+              {endsAt && (
+                <Button type="button" variant="ghost" size="sm" onClick={() => setEndsAt("")}>
+                  Limpar
+                </Button>
+              )}
+            </div>
+          </Field>
+        </div>
+      </EditorSection>
+
+      <EditorSection
+        title="Conflitos entre jornadas"
+        help="O que acontece quando outra jornada disputa o mesmo jogador. Na disputa, o menor número de prioridade vence."
+      >
+        {conflictWarnings.length > 0 && (
+          <ul
+            className="space-y-1 rounded-md border border-warning/30 bg-warning/10 p-3 text-[12.5px] text-warning"
+            role="status"
+          >
+            {conflictWarnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        )}
+        <div className="grid gap-4 sm:grid-cols-3">
+          <Field id="conflict-family" label="Família">
+            <OptionSelect
+              id="conflict-family"
+              value={conflictFamily || FAMILY_NONE}
+              onChange={(value) => setConflictFamily(value === FAMILY_NONE ? "" : value)}
+              options={FAMILY_OPTIONS}
+            />
+          </Field>
+          <Field id="journey-priority" label="Prioridade (1 é a maior)">
+            <Input
+              id="journey-priority"
+              className="h-10"
+              type="number"
+              min={1}
+              max={100}
+              value={journeyPriority}
+              onChange={(event) => setJourneyPriority(Number(event.target.value) || 1)}
+            />
+          </Field>
+          <Field id="conflict-policy" label="Ao competir">
+            <OptionSelect
+              id="conflict-policy"
+              value={conflictPolicy}
+              onChange={(value) => setConflictPolicy(value as ConflictPolicy)}
+              options={POLICY_OPTIONS}
+            />
+          </Field>
+        </div>
+        <p className="text-[12.5px] text-muted-foreground">
+          {conflictFamily === "progressao_niveis"
+            ? "Ao mudar de nível, a jornada anterior é encerrada antes da entrada na nova jornada."
+            : conflictPolicy === "pause_lower_priority"
+              ? "No mesmo canal, a jornada com o menor número de prioridade segue; a outra aguarda."
+              : "Esta jornada não bloqueia outras jornadas."}
+        </p>
+      </EditorSection>
+
+      {/* Phones: Salvar / Ativar always at hand, above the bottom tab bar. */}
+      <div className="sticky bottom-[calc(60px+env(safe-area-inset-bottom))] z-30 -mx-4 flex gap-2 sm:-mx-6 sm:px-6 border-t border-border bg-background/95 px-4 py-3 backdrop-blur md:hidden [&>*]:flex-1">
+        {statusAction}
+        {saveAction}
       </div>
-    </div>
+      {statusControl.dialogs}
+    </Page>
   );
 }

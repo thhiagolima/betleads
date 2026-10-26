@@ -135,10 +135,14 @@ function splitDelay(totalSeconds: number): { value: number; unit: DelayUnit } {
 function joinDelay(value: number, unit: DelayUnit): number {
   const v = Math.max(1, Math.floor(value || 1));
   switch (unit) {
-    case "s": return v;
-    case "m": return v * 60;
-    case "h": return v * 3600;
-    case "d": return v * 86400;
+    case "s":
+      return v;
+    case "m":
+      return v * 60;
+    case "h":
+      return v * 3600;
+    case "d":
+      return v * 86400;
   }
 }
 function formatDelay(totalSeconds: number): string {
@@ -267,10 +271,7 @@ export function FlowFormDialog({ open, onOpenChange, initial }: Props) {
   function addDelayBlock() {
     setForm((f) => ({
       ...f,
-      blocks: [
-        ...f.blocks,
-        { block_type: "delay", delay_seconds: 86400 },
-      ],
+      blocks: [...f.blocks, { block_type: "delay", delay_seconds: 86400 }],
     }));
   }
   function removeBlock(idx: number) {
@@ -297,7 +298,10 @@ export function FlowFormDialog({ open, onOpenChange, initial }: Props) {
       const next = [...f.blocks];
       const b = next[idx];
       if (b.block_type !== "call") return f;
-      next[idx] = { ...b, sms: [...b.sms, { condition: "answered", threshold_seconds: null, template: "" }] };
+      next[idx] = {
+        ...b,
+        sms: [...b.sms, { condition: "answered", threshold_seconds: null, template: "" }],
+      };
       return { ...f, blocks: next };
     });
   }
@@ -351,9 +355,7 @@ export function FlowFormDialog({ open, onOpenChange, initial }: Props) {
                 <Label>Gatilho</Label>
                 <Select
                   value={form.trigger_name || "__none"}
-                  onValueChange={(v) =>
-                    setForm({ ...form, trigger_name: v === "__none" ? "" : v })
-                  }
+                  onValueChange={(v) => setForm({ ...form, trigger_name: v === "__none" ? "" : v })}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Selecione um gatilho" />
@@ -386,14 +388,12 @@ export function FlowFormDialog({ open, onOpenChange, initial }: Props) {
             <div className="mb-3 flex items-center justify-between">
               <div className="flex items-center gap-2 text-sm font-medium text-foreground">
                 <Phone className="h-4 w-4 text-primary" /> Sequência de blocos
-                <Badge variant="secondary" className="ml-1">{form.blocks.length}</Badge>
+                <Badge variant="secondary" className="ml-1">
+                  {form.blocks.length}
+                </Badge>
               </div>
               <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  variant="default"
-                  onClick={() => setSeqOpen(true)}
-                >
+                <Button size="sm" variant="default" onClick={() => setSeqOpen(true)}>
                   <Wand2 className="mr-1 h-3.5 w-3.5" /> Gerar em sequência
                 </Button>
                 <Button size="sm" variant="outline" onClick={addCallBlock}>
@@ -436,12 +436,14 @@ export function FlowFormDialog({ open, onOpenChange, initial }: Props) {
               <Settings2 className="h-4 w-4 text-primary" /> Condições de saída
             </div>
             <div className="flex flex-wrap gap-2 text-xs">
-              {([
-                ["login", "se fizer login"],
-                ["deposit", "se depositar"],
-                ["first_deposit", "se fizer primeiro depósito"],
-                ["voltou_jogar", "se voltar a jogar"],
-              ] as const).map(([k, label]) => {
+              {(
+                [
+                  ["login", "se fizer login"],
+                  ["deposit", "se depositar"],
+                  ["first_deposit", "se fizer primeiro depósito"],
+                  ["voltou_jogar", "se voltar a jogar"],
+                ] as const
+              ).map(([k, label]) => {
                 const ativo = form.exit_conditions[k];
                 return (
                   <button
@@ -459,7 +461,8 @@ export function FlowFormDialog({ open, onOpenChange, initial }: Props) {
                         : "border-border text-muted-foreground"
                     }`}
                   >
-                    {ativo ? "› " : ""}{label}
+                    {ativo ? "› " : ""}
+                    {label}
                   </button>
                 );
               })}
@@ -507,7 +510,8 @@ export function FlowFormDialog({ open, onOpenChange, initial }: Props) {
             </div>
 
             <p className="mt-2 text-xs text-muted-foreground">
-              Quando qualquer condição acontecer, o player sai do fluxo imediatamente (verificação em tempo real).
+              Quando qualquer condição acontecer, o player sai do fluxo imediatamente (verificação
+              em tempo real).
             </p>
           </section>
         </div>
@@ -525,9 +529,7 @@ export function FlowFormDialog({ open, onOpenChange, initial }: Props) {
         open={seqOpen}
         onOpenChange={setSeqOpen}
         scripts={allScripts.map((s: any) => ({ id: s.id, name: s.name }))}
-        onGenerate={(newBlocks) =>
-          setForm((f) => ({ ...f, blocks: [...f.blocks, ...newBlocks] }))
-        }
+        onGenerate={(newBlocks) => setForm((f) => ({ ...f, blocks: [...f.blocks, ...newBlocks] }))}
       />
     </Dialog>
   );
@@ -565,7 +567,9 @@ function BlockEditor({
   return (
     <div className="rounded-md border border-border bg-muted/20">
       <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-        <Badge variant="outline" className="font-mono text-[10px]">{index + 1}</Badge>
+        <Badge variant="outline" className="font-mono text-meta">
+          {index + 1}
+        </Badge>
         {block.block_type === "call" ? (
           <>
             <Phone className="h-3.5 w-3.5 text-primary" />
@@ -578,13 +582,25 @@ function BlockEditor({
           </>
         )}
         <div className="ml-auto flex items-center gap-1">
-          <Button size="icon" variant="ghost" onClick={() => onMove(-1)} disabled={index === 0}>
+          <Button
+            size="icon"
+            variant="ghost"
+            aria-label="Mover etapa para cima"
+            onClick={() => onMove(-1)}
+            disabled={index === 0}
+          >
             <ArrowUp className="h-3.5 w-3.5" />
           </Button>
-          <Button size="icon" variant="ghost" onClick={() => onMove(1)} disabled={index === total - 1}>
+          <Button
+            size="icon"
+            variant="ghost"
+            aria-label="Mover etapa para baixo"
+            onClick={() => onMove(1)}
+            disabled={index === total - 1}
+          >
             <ArrowDown className="h-3.5 w-3.5" />
           </Button>
-          <Button size="icon" variant="ghost" onClick={onRemove}>
+          <Button size="icon" variant="ghost" aria-label="Remover etapa" onClick={onRemove}>
             <Trash2 className="h-3.5 w-3.5 text-destructive" />
           </Button>
         </div>
@@ -611,7 +627,13 @@ function BlockEditor({
   );
 }
 
-function DelayBlockEditor({ seconds, onChange }: { seconds: number; onChange: (s: number) => void }) {
+function DelayBlockEditor({
+  seconds,
+  onChange,
+}: {
+  seconds: number;
+  onChange: (s: number) => void;
+}) {
   const { value, unit } = splitDelay(seconds);
   return (
     <div className="grid grid-cols-[1fr_140px] gap-2">
@@ -679,7 +701,9 @@ function CallBlockEditor({
             </SelectTrigger>
             <SelectContent>
               {allScripts.map((s: any) => (
-                <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                <SelectItem key={s.id} value={s.id}>
+                  {s.name}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -699,7 +723,9 @@ function CallBlockEditor({
             <SelectContent>
               <SelectItem value="__default">Padrão do roteiro</SelectItem>
               {VOICE_OPTIONS.map((v) => (
-                <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>
+                <SelectItem key={v.id} value={v.id}>
+                  {v.name}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -711,7 +737,9 @@ function CallBlockEditor({
             min={5}
             max={600}
             value={block.max_call_seconds}
-            onChange={(e) => onUpdate({ max_call_seconds: Math.max(5, Number(e.target.value) || 60) })}
+            onChange={(e) =>
+              onUpdate({ max_call_seconds: Math.max(5, Number(e.target.value) || 60) })
+            }
           />
         </div>
       </div>
@@ -725,8 +753,9 @@ function CallBlockEditor({
           value={block.max_attempts}
           onChange={(e) => onUpdate({ max_attempts: Math.max(1, Number(e.target.value) || 1) })}
         />
-        <p className="mt-1 text-[10px] text-muted-foreground">
-          Para criar intervalo entre ligações (ex.: 1 dia), adicione um bloco de Delay logo após este.
+        <p className="mt-1 text-meta text-muted-foreground">
+          Para criar intervalo entre ligações (ex.: 1 dia), adicione um bloco de Delay logo após
+          este.
         </p>
       </div>
 
@@ -735,7 +764,9 @@ function CallBlockEditor({
         <div className="mb-2 flex items-center justify-between">
           <div className="flex items-center gap-2 text-xs font-medium text-foreground">
             <MessageSquare className="h-3.5 w-3.5 text-primary" /> SMS pós-ligação por resultado
-            <Badge variant="secondary" className="text-[10px]">{block.sms.length}</Badge>
+            <Badge variant="secondary" className="text-meta">
+              {block.sms.length}
+            </Badge>
           </div>
           <Button size="sm" variant="outline" onClick={onAddSms}>
             <Plus className="mr-1 h-3 w-3" /> Adicionar SMS
@@ -743,7 +774,7 @@ function CallBlockEditor({
         </div>
 
         {block.sms.length === 0 ? (
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-meta text-muted-foreground">
             Nenhum SMS configurado. A primeira condição que casar dispara o SMS correspondente.
           </p>
         ) : (
@@ -803,14 +834,21 @@ function SmsRow({
   return (
     <div className="rounded-md border border-border bg-muted/30 p-2">
       <div className="mb-2 flex items-center gap-2">
-        <Badge variant="outline" className="font-mono text-[10px]">SMS {index + 1}</Badge>
-        <Select value={sms.condition} onValueChange={(v) => onChange({ condition: v as SmsCondition })}>
+        <Badge variant="outline" className="font-mono text-meta">
+          SMS {index + 1}
+        </Badge>
+        <Select
+          value={sms.condition}
+          onValueChange={(v) => onChange({ condition: v as SmsCondition })}
+        >
           <SelectTrigger className="h-8 flex-1">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             {SMS_CONDITION_OPTIONS.map((o) => (
-              <SelectItem key={o.v} value={o.v}>{o.l}</SelectItem>
+              <SelectItem key={o.v} value={o.v}>
+                {o.l}
+              </SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -827,7 +865,7 @@ function SmsRow({
             }}
           />
         )}
-        <Button size="icon" variant="ghost" onClick={onRemove}>
+        <Button size="icon" variant="ghost" aria-label="Remover SMS" onClick={onRemove}>
           <Trash2 className="h-3.5 w-3.5 text-destructive" />
         </Button>
       </div>

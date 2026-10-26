@@ -14,6 +14,7 @@ import {
   resolveCurrentTenantId,
   resolveOperationalTenantId,
 } from "@/lib/tenant-access.server";
+import { getReportUnitPrices } from "./billing/pricing.server";
 import { buildPlayerVariables, renderTemplate } from "./template-vars.server";
 import { loadHouseLinks, type HouseLinks } from "./house-links.server";
 import {
@@ -39,7 +40,10 @@ import {
 import type { LinkTrackingContext } from "./shortio.server";
 import { conversionFunnelSnapshot } from "./conversion-funnel";
 import { campaignShortDomainColumn } from "./campaign-refs.server";
-import { normalizeSmsAudienceCriteria } from "./sms-audience-criteria";
+import {
+  campaignAudienceCriteriaInput,
+  normalizeSmsAudienceCriteria,
+} from "./sms-audience-criteria";
 import {
   campaignDeliveryKey,
   countUnresolvedByReason,
@@ -52,6 +56,13 @@ import {
   resolveCampaignRecipients,
   type CampaignDb,
 } from "./campaign-recipients.server";
+import {
+  deliveryBillingReference,
+  reserveForDelivery,
+  refundForDelivery,
+} from "./billing/wallet.server";
+import { countSmsSegments } from "./sms-segments";
+import { cancelSmsCampaignRow, resumePausedSmsCampaign } from "./sms-campaign-dispatch.server";
 
 const DEFAULT_SHORT_BRASIL_SINGLE_URL = "http://lp01-short.painelsms.com/bot/single-sms.php";
 const DEFAULT_SHORT_BRASIL_BULK_URL = "http://lp01-short.painelsms.com/bot/bulk-sms.php";
@@ -474,6 +485,8 @@ async function logSend(row: {
   step_label?: string | null;
   flow_lead_id?: string | null;
   tenant_id?: string | null;
+  /** Units reserved from the wallet for this send (Task 6 adds the column). */
+  billed_units?: number | null;
 }) {
   const { data, error } = await supabaseAdmin
     .from("sms_send_logs")
@@ -495,6 +508,7 @@ async function logSend(row: {
       step_label: row.step_label ?? null,
       flow_lead_id: row.flow_lead_id ?? null,
       ...(row.tenant_id ? { tenant_id: row.tenant_id } : {}),
+      billed_units: row.billed_units ?? null,
     })
     .select("id")
     .single();
@@ -582,18 +596,6 @@ export function summarizeProviderError(status: number, body: unknown): string {
   return `HTTP ${status} do provedor`;
 }
 
-type SmsCreditRpcResult<T = unknown> = {
-  data: T | null;
-  error: { message: string } | null;
-};
-type SmsCreditRpcClient = {
-  rpc: <T = unknown>(fn: string, args: Record<string, unknown>) => Promise<SmsCreditRpcResult<T>>;
-};
-
-function smsCreditDb() {
-  return supabaseAdmin as unknown as SmsCreditRpcClient;
-}
-
 async function resolveBillingTenantId(args: {
   tenantId?: string | null;
   playerId?: string | null;
@@ -615,40 +617,13 @@ async function resolveBillingTenantId(args: {
   return data?.tenant_id ?? null;
 }
 
-async function reserveSmsCredit(tenantId: string, referenceId: string) {
-  const { data, error } = await smsCreditDb().rpc("reserve_sms_credits", {
-    _tenant: tenantId,
-    _credits: 1,
-    _reference_type: "sms_send",
-    _reference_id: referenceId,
-    _idempotency_key: `sms-reserve:${referenceId}`,
-  });
-  if (error) {
-    const message = String(error.message ?? "");
-    if (message.includes("insufficient_sms_credits")) {
-      return { ok: false as const, error: "Saldo de créditos SMS insuficiente" };
-    }
-    throw new Error(message);
-  }
-  return { ok: true as const, data };
-}
-
 export async function refundSmsCredit(tenantId: string, referenceId: string, reason: string) {
-  const { error } = await smsCreditDb().rpc("refund_sms_credits", {
-    _tenant: tenantId,
-    _credits: 1,
-    _reference_type: "sms_send",
-    _reference_id: referenceId,
-    _idempotency_key: `sms-refund:${referenceId}`,
-    _reason: reason,
+  await refundForDelivery(supabaseAdmin, {
+    tenantId,
+    referenceId,
+    prefix: "sms",
+    reason,
   });
-  if (error) {
-    console.error("Failed to refund SMS credit", {
-      tenantId,
-      referenceId,
-      error: error.message,
-    });
-  }
 }
 
 /** Max refunded attempts of one delivery that still get a deterministic billing reference. */
@@ -659,48 +634,48 @@ export const SMS_BILLING_MAX_GENERATIONS = 20;
  * a retry only moves to the next generation after the previous charge was
  * refunded, so "provider accepted -> commit failed -> retry" never charges twice
  * and a retry after a refunded rejection is still charged once.
+ *
+ * Thin wrapper over the generic `deliveryBillingReference` (PG3 Task 2,
+ * src/lib/billing/wallet.server.ts): SMS keeps the `delivery:` reference
+ * prefix (not `sms:`) because production's ledger rows are already keyed
+ * that way.
  */
 export function smsBillingReference(deliveryKey: string, generation: number): string {
-  return generation === 0 ? `delivery:${deliveryKey}` : `delivery:${deliveryKey}:${generation}`;
-}
-
-async function smsCreditWasRefunded(tenantId: string, referenceId: string): Promise<boolean> {
-  const { data, error } = await (supabaseAdmin as any)
-    .from("sms_credit_ledger")
-    .select("id")
-    .eq("tenant_id", tenantId)
-    .eq("idempotency_key", `sms-refund:${referenceId}`)
-    .limit(1);
-  if (error) throw new Error(error.message);
-  return Array.isArray(data) && data.length > 0;
+  return deliveryBillingReference("sms", deliveryKey, generation);
 }
 
 /**
  * Reserves the credit for one send. Without a delivery key every call is a new
  * charge (campaigns, manual sends). With one, the reference is derived from it:
  * an existing, non-refunded reservation is reused instead of charging again.
+ *
+ * `segments` is the result of countSmsSegments(finalContent).segments; a
+ * non-empty send is always billed at least 1 unit (wallet_reserve rejects
+ * _units = 0 with invalid_units), so the caller's segment count is clamped
+ * to a 1-unit floor here.
+ *
+ * Thin wrapper over the generic `reserveForDelivery` (PG3 Task 2): keeps the
+ * pre-existing `{ok, referenceId, error}` shape (rather than the generic
+ * function's `{ok, referenceId, amount, balance}` / `{ok, referenceId,
+ * reason, balance?}`) so every existing caller and test stays untouched.
  */
 export async function reserveSmsCreditForDelivery(
   tenantId: string,
   deliveryKey: string | null | undefined,
+  segments: number,
 ): Promise<{ ok: true; referenceId: string } | { ok: false; referenceId: string; error: string }> {
-  if (!deliveryKey) {
-    const referenceId = crypto.randomUUID();
-    const reservation = await reserveSmsCredit(tenantId, referenceId);
-    return reservation.ok
-      ? { ok: true, referenceId }
-      : { ok: false, referenceId, error: reservation.error };
-  }
-  for (let generation = 0; generation < SMS_BILLING_MAX_GENERATIONS; generation++) {
-    const referenceId = smsBillingReference(deliveryKey, generation);
-    const reservation = await reserveSmsCredit(tenantId, referenceId);
-    if (!reservation.ok) return { ok: false, referenceId, error: reservation.error };
-    const idempotent = (reservation.data as { idempotent?: boolean } | null)?.idempotent === true;
-    if (!idempotent) return { ok: true, referenceId };
-    if (!(await smsCreditWasRefunded(tenantId, referenceId))) return { ok: true, referenceId };
-  }
-  console.warn("SMS delivery exceeded deterministic billing generations", { deliveryKey });
-  return reserveSmsCreditForDelivery(tenantId, null);
+  const units = Math.max(1, segments);
+  const reservation = await reserveForDelivery(supabaseAdmin, {
+    tenantId,
+    item: "sms",
+    prefix: "sms",
+    deliveryKey,
+    units,
+    referenceType: "sms_send",
+  });
+  return reservation.ok
+    ? { ok: true, referenceId: reservation.referenceId }
+    : { ok: false, referenceId: reservation.referenceId, error: reservation.reason };
 }
 
 /** Log of a previous send of this delivery that the provider already accepted. */
@@ -848,8 +823,15 @@ export async function sendSmsInternal(args: {
   }
   let billingReferenceId: string = crypto.randomUUID();
   let creditReserved = false;
+  // Segments are counted on the FINAL content actually sent (after
+  // variables and link shortening), never the template or preview text.
+  const billedUnits = Math.max(1, countSmsSegments(preparedContent).segments);
   if (billingTenantId) {
-    const reservation = await reserveSmsCreditForDelivery(billingTenantId, args.deliveryKey);
+    const reservation = await reserveSmsCreditForDelivery(
+      billingTenantId,
+      args.deliveryKey,
+      billedUnits,
+    );
     billingReferenceId = reservation.referenceId;
     if (!reservation.ok) {
       await logSend({
@@ -867,7 +849,15 @@ export async function sendSmsInternal(args: {
         flow_lead_id: args.flowLeadId,
         tenant_id: billingTenantId,
       });
-      return { ok: false as const, status: 402, error: reservation.error };
+      // Wallet refusal for THIS house: distinct from a real provider 402
+      // (Short Brasil account out of balance). Never pauses the channel
+      // globally — see errorKind "insufficient_balance".
+      return {
+        ok: false as const,
+        status: 402,
+        error: reservation.error,
+        errorKind: "insufficient_balance" as ProviderErrorKind,
+      };
     }
     creditReserved = true;
   }
@@ -929,6 +919,7 @@ export async function sendSmsInternal(args: {
     step_label: args.stepLabel,
     flow_lead_id: args.flowLeadId,
     tenant_id: billingTenantId ?? args.tenantId ?? null,
+    billed_units: creditReserved ? billedUnits : null,
   });
   if (messageLogId && trackedDispatchIds.length > 0) {
     const { error: dispatchLogError } = await (supabaseAdmin as any)
@@ -1017,10 +1008,7 @@ export const sendTestSms = createServerFn({ method: "POST" })
 export const listSmsLogs = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data: tenantRow, error: tenantErr } = await context.supabase.rpc("current_tenant_id");
-    if (tenantErr) throw new Error(tenantErr.message);
-    const tenantId = tenantRow as string | null;
-    if (!tenantId) throw new Error("tenant não encontrado para o usuário");
+    const tenantId = await resolveCurrentTenantId(context.supabase);
 
     const { data, error } = await supabaseAdmin
       .from("sms_send_logs")
@@ -1124,10 +1112,7 @@ export const sendBulkSms = createServerFn({ method: "POST" })
       .parse(input),
   )
   .handler(async ({ data, context }) => {
-    const { data: tenantRow, error: tenantErr } = await context.supabase.rpc("current_tenant_id");
-    if (tenantErr) throw new Error(tenantErr.message);
-    const tenantId = tenantRow as string | null;
-    if (!tenantId) throw new Error("tenant não encontrado para o usuário");
+    const tenantId = await resolveCurrentTenantId(context.supabase);
 
     await assertTenantCanOperate(tenantId);
     // Demo guard once, before the campaign row, stats or any per-recipient send.
@@ -1537,10 +1522,7 @@ export const getSmsDashboard = createServerFn({ method: "POST" })
 
     // Resolve tenant do usuário autenticado — todas as queries do dashboard
     // DEVEM ser filtradas por tenant para não misturar dados de outros tenants.
-    const { data: tenantRow, error: tenantErr } = await context.supabase.rpc("current_tenant_id");
-    if (tenantErr) throw new Error(tenantErr.message);
-    const tenantId = tenantRow as string | null;
-    if (!tenantId) throw new Error("tenant não encontrado para o usuário");
+    const tenantId = await resolveCurrentTenantId(context.supabase);
 
     // Resolve período em America/Sao_Paulo (BRT). As datas YYYY-MM-DD vindas
     // do front representam dias do calendário em Brasília — não em UTC.
@@ -1586,6 +1568,7 @@ export const getSmsDashboard = createServerFn({ method: "POST" })
       created_at: string;
       player_id: string | null;
       to_phone: string | null;
+      billed_units: number | null;
     }> = [];
     {
       const PAGE = 1000;
@@ -1593,7 +1576,7 @@ export const getSmsDashboard = createServerFn({ method: "POST" })
       while (true) {
         const { data: chunk, error: logsErr } = await supabaseAdmin
           .from("sms_send_logs")
-          .select("id, status, delivery_status, created_at, player_id, to_phone")
+          .select("id, status, delivery_status, created_at, player_id, to_phone, billed_units")
           .eq("tenant_id", tenantId)
           .gte("created_at", sinceIso)
           .lte("created_at", endIso)
@@ -1700,6 +1683,7 @@ export const getSmsDashboard = createServerFn({ method: "POST" })
     };
 
     let sentTotal = 0;
+    let billedUnitsTotal = 0;
     let deliveredTotal = 0;
     let failedTotal = 0;
     let todaySent = 0;
@@ -1717,6 +1701,7 @@ export const getSmsDashboard = createServerFn({ method: "POST" })
       const isSent = r.status === "sent";
       if (isSent) {
         sentTotal++;
+        billedUnitsTotal += Number(r.billed_units ?? 1);
         b.enviados++;
         if (created >= todayStart) todaySent++;
         if (r.to_phone) {
@@ -1761,12 +1746,11 @@ export const getSmsDashboard = createServerFn({ method: "POST" })
       }
     }
 
-    // Same price the house pays per credit (and the Central uses as cost).
-    const { data: pricing } = await (supabaseAdmin as any).rpc("sms_effective_pricing", {
-      _tenant: tenantId,
-    });
-    const smsPrice = Number(pricing?.sale_price_per_sms) || 0.12;
-    const totalCost = sentTotal * smsPrice;
+    // Same report price the Central de Resultados uses as cost: segments
+    // actually billed (billed_units, defaulting legacy null rows to 1), not
+    // the row count.
+    const { sms: smsPrice } = await getReportUnitPrices(tenantId);
+    const totalCost = billedUnitsTotal * smsPrice;
     const roi_brl = Math.max(0, convertedRevenue - totalCost);
 
     const series = denseSeries(rangeDays, buckets, endDate);
@@ -2023,7 +2007,8 @@ export const resendFailedSms = createServerFn({ method: "POST" })
 // Campanhas de SMS agendadas (envio em massa com horário programado)
 // ============================================================
 
-const ScheduleBulkSchema = z.object({
+/** Exportado para testes. */
+export const ScheduleBulkSchema = z.object({
   phones: z.array(z.string().min(8).max(20)).min(0).max(20000).optional().default([]),
   recipients: z
     .array(
@@ -2045,7 +2030,7 @@ const ScheduleBulkSchema = z.object({
   conversionObjective: z.enum(["acquisition", "conversion", "reactivation"]).default("conversion"),
   enabledFunnelSteps: z.array(z.string().max(80)).max(10).optional(),
   /** Saved audience rule: recipients are recalculated by the worker at send time. */
-  audienceCriteria: z.record(z.string(), z.unknown()).optional(),
+  audienceCriteria: campaignAudienceCriteriaInput.optional(),
   /** tenant_domains shortener for this campaign's links. */
   shortDomainId: dbUuid().nullable().optional(),
 });
@@ -2094,10 +2079,7 @@ export const scheduleBulkSms = createServerFn({ method: "POST" })
       throw new Error("O horário agendado precisa estar pelo menos 1 minuto no futuro");
     }
 
-    const { data: tenantRow, error: tenantErr } = await context.supabase.rpc("current_tenant_id");
-    if (tenantErr) throw new Error(tenantErr.message);
-    const tenantId = tenantRow as string | null;
-    if (!tenantId) throw new Error("tenant não encontrado para o usuário");
+    const tenantId = await resolveCurrentTenantId(context.supabase);
 
     await assertTenantCanOperate(tenantId);
     // Demo guard once, before the campaign row, stats or any per-recipient send.
@@ -2163,7 +2145,9 @@ export const scheduleBulkSms = createServerFn({ method: "POST" })
       data.audienceCriteria
         ? {
             ...campaignRow,
-            audience_criteria: normalizeSmsAudienceCriteria(data.audienceCriteria) as unknown as Json,
+            audience_criteria: normalizeSmsAudienceCriteria(
+              data.audienceCriteria,
+            ) as unknown as Json,
           }
         : campaignRow,
     );
@@ -2214,6 +2198,38 @@ export const listScheduledSmsCampaigns = createServerFn({ method: "GET" })
     };
   });
 
+/**
+ * PG3 final fix I3 — "Retomar" a campaign the dispatcher paused because the
+ * house ran out of balance. Same access rule as cancelling (the user's own
+ * client, RLS + tenant filter); audited.
+ */
+export const resumeSmsCampaign = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) => z.object({ id: dbUuid() }).parse(input))
+  .handler(async ({ data, context }) => {
+    const tenantId = await resolveCurrentTenantId(context.supabase);
+    const resumed = await resumePausedSmsCampaign(context.supabase, {
+      tenantId,
+      campaignId: data.id,
+    });
+    if (!resumed) throw new Error("Esta campanha não está pausada.");
+    const { error: auditError } = await supabaseAdmin.from("tenant_audit_logs").insert({
+      tenant_id: tenantId,
+      actor_user_id: context.userId,
+      action: "sms_campaign.resumed",
+      entity_type: "sms_campaign",
+      entity_id: data.id,
+      before_data: { status: "pausada" } as Json,
+      after_data: { status: "enviando" } as Json,
+    });
+    if (auditError)
+      console.warn("[sms-campaigns] retomada sem auditoria", {
+        campaignId: data.id,
+        error: auditError.message,
+      });
+    return { ok: true };
+  });
+
 export const cancelScheduledSmsCampaign = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) => z.object({ id: dbUuid() }).parse(input))
@@ -2228,23 +2244,21 @@ export const cancelScheduledSmsCampaign = createServerFn({ method: "POST" })
       dateStyle: "short",
       timeStyle: "short",
     });
-    const { data: updated, error } = await context.supabase
-      .from("sms_campaigns")
-      .update({ status: "cancelada", last_error: `Cancelada manualmente por ${actor} em ${when}.` })
-      .eq("id", data.id)
-      .eq("tenant_id", tenantId)
-      .eq("status", "agendada")
-      .select("id, name, scheduled_at, total_count")
-      .maybeSingle();
-    if (error) throw new Error(error.message);
-    if (!updated) throw new Error("Campanha não pode mais ser cancelada");
+    // 'agendada' or (Ruling final-2) 'pausada' por saldo.
+    const cancelled = await cancelSmsCampaignRow(context.supabase, {
+      tenantId,
+      campaignId: data.id,
+      lastError: `Cancelada manualmente por ${actor} em ${when}.`,
+    });
+    if (!cancelled) throw new Error("Campanha não pode mais ser cancelada");
+    const updated = cancelled.row;
     const { error: auditError } = await supabaseAdmin.from("tenant_audit_logs").insert({
       tenant_id: tenantId,
       actor_user_id: context.userId,
       action: "sms_campaign.cancelled",
       entity_type: "sms_campaign",
       entity_id: data.id,
-      before_data: { status: "agendada" } as Json,
+      before_data: { status: cancelled.previousStatus } as Json,
       after_data: { status: "cancelada" } as Json,
       metadata: { ...updated, actor_email: actor, cancelled_at: cancelledAt.toISOString() } as Json,
     });
