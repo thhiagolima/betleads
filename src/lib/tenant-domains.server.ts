@@ -197,16 +197,23 @@ export async function addTenantDomain(input: {
     if (hostnameError) throw new Error(hostnameError);
   }
 
+  // Every row with this hostname, any kind and any case (`hostname` only
+  // holds [a-z0-9.-] after normalization, so ilike is an exact,
+  // case-insensitive match — older backfilled rows may be mixed case).
+  // A hostname belongs to one house only (any kind); within that house it may
+  // be both the shortener and the e-mail domain, so only a row of the SAME
+  // kind counts as "this domain already exists".
   const { data: existingRows, error: existingErr } = await supabaseAdmin
     .from("tenant_domains")
     .select("*")
-    .eq("hostname", hostname);
+    .ilike("hostname", hostname);
   if (existingErr) throw new Error(existingErr.message);
-  const existing = ((existingRows ?? []) as DomainRow[])[0];
+  const sameHostname = (existingRows ?? []) as DomainRow[];
 
-  if (existing && existing.tenant_id !== input.tenantId) {
+  if (sameHostname.some((row) => row.tenant_id !== input.tenantId)) {
     throw new Error("Esse domínio já está em uso por outra conta");
   }
+  const existing = sameHostname.find((row) => row.kind === input.kind);
 
   if (existing && !existing.removed_at) {
     // Already active for this tenant: just bring it up to date.
