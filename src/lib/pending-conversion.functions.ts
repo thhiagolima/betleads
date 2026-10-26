@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { tenantReads } from "@/lib/active-tenant-filter";
 
 // Janela em dias que um lead "aguarda conversão" depois que o gerente manda
 // mensagem. Depois disso ele sai da fila automaticamente.
@@ -37,8 +38,9 @@ export type PendingConversionRow = {
 export const listPendingConversion = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<{ rows: PendingConversionRow[] }> => {
+    const reads = await tenantReads(context.supabase);
     const since = new Date(Date.now() - WINDOW_DAYS * 86400000).toISOString();
-    const { data: fups, error } = await context.supabase
+    const { data: fups, error } = await reads
       .from("lead_followups")
       .select("player_id, alerta_tipo, acao, created_at")
       .gte("created_at", since)
@@ -72,11 +74,11 @@ export const listPendingConversion = createServerFn({ method: "GET" })
     const playerIds = Array.from(new Set(pending.map((p) => p.player_id)));
 
     const [playersRes, depsRes] = await Promise.all([
-      context.supabase
+      reads
         .from("players")
         .select("id, nome, telefone, email")
         .in("id", playerIds),
-      context.supabase
+      reads
         .from("deposits")
         .select("player_id, created_at")
         .in("player_id", playerIds)
@@ -124,8 +126,9 @@ export const listPendingConversion = createServerFn({ method: "GET" })
 export const listRecentFollowupKeys = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<{ keys: string[] }> => {
+    const reads = await tenantReads(context.supabase);
     const since = new Date(Date.now() - WINDOW_DAYS * 86400000).toISOString();
-    const { data, error } = await context.supabase
+    const { data, error } = await reads
       .from("lead_followups")
       .select("player_id, alerta_tipo, acao, created_at")
       .gte("created_at", since)

@@ -5,6 +5,7 @@ import { dbUuid } from "@/lib/zod-helpers";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { TRIGGER_NAMES } from "@/lib/triggers";
+import { tenantReads } from "@/lib/active-tenant-filter";
 
 const EtapaSchema = z.discriminatedUnion("tipo", [
   z.object({ tipo: z.literal("sms"), mensagem: z.string().max(480).default(""), trackLinks: z.boolean().default(true) }),
@@ -144,8 +145,9 @@ function rowToFluxo(flow: any, steps: any[]): FluxoOut {
 export const listSmsFlows = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
+    const reads = await tenantReads(context.supabase);
     const { supabase } = context;
-    const { data: flows, error } = await supabase
+    const { data: flows, error } = await reads
       .from("sms_flows")
       .select("*")
       .order("created_at", { ascending: false });
@@ -153,7 +155,7 @@ export const listSmsFlows = createServerFn({ method: "GET" })
     const ids = (flows ?? []).map((f: any) => f.id);
     let stepsByFlow: Record<string, any[]> = {};
     if (ids.length) {
-      const { data: steps, error: sErr } = await supabase
+      const { data: steps, error: sErr } = await reads
         .from("sms_flow_steps")
         .select("*")
         .in("flow_id", ids);

@@ -3,6 +3,7 @@ import { dbUuid } from "@/lib/zod-helpers";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { assertCallerNotBillingLocked } from "@/lib/tenant-access.server";
+import { tenantReads } from "@/lib/active-tenant-filter";
 
 /**
  * Histórico unificado dos canais BETLEADS (WhatsApp, SMS, Email, Ligações).
@@ -15,10 +16,9 @@ import { assertCallerNotBillingLocked } from "@/lib/tenant-access.server";
  * RLS on these tables is `is_super_admin() OR tenant_id = current_tenant_id()`.
  * Repeating the tenant as `.eq("tenant_id", …)` lets PostgREST use the
  * `(tenant_id, …)` indexes instead of scanning the whole table under RLS.
- * Returns the tenant to filter by, or null when no extra filter must be added
- * so the result stays identical to RLS alone:
- *   - super admins: RLS shows every tenant to them, so they stay unfiltered;
- *   - no active tenant / RPC failure: RLS already decides (normally: no rows).
+ * Returns the active tenant (the header switcher's house, super admins
+ * included: RLS alone would show them every tenant), or null when there is
+ * no active tenant / the RPC fails and RLS already decides.
  */
 export async function resolveTenantReadFilter(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -29,11 +29,12 @@ export async function resolveTenantReadFilter(
     sb.rpc("is_super_admin", { _user_id: userId }),
     sb.rpc("current_tenant_id"),
   ]);
-  if (superAdmin.error || current.error || superAdmin.data) return null;
-  if (!current.data) return null;
+  if (superAdmin.error || current.error || !current.data) return null;
   const tenantId = String(current.data);
-  // A house locked for the monthly fee is refused (the superadmin returned above).
-  await assertCallerNotBillingLocked(sb, tenantId, false);
+  // The superadmin is scoped to the house picked in the header too: RLS lets
+  // it read every tenant, so without this filter one house showed them all.
+  // A house locked for the monthly fee is refused (never for the superadmin).
+  await assertCallerNotBillingLocked(sb, tenantId, superAdmin.data === true);
   return tenantId;
 }
 
@@ -642,20 +643,21 @@ export const getChannelFlowOptions = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d) => z.object({ channel: ChannelEnum }).parse(d))
   .handler(async ({ data, context }) => {
+    const reads = await tenantReads(context.supabase);
     const sb = context.supabase;
     if (data.channel === "sms") {
-      const { data: rs } = await sb
+      const { data: rs } = await reads
         .from("sms_flows")
         .select("id, name, trigger_name")
         .order("name", { ascending: true });
       return { flows: (rs ?? []).map((r: any) => ({ id: r.id, name: r.name, trigger_name: r.trigger_name })) };
     }
     if (data.channel === "email") {
-      const { data: autos } = await sb
+      const { data: autos } = await reads
         .from("email_automations")
         .select("id, name, trigger_name")
         .order("name", { ascending: true });
-      const { data: flows } = await sb
+      const { data: flows } = await reads
         .from("email_flows")
         .select("id, name")
         .order("name", { ascending: true });
@@ -666,7 +668,7 @@ export const getChannelFlowOptions = createServerFn({ method: "POST" })
       return { flows: items };
     }
     if (data.channel === "calls") {
-      const { data: rs } = await sb
+      const { data: rs } = await reads
         .from("call_flows")
         .select("id, name, trigger_name")
         .order("name", { ascending: true });
@@ -811,9 +813,10 @@ export const getChannelFlowSteps = createServerFn({ method: "POST" })
     z.object({ channel: ChannelEnum, flowId: dbUuid() }).parse(d),
   )
   .handler(async ({ data, context }) => {
+    const reads = await tenantReads(context.supabase);
     const sb = context.supabase;
     if (data.channel === "sms") {
-      const { data: steps } = await sb
+      const { data: steps } = await reads
         .from("sms_flow_steps")
         .select("order_index, step_type, delay_days, content")
         .eq("flow_id", data.flowId)
@@ -836,7 +839,7 @@ export const getChannelFlowSteps = createServerFn({ method: "POST" })
       return { steps: result };
     }
     if (data.channel === "email") {
-      const { data: blocks } = await sb
+      const { data: blocks } = await reads
         .from("email_flow_blocks")
         .select("order_index, block_type, pre_delay_seconds, delay_seconds")
         .eq("flow_id", data.flowId)

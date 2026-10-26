@@ -13,6 +13,7 @@ import {
   tickFlows,
 } from "./call-flows.server";
 import { resolveOperationalTenantId } from "./tenant-access.server";
+import { tenantReads } from "@/lib/active-tenant-filter";
 
 const SmsConditionSchema = z.enum([
   "always",
@@ -77,7 +78,8 @@ const FlowInputSchema = z.object({
 export const listCallFlows = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data: flows, error } = await context.supabase
+    const reads = await tenantReads(context.supabase);
+    const { data: flows, error } = await reads
       .from("call_flows")
       .select("*, call_flow_blocks(*, call_flow_block_sms(*))")
       .order("updated_at", { ascending: false });
@@ -306,7 +308,8 @@ export const runCallFlowsTick = createServerFn({ method: "POST" })
 export const listActiveCallFlowProgress = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data, error } = await context.supabase
+    const reads = await tenantReads(context.supabase);
+    const { data, error } = await reads
       .from("call_flow_progress")
       .select("*, call_flows(name), players(nome, telefone)")
       .in("status", ["active", "waiting"])

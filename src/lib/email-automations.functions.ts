@@ -6,6 +6,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { runEmailFlowDispatcher } from "./email-automations.server";
 import { resolveOperationalTenantId } from "./tenant-access.server";
+import { tenantReads } from "@/lib/active-tenant-filter";
 
 const TriggerSchema = z.enum([
   "lead_cadastrado",
@@ -75,7 +76,8 @@ const ExitConditionsSchema = z.object({
 export const listEmailFlows = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data, error } = await context.supabase
+    const reads = await tenantReads(context.supabase);
+    const { data, error } = await reads
       .from("email_flows")
       .select(
         "id, name, trigger_type, active, daily_limit, cooldown_hours, exit_conditions, stats, activated_at, last_run_at, updated_at",
@@ -86,11 +88,11 @@ export const listEmailFlows = createServerFn({ method: "GET" })
     const ids = (data ?? []).map((f) => f.id);
     let counts: Record<string, { blocks: number; active_leads: number }> = {};
     if (ids.length > 0) {
-      const { data: blocks } = await context.supabase
+      const { data: blocks } = await reads
         .from("email_flow_blocks")
         .select("flow_id")
         .in("flow_id", ids);
-      const { data: leads } = await context.supabase
+      const { data: leads } = await reads
         .from("email_flow_leads")
         .select("flow_id, status")
         .in("flow_id", ids);
@@ -295,7 +297,8 @@ export const listEmailFlowLeads = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    let q = context.supabase
+    const reads = await tenantReads(context.supabase);
+    let q = reads
       .from("email_flow_leads")
       .select(
         "id, flow_id, player_id, email, status, current_block_index, next_run_at, entered_at, last_sent_at, last_template_id, exit_reason",
@@ -319,7 +322,8 @@ export const listEmailFlowLogs = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    let q = context.supabase
+    const reads = await tenantReads(context.supabase);
+    let q = reads
       .from("email_flow_logs")
       .select("id, flow_id, flow_lead_id, player_id, event, detail, created_at")
       .order("created_at", { ascending: false })

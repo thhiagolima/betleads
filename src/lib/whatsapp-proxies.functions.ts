@@ -4,6 +4,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { assertCallerNotBillingLocked, assertTenantNotDemo } from "./tenant-access.server";
+import { tenantReads } from "@/lib/active-tenant-filter";
 
 /**
  * `whatsapp_proxies` is a global, admin-role-gated table with no `tenant_id`
@@ -50,7 +51,8 @@ function shapePublic(row: any) {
 export const listWhatsappProxies = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data, error } = await context.supabase
+    const reads = await tenantReads(context.supabase);
+    const { data, error } = await reads
       .from("whatsapp_proxies")
       .select("*")
       .order("created_at", { ascending: false });
