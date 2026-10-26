@@ -69,6 +69,7 @@ describe("unresolved recipients presentation", () => {
       telefone_invalido: 1,
       sem_consentimento: 0,
       grupo_controle: 0,
+      ja_jogador: 0,
     });
     expect(describeUnresolvedCounts(counts)).toBe("2 sem cadastro, 1 telefone inválido");
     expect(noRecipientResolvedMessage(rows)).toContain("(2 sem cadastro, 1 telefone inválido)");

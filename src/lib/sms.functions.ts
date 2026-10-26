@@ -43,6 +43,7 @@ import { normalizeSmsAudienceCriteria } from "./sms-audience-criteria";
 import {
   campaignDeliveryKey,
   countUnresolvedByReason,
+  describeUnresolvedCounts,
   noRecipientResolvedMessage,
   type RecipientResolution,
 } from "./campaign-recipients";
@@ -50,8 +51,13 @@ import {
   isMissingColumnError,
   persistCampaignUnresolved,
   resolveCampaignRecipients,
+  resolveExternalListRecipients,
   type CampaignDb,
 } from "./campaign-recipients.server";
+import {
+  externalListBlockedVariables,
+  externalListVariablesError,
+} from "./campaign-external-list";
 
 const DEFAULT_SHORT_BRASIL_SINGLE_URL = "http://lp01-short.painelsms.com/bot/single-sms.php";
 const DEFAULT_SHORT_BRASIL_BULK_URL = "http://lp01-short.painelsms.com/bot/bulk-sms.php";
@@ -76,6 +82,33 @@ async function resolveCampaignTargetsForSend(
     throw new Error(noRecipientResolvedMessage(resolution.unresolved));
   return resolution;
 }
+
+/**
+ * External phone list (numbers that are not players): validates the message
+ * and resolves the sendable numbers. Nothing is written to `players`.
+ */
+async function resolveExternalListForSend(tenantId: string, phones: string[], content: string) {
+  const blocked = externalListBlockedVariables(content);
+  if (blocked.length > 0) throw new Error(externalListVariablesError(blocked));
+  const resolution = await resolveExternalListRecipients(campaignDb(), tenantId, phones);
+  if (resolution.phones.length === 0) {
+    const detail = describeUnresolvedCounts(countUnresolvedByReason(resolution.unresolved));
+    throw new Error(
+      `Nenhum número da lista pode receber${detail ? ` (${detail})` : ""}. A campanha não foi criada.`,
+    );
+  }
+  return {
+    resolution,
+    targets: resolution.phones.map((phone) => ({ phone, playerId: null, external: true })),
+    summary: {
+      unresolvedCount: resolution.unresolved.length,
+      unresolvedByReason: countUnresolvedByReason(resolution.unresolved),
+      duplicates: resolution.duplicates,
+    },
+  };
+}
+
+const recipientSourceSchema = z.enum(["players", "external_list"]).optional().default("players");
 
 function campaignUnresolvedSummary(resolution: RecipientResolution) {
   return {
@@ -731,7 +764,12 @@ export async function sendSmsInternal(args: {
   /** Structured origin for campaign/journey attribution. Never infer this from display text. */
   linkTrackingOrigin?: Pick<
     LinkTrackingContext,
-    "sourceType" | "sourceId" | "journeyStepId" | "journeyStepPosition" | "shortDomainId"
+    | "sourceType"
+    | "sourceId"
+    | "journeyStepId"
+    | "journeyStepPosition"
+    | "shortDomainId"
+    | "recipientHash"
   >;
   /** Stable identity supplied by a queue/worker when retrying one delivery. */
   deliveryKey?: string | null;
@@ -839,6 +877,7 @@ export async function sendSmsInternal(args: {
       journeyStepPosition: args.linkTrackingOrigin?.journeyStepPosition ?? null,
       shortDomainId: args.linkTrackingOrigin?.shortDomainId ?? null,
       recipientPlayerId: args.playerId ?? null,
+      recipientHash: args.linkTrackingOrigin?.recipientHash ?? null,
       messageLogType: "sms_send_logs",
       deliveryKey,
       enabled: args.linkTrackingEnabled,
@@ -1120,6 +1159,8 @@ export const sendBulkSms = createServerFn({ method: "POST" })
         enabledFunnelSteps: z.array(z.string().max(80)).max(10).optional(),
         /** tenant_domains shortener for this campaign's links. */
         shortDomainId: dbUuid().nullable().optional(),
+        /** 'external_list': `phones` are numbers that are not players (never saved as players). */
+        recipientSource: recipientSourceSchema,
       })
       .parse(input),
   )
@@ -1158,6 +1199,52 @@ export const sendBulkSms = createServerFn({ method: "POST" })
     ];
     if (inputTargets.length === 0) {
       return { total: 0, sent: 0, failed: 0, results: [] };
+    }
+
+    // External list: always queued — the campaign worker sends it with the
+    // same cadence, dedupe and billing as any campaign, without a player.
+    if (data.recipientSource === "external_list") {
+      const external = await resolveExternalListForSend(tenantId, data.phones, data.content);
+      const { data: inserted, error: insErr } = await (context.supabase as any)
+        .from("sms_campaigns")
+        .insert({
+          tenant_id: tenantId,
+          name: data.campaignName,
+          content: data.content,
+          route: data.route,
+          recipients: external.targets as unknown as Json,
+          total_count: external.targets.length,
+          scheduled_at: new Date().toISOString(),
+          status: "agendada",
+          rate_per_minute: data.ratePerMinute,
+          track_links: true,
+          template_id: data.templateId ?? null,
+          template_snapshot: templateSnapshot,
+          conversion_objective: data.conversionObjective,
+          conversion_funnel_snapshot: conversionFunnelSnapshot(
+            data.conversionObjective,
+            "campaign",
+            data.enabledFunnelSteps,
+          ),
+          created_by: context.userId,
+          recipient_source: "external_list",
+          ...shortDomainColumn,
+        })
+        .select("id")
+        .single();
+      if (insErr) throw new Error(insErr.message);
+      if (external.resolution.unresolved.length > 0)
+        await persistCampaignUnresolved(campaignDb(), inserted.id, external.resolution.unresolved);
+      return {
+        total: external.targets.length,
+        sent: 0,
+        failed: 0,
+        pending: 0,
+        results: [],
+        queued: true as const,
+        campaignId: inserted.id,
+        ...external.summary,
+      };
     }
 
     // ENV-06: resolve por telefone normalizado em lotes; quem não resolve não
@@ -2048,6 +2135,8 @@ const ScheduleBulkSchema = z.object({
   audienceCriteria: z.record(z.string(), z.unknown()).optional(),
   /** tenant_domains shortener for this campaign's links. */
   shortDomainId: dbUuid().nullable().optional(),
+  /** 'external_list': `phones` are numbers that are not players (never saved as players). */
+  recipientSource: recipientSourceSchema,
 });
 
 /**
@@ -2066,11 +2155,22 @@ export const previewSmsCampaignRecipients = createServerFn({ method: "POST" })
           .max(20000)
           .optional()
           .default([]),
+        recipientSource: recipientSourceSchema,
       })
       .parse(input),
   )
   .handler(async ({ data, context }) => {
     const tenantId = await resolveCurrentTenantId(context.supabase);
+    if (data.recipientSource === "external_list") {
+      const external = await resolveExternalListRecipients(campaignDb(), tenantId, data.phones);
+      return {
+        total: data.phones.length,
+        resolved: external.phones.length,
+        unresolvedCount: external.unresolved.length,
+        unresolvedByReason: countUnresolvedByReason(external.unresolved),
+        duplicates: external.duplicates,
+      };
+    }
     const resolution = await resolveCampaignRecipients(campaignDb(), tenantId, [
       ...data.recipients,
       ...data.phones.map((phone) => ({ phone })),
@@ -2122,11 +2222,18 @@ export const scheduleBulkSms = createServerFn({ method: "POST" })
 
     if (data.phones.length + data.recipients.length === 0)
       throw new Error("Sem destinatários válidos");
-    const resolution = await resolveCampaignTargetsForSend(tenantId, [
-      ...data.recipients,
-      ...data.phones.map((phone) => ({ phone })),
-    ]);
-    const targets = resolution.resolved;
+    const external =
+      data.recipientSource === "external_list"
+        ? await resolveExternalListForSend(tenantId, data.phones, data.content)
+        : null;
+    const resolution = external
+      ? null
+      : await resolveCampaignTargetsForSend(tenantId, [
+          ...data.recipients,
+          ...data.phones.map((phone) => ({ phone })),
+        ]);
+    const targets = external ? external.targets : resolution!.resolved;
+    const unresolved = external ? external.resolution.unresolved : resolution!.unresolved;
     const shortDomainColumn = await campaignShortDomainColumn(tenantId, data.shortDomainId);
 
     const campaignRow = {
@@ -2149,6 +2256,7 @@ export const scheduleBulkSms = createServerFn({ method: "POST" })
         data.enabledFunnelSteps,
       ),
       created_by: context.userId,
+      ...(external ? { recipient_source: "external_list" } : {}),
       ...shortDomainColumn,
     };
     const insertCampaign = (row: Record<string, unknown>) =>
@@ -2160,7 +2268,7 @@ export const scheduleBulkSms = createServerFn({ method: "POST" })
     // Dynamic audience: the worker recalculates the rule at send time; the
     // snapshot above only validates the schedule and shows the current count.
     let { data: inserted, error } = await insertCampaign(
-      data.audienceCriteria
+      data.audienceCriteria && !external
         ? {
             ...campaignRow,
             audience_criteria: normalizeSmsAudienceCriteria(data.audienceCriteria) as unknown as Json,
@@ -2168,12 +2276,15 @@ export const scheduleBulkSms = createServerFn({ method: "POST" })
         : campaignRow,
     );
     // Column ships with migration 20261019160000; until then the send keeps the snapshot.
-    if (error && data.audienceCriteria && isMissingColumnError(error))
+    if (error && data.audienceCriteria && !external && isMissingColumnError(error))
       ({ data: inserted, error } = await insertCampaign(campaignRow));
     if (error) throw new Error(error.message);
-    if (resolution.unresolved.length > 0)
-      await persistCampaignUnresolved(campaignDb(), inserted.id, resolution.unresolved);
-    return { ...inserted, ...campaignUnresolvedSummary(resolution) };
+    if (unresolved.length > 0)
+      await persistCampaignUnresolved(campaignDb(), inserted.id, unresolved);
+    return {
+      ...inserted,
+      ...(external ? external.summary : campaignUnresolvedSummary(resolution!)),
+    };
   });
 
 export const listScheduledSmsCampaigns = createServerFn({ method: "GET" })

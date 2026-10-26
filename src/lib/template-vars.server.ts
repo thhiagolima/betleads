@@ -46,6 +46,18 @@ function safe(v: string | number | null | undefined, fb: string) {
   return String(v);
 }
 
+/** `{link}`, `{link_login}` and `{link_deposito}`: house config only, no player data. */
+export function houseLinkVariables(house?: HouseLinks | null): Record<string, string> {
+  // Legacy defaults, unchanged for a house with no site URL.
+  const siteUrl = house?.siteUrl ?? null;
+  const quickLinks = house?.quickLinks ?? {};
+  return {
+    link: siteUrl ?? "https://betleads.app/depositar",
+    link_login: quickLinks.login ?? siteUrl ?? "https://betleads.app",
+    link_deposito: quickLinks.deposito ?? siteUrl ?? "https://betleads.app/depositar",
+  };
+}
+
 export function buildPlayerVariables(
   p: PlayerVarsInput,
   house?: HouseLinks | null,
@@ -57,12 +69,7 @@ export function buildPlayerVariables(
   const saq = Number(p.total_sacado ?? 0);
   const cashback = p.last_cashback_amount != null ? Number(p.last_cashback_amount) : null;
   const cashbackPaidAt = p.last_cashback_paid_at ? new Date(p.last_cashback_paid_at) : null;
-  // Legacy defaults, unchanged for a house with no site URL.
-  const siteUrl = house?.siteUrl ?? null;
-  const quickLinks = house?.quickLinks ?? {};
-  const link = siteUrl ?? "https://betleads.app/depositar";
-  const linkLogin = quickLinks.login ?? siteUrl ?? "https://betleads.app";
-  const linkDeposito = quickLinks.deposito ?? siteUrl ?? "https://betleads.app/depositar";
+  const links = houseLinkVariables(house);
   return {
     primeiro_nome: firstName(p.nome),
     nome: safe(p.nome, "amigo"),
@@ -89,9 +96,7 @@ export function buildPlayerVariables(
     status_lead: safe(p.status, "ativo"),
     expert: safe(p.expert, "Equipe BETLEADS"),
     nome_expert: safe(p.expert, "Equipe BETLEADS"),
-    link,
-    link_login: linkLogin,
-    link_deposito: linkDeposito,
+    ...links,
     cashback_amount: cashback != null ? cashback.toFixed(2).replace(".", ",") : "0,00",
     cashback_valor: brl(cashback ?? 0),
     cashback_pago_em: cashbackPaidAt

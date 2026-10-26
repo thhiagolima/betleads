@@ -9,6 +9,7 @@ import {
   campaignDeliveryKey,
   campaignTickQuota,
   isUnresolvedReason,
+  parseUnresolvedRecipients,
   SMS_CAMPAIGN_DEFAULT_RATE,
   SMS_CAMPAIGN_TICK_SECONDS,
   type RecipientResolution,
@@ -40,14 +41,28 @@ export type SmsCampaignRow = {
   audience_criteria?: unknown;
   /** When the rule was materialized into `recipients` (once, on the first tick). */
   audience_resolved_at?: string | null;
+  /** 'external_list': phones that are not players (see campaign-external-list.ts). */
+  recipient_source?: string | null;
+  unresolved_recipients?: unknown;
 };
 
 export type CampaignTarget = {
   phone: string;
   playerId: string | null;
+  /** Number of an external list: sent without a player (never resolved to one). */
+  external?: boolean;
   /** Set once the recipient was classified as not sendable; it is skipped forever. */
   unresolvedReason?: UnresolvedReason | null;
 };
+
+export function isSendableTarget(t: CampaignTarget): boolean {
+  return Boolean(t.playerId) || (t.external === true && !t.unresolvedReason);
+}
+
+/** (campaign, player) for players; (campaign, phone) for external numbers. */
+export function targetDeliveryKey(campaignId: string, t: CampaignTarget): Promise<string> {
+  return campaignDeliveryKey(campaignId, t.playerId ?? `phone:${t.phone}`);
+}
 
 export function parseCampaignTargets(raw: unknown): CampaignTarget[] {
   if (!Array.isArray(raw)) return [];
@@ -60,6 +75,7 @@ export function parseCampaignTargets(raw: unknown): CampaignTarget[] {
     out.push({
       phone: (r as { phone: string }).phone,
       playerId: typeof pid === "string" && pid ? pid : null,
+      ...((r as { external?: unknown }).external === true ? { external: true } : {}),
       ...(isUnresolvedReason(reason) ? { unresolvedReason: reason } : {}),
     });
   }
@@ -89,7 +105,7 @@ export type ProviderGateDecision =
   { mode: "closed" } | { mode: "probe" } | { mode: "open"; message: string };
 
 export type CampaignSendItem = {
-  target: CampaignTarget & { playerId: string };
+  target: CampaignTarget;
   deliveryKey: string;
   variables: Record<string, string> | null;
 };
@@ -109,7 +125,7 @@ export type CampaignDispatchDeps = {
   ) => Promise<Map<string, Record<string, string>>>;
   send: (args: {
     campaign: SmsCampaignRow;
-    target: CampaignTarget & { playerId: string };
+    target: CampaignTarget;
     deliveryKey: string;
     variables: Record<string, string> | null;
   }) => Promise<SendOutcome>;
@@ -127,6 +143,8 @@ export type CampaignDispatchDeps = {
   providerGate?: () => Promise<ProviderGateDecision>;
   /** Phones matching a saved audience rule right now (dynamic audiences). */
   resolveAudiencePhones?: (tenantId: string, criteria: unknown) => Promise<string[]>;
+  /** External lists: which of these phones registered as players meanwhile. */
+  findRegisteredPhones?: (tenantId: string, phones: string[]) => Promise<Set<string>>;
 };
 
 export type CampaignTickResult = {
@@ -156,7 +174,7 @@ export const MAX_ZERO_GRANTS = 3;
 type BatchItem =
   | { kind: "skip"; target: CampaignTarget }
   | { kind: "dup"; target: CampaignTarget; key: string }
-  | { kind: "send"; target: CampaignTarget & { playerId: string }; key: string };
+  | { kind: "send"; target: CampaignTarget; key: string };
 
 async function runPool<T, R>(
   items: T[],
@@ -267,7 +285,7 @@ export async function processSmsCampaignTick(
 
   // 1. Dispatch-time resolution for campaigns that stored only phones.
   const pendingIdx = targets
-    .map((t, i) => (!t.playerId && !t.unresolvedReason ? i : -1))
+    .map((t, i) => (!t.playerId && !t.unresolvedReason && !t.external ? i : -1))
     .filter((i) => i >= 0);
   if (pendingIdx.length > 0) {
     let resolution: RecipientResolution;
@@ -302,12 +320,58 @@ export async function processSmsCampaignTick(
     await deps.persistUnresolved(c.id, unresolvedOf(targets));
   }
 
-  const sendable = targets.filter((t) => t.playerId).length;
+  // 1b. External list: a number that registered as a player between the
+  // creation and the first send is left out (the list targets non-players).
+  // Runs until the first recipient goes out; re-running it is harmless.
+  const externalIdx = targets
+    .map((t, i) => (t.external && !t.unresolvedReason ? i : -1))
+    .filter((i) => i >= 0);
+  if (externalIdx.length > 0 && (c.sent_cursor ?? 0) === 0 && deps.findRegisteredPhones) {
+    let registered: Set<string>;
+    try {
+      registered = await deps.findRegisteredPhones(
+        c.tenant_id,
+        externalIdx.map((i) => targets[i].phone),
+      );
+    } catch (error) {
+      await deps.updateCampaign(c, {
+        status: "enviando",
+        last_error: `Falha ao verificar jogadores da lista: ${error instanceof Error ? error.message : String(error)}`,
+        locked_at: null,
+        locked_by: null,
+      });
+      return { ...result, stopReason: "resolution_error" };
+    }
+    const nowPlayers = externalIdx.filter((i) => registered.has(targets[i].phone));
+    if (nowPlayers.length > 0) {
+      for (const i of nowPlayers) targets[i] = { ...targets[i], unresolvedReason: "ja_jogador" };
+      const sendableTotal = targets.filter(isSendableTarget).length;
+      const ok = await deps.updateCampaign(c, {
+        recipients: targets,
+        total_count: sendableTotal,
+      });
+      if (!ok) return { ...result, stopReason: "lock_lost" };
+      // Creation-time exclusions are only in unresolved_recipients: keep them.
+      const previous = parseUnresolvedRecipients(c.unresolved_recipients);
+      const merged = [...previous];
+      const known = new Set(previous.map((u) => `${u.reason}|${u.phone}`));
+      for (const u of unresolvedOf(targets)) {
+        if (!known.has(`${u.reason}|${u.phone}`)) merged.push(u);
+      }
+      c = { ...c, total_count: sendableTotal, recipients: targets, unresolved_recipients: merged };
+      await deps.persistUnresolved(c.id, merged);
+    }
+  }
+
+  const sendable = targets.filter(isSendableTarget).length;
   if (sendable === 0) {
     const unresolved = unresolvedOf(targets).length;
     await deps.updateCampaign(c, {
       status: "falhou",
-      last_error: `Nenhum destinatário corresponde a um jogador cadastrado (${unresolved} não enviado(s)). Veja o relatório da campanha.`,
+      last_error:
+        c.recipient_source === "external_list"
+          ? `Nenhum número da lista pode receber: todos já são jogadores ou foram bloqueados (${unresolved} não enviado(s)). Veja o relatório da campanha.`
+          : `Nenhum destinatário corresponde a um jogador cadastrado (${unresolved} não enviado(s)). Veja o relatório da campanha.`,
       locked_at: null,
       locked_by: null,
     });
@@ -355,12 +419,12 @@ export async function processSmsCampaignTick(
     let sendableInWindow = 0;
     for (let i = cursor; i < targets.length && sendableInWindow < want; i++) {
       const t = targets[i];
-      if (!t.playerId) {
+      if (!isSendableTarget(t)) {
         items.push({ kind: "skip", target: t });
         continue;
       }
-      const key = await campaignDeliveryKey(c.id, t.playerId);
-      items.push({ kind: "send", target: t as CampaignTarget & { playerId: string }, key });
+      const key = await targetDeliveryKey(c.id, t);
+      items.push({ kind: "send", target: t, key });
       sendableInWindow++;
     }
 
@@ -427,12 +491,13 @@ export async function processSmsCampaignTick(
     const sends = batch.filter(
       (it): it is Extract<BatchItem, { kind: "send" }> => it.kind === "send",
     );
-    const vars = sends.length
-      ? await deps.loadPlayerVariables(
-          Array.from(new Set(sends.map((s) => s.target.playerId))),
-          c.tenant_id,
-        )
+    const sendPlayerIds = Array.from(
+      new Set(sends.map((s) => s.target.playerId).filter((id): id is string => Boolean(id))),
+    );
+    const vars = sendPlayerIds.length
+      ? await deps.loadPlayerVariables(sendPlayerIds, c.tenant_id)
       : new Map<string, Record<string, string>>();
+    const varsOf = (t: CampaignTarget) => (t.playerId ? (vars.get(t.playerId) ?? null) : null);
     let outcomes: SendOutcome[];
     let deferredError: string | null = null;
     if (deps.sendBatch && sends.length > 0) {
@@ -442,7 +507,7 @@ export async function processSmsCampaignTick(
           items: sends.map((it) => ({
             target: it.target,
             deliveryKey: it.key,
-            variables: vars.get(it.target.playerId) ?? null,
+            variables: varsOf(it.target),
           })),
         });
       } catch (error) {
@@ -456,7 +521,7 @@ export async function processSmsCampaignTick(
             campaign: c,
             target: it.target,
             deliveryKey: it.key,
-            variables: vars.get(it.target.playerId) ?? null,
+            variables: varsOf(it.target),
           });
         } catch (error) {
           return { ok: false, error: error instanceof Error ? error.message : String(error) };

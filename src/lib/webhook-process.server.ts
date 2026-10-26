@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { attributeFromLastFirstPartyClick } from "./conversion-attribution.server";
+import { bindExternalListDispatches } from "./external-list-binding.server";
 import { enrollPlayerOnEvent, eventEntryTriggers } from "./journey-scanner.server";
 
 export function getServiceClient(): SupabaseClient | null {
@@ -713,6 +714,19 @@ export async function processWebhookEvent(
                 (data.isFtd === true ||
                   (userEnvelope && finiteNumber(payload.paid_deposits_count) === 1)),
             } as const;
+            // A registration may come from an SMS sent to an external phone
+            // list (no player at send time): bind those links to the new
+            // player first, so the click below can be credited.
+            if (conversionEvent === "registered" && playerId) {
+              await bindExternalListDispatches(sb, { tenantId, playerId, phone: telefone }).catch(
+                (bindError) =>
+                  console.error("[external list] bind failed", {
+                    tenantId,
+                    playerId,
+                    error: bindError instanceof Error ? bindError.message : String(bindError),
+                  }),
+              );
+            }
             // The provider identifies the player, while BetLeads owns the
             // click proof. Do not trust query parameters echoed by the casino:
             // attribution requires an exact, first-party recorded click.
