@@ -11,85 +11,47 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { compareRange, round2, summarize } from "@/lib/finance/calc";
 import {
-  compareRange,
-  computeDay,
-  evaluateGoal,
-  isWholeMonth,
-  presetRange,
-  round2,
-  summarize,
-} from "@/lib/finance/calc";
+  GOAL_METRICS,
+  clampToToday,
+  can,
+  costMonthsFor,
+  dateRange,
+  compareMode,
+  db,
+  evaluateGoals,
+  fetchFinanceDays,
+  fetchGoalDays,
+  inRange,
+  isoDate,
+  num,
+  numOrNull,
+  periodPreset,
+  requirePermission,
+  toFinanceDay,
+  todaySaoPaulo,
+  type OtherCostRow,
+} from "@/lib/finance/finance-data.server";
 import type {
   CompareMode,
   DateRange,
-  FinanceDay,
-  GoalDay,
   GoalDirection,
-  GoalEvaluation,
   GoalMetric,
   PeriodPreset,
-  PeriodSummary,
 } from "@/lib/finance/types";
 import { assertTenantNotDemo } from "@/lib/tenant-access.server";
 import { auditTenant } from "@/lib/tenant-audit.server";
 import { listTenantMembers, managedGroupIds } from "@/lib/tenants.functions";
 import { dbUuid } from "@/lib/zod-helpers";
 
-type DbError = { message: string; code?: string };
-type DbResult<T = unknown> = { data: T | null; error: DbError | null };
-type QueryBuilder<T = unknown> = PromiseLike<DbResult<T>> & {
-  select: (columns?: string) => QueryBuilder<T>;
-  eq: (column: string, value: unknown) => QueryBuilder<T>;
-  in: (column: string, values: unknown[]) => QueryBuilder<T>;
-  order: (column: string, options?: unknown) => QueryBuilder<T>;
-  maybeSingle: () => Promise<DbResult<T>>;
-  single: () => Promise<DbResult<T>>;
-  insert: (values: unknown) => QueryBuilder<T>;
-  update: (values: unknown) => QueryBuilder<T>;
-  upsert: (values: unknown, options?: unknown) => QueryBuilder<T>;
-  delete: () => QueryBuilder<T>;
-};
-type LooseDb = {
-  rpc: <T = unknown>(fn: string, args?: Record<string, unknown>) => Promise<DbResult<T>>;
-  from: <T = unknown>(table: string) => QueryBuilder<T>;
-};
 type ServerContext = { userId: string };
 
-type FinanceDayRow = {
-  tenant_id: string;
-  metric_date: string;
-  registrations: number | string | null;
-  ftds: number | string | null;
-  ftd_deposit_amount: number | string | null;
-  deposit_amount: number | string | null;
-  withdrawal_amount: number | string | null;
-  ad_spend: number | string | null;
-  ad_spend_suggested: number | string | null;
-  ggr: number | string | null;
-  ggr_fee_pct: number | string;
-  movement_fee_pct: number | string;
-};
-type GoalDayRow = {
-  tenant_id: string;
-  metric_date: string;
-  metric: GoalMetric;
-  direction: GoalDirection;
-  daily_value: number | string;
-};
 type DailyRow = {
   tenant_id: string;
   metric_date: string;
   ad_spend: number | string | null;
   ggr: number | string | null;
-};
-type OtherCostRow = {
-  id: string;
-  tenant_id: string;
-  month: string;
-  descricao: string;
-  valor: number | string;
 };
 type RateRow = {
   tenant_id: string;
@@ -106,48 +68,18 @@ type GoalRow = {
 };
 type TenantLite = { id: string; nome: string };
 
-const db = () => supabaseAdmin as unknown as LooseDb;
-
 /** Spreadsheet defaults when a house has no rate row (same as finance_days in SQL). */
 const DEFAULT_GGR_FEE_PCT = 16;
 const DEFAULT_MOVEMENT_FEE_PCT = 2.7;
 const MAX_MONEY = 999_999_999_999.99;
-const MAX_RANGE_DAYS = 366;
-
-const GOAL_METRICS = [
-  "registrations",
-  "ftds",
-  "deposits",
-  "net",
-  "cash_result",
-  "cost_per_registration",
-  "cost_per_ftd",
-  "roi",
-] as const satisfies readonly GoalMetric[];
 
 // ─── Small helpers ──────────────────────────────────────────────────────────
 
-const num = (value: number | string | null | undefined) => Number(value ?? 0);
-const numOrNull = (value: number | string | null | undefined) =>
-  value === null || value === undefined ? null : Number(value);
-
 const byNome = <T extends { nome: string }>(a: T, b: T) => a.nome.localeCompare(b.nome, "pt-BR");
-
-/** "YYYY-MM-DD" of today in São Paulo. */
-const todaySaoPaulo = () => presetRange("today", new Date()).from;
-
-function isRealDate(value: string) {
-  const date = new Date(`${value}T00:00:00Z`);
-  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
-}
 
 function lastDayOfMonth(firstDay: string) {
   const [y, m] = firstDay.split("-").map(Number);
   return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
-}
-
-function daysInclusive(range: DateRange) {
-  return (Date.parse(range.to) - Date.parse(range.from)) / 86_400_000 + 1;
 }
 
 /**
@@ -160,90 +92,6 @@ function notInThePast(validFrom: string | undefined) {
     throw new Error("A data de início não pode ser no passado");
   }
   return validFrom ?? today;
-}
-
-/** The range cut at today (São Paulo); null when it starts in the future. */
-function clampToToday(range: DateRange, today: string): DateRange | null {
-  if (range.from > today) return null;
-  return { from: range.from, to: range.to > today ? today : range.to };
-}
-
-const inRange = (date: string, range: DateRange | null) =>
-  !!range && date >= range.from && date <= range.to;
-
-async function can(fn: string, userId: string, tenantId: string) {
-  const { data, error } = await db().rpc<boolean>(fn, { _user: userId, _tenant: tenantId });
-  if (error) throw new Error(error.message);
-  return data === true;
-}
-
-async function requirePermission(fn: string, userId: string, tenantId: string) {
-  if (!(await can(fn, userId, tenantId))) throw new Error("Sem permissão");
-}
-
-function toFinanceDay(row: FinanceDayRow): FinanceDay {
-  return computeDay({
-    date: row.metric_date,
-    registrations: num(row.registrations),
-    ftds: num(row.ftds),
-    ftdDepositAmount: num(row.ftd_deposit_amount),
-    depositAmount: num(row.deposit_amount),
-    withdrawalAmount: num(row.withdrawal_amount),
-    adSpend: numOrNull(row.ad_spend),
-    adSpendSuggested: numOrNull(row.ad_spend_suggested),
-    ggr: numOrNull(row.ggr),
-    // Stored and consumed as percent numbers (16 = 16%), see computeDay.
-    ggrFeePct: num(row.ggr_fee_pct),
-    movementFeePct: num(row.movement_fee_pct),
-  });
-}
-
-async function fetchFinanceDays(tenantIds: string[], range: DateRange) {
-  const { data, error } = await db().rpc<FinanceDayRow[]>("finance_days", {
-    _tenants: tenantIds,
-    _from: range.from,
-    _to: range.to,
-  });
-  if (error) throw new Error(error.message);
-  return data ?? [];
-}
-
-async function fetchGoalDays(tenantIds: string[], range: DateRange) {
-  const { data, error } = await db().rpc<GoalDayRow[]>("finance_goal_days", {
-    _tenants: tenantIds,
-    _from: range.from,
-    _to: range.to,
-  });
-  if (error) throw new Error(error.message);
-  return data ?? [];
-}
-
-/**
- * One evaluation per metric with a goal, over exactly the goal days inside
- * `range` (evaluateGoal sums every goal day it is given).
- */
-function evaluateGoals(
-  goalRows: GoalDayRow[],
-  summary: PeriodSummary,
-  range: DateRange,
-  today: string,
-): GoalEvaluation[] {
-  const byMetric = new Map<GoalMetric, GoalDay[]>();
-  for (const row of goalRows) {
-    if (!inRange(row.metric_date, range)) continue;
-    const list = byMetric.get(row.metric) ?? [];
-    list.push({
-      date: row.metric_date,
-      metric: row.metric,
-      direction: row.direction,
-      dailyValue: num(row.daily_value),
-    });
-    byMetric.set(row.metric, list);
-  }
-  return GOAL_METRICS.map((metric) => {
-    const goalDays = byMetric.get(metric);
-    return goalDays ? evaluateGoal(goalDays, summary, range, today) : null;
-  }).filter((goal): goal is GoalEvaluation => goal !== null);
 }
 
 async function getTenantLite(tenantId: string) {
@@ -259,10 +107,6 @@ async function getTenantLite(tenantId: string) {
 
 // ─── Input schemas ──────────────────────────────────────────────────────────
 
-const isoDate = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, "Data inválida")
-  .refine(isRealDate, "Data inválida");
 const yearMonth = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "Mês inválido");
 const money = z.number().finite().min(-MAX_MONEY).max(MAX_MONEY);
 const percent = z.number().finite().min(0).max(100);
@@ -839,16 +683,11 @@ export const getTenantGoals = createServerFn({ method: "POST" })
 
 // ─── Group overview ─────────────────────────────────────────────────────────
 
-const dateRange = z
-  .object({ from: isoDate, to: isoDate })
-  .refine((range) => range.from <= range.to, "Período inválido")
-  .refine((range) => daysInclusive(range) <= MAX_RANGE_DAYS, "Período longo demais");
-
 const overviewInput = z.object({
   groupId: dbUuid(),
   range: dateRange,
-  compare: z.enum(["previous", "same_weekday_last_week", "last_week"]),
-  preset: z.enum(["today", "yesterday", "7d", "month", "custom"]),
+  compare: compareMode,
+  preset: periodPreset,
 });
 
 type OverviewInput = {
@@ -911,21 +750,11 @@ export async function getGroupOverviewFor(ctx: ServerContext, data: OverviewInpu
         }
       : null;
 
-  // Spec §5: other costs enter a window's result only for a closed calendar
-  // month: a range covering exactly one month, or the "Mês" preset (also
-  // while in progress). The preset is only trusted when the range really is
-  // a month-to-date window, and its comparison window counts only for
-  // "previous" (the previous month to the same day), never a 7-day shift.
-  const monthToDate =
-    data.preset === "month" &&
-    data.range.from.endsWith("-01") &&
-    data.range.to.slice(0, 7) === data.range.from.slice(0, 7);
-  const monthOf = (range: DateRange) => `${range.from.slice(0, 7)}-01`;
-  const currentCostMonth = monthToDate || isWholeMonth(data.range) ? monthOf(data.range) : null;
-  const previousCostMonth =
-    (monthToDate && data.compare === "previous") || isWholeMonth(previousRange)
-      ? monthOf(previousRange)
-      : null;
+  const { current: currentCostMonth, previous: previousCostMonth } = costMonthsFor(
+    data.range,
+    data.compare,
+    data.preset,
+  );
   const costMonths = [currentCostMonth, previousCostMonth].filter(
     (month): month is string => month !== null,
   );
