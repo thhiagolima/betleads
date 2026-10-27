@@ -414,6 +414,19 @@ export const adminAssignUserToTenant = createServerFn({ method: "POST" })
 
 type AdminContext = { userId: string };
 
+const LAST_ADMIN_GUARD = "Esta casa precisa de pelo menos um admin. Defina outro admin antes.";
+
+async function countTenantAdmins(tenantId: string) {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data, error } = await supabaseAdmin
+    .from("user_roles")
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .eq("role", "admin");
+  if (error) throw new Error(error.message);
+  return data?.length ?? 0;
+}
+
 // Body of `adminAssignUserToTenant`, exported so its guards are unit-testable.
 export async function adminAssignUserToTenantFor(
   context: AdminContext,
@@ -431,20 +444,13 @@ export async function adminAssignUserToTenantFor(
   // An expert's role is tied to its `experts.user_id`; changing it here
   // would leave that link behind. Experts are managed only in Experts.
   if ((before?.role as string | undefined) === "expert") throw new Error(EXPERT_MEMBER_GUARD);
-  if (before?.role === "admin" && data.role !== "admin") {
-    throw new Error("Transfira a administração para outro usuário antes de rebaixar o admin atual");
-  }
-  if (data.role === "admin" && before?.role !== "admin") {
-    const { data: currentAdmin, error: adminErr } = await supabaseAdmin
-      .from("user_roles")
-      .select("id,user_id")
-      .eq("tenant_id", data.tenant_id)
-      .eq("role", "admin")
-      .maybeSingle();
-    if (adminErr) throw new Error(adminErr.message);
-    if (currentAdmin) {
-      throw new Error("Este tenant já possui um admin. Use a transferência de administração.");
-    }
+  // A house may have several admins, but never zero.
+  if (
+    before?.role === "admin" &&
+    data.role !== "admin" &&
+    (await countTenantAdmins(data.tenant_id)) <= 1
+  ) {
+    throw new Error(LAST_ADMIN_GUARD);
   }
 
   const request = before
@@ -488,7 +494,9 @@ export async function adminRemoveUserFromTenantFor(
   if (beforeErr) throw new Error(beforeErr.message);
   if (!before) throw new Error("Vínculo não encontrado");
   if ((before.role as string) === "expert") throw new Error(EXPERT_MEMBER_GUARD);
-  if (before.role === "admin") throw new Error("Defina outro admin antes de remover este vínculo");
+  if (before.role === "admin" && (await countTenantAdmins(data.tenant_id)) <= 1) {
+    throw new Error(LAST_ADMIN_GUARD);
+  }
   const { error } = await supabaseAdmin.from("user_roles").delete().eq("id", before.id);
   if (error) throw new Error(error.message);
   await auditAdminAction({

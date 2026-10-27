@@ -547,7 +547,6 @@ function ManageAccessButton({ userId, email }: { userId: string; email: string }
                   </Select>
                   <IconButton
                     disabled={
-                      membership.role === "admin" ||
                       (membership.role as string) === "expert" ||
                       removeMut.isPending
                     }
