@@ -1,5 +1,7 @@
 import type {
+  BetleadsCost,
   CompareMode,
+  CostLine,
   DateRange,
   FinanceDay,
   FinanceDayInput,
@@ -80,6 +82,7 @@ export function summarize(
   days: FinanceDay[],
   otherCosts: number | null,
   today?: string,
+  betleads?: BetleadsCost,
 ): PeriodSummary {
   const completeDays = days.filter((d) => !d.pending);
   const pendingDates = new Set(days.filter((d) => d.pending).map((d) => d.date));
@@ -100,7 +103,9 @@ export function summarize(
   const completeAdSpend = sumBy(completeDays, (d) => d.adSpend ?? 0);
   const rawCashResult = sumBy(completeDays, (d) => d.cashResult ?? 0);
 
-  const cashResult = round2(rawCashResult - (otherCosts ?? 0));
+  const betleadsUsage = betleads?.usage ?? 0;
+  const betleadsFee = betleads?.fee ?? null;
+  const cashResult = round2(rawCashResult - (otherCosts ?? 0) - betleadsUsage - (betleadsFee ?? 0));
   const roi = completeAdSpend === 0 ? null : cashResult / completeAdSpend;
   const costPerRegistration = registrations === 0 ? null : adSpend / registrations;
   const costPerFtd = ftds === 0 ? null : adSpend / ftds;
@@ -126,7 +131,76 @@ export function summarize(
     costPerRegistration,
     costPerFtd,
     avgDailyCashResult,
+    betleadsUsage,
+    betleadsFee,
   };
+}
+
+/** A percent without trailing zeros, pt-BR style: 16 -> "16%", 2.7 -> "2,7%". */
+function formatPctNoTrailingZeros(pct: number): string {
+  return `${pct.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%`;
+}
+
+/**
+ * Cost breakdown shown next to the period summary: the automatic lines
+ * (Anúncios, Taxa de GGR, Taxa de movimentação, Betleads) plus one line per
+ * manually entered cost category. Sorted by amount descending; a line with
+ * amount 0 and no previous amount (0 or null) is dropped as noise.
+ */
+export function costBreakdown(
+  current: PeriodSummary,
+  previous: PeriodSummary | null,
+  categories: Record<string, number>,
+  previousCategories: Record<string, number> | null,
+  ggrFeePct: number | null,
+): CostLine[] {
+  const ggrLabel =
+    ggrFeePct === null ? "Taxa de GGR" : `Taxa de GGR (${formatPctNoTrailingZeros(ggrFeePct)})`;
+
+  const lines: CostLine[] = [
+    {
+      key: "ad_spend",
+      label: "Anúncios",
+      amount: current.adSpend,
+      previous: previous?.adSpend ?? null,
+      auto: true,
+    },
+    {
+      key: "ggr_fee",
+      label: ggrLabel,
+      amount: current.ggrFee,
+      previous: previous?.ggrFee ?? null,
+      auto: true,
+    },
+    {
+      key: "movement_fee",
+      label: "Taxa de movimentação",
+      amount: current.movementFee,
+      previous: previous?.movementFee ?? null,
+      auto: true,
+    },
+    {
+      key: "betleads",
+      label: "Betleads",
+      amount: round2(current.betleadsUsage + (current.betleadsFee ?? 0)),
+      previous: previous ? round2(previous.betleadsUsage + (previous.betleadsFee ?? 0)) : null,
+      auto: true,
+    },
+  ];
+
+  for (const [name, amount] of Object.entries(categories)) {
+    lines.push({
+      key: `category:${name}`,
+      label: name,
+      amount,
+      previous: previousCategories?.[name] ?? null,
+      auto: false,
+    });
+  }
+
+  return lines
+    .filter((line) => !(line.amount === 0 && (line.previous === null || line.previous === 0)))
+    .sort((a, b) => b.amount - a.amount);
 }
 
 /** Daily average of Anúncios over the days that have it filled (spec §5); null when none. */

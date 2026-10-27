@@ -4,6 +4,7 @@ import {
   averageFilledAdSpend,
   compareRange,
   computeDay,
+  costBreakdown,
   dependsOnManual,
   evaluateGoal,
   isSumMetric,
@@ -249,6 +250,132 @@ describe("summarize", () => {
     expect(withCosts.ggrFee).toBe(withoutCosts.ggrFee);
     expect(withCosts.movementFee).toBe(withoutCosts.movementFee);
   });
+
+  it("deducts Betleads usage and fee from cashResult and ROI", () => {
+    const day = (date: string, adSpend: number, depositAmount: number) =>
+      computeDay({
+        date,
+        registrations: 0,
+        ftds: 0,
+        ftdDepositAmount: 0,
+        depositAmount,
+        withdrawalAmount: 0,
+        adSpend,
+        adSpendSuggested: null,
+        ggr: 0,
+        ggrFeePct: 0,
+        movementFeePct: 0,
+      });
+    // Two complete days: cashResult sums to 1000 (500 + 500), adSpend sums to 500.
+    const days = [day("2026-10-01", 300, 800), day("2026-10-02", 200, 700)];
+
+    const summary = summarize(days, 100, undefined, { usage: 50, fee: 4000 });
+
+    expect(summary.cashResult).toBe(-3150);
+    expect(summary.roi).toBeCloseTo(-6.3, 6);
+    expect(summary.betleadsUsage).toBe(50);
+    expect(summary.betleadsFee).toBe(4000);
+  });
+
+  it("without betleads keeps today's numbers", () => {
+    const days = rows.map((row) => computeDay(toInput(row)));
+    const summary = summarize(days, 0);
+
+    expect(summary.cashResult).toBeCloseTo(43706.07, 2);
+    expect(summary.betleadsUsage).toBe(0);
+    expect(summary.betleadsFee).toBeNull();
+  });
+
+  it("zero ad spend gives null ROI and pctChange from negative previous is positive", () => {
+    const days = [
+      computeDay({
+        date: "2026-10-01",
+        registrations: 1,
+        ftds: 0,
+        ftdDepositAmount: 0,
+        depositAmount: 100,
+        withdrawalAmount: 0,
+        adSpend: 0,
+        adSpendSuggested: null,
+        ggr: 0,
+        ggrFeePct: 0,
+        movementFeePct: 0,
+      }),
+    ];
+    const summary = summarize(days, null);
+    expect(summary.roi).toBeNull();
+    expect(pctChange(-50, -100)).toBeCloseTo(0.5, 6);
+  });
+});
+
+describe("costBreakdown", () => {
+  const summaryWith = (overrides: Partial<PeriodSummary>): PeriodSummary => ({
+    days: 1,
+    pendingDays: 0,
+    pendingToday: false,
+    registrations: 0,
+    ftds: 0,
+    ftdDepositAmount: 0,
+    depositAmount: 0,
+    withdrawalAmount: 0,
+    adSpend: 0,
+    ggr: 0,
+    net: 0,
+    ggrFee: 0,
+    movementFee: 0,
+    otherCosts: null,
+    cashResult: 0,
+    roi: null,
+    costPerRegistration: null,
+    costPerFtd: null,
+    avgDailyCashResult: null,
+    betleadsUsage: 0,
+    betleadsFee: null,
+    ...overrides,
+  });
+
+  it("orders by amount, labels the GGR rate, marks Betleads auto, drops empty lines", () => {
+    const current = summaryWith({
+      adSpend: 100,
+      ggrFee: 50,
+      movementFee: 20,
+      betleadsUsage: 10,
+      betleadsFee: 0,
+    });
+    const categories = { Equipe: 30, Ferramentas: 0 };
+
+    const lines = costBreakdown(current, null, categories, null, 16);
+
+    expect(lines.map((l) => l.key)).toEqual([
+      "ad_spend",
+      "ggr_fee",
+      "category:Equipe",
+      "movement_fee",
+      "betleads",
+    ]);
+    expect(lines.find((l) => l.key === "ggr_fee")?.label).toBe("Taxa de GGR (16%)");
+    const betleadsLine = lines.find((l) => l.key === "betleads");
+    expect(betleadsLine?.label).toBe("Betleads");
+    expect(betleadsLine?.auto).toBe(true);
+    expect(betleadsLine?.amount).toBe(10);
+    // Ferramentas (0, no previous) is dropped.
+    expect(lines.some((l) => l.key === "category:Ferramentas")).toBe(false);
+  });
+
+  it("labels the GGR line without a rate when ggrFeePct is null", () => {
+    const current = summaryWith({ ggrFee: 10 });
+    const lines = costBreakdown(current, null, {}, null, null);
+    expect(lines.find((l) => l.key === "ggr_fee")?.label).toBe("Taxa de GGR");
+  });
+
+  it("keeps a line whose previous amount was non-zero even if current is now zero", () => {
+    const current = summaryWith({ adSpend: 0 });
+    const previous = summaryWith({ adSpend: 200 });
+    const lines = costBreakdown(current, previous, {}, null, null);
+    const adLine = lines.find((l) => l.key === "ad_spend");
+    expect(adLine?.amount).toBe(0);
+    expect(adLine?.previous).toBe(200);
+  });
 });
 
 describe("averageFilledAdSpend", () => {
@@ -268,7 +395,11 @@ describe("averageFilledAdSpend", () => {
         movementFeePct: 2.7,
       });
     expect(
-      averageFilledAdSpend([day("2026-10-01", 100), day("2026-10-02", null), day("2026-10-03", 50)]),
+      averageFilledAdSpend([
+        day("2026-10-01", 100),
+        day("2026-10-02", null),
+        day("2026-10-03", 50),
+      ]),
     ).toBe(75);
     expect(averageFilledAdSpend([day("2026-10-01", null)])).toBeNull();
   });
@@ -295,6 +426,8 @@ describe("goals", () => {
     costPerRegistration: null,
     costPerFtd: null,
     avgDailyCashResult: null,
+    betleadsUsage: 0,
+    betleadsFee: null,
   };
   const range = { from: "2026-10-01", to: "2026-10-01" };
 
@@ -375,6 +508,8 @@ describe("metricValue, isSumMetric, dependsOnManual", () => {
       costPerRegistration: 6,
       costPerFtd: 15,
       avgDailyCashResult: 50,
+      betleadsUsage: 0,
+      betleadsFee: null,
     };
 
     expect(metricValue(summary, "registrations")).toBe(5);
@@ -434,36 +569,42 @@ describe("presetRange", () => {
 
 describe("compareRange", () => {
   it("previous: window of the same size immediately before", () => {
-    expect(
-      compareRange({ from: "2026-10-10", to: "2026-10-16" }, "previous", "7d"),
-    ).toEqual({ from: "2026-10-03", to: "2026-10-09" });
+    expect(compareRange({ from: "2026-10-10", to: "2026-10-16" }, "previous", "7d")).toEqual({
+      from: "2026-10-03",
+      to: "2026-10-09",
+    });
   });
 
   it("previous month: 31-day month compared to a shorter month", () => {
-    expect(
-      compareRange({ from: "2026-03-01", to: "2026-03-31" }, "previous", "month"),
-    ).toEqual({ from: "2026-02-01", to: "2026-02-28" });
+    expect(compareRange({ from: "2026-03-01", to: "2026-03-31" }, "previous", "month")).toEqual({
+      from: "2026-02-01",
+      to: "2026-02-28",
+    });
   });
 
   it("previous month: in-progress month compared up to the same day", () => {
-    expect(
-      compareRange({ from: "2026-10-01", to: "2026-10-24" }, "previous", "month"),
-    ).toEqual({ from: "2026-09-01", to: "2026-09-24" });
+    expect(compareRange({ from: "2026-10-01", to: "2026-10-24" }, "previous", "month")).toEqual({
+      from: "2026-09-01",
+      to: "2026-09-24",
+    });
   });
 
   it("previous: a custom range that is exactly a calendar month compares with the whole previous month", () => {
-    expect(
-      compareRange({ from: "2026-09-01", to: "2026-09-30" }, "previous", "custom"),
-    ).toEqual({ from: "2026-08-01", to: "2026-08-31" });
-    expect(
-      compareRange({ from: "2026-03-01", to: "2026-03-31" }, "previous", "custom"),
-    ).toEqual({ from: "2026-02-01", to: "2026-02-28" });
+    expect(compareRange({ from: "2026-09-01", to: "2026-09-30" }, "previous", "custom")).toEqual({
+      from: "2026-08-01",
+      to: "2026-08-31",
+    });
+    expect(compareRange({ from: "2026-03-01", to: "2026-03-31" }, "previous", "custom")).toEqual({
+      from: "2026-02-01",
+      to: "2026-02-28",
+    });
   });
 
   it("last_week shifts the window back 7 days", () => {
-    expect(
-      compareRange({ from: "2026-10-24", to: "2026-10-24" }, "last_week", "today"),
-    ).toEqual({ from: "2026-10-17", to: "2026-10-17" });
+    expect(compareRange({ from: "2026-10-24", to: "2026-10-24" }, "last_week", "today")).toEqual({
+      from: "2026-10-17",
+      to: "2026-10-17",
+    });
   });
 });
 

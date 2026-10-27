@@ -59,6 +59,37 @@ export type PeriodSummary = {
   costPerRegistration: number | null;
   costPerFtd: number | null;
   avgDailyCashResult: number | null;
+  /** Sum of wallet usage (SMS, voz, e-mail...) for the window; 0 when not given. */
+  betleadsUsage: number;
+  /** Plan fee for the window's closed month; null when the window is not a closed month. */
+  betleadsFee: number | null;
+};
+
+/** The Betleads cost for a window, passed into summarize() by the caller. */
+export type BetleadsCost = { usage: number; fee: number | null };
+
+/** A row of the cost breakdown shown next to the period summary. */
+export type CostLineKey =
+  "ad_spend" | "ggr_fee" | "movement_fee" | "betleads" | `category:${string}`;
+
+export type CostLine = {
+  key: CostLineKey;
+  label: string;
+  amount: number;
+  previous: number | null;
+  auto: boolean;
+};
+
+/** One point of the monthly cashResult series (filled by a server function in a later task). */
+export type MonthPoint = {
+  month: string; // "YYYY-MM"
+  cashResult: number;
+  adSpend: number;
+  roi: number | null;
+  incomplete: boolean; // pendingDays > 0 or pendingToday
+  inProgress: boolean; // the current month
+  betleadsMissing: boolean;
+  byTenant: Record<string, number>; // tenantId -> cashResult
 };
 
 export type GoalDay = {
