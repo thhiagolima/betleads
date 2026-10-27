@@ -67,30 +67,25 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("adminSmsCreditConsoleFor — platform-wide SMS credit totals", () => {
+describe("adminSmsCreditConsoleFor — platform-wide wallet totals", () => {
   beforeEach(() => {
-    fake.admin.onRpc("admin_sms_credit_overview", () => ({
-      data: [
-        { tenant_id: NORMAL_TENANT, tenant_name: "Casa Normal", balance_credits: 1000 },
-        { tenant_id: DEMO_TENANT, tenant_name: "Casa Demo", balance_credits: 500 },
-      ],
-      error: null,
-    }));
-    fake.admin
-      .rows("sms_credit_orders")
-      .push(
-        { id: "order-normal", tenant_id: NORMAL_TENANT, credits: 100, amount_cents: 1000 },
-        { id: "order-demo", tenant_id: DEMO_TENANT, credits: 200, amount_cents: 2000 },
-      );
+    fake.admin.rows("tenant_wallets").push(
+      { tenant_id: NORMAL_TENANT, balance: 1000, lifetime_purchased: 1000, lifetime_used: 0 },
+      { tenant_id: DEMO_TENANT, balance: 500, lifetime_purchased: 500, lifetime_used: 0 },
+    );
+    fake.admin.rows("sms_credit_orders").push(
+      { id: "order-normal", tenant_id: NORMAL_TENANT, credits: 100, amount_cents: 1000 },
+      { id: "order-demo", tenant_id: DEMO_TENANT, credits: 200, amount_cents: 2000 },
+    );
   });
 
-  it("sums/lists only the normal tenant's balance overview, excluding the demo tenant", async () => {
+  it("lists only the normal tenant's wallet, excluding the demo tenant", async () => {
     const result = await adminSmsCreditConsoleFor({
       userId: SUPER_ADMIN_USER,
       supabase: fake.admin.client,
     } as unknown as Parameters<typeof adminSmsCreditConsoleFor>[0]);
 
-    expect(result.overview.map((row) => row.tenant_id)).toEqual([NORMAL_TENANT]);
+    expect(result.wallets.map((row) => row.tenant_id)).toEqual([NORMAL_TENANT]);
   });
 
   it("excludes the demo tenant's credit orders from the platform-wide orders list", async () => {

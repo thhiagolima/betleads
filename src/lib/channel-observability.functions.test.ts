@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { summarizeChannelDelivery } from "./channel-observability.functions";
+import { channelDeliveryMetric, summarizeChannelDelivery } from "./channel-observability.functions";
 
 describe("summarizeChannelDelivery", () => {
   it("prioritizes the SMS delivery callback status", () => {
@@ -21,5 +21,33 @@ describe("summarizeChannelDelivery", () => {
         { status: "failed" },
       ]),
     ).toEqual({ total: 3, delivered: 2, failed: 1 });
+  });
+
+  it("counts a dispatched voice call only once it is answered or completed", () => {
+    expect(
+      summarizeChannelDelivery("voice", [
+        { status: "sent" },
+        { status: "answered" },
+        { status: "no_answer" },
+      ]),
+    ).toEqual({ total: 3, delivered: 1, failed: 0 });
+  });
+
+  it("counts provider-accepted SMS and e-mail (no delivery receipt exists)", () => {
+    expect(
+      summarizeChannelDelivery("email", [
+        { status: "sent" },
+        { status: "enviado" },
+        { status: "failed" },
+      ]),
+    ).toEqual({ total: 3, delivered: 2, failed: 1 });
+  });
+});
+
+describe("channelDeliveryMetric", () => {
+  it("labels SMS and e-mail as accepted and voice as answered", () => {
+    expect(channelDeliveryMetric("sms")).toBe("accepted");
+    expect(channelDeliveryMetric("email")).toBe("accepted");
+    expect(channelDeliveryMetric("voice")).toBe("answered");
   });
 });

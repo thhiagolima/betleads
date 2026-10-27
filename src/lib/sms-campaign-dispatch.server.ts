@@ -9,6 +9,7 @@ import {
   campaignDeliveryKey,
   campaignTickQuota,
   isUnresolvedReason,
+  parseUnresolvedRecipients,
   SMS_CAMPAIGN_DEFAULT_RATE,
   SMS_CAMPAIGN_TICK_SECONDS,
   type RecipientResolution,
@@ -40,14 +41,28 @@ export type SmsCampaignRow = {
   audience_criteria?: unknown;
   /** When the rule was materialized into `recipients` (once, on the first tick). */
   audience_resolved_at?: string | null;
+  /** 'external_list': phones that are not players (see campaign-external-list.ts). */
+  recipient_source?: string | null;
+  unresolved_recipients?: unknown;
 };
 
 export type CampaignTarget = {
   phone: string;
   playerId: string | null;
+  /** Number of an external list: sent without a player (never resolved to one). */
+  external?: boolean;
   /** Set once the recipient was classified as not sendable; it is skipped forever. */
   unresolvedReason?: UnresolvedReason | null;
 };
+
+export function isSendableTarget(t: CampaignTarget): boolean {
+  return Boolean(t.playerId) || (t.external === true && !t.unresolvedReason);
+}
+
+/** (campaign, player) for players; (campaign, phone) for external numbers. */
+export function targetDeliveryKey(campaignId: string, t: CampaignTarget): Promise<string> {
+  return campaignDeliveryKey(campaignId, t.playerId ?? `phone:${t.phone}`);
+}
 
 export function parseCampaignTargets(raw: unknown): CampaignTarget[] {
   if (!Array.isArray(raw)) return [];
@@ -60,6 +75,7 @@ export function parseCampaignTargets(raw: unknown): CampaignTarget[] {
     out.push({
       phone: (r as { phone: string }).phone,
       playerId: typeof pid === "string" && pid ? pid : null,
+      ...((r as { external?: unknown }).external === true ? { external: true } : {}),
       ...(isUnresolvedReason(reason) ? { unresolvedReason: reason } : {}),
     });
   }
@@ -76,8 +92,17 @@ export type SendOutcome = {
   retryable?: boolean;
   /** The provider refused the ACCOUNT (101/505, 401/402/403): retryable, never the lead's fault. */
   providerAccount?: boolean;
+  /**
+   * PG3 final fix I3: the HOUSE's wallet refused the reservation (errorKind
+   * "insufficient_balance"). Nothing was sent nor charged; the tick stops
+   * before this recipient and the campaign is paused until "Retomar".
+   */
+  insufficientBalance?: boolean;
   error?: string;
 };
+
+/** last_error of a campaign paused because the house ran out of balance. */
+export const SMS_CAMPAIGN_NO_BALANCE_MESSAGE = "Saldo insuficiente";
 
 /**
  * SMS provider circuit breaker, asked before every batch:
@@ -89,7 +114,7 @@ export type ProviderGateDecision =
   { mode: "closed" } | { mode: "probe" } | { mode: "open"; message: string };
 
 export type CampaignSendItem = {
-  target: CampaignTarget & { playerId: string };
+  target: CampaignTarget;
   deliveryKey: string;
   variables: Record<string, string> | null;
 };
@@ -109,7 +134,7 @@ export type CampaignDispatchDeps = {
   ) => Promise<Map<string, Record<string, string>>>;
   send: (args: {
     campaign: SmsCampaignRow;
-    target: CampaignTarget & { playerId: string };
+    target: CampaignTarget;
     deliveryKey: string;
     variables: Record<string, string> | null;
   }) => Promise<SendOutcome>;
@@ -127,6 +152,8 @@ export type CampaignDispatchDeps = {
   providerGate?: () => Promise<ProviderGateDecision>;
   /** Phones matching a saved audience rule right now (dynamic audiences). */
   resolveAudiencePhones?: (tenantId: string, criteria: unknown) => Promise<string[]>;
+  /** External lists: which of these phones registered as players meanwhile. */
+  findRegisteredPhones?: (tenantId: string, phones: string[]) => Promise<Set<string>>;
 };
 
 export type CampaignTickResult = {
@@ -135,7 +162,8 @@ export type CampaignTickResult = {
   failed: number;
   /** Recipients the cursor moved past in this tick (sendable + skipped). */
   advanced: number;
-  status: "enviado" | "enviando" | "falhou";
+  /** "pausada": stopped for lack of house balance; resumed by hand ("Retomar"). */
+  status: "enviado" | "enviando" | "falhou" | "pausada";
   stopReason:
     | "done"
     | "quota"
@@ -145,7 +173,8 @@ export type CampaignTickResult = {
     | "resolution_error"
     | "no_recipients"
     | "none_resolved"
-    | "provider_unavailable";
+    | "provider_unavailable"
+    | "insufficient_balance";
   /** ENV-10: sends whose provider outcome is unknown (counted in `sent`). */
   pendingConfirmation?: number;
 };
@@ -156,7 +185,7 @@ export const MAX_ZERO_GRANTS = 3;
 type BatchItem =
   | { kind: "skip"; target: CampaignTarget }
   | { kind: "dup"; target: CampaignTarget; key: string }
-  | { kind: "send"; target: CampaignTarget & { playerId: string }; key: string };
+  | { kind: "send"; target: CampaignTarget; key: string };
 
 async function runPool<T, R>(
   items: T[],
@@ -196,6 +225,15 @@ function unresolvedOf(targets: CampaignTarget[]): UnresolvedRecipient[] {
  *    in batches; each send carries a stable (campaign, player) delivery key;
  * 3. persists the cursor and counters AFTER each batch was sent.
  */
+/** Erro de público que não se resolve com nova tentativa (marcado por `permanentAudienceError`). */
+function isPermanentAudienceError(error: unknown) {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { permanentAudienceError?: unknown }).permanentAudienceError === true
+  );
+}
+
 export async function processSmsCampaignTick(
   c: SmsCampaignRow,
   deps: CampaignDispatchDeps,
@@ -223,6 +261,20 @@ export async function processSmsCampaignTick(
     try {
       phones = await deps.resolveAudiencePhones(c.tenant_id, c.audience_criteria);
     } catch (error) {
+      // Ex.: o público de seleção foi excluído depois do agendamento. Tentar de
+      // novo não resolve: a campanha falha (fechado, nada é enviado).
+      if (isPermanentAudienceError(error)) {
+        await deps.updateCampaign(c, {
+          status: "falhou",
+          recipients: [],
+          total_count: 0,
+          audience_resolved_at: new Date(deps.now()).toISOString(),
+          last_error: error instanceof Error ? error.message : String(error),
+          locked_at: null,
+          locked_by: null,
+        });
+        return { ...result, status: "falhou", stopReason: "no_recipients" };
+      }
       await deps.updateCampaign(c, {
         status: "enviando",
         last_error: `Falha ao recalcular o público: ${error instanceof Error ? error.message : String(error)}`,
@@ -267,7 +319,7 @@ export async function processSmsCampaignTick(
 
   // 1. Dispatch-time resolution for campaigns that stored only phones.
   const pendingIdx = targets
-    .map((t, i) => (!t.playerId && !t.unresolvedReason ? i : -1))
+    .map((t, i) => (!t.playerId && !t.unresolvedReason && !t.external ? i : -1))
     .filter((i) => i >= 0);
   if (pendingIdx.length > 0) {
     let resolution: RecipientResolution;
@@ -302,12 +354,58 @@ export async function processSmsCampaignTick(
     await deps.persistUnresolved(c.id, unresolvedOf(targets));
   }
 
-  const sendable = targets.filter((t) => t.playerId).length;
+  // 1b. External list: a number that registered as a player between the
+  // creation and the first send is left out (the list targets non-players).
+  // Runs until the first recipient goes out; re-running it is harmless.
+  const externalIdx = targets
+    .map((t, i) => (t.external && !t.unresolvedReason ? i : -1))
+    .filter((i) => i >= 0);
+  if (externalIdx.length > 0 && (c.sent_cursor ?? 0) === 0 && deps.findRegisteredPhones) {
+    let registered: Set<string>;
+    try {
+      registered = await deps.findRegisteredPhones(
+        c.tenant_id,
+        externalIdx.map((i) => targets[i].phone),
+      );
+    } catch (error) {
+      await deps.updateCampaign(c, {
+        status: "enviando",
+        last_error: `Falha ao verificar jogadores da lista: ${error instanceof Error ? error.message : String(error)}`,
+        locked_at: null,
+        locked_by: null,
+      });
+      return { ...result, stopReason: "resolution_error" };
+    }
+    const nowPlayers = externalIdx.filter((i) => registered.has(targets[i].phone));
+    if (nowPlayers.length > 0) {
+      for (const i of nowPlayers) targets[i] = { ...targets[i], unresolvedReason: "ja_jogador" };
+      const sendableTotal = targets.filter(isSendableTarget).length;
+      const ok = await deps.updateCampaign(c, {
+        recipients: targets,
+        total_count: sendableTotal,
+      });
+      if (!ok) return { ...result, stopReason: "lock_lost" };
+      // Creation-time exclusions are only in unresolved_recipients: keep them.
+      const previous = parseUnresolvedRecipients(c.unresolved_recipients);
+      const merged = [...previous];
+      const known = new Set(previous.map((u) => `${u.reason}|${u.phone}`));
+      for (const u of unresolvedOf(targets)) {
+        if (!known.has(`${u.reason}|${u.phone}`)) merged.push(u);
+      }
+      c = { ...c, total_count: sendableTotal, recipients: targets, unresolved_recipients: merged };
+      await deps.persistUnresolved(c.id, merged);
+    }
+  }
+
+  const sendable = targets.filter(isSendableTarget).length;
   if (sendable === 0) {
     const unresolved = unresolvedOf(targets).length;
     await deps.updateCampaign(c, {
       status: "falhou",
-      last_error: `Nenhum destinatário corresponde a um jogador cadastrado (${unresolved} não enviado(s)). Veja o relatório da campanha.`,
+      last_error:
+        c.recipient_source === "external_list"
+          ? `Nenhum número da lista pode receber: todos já são jogadores ou foram bloqueados (${unresolved} não enviado(s)). Veja o relatório da campanha.`
+          : `Nenhum destinatário corresponde a um jogador cadastrado (${unresolved} não enviado(s)). Veja o relatório da campanha.`,
       locked_at: null,
       locked_by: null,
     });
@@ -355,12 +453,12 @@ export async function processSmsCampaignTick(
     let sendableInWindow = 0;
     for (let i = cursor; i < targets.length && sendableInWindow < want; i++) {
       const t = targets[i];
-      if (!t.playerId) {
+      if (!isSendableTarget(t)) {
         items.push({ kind: "skip", target: t });
         continue;
       }
-      const key = await campaignDeliveryKey(c.id, t.playerId);
-      items.push({ kind: "send", target: t as CampaignTarget & { playerId: string }, key });
+      const key = await targetDeliveryKey(c.id, t);
+      items.push({ kind: "send", target: t, key });
       sendableInWindow++;
     }
 
@@ -427,12 +525,13 @@ export async function processSmsCampaignTick(
     const sends = batch.filter(
       (it): it is Extract<BatchItem, { kind: "send" }> => it.kind === "send",
     );
-    const vars = sends.length
-      ? await deps.loadPlayerVariables(
-          Array.from(new Set(sends.map((s) => s.target.playerId))),
-          c.tenant_id,
-        )
+    const sendPlayerIds = Array.from(
+      new Set(sends.map((s) => s.target.playerId).filter((id): id is string => Boolean(id))),
+    );
+    const vars = sendPlayerIds.length
+      ? await deps.loadPlayerVariables(sendPlayerIds, c.tenant_id)
       : new Map<string, Record<string, string>>();
+    const varsOf = (t: CampaignTarget) => (t.playerId ? (vars.get(t.playerId) ?? null) : null);
     let outcomes: SendOutcome[];
     let deferredError: string | null = null;
     if (deps.sendBatch && sends.length > 0) {
@@ -442,7 +541,7 @@ export async function processSmsCampaignTick(
           items: sends.map((it) => ({
             target: it.target,
             deliveryKey: it.key,
-            variables: vars.get(it.target.playerId) ?? null,
+            variables: varsOf(it.target),
           })),
         });
       } catch (error) {
@@ -456,7 +555,7 @@ export async function processSmsCampaignTick(
             campaign: c,
             target: it.target,
             deliveryKey: it.key,
-            variables: vars.get(it.target.playerId) ?? null,
+            variables: varsOf(it.target),
           });
         } catch (error) {
           return { ok: false, error: error instanceof Error ? error.message : String(error) };
@@ -469,11 +568,20 @@ export async function processSmsCampaignTick(
     // recipient (cursor order preserved): everything before it is counted and
     // checkpointed; from it onwards is re-processed next tick (accepted items
     // after the cut are deduped by their delivery key, never resent).
+    //
+    // PG3 final fix I3: a recipient the house's wallet refused is cut the same
+    // way (not counted as failed, cursor stays before it) and pauses the
+    // campaign: every later recipient would be refused too.
     const firstRetryable =
-      deferredError !== null ? 0 : outcomes.findIndex((o) => !o?.ok && o?.retryable);
+      deferredError !== null
+        ? 0
+        : outcomes.findIndex((o) => !o?.ok && (o?.retryable || o?.insufficientBalance));
     if (firstRetryable >= 0) {
-      lastError = deferredError ?? outcomes[firstRetryable]?.error ?? "Provedor SMS indisponível";
-      stop = "provider_unavailable";
+      const noBalance = deferredError === null && outcomes[firstRetryable]?.insufficientBalance === true;
+      lastError = noBalance
+        ? SMS_CAMPAIGN_NO_BALANCE_MESSAGE
+        : (deferredError ?? outcomes[firstRetryable]?.error ?? "Provedor SMS indisponível");
+      stop = noBalance ? "insufficient_balance" : "provider_unavailable";
       const cutKey = sends[firstRetryable]?.key;
       const cutAt = batch.findIndex((it) => it.kind === "send" && it.key === cutKey);
       batch = cutAt >= 0 ? batch.slice(0, cutAt) : [];
@@ -496,6 +604,9 @@ export async function processSmsCampaignTick(
         if (o?.error) lastError = o.error;
       }
     }
+    // Ruling (final-2): an earlier failure or pending confirmation in this
+    // batch must not replace the pause reason.
+    if (stop === "insufficient_balance") lastError = SMS_CAMPAIGN_NO_BALANCE_MESSAGE;
     result.sent += batchSent;
     result.deduplicated += batchDedup;
     result.failed += batchFailed;
@@ -520,14 +631,110 @@ export async function processSmsCampaignTick(
   const isDone = cursor >= targets.length;
   const totalSent = (c.sent_count ?? 0) + result.sent;
   const totalDedup = (c.deduplicated_count ?? 0) + result.deduplicated;
-  result.status = isDone ? (totalSent + totalDedup === 0 ? "falhou" : "enviado") : "enviando";
+  result.status = isDone
+    ? totalSent + totalDedup === 0
+      ? "falhou"
+      : "enviado"
+    : stop === "insufficient_balance"
+      ? "pausada"
+      : "enviando";
   result.stopReason = isDone ? "done" : (stop ?? "quota");
   const patch: Record<string, unknown> = {
     status: result.status,
     locked_at: null,
     locked_by: null,
   };
-  if (result.stopReason === "provider_unavailable") patch.last_error = lastError;
+  if (
+    result.stopReason === "provider_unavailable" ||
+    result.stopReason === "insufficient_balance"
+  )
+    patch.last_error = lastError;
   await deps.updateCampaign(c, patch);
   return result;
+}
+
+/** Minimal query-builder shape `resumePausedSmsCampaign` needs. */
+type ResumeDb = {
+  from: (table: string) => {
+    update: (patch: Record<string, unknown>) => {
+      eq: (col: string, value: unknown) => {
+        eq: (col: string, value: unknown) => {
+          eq: (col: string, value: unknown) => {
+            select: (columns: string) => PromiseLike<{
+              data: unknown;
+              error: { message: string } | null;
+            }>;
+          };
+        };
+      };
+    };
+  };
+};
+
+/**
+ * PG3 final fix I3 — "Retomar" on a campaign paused for lack of balance:
+ * back to 'enviando' with no lock (claim_due_sms_campaigns picks it on the
+ * next tick), cursor and counters kept, last_error cleared. Only a 'pausada'
+ * campaign of this house is touched; returns false otherwise. If the house
+ * still has no balance, the next tick pauses it again at the same recipient.
+ */
+export async function resumePausedSmsCampaign(
+  db: unknown,
+  args: { tenantId: string; campaignId: string },
+): Promise<boolean> {
+  const { data, error } = await (db as ResumeDb)
+    .from("sms_campaigns")
+    .update({ status: "enviando", last_error: null, locked_at: null, locked_by: null })
+    .eq("id", args.campaignId)
+    .eq("tenant_id", args.tenantId)
+    .eq("status", "pausada")
+    .select("id");
+  if (error) throw new Error(error.message);
+  return Array.isArray(data) && data.length > 0;
+}
+
+type LooseQuery = PromiseLike<{ data: unknown; error: { message: string } | null }> & {
+  select: (columns: string) => LooseQuery;
+  update: (patch: Record<string, unknown>) => LooseQuery;
+  eq: (col: string, value: unknown) => LooseQuery;
+  maybeSingle: () => PromiseLike<{ data: unknown; error: { message: string } | null }>;
+};
+
+/** Statuses a house can still cancel: nothing sent yet, or paused for balance. */
+const CANCELLABLE_SMS_CAMPAIGN_STATUSES = ["agendada", "pausada"];
+
+export type CancelledSmsCampaign = {
+  previousStatus: string;
+  row: { id: string; name: string | null; scheduled_at: string | null; total_count: number | null };
+};
+
+/**
+ * Cancels an 'agendada' or (Ruling final-2) 'pausada' campaign of this house,
+ * keeping the reason in last_error. The update is guarded by the status just
+ * read, so a campaign the dispatcher claimed in between is never cancelled.
+ * Returns null when the campaign is not cancellable.
+ */
+export async function cancelSmsCampaignRow(
+  db: unknown,
+  args: { tenantId: string; campaignId: string; lastError: string },
+): Promise<CancelledSmsCampaign | null> {
+  const from = () => (db as { from: (table: string) => LooseQuery }).from("sms_campaigns");
+  const { data: current, error: readError } = await from()
+    .select("id, status")
+    .eq("id", args.campaignId)
+    .eq("tenant_id", args.tenantId)
+    .maybeSingle();
+  if (readError) throw new Error(readError.message);
+  const previousStatus = (current as { status?: string } | null)?.status;
+  if (!previousStatus || !CANCELLABLE_SMS_CAMPAIGN_STATUSES.includes(previousStatus)) return null;
+  const { data: updated, error } = await from()
+    .update({ status: "cancelada", last_error: args.lastError })
+    .eq("id", args.campaignId)
+    .eq("tenant_id", args.tenantId)
+    .eq("status", previousStatus)
+    .select("id, name, scheduled_at, total_count")
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!updated) return null;
+  return { previousStatus, row: updated as CancelledSmsCampaign["row"] };
 }

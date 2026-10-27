@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { assertTenantNotDemo, resolveCurrentTenantId } from "./tenant-access.server";
+import { tenantReads } from "@/lib/active-tenant-filter";
 
 const saveSchema = z.object({
   url: z.string().trim().url().max(500),
@@ -13,7 +14,8 @@ const saveSchema = z.object({
 export const getWhatsappExternalIntegration = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data, error } = await context.supabase
+    const reads = await tenantReads(context.supabase);
+    const { data, error } = await reads
       .from("whatsapp_external_integrations")
       .select("*")
       .limit(1)
@@ -34,7 +36,8 @@ export const saveWhatsappExternalIntegration = createServerFn({ method: "POST" }
 export const listWhatsappExternalEvents = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data, error } = await context.supabase
+    const reads = await tenantReads(context.supabase);
+    const { data, error } = await reads
       .from("whatsapp_external_events")
       .select("id, trigger_type, phone_e164, status, http_status, error, is_test, created_at, player_id")
       .order("created_at", { ascending: false })

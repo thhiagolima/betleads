@@ -30,7 +30,7 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import type { Json } from "@/integrations/supabase/types";
 import { assertTenantCanOperate, assertTenantNotDemoForSend } from "./tenant-access.server";
-import { isDemoBlockedError } from "./demo-tenant";
+import { isBillingLockedError, isSendBlockedError } from "./billing/billing-locked-error";
 import { captureServerException } from "./observability/sentry.server";
 import { normalizeConsentSubject } from "./consent.server";
 import { requireBrazilianPhone } from "./phone-normalization";
@@ -61,6 +61,7 @@ import {
   summarizeProviderError,
   toShortBrasilCell,
 } from "./sms.functions";
+import { countSmsSegments } from "./sms-segments";
 
 /** Items per HTTP request. The provider accepts 5000; 500 limits the blast radius. */
 export const SMS_BULK_CHUNK_SIZE = 500;
@@ -81,7 +82,12 @@ export type SmsBatchItem = {
   linkTrackingEnabled?: boolean;
   linkTrackingOrigin?: Pick<
     LinkTrackingContext,
-    "sourceType" | "sourceId" | "journeyStepId" | "journeyStepPosition" | "shortDomainId"
+    | "sourceType"
+    | "sourceId"
+    | "journeyStepId"
+    | "journeyStepPosition"
+    | "shortDomainId"
+    | "recipientHash"
   >;
 };
 
@@ -149,6 +155,8 @@ type Prepared = {
   content: string;
   dispatchIds: string[];
   billingReferenceId: string | null;
+  /** Units reserved from the wallet (countSmsSegments(content).segments, min 1). */
+  billedUnits: number;
 };
 
 type LogRow = {
@@ -165,6 +173,8 @@ type LogRow = {
   player_id: string | null;
   trigger_name: string | null;
   tenant_id: string;
+  /** Units reserved from the wallet for this send; null when nothing was billed. */
+  billed_units?: number | null;
 };
 
 const db = () => supabaseAdmin as any; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -227,8 +237,9 @@ type ProviderCall =
 
 /**
  * One Short Brasil bulk request. `tenantIds` are the tenants of every item in
- * the payload (a chunk may mix tenants); each passes the demo send guard right
- * before the request, and a DemoTenantBlockedError propagates (nothing sent).
+ * the payload (a chunk may mix tenants); each passes the send guard right
+ * before the request, and a DemoTenantBlockedError/TenantBillingLockedError
+ * propagates (nothing sent).
  */
 async function postBulk(tenantIds: readonly string[], payload: unknown): Promise<ProviderCall> {
   const { usuario, chave } = shortBrasilCredentials();
@@ -402,10 +413,11 @@ async function sendChunk(chunk: Prepared[]): Promise<{
   try {
     call = await postBulk(chunk.map((p) => p.item.tenantId), payload);
   } catch (error) {
-    if (!isDemoBlockedError(error)) throw error;
-    // Only reachable if a tenant turned demo after sendSmsBatch's own guard:
-    // nothing left, so the write-ahead rows and credits are released as failed.
-    return wholeChunkFailed(error.message, false, null);
+    if (!isSendBlockedError(error)) throw error;
+    // Only reachable if a tenant turned demo or got billing-locked after
+    // sendSmsBatch's own guard: nothing left, so the write-ahead rows and
+    // credits are released as failed (final, never retried).
+    return wholeChunkFailed((error as Error).message, false, null);
   }
 
   if (call.kind === "transport") {
@@ -480,6 +492,7 @@ async function sendChunk(chunk: Prepared[]): Promise<{
           player_id: p.item.playerId,
           trigger_name: p.item.triggerName ?? null,
           tenant_id: p.item.tenantId,
+          billed_units: p.billedUnits,
         })),
         { onConflict: "id" },
       );
@@ -540,15 +553,28 @@ async function sendChunk(chunk: Prepared[]): Promise<{
 }
 
 /**
- * Demo send guard for every distinct tenant of a batch. Throws only the
+ * Send guard for every distinct tenant of a batch. Throws the
  * DemoTenantBlockedError (DEMO_SEND_BLOCKED, fail-closed for an empty or
- * unknown tenant); other tenant states (suspended/canceled) are left to the
- * existing checks so their behaviour is unchanged.
+ * unknown tenant) or the TenantBillingLockedError (effective billing lock);
+ * other tenant states (suspended/canceled) are left to the existing checks so
+ * their behaviour is unchanged.
  */
-async function assertBatchTenantsCanSend(tenantIds: Iterable<string>) {
+async function assertBatchTenantsCanSend(
+  tenantIds: Iterable<string>,
+  billingLocked?: Map<string, string>,
+) {
   const ids = Array.from(new Set(tenantIds));
   if (ids.length === 0) await assertTenantNotDemoForSend(null);
-  for (const tenantId of ids) await assertTenantNotDemoForSend(tenantId);
+  for (const tenantId of ids) {
+    try {
+      await assertTenantNotDemoForSend(tenantId);
+    } catch (error) {
+      // With a collector, a billing-locked tenant is recorded instead of
+      // failing the whole batch; a demo/unknown tenant still throws.
+      if (!billingLocked || !isBillingLockedError(error)) throw error;
+      billingLocked.set(tenantId, (error as Error).message);
+    }
+  }
 }
 
 /** Thrown before anything is charged or sent: the caller must retry the whole batch later. */
@@ -564,7 +590,10 @@ export class SmsBatchDeferredError extends Error {
  * Throws SmsBatchDeferredError (nothing charged or sent) when the tenant is
  * blocked or link tracking is in 'block' mode and links could not be prepared.
  * Throws DemoTenantBlockedError (DEMO_SEND_BLOCKED, nothing written) when any
- * item belongs to a demo or unknown tenant.
+ * item belongs to a demo or unknown tenant. Items of a house with an
+ * effective billing lock come back failed, final (`retryable: false`), with
+ * the lock copy and nothing written or charged; the other tenants' items are
+ * sent normally.
  */
 export async function sendSmsBatch(items: SmsBatchItem[]): Promise<SmsBatchResult> {
   const outcomes: Array<SmsBatchOutcome | undefined> = new Array(items.length);
@@ -577,8 +606,31 @@ export async function sendSmsBatch(items: SmsBatchItem[]): Promise<SmsBatchResul
 
   // Demo guard for the whole batch, before any transport choice, log, credit
   // or link: one demo (or unknown) tenant rejects the batch with
-  // DemoTenantBlockedError and no per-recipient row is written.
-  await assertBatchTenantsCanSend(items.map((i) => i.tenantId));
+  // DemoTenantBlockedError and no per-recipient row is written. A
+  // billing-locked house's items fail here, final, before anything is written.
+  const billingLocked = new Map<string, string>();
+  await assertBatchTenantsCanSend(items.map((i) => i.tenantId), billingLocked);
+  if (billingLocked.size > 0) {
+    const keep: Array<{ item: SmsBatchItem; index: number }> = [];
+    items.forEach((item, index) => {
+      const reason = billingLocked.get(item.tenantId);
+      if (reason === undefined) keep.push({ item, index });
+      else
+        outcomes[index] = {
+          deliveryKey: item.deliveryKey,
+          status: "failed",
+          ok: false,
+          retryable: false,
+          error: reason,
+        };
+    });
+    if (keep.length === 0) return result([], 0);
+    const rest = await sendSmsBatch(keep.map((k) => k.item));
+    rest.outcomes.forEach((outcome, j) => {
+      outcomes[keep[j].index] = outcome;
+    });
+    return result(rest.lotes, rest.httpCalls);
+  }
 
   const transport = smsBulkTransport();
   if (transport === "misconfigured") {
@@ -611,14 +663,16 @@ export async function sendSmsBatch(items: SmsBatchItem[]): Promise<SmsBatchResul
           deliveryKey: item.deliveryKey,
         });
         const alreadySent = "alreadySent" in r && r.alreadySent === true;
-        const providerAccount =
-          !r.ok && (r as { errorKind?: unknown }).errorKind === "provider_account";
+        const errorKind = r.ok ? undefined : (r as { errorKind?: unknown }).errorKind;
+        const providerAccount = errorKind === "provider_account";
+        const noBalance = errorKind === "insufficient_balance";
         outcomes[index] = {
           deliveryKey: item.deliveryKey,
           status: r.ok ? (alreadySent ? "already_sent" : "accepted") : "failed",
           ok: r.ok,
           retryable: providerAccount,
           ...(providerAccount ? { errorKind: "provider_account" as const } : {}),
+          ...(noBalance ? { errorKind: "insufficient_balance" as const } : {}),
           error: r.ok ? undefined : (r as { error?: string }).error,
         };
       },
@@ -732,6 +786,7 @@ export async function sendSmsBatch(items: SmsBatchItem[]): Promise<SmsBatchResul
         journeyStepPosition: c.item.linkTrackingOrigin?.journeyStepPosition ?? null,
         shortDomainId: c.item.linkTrackingOrigin?.shortDomainId ?? null,
         recipientPlayerId: c.item.playerId,
+        recipientHash: c.item.linkTrackingOrigin?.recipientHash ?? null,
         messageLogType: "sms_send_logs",
         messageLogId: logIds[k],
         deliveryKey: c.item.deliveryKey,
@@ -756,13 +811,22 @@ export async function sendSmsBatch(items: SmsBatchItem[]): Promise<SmsBatchResul
       const link = links[k];
       const content = link.ok ? link.content : c.item.content;
       const dispatchIds = link.ok ? link.links.map((l) => l.dispatchId) : [];
-      const reservation = await reserveSmsCreditForDelivery(c.item.tenantId, c.item.deliveryKey);
+      // Segments counted on the FINAL content (post-link), never the template text.
+      const billedUnits = Math.max(1, countSmsSegments(content).segments);
+      const reservation = await reserveSmsCreditForDelivery(
+        c.item.tenantId,
+        c.item.deliveryKey,
+        billedUnits,
+      );
       if (!reservation.ok) {
+        // reserveSmsCreditForDelivery only returns ok:false for the house's
+        // own wallet refusal (any other error throws).
         outcomes[c.index] = {
           deliveryKey: c.item.deliveryKey,
           status: "failed",
           ok: false,
           retryable: false,
+          errorKind: "insufficient_balance",
           error: reservation.error,
         };
         failLogs.push(
@@ -793,6 +857,7 @@ export async function sendSmsBatch(items: SmsBatchItem[]): Promise<SmsBatchResul
         content,
         dispatchIds,
         billingReferenceId: reservation.referenceId,
+        billedUnits,
       });
     },
   );
@@ -826,6 +891,7 @@ export async function sendSmsBatch(items: SmsBatchItem[]): Promise<SmsBatchResul
             player_id: p.item.playerId,
             trigger_name: p.item.triggerName ?? null,
             tenant_id: p.item.tenantId,
+            billed_units: p.billedUnits,
           }),
         ),
       );

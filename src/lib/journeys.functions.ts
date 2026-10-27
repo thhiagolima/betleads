@@ -4,6 +4,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { resolveOperationalTenantId } from "./tenant-access.server";
+import { getEffectivePrices, getReportUnitPrices } from "./billing/pricing.server";
 import {
   journeyInputSchema,
   journeyStatusSchema,
@@ -485,10 +486,13 @@ export const getJourney = createServerFn({ method: "GET" })
     };
     const sentByChannel = aggregate.sentByChannel ?? {};
     const recovered = Number(aggregate.recovered ?? 0);
+    const prices = await getReportUnitPrices(tenantId);
+    // Voice is estimated as 1 block (30s) per call until PG3 ships real
+    // per-call duration billing; voice_30s is the only price book has today.
     const cost =
-      (sentByChannel.sms ?? 0) * 0.12 +
-      (sentByChannel.email ?? 0) * 0.01 +
-      (sentByChannel.voice ?? 0) * 0.35;
+      (sentByChannel.sms ?? 0) * prices.sms +
+      (sentByChannel.email ?? 0) * prices.email +
+      (sentByChannel.voice ?? 0) * prices.voice_30s;
     return {
       journey,
       steps: steps ?? [],
@@ -982,17 +986,8 @@ export const getJourneyActivationEstimate = createServerFn({ method: "GET" })
     if (error) throw new Error("Não foi possível estimar o impacto da publicação.");
     const row = (rows ?? [])[0] as
       { eligible: number | string | null; supported: boolean } | undefined;
-    const [{ data: pricing }, { data: settings }] = await Promise.all([
-      supabaseAdmin
-        .from("tenant_sms_pricing")
-        .select("sale_price_per_sms")
-        .eq("tenant_id", tenantId)
-        .maybeSingle(),
-      supabaseAdmin.from("sms_credit_settings").select("default_sale_price_per_sms").maybeSingle(),
-    ]);
-    const price = Number(
-      pricing?.sale_price_per_sms ?? settings?.default_sale_price_per_sms ?? 0.12,
-    );
+    const prices = await getEffectivePrices(tenantId);
+    const price = prices.sms.unitPrice;
     const eligible = row?.eligible == null ? null : Number(row.eligible);
     return {
       supported: Boolean(row?.supported),

@@ -29,6 +29,7 @@ const roleLabel: Record<TenantOption["role"], string> = {
   gestor: "Gestor",
   member: "Membro",
   super_admin: "Super admin",
+  expert: "Expert",
 };
 
 /**

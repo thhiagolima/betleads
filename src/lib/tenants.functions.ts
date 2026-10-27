@@ -4,7 +4,19 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import type { Json } from "@/integrations/supabase/types";
-import { assertTenantNotDemo } from "@/lib/tenant-access.server";
+import {
+  getTenantBillingSnapshot,
+  isTenantPayer,
+  type BillingSnapshotInvoice,
+} from "@/lib/billing/billing-state.server";
+import {
+  isEffectiveLock,
+  type BillingAccessState,
+  type BillingRole,
+} from "@/lib/billing/billing-view";
+import { cancelOpenInvoiceCharges } from "@/lib/billing/invoices.server";
+import { EXPERT_MEMBER_GUARD, HOUSE_MEMBER_ROLES } from "@/lib/house-member-roles";
+import { assertTenantNotDemo, isBillingEnforcementEnabled } from "@/lib/tenant-access.server";
 import { auditTenant } from "@/lib/tenant-audit.server";
 import { dbUuid } from "@/lib/zod-helpers";
 
@@ -61,7 +73,9 @@ type TenantMemberRow = {
   id: string;
   user_id: string;
   tenant_id: string;
-  role: TenantAssignableRole;
+  // `expert` rows live in user_roles too (Área do Expert), but are managed
+  // only in Experts — never assigned from the team screen.
+  role: TenantAssignableRole | "expert";
   created_at: string;
 };
 
@@ -173,10 +187,13 @@ async function getAccessibleTenants(ctx: ServerContext) {
     return { superAdmin, tenants: data ?? [] };
   }
 
+  // Team roles only: an `expert` row must never open the house console
+  // (team, wallet, ledger, audit log...), which is read via supabaseAdmin.
   const { data: roles, error: rolesErr } = await db()
     .from<TenantMemberRow[]>("user_roles")
     .select("tenant_id")
     .eq("user_id", ctx.userId)
+    .in("role", [...HOUSE_MEMBER_ROLES])
     .not("tenant_id", "is", null);
   if (rolesErr) throw new Error(rolesErr.message);
 
@@ -251,6 +268,36 @@ export async function findAuthUserByEmail(email: string) {
   return null;
 }
 
+/**
+ * Finds the auth user for `email`, or creates one: an e-mail invite
+ * (`inviteUserByEmail`) by default, or — only when `password` is given — a
+ * confirmed user with that password who must change it on first sign-in.
+ * Shared by the team screen (`addUserToTenantFor`) and Experts
+ * (`inviteExpertFor`). An existing user is reused as-is (`created: false`).
+ */
+export async function findOrInviteUserByEmail(
+  email: string,
+  opts: { invitedBy: string; tenantId: string; password?: string | null },
+): Promise<{ userId: string; created: boolean }> {
+  const normalized = email.trim().toLowerCase();
+  const existing = await findAuthUserByEmail(normalized);
+  if (existing) return { userId: existing.id, created: false };
+
+  const metadata = { invited_by: opts.invitedBy, tenant_id: opts.tenantId };
+  const createRes = opts.password
+    ? await supabaseAdmin.auth.admin.createUser({
+        email: normalized,
+        password: opts.password,
+        email_confirm: true,
+        user_metadata: metadata,
+        app_metadata: { force_password_change: true },
+      })
+    : await supabaseAdmin.auth.admin.inviteUserByEmail(normalized, { data: metadata });
+  if (createRes.error) throw new Error(createRes.error.message);
+  if (!createRes.data.user) throw new Error("Falha ao criar usuário");
+  return { userId: createRes.data.user.id, created: true };
+}
+
 /** Members of a house (user_roles) with their auth e-mail and sign-in data, oldest first. */
 export async function listTenantMembers(tenantId: string) {
   const { data, error } = await db()
@@ -269,14 +316,71 @@ export async function listTenantMembers(tenantId: string) {
   }));
 }
 
-async function buildTenantDetail(tenantId: string) {
+/**
+ * Keys that carry what Betleads pays the supplier: `provider_unit_cost` is
+ * the current (PG1) key on `billing_effective_price`/`wallet_summary.prices.*`
+ * /`admin_set_tenant_price`; `provider_cost_per_sms` is the legacy (pre-PG1)
+ * key, still present verbatim in old `sms_credit_summary.pricing`/
+ * `sms_effective_pricing` audit rows written before this migration. Only the
+ * super admin may see either (or the margin derived from them).
+ */
+const PROVIDER_COST_KEYS = new Set(["provider_unit_cost", "provider_cost_per_sms"]);
+
+/**
+ * Recursively strips every `PROVIDER_COST_KEYS` entry from `value`, at any
+ * depth — top level, nested one level in `prices.<item>` (wallet_summary) or
+ * `pricing` (legacy sms_credit_summary), and inside arrays. Used both for the
+ * live wallet summary and for historical audit rows (`before_data`/
+ * `after_data`/`metadata`), which may carry either shape depending on when
+ * they were written.
+ */
+function withoutProviderCost<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((item) => withoutProviderCost(item)) as unknown as T;
+  }
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, v] of Object.entries(value as Record<string, unknown>)) {
+      if (PROVIDER_COST_KEYS.has(key)) continue;
+      out[key] = withoutProviderCost(v);
+    }
+    return out as T;
+  }
+  return value;
+}
+
+/**
+ * Audit rows written by the price-book and wallet admin actions (and, for
+ * older rows, the legacy SMS-credit admin actions) carry the provider cost
+ * in before/after/metadata, at any depth. Strip it the same way for anyone
+ * who is not the super admin.
+ */
+type AuditRow = { [key: string]: Json };
+
+function redactAuditJson(value: Json): Json {
+  return withoutProviderCost(value);
+}
+
+function redactAuditRows(rows: AuditRow[]): AuditRow[] {
+  return rows.map((row) => {
+    const copy = { ...row };
+    for (const key of ["before_data", "after_data", "metadata", "before", "after"]) {
+      if (key in copy) copy[key] = redactAuditJson(copy[key]);
+    }
+    return copy;
+  });
+}
+
+async function buildTenantDetail(
+  tenantId: string,
+  { includeProviderCost }: { includeProviderCost: boolean },
+) {
   const since30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
   const [
     tenantRes,
     users,
-    smsSummaryRes,
-    pricingRes,
+    walletSummaryRes,
     ledgerRes,
     ordersRes,
     auditRes,
@@ -293,16 +397,20 @@ async function buildTenantDetail(tenantId: string) {
       .eq("id", tenantId)
       .maybeSingle(),
     listTenantMembers(tenantId),
-    db().rpc("sms_credit_summary", { _tenant: tenantId }),
-    db().rpc("sms_effective_pricing", { _tenant: tenantId }),
+    db().rpc("wallet_summary", { _tenant: tenantId }),
+    // Never selects `provider_unit_cost`, regardless of who's asking: this
+    // query always runs through `db()` (supabaseAdmin), which bypasses the
+    // column grant that normally hides it from `authenticated`.
     db()
-      .from("sms_credit_ledger")
+      .from("wallet_ledger")
       .select(
-        "id,delta_credits,balance_after,entry_type,reason,reference_type,created_by,created_at",
+        "id,entry_type,item,units,free_units,usage_month,unit_price,amount,balance_after,reference_type,reference_id,reason,created_by,created_at",
       )
       .eq("tenant_id", tenantId)
       .order("created_at", { ascending: false })
       .limit(25),
+    // Legacy pre-wallet orders: read-only now (PG2 brings the real Pix
+    // checkout), kept so old purchase history doesn't disappear.
     db()
       .from("sms_credit_orders")
       .select(
@@ -329,11 +437,32 @@ async function buildTenantDetail(tenantId: string) {
 
   if (tenantRes.error) throw new Error(tenantRes.error.message);
   if (!tenantRes.data) throw new Error("Tenant não encontrado");
-  if (smsSummaryRes.error) throw new Error(smsSummaryRes.error.message);
-  if (pricingRes.error) throw new Error(pricingRes.error.message);
+  if (walletSummaryRes.error) throw new Error(walletSummaryRes.error.message);
   if (ledgerRes.error) throw new Error(ledgerRes.error.message);
   if (ordersRes.error) throw new Error(ordersRes.error.message);
   if (auditRes.error) throw new Error(auditRes.error.message);
+
+  const walletSummary = (walletSummaryRes.data ?? {}) as {
+    exempt?: boolean;
+    prices?: Record<
+      string,
+      {
+        unit_price?: number;
+        provider_unit_cost?: number;
+        free_monthly_units?: number;
+        source?: string;
+      }
+    >;
+  };
+  const smsPrice = walletSummary.prices?.sms ?? {};
+  const pricing = {
+    item: "sms",
+    unit_price: Number(smsPrice.unit_price ?? 0),
+    free_monthly_units: Number(smsPrice.free_monthly_units ?? 0),
+    exempt: Boolean(walletSummary.exempt),
+    has_tenant_override: smsPrice.source === "override",
+    ...(includeProviderCost ? { provider_unit_cost: smsPrice.provider_unit_cost ?? null } : {}),
+  };
 
   return {
     tenant: tenantRes.data,
@@ -347,12 +476,14 @@ async function buildTenantDetail(tenantId: string) {
       meta_accounts: metaAccounts,
     },
     sms: {
-      summary: smsSummaryRes.data ?? {},
-      pricing: pricingRes.data ?? {},
+      summary: includeProviderCost ? walletSummary : withoutProviderCost(walletSummary),
+      pricing,
       ledger: ledgerRes.data ?? [],
       orders: ordersRes.data ?? [],
     },
-    audit: auditRes.data ?? [],
+    audit: includeProviderCost
+      ? ((auditRes.data ?? []) as AuditRow[])
+      : redactAuditRows((auditRes.data ?? []) as AuditRow[]),
   };
 }
 
@@ -369,11 +500,12 @@ export const getTenantManagementConsole = createServerFn({ method: "POST" })
     getTenantManagementConsoleFor(context as unknown as ServerContext, data),
   );
 
-// Body of `getTenantManagementConsole`, exported so its access rule (house
-// role or super admin only; group managers get no path here) is unit-testable.
+// Body of `getTenantManagementConsole`, exported so it is unit-testable. Its
+// access rule is house role or super admin only (getAccessibleTenants); group
+// managers get no path here.
 export async function getTenantManagementConsoleFor(
   ctx: ServerContext,
-  data: z.infer<typeof consoleInput>,
+  data: { tenantId?: string | null },
 ) {
   const { superAdmin, tenants } = await getAccessibleTenants(ctx);
   const selectedTenantId = data.tenantId ?? tenants[0]?.id ?? null;
@@ -396,7 +528,7 @@ export async function getTenantManagementConsoleFor(
     canManage: await canManageTenant(ctx, selectedTenantId),
     tenants,
     selectedTenantId,
-    detail: await buildTenantDetail(selectedTenantId),
+    detail: await buildTenantDetail(selectedTenantId, { includeProviderCost: superAdmin }),
   };
 }
 
@@ -510,47 +642,106 @@ export const getTenantSwitcher = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => getTenantSwitcherFor(context as unknown as ServerContext));
 
-export const getCurrentTenantAccessStatus = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    const ctx = context as unknown as ServerContext;
-    const superAdmin = await checkSuperAdmin(ctx.userId);
+/** The billing block of `getCurrentTenantAccessStatus`, for the banner and lock UI. */
+export type TenantAccessBilling = {
+  state: BillingAccessState;
+  /** The lock for THIS caller: always false for the superadmin. */
+  effectiveLock: boolean;
+  role: BillingRole;
+  invoice: BillingSnapshotInvoice | null;
+  enforcement: boolean;
+  /** Brasília calendar day (YYYY-MM-DD), for `billingView`. */
+  today: string;
+};
 
-    if (superAdmin) {
-      return {
-        isSuperAdmin: true,
-        tenant: null,
-        blocked: false,
-      };
-    }
+function brasiliaToday(now: Date = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+}
 
-    const { data: tenantId, error: tenantErr } =
-      await ctx.supabase.rpc<string>("current_tenant_id");
-    if (tenantErr) throw new Error(tenantErr.message);
+async function tenantAccessBilling(
+  ctx: ServerContext,
+  tenantId: string,
+  superAdmin: boolean,
+): Promise<TenantAccessBilling> {
+  const [snapshot, payer] = await Promise.all([
+    getTenantBillingSnapshot(tenantId),
+    superAdmin ? Promise.resolve(true) : isTenantPayer(ctx.supabase, tenantId, ctx.userId),
+  ]);
+  const enforcement = isBillingEnforcementEnabled();
+  return {
+    state: snapshot.state,
+    effectiveLock: !superAdmin && isEffectiveLock(snapshot.state, enforcement),
+    role: superAdmin ? "super_admin" : payer ? "payer" : "member",
+    invoice: snapshot.invoice,
+    enforcement,
+    today: brasiliaToday(),
+  };
+}
 
-    if (!tenantId) {
-      return {
-        isSuperAdmin: false,
-        tenant: null,
-        blocked: false,
-      };
-    }
+/**
+ * Status the UI gate polls. Never refused for a billing-locked house (it is
+ * how the UI learns about the lock), so it reads the active tenant with the
+ * raw `current_tenant_id` RPC, not a locking resolver.
+ */
+export async function getCurrentTenantAccessStatusFor(ctx: ServerContext) {
+  const superAdmin = await checkSuperAdmin(ctx.userId);
 
-    const { data: tenant, error } = await db()
+  if (superAdmin) {
+    // The superadmin is never locked, but sees the house's billing state
+    // (banner) for the house currently selected, when there is one.
+    let billing: TenantAccessBilling | null = null;
+    const { data: activeTenantId } = await ctx.supabase.rpc<string>("current_tenant_id");
+    if (activeTenantId) billing = await tenantAccessBilling(ctx, activeTenantId, true);
+    return {
+      isSuperAdmin: true,
+      tenant: null,
+      blocked: false,
+      billing,
+    };
+  }
+
+  const { data: tenantId, error: tenantErr } = await ctx.supabase.rpc<string>("current_tenant_id");
+  if (tenantErr) throw new Error(tenantErr.message);
+
+  if (!tenantId) {
+    return {
+      isSuperAdmin: false,
+      tenant: null,
+      blocked: false,
+      billing: null,
+    };
+  }
+
+  const [{ data: tenant, error }, billing] = await Promise.all([
+    db()
       .from<TenantRow>("tenants")
       .select("id,nome,slug,status,plano,crm_model,created_at,updated_at")
       .eq("id", tenantId)
-      .maybeSingle();
-    if (error) throw new Error(error.message);
+      .maybeSingle(),
+    tenantAccessBilling(ctx, tenantId, false),
+  ]);
+  if (error) throw new Error(error.message);
 
-    const status = tenant?.status ?? null;
+  const status = tenant?.status ?? null;
 
-    return {
-      isSuperAdmin: false,
-      tenant,
-      blocked: status === "suspended" || status === "canceled",
-    };
-  });
+  return {
+    isSuperAdmin: false,
+    tenant,
+    blocked: status === "suspended" || status === "canceled",
+    billing,
+  };
+}
+
+export const getCurrentTenantAccessStatus = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) =>
+    getCurrentTenantAccessStatusFor(context as unknown as ServerContext),
+  );
 
 const createTenantInput = z.object({
   nome: z.string().min(2).max(160),
@@ -558,7 +749,9 @@ const createTenantInput = z.object({
   adminEmail: z.string().email().max(255),
   status: tenantStatus.default("trial"),
   plano: tenantPlan.default("starter"),
-  crm_model: crmModel.default("CRM_PLATAFORMA"),
+  // Criação de casa só aceita o modelo vigente; CRM_EXPERT foi descontinuado
+  // (Task 3 da Área do Expert) e só sobrevive em casas legadas já nesse modelo.
+  crm_model: z.enum(["CRM_PLATAFORMA"]).default("CRM_PLATAFORMA"),
 });
 
 export const adminCreateTenant = createServerFn({ method: "POST" })
@@ -616,17 +809,16 @@ const updateTenantInput = z.object({
   status: tenantStatus,
   plano: tenantPlan,
   crm_model: crmModel,
+  // Required (>= 5 chars) only when `plano` changes into or out of
+  // 'interno'; optional otherwise (see `updateTenantSettingsFor` below).
+  planReason: z.string().max(500).optional().nullable(),
 });
 
-export const updateTenantSettings = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => updateTenantInput.parse(data))
-  .handler(async ({ data, context }) =>
-    updateTenantSettingsFor(context as unknown as ServerContext, data),
-  );
-
-// Body of `updateTenantSettings`. Settings stay with super admin / house admin;
-// a group manager has no settings path (requireTenantSettingsManager).
+/**
+ * Body of `updateTenantSettings`, exported so the plan-reason rule is directly
+ * unit-testable. Settings stay with super admin / house admin; a group manager
+ * has no settings path (requireTenantSettingsManager).
+ */
 export async function updateTenantSettingsFor(
   ctx: ServerContext,
   data: z.infer<typeof updateTenantInput>,
@@ -642,6 +834,30 @@ export async function updateTenantSettingsFor(
     .maybeSingle();
   if (beforeErr) throw new Error(beforeErr.message);
   if (!before) throw new Error("Tenant não encontrado");
+
+  // CRM_EXPERT foi descontinuado (Task 3 da Área do Expert): só continua
+  // existindo em casas legadas que já estavam nesse modelo. Mudar uma casa
+  // atual *para* CRM_EXPERT não é permitido; manter o valor já vigente é.
+  if (data.crm_model === "CRM_EXPERT" && before.crm_model !== "CRM_EXPERT") {
+    throw new Error(
+      "O modelo CRM Expert foi descontinuado. Cadastre experts dentro da casa, em Experts.",
+    );
+  }
+
+  // Only the super admin can actually change `plano` (the `patch` below
+  // omits it otherwise, and `tenants_plan_guard` enforces the same rule at
+  // the DB level), so the reason is only ever required on that branch.
+  const planChanging = superAdmin && before.plano !== data.plano;
+  const touchesInterno = planChanging && (before.plano === "interno" || data.plano === "interno");
+  const planReason = (data.planReason ?? "").trim();
+  if (touchesInterno && planReason.length < 5) {
+    throw new Error("Informe o motivo da troca de plano");
+  }
+
+  // A house that becomes exempt has its open invoice canceled by the plano
+  // trigger, but the invoice's Pix at Upper stays payable. Note the open
+  // invoice before the update so its charges can be canceled afterwards.
+  const openInvoiceBefore = planChanging ? await findOpenInvoiceId(data.tenantId) : null;
 
   const patch = superAdmin
     ? {
@@ -664,6 +880,8 @@ export async function updateTenantSettingsFor(
     .single();
   if (error) throw new Error(error.message);
 
+  const pixCancel = openInvoiceBefore ? await cancelPixOfClosedInvoice(openInvoiceBefore) : null;
+
   await auditTenant({
     tenantId: data.tenantId,
     actorUserId: ctx.userId,
@@ -672,11 +890,60 @@ export async function updateTenantSettingsFor(
     entityId: data.tenantId,
     before,
     after: tenant,
-    metadata: { limited_scope: !superAdmin },
+    metadata: {
+      limited_scope: !superAdmin,
+      ...(touchesInterno ? { plan_reason: planReason } : {}),
+      ...(pixCancel ? { pix_cancel: pixCancel } : {}),
+    },
   });
 
   return { tenant };
 }
+
+async function findOpenInvoiceId(tenantId: string): Promise<string | null> {
+  const { data, error } = await db()
+    .from<{ id: string }>("billing_invoices")
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .eq("status", "open")
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data?.id ?? null;
+}
+
+/**
+ * After a plan change: if the invoice that was open before it is no longer
+ * open (the plano trigger cancels it when the house becomes exempt), cancel
+ * its Pix charges at Upper. Best-effort: the plan change already happened,
+ * so a failure is logged and returned for the audit row, never thrown.
+ */
+async function cancelPixOfClosedInvoice(invoiceId: string) {
+  try {
+    const { data, error } = await db()
+      .from<{ status: string }>("billing_invoices")
+      .select("status")
+      .eq("id", invoiceId)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (data?.status === "open") return null;
+    const { canceled, failed } = await cancelOpenInvoiceCharges(invoiceId);
+    if (failed.length > 0) {
+      console.error("[tenants] cancelOpenInvoiceCharges reported per-charge failures", failed);
+    }
+    return { invoiceId, ok: failed.length === 0, canceled, failed };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[tenants] cancelOpenInvoiceCharges failed", message);
+    return { invoiceId, ok: false, canceled: 0, failed: [{ chargeId: "unknown", error: message }] };
+  }
+}
+
+export const updateTenantSettings = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => updateTenantInput.parse(data))
+  .handler(async ({ data, context }) =>
+    updateTenantSettingsFor(context as unknown as ServerContext, data),
+  );
 
 const addUserInput = z.object({
   tenantId: dbUuid(),
@@ -707,28 +974,13 @@ export async function addUserToTenantFor(ctx: ServerContext, data: z.infer<typeo
   }
 
   const email = data.email.trim().toLowerCase();
-  let user = await findAuthUserByEmail(email);
-  let created = false;
+  const { userId, created } = await findOrInviteUserByEmail(email, {
+    invitedBy: ctx.userId,
+    tenantId: data.tenantId,
+    password: data.password,
+  });
 
-  if (!user) {
-    const createRes = data.password
-      ? await supabaseAdmin.auth.admin.createUser({
-          email,
-          password: data.password,
-          email_confirm: true,
-          user_metadata: { invited_by: ctx.userId, tenant_id: data.tenantId },
-          app_metadata: { force_password_change: true },
-        })
-      : await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
-          data: { invited_by: ctx.userId, tenant_id: data.tenantId },
-        });
-    if (createRes.error) throw new Error(createRes.error.message);
-    if (!createRes.data.user) throw new Error("Falha ao criar usuário");
-    user = createRes.data.user;
-    created = true;
-  }
-
-  if (!actorIsSuperAdmin && (await checkSuperAdmin(user.id))) {
+  if (!actorIsSuperAdmin && (await checkSuperAdmin(userId))) {
     throw new Error("Não é permitido vincular um superadmin global por esta área");
   }
 
@@ -736,11 +988,12 @@ export async function addUserToTenantFor(ctx: ServerContext, data: z.infer<typeo
     .from<TenantMemberRow>("user_roles")
     .select("id,user_id,tenant_id,role,created_at")
     .eq("tenant_id", data.tenantId)
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .maybeSingle();
   if (existingErr) throw new Error(existingErr.message);
 
   if (existing) {
+    if (existing.role === "expert") throw new Error(EXPERT_MEMBER_GUARD);
     if (existing.role === data.role) return { ok: true, created, existing: true };
     // Same admin rules as updateTenantUserRole: re-adding an existing admin
     // with another role is a demotion.
@@ -770,7 +1023,7 @@ export async function addUserToTenantFor(ctx: ServerContext, data: z.infer<typeo
   const { data: membership, error } = await db()
     .from<TenantMemberRow>("user_roles")
     .insert({
-      user_id: user.id,
+      user_id: userId,
       tenant_id: data.tenantId,
       role: data.role,
     })
@@ -783,7 +1036,7 @@ export async function addUserToTenantFor(ctx: ServerContext, data: z.infer<typeo
     actorUserId: ctx.userId,
     action: "tenant_user.added",
     entityType: "user_role",
-    entityId: membership?.id ?? user.id,
+    entityId: membership?.id ?? userId,
     after: { ...membership, email },
     metadata: { auth_user_created: created },
   });
@@ -804,7 +1057,7 @@ export const updateTenantUserRole = createServerFn({ method: "POST" })
     updateTenantUserRoleFor(context as unknown as ServerContext, data),
   );
 
-// Body of `updateTenantUserRole`, exported so the admin rules are unit-testable.
+// Body of `updateTenantUserRole`, exported so its guards are unit-testable.
 export async function updateTenantUserRoleFor(
   ctx: ServerContext,
   data: z.infer<typeof updateUserRoleInput>,
@@ -825,6 +1078,7 @@ export async function updateTenantUserRoleFor(
     .maybeSingle();
   if (beforeErr) throw new Error(beforeErr.message);
   if (!before) throw new Error("Vínculo não encontrado");
+  if (before.role === "expert") throw new Error(EXPERT_MEMBER_GUARD);
 
   if (!actorCanSetAdmin && before.role === "admin") {
     throw new Error("Apenas o super admin ou o gestor do grupo pode alterar o admin da casa");
@@ -871,7 +1125,7 @@ export const removeUserFromTenant = createServerFn({ method: "POST" })
     removeUserFromTenantFor(context as unknown as ServerContext, data),
   );
 
-// Body of `removeUserFromTenant`, exported so the admin rules are unit-testable.
+// Body of `removeUserFromTenant`, exported so its guards are unit-testable.
 export async function removeUserFromTenantFor(
   ctx: ServerContext,
   data: z.infer<typeof removeUserInput>,
@@ -890,6 +1144,7 @@ export async function removeUserFromTenantFor(
 
   const before = (memberships ?? []).find((row) => row.id === data.membershipId);
   if (!before) throw new Error("Vínculo não encontrado");
+  if (before.role === "expert") throw new Error(EXPERT_MEMBER_GUARD);
   if (before.user_id === ctx.userId) {
     throw new Error("Você não pode remover seu próprio acesso por aqui");
   }

@@ -56,6 +56,8 @@ Criar em **Uptime → Heartbeats** um heartbeat por linha, copiar a URL e coloca
 | `webhook_replay` | `BETTERSTACK_HEARTBEAT_WEBHOOK_REPLAY` | `POST /api/public/hooks/webhook-replay` | `* * * * *` (`20261014213000`) | 1 min | 3 min |
 | `shortio_sync` | `BETTERSTACK_HEARTBEAT_SHORTIO_SYNC` | `POST /api/public/shortio/sync` | `* * * * *` (`20261014193000`) | 1 min | 3 min |
 | `recovery` | `BETTERSTACK_HEARTBEAT_RECOVERY` | `POST /api/public/hooks/recovery` | `*/2 * * * *` (`20261003143000`) | 2 min | 4 min |
+| `billing-reconcile` | `BETTERSTACK_HEARTBEAT_BILLING_RECONCILE` | `POST /api/public/hooks/billing-reconcile` (conciliação Pix Upper) | `*/5 * * * *` (`20261022110100`) | 5 min | 10 min |
+| `billing-health` (só ping, sem linha própria) | `BETTERSTACK_HEARTBEAT_BILLING_HEALTH` | mesmo request da conciliação: checagem de saúde da cobrança (PG6-03); ping só quando nenhum achado crítico | `*/5 * * * *` (`20261022110100`) | 5 min | 10 min |
 | refresh do dashboard | — | `select public.refresh_recent_dashboard_metrics()` direto no pg_cron | `*/5 * * * *` (`20261014153000`) | — | — |
 
 Regra geral para nomes: `BETTERSTACK_HEARTBEAT_<JOB em MAIÚSCULAS>`.
@@ -65,6 +67,15 @@ Particularidades:
 - `journey_dispatch` faz ping mesmo com `JOURNEYS_DISPATCH_ENABLED` desligado (registra `stop_reason='disabled'`). Se o alerta deve refletir envio real, acompanhar `sent` em `observability_job_health()`/`dispatcher_runs`.
 - `journey_scan` **não** faz ping quando `JOURNEYS_SCANNER_ENABLED` está desligado ou o escopo canário não permite; nesse caso não crie o heartbeat (ou pause-o).
 - `sms_campaign_dispatch` e `webhook_replay` só gravam linha em `dispatcher_runs` quando há trabalho (campanha reservada / backlog). Ticks vazios apenas fazem ping. `dry_run` do replay não faz ping.
+- `billing-health` não faz ping quando a checagem de saúde da cobrança encontra um problema crítico de estado: conciliação ou ciclo parados, cobrança paga e não creditada há mais de 10 min, carteira diferente do razão, ou a própria checagem falhou. Os sinais por evento (webhook com assinatura inválida, Upper com `FEATURE_DISABLED`/401, e `upper_unavailable`: 3 ou mais tempos esgotados, erros de rede ou 5xx da Upper na janela) também alertam, mas só para eventos novos desde a execução anterior, e nunca seguram o heartbeat. Cobranças em revisão são resolvidas pelo botão "Resolver" no mesmo card (ver `docs/operacoes/RUNBOOK_INCIDENTES_COBRANCA.md`, seção 3), nunca por `update` manual. Os achados vão para o Sentry (um issue por código, fingerprint `billing-alert/<código>`) quando o Sentry do servidor está ativo; senão, para o log com o prefixo fixo `[billing-alert]`, no máximo uma vez por hora por código e por processo. Admin → Faturamento → "Saúde da cobrança" mostra os achados das últimas 24 h e tem o botão "Testar alerta" (código `billing_alert_test`).
+
+### Saúde da cobrança (PG6-03): checklist de deploy
+
+1. Aplicar as migrations `20261024100400_billing_health_monitor.sql` e `20261024100500_billing_review_and_retention.sql`, nessa ordem, **antes** do deploy do app. Sem ela, toda conciliação registra `billing_health_check_failed` e o heartbeat `billing-health` nunca faz ping.
+2. Antes de ligar o monitor do heartbeat `BETTERSTACK_HEARTBEAT_BILLING_HEALTH` no Better Stack, confirmar que já existe uma linha do ciclo em `dispatcher_runs` (`select finished_at from dispatcher_runs where job = 'billing-cycle' and status in ('succeeded','partial') order by started_at desc limit 1;`). Sem ela, `billing_cycle_cron_stale` segura o heartbeat até a primeira execução da hora.
+3. Sem Sentry no servidor, configurar no Better Stack um alerta de log para o texto `[billing-alert]`, com cooldown (ex.: 1 h).
+4. Retenção: o `billing-cycle` limpa `raw_body`/`headers` de `payment_webhook_events` com mais de 90 dias (campo `webhook_bodies_purged` na resposta; `null` = a etapa falhou, ver `[billing-retention]` nos logs). Não mexe em `payment_charges`.
+5. Depois do deploy, apertar "Testar alerta" uma vez (Admin → Faturamento → Saúde da cobrança) e confirmar a chegada no Sentry ou no alerta de log. É o critério de aceite da PG6-03.
 - Refresh do dashboard roda inteiramente no Postgres; o app não participa. Opções: (a) consultar `cron.job_run_details` (seção 6.4); (b) acrescentar ao comando do cron um `net.http_get` para a URL do heartbeat após o refresh, guardando a URL no Vault (não aplicar sem revisão).
 
 Aceite OBS-04 ("derrubar um job em homologação dispara alerta em < 5 min"): com período 1 min e grace 3 min, a ausência de ping alerta em ~4 min; um `/fail` alerta imediatamente.

@@ -16,6 +16,14 @@ const minutesSince = (data: Data) =>
     ? Math.round((Date.now() - new Date(data.health.updatedAt).getTime()) / 60_000)
     : null;
 
+/** "12 min", "3 h", "4 dias": long gaps in minutes are unreadable. */
+export function agoLabel(minutes: number) {
+  if (minutes < 60) return `${num(minutes)} min`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${num(hours)} h`;
+  return `${num(Math.round(hours / 24))} dias`;
+}
+
 /**
  * Header pill for data health (C-10): fresh and consistent shows green; stale
  * data or a failed daily check shows amber. Opens the details in a side panel.
@@ -29,14 +37,14 @@ export function HealthIndicator({ data }: { data: Data }) {
       <SheetTrigger asChild>
         <Button size="sm" variant="ghost" className="gap-2 text-muted-foreground">
           <span
-            className={`h-2 w-2 rounded-full ${ok ? "bg-emerald-500" : "bg-amber-500"}`}
+            className={`h-2 w-2 rounded-full ${ok ? "bg-success" : "bg-warning"}`}
             aria-hidden="true"
           />
           {minutes == null
             ? "Sem atualização"
             : failed
               ? "Divergência nos dados"
-              : `Atualizado há ${num(minutes)} min`}
+              : `Atualizado há ${agoLabel(minutes)}`}
         </Button>
       </SheetTrigger>
       <SheetContent className="w-full overflow-y-auto sm:max-w-lg">
@@ -69,7 +77,7 @@ function HealthDetails({ data }: { data: Data }) {
         label="Última atualização"
         value={
           updated
-            ? `${updated.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })} (há ${num(minutesAgo ?? 0)} min)`
+            ? `${updated.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })} (há ${agoLabel(minutesAgo ?? 0)})`
             : "sem atualização"
         }
       />
@@ -103,7 +111,7 @@ function HealthLine({ ok, label, value }: { ok: boolean; label: string; value: s
   return (
     <div className="flex items-start gap-3">
       <span
-        className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${ok ? "bg-emerald-500" : "bg-amber-500"}`}
+        className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${ok ? "bg-success" : "bg-warning"}`}
         aria-hidden="true"
       />
       <div>
@@ -118,7 +126,7 @@ function HealthLine({ ok, label, value }: { ok: boolean; label: string; value: s
 
 const CHECK_LABELS: Record<string, string> = {
   sends: "Envios conferem com o registro de SMS",
-  cost: "Custo confere com os créditos cobrados",
+  cost: "Custo confere com o preço por segmento cobrado",
   direct: "Conversões por clique conferem com as atribuições",
 };
 
@@ -146,7 +154,7 @@ function ConsistencyChecks({ checks }: { checks: Data["health"]["checks"] }) {
         />
       ))}
       {failures.length > 0 && (
-        <p className="text-xs text-amber-600 dark:text-amber-400">
+        <p className="text-xs text-warning">
           {num(failures.length)} checagem(ns) com divergência nos últimos 14 dias:{" "}
           {failures
             .slice(0, 5)

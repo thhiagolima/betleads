@@ -1,14 +1,13 @@
 import { Fragment, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { Link } from "@tanstack/react-router";
-import { ArrowLeft } from "lucide-react";
 
 import { getTenantComparison } from "@/lib/tenant-comparison.functions";
 import { brl, num } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Page, PageHeader } from "@/components/ui-premium/page-header";
 import {
   Table,
   TableBody,
@@ -51,7 +50,7 @@ const currency = (value: number | null) => money(value);
 
 const GROUPS: Array<{ title: string; metrics: Metric[] }> = [
   {
-    title: "Conversão por clique",
+    title: "Recuperado pelo CRM",
     metrics: [
       { label: "SMS enviados", raw: (row) => row.sent, format: count },
       { label: "Custo em SMS", raw: (row) => row.cost, format: currency },
@@ -77,7 +76,7 @@ const GROUPS: Array<{ title: string; metrics: Metric[] }> = [
         better: "high",
       },
       {
-        label: "Valor convertido",
+        label: "Recuperado pelo CRM",
         raw: (row) => row.directRevenue,
         format: currency,
         better: "high",
@@ -90,7 +89,7 @@ const GROUPS: Array<{ title: string; metrics: Metric[] }> = [
       },
       {
         label: "Retorno",
-        hint: "Valor convertido ÷ custo.",
+        hint: "Recuperado pelo CRM ÷ custo.",
         raw: (row) => row.clickRoi,
         format: ratio,
         better: "high",
@@ -98,7 +97,7 @@ const GROUPS: Array<{ title: string; metrics: Metric[] }> = [
     ],
   },
   {
-    title: "Visão ampla: recuperados",
+    title: "Recuperados (visão ampla)",
     metrics: [
       {
         label: "Jogadores recuperados",
@@ -169,39 +168,30 @@ export function TenantComparison() {
   });
 
   return (
-    <main className="mx-auto max-w-7xl space-y-6 p-4 sm:p-6">
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <Link
-            to="/resultados"
-            className="mb-2 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeft className="size-4" /> Resultados do CRM
-          </Link>
-          <h1 className="text-2xl font-bold">Comparar casas</h1>
-          <p className="text-sm text-muted-foreground">
-            Mesmas métricas lado a lado, apenas nas casas em que você é administrador.
-          </p>
-        </div>
-        <div className="flex gap-2" role="group" aria-label="Período">
-          {PERIODS.map((value) => (
-            <Button
-              key={value}
-              size="sm"
-              variant={days === value ? "default" : "outline"}
-              onClick={() => setDays(value)}
-            >
-              {value} dias
-            </Button>
-          ))}
-        </div>
-      </header>
+    <Page>
+      <PageHeader
+        subtitle="Mesmas métricas lado a lado, apenas nas casas em que você é administrador."
+        actions={
+          <div className="flex gap-2" role="group" aria-label="Período">
+            {PERIODS.map((value) => (
+              <Button
+                key={value}
+                size="sm"
+                variant={days === value ? "default" : "outline"}
+                onClick={() => setDays(value)}
+              >
+                {value} dias
+              </Button>
+            ))}
+          </div>
+        }
+      />
 
       {query.isLoading ? (
         <Skeleton className="h-96 rounded-xl" />
       ) : query.isError || !query.data ? (
         <Card>
-          <CardContent className="p-6 text-sm text-muted-foreground">
+          <CardContent className="p-4 text-sm text-muted-foreground sm:p-5">
             {query.error instanceof Error && query.error.message.includes("duas ou mais casas")
               ? "A comparação está disponível apenas para administradores de duas ou mais casas."
               : "Não foi possível carregar a comparação. Tente novamente em instantes."}
@@ -210,9 +200,9 @@ export function TenantComparison() {
       ) : (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Últimos {query.data.days} dias</CardTitle>
+            <CardTitle>Últimos {query.data.days} dias</CardTitle>
             <CardDescription>
-              Conversão por clique primeiro. Em verde, a melhor casa em cada linha. A base de
+              Recuperado pelo CRM primeiro. Em verde, a melhor casa em cada linha. A base de
               jogadores é a de agora, não a do período.
             </CardDescription>
           </CardHeader>
@@ -234,7 +224,7 @@ export function TenantComparison() {
                     <TableRow className="bg-muted/30 hover:bg-muted/30">
                       <TableCell
                         colSpan={query.data.rows.length + 1}
-                        className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                        className="text-label font-semibold text-muted-foreground"
                       >
                         {group.title}
                       </TableCell>
@@ -253,9 +243,7 @@ export function TenantComparison() {
                             <TableCell
                               key={row.tenant}
                               className={`text-right tabular-nums ${
-                                index === best
-                                  ? "font-semibold text-emerald-600 dark:text-emerald-400"
-                                  : ""
+                                index === best ? "font-semibold text-success" : ""
                               }`}
                             >
                               {metric.format(metric.raw(row))}
@@ -272,6 +260,6 @@ export function TenantComparison() {
           </CardContent>
         </Card>
       )}
-    </main>
+    </Page>
   );
 }

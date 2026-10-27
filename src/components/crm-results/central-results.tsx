@@ -16,22 +16,25 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { BasePlayers } from "./base-players";
+import { Page, PageHeader } from "@/components/ui-premium/page-header";
+import { PageTabs } from "@/components/ui-premium/page-tabs";
 import { HealthIndicator } from "./health";
 import { Holdout } from "./holdout";
 import { Origins } from "./origins";
-import { Recommendations } from "./recommendations";
 import { type Data, periodLabel } from "./format";
 import { Overview } from "./overview";
-import { EmptyCard } from "./shared";
+import { SpendByState } from "./retention";
+import { CentralPeriodPicker, EmptyCard } from "./shared";
 import { PERIODS, TABS, type CentralSearch, type PeriodKey, type TabKey } from "./search";
 
 export function CentralResults() {
   const search = useSearch({ from: "/resultados" });
   const navigate = useNavigate({ from: "/resultados" });
   const period = PERIODS.find((item) => item.key === search.periodo) ?? PERIODS[3];
-  const tab = search.aba ?? "visao";
+  // Retired tabs ("recomendacoes", "base") fall back to the overview.
+  const tab: TabKey = TABS.some((item) => item.key === search.aba)
+    ? (search.aba as TabKey)
+    : "visao";
   const setSearch = (next: Partial<CentralSearch>, replace = false) =>
     void navigate({ search: (current) => ({ ...current, ...next }), replace });
 
@@ -49,60 +52,41 @@ export function CentralResults() {
   });
 
   return (
-    <main className="mx-auto max-w-7xl space-y-5 p-4 sm:p-6">
-      <header className="space-y-3">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold">Resultados do CRM</h1>
-            <p className="text-sm text-muted-foreground">
+    <Page>
+      <div className="space-y-3">
+        <PageHeader
+          subtitle={
+            <>
               Quanto cada jornada e campanha converte e quanto custa cada conversão.
               {query.data &&
                 ` ${periodLabel(query.data.from, query.data.to)} · horário de Brasília`}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-1">
-            {query.data && <HealthIndicator data={query.data} />}
-            <Glossary />
-            {access.data?.allowed && (
-              <Button size="sm" variant="ghost" asChild>
-                <Link to="/resultados/comparar">Comparar casas</Link>
-              </Button>
-            )}
-            {query.data && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="gap-2"
-                onClick={() => downloadCsv(query.data, period.key)}
-              >
-                <Download className="h-4 w-4" aria-hidden="true" />
-                CSV
-              </Button>
-            )}
-          </div>
-        </div>
-        <div
-          className="inline-flex rounded-lg bg-muted p-1 text-sm"
-          role="group"
-          aria-label="Período"
-        >
-          {PERIODS.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              aria-pressed={period.key === item.key}
-              onClick={() => setSearch({ periodo: item.key })}
-              className={
-                period.key === item.key
-                  ? "rounded-md bg-background px-3 py-1.5 font-medium shadow-sm"
-                  : "px-3 py-1.5 text-muted-foreground hover:text-foreground"
-              }
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-      </header>
+            </>
+          }
+          actions={
+            <>
+              {query.data && <HealthIndicator data={query.data} />}
+              <Glossary />
+              {access.data?.allowed && (
+                <Button size="sm" variant="ghost" asChild>
+                  <Link to="/resultados/comparar">Comparar casas</Link>
+                </Button>
+              )}
+              {query.data && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-2"
+                  onClick={() => downloadCsv(query.data, period.key)}
+                >
+                  <Download className="h-4 w-4" aria-hidden="true" />
+                  CSV
+                </Button>
+              )}
+            </>
+          }
+        />
+        <CentralPeriodPicker value={period.key} onChange={(key) => setSearch({ periodo: key })} />
+      </div>
 
       {query.isLoading ? (
         <LoadingSkeleton />
@@ -111,44 +95,35 @@ export function CentralResults() {
           Não foi possível carregar os resultados. Tente novamente em instantes.
         </EmptyCard>
       ) : (
-        <Tabs
-          value={tab}
-          onValueChange={(value) => setSearch({ aba: value as TabKey })}
-          className="space-y-4"
-        >
-          <TabsList className="flex h-auto w-full justify-start overflow-x-auto">
-            {TABS.map((item) => (
-              <TabsTrigger key={item.key} value={item.key}>
-                {item.label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-          <TabsContent value="visao">
-            <Overview
-              data={query.data}
-              onOpenOrigin={(name) => setSearch({ aba: "origens", busca: name })}
-              onOpenRecommendations={() => setSearch({ aba: "recomendacoes" })}
-            />
-          </TabsContent>
-          <TabsContent value="origens">
-            <Origins
-              data={query.data}
-              search={search.busca ?? ""}
-              onSearch={(value) => setSearch({ busca: value || undefined }, true)}
-            />
-          </TabsContent>
-          <TabsContent value="base">
-            <BasePlayers data={query.data} />
-          </TabsContent>
-          <TabsContent value="controle">
-            <Holdout data={query.data} />
-          </TabsContent>
-          <TabsContent value="recomendacoes">
-            <Recommendations data={query.data} />
-          </TabsContent>
-        </Tabs>
+        <div className="space-y-4">
+          <PageTabs
+            value={tab}
+            onValueChange={(value) => setSearch({ aba: value })}
+            label="Seções dos resultados"
+            items={TABS.map((item) => ({ value: item.key, label: item.label }))}
+          />
+          <div role="tabpanel" aria-labelledby={`tab-${tab}`}>
+            {tab === "visao" && (
+              <Overview
+                data={query.data}
+                onOpenOrigin={(name) => setSearch({ aba: "origens", busca: name })}
+              />
+            )}
+            {tab === "origens" && (
+              <div className="space-y-4">
+                <Origins
+                  data={query.data}
+                  search={search.busca ?? ""}
+                  onSearch={(value) => setSearch({ busca: value || undefined }, true)}
+                />
+                <SpendByState data={query.data} />
+              </div>
+            )}
+            {tab === "controle" && <Holdout data={query.data} />}
+          </div>
+        </div>
       )}
-    </main>
+    </Page>
   );
 }
 
@@ -188,18 +163,18 @@ function LoadingSkeleton() {
 function Glossary() {
   const terms: Array<[string, string]> = [
     [
-      "Conversão por clique",
-      "Jogador que clicou no link do SMS e depositou em até 7 dias. É a medida principal. Conta jogadores, não depósitos: quem deposita 3 vezes conta 1.",
+      "Recuperado pelo CRM",
+      "Jogador que clicou no link do SMS e depositou em até 7 dias, e o valor depositado. É a medida principal, a mesma do Início (conversão por clique). Conta jogadores, não depósitos: quem deposita 3 vezes conta 1.",
     ],
     ["Taxa de clique", "SMS clicados ÷ SMS enviados."],
     ["Custo por jogador convertido", "Custo em SMS ÷ jogadores convertidos pelo clique."],
     [
       "Retorno",
-      "Valor convertido ÷ custo em SMS. Verde quando paga o envio (1x ou mais), vermelho quando não paga. Com menos de 5 jogadores convertidos aparece como “amostra pequena” e não entra em comparações.",
+      "Recuperado pelo CRM ÷ custo em SMS. Verde quando paga o envio (1x ou mais), vermelho quando não paga. Com menos de 5 jogadores convertidos aparece como “amostra pequena” e não entra em comparações.",
     ],
     [
       "Recuperados (visão ampla)",
-      "Jogador parado há 2+ dias (ou sem 1º depósito) que depositou até 3 dias depois de um SMS, com ou sem clique. Conta retornos, não pessoas, e o valor é só o depósito de retorno. Inclui boa parte das conversões por clique: não some os dois.",
+      "Jogador parado há 2+ dias (ou sem 1º depósito) que depositou até 3 dias depois de um SMS, com ou sem clique. Conta retornos, não pessoas, e o valor é só o depósito de retorno. Inclui boa parte do Recuperado pelo CRM: não some os dois.",
     ],
     [
       "Últimos 7 dias",

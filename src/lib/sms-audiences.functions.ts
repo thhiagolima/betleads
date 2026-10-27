@@ -3,9 +3,11 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { assertTenantCanOperate, resolveCurrentTenantId } from "@/lib/tenant-access.server";
 import {
+  isSelectionAudience,
   normalizeSmsAudienceCriteria,
   smsAudienceCriteriaSchema,
 } from "@/lib/sms-audience-criteria";
+import { resolveAudienceForTenant, type SelectionDb } from "@/lib/sms-audience-selection.server";
 import { withServerResultCache } from "@/lib/server-result-cache";
 import type { BlockReason } from "@/lib/channel-eligibility.server";
 
@@ -43,19 +45,16 @@ export const resolveSmsCampaignAudience = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<ResolvedSmsAudience> => {
     const supabase = context.supabase;
     const tenantId = await resolveCurrentTenantId(supabase);
-    await assertTenantCanOperate(tenantId);
+    await assertTenantCanOperate(tenantId, context.supabase);
     const criteria = normalizeSmsAudienceCriteria(data.criteria);
+    const db = supabase as unknown as SelectionDb;
+    // Seleção: lista de até 50 mil ids, não vira chave de cache.
+    if (isSelectionAudience(criteria)) return resolveAudienceForTenant(db, tenantId, criteria);
     const criteriaKey = JSON.stringify(criteria);
 
-    return withServerResultCache(`audience:${tenantId}:${criteriaKey}`, 30_000, async () => {
-      const { data: result, error } = await supabase.rpc("resolve_sms_audience_v2", {
-        _tenant: tenantId,
-        _criteria: criteria,
-      });
-      if (error) throw new Error(error.message);
-      if (!result) throw new Error("Sem acesso aos jogadores desta conta.");
-      return result as ResolvedSmsAudience;
-    });
+    return withServerResultCache(`audience:${tenantId}:${criteriaKey}`, 30_000, () =>
+      resolveAudienceForTenant(db, tenantId, criteria),
+    );
   });
 
 const channelAudienceInput = audienceInput.extend({ channel: z.enum(["sms", "email", "voice"]) });
@@ -78,18 +77,26 @@ export const resolveCampaignAudience = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => channelAudienceInput.parse(input))
   .handler(async ({ data, context }): Promise<ResolvedCampaignAudience> => {
     const tenantId = await resolveCurrentTenantId(context.supabase);
-    await assertTenantCanOperate(tenantId);
+    await assertTenantCanOperate(tenantId, context.supabase);
     const criteria = normalizeSmsAudienceCriteria(data.criteria);
-    const { data: raw, error } = await context.supabase.rpc("resolve_sms_audience_v2", {
-      _tenant: tenantId,
-      _criteria: criteria,
-    });
-    if (error || !raw) throw new Error("Não foi possível calcular o público desta campanha.");
-    const base = raw as unknown as ResolvedSmsAudience;
+    let base: ResolvedSmsAudience;
+    try {
+      base = await resolveAudienceForTenant(
+        context.supabase as unknown as SelectionDb,
+        tenantId,
+        criteria,
+      );
+    } catch {
+      throw new Error("Não foi possível calcular o público desta campanha.");
+    }
     const candidates = data.channel === "email" ? (base.emailPlayerIds ?? []) : (base.phones ?? []);
     const rpcClient = context.supabase as unknown as {
-      rpc: (name: string, args: Record<string, unknown>) => Promise<{
-        data: unknown; error: { message: string } | null;
+      rpc: (
+        name: string,
+        args: Record<string, unknown>,
+      ) => Promise<{
+        data: unknown;
+        error: { message: string } | null;
       }>;
     };
     const { data: eligibilityRaw, error: eligibilityError } = await rpcClient.rpc(
@@ -111,13 +118,15 @@ export const resolveCampaignAudience = createServerFn({ method: "POST" })
     const missing = Math.max(0, base.total - candidates.length);
     if (missing) exclusions[data.channel === "email" ? "missing_email" : "missing_phone"] = missing;
     if (eligibility.invalidCount)
-      exclusions[data.channel === "email" ? "invalid_email" : "invalid_phone"] = eligibility.invalidCount;
+      exclusions[data.channel === "email" ? "invalid_email" : "invalid_phone"] =
+        eligibility.invalidCount;
     if (eligibility.optOutCount) {
-      const reason = data.channel === "email"
-        ? "email_opt_out"
-        : data.channel === "voice"
-          ? "voice_opt_out"
-          : "sms_opt_out";
+      const reason =
+        data.channel === "email"
+          ? "email_opt_out"
+          : data.channel === "voice"
+            ? "voice_opt_out"
+            : "sms_opt_out";
       exclusions[reason] = eligibility.optOutCount;
     }
     return {

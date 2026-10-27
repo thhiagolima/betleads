@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+/** Teto de jogadores num público de seleção (mesmo teto da exportação de Jogadores). */
+export const MAX_SELECTION_PLAYER_IDS = 50_000;
+
 export const smsAudienceCriteriaSchema = z.object({
   activity: z
     .object({
@@ -18,12 +21,48 @@ export const smsAudienceCriteriaSchema = z.object({
     }),
   level: z.enum(["bronze", "silver", "gold", "diamond", "black"]).nullable().default(null),
   timing: z
-    .enum(["any", "cooling", "sleeping", "inactive30", "inactive90", "custom", "registered_week"])
+    .enum([
+      "any",
+      "cooling",
+      "sleeping",
+      "inactive30",
+      "inactive90",
+      "custom",
+      "registered_week",
+      // Marcador de público de seleção. O schema anterior a este campo não
+      // conhece o valor e lança erro: código antigo falha fechado em vez de
+      // tratar a seleção como "todos os jogadores".
+      "selection",
+    ])
     .default("any"),
   customDays: z.number().int().min(1).max(3650).default(2),
   daysWithoutLogin: z.number().int().min(1).max(3650).nullable().default(null),
   daysSinceRegistration: z.number().int().min(1).max(3650).nullable().default(null),
+  /**
+   * Público de seleção, forma gravada em `sms_audiences`: exatamente estes
+   * jogadores (sempre restritos à casa). Exige `timing: "selection"` e
+   * nenhuma regra.
+   */
+  playerIds: z.array(z.string().uuid()).max(MAX_SELECTION_PLAYER_IDS).optional(),
+  /**
+   * Público de seleção, forma de referência (lista, compositor, rascunho,
+   * campanha agendada): o servidor carrega a lista do público pelo id + casa.
+   */
+  audienceId: z.string().uuid().optional(),
+  /** Quantos jogadores a seleção tem (só exibição; a lista fica no servidor). */
+  selectionCount: z.number().int().min(0).max(MAX_SELECTION_PLAYER_IDS).optional(),
 });
+
+/**
+ * Critério de público que chega do navegador para campanha ou rascunho: a
+ * seleção só vale pela forma de referência (`audienceId`); a lista de
+ * jogadores (`playerIds`) é recusada.
+ */
+export const campaignAudienceCriteriaInput = z
+  .record(z.string(), z.unknown())
+  .refine((criteria) => !("playerIds" in criteria), {
+    message: "Envie o público de seleção pelo id, não pela lista de jogadores.",
+  });
 
 export type SmsAudienceCriteria = z.infer<typeof smsAudienceCriteriaSchema>;
 
@@ -50,8 +89,8 @@ export const SYSTEM_SMS_AUDIENCES: Array<{
 }> = [
   {
     id: "system:all-leads",
-    name: "Todos os leads",
-    description: "Todos os jogadores cadastrados neste tenant.",
+    name: "Todos os jogadores",
+    description: "Todos os jogadores cadastrados na casa.",
     criteria: EMPTY_SMS_AUDIENCE,
   },
   {
@@ -102,6 +141,8 @@ export function normalizeSmsAudienceCriteria(value: unknown): SmsAudienceCriteri
             : legacyDays > 0
               ? "custom"
               : "any");
+  if (timing === "selection" || "playerIds" in raw || raw.audienceId !== undefined)
+    return normalizeSelectionCriteria(raw);
   const criteria = smsAudienceCriteriaSchema.parse({
     ...raw,
     activity: raw.activity ?? { ...EMPTY_SMS_AUDIENCE.activity, deposit: raw.deposit ?? "any" },
@@ -120,8 +161,85 @@ export function normalizeSmsAudienceCriteria(value: unknown): SmsAudienceCriteri
   return criteria;
 }
 
+const SELECTION_ERROR = "Público de seleção inválido.";
+
+/**
+ * Seleção: `timing: "selection"` com `playerIds` (lista) ou `audienceId`
+ * (referência). Qualquer forma ambígua lança erro; nunca vira "todos".
+ */
+function normalizeSelectionCriteria(raw: Record<string, unknown>): SmsAudienceCriteria {
+  const hasList = "playerIds" in raw;
+  if (hasList && !Array.isArray(raw.playerIds))
+    throw new Error(`${SELECTION_ERROR} A lista de jogadores não é uma lista.`);
+  if (raw.timing !== undefined && raw.timing !== "selection")
+    throw new Error(`${SELECTION_ERROR} Seleção não combina com regras de tempo.`);
+  const playerIds = hasList
+    ? Array.from(new Set((raw.playerIds as unknown[]).map((id) => String(id).toLowerCase())))
+    : undefined;
+  if (!playerIds && typeof raw.audienceId !== "string")
+    throw new Error(`${SELECTION_ERROR} Falta a lista de jogadores.`);
+  const criteria = smsAudienceCriteriaSchema.parse({
+    ...raw,
+    ...(playerIds ? { playerIds } : {}),
+    timing: "selection",
+  });
+  if (!hasNoAudienceRules(criteria))
+    throw new Error(`${SELECTION_ERROR} Um público de seleção não aceita regras.`);
+  return criteria;
+}
+
+/** Público de seleção (lista de jogadores) em vez de público por regras. */
+export function isSelectionAudience(criteria: Pick<SmsAudienceCriteria, "timing">) {
+  return criteria.timing === "selection";
+}
+
+/** Quantos jogadores a seleção tem, na forma gravada ou de referência. */
+export function selectionCountOf(criteria: SmsAudienceCriteria) {
+  return criteria.playerIds?.length ?? criteria.selectionCount ?? 0;
+}
+
+/**
+ * Forma de referência enviada ao navegador: sem a lista, com o id do público
+ * e a contagem. O servidor recarrega a lista pelo id + casa.
+ */
+export function toSelectionReference(
+  criteria: SmsAudienceCriteria,
+  audienceId: string,
+): SmsAudienceCriteria {
+  return {
+    ...EMPTY_SMS_AUDIENCE,
+    timing: "selection",
+    audienceId,
+    selectionCount: selectionCountOf(criteria),
+  };
+}
+
+/** As regras (tudo exceto a seleção) não restringem ninguém. */
+export function hasNoAudienceRules(criteria: SmsAudienceCriteria) {
+  const { activity } = criteria;
+  return (
+    activity.deposit === "any" &&
+    !activity.pixUnpaid &&
+    !activity.cashback &&
+    activity.withdrawal === "any" &&
+    !activity.withdrawalPending &&
+    criteria.level === null &&
+    (criteria.timing === "any" || criteria.timing === "selection") &&
+    criteria.daysWithoutLogin === null &&
+    criteria.daysSinceRegistration === null
+  );
+}
+
+/** "N jogadores escolhidos" de um público de seleção. */
+export function selectionAudienceLabel(count: number) {
+  return count === 1
+    ? "1 jogador escolhido"
+    : `${count.toLocaleString("pt-BR")} jogadores escolhidos`;
+}
+
 export function describeSmsAudience(criteria: SmsAudienceCriteria) {
   const parts: string[] = [];
+  if (isSelectionAudience(criteria)) parts.push(selectionAudienceLabel(selectionCountOf(criteria)));
   if (criteria.activity.deposit === "yes") parts.push("já depositou");
   if (criteria.activity.deposit === "never") parts.push("nunca depositou");
   if (criteria.activity.pixUnpaid) parts.push("gerou PIX e não pagou");

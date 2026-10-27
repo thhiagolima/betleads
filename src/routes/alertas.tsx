@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -10,6 +10,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { brl, timeAgo } from "@/lib/format";
 import { toast } from "sonner";
+import { requestConfirmation } from "@/components/system-dialog-host";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   detectAlerts,
   priorityColor,
@@ -23,6 +30,7 @@ import {
   PRIORIDADE_LABEL,
   CLASSIFICACAO_LABEL,
   whatsappMessageFor,
+  buildWhatsAppLink,
   recoveryPotential,
   returnChance,
   ABORDAGEM_POR_TIPO,
@@ -51,8 +59,10 @@ import {
   CheckCircle2,
   Clock,
   Inbox,
+  ChevronDown,
 } from "lucide-react";
 import { PageHeader, MetricCard } from "@/components/ui-premium";
+import { Page } from "@/components/ui-premium/page-header";
 
 export const Route = createFileRoute("/alertas")({
   component: AlertasPage,
@@ -80,37 +90,36 @@ async function fetchAlertsData(): Promise<EnrichedPlayer[]> {
   const iso30 = new Date(Date.now() - 30 * 86400000).toISOString();
   const iso60 = new Date(Date.now() - 60 * 86400000).toISOString();
 
-  const [playersRes, depsRes, wd30Res, sessionsRes, followupsRes] =
-    await Promise.all([
-      supabase
-        .from("players")
-        .select(
-          "id,nome,telefone,status,vip,total_depositado,total_sacado,saldo_carteira,ultimo_login,ultimo_jogo,ultimo_deposito,created_at,ftd_em,expert,origem,utm_source",
-        )
-        .order("total_depositado", { ascending: false })
-        .limit(800),
-      supabase
-        .from("deposits")
-        .select("player_id,valor,created_at")
-        .gte("created_at", iso60)
-        .eq("status", "aprovado")
-        .limit(8000),
-      supabase
-        .from("withdrawals")
-        .select("player_id,valor,created_at")
-        .gte("created_at", iso30)
-        .limit(5000),
-      supabase
-        .from("sessions")
-        .select("player_id,iniciado_em")
-        .gte("iniciado_em", iso60)
-        .limit(10000),
-      supabase
-        .from("lead_followups")
-        .select("id,player_id,alerta_tipo,acao,created_at")
-        .gte("created_at", iso30)
-        .order("created_at", { ascending: false }),
-    ]);
+  const [playersRes, depsRes, wd30Res, sessionsRes, followupsRes] = await Promise.all([
+    supabase
+      .from("players")
+      .select(
+        "id,nome,telefone,status,vip,total_depositado,total_sacado,saldo_carteira,ultimo_login,ultimo_jogo,ultimo_deposito,created_at,ftd_em,expert,origem,utm_source",
+      )
+      .order("total_depositado", { ascending: false })
+      .limit(800),
+    supabase
+      .from("deposits")
+      .select("player_id,valor,created_at")
+      .gte("created_at", iso60)
+      .eq("status", "aprovado")
+      .limit(8000),
+    supabase
+      .from("withdrawals")
+      .select("player_id,valor,created_at")
+      .gte("created_at", iso30)
+      .limit(5000),
+    supabase
+      .from("sessions")
+      .select("player_id,iniciado_em")
+      .gte("iniciado_em", iso60)
+      .limit(10000),
+    supabase
+      .from("lead_followups")
+      .select("id,player_id,alerta_tipo,acao,created_at")
+      .gte("created_at", iso30)
+      .order("created_at", { ascending: false }),
+  ]);
 
   const dep30 = new Map<string, number>();
   const dep3060 = new Map<string, number>();
@@ -129,7 +138,10 @@ async function fetchAlertsData(): Promise<EnrichedPlayer[]> {
   const saqRec = new Map<string, number>();
   for (const w of wd30Res.data ?? []) {
     if (!w.player_id) continue;
-    saqRec.set(w.player_id as string, (saqRec.get(w.player_id as string) ?? 0) + Number(w.valor ?? 0));
+    saqRec.set(
+      w.player_id as string,
+      (saqRec.get(w.player_id as string) ?? 0) + Number(w.valor ?? 0),
+    );
   }
 
   const logins30 = new Map<string, number>();
@@ -175,7 +187,8 @@ async function fetchAlertsData(): Promise<EnrichedPlayer[]> {
     let reativadoEm: string | null = null;
     const sortedAsc = (depDates.get(p.id) ?? []).slice().sort();
     for (let i = 1; i < sortedAsc.length; i++) {
-      const gap = (new Date(sortedAsc[i]).getTime() - new Date(sortedAsc[i - 1]).getTime()) / 86400000;
+      const gap =
+        (new Date(sortedAsc[i]).getTime() - new Date(sortedAsc[i - 1]).getTime()) / 86400000;
       if (gap >= 14 && new Date(sortedAsc[i]).getTime() >= Date.now() - 7 * 86400000) {
         reativadoEm = sortedAsc[i];
         break;
@@ -239,11 +252,32 @@ async function fetchAlertsData(): Promise<EnrichedPlayer[]> {
 const ACAO_LABEL: Record<AcaoRecomendada, string> = {
   whatsapp: "WhatsApp",
   sms: "SMS",
-  bonus: "Enviar bônus",
-  campanha: "Adic. campanha",
+  bonus: "Bônus oferecido",
+  campanha: "Inclusão em campanha",
   acompanhamento: "Tentativa enviada",
+  copiar: "Mensagem copiada",
+};
+
+// Rótulo do botão: diz o que o clique faz de verdade. Nenhuma ação envia
+// mensagem sozinha — WhatsApp e SMS só abrem o app com o texto pronto; bônus e
+// campanha não têm integração e apenas registram o acompanhamento.
+const ACAO_BOTAO: Record<AcaoRecomendada, string> = {
+  whatsapp: "Abrir WhatsApp",
+  sms: "Abrir SMS",
+  bonus: "Registrar bônus oferecido",
+  campanha: "Registrar inclusão em campanha",
+  acompanhamento: "Marcar tentativa enviada",
   copiar: "Copiar mensagem",
 };
+
+const ACOES: AcaoRecomendada[] = [
+  "whatsapp",
+  "sms",
+  "copiar",
+  "bonus",
+  "campanha",
+  "acompanhamento",
+];
 
 type LeadStatus = "pendente" | "aguardando" | "recuperado" | "convertido";
 
@@ -285,22 +319,20 @@ function ScoreBlock({
   const tone =
     good === "high"
       ? value >= 70
-        ? "text-emerald-400"
+        ? "text-success"
         : value >= 40
-          ? "text-amber-400"
-          : "text-rose-400"
+          ? "text-warning"
+          : "text-danger"
       : value >= 70
-        ? "text-rose-400"
+        ? "text-danger"
         : value >= 40
-          ? "text-amber-400"
-          : "text-emerald-400";
+          ? "text-warning"
+          : "text-success";
   return (
     <div className="rounded-md bg-muted/30 px-3 py-2 flex items-center gap-2">
       <Icon className={`h-4 w-4 ${tone}`} />
       <div className="min-w-0">
-        <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-          {label}
-        </p>
+        <p className="text-label text-muted-foreground">{label}</p>
         <p className={`text-base font-bold leading-none mt-0.5 ${tone}`}>{value}</p>
       </div>
     </div>
@@ -310,11 +342,9 @@ function ScoreBlock({
 function AlertRow({
   p,
   onAction,
-  onSimulate,
 }: {
   p: EnrichedPlayer;
   onAction: (player: EnrichedPlayer, alerta: Alerta, acao: AcaoRecomendada) => void;
-  onSimulate: (player: EnrichedPlayer) => void;
 }) {
   const c = priorityColor(p.topPrioridade);
   const dep = Number(p.total_depositado ?? 0);
@@ -326,18 +356,22 @@ function AlertRow({
   const recup = recoveryPotential(p);
   const chance = returnChance(p);
   const abordagem = principal ? ABORDAGEM_POR_TIPO[principal.tipo] : null;
-  const chanceTone =
-    chance >= 70 ? "text-emerald-400" : chance >= 40 ? "text-amber-400" : "text-rose-400";
+  const chanceTone = chance >= 70 ? "text-success" : chance >= 40 ? "text-warning" : "text-danger";
 
   return (
-    <div
-      className={`rounded-xl border ${c.border} ${c.bg} p-4 transition-colors`}
-    >
+    <div className={`rounded-xl border ${c.border} ${c.bg} p-4 transition-colors`}>
       {/* Header: identidade + saldo em destaque */}
       <div className="flex items-start justify-between gap-3 mb-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <p className="font-semibold text-sm truncate">{p.nome}</p>
+            <Link
+              to="/players/$playerId"
+              params={{ playerId: p.id! }}
+              search={{ id: undefined, focus: undefined }}
+              className="font-semibold text-sm truncate hover:underline"
+            >
+              {p.nome}
+            </Link>
             {p.vip && (
               <Badge className="bg-amber-500/15 text-amber-400 border-amber-500/30 gap-1">
                 <Crown className="h-3 w-3" /> VIP
@@ -347,7 +381,10 @@ function AlertRow({
               {PRIORIDADE_LABEL[p.topPrioridade]}
             </Badge>
             {ultimoFollowup && (
-              <Badge variant="outline" className="bg-muted/40 text-muted-foreground border-border/40 gap-1">
+              <Badge
+                variant="outline"
+                className="bg-muted/40 text-muted-foreground border-border/40 gap-1"
+              >
                 <Bookmark className="h-3 w-3" />
                 {ACAO_LABEL[ultimoFollowup.acao]} · {timeAgo(ultimoFollowup.created_at)}
               </Badge>
@@ -355,47 +392,60 @@ function AlertRow({
           </div>
           <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground flex-wrap">
             {p.telefone && (
-              <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{p.telefone}</span>
+              <span className="flex items-center gap-1">
+                <Phone className="h-3 w-3" />
+                {p.telefone}
+              </span>
             )}
             <span>· {CLASSIFICACAO_LABEL[p.classif]}</span>
-            {p.expert && <span>· Expert: <span className="text-foreground/80">{p.expert}</span></span>}
+            {p.expert && (
+              <span>
+                · Expert: <span className="text-foreground/80">{p.expert}</span>
+              </span>
+            )}
           </div>
         </div>
         {/* SALDO em destaque */}
-        <div className={cn(
-          "rounded-lg border px-3 py-2 text-right shrink-0",
-          saldo >= 200
-            ? "border-emerald-500/40 bg-emerald-500/10"
-            : saldo > 0
-              ? "border-amber-500/30 bg-amber-500/5"
-              : "border-border/40 bg-muted/20",
-        )}>
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center justify-end gap-1">
+        <div
+          className={cn(
+            "rounded-lg border px-3 py-2 text-right shrink-0",
+            saldo >= 200
+              ? "border-success/40 bg-success/10"
+              : saldo > 0
+                ? "border-warning/30 bg-warning/5"
+                : "border-border/40 bg-muted/20",
+          )}
+        >
+          <p className="text-label text-muted-foreground flex items-center justify-end gap-1">
             <Wallet className="h-3 w-3" /> Saldo atual
           </p>
-          <p className={cn(
-            "text-lg font-bold leading-none mt-1",
-            saldo >= 200 ? "text-emerald-400" : saldo > 0 ? "text-amber-400" : "text-muted-foreground",
-          )}>{brl(saldo)}</p>
+          <p
+            className={cn(
+              "text-lg font-bold leading-none mt-1",
+              saldo >= 200 ? "text-success" : saldo > 0 ? "text-warning" : "text-muted-foreground",
+            )}
+          >
+            {brl(saldo)}
+          </p>
         </div>
       </div>
 
       {/* Métricas do lead */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs mb-3">
         <div className="rounded-md bg-muted/30 px-2.5 py-1.5">
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Depositado</p>
+          <p className="text-label text-muted-foreground">Depositado</p>
           <p className="font-semibold mt-0.5">{brl(dep)}</p>
         </div>
         <div className="rounded-md bg-muted/30 px-2.5 py-1.5">
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Últ. login</p>
+          <p className="text-label text-muted-foreground">Últ. login</p>
           <p className="font-semibold mt-0.5">{timeAgo(p.ultimo_login)}</p>
         </div>
         <div className="rounded-md bg-muted/30 px-2.5 py-1.5">
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Últ. depósito</p>
+          <p className="text-label text-muted-foreground">Últ. depósito</p>
           <p className="font-semibold mt-0.5">{timeAgo(p.ultimo_deposito)}</p>
         </div>
         <div className="rounded-md bg-muted/30 px-2.5 py-1.5">
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Origem</p>
+          <p className="text-label text-muted-foreground">Origem</p>
           <p className="font-semibold mt-0.5 truncate">{p.origem ?? p.utm_source ?? "—"}</p>
         </div>
       </div>
@@ -406,27 +456,42 @@ function AlertRow({
 
       {/* Alerta principal + motivo + ação ideal */}
       {principal && (
-        <div className={cn("rounded-lg border px-3 py-2.5 mb-3", priorityColor(principal.prioridade).border, priorityColor(principal.prioridade).bg)}>
+        <div
+          className={cn(
+            "rounded-lg border px-3 py-2.5 mb-3",
+            priorityColor(principal.prioridade).border,
+            priorityColor(principal.prioridade).bg,
+          )}
+        >
           <div className="flex items-start gap-2">
-            <AlertTriangle className={cn("h-4 w-4 mt-0.5 shrink-0", priorityColor(principal.prioridade).text)} />
+            <AlertTriangle
+              className={cn("h-4 w-4 mt-0.5 shrink-0", priorityColor(principal.prioridade).text)}
+            />
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold">{principal.titulo}</p>
               <p className="text-xs text-muted-foreground mt-0.5">{principal.motivo}</p>
               <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <div className="flex items-start gap-2 rounded-md bg-background/40 px-2 py-1.5">
                   <Target className="h-3.5 w-3.5 mt-0.5 shrink-0 text-primary" />
-                  <p className="text-xs"><span className="text-muted-foreground">Ação ideal: </span><span className="font-medium">{principal.acaoLabel}</span></p>
+                  <p className="text-xs">
+                    <span className="text-muted-foreground">Ação ideal: </span>
+                    <span className="font-medium">{principal.acaoLabel}</span>
+                  </p>
                 </div>
                 {abordagem && (
                   <div className="flex items-start gap-2 rounded-md bg-background/40 px-2 py-1.5">
                     <HeartHandshake className="h-3.5 w-3.5 mt-0.5 shrink-0 text-violet-400" />
-                    <p className="text-xs"><span className="text-muted-foreground">Abordagem: </span><span className="font-medium">{abordagem}</span></p>
+                    <p className="text-xs">
+                      <span className="text-muted-foreground">Abordagem: </span>
+                      <span className="font-medium">{abordagem}</span>
+                    </p>
                   </div>
                 )}
               </div>
               {outros.length > 0 && (
-                <p className="text-[11px] text-muted-foreground mt-2 flex items-center gap-1">
-                  <Lightbulb className="h-3 w-3" /> +{outros.length} alerta(s): {outros.map(o => o.titulo).join(" · ")}
+                <p className="text-meta text-muted-foreground mt-2 flex items-center gap-1">
+                  <Lightbulb className="h-3 w-3" /> +{outros.length} alerta(s):{" "}
+                  {outros.map((o) => o.titulo).join(" · ")}
                 </p>
               )}
             </div>
@@ -436,16 +501,17 @@ function AlertRow({
 
       {/* Potencial de recuperação + chance de retorno */}
       <div className="grid grid-cols-2 gap-2 mb-3">
-        <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2">
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1">
-            <Sparkles className="h-3 w-3 text-emerald-400" /> Potencial de recuperação
+        <div className="rounded-lg border border-success/30 bg-success/5 px-3 py-2">
+          <p className="text-label text-muted-foreground flex items-center gap-1">
+            <Sparkles className="h-3 w-3 text-success" /> Potencial de recuperação
           </p>
-          <p className="text-sm font-bold text-emerald-300 mt-1 leading-none">
-            {brl(recup.min)} <span className="text-muted-foreground font-normal">–</span> {brl(recup.max)}
+          <p className="text-sm font-bold text-success mt-1 leading-none">
+            {brl(recup.min)} <span className="text-muted-foreground font-normal">–</span>{" "}
+            {brl(recup.max)}
           </p>
         </div>
         <div className="rounded-lg border border-border/40 bg-muted/20 px-3 py-2">
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+          <p className="text-label text-muted-foreground flex items-center gap-1">
             <TrendingUp className={cn("h-3 w-3", chanceTone)} /> Chance de retorno
           </p>
           <div className="flex items-center gap-2 mt-1">
@@ -454,7 +520,7 @@ function AlertRow({
               <div
                 className={cn(
                   "h-full rounded-full",
-                  chance >= 70 ? "bg-emerald-400" : chance >= 40 ? "bg-amber-400" : "bg-rose-400",
+                  chance >= 70 ? "bg-success" : chance >= 40 ? "bg-warning" : "bg-danger",
                 )}
                 style={{ width: `${chance}%` }}
               />
@@ -463,18 +529,30 @@ function AlertRow({
         </div>
       </div>
 
-      {/* Botões de ação direta */}
+      {/* Ação recomendada + outras ações */}
       {principal && (
-        <div className="grid grid-cols-1 gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             size="sm"
-            variant="outline"
-            className="h-9 gap-1.5 border-sky-500/40 text-sky-300 hover:bg-sky-500/10"
-            onClick={() => onSimulate(p)}
-            title="Simula login + atividade agora — testa atualização em tempo real"
+            className="h-9 flex-1 gap-1.5"
+            onClick={() => onAction(p, principal, principal.acaoRecomendada)}
           >
-            <Zap className="h-4 w-4" /> Simular
+            <Target className="h-4 w-4" /> {ACAO_BOTAO[principal.acaoRecomendada]}
           </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="sm" variant="outline" className="h-9 gap-1.5">
+                Outras ações <ChevronDown className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {ACOES.filter((a) => a !== principal.acaoRecomendada).map((a) => (
+                <DropdownMenuItem key={a} onSelect={() => onAction(p, principal, a)}>
+                  {ACAO_BOTAO[a]}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       )}
     </div>
@@ -516,7 +594,12 @@ function AlertasPage() {
   }, [data]);
 
   const statusCounts = useMemo(() => {
-    const c: Record<LeadStatus, number> = { pendente: 0, aguardando: 0, recuperado: 0, convertido: 0 };
+    const c: Record<LeadStatus, number> = {
+      pendente: 0,
+      aguardando: 0,
+      recuperado: 0,
+      convertido: 0,
+    };
     for (const p of enriched) c[p.status]++;
     return c;
   }, [enriched]);
@@ -534,18 +617,33 @@ function AlertasPage() {
   }, [enriched, statusTab]);
 
   const handleAction = async (player: EnrichedPlayer, alerta: Alerta, acao: AcaoRecomendada) => {
-    if (acao === "sms") {
-      const msg = whatsappMessageFor(alerta, player);
-      const tel = (player.telefone ?? "").replace(/\D/g, "");
-      // tenta abrir app de SMS nativo
-      if (tel) window.open(`sms:${tel}?body=${encodeURIComponent(msg)}`, "_blank");
-      else {
-        toast.error("Player sem telefone cadastrado.");
+    const msg = whatsappMessageFor(alerta, player);
+    const tel = (player.telefone ?? "").replace(/\D/g, "");
+
+    if (acao === "whatsapp" || acao === "sms") {
+      if (!tel) {
+        toast.error("Jogador sem telefone cadastrado.");
         return;
       }
+      const canal = acao === "whatsapp" ? "WhatsApp" : "SMS";
+      const ok = await requestConfirmation({
+        title: `Abrir ${canal} para ${player.nome}?`,
+        description: `O ${canal} abre com a mensagem pronta para você revisar e enviar. Nada é enviado automaticamente. O contato fica registrado e o jogador vai para "Aguardando retorno".`,
+        confirmLabel: `Abrir ${canal}`,
+      });
+      if (!ok) return;
+      const url =
+        acao === "whatsapp"
+          ? buildWhatsAppLink(player, alerta)
+          : `sms:${tel}?body=${encodeURIComponent(msg)}`;
+      if (!url) {
+        // Do not record a contact that could not be opened.
+        toast.error("Telefone inválido para WhatsApp. Confira o DDD e o número.");
+        return;
+      }
+      window.open(url, "_blank", "noopener");
     }
     if (acao === "copiar") {
-      const msg = whatsappMessageFor(alerta, player);
       try {
         await navigator.clipboard.writeText(msg);
         toast.success("Mensagem copiada para a área de transferência.");
@@ -554,8 +652,16 @@ function AlertasPage() {
         return;
       }
     }
-    if (acao === "bonus") {
-      toast.info("Envio de bônus precisa de integração com a plataforma da casa. Registrando como acompanhamento.");
+    if (acao === "bonus" || acao === "campanha") {
+      const ok = await requestConfirmation({
+        title: acao === "bonus" ? "Registrar bônus oferecido?" : "Registrar inclusão em campanha?",
+        description:
+          acao === "bonus"
+            ? "O CRM não credita bônus na plataforma da casa. Isto só registra que você ofereceu o bônus por outro canal."
+            : "Isto não adiciona o jogador a uma campanha. Só registra o acompanhamento; crie ou edite a campanha em Campanhas.",
+        confirmLabel: "Registrar",
+      });
+      if (!ok) return;
     }
 
     const { data: userRes } = await supabase.auth.getUser();
@@ -570,9 +676,11 @@ function AlertasPage() {
       return;
     }
     if (acao === "acompanhamento") {
-      toast.success(`${player.nome} marcado como "Tentativa enviada". Movido para Aguardando retorno.`);
+      toast.success(
+        `${player.nome} marcado como "Tentativa enviada". Movido para Aguardando retorno.`,
+      );
     } else {
-      toast.success(`${ACAO_LABEL[acao]} registrado para ${player.nome}.`);
+      toast.success(`Contato registrado para ${player.nome}: ${ACAO_LABEL[acao]}.`);
     }
     qc.invalidateQueries({ queryKey: ["alertas"] });
     qc.invalidateQueries({ queryKey: ["players-recent-followup-keys"] });
@@ -580,28 +688,10 @@ function AlertasPage() {
     qc.invalidateQueries({ queryKey: ["players-page"] });
   };
 
-  const handleSimulate = async (player: EnrichedPlayer) => {
-    const now = new Date().toISOString();
-    const { error } = await supabase
-      .from("players")
-      .update({ ultimo_login: now, ultimo_jogo: now, status: "ativo" })
-      .eq("id", player.id!);
-    if (error) {
-      toast.error("Falha ao simular atividade: " + error.message);
-      return;
-    }
-    await supabase.from("sessions").insert({ player_id: player.id!, iniciado_em: now });
-    toast.success(`Atividade simulada para ${player.nome}. Alertas devem sumir em segundos.`);
-    qc.invalidateQueries({ queryKey: ["alertas"] });
-    qc.invalidateQueries({ queryKey: ["players"] });
-  };
-
   return (
-    <div className="space-y-6">
+    <Page>
       <PageHeader
-        title="Central de Recuperação de Receita"
         subtitle="Fila de oportunidades — players com maior potencial de retorno e receita recuperável primeiro."
-        icon={<HeartHandshake className="h-5 w-5 text-primary-foreground" />}
         actions={
           <div className="flex items-center gap-3">
             <UpdatedAgo ts={dataUpdatedAt} className="hidden sm:inline" />
@@ -620,21 +710,67 @@ function AlertasPage() {
       />
 
       <div className="grid gap-3 grid-cols-2 md:grid-cols-5">
-        <MetricCard label="Críticos" value={counts.critico} accent="danger" icon={<AlertTriangle className="h-4 w-4" />} />
-        <MetricCard label="Alto" value={counts.alto} accent="warning" icon={<Zap className="h-4 w-4" />} />
-        <MetricCard label="Médio" value={counts.medio} accent="warning" icon={<Clock className="h-4 w-4" />} />
-        <MetricCard label="Baixo" value={counts.baixo} accent="primary" icon={<Clock className="h-4 w-4" />} />
-        <MetricCard label="Players na fila" value={enriched.filter((p) => p.status === statusTab).length} icon={<Inbox className="h-4 w-4" />} />
+        <MetricCard
+          label="Críticos"
+          value={counts.critico}
+          accent="danger"
+          icon={<AlertTriangle className="h-4 w-4" />}
+        />
+        <MetricCard
+          label="Alto"
+          value={counts.alto}
+          accent="warning"
+          icon={<Zap className="h-4 w-4" />}
+        />
+        <MetricCard
+          label="Médio"
+          value={counts.medio}
+          accent="warning"
+          icon={<Clock className="h-4 w-4" />}
+        />
+        <MetricCard
+          label="Baixo"
+          value={counts.baixo}
+          accent="primary"
+          icon={<Clock className="h-4 w-4" />}
+        />
+        <MetricCard
+          label="Players na fila"
+          value={enriched.filter((p) => p.status === statusTab).length}
+          icon={<Inbox className="h-4 w-4" />}
+        />
       </div>
 
       {/* Tabs de status do lead */}
       <div className="flex flex-wrap items-center gap-2">
-        {([
-          { id: "pendente", label: "Pendente", icon: Inbox, cls: "bg-rose-500/15 text-rose-300 border-rose-500/50" },
-          { id: "aguardando", label: "Aguardando retorno", icon: Clock, cls: "bg-amber-500/15 text-amber-300 border-amber-500/50" },
-          { id: "recuperado", label: "Recuperado", icon: CheckCircle2, cls: "bg-emerald-500/15 text-emerald-300 border-emerald-500/50" },
-          { id: "convertido", label: "Convertido", icon: Sparkles, cls: "bg-violet-500/15 text-violet-300 border-violet-500/50" },
-        ] as const).map((t) => {
+        {(
+          [
+            {
+              id: "pendente",
+              label: "Pendente",
+              icon: Inbox,
+              cls: "bg-danger/15 text-danger border-danger/50",
+            },
+            {
+              id: "aguardando",
+              label: "Aguardando retorno",
+              icon: Clock,
+              cls: "bg-warning/15 text-warning border-warning/50",
+            },
+            {
+              id: "recuperado",
+              label: "Recuperado",
+              icon: CheckCircle2,
+              cls: "bg-success/15 text-success border-success/50",
+            },
+            {
+              id: "convertido",
+              label: "Convertido",
+              icon: Sparkles,
+              cls: "bg-violet-500/15 text-violet-300 border-violet-500/50",
+            },
+          ] as const
+        ).map((t) => {
           const active = statusTab === t.id;
           const Icon = t.icon;
           return (
@@ -643,12 +779,16 @@ function AlertasPage() {
               onClick={() => setStatusTab(t.id)}
               className={cn(
                 "h-9 px-3 rounded-lg text-xs font-semibold border transition-colors inline-flex items-center gap-1.5",
-                active ? t.cls : "bg-card/40 text-muted-foreground border-border/50 hover:text-foreground hover:border-border",
+                active
+                  ? t.cls
+                  : "bg-card/40 text-muted-foreground border-border/50 hover:text-foreground hover:border-border",
               )}
             >
               <Icon className="h-3.5 w-3.5" />
               {t.label}
-              <span className="ml-1 rounded-full bg-background/60 px-1.5 py-0.5 text-[10px]">{statusCounts[t.id]}</span>
+              <span className="ml-1 rounded-full bg-background/60 px-1.5 py-0.5 text-meta">
+                {statusCounts[t.id]}
+              </span>
             </button>
           );
         })}
@@ -656,13 +796,27 @@ function AlertasPage() {
 
       {/* Filtro por prioridade */}
       <div className="flex flex-wrap items-center gap-2">
-        {([
-          { id: "todos", label: "Todos", cls: "bg-foreground text-background border-foreground" },
-          { id: "critico", label: "Crítico", cls: "bg-rose-500/15 text-rose-300 border-rose-500/50" },
-          { id: "alto", label: "Alto", cls: "bg-orange-500/15 text-orange-300 border-orange-500/50" },
-          { id: "medio", label: "Médio", cls: "bg-amber-500/15 text-amber-300 border-amber-500/50" },
-          { id: "baixo", label: "Baixo", cls: "bg-sky-500/15 text-sky-300 border-sky-500/50" },
-        ] as const).map((f) => {
+        {(
+          [
+            { id: "todos", label: "Todos", cls: "bg-foreground text-background border-foreground" },
+            {
+              id: "critico",
+              label: "Crítico",
+              cls: "bg-danger/15 text-danger border-danger/50",
+            },
+            {
+              id: "alto",
+              label: "Alto",
+              cls: "bg-orange-500/15 text-orange-300 border-orange-500/50",
+            },
+            {
+              id: "medio",
+              label: "Médio",
+              cls: "bg-warning/15 text-warning border-warning/50",
+            },
+            { id: "baixo", label: "Baixo", cls: "bg-sky-500/15 text-sky-300 border-sky-500/50" },
+          ] as const
+        ).map((f) => {
           const active = prioridade === f.id;
           return (
             <button
@@ -683,9 +837,7 @@ function AlertasPage() {
 
       <Card className="border-border/50 bg-card/60 backdrop-blur">
         <CardHeader>
-          <CardTitle className="text-sm font-semibold">
-            {filtered.length} lead(s) na fila
-          </CardTitle>
+          <CardTitle className="text-sm font-semibold">{filtered.length} lead(s) na fila</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           {isLoading ? (
@@ -697,12 +849,10 @@ function AlertasPage() {
                 : `Nenhum lead em "${STATUS_LABEL[statusTab]}" no momento.`}
             </p>
           ) : (
-            filtered.map((p) => (
-              <AlertRow key={p.id} p={p} onAction={handleAction} onSimulate={handleSimulate} />
-            ))
+            filtered.map((p) => <AlertRow key={p.id} p={p} onAction={handleAction} />)
           )}
         </CardContent>
       </Card>
-    </div>
+    </Page>
   );
 }

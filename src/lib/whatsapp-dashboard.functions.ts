@@ -3,6 +3,8 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { readResetAtAdmin } from "@/lib/dashboard-settings.functions";
+import { resolveCurrentTenantId } from "@/lib/tenant-access.server";
+import { tenantReads } from "@/lib/active-tenant-filter";
 
 export type WhatsappDashboard = {
   totals_today: {
@@ -68,11 +70,9 @@ export const getWhatsappDashboard = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) => RangeSchema.parse(input ?? {}))
   .handler(async ({ context, data }): Promise<WhatsappDashboard> => {
+    const reads = await tenantReads(context.supabase);
     const { supabase } = context;
-    const { data: tenantRow, error: tenantErr } = await supabase.rpc("current_tenant_id");
-    if (tenantErr) throw new Error(tenantErr.message);
-    const tenantId = tenantRow as string | null;
-    if (!tenantId) throw new Error("tenant não encontrado para o usuário");
+    const tenantId = await resolveCurrentTenantId(supabase);
     const todayRef = new Date();
     const fromDate = data?.from ? parseLocalDate(data.from) : todayRef;
     const toDate = data?.to ? parseLocalDate(data.to) : todayRef;
@@ -86,7 +86,7 @@ export const getWhatsappDashboard = createServerFn({ method: "POST" })
     const last72hISO = max(new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString(), resetAt);
 
     // Mensagens no período (apenas campos necessários)
-    const { data: msgsToday } = await supabase
+    const { data: msgsToday } = await reads
       .from("whatsapp_messages")
       .select("id,from_me,status,created_at,chat_id,session_id")
       .gte("created_at", todayISO)
@@ -113,7 +113,7 @@ export const getWhatsappDashboard = createServerFn({ method: "POST" })
       buckets.push({ hour: start.toISOString(), sent: 0 });
     }
     // contar mensagens nas últimas 24h (incluindo as de hoje + dia anterior recentes)
-    const { data: msgs24 } = await supabase
+    const { data: msgs24 } = await reads
       .from("whatsapp_messages")
       .select("created_at,from_me")
       .gte("created_at", last24hISO)
@@ -126,7 +126,7 @@ export const getWhatsappDashboard = createServerFn({ method: "POST" })
     }
 
     // Sessões
-    const { data: sessRows } = await supabase
+    const { data: sessRows } = await reads
       .from("whatsapp_sessions")
       .select("id,name,status,messages_sent_today,daily_limit,health_score,queue_pending,is_active");
     const sessions = sessRows ?? [];
@@ -148,14 +148,14 @@ export const getWhatsappDashboard = createServerFn({ method: "POST" })
     }
 
     // Hot leads = chats com unread_count>0 nas últimas 24h
-    const { count: hotLeadsCount } = await supabase
+    const { count: hotLeadsCount } = await reads
       .from("whatsapp_chats")
       .select("id", { count: "exact", head: true })
       .gt("unread_count", 0)
       .gte("last_message_at", last24hISO);
 
     // Performance por fluxo (via flow_logs)
-    const { data: flowLogsToday } = await supabase
+    const { data: flowLogsToday } = await reads
       .from("flow_logs")
       .select("flow_id,event,created_at")
       .gte("created_at", todayISO)
@@ -173,7 +173,7 @@ export const getWhatsappDashboard = createServerFn({ method: "POST" })
     let flowsPerformance: WhatsappDashboard["flows_performance"] = [];
     if (flowAgg.size > 0) {
       const ids = Array.from(flowAgg.keys());
-      const { data: flowRows } = await supabase
+      const { data: flowRows } = await reads
         .from("flows")
         .select("id,name")
         .in("id", ids);
@@ -189,7 +189,7 @@ export const getWhatsappDashboard = createServerFn({ method: "POST" })
     // Conversões: depósitos no período cujo player teve chat WhatsApp nas últimas 72h
     let conversionsCount = 0;
     try {
-      const { data: chatsRecent } = await supabase
+      const { data: chatsRecent } = await reads
         .from("whatsapp_chats")
         .select("phone")
         .gte("last_message_at", last72hISO)
@@ -202,13 +202,13 @@ export const getWhatsappDashboard = createServerFn({ method: "POST" })
         ),
       );
       if (phones.length > 0) {
-        const { data: playerRows } = await supabase
+        const { data: playerRows } = await reads
           .from("players")
           .select("id,telefone")
           .in("telefone", phones.slice(0, 1000));
         const playerIds = (playerRows ?? []).map((p: any) => p.id);
         if (playerIds.length > 0) {
-          const { count } = await supabase
+          const { count } = await reads
             .from("deposits")
             .select("id", { count: "exact", head: true })
             .gte("created_at", todayISO)

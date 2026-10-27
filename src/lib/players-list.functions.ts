@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { applyActiveWithin, applyInactiveAtLeast, applyInactivityWindow } from "./player-activity";
+import { resolveCurrentTenantId } from "@/lib/tenant-access.server";
 
 // Colunas usadas pela tabela /players. Mantenha em sincronia com o tipo Player no route.
 const COLS =
@@ -275,10 +276,9 @@ function applyGamificationDimensions<T extends QueryLike>(
 async function attachDepositCounts(
   client: unknown,
   rows: PlayerRow[],
-  // CON-08: tenant of the rows when the caller filtered players by it, so the deposits
-  // query carries an explicit tenant filter instead of relying on RLS alone. null when
-  // the rows came from players_by_behavior_filters (security invoker, no tenant filter:
-  // for a super admin it may span tenants), keeping that path exactly as before.
+  // CON-08: tenant of the rows, so the deposits query carries an explicit tenant filter
+  // instead of relying on RLS alone. Every players query here is pinned to the active
+  // house, including the players_by_behavior_filters path.
   tenantId: string | null,
 ): Promise<PlayerRow[]> {
   const supabase = client as DepositCountClient;
@@ -290,9 +290,7 @@ async function attachDepositCounts(
   for (let from = 0; ; from += pageSize) {
     let query = supabase.from("deposits").select("player_id").in("player_id", ids);
     if (tenantId) query = query.eq("tenant_id", tenantId);
-    const { data, error } = await query
-      .eq("status", "aprovado")
-      .range(from, from + pageSize - 1);
+    const { data, error } = await query.eq("status", "aprovado").range(from, from + pageSize - 1);
     if (error) throw new Error(error.message);
 
     const batch = data ?? [];
@@ -330,9 +328,7 @@ export const getPlayersPage = createServerFn({ method: "POST" })
       dateTo,
     } = data;
     const supabase = context.supabase;
-    const { data: tenantId, error: tenantError } = await (supabase as any).rpc("current_tenant_id");
-    if (tenantError) throw new Error(tenantError.message);
-    if (!tenantId) throw new Error("Tenant atual não encontrado.");
+    const tenantId = await resolveCurrentTenantId(supabase as any);
     const behaviorFilters = Array.from(
       new Set((rawBehaviorFilters ?? []).filter((value) => typeof value === "string" && value)),
     );
@@ -368,6 +364,9 @@ export const getPlayersPage = createServerFn({ method: "POST" })
             _vip_threshold: vipThreshold(gamificationSettings),
           })
           .select(COLS, { count: "exact" })
+          // The RPC is security invoker with no tenant filter (a super admin would get every
+          // house): pin it to the active house like the plain query below.
+          .eq("tenant_id", tenantId)
       : supabase.from("players").select(COLS, { count: "exact" }).eq("tenant_id", tenantId);
 
     // 1) Restrição por IDs (alerta) — vem primeiro pra cortar volume.
@@ -495,7 +494,7 @@ export const getPlayersPage = createServerFn({ method: "POST" })
       const enrichedRows = await attachDepositCounts(
         supabase,
         (rows ?? []) as unknown as PlayerRow[],
-        usesCombinedBehaviorFilters ? null : (tenantId as string),
+        tenantId as string,
       );
       return { rows: enrichedRows, total: count ?? 0 };
     }
@@ -519,6 +518,9 @@ export const getPlayersPage = createServerFn({ method: "POST" })
             _vip_threshold: vipThreshold(gamificationSettings),
           })
           .select("id,total_depositado,total_sacado,saldo_carteira,saldo_bonus", { count: "exact" })
+          // The RPC is security invoker with no tenant filter (a super admin would get every
+          // house): pin it to the active house like the plain query below.
+          .eq("tenant_id", tenantId)
       : supabase
           .from("players")
           .select("id,total_depositado,total_sacado,saldo_carteira,saldo_bonus", { count: "exact" })
@@ -647,11 +649,7 @@ export const getPlayersPage = createServerFn({ method: "POST" })
     // re-ordena conforme pageIds
     const byId = new Map((rows ?? []).map((r) => [(r as { id: string }).id, r]));
     const ordered = pageIds.map((id) => byId.get(id)).filter(Boolean) as unknown as PlayerRow[];
-    const enrichedRows = await attachDepositCounts(
-      supabase,
-      ordered,
-      usesCombinedBehaviorFilters ? null : (tenantId as string),
-    );
+    const enrichedRows = await attachDepositCounts(supabase, ordered, tenantId as string);
     return { rows: enrichedRows, total: total || all.length };
   });
 
@@ -670,156 +668,162 @@ type IdsInput = {
   dateTo?: string | null;
 };
 
+type FilteredQueryResult = { q: any; empty: false } | { q: null; empty: true };
+
+// Monta a query de players com o MESMO filtro da listagem (chips, busca,
+// gamificação, datas e IDs de alerta), projetando só `columns`. Usado pelas
+// ações que valem para o filtro inteiro: copiar IDs, público de SMS e CSV.
+async function buildFilteredPlayersQuery(
+  supabase: any,
+  data: IdsInput,
+  columns: string,
+): Promise<FilteredQueryResult> {
+  const {
+    filter,
+    behaviorFilters: rawBehaviorFilters,
+    behaviorOperator,
+    gamificationStatus,
+    gamificationLevel,
+    search,
+    idsIn,
+    dateField,
+    dateFrom,
+    dateTo,
+  } = data;
+  const tenantId = await resolveCurrentTenantId(supabase);
+  const behaviorFilters = Array.from(
+    new Set((rawBehaviorFilters ?? []).filter((value) => typeof value === "string" && value)),
+  );
+  const primaryBehaviorFilter = behaviorFilters[0] ?? filter;
+  const usesCombinedBehaviorFilters = behaviorFilters.length > 1;
+  const gamificationSettings =
+    needsGamificationSettings(primaryBehaviorFilter, gamificationStatus, gamificationLevel) ||
+    behaviorFilters.some((value) => ["vip", "vip_em_risco", "quase_vip"].includes(value))
+      ? await readGamificationSettings(supabase, tenantId as string)
+      : DEFAULT_GAMIFICATION;
+  const now = Date.now();
+  const daysAgo = (n: number) => new Date(now - n * 86400000).toISOString();
+  const todayStartBrt = (() => {
+    const current = new Date();
+    const brt = new Date(current.getTime() - 3 * 3600 * 1000);
+    return new Date(
+      Date.UTC(brt.getUTCFullYear(), brt.getUTCMonth(), brt.getUTCDate()) + 3 * 3600 * 1000,
+    ).toISOString();
+  })();
+
+  let q: any = usesCombinedBehaviorFilters
+    ? supabase
+        .rpc("players_by_behavior_filters", {
+          _filters: behaviorFilters,
+          _operator: behaviorOperator === "or" ? "or" : "and",
+          _vip_threshold: vipThreshold(gamificationSettings),
+        })
+        .select(columns, { count: "exact" })
+        // The RPC is security invoker with no tenant filter (a super admin would get every
+        // house): pin it to the active house like the plain query below.
+        .eq("tenant_id", tenantId)
+    : supabase.from("players").select(columns, { count: "exact" }).eq("tenant_id", tenantId);
+
+  if (idsIn) {
+    if (idsIn.length === 0) return { q: null, empty: true };
+    q = q.in("id", idsIn);
+  }
+
+  const s = sanitizeSearch(search);
+  if (s) {
+    const term = `%${s}%`;
+    q = q.or(
+      `nome.ilike.${term},telefone.ilike.${term},email.ilike.${term},player_external_id.ilike.${term}`,
+    );
+  }
+
+  if (!usesCombinedBehaviorFilters)
+    switch (primaryBehaviorFilter) {
+      case "recorrentes":
+        q = applyActiveWithin(q, daysAgo(4));
+        break;
+      case "ativo":
+        q = q.not("ftd_em", "is", null);
+        break;
+      case "em_risco":
+        q = applyInactiveAtLeast(q, daysAgo(7));
+        break;
+      case "risco_5_7":
+        q = applyInactivityWindow(q, daysAgo(5), daysAgo(7));
+        break;
+      case "vip":
+        q = q.or(`vip.eq.true,total_depositado.gte.${vipThreshold(gamificationSettings)}`);
+        break;
+      case "vip_em_risco":
+        q = applyInactiveAtLeast(
+          q.or(`vip.eq.true,total_depositado.gte.${vipThreshold(gamificationSettings)}`),
+          daysAgo(7),
+        );
+        break;
+      case "quase_vip":
+        q = q
+          .eq("vip", false)
+          .gte("total_depositado", vipThreshold(gamificationSettings) * 0.7)
+          .lt("total_depositado", vipThreshold(gamificationSettings));
+        break;
+      case "leads_quentes":
+        q = applyActiveWithin(q, daysAgo(4)).gte("ultimo_deposito", daysAgo(7));
+        break;
+      case "com_saldo":
+        q = applyActiveWithin(q.or(`saldo_carteira.gt.0,saldo_bonus.gt.0`), daysAgo(60));
+        break;
+      case "deposito_hoje":
+        q = q.gte("ultimo_deposito", todayStartBrt);
+        break;
+      case "ftd_hoje":
+        q = q.gte("ftd_em", todayStartBrt);
+        break;
+      case "nao_converteram":
+        q = q.is("ftd_em", null);
+        break;
+      case "risco_inicial":
+        q = applyInactivityWindow(q, daysAgo(7), daysAgo(14)).not("ftd_em", "is", null);
+        break;
+      case "risco_moderado":
+        q = applyInactivityWindow(q, daysAgo(15), daysAgo(24)).not("ftd_em", "is", null);
+        break;
+      case "risco_alto":
+        q = applyInactivityWindow(q, daysAgo(25), daysAgo(34)).not("ftd_em", "is", null);
+        break;
+      case "quase_perdido":
+        q = applyInactivityWindow(q, daysAgo(35), daysAgo(44)).not("ftd_em", "is", null);
+        break;
+      case "recuperacao_dificil":
+        q = applyInactivityWindow(q, daysAgo(45), daysAgo(59)).not("ftd_em", "is", null);
+        break;
+      case "perdidos":
+        q = applyInactiveAtLeast(q, daysAgo(60)).not("ftd_em", "is", null);
+        break;
+      case "cashback_pago_hoje":
+        q = q.gte("last_cashback_paid_at", todayStartBrt);
+        break;
+      default:
+        q = applyGamificationFilter(q, filter, gamificationSettings);
+        break;
+    }
+  q = applyGamificationDimensions(q, gamificationStatus, gamificationLevel, gamificationSettings);
+
+  if (dateField && dateFrom && dateTo) {
+    q = q.gte(dateField, dateFrom).lte(dateField, dateTo);
+    if (dateField === "ftd_em") q = q.not("ftd_em", "is", null);
+  }
+
+  return { q, empty: false };
+}
+
 export const getPlayersFilteredExternalIds = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: IdsInput) => data)
   .handler(
     async ({ data, context }): Promise<{ ids: string[]; missing: number; total: number }> => {
-      const {
-        filter,
-        behaviorFilters: rawBehaviorFilters,
-        behaviorOperator,
-        gamificationStatus,
-        gamificationLevel,
-        search,
-        idsIn,
-        dateField,
-        dateFrom,
-        dateTo,
-      } = data;
-      const supabase = context.supabase;
-      const { data: tenantId, error: tenantError } = await (supabase as any).rpc(
-        "current_tenant_id",
-      );
-      if (tenantError) throw new Error(tenantError.message);
-      if (!tenantId) throw new Error("Tenant atual não encontrado.");
-      const behaviorFilters = Array.from(
-        new Set((rawBehaviorFilters ?? []).filter((value) => typeof value === "string" && value)),
-      );
-      const primaryBehaviorFilter = behaviorFilters[0] ?? filter;
-      const usesCombinedBehaviorFilters = behaviorFilters.length > 1;
-      const gamificationSettings =
-        needsGamificationSettings(primaryBehaviorFilter, gamificationStatus, gamificationLevel) ||
-        behaviorFilters.some((value) => ["vip", "vip_em_risco", "quase_vip"].includes(value))
-          ? await readGamificationSettings(supabase, tenantId as string)
-          : DEFAULT_GAMIFICATION;
-      const now = Date.now();
-      const daysAgo = (n: number) => new Date(now - n * 86400000).toISOString();
-
-      let q: any = usesCombinedBehaviorFilters
-        ? (supabase as any)
-            .rpc("players_by_behavior_filters", {
-              _filters: behaviorFilters,
-              _operator: behaviorOperator === "or" ? "or" : "and",
-              _vip_threshold: vipThreshold(gamificationSettings),
-            })
-            .select("player_external_id", { count: "exact" })
-        : supabase
-            .from("players")
-            .select("player_external_id", { count: "exact" })
-            .eq("tenant_id", tenantId);
-      const todayStartBrt = (() => {
-        const now = new Date();
-        const brt = new Date(now.getTime() - 3 * 3600 * 1000);
-        const y = brt.getUTCFullYear(),
-          m = brt.getUTCMonth(),
-          d = brt.getUTCDate();
-        return new Date(Date.UTC(y, m, d) + 3 * 3600 * 1000).toISOString();
-      })();
-
-      if (idsIn) {
-        if (idsIn.length === 0) return { ids: [], missing: 0, total: 0 };
-        q = q.in("id", idsIn);
-      }
-
-      const s = sanitizeSearch(search);
-      if (s) {
-        const term = `%${s}%`;
-        q = q.or(
-          `nome.ilike.${term},telefone.ilike.${term},email.ilike.${term},player_external_id.ilike.${term}`,
-        );
-      }
-
-      if (!usesCombinedBehaviorFilters)
-        switch (primaryBehaviorFilter) {
-          case "recorrentes":
-            q = applyActiveWithin(q, daysAgo(4));
-            break;
-          case "ativo":
-            q = q.not("ftd_em", "is", null);
-            break;
-          case "em_risco":
-            q = applyInactiveAtLeast(q, daysAgo(7));
-            break;
-          case "risco_5_7":
-            q = applyInactivityWindow(q, daysAgo(5), daysAgo(7));
-            break;
-          case "vip":
-            q = q.or(`vip.eq.true,total_depositado.gte.${vipThreshold(gamificationSettings)}`);
-            break;
-          case "vip_em_risco":
-            q = applyInactiveAtLeast(
-              q.or(`vip.eq.true,total_depositado.gte.${vipThreshold(gamificationSettings)}`),
-              daysAgo(7),
-            );
-            break;
-          case "quase_vip":
-            q = q
-              .eq("vip", false)
-              .gte("total_depositado", vipThreshold(gamificationSettings) * 0.7)
-              .lt("total_depositado", vipThreshold(gamificationSettings));
-            break;
-          case "leads_quentes":
-            q = applyActiveWithin(q, daysAgo(4)).gte("ultimo_deposito", daysAgo(7));
-            break;
-          case "com_saldo":
-            q = applyActiveWithin(q.or(`saldo_carteira.gt.0,saldo_bonus.gt.0`), daysAgo(60));
-            break;
-          case "deposito_hoje":
-            q = q.gte("ultimo_deposito", todayStartBrt);
-            break;
-          case "ftd_hoje":
-            q = q.gte("ftd_em", todayStartBrt);
-            break;
-          case "nao_converteram":
-            q = q.is("ftd_em", null);
-            break;
-          case "risco_inicial":
-            q = applyInactivityWindow(q, daysAgo(7), daysAgo(14)).not("ftd_em", "is", null);
-            break;
-          case "risco_moderado":
-            q = applyInactivityWindow(q, daysAgo(15), daysAgo(24)).not("ftd_em", "is", null);
-            break;
-          case "risco_alto":
-            q = applyInactivityWindow(q, daysAgo(25), daysAgo(34)).not("ftd_em", "is", null);
-            break;
-          case "quase_perdido":
-            q = applyInactivityWindow(q, daysAgo(35), daysAgo(44)).not("ftd_em", "is", null);
-            break;
-          case "recuperacao_dificil":
-            q = applyInactivityWindow(q, daysAgo(45), daysAgo(59)).not("ftd_em", "is", null);
-            break;
-          case "perdidos":
-            q = applyInactiveAtLeast(q, daysAgo(60)).not("ftd_em", "is", null);
-            break;
-          case "cashback_pago_hoje":
-            q = q.gte("last_cashback_paid_at", todayStartBrt);
-            break;
-          default:
-            q = applyGamificationFilter(q, filter, gamificationSettings);
-            break;
-        }
-      q = applyGamificationDimensions(
-        q,
-        gamificationStatus,
-        gamificationLevel,
-        gamificationSettings,
-      );
-
-      if (dateField && dateFrom && dateTo) {
-        q = q.gte(dateField, dateFrom).lte(dateField, dateTo);
-        if (dateField === "ftd_em") q = q.not("ftd_em", "is", null);
-      }
+      const built = await buildFilteredPlayersQuery(context.supabase, data, "player_external_id");
+      if (built.empty) return { ids: [], missing: 0, total: 0 };
+      const q = built.q;
 
       const PAGE = 1000;
       const ids: string[] = [];
@@ -850,181 +854,105 @@ export const getPlayersFilteredExternalIds = createServerFn({ method: "POST" })
     },
   );
 
-export const getPlayersFilteredSmsAudience = createServerFn({ method: "POST" })
+/** Teto da seleção "filtro atual" enviada para campanha (mesmo do público de seleção). */
+export const PLAYERS_SELECTION_LIMIT = 50_000;
+
+/**
+ * Ids internos dos jogadores do filtro atual, para virar público de seleção.
+ * Corta nos 50 mil primeiros por data de cadastro (mais antigos primeiro) e
+ * avisa (`truncated`).
+ */
+export const getPlayersFilteredPlayerIds = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: IdsInput) => data)
+  .handler(
+    async ({ data, context }): Promise<{ ids: string[]; total: number; truncated: boolean }> => {
+      const built = await buildFilteredPlayersQuery(context.supabase, data, "id");
+      if (built.empty) return { ids: [], total: 0, truncated: false };
+      // Ordem estável entre as páginas e explicável no aviso de corte: os mais
+      // antigos por data de cadastro primeiro (id desempata).
+      const q = built.q.order("created_at", { ascending: true }).order("id", { ascending: true });
+
+      const PAGE = 1000;
+      const seen = new Set<string>();
+      let total = 0;
+      for (let from = 0; from < PLAYERS_SELECTION_LIMIT; from += PAGE) {
+        const to = Math.min(from + PAGE, PLAYERS_SELECTION_LIMIT) - 1;
+        const { data: chunk, count, error } = await q.range(from, to);
+        if (error) throw new Error(error.message);
+        const batch = (chunk ?? []) as Array<{ id: string }>;
+        for (const row of batch) if (row.id) seen.add(row.id);
+        if (count != null) total = count;
+        if (batch.length < to - from + 1) break;
+      }
+      const ids = Array.from(seen);
+      total = Math.max(total, ids.length);
+      return { ids, total, truncated: total > ids.length };
+    },
+  );
+
+// Colunas do CSV de Jogadores (sem deposits_count, que exigiria outra consulta).
+const EXPORT_COLS =
+  "id,nome,telefone,email,player_external_id,origem,expert,status,vip,ultimo_login,ultimo_jogo,ultimo_deposito,total_depositado,total_sacado,saldo_carteira,saldo_bonus,tags,created_at,ftd_em";
+
+export const PLAYERS_EXPORT_LIMIT = 50_000;
+
+const EXPORT_SORT_COLUMNS = new Set([
+  "ultimo_login",
+  "ultimo_jogo",
+  "total_depositado",
+  "total_sacado",
+  "ultimo_deposito",
+  "status",
+  "origem",
+]);
+
+export type PlayerExportRow = Omit<
+  PlayerRow,
+  | "deposits_count"
+  | "risco"
+  | "last_cashback_paid_at"
+  | "last_cashback_amount"
+  | "total_cashback_paid"
+>;
+
+type ExportInput = IdsInput & {
+  sortKey?: string | null;
+  sortDir?: "asc" | "desc" | null;
+};
+
+// C-06: o CSV exporta o filtro inteiro (não só a página), com o mesmo filtro da
+// listagem e um teto de segurança de PLAYERS_EXPORT_LIMIT linhas.
+export const getPlayersFilteredExport = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: ExportInput) => data)
   .handler(
     async ({
       data,
       context,
-    }): Promise<{
-      recipients: Array<{ phone: string; playerId: string }>;
-      missingPhone: number;
-      total: number;
-    }> => {
-      const {
-        filter,
-        behaviorFilters: rawBehaviorFilters,
-        behaviorOperator,
-        gamificationStatus,
-        gamificationLevel,
-        search,
-        idsIn,
-        dateField,
-        dateFrom,
-        dateTo,
-      } = data;
-      const supabase = context.supabase;
-      const { data: tenantId, error: tenantError } = await (supabase as any).rpc(
-        "current_tenant_id",
-      );
-      if (tenantError) throw new Error(tenantError.message);
-      if (!tenantId) throw new Error("Tenant atual não encontrado.");
-      const behaviorFilters = Array.from(
-        new Set((rawBehaviorFilters ?? []).filter((value) => typeof value === "string" && value)),
-      );
-      const primaryBehaviorFilter = behaviorFilters[0] ?? filter;
-      const usesCombinedBehaviorFilters = behaviorFilters.length > 1;
-      const gamificationSettings =
-        needsGamificationSettings(primaryBehaviorFilter, gamificationStatus, gamificationLevel) ||
-        behaviorFilters.some((value) => ["vip", "vip_em_risco", "quase_vip"].includes(value))
-          ? await readGamificationSettings(supabase, tenantId as string)
-          : DEFAULT_GAMIFICATION;
-      const now = Date.now();
-      const daysAgo = (n: number) => new Date(now - n * 86400000).toISOString();
-      const todayStartBrt = (() => {
-        const current = new Date();
-        const brt = new Date(current.getTime() - 3 * 3600 * 1000);
-        return new Date(
-          Date.UTC(brt.getUTCFullYear(), brt.getUTCMonth(), brt.getUTCDate()) + 3 * 3600 * 1000,
-        ).toISOString();
-      })();
+    }): Promise<{ rows: PlayerExportRow[]; total: number; truncated: boolean }> => {
+      const built = await buildFilteredPlayersQuery(context.supabase, data, EXPORT_COLS);
+      if (built.empty) return { rows: [], total: 0, truncated: false };
+      const orderCol =
+        data.sortKey && EXPORT_SORT_COLUMNS.has(data.sortKey) ? data.sortKey : "ultimo_login";
+      // `id` como desempate deixa a paginação estável entre os blocos de 1.000.
+      const q = built.q
+        .order(orderCol, { ascending: data.sortDir === "asc", nullsFirst: false })
+        .order("id", { ascending: true });
 
-      let q: any = usesCombinedBehaviorFilters
-        ? (supabase as any)
-            .rpc("players_by_behavior_filters", {
-              _filters: behaviorFilters,
-              _operator: behaviorOperator === "or" ? "or" : "and",
-              _vip_threshold: vipThreshold(gamificationSettings),
-            })
-            .select("id,telefone", { count: "exact" })
-        : supabase
-            .from("players")
-            .select("id,telefone", { count: "exact" })
-            .eq("tenant_id", tenantId);
-
-      if (idsIn) {
-        if (idsIn.length === 0) return { recipients: [], missingPhone: 0, total: 0 };
-        q = q.in("id", idsIn);
-      }
-
-      const s = sanitizeSearch(search);
-      if (s) {
-        const term = `%${s}%`;
-        q = q.or(
-          `nome.ilike.${term},telefone.ilike.${term},email.ilike.${term},player_external_id.ilike.${term}`,
-        );
-      }
-
-      if (!usesCombinedBehaviorFilters)
-        switch (primaryBehaviorFilter) {
-          case "recorrentes":
-            q = applyActiveWithin(q, daysAgo(4));
-            break;
-          case "ativo":
-            q = q.not("ftd_em", "is", null);
-            break;
-          case "em_risco":
-            q = applyInactiveAtLeast(q, daysAgo(7));
-            break;
-          case "risco_5_7":
-            q = applyInactivityWindow(q, daysAgo(5), daysAgo(7));
-            break;
-          case "vip":
-            q = q.or(`vip.eq.true,total_depositado.gte.${vipThreshold(gamificationSettings)}`);
-            break;
-          case "vip_em_risco":
-            q = applyInactiveAtLeast(
-              q.or(`vip.eq.true,total_depositado.gte.${vipThreshold(gamificationSettings)}`),
-              daysAgo(7),
-            );
-            break;
-          case "quase_vip":
-            q = q
-              .eq("vip", false)
-              .gte("total_depositado", vipThreshold(gamificationSettings) * 0.7)
-              .lt("total_depositado", vipThreshold(gamificationSettings));
-            break;
-          case "leads_quentes":
-            q = applyActiveWithin(q, daysAgo(4)).gte("ultimo_deposito", daysAgo(7));
-            break;
-          case "com_saldo":
-            q = applyActiveWithin(q.or(`saldo_carteira.gt.0,saldo_bonus.gt.0`), daysAgo(60));
-            break;
-          case "deposito_hoje":
-            q = q.gte("ultimo_deposito", todayStartBrt);
-            break;
-          case "ftd_hoje":
-            q = q.gte("ftd_em", todayStartBrt);
-            break;
-          case "nao_converteram":
-            q = q.is("ftd_em", null);
-            break;
-          case "risco_inicial":
-            q = applyInactivityWindow(q, daysAgo(7), daysAgo(14)).not("ftd_em", "is", null);
-            break;
-          case "risco_moderado":
-            q = applyInactivityWindow(q, daysAgo(15), daysAgo(24)).not("ftd_em", "is", null);
-            break;
-          case "risco_alto":
-            q = applyInactivityWindow(q, daysAgo(25), daysAgo(34)).not("ftd_em", "is", null);
-            break;
-          case "quase_perdido":
-            q = applyInactivityWindow(q, daysAgo(35), daysAgo(44)).not("ftd_em", "is", null);
-            break;
-          case "recuperacao_dificil":
-            q = applyInactivityWindow(q, daysAgo(45), daysAgo(59)).not("ftd_em", "is", null);
-            break;
-          case "perdidos":
-            q = applyInactiveAtLeast(q, daysAgo(60)).not("ftd_em", "is", null);
-            break;
-          case "cashback_pago_hoje":
-            q = q.gte("last_cashback_paid_at", todayStartBrt);
-            break;
-          default:
-            q = applyGamificationFilter(q, filter, gamificationSettings);
-            break;
-        }
-      q = applyGamificationDimensions(
-        q,
-        gamificationStatus,
-        gamificationLevel,
-        gamificationSettings,
-      );
-
-      if (dateField && dateFrom && dateTo) {
-        q = q.gte(dateField, dateFrom).lte(dateField, dateTo);
-        if (dateField === "ftd_em") q = q.not("ftd_em", "is", null);
-      }
-
-      const recipients: Array<{ phone: string; playerId: string }> = [];
-      let missingPhone = 0;
-      let total = 0;
       const PAGE = 1000;
-      for (let from = 0; ; from += PAGE) {
-        const { data: chunk, count, error } = await q.range(from, from + PAGE - 1);
+      const rows: PlayerExportRow[] = [];
+      let total = 0;
+      for (let from = 0; from < PLAYERS_EXPORT_LIMIT; from += PAGE) {
+        const to = Math.min(from + PAGE, PLAYERS_EXPORT_LIMIT) - 1;
+        const { data: chunk, count, error } = await q.range(from, to);
         if (error) throw new Error(error.message);
-        const batch = (chunk ?? []) as Array<{ id: string; telefone: string | null }>;
-        for (const row of batch) {
-          const phone = (row.telefone ?? "").replace(/\D/g, "");
-          if (phone.length >= 10) recipients.push({ phone, playerId: row.id });
-          else missingPhone += 1;
-        }
+        const batch = (chunk ?? []) as PlayerExportRow[];
+        rows.push(...batch);
         if (count != null) total = count;
-        if (batch.length < PAGE) break;
-        if (recipients.length + missingPhone >= 50000) break;
+        if (batch.length < to - from + 1) break;
       }
-
-      return { recipients, missingPhone, total: total || recipients.length + missingPhone };
+      total = total || rows.length;
+      return { rows, total, truncated: total > rows.length };
     },
   );

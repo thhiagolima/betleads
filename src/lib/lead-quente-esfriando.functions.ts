@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { tenantReads } from "@/lib/active-tenant-filter";
 
 // Retorna os IDs dos players que disparam o gatilho "Lead quente esfriando":
 // sequência de 5+ dias seguidos depositando (contando de hoje pra trás, na
@@ -7,6 +8,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 export const getLeadQuenteEsfriandoPlayerIds = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<{ ids: string[] }> => {
+    const reads = await tenantReads(context.supabase);
     const now = Date.now();
     const iso60 = new Date(now - 60 * 86400000).toISOString();
 
@@ -17,7 +19,7 @@ export const getLeadQuenteEsfriandoPlayerIds = createServerFn({ method: "GET" })
     const maxLogin = new Date(now - 3 * 86400000).toISOString();
     const candidates: P[] = [];
     for (let from = 0; ; from += PAGE) {
-      const { data, error } = await context.supabase
+      const { data, error } = await reads
         .from("players")
         .select("id,ultimo_login")
         .gte("ultimo_login", minLogin)
@@ -35,7 +37,7 @@ export const getLeadQuenteEsfriandoPlayerIds = createServerFn({ method: "GET" })
     type Row = { player_id: string | null; created_at: string };
     const deps: Row[] = [];
     for (let from = 0; ; from += PAGE) {
-      const { data, error } = await context.supabase
+      const { data, error } = await reads
         .from("deposits")
         .select("player_id,created_at")
         .eq("status", "aprovado")

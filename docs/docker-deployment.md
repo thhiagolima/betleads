@@ -38,9 +38,86 @@ SHORTIO_SYNC_CONCURRENCY=15
 EVOLUTION_API_URL=<evolution-base-url>
 EVOLUTION_API_KEY=<evolution-api-key>
 EVOLUTION_WEBHOOK_SECRET=<strong-random-webhook-secret>
+BILLING_GATEWAY_ENABLED=false
+UPPER_API_BASE=https://api.uppersc.com.br
+UPPER_API_KEY=<upper-pix_in-only-api-key>
+UPPER_WEBHOOK_SECRET=<strong-random-webhook-secret>
+BETTERSTACK_HEARTBEAT_BILLING_RECONCILE=<better-stack-heartbeat-url>
+BETTERSTACK_HEARTBEAT_BILLING_HEALTH=<better-stack-heartbeat-url>
+BILLING_INVOICES_ENABLED=false
+BILLING_ENFORCEMENT_ENABLED=false
+PLATFORM_EMAIL_FROM=no-reply@betleads.io
+VOICE_MAX_CALL_SECONDS=120
 ```
 
 Nunca crie variavel `VITE_` para `SUPABASE_SECRET_KEY`.
+
+## Gateway de pagamento Upper (Pix)
+
+Compra de créditos por Pix (PG2) via a Upper:
+
+- `BILLING_GATEWAY_ENABLED`: kill switch. Desligado (padrao `false`), a tela de
+  compra mostra "Compra por Pix indisponivel no momento." ao criar uma cobranca;
+  o webhook e a conciliacao continuam funcionando normalmente.
+- `UPPER_API_BASE`: aceita a raiz (`https://api.uppersc.com.br`) ou com `/v1`
+  no final — o cliente normaliza para sempre ter exatamente um `/v1` no path.
+- `UPPER_API_KEY`: chave da Upper com escopo **somente `pix_in`**. Nunca use
+  uma chave com outros escopos nem prefixe com `VITE_`.
+- `UPPER_WEBHOOK_SECRET`: segredo usado para validar `X-Upper-Signature` nos
+  callbacks de `charge.paid`/`charge.expired`/`charge.cancelled`/`ping`.
+- `BETTERSTACK_HEARTBEAT_BILLING_RECONCILE`: URL do heartbeat do Better Stack
+  para a conciliacao (`POST /api/public/hooks/billing-reconcile`, job
+  `billing-reconcile`, cron `*/5 * * * *`). Periodo 5 min, tolerancia 10 min.
+  Vazio = sem ping. Ver `docs/RUNBOOK_OBSERVABILIDADE.md`.
+- `BETTERSTACK_HEARTBEAT_BILLING_HEALTH`: URL do heartbeat da saude da
+  cobranca (PG6-03), checada no mesmo request da conciliacao (job
+  `billing-health`). So faz ping quando nao ha problema critico de estado
+  (crons, cobranca paga sem credito, carteira x razao); sem ping =
+  conciliacao parada ou cobranca com problema. Assinatura invalida e erros
+  401/FEATURE_DISABLED da Upper alertam, mas nao seguram o ping. Periodo 5
+  min, tolerancia 10 min. Os achados vao para o Sentry quando `SENTRY_DSN`
+  esta configurado; senao, para o log com o prefixo `[billing-alert]`.
+
+Nenhuma dessas variaveis deve ser logada; a chave e o segredo ficam apenas no
+servidor.
+
+## Mensalidade do plano (fatura mensal + ciclo da hora)
+
+- `BILLING_INVOICES_ENABLED`: kill switch. Desligado (padrao `false`), o job
+  `POST /api/public/hooks/billing-cycle` (job `billing-cycle`, cron `7 * * *
+  *`) so recalcula o `access_state` de cada casa paga, sem emitir fatura nem
+  disparar e-mail; o Pix de uma fatura responde "Pagamento por Pix
+  indisponivel no momento." ao criar uma cobranca.
+- `BILLING_ENFORCEMENT_ENABLED`: liga o bloqueio de acesso por falta de
+  pagamento (`locked_unpaid`/`awaiting_first_payment`); `frozen` e
+  `locked_manual` bloqueiam sempre, com a flag ligada ou nao. O superadmin
+  nunca e bloqueado. Desligado (padrao `false`), a casa so ve a faixa
+  vermelha ("Sua mensalidade venceu..."), sem cartao de bloqueio nem o
+  e-mail "locked" (que exige esta flag mesmo num reenvio forcado pelo
+  superadmin). So vale com `BILLING_INVOICES_ENABLED=true`: sem ela, a flag
+  e ignorada (nenhuma casa e bloqueada por falta de pagamento) e o servidor
+  registra um `console.error` uma vez por processo.
+- `PLATFORM_EMAIL_FROM`: remetente dos quatro e-mails de cobranca (fatura
+  emitida, vence hoje, acesso suspenso, pagamento confirmado), nome fixo
+  "BetLeads". Padrao `no-reply@betleads.io`. Esse envio nunca passa pela
+  guarda de demo/bloqueio das casas (senao o e-mail de bloqueio da propria
+  casa bloqueada seria recusado); so entre 08:00-20:00 de Brasilia, e uma vez
+  por fatura e tipo (`billing_email_log`).
+
+## Reserva de saldo das ligacoes (PG3)
+
+Deploy do PG3 (3 migrations antes do deploy, verificacao e rollback): ver
+`docs/operacoes/RUNBOOK_DEPLOY_PG3_CONSUMO.md`.
+
+Antes de discar, cada ligacao reserva blocos de 30 s da carteira da casa
+(`voice_30s`): `ceil((cap + 10) / 30)` blocos. Sem saldo, a ligacao nao e
+feita ("Saldo insuficiente"): na fila de voz, os itens da casa continuam
+prontos e voltam 15 min depois; no "Disparar agora", o item falha.
+
+- `VOICE_MAX_CALL_SECONDS`: cap em segundos das ligacoes sem limite conhecido
+  (fila de voz e disparo manual). Padrao `120` (5 blocos). Jornadas usam a
+  duracao do audio (`journey_voice_assets.duration_seconds`, ou este valor
+  quando ausente); fluxos de ligacao usam o `max_call_seconds` do bloco.
 
 ## Ativacao do dispatcher de jornadas
 

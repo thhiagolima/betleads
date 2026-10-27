@@ -1,5 +1,5 @@
 // Task 2 — SQL test for
-// supabase/migrations/20261024100100_tenant_finance.sql:
+// supabase/migrations/20261101100100_tenant_finance.sql:
 // tenant_finance_daily, tenant_finance_other_costs, tenant_finance_rates,
 // tenant_finance_viewers, tenant_goals, the finance_can_* permission
 // functions and the finance_days / finance_goal_days data functions.
@@ -13,11 +13,11 @@ import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const MIGRATION_GROUPS = readFileSync(
-  resolve(__dirname, "../..", "supabase/migrations/20261024100000_tenant_groups.sql"),
+  resolve(__dirname, "../..", "supabase/migrations/20261101100000_tenant_groups.sql"),
   "utf8",
 );
 const MIGRATION_FINANCE = readFileSync(
-  resolve(__dirname, "../..", "supabase/migrations/20261024100100_tenant_finance.sql"),
+  resolve(__dirname, "../..", "supabase/migrations/20261101100100_tenant_finance.sql"),
   "utf8",
 );
 

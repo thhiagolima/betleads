@@ -3,11 +3,7 @@ import { Calendar as CalendarIcon } from "lucide-react";
 import { type DateRange } from "react-day-picker";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 export type DashboardRange = { from: Date; to: Date };
 
@@ -36,7 +32,7 @@ export function DashboardDateRangePicker({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" className="h-8 gap-2 text-xs">
+        <Button variant="outline" size="sm" className="gap-2 text-label">
           <CalendarIcon className="h-3.5 w-3.5" />
           {sameDay ? fmt(range.from) : `${fmt(range.from)} - ${fmt(range.to)}`}
         </Button>

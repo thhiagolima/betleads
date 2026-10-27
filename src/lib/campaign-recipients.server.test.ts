@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { findAcceptedDeliveryKeys, resolveCampaignRecipients } from "./campaign-recipients.server";
+import {
+  findAcceptedDeliveryKeys,
+  resolveCampaignRecipients,
+  resolveExternalListRecipients,
+} from "./campaign-recipients.server";
 
 type Row = Record<string, unknown>;
 const TENANT = "00000000-0000-4000-8000-000000000001";
@@ -174,5 +178,41 @@ describe("journey control group in campaigns (F3)", () => {
     const db = fakeDb({ players, channel_consents: [], journey_enrollments: enrollments });
     const result = await resolveCampaignRecipients(db as never, TENANT, [inputs[1]]);
     expect(result.resolved.map((r) => r.playerId)).toEqual([pid(2)]);
+  });
+});
+
+describe("resolveExternalListRecipients (lista de números)", () => {
+  it("leaves players out, honors revoked consent, reports invalid and repeated numbers", async () => {
+    const db = fakeDb({
+      players: [
+        { id: pid(1), tenant_id: TENANT, telefone: "+5511988880001" },
+        { id: pid(9), tenant_id: OTHER, telefone: "+5511988880003" },
+      ],
+      channel_consents: [
+        { tenant_id: TENANT, channel: "sms", status: "revoked", subject: "5511988880002" },
+      ],
+    });
+    const r = await resolveExternalListRecipients(
+      db,
+      TENANT,
+      [
+        "11988880001", // already a player here
+        "+55 11 98888-0002", // revoked consent
+        "11988880003", // player only in another tenant: still a lead here
+        "(11) 98888-0004",
+        "5511988880004", // same number again
+        "999",
+      ],
+      { chunkSize: 2 },
+    );
+    expect(r.phones).toEqual(["+5511988880003", "+5511988880004"]);
+    expect(r.duplicates).toBe(1);
+    expect(r.unresolved).toEqual([
+      { phone: "999", reason: "telefone_invalido" },
+      { phone: "+5511988880001", reason: "ja_jogador" },
+      { phone: "+5511988880002", reason: "sem_consentimento" },
+    ]);
+    const playerCalls = db.calls.filter((c) => c.table === "players");
+    expect(Math.max(...playerCalls.map((c) => c.size))).toBeLessThanOrEqual(2);
   });
 });

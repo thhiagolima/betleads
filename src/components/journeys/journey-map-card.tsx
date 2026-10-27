@@ -1,23 +1,38 @@
 import { Link } from "@tanstack/react-router";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Route } from "lucide-react";
+
+import { EmptyState } from "@/components/ui-premium/empty-state";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { buildJourneyMap, type MapJourney } from "@/lib/journey-map";
 
-const STATUS_LABEL: Record<string, string> = { paused: "desligada", draft: "rascunho" };
+const STATUS_LABEL: Record<string, string> = {
+  paused: "pausada",
+  draft: "rascunho",
+  archived: "arquivada",
+};
 
-/** P3: the tenant's journeys as lanes a player goes through, with who is in each. */
+/** P3: the house's journeys as lanes a player goes through, with who is in each. */
 export function JourneyMapCard({ journeys }: { journeys: MapJourney[] }) {
   const lanes = buildJourneyMap(journeys);
-  if (lanes.length === 0) return null;
+  if (lanes.length === 0)
+    return (
+      <Card>
+        <EmptyState
+          icon={<Route />}
+          title="Nenhuma jornada no mapa"
+          description="Crie uma jornada para ver aqui como elas se encaixam e quantos jogadores estão em cada uma."
+        />
+      </Card>
+    );
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Mapa das réguas</CardTitle>
+        <CardTitle>Mapa das jornadas</CardTitle>
         <CardDescription>
           Como as jornadas se encaixam e quantos jogadores estão em cada uma agora. Jornadas
-          desligadas ou em rascunho aparecem esmaecidas.
+          pausadas ou em rascunho aparecem esmaecidas.
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-x-6 gap-y-5 lg:grid-cols-2">
@@ -42,7 +57,7 @@ export function JourneyMapCard({ journeys }: { journeys: MapJourney[] }) {
                     >
                       <span
                         className={`size-1.5 shrink-0 rounded-full ${
-                          inactive ? "bg-muted-foreground/50" : "bg-emerald-500"
+                          inactive ? "bg-muted-foreground/50" : "bg-success"
                         }`}
                         aria-hidden="true"
                       />
@@ -53,7 +68,7 @@ export function JourneyMapCard({ journeys }: { journeys: MapJourney[] }) {
                       </span>
                       {inactive && <span className="sr-only">({STATUS_LABEL[item.status]})</span>}
                       {Number(item.holdout_percent ?? 0) > 0 && (
-                        <Badge variant="outline" className="px-1 py-0 text-[10px]">
+                        <Badge variant="outline" className="px-1 py-0 text-meta">
                           controle {item.holdout_percent}%
                         </Badge>
                       )}

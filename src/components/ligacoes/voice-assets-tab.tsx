@@ -195,7 +195,7 @@ export function VoiceAssetsTab() {
                 <p className="font-medium">{asset.name}</p>
                 <Badge variant="outline">
                   {asset.source === "tts"
-                    ? "TTS"
+                    ? "Voz gerada"
                     : asset.source === "import"
                       ? "Importado"
                       : "Upload"}
@@ -246,7 +246,7 @@ export function VoiceAssetsTab() {
       {editing && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Editar metadados</CardTitle>
+            <CardTitle>Editar metadados</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-3 md:grid-cols-3">
             <div>

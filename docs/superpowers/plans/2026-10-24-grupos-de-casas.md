@@ -46,8 +46,8 @@
 ## File Structure
 
 **Migrações** (`supabase/migrations/`):
-- `20261024100000_tenant_groups.sql`: grupos, vínculos casa ↔ grupo e gestores de grupo; funções `group_*`; guards de demo.
-- `20261024100100_tenant_finance.sql`: lançamentos diários, outros custos, taxas, liberações e metas; funções `finance_can_*`, `finance_days` e `finance_goal_days`.
+- `20261101100000_tenant_groups.sql`: grupos, vínculos casa ↔ grupo e gestores de grupo; funções `group_*`; guards de demo.
+- `20261101100100_tenant_finance.sql`: lançamentos diários, outros custos, taxas, liberações e metas; funções `finance_can_*`, `finance_days` e `finance_goal_days`.
 
 **Servidor** (`src/lib/`):
 - `tenant-audit.server.ts`: `auditTenant`, extraído de `tenants.functions.ts`.
@@ -83,7 +83,7 @@
 ### Task 1: Esquema de grupos e funções de acesso
 
 **Files:**
-- Create: `supabase/migrations/20261024100000_tenant_groups.sql`
+- Create: `supabase/migrations/20261101100000_tenant_groups.sql`
 - Test: `src/lib/tenant-groups.db.test.ts`. Use o padrão A de `src/lib/demo-tenant-flag.db.test.ts`:
   - SCHEMA com stubs de `auth.users` (com `raw_app_meta_data`), `public.tenants` (com `is_demo`), `public.user_roles`, `app_role` e `public.is_super_admin(_user_id uuid)`;
   - aplicar a migração duas vezes, para provar que é idempotente.
@@ -125,7 +125,7 @@
 ### Task 2: Esquema financeiro, permissões e funções de dados
 
 **Files:**
-- Create: `supabase/migrations/20261024100100_tenant_finance.sql`
+- Create: `supabase/migrations/20261101100100_tenant_finance.sql`
 - Test: `src/lib/tenant-finance.db.test.ts`. Mesmo padrão: aplicar a migração da Task 1 + esta, sobre stubs de:
   - `players(id, tenant_id, ftd_em)`;
   - `deposits(id, tenant_id, player_id, valor, status, created_at, completed_at)`;

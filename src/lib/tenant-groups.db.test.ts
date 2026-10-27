@@ -1,5 +1,5 @@
 // Task 1 — SQL test for
-// supabase/migrations/20261024100000_tenant_groups.sql:
+// supabase/migrations/20261101100000_tenant_groups.sql:
 // `tenant_groups`, `tenant_group_tenants`, `tenant_group_managers`, their
 // demo/immutability guards, and the access helper functions
 // (`group_ids_managed_by`, `can_view_group`, `is_group_manager_of_tenant`,
@@ -12,7 +12,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const MIGRATION = readFileSync(
-  resolve(__dirname, "../..", "supabase/migrations/20261024100000_tenant_groups.sql"),
+  resolve(__dirname, "../..", "supabase/migrations/20261101100000_tenant_groups.sql"),
   "utf8",
 );
 

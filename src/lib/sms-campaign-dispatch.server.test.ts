@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { campaignDeliveryKey } from "./campaign-recipients";
+import { resolveAudienceForTenant } from "./sms-audience-selection.server";
+import { createFakeDb } from "./sms-bulk.test-support";
 import {
   MAX_ZERO_GRANTS,
   processSmsCampaignTick,
@@ -191,6 +193,50 @@ describe("processSmsCampaignTick", () => {
     expect(r.stopReason).toBe("resolution_error");
     expect(state.sendCalls).toHaveLength(0);
     expect(lastPatch(state.patches)).toMatchObject({ status: "enviando", locked_by: null });
+  });
+
+  it("selection audience deleted after scheduling → campaign fails closed, nothing sent", async () => {
+    const { state, deps } = world();
+    deps.resolveAudiencePhones = async () => {
+      throw Object.assign(
+        new Error("O público de seleção desta campanha foi excluído; nada será enviado."),
+        {
+          permanentAudienceError: true,
+        },
+      );
+    };
+    const c = campaign([{ phone: phone(10), playerId: "p-old" }], {
+      audience_criteria: {
+        timing: "selection",
+        audienceId: "00000000-0000-4000-8000-0000000c0001",
+      },
+      audience_resolved_at: null,
+    });
+    const r = await processSmsCampaignTick(c, deps, { deadline: 45_000 });
+    expect(r.status).toBe("falhou");
+    expect(state.sendCalls).toHaveLength(0);
+    expect(lastPatch(state.patches)).toMatchObject({
+      status: "falhou",
+      recipients: [],
+      locked_by: null,
+    });
+    expect(String(lastPatch(state.patches).last_error)).toContain("excluído");
+  });
+
+  it("corrupted audience_criteria → campaign fails closed (permanent), nothing sent", async () => {
+    const { state, deps } = world();
+    const db = createFakeDb();
+    deps.resolveAudiencePhones = async (tenantId, criteria) =>
+      (await resolveAudienceForTenant(db.client, tenantId, criteria)).phones;
+    const c = campaign([{ phone: phone(10), playerId: "p-old" }], {
+      audience_criteria: { timing: "selection", playerIds: "corrompido" },
+      audience_resolved_at: null,
+    });
+    const r = await processSmsCampaignTick(c, deps, { deadline: 45_000 });
+    expect(r.status).toBe("falhou");
+    expect(state.sendCalls).toHaveLength(0);
+    expect(lastPatch(state.patches)).toMatchObject({ status: "falhou", locked_by: null });
+    expect(String(lastPatch(state.patches).last_error)).toContain("inválido");
   });
 
   it("dedupes by (campaign, player), not by rendered content", async () => {
@@ -460,6 +506,74 @@ describe("processSmsCampaignTick with sendBatch (ENV-10 bulk)", () => {
     expect(r2).toMatchObject({ sent: 4, status: "enviado" });
     expect(w.batches[1]).toHaveLength(4);
   });
+
+  // Ruling (final-2): an earlier failure in the same batch never replaces
+  // the pause reason.
+  it("no balance after a rejected recipient: the pause reason stays Saldo insuficiente", async () => {
+    const w = batchWorld();
+    let call = 0;
+    w.setBehaviour((key) => {
+      call++;
+      if (call === 1) return { ok: false, error: "rejeitado pelo provedor" };
+      if (call === 2) return { ok: true, pendingConfirmation: true, error: "timeout" };
+      if (call === 3) return { ok: false, insufficientBalance: true, error: "Saldo insuficiente" };
+      w.state.accepted.add(key);
+      return { ok: true };
+    });
+    const r = await processSmsCampaignTick(campaign(recipients(5)), w.deps, { deadline: 45_000 });
+    expect(r).toMatchObject({ status: "pausada", stopReason: "insufficient_balance", failed: 1 });
+    const cursorPatch = w.state.patches.find((p) => "sent_cursor" in p)!;
+    expect(cursorPatch).toMatchObject({ sent_cursor: 2, last_error: "Saldo insuficiente" });
+    expect(lastPatch(w.state.patches)).toMatchObject({
+      status: "pausada",
+      last_error: "Saldo insuficiente",
+    });
+  });
+
+  // Final fix I3: the house's wallet refused the reservation.
+  it("no balance mid-batch: pauses at that recipient, not failed; resume dedupes the rest", async () => {
+    const w = batchWorld();
+    const c = campaign(recipients(5));
+    let call = 0;
+    w.setBehaviour((key) => {
+      call++;
+      // 1 accepted, 2 refused by the wallet, 3.. accepted (reserved concurrently).
+      if (call === 2) return { ok: false, insufficientBalance: true, error: "Saldo insuficiente" };
+      w.state.accepted.add(key);
+      return { ok: true };
+    });
+    const r1 = await processSmsCampaignTick(c, w.deps, { deadline: 45_000 });
+    expect(r1).toMatchObject({
+      sent: 1,
+      failed: 0,
+      advanced: 1,
+      status: "pausada",
+      stopReason: "insufficient_balance",
+    });
+    expect(w.state.patches.filter((p) => "sent_cursor" in p).map((p) => p.sent_cursor)).toEqual([
+      1,
+    ]);
+    expect(lastPatch(w.state.patches)).toMatchObject({
+      status: "pausada",
+      last_error: "Saldo insuficiente",
+      locked_at: null,
+      locked_by: null,
+    });
+
+    // "Retomar" after a top-up: only recipient 2 is really sent now.
+    w.setBehaviour((key) => {
+      if (w.state.accepted.has(key)) return { ok: true, alreadySent: true };
+      w.state.accepted.add(key);
+      return { ok: true };
+    });
+    const r2 = await processSmsCampaignTick(
+      { ...c, sent_cursor: 1, sent_count: 1, status: "enviando" } as SmsCampaignRow,
+      w.deps,
+      { deadline: 45_000 },
+    );
+    expect(r2).toMatchObject({ sent: 1, deduplicated: 3, status: "enviado" });
+    expect(w.batches[1]).toHaveLength(1);
+  });
 });
 
 describe("processSmsCampaignTick with the SMS provider breaker (incident 15/10/2026)", () => {
@@ -532,5 +646,102 @@ describe("processSmsCampaignTick with the SMS provider breaker (incident 15/10/2
       status: "enviando",
       last_error: "Short Brasil: erro de autenticacao",
     });
+  });
+
+  // Final fix I3 (per-recipient path).
+  it("the house's wallet refuses a recipient: stops before it, not failed, campaign paused", async () => {
+    const { state, deps } = world();
+    let n = 0;
+    deps.send = async ({ deliveryKey }) => {
+      state.sendCalls.push(deliveryKey);
+      if (++n <= 2) return { ok: true };
+      return { ok: false, insufficientBalance: true, error: "Saldo insuficiente" };
+    };
+    const c = campaign(recipients(5), { rate_per_minute: 5 });
+    const r = await processSmsCampaignTick(c, deps, { deadline: 45_000 });
+    expect(r).toMatchObject({
+      sent: 2,
+      failed: 0,
+      status: "pausada",
+      stopReason: "insufficient_balance",
+    });
+    expect(state.patches.filter((p) => "sent_cursor" in p).map((p) => p.sent_cursor)).toEqual([2]);
+    expect(state.patches.some((p) => Number(p.failed_count ?? 0) > 0)).toBe(false);
+    expect(lastPatch(state.patches)).toMatchObject({
+      status: "pausada",
+      last_error: "Saldo insuficiente",
+      locked_by: null,
+    });
+  });
+});
+
+describe("processSmsCampaignTick with an external phone list", () => {
+  const external = (n: number): CampaignTarget[] =>
+    Array.from({ length: n }, (_, i) => ({ phone: phone(i + 1), playerId: null, external: true }));
+
+  it("sends to every number without resolving it to a player, keyed by phone", async () => {
+    const c = campaign(external(3), { recipient_source: "external_list", content: "Entre: {link}" });
+    const { state, deps } = world();
+    const resolved: unknown[] = [];
+    deps.resolveRecipients = async (tenant, inputs) => {
+      resolved.push(...inputs);
+      throw new Error("external numbers must not be resolved to players");
+    };
+    const seen: Array<{ playerId: string | null; variables: unknown }> = [];
+    const send = deps.send;
+    deps.send = async (args) => {
+      seen.push({ playerId: args.target.playerId, variables: args.variables });
+      return send(args);
+    };
+    const r = await processSmsCampaignTick(c, deps, { deadline: 45_000 });
+    expect(r.sent).toBe(3);
+    expect(r.status).toBe("enviado");
+    expect(resolved).toEqual([]);
+    expect(seen.every((s) => s.playerId === null && s.variables === null)).toBe(true);
+    expect(state.sendCalls).toEqual([
+      await campaignDeliveryKey(c.id, `phone:${phone(1)}`),
+      await campaignDeliveryKey(c.id, `phone:${phone(2)}`),
+      await campaignDeliveryKey(c.id, `phone:${phone(3)}`),
+    ]);
+  });
+
+  it("drops numbers that registered before the first send and keeps creation-time exclusions", async () => {
+    const c = campaign(external(3), {
+      recipient_source: "external_list",
+      unresolved_recipients: [{ phone: "+5511900000099", reason: "ja_jogador" }],
+    });
+    const { state, deps } = world();
+    deps.findRegisteredPhones = async (_tenant, phones) =>
+      new Set(phones.filter((p) => p === phone(2)));
+    const r = await processSmsCampaignTick(c, deps, { deadline: 45_000 });
+    expect(r.sent).toBe(2);
+    expect(state.sendCalls).not.toContain(await campaignDeliveryKey(c.id, `phone:${phone(2)}`));
+    expect(state.patches[0]).toMatchObject({ total_count: 2 });
+    expect(state.unresolved).toEqual([
+      { phone: "+5511900000099", reason: "ja_jogador" },
+      { phone: phone(2), reason: "ja_jogador" },
+    ]);
+  });
+
+  it("does not re-check registrations after the first recipient went out", async () => {
+    const c = campaign(external(3), { recipient_source: "external_list", sent_cursor: 1 });
+    const { deps } = world();
+    let checked = false;
+    deps.findRegisteredPhones = async () => {
+      checked = true;
+      return new Set();
+    };
+    const r = await processSmsCampaignTick(c, deps, { deadline: 45_000 });
+    expect(checked).toBe(false);
+    expect(r.sent).toBe(2);
+  });
+
+  it("fails with a list-specific reason when every number is already a player", async () => {
+    const c = campaign(external(2), { recipient_source: "external_list" });
+    const { state, deps } = world();
+    deps.findRegisteredPhones = async (_tenant, phones) => new Set(phones);
+    const r = await processSmsCampaignTick(c, deps, { deadline: 45_000 });
+    expect(r.status).toBe("falhou");
+    expect(String(lastPatch(state.patches).last_error)).toContain("Nenhum número da lista");
   });
 });

@@ -211,7 +211,6 @@ describe("processWebhookEvent duplicate vs in-progress (CON-04)", () => {
     const lockedAt = new Date(NOW - 60_000).toISOString();
     const { sb, ops } = setup({ data: { status: "processing", locked_at: lockedAt } });
     const res = await processWebhookEvent(sb, TENANT, "login", PAYLOAD, {
-      mirror: true,
       existingLogId: "replayed-log",
     });
     expect(res.status).toBe(202);
@@ -273,7 +272,7 @@ describe("crash after claim followed by retry processes the event exactly once",
 
     // Provider retry 1 minute later: must not be swallowed as a duplicate.
     vi.setSystemTime(new Date(NOW + 60_000));
-    const retry = await processWebhookEvent(sb, TENANT, "login", PAYLOAD, { mirror: false });
+    const retry = await processWebhookEvent(sb, TENANT, "login", PAYLOAD);
     expect(retry.status).toBe(202);
     expect(eventInserts).toHaveLength(0);
     const deferred = logUpdates(ops).at(-1)!;
@@ -282,7 +281,6 @@ describe("crash after claim followed by retry processes the event exactly once",
     // Replay after the lease expired: claims and processes the event.
     vi.setSystemTime(new Date(NOW + RECEIPT_PROCESSING_LEASE_MS + 60_000));
     const replay = await processWebhookEvent(sb, TENANT, "login", PAYLOAD, {
-      mirror: false,
       existingLogId: "log-1",
     });
     expect(replay.status).toBe(200);
@@ -292,7 +290,7 @@ describe("crash after claim followed by retry processes the event exactly once",
     expect(logUpdates(ops).at(-1)?.payload?.status).toBe("processado");
 
     // A late duplicate delivery is now acknowledged as a real duplicate.
-    const late = await processWebhookEvent(sb, TENANT, "login", PAYLOAD, { mirror: false });
+    const late = await processWebhookEvent(sb, TENANT, "login", PAYLOAD);
     expect(late.status).toBe(200);
     expect(await late.json()).toMatchObject({ ok: true, duplicate: true });
     expect(eventInserts).toHaveLength(1);

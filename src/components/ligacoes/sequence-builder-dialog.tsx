@@ -88,12 +88,7 @@ const SMS_CONDS: { v: SmsCondition; l: string }[] = [
   { v: "no_answer", l: "Sem resposta" },
 ];
 
-export function SequenceBuilderDialog({
-  open,
-  onOpenChange,
-  scripts,
-  onGenerate,
-}: Props) {
+export function SequenceBuilderDialog({ open, onOpenChange, scripts, onGenerate }: Props) {
   const [steps, setSteps] = useState<Step[]>([
     { script_id: null, sms: "" },
     { script_id: null, sms: "" },
@@ -116,10 +111,7 @@ export function SequenceBuilderDialog({
     }
   }, [open]);
 
-  const delaySeconds = useMemo(
-    () => unitToSeconds(delayValue, delayUnit),
-    [delayValue, delayUnit],
-  );
+  const delaySeconds = useMemo(() => unitToSeconds(delayValue, delayUnit), [delayValue, delayUnit]);
 
   function update(idx: number, patch: Partial<Step>) {
     setSteps((s) => s.map((st, i) => (i === idx ? { ...st, ...patch } : st)));
@@ -145,9 +137,7 @@ export function SequenceBuilderDialog({
       toast.error("Nenhum roteiro disponível");
       return;
     }
-    setSteps(
-      scripts.map((sc) => ({ script_id: sc.id, sms: "" })),
-    );
+    setSteps(scripts.map((sc) => ({ script_id: sc.id, sms: "" })));
   }
 
   function generate() {
@@ -167,8 +157,7 @@ export function SequenceBuilderDialog({
             },
           ]
         : [];
-      const scriptName =
-        scripts.find((sc) => sc.id === s.script_id)?.name ?? `Ligação ${i + 1}`;
+      const scriptName = scripts.find((sc) => sc.id === s.script_id)?.name ?? `Ligação ${i + 1}`;
       blocks.push({
         block_type: "call",
         name: scriptName,
@@ -194,8 +183,8 @@ export function SequenceBuilderDialog({
             Gerar fluxo em sequência
           </DialogTitle>
           <DialogDescription>
-            Escolha os roteiros na ordem desejada e o SMS de cada etapa. O sistema
-            monta automaticamente todos os blocos com o mesmo delay entre eles.
+            Escolha os roteiros na ordem desejada e o SMS de cada etapa. O sistema monta
+            automaticamente todos os blocos com o mesmo delay entre eles.
           </DialogDescription>
         </DialogHeader>
 
@@ -208,14 +197,9 @@ export function SequenceBuilderDialog({
                   type="number"
                   min={1}
                   value={delayValue}
-                  onChange={(e) =>
-                    setDelayValue(Math.max(1, Number(e.target.value) || 1))
-                  }
+                  onChange={(e) => setDelayValue(Math.max(1, Number(e.target.value) || 1))}
                 />
-                <Select
-                  value={delayUnit}
-                  onValueChange={(v) => setDelayUnit(v as DelayUnit)}
-                >
+                <Select value={delayUnit} onValueChange={(v) => setDelayUnit(v as DelayUnit)}>
                   <SelectTrigger className="w-[80px]">
                     <SelectValue />
                   </SelectTrigger>
@@ -252,9 +236,7 @@ export function SequenceBuilderDialog({
                 min={5}
                 max={600}
                 value={maxCallSeconds}
-                onChange={(e) =>
-                  setMaxCallSeconds(Math.max(5, Number(e.target.value) || 60))
-                }
+                onChange={(e) => setMaxCallSeconds(Math.max(5, Number(e.target.value) || 60))}
               />
             </div>
             <div className="flex items-end">
@@ -284,19 +266,15 @@ export function SequenceBuilderDialog({
             </div>
 
             {steps.map((s, i) => (
-              <div
-                key={i}
-                className="rounded-lg border border-border bg-card/40 p-3"
-              >
+              <div key={i} className="rounded-lg border border-border bg-card/40 p-3">
                 <div className="mb-2 flex items-center justify-between">
-                  <span className="text-xs font-medium text-muted-foreground">
-                    Etapa {i + 1}
-                  </span>
+                  <span className="text-xs font-medium text-muted-foreground">Etapa {i + 1}</span>
                   <div className="flex gap-1">
                     <Button
                       size="icon"
                       variant="ghost"
-                      className="h-7 w-7"
+                      className="h-9 w-9"
+                      aria-label="Mover etapa para cima"
                       disabled={i === 0}
                       onClick={() => move(i, -1)}
                     >
@@ -305,7 +283,8 @@ export function SequenceBuilderDialog({
                     <Button
                       size="icon"
                       variant="ghost"
-                      className="h-7 w-7"
+                      className="h-9 w-9"
+                      aria-label="Mover etapa para baixo"
                       disabled={i === steps.length - 1}
                       onClick={() => move(i, 1)}
                     >
@@ -314,7 +293,8 @@ export function SequenceBuilderDialog({
                     <Button
                       size="icon"
                       variant="ghost"
-                      className="h-7 w-7 text-destructive"
+                      className="h-9 w-9 text-destructive"
+                      aria-label="Remover etapa"
                       onClick={() => remove(i)}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -324,9 +304,7 @@ export function SequenceBuilderDialog({
                 <div className="grid gap-2">
                   <Select
                     value={s.script_id ?? "__none"}
-                    onValueChange={(v) =>
-                      update(i, { script_id: v === "__none" ? null : v })
-                    }
+                    onValueChange={(v) => update(i, { script_id: v === "__none" ? null : v })}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Selecione o roteiro de ligação" />

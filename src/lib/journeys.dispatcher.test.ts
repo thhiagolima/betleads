@@ -129,6 +129,7 @@ const sentry = vi.hoisted(() => ({
   captureServerException: vi.fn(),
   captureServerMessage: vi.fn(),
 }));
+const alerts = vi.hoisted(() => ({ notifyNoBalance: vi.fn(async () => false) }));
 const heartbeat = vi.hoisted(() => ({ pingHeartbeat: vi.fn(async () => undefined) }));
 
 vi.mock("@/integrations/supabase/client.server", () => ({ supabaseAdmin: fake.client }));
@@ -141,6 +142,7 @@ vi.mock("./observability/sentry.server", () => ({
   captureServerMessage: sentry.captureServerMessage,
 }));
 vi.mock("./sms.functions", () => ({ sendSmsInternal: sms.sendSmsInternal }));
+vi.mock("./billing/wallet-alerts.server", () => ({ notifyNoBalance: alerts.notifyNoBalance }));
 const email = vi.hoisted(() => ({ sendInfobipEmail: vi.fn(), resolveSender: vi.fn() }));
 vi.mock("./email-send.server", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./email-send.server")>()),
@@ -258,6 +260,8 @@ beforeEach(() => {
   monitor.finish.mockClear();
   sms.sendSmsInternal.mockReset();
   voice.callInfobipVoice.mockReset();
+  alerts.notifyNoBalance.mockReset();
+  alerts.notifyNoBalance.mockResolvedValue(false);
   vi.stubEnv("JOURNEYS_DISPATCH_ENABLED", "true");
   vi.stubEnv("JOURNEYS_ALLOW_ALL_TENANTS", "true");
 });
@@ -324,7 +328,7 @@ describe("runJourneyDispatcher", () => {
     expect(fake.tables.dispatch_pause_state).toHaveLength(0);
   });
 
-  it("402 (no credit) defers 15 min without pausing the channel or consuming an attempt (I4)", async () => {
+  it("402 (no credit, no errorKind) defers 15 min without pausing the channel or consuming an attempt — provider-level, unchanged by PG3 Task 1 (I4)", async () => {
     seed(["e1"]);
     sms.sendSmsInternal.mockResolvedValue({ ok: false, status: 402, error: "Saldo insuficiente" });
     const before = Date.now();
@@ -340,6 +344,71 @@ describe("runJourneyDispatcher", () => {
       event_type: "step_deferred",
       detail: expect.objectContaining({ reason: "insufficient_credit", attempt_consumed: false }),
     });
+  });
+
+  it("house wallet refusal (errorKind insufficient_balance): the step is skipped (saldo_insuficiente), the journey advances, no retry, no attempt consumed, the house is alerted (PG3 Task 7)", async () => {
+    seed(["e1"]);
+    sms.sendSmsInternal.mockResolvedValue({
+      ok: false,
+      status: 402,
+      error: "Saldo insuficiente",
+      errorKind: "insufficient_balance",
+    });
+    const result = await runJourneyDispatcher(1000);
+    expect(result).toMatchObject({ failed: 0, rescheduled: 0, skippedNoBalance: 1 });
+    const row = enrollment("e1");
+    // Next step, due now: not a retry of the same step.
+    expect(row).toMatchObject({
+      status: "active",
+      current_position: 1,
+      attempts: 0,
+      claimed_by: null,
+    });
+    expect(Date.parse(String(row.next_run_at))).toBeLessThanOrEqual(Date.now());
+    expect(fake.tables.journey_step_executions[0]).toMatchObject({ status: "skipped" });
+    expect(fake.tables.dispatch_pause_state).toHaveLength(0);
+    expect(fake.tables.journey_events.at(-1)).toMatchObject({
+      event_type: "step_skipped",
+      detail: expect.objectContaining({
+        channel: "sms",
+        step_position: 0,
+        reason: "saldo_insuficiente",
+        attempt_consumed: false,
+      }),
+    });
+    expect(alerts.notifyNoBalance).toHaveBeenCalledWith(TENANT);
+  });
+
+  it("a house without balance is not retried: a second run does not resend the skipped step", async () => {
+    seed(["e1"]);
+    sms.sendSmsInternal.mockResolvedValue({
+      ok: false,
+      status: 402,
+      error: "Saldo insuficiente",
+      errorKind: "insufficient_balance",
+    });
+    await runJourneyDispatcher(1000);
+    seedClaimAgain();
+    sms.sendSmsInternal.mockClear();
+    await runJourneyDispatcher(1000);
+    // Position 1 does not exist: the journey ends instead of re-sending step 0.
+    expect(sms.sendSmsInternal).not.toHaveBeenCalled();
+    expect(enrollment("e1")).toMatchObject({ status: "completed" });
+  });
+
+  it("an alert failure never breaks the skip", async () => {
+    seed(["e1"]);
+    alerts.notifyNoBalance.mockRejectedValueOnce(new Error("alert down"));
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    sms.sendSmsInternal.mockResolvedValue({
+      ok: false,
+      status: 402,
+      error: "Saldo insuficiente",
+      errorKind: "insufficient_balance",
+    });
+    const result = await runJourneyDispatcher(1000);
+    expect(result).toMatchObject({ failed: 0, skippedNoBalance: 1 });
+    expect(enrollment("e1")).toMatchObject({ current_position: 1, attempts: 0 });
   });
 
   it("caps consecutive no-cost defers: the 11th 429 in a row consumes an attempt", async () => {
@@ -570,6 +639,124 @@ describe("runJourneyDispatcher", () => {
     expect(rpcNames()).not.toContain("release_channel_slot");
   });
 
+  it("voice: caps the reservation by the asset's duration_seconds and stores billing_reference_id (PG3 Task 4)", async () => {
+    seed(["e1"]);
+    fake.tables.journey_steps = [
+      {
+        id: "step-0",
+        journey_id: JOURNEY,
+        position: 0,
+        step_type: "voice",
+        is_enabled: true,
+        config: { asset_id: "a1" },
+      },
+    ];
+    fake.tables.journey_voice_assets = [
+      { id: "a1", tenant_id: TENANT, storage_path: "x.mp3", duration_seconds: 37 },
+    ];
+    const signed = vi.spyOn(fake.client.storage, "from").mockReturnValue({
+      createSignedUrl: async () => ({ data: { signedUrl: "https://a/x.mp3" }, error: null }),
+    } as never);
+    voice.callInfobipVoice.mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: { callId: "call-1" },
+      idempotencyKey: "key-1",
+      providerCallId: "call-1",
+      billing: { referenceId: "voice:key-1", units: 2 },
+    });
+    const result = await runJourneyDispatcher(1000);
+    signed.mockRestore();
+    expect(result).toMatchObject({ processed: 1, failed: 0 });
+    expect(voice.callInfobipVoice).toHaveBeenCalledWith(
+      expect.any(String),
+      { type: "audio", audioUrl: "https://a/x.mp3" },
+      expect.objectContaining({ tenantId: TENANT, maxSeconds: 37 }),
+    );
+    expect(fake.tables.call_history).toEqual([
+      expect.objectContaining({ billing_reference_id: "voice:key-1", tenant_id: TENANT }),
+    ]);
+  });
+
+  it("voice: a failed call_history insert is logged with reference and correlation; the step still counts as sent (PG3 Task 5)", async () => {
+    seed(["e1"]);
+    fake.tables.journey_steps = [
+      {
+        id: "step-0",
+        journey_id: JOURNEY,
+        position: 0,
+        step_type: "voice",
+        is_enabled: true,
+        config: { asset_id: "a1" },
+      },
+    ];
+    fake.tables.journey_voice_assets = [{ id: "a1", tenant_id: TENANT, storage_path: "x.mp3" }];
+    const signed = vi.spyOn(fake.client.storage, "from").mockReturnValue({
+      createSignedUrl: async () => ({ data: { signedUrl: "https://a/x.mp3" }, error: null }),
+    } as never);
+    const originalFrom = fake.client.from;
+    const from = vi.spyOn(fake.client, "from").mockImplementation(((table: string) =>
+      table === "call_history"
+        ? { insert: async () => ({ error: { message: "insert failed" } }) }
+        : originalFrom(table)) as never);
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    voice.callInfobipVoice.mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: { callId: "call-1" },
+      idempotencyKey: "key-1",
+      providerCallId: "call-1",
+      billing: { referenceId: "voice:key-1", units: 2 },
+    });
+    const result = await runJourneyDispatcher(1000);
+    signed.mockRestore();
+    from.mockRestore();
+    expect(result).toMatchObject({ processed: 1, failed: 0 });
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining("call_history"),
+      expect.objectContaining({ referenceId: "voice:key-1", correlationId: "key-1" }),
+    );
+    consoleError.mockRestore();
+  });
+
+  it("voice: passes the wallet refusal through as errorKind insufficient_balance (PG3 Task 4)", async () => {
+    seed(["e1"]);
+    fake.tables.journey_steps = [
+      {
+        id: "step-0",
+        journey_id: JOURNEY,
+        position: 0,
+        step_type: "voice",
+        is_enabled: true,
+        config: { asset_id: "a1" },
+      },
+    ];
+    fake.tables.journey_voice_assets = [{ id: "a1", tenant_id: TENANT, storage_path: "x.mp3" }];
+    const signed = vi.spyOn(fake.client.storage, "from").mockReturnValue({
+      createSignedUrl: async () => ({ data: { signedUrl: "https://a/x.mp3" }, error: null }),
+    } as never);
+    voice.callInfobipVoice.mockResolvedValue({
+      ok: false,
+      status: 0,
+      body: { error: "Saldo insuficiente" },
+      idempotencyKey: "key-1",
+      providerCallId: null,
+      errorKind: "insufficient_balance",
+    });
+    const result = await runJourneyDispatcher(1000);
+    signed.mockRestore();
+    // PG3 Task 7: same skip-and-advance as SMS and e-mail.
+    expect(result).toMatchObject({ failed: 0, outcomeUnknown: 0, rescheduled: 0 });
+    expect(result).toMatchObject({ skippedNoBalance: 1 });
+    expect(enrollment("e1")).toMatchObject({ current_position: 1, attempts: 0 });
+    expect(fake.tables.journey_events.at(-1)).toMatchObject({
+      event_type: "step_skipped",
+      detail: expect.objectContaining({ channel: "voice", reason: "saldo_insuficiente" }),
+    });
+    expect(fake.tables.call_history ?? []).toEqual([]);
+    expect(alerts.notifyNoBalance).toHaveBeenCalledWith(TENANT);
+  });
+
   it("permanent provider errors still consume attempts", async () => {
     seed(["e1"]);
     sms.sendSmsInternal.mockResolvedValue({ ok: false, status: 400, error: "numero invalido" });
@@ -577,6 +764,22 @@ describe("runJourneyDispatcher", () => {
     expect(result).toMatchObject({ failed: 1, rescheduled: 0 });
     expect(enrollment("e1")).toMatchObject({ status: "waiting", attempts: 2 });
     expect(fake.tables.journey_step_executions[0].status).toBe("failed");
+  });
+
+  it("a house locked for the monthly fee: the item fails final, no retry scheduled", async () => {
+    seed(["e1"]);
+    // sendSmsInternal's result when the send guard refuses a locked house.
+    sms.sendSmsInternal.mockResolvedValue({
+      ok: false,
+      status: 0,
+      error: "Acesso suspenso. Regularize a mensalidade em Plano e créditos.",
+      temporary: false,
+    });
+    const result = await runJourneyDispatcher(1000);
+    expect(result).toMatchObject({ failed: 1, rescheduled: 0, outcomeUnknown: 0 });
+    expect(enrollment("e1")).toMatchObject({ status: "failed" });
+    expect(fake.tables.journey_step_executions[0].status).toBe("failed");
+    expect(fake.tables.journey_events.at(-1)).toMatchObject({ event_type: "failed" });
   });
 
   it("a denied rate-limit admission defers without reserving or sending", async () => {
@@ -883,5 +1086,91 @@ describe("runJourneyDispatcher email step", () => {
       status: "failed",
       error: "Configure e verifique um domínio de e-mail da casa para enviar e-mails.",
     });
+  });
+
+  it("email step: logs the wallet reference and the amount charged (PG3 Task 6)", async () => {
+    seed(["e1"]);
+    fake.tables.journey_steps[0] = {
+      id: "step-0",
+      journey_id: JOURNEY,
+      position: 0,
+      step_type: "email",
+      is_enabled: true,
+      config: {
+        template_id: "tpl-1",
+        template_snapshot: { subject: "Oi", body_html: "<p>oi</p>" },
+      },
+    };
+    fake.tables.players = [{ id: PLAYER, tenant_id: TENANT, email: "jogador@x.com" }];
+    fake.tables.email_send_logs = [];
+    email.resolveSender.mockReset();
+    email.sendInfobipEmail.mockReset();
+    email.resolveSender.mockResolvedValue({
+      fromEmail: "a@casa.bet",
+      fromName: "Casa",
+      replyTo: null,
+      senderId: "s-1",
+    });
+    email.sendInfobipEmail.mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: {},
+      idempotencyKey: "key-1",
+      temporary: false,
+      billing: { referenceId: "email:key-1", amount: 0 },
+    });
+
+    const result = await runJourneyDispatcher(1000);
+    expect(result).toMatchObject({ processed: 1, failed: 0 });
+    expect(fake.tables.email_send_logs).toEqual([
+      expect.objectContaining({
+        tenant_id: TENANT,
+        status: "sent",
+        billing_reference_id: "email:key-1",
+        billed_amount: 0,
+      }),
+    ]);
+  });
+  it("email step without balance: skipped (saldo_insuficiente), no log row, the journey advances (PG3 Task 7)", async () => {
+    seed(["e1"]);
+    fake.tables.journey_steps[0] = {
+      id: "step-0",
+      journey_id: JOURNEY,
+      position: 0,
+      step_type: "email",
+      is_enabled: true,
+      config: {
+        template_id: "tpl-1",
+        template_snapshot: { subject: "Oi", body_html: "<p>oi</p>" },
+      },
+    };
+    fake.tables.players = [{ id: PLAYER, tenant_id: TENANT, email: "jogador@x.com" }];
+    fake.tables.email_send_logs = [];
+    email.resolveSender.mockReset();
+    email.sendInfobipEmail.mockReset();
+    email.resolveSender.mockResolvedValue({
+      fromEmail: "a@casa.bet",
+      fromName: "Casa",
+      replyTo: null,
+      senderId: "s-1",
+    });
+    email.sendInfobipEmail.mockResolvedValue({
+      ok: false,
+      status: 402,
+      body: { error: "Saldo insuficiente" },
+      idempotencyKey: "key-1",
+      temporary: false,
+      errorKind: "insufficient_balance",
+    });
+
+    const result = await runJourneyDispatcher(1000);
+    expect(result).toMatchObject({ processed: 0, failed: 0, skippedNoBalance: 1 });
+    expect(fake.tables.email_send_logs).toEqual([]);
+    expect(enrollment("e1")).toMatchObject({ current_position: 1, attempts: 0 });
+    expect(fake.tables.journey_events.at(-1)).toMatchObject({
+      event_type: "step_skipped",
+      detail: expect.objectContaining({ channel: "email", reason: "saldo_insuficiente" }),
+    });
+    expect(alerts.notifyNoBalance).toHaveBeenCalledWith(TENANT);
   });
 });

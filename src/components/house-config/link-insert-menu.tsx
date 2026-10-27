@@ -83,7 +83,7 @@ export function LinkInsertMenu({
 
   return (
     <div className={`rounded-md border border-border/60 bg-muted/30 p-2 ${className ?? ""}`}>
-      <p className="mb-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+      <p className="mb-1.5 text-label text-muted-foreground">
         Inserir link — clique para inserir
       </p>
       <div className="flex flex-wrap gap-1">
@@ -91,7 +91,7 @@ export function LinkInsertMenu({
           <Badge
             key={item.token}
             variant="outline"
-            className="cursor-pointer font-mono text-[10px] hover:bg-primary hover:text-primary-foreground"
+            className="cursor-pointer font-mono text-meta hover:bg-primary hover:text-primary-foreground"
             onClick={() => insert(item.token)}
             title={`${item.label} — clique para inserir`}
           >

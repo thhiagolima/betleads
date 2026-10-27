@@ -7,7 +7,8 @@ import {
   resolveCurrentTenantId,
   resolveOperationalTenantId,
 } from "./tenant-access.server";
-import { DemoTenantBlockedError, isDemoBlockedError } from "./demo-tenant";
+import { DemoTenantBlockedError } from "./demo-tenant";
+import { isSendBlockedError } from "./billing/billing-locked-error";
 import {
   markTrackedDispatchesFailed,
   markTrackedDispatchesSent,
@@ -21,19 +22,20 @@ import {
   setEvolutionProxy,
 } from "./evolution.server";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { tenantReads } from "@/lib/active-tenant-filter";
 
-/** Non-fatal Evolution catches must never swallow a demo-tenant block. */
+/** Non-fatal Evolution catches must never swallow a demo-tenant block or a billing lock. */
 function rethrowIfDemoBlocked(error: unknown) {
-  if (isDemoBlockedError(error)) throw error;
+  if (isSendBlockedError(error)) throw error;
 }
 
-/** False when the transport guard refuses this instance (demo/unknown tenant). */
+/** False when the transport guard refuses this instance (demo/unknown or billing-locked tenant). */
 async function evolutionInstanceAllowed(instance: string): Promise<boolean> {
   try {
     await assertEvolutionInstanceCanCall(instance);
     return true;
   } catch (error) {
-    if (isDemoBlockedError(error)) return false;
+    if (isSendBlockedError(error)) return false;
     throw error;
   }
 }
@@ -61,7 +63,8 @@ export const getEvolutionRealtimeConfig = createServerFn({ method: "GET" })
 export const listWhatsappSessions = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data, error } = await context.supabase
+    const reads = await tenantReads(context.supabase);
+    const { data, error } = await reads
       .from("whatsapp_sessions")
       .select("*")
       .order("created_at", { ascending: true });
@@ -646,7 +649,8 @@ export const configureEvolutionWebhook = createServerFn({ method: "POST" })
 export const listInboxChats = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data, error } = await context.supabase
+    const reads = await tenantReads(context.supabase);
+    const { data, error } = await reads
       .from("whatsapp_chats")
       .select(
         "id, session_id, remote_jid, phone, name, is_group, unread_count, last_message, last_message_at, profile_pic_url, whatsapp_sessions:session_id(name)",
@@ -668,7 +672,7 @@ export const listInboxChats = createServerFn({ method: "GET" })
     };
     const assignByPhone = new Map<string, Assign>();
     if (phones.length > 0) {
-      const { data: assigns } = await context.supabase
+      const { data: assigns } = await reads
         .from("lead_whatsapp_assignments")
         .select("phone_e164, session_id, status, whatsapp_sessions:session_id(name)")
         .in("phone_e164", phones);
@@ -740,7 +744,7 @@ export const listInboxChats = createServerFn({ method: "GET" })
     // Marca cada chat com a direção da última mensagem (pendente = inbound).
     const chatIds = chats.map((c) => c.id);
     if (chatIds.length > 0) {
-      const { data: msgs } = await context.supabase
+      const { data: msgs } = await reads
         .from("whatsapp_messages")
         .select("chat_id, from_me, created_at")
         .in("chat_id", chatIds)
@@ -778,9 +782,10 @@ export const listInboxChats = createServerFn({ method: "GET" })
 export const getWhatsappPendingTotal = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
+    const reads = await tenantReads(context.supabase);
     // Soma `unread_count` de todos os chats — mesma fonte da bolinha por
     // conversa no inbox (estilo WhatsApp: zera quando o chat é aberto).
-    const { data, error } = await context.supabase
+    const { data, error } = await reads
       .from("whatsapp_chats")
       .select("unread_count")
       .gt("unread_count", 0);

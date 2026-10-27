@@ -1,4 +1,4 @@
-import { num } from "@/lib/format";
+import { brl, num } from "@/lib/format";
 
 /** Acima deste número de destinatários, o envio exige digitar a quantidade. */
 export const TYPED_CONFIRMATION_THRESHOLD = 1000;
@@ -59,23 +59,36 @@ function players(count: number) {
 }
 
 /**
- * Texto do botão final: diz a quem vai e quanto custa. Só o SMS tem custo
- * diferente da quantidade (mensagens longas usam mais de um crédito).
+ * Texto do botão final: diz a quem vai e quanto custa, em R$, não em
+ * "créditos" (PG1 final review). Só o SMS tem custo diferente da
+ * quantidade de destinatários (mensagens longas usam mais de um segmento),
+ * e a casa isenta (`interno`) não paga nada pelo envio.
  */
 export function campaignSendLabel({
   channel,
   when,
   recipients,
   cost,
+  smsUnitPrice,
+  smsExempt,
 }: {
   channel: CampaignSendChannel;
   when: "now" | "schedule";
   recipients: number;
   cost: number;
+  /** Preço vigente do segmento de SMS (`getBillingPrices().sms.unitPrice`). */
+  smsUnitPrice?: number | null;
+  /** Casa isenta (`interno`): não exibe preço, o envio não é cobrado. */
+  smsExempt?: boolean;
 }): string {
   const verb = when === "schedule" ? "Agendar para" : "Enviar para";
   const base = `${verb} ${players(recipients)}`;
-  if (channel === "sms") return `${base} · ${num(cost)} ${cost === 1 ? "crédito" : "créditos"}`;
+  if (channel === "sms") {
+    const segments = `${num(cost)} ${cost === 1 ? "segmento" : "segmentos"}`;
+    if (smsExempt) return `${base} · Casa isenta`;
+    if (smsUnitPrice != null) return `${base} · ${segments} · ${brl(cost * smsUnitPrice)}`;
+    return `${base} · ${segments}`;
+  }
   if (channel === "voice") return `${base} · ${num(cost)} ${cost === 1 ? "chamada" : "chamadas"}`;
   return base;
 }

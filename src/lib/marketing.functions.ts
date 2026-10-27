@@ -7,6 +7,7 @@ import {
   parseOverviewPeriod,
   type MarketingOverviewRpc,
 } from "@/lib/marketing-overview";
+import { resolveCurrentTenantId } from "@/lib/tenant-access.server";
 
 const overviewSchema = z.object({
   from: z.string().trim(),
@@ -42,10 +43,7 @@ type DbClient = {
 };
 
 async function resolveTenantId(supabase: DbClient): Promise<string> {
-  const { data, error } = await supabase.rpc("current_tenant_id");
-  if (error) throw new Error(error.message);
-  if (!data) throw new Error("Casa não identificada.");
-  return data as string;
+  return resolveCurrentTenantId(supabase);
 }
 
 // Todos os números vêm de public.marketing_overview (AL1-01): totais sobre todas as

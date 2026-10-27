@@ -3,21 +3,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Plus, Pencil, Trash2, Workflow, Layers, RefreshCw } from "lucide-react";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import {
-  deleteCallFlow,
-  listCallFlows,
-  toggleCallFlow,
-} from "@/lib/call-flows.functions";
+import { deleteCallFlow, listCallFlows, toggleCallFlow } from "@/lib/call-flows.functions";
 import { TRIGGER_OPTIONS } from "./shared";
 import { FlowFormDialog } from "./flow-form-dialog";
 import { requestConfirmation } from "@/components/system-dialog-host";
@@ -83,7 +73,9 @@ export function FlowsTab() {
         ) : isError ? (
           <div className="py-12 text-center">
             <Workflow className="mx-auto mb-3 h-10 w-10 text-muted-foreground" />
-            <p className="text-sm font-medium text-foreground">Não foi possível carregar os fluxos.</p>
+            <p className="text-sm font-medium text-foreground">
+              Não foi possível carregar os fluxos.
+            </p>
             <p className="mx-auto mt-1 max-w-xl text-xs text-muted-foreground">
               {(error as Error)?.message ?? "Erro desconhecido ao buscar os fluxos de ligação."}
             </p>
@@ -119,9 +111,13 @@ export function FlowsTab() {
                     <div className="mb-1 flex items-center gap-2">
                       <p className="truncate font-medium text-foreground">{f.name}</p>
                       {f.is_active ? (
-                        <Badge variant="default" className="text-[10px]">ativo</Badge>
+                        <Badge variant="default" className="text-meta">
+                          ativo
+                        </Badge>
                       ) : (
-                        <Badge variant="secondary" className="text-[10px]">pausado</Badge>
+                        <Badge variant="secondary" className="text-meta">
+                          pausado
+                        </Badge>
                       )}
                     </div>
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
@@ -134,8 +130,8 @@ export function FlowsTab() {
                       <span className="flex items-center gap-1">
                         <Layers className="h-3 w-3" />
                         {callBlocks.length} ligaç{callBlocks.length === 1 ? "ão" : "ões"} ·{" "}
-                        {delayBlocks.length} delay{delayBlocks.length === 1 ? "" : "s"} ·{" "}
-                        {smsCount} SMS
+                        {delayBlocks.length} delay{delayBlocks.length === 1 ? "" : "s"} · {smsCount}{" "}
+                        SMS
                       </span>
                     </div>
                   </div>
@@ -147,6 +143,7 @@ export function FlowsTab() {
                   <Button
                     size="icon"
                     variant="ghost"
+                    aria-label={`Editar fluxo ${f.name}`}
                     onClick={() => {
                       setEditing(f);
                       setDialogOpen(true);
@@ -157,10 +154,12 @@ export function FlowsTab() {
                   <Button
                     size="icon"
                     variant="ghost"
+                    aria-label={`Excluir fluxo ${f.name}`}
                     onClick={async () => {
                       const confirmed = await requestConfirmation({
                         title: `Excluir fluxo “${f.name}”?`,
-                        description: "O fluxo de ligação e todas as suas etapas serão removidos permanentemente.",
+                        description:
+                          "O fluxo de ligação e todas as suas etapas serão removidos permanentemente.",
                         confirmLabel: "Excluir fluxo",
                         destructive: true,
                       });

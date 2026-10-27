@@ -1,7 +1,7 @@
 // Grupos de casas, Task 5: financial month of a house, manual entries
 // (retroactive included), rates, viewer grants, goals and the group overview.
 // Uses the in-memory createFakeDb stand-in for supabaseAdmin. The permission
-// helpers are a small model of the SQL in 20261024100100_tenant_finance.sql;
+// helpers are a small model of the SQL in 20261101100100_tenant_finance.sql;
 // finance_days / finance_goal_days return fixed rows filtered by tenant/window.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

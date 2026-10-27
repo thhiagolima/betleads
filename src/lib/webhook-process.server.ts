@@ -1,5 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { attributeFromLastFirstPartyClick } from "./conversion-attribution.server";
+import { lookupExpertName, type SupabaseLike } from "./expert-lookup.server";
+import { bindExternalListDispatches } from "./external-list-binding.server";
 import { enrollPlayerOnEvent, eventEntryTriggers } from "./journey-scanner.server";
 
 export function getServiceClient(): SupabaseClient | null {
@@ -11,52 +13,12 @@ export function getServiceClient(): SupabaseClient | null {
   });
 }
 
-// Casa de onde os CRMs Expert recebem os eventos espelhados, salvo quando o
-// tenant Expert declara outra em metadata.source_tenant_id.
-const DEFAULT_EXPERT_SOURCE_TENANT_ID = "00000000-0000-0000-0000-000000000001";
-
-type ExpertTenantRow = { id: string; metadata: unknown };
-
-/**
- * Tenants CRM Expert que devem receber o evento. Cada casa tem o próprio
- * token de webhook e controla o payload, então só a casa de origem do Expert
- * pode alimentá-lo; senão qualquer casa injetaria leads num Expert apenas
- * enviando o affiliate id dele.
- */
-export function expertMirrorTargets(
-  experts: ExpertTenantRow[],
-  sourceTenantId: string,
-  affiliateId: string | null,
-): string[] {
-  if (!affiliateId) return [];
-  return experts
-    .filter((t) => {
-      if (t.id === sourceTenantId) return false;
-      const meta = (t.metadata ?? {}) as {
-        expert_affiliate_ids?: unknown;
-        source_tenant_id?: unknown;
-      };
-      const source =
-        typeof meta.source_tenant_id === "string" && meta.source_tenant_id
-          ? meta.source_tenant_id
-          : DEFAULT_EXPERT_SOURCE_TENANT_ID;
-      if (source !== sourceTenantId) return false;
-      const ids = Array.isArray(meta.expert_affiliate_ids)
-        ? meta.expert_affiliate_ids
-            .map((v) => (typeof v === "string" ? v.trim() : ""))
-            .filter((v) => v.length > 0)
-        : [];
-      return ids.includes(affiliateId);
-    })
-    .map((t) => t.id);
-}
-
 export async function processWebhookEvent(
   sb: SupabaseClient,
   tenantId: string,
   evento: string,
   payload: Record<string, unknown>,
-  options: { mirror?: boolean; existingLogId?: string } = { mirror: true },
+  options: { existingLogId?: string } = {},
 ): Promise<Response> {
   let logId = options.existingLogId;
   let receiptClaimed = false;
@@ -132,6 +94,9 @@ export async function processWebhookEvent(
     // internal_id, ... }`: o player fica em `user`, mas a transação, o
     // tracking e o instante do evento ficam no topo do payload.
     const userEnvelope = isUserEnvelope(payload);
+    // A bravabet365 usa o mesmo envelope, mas manda a transação num objeto
+    // `deposit` ou `withdraw` em vez de no topo do payload.
+    const envelopeTx = userEnvelope ? asRecord(payload.deposit ?? payload.withdraw) : {};
     const eventIso = resolveEventTimestamp(evento, payload, data, userEnvelope);
     // Carrega o modelo de CRM do tenant uma única vez — usado para gatear
     // enrollments automáticos. CRM_EXPERT só aceita entrada via
@@ -158,21 +123,13 @@ export async function processWebhookEvent(
         data.axio_aff_id,
       ) ?? null;
 
-    let expertNome: string | null = null;
-    if (affiliateId) {
-      const { data: exp } = await sb
-        .from("experts")
-        .select("nome")
-        .eq("affiliate_id", affiliateId)
-        .eq("tenant_id", tenantId)
-        .maybeSingle();
-      expertNome = exp?.nome ?? null;
-    }
+    const expertNome = await lookupExpertName(sb as unknown as SupabaseLike, tenantId, affiliateId);
 
     const externalId = resolveExternalId(evento, payload, data);
     const signupEvent = isSignupEvent(evento, payload);
 
-    const rawValor = data.amount ?? data.valor ?? payload.amount ?? payload.valor;
+    const rawValor =
+      data.amount ?? data.valor ?? envelopeTx.amount ?? payload.amount ?? payload.valor;
     const valor = rawValor != null ? Math.abs(Number(rawValor)) || null : null;
 
     const nome =
@@ -212,12 +169,17 @@ export async function processWebhookEvent(
         signupAttribution.fbclid ? "fb" : undefined,
       ) ?? null;
     const metodo =
-      firstString(data.paymentMethod, data.methodCode, data.metodo, data.method) ??
-      (userEnvelope && stringFrom(payload.pix_copy_paste) ? "pix" : null);
+      firstString(data.paymentMethod, data.methodCode, data.metodo, data.method, envelopeTx.type) ??
+      (userEnvelope && (stringFrom(payload.pix_copy_paste) || stringFrom(envelopeTx.pix))
+        ? "pix"
+        : null);
     // No envelope `user`, `data.id` é o player: a transação vem do topo.
     // `internal_id` é o id da fatura na casa; `external_id`, o do PSP.
+    // Em `deposit`/`withdraw`, o `id` da casa é o único presente tanto no
+    // evento pendente quanto no pago.
     const envelopeTransactionId = userEnvelope
       ? firstString(
+          envelopeTx.id,
           payload.internal_id,
           payload.transaction_id,
           payload.transactionId,
@@ -236,10 +198,22 @@ export async function processWebhookEvent(
         payload.event_id,
         payload.deliveryId,
       ) ?? null;
+    // No envelope `user` o recibo inclui o tipo do evento: a casa pode repetir
+    // o `event_id` entre eventos diferentes, e um login não pode bloquear o
+    // depósito que chega depois.
+    const rawProviderEventId = firstString(
+      payload.eventId,
+      payload.event_id,
+      data.eventId,
+      data.event_id,
+    );
+    const envelopeEvent = userEnvelope ? stringFrom(payload.event) : undefined;
     const providerEventId =
-      firstString(payload.eventId, payload.event_id, data.eventId, data.event_id) ??
+      (rawProviderEventId && envelopeEvent
+        ? `${envelopeEvent}:${rawProviderEventId}`
+        : rawProviderEventId) ??
       (userEnvelope ? envelopeEventId(payload, data, envelopeTransactionId) : null);
-    const providerStatus = firstString(data.status, payload.status) ?? null;
+    const providerStatus = firstString(data.status, envelopeTx.status, payload.status) ?? null;
 
     if (providerEventId) {
       const { data: claimed, error: claimError } = await sb.rpc("claim_webhook_event", {
@@ -398,12 +372,15 @@ export async function processWebhookEvent(
 
       // Atividade de login precisa representar somente uma entrada real na plataforma.
       // Depósitos e saques não podem mascarar filtros como “X dias sem login”.
+      const nascimento = dateOnly(data.birth_date ?? data.birthDate ?? data.data_nascimento);
+      if (nascimento) updates.data_nascimento = nascimento;
+
       if (evento === "login") updates.ultimo_login = eventIso;
       if (evento === "jogo-iniciado") updates.ultimo_jogo = eventIso;
       // O login do envelope `user` traz o saldo atual da carteira.
       if (userEnvelope) {
-        const saldo = finiteNumber(payload.balance_brl);
-        const bonus = finiteNumber(payload.balance_bonus);
+        const saldo = finiteNumber(payload.balance_brl ?? data.wallet);
+        const bonus = finiteNumber(payload.balance_bonus ?? data.wallet_bonus);
         if (saldo !== null) updates.saldo_carteira = saldo;
         if (bonus !== null) updates.saldo_bonus = bonus;
       }
@@ -711,8 +688,23 @@ export async function processWebhookEvent(
               isFtd:
                 conversionEvent === "deposit_approved" &&
                 (data.isFtd === true ||
-                  (userEnvelope && finiteNumber(payload.paid_deposits_count) === 1)),
+                  (userEnvelope &&
+                    (finiteNumber(payload.paid_deposits_count) === 1 ||
+                      finiteNumber(envelopeTx.is_ftd) === 1))),
             } as const;
+            // A registration may come from an SMS sent to an external phone
+            // list (no player at send time): bind those links to the new
+            // player first, so the click below can be credited.
+            if (conversionEvent === "registered" && playerId) {
+              await bindExternalListDispatches(sb, { tenantId, playerId, phone: telefone }).catch(
+                (bindError) =>
+                  console.error("[external list] bind failed", {
+                    tenantId,
+                    playerId,
+                    error: bindError instanceof Error ? bindError.message : String(bindError),
+                  }),
+              );
+            }
             // The provider identifies the player, while BetLeads owns the
             // click proof. Do not trust query parameters echoed by the casino:
             // attribution requires an exact, first-party recorded click.
@@ -1017,89 +1009,6 @@ export async function processWebhookEvent(
       void enrollPlayerOnEvent(tenantId, playerId, evento);
     }
 
-    // Espelhamento para CRMs Expert.
-    // Quando um evento chega no tenant principal (CRM_PLATAFORMA) e o
-    // affiliate_id do lead está na allowlist de algum tenant CRM_EXPERT,
-    // o mesmo evento é reprocessado nesse tenant — assim o CRM Expert
-    // só recebe leads dele e ignora todo o resto automaticamente.
-    if (options.mirror !== false) {
-      try {
-        const data2 = (payload.data ?? payload.player ?? payload.user ?? payload) as Record<
-          string,
-          unknown
-        >;
-        const aff = asRecord(data2.affiliate);
-        let affId =
-          firstString(
-            aff.referredBy,
-            aff.affiliate_id,
-            data2.affiliate_id,
-            data2.axioAffId,
-            data2.axio_aff_id,
-          ) ?? null;
-        if (typeof affId === "string") affId = affId.trim() || null;
-        // Fallback: eventos financeiros (deposito-aprovado, saque-*, cashback-pago,
-        // jogo-iniciado, logout) normalmente NÃO trazem o bloco `affiliate` no
-        // payload — só vem `userId`. Sem affiliate_id o mirror não dispara e
-        // o CRM Expert nunca recebe esses eventos. Resolve via lookup do player
-        // no tenant de origem usando qualquer um dos IDs externos disponíveis.
-        if (!affId) {
-          const candidates = [
-            data2.userId,
-            data2.external_id,
-            (data2 as { user_id?: unknown }).user_id,
-            data2.id,
-            payload.user_id,
-            payload.player_id,
-            payload.userId,
-            payload.external_id,
-          ]
-            .map((v) => (typeof v === "string" ? v.trim() : v))
-            .filter((v): v is string => typeof v === "string" && v.length > 0);
-          for (const ext of candidates) {
-            const { data: playerRow } = await sb
-              .from("players")
-              .select("affiliate_id")
-              .eq("tenant_id", tenantId)
-              .eq("player_external_id", ext)
-              .maybeSingle();
-            const found = (playerRow?.affiliate_id as string | undefined) ?? null;
-            if (found && found.trim().length > 0) {
-              affId = found.trim();
-              break;
-            }
-          }
-          if (!affId) {
-            console.warn("[webhook] mirror skipped — no affiliate_id resolved", {
-              tenantId,
-              evento,
-              externalCandidates: candidates,
-            });
-          }
-        }
-        if (affId) {
-          // A demo tenant is a frozen snapshot: it never receives mirrored
-          // events, even when its metadata declares the affiliate id.
-          const { data: experts } = await sb
-            .from("tenants")
-            .select("id, metadata, crm_model, is_demo")
-            .eq("crm_model", "CRM_EXPERT")
-            .eq("is_demo", false);
-          for (const targetId of expertMirrorTargets(
-            (experts ?? []) as ExpertTenantRow[],
-            tenantId,
-            affId,
-          )) {
-            await processWebhookEvent(sb, targetId, evento, payload, {
-              mirror: false,
-            });
-          }
-        }
-      } catch (mirrorErr) {
-        console.error("[webhook] mirror to CRM_EXPERT failed", mirrorErr);
-      }
-    }
-
     return Response.json({ ok: true, evento });
   } catch (e) {
     await markLog("erro", { step: "exception", error: String(e) });
@@ -1239,6 +1148,13 @@ function finiteNumber(value: unknown): number | null {
   if (typeof value === "string" && !value.trim()) return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+/** Aceita só `AAAA-MM-DD` (com ou sem hora) e devolve a data pura. */
+function dateOnly(value: unknown): string | null {
+  const match = /^(\d{4}-\d{2}-\d{2})(?:$|T)/.exec(stringFrom(value) ?? "");
+  if (!match || Number.isNaN(Date.parse(match[1]))) return null;
+  return match[1];
 }
 
 function joinName(first: unknown, last: unknown): string | undefined {
@@ -1663,7 +1579,13 @@ function resolveEventTimestamp(
     const signupAt = isSignupEvent(evento, payload) ? stringFrom(data.created_at) : undefined;
     const signupMs = signupAt ? Date.parse(signupAt) : Number.NaN;
     if (!Number.isNaN(signupMs)) return new Date(signupMs).toISOString();
-    return envelopeTimeToIso(payload.time) ?? new Date().toISOString();
+    const occurredAt = stringFrom(payload.occurred_at);
+    const occurredMs = occurredAt ? Date.parse(occurredAt) : Number.NaN;
+    return (
+      envelopeTimeToIso(payload.time) ??
+      (Number.isNaN(occurredMs) ? null : new Date(occurredMs).toISOString()) ??
+      new Date().toISOString()
+    );
   }
   const candidates = [
     evento.includes("aprovado") || evento.includes("concluido") ? data.completedAt : undefined,

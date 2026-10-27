@@ -17,7 +17,7 @@ import {
   Sparkles,
   Target,
   Trophy,
-  TriangleAlert,
+  UserCog,
   Users,
   Wallet,
   Workflow,
@@ -27,11 +27,16 @@ import {
 /**
  * Single source for the app shell: sidebar sections, mobile tabs and the
  * breadcrumb/title of every route. Routes left out of the menu on purpose
- * (jornadas, whatsapp, eventos, experts, links, créditos SMS, relatório de
- * conversão) still get a title here — they are reachable from inside pages.
+ * still get a title here: some are reached from inside pages (jornadas,
+ * eventos, créditos SMS), others are parked until they are redesigned
+ * (Oportunidades, WhatsApp — the last one redirects). Experts is not
+ * parked: it is an admin/super-admin-only link under Jogadores. The
+ * expert role itself gets a separate, dedicated set of sections/tabs
+ * (EXPERT_SECTIONS / EXPERT_MOBILE_TABS) instead of a filtered view of
+ * the house shell.
  */
 
-export type ShellRole = "admin" | "gestor" | "member" | "super_admin";
+export type ShellRole = "admin" | "gestor" | "member" | "super_admin" | "expert";
 
 export type NavAccess = {
   /** Who sees the item. Defaults to everyone. */
@@ -80,8 +85,8 @@ export const SIDEBAR_SECTIONS: NavSection[] = [
     items: [
       link("Jogadores", "/players", Users),
       link("Públicos", "/publicos", PieChart),
-      link("Oportunidades", "/alertas", TriangleAlert),
       link("Níveis e fidelização", "/gamificacao", Trophy, { alsoActiveOn: ["/regras"] }),
+      link("Experts", "/experts", UserCog, { requires: "tenant_admin" }),
     ],
   },
   {
@@ -94,15 +99,16 @@ export const SIDEBAR_SECTIONS: NavSection[] = [
   {
     label: "Canais",
     items: [
-      link("SMS", "/sms", MessageSquare, { alsoActiveOn: ["/creditos-sms", "/links"] }),
+      link("SMS", "/sms", MessageSquare),
       link("Email", "/email", Mail),
       link("Voz", "/ligacoes", Phone),
+      link("Consentimentos", "/consentimentos", ShieldQuestion),
       {
         kind: "group",
         title: "Templates e áudios",
         icon: FileText,
         children: [
-          link("Templates de SMS", "/sms/templates"),
+          link("Templates de SMS", "/sms", undefined, { hash: "templates" }),
           link("Templates de email", "/email", undefined, { hash: "templates" }),
           link("Áudios e scripts", "/ligacoes", undefined, { hash: "audios" }),
         ],
@@ -113,8 +119,18 @@ export const SIDEBAR_SECTIONS: NavSection[] = [
     label: "IA",
     requires: "tenant_admin",
     items: [
-      link("Assistente IA", "/inteligencia", Sparkles, { alsoActiveOn: ["/experts"] }),
+      link("Assistente IA", "/inteligencia", Sparkles),
       link("Configurar IA", "/treino-ia", Settings),
+    ],
+  },
+  {
+    label: "Configurações",
+    items: [
+      link("Plano e créditos", "/plano-e-creditos", Wallet),
+      // Links curtos (Short.io) and the Meta connection live inside Integrações.
+      link("Integrações", "/webhooks", Plug, { alsoActiveOn: ["/links"] }),
+      link("Configuração da casa", "/configuracoes/casa", Building2),
+      link("Configurações", "/configuracoes", Settings),
     ],
   },
   {
@@ -128,12 +144,16 @@ export const SIDEBAR_SECTIONS: NavSection[] = [
   },
 ];
 
-/** Pinned to the bottom of the sidebar. */
-export const SIDEBAR_FOOTER: NavLink[] = [
-  link("Integrações", "/webhooks", Plug),
-  link("Consentimentos", "/consentimentos", ShieldQuestion),
-  link("Configuração da casa", "/configuracoes/casa", Building2),
-  link("Configurações", "/configuracoes", Settings),
+/** The whole shell for an expert: no house sections, just their two pages. */
+export const EXPERT_SECTIONS: NavSection[] = [
+  {
+    label: "Expert",
+    items: [
+      link("Início", "/expert", Home),
+      link("Leads", "/expert/leads", Users),
+      link("Modelos", "/expert/modelos", FileText),
+    ],
+  },
 ];
 
 /** Lives in the account menu (header avatar). */
@@ -180,11 +200,23 @@ export function homeRedirect(tenantCount: number, groupCount: number): "/grupo" 
 
 export type MobileTab = { title: string; to?: string; icon: LucideIcon; alsoActiveOn?: string[] };
 
+export const EXPERT_MOBILE_TABS: MobileTab[] = [
+  { title: "Início", to: "/expert", icon: Home },
+  { title: "Leads", to: "/expert/leads", icon: Users },
+  { title: "Modelos", to: "/expert/modelos", icon: FileText },
+];
+
 export const MOBILE_TABS: MobileTab[] = [
   { title: "Início", to: "/", icon: Home },
-  { title: "Jogadores", to: "/players", icon: Users, alsoActiveOn: ["/publicos", "/alertas"] },
   {
-    title: "Campanhas",
+    title: "Jogadores",
+    to: "/players",
+    icon: Users,
+    alsoActiveOn: ["/publicos", "/alertas", "/gamificacao", "/regras"],
+  },
+  {
+    // Same name as the sidebar section; opens Campanhas, lights on Automações too.
+    title: "Ações",
     to: "/campanhas",
     icon: Megaphone,
     alsoActiveOn: ["/automacoes", "/jornadas"],
@@ -223,22 +255,33 @@ export const ROUTE_META: Record<string, RouteMeta> = {
   "/automacoes/ligacoes": { section: "Automações", title: "Automações de voz" },
   "/automacoes/whatsapp": { section: "Automações", title: "Automações de WhatsApp" },
   "/jornadas": { section: "Ações", title: "Jornadas" },
-  "/jornadas/nova": { section: "Jornadas", title: "Nova jornada" },
-  "/jornadas/$journeyId": { section: "Jornadas", title: "Editar jornada" },
-  "/jornadas/$journeyId/relatorio": { section: "Jornadas", title: "Relatório da jornada" },
+  "/jornadas/nova": { section: "Automações", title: "Nova jornada" },
+  "/jornadas/$journeyId": { section: "Automações", title: "Editar jornada" },
+  "/jornadas/$journeyId/relatorio": { section: "Automações", title: "Relatório da jornada" },
   "/sms": { section: "Canais", title: "SMS" },
   "/sms/templates": { section: "Canais", title: "Templates de SMS" },
-  "/creditos-sms": { section: "Canais", title: "Créditos SMS" },
+  "/creditos-sms": { section: "Configurações", title: "Saldo e consumo" },
+  "/plano-e-creditos": { section: "Configurações", title: "Plano e créditos" },
   "/email": { section: "Canais", title: "Email" },
   "/ligacoes": { section: "Canais", title: "Voz" },
   "/whatsapp": { section: "Canais", title: "WhatsApp" },
-  "/links": { section: "Canais", title: "Links" },
-  "/links/configuracoes": { section: "Links", title: "Configurações de links" },
+  "/links": { section: "Integrações", title: "Links curtos" },
+  "/links/configuracoes": { section: "Integrações", title: "Links curtos" },
   "/inteligencia": { section: "IA", title: "Assistente IA" },
   "/treino-ia": { section: "IA", title: "Configurar IA" },
-  "/experts": { section: "IA", title: "Experts" },
+  "/experts": { section: "Jogadores", title: "Experts" },
+  "/expert": { section: "Expert", title: "Início" },
+  // The generated route tree's `FileRoutesByFullPath` keeps the trailing
+  // slash for a nested index route ("/expert/" is `expert.index.tsx`'s
+  // typed full path); `resolveRouteMeta` never looks this entry up at
+  // runtime (it strips the trailing slash first), but the
+  // "every route has a title" test walks that interface verbatim.
+  "/expert/": { section: "Expert", title: "Início" },
+  "/expert/leads": { section: "Expert", title: "Leads" },
+  "/expert/leads/$playerId": { section: "Expert", title: "Ficha do lead" },
+  "/expert/modelos": { section: "Expert", title: "Modelos de mensagem" },
   "/webhooks": { section: "Configurações", title: "Integrações" },
-  "/consentimentos": { section: "Configurações", title: "Consentimentos" },
+  "/consentimentos": { section: "Canais", title: "Consentimentos" },
   "/configuracoes/casa": { section: "Configurações", title: "Configuração da casa" },
   "/configuracoes": { section: "Configurações", title: "Configurações" },
   "/tenants": { section: "Conta", title: "Conta e equipe" },
@@ -290,7 +333,9 @@ export function canSee(
 ) {
   if (!access.requires) return true;
   if (access.requires === "super_admin") return isSuperAdmin;
-  if (access.requires === "not_super_admin") return !isSuperAdmin;
+  // The expert never gets house-admin links either, including the ones
+  // (like "Conta e equipe") only gated on "not being the super admin".
+  if (access.requires === "not_super_admin") return !isSuperAdmin && role !== "expert";
   if (access.requires === "finance") return isSuperAdmin || canViewFinance;
   return isSuperAdmin || role === "admin";
 }
@@ -300,6 +345,7 @@ export function visibleSections(
   isSuperAdmin: boolean,
   canViewFinance = false,
 ): NavSection[] {
+  if (role === "expert") return EXPERT_SECTIONS;
   return SIDEBAR_SECTIONS.filter((section) => canSee(section, role, isSuperAdmin, canViewFinance))
     .map((section) => ({
       ...section,
@@ -308,15 +354,51 @@ export function visibleSections(
     .filter((section) => section.items.length > 0);
 }
 
+/**
+ * Whether an expert may stay on `pathname` without being bounced to
+ * `/expert`: the Expert area itself, plus the account/auth screens that
+ * exist outside the house shell. Today those screens (login, password
+ * reset, forced password change) are rendered by `AuthGate` before the
+ * shell ever mounts and have no entry in `routeTree.gen.ts`, so there is
+ * nothing else to allow — this stays a dedicated function so a future
+ * account-only route can be added here without touching the redirect.
+ */
+export function isExpertAllowedPath(pathname: string): boolean {
+  return isPathUnder(pathname, "/expert");
+}
+
+/**
+ * What the shell's main area shows. Until the active house's role is known,
+ * a house route renders nothing: otherwise a pure expert landing on it would
+ * mount that page (and fire its house server functions) before the redirect
+ * to /expert. Expert routes render right away; once the role is known (or
+ * its lookup failed, role null), every role behaves as before.
+ */
+export type ShellContentState = "waiting_role" | "redirect_expert" | "render";
+
+export function shellContentState(
+  role: ShellRole | null,
+  roleLoading: boolean,
+  pathname: string,
+): ShellContentState {
+  if (isExpertAllowedPath(pathname)) return "render";
+  if (roleLoading) return "waiting_role";
+  if (role === "expert") return "redirect_expert";
+  return "render";
+}
+
 export function navLinkKey(item: Pick<NavLink, "to" | "hash">) {
   return item.hash ? `${item.to}#${item.hash}` : item.to;
 }
 
 function allLinks(): NavLink[] {
-  const fromSections = [...SIDEBAR_SECTIONS, ...GROUP_SECTIONS].flatMap((section) =>
+  // The expert's own sections are included so their links light up too
+  // ("/expert/leads/$playerId" keeps "Leads" active); their paths never
+  // overlap a house link ("/experts" is a different segment). The group
+  // menu's links (/grupo*) likewise never overlap a house link.
+  return [...SIDEBAR_SECTIONS, ...EXPERT_SECTIONS, ...GROUP_SECTIONS].flatMap((section) =>
     section.items.flatMap((item) => (item.kind === "group" ? item.children : [item])),
   );
-  return [...fromSections, ...SIDEBAR_FOOTER];
 }
 
 /**
@@ -341,13 +423,17 @@ export function activeNavKey(pathname: string, hash: string): string | null {
   return best?.key ?? null;
 }
 
-export function activeMobileTab(pathname: string): string | null {
-  const tab = MOBILE_TABS.find(
-    (candidate) =>
-      candidate.to &&
-      [candidate.to, ...(candidate.alsoActiveOn ?? [])].some((prefix) =>
-        isPathUnder(pathname, prefix),
-      ),
-  );
-  return tab?.title ?? null;
+export function activeMobileTab(pathname: string, tabs: MobileTab[] = MOBILE_TABS): string | null {
+  // Longest-prefix wins, so e.g. "/expert/leads" lights "Leads" and not
+  // "Início" even though "/expert" is also a prefix of it.
+  let best: { title: string; length: number } | null = null;
+  for (const candidate of tabs) {
+    if (!candidate.to) continue;
+    const prefixes = [candidate.to, ...(candidate.alsoActiveOn ?? [])];
+    const matched = prefixes.filter((prefix) => isPathUnder(pathname, prefix));
+    if (matched.length === 0) continue;
+    const length = Math.max(...matched.map((prefix) => prefix.length));
+    if (!best || length > best.length) best = { title: candidate.title, length };
+  }
+  return best?.title ?? null;
 }

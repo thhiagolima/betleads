@@ -1,43 +1,65 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { createFileRoute } from "@tanstack/react-router";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import type React from "react";
+import { useState, type ReactNode } from "react";
 import {
-  ArrowLeft,
-  BadgeDollarSign,
-  CalendarDays,
-  CheckCircle2,
-  Clock3,
+  Check,
+  Copy,
   Crown,
-  Gem,
-  Mail,
+  ExternalLink,
+  History,
+  MessageCircle,
   MessageSquareText,
-  Phone,
   ShieldAlert,
-  Sparkles,
-  Target,
-  TrendingDown,
-  TrendingUp,
-  User,
-  Wallet,
 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { toast } from "sonner";
+
+import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { HomeCard, KpiCard, MetricRow } from "@/components/home/home-cards";
+import { Page, PageHeader } from "@/components/ui-premium/page-header";
+import { PlayerContactHistoryDialog } from "@/components/history/player-contact-history";
+import { EnviarPeloWhatsAppDialog } from "@/components/whatsapp/send-dialog";
+import { LevelBadge } from "@/components/players/level-badge";
+import { IdentityIcon } from "@/components/identity/identity-badge";
+import { CHANNEL_IDENTITY, EVENT_IDENTITY, LEVEL_IDENTITY } from "@/components/identity/identity";
+import { SituationText } from "@/components/players/situation-text";
+import { PlayerJourneysCard } from "@/components/players/player-journeys-card";
+import { copyToClipboard, openCampaignWithAudience } from "@/components/players/campaign-audience";
+import {
+  alertTypeLabel,
+  linkChannelLabel,
+  linkSourceLabel,
+  recordStatusLabel,
+} from "@/components/players/player-labels";
 import { brl, num, timeAgo } from "@/lib/format";
 import { getPlayerDetail, type PlayerDetail } from "@/lib/player-detail.functions";
 import { getPlayerLinkHistory } from "@/lib/shortio.functions";
-import { PlayerJourneysCard } from "@/components/players/player-journeys-card";
+import { nextPrecallCopy } from "@/lib/precall-copy";
+import { cn } from "@/lib/utils";
+import { describeEventType } from "@/lib/webhook-events";
 
 export const Route = createFileRoute("/players/$playerId")({
   component: PlayerDetailPage,
 });
 
+type LinkRow = {
+  id: string;
+  channel: string;
+  source_type: string;
+  sent_url: string;
+  sent_at?: string | null;
+  clicks: number;
+};
+
+const RISK_LABEL: Record<string, string> = { alto: "Alto", medio: "Médio", baixo: "Baixo" };
+
 function PlayerDetailPage() {
   const { playerId } = Route.useParams();
+  const qc = useQueryClient();
   const fetchDetail = useServerFn(getPlayerDetail);
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ["player-detail", playerId],
     queryFn: () => fetchDetail({ data: { playerId } }),
     staleTime: 15_000,
@@ -48,605 +70,566 @@ function PlayerDetailPage() {
     queryFn: () => fetchLinks({ data: { playerId } }),
     staleTime: 15_000,
   });
+  // Nome da casa para a mensagem pronta (mesma copy da lista de Jogadores).
+  const { data: tenantBrand } = useQuery({
+    queryKey: ["current-tenant-brand"],
+    queryFn: async () => {
+      const { data: tenant } = await supabase.from("tenants").select("nome").limit(1).maybeSingle();
+      return (tenant?.nome as string | undefined) ?? "";
+    },
+    staleTime: 5 * 60_000,
+  });
+  const [messageOpen, setMessageOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [idCopied, setIdCopied] = useState(false);
+  const [campaignBusy, setCampaignBusy] = useState(false);
 
   if (isLoading) return <DetailSkeleton />;
 
   if (error || !data) {
     return (
-      <div className="space-y-4">
-        <BackButton />
-        <Card className="border-border/50 bg-card/60">
-          <CardContent className="p-6">
-            <div className="text-lg font-semibold">Nao foi possivel abrir a ficha</div>
-            <div className="mt-1 text-sm text-muted-foreground">
-              {error instanceof Error ? error.message : "Tente novamente em alguns instantes."}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      <Page>
+        <PageHeader />
+        <HomeCard className="p-5 sm:p-6">
+          <h2 className="text-section">Não foi possível abrir a ficha</h2>
+          <p className="mt-1 text-body text-muted-foreground">
+            {error instanceof Error ? error.message : "Tente novamente em alguns instantes."}
+          </p>
+          <Button
+            variant="outline"
+            className="mt-4 h-11 sm:h-9"
+            onClick={() => void refetch()}
+            disabled={isFetching}
+          >
+            Tentar de novo
+          </Button>
+        </HomeCard>
+      </Page>
     );
   }
 
   const p = data.player;
-  const level = levelFor(Number(p.total_depositado ?? 0), Boolean(p.vip));
   const ftd = p.ftd_em ?? data.attribution?.raw_payload?.raw?.primeiro_deposito ?? null;
   const lastDeposit =
     p.ultimo_deposito ?? data.attribution?.raw_payload?.raw?.ultimo_deposito ?? null;
+  const externalId = String(p.player_external_id ?? "").trim();
+  const phone = String(p.telefone ?? "").trim();
+  const linkRows = (links.data ?? []) as LinkRow[];
+  const linkClicks = linkRows.reduce((total, link) => total + Number(link.clicks ?? 0), 0);
+  const createdAt = formatDate(p.created_at);
+
+  async function copyExternalId() {
+    if (!externalId) return;
+    await copyToClipboard(externalId);
+    setIdCopied(true);
+    window.setTimeout(() => setIdCopied(false), 1500);
+    toast.success("ID copiado.");
+  }
+
+  const actionClass = "h-11 px-4 sm:h-9";
 
   return (
-    <div className="space-y-5">
-      <BackButton />
+    <Page>
+      <PageHeader
+        title={p.nome}
+        leading={<IdentityIcon tone={LEVEL_IDENTITY[data.level]} size="lg" className="mt-0.5" />}
+        subtitle={
+          <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+            <LevelBadge level={data.level} />
+            {p.vip && (
+              <span className="inline-flex items-center gap-1 text-amber-300">
+                <Crown className="h-3.5 w-3.5" aria-hidden="true" />
+                VIP
+              </span>
+            )}
+            <span aria-hidden="true">·</span>
+            <SituationText situation={data.situation} />
+            {data.days_without_deposit != null && data.situation !== "no_deposit" && (
+              <span>
+                (
+                {data.days_without_deposit === 0
+                  ? "depositou hoje"
+                  : `${num(data.days_without_deposit)} ${data.days_without_deposit === 1 ? "dia" : "dias"} sem depositar`}
+                )
+              </span>
+            )}
+            {createdAt !== "—" && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span>cadastro em {createdAt}</span>
+              </>
+            )}
+          </span>
+        }
+        actions={
+          <>
+            <Button
+              variant="outline"
+              className={actionClass}
+              onClick={() => setMessageOpen(true)}
+              disabled={!phone}
+              title={phone ? undefined : "Jogador sem telefone cadastrado"}
+            >
+              <MessageCircle className="h-4 w-4" />
+              Mensagem
+            </Button>
+            <Button
+              className={actionClass}
+              disabled={campaignBusy}
+              onClick={async () => {
+                setCampaignBusy(true);
+                const opened = await openCampaignWithAudience({ playerIds: [p.id] });
+                if (!opened) setCampaignBusy(false);
+              }}
+            >
+              <MessageSquareText className="h-4 w-4" />
+              Usar na campanha
+            </Button>
+            <Button variant="outline" className={actionClass} onClick={() => setHistoryOpen(true)}>
+              <History className="h-4 w-4" />
+              Histórico de contatos
+            </Button>
+          </>
+        }
+      />
 
-      <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-        <Card className="border-border/50 bg-card/70">
-          <CardContent className="p-5">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-              <div className="min-w-0">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-lg border border-primary/30 bg-primary/15">
-                    <User className="h-5 w-5 text-primary" />
-                  </div>
-                  <div className="min-w-0">
-                    <h1 className="truncate text-2xl font-bold tracking-normal">{p.nome}</h1>
-                    <div className="mt-0.5 truncate text-sm text-muted-foreground">
-                      {p.player_external_id ?? p.id}
-                    </div>
-                  </div>
-                </div>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <Badge className={`${level.className} border`}>{level.label}</Badge>
-                  <StatusBadge
-                    active={
-                      data.metrics.days_since_activity != null &&
-                      data.metrics.days_since_activity <= 4
-                    }
-                  />
-                  {p.risco && (
-                    <Badge variant="outline" className="border-border/70 text-muted-foreground">
-                      risco {p.risco}
-                    </Badge>
-                  )}
-                  {p.verificado && (
-                    <Badge className="border-emerald-500/30 bg-emerald-500/15 text-emerald-300">
-                      <CheckCircle2 className="mr-1 h-3 w-3" /> verificado
-                    </Badge>
-                  )}
-                </div>
-              </div>
-
-              <div className="grid min-w-[260px] gap-2 text-sm">
-                <ContactLine
-                  icon={<Phone className="h-4 w-4" />}
-                  label="Telefone"
-                  value={p.telefone}
-                />
-                <ContactLine icon={<Mail className="h-4 w-4" />} label="E-mail" value={p.email} />
-                <ContactLine
-                  icon={<CalendarDays className="h-4 w-4" />}
-                  label="Cadastro"
-                  value={formatDate(p.created_at)}
-                />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="border-border/50 bg-card/70">
-          <CardContent className="grid gap-3 p-5 sm:grid-cols-2">
-            <ScoreTile label="Score geral" value={`${data.metrics.score}/100`} tone="blue" />
-            <ScoreTile
-              label="Retencao"
-              value={`${data.metrics.retention_score}/100`}
-              tone="green"
-            />
-            <ScoreTile label="Risco" value={`${data.metrics.risk_score}/100`} tone="red" />
-            <ScoreTile
-              label="Conversao"
-              value={`${data.metrics.conversion_score}/100`}
-              tone="amber"
-            />
-          </CardContent>
-        </Card>
-      </section>
-
-      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard
-          icon={<BadgeDollarSign />}
-          label="Total depositado"
-          value={brl(p.total_depositado)}
-        />
-        <MetricCard icon={<TrendingDown />} label="Total sacado" value={brl(p.total_sacado)} />
-        <MetricCard
-          icon={<Wallet />}
-          label="Saldo informado"
-          value={brl(data.metrics.saldo_total)}
-        />
-        <MetricCard
-          icon={<TrendingUp />}
-          label="Resultado da casa"
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <KpiCard title="Total depositado" value={brl(p.total_depositado)} />
+        <KpiCard title="Total sacado" value={brl(p.total_sacado)} />
+        <KpiCard title="Saldo informado" value={brl(data.metrics.saldo_total)} />
+        <KpiCard
+          title="Resultado da casa"
           value={brl(data.metrics.lucro)}
-          valueClass={data.metrics.lucro >= 0 ? "text-emerald-400" : "text-rose-400"}
+          detail="depositado menos sacado"
         />
-      </section>
+      </div>
+
+      <div className="grid gap-3 lg:grid-cols-2">
+        <Section title="Contato">
+          <MetricRow label="Telefone" value={empty(p.telefone)} />
+          <MetricRow label="E-mail" value={<span className="break-all">{empty(p.email)}</span>} />
+          <MetricRow
+            label="ID na plataforma"
+            value={
+              externalId ? (
+                <button
+                  type="button"
+                  onClick={copyExternalId}
+                  className="-my-2 inline-flex min-h-11 items-center gap-1.5 font-medium text-primary hover:underline sm:min-h-0"
+                >
+                  {idCopied ? (
+                    <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                  ) : (
+                    <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                  )}
+                  {idCopied ? "ID copiado" : "Copiar ID"}
+                </button>
+              ) : (
+                <Muted>Sem ID</Muted>
+              )
+            }
+          />
+          <MetricRow label="Cadastro" value={createdAt} />
+          <MetricRow label="Verificado" value={p.verificado ? "Sim" : "Não"} />
+          <MetricRow
+            label="Risco"
+            value={p.risco ? (RISK_LABEL[p.risco] ?? p.risco) : <Muted>Sem dado</Muted>}
+          />
+        </Section>
+
+        <Section title="Movimento do jogador">
+          <MetricRow label="Depósitos" value={num(data.metrics.deposit_count)} />
+          <MetricRow label="Saques" value={num(data.metrics.withdrawal_count)} />
+          <MetricRow label="Último depósito" value={<When value={lastDeposit} />} />
+          <MetricRow label="Primeiro depósito" value={<When value={ftd} />} />
+          <MetricRow
+            label="Última atividade"
+            value={<When value={data.metrics.last_activity_at} />}
+          />
+          <MetricRow label="Último saque" value={<When value={p.ultimo_saque} />} />
+        </Section>
+      </div>
+
+      <div className="grid gap-3 lg:grid-cols-2">
+        <Section
+          title="Pontuação"
+          subtitle="Notas de 0 a 100 calculadas pelo CRM. Em risco, quanto maior, mais chance de parar."
+        >
+          <MetricRow label="Score geral" value={<Score value={data.metrics.score} />} />
+          <MetricRow label="Retenção" value={<Score value={data.metrics.retention_score} />} />
+          <MetricRow label="Risco" value={<Score value={data.metrics.risk_score} />} />
+          <MetricRow label="Conversão" value={<Score value={data.metrics.conversion_score} />} />
+        </Section>
+
+        <Section title="Sinais e alertas">
+          {data.alerts.length === 0 ? (
+            <p className="py-2.5 text-body text-muted-foreground">
+              Nenhum alerta ativo para este jogador agora.
+            </p>
+          ) : (
+            <ul className="divide-y divide-border/70">
+              {data.alerts.map((alert) => (
+                <li key={alert.tipo} className="flex gap-2.5 py-2.5">
+                  <ShieldAlert
+                    className="mt-0.5 h-4 w-4 shrink-0 text-warning"
+                    aria-hidden="true"
+                  />
+                  <div className="min-w-0">
+                    <p className="text-body font-medium">{alert.titulo}</p>
+                    <p className="mt-0.5 text-label text-muted-foreground">{alert.motivo}</p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+      </div>
 
       <PlayerJourneysCard playerId={playerId} />
 
-      <Card className="border-border/50 bg-card/70">
-        <CardContent className="p-5">
-          <SectionTitle
-            title="Links enviados"
-            subtitle="Histórico de links rastreados e cliques agregados."
+      <div className="grid gap-3 lg:grid-cols-2">
+        <Section title="Como chegou" subtitle="Atribuição declarada no cadastro ou na importação.">
+          <MetricRow label="Fonte" value={empty(data.media.source ?? p.origem)} />
+          <MetricRow label="Meio" value={empty(data.attribution?.utm_medium ?? p.utm_medium)} />
+          <MetricRow
+            label="Campanha"
+            value={
+              <span className="break-all">{empty(data.media.campaign ?? p.utm_campaign)}</span>
+            }
           />
-          <div className="mt-4 space-y-2">
-            {links.isLoading ? (
-              <Skeleton className="h-12 w-full" />
-            ) : links.data?.length ? (
-              (
-                links.data as Array<{
-                  id: string;
-                  channel: string;
-                  source_type: string;
-                  sent_url: string;
-                  clicks: number;
-                }>
-              ).map((link) => (
-                <div
-                  key={link.id}
-                  className="flex items-center justify-between gap-3 rounded-md border border-border/50 p-3 text-sm"
+          <MetricRow
+            label="Criativo"
+            value={<span className="break-all">{empty(data.media.creative ?? p.utm_content)}</span>}
+          />
+          <MetricRow label="ID do anúncio" value={empty(data.media.ad_id ?? p.utm_id)} />
+          <MetricRow label="Expert" value={empty(p.expert)} />
+          {(data.media.impressions != null || data.media.clicks != null) && (
+            <MetricRow
+              label="Alcance do anúncio"
+              value={`${num(data.media.impressions ?? 0)} impressões · ${num(data.media.clicks ?? 0)} cliques`}
+            />
+          )}
+        </Section>
+
+        <Section title="CRM e mídia" subtitle="O que a casa fez com este jogador e quanto custou.">
+          <MetricRow
+            label="SMS enviados"
+            value={
+              <>
+                {num(data.metrics.sms_sent)}
+                {data.metrics.sms_failed > 0 && (
+                  <span className="ml-1.5 font-normal text-muted-foreground">
+                    · {num(data.metrics.sms_failed)} com falha
+                  </span>
+                )}
+              </>
+            }
+          />
+          <MetricRow
+            label="Cliques nos links enviados"
+            value={links.isLoading ? <Muted>…</Muted> : num(linkClicks)}
+          />
+          <MetricRow
+            label="Gasto com mídia"
+            value={
+              data.media.spend_estimate == null ? (
+                <Muted>Sem dado</Muted>
+              ) : (
+                <>
+                  {brl(data.media.spend_estimate)}
+                  <span className="ml-1.5 font-normal text-muted-foreground">
+                    · {mediaBasis(data.media.spend_basis)}
+                  </span>
+                </>
+              )
+            }
+          />
+          <MetricRow
+            label="Resultado da mídia"
+            value={data.media.result == null ? <Muted>Sem dado</Muted> : brl(data.media.result)}
+            valueClassName={
+              data.media.result == null
+                ? undefined
+                : data.media.result >= 0
+                  ? "text-success"
+                  : "text-danger"
+            }
+          />
+        </Section>
+      </div>
+
+      <div className="grid gap-3 lg:grid-cols-2">
+        <Section title="Cashback" subtitle="O que a casa devolveu e quando pagou.">
+          <MetricRow
+            label="Total recebido"
+            value={
+              <>
+                {brl(p.total_cashback_paid)}
+                <span className="ml-1.5 font-normal text-muted-foreground">
+                  · {num(data.metrics.cashback_count)}{" "}
+                  {data.metrics.cashback_count === 1 ? "pagamento" : "pagamentos"}
+                </span>
+              </>
+            }
+          />
+          <MetricRow
+            label="Último"
+            value={
+              p.last_cashback_paid_at ? (
+                <>
+                  {brl(p.last_cashback_amount)}
+                  <span className="ml-1.5 font-normal text-muted-foreground">
+                    · {formatDate(p.last_cashback_paid_at)}
+                  </span>
+                </>
+              ) : (
+                <Muted>Nenhum</Muted>
+              )
+            }
+          />
+          {data.cashbacks.length > 0 && (
+            <ul className="mt-2 divide-y divide-border/70 border-t border-border/70">
+              {data.cashbacks.slice(0, 6).map((c) => (
+                <li
+                  key={c.id}
+                  className="grid grid-cols-[minmax(0,6rem)_minmax(0,1fr)_auto] gap-3 py-2 text-body"
                 >
-                  <div className="min-w-0">
-                    <div className="font-medium">
-                      {link.channel} · {link.source_type}
+                  <span className="text-muted-foreground">{formatDate(c.paid_at)}</span>
+                  <span className="truncate">{recordStatusLabel(c.status) ?? "Cashback"}</span>
+                  <span className="font-semibold tabular-nums">{brl(c.cashback_amount)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+
+        <Section
+          title="Links enviados"
+          subtitle={
+            linkRows.length > 0
+              ? `${num(linkRows.length)} ${linkRows.length === 1 ? "link" : "links"} rastreados, ${num(linkClicks)} ${linkClicks === 1 ? "clique" : "cliques"}.`
+              : "Links rastreados enviados a este jogador."
+          }
+        >
+          {links.isLoading ? (
+            <Skeleton className="h-12 w-full" />
+          ) : linkRows.length === 0 ? (
+            <p className="py-2.5 text-body text-muted-foreground">Nenhum link rastreado enviado.</p>
+          ) : (
+            <ul className="divide-y divide-border/70">
+              {linkRows.map((link) => {
+                const source = linkSourceLabel(link.source_type);
+                return (
+                  <li key={link.id} className="flex items-center gap-3 py-2.5">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-body font-medium">
+                        {linkChannelLabel(link.channel)}
+                        {source && <span className="text-muted-foreground"> · {source}</span>}
+                        {link.sent_at && (
+                          <span className="font-normal text-muted-foreground">
+                            {" "}
+                            · {timeAgo(link.sent_at)}
+                          </span>
+                        )}
+                      </p>
+                      <a
+                        className="inline-flex max-w-full items-center gap-1 text-label text-primary hover:underline"
+                        href={link.sent_url}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        <span className="truncate">{link.sent_url}</span>
+                        <ExternalLink className="h-3 w-3 shrink-0" aria-hidden="true" />
+                      </a>
                     </div>
-                    <a
-                      className="block truncate text-primary"
-                      href={link.sent_url}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      {link.sent_url}
-                    </a>
-                  </div>
-                  <Badge variant="outline">{link.clicks} cliques</Badge>
-                </div>
-              ))
-            ) : (
-              <p className="text-sm text-muted-foreground">Nenhum link rastreado enviado.</p>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+                    <span className="shrink-0 text-label tabular-nums text-muted-foreground">
+                      {num(link.clicks)} {link.clicks === 1 ? "clique" : "cliques"}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </Section>
+      </div>
 
-      <section className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
-        <Card className="border-border/50 bg-card/70">
-          <CardContent className="p-5">
-            <SectionTitle
-              title="Movimento do player"
-              subtitle="Datas e contagens conhecidas pelo CRM."
-            />
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <InfoBox label="Depositos" value={num(data.metrics.deposit_count)} />
-              <InfoBox label="Saques" value={num(data.metrics.withdrawal_count)} />
-              <InfoBox
-                label="Ultimo deposito"
-                value={timeAgo(lastDeposit)}
-                detail={formatDateTime(lastDeposit)}
-              />
-              <InfoBox
-                label="Primeiro deposito"
-                value={timeAgo(ftd)}
-                detail={formatDateTime(ftd)}
-              />
-              <InfoBox
-                label="Ultima atividade"
-                value={timeAgo(data.metrics.last_activity_at)}
-                detail={formatDateTime(data.metrics.last_activity_at)}
-              />
-              <InfoBox
-                label="Ultimo saque"
-                value={timeAgo(p.ultimo_saque)}
-                detail={formatDateTime(p.ultimo_saque)}
-              />
-            </div>
-          </CardContent>
-        </Card>
+      <Section
+        title="Linha do tempo"
+        subtitle="Depósitos, saques, acessos e mensagens, do mais recente ao mais antigo."
+      >
+        {data.timeline.length === 0 ? (
+          <p className="py-2.5 text-body text-muted-foreground">
+            Sem eventos registrados para este jogador.
+          </p>
+        ) : (
+          <ul className="max-h-[560px] divide-y divide-border/60 overflow-y-auto pr-1">
+            {data.timeline.map((item) => (
+              <TimelineItem key={item.id} item={item} />
+            ))}
+          </ul>
+        )}
+      </Section>
 
-        <Card className="border-border/50 bg-card/70">
-          <CardContent className="p-5">
-            <SectionTitle
-              title="Como chegou"
-              subtitle="Atribuicao declarada no cadastro/importacao."
-            />
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <InfoRow label="Fonte" value={data.media.source ?? p.origem} />
-              <InfoRow label="Meio" value={data.attribution?.utm_medium ?? p.utm_medium} />
-              <InfoRow label="Campanha" value={data.media.campaign ?? p.utm_campaign} wide />
-              <InfoRow label="Criativo" value={data.media.creative ?? p.utm_content} />
-              <InfoRow label="ID do anuncio" value={data.media.ad_id ?? p.utm_id} />
-              <InfoRow label="Expert" value={p.expert} />
-            </div>
-          </CardContent>
-        </Card>
-      </section>
-
-      <section className="grid gap-4 xl:grid-cols-[1fr_1fr]">
-        <Card className="border-border/50 bg-card/70">
-          <CardContent className="p-5">
-            <SectionTitle title="Cashback" subtitle="O que a casa devolveu e quando pagou." />
-            <div className="mt-4 grid gap-3 sm:grid-cols-3">
-              <InfoBox
-                label="Total recebido"
-                value={brl(p.total_cashback_paid)}
-                detail={`${data.metrics.cashback_count} registros`}
-              />
-              <InfoBox
-                label="Ultimo"
-                value={brl(p.last_cashback_amount)}
-                detail={formatDateTime(p.last_cashback_paid_at)}
-              />
-              <InfoBox
-                label="SMS de cashback"
-                value={num(p.last_cashback_sms_template_sent ?? 0)}
-                detail="template enviado"
-              />
-            </div>
-            <CompactList
-              rows={data.cashbacks.slice(0, 6).map((c) => ({
-                id: c.id,
-                left: formatDate(c.paid_at),
-                title: c.status ?? "cashback",
-                right: brl(c.cashback_amount),
-              }))}
-              empty="Nenhum cashback registrado."
-            />
-          </CardContent>
-        </Card>
-
-        <Card className="border-border/50 bg-card/70">
-          <CardContent className="p-5">
-            <SectionTitle
-              title="CRM e midia"
-              subtitle="Custo de comunicacao e origem paga quando houver dados."
-            />
-            <div className="mt-4 grid gap-3 sm:grid-cols-3">
-              <InfoBox
-                label="SMS enviados"
-                value={num(data.metrics.sms_sent)}
-                detail={`${data.metrics.sms_delivered} entregues`}
-              />
-              <InfoBox
-                label="Cliques/eventos"
-                value={num(data.metrics.sms_clicked)}
-                detail="eventos de clique"
-              />
-              <InfoBox
-                label="Gasto midia"
-                value={
-                  data.media.spend_estimate == null ? "Sem dado" : brl(data.media.spend_estimate)
-                }
-                detail={mediaBasis(data.media.spend_basis)}
-              />
-              <InfoBox
-                label="Trouxe"
-                value={brl(p.total_depositado)}
-                detail="depositado pelo player"
-              />
-              <InfoBox
-                label="Resultado midia"
-                value={data.media.result == null ? "Sem dado" : brl(data.media.result)}
-                valueClass={
-                  data.media.result == null || data.media.result >= 0
-                    ? "text-emerald-400"
-                    : "text-rose-400"
-                }
-              />
-              <InfoBox
-                label="Impressoes/cliques"
-                value={`${num(data.media.impressions ?? 0)} / ${num(data.media.clicks ?? 0)}`}
-                detail="Meta/ads sincronizados"
-              />
-            </div>
-          </CardContent>
-        </Card>
-      </section>
-
-      <section className="grid gap-4 xl:grid-cols-[0.8fr_1.2fr]">
-        <Card className="border-border/50 bg-card/70">
-          <CardContent className="p-5">
-            <SectionTitle title="Sinais e alertas" subtitle="O que merece atencao operacional." />
-            <div className="mt-4 space-y-2">
-              {data.alerts.length === 0 && (
-                <div className="rounded-md border border-border/50 bg-background/40 p-3 text-sm text-muted-foreground">
-                  Nenhum alerta ativo para este player agora.
-                </div>
-              )}
-              {data.alerts.map((alert) => (
-                <div
-                  key={alert.tipo}
-                  className="rounded-md border border-border/50 bg-background/40 p-3"
-                >
-                  <div className="flex items-center gap-2 text-sm font-semibold">
-                    <ShieldAlert className="h-4 w-4 text-amber-400" />
-                    {alert.titulo}
-                  </div>
-                  <div className="mt-1 text-xs text-muted-foreground">{alert.motivo}</div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="border-border/50 bg-card/70">
-          <CardContent className="p-5">
-            <SectionTitle
-              title="Linha do tempo"
-              subtitle="Eventos, dinheiro, sessoes e mensagens em ordem recente."
-            />
-            <div className="mt-4 max-h-[560px] space-y-1 overflow-y-auto pr-1">
-              {data.timeline.length === 0 && (
-                <div className="rounded-md border border-border/50 bg-background/40 p-3 text-sm text-muted-foreground">
-                  Sem eventos individuais registrados para este player.
-                </div>
-              )}
-              {data.timeline.map((item) => (
-                <TimelineItem key={item.id} item={item} />
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      </section>
-    </div>
-  );
-}
-
-function BackButton() {
-  return (
-    <Button variant="ghost" size="sm" asChild className="gap-2 text-muted-foreground">
-      <Link to="/players" search={{ id: undefined, focus: undefined }}>
-        <ArrowLeft className="h-4 w-4" />
-        Voltar para players
-      </Link>
-    </Button>
+      <EnviarPeloWhatsAppDialog
+        open={messageOpen}
+        onOpenChange={setMessageOpen}
+        phone={p.telefone}
+        leadName={p.nome}
+        mensagem={nextPrecallCopy({ fullName: p.nome, brand: tenantBrand ?? "" })}
+        onSent={() => {
+          void qc.invalidateQueries({ queryKey: ["player-contact-history", playerId] });
+          void qc.invalidateQueries({ queryKey: ["player-detail", playerId] });
+        }}
+      />
+      <PlayerContactHistoryDialog
+        open={historyOpen}
+        onOpenChange={setHistoryOpen}
+        playerId={historyOpen ? playerId : null}
+        playerName={p.nome}
+      />
+    </Page>
   );
 }
 
 function DetailSkeleton() {
   return (
-    <div className="space-y-4">
-      <BackButton />
-      <Skeleton className="h-32 w-full" />
-      <div className="grid gap-3 md:grid-cols-4">
+    <Page>
+      <div className="space-y-2">
+        <Skeleton className="h-8 w-56" />
+        <Skeleton className="h-4 w-72" />
+      </div>
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
-          <Skeleton key={i} className="h-28" />
+          <Skeleton key={i} className="h-24 rounded-2xl" />
         ))}
       </div>
-      <Skeleton className="h-96 w-full" />
-    </div>
+      <div className="grid gap-3 lg:grid-cols-2">
+        <Skeleton className="h-64 rounded-2xl" />
+        <Skeleton className="h-64 rounded-2xl" />
+      </div>
+    </Page>
   );
 }
 
-function SectionTitle({ title, subtitle }: { title: string; subtitle: string }) {
-  return (
-    <div>
-      <h2 className="text-base font-semibold">{title}</h2>
-      <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
-    </div>
-  );
-}
-
-function MetricCard({
-  icon,
-  label,
-  value,
-  valueClass,
+function Section({
+  title,
+  subtitle,
+  children,
 }: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  valueClass?: string;
+  title: string;
+  subtitle?: string;
+  children: ReactNode;
 }) {
   return (
-    <Card className="border-border/50 bg-card/70">
-      <CardContent className="p-4">
-        <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
-          <span className="text-primary [&_svg]:h-4 [&_svg]:w-4">{icon}</span>
-          {label}
-        </div>
-        <div className={`mt-3 text-2xl font-bold ${valueClass ?? ""}`}>{value}</div>
-      </CardContent>
-    </Card>
+    <HomeCard className="p-4 sm:p-5">
+      <h2 className="text-section">{title}</h2>
+      {subtitle && <p className="mt-0.5 text-label text-muted-foreground">{subtitle}</p>}
+      <div className="mt-2">{children}</div>
+    </HomeCard>
   );
 }
 
-function InfoBox({
-  label,
-  value,
-  detail,
-  valueClass,
-}: {
-  label: string;
-  value: string;
-  detail?: string | null;
-  valueClass?: string;
-}) {
+function Muted({ children }: { children: ReactNode }) {
+  return <span className="font-normal text-muted-foreground">{children}</span>;
+}
+
+function When({ value }: { value: string | null | undefined }) {
+  if (!value) return <Muted>Sem dado</Muted>;
   return (
-    <div className="rounded-md border border-border/50 bg-background/50 p-3">
-      <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
-      <div className={`mt-2 text-lg font-bold ${valueClass ?? ""}`}>{value}</div>
-      {detail && <div className="mt-1 truncate text-xs text-muted-foreground">{detail}</div>}
-    </div>
+    <span title={formatDateTime(value) ?? undefined}>
+      {timeAgo(value)}
+      <span className="ml-1.5 font-normal text-muted-foreground">· {formatDate(value)}</span>
+    </span>
   );
 }
 
-function InfoRow({ label, value, wide }: { label: string; value: unknown; wide?: boolean }) {
+function Score({ value }: { value: number }) {
   return (
-    <div className={wide ? "sm:col-span-2" : ""}>
-      <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
-      <div className="mt-1 break-words text-sm font-medium">{empty(value)}</div>
-    </div>
-  );
-}
-
-function ScoreTile({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone: "blue" | "green" | "red" | "amber";
-}) {
-  const color =
-    tone === "green"
-      ? "text-emerald-400"
-      : tone === "red"
-        ? "text-rose-400"
-        : tone === "amber"
-          ? "text-amber-400"
-          : "text-primary";
-  return (
-    <div className="rounded-md border border-border/50 bg-background/50 p-3">
-      <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
-      <div className={`mt-2 text-xl font-bold ${color}`}>{value}</div>
-    </div>
-  );
-}
-
-function ContactLine({
-  icon,
-  label,
-  value,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: unknown;
-}) {
-  return (
-    <div className="flex min-w-0 items-center gap-2 rounded-md border border-border/50 bg-background/40 px-3 py-2">
-      <span className="text-muted-foreground">{icon}</span>
-      <span className="w-20 shrink-0 text-xs text-muted-foreground">{label}</span>
-      <span className="truncate text-sm font-medium">{empty(value)}</span>
-    </div>
-  );
-}
-
-function StatusBadge({ active }: { active: boolean }) {
-  return active ? (
-    <Badge className="border-emerald-500/30 bg-emerald-500/15 text-emerald-300">Ativo</Badge>
-  ) : (
-    <Badge variant="outline" className="border-border/70 text-muted-foreground">
-      Sem atividade recente
-    </Badge>
-  );
-}
-
-function CompactList({
-  rows,
-  empty,
-}: {
-  rows: Array<{ id: string; left: string; title: string; right: string }>;
-  empty: string;
-}) {
-  if (rows.length === 0) return <div className="mt-4 text-sm text-muted-foreground">{empty}</div>;
-  return (
-    <div className="mt-4 divide-y divide-border/50 overflow-hidden rounded-md border border-border/50">
-      {rows.map((row) => (
-        <div
-          key={row.id}
-          className="grid grid-cols-[95px_1fr_auto] gap-3 bg-background/30 px-3 py-2 text-sm"
-        >
-          <span className="text-muted-foreground">{row.left}</span>
-          <span className="truncate">{row.title}</span>
-          <span className="font-semibold">{row.right}</span>
-        </div>
-      ))}
-    </div>
+    <span title={`${value} de 0 a 100`}>
+      {num(value)}
+      <span className="font-normal text-muted-foreground">/100</span>
+    </span>
   );
 }
 
 function TimelineItem({ item }: { item: PlayerDetail["timeline"][number] }) {
-  const style = timelineStyle(item.type);
+  const label =
+    item.type === "followup"
+      ? `Contato · ${alertTypeLabel(item.label.replace(/^Follow-up - /, ""))}`
+      : item.type === "event"
+        ? eventLabel(item.label)
+        : item.type === "sms"
+          ? smsTimelineLabel(item.label)
+          : item.label;
+  // Provider event codes ("auth.login.success") are not for people; hide them.
+  const description =
+    item.description && !/^[a-z0-9_]+(\.[a-z0-9_]+)+$/i.test(item.description.trim())
+      ? item.description
+      : null;
+  const status = recordStatusLabel(item.status);
   return (
-    <div className="grid grid-cols-[18px_1fr_auto] gap-3 rounded-md px-2 py-2 hover:bg-background/45">
-      <span className={`mt-1.5 h-2.5 w-2.5 rounded-full ${style}`} />
+    <li className="grid grid-cols-[10px_minmax(0,1fr)_auto] gap-3 py-2.5">
+      <span
+        className={cn("mt-1.5 h-2.5 w-2.5 rounded-full", timelineDot(item.type))}
+        aria-hidden="true"
+      />
       <div className="min-w-0">
-        <div className="truncate text-sm font-semibold">{item.label}</div>
-        {item.description && (
-          <div className="mt-0.5 truncate text-xs text-muted-foreground">{item.description}</div>
+        <p className="truncate text-body font-medium">{label}</p>
+        {description && (
+          <p className="mt-0.5 truncate text-label text-muted-foreground">{description}</p>
         )}
-        {item.status && (
-          <div className="mt-1 text-[11px] uppercase tracking-wide text-muted-foreground">
-            {item.status}
-          </div>
+        {status && item.type !== "followup" && (
+          <p className="mt-0.5 text-meta text-muted-foreground">{status}</p>
         )}
       </div>
       <div className="text-right">
-        <div className="text-xs text-muted-foreground">{timeAgo(item.at)}</div>
+        <p className="text-meta text-muted-foreground" title={formatDateTime(item.at) ?? undefined}>
+          {timeAgo(item.at)}
+        </p>
         {item.amount != null && (
-          <div className="mt-1 text-sm font-semibold">{brl(item.amount)}</div>
+          <p className="mt-0.5 text-body font-semibold tabular-nums">{brl(item.amount)}</p>
         )}
       </div>
-    </div>
+    </li>
   );
 }
 
-function timelineStyle(type: string) {
-  if (type === "deposit" || type === "cashback") return "bg-emerald-400";
-  if (type === "withdrawal") return "bg-rose-400";
-  if (type === "sms" || type === "followup") return "bg-primary";
-  if (type === "session") return "bg-sky-400";
-  return "bg-amber-400";
+/** "SMS - journey:<uuid>" → "SMS de jornada"; keeps readable trigger names. */
+function smsTimelineLabel(label: string) {
+  const trigger = label.replace(/^SMS - /, "");
+  if (trigger === label) return label;
+  if (/^journey[:_]/i.test(trigger)) return "SMS de jornada";
+  if (/^campaign[:_]/i.test(trigger)) return "SMS de campanha";
+  if (/^[0-9a-f-]{20,}$/i.test(trigger) || /[:][0-9a-f-]{20,}/i.test(trigger)) return "SMS enviado";
+  return label;
 }
 
-function levelFor(total: number, vip: boolean) {
-  if (vip || total >= 3000) {
-    return {
-      label: "Black VIP",
-      className: "border-violet-400/40 bg-violet-500/15 text-violet-300",
-      icon: Crown,
-    };
-  }
-  if (total >= 1000) {
-    return {
-      label: "Diamante",
-      className: "border-cyan-400/40 bg-cyan-500/15 text-cyan-300",
-      icon: Gem,
-    };
-  }
-  if (total >= 500)
-    return {
-      label: "Ouro",
-      className: "border-amber-400/40 bg-amber-500/15 text-amber-300",
-      icon: Sparkles,
-    };
-  if (total >= 200)
-    return {
-      label: "Prata",
-      className: "border-slate-300/40 bg-slate-300/10 text-slate-200",
-      icon: Target,
-    };
-  if (total >= 10)
-    return {
-      label: "Bronze",
-      className: "border-orange-400/40 bg-orange-500/15 text-orange-300",
-      icon: Target,
-    };
-  return {
-    label: "Novato",
-    className: "border-emerald-400/40 bg-emerald-500/15 text-emerald-300",
-    icon: User,
-  };
+function eventLabel(value: string) {
+  const known = describeEventType(value);
+  if (known.categoria) return known.label;
+  const text = value.replace(/[_-]+/g, " ").trim();
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : "Evento";
+}
+
+/** Same colours as Eventos and the channel badges (identity colours). */
+function timelineDot(type: string) {
+  if (type === "deposit") return EVENT_IDENTITY.deposit.dot;
+  if (type === "cashback") return EVENT_IDENTITY.bonus.dot;
+  if (type === "withdrawal") return EVENT_IDENTITY.withdrawal.dot;
+  if (type === "sms" || type === "followup") return CHANNEL_IDENTITY.sms.dot;
+  if (type === "session") return EVENT_IDENTITY.login.dot;
+  return EVENT_IDENTITY.other.dot;
 }
 
 function mediaBasis(basis: PlayerDetail["media"]["spend_basis"]) {
-  if (basis === "ad") return "criativo/anuncio";
-  if (basis === "campaign") return "campanha";
-  return "sem match";
+  if (basis === "ad") return "pelo anúncio";
+  if (basis === "campaign") return "pela campanha";
+  return "sem correspondência";
 }
 
-function empty(value: unknown) {
+function empty(value: unknown): ReactNode {
   const text = String(value ?? "").trim();
-  return text || "—";
+  return text || <Muted>Sem dado</Muted>;
 }
 
 function formatDate(value: string | null | undefined) {

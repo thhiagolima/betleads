@@ -6,6 +6,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { runDispatcher, evaluateAllPlayers } from "@/lib/automation.server";
 import { resolveOperationalTenantId } from "@/lib/tenant-access.server";
+import { tenantReads } from "@/lib/active-tenant-filter";
 
 const PrioritySchema = z.enum(["critico", "alto", "medio", "baixo"]);
 const TriggerSchema = z.enum([
@@ -35,7 +36,8 @@ const BlockTypeSchema = z.enum(["text", "image", "video", "audio", "document", "
 export const listRules = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data, error } = await context.supabase
+    const reads = await tenantReads(context.supabase);
+    const { data, error } = await reads
       .from("rules")
       .select(
         "id, trigger_type, name, meaning, priority, flow_id, active, last_run_at, last_match_count",
@@ -78,7 +80,8 @@ export const updateRule = createServerFn({ method: "POST" })
 export const listFlows = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data, error } = await context.supabase
+    const reads = await tenantReads(context.supabase);
+    const { data, error } = await reads
       .from("flows")
       .select(
         "id, name, trigger_type, priority, active, delay_min_seconds, delay_max_seconds, cooldown_hours, daily_limit, hourly_limit, exit_conditions, stats, updated_at, activated_at",
@@ -358,7 +361,8 @@ export const listFlowHistory = createServerFn({ method: "POST" })
       .parse(input),
   )
   .handler(async ({ data, context }) => {
-    let q = context.supabase
+    const reads = await tenantReads(context.supabase);
+    let q = reads
       .from("flow_logs")
       .select("id, event, detail, created_at, flow_id, flow_lead_id, player_id")
       .order("created_at", { ascending: false })
@@ -556,7 +560,8 @@ const AntibanInputSchema = z.object({
 export const getAntibanSettings = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data, error } = await context.supabase
+    const reads = await tenantReads(context.supabase);
+    const { data, error } = await reads
       .from("antiban_settings")
       .select(
         "id, delay_min_seconds, delay_max_seconds, hourly_limit, daily_limit, cooldown_hours, window_start, window_end, randomization_enabled, smart_suppression_enabled, auto_pause_enabled, warmup_enabled, warmup_initial_daily, warmup_days, updated_at",

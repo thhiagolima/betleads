@@ -29,6 +29,7 @@ import { Route as JornadasRouteImport } from './routes/jornadas'
 import { Route as LigacoesRouteImport } from './routes/ligacoes'
 import { Route as LinksRouteImport } from './routes/links'
 import { Route as MidiaLtvRouteImport } from './routes/midia-ltv'
+import { Route as PlanoECreditosRouteImport } from './routes/plano-e-creditos'
 import { Route as PlayersRouteImport } from './routes/players'
 import { Route as PublicosRouteImport } from './routes/publicos'
 import { Route as RegrasRouteImport } from './routes/regras'
@@ -42,7 +43,10 @@ import { Route as AutomacoesEmailRouteImport } from './routes/automacoes.email'
 import { Route as AutomacoesLigacoesRouteImport } from './routes/automacoes.ligacoes'
 import { Route as AutomacoesSmsRouteImport } from './routes/automacoes.sms'
 import { Route as AutomacoesWhatsappRouteImport } from './routes/automacoes.whatsapp'
-import { Route as ConfiguracoesCasaRouteImport } from './routes/configuracoes.casa'
+import { Route as ConfiguracoesCasaRouteImport } from './routes/configuracoes_.casa'
+import { Route as ExpertIndexRouteImport } from './routes/expert.index'
+import { Route as ExpertLeadsRouteImport } from './routes/expert.leads'
+import { Route as ExpertModelosRouteImport } from './routes/expert.modelos'
 import { Route as GrupoCasaRouteImport } from './routes/grupo_.casa'
 import { Route as GrupoMetasRouteImport } from './routes/grupo_.metas'
 import { Route as GrupoPessoasRouteImport } from './routes/grupo_.pessoas'
@@ -58,6 +62,7 @@ import { Route as ApiPublicEvolutionWebhookRouteImport } from './routes/api/publ
 import { Route as ApiPublicHealthRouteImport } from './routes/api/public/health'
 import { Route as ApiPublicSmsWebhookRouteImport } from './routes/api/public/sms-webhook'
 import { Route as CampanhasCampaignIdRelatorioRouteImport } from './routes/campanhas.$campaignId.relatorio'
+import { Route as ExpertLeadsPlayerIdRouteImport } from './routes/expert.leads.$playerId'
 import { Route as JornadasJourneyIdRelatorioRouteImport } from './routes/jornadas.$journeyId_.relatorio'
 import { Route as ApiPublicAutomationsDispatchRouteImport } from './routes/api/public/automations/dispatch'
 import { Route as ApiPublicAutomationsEvaluateRouteImport } from './routes/api/public/automations/evaluate'
@@ -65,6 +70,8 @@ import { Route as ApiPublicCallFlowsTickRouteImport } from './routes/api/public/
 import { Route as ApiPublicClickTokenRouteImport } from './routes/api/public/click.$token'
 import { Route as ApiPublicEmailCampaignsTickRouteImport } from './routes/api/public/email-campaigns/tick'
 import { Route as ApiPublicEmailFlowsTickRouteImport } from './routes/api/public/email-flows/tick'
+import { Route as ApiPublicHooksBillingCycleRouteImport } from './routes/api/public/hooks/billing-cycle'
+import { Route as ApiPublicHooksBillingReconcileRouteImport } from './routes/api/public/hooks/billing-reconcile'
 import { Route as ApiPublicHooksCashbackCatchupRouteImport } from './routes/api/public/hooks/cashback-catchup'
 import { Route as ApiPublicHooksDispatchRouteImport } from './routes/api/public/hooks/dispatch'
 import { Route as ApiPublicHooksJourneyCrossingRouteImport } from './routes/api/public/hooks/journey-crossing'
@@ -79,6 +86,7 @@ import { Route as ApiPublicMetaSyncTickRouteImport } from './routes/api/public/m
 import { Route as ApiPublicPrecallDispatchRouteImport } from './routes/api/public/precall/dispatch'
 import { Route as ApiPublicShortioSyncRouteImport } from './routes/api/public/shortio/sync'
 import { Route as ApiPublicTenantDomainsVerifyRouteImport } from './routes/api/public/tenant-domains/verify'
+import { Route as ApiPublicUpperWebhookRouteImport } from './routes/api/public/upper/webhook'
 import { Route as ApiPublicWebhookEventoRouteImport } from './routes/api/public/webhook.$evento'
 import { Route as ApiPublicEmailImgAssetIdFilenameRouteImport } from './routes/api/public/email-img.$assetId.$filename'
 import { Route as ApiPublicInfobipEmailEventsRouteImport } from './routes/api/public/infobip/email/events'
@@ -187,6 +195,11 @@ const MidiaLtvRoute = MidiaLtvRouteImport.update({
   path: '/midia-ltv',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PlanoECreditosRoute = PlanoECreditosRouteImport.update({
+  id: '/plano-e-creditos',
+  path: '/plano-e-creditos',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PlayersRoute = PlayersRouteImport.update({
   id: '/players',
   path: '/players',
@@ -253,9 +266,24 @@ const AutomacoesWhatsappRoute = AutomacoesWhatsappRouteImport.update({
   getParentRoute: () => AutomacoesRoute,
 } as any)
 const ConfiguracoesCasaRoute = ConfiguracoesCasaRouteImport.update({
-  id: '/casa',
-  path: '/casa',
-  getParentRoute: () => ConfiguracoesRoute,
+  id: '/configuracoes_/casa',
+  path: '/configuracoes/casa',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ExpertIndexRoute = ExpertIndexRouteImport.update({
+  id: '/expert/',
+  path: '/expert/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ExpertLeadsRoute = ExpertLeadsRouteImport.update({
+  id: '/expert/leads',
+  path: '/expert/leads',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ExpertModelosRoute = ExpertModelosRouteImport.update({
+  id: '/expert/modelos',
+  path: '/expert/modelos',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const GrupoCasaRoute = GrupoCasaRouteImport.update({
   id: '/grupo_/casa',
@@ -334,6 +362,11 @@ const CampanhasCampaignIdRelatorioRoute =
     path: '/$campaignId/relatorio',
     getParentRoute: () => CampanhasRoute,
   } as any)
+const ExpertLeadsPlayerIdRoute = ExpertLeadsPlayerIdRouteImport.update({
+  id: '/$playerId',
+  path: '/$playerId',
+  getParentRoute: () => ExpertLeadsRoute,
+} as any)
 const JornadasJourneyIdRelatorioRoute =
   JornadasJourneyIdRelatorioRouteImport.update({
     id: '/$journeyId_/relatorio',
@@ -373,6 +406,18 @@ const ApiPublicEmailFlowsTickRoute = ApiPublicEmailFlowsTickRouteImport.update({
   path: '/api/public/email-flows/tick',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicHooksBillingCycleRoute =
+  ApiPublicHooksBillingCycleRouteImport.update({
+    id: '/api/public/hooks/billing-cycle',
+    path: '/api/public/hooks/billing-cycle',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiPublicHooksBillingReconcileRoute =
+  ApiPublicHooksBillingReconcileRouteImport.update({
+    id: '/api/public/hooks/billing-reconcile',
+    path: '/api/public/hooks/billing-reconcile',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicHooksCashbackCatchupRoute =
   ApiPublicHooksCashbackCatchupRouteImport.update({
     id: '/api/public/hooks/cashback-catchup',
@@ -453,6 +498,11 @@ const ApiPublicTenantDomainsVerifyRoute =
     path: '/api/public/tenant-domains/verify',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicUpperWebhookRoute = ApiPublicUpperWebhookRouteImport.update({
+  id: '/api/public/upper/webhook',
+  path: '/api/public/upper/webhook',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicWebhookEventoRoute = ApiPublicWebhookEventoRouteImport.update({
   id: '/api/public/webhook/$evento',
   path: '/api/public/webhook/$evento',
@@ -501,7 +551,7 @@ export interface FileRoutesByFullPath {
   '/alertas': typeof AlertasRoute
   '/automacoes': typeof AutomacoesRouteWithChildren
   '/campanhas': typeof CampanhasRouteWithChildren
-  '/configuracoes': typeof ConfiguracoesRouteWithChildren
+  '/configuracoes': typeof ConfiguracoesRoute
   '/consentimentos': typeof ConsentimentosRoute
   '/creditos-sms': typeof CreditosSmsRoute
   '/email': typeof EmailRoute
@@ -516,6 +566,7 @@ export interface FileRoutesByFullPath {
   '/ligacoes': typeof LigacoesRoute
   '/links': typeof LinksRouteWithChildren
   '/midia-ltv': typeof MidiaLtvRoute
+  '/plano-e-creditos': typeof PlanoECreditosRoute
   '/players': typeof PlayersRouteWithChildren
   '/publicos': typeof PublicosRoute
   '/regras': typeof RegrasRoute
@@ -530,6 +581,8 @@ export interface FileRoutesByFullPath {
   '/automacoes/sms': typeof AutomacoesSmsRoute
   '/automacoes/whatsapp': typeof AutomacoesWhatsappRoute
   '/configuracoes/casa': typeof ConfiguracoesCasaRoute
+  '/expert/leads': typeof ExpertLeadsRouteWithChildren
+  '/expert/modelos': typeof ExpertModelosRoute
   '/grupo/casa': typeof GrupoCasaRoute
   '/grupo/metas': typeof GrupoMetasRoute
   '/grupo/pessoas': typeof GrupoPessoasRoute
@@ -541,10 +594,12 @@ export interface FileRoutesByFullPath {
   '/resultados/comparar': typeof ResultadosCompararRoute
   '/sms/templates': typeof SmsTemplatesRoute
   '/u/$token': typeof UTokenRoute
+  '/expert/': typeof ExpertIndexRoute
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
   '/api/public/health': typeof ApiPublicHealthRoute
   '/api/public/sms-webhook': typeof ApiPublicSmsWebhookRoute
   '/campanhas/$campaignId/relatorio': typeof CampanhasCampaignIdRelatorioRoute
+  '/expert/leads/$playerId': typeof ExpertLeadsPlayerIdRoute
   '/jornadas/$journeyId/relatorio': typeof JornadasJourneyIdRelatorioRoute
   '/api/public/automations/dispatch': typeof ApiPublicAutomationsDispatchRoute
   '/api/public/automations/evaluate': typeof ApiPublicAutomationsEvaluateRoute
@@ -552,6 +607,8 @@ export interface FileRoutesByFullPath {
   '/api/public/click/$token': typeof ApiPublicClickTokenRoute
   '/api/public/email-campaigns/tick': typeof ApiPublicEmailCampaignsTickRoute
   '/api/public/email-flows/tick': typeof ApiPublicEmailFlowsTickRoute
+  '/api/public/hooks/billing-cycle': typeof ApiPublicHooksBillingCycleRoute
+  '/api/public/hooks/billing-reconcile': typeof ApiPublicHooksBillingReconcileRoute
   '/api/public/hooks/cashback-catchup': typeof ApiPublicHooksCashbackCatchupRoute
   '/api/public/hooks/dispatch': typeof ApiPublicHooksDispatchRoute
   '/api/public/hooks/journey-crossing': typeof ApiPublicHooksJourneyCrossingRoute
@@ -566,6 +623,7 @@ export interface FileRoutesByFullPath {
   '/api/public/precall/dispatch': typeof ApiPublicPrecallDispatchRoute
   '/api/public/shortio/sync': typeof ApiPublicShortioSyncRoute
   '/api/public/tenant-domains/verify': typeof ApiPublicTenantDomainsVerifyRoute
+  '/api/public/upper/webhook': typeof ApiPublicUpperWebhookRoute
   '/api/public/webhook/$evento': typeof ApiPublicWebhookEventoRoute
   '/api/public/email-img/$assetId/$filename': typeof ApiPublicEmailImgAssetIdFilenameRoute
   '/api/public/infobip/email/events': typeof ApiPublicInfobipEmailEventsRoute
@@ -580,7 +638,7 @@ export interface FileRoutesByTo {
   '/alertas': typeof AlertasRoute
   '/automacoes': typeof AutomacoesRouteWithChildren
   '/campanhas': typeof CampanhasRouteWithChildren
-  '/configuracoes': typeof ConfiguracoesRouteWithChildren
+  '/configuracoes': typeof ConfiguracoesRoute
   '/consentimentos': typeof ConsentimentosRoute
   '/creditos-sms': typeof CreditosSmsRoute
   '/email': typeof EmailRoute
@@ -595,6 +653,7 @@ export interface FileRoutesByTo {
   '/ligacoes': typeof LigacoesRoute
   '/links': typeof LinksRouteWithChildren
   '/midia-ltv': typeof MidiaLtvRoute
+  '/plano-e-creditos': typeof PlanoECreditosRoute
   '/players': typeof PlayersRouteWithChildren
   '/publicos': typeof PublicosRoute
   '/regras': typeof RegrasRoute
@@ -609,6 +668,8 @@ export interface FileRoutesByTo {
   '/automacoes/sms': typeof AutomacoesSmsRoute
   '/automacoes/whatsapp': typeof AutomacoesWhatsappRoute
   '/configuracoes/casa': typeof ConfiguracoesCasaRoute
+  '/expert/leads': typeof ExpertLeadsRouteWithChildren
+  '/expert/modelos': typeof ExpertModelosRoute
   '/grupo/casa': typeof GrupoCasaRoute
   '/grupo/metas': typeof GrupoMetasRoute
   '/grupo/pessoas': typeof GrupoPessoasRoute
@@ -620,10 +681,12 @@ export interface FileRoutesByTo {
   '/resultados/comparar': typeof ResultadosCompararRoute
   '/sms/templates': typeof SmsTemplatesRoute
   '/u/$token': typeof UTokenRoute
+  '/expert': typeof ExpertIndexRoute
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
   '/api/public/health': typeof ApiPublicHealthRoute
   '/api/public/sms-webhook': typeof ApiPublicSmsWebhookRoute
   '/campanhas/$campaignId/relatorio': typeof CampanhasCampaignIdRelatorioRoute
+  '/expert/leads/$playerId': typeof ExpertLeadsPlayerIdRoute
   '/jornadas/$journeyId/relatorio': typeof JornadasJourneyIdRelatorioRoute
   '/api/public/automations/dispatch': typeof ApiPublicAutomationsDispatchRoute
   '/api/public/automations/evaluate': typeof ApiPublicAutomationsEvaluateRoute
@@ -631,6 +694,8 @@ export interface FileRoutesByTo {
   '/api/public/click/$token': typeof ApiPublicClickTokenRoute
   '/api/public/email-campaigns/tick': typeof ApiPublicEmailCampaignsTickRoute
   '/api/public/email-flows/tick': typeof ApiPublicEmailFlowsTickRoute
+  '/api/public/hooks/billing-cycle': typeof ApiPublicHooksBillingCycleRoute
+  '/api/public/hooks/billing-reconcile': typeof ApiPublicHooksBillingReconcileRoute
   '/api/public/hooks/cashback-catchup': typeof ApiPublicHooksCashbackCatchupRoute
   '/api/public/hooks/dispatch': typeof ApiPublicHooksDispatchRoute
   '/api/public/hooks/journey-crossing': typeof ApiPublicHooksJourneyCrossingRoute
@@ -645,6 +710,7 @@ export interface FileRoutesByTo {
   '/api/public/precall/dispatch': typeof ApiPublicPrecallDispatchRoute
   '/api/public/shortio/sync': typeof ApiPublicShortioSyncRoute
   '/api/public/tenant-domains/verify': typeof ApiPublicTenantDomainsVerifyRoute
+  '/api/public/upper/webhook': typeof ApiPublicUpperWebhookRoute
   '/api/public/webhook/$evento': typeof ApiPublicWebhookEventoRoute
   '/api/public/email-img/$assetId/$filename': typeof ApiPublicEmailImgAssetIdFilenameRoute
   '/api/public/infobip/email/events': typeof ApiPublicInfobipEmailEventsRoute
@@ -660,7 +726,7 @@ export interface FileRoutesById {
   '/alertas': typeof AlertasRoute
   '/automacoes': typeof AutomacoesRouteWithChildren
   '/campanhas': typeof CampanhasRouteWithChildren
-  '/configuracoes': typeof ConfiguracoesRouteWithChildren
+  '/configuracoes': typeof ConfiguracoesRoute
   '/consentimentos': typeof ConsentimentosRoute
   '/creditos-sms': typeof CreditosSmsRoute
   '/email': typeof EmailRoute
@@ -675,6 +741,7 @@ export interface FileRoutesById {
   '/ligacoes': typeof LigacoesRoute
   '/links': typeof LinksRouteWithChildren
   '/midia-ltv': typeof MidiaLtvRoute
+  '/plano-e-creditos': typeof PlanoECreditosRoute
   '/players': typeof PlayersRouteWithChildren
   '/publicos': typeof PublicosRoute
   '/regras': typeof RegrasRoute
@@ -688,7 +755,9 @@ export interface FileRoutesById {
   '/automacoes/ligacoes': typeof AutomacoesLigacoesRoute
   '/automacoes/sms': typeof AutomacoesSmsRoute
   '/automacoes/whatsapp': typeof AutomacoesWhatsappRoute
-  '/configuracoes/casa': typeof ConfiguracoesCasaRoute
+  '/configuracoes_/casa': typeof ConfiguracoesCasaRoute
+  '/expert/leads': typeof ExpertLeadsRouteWithChildren
+  '/expert/modelos': typeof ExpertModelosRoute
   '/grupo_/casa': typeof GrupoCasaRoute
   '/grupo_/metas': typeof GrupoMetasRoute
   '/grupo_/pessoas': typeof GrupoPessoasRoute
@@ -700,10 +769,12 @@ export interface FileRoutesById {
   '/resultados_/comparar': typeof ResultadosCompararRoute
   '/sms/templates': typeof SmsTemplatesRoute
   '/u/$token': typeof UTokenRoute
+  '/expert/': typeof ExpertIndexRoute
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
   '/api/public/health': typeof ApiPublicHealthRoute
   '/api/public/sms-webhook': typeof ApiPublicSmsWebhookRoute
   '/campanhas/$campaignId/relatorio': typeof CampanhasCampaignIdRelatorioRoute
+  '/expert/leads/$playerId': typeof ExpertLeadsPlayerIdRoute
   '/jornadas/$journeyId_/relatorio': typeof JornadasJourneyIdRelatorioRoute
   '/api/public/automations/dispatch': typeof ApiPublicAutomationsDispatchRoute
   '/api/public/automations/evaluate': typeof ApiPublicAutomationsEvaluateRoute
@@ -711,6 +782,8 @@ export interface FileRoutesById {
   '/api/public/click/$token': typeof ApiPublicClickTokenRoute
   '/api/public/email-campaigns/tick': typeof ApiPublicEmailCampaignsTickRoute
   '/api/public/email-flows/tick': typeof ApiPublicEmailFlowsTickRoute
+  '/api/public/hooks/billing-cycle': typeof ApiPublicHooksBillingCycleRoute
+  '/api/public/hooks/billing-reconcile': typeof ApiPublicHooksBillingReconcileRoute
   '/api/public/hooks/cashback-catchup': typeof ApiPublicHooksCashbackCatchupRoute
   '/api/public/hooks/dispatch': typeof ApiPublicHooksDispatchRoute
   '/api/public/hooks/journey-crossing': typeof ApiPublicHooksJourneyCrossingRoute
@@ -725,6 +798,7 @@ export interface FileRoutesById {
   '/api/public/precall/dispatch': typeof ApiPublicPrecallDispatchRoute
   '/api/public/shortio/sync': typeof ApiPublicShortioSyncRoute
   '/api/public/tenant-domains/verify': typeof ApiPublicTenantDomainsVerifyRoute
+  '/api/public/upper/webhook': typeof ApiPublicUpperWebhookRoute
   '/api/public/webhook/$evento': typeof ApiPublicWebhookEventoRoute
   '/api/public/email-img/$assetId/$filename': typeof ApiPublicEmailImgAssetIdFilenameRoute
   '/api/public/infobip/email/events': typeof ApiPublicInfobipEmailEventsRoute
@@ -756,6 +830,7 @@ export interface FileRouteTypes {
     | '/ligacoes'
     | '/links'
     | '/midia-ltv'
+    | '/plano-e-creditos'
     | '/players'
     | '/publicos'
     | '/regras'
@@ -770,6 +845,8 @@ export interface FileRouteTypes {
     | '/automacoes/sms'
     | '/automacoes/whatsapp'
     | '/configuracoes/casa'
+    | '/expert/leads'
+    | '/expert/modelos'
     | '/grupo/casa'
     | '/grupo/metas'
     | '/grupo/pessoas'
@@ -781,10 +858,12 @@ export interface FileRouteTypes {
     | '/resultados/comparar'
     | '/sms/templates'
     | '/u/$token'
+    | '/expert/'
     | '/api/public/evolution-webhook'
     | '/api/public/health'
     | '/api/public/sms-webhook'
     | '/campanhas/$campaignId/relatorio'
+    | '/expert/leads/$playerId'
     | '/jornadas/$journeyId/relatorio'
     | '/api/public/automations/dispatch'
     | '/api/public/automations/evaluate'
@@ -792,6 +871,8 @@ export interface FileRouteTypes {
     | '/api/public/click/$token'
     | '/api/public/email-campaigns/tick'
     | '/api/public/email-flows/tick'
+    | '/api/public/hooks/billing-cycle'
+    | '/api/public/hooks/billing-reconcile'
     | '/api/public/hooks/cashback-catchup'
     | '/api/public/hooks/dispatch'
     | '/api/public/hooks/journey-crossing'
@@ -806,6 +887,7 @@ export interface FileRouteTypes {
     | '/api/public/precall/dispatch'
     | '/api/public/shortio/sync'
     | '/api/public/tenant-domains/verify'
+    | '/api/public/upper/webhook'
     | '/api/public/webhook/$evento'
     | '/api/public/email-img/$assetId/$filename'
     | '/api/public/infobip/email/events'
@@ -835,6 +917,7 @@ export interface FileRouteTypes {
     | '/ligacoes'
     | '/links'
     | '/midia-ltv'
+    | '/plano-e-creditos'
     | '/players'
     | '/publicos'
     | '/regras'
@@ -849,6 +932,8 @@ export interface FileRouteTypes {
     | '/automacoes/sms'
     | '/automacoes/whatsapp'
     | '/configuracoes/casa'
+    | '/expert/leads'
+    | '/expert/modelos'
     | '/grupo/casa'
     | '/grupo/metas'
     | '/grupo/pessoas'
@@ -860,10 +945,12 @@ export interface FileRouteTypes {
     | '/resultados/comparar'
     | '/sms/templates'
     | '/u/$token'
+    | '/expert'
     | '/api/public/evolution-webhook'
     | '/api/public/health'
     | '/api/public/sms-webhook'
     | '/campanhas/$campaignId/relatorio'
+    | '/expert/leads/$playerId'
     | '/jornadas/$journeyId/relatorio'
     | '/api/public/automations/dispatch'
     | '/api/public/automations/evaluate'
@@ -871,6 +958,8 @@ export interface FileRouteTypes {
     | '/api/public/click/$token'
     | '/api/public/email-campaigns/tick'
     | '/api/public/email-flows/tick'
+    | '/api/public/hooks/billing-cycle'
+    | '/api/public/hooks/billing-reconcile'
     | '/api/public/hooks/cashback-catchup'
     | '/api/public/hooks/dispatch'
     | '/api/public/hooks/journey-crossing'
@@ -885,6 +974,7 @@ export interface FileRouteTypes {
     | '/api/public/precall/dispatch'
     | '/api/public/shortio/sync'
     | '/api/public/tenant-domains/verify'
+    | '/api/public/upper/webhook'
     | '/api/public/webhook/$evento'
     | '/api/public/email-img/$assetId/$filename'
     | '/api/public/infobip/email/events'
@@ -914,6 +1004,7 @@ export interface FileRouteTypes {
     | '/ligacoes'
     | '/links'
     | '/midia-ltv'
+    | '/plano-e-creditos'
     | '/players'
     | '/publicos'
     | '/regras'
@@ -927,7 +1018,9 @@ export interface FileRouteTypes {
     | '/automacoes/ligacoes'
     | '/automacoes/sms'
     | '/automacoes/whatsapp'
-    | '/configuracoes/casa'
+    | '/configuracoes_/casa'
+    | '/expert/leads'
+    | '/expert/modelos'
     | '/grupo_/casa'
     | '/grupo_/metas'
     | '/grupo_/pessoas'
@@ -939,10 +1032,12 @@ export interface FileRouteTypes {
     | '/resultados_/comparar'
     | '/sms/templates'
     | '/u/$token'
+    | '/expert/'
     | '/api/public/evolution-webhook'
     | '/api/public/health'
     | '/api/public/sms-webhook'
     | '/campanhas/$campaignId/relatorio'
+    | '/expert/leads/$playerId'
     | '/jornadas/$journeyId_/relatorio'
     | '/api/public/automations/dispatch'
     | '/api/public/automations/evaluate'
@@ -950,6 +1045,8 @@ export interface FileRouteTypes {
     | '/api/public/click/$token'
     | '/api/public/email-campaigns/tick'
     | '/api/public/email-flows/tick'
+    | '/api/public/hooks/billing-cycle'
+    | '/api/public/hooks/billing-reconcile'
     | '/api/public/hooks/cashback-catchup'
     | '/api/public/hooks/dispatch'
     | '/api/public/hooks/journey-crossing'
@@ -964,6 +1061,7 @@ export interface FileRouteTypes {
     | '/api/public/precall/dispatch'
     | '/api/public/shortio/sync'
     | '/api/public/tenant-domains/verify'
+    | '/api/public/upper/webhook'
     | '/api/public/webhook/$evento'
     | '/api/public/email-img/$assetId/$filename'
     | '/api/public/infobip/email/events'
@@ -979,7 +1077,7 @@ export interface RootRouteChildren {
   AlertasRoute: typeof AlertasRoute
   AutomacoesRoute: typeof AutomacoesRouteWithChildren
   CampanhasRoute: typeof CampanhasRouteWithChildren
-  ConfiguracoesRoute: typeof ConfiguracoesRouteWithChildren
+  ConfiguracoesRoute: typeof ConfiguracoesRoute
   ConsentimentosRoute: typeof ConsentimentosRoute
   CreditosSmsRoute: typeof CreditosSmsRoute
   EmailRoute: typeof EmailRoute
@@ -994,6 +1092,7 @@ export interface RootRouteChildren {
   LigacoesRoute: typeof LigacoesRoute
   LinksRoute: typeof LinksRouteWithChildren
   MidiaLtvRoute: typeof MidiaLtvRoute
+  PlanoECreditosRoute: typeof PlanoECreditosRoute
   PlayersRoute: typeof PlayersRouteWithChildren
   PublicosRoute: typeof PublicosRoute
   RegrasRoute: typeof RegrasRoute
@@ -1003,12 +1102,16 @@ export interface RootRouteChildren {
   TreinoIaRoute: typeof TreinoIaRoute
   WebhooksRoute: typeof WebhooksRoute
   WhatsappRoute: typeof WhatsappRoute
+  ConfiguracoesCasaRoute: typeof ConfiguracoesCasaRoute
+  ExpertLeadsRoute: typeof ExpertLeadsRouteWithChildren
+  ExpertModelosRoute: typeof ExpertModelosRoute
   GrupoCasaRoute: typeof GrupoCasaRoute
   GrupoMetasRoute: typeof GrupoMetasRoute
   GrupoPessoasRoute: typeof GrupoPessoasRoute
   RelatoriosConversaoRoute: typeof RelatoriosConversaoRoute
   ResultadosCompararRoute: typeof ResultadosCompararRoute
   UTokenRoute: typeof UTokenRoute
+  ExpertIndexRoute: typeof ExpertIndexRoute
   ApiPublicEvolutionWebhookRoute: typeof ApiPublicEvolutionWebhookRoute
   ApiPublicHealthRoute: typeof ApiPublicHealthRoute
   ApiPublicSmsWebhookRoute: typeof ApiPublicSmsWebhookRoute
@@ -1018,6 +1121,8 @@ export interface RootRouteChildren {
   ApiPublicClickTokenRoute: typeof ApiPublicClickTokenRoute
   ApiPublicEmailCampaignsTickRoute: typeof ApiPublicEmailCampaignsTickRoute
   ApiPublicEmailFlowsTickRoute: typeof ApiPublicEmailFlowsTickRoute
+  ApiPublicHooksBillingCycleRoute: typeof ApiPublicHooksBillingCycleRoute
+  ApiPublicHooksBillingReconcileRoute: typeof ApiPublicHooksBillingReconcileRoute
   ApiPublicHooksCashbackCatchupRoute: typeof ApiPublicHooksCashbackCatchupRoute
   ApiPublicHooksDispatchRoute: typeof ApiPublicHooksDispatchRoute
   ApiPublicHooksJourneyCrossingRoute: typeof ApiPublicHooksJourneyCrossingRoute
@@ -1032,6 +1137,7 @@ export interface RootRouteChildren {
   ApiPublicPrecallDispatchRoute: typeof ApiPublicPrecallDispatchRoute
   ApiPublicShortioSyncRoute: typeof ApiPublicShortioSyncRoute
   ApiPublicTenantDomainsVerifyRoute: typeof ApiPublicTenantDomainsVerifyRoute
+  ApiPublicUpperWebhookRoute: typeof ApiPublicUpperWebhookRoute
   ApiPublicWebhookEventoRoute: typeof ApiPublicWebhookEventoRoute
   ApiPublicEmailImgAssetIdFilenameRoute: typeof ApiPublicEmailImgAssetIdFilenameRoute
   ApiPublicInfobipEmailEventsRoute: typeof ApiPublicInfobipEmailEventsRoute
@@ -1183,6 +1289,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MidiaLtvRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/plano-e-creditos': {
+      id: '/plano-e-creditos'
+      path: '/plano-e-creditos'
+      fullPath: '/plano-e-creditos'
+      preLoaderRoute: typeof PlanoECreditosRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/players': {
       id: '/players'
       path: '/players'
@@ -1274,12 +1387,33 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AutomacoesWhatsappRouteImport
       parentRoute: typeof AutomacoesRoute
     }
-    '/configuracoes/casa': {
-      id: '/configuracoes/casa'
-      path: '/casa'
+    '/configuracoes_/casa': {
+      id: '/configuracoes_/casa'
+      path: '/configuracoes/casa'
       fullPath: '/configuracoes/casa'
       preLoaderRoute: typeof ConfiguracoesCasaRouteImport
-      parentRoute: typeof ConfiguracoesRoute
+      parentRoute: typeof rootRouteImport
+    }
+    '/expert/': {
+      id: '/expert/'
+      path: '/expert'
+      fullPath: '/expert/'
+      preLoaderRoute: typeof ExpertIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/expert/leads': {
+      id: '/expert/leads'
+      path: '/expert/leads'
+      fullPath: '/expert/leads'
+      preLoaderRoute: typeof ExpertLeadsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/expert/modelos': {
+      id: '/expert/modelos'
+      path: '/expert/modelos'
+      fullPath: '/expert/modelos'
+      preLoaderRoute: typeof ExpertModelosRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/grupo_/casa': {
       id: '/grupo_/casa'
@@ -1386,6 +1520,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CampanhasCampaignIdRelatorioRouteImport
       parentRoute: typeof CampanhasRoute
     }
+    '/expert/leads/$playerId': {
+      id: '/expert/leads/$playerId'
+      path: '/$playerId'
+      fullPath: '/expert/leads/$playerId'
+      preLoaderRoute: typeof ExpertLeadsPlayerIdRouteImport
+      parentRoute: typeof ExpertLeadsRoute
+    }
     '/jornadas/$journeyId_/relatorio': {
       id: '/jornadas/$journeyId_/relatorio'
       path: '/$journeyId/relatorio'
@@ -1433,6 +1574,20 @@ declare module '@tanstack/react-router' {
       path: '/api/public/email-flows/tick'
       fullPath: '/api/public/email-flows/tick'
       preLoaderRoute: typeof ApiPublicEmailFlowsTickRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/hooks/billing-cycle': {
+      id: '/api/public/hooks/billing-cycle'
+      path: '/api/public/hooks/billing-cycle'
+      fullPath: '/api/public/hooks/billing-cycle'
+      preLoaderRoute: typeof ApiPublicHooksBillingCycleRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/hooks/billing-reconcile': {
+      id: '/api/public/hooks/billing-reconcile'
+      path: '/api/public/hooks/billing-reconcile'
+      fullPath: '/api/public/hooks/billing-reconcile'
+      preLoaderRoute: typeof ApiPublicHooksBillingReconcileRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/public/hooks/cashback-catchup': {
@@ -1533,6 +1688,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicTenantDomainsVerifyRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/upper/webhook': {
+      id: '/api/public/upper/webhook'
+      path: '/api/public/upper/webhook'
+      fullPath: '/api/public/upper/webhook'
+      preLoaderRoute: typeof ApiPublicUpperWebhookRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/webhook/$evento': {
       id: '/api/public/webhook/$evento'
       path: '/api/public/webhook/$evento'
@@ -1615,18 +1777,6 @@ const CampanhasRouteWithChildren = CampanhasRoute._addFileChildren(
   CampanhasRouteChildren,
 )
 
-interface ConfiguracoesRouteChildren {
-  ConfiguracoesCasaRoute: typeof ConfiguracoesCasaRoute
-}
-
-const ConfiguracoesRouteChildren: ConfiguracoesRouteChildren = {
-  ConfiguracoesCasaRoute: ConfiguracoesCasaRoute,
-}
-
-const ConfiguracoesRouteWithChildren = ConfiguracoesRoute._addFileChildren(
-  ConfiguracoesRouteChildren,
-)
-
 interface JornadasRouteChildren {
   JornadasJourneyIdRoute: typeof JornadasJourneyIdRoute
   JornadasNovaRoute: typeof JornadasNovaRoute
@@ -1674,13 +1824,25 @@ const SmsRouteChildren: SmsRouteChildren = {
 
 const SmsRouteWithChildren = SmsRoute._addFileChildren(SmsRouteChildren)
 
+interface ExpertLeadsRouteChildren {
+  ExpertLeadsPlayerIdRoute: typeof ExpertLeadsPlayerIdRoute
+}
+
+const ExpertLeadsRouteChildren: ExpertLeadsRouteChildren = {
+  ExpertLeadsPlayerIdRoute: ExpertLeadsPlayerIdRoute,
+}
+
+const ExpertLeadsRouteWithChildren = ExpertLeadsRoute._addFileChildren(
+  ExpertLeadsRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
   AlertasRoute: AlertasRoute,
   AutomacoesRoute: AutomacoesRouteWithChildren,
   CampanhasRoute: CampanhasRouteWithChildren,
-  ConfiguracoesRoute: ConfiguracoesRouteWithChildren,
+  ConfiguracoesRoute: ConfiguracoesRoute,
   ConsentimentosRoute: ConsentimentosRoute,
   CreditosSmsRoute: CreditosSmsRoute,
   EmailRoute: EmailRoute,
@@ -1695,6 +1857,7 @@ const rootRouteChildren: RootRouteChildren = {
   LigacoesRoute: LigacoesRoute,
   LinksRoute: LinksRouteWithChildren,
   MidiaLtvRoute: MidiaLtvRoute,
+  PlanoECreditosRoute: PlanoECreditosRoute,
   PlayersRoute: PlayersRouteWithChildren,
   PublicosRoute: PublicosRoute,
   RegrasRoute: RegrasRoute,
@@ -1704,12 +1867,16 @@ const rootRouteChildren: RootRouteChildren = {
   TreinoIaRoute: TreinoIaRoute,
   WebhooksRoute: WebhooksRoute,
   WhatsappRoute: WhatsappRoute,
+  ConfiguracoesCasaRoute: ConfiguracoesCasaRoute,
+  ExpertLeadsRoute: ExpertLeadsRouteWithChildren,
+  ExpertModelosRoute: ExpertModelosRoute,
   GrupoCasaRoute: GrupoCasaRoute,
   GrupoMetasRoute: GrupoMetasRoute,
   GrupoPessoasRoute: GrupoPessoasRoute,
   RelatoriosConversaoRoute: RelatoriosConversaoRoute,
   ResultadosCompararRoute: ResultadosCompararRoute,
   UTokenRoute: UTokenRoute,
+  ExpertIndexRoute: ExpertIndexRoute,
   ApiPublicEvolutionWebhookRoute: ApiPublicEvolutionWebhookRoute,
   ApiPublicHealthRoute: ApiPublicHealthRoute,
   ApiPublicSmsWebhookRoute: ApiPublicSmsWebhookRoute,
@@ -1719,6 +1886,8 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicClickTokenRoute: ApiPublicClickTokenRoute,
   ApiPublicEmailCampaignsTickRoute: ApiPublicEmailCampaignsTickRoute,
   ApiPublicEmailFlowsTickRoute: ApiPublicEmailFlowsTickRoute,
+  ApiPublicHooksBillingCycleRoute: ApiPublicHooksBillingCycleRoute,
+  ApiPublicHooksBillingReconcileRoute: ApiPublicHooksBillingReconcileRoute,
   ApiPublicHooksCashbackCatchupRoute: ApiPublicHooksCashbackCatchupRoute,
   ApiPublicHooksDispatchRoute: ApiPublicHooksDispatchRoute,
   ApiPublicHooksJourneyCrossingRoute: ApiPublicHooksJourneyCrossingRoute,
@@ -1733,6 +1902,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicPrecallDispatchRoute: ApiPublicPrecallDispatchRoute,
   ApiPublicShortioSyncRoute: ApiPublicShortioSyncRoute,
   ApiPublicTenantDomainsVerifyRoute: ApiPublicTenantDomainsVerifyRoute,
+  ApiPublicUpperWebhookRoute: ApiPublicUpperWebhookRoute,
   ApiPublicWebhookEventoRoute: ApiPublicWebhookEventoRoute,
   ApiPublicEmailImgAssetIdFilenameRoute: ApiPublicEmailImgAssetIdFilenameRoute,
   ApiPublicInfobipEmailEventsRoute: ApiPublicInfobipEmailEventsRoute,

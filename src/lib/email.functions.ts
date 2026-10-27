@@ -8,6 +8,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import {
   EmailDomainNotVerifiedError,
+  emailBillingColumns,
   resolveSender,
   sendInfobipEmail,
   STALE_SENDER_MESSAGE,
@@ -26,9 +27,10 @@ import {
   resolveCurrentTenantId,
   resolveOperationalTenantId,
 } from "./tenant-access.server";
-import { isDemoBlockedError } from "./demo-tenant";
+import { isSendBlockedError } from "./billing/billing-locked-error";
 import { bindTrackedDispatchesToMessageLog } from "./shortio.server";
 import { conversionFunnelSnapshot, type ConversionObjective } from "./conversion-funnel";
+import { tenantReads } from "@/lib/active-tenant-filter";
 
 // ============ Helpers ============
 
@@ -90,6 +92,10 @@ const SendTestEmailSchema = z.object({
   trackLinks: z.boolean().optional().default(true),
 });
 
+/** Shown when the house's wallet cannot pay for a test e-mail. */
+export const EMAIL_TEST_NO_BALANCE_MESSAGE =
+  "Saldo insuficiente para enviar o e-mail de teste. Recarregue a carteira da casa.";
+
 export const sendTestEmail = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => SendTestEmailSchema.parse(d))
@@ -150,6 +156,11 @@ export const sendTestEmail = createServerFn({ method: "POST" })
         enabled: data.trackLinks,
       },
     });
+    // PG3 (spec decision 11): a test e-mail is charged like any send. A
+    // wallet refusal sent nothing and charged nothing: no log row.
+    if (!result.ok && result.errorKind === "insufficient_balance") {
+      throw new Error(EMAIL_TEST_NO_BALANCE_MESSAGE);
+    }
 
     // Log
     const { data: log, error: logErr } = await supabaseAdmin
@@ -162,6 +173,7 @@ export const sendTestEmail = createServerFn({ method: "POST" })
         error: result.ok ? null : JSON.stringify(result.body).slice(0, 1000),
         sent_at: result.ok ? new Date().toISOString() : null,
         player_id: playerId,
+        ...emailBillingColumns(result),
         provider_response: {
           status: result.status,
           body: result.body,
@@ -244,8 +256,9 @@ function smtpRowToUI(r: any) {
 export const listSmtpConfigs = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
+    const reads = await tenantReads(context.supabase);
     await assertSuperAdmin(context.userId);
-    const { data, error } = await context.supabase
+    const { data, error } = await reads
       .from("email_smtp_configs")
       .select("*")
       .order("created_at", { ascending: false });
@@ -357,8 +370,9 @@ function senderRowToUI(r: any) {
 export const listEmailSenders = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
+    const reads = await tenantReads(context.supabase);
     await assertSuperAdmin(context.userId);
-    const { data, error } = await context.supabase
+    const { data, error } = await reads
       .from("email_senders")
       .select("*")
       .order("created_at", { ascending: false });
@@ -372,10 +386,7 @@ export const saveEmailSender = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertSuperAdmin(context.userId);
     const { supabase } = context;
-    const { data: tenantRow, error: tenantErr } = await supabase.rpc("current_tenant_id");
-    if (tenantErr) throw new Error(tenantErr.message);
-    const tenantId = tenantRow as string | null;
-    if (!tenantId) throw new Error("tenant não encontrado para o usuário");
+    const tenantId = await resolveCurrentTenantId(supabase);
     const payload: any = {
       name: data.name,
       from_email: data.fromEmail,
@@ -425,10 +436,7 @@ export const setDefaultEmailSender = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertSuperAdmin(context.userId);
     const { supabase } = context;
-    const { data: tenantRow, error: tenantErr } = await supabase.rpc("current_tenant_id");
-    if (tenantErr) throw new Error(tenantErr.message);
-    const tenantId = tenantRow as string | null;
-    if (!tenantId) throw new Error("tenant não encontrado para o usuário");
+    const tenantId = await resolveCurrentTenantId(supabase);
     await supabase
       .from("email_senders")
       .update({ is_default: false })
@@ -479,7 +487,8 @@ function templateRowToUI(r: any) {
 export const listEmailTemplates = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data, error } = await context.supabase
+    const reads = await tenantReads(context.supabase);
+    const { data, error } = await reads
       .from("email_templates")
       .select("*")
       .order("created_at", { ascending: false });
@@ -632,7 +641,8 @@ function campanhaRowToUI(r: any) {
 export const listEmailCampaigns = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data, error } = await context.supabase
+    const reads = await tenantReads(context.supabase);
+    const { data, error } = await reads
       .from("email_campaigns")
       .select("*")
       .order("created_at", { ascending: false });
@@ -731,7 +741,7 @@ export const updateEmailCampaignStatus = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { error } = await context.supabase
       .from("email_campaigns")
-      .update({ status: data.status, blocked_reason: null })
+      .update(emailCampaignStatusPatch(data.status))
       .eq("id", data.id);
     if (error) throw new Error(error.message);
     return { ok: true };
@@ -792,12 +802,13 @@ export const previewSegmentCount = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
+    const reads = await tenantReads(context.supabase);
     if (data.audienceMode === "emails") {
       return { total: new Set((data.extraEmails ?? []).map((e) => e.trim().toLowerCase())).size };
     }
     if (data.audienceMode === "leads") {
       if (!data.targetPlayerIds || data.targetPlayerIds.length === 0) return { total: 0 };
-      const { data: rows, error } = await context.supabase
+      const { data: rows, error } = await reads
         .from("players")
         .select("id, email")
         .in("id", data.targetPlayerIds);
@@ -823,7 +834,8 @@ export const listPlayersForEmail = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    let q = context.supabase
+    const reads = await tenantReads(context.supabase);
+    let q = reads
       .from("players")
       .select("id, nome, email, telefone, status, vip")
       .order("updated_at", { ascending: false })
@@ -995,35 +1007,58 @@ export async function runCampaignSend(campaignId: string) {
     );
   }
 
+  // A re-run (after "pausada por saldo", "Retomar" or a second "Enviar
+  // agora") never re-sends — nor re-charges — a recipient this campaign
+  // already reached. Pending/error rows are retried.
+  const reached = await loadCampaignReachedRecipients(campaignId);
+  const isReached = (p: { id?: string | null; email?: string | null }) =>
+    p.id
+      ? reached.playerIds.has(p.id)
+      : reached.emails.has(String(p.email ?? "").trim().toLowerCase());
+  const remaining = players.filter((p) => !isReached(p));
+  const jaEnviados = players.length - remaining.length;
+  const stats = (sent: number, failed: number) => ({
+    enviados: jaEnviados + sent,
+    entregues: 0,
+    abertos: 0,
+    cliques: 0,
+    falhas: failed,
+    total: players.length,
+  });
+
+  if (remaining.length === 0) {
+    await supabaseAdmin
+      .from("email_campaigns")
+      .update({ status: "concluida", blocked_reason: null, stats: stats(0, 0) })
+      .eq("id", campaignId);
+    return { enviados: 0, falhas: 0, pendentes: 0, total: players.length, jaEnviados, pausadaPorSaldo: false };
+  }
+
   await supabaseAdmin
     .from("email_campaigns")
-    .update({
-      status: "enviando",
-      stats: {
-        enviados: 0,
-        entregues: 0,
-        abertos: 0,
-        cliques: 0,
-        falhas: 0,
-        total: players.length,
-      },
-    })
+    .update({ status: "enviando", stats: stats(0, 0) })
     .eq("id", campaignId);
 
   let enviados = 0;
   let falhas = 0;
   let pendentes = 0;
+  // PG3 (spec decision 7): the run stops at the first e-mail the house's
+  // wallet refuses; the campaign is left "pausada" and the house reruns it
+  // after a top-up (no automatic resume).
+  let pausadaPorSaldo = false;
 
   const house = await loadHouseLinks(camp.tenant_id);
 
-  for (const p of players) {
+  for (const p of remaining) {
     if (!p.email) continue;
+    // Known once the provider answered: the throw-path log row keeps it.
+    let r: Awaited<ReturnType<typeof sendInfobipEmail>> | null = null;
     try {
       // Campaigns are not frequency-capped (the contact limit is for journeys).
       const vars = buildPlayerVariables(p, house);
       const subject = renderTemplate(tpl.subject ?? "", vars, house);
       const html = renderTemplate(tpl.body_html ?? "", vars, house);
-      const r = await sendInfobipEmail({
+      r = await sendInfobipEmail({
         to: p.email,
         from: sender.fromEmail,
         fromName: sender.fromName,
@@ -1041,6 +1076,11 @@ export async function runCampaignSend(campaignId: string) {
           shortDomainId: camp.short_domain_id,
         },
       });
+      if (!r.ok && r.errorKind === "insufficient_balance") {
+        // Nothing was sent nor charged: not a delivery attempt, no log row.
+        pausadaPorSaldo = true;
+        break;
+      }
       const errSnippet = r.ok
         ? null
         : `status=${(r as any).status ?? "?"} body=${
@@ -1056,6 +1096,7 @@ export async function runCampaignSend(campaignId: string) {
         player_id: p.id,
         campaign_id: campaignId,
         tenant_id: camp.tenant_id,
+        ...emailBillingColumns(r),
         provider_response: {
           status: (r as any).status,
           body: r.body,
@@ -1074,8 +1115,9 @@ export async function runCampaignSend(campaignId: string) {
         console.error("campaign send failed", { to: p.email, snippet: errSnippet });
       }
     } catch (err) {
-      // Second net: a demo block is not a delivery failure and is never logged.
-      if (isDemoBlockedError(err)) throw err;
+      // Second net: a demo block or a billing lock is not a delivery failure
+      // and is never logged; it ends the whole campaign run (final).
+      if (isSendBlockedError(err)) throw err;
       falhas++;
       console.error("campaign send error", err);
       await supabaseAdmin.from("email_send_logs").insert({
@@ -1087,6 +1129,7 @@ export async function runCampaignSend(campaignId: string) {
         player_id: p.id,
         campaign_id: campaignId,
         tenant_id: camp.tenant_id,
+        ...(r ? emailBillingColumns(r) : {}),
         provider_response: { error: String((err as any)?.message ?? err) } as never,
       });
     }
@@ -1094,16 +1137,7 @@ export async function runCampaignSend(campaignId: string) {
     if ((enviados + falhas) % 25 === 0) {
       await supabaseAdmin
         .from("email_campaigns")
-        .update({
-          stats: {
-            enviados,
-            entregues: 0,
-            abertos: 0,
-            cliques: 0,
-            falhas,
-            total: players.length,
-          },
-        })
+        .update({ stats: stats(enviados, falhas) })
         .eq("id", campaignId);
     }
     // small breath to avoid bursts
@@ -1115,20 +1149,58 @@ export async function runCampaignSend(campaignId: string) {
     .update({
       // Falhas temporárias ficam como pendentes no log; não contam como falha
       // definitiva porque o provedor pode aceitar o próximo retry.
-      status: "concluida",
-      stats: {
-        enviados,
-        entregues: 0,
-        abertos: 0,
-        cliques: 0,
-        falhas,
-        total: players.length,
-      },
+      status: pausadaPorSaldo ? "pausada" : "concluida",
+      ...(pausadaPorSaldo ? { blocked_reason: EMAIL_CAMPAIGN_NO_BALANCE_MESSAGE } : {}),
+      stats: stats(enviados, falhas),
     })
     .eq("id", campaignId);
 
-  return { enviados, falhas, pendentes, total: players.length };
+  return { enviados, falhas, pendentes, total: players.length, jaEnviados, pausadaPorSaldo };
 }
+
+/**
+ * Recipients this campaign already reached: a log row marked sent/delivered,
+ * or with sent_at (a later bounce keeps it). Pending/error rows are not
+ * reached, so a re-run retries them. Extra addresses without a player are
+ * matched by their lowercased e-mail. A failed read throws (fail closed:
+ * never risk re-sending a whole campaign).
+ */
+async function loadCampaignReachedRecipients(campaignId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("email_send_logs")
+    .select("player_id, to_email, status, sent_at")
+    .eq("campaign_id", campaignId);
+  if (error) throw new Error(error.message);
+  const playerIds = new Set<string>();
+  const emails = new Set<string>();
+  for (const row of data ?? []) {
+    const reached = row.status === "sent" || row.status === "delivered" || row.sent_at != null;
+    if (!reached) continue;
+    if (row.player_id) playerIds.add(row.player_id);
+    const email = String(row.to_email ?? "").trim().toLowerCase();
+    if (email) emails.add(email);
+  }
+  return { playerIds, emails };
+}
+
+/**
+ * Columns written when a house changes a campaign's status by hand. Pausing
+ * also releases the run lock (locked_at/locked_by) so the campaign is never
+ * left claimed while paused.
+ */
+export function emailCampaignStatusPatch(
+  status: "rascunho" | "agendada" | "enviando" | "pausada" | "concluida",
+) {
+  return {
+    status,
+    blocked_reason: null,
+    ...(status === "pausada" ? { locked_at: null, locked_by: null } : {}),
+  };
+}
+
+/** blocked_reason of an e-mail campaign paused because the house ran out of balance. */
+export const EMAIL_CAMPAIGN_NO_BALANCE_MESSAGE =
+  "Saldo insuficiente: a campanha foi pausada. Recarregue a carteira da casa e envie novamente.";
 
 // ============ AUTOMAÇÕES ============
 
@@ -1166,7 +1238,8 @@ function automacaoRowToUI(r: any) {
 export const listEmailAutomations = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data, error } = await context.supabase
+    const reads = await tenantReads(context.supabase);
+    const { data, error } = await reads
       .from("email_automations")
       .select("*")
       .order("created_at", { ascending: false });
@@ -1290,10 +1363,7 @@ export const getEmailDashboard = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     // Resolve tenant do usuário autenticado — todas as queries do dashboard
     // DEVEM ser filtradas por tenant para não misturar dados de outros tenants.
-    const { data: tenantRow, error: tenantErr } = await context.supabase.rpc("current_tenant_id");
-    if (tenantErr) throw new Error(tenantErr.message);
-    const tenantId = tenantRow as string | null;
-    if (!tenantId) throw new Error("tenant não encontrado para o usuário");
+    const tenantId = await resolveCurrentTenantId(context.supabase);
     // Dias YYYY-MM-DD = calendário em Brasília (BRT), não em UTC.
     const { parseBrtDayStart, parseBrtDayEnd, brtDayStart, brtDayEnd } = await import("./tz");
     let sinceDate: Date;

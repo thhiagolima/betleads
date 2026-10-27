@@ -1,95 +1,34 @@
-import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
-import {
-  Phone,
-  PhoneCall,
-  PhoneOff,
-  PhoneForwarded,
-  XCircle,
-  Clock,
-  Timer,
-  TrendingUp,
-  type LucideIcon,
-} from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  LineChart,
-  Line,
-  CartesianGrid,
-  XAxis,
-  YAxis,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-} from "recharts";
-import { cn } from "@/lib/utils";
-import { MetricCard } from "@/components/ui-premium/metric-card";
-import { getCallsDashboard } from "@/lib/calls.functions";
-import { HISTORY_STATUS_LABEL } from "./shared";
-import {
-  DashboardDateRangePicker,
-  defaultTodayRange,
-  rangeToKey,
-  type DashboardRange,
-} from "@/components/dashboard-date-range-picker";
 
-function StatCard({
-  icon: Icon,
-  label,
-  value,
-  hint,
-  tone = "default",
-}: {
-  icon: LucideIcon;
-  label: string;
-  value: string;
-  hint?: string;
-  tone?: "default" | "success" | "danger" | "warning" | "info" | "muted";
-}) {
-  const accents = {
-    default: "primary",
-    success: "success",
-    danger: "danger",
-    warning: "warning",
-    info: "primary",
-    muted: "primary",
-  } as const;
-  return (
-    <MetricCard
-      label={label}
-      value={value}
-      hint={hint}
-      icon={<Icon className="h-4 w-4" />}
-      accent={accents[tone]}
-    />
-  );
-}
+import {
+  ChannelBlock,
+  ChannelOverview,
+  ChannelSendsChart,
+  useChannelPeriod,
+} from "@/components/channels/channel-overview";
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
+import { getCallsDashboard } from "@/lib/calls.functions";
+import { CHART_COLORS } from "@/lib/chart-theme";
+import { num, timeAgo } from "@/lib/format";
+import { cn } from "@/lib/utils";
+
+import { HISTORY_STATUS_LABEL } from "./shared";
 
 function statusBadgeTone(status: string) {
   switch (status) {
     case "answered":
     case "completed":
     case "converted":
-      return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
+      return "bg-success/15 text-success border-success/30";
     case "not_answered":
-      return "bg-amber-500/15 text-amber-400 border-amber-500/30";
+      return "bg-warning/15 text-warning border-warning/30";
     case "busy":
-      return "bg-sky-500/15 text-sky-400 border-sky-500/30";
+      return "bg-info/15 text-info border-info/30";
     case "failed":
-      return "bg-rose-500/15 text-rose-400 border-rose-500/30";
+      return "bg-danger/15 text-danger border-danger/30";
     case "calling":
     case "pending":
       return "bg-primary/15 text-primary border-primary/30";
@@ -98,232 +37,134 @@ function statusBadgeTone(status: string) {
   }
 }
 
-function formatDate(iso: string, sameDay: boolean) {
-  const d = new Date(iso);
-  if (sameDay) return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-  return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+function pct(part: number, total: number) {
+  return total > 0 ? Math.round((part / total) * 100) : 0;
 }
 
+/** Visão geral de Voz: same layout as SMS and Email, with "Atendidas" as the channel KPI. */
 export function DashboardTab() {
-  const [range, setRange] = useState<DashboardRange>(() => defaultTodayRange());
-  const rk = rangeToKey(range);
-  const sameDay = rk.from === rk.to;
+  const period = useChannelPeriod();
+  const { query } = period;
   const fn = useServerFn(getCallsDashboard);
   useRealtimeInvalidate(
     "calls-dashboard-realtime",
     ["call_history", "call_queue"],
     [["calls-dashboard"]],
   );
-  const { data, isLoading } = useQuery({
-    queryKey: ["calls-dashboard", rk.from, rk.to],
-    queryFn: () => fn({ data: rk }),
-    refetchInterval: 30_000,
+  const { data, isLoading, isFetching, dataUpdatedAt } = useQuery({
+    queryKey: ["calls-dashboard", query.from, query.to],
+    queryFn: () => fn({ data: { from: query.from, to: query.to } }),
+    refetchInterval: query.includesToday ? 30_000 : false,
+    placeholderData: (previous) => previous,
   });
 
   const totals = data?.totals;
-  const answeredCount = totals ? totals.answered + totals.completed + totals.converted : 0;
-  const answerRate = totals?.total ? Math.round((answeredCount / totals.total) * 100) : 0;
+  const total = totals?.total ?? 0;
+  const answered = totals ? totals.answered + totals.completed + totals.converted : 0;
+  const notAnswered = (totals?.not_answered ?? 0) + (totals?.busy ?? 0);
+  const topScripts = data?.top_scripts ?? [];
+  const recent = data?.recent ?? [];
 
   return (
-    <div className="space-y-6">
-      {/* Filtro de período */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold">Visão geral</h2>
-          <p className="text-xs text-muted-foreground">
-            Métricas operacionais atualizadas a cada 30s
-          </p>
-        </div>
-        <DashboardDateRangePicker range={range} onChange={setRange} />
-      </div>
-
-      {/* StatCards */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
-        <StatCard
-          icon={Phone}
-          label="Total"
-          value={String(totals?.total ?? 0)}
-          hint={`Hoje: ${data?.today.total ?? 0}`}
-          tone="info"
+    <ChannelOverview
+      period={period}
+      updatedAt={dataUpdatedAt}
+      isFetching={isFetching}
+      isLoading={isLoading}
+      kpis={[
+        {
+          title: "Enviados",
+          value: num(total),
+          detail: `${num(notAnswered)} não atendidas ou ocupado`,
+        },
+        { title: "Falhas", value: num(totals?.failed ?? 0), detail: "a ligação não completou" },
+        { title: "Na fila", value: num(totals?.pending ?? 0), detail: "aguardando para ligar" },
+        {
+          title: "Atendidas",
+          value: num(answered),
+          detail: total > 0 ? `${pct(answered, total)}% das ligações` : undefined,
+        },
+      ]}
+      chart={
+        <ChannelSendsChart
+          historyChannel="calls"
+          period={period}
+          daily={data?.by_day}
+          series={[
+            { key: "total", label: "Total", color: CHART_COLORS.primary },
+            { key: "answered", label: "Atendidas", color: CHART_COLORS.success },
+            { key: "failed", label: "Falhas", color: CHART_COLORS.danger },
+          ]}
         />
-        <StatCard
-          icon={PhoneCall}
-          label="Atendidas"
-          value={String(answeredCount)}
-          hint={`Taxa: ${answerRate}%`}
-          tone="success"
-        />
-        <StatCard
-          icon={PhoneOff}
-          label="Não atendidas"
-          value={String(totals?.not_answered ?? 0)}
-          tone="warning"
-        />
-        <StatCard
-          icon={PhoneForwarded}
-          label="Ocupado"
-          value={String(totals?.busy ?? 0)}
-          tone="info"
-        />
-        <StatCard icon={XCircle} label="Falhas" value={String(totals?.failed ?? 0)} tone="danger" />
-        <StatCard
-          icon={Clock}
-          label="Na fila"
-          value={String(totals?.pending ?? 0)}
-          hint="aguardando"
-          tone="muted"
-        />
-        <StatCard
-          icon={Timer}
-          label="Duração média"
-          value={`${totals?.avg_duration_seconds ?? 0}s`}
-          tone="default"
-        />
-      </div>
-
-      {/* Gráfico */}
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <TrendingUp className="h-4 w-4 text-primary" />
-            Ligações por dia
-          </CardTitle>
-          <CardDescription>Total disparado × atendidas no período selecionado.</CardDescription>
-        </CardHeader>
-        <CardContent className="h-72">
-          {isLoading || !data ? (
-            <p className="py-12 text-center text-sm text-muted-foreground">Carregando…</p>
+      }
+    >
+      <div className="grid gap-3 sm:gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+        <ChannelBlock
+          title="Top roteiros"
+          description="Os mais usados no período e quantos atenderam."
+        >
+          {topScripts.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              Nenhuma ligação com roteiro no período.
+            </p>
           ) : (
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={data.by_day}>
-                <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" />
-                <XAxis
-                  dataKey="date"
-                  tickFormatter={(v) => formatDate(v + "T00:00:00", sameDay)}
-                  stroke="hsl(var(--muted-foreground))"
-                  fontSize={11}
-                />
-                <YAxis stroke="hsl(var(--muted-foreground))" fontSize={11} allowDecimals={false} />
-                <Tooltip
-                  contentStyle={{
-                    background: "hsl(var(--card))",
-                    border: "1px solid hsl(var(--border))",
-                    borderRadius: 8,
-                    fontSize: 12,
-                  }}
-                  labelFormatter={(v) => formatDate(v + "T00:00:00", sameDay)}
-                />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Line
-                  type="monotone"
-                  dataKey="total"
-                  stroke="hsl(var(--primary))"
-                  strokeWidth={2}
-                  dot={false}
-                  name="Total"
-                />
-                <Line
-                  type="monotone"
-                  dataKey="answered"
-                  stroke="#34d399"
-                  strokeWidth={2}
-                  dot={false}
-                  name="Atendidas"
-                />
-                <Line
-                  type="monotone"
-                  dataKey="failed"
-                  stroke="#fb7185"
-                  strokeWidth={2}
-                  dot={false}
-                  name="Falhas"
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          )}
-        </CardContent>
-      </Card>
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        {/* Top scripts */}
-        <Card className="lg:col-span-1">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Top scripts</CardTitle>
-            <CardDescription>Mais disparados no período (com taxa de atendimento).</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {(data?.top_scripts ?? []).length === 0 ? (
-              <p className="py-6 text-center text-xs text-muted-foreground">Sem dados ainda.</p>
-            ) : (
-              data!.top_scripts.map((s) => {
-                const rate = s.total ? Math.round((s.answered / s.total) * 100) : 0;
+            <ul className="space-y-4">
+              {topScripts.map((script) => {
+                const rate = pct(script.answered, script.total);
                 return (
-                  <div key={s.script_id} className="space-y-1.5">
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="truncate font-medium">{s.name}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {s.answered}/{s.total} · {rate}%
+                  <li key={script.script_id} className="space-y-1.5">
+                    <div className="flex items-center justify-between gap-3 text-[13.5px]">
+                      <span className="truncate font-medium">
+                        {script.name === "Script removido" ? "Roteiro excluído" : script.name}
+                      </span>
+                      <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                        {num(script.answered)} de {num(script.total)} · {rate}%
                       </span>
                     </div>
                     <Progress value={rate} className="h-1.5" />
-                  </div>
+                  </li>
                 );
-              })
-            )}
-          </CardContent>
-        </Card>
+              })}
+            </ul>
+          )}
+        </ChannelBlock>
 
-        {/* Últimas 10 */}
-        <Card className="lg:col-span-2">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Últimas ligações</CardTitle>
-            <CardDescription>10 mais recentes — atualizadas em tempo real.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {(data?.recent ?? []).length === 0 ? (
-              <p className="py-8 text-center text-xs text-muted-foreground">
-                Nenhuma ligação no período.
-              </p>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Lead</TableHead>
-                    <TableHead>Script</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Duração</TableHead>
-                    <TableHead>Quando</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {data!.recent.map((r) => (
-                    <TableRow key={r.id}>
-                      <TableCell className="text-sm font-medium">{r.lead_nome}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {r.script_name}
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          variant="outline"
-                          className={cn("text-xs", statusBadgeTone(r.status))}
-                        >
-                          {HISTORY_STATUS_LABEL[r.status] ?? r.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-xs">
-                        {r.duration_seconds ? `${r.duration_seconds}s` : "—"}
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {new Date(r.created_at).toLocaleString("pt-BR")}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
+        <ChannelBlock title="Últimas ligações" description="As 10 mais recentes do período.">
+          {recent.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              Nenhuma ligação no período.
+            </p>
+          ) : (
+            <ul>
+              {recent.map((call) => (
+                <li
+                  key={call.id}
+                  className="flex items-center gap-3 border-b border-border/70 py-2.5 text-[13.5px] last:border-b-0"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium">
+                      {call.lead_nome === "Avulso" ? "Número avulso" : call.lead_nome}
+                    </p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {call.script_name === "—" ? "Sem roteiro" : call.script_name}
+                      {call.duration_seconds ? ` · ${call.duration_seconds}s` : ""}
+                    </p>
+                  </div>
+                  <Badge
+                    variant="outline"
+                    className={cn("shrink-0 text-xs", statusBadgeTone(call.status))}
+                  >
+                    {HISTORY_STATUS_LABEL[call.status] ?? call.status}
+                  </Badge>
+                  <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">
+                    {timeAgo(call.created_at)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </ChannelBlock>
       </div>
-    </div>
+    </ChannelOverview>
   );
 }

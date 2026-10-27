@@ -1,5 +1,7 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { DemoTenantBlockedError, isDemoBlockedError } from "@/lib/demo-tenant";
+import { DemoTenantBlockedError } from "@/lib/demo-tenant";
+import { isEffectiveLock, type BillingAccessState } from "@/lib/billing/billing-view";
+import { isSendBlockedError, TenantBillingLockedError } from "@/lib/billing/billing-locked-error";
 
 type DbError = { message: string };
 type DbResult<T = unknown> = { data: T | null; error: DbError | null };
@@ -14,9 +16,77 @@ type TenantStatusRow = {
   id: string;
   status: string | null;
   is_demo: boolean | null;
+  /** `tenant_billing.access_state`; null when the house has no billing row. */
+  billing_state: BillingAccessState | null;
 };
 
+// One query reads the tenant status, the demo flag and the billing state:
+// `tenant_billing` is 1:1 with `tenants` (its PK is the FK), so PostgREST
+// embeds it as an object (or null).
+const TENANT_STATUS_COLUMNS = "id,status,is_demo,tenant_billing(access_state)";
+
+type EmbeddedBilling = { access_state?: string | null };
+type TenantStatusDbRow = {
+  id: string;
+  status: string | null;
+  is_demo: boolean | null;
+  tenant_billing?: EmbeddedBilling | EmbeddedBilling[] | null;
+};
+
+function toTenantStatusRow(data: TenantStatusDbRow | null): TenantStatusRow | null {
+  if (!data) return null;
+  const embedded = Array.isArray(data.tenant_billing)
+    ? data.tenant_billing[0]
+    : data.tenant_billing;
+  return {
+    id: data.id,
+    status: data.status ?? null,
+    is_demo: data.is_demo ?? null,
+    billing_state: (embedded?.access_state as BillingAccessState | null | undefined) ?? null,
+  };
+}
+
+let enforcementWithoutInvoicesReported = false;
+
+/** Test-only: lets the misconfiguration error be observed again. */
+export function __resetBillingEnforcementWarningForTests() {
+  enforcementWithoutInvoicesReported = false;
+}
+
+/**
+ * `BILLING_ENFORCEMENT_ENABLED === "true"` turns on the lock for unpaid
+ * houses — but only together with `BILLING_INVOICES_ENABLED === "true"`.
+ * Enforcement without invoices would lock houses that never got an invoice
+ * or e-mail to pay, so that combination fails closed to "no lock" and logs
+ * one console.error per process.
+ */
+export function isBillingEnforcementEnabled(): boolean {
+  if (process.env.BILLING_ENFORCEMENT_ENABLED !== "true") return false;
+  if (process.env.BILLING_INVOICES_ENABLED === "true") return true;
+  if (!enforcementWithoutInvoicesReported) {
+    enforcementWithoutInvoicesReported = true;
+    console.error(
+      '[billing] BILLING_ENFORCEMENT_ENABLED=true is ignored: BILLING_INVOICES_ENABLED is not "true". No house is locked for an unpaid invoice.',
+    );
+  }
+  return false;
+}
+
+/**
+ * The house's effective billing lock, before the superadmin exemption:
+ * `frozen`/`locked_manual` always, `locked_unpaid`/`awaiting_first_payment`
+ * only with enforcement on. A house without a billing row is never locked.
+ */
+function hasEffectiveBillingLock(tenant: TenantStatusRow | null): boolean {
+  if (!tenant?.billing_state) return false;
+  return isEffectiveLock(tenant.billing_state, isBillingEnforcementEnabled());
+}
+
 const blockedOperationalStatuses = new Set(["suspended", "canceled"]);
+
+/** Message of the error `assertTenantCanOperate` throws for a suspended/canceled tenant. */
+export const TENANT_BLOCKED_MESSAGE =
+  "Tenant bloqueado para operacoes. Regularize a conta antes de continuar.";
 
 // In-memory cache for the guard lookups (send/action guards), 5s TTL. A miss
 // or an unknown tenant is never cached as "allowed" — only resolved rows are
@@ -30,6 +100,15 @@ export function __resetDemoTenantCacheForTests() {
   tenantStatusCache = new Map();
 }
 
+/**
+ * Drops one tenant from the 5 s guard cache, so the next guard reads its
+ * status (and billing state) fresh — e.g. right after an invoice is settled,
+ * so the house unlocks at once in this process.
+ */
+export function invalidateTenantStatusCache(tenantId: string) {
+  tenantStatusCache.delete(tenantId);
+}
+
 async function getCachedTenantStatus(tenantId: string): Promise<TenantStatusRow | null> {
   const cached = tenantStatusCache.get(tenantId);
   if (cached && cached.expiresAt > Date.now()) return cached.tenant;
@@ -39,14 +118,22 @@ async function getCachedTenantStatus(tenantId: string): Promise<TenantStatusRow 
   // codebase of casting to `any` for columns ahead of codegen.
   const { data, error } = await (supabaseAdmin as any)
     .from("tenants")
-    .select("id,status,is_demo")
+    .select(TENANT_STATUS_COLUMNS)
     .eq("id", tenantId)
     .maybeSingle();
   if (error) throw new Error(error.message);
 
-  const tenant = (data as TenantStatusRow | null) ?? null;
+  const tenant = toTenantStatusRow((data as TenantStatusDbRow | null) ?? null);
   tenantStatusCache.set(tenantId, { tenant, expiresAt: Date.now() + TENANT_STATUS_CACHE_TTL_MS });
   return tenant;
+}
+
+/** The house's billing state from the 5 s guard cache (null without a billing row). */
+export async function getCachedTenantBillingState(
+  tenantId: string,
+): Promise<BillingAccessState | null> {
+  const tenant = await getCachedTenantStatus(tenantId);
+  return tenant?.billing_state ?? null;
 }
 
 export type DemoTenantCheck = "demo" | "not_demo";
@@ -74,7 +161,8 @@ export async function checkDemoTenant(tenantId: string): Promise<DemoTenantCheck
   return tenant?.is_demo === true ? "demo" : "not_demo";
 }
 
-export async function resolveCurrentTenantId(supabase: RpcClient) {
+/** The user's active tenant (`current_tenant_id()`), with no billing check. */
+async function currentTenantIdOf(supabase: RpcClient) {
   const { data, error } = await supabase.rpc("current_tenant_id");
   if (error) throw new Error(error.message);
   const tenantId = data ?? null;
@@ -83,17 +171,65 @@ export async function resolveCurrentTenantId(supabase: RpcClient) {
 }
 
 /**
- * Selects the operational tenant for an authenticated server action.
- *
- * Regular users are always bound to their active tenant. A requested tenant
- * is accepted only for a global super admin, which is the one role allowed to
- * inspect every account from the administration/dashboard screens.
+ * Super admin check for the caller of a user-scoped client:
+ * `is_super_admin()` defaults `_user_id` to `auth.uid()`.
  */
-export async function resolveOperationalTenantForRequest(
+async function callerIsSuperAdmin(supabase: RpcClient): Promise<boolean> {
+  const { data, error } = await supabase.rpc("is_super_admin");
+  if (error) throw new Error(error.message);
+  return data === true;
+}
+
+/**
+ * Refuses a house with an effective billing lock unless the caller is the
+ * superadmin (never locked). `superAdmin` is passed when already known; when
+ * null it is asked through the caller's own client, and only for a locked
+ * house, so an unlocked house costs no extra query.
+ */
+async function assertNotBillingLockedForCaller(
+  supabase: RpcClient,
+  tenant: TenantStatusRow | null,
+  superAdmin: boolean | null,
+) {
+  if (!hasEffectiveBillingLock(tenant)) return;
+  const isSuperAdmin = superAdmin ?? (await callerIsSuperAdmin(supabase));
+  if (!isSuperAdmin) throw new TenantBillingLockedError();
+}
+
+/**
+ * The billing-lock half of `resolveCurrentTenantId`, for the few callers that
+ * must read `current_tenant_id` themselves (they tolerate a missing tenant or
+ * filter differently for the superadmin). `superAdmin` when already known.
+ */
+export async function assertCallerNotBillingLocked(
+  supabase: RpcClient,
+  tenantId: string,
+  superAdmin: boolean | null = null,
+) {
+  await assertNotBillingLockedForCaller(
+    supabase,
+    await getCachedTenantStatus(tenantId),
+    superAdmin,
+  );
+}
+
+/**
+ * The caller's active tenant. A house with an effective billing lock is
+ * refused (`TenantBillingLockedError`) unless the caller is the superadmin;
+ * the lock is read from the 5 s tenant-status cache. Billing screens use
+ * `resolveTenantForBilling` instead, which never refuses a locked house.
+ */
+export async function resolveCurrentTenantId(supabase: RpcClient) {
+  const tenantId = await currentTenantIdOf(supabase);
+  await assertNotBillingLockedForCaller(supabase, await getCachedTenantStatus(tenantId), null);
+  return tenantId;
+}
+
+async function resolveTenantSelection(
   supabase: RpcClient,
   userId: string,
   requestedTenantId?: string | null,
-) {
+): Promise<{ tenantId: string; isSuperAdmin: boolean }> {
   const { data: isSuperAdmin, error: roleError } = await supabase.rpc("is_super_admin", {
     _user_id: userId,
   });
@@ -101,14 +237,51 @@ export async function resolveOperationalTenantForRequest(
 
   if (isSuperAdmin) {
     if (!requestedTenantId) throw new Error("Selecione uma conta para consultar os dados.");
-    return requestedTenantId;
+    return { tenantId: requestedTenantId, isSuperAdmin: true };
   }
 
-  const activeTenantId = await resolveCurrentTenantId(supabase);
+  const activeTenantId = await currentTenantIdOf(supabase);
   if (requestedTenantId && requestedTenantId !== activeTenantId) {
     throw new Error("Sem acesso aos dados desta conta.");
   }
-  return activeTenantId;
+  return { tenantId: activeTenantId, isSuperAdmin: false };
+}
+
+/**
+ * Selects the operational tenant for an authenticated server action.
+ *
+ * Regular users are always bound to their active tenant. A requested tenant
+ * is accepted only for a global super admin, which is the one role allowed to
+ * inspect every account from the administration/dashboard screens. A house
+ * with an effective billing lock is refused for everyone but the superadmin.
+ */
+export async function resolveOperationalTenantForRequest(
+  supabase: RpcClient,
+  userId: string,
+  requestedTenantId?: string | null,
+) {
+  const { tenantId, isSuperAdmin } = await resolveTenantSelection(
+    supabase,
+    userId,
+    requestedTenantId,
+  );
+  if (!isSuperAdmin) {
+    await assertNotBillingLockedForCaller(supabase, await getCachedTenantStatus(tenantId), false);
+  }
+  return tenantId;
+}
+
+/**
+ * `resolveOperationalTenantForRequest` without the billing lock: the only
+ * resolver the billing server functions (Plano e créditos, Pix purchase,
+ * invoice payment) use, so a locked house can still pay.
+ */
+export async function resolveTenantForBilling(
+  supabase: RpcClient,
+  userId: string,
+  requestedTenantId?: string | null,
+) {
+  return (await resolveTenantSelection(supabase, userId, requestedTenantId)).tenantId;
 }
 
 /**
@@ -132,18 +305,28 @@ export async function requireActiveTenantAdmin(supabase: RpcClient, message: str
 export async function getTenantStatus(tenantId: string) {
   const { data, error } = await (supabaseAdmin as any)
     .from("tenants")
-    .select("id,status,is_demo")
+    .select(TENANT_STATUS_COLUMNS)
     .eq("id", tenantId)
     .maybeSingle();
   if (error) throw new Error(error.message);
-  if (!data) throw new Error("Tenant nao encontrado");
-  return data as TenantStatusRow;
+  const tenant = toTenantStatusRow((data as TenantStatusDbRow | null) ?? null);
+  if (!tenant) throw new Error("Tenant nao encontrado");
+  return tenant;
 }
 
-export async function assertTenantCanOperate(tenantId: string) {
+/**
+ * Refuses a suspended/canceled tenant, and a house with an effective billing
+ * lock. The billing lock is lifted only for the superadmin, which needs the
+ * caller's own client (`actor`): without it (workers, sends) a locked house
+ * is always refused.
+ */
+export async function assertTenantCanOperate(tenantId: string, actor?: RpcClient) {
   const tenant = await getTenantStatus(tenantId);
   if (tenant.status && blockedOperationalStatuses.has(tenant.status)) {
-    throw new Error("Tenant bloqueado para operacoes. Regularize a conta antes de continuar.");
+    throw new Error(TENANT_BLOCKED_MESSAGE);
+  }
+  if (hasEffectiveBillingLock(tenant)) {
+    if (!actor || !(await callerIsSuperAdmin(actor))) throw new TenantBillingLockedError();
   }
   return tenant;
 }
@@ -156,9 +339,14 @@ export async function assertTenantCanOpenBilling(tenantId: string) {
   return tenant;
 }
 
+/**
+ * The caller's active tenant, refused when suspended/canceled or (for anyone
+ * but the superadmin) under an effective billing lock. One tenant read: the
+ * billing lock comes from the same row `assertTenantCanOperate` reads.
+ */
 export async function resolveOperationalTenantId(supabase: RpcClient) {
-  const tenantId = await resolveCurrentTenantId(supabase);
-  await assertTenantCanOperate(tenantId);
+  const tenantId = await currentTenantIdOf(supabase);
+  await assertTenantCanOperate(tenantId, supabase);
   return tenantId;
 }
 
@@ -168,7 +356,10 @@ export async function resolveOperationalTenantId(supabase: RpcClient) {
  * null/undefined tenant id, an unknown tenant, or a demo tenant are all
  * refused with `DemoTenantBlockedError("DEMO_SEND_BLOCKED")` so nothing is
  * ever sent/recorded as sent on their behalf. A suspended/canceled tenant
- * keeps the existing `assertTenantCanOperate` message.
+ * keeps the existing `assertTenantCanOperate` message. A house with an
+ * effective billing lock is refused with `TenantBillingLockedError` for
+ * everyone: sends are not user-scoped, so the superadmin exemption does not
+ * apply here.
  */
 export async function assertTenantCanSendExternally(tenantId: string | null | undefined) {
   if (!tenantId) throw new DemoTenantBlockedError("DEMO_SEND_BLOCKED");
@@ -177,39 +368,54 @@ export async function assertTenantCanSendExternally(tenantId: string | null | un
   if (!tenant) throw new DemoTenantBlockedError("DEMO_SEND_BLOCKED");
   if (tenant.is_demo) throw new DemoTenantBlockedError("DEMO_SEND_BLOCKED");
   if (tenant.status && blockedOperationalStatuses.has(tenant.status)) {
-    throw new Error("Tenant bloqueado para operacoes. Regularize a conta antes de continuar.");
+    throw new Error(TENANT_BLOCKED_MESSAGE);
   }
+  if (hasEffectiveBillingLock(tenant)) throw new TenantBillingLockedError();
 }
 
 /**
- * The demo half of `assertTenantCanSendExternally`, for channels that never
- * checked the tenant's billing status before (e-mail, external webhook,
- * Short.io, ElevenLabs): throws only `DemoTenantBlockedError`
- * (`DEMO_SEND_BLOCKED`, fail-closed for null/undefined/unknown/demo) and
- * leaves suspended/canceled tenants to each channel's existing rules. A
- * failed tenant lookup throws its own error (also blocking the send).
+ * The demo half of `assertTenantCanSendExternally`, plus the billing lock,
+ * for channels that never checked the tenant's billing status before
+ * (e-mail, external webhook, Short.io, ElevenLabs): throws
+ * `DemoTenantBlockedError` (`DEMO_SEND_BLOCKED`, fail-closed for
+ * null/undefined/unknown/demo) or `TenantBillingLockedError` (effective
+ * billing lock, for everyone), and leaves suspended/canceled tenants to each
+ * channel's existing rules. A failed tenant lookup throws its own error
+ * (also blocking the send).
+ *
+ * `allowBillingLocked` is only for calls that READ data back from a provider
+ * for the house (Short.io click statistics): like the house's inbound
+ * webhook, they keep working while the house is locked.
  */
-export async function assertTenantNotDemoForSend(tenantId: string | null | undefined) {
+export async function assertTenantNotDemoForSend(
+  tenantId: string | null | undefined,
+  options: { allowBillingLocked?: boolean } = {},
+) {
   if (!tenantId) throw new DemoTenantBlockedError("DEMO_SEND_BLOCKED");
   // Decided on the row itself, never by catching errors: a failed lookup
   // propagates, so the send is refused (fail-closed).
   const tenant = await getCachedTenantStatus(tenantId);
   if (!tenant || tenant.is_demo) throw new DemoTenantBlockedError("DEMO_SEND_BLOCKED");
+  if (!options.allowBillingLocked && hasEffectiveBillingLock(tenant)) {
+    throw new TenantBillingLockedError();
+  }
 }
 
 /**
  * `assertTenantNotDemoForSend` for senders whose contract is a result object:
- * the `DEMO_SEND_BLOCKED` message when the tenant is refused, else null. A
- * lookup error is rethrown (the send never happens).
+ * the refusal message (`DEMO_SEND_BLOCKED` copy or the billing lock copy)
+ * when the tenant is refused, else null. A lookup error is rethrown (the
+ * send never happens).
  */
 export async function demoSendBlockedReason(
   tenantId: string | null | undefined,
+  options: { allowBillingLocked?: boolean } = {},
 ): Promise<string | null> {
   try {
-    await assertTenantNotDemoForSend(tenantId);
+    await assertTenantNotDemoForSend(tenantId, options);
     return null;
   } catch (error) {
-    if (isDemoBlockedError(error)) return error.message;
+    if (isSendBlockedError(error)) return (error as Error).message;
     throw error;
   }
 }

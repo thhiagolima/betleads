@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
-import { LogOut, Sparkles } from "lucide-react";
+import { LogOut } from "lucide-react";
 
 type AuthState =
   | { status: "loading" }
@@ -262,46 +262,63 @@ function InitialPasswordScreen({
   );
 }
 
+/** Supabase answers in English; the operator reads Portuguese. */
+export function loginErrorMessage(err: unknown) {
+  const raw = err instanceof Error ? err.message : "";
+  const msg = raw.toLowerCase();
+  if (msg.includes("invalid login credentials")) return "E-mail ou senha incorretos.";
+  if (msg.includes("email not confirmed")) return "Este e-mail ainda não foi confirmado.";
+  if (msg.includes("banned") || msg.includes("user is banned"))
+    return "Este acesso foi desativado.";
+  if (msg.includes("rate limit") || msg.includes("too many"))
+    return "Muitas tentativas. Aguarde alguns minutos e tente de novo.";
+  if (msg.includes("failed to fetch") || msg.includes("network"))
+    return "Sem conexão com o servidor. Confira a internet e tente de novo.";
+  return raw || "Não foi possível entrar. Tente de novo.";
+}
+
 function AuthScreen({ onAuthenticated }: { onAuthenticated: (session: Session) => void }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setError(null);
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
       if (!data.session) throw new Error("A autenticação não retornou uma sessão válida.");
       onAuthenticated(data.session);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Erro ao autenticar";
-      toast.error(msg);
+      setError(loginErrorMessage(err));
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="relative min-h-screen flex items-center justify-center overflow-hidden bg-[#05070d] p-4">
-      {/* Background gradient + glow */}
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,_rgba(30,64,175,0.12),_transparent_65%)]" />
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#05070d] via-[#070b18] to-[#05070d]" />
-      <div className="pointer-events-none absolute left-1/2 top-1/2 -z-0 h-[380px] w-[380px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#1d6fff]/10 blur-[100px]" />
-
-      <Card className="relative z-10 w-full max-w-md border border-white/10 bg-[#0a0f1c]/80 backdrop-blur-xl shadow-[0_0_45px_-20px_rgba(29,111,255,0.35)] py-2">
-        <CardHeader className="items-center text-center pt-6 pb-1">
-          <div className="flex items-center justify-center gap-3" aria-label="BETLEADS">
-            <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-[#00b3ff] to-[#1d6fff] text-white shadow-[0_0_28px_-8px_rgba(0,179,255,0.9)]">
-              <Sparkles className="h-6 w-6" />
+    <div className="flex min-h-dvh items-center justify-center bg-background p-4">
+      <main className="w-full max-w-sm">
+        <div className="mb-8 flex items-center justify-center gap-2.5" aria-label="BETLEADS">
+          <span className="flex size-9 items-center justify-center rounded-lg bg-primary text-base font-bold text-primary-foreground">
+            B
+          </span>
+          <span>
+            <span className="block text-section font-semibold leading-none">BETLEADS</span>
+            <span className="mt-1 block text-[10px] uppercase leading-none tracking-[0.15em] text-muted-foreground">
+              Player Intelligence
             </span>
-            <span className="text-2xl font-bold tracking-tight text-white">BETLEADS</span>
-          </div>
-          <CardTitle className="mt-5 text-lg font-semibold tracking-tight">Entrar</CardTitle>
-        </CardHeader>
-        <CardContent className="pt-2 pb-6">
-          <form onSubmit={handleSubmit} className="space-y-4">
+          </span>
+        </div>
+        <section className="rounded-2xl border border-border bg-card/80 p-6">
+          <h1 className="text-title">Entrar</h1>
+          <p className="mt-1 text-body text-muted-foreground">
+            Use o e-mail e a senha da sua casa.
+          </p>
+          <form onSubmit={handleSubmit} className="mt-5 space-y-4">
             <div className="space-y-1.5">
               <Label htmlFor="email">E-mail</Label>
               <Input
@@ -311,7 +328,8 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (session: Session) =
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 autoComplete="email"
-                className="h-11 bg-white/[0.03] border-white/10 focus-visible:ring-[#1d6fff]/60 focus-visible:border-[#1d6fff]/60"
+                className="h-11"
+                aria-invalid={error ? true : undefined}
               />
             </div>
             <div className="space-y-1.5">
@@ -324,19 +342,22 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (session: Session) =
                 required
                 minLength={8}
                 autoComplete="current-password"
-                className="h-11 bg-white/[0.03] border-white/10 focus-visible:ring-[#1d6fff]/60 focus-visible:border-[#1d6fff]/60"
+                className="h-11"
+                aria-invalid={error ? true : undefined}
+                aria-describedby={error ? "login-error" : undefined}
               />
             </div>
-            <Button
-              type="submit"
-              disabled={loading}
-              className="w-full h-11 mt-2 bg-gradient-to-r from-[#1d6fff] to-[#00b3ff] text-white font-semibold tracking-wide shadow-[0_0_25px_-5px_rgba(29,111,255,0.7)] hover:shadow-[0_0_35px_-3px_rgba(0,179,255,0.8)] hover:from-[#2a7bff] hover:to-[#1ec0ff] transition-all duration-300 border-0"
-            >
-              {loading ? "Aguarde…" : "Entrar"}
+            {error && (
+              <p id="login-error" role="alert" className="text-label text-danger">
+                {error}
+              </p>
+            )}
+            <Button type="submit" disabled={loading} className="h-11 w-full">
+              {loading ? "Entrando…" : "Entrar"}
             </Button>
           </form>
-        </CardContent>
-      </Card>
+        </section>
+      </main>
     </div>
   );
 }

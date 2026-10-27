@@ -14,13 +14,14 @@ export const Route = createFileRoute("/api/public/shortio/sync")({
         }
         const run = await startJobRun("shortio_sync", { channel: "shortio", kind: "sync" });
         try {
-          // Fresh links must be observed quickly. Concurrency remains bounded
-          // inside the worker, while this larger batch prevents a campaign
-          // backlog from taking hours to reach the reporting pipeline.
-          const configuredLimit = Number(process.env.SHORTIO_SYNC_BATCH_SIZE ?? 200);
+          // Links read from Short.io per tick across every house (split
+          // between them inside the worker). Concurrency is one shared gate,
+          // so a larger batch makes the tick longer, not the request rate
+          // higher.
+          const configuredLimit = Number(process.env.SHORTIO_SYNC_BATCH_SIZE ?? 600);
           const limit = Math.max(
             10,
-            Math.min(Number.isFinite(configuredLimit) ? configuredLimit : 200, 500),
+            Math.min(Number.isFinite(configuredLimit) ? configuredLimit : 600, 2000),
           );
           const result = await syncShortioMetrics(limit);
           await run.finish({

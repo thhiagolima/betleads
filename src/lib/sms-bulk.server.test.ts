@@ -36,6 +36,8 @@ import {
   type SmsBatchItem,
 } from "./sms-bulk.server";
 import { Route as SmsWebhookRoute } from "@/routes/api/public/sms-webhook";
+import { assertTenantNotDemoForSend } from "@/lib/tenant-access.server";
+import { BILLING_LOCKED_TEXT, TenantBillingLockedError } from "@/lib/billing/billing-locked-error";
 import { __resetShortenerDomainCacheForTests } from "./shortio.server";
 
 const TENANT = "00000000-0000-4000-8000-000000000001";
@@ -205,6 +207,51 @@ describe("sendSmsBatch (ENV-10, Short Brasil bulk)", () => {
     expect(credits.ledger().map((l) => l.idempotency_key)).toContain(
       `sms-reserve:delivery:${key(1)}`,
     );
+  });
+
+  it("a house locked for the monthly fee: its items fail final (not retryable), nothing written or charged; other houses still send", async () => {
+    settings("block");
+    const LOCKED = "00000000-0000-4000-8000-0000000000ff";
+    const guard = vi.mocked(assertTenantNotDemoForSend);
+    guard.mockImplementation(async (tenantId) => {
+      if (tenantId === LOCKED) throw new TenantBillingLockedError();
+    });
+    try {
+      const r = await sendSmsBatch([item(1, { tenantId: LOCKED }), item(2), item(3, { tenantId: LOCKED })]);
+
+      for (const index of [0, 2]) {
+        expect(r.outcomes[index]).toMatchObject({
+          status: "failed",
+          ok: false,
+          retryable: false,
+          error: BILLING_LOCKED_TEXT,
+        });
+      }
+      expect(r.outcomes[1]).toMatchObject({ status: "accepted", ok: true });
+      expect(smsCalls).toHaveLength(1);
+      expect(smsCalls[0].bulk.map((b) => b.parceiroId)).toEqual([key(2)]);
+      expect(logFor(key(1))).toHaveLength(0);
+      expect(logFor(key(3))).toHaveLength(0);
+      expect(credits.charged()).toBe(1);
+    } finally {
+      guard.mockImplementation(async () => undefined);
+    }
+  });
+
+  it("a whole batch of a locked house: nothing is sent and no item is retryable", async () => {
+    const guard = vi.mocked(assertTenantNotDemoForSend);
+    guard.mockImplementation(async () => {
+      throw new TenantBillingLockedError();
+    });
+    try {
+      const r = await sendSmsBatch([item(1), item(2)]);
+      expect(r.outcomes.every((o) => !o.ok && o.retryable === false)).toBe(true);
+      expect(smsCalls).toHaveLength(0);
+      expect(logs()).toHaveLength(0);
+      expect(credits.charged()).toBe(0);
+    } finally {
+      guard.mockImplementation(async () => undefined);
+    }
   });
 
   it("partial rejection: only the items missing from bulk[] fail and are refunded", async () => {
@@ -607,5 +654,77 @@ describe("sendSmsBatch (ENV-10, Short Brasil bulk)", () => {
     shortioBehaviour = (links) =>
       Response.json(links.map((_, i) => ({ idString: `x${i}`, shortURL: `https://go.example/x${i}` })));
     await expect(sendSmsBatch([item(5), item(6)])).rejects.toBeInstanceOf(SmsBatchDeferredError);
+  });
+
+  // PG1 Task 5 — billing reserves countSmsSegments(finalContent).segments
+  // units from the wallet instead of a flat 1 legacy credit per send.
+  describe("wallet billing: segments x price, not a flat credit", () => {
+    it("a 161-unit GSM-7 message reserves 2 segments", async () => {
+      const content = "A".repeat(161); // GSM-7, > 160 units -> ceil(161/153) = 2
+      const r = await sendSmsBatch([item(1, { content, linkTrackingEnabled: false })]);
+      expect(r.outcomes[0].status).toBe("accepted");
+      expect(credits.charged()).toBe(2);
+    });
+
+    it("UCS-2 content (forced by a non-GSM-7 character) reserves 1 segment at 70 units, 2 at 71", async () => {
+      // 'ã' is not in the GSM-7 alphabet (only 'à' is) -> forces UCS-2.
+      const ucs70 = "ã" + "a".repeat(69); // 70 units -> 1 segment
+      const ucs71 = "ã" + "a".repeat(70); // 71 units -> ceil(71/67) = 2 segments
+      const r1 = await sendSmsBatch([item(1, { content: ucs70, linkTrackingEnabled: false })]);
+      expect(r1.outcomes[0].status).toBe("accepted");
+      expect(credits.charged()).toBe(1);
+
+      const r2 = await sendSmsBatch([item(2, { content: ucs71, linkTrackingEnabled: false })]);
+      expect(r2.outcomes[0].status).toBe("accepted");
+      expect(credits.charged()).toBe(3); // 1 (first item) + 2 (this one)
+    });
+
+    it("insufficient balance for a multi-segment item fails with 'Saldo insuficiente', nothing sent", async () => {
+      fake.db.reset();
+      credits = installCreditLedger(fake.db, { balance: () => 1 });
+      fake.db.onRpc("consume_channel_budget", (args) => ({
+        data: [{ granted: args.p_n, retry_after_ms: 0, limited_by: null }],
+        error: null,
+      }));
+      const content = "A".repeat(161); // 2 segments, only 1 unit of balance available
+      const r = await sendSmsBatch([item(1, { content, linkTrackingEnabled: false })]);
+      expect(r.outcomes[0]).toMatchObject({
+        status: "failed",
+        ok: false,
+        error: "Saldo insuficiente",
+        // Final fix I3: the campaign tick pauses on this kind.
+        errorKind: "insufficient_balance",
+        retryable: false,
+      });
+      expect(smsCalls).toHaveLength(0);
+      expect(credits.charged()).toBe(0);
+    });
+
+    it("provider rejection refunds under sms-refund:<ref>; the retry reserves generation 1", async () => {
+      settings("block");
+      smsBehaviour = (body) =>
+        Response.json({
+          id: "lote-r",
+          bulk: body.bulk.map((b) => ({
+            parceiroId: b.parceiroId,
+            status: 303,
+            statusDetalhe: "numero invalido",
+          })),
+        });
+      const first = await sendSmsBatch([item(1)]);
+      expect(first.outcomes[0].status).toBe("rejected");
+      expect(
+        credits.ledger().some((l) => l.idempotency_key === `sms-refund:delivery:${key(1)}`),
+      ).toBe(true);
+      expect(credits.charged()).toBe(0);
+
+      smsBehaviour = acceptAll;
+      const second = await sendSmsBatch([item(1)]);
+      expect(second.outcomes[0].status).toBe("accepted");
+      expect(credits.ledger().map((l) => l.idempotency_key)).toContain(
+        `sms-reserve:delivery:${key(1)}:1`,
+      );
+      expect(credits.charged()).toBe(1);
+    });
   });
 });

@@ -1,20 +1,19 @@
 import { useMemo, useState } from "react";
+import { CHANNEL_IDENTITY } from "@/components/identity/identity";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import {
-  ChevronRight,
-  CircleDollarSign,
+  Inbox,
   Info,
   Mail,
   MessageSquare,
+  MoreHorizontal,
   Pause,
+  Pencil,
   Play,
   Plus,
-  Route,
   Search,
-  Send,
-  UsersRound,
   Trash2,
   Zap,
 } from "lucide-react";
@@ -29,20 +28,20 @@ import {
   saveJourneyContactLimits,
   retireLegacyJourney,
   setJourneyExpress,
-  getJourneyActivationEstimate,
-  setJourneyStatus,
 } from "@/lib/journeys.functions";
 import { EXPRESS_JOURNEY_HINT } from "@/lib/journey-express";
+import { ENROLLMENT_STATUS_LABELS } from "@/lib/player-journeys";
 import { JourneyMapCard } from "@/components/journeys/journey-map-card";
+import { useJourneyStatusControl } from "@/components/journeys/journey-status-control";
+import { FlowsTab } from "@/components/ligacoes/flows-tab";
+import { EmptyState } from "@/components/ui-premium/empty-state";
+import { PageTabs } from "@/components/ui-premium/page-tabs";
 import { requestConfirmation } from "@/components/system-dialog-host";
-import {
-  activationAsksEntryScope,
-  defaultEntryScope,
-  type JourneyEntryScope,
-} from "@/lib/journey-policy";
+import { HomeCard, KpiCard } from "@/components/home/home-cards";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
+import { Page, PageHeader } from "@/components/ui-premium/page-header";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -51,10 +50,23 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { TRIGGER_NAMES } from "@/lib/triggers";
+import {
+  JOURNEY_STATUS_LABELS,
+  journeyExitReasonLabel,
+  journeyInProgress,
+  journeyTriggerLabel,
+  priorityPauseReasonLabel,
+} from "@/components/journeys/journey-editor-config";
 
 // Grade A only: direct conversion_attributions (confirmed first-party click,
 // same player, up to 7 days). Operational deposits never appear in journeys.
@@ -101,12 +113,63 @@ type LegacyJourney = {
   journeyId: string | null;
   journeyStatus: Journey["status"] | null;
 };
+type OperationItem = {
+  id: string;
+  status: string;
+  current_position: number;
+  next_run_at: string | null;
+  exit_reason: string | null;
+  priority_paused_at: string | null;
+  priority_pause_reason: string | null;
+  priority_paused_by_journey_name: string | null;
+  journeys: { name: string } | null;
+  players: { nome: string | null } | null;
+};
+
+type HubView = "journeys" | "map" | "queue" | "failures" | "conflicts" | "flows";
+const HUB_VIEWS: ReadonlyArray<{ value: HubView; label: string; hash: string }> = [
+  { value: "journeys", label: "Jornadas", hash: "jornadas" },
+  { value: "map", label: "Mapa", hash: "mapa" },
+  { value: "queue", label: "Fila de envio", hash: "fila" },
+  { value: "failures", label: "Falhas", hash: "falhas" },
+  { value: "conflicts", label: "Conflitos", hash: "conflitos" },
+  { value: "flows", label: "Fluxos de voz", hash: "fluxos-de-voz" },
+];
+
+function viewFromHash(hash: string): HubView {
+  const clean = hash.replace(/^#/, "");
+  return HUB_VIEWS.find((item) => item.hash === clean)?.value ?? "journeys";
+}
+
+const STATUS_FILTERS = [
+  { value: "all", label: "Todas" },
+  { value: "active", label: "Ativas" },
+  { value: "paused", label: "Pausadas" },
+  { value: "draft", label: "Rascunhos" },
+] as const;
+
+const STATUS_BADGE: Record<Journey["status"], string> = {
+  active: "border-success/20 bg-success/15 text-success",
+  paused: "border-warning/20 bg-warning/15 text-warning",
+  draft: "bg-muted text-muted-foreground",
+  archived: "bg-muted text-muted-foreground",
+};
+
+const brl = (value: number) =>
+  value.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+const dateTime = (iso: string) =>
+  new Date(iso).toLocaleString("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 
 export function JourneysHub() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const list = useServerFn(listJourneys);
-  const changeStatus = useServerFn(setJourneyStatus);
   const changeExpress = useServerFn(setJourneyExpress);
   const [expressCandidate, setExpressCandidate] = useState<Journey | null>(null);
   const removeJourney = useServerFn(deleteJourney);
@@ -118,43 +181,26 @@ export function JourneysHub() {
   const saveContactLimitsFn = useServerFn(saveJourneyContactLimits);
   const [filter, setFilter] = useState<"all" | Journey["status"]>("all");
   const [search, setSearch] = useState("");
-  const [view, setView] = useState<"journeys" | "map" | "queue" | "conflicts" | "failures">(
-    "journeys",
-  );
+  // Active tab lives in the URL hash (#jornadas, #mapa, #fila…), pushed to the
+  // history so Voltar returns to the previous tab.
+  const hash = useLocation({ select: (location) => location.hash });
+  const view = viewFromHash(hash);
+  const setView = (next: HubView) => {
+    void navigate({
+      to: "/automacoes",
+      hash: HUB_VIEWS.find((item) => item.value === next)?.hash ?? "jornadas",
+    });
+  };
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
   const [dailyMessageLimit, setDailyMessageLimit] = useState("");
   const [weeklyMessageLimit, setWeeklyMessageLimit] = useState("");
-  const [newOpen, setNewOpen] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [entryMode, setEntryMode] = useState<"event" | "inactivity" | "manual">("event");
-  const [newTrigger, setNewTrigger] = useState("lead_cadastrado");
-  const [inactivityField, setInactivityField] = useState("ultimo_login");
-  const [inactivityHours, setInactivityHours] = useState(168);
-  const create = () => {
-    window.sessionStorage.setItem(
-      "journey-draft",
-      JSON.stringify({
-        name: newName,
-        trigger:
-          entryMode === "manual"
-            ? "manual"
-            : entryMode === "inactivity"
-              ? "inactivity"
-              : newTrigger,
-        entryMode,
-        triggerConfig:
-          entryMode === "inactivity" ? { field: inactivityField, hours: inactivityHours } : {},
-      }),
-    );
-    setNewOpen(false);
-    navigate({ to: "/jornadas/nova" });
-  };
+  const statusControl = useJourneyStatusControl();
   const journeys = useQuery({ queryKey: ["journeys"], queryFn: () => list() });
   const operations = useQuery({
     queryKey: ["journey-operations"],
     queryFn: () => operationsFn(),
-    enabled: view !== "journeys" && view !== "map",
+    enabled: view === "queue" || view === "failures" || view === "conflicts",
   });
   const contactLimits = useQuery({
     queryKey: ["journey-contact-limits"],
@@ -166,53 +212,6 @@ export function JourneysHub() {
     queryFn: () => legacyFn(),
     enabled: Boolean(journeys.data) && view === "journeys",
   });
-  const [pauseCandidate, setPauseCandidate] = useState<{
-    id: string;
-    name: string;
-    inProgress: number;
-  } | null>(null);
-  const [closeOnPause, setCloseOnPause] = useState(false);
-  const [publishCandidate, setPublishCandidate] = useState<{
-    id: string;
-    name: string;
-  } | null>(null);
-  const [entryScope, setEntryScope] = useState<JourneyEntryScope>("new_only");
-  const estimateFn = useServerFn(getJourneyActivationEstimate);
-  const estimate = useQuery({
-    queryKey: ["journey-activation-estimate", publishCandidate?.id],
-    queryFn: () => estimateFn({ data: { id: publishCandidate!.id } }),
-    enabled: Boolean(publishCandidate),
-    staleTime: 60_000,
-  });
-  const status = useMutation({
-    mutationFn: (input: {
-      id: string;
-      status: Journey["status"];
-      entryScope?: JourneyEntryScope;
-      closeEnrollments?: boolean;
-    }) => changeStatus({ data: input }),
-    onSuccess: async (result, variables) => {
-      await queryClient.invalidateQueries({ queryKey: ["journeys"] });
-      setPauseCandidate(null);
-      setPublishCandidate(null);
-      toast.success(
-        variables.status === "active"
-          ? "Jornada publicada"
-          : result.closed
-            ? `Jornada desligada · ${result.closed} jogador(es) saíram da jornada`
-            : "Jornada desligada",
-      );
-    },
-    onError: (error: Error) => toast.error(error.message),
-  });
-  const requestPublish = (journey: { id: string; name: string; trigger_type: string }) => {
-    if (!activationAsksEntryScope(journey.trigger_type)) {
-      status.mutate({ id: journey.id, status: "active" });
-      return;
-    }
-    setEntryScope(defaultEntryScope(journey.trigger_type));
-    setPublishCandidate({ id: journey.id, name: journey.name });
-  };
   const express = useMutation({
     mutationFn: (input: { id: string; express: boolean }) => changeExpress({ data: input }),
     onSuccess: async (result) => {
@@ -221,7 +220,7 @@ export function JourneysHub() {
       toast.success(
         result.express
           ? result.requeued > 0
-            ? `Envio imediato ligado. ${result.requeued} lead(s) adiado(s) voltaram para a fila.`
+            ? `Envio imediato ligado. ${result.requeued} jogador(es) adiado(s) voltaram para a fila.`
             : "Envio imediato ligado."
           : "Envio imediato desligado.",
       );
@@ -286,506 +285,348 @@ export function JourneysHub() {
     setWeeklyMessageLimit(result.data?.max7d?.toString() ?? "");
     setSettingsOpen(true);
   };
+  const allJourneys = useMemo(
+    () => (journeys.data?.journeys ?? []) as Journey[],
+    [journeys.data?.journeys],
+  );
   const rows = useMemo(
     () =>
-      ((journeys.data?.journeys ?? []) as Journey[]).filter(
+      allJourneys.filter(
         (journey) =>
           (filter === "all" || journey.status === filter) &&
-          `${journey.name} ${journey.trigger_type}`.toLowerCase().includes(search.toLowerCase()),
+          `${journey.name} ${journeyTriggerLabel(journey.trigger_type, journey.trigger_config)}`
+            .toLowerCase()
+            .includes(search.toLowerCase()),
       ),
-    [journeys.data?.journeys, filter, search],
+    [allJourneys, filter, search],
   );
-  const overview = useMemo(() => {
-    const all = (journeys.data?.journeys ?? []) as Journey[];
-    return all.reduce(
-      (total, journey) => {
-        const metrics = journey.metrics ?? {};
-        total.recovered += Number(metrics.recovered ?? 0);
-        total.sent += Object.values(metrics.sentByChannel ?? {}).reduce(
-          (sum, value) => sum + Number(value),
-          0,
-        );
-        total.queued +=
-          Number(metrics.byStatus?.active ?? 0) +
-          Number(metrics.byStatus?.waiting ?? 0) +
-          Number(metrics.byStatus?.paused_by_priority ?? 0);
-        return total;
-      },
-      { recovered: 0, sent: 0, queued: 0 },
-    );
-  }, [journeys.data?.journeys]);
+  const overview = useMemo(
+    () =>
+      allJourneys.reduce(
+        (total, journey) => {
+          const metrics = journey.metrics ?? {};
+          total.recovered += Number(metrics.recovered ?? 0);
+          total.sent += Object.values(metrics.sentByChannel ?? {}).reduce(
+            (sum, value) => sum + Number(value),
+            0,
+          );
+          total.queued += journeyInProgress(metrics.byStatus);
+          if (journey.status === "active") total.active += 1;
+          return total;
+        },
+        { recovered: 0, sent: 0, queued: 0, active: 0 },
+      ),
+    [allJourneys],
+  );
+  const operationItems = ((operations.data?.items ?? []) as OperationItem[]).filter((item) =>
+    view === "failures"
+      ? item.status === "failed"
+      : view === "conflicts"
+        ? item.status === "paused_by_priority"
+        : item.status !== "failed" && item.status !== "paused_by_priority",
+  );
+  const pausedByPriority = Number(operations.data?.summary?.pausedByPriority ?? 0);
+
+  const confirmExpressOff = async (journey: Journey) => {
+    const confirmed = await requestConfirmation({
+      title: "Desligar o envio imediato?",
+      description: `A jornada “${journey.name}” volta a respeitar o intervalo entre jornadas, os limites de mensagens por pessoa e a prioridade. Envios podem passar a ser adiados.`,
+      confirmLabel: "Desligar envio imediato",
+    });
+    if (confirmed) express.mutate({ id: journey.id, express: false });
+  };
+  const confirmDelete = async (journey: Journey) => {
+    const confirmed = await requestConfirmation({
+      title: "Excluir jornada?",
+      description: `A jornada “${journey.name}” será excluída. Esta ação não pode ser desfeita.`,
+      confirmLabel: "Excluir jornada",
+      destructive: true,
+    });
+    if (confirmed) remove.mutate(journey.id);
+  };
+  const confirmRetire = async (item: LegacyJourney) => {
+    const confirmed = await requestConfirmation({
+      title: "Desativar a automação legada?",
+      description: `A automação de ${item.channel === "sms" ? "SMS" : "e-mail"} “${item.name}” para de enviar agora. Os envios passam a sair só pela jornada convertida, que já está ativa.`,
+      confirmLabel: "Desativar legado",
+      destructive: true,
+    });
+    if (confirmed) retire.mutate({ sourceType: item.sourceType, sourceId: item.sourceId });
+  };
+
   return (
-    <div className="mx-auto w-full max-w-[1480px] space-y-6 p-4 sm:p-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary">Automações</p>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight sm:text-4xl">Jornadas</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Sequências individuais que combinam SMS, e-mail e voz com esperas e regras de saída.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => toast.message("Importacao de modelo em breve.")}>
-            Importar modelo
+    <Page>
+      <PageHeader
+        subtitle="Jornadas entram por gatilho e seguem jogador a jogador, com SMS, e-mail, voz e esperas."
+        actions={
+          <Button asChild>
+            <Link to="/jornadas/nova">
+              <Plus className="mr-2 h-4 w-4" aria-hidden="true" /> Nova jornada
+            </Link>
           </Button>
-          <Button onClick={() => setNewOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" /> Nova jornada
-          </Button>
-        </div>
-      </div>
-      {/* Period selector (Hoje/7/30 dias) hidden: list_journey_metrics has no
-          date filter, so totals below are all-time. Restore with REP-02. */}
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <OverviewCard
-          icon={CircleDollarSign}
-          label="Recuperado atribuído"
-          value={overview.recovered.toLocaleString("pt-BR", {
-            style: "currency",
-            currency: "BRL",
-            maximumFractionDigits: 0,
-          })}
-          detail={ATTRIBUTED_RECOVERY_HINT}
-          color="emerald"
-        />
-        <OverviewCard
-          icon={Send}
-          label="Mensagens enviadas"
-          value={overview.sent.toLocaleString("pt-BR")}
-          detail="Desde o início, todos os canais"
-          color="blue"
-        />
-        <OverviewCard
-          icon={UsersRound}
-          label="Em andamento"
-          value={overview.queued.toLocaleString("pt-BR")}
-          detail="Ativos, aguardando ou pausados por prioridade"
-          color="cyan"
-        />
-        <OverviewCard
-          icon={Route}
-          label="Jornadas ativas"
-          value={((journeys.data?.journeys ?? []) as Journey[])
-            .filter((journey) => journey.status === "active")
-            .length.toLocaleString("pt-BR")}
-          detail="Em execucao neste momento"
-          color="slate"
-        />
-      </div>
-      <Card className="border-primary/20 bg-primary/[0.03]">
-        <CardContent className="flex gap-3 p-4 text-sm text-muted-foreground">
-          <Route className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
-          <span>
-            Campanhas são disparos pontuais. Jornadas entram por gatilho e avançam pessoa a pessoa.
-            Etapas de voz usam um áudio ativo da biblioteca da tenant.
-          </span>
-        </CardContent>
-      </Card>
-      <div className="flex flex-wrap gap-2">
-        {(["all", "draft", "active", "paused"] as const).map((item) => (
-          <Button
-            key={item}
-            size="sm"
-            variant={filter === item ? "default" : "outline"}
-            onClick={() => setFilter(item)}
-          >
-            {item === "all" ? "Todas" : labels[item]}
-          </Button>
-        ))}
-      </div>
+        }
+      />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="inline-flex rounded-lg bg-muted p-1 text-sm">
-          <button
-            className={
-              view === "journeys"
-                ? "rounded-md bg-background px-3 py-2 font-medium shadow-sm"
-                : "px-3 py-2 text-muted-foreground"
-            }
-            onClick={() => setView("journeys")}
-          >
-            Jornadas
-          </button>
-          <button
-            className={
-              view === "map"
-                ? "rounded-md bg-background px-3 py-2 font-medium shadow-sm"
-                : "px-3 py-2 text-muted-foreground"
-            }
-            onClick={() => setView("map")}
-          >
-            Mapa
-          </button>
-          <button
-            className={
-              view === "queue"
-                ? "rounded-md bg-background px-3 py-2 font-medium shadow-sm"
-                : "px-3 py-2 text-muted-foreground"
-            }
-            onClick={() => setView("queue")}
-          >
-            Fila de envio
-          </button>
-          <button
-            className={
-              view === "failures"
-                ? "rounded-md bg-background px-3 py-2 font-medium shadow-sm"
-                : "px-3 py-2 text-muted-foreground"
-            }
-            onClick={() => setView("failures")}
-          >
-            Falhas
-          </button>
-          <button
-            className={
-              view === "conflicts"
-                ? "rounded-md bg-background px-3 py-2 font-medium shadow-sm"
-                : "px-3 py-2 text-muted-foreground"
-            }
-            onClick={() => setView("conflicts")}
-          >
-            Conflitos
-            {Number(operations.data?.summary?.pausedByPriority ?? 0) > 0 && (
-              <span className="ml-1.5 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-xs text-amber-700">
-                {operations.data?.summary?.pausedByPriority}
-              </span>
+        <PageTabs
+          value={view}
+          onValueChange={setView}
+          label="Seções de Automações"
+          items={HUB_VIEWS.map((item) => ({
+            value: item.value,
+            label:
+              item.value === "conflicts" && pausedByPriority > 0
+                ? `${item.label} (${pausedByPriority.toLocaleString("pt-BR")})`
+                : item.label,
+          }))}
+        />
+        {view !== "flows" && view !== "map" && (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => void openContactSettings()}>
+              Limites de contato
+            </Button>
+            {view === "journeys" && (
+              <Button variant="outline" size="sm" onClick={() => setInfoOpen(true)}>
+                Como contamos
+              </Button>
             )}
-          </button>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => void openContactSettings()}>
-            Configuracoes
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setInfoOpen(true)}>
-            Informacoes
-          </Button>
-          <label className="relative block">
-            <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-            <input
-              className="h-10 w-full rounded-md border bg-background pl-9 pr-3 text-sm sm:w-72"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Buscar jornada..."
-            />
-          </label>
-        </div>
+          </div>
+        )}
       </div>
-      {view !== "journeys" && view !== "map" && (
-        <Card>
-          <CardHeader>
-            <CardTitle>
-              {view === "queue"
-                ? "Fila de envio"
-                : view === "conflicts"
-                  ? "Conflitos e pausas"
-                  : "Falhas"}
-            </CardTitle>
-            <CardDescription>
-              {
-                (operations.data?.items ?? []).filter((item: { status: string }) =>
-                  view === "failures"
-                    ? item.status === "failed"
-                    : view === "conflicts"
-                      ? item.status === "paused_by_priority"
-                      : item.status !== "failed" && item.status !== "paused_by_priority",
-                ).length
-              }{" "}
-              registro(s)
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {(operations.data?.items ?? [])
-              .filter((item: { status: string }) =>
-                view === "failures"
-                  ? item.status === "failed"
-                  : view === "conflicts"
-                    ? item.status === "paused_by_priority"
-                    : item.status !== "failed" && item.status !== "paused_by_priority",
-              )
-              .map(
-                (item: {
-                  id: string;
-                  status: string;
-                  current_position: number;
-                  next_run_at: string | null;
-                  exit_reason: string | null;
-                  priority_paused_at: string | null;
-                  priority_pause_reason: string | null;
-                  priority_paused_by_journey_name: string | null;
-                  journeys: { name: string } | null;
-                  players: { nome: string | null } | null;
-                }) => (
-                  <div key={item.id} className="rounded-lg border p-3 text-sm">
-                    <b>
-                      {item.players?.nome ?? "Jogador"} · {item.journeys?.name ?? "Jornada"}
-                    </b>
-                    <p className="mt-1 text-muted-foreground">
-                      Etapa {item.current_position + 1}
-                      {item.next_run_at
-                        ? ` · ${new Date(item.next_run_at).toLocaleString("pt-BR")}`
-                        : ""}
-                      {item.exit_reason ? ` · ${item.exit_reason}` : ""}
-                    </p>
-                    {item.status === "paused_by_priority" && (
-                      <p className="mt-1 text-amber-700 dark:text-amber-400">
-                        Pausada por prioridade
-                        {item.priority_paused_by_journey_name
-                          ? `: ${item.priority_paused_by_journey_name} venceu a disputa.`
-                          : ". Aguardando o fim da jornada vencedora."}
-                        {item.priority_paused_at
-                          ? ` ${new Date(item.priority_paused_at).toLocaleString("pt-BR")}`
-                          : ""}
-                      </p>
-                    )}
-                  </div>
-                ),
-              )}
-          </CardContent>
-        </Card>
+      {view === "journeys" && (
+        <>
+          {/* Period selector (Hoje/7/30 dias) hidden: list_journey_metrics has no
+              date filter, so totals below are all-time. Restore with REP-02. */}
+          <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+            <KpiCard
+              title="Recuperado pelo CRM"
+              value={brl(overview.recovered)}
+              detail={ATTRIBUTED_RECOVERY_HINT}
+            />
+            <KpiCard
+              title="Mensagens enviadas"
+              value={overview.sent.toLocaleString("pt-BR")}
+              detail="Desde o início, todos os canais"
+            />
+            <KpiCard
+              title="Em andamento"
+              value={overview.queued.toLocaleString("pt-BR")}
+              detail="Jogadores dentro das jornadas agora"
+            />
+            <KpiCard
+              title="Jornadas ativas"
+              value={overview.active.toLocaleString("pt-BR")}
+              detail={`de ${allJourneys.length.toLocaleString("pt-BR")} jornada(s)`}
+            />
+          </div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div
+              role="group"
+              aria-label="Filtrar por status"
+              className="flex w-fit max-w-full gap-0.5 overflow-x-auto rounded-xl border border-border bg-card p-[3px] [scrollbar-width:none]"
+            >
+              {STATUS_FILTERS.map((item) => (
+                <button
+                  key={item.value}
+                  type="button"
+                  aria-pressed={filter === item.value}
+                  onClick={() => setFilter(item.value)}
+                  className={
+                    filter === item.value
+                      ? "h-9 shrink-0 rounded-lg bg-secondary px-3 text-[13px] font-medium text-foreground"
+                      : "h-9 shrink-0 rounded-lg px-3 text-[13px] font-medium text-muted-foreground hover:text-foreground"
+                  }
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+            <div className="relative sm:w-72">
+              <Label htmlFor="journey-search" className="sr-only">
+                Buscar jornada
+              </Label>
+              <Search
+                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+                aria-hidden="true"
+              />
+              <Input
+                id="journey-search"
+                className="h-10 pl-9"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Buscar por nome ou gatilho"
+              />
+            </div>
+          </div>
+          <HomeCard className="overflow-hidden">
+            <div className="flex items-baseline justify-between gap-3 border-b border-border px-4 py-3 sm:px-5">
+              <h2 className="text-section">Jornadas</h2>
+              <span className="text-meta text-muted-foreground">
+                {rows.length.toLocaleString("pt-BR")} encontrada(s)
+              </span>
+            </div>
+            {journeys.isLoading ? (
+              <p className="py-8 text-center text-body text-muted-foreground">
+                Carregando jornadas…
+              </p>
+            ) : rows.length === 0 ? (
+              <EmptyState
+                icon={<Inbox />}
+                title={allJourneys.length ? "Nenhuma jornada nesta visão" : "Nenhuma jornada ainda"}
+                description={
+                  allJourneys.length
+                    ? "Mude o filtro ou a busca para ver outras jornadas."
+                    : "Crie a primeira jornada para falar com os jogadores no momento certo."
+                }
+                action={
+                  allJourneys.length ? undefined : (
+                    <Button asChild size="sm">
+                      <Link to="/jornadas/nova">
+                        <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Nova jornada
+                      </Link>
+                    </Button>
+                  )
+                }
+              />
+            ) : (
+              <ul className="divide-y divide-border">
+                {rows.map((journey) => (
+                  <JourneyRow
+                    key={journey.id}
+                    journey={journey}
+                    busy={statusControl.isPending}
+                    expressBusy={express.isPending}
+                    removeBusy={remove.isPending}
+                    onActivate={() => statusControl.requestActivate(journey)}
+                    onPause={() =>
+                      statusControl.requestPause({
+                        id: journey.id,
+                        name: journey.name,
+                        inProgress: journeyInProgress(journey.metrics?.byStatus),
+                      })
+                    }
+                    onExpress={() =>
+                      journey.express
+                        ? void confirmExpressOff(journey)
+                        : setExpressCandidate(journey)
+                    }
+                    onDelete={() => void confirmDelete(journey)}
+                  />
+                ))}
+              </ul>
+            )}
+          </HomeCard>
+        </>
       )}
+      {(view === "queue" || view === "failures" || view === "conflicts") && (
+        <HomeCard className="overflow-hidden">
+          <div className="border-b border-border px-4 py-3 sm:px-5">
+            <div className="flex items-baseline justify-between gap-3">
+              <h2 className="text-section">
+                {view === "queue" ? "Fila de envio" : view === "conflicts" ? "Conflitos" : "Falhas"}
+              </h2>
+              <span className="text-meta text-muted-foreground">
+                {operationItems.length.toLocaleString("pt-BR")} registro(s)
+              </span>
+            </div>
+            <p className="mt-0.5 text-[12.5px] text-muted-foreground">
+              {view === "queue"
+                ? "Jogadores dentro de uma jornada, aguardando a próxima etapa."
+                : view === "conflicts"
+                  ? "Jogadores pausados porque outra jornada de maior prioridade está falando com eles."
+                  : "Jogadores cujo envio falhou depois de todas as tentativas."}
+            </p>
+          </div>
+          {operations.isLoading ? (
+            <p className="py-8 text-center text-body text-muted-foreground">Carregando…</p>
+          ) : operationItems.length === 0 ? (
+            <EmptyState
+              icon={<Inbox />}
+              title={
+                view === "queue"
+                  ? "Fila de envio vazia"
+                  : view === "conflicts"
+                    ? "Nenhum conflito agora"
+                    : "Nenhuma falha registrada"
+              }
+              description={
+                view === "queue"
+                  ? "Nenhum jogador aguardando envio nas jornadas."
+                  : view === "conflicts"
+                    ? "Nenhum jogador pausado por prioridade entre jornadas."
+                    : "Nenhum envio de jornada falhou."
+              }
+            />
+          ) : (
+            <ul className="divide-y divide-border">
+              {operationItems.map((item) => (
+                <OperationRow key={item.id} item={item} />
+              ))}
+            </ul>
+          )}
+        </HomeCard>
+      )}
+      {view === "flows" && <FlowsTab />}
       {view === "map" && (
         <JourneyMapCard
-          journeys={((journeys.data?.journeys ?? []) as Journey[]).map((journey) => ({
+          journeys={allJourneys.map((journey) => ({
             ...journey,
-            inProgress:
-              Number(journey.metrics?.byStatus?.active ?? 0) +
-              Number(journey.metrics?.byStatus?.waiting ?? 0) +
-              Number(journey.metrics?.byStatus?.paused_by_priority ?? 0),
+            inProgress: journeyInProgress(journey.metrics?.byStatus),
           }))}
         />
       )}
-      {view === "journeys" && (
-        <Card className="overflow-hidden">
-          <CardHeader className="border-b">
-            <CardTitle>Jornadas</CardTitle>
-            <CardDescription>{rows.length} encontrada(s)</CardDescription>
-          </CardHeader>
-          <CardContent className="p-0">
-            {journeys.isLoading ? (
-              <p className="py-8 text-center text-sm text-muted-foreground">Carregando jornadas…</p>
-            ) : rows.length === 0 ? (
-              <div className="rounded-lg border border-dashed py-10 text-center text-sm text-muted-foreground">
-                Nenhuma jornada nesta visão.
-              </div>
-            ) : (
-              rows.map((journey) => {
-                const steps = journey.journey_steps
-                  .filter((step) => step.is_enabled && step.step_type !== "end")
-                  .sort((a, b) => a.position - b.position);
-                const metrics = journey.metrics ?? {};
-                // Leads enter the moment they qualify (ENV-09), so there is no
-                // "eligible but waiting" pool: everyone inside is in progress.
-                const inProgress =
-                  Number(metrics.byStatus?.active ?? 0) +
-                  Number(metrics.byStatus?.waiting ?? 0) +
-                  Number(metrics.byStatus?.paused_by_priority ?? 0);
-                const finished =
-                  Number(metrics.byStatus?.completed ?? 0) + Number(metrics.byStatus?.exited ?? 0);
-                const sent = Object.values(metrics.sentByChannel ?? {}).reduce(
-                  (total, value) => total + Number(value),
-                  0,
-                );
-                return (
-                  <div
-                    key={journey.id}
-                    className="grid gap-4 border-b p-5 last:border-b-0 xl:grid-cols-[minmax(16rem,1fr)_auto_auto] xl:items-center xl:gap-6"
-                  >
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="truncate font-semibold">{journey.name}</p>
-                        <Badge
-                          variant="outline"
-                          className={
-                            journey.status === "active"
-                              ? "border-emerald-500/20 bg-emerald-500/15 text-emerald-500"
-                              : "bg-muted text-muted-foreground"
-                          }
-                        >
-                          {labels[journey.status].toLowerCase()}
-                        </Badge>
-                        {journey.ends_at && (
-                          <Badge variant="outline" className="bg-muted text-muted-foreground">
-                            {Date.parse(journey.ends_at) <= Date.now()
-                              ? "encerrada em "
-                              : "encerra em "}
-                            {new Date(journey.ends_at).toLocaleDateString("pt-BR", {
-                              timeZone: "America/Sao_Paulo",
-                            })}
-                          </Badge>
-                        )}
-                        {journey.express && (
-                          <Badge
-                            variant="outline"
-                            className="gap-1 border-amber-500/30 bg-amber-500/15 text-amber-600 dark:text-amber-400"
-                            title={EXPRESS_JOURNEY_HINT}
-                          >
-                            <Zap className="h-3 w-3" aria-hidden="true" /> Envio imediato
-                          </Badge>
-                        )}
-                      </div>
-                      <p className="mt-1 truncate text-xs text-muted-foreground">
-                        {TRIGGER_NAMES[journey.trigger_type as keyof typeof TRIGGER_NAMES] ??
-                          journey.trigger_type}
-                      </p>
-                      <JourneyStepSummary steps={steps} />
-                    </div>
-                    <div className="grid grid-cols-2 gap-x-7 gap-y-3 sm:grid-cols-4">
-                      <JourneyMetric
-                        label="Em andamento"
-                        hint="Leads dentro da jornada agora: aguardando a próxima etapa, a janela de envio ou pausados por prioridade."
-                        value={inProgress.toLocaleString("pt-BR")}
-                      />
-                      <JourneyMetric
-                        label="Concluíram"
-                        hint="Leads que terminaram a jornada ou saíram dela (por exemplo, ao depositar)."
-                        value={finished.toLocaleString("pt-BR")}
-                      />
-                      <JourneyMetric label="Enviados" value={sent.toLocaleString("pt-BR")} />
-                      <JourneyMetric
-                        label="Recuperado atribuído"
-                        hint={ATTRIBUTED_RECOVERY_HINT}
-                        value={Number(metrics.recovered ?? 0).toLocaleString("pt-BR", {
-                          style: "currency",
-                          currency: "BRL",
-                          maximumFractionDigits: 0,
-                        })}
-                        accent
-                      />
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2 xl:justify-end">
-                      <TooltipProvider delayDuration={150}>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <label className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border px-2 text-xs font-medium">
-                              <Zap
-                                className={
-                                  journey.express
-                                    ? "h-3.5 w-3.5 text-amber-500"
-                                    : "h-3.5 w-3.5 text-muted-foreground"
-                                }
-                                aria-hidden="true"
-                              />
-                              Envio imediato
-                              <Switch
-                                checked={Boolean(journey.express)}
-                                disabled={express.isPending}
-                                aria-label={`Envio imediato (fura fila) na jornada ${journey.name}`}
-                                onCheckedChange={(checked) => {
-                                  if (checked) setExpressCandidate(journey);
-                                  else express.mutate({ id: journey.id, express: false });
-                                }}
-                              />
-                            </label>
-                          </TooltipTrigger>
-                          <TooltipContent className="max-w-xs whitespace-normal text-left">
-                            {EXPRESS_JOURNEY_HINT}
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                      <Button asChild variant="outline" size="sm">
-                        <Link to="/jornadas/$journeyId" params={{ journeyId: journey.id }}>
-                          Editar
-                        </Link>
-                      </Button>
-                      <Button asChild variant="outline" size="sm">
-                        <Link
-                          to="/jornadas/$journeyId/relatorio"
-                          params={{ journeyId: journey.id }}
-                        >
-                          Ver relatório
-                        </Link>
-                      </Button>
-                      {journey.status === "active" ? (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          disabled={status.isPending}
-                          onClick={() => {
-                            setCloseOnPause(false);
-                            setPauseCandidate({ id: journey.id, name: journey.name, inProgress });
-                          }}
-                        >
-                          <Pause className="mr-1 h-4 w-4" /> Desligar
-                        </Button>
-                      ) : (
-                        <Button
-                          size="sm"
-                          disabled={status.isPending || journey.status === "archived"}
-                          onClick={() => requestPublish(journey)}
-                        >
-                          <Play className="mr-1 h-4 w-4" /> Publicar
-                        </Button>
-                      )}
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                        aria-label={`Excluir a jornada ${journey.name}`}
-                        title="Excluir"
-                        disabled={remove.isPending}
-                        onClick={async () => {
-                          const confirmed = await requestConfirmation({
-                            title: "Excluir jornada?",
-                            description: `A jornada “${journey.name}” será excluída. Esta ação não pode ser desfeita.`,
-                            confirmLabel: "Excluir jornada",
-                            destructive: true,
-                          });
-                          if (confirmed) remove.mutate(journey.id);
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4" aria-hidden="true" />
-                      </Button>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </CardContent>
-        </Card>
-      )}
       {view === "journeys" && ((legacy.data?.items ?? []).length > 0 || legacy.isLoading) && (
-        <Card id="legado" className="border-dashed">
-          <CardHeader>
+        <HomeCard className="overflow-hidden border-dashed">
+          <div id="legado" className="border-b border-border px-4 py-3 sm:px-5">
             <div className="flex flex-wrap items-center gap-2">
-              <CardTitle>Automações legadas</CardTitle>
-              <Badge variant="outline">compatibilidade temporária</Badge>
+              <h2 className="text-section">Automações legadas</h2>
+              <Badge variant="outline">Compatibilidade temporária</Badge>
             </div>
-            <CardDescription>
-              Plano de desativação: converter, revisar o rascunho, publicar a jornada e só então
-              desligar a origem. Novas criações acontecem exclusivamente como jornadas.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {legacy.isLoading ? (
-              <p className="text-sm text-muted-foreground">Carregando itens legados…</p>
-            ) : (
-              (legacy.data?.items ?? []).map((item: LegacyJourney) => (
-                <div
+            <p className="mt-0.5 text-[12.5px] text-muted-foreground">
+              Converta, revise o rascunho, ative a jornada e só então desative a origem. Novas
+              automações são criadas sempre como jornadas.
+            </p>
+          </div>
+          {legacy.isLoading ? (
+            <p className="px-4 py-6 text-body text-muted-foreground sm:px-5">
+              Carregando itens legados…
+            </p>
+          ) : (
+            <ul className="divide-y divide-border">
+              {(legacy.data?.items ?? []).map((item: LegacyJourney) => (
+                <li
                   key={`${item.sourceType}:${item.sourceId}`}
-                  className="flex flex-col gap-3 rounded-lg border p-4 lg:flex-row lg:items-center"
+                  className="flex flex-col gap-3 px-4 py-3 sm:px-5 lg:flex-row lg:items-center"
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       {item.channel === "sms" ? (
-                        <MessageSquare className="h-4 w-4 text-primary" />
+                        <MessageSquare
+                          className="h-4 w-4 text-muted-foreground"
+                          aria-hidden="true"
+                        />
                       ) : (
-                        <Mail className="h-4 w-4 text-primary" />
+                        <Mail className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
                       )}
                       <p className="font-medium">{item.name}</p>
-                      <Badge variant="outline">Legado</Badge>
-                      <Badge variant={item.active ? "default" : "secondary"}>
-                        {item.active ? "Em execução" : "Desligada"}
+                      <Badge
+                        variant="outline"
+                        className={item.active ? STATUS_BADGE.active : STATUS_BADGE.draft}
+                      >
+                        {item.active ? "Ativa" : "Desativada"}
                       </Badge>
-                      {item.journeyId && <Badge variant="secondary">Convertida</Badge>}
-                      {!item.active && item.journeyId && (
-                        <Badge variant="secondary">Migração concluída</Badge>
+                      {item.journeyId && (
+                        <Badge variant="outline" className="bg-muted text-muted-foreground">
+                          {item.active ? "Convertida" : "Migração concluída"}
+                        </Badge>
                       )}
                     </div>
-                    <p className="mt-1 text-xs text-muted-foreground">
+                    <p className="mt-1 text-[12.5px] text-muted-foreground">
                       {item.channel === "sms" ? "SMS" : "E-mail"} · entrada {item.trigger}
                     </p>
                   </div>
                   {item.journeyId ? (
                     <div className="flex flex-wrap gap-2">
-                      <Button asChild size="sm" variant="outline">
+                      <Button asChild size="sm" variant="outline" className="h-11 md:h-9">
                         <Link to="/jornadas/$journeyId" params={{ journeyId: item.journeyId }}>
                           Abrir jornada
                         </Link>
@@ -793,11 +634,10 @@ export function JourneysHub() {
                       {item.active && item.journeyStatus === "active" && (
                         <Button
                           size="sm"
-                          variant="destructive"
+                          variant="outline"
+                          className="h-11 text-destructive hover:text-destructive md:h-9"
                           disabled={retire.isPending}
-                          onClick={() =>
-                            retire.mutate({ sourceType: item.sourceType, sourceId: item.sourceId })
-                          }
+                          onClick={() => void confirmRetire(item)}
                         >
                           Desativar legado
                         </Button>
@@ -807,6 +647,7 @@ export function JourneysHub() {
                     <Button
                       size="sm"
                       variant="outline"
+                      className="h-11 md:h-9"
                       disabled={convert.isPending}
                       onClick={() =>
                         convert.mutate({ sourceType: item.sourceType, sourceId: item.sourceId })
@@ -815,12 +656,13 @@ export function JourneysHub() {
                       Converter em jornada
                     </Button>
                   )}
-                </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
+                </li>
+              ))}
+            </ul>
+          )}
+        </HomeCard>
       )}
+      {statusControl.dialogs}
       <Dialog
         open={expressCandidate !== null}
         onOpenChange={(open) => {
@@ -830,7 +672,7 @@ export function JourneysHub() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Zap className="h-4 w-4 text-amber-500" aria-hidden="true" /> Ligar envio imediato?
+              <Zap className="h-4 w-4 text-warning" aria-hidden="true" /> Ligar envio imediato?
             </DialogTitle>
             <DialogDescription>
               {expressCandidate ? `Jornada “${expressCandidate.name}”.` : null}
@@ -842,8 +684,8 @@ export function JourneysHub() {
               <li>Passa na frente das outras jornadas na fila de envio.</li>
               <li>Continua respeitando o limite diário da própria jornada e a reentrada.</li>
               <li>
-                Leads desta jornada que foram adiados pelo intervalo entre jornadas ou por limite
-                global voltam para a fila agora.
+                Jogadores desta jornada que foram adiados pelo intervalo entre jornadas ou por
+                limite global voltam para a fila agora.
               </li>
             </ul>
             <p>Use só em jornadas urgentes, como saque pago ou PIX gerado.</p>
@@ -867,202 +709,46 @@ export function JourneysHub() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      <Dialog
-        open={pauseCandidate !== null}
-        onOpenChange={(open) => !open && setPauseCandidate(null)}
-      >
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Desligar “{pauseCandidate?.name}”</DialogTitle>
-            <DialogDescription>
-              {pauseCandidate?.inProgress
-                ? `${pauseCandidate.inProgress.toLocaleString("pt-BR")} jogador(es) estão nesta jornada agora. Nenhuma mensagem sai enquanto ela estiver desligada.`
-                : "Ninguém está nesta jornada agora."}
-            </DialogDescription>
-          </DialogHeader>
-          {Boolean(pauseCandidate?.inProgress) && (
-            <fieldset className="space-y-3 text-sm">
-              <legend className="sr-only">O que fazer com quem está na jornada</legend>
-              <label className="flex cursor-pointer gap-3 rounded-lg border p-3">
-                <input
-                  type="radio"
-                  name="pause-mode"
-                  checked={!closeOnPause}
-                  onChange={() => setCloseOnPause(false)}
-                />
-                <span>
-                  <span className="font-medium">Manter os jogadores</span>
-                  <span className="block text-muted-foreground">
-                    Ao republicar, cada um continua de onde parou. Etapas atrasadas respeitam o
-                    limite de mensagens por pessoa.
-                  </span>
-                </span>
-              </label>
-              <label className="flex cursor-pointer gap-3 rounded-lg border p-3">
-                <input
-                  type="radio"
-                  name="pause-mode"
-                  checked={closeOnPause}
-                  onChange={() => setCloseOnPause(true)}
-                />
-                <span>
-                  <span className="font-medium">Encerrar a participação de todos</span>
-                  <span className="block text-muted-foreground">
-                    Todos saem da jornada agora. Ao republicar, só entra quem cumprir o gatilho de
-                    novo.
-                  </span>
-                </span>
-              </label>
-            </fieldset>
-          )}
-          <DialogFooter>
-            <Button
-              variant="outline"
-              disabled={status.isPending}
-              onClick={() => setPauseCandidate(null)}
-            >
-              Cancelar
-            </Button>
-            <Button
-              variant={closeOnPause ? "destructive" : "default"}
-              disabled={status.isPending || !pauseCandidate}
-              onClick={() =>
-                pauseCandidate &&
-                status.mutate({
-                  id: pauseCandidate.id,
-                  status: "paused",
-                  closeEnrollments: closeOnPause,
-                })
-              }
-            >
-              <Pause className="mr-1 h-4 w-4" aria-hidden="true" />
-              {closeOnPause ? "Desligar e encerrar" : "Desligar"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      <Dialog
-        open={publishCandidate !== null}
-        onOpenChange={(open) => !open && setPublishCandidate(null)}
-      >
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Publicar “{publishCandidate?.name}”</DialogTitle>
-            <DialogDescription>Quem pode entrar nesta jornada?</DialogDescription>
-          </DialogHeader>
-          <fieldset className="space-y-3 text-sm">
-            <legend className="sr-only">Quem pode entrar</legend>
-            <label className="flex cursor-pointer gap-3 rounded-lg border p-3">
-              <input
-                type="radio"
-                name="entry-scope"
-                checked={entryScope === "new_only"}
-                onChange={() => setEntryScope("new_only")}
-              />
-              <span>
-                <span className="font-medium">Só casos novos, a partir de agora</span>
-                <span className="block text-muted-foreground">
-                  Ninguém da base atual entra. Quem já estava na jornada sai na próxima verificação.
-                </span>
-              </span>
-            </label>
-            <label className="flex cursor-pointer gap-3 rounded-lg border p-3">
-              <input
-                type="radio"
-                name="entry-scope"
-                checked={entryScope === "include_base"}
-                onChange={() => setEntryScope("include_base")}
-              />
-              <span>
-                <span className="font-medium">Incluir a base atual</span>
-                <span className="block text-muted-foreground">
-                  Jogadores que já cumprem o gatilho entram nos próximos minutos e recebem o
-                  primeiro passo, dentro do limite de mensagens por pessoa.
-                </span>
-                {estimate.isLoading ? (
-                  <span className="mt-1 block text-xs text-muted-foreground">
-                    Calculando o impacto…
-                  </span>
-                ) : estimate.data?.supported && estimate.data.eligible != null ? (
-                  <span className="mt-1 block text-xs font-medium">
-                    ≈ {estimate.data.eligible.toLocaleString("pt-BR")} jogador(es) entram agora · 1º
-                    envio ≈{" "}
-                    {(estimate.data.firstSendCost ?? 0).toLocaleString("pt-BR", {
-                      style: "currency",
-                      currency: "BRL",
-                    })}
-                    {estimate.data.eligible > 0 &&
-                      " · enquanto ficarem na régua diária, o custo se repete por dia"}
-                  </span>
-                ) : null}
-              </span>
-            </label>
-          </fieldset>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              disabled={status.isPending}
-              onClick={() => setPublishCandidate(null)}
-            >
-              Cancelar
-            </Button>
-            <Button
-              disabled={status.isPending || !publishCandidate}
-              onClick={() =>
-                publishCandidate &&
-                status.mutate({ id: publishCandidate.id, status: "active", entryScope })
-              }
-            >
-              <Play className="mr-1 h-4 w-4" aria-hidden="true" /> Publicar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
       <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Configuracoes</DialogTitle>
-            <DialogDescription>Vale para todas as jornadas, em todos os canais.</DialogDescription>
+            <DialogTitle>Limite de mensagens por pessoa</DialogTitle>
+            <DialogDescription>
+              Vale para todas as jornadas, em todos os canais. Em branco, não há limite.
+            </DialogDescription>
           </DialogHeader>
-          <div className="rounded-2xl border p-5">
-            <h3 className="font-semibold">Limite de mensagens por pessoa</h3>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Os limites das jornadas incluem os envios de SMS e e-mail já registrados no tenant. Em
-              branco, não há limite.
-            </p>
-            <div className="mt-5 grid gap-3 sm:grid-cols-2">
-              <label className="text-sm font-medium">
-                Maximo em 24 h
-                <Input
-                  className="mt-1"
-                  inputMode="numeric"
-                  placeholder="Sem limite"
-                  value={dailyMessageLimit}
-                  onChange={(event) => setDailyMessageLimit(event.target.value)}
-                />
-              </label>
-              <label className="text-sm font-medium">
-                Maximo em 7 dias
-                <Input
-                  className="mt-1"
-                  inputMode="numeric"
-                  placeholder="Sem limite"
-                  value={weeklyMessageLimit}
-                  onChange={(event) => setWeeklyMessageLimit(event.target.value)}
-                />
-              </label>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="contact-limit-24h">Máximo em 24 h</Label>
+              <Input
+                id="contact-limit-24h"
+                inputMode="numeric"
+                placeholder="Sem limite"
+                value={dailyMessageLimit}
+                onChange={(event) => setDailyMessageLimit(event.target.value)}
+              />
             </div>
-            <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
-              A contagem considera mensagens ja enviadas em cada canal. Mensagens ainda agendadas
-              nao entram no limite.
-            </p>
+            <div className="space-y-1.5">
+              <Label htmlFor="contact-limit-7d">Máximo em 7 dias</Label>
+              <Input
+                id="contact-limit-7d"
+                inputMode="numeric"
+                placeholder="Sem limite"
+                value={weeklyMessageLimit}
+                onChange={(event) => setWeeklyMessageLimit(event.target.value)}
+              />
+            </div>
           </div>
+          <p className="text-[12.5px] leading-relaxed text-muted-foreground">
+            A contagem inclui os SMS e e-mails já enviados pela casa em cada canal. Mensagens ainda
+            agendadas não entram no limite.
+          </p>
           <DialogFooter>
             <Button
               disabled={saveContactLimits.isPending}
               onClick={() => saveContactLimits.mutate()}
             >
-              {saveContactLimits.isPending ? "Salvando..." : "Salvar limite"}
+              {saveContactLimits.isPending ? "Salvando…" : "Salvar limites"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1070,9 +756,9 @@ export function JourneysHub() {
       <Dialog open={infoOpen} onOpenChange={setInfoOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Como a conta e feita</DialogTitle>
+            <DialogTitle>Como a conta é feita</DialogTitle>
             <DialogDescription>
-              O que entra em Recuperado atribuído e o que fica de fora.
+              O que entra em Recuperado pelo CRM e o que fica de fora.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 text-sm leading-relaxed text-muted-foreground">
@@ -1091,118 +777,224 @@ export function JourneysHub() {
             </p>
             <p>
               Quem deposita em qualquer etapa sai da jornada na hora. Jogadores que pediram para
-              sair nao voltam a receber comunicacoes.
+              sair não voltam a receber comunicações.
             </p>
           </div>
         </DialogContent>
       </Dialog>
-      <Dialog open={newOpen} onOpenChange={setNewOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Nova jornada</DialogTitle>
-            <DialogDescription>
-              Escolha o gatilho. Os degraus são montados na tela seguinte.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <label className="block text-sm font-medium">
-              Nome da jornada
-              <Input
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                placeholder="Ex.: Sumiu depois do primeiro depósito"
-              />
-            </label>
-            <div className="grid gap-2">
-              <Button
-                type="button"
-                variant={entryMode === "event" ? "default" : "outline"}
-                className="justify-start"
-                onClick={() => setEntryMode("event")}
-              >
-                Quando algo acontece
-              </Button>
-              <Button
-                type="button"
-                variant={entryMode === "inactivity" ? "default" : "outline"}
-                className="justify-start"
-                onClick={() => setEntryMode("inactivity")}
-              >
-                Quando nada acontece
-              </Button>
-              <Button
-                type="button"
-                variant={entryMode === "manual" ? "default" : "outline"}
-                className="justify-start"
-                onClick={() => setEntryMode("manual")}
-              >
-                Entrada manual ou API
-              </Button>
-            </div>
-            {entryMode === "event" && (
-              <label className="block text-sm font-medium">
-                Qual evento
-                <select
-                  className="mt-1 flex h-10 w-full rounded-md border bg-background px-3 text-sm"
-                  value={newTrigger}
-                  onChange={(e) => setNewTrigger(e.target.value)}
-                >
-                  {Object.entries(TRIGGER_NAMES).map(([key, label]) => (
-                    <option key={key} value={key}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-            {entryMode === "inactivity" && (
-              <div className="grid grid-cols-2 gap-2">
-                <label className="text-sm font-medium">
-                  Sem atividade em
-                  <select
-                    className="mt-1 flex h-10 w-full rounded-md border bg-background px-3 text-sm"
-                    value={inactivityField}
-                    onChange={(e) => setInactivityField(e.target.value)}
-                  >
-                    <option value="ultimo_login">Login</option>
-                    <option value="ultimo_jogo">Jogo</option>
-                    <option value="ultimo_deposito">Depósito</option>
-                  </select>
-                </label>
-                <label className="text-sm font-medium">
-                  Horas
-                  <Input
-                    type="number"
-                    min={1}
-                    max={8760}
-                    value={inactivityHours}
-                    onChange={(e) => setInactivityHours(Number(e.target.value))}
-                  />
-                </label>
-              </div>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setNewOpen(false)}>
-              Cancelar
-            </Button>
-            <Button disabled={!newName.trim()} onClick={create}>
-              Criar e abrir
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
+    </Page>
   );
 }
-const labels = { draft: "Rascunho", active: "Ativa", paused: "Pausada", archived: "Arquivada" };
 
-const channelNames = { wait: "espera", sms: "sms", email: "e-mail", voice: "voz", end: "fim" };
+function JourneyRow({
+  journey,
+  busy,
+  expressBusy,
+  removeBusy,
+  onActivate,
+  onPause,
+  onExpress,
+  onDelete,
+}: {
+  journey: Journey;
+  busy: boolean;
+  expressBusy: boolean;
+  removeBusy: boolean;
+  onActivate: () => void;
+  onPause: () => void;
+  onExpress: () => void;
+  onDelete: () => void;
+}) {
+  const steps = journey.journey_steps
+    .filter((step) => step.is_enabled && step.step_type !== "end")
+    .sort((a, b) => a.position - b.position);
+  const metrics = journey.metrics ?? {};
+  const inProgress = journeyInProgress(metrics.byStatus);
+  const finished = Number(metrics.byStatus?.completed ?? 0) + Number(metrics.byStatus?.exited ?? 0);
+  const sent = Object.values(metrics.sentByChannel ?? {}).reduce(
+    (total, value) => total + Number(value),
+    0,
+  );
+  const active = journey.status === "active";
+  return (
+    <li className="grid gap-4 px-4 py-4 sm:px-5 xl:grid-cols-[minmax(16rem,1fr)_auto_auto] xl:items-center xl:gap-6">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            to="/jornadas/$journeyId"
+            params={{ journeyId: journey.id }}
+            className="truncate font-semibold hover:underline"
+          >
+            {journey.name}
+          </Link>
+          <Badge variant="outline" className={STATUS_BADGE[journey.status]}>
+            {JOURNEY_STATUS_LABELS[journey.status]}
+          </Badge>
+          {journey.ends_at && (
+            <Badge variant="outline" className="bg-muted text-muted-foreground">
+              {Date.parse(journey.ends_at) <= Date.now() ? "Encerrada em " : "Encerra em "}
+              {new Date(journey.ends_at).toLocaleDateString("pt-BR", {
+                timeZone: "America/Sao_Paulo",
+              })}
+            </Badge>
+          )}
+          {journey.express && (
+            <Badge
+              variant="outline"
+              className="gap-1 border-warning/30 bg-warning/15 text-warning"
+              title={EXPRESS_JOURNEY_HINT}
+            >
+              <Zap className="h-3 w-3" aria-hidden="true" /> Envio imediato
+            </Badge>
+          )}
+        </div>
+        <p className="mt-1 truncate text-[12.5px] text-muted-foreground">
+          {journeyTriggerLabel(journey.trigger_type, journey.trigger_config)}
+        </p>
+        <JourneyStepSummary steps={steps} />
+      </div>
+      <div className="grid grid-cols-2 gap-x-7 gap-y-3 sm:grid-cols-4">
+        <JourneyMetric
+          label="Em andamento"
+          hint="Jogadores dentro da jornada agora: aguardando a próxima etapa, a janela de envio ou pausados por prioridade."
+          value={inProgress.toLocaleString("pt-BR")}
+        />
+        <JourneyMetric
+          label="Concluíram"
+          hint="Jogadores que terminaram a jornada ou saíram dela (por exemplo, ao depositar)."
+          value={finished.toLocaleString("pt-BR")}
+        />
+        <JourneyMetric label="Enviados" value={sent.toLocaleString("pt-BR")} />
+        <JourneyMetric
+          label="Recuperado pelo CRM"
+          hint={ATTRIBUTED_RECOVERY_HINT}
+          value={brl(Number(metrics.recovered ?? 0))}
+          accent
+        />
+      </div>
+      <div className="grid grid-cols-[1fr_1fr_auto] items-center gap-2 sm:flex xl:justify-end">
+        {active ? (
+          <Button
+            variant="outline"
+            className="h-11 md:h-9"
+            disabled={busy}
+            onClick={onPause}
+            aria-label={`Pausar a jornada ${journey.name}`}
+          >
+            <Pause className="mr-1 h-4 w-4" aria-hidden="true" /> Pausar
+          </Button>
+        ) : (
+          <Button
+            className="h-11 md:h-9"
+            disabled={busy || journey.status === "archived"}
+            onClick={onActivate}
+            aria-label={`Ativar a jornada ${journey.name}`}
+          >
+            <Play className="mr-1 h-4 w-4" aria-hidden="true" /> Ativar
+          </Button>
+        )}
+        <Button asChild variant="outline" className="h-11 md:h-9">
+          <Link to="/jornadas/$journeyId/relatorio" params={{ journeyId: journey.id }}>
+            Relatório
+          </Link>
+        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <IconButton
+              variant="outline"
+              label={`Mais ações da jornada ${journey.name}`}
+              icon={<MoreHorizontal className="h-4 w-4" aria-hidden="true" />}
+            />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-60">
+            <DropdownMenuItem asChild className="min-h-11 md:min-h-9">
+              <Link to="/jornadas/$journeyId" params={{ journeyId: journey.id }}>
+                <Pencil className="mr-2 h-4 w-4" aria-hidden="true" /> Editar
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="min-h-11 md:min-h-9"
+              disabled={expressBusy}
+              onSelect={onExpress}
+            >
+              <Zap
+                className={journey.express ? "mr-2 h-4 w-4 text-warning" : "mr-2 h-4 w-4"}
+                aria-hidden="true"
+              />
+              {journey.express ? "Desligar envio imediato" : "Ligar envio imediato"}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="min-h-11 text-destructive focus:text-destructive md:min-h-9"
+              disabled={removeBusy || active}
+              onSelect={onDelete}
+            >
+              <Trash2 className="mr-2 h-4 w-4" aria-hidden="true" />
+              {active ? "Excluir (pause antes)" : "Excluir"}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </li>
+  );
+}
+
+function OperationRow({ item }: { item: OperationItem }) {
+  const reason = journeyExitReasonLabel(item.exit_reason);
+  const statusLabel = ENROLLMENT_STATUS_LABELS[item.status];
+  const pauseReason = priorityPauseReasonLabel(item.priority_pause_reason);
+  return (
+    <li className="px-4 py-3 text-[13.5px] sm:px-5">
+      <p className="font-medium">
+        {item.players?.nome ?? "Jogador"}
+        <span className="font-normal text-muted-foreground">
+          {" "}
+          · {item.journeys?.name ?? "Jornada"}
+        </span>
+      </p>
+      <p className="mt-0.5 text-[12.5px] text-muted-foreground">
+        Etapa {item.current_position + 1}
+        {statusLabel && item.status !== "failed" && item.status !== "paused_by_priority"
+          ? ` · ${statusLabel}`
+          : ""}
+        {item.next_run_at ? ` · próximo envio ${dateTime(item.next_run_at)}` : ""}
+      </p>
+      {reason && (
+        <p
+          className={`mt-0.5 text-[12.5px] ${item.status === "failed" ? "text-danger" : "text-muted-foreground"}`}
+        >
+          {item.status === "failed" ? "Motivo da falha: " : "Motivo: "}
+          {reason}
+        </p>
+      )}
+      {item.status === "paused_by_priority" && (
+        <p className="mt-0.5 text-[12.5px] text-warning">
+          Pausada por prioridade
+          {item.priority_paused_by_journey_name
+            ? `: “${item.priority_paused_by_journey_name}” tem prioridade`
+            : ", aguardando o fim da jornada com prioridade"}
+          {pauseReason ? ` (${pauseReason})` : ""}
+          {item.priority_paused_at ? ` · desde ${dateTime(item.priority_paused_at)}` : ""}
+        </p>
+      )}
+    </li>
+  );
+}
+
+const channelNames = { wait: "espera", sms: "SMS", email: "e-mail", voice: "voz", end: "fim" };
+// Identity colours: the same channel colour as campaigns and the player's history.
 const channelStyles = {
   wait: "",
-  sms: "border-blue-500/30 text-blue-500",
-  email: "border-violet-500/30 text-violet-500",
-  voice: "border-emerald-500/30 text-emerald-500",
+  sms: `${CHANNEL_IDENTITY.sms.border} ${CHANNEL_IDENTITY.sms.text}`,
+  email: `${CHANNEL_IDENTITY.email.border} ${CHANNEL_IDENTITY.email.text}`,
+  voice: `${CHANNEL_IDENTITY.voice.border} ${CHANNEL_IDENTITY.voice.text}`,
+  end: "",
+};
+const channelDots = {
+  wait: "",
+  sms: CHANNEL_IDENTITY.sms.dot,
+  email: CHANNEL_IDENTITY.email.dot,
+  voice: CHANNEL_IDENTITY.voice.dot,
   end: "",
 };
 
@@ -1215,7 +1007,7 @@ const STEP_SEQUENCE_MAX = 10;
 function JourneyStepSummary({ steps }: { steps: Journey["journey_steps"] }) {
   const sends = steps.filter((step) => step.step_type !== "wait");
   if (sends.length === 0) {
-    return <p className="mt-2 text-sm text-muted-foreground">Sem etapas configuradas</p>;
+    return <p className="mt-2 text-[12.5px] text-muted-foreground">Sem etapas configuradas</p>;
   }
   const byChannel = sends.reduce<Record<string, number>>((acc, step) => {
     acc[step.step_type] = (acc[step.step_type] ?? 0) + 1;
@@ -1239,7 +1031,7 @@ function JourneyStepSummary({ steps }: { steps: Journey["journey_steps"] }) {
         {Object.entries(byChannel).map(([channel, count]) => (
           <span
             key={channel}
-            className={`rounded-full border px-2 py-0.5 text-xs font-medium ${channelStyles[channel as keyof typeof channelStyles]}`}
+            className={`rounded-md border px-2 py-0.5 text-meta font-semibold ${channelStyles[channel as keyof typeof channelStyles]}`}
           >
             {count} {channelNames[channel as keyof typeof channelNames]}
           </span>
@@ -1260,7 +1052,7 @@ function JourneyStepSummary({ steps }: { steps: Journey["journey_steps"] }) {
           ) : (
             <span
               key={step.id}
-              className={`h-2 w-2 rounded-full border ${channelStyles[step.step_type]}`}
+              className={`h-2 w-2 rounded-full ${channelDots[step.step_type]}`}
               aria-hidden="true"
             />
           ),
@@ -1293,8 +1085,8 @@ function JourneyMetric({
   accent?: boolean;
 }) {
   return (
-    <div className="text-right">
-      <p className="flex items-center justify-end gap-1 whitespace-nowrap text-xs text-muted-foreground">
+    <div className="sm:text-right">
+      <p className="flex items-center gap-1 text-meta text-muted-foreground sm:justify-end">
         {label}
         {hint ? (
           <TooltipProvider delayDuration={150}>
@@ -1315,42 +1107,7 @@ function JourneyMetric({
           </TooltipProvider>
         ) : null}
       </p>
-      <p className={`mt-0.5 font-semibold tabular-nums ${accent ? "text-emerald-500" : ""}`}>
-        {value}
-      </p>
+      <p className={`mt-0.5 font-semibold tabular-nums ${accent ? "text-success" : ""}`}>{value}</p>
     </div>
-  );
-}
-
-function OverviewCard({
-  icon: Icon,
-  label,
-  value,
-  detail,
-  color,
-}: {
-  icon: typeof CircleDollarSign;
-  label: string;
-  value: string;
-  detail: string;
-  color: "emerald" | "blue" | "cyan" | "slate";
-}) {
-  const tones = {
-    emerald: "border-l-emerald-500 bg-emerald-500/[0.06] text-emerald-400",
-    blue: "border-l-blue-500 bg-blue-500/[0.06] text-blue-400",
-    cyan: "border-l-cyan-400 bg-cyan-400/[0.06] text-cyan-300",
-    slate: "border-l-slate-500 bg-muted/50 text-muted-foreground",
-  };
-  return (
-    <Card className={`border-l-4 ${tones[color]}`}>
-      <CardContent className="p-5">
-        <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-          <Icon className="h-5 w-5" />
-          {label}
-        </div>
-        <p className="mt-5 text-4xl font-semibold tracking-tight text-foreground">{value}</p>
-        <p className="mt-3 text-sm text-muted-foreground">{detail}</p>
-      </CardContent>
-    </Card>
   );
 }

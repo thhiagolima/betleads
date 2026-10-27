@@ -52,7 +52,6 @@
     "@sentry/node": "11.7.0",
     "@sentry/react": "11.7.0",
     "@supabase/supabase-js": "^2.106.0",
-    "@tabler/icons-react": "^3.48.0",
     "@tailwindcss/vite": "^4.2.1",
     "@tanstack/react-query": "^5.83.0",
     "@tanstack/react-router": "^1.170.42",
@@ -83,6 +82,7 @@
     "tw-animate-css": "^1.3.4",
     "vaul": "^1.1.2",
     "vite-tsconfig-paths": "^6.0.2",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "zod": "^4.4.3"
   },
   "devDependencies": {

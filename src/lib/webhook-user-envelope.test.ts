@@ -222,3 +222,124 @@ describe("payload com o player em `user` e a transação no topo (Sorte da Bet)"
     expect(financial?.args.p_event_at).toBe(PAID_AT_UTC);
   });
 });
+
+// bravabet365: `{ event, event_id, occurred_at, user, tracking, deposit | withdraw }`.
+const BRAVA_USER = {
+  id: 8812,
+  cpf: "12345678909",
+  ddi: "55",
+  name: "João da Silva",
+  email: "joao@email.com",
+  phone: "11999998888",
+  wallet: "150.00",
+  wallet_bonus: "50.00",
+  birth_date: "1990-05-20",
+  created_at: "2026-10-15T17:00:00Z",
+};
+const BRAVA_DEPOSIT = {
+  id: 9871,
+  type: "pix",
+  amount: "50.00",
+  is_ftd: 1,
+  status: "paid",
+  paid_at: "2026-10-15T17:32:10Z",
+  created_at: "2026-10-15T17:30:00Z",
+  gateway_id: "sp_7f3a91",
+};
+const BRAVA_WITHDRAW = {
+  id: 4410,
+  pix: "12345678909",
+  amount: "200.00",
+  status: "Approved",
+  amount_paid: "200.00",
+  transaction_id: "tx_5521",
+};
+const brava = (event: string, extra: Record<string, unknown> = {}) => ({
+  event,
+  event_id: "9b1f6a52-3c1e-4d55-9a3e-2f7c1b0d8e41",
+  occurred_at: "2026-10-15T17:32:10Z",
+  timestamp: 1792085530,
+  user: BRAVA_USER,
+  house: { url: "https://minhacasa.bet", name: "Minha Casa" },
+  tracking: { utm_source: "facebook", utm_medium: "Instagram_Stories" },
+  ...extra,
+});
+
+describe("payload com a transação em `deposit`/`withdraw` (bravabet365)", () => {
+  it("registra o depósito pago com valor, id e método do objeto `deposit`", async () => {
+    const { sb, rpcCalls } = setup(true);
+    const res = await processWebhookEvent(
+      sb,
+      TENANT,
+      "deposito-aprovado",
+      brava("deposit.paid", { deposit: BRAVA_DEPOSIT }),
+    );
+    expect(await res.json()).toMatchObject({ ok: true });
+
+    const financial = rpcCalls.find((c) => c.name === "record_financial_webhook_event");
+    expect(financial?.args).toMatchObject({
+      p_kind: "deposit",
+      p_status: "aprovado",
+      p_external_id: "9871",
+      p_amount: 50,
+      p_method: "pix",
+      p_provider_status: "paid",
+      p_event_at: "2026-10-15T17:32:10.000Z",
+    });
+    expect(attributeFromLastFirstPartyClick).toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "deposit_approved", isFtd: true }),
+    );
+  });
+
+  it("liga depósito pendente e pago pela mesma transação", async () => {
+    const { sb, rpcCalls } = setup(true);
+    await processWebhookEvent(
+      sb,
+      TENANT,
+      "deposito-pendente",
+      brava("deposit.created", { deposit: BRAVA_DEPOSIT }),
+    );
+    const financial = rpcCalls.find((c) => c.name === "record_financial_webhook_event");
+    expect(financial?.args).toMatchObject({
+      p_status: "pendente",
+      p_external_id: "9871",
+    });
+  });
+
+  it("registra o saque com valor e id do objeto `withdraw`", async () => {
+    const { sb, rpcCalls } = setup(true);
+    await processWebhookEvent(
+      sb,
+      TENANT,
+      "saque-concluido",
+      brava("withdraw.paid", { withdraw: BRAVA_WITHDRAW }),
+    );
+    const financial = rpcCalls.find((c) => c.name === "record_financial_webhook_event");
+    expect(financial?.args).toMatchObject({
+      p_kind: "withdrawal",
+      p_status: "aprovado",
+      p_external_id: "4410",
+      p_amount: 200,
+      p_method: "pix",
+    });
+  });
+
+  it("separa o recibo por tipo de evento quando a casa repete o event_id", async () => {
+    const { sb, rpcCalls } = setup(true);
+    await processWebhookEvent(sb, TENANT, "login", brava("user.login"));
+    const claim = rpcCalls.find((c) => c.name === "claim_webhook_event");
+    expect(claim?.args.p_provider_event_id).toBe("user.login:9b1f6a52-3c1e-4d55-9a3e-2f7c1b0d8e41");
+  });
+
+  it("salva nascimento e saldos do usuário e usa occurred_at no login", async () => {
+    const { sb, ops } = setup(true);
+    await processWebhookEvent(sb, TENANT, "login", brava("user.login"));
+    const update = ops.find((o) => o.table === "players" && o.op === "update");
+    expect(update?.payload).toMatchObject({
+      ultimo_login: "2026-10-15T17:32:10.000Z",
+      data_nascimento: "1990-05-20",
+      saldo_carteira: 150,
+      saldo_bonus: 50,
+    });
+  });
+});
