@@ -20,7 +20,10 @@ import { Route as CreditosSmsRouteImport } from './routes/creditos-sms'
 import { Route as EmailRouteImport } from './routes/email'
 import { Route as EventosRouteImport } from './routes/eventos'
 import { Route as ExpertsRouteImport } from './routes/experts'
+import { Route as FinanceiroRouteImport } from './routes/financeiro'
 import { Route as GamificacaoRouteImport } from './routes/gamificacao'
+import { Route as GrupoRouteImport } from './routes/grupo'
+import { Route as GruposRouteImport } from './routes/grupos'
 import { Route as InteligenciaRouteImport } from './routes/inteligencia'
 import { Route as JornadasRouteImport } from './routes/jornadas'
 import { Route as LigacoesRouteImport } from './routes/ligacoes'
@@ -44,6 +47,9 @@ import { Route as ConfiguracoesCasaRouteImport } from './routes/configuracoes_.c
 import { Route as ExpertIndexRouteImport } from './routes/expert.index'
 import { Route as ExpertLeadsRouteImport } from './routes/expert.leads'
 import { Route as ExpertModelosRouteImport } from './routes/expert.modelos'
+import { Route as GrupoCasaRouteImport } from './routes/grupo_.casa'
+import { Route as GrupoMetasRouteImport } from './routes/grupo_.metas'
+import { Route as GrupoPessoasRouteImport } from './routes/grupo_.pessoas'
 import { Route as JornadasJourneyIdRouteImport } from './routes/jornadas.$journeyId'
 import { Route as JornadasNovaRouteImport } from './routes/jornadas.nova'
 import { Route as LinksConfiguracoesRouteImport } from './routes/links.configuracoes'
@@ -144,9 +150,24 @@ const ExpertsRoute = ExpertsRouteImport.update({
   path: '/experts',
   getParentRoute: () => rootRouteImport,
 } as any)
+const FinanceiroRoute = FinanceiroRouteImport.update({
+  id: '/financeiro',
+  path: '/financeiro',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const GamificacaoRoute = GamificacaoRouteImport.update({
   id: '/gamificacao',
   path: '/gamificacao',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GrupoRoute = GrupoRouteImport.update({
+  id: '/grupo',
+  path: '/grupo',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GruposRoute = GruposRouteImport.update({
+  id: '/grupos',
+  path: '/grupos',
   getParentRoute: () => rootRouteImport,
 } as any)
 const InteligenciaRoute = InteligenciaRouteImport.update({
@@ -262,6 +283,21 @@ const ExpertLeadsRoute = ExpertLeadsRouteImport.update({
 const ExpertModelosRoute = ExpertModelosRouteImport.update({
   id: '/expert/modelos',
   path: '/expert/modelos',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GrupoCasaRoute = GrupoCasaRouteImport.update({
+  id: '/grupo_/casa',
+  path: '/grupo/casa',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GrupoMetasRoute = GrupoMetasRouteImport.update({
+  id: '/grupo_/metas',
+  path: '/grupo/metas',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GrupoPessoasRoute = GrupoPessoasRouteImport.update({
+  id: '/grupo_/pessoas',
+  path: '/grupo/pessoas',
   getParentRoute: () => rootRouteImport,
 } as any)
 const JornadasJourneyIdRoute = JornadasJourneyIdRouteImport.update({
@@ -521,7 +557,10 @@ export interface FileRoutesByFullPath {
   '/email': typeof EmailRoute
   '/eventos': typeof EventosRoute
   '/experts': typeof ExpertsRoute
+  '/financeiro': typeof FinanceiroRoute
   '/gamificacao': typeof GamificacaoRoute
+  '/grupo': typeof GrupoRoute
+  '/grupos': typeof GruposRoute
   '/inteligencia': typeof InteligenciaRoute
   '/jornadas': typeof JornadasRouteWithChildren
   '/ligacoes': typeof LigacoesRoute
@@ -544,6 +583,9 @@ export interface FileRoutesByFullPath {
   '/configuracoes/casa': typeof ConfiguracoesCasaRoute
   '/expert/leads': typeof ExpertLeadsRouteWithChildren
   '/expert/modelos': typeof ExpertModelosRoute
+  '/grupo/casa': typeof GrupoCasaRoute
+  '/grupo/metas': typeof GrupoMetasRoute
+  '/grupo/pessoas': typeof GrupoPessoasRoute
   '/jornadas/$journeyId': typeof JornadasJourneyIdRoute
   '/jornadas/nova': typeof JornadasNovaRoute
   '/links/configuracoes': typeof LinksConfiguracoesRoute
@@ -602,7 +644,10 @@ export interface FileRoutesByTo {
   '/email': typeof EmailRoute
   '/eventos': typeof EventosRoute
   '/experts': typeof ExpertsRoute
+  '/financeiro': typeof FinanceiroRoute
   '/gamificacao': typeof GamificacaoRoute
+  '/grupo': typeof GrupoRoute
+  '/grupos': typeof GruposRoute
   '/inteligencia': typeof InteligenciaRoute
   '/jornadas': typeof JornadasRouteWithChildren
   '/ligacoes': typeof LigacoesRoute
@@ -625,6 +670,9 @@ export interface FileRoutesByTo {
   '/configuracoes/casa': typeof ConfiguracoesCasaRoute
   '/expert/leads': typeof ExpertLeadsRouteWithChildren
   '/expert/modelos': typeof ExpertModelosRoute
+  '/grupo/casa': typeof GrupoCasaRoute
+  '/grupo/metas': typeof GrupoMetasRoute
+  '/grupo/pessoas': typeof GrupoPessoasRoute
   '/jornadas/$journeyId': typeof JornadasJourneyIdRoute
   '/jornadas/nova': typeof JornadasNovaRoute
   '/links/configuracoes': typeof LinksConfiguracoesRoute
@@ -684,7 +732,10 @@ export interface FileRoutesById {
   '/email': typeof EmailRoute
   '/eventos': typeof EventosRoute
   '/experts': typeof ExpertsRoute
+  '/financeiro': typeof FinanceiroRoute
   '/gamificacao': typeof GamificacaoRoute
+  '/grupo': typeof GrupoRoute
+  '/grupos': typeof GruposRoute
   '/inteligencia': typeof InteligenciaRoute
   '/jornadas': typeof JornadasRouteWithChildren
   '/ligacoes': typeof LigacoesRoute
@@ -707,6 +758,9 @@ export interface FileRoutesById {
   '/configuracoes_/casa': typeof ConfiguracoesCasaRoute
   '/expert/leads': typeof ExpertLeadsRouteWithChildren
   '/expert/modelos': typeof ExpertModelosRoute
+  '/grupo_/casa': typeof GrupoCasaRoute
+  '/grupo_/metas': typeof GrupoMetasRoute
+  '/grupo_/pessoas': typeof GrupoPessoasRoute
   '/jornadas/$journeyId': typeof JornadasJourneyIdRoute
   '/jornadas/nova': typeof JornadasNovaRoute
   '/links/configuracoes': typeof LinksConfiguracoesRoute
@@ -767,7 +821,10 @@ export interface FileRouteTypes {
     | '/email'
     | '/eventos'
     | '/experts'
+    | '/financeiro'
     | '/gamificacao'
+    | '/grupo'
+    | '/grupos'
     | '/inteligencia'
     | '/jornadas'
     | '/ligacoes'
@@ -790,6 +847,9 @@ export interface FileRouteTypes {
     | '/configuracoes/casa'
     | '/expert/leads'
     | '/expert/modelos'
+    | '/grupo/casa'
+    | '/grupo/metas'
+    | '/grupo/pessoas'
     | '/jornadas/$journeyId'
     | '/jornadas/nova'
     | '/links/configuracoes'
@@ -848,7 +908,10 @@ export interface FileRouteTypes {
     | '/email'
     | '/eventos'
     | '/experts'
+    | '/financeiro'
     | '/gamificacao'
+    | '/grupo'
+    | '/grupos'
     | '/inteligencia'
     | '/jornadas'
     | '/ligacoes'
@@ -871,6 +934,9 @@ export interface FileRouteTypes {
     | '/configuracoes/casa'
     | '/expert/leads'
     | '/expert/modelos'
+    | '/grupo/casa'
+    | '/grupo/metas'
+    | '/grupo/pessoas'
     | '/jornadas/$journeyId'
     | '/jornadas/nova'
     | '/links/configuracoes'
@@ -929,7 +995,10 @@ export interface FileRouteTypes {
     | '/email'
     | '/eventos'
     | '/experts'
+    | '/financeiro'
     | '/gamificacao'
+    | '/grupo'
+    | '/grupos'
     | '/inteligencia'
     | '/jornadas'
     | '/ligacoes'
@@ -952,6 +1021,9 @@ export interface FileRouteTypes {
     | '/configuracoes_/casa'
     | '/expert/leads'
     | '/expert/modelos'
+    | '/grupo_/casa'
+    | '/grupo_/metas'
+    | '/grupo_/pessoas'
     | '/jornadas/$journeyId'
     | '/jornadas/nova'
     | '/links/configuracoes'
@@ -1011,7 +1083,10 @@ export interface RootRouteChildren {
   EmailRoute: typeof EmailRoute
   EventosRoute: typeof EventosRoute
   ExpertsRoute: typeof ExpertsRoute
+  FinanceiroRoute: typeof FinanceiroRoute
   GamificacaoRoute: typeof GamificacaoRoute
+  GrupoRoute: typeof GrupoRoute
+  GruposRoute: typeof GruposRoute
   InteligenciaRoute: typeof InteligenciaRoute
   JornadasRoute: typeof JornadasRouteWithChildren
   LigacoesRoute: typeof LigacoesRoute
@@ -1030,6 +1105,9 @@ export interface RootRouteChildren {
   ConfiguracoesCasaRoute: typeof ConfiguracoesCasaRoute
   ExpertLeadsRoute: typeof ExpertLeadsRouteWithChildren
   ExpertModelosRoute: typeof ExpertModelosRoute
+  GrupoCasaRoute: typeof GrupoCasaRoute
+  GrupoMetasRoute: typeof GrupoMetasRoute
+  GrupoPessoasRoute: typeof GrupoPessoasRoute
   RelatoriosConversaoRoute: typeof RelatoriosConversaoRoute
   ResultadosCompararRoute: typeof ResultadosCompararRoute
   UTokenRoute: typeof UTokenRoute
@@ -1148,11 +1226,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ExpertsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/financeiro': {
+      id: '/financeiro'
+      path: '/financeiro'
+      fullPath: '/financeiro'
+      preLoaderRoute: typeof FinanceiroRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/gamificacao': {
       id: '/gamificacao'
       path: '/gamificacao'
       fullPath: '/gamificacao'
       preLoaderRoute: typeof GamificacaoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/grupo': {
+      id: '/grupo'
+      path: '/grupo'
+      fullPath: '/grupo'
+      preLoaderRoute: typeof GrupoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/grupos': {
+      id: '/grupos'
+      path: '/grupos'
+      fullPath: '/grupos'
+      preLoaderRoute: typeof GruposRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/inteligencia': {
@@ -1314,6 +1413,27 @@ declare module '@tanstack/react-router' {
       path: '/expert/modelos'
       fullPath: '/expert/modelos'
       preLoaderRoute: typeof ExpertModelosRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/grupo_/casa': {
+      id: '/grupo_/casa'
+      path: '/grupo/casa'
+      fullPath: '/grupo/casa'
+      preLoaderRoute: typeof GrupoCasaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/grupo_/metas': {
+      id: '/grupo_/metas'
+      path: '/grupo/metas'
+      fullPath: '/grupo/metas'
+      preLoaderRoute: typeof GrupoMetasRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/grupo_/pessoas': {
+      id: '/grupo_/pessoas'
+      path: '/grupo/pessoas'
+      fullPath: '/grupo/pessoas'
+      preLoaderRoute: typeof GrupoPessoasRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/jornadas/$journeyId': {
@@ -1728,7 +1848,10 @@ const rootRouteChildren: RootRouteChildren = {
   EmailRoute: EmailRoute,
   EventosRoute: EventosRoute,
   ExpertsRoute: ExpertsRoute,
+  FinanceiroRoute: FinanceiroRoute,
   GamificacaoRoute: GamificacaoRoute,
+  GrupoRoute: GrupoRoute,
+  GruposRoute: GruposRoute,
   InteligenciaRoute: InteligenciaRoute,
   JornadasRoute: JornadasRouteWithChildren,
   LigacoesRoute: LigacoesRoute,
@@ -1747,6 +1870,9 @@ const rootRouteChildren: RootRouteChildren = {
   ConfiguracoesCasaRoute: ConfiguracoesCasaRoute,
   ExpertLeadsRoute: ExpertLeadsRouteWithChildren,
   ExpertModelosRoute: ExpertModelosRoute,
+  GrupoCasaRoute: GrupoCasaRoute,
+  GrupoMetasRoute: GrupoMetasRoute,
+  GrupoPessoasRoute: GrupoPessoasRoute,
   RelatoriosConversaoRoute: RelatoriosConversaoRoute,
   ResultadosCompararRoute: ResultadosCompararRoute,
   UTokenRoute: UTokenRoute,

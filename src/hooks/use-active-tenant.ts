@@ -10,6 +10,7 @@ export type TenantOption = {
   slug: string;
   role: ShellRole;
   is_demo?: boolean;
+  can_view_finance?: boolean;
 };
 
 /**

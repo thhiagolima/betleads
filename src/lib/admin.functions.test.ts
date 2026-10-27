@@ -171,3 +171,72 @@ describe("super admin membership changes refuse an expert's role", () => {
     expect(fake.admin.rows("user_roles")).toHaveLength(2);
   });
 });
+
+describe("super admin membership changes allow several admins per tenant", () => {
+  const TENANT = "00000000-0000-4000-8000-00000000b0b0";
+  const ADMIN_A = "00000000-0000-4000-8000-0000000000a1";
+  const ADMIN_B = "00000000-0000-4000-8000-0000000000a2";
+  const LAST_ADMIN = "Esta casa precisa de pelo menos um admin. Defina outro admin antes.";
+
+  beforeEach(() => {
+    fake.admin.rows("user_roles").push({
+      id: "admin-a",
+      user_id: ADMIN_A,
+      tenant_id: TENANT,
+      role: "admin",
+    });
+  });
+
+  it("promotes a second admin while one already exists", async () => {
+    await expect(
+      adminAssignUserToTenantFor(
+        { userId: SUPER_ADMIN },
+        { user_id: ADMIN_B, tenant_id: TENANT, role: "admin" },
+      ),
+    ).resolves.toEqual({ ok: true });
+    expect(fake.admin.rows("user_roles").filter((r) => r.role === "admin")).toHaveLength(2);
+  });
+
+  it("refuses to demote the only admin", async () => {
+    await expect(
+      adminAssignUserToTenantFor(
+        { userId: SUPER_ADMIN },
+        { user_id: ADMIN_A, tenant_id: TENANT, role: "gestor" },
+      ),
+    ).rejects.toThrow(LAST_ADMIN);
+  });
+
+  it("refuses to remove the only admin", async () => {
+    await expect(
+      adminRemoveUserFromTenantFor({ userId: SUPER_ADMIN }, { user_id: ADMIN_A, tenant_id: TENANT }),
+    ).rejects.toThrow(LAST_ADMIN);
+    expect(fake.admin.rows("user_roles")).toHaveLength(1);
+  });
+
+  it("demotes or removes an admin when another admin remains", async () => {
+    fake.admin.rows("user_roles").push({
+      id: "admin-b",
+      user_id: ADMIN_B,
+      tenant_id: TENANT,
+      role: "admin",
+    });
+    await expect(
+      adminAssignUserToTenantFor(
+        { userId: SUPER_ADMIN },
+        { user_id: ADMIN_A, tenant_id: TENANT, role: "gestor" },
+      ),
+    ).resolves.toEqual({ ok: true });
+    await expect(
+      adminAssignUserToTenantFor(
+        { userId: SUPER_ADMIN },
+        { user_id: ADMIN_A, tenant_id: TENANT, role: "admin" },
+      ),
+    ).resolves.toEqual({ ok: true });
+    await expect(
+      adminRemoveUserFromTenantFor({ userId: SUPER_ADMIN }, { user_id: ADMIN_B, tenant_id: TENANT }),
+    ).resolves.toEqual({ ok: true });
+    expect(fake.admin.rows("user_roles")).toEqual([
+      expect.objectContaining({ user_id: ADMIN_A, role: "admin" }),
+    ]);
+  });
+});

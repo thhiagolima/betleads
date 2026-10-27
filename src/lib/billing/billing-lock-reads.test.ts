@@ -79,11 +79,13 @@ describe("reads behind the tenant resolver on a locked house", () => {
     await expect(resolveSmsAudienceTenant(userClient(SUPER_ADMIN))).resolves.toBe(TENANT);
   });
 
-  it("history's tenant filter refuses the admin, keeps the superadmin unfiltered", async () => {
+  it("history's tenant filter refuses the admin, scopes the superadmin to the active house", async () => {
     await expect(resolveTenantReadFilter(userClient(ADMIN), ADMIN)).rejects.toMatchObject({
       code: "BILLING_LOCKED",
     });
-    await expect(resolveTenantReadFilter(userClient(SUPER_ADMIN), SUPER_ADMIN)).resolves.toBeNull();
+    await expect(resolveTenantReadFilter(userClient(SUPER_ADMIN), SUPER_ADMIN)).resolves.toBe(
+      TENANT,
+    );
     setBillingState("overdue");
     await expect(resolveTenantReadFilter(userClient(ADMIN), ADMIN)).resolves.toBe(TENANT);
   });

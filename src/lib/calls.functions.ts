@@ -28,6 +28,7 @@ import {
   resolveCurrentTenantId,
   resolveOperationalTenantId,
 } from "./tenant-access.server";
+import { tenantReads } from "@/lib/active-tenant-filter";
 
 // ============================================================
 // Schemas
@@ -51,7 +52,8 @@ const ScriptStatusSchema = z.enum(["active", "inactive", "draft"]);
 export const listCallScripts = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data, error } = await context.supabase
+    const reads = await tenantReads(context.supabase);
+    const { data, error } = await reads
       .from("call_scripts")
       .select(
         "id, name, trigger_name, content, status, default_voice_id, voice_settings, version, created_at, updated_at",
@@ -508,7 +510,8 @@ export const listCallQueue = createServerFn({ method: "POST" })
       .parse(input),
   )
   .handler(async ({ data, context }) => {
-    let q = context.supabase
+    const reads = await tenantReads(context.supabase);
+    let q = reads
       .from("call_queue")
       // trigger_name/script/asset/created_at let the campaigns hub group one
       // bulk dispatch into a single campaign row.
@@ -556,7 +559,8 @@ export const listCallHistory = createServerFn({ method: "POST" })
       .parse(input),
   )
   .handler(async ({ data, context }) => {
-    let q = context.supabase
+    const reads = await tenantReads(context.supabase);
+    let q = reads
       .from("call_history")
       .select(
         "id, lead_id, script_id, call_queue_id, to_phone, status, duration_seconds, recording_url, created_at, error_message, provider, provider_call_id, provider_status_code, provider_response, audio_url, result",
@@ -586,7 +590,8 @@ export const listAudioGenerations = createServerFn({ method: "POST" })
       .parse(input),
   )
   .handler(async ({ data, context }) => {
-    let q = context.supabase
+    const reads = await tenantReads(context.supabase);
+    let q = reads
       .from("call_audio_generations")
       .select("id, lead_id, script_id, rendered_text, audio_url, generation_status, created_at")
       .order("created_at", { ascending: false })
@@ -612,7 +617,8 @@ export const listPlayersForCalls = createServerFn({ method: "POST" })
       .parse(input),
   )
   .handler(async ({ data, context }) => {
-    let q = context.supabase
+    const reads = await tenantReads(context.supabase);
+    let q = reads
       .from("players")
       .select("id, nome, telefone, saldo_carteira, status, vip")
       .order("updated_at", { ascending: false })

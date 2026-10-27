@@ -1,9 +1,9 @@
 // Server functions de Super Admin: gerenciamento de usuários, preços e impersonação.
 import { createServerFn } from "@tanstack/react-start";
+import { auditAdminAction } from "@/lib/admin-audit.server";
 import { dbUuid } from "@/lib/zod-helpers";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { EXPERT_MEMBER_GUARD } from "@/lib/house-member-roles";
-import type { Json } from "@/integrations/supabase/types";
 import { z } from "zod";
 
 async function assertSuperAdmin(userId: string) {
@@ -11,26 +11,6 @@ async function assertSuperAdmin(userId: string) {
   const { data, error } = await supabaseAdmin.rpc("is_super_admin", { _user_id: userId });
   if (error) throw new Error(error.message);
   if (!data) throw new Error("Apenas o super admin pode realizar esta ação");
-}
-
-async function auditAdminAction(args: {
-  actorUserId: string;
-  action: string;
-  targetUserId?: string | null;
-  tenantId?: string | null;
-  before?: unknown;
-  after?: unknown;
-}) {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { error } = await supabaseAdmin.from("admin_audit_logs").insert({
-    actor_user_id: args.actorUserId,
-    action: args.action,
-    target_user_id: args.targetUserId ?? null,
-    tenant_id: args.tenantId ?? null,
-    before_data: (args.before ?? null) as Json,
-    after_data: (args.after ?? null) as Json,
-  });
-  if (error) console.warn("[admin] audit failed", error.message);
 }
 
 export const adminGetSmsProviderConfig = createServerFn({ method: "GET" })
@@ -434,6 +414,19 @@ export const adminAssignUserToTenant = createServerFn({ method: "POST" })
 
 type AdminContext = { userId: string };
 
+const LAST_ADMIN_GUARD = "Esta casa precisa de pelo menos um admin. Defina outro admin antes.";
+
+async function countTenantAdmins(tenantId: string) {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data, error } = await supabaseAdmin
+    .from("user_roles")
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .eq("role", "admin");
+  if (error) throw new Error(error.message);
+  return data?.length ?? 0;
+}
+
 // Body of `adminAssignUserToTenant`, exported so its guards are unit-testable.
 export async function adminAssignUserToTenantFor(
   context: AdminContext,
@@ -451,20 +444,13 @@ export async function adminAssignUserToTenantFor(
   // An expert's role is tied to its `experts.user_id`; changing it here
   // would leave that link behind. Experts are managed only in Experts.
   if ((before?.role as string | undefined) === "expert") throw new Error(EXPERT_MEMBER_GUARD);
-  if (before?.role === "admin" && data.role !== "admin") {
-    throw new Error("Transfira a administração para outro usuário antes de rebaixar o admin atual");
-  }
-  if (data.role === "admin" && before?.role !== "admin") {
-    const { data: currentAdmin, error: adminErr } = await supabaseAdmin
-      .from("user_roles")
-      .select("id,user_id")
-      .eq("tenant_id", data.tenant_id)
-      .eq("role", "admin")
-      .maybeSingle();
-    if (adminErr) throw new Error(adminErr.message);
-    if (currentAdmin) {
-      throw new Error("Este tenant já possui um admin. Use a transferência de administração.");
-    }
+  // A house may have several admins, but never zero.
+  if (
+    before?.role === "admin" &&
+    data.role !== "admin" &&
+    (await countTenantAdmins(data.tenant_id)) <= 1
+  ) {
+    throw new Error(LAST_ADMIN_GUARD);
   }
 
   const request = before
@@ -508,7 +494,9 @@ export async function adminRemoveUserFromTenantFor(
   if (beforeErr) throw new Error(beforeErr.message);
   if (!before) throw new Error("Vínculo não encontrado");
   if ((before.role as string) === "expert") throw new Error(EXPERT_MEMBER_GUARD);
-  if (before.role === "admin") throw new Error("Defina outro admin antes de remover este vínculo");
+  if (before.role === "admin" && (await countTenantAdmins(data.tenant_id)) <= 1) {
+    throw new Error(LAST_ADMIN_GUARD);
+  }
   const { error } = await supabaseAdmin.from("user_roles").delete().eq("id", before.id);
   if (error) throw new Error(error.message);
   await auditAdminAction({

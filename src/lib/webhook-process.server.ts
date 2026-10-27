@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { attributeFromLastFirstPartyClick } from "./conversion-attribution.server";
 import { lookupExpertName, type SupabaseLike } from "./expert-lookup.server";
+import { bindExternalListDispatches } from "./external-list-binding.server";
 import { enrollPlayerOnEvent, eventEntryTriggers } from "./journey-scanner.server";
 
 export function getServiceClient(): SupabaseClient | null {
@@ -93,6 +94,9 @@ export async function processWebhookEvent(
     // internal_id, ... }`: o player fica em `user`, mas a transação, o
     // tracking e o instante do evento ficam no topo do payload.
     const userEnvelope = isUserEnvelope(payload);
+    // A bravabet365 usa o mesmo envelope, mas manda a transação num objeto
+    // `deposit` ou `withdraw` em vez de no topo do payload.
+    const envelopeTx = userEnvelope ? asRecord(payload.deposit ?? payload.withdraw) : {};
     const eventIso = resolveEventTimestamp(evento, payload, data, userEnvelope);
     // Carrega o modelo de CRM do tenant uma única vez — usado para gatear
     // enrollments automáticos. CRM_EXPERT só aceita entrada via
@@ -117,6 +121,9 @@ export async function processWebhookEvent(
         data.affiliate_id,
         data.axioAffId,
         data.axio_aff_id,
+        // bravabet365: quem indicou o jogador vem em `inviter`.
+        data.inviter,
+        userEnvelope ? payload.inviter : undefined,
       ) ?? null;
 
     const expertNome = await lookupExpertName(sb as unknown as SupabaseLike, tenantId, affiliateId);
@@ -124,7 +131,8 @@ export async function processWebhookEvent(
     const externalId = resolveExternalId(evento, payload, data);
     const signupEvent = isSignupEvent(evento, payload);
 
-    const rawValor = data.amount ?? data.valor ?? payload.amount ?? payload.valor;
+    const rawValor =
+      data.amount ?? data.valor ?? envelopeTx.amount ?? payload.amount ?? payload.valor;
     const valor = rawValor != null ? Math.abs(Number(rawValor)) || null : null;
 
     const nome =
@@ -158,18 +166,24 @@ export async function processWebhookEvent(
     const origem =
       firstString(
         tracking.landing_page,
+        tracking.landing_url,
         tracking.referer,
         data.origem,
         utm.utm_source,
         signupAttribution.fbclid ? "fb" : undefined,
       ) ?? null;
     const metodo =
-      firstString(data.paymentMethod, data.methodCode, data.metodo, data.method) ??
-      (userEnvelope && stringFrom(payload.pix_copy_paste) ? "pix" : null);
+      firstString(data.paymentMethod, data.methodCode, data.metodo, data.method, envelopeTx.type) ??
+      (userEnvelope && (stringFrom(payload.pix_copy_paste) || stringFrom(envelopeTx.pix))
+        ? "pix"
+        : null);
     // No envelope `user`, `data.id` é o player: a transação vem do topo.
     // `internal_id` é o id da fatura na casa; `external_id`, o do PSP.
+    // Em `deposit`/`withdraw`, o `id` da casa é o único presente tanto no
+    // evento pendente quanto no pago.
     const envelopeTransactionId = userEnvelope
       ? firstString(
+          envelopeTx.id,
           payload.internal_id,
           payload.transaction_id,
           payload.transactionId,
@@ -188,10 +202,22 @@ export async function processWebhookEvent(
         payload.event_id,
         payload.deliveryId,
       ) ?? null;
+    // No envelope `user` o recibo inclui o tipo do evento: a casa pode repetir
+    // o `event_id` entre eventos diferentes, e um login não pode bloquear o
+    // depósito que chega depois.
+    const rawProviderEventId = firstString(
+      payload.eventId,
+      payload.event_id,
+      data.eventId,
+      data.event_id,
+    );
+    const envelopeEvent = userEnvelope ? stringFrom(payload.event) : undefined;
     const providerEventId =
-      firstString(payload.eventId, payload.event_id, data.eventId, data.event_id) ??
+      (rawProviderEventId && envelopeEvent
+        ? `${envelopeEvent}:${rawProviderEventId}`
+        : rawProviderEventId) ??
       (userEnvelope ? envelopeEventId(payload, data, envelopeTransactionId) : null);
-    const providerStatus = firstString(data.status, payload.status) ?? null;
+    const providerStatus = firstString(data.status, envelopeTx.status, payload.status) ?? null;
 
     if (providerEventId) {
       const { data: claimed, error: claimError } = await sb.rpc("claim_webhook_event", {
@@ -350,12 +376,15 @@ export async function processWebhookEvent(
 
       // Atividade de login precisa representar somente uma entrada real na plataforma.
       // Depósitos e saques não podem mascarar filtros como “X dias sem login”.
+      const nascimento = dateOnly(data.birth_date ?? data.birthDate ?? data.data_nascimento);
+      if (nascimento) updates.data_nascimento = nascimento;
+
       if (evento === "login") updates.ultimo_login = eventIso;
       if (evento === "jogo-iniciado") updates.ultimo_jogo = eventIso;
       // O login do envelope `user` traz o saldo atual da carteira.
       if (userEnvelope) {
-        const saldo = finiteNumber(payload.balance_brl);
-        const bonus = finiteNumber(payload.balance_bonus);
+        const saldo = finiteNumber(payload.balance_brl ?? data.wallet);
+        const bonus = finiteNumber(payload.balance_bonus ?? data.wallet_bonus);
         if (saldo !== null) updates.saldo_carteira = saldo;
         if (bonus !== null) updates.saldo_bonus = bonus;
       }
@@ -663,8 +692,23 @@ export async function processWebhookEvent(
               isFtd:
                 conversionEvent === "deposit_approved" &&
                 (data.isFtd === true ||
-                  (userEnvelope && finiteNumber(payload.paid_deposits_count) === 1)),
+                  (userEnvelope &&
+                    (finiteNumber(payload.paid_deposits_count) === 1 ||
+                      finiteNumber(envelopeTx.is_ftd) === 1))),
             } as const;
+            // A registration may come from an SMS sent to an external phone
+            // list (no player at send time): bind those links to the new
+            // player first, so the click below can be credited.
+            if (conversionEvent === "registered" && playerId) {
+              await bindExternalListDispatches(sb, { tenantId, playerId, phone: telefone }).catch(
+                (bindError) =>
+                  console.error("[external list] bind failed", {
+                    tenantId,
+                    playerId,
+                    error: bindError instanceof Error ? bindError.message : String(bindError),
+                  }),
+              );
+            }
             // The provider identifies the player, while BetLeads owns the
             // click proof. Do not trust query parameters echoed by the casino:
             // attribution requires an exact, first-party recorded click.
@@ -1110,6 +1154,13 @@ function finiteNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+/** Aceita só `AAAA-MM-DD` (com ou sem hora) e devolve a data pura. */
+function dateOnly(value: unknown): string | null {
+  const match = /^(\d{4}-\d{2}-\d{2})(?:$|T)/.exec(stringFrom(value) ?? "");
+  if (!match || Number.isNaN(Date.parse(match[1]))) return null;
+  return match[1];
+}
+
 function joinName(first: unknown, last: unknown): string | undefined {
   const parts = [stringFrom(first), stringFrom(last)].filter(Boolean);
   return parts.length ? parts.join(" ") : undefined;
@@ -1532,7 +1583,13 @@ function resolveEventTimestamp(
     const signupAt = isSignupEvent(evento, payload) ? stringFrom(data.created_at) : undefined;
     const signupMs = signupAt ? Date.parse(signupAt) : Number.NaN;
     if (!Number.isNaN(signupMs)) return new Date(signupMs).toISOString();
-    return envelopeTimeToIso(payload.time) ?? new Date().toISOString();
+    const occurredAt = stringFrom(payload.occurred_at);
+    const occurredMs = occurredAt ? Date.parse(occurredAt) : Number.NaN;
+    return (
+      envelopeTimeToIso(payload.time) ??
+      (Number.isNaN(occurredMs) ? null : new Date(occurredMs).toISOString()) ??
+      new Date().toISOString()
+    );
   }
   const candidates = [
     evento.includes("aprovado") || evento.includes("concluido") ? data.completedAt : undefined,

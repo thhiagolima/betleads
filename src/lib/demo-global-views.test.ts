@@ -37,11 +37,30 @@ const SUPER_ADMIN_USER = "00000000-0000-4000-8000-0000000000aa";
 beforeEach(() => {
   __resetDemoTenantCacheForTests();
   fake.admin.reset();
-  fake.admin.rows("tenants").push(
-    { id: NORMAL_TENANT, nome: "Casa Normal", slug: "normal", status: "active", plano: "pro", is_demo: false },
-    { id: DEMO_TENANT, nome: "Casa Demo", slug: "demo", status: "active", plano: "pro", is_demo: true },
-  );
+  fake.admin
+    .rows("tenants")
+    .push(
+      {
+        id: NORMAL_TENANT,
+        nome: "Casa Normal",
+        slug: "normal",
+        status: "active",
+        plano: "pro",
+        is_demo: false,
+      },
+      {
+        id: DEMO_TENANT,
+        nome: "Casa Demo",
+        slug: "demo",
+        status: "active",
+        plano: "pro",
+        is_demo: true,
+      },
+    );
   fake.admin.onRpc("is_super_admin", () => ({ data: true, error: null }));
+  // getTenantSwitcherFor also asks for finance visibility and managed groups.
+  fake.admin.onRpc("finance_can_view", () => ({ data: true, error: null }));
+  fake.admin.onRpc("group_ids_managed_by", () => ({ data: [], error: null }));
 });
 
 afterEach(() => {

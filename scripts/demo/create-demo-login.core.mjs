@@ -50,6 +50,19 @@ async function loadDemoTenant(client, demoSlug) {
   return data;
 }
 
+/** The demo group (is_demo) holding `tenantId`, if seedDemoFinance (Task 9)
+ * has already created one — best-effort, so a demo environment seeded
+ * before groups existed still creates logins normally. */
+async function loadDemoGroupId(client, tenantId) {
+  const { data, error } = await client
+    .from("tenant_group_tenants")
+    .select("group_id")
+    .eq("tenant_id", tenantId)
+    .maybeSingle();
+  if (error) throw new Error(`failed to load the demo tenant's group: ${error.message}`);
+  return data?.group_id ?? null;
+}
+
 /** Creates one demo Auth user and grants it `gestor` in the demo tenant. */
 // No expiry flag: nothing in the app or the database enforces an expiry date,
 // so a login is ended explicitly with --revoke (spec §11).
@@ -76,6 +89,23 @@ export async function createDemoLogin(client, { label, demoSlug = DEMO_SLUG } = 
     // Best-effort cleanup: don't leave an Auth user with no role at all.
     await client.auth.admin.deleteUser(user.id).catch(() => {});
     throw new Error(`failed to grant gestor role to ${email}: ${roleError.message}`);
+  }
+
+  // Task 9: the demo group (if seeded) shows the demo house's scoreboard —
+  // the demo user becomes one of its managers too (trg_tenant_group_managers_demo_user
+  // confines this to demo groups only, matching is_demo_user above).
+  const groupId = await loadDemoGroupId(client, tenant.id);
+  if (groupId) {
+    const { error: managerError } = await client
+      .from("tenant_group_managers")
+      .insert({ group_id: groupId, user_id: user.id });
+    if (managerError) {
+      // Same best-effort cleanup as above: don't leave a role or an Auth
+      // user behind for a login that never fully succeeded.
+      await client.from("user_roles").delete().eq("user_id", user.id);
+      await client.auth.admin.deleteUser(user.id).catch(() => {});
+      throw new Error(`failed to add ${email} as a manager of the demo group: ${managerError.message}`);
+    }
   }
 
   return { email, password, userId: user.id, tenantId: tenant.id };

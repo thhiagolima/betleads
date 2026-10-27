@@ -3,11 +3,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { buildFirstPartyClickUrl } from "./click-tracking.server";
 import { DemoTenantBlockedError } from "./demo-tenant";
 import { channelBudget } from "./rate-limit/channel-budget.server";
-import {
-  assertTenantNotDemoForSend,
-  demoSendBlockedReason,
-  listDemoTenantIds,
-} from "./tenant-access.server";
+import { assertTenantNotDemoForSend, demoSendBlockedReason } from "./tenant-access.server";
 
 const SHORTIO_API_URL = "https://api.short.io/links";
 const SHORTIO_BULK_API_URL = "https://api.short.io/links/bulk";
@@ -923,29 +919,79 @@ type ShortioSyncResult = {
   skipped?: boolean;
 };
 
+/** Short.io's statistics endpoint is read with `period: "last30"`, so a link
+ * older than this can only lose clicks: it is not worth an HTTP call. */
+const SHORTIO_STATS_WINDOW_MS = 30 * 24 * 60 * 60_000;
+/** Smallest per-house share of a tick, so a small house's fresh links are
+ * never starved when many houses split the budget. */
+const SHORTIO_SYNC_MIN_SHARE = 25;
+
+type ConcurrencyGate = <T>(task: () => Promise<T>) => Promise<T>;
+
+/** Caps in-flight Short.io statistics calls across every house of a tick. */
+function createConcurrencyGate(size: number): ConcurrencyGate {
+  let active = 0;
+  const waiting: Array<() => void> = [];
+  return async (task) => {
+    if (active >= size) await new Promise<void>((resolve) => waiting.push(resolve));
+    active++;
+    try {
+      return await task();
+    } finally {
+      active--;
+      waiting.shift()?.();
+    }
+  };
+}
+
+function shortioSyncConcurrency(): number {
+  const configured = Number(process.env.SHORTIO_SYNC_CONCURRENCY ?? 10);
+  return Math.max(1, Math.min(Number.isFinite(configured) ? configured : 10, 25));
+}
+
+/**
+ * `limit` is the number of links one tick may read from Short.io. Called
+ * without a tenant it covers every non-demo house: the houses come from
+ * `tenants` (a sample of tracked_links rows only ever reached the two largest
+ * houses), the budget is split evenly between the houses with links in the
+ * statistics window, and one concurrency gate is shared by all of them, so the
+ * request rate to Short.io does not grow with the number of houses.
+ */
 export async function syncShortioMetrics(
   limit = 100,
   tenantId?: string,
+  gate: ConcurrencyGate = createConcurrencyGate(shortioSyncConcurrency()),
 ): Promise<ShortioSyncResult> {
   const apiKey = process.env.SHORTIO_API_KEY?.trim();
   if (!apiKey) throw new Error("SHORTIO_API_KEY não configurada no servidor");
   const db = supabaseAdmin as any;
   const startedAt = new Date().toISOString();
+  const windowSince = new Date(Date.now() - SHORTIO_STATS_WINDOW_MS).toISOString();
   // A execução global é registrada por tenant, preservando RLS e permitindo
   // identificar exatamente qual carteira de links falhou.
   if (!tenantId) {
     // Demo tenants are not even visited (their links are never synced).
-    const demoTenantIds = await listDemoTenantIds();
-    let tenantsQuery = db.from("tracked_links").select("tenant_id").eq("status", "active");
-    if (demoTenantIds.length > 0) {
-      tenantsQuery = tenantsQuery.not("tenant_id", "in", `(${demoTenantIds.join(",")})`);
-    }
-    const { data: tenants, error: tenantsError } = await tenantsQuery.limit(10_000);
+    const { data: tenants, error: tenantsError } = await db
+      .from("tenants")
+      .select("id")
+      .eq("is_demo", false);
     if (tenantsError) throw new Error(`Falha ao listar tenants Short.io: ${tenantsError.message}`);
-    const ids: string[] = Array.from(
-      new Set<string>((tenants ?? []).map((row: any) => String(row.tenant_id))),
+    const withLinks = await Promise.all(
+      (tenants ?? []).map(async (row: any) => {
+        const { data, error } = await db
+          .from("tracked_links")
+          .select("id")
+          .eq("tenant_id", row.id)
+          .eq("status", "active")
+          .gte("created_at", windowSince)
+          .limit(1);
+        if (error) throw new Error(`Falha ao listar links Short.io: ${error.message}`);
+        return (data ?? []).length > 0 ? String(row.id) : null;
+      }),
     );
-    const results = await Promise.all(ids.map((id) => syncShortioMetrics(limit, id)));
+    const ids = withLinks.filter((id): id is string => id !== null);
+    const share = Math.max(SHORTIO_SYNC_MIN_SHARE, Math.ceil(limit / Math.max(1, ids.length)));
+    const results = await Promise.all(ids.map((id) => syncShortioMetrics(share, id, gate)));
     return {
       startedAt,
       processed: results.reduce((sum, result) => sum + result.processed, 0),
@@ -1024,6 +1070,7 @@ export async function syncShortioMetrics(
         .select("id,tenant_id,shortio_link_id")
         .eq("status", "active")
         .eq("tenant_id", tenantId)
+        .gte("created_at", windowSince)
         .order("last_synced_at", { ascending: true, nullsFirst: true })
         .order("created_at", { ascending: true })
         .limit(backgroundLimit + recentLinks.length)
@@ -1040,11 +1087,6 @@ export async function syncShortioMetrics(
   const snapshotAt = new Date();
   snapshotAt.setUTCMinutes(0, 0, 0);
   const syncLinks = links ?? [];
-  const configuredConcurrency = Number(process.env.SHORTIO_SYNC_CONCURRENCY ?? 15);
-  const concurrency = Math.max(
-    1,
-    Math.min(Number.isFinite(configuredConcurrency) ? configuredConcurrency : 15, 25),
-  );
   const fetchStatistics = async (linkTenantId: string, shortioLinkId: string) => {
     let response: Response | null = null;
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -1079,9 +1121,11 @@ export async function syncShortioMetrics(
     }
     throw new Error(`Short.io retornou HTTP ${response?.status ?? 0}`);
   };
-  for (let offset = 0; offset < syncLinks.length; offset += concurrency) {
-    await Promise.all(
-      syncLinks.slice(offset, offset + concurrency).map(async (link: any) => {
+  // The gate is shared by every house of a global tick; a retry's back-off
+  // keeps its slot, so a 429 slows the whole tick instead of piling up calls.
+  await Promise.all(
+    syncLinks.map((link: any) =>
+      gate(async () => {
         try {
           const response = await fetchStatistics(String(link.tenant_id), link.shortio_link_id);
           const payload = (await response.json()) as {
@@ -1133,8 +1177,8 @@ export async function syncShortioMetrics(
           });
         }
       }),
-    );
-  }
+    ),
+  );
   if (runId) {
     await db
       .from("link_tracking_sync_runs")

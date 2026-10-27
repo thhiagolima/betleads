@@ -21,7 +21,8 @@ import {
   requireTenantAdmin,
   resolveOperationalTenantForRequest,
 } from "@/lib/tenant-access.server";
-import { auditTenant, findOrInviteUserByEmail } from "@/lib/tenants.functions";
+import { auditTenant } from "@/lib/tenant-audit.server";
+import { findOrInviteUserByEmail } from "@/lib/tenants.functions";
 import { dbUuid } from "@/lib/zod-helpers";
 
 type DbError = { message: string; code?: string; details?: string | null };

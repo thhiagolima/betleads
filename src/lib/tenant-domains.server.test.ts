@@ -130,6 +130,11 @@ function makeFakeSupabase(tables: Record<string, Row[]>, updateLog: UpdateLogEnt
         filters.push((r) => (r[col] ?? null) === val);
         return builder;
       },
+      ilike(col: string, pattern: string) {
+        // Only exact (wildcard-free) patterns are used by the service.
+        filters.push((r) => String(r[col] ?? "").toLowerCase() === pattern.toLowerCase());
+        return builder;
+      },
       in(col: string, vals: unknown[]) {
         filters.push((r) => vals.includes(r[col]));
         return builder;
@@ -537,6 +542,153 @@ describe("addTenantDomain", () => {
     expect(result.status).toBe("pending");
     expect(result.last_error).toBe("O provedor está indisponível no momento. Tente novamente em alguns minutos.");
     expect(tables.tenant_domains).toHaveLength(1);
+  });
+});
+
+describe("addTenantDomain: same hostname as shortener and e-mail", () => {
+  const pendingInfobip = {
+    providerDomainId: "infobip-1",
+    providerState: "inactive",
+    status: "pending" as const,
+    dnsRecords: [],
+  };
+  const pendingShortio = {
+    providerDomainId: "shortio-1",
+    providerState: "pending",
+    status: "pending" as const,
+    dnsRecords: [],
+  };
+
+  it("same tenant already has it as shortener: adding as e-mail creates a NEW e-mail row at Infobip", async () => {
+    seed({
+      tenants: [{ id: TENANT_A, site_url: null }],
+      tenant_domains: [
+        domainRow({ id: "short-1", kind: "shortener", hostname: "bravabet365.online", status: "verified", is_default: true }),
+      ],
+    });
+    mocks.createInfobipDomain.mockResolvedValue(pendingInfobip);
+    mocks.requestInfobipVerification.mockResolvedValue(undefined);
+
+    const result = await addTenantDomain({
+      tenantId: TENANT_A,
+      kind: "email",
+      rawHostname: "BravaBet365.online",
+      userId: USER_ID,
+    });
+
+    expect(mocks.createInfobipDomain).toHaveBeenCalledWith("bravabet365.online");
+    expect(mocks.getShortioDomain).not.toHaveBeenCalled();
+    expect(result.id).not.toBe("short-1");
+    expect(result.kind).toBe("email");
+    expect(result.hostname).toBe("bravabet365.online");
+    expect(tables.tenant_domains).toHaveLength(2);
+    const shortener = tables.tenant_domains.find((r) => r.id === "short-1")!;
+    expect(shortener.kind).toBe("shortener");
+    expect(shortener.is_default).toBe(true);
+  });
+
+  it("same tenant already has it as e-mail: adding as shortener creates a NEW shortener row at Short.io", async () => {
+    seed({
+      tenants: [{ id: TENANT_A, site_url: null }],
+      tenant_domains: [domainRow({ id: "mail-1", kind: "email", hostname: "go.example.com" })],
+    });
+    mocks.createShortioDomain.mockResolvedValue(pendingShortio);
+
+    const result = await addTenantDomain({
+      tenantId: TENANT_A,
+      kind: "shortener",
+      rawHostname: "go.example.com",
+      userId: USER_ID,
+    });
+
+    expect(mocks.createShortioDomain).toHaveBeenCalledWith("go.example.com");
+    expect(mocks.getInfobipDomain).not.toHaveBeenCalled();
+    expect(result.id).not.toBe("mail-1");
+    expect(result.kind).toBe("shortener");
+    expect(tables.tenant_domains).toHaveLength(2);
+  });
+
+  it("another tenant has the hostname as e-mail: adding it as shortener is rejected without calling the provider", async () => {
+    seed({
+      tenants: [{ id: TENANT_A, site_url: null }],
+      tenant_domains: [domainRow({ id: "mail-b", tenant_id: TENANT_B, kind: "email", hostname: "go.example.com" })],
+    });
+
+    await expect(
+      addTenantDomain({ tenantId: TENANT_A, kind: "shortener", rawHostname: "go.example.com", userId: USER_ID }),
+    ).rejects.toThrow("Esse domínio já está em uso por outra conta");
+    expect(mocks.createShortioDomain).not.toHaveBeenCalled();
+    expect(tables.tenant_domains).toHaveLength(1);
+  });
+
+  it("another tenant has a REMOVED row with the hostname (other kind): still rejected", async () => {
+    seed({
+      tenants: [{ id: TENANT_A, site_url: null }],
+      tenant_domains: [
+        domainRow({
+          id: "short-b",
+          tenant_id: TENANT_B,
+          kind: "shortener",
+          hostname: "go.example.com",
+          removed_at: "2026-01-01T00:00:00.000Z",
+        }),
+      ],
+    });
+
+    await expect(
+      addTenantDomain({ tenantId: TENANT_A, kind: "email", rawHostname: "go.example.com", userId: USER_ID }),
+    ).rejects.toThrow("Esse domínio já está em uso por outra conta");
+    expect(mocks.createInfobipDomain).not.toHaveBeenCalled();
+  });
+
+  it("an active row of the SAME kind and tenant is still just refreshed and returned", async () => {
+    seed({
+      tenants: [{ id: TENANT_A, site_url: null }],
+      tenant_domains: [
+        domainRow({ id: "short-1", kind: "shortener", hostname: "go.example.com" }),
+        domainRow({ id: "mail-1", kind: "email", hostname: "go.example.com" }),
+      ],
+    });
+    mocks.findShortioDomainByHostname.mockResolvedValue(pendingShortio);
+
+    const result = await addTenantDomain({
+      tenantId: TENANT_A,
+      kind: "shortener",
+      rawHostname: "go.example.com",
+      userId: USER_ID,
+    });
+
+    expect(result.id).toBe("short-1");
+    expect(mocks.createShortioDomain).not.toHaveBeenCalled();
+    expect(tables.tenant_domains).toHaveLength(2);
+  });
+
+  it("a removed e-mail row is reactivated even when an active shortener row exists for the same hostname", async () => {
+    seed({
+      tenants: [{ id: TENANT_A, site_url: null }],
+      tenant_domains: [
+        domainRow({ id: "short-1", kind: "shortener", hostname: "go.example.com", status: "verified" }),
+        domainRow({
+          id: "mail-1",
+          kind: "email",
+          hostname: "go.example.com",
+          removed_at: "2026-01-01T00:00:00.000Z",
+        }),
+      ],
+    });
+    mocks.createInfobipDomain.mockResolvedValue(pendingInfobip);
+    mocks.requestInfobipVerification.mockResolvedValue(undefined);
+
+    const result = await addTenantDomain({
+      tenantId: TENANT_A,
+      kind: "email",
+      rawHostname: "go.example.com",
+      userId: USER_ID,
+    });
+
+    expect(result.id).toBe("mail-1");
+    expect(result.removed_at).toBeNull();
+    expect(tables.tenant_domains).toHaveLength(2);
   });
 });
 

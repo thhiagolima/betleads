@@ -17,6 +17,10 @@ const MIGRATION = readFileSync(
   resolve(root, "supabase/migrations/20261021100000_tenant_house_config.sql"),
   "utf8",
 );
+const MIGRATION_PER_KIND = readFileSync(
+  resolve(root, "supabase/migrations/20261030200000_tenant_domains_unique_per_kind.sql"),
+  "utf8",
+);
 
 const SCHEMA = `
 create role anon nologin;
@@ -99,6 +103,8 @@ beforeAll(async () => {
   }
 
   await db.exec(MIGRATION);
+  // Applied on top of the backfilled data, as on prod.
+  await db.exec(MIGRATION_PER_KIND.replace(/^notify pgrst.*$/m, ""));
 });
 
 afterAll(async () => {
@@ -216,6 +222,84 @@ describe("backfill from shortio_settings", () => {
       [[SHARED_TENANT_1, SHARED_TENANT_2]],
     );
     expect(rows).toHaveLength(0);
+  });
+});
+
+describe("tenant_domains: one hostname per kind, one house per hostname", () => {
+  const OTHER = "00000000-0000-4000-8000-000000000021";
+
+  beforeAll(async () => {
+    await db.query(`insert into public.tenants (id, nome) values ($1, 'Outra Casa')`, [OTHER]);
+  });
+
+  it("drops the old global hostname index", async () => {
+    const { rows } = await db.query(
+      `select indexname from pg_indexes where tablename = 'tenant_domains' and indexname like 'tenant_domains_hostname%'`,
+    );
+    expect(rows.map((r: any) => r.indexname)).toEqual(["tenant_domains_hostname_kind_lower_idx"]);
+  });
+
+  it("allows the same hostname as shortener and e-mail in the same house", async () => {
+    await db.query(
+      `insert into public.tenant_domains (tenant_id, kind, hostname) values ($1, 'shortener', 'bravabet365.online')`,
+      [EXISTING_TENANT],
+    );
+    await db.query(
+      `insert into public.tenant_domains (tenant_id, kind, hostname) values ($1, 'email', 'BravaBet365.online')`,
+      [EXISTING_TENANT],
+    );
+    const { rows } = await db.query(
+      `select kind from public.tenant_domains where lower(hostname) = 'bravabet365.online' order by kind`,
+    );
+    expect(rows.map((r: any) => r.kind)).toEqual(["email", "shortener"]);
+  });
+
+  it("rejects the same hostname and kind twice (any case)", async () => {
+    await expect(
+      db.query(
+        `insert into public.tenant_domains (tenant_id, kind, hostname) values ($1, 'email', 'BRAVABET365.online')`,
+        [EXISTING_TENANT],
+      ),
+    ).rejects.toThrow();
+  });
+
+  it.each(["shortener", "email"])("rejects the hostname for another house as %s", async (kind) => {
+    await expect(
+      db.query(`insert into public.tenant_domains (tenant_id, kind, hostname) values ($1, $2, 'bravabet365.online')`, [
+        OTHER,
+        kind,
+      ]),
+    ).rejects.toThrow(/outra conta/);
+  });
+
+  it("rejects another house even when the owner has only one kind (and it is removed)", async () => {
+    await db.query(
+      `insert into public.tenant_domains (tenant_id, kind, hostname, removed_at)
+       values ($1, 'shortener', 'go.removida.com', now())`,
+      [EXISTING_TENANT],
+    );
+    await expect(
+      db.query(`insert into public.tenant_domains (tenant_id, kind, hostname) values ($1, 'email', 'go.removida.com')`, [
+        OTHER,
+      ]),
+    ).rejects.toThrow(/outra conta/);
+  });
+
+  it("rejects moving a row to another house that would share the hostname", async () => {
+    await db.query(
+      `insert into public.tenant_domains (tenant_id, kind, hostname) values ($1, 'email', 'mail.outra.com')`,
+      [OTHER],
+    );
+    await expect(
+      db.query(
+        `update public.tenant_domains set tenant_id = $1 where lower(hostname) = 'bravabet365.online' and kind = 'email'`,
+        [OTHER],
+      ),
+    ).rejects.toThrow(/outra conta/);
+    // Ordinary updates of a row (status, removal) keep working.
+    await db.query(
+      `update public.tenant_domains set status = 'verified', removed_at = now() where lower(hostname) = 'bravabet365.online'`,
+    );
   });
 });
 

@@ -17,6 +17,7 @@ import {
 import { cancelOpenInvoiceCharges } from "@/lib/billing/invoices.server";
 import { EXPERT_MEMBER_GUARD, HOUSE_MEMBER_ROLES } from "@/lib/house-member-roles";
 import { assertTenantNotDemo, isBillingEnforcementEnabled } from "@/lib/tenant-access.server";
+import { auditTenant } from "@/lib/tenant-audit.server";
 import { dbUuid } from "@/lib/zod-helpers";
 
 type DbError = { message: string };
@@ -113,7 +114,20 @@ async function checkSuperAdmin(userId: string) {
   return !!data;
 }
 
-async function canManageTenant(ctx: ServerContext, tenantId: string) {
+/**
+ * True only for a real manager of a group containing the house (super admin
+ * deliberately does not count, see is_group_manager_of_tenant in SQL).
+ */
+async function checkGroupManagerOfTenant(userId: string, tenantId: string) {
+  const { data, error } = await db().rpc<boolean>("is_group_manager_of_tenant", {
+    _user: userId,
+    _tenant: tenantId,
+  });
+  if (error) throw new Error(error.message);
+  return data === true;
+}
+
+async function isSuperAdminOrTenantAdmin(ctx: ServerContext, tenantId: string) {
   if (await checkSuperAdmin(ctx.userId)) return true;
   const { data, error } = await db()
     .from<TenantMemberRow[]>("user_roles")
@@ -125,9 +139,31 @@ async function canManageTenant(ctx: ServerContext, tenantId: string) {
   return !!data?.length;
 }
 
+/**
+ * People management (add/change/remove members): super admin, house admin, or
+ * a manager of a group containing the house. Never used for operational or
+ * settings access — see requireTenantSettingsManager.
+ */
+async function canManageTenant(ctx: ServerContext, tenantId: string) {
+  if (await isSuperAdminOrTenantAdmin(ctx, tenantId)) return true;
+  return checkGroupManagerOfTenant(ctx.userId, tenantId);
+}
+
 async function requireTenantManager(ctx: ServerContext, tenantId: string) {
   const allowed = await canManageTenant(ctx, tenantId);
   if (!allowed) throw new Error("Sem permissão para gerenciar este tenant");
+}
+
+/** House settings stay limited to super admin and house admin (no group-manager path). */
+async function requireTenantSettingsManager(ctx: ServerContext, tenantId: string) {
+  const allowed = await isSuperAdminOrTenantAdmin(ctx, tenantId);
+  if (!allowed) throw new Error("Sem permissão para gerenciar este tenant");
+}
+
+/** Super admin, or a manager of a group containing the house, may name/change/remove admins. */
+async function checkActorCanSetAdmin(ctx: ServerContext, tenantId: string) {
+  if (await checkSuperAdmin(ctx.userId)) return true;
+  return checkGroupManagerOfTenant(ctx.userId, tenantId);
 }
 
 async function countTenantAdmins(tenantId: string) {
@@ -187,7 +223,7 @@ async function countRows(table: string, tenantId: string, from?: string) {
   return count ?? 0;
 }
 
-async function listAuthUsersById(userIds: string[]) {
+export async function listAuthUsersById(userIds: string[]) {
   const wanted = new Set(userIds);
   const map = new Map<string, AuthUserRow>();
   let page = 1;
@@ -215,7 +251,7 @@ async function listAuthUsersById(userIds: string[]) {
   return map;
 }
 
-async function findAuthUserByEmail(email: string) {
+export async function findAuthUserByEmail(email: string) {
   const target = email.trim().toLowerCase();
   let page = 1;
   const perPage = 1000;
@@ -262,31 +298,22 @@ export async function findOrInviteUserByEmail(
   return { userId: createRes.data.user.id, created: true };
 }
 
-export async function auditTenant(args: {
-  tenantId: string;
-  actorUserId: string;
-  action: string;
-  entityType: string;
-  entityId?: string | null;
-  before?: unknown;
-  after?: unknown;
-  metadata?: Record<string, unknown>;
-}) {
-  const { error } = await db()
-    .from("tenant_audit_logs")
-    .insert({
-      tenant_id: args.tenantId,
-      actor_user_id: args.actorUserId,
-      action: args.action,
-      entity_type: args.entityType,
-      entity_id: args.entityId ?? null,
-      before_data: args.before ?? null,
-      after_data: args.after ?? null,
-      metadata: args.metadata ?? {},
-    });
-  if (error) {
-    console.warn("[tenants] failed writing audit log", error.message);
-  }
+/** Members of a house (user_roles) with their auth e-mail and sign-in data, oldest first. */
+export async function listTenantMembers(tenantId: string) {
+  const { data, error } = await db()
+    .from<TenantMemberRow[]>("user_roles")
+    .select("id,user_id,tenant_id,role,created_at")
+    .eq("tenant_id", tenantId)
+    .order("created_at", { ascending: true });
+  if (error) throw new Error(error.message);
+  const members = data ?? [];
+  const userMap = await listAuthUsersById(members.map((m) => m.user_id));
+  return members.map((member) => ({
+    ...member,
+    email: userMap.get(member.user_id)?.email ?? null,
+    last_sign_in_at: userMap.get(member.user_id)?.last_sign_in_at ?? null,
+    banned_until: userMap.get(member.user_id)?.banned_until ?? null,
+  }));
 }
 
 /**
@@ -352,7 +379,7 @@ async function buildTenantDetail(
 
   const [
     tenantRes,
-    membersRes,
+    users,
     walletSummaryRes,
     ledgerRes,
     ordersRes,
@@ -369,11 +396,7 @@ async function buildTenantDetail(
       .select("id,nome,slug,status,plano,crm_model,limits,metadata,created_at,updated_at")
       .eq("id", tenantId)
       .maybeSingle(),
-    db()
-      .from<TenantMemberRow[]>("user_roles")
-      .select("id,user_id,tenant_id,role,created_at")
-      .eq("tenant_id", tenantId)
-      .order("created_at", { ascending: true }),
+    listTenantMembers(tenantId),
     db().rpc("wallet_summary", { _tenant: tenantId }),
     // Never selects `provider_unit_cost`, regardless of who's asking: this
     // query always runs through `db()` (supabaseAdmin), which bypasses the
@@ -414,20 +437,10 @@ async function buildTenantDetail(
 
   if (tenantRes.error) throw new Error(tenantRes.error.message);
   if (!tenantRes.data) throw new Error("Tenant não encontrado");
-  if (membersRes.error) throw new Error(membersRes.error.message);
   if (walletSummaryRes.error) throw new Error(walletSummaryRes.error.message);
   if (ledgerRes.error) throw new Error(ledgerRes.error.message);
   if (ordersRes.error) throw new Error(ordersRes.error.message);
   if (auditRes.error) throw new Error(auditRes.error.message);
-
-  const members = membersRes.data ?? [];
-  const userMap = await listAuthUsersById(members.map((m) => m.user_id));
-  const users = members.map((member) => ({
-    ...member,
-    email: userMap.get(member.user_id)?.email ?? null,
-    last_sign_in_at: userMap.get(member.user_id)?.last_sign_in_at ?? null,
-    banned_until: userMap.get(member.user_id)?.banned_until ?? null,
-  }));
 
   const walletSummary = (walletSummaryRes.data ?? {}) as {
     exempt?: boolean;
@@ -487,7 +500,9 @@ export const getTenantManagementConsole = createServerFn({ method: "POST" })
     getTenantManagementConsoleFor(context as unknown as ServerContext, data),
   );
 
-/** Body of `getTenantManagementConsole`, extracted so it is unit-testable. */
+// Body of `getTenantManagementConsole`, exported so it is unit-testable. Its
+// access rule is house role or super admin only (getAccessibleTenants); group
+// managers get no path here.
 export async function getTenantManagementConsoleFor(
   ctx: ServerContext,
   data: { tenantId?: string | null },
@@ -515,6 +530,45 @@ export async function getTenantManagementConsoleFor(
     selectedTenantId,
     detail: await buildTenantDetail(selectedTenantId, { includeProviderCost: superAdmin }),
   };
+}
+
+export async function checkFinanceCanView(userId: string, tenantId: string) {
+  const { data, error } = await db().rpc<boolean>("finance_can_view", {
+    _user: userId,
+    _tenant: tenantId,
+  });
+  if (error) throw new Error(error.message);
+  return data === true;
+}
+
+/**
+ * Group ids the user manages (all groups for a super admin). PostgREST returns
+ * a `setof uuid` as a list of scalars; an object row is unwrapped defensively.
+ */
+export async function managedGroupIds(userId: string) {
+  const { data, error } = await db().rpc<unknown[]>("group_ids_managed_by", { _user: userId });
+  if (error) throw new Error(error.message);
+  return (data ?? [])
+    .map((row) =>
+      row && typeof row === "object" ? Object.values(row as Record<string, unknown>)[0] : row,
+    )
+    .filter((id): id is string => typeof id === "string");
+}
+
+type GroupOption = { id: string; nome: string; is_demo: boolean };
+
+async function listManagedGroups(userId: string): Promise<GroupOption[]> {
+  const ids = await managedGroupIds(userId);
+  if (!ids.length) return [];
+  const { data, error } = await db()
+    .from<GroupOption[]>("tenant_groups")
+    .select("id,nome,is_demo")
+    .in("id", ids)
+    .order("nome", { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data ?? [])
+    .map((group) => ({ id: group.id, nome: group.nome, is_demo: group.is_demo === true }))
+    .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
 }
 
 /**
@@ -551,11 +605,37 @@ export async function getTenantSwitcherFor(ctx: ServerContext) {
     role: superAdmin ? "super_admin" : (roleByTenant.get(tenant.id) ?? "member"),
     is_demo: tenant.is_demo === true,
   }));
+  // The switcher is on every page: a failing finance/group lookup must only
+  // hide those entries, never break navigation. A super admin sees every
+  // house's finance, so no per-house RPC is needed.
+  const [canViewFinance, groups] = await Promise.all([
+    Promise.all(
+      options.map((tenant) =>
+        superAdmin
+          ? true
+          : checkFinanceCanView(ctx.userId, tenant.id).catch((error: unknown) => {
+              console.warn("[tenant-switcher] finance_can_view failed", tenant.id, error);
+              return false;
+            }),
+      ),
+    ),
+    listManagedGroups(ctx.userId).catch((error: unknown) => {
+      console.warn("[tenant-switcher] managed groups lookup failed", error);
+      return [] as GroupOption[];
+    }),
+  ]);
   const activeTenantId = options.some((tenant) => tenant.id === ctx.activeTenantId)
     ? ctx.activeTenantId
     : (options[0]?.id ?? null);
 
-  return { activeTenantId, tenants: options };
+  return {
+    activeTenantId,
+    tenants: options.map((tenant, index) => ({
+      ...tenant,
+      can_view_finance: canViewFinance[index],
+    })),
+    groups,
+  };
 }
 
 export const getTenantSwitcher = createServerFn({ method: "GET" })
@@ -734,13 +814,17 @@ const updateTenantInput = z.object({
   planReason: z.string().max(500).optional().nullable(),
 });
 
-/** Body of `updateTenantSettings`, exported so the plan-reason rule is directly unit-testable. */
+/**
+ * Body of `updateTenantSettings`, exported so the plan-reason rule is directly
+ * unit-testable. Settings stay with super admin / house admin; a group manager
+ * has no settings path (requireTenantSettingsManager).
+ */
 export async function updateTenantSettingsFor(
   ctx: ServerContext,
   data: z.infer<typeof updateTenantInput>,
 ) {
   const superAdmin = await checkSuperAdmin(ctx.userId);
-  await requireTenantManager(ctx, data.tenantId);
+  await requireTenantSettingsManager(ctx, data.tenantId);
   await assertTenantNotDemo(data.tenantId);
 
   const { data: before, error: beforeErr } = await db()
@@ -880,12 +964,13 @@ export async function addUserToTenantFor(ctx: ServerContext, data: z.infer<typeo
   await requireTenantManager(ctx, data.tenantId);
   await assertTenantNotDemo(data.tenantId);
   const actorIsSuperAdmin = await checkSuperAdmin(ctx.userId);
+  const actorCanSetAdmin = await checkActorCanSetAdmin(ctx, data.tenantId);
 
   if (!actorIsSuperAdmin && data.password) {
     throw new Error("Convites de tenant devem ser enviados por email, sem senha manual");
   }
-  if (!actorIsSuperAdmin && data.role === "admin") {
-    throw new Error("Apenas o super admin pode definir o admin do tenant");
+  if (!actorCanSetAdmin && data.role === "admin") {
+    throw new Error("Apenas o super admin ou o gestor do grupo pode definir o admin da casa");
   }
 
   const email = data.email.trim().toLowerCase();
@@ -910,6 +995,14 @@ export async function addUserToTenantFor(ctx: ServerContext, data: z.infer<typeo
   if (existing) {
     if (existing.role === "expert") throw new Error(EXPERT_MEMBER_GUARD);
     if (existing.role === data.role) return { ok: true, created, existing: true };
+    // Same admin rules as updateTenantUserRole: re-adding an existing admin
+    // with another role is a demotion.
+    if (!actorCanSetAdmin && existing.role === "admin") {
+      throw new Error("Apenas o super admin ou o gestor do grupo pode alterar o admin da casa");
+    }
+    if (existing.role === "admin" && (await countTenantAdmins(data.tenantId)) <= 1) {
+      throw new Error("Nao e permitido remover o unico admin do tenant");
+    }
     const { error } = await db()
       .from("user_roles")
       .update({ role: data.role })
@@ -971,10 +1064,10 @@ export async function updateTenantUserRoleFor(
 ) {
   await requireTenantManager(ctx, data.tenantId);
   await assertTenantNotDemo(data.tenantId);
-  const actorIsSuperAdmin = await checkSuperAdmin(ctx.userId);
+  const actorCanSetAdmin = await checkActorCanSetAdmin(ctx, data.tenantId);
 
-  if (!actorIsSuperAdmin && data.role === "admin") {
-    throw new Error("Apenas o super admin pode definir o admin do tenant");
+  if (!actorCanSetAdmin && data.role === "admin") {
+    throw new Error("Apenas o super admin ou o gestor do grupo pode definir o admin da casa");
   }
 
   const { data: before, error: beforeErr } = await db()
@@ -987,8 +1080,8 @@ export async function updateTenantUserRoleFor(
   if (!before) throw new Error("Vínculo não encontrado");
   if (before.role === "expert") throw new Error(EXPERT_MEMBER_GUARD);
 
-  if (!actorIsSuperAdmin && before.role === "admin") {
-    throw new Error("Apenas o super admin pode alterar o admin do tenant");
+  if (!actorCanSetAdmin && before.role === "admin") {
+    throw new Error("Apenas o super admin ou o gestor do grupo pode alterar o admin da casa");
   }
   if (
     before.role === "admin" &&
@@ -1056,9 +1149,9 @@ export async function removeUserFromTenantFor(
     throw new Error("Você não pode remover seu próprio acesso por aqui");
   }
 
-  const actorIsSuperAdmin = await checkSuperAdmin(ctx.userId);
-  if (!actorIsSuperAdmin && before.role === "admin") {
-    throw new Error("Apenas o super admin pode remover o admin do tenant");
+  const actorCanSetAdmin = await checkActorCanSetAdmin(ctx, data.tenantId);
+  if (!actorCanSetAdmin && before.role === "admin") {
+    throw new Error("Apenas o super admin ou o gestor do grupo pode remover o admin da casa");
   }
   if (before.role === "admin" && (await countTenantAdmins(data.tenantId)) <= 1) {
     throw new Error("Nao e permitido remover o unico admin do tenant");

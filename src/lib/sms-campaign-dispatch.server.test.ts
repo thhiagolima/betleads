@@ -674,3 +674,74 @@ describe("processSmsCampaignTick with the SMS provider breaker (incident 15/10/2
     });
   });
 });
+
+describe("processSmsCampaignTick with an external phone list", () => {
+  const external = (n: number): CampaignTarget[] =>
+    Array.from({ length: n }, (_, i) => ({ phone: phone(i + 1), playerId: null, external: true }));
+
+  it("sends to every number without resolving it to a player, keyed by phone", async () => {
+    const c = campaign(external(3), { recipient_source: "external_list", content: "Entre: {link}" });
+    const { state, deps } = world();
+    const resolved: unknown[] = [];
+    deps.resolveRecipients = async (tenant, inputs) => {
+      resolved.push(...inputs);
+      throw new Error("external numbers must not be resolved to players");
+    };
+    const seen: Array<{ playerId: string | null; variables: unknown }> = [];
+    const send = deps.send;
+    deps.send = async (args) => {
+      seen.push({ playerId: args.target.playerId, variables: args.variables });
+      return send(args);
+    };
+    const r = await processSmsCampaignTick(c, deps, { deadline: 45_000 });
+    expect(r.sent).toBe(3);
+    expect(r.status).toBe("enviado");
+    expect(resolved).toEqual([]);
+    expect(seen.every((s) => s.playerId === null && s.variables === null)).toBe(true);
+    expect(state.sendCalls).toEqual([
+      await campaignDeliveryKey(c.id, `phone:${phone(1)}`),
+      await campaignDeliveryKey(c.id, `phone:${phone(2)}`),
+      await campaignDeliveryKey(c.id, `phone:${phone(3)}`),
+    ]);
+  });
+
+  it("drops numbers that registered before the first send and keeps creation-time exclusions", async () => {
+    const c = campaign(external(3), {
+      recipient_source: "external_list",
+      unresolved_recipients: [{ phone: "+5511900000099", reason: "ja_jogador" }],
+    });
+    const { state, deps } = world();
+    deps.findRegisteredPhones = async (_tenant, phones) =>
+      new Set(phones.filter((p) => p === phone(2)));
+    const r = await processSmsCampaignTick(c, deps, { deadline: 45_000 });
+    expect(r.sent).toBe(2);
+    expect(state.sendCalls).not.toContain(await campaignDeliveryKey(c.id, `phone:${phone(2)}`));
+    expect(state.patches[0]).toMatchObject({ total_count: 2 });
+    expect(state.unresolved).toEqual([
+      { phone: "+5511900000099", reason: "ja_jogador" },
+      { phone: phone(2), reason: "ja_jogador" },
+    ]);
+  });
+
+  it("does not re-check registrations after the first recipient went out", async () => {
+    const c = campaign(external(3), { recipient_source: "external_list", sent_cursor: 1 });
+    const { deps } = world();
+    let checked = false;
+    deps.findRegisteredPhones = async () => {
+      checked = true;
+      return new Set();
+    };
+    const r = await processSmsCampaignTick(c, deps, { deadline: 45_000 });
+    expect(checked).toBe(false);
+    expect(r.sent).toBe(2);
+  });
+
+  it("fails with a list-specific reason when every number is already a player", async () => {
+    const c = campaign(external(2), { recipient_source: "external_list" });
+    const { state, deps } = world();
+    deps.findRegisteredPhones = async (_tenant, phones) => new Set(phones);
+    const r = await processSmsCampaignTick(c, deps, { deadline: 45_000 });
+    expect(r.status).toBe("falhou");
+    expect(String(lastPatch(state.patches).last_error)).toContain("Nenhum número da lista");
+  });
+});

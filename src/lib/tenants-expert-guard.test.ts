@@ -53,6 +53,7 @@ beforeEach(() => {
   fake.authUsers.length = 0;
   fake.authUsers.push({ id: EXPERT_USER, email: "expert@casa.com" });
   fake.admin.onRpc("is_super_admin", () => ({ data: false, error: null }));
+  fake.admin.onRpc("is_group_manager_of_tenant", () => ({ data: false, error: null }));
   fake.admin
     .rows("user_roles")
     .push(
@@ -84,6 +85,29 @@ describe("team management refuses expert members", () => {
     await expect(
       addUserToTenantFor(ctx, { tenantId: TENANT, email: "expert@casa.com", role: "member" }),
     ).rejects.toThrow(GUARD);
+    expect(fake.admin.rows("user_roles")[1].role).toBe("expert");
+  });
+
+  it("a group manager of the house cannot bypass the expert guard either", async () => {
+    const managerCtx = {
+      userId: "00000000-0000-4000-8000-0000000000c1",
+      supabase: {},
+    } as unknown as Ctx;
+    fake.admin.onRpc("is_group_manager_of_tenant", () => ({ data: true, error: null }));
+    await expect(
+      updateTenantUserRoleFor(managerCtx, {
+        tenantId: TENANT,
+        membershipId: EXPERT_MEMBERSHIP,
+        role: "admin",
+      }),
+    ).rejects.toThrow(GUARD);
+    await expect(
+      removeUserFromTenantFor(managerCtx, { tenantId: TENANT, membershipId: EXPERT_MEMBERSHIP }),
+    ).rejects.toThrow(GUARD);
+    await expect(
+      addUserToTenantFor(managerCtx, { tenantId: TENANT, email: "expert@casa.com", role: "admin" }),
+    ).rejects.toThrow(GUARD);
+    expect(fake.admin.rows("user_roles")).toHaveLength(2);
     expect(fake.admin.rows("user_roles")[1].role).toBe("expert");
   });
 });

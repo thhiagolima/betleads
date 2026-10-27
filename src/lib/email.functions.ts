@@ -30,6 +30,7 @@ import {
 import { isSendBlockedError } from "./billing/billing-locked-error";
 import { bindTrackedDispatchesToMessageLog } from "./shortio.server";
 import { conversionFunnelSnapshot, type ConversionObjective } from "./conversion-funnel";
+import { tenantReads } from "@/lib/active-tenant-filter";
 
 // ============ Helpers ============
 
@@ -255,8 +256,9 @@ function smtpRowToUI(r: any) {
 export const listSmtpConfigs = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
+    const reads = await tenantReads(context.supabase);
     await assertSuperAdmin(context.userId);
-    const { data, error } = await context.supabase
+    const { data, error } = await reads
       .from("email_smtp_configs")
       .select("*")
       .order("created_at", { ascending: false });
@@ -368,8 +370,9 @@ function senderRowToUI(r: any) {
 export const listEmailSenders = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
+    const reads = await tenantReads(context.supabase);
     await assertSuperAdmin(context.userId);
-    const { data, error } = await context.supabase
+    const { data, error } = await reads
       .from("email_senders")
       .select("*")
       .order("created_at", { ascending: false });
@@ -484,7 +487,8 @@ function templateRowToUI(r: any) {
 export const listEmailTemplates = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data, error } = await context.supabase
+    const reads = await tenantReads(context.supabase);
+    const { data, error } = await reads
       .from("email_templates")
       .select("*")
       .order("created_at", { ascending: false });
@@ -637,7 +641,8 @@ function campanhaRowToUI(r: any) {
 export const listEmailCampaigns = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data, error } = await context.supabase
+    const reads = await tenantReads(context.supabase);
+    const { data, error } = await reads
       .from("email_campaigns")
       .select("*")
       .order("created_at", { ascending: false });
@@ -797,12 +802,13 @@ export const previewSegmentCount = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
+    const reads = await tenantReads(context.supabase);
     if (data.audienceMode === "emails") {
       return { total: new Set((data.extraEmails ?? []).map((e) => e.trim().toLowerCase())).size };
     }
     if (data.audienceMode === "leads") {
       if (!data.targetPlayerIds || data.targetPlayerIds.length === 0) return { total: 0 };
-      const { data: rows, error } = await context.supabase
+      const { data: rows, error } = await reads
         .from("players")
         .select("id, email")
         .in("id", data.targetPlayerIds);
@@ -828,7 +834,8 @@ export const listPlayersForEmail = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    let q = context.supabase
+    const reads = await tenantReads(context.supabase);
+    let q = reads
       .from("players")
       .select("id, nome, email, telefone, status, vip")
       .order("updated_at", { ascending: false })
@@ -1231,7 +1238,8 @@ function automacaoRowToUI(r: any) {
 export const listEmailAutomations = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data, error } = await context.supabase
+    const reads = await tenantReads(context.supabase);
+    const { data, error } = await reads
       .from("email_automations")
       .select("*")
       .order("created_at", { ascending: false });

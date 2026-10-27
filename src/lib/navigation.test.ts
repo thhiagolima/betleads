@@ -9,9 +9,12 @@ import {
   activeMobileTab,
   activeNavKey,
   canSee,
+  homeRedirect,
   isExpertAllowedPath,
+  isGroupPath,
   resolveRouteMeta,
   shellContentState,
+  tenantSwitcherMode,
   visibleSections,
 } from "./navigation";
 
@@ -152,6 +155,69 @@ describe("visible sections", () => {
 
   it("hides IA while the role is unknown", () => {
     expect(labels(null, false)).not.toContain("IA");
+  });
+
+  it("finance link visible only with can_view_finance or super admin", () => {
+    const financeLinks = (
+      role: Parameters<typeof visibleSections>[0],
+      superAdmin: boolean,
+      canViewFinance?: boolean,
+    ) =>
+      visibleSections(role, superAdmin, canViewFinance)
+        .flatMap((section) => section.items)
+        .filter((item) => item.kind === "link")
+        .map((item) => item.to);
+
+    expect(financeLinks("admin", false)).not.toContain("/financeiro");
+    expect(financeLinks("admin", false, false)).not.toContain("/financeiro");
+    expect(financeLinks("admin", false, true)).toContain("/financeiro");
+    expect(financeLinks("gestor", false, true)).toContain("/financeiro");
+    expect(financeLinks("member", false, true)).toContain("/financeiro");
+    expect(financeLinks(null, false, true)).toContain("/financeiro");
+    expect(financeLinks("super_admin", true, false)).toContain("/financeiro");
+  });
+});
+
+describe("isGroupPath", () => {
+  it("matches /grupo and every /grupo/... path", () => {
+    expect(isGroupPath("/grupo")).toBe(true);
+    expect(isGroupPath("/grupo/metas")).toBe(true);
+    expect(isGroupPath("/grupo/casa")).toBe(true);
+    expect(isGroupPath("/grupo/pessoas")).toBe(true);
+  });
+
+  it("does not match a path that merely starts with the same letters", () => {
+    expect(isGroupPath("/grupos")).toBe(false);
+    expect(isGroupPath("/grupo-x")).toBe(false);
+    expect(isGroupPath("/")).toBe(false);
+  });
+});
+
+describe("tenantSwitcherMode", () => {
+  it("is a menu whenever there is a group, even a single one with no house", () => {
+    expect(tenantSwitcherMode(0, 1)).toBe("menu");
+    expect(tenantSwitcherMode(1, 1)).toBe("menu");
+  });
+
+  it("is static for a single house and no group, menu for two houses", () => {
+    expect(tenantSwitcherMode(1, 0)).toBe("static");
+    expect(tenantSwitcherMode(2, 0)).toBe("menu");
+  });
+
+  it("is hidden with nothing to show", () => {
+    expect(tenantSwitcherMode(0, 0)).toBe("hidden");
+  });
+});
+
+describe("homeRedirect", () => {
+  it("sends a group manager with no house to /grupo", () => {
+    expect(homeRedirect(0, 1)).toBe("/grupo");
+  });
+
+  it("keeps everyone with a house (or with nothing) on the home", () => {
+    expect(homeRedirect(1, 1)).toBeNull();
+    expect(homeRedirect(1, 0)).toBeNull();
+    expect(homeRedirect(0, 0)).toBeNull();
   });
 });
 

@@ -7,6 +7,7 @@ import {
   Megaphone,
   Menu,
   MessageSquare,
+  Network,
   Phone,
   PieChart,
   Plug,
@@ -39,7 +40,7 @@ export type ShellRole = "admin" | "gestor" | "member" | "super_admin" | "expert"
 
 export type NavAccess = {
   /** Who sees the item. Defaults to everyone. */
-  requires?: "tenant_admin" | "super_admin" | "not_super_admin";
+  requires?: "tenant_admin" | "super_admin" | "not_super_admin" | "finance";
 };
 
 export type NavLink = NavAccess & {
@@ -76,6 +77,7 @@ export const SIDEBAR_SECTIONS: NavSection[] = [
     items: [
       link("Resultados do CRM", "/resultados", Target, { alsoActiveOn: ["/relatorios"] }),
       link("Aquisição e LTV", "/midia-ltv", BarChart3),
+      link("Financeiro", "/financeiro", Wallet, { requires: "finance" }),
     ],
   },
   {
@@ -137,6 +139,7 @@ export const SIDEBAR_SECTIONS: NavSection[] = [
     items: [
       link("Visão da plataforma", "/admin", ShieldCheck),
       link("Contas", "/tenants", Building2),
+      link("Grupos", "/grupos", Network),
     ],
   },
 ];
@@ -157,6 +160,43 @@ export const EXPERT_SECTIONS: NavSection[] = [
 export const ACCOUNT_LINKS: NavLink[] = [
   link("Conta e equipe", "/tenants", Building2, { requires: "not_super_admin" }),
 ];
+
+/** Menu shown instead of SIDEBAR_SECTIONS while on a /grupo* route (Task 7, spec §4/§6). */
+export const GROUP_SECTIONS: NavSection[] = [
+  { items: [link("Painel do grupo", "/grupo", Trophy)] },
+  {
+    label: "Grupo",
+    items: [
+      link("Metas", "/grupo/metas", Target),
+      link("Pessoas", "/grupo/pessoas", Users),
+    ],
+  },
+  { items: [link("Voltar às casas", "/", Home)] },
+];
+
+/** `/grupo` and every `/grupo/...` path (not `/grupos`). */
+export function isGroupPath(pathname: string): boolean {
+  return pathname === "/grupo" || pathname.startsWith("/grupo/");
+}
+
+/**
+ * How the header switcher renders. Any group means a menu: the switcher is
+ * the only way into /grupo, so a group manager with a single group (and no
+ * or one house) must still be able to open it.
+ */
+export function tenantSwitcherMode(
+  tenantCount: number,
+  groupCount: number,
+): "hidden" | "static" | "menu" {
+  if (tenantCount === 0 && groupCount === 0) return "hidden";
+  if (groupCount > 0 || tenantCount > 1) return "menu";
+  return "static";
+}
+
+/** Where "/" sends a user who has groups but no house (the house home is empty for them). */
+export function homeRedirect(tenantCount: number, groupCount: number): "/grupo" | null {
+  return tenantCount === 0 && groupCount > 0 ? "/grupo" : null;
+}
 
 export type MobileTab = { title: string; to?: string; icon: LucideIcon; alsoActiveOn?: string[] };
 
@@ -200,6 +240,7 @@ export const ROUTE_META: Record<string, RouteMeta> = {
   "/resultados/comparar": { section: "Resultados", title: "Comparar casas" },
   "/relatorios/conversao": { section: "Resultados", title: "Relatório de conversão" },
   "/midia-ltv": { section: "Resultados", title: "Aquisição e LTV" },
+  "/financeiro": { section: "Resultados", title: "Financeiro" },
   "/players": { section: "Jogadores", title: "Jogadores" },
   "/players/$playerId": { section: "Jogadores", title: "Detalhe do jogador" },
   "/publicos": { section: "Jogadores", title: "Públicos" },
@@ -245,6 +286,11 @@ export const ROUTE_META: Record<string, RouteMeta> = {
   "/configuracoes": { section: "Configurações", title: "Configurações" },
   "/tenants": { section: "Conta", title: "Conta e equipe" },
   "/admin": { section: "Administração", title: "Visão da plataforma" },
+  "/grupos": { section: "Administração", title: "Grupos" },
+  "/grupo": { section: "Grupo", title: "Painel do grupo" },
+  "/grupo/casa": { section: "Grupo", title: "Financeiro da casa" },
+  "/grupo/metas": { section: "Grupo", title: "Metas do grupo" },
+  "/grupo/pessoas": { section: "Grupo", title: "Pessoas do grupo" },
 };
 
 const FALLBACK_META: RouteMeta = { section: "BETLEADS", title: "BETLEADS" };
@@ -279,21 +325,31 @@ export function isPathUnder(pathname: string, to: string) {
   return pathname === to || pathname.startsWith(`${to}/`);
 }
 
-export function canSee(access: NavAccess, role: ShellRole | null, isSuperAdmin: boolean) {
+export function canSee(
+  access: NavAccess,
+  role: ShellRole | null,
+  isSuperAdmin: boolean,
+  canViewFinance = false,
+) {
   if (!access.requires) return true;
   if (access.requires === "super_admin") return isSuperAdmin;
   // The expert never gets house-admin links either, including the ones
   // (like "Conta e equipe") only gated on "not being the super admin".
   if (access.requires === "not_super_admin") return !isSuperAdmin && role !== "expert";
+  if (access.requires === "finance") return isSuperAdmin || canViewFinance;
   return isSuperAdmin || role === "admin";
 }
 
-export function visibleSections(role: ShellRole | null, isSuperAdmin: boolean): NavSection[] {
+export function visibleSections(
+  role: ShellRole | null,
+  isSuperAdmin: boolean,
+  canViewFinance = false,
+): NavSection[] {
   if (role === "expert") return EXPERT_SECTIONS;
-  return SIDEBAR_SECTIONS.filter((section) => canSee(section, role, isSuperAdmin))
+  return SIDEBAR_SECTIONS.filter((section) => canSee(section, role, isSuperAdmin, canViewFinance))
     .map((section) => ({
       ...section,
-      items: section.items.filter((item) => canSee(item, role, isSuperAdmin)),
+      items: section.items.filter((item) => canSee(item, role, isSuperAdmin, canViewFinance)),
     }))
     .filter((section) => section.items.length > 0);
 }
@@ -338,8 +394,9 @@ export function navLinkKey(item: Pick<NavLink, "to" | "hash">) {
 function allLinks(): NavLink[] {
   // The expert's own sections are included so their links light up too
   // ("/expert/leads/$playerId" keeps "Leads" active); their paths never
-  // overlap a house link ("/experts" is a different segment).
-  return [...SIDEBAR_SECTIONS, ...EXPERT_SECTIONS].flatMap((section) =>
+  // overlap a house link ("/experts" is a different segment). The group
+  // menu's links (/grupo*) likewise never overlap a house link.
+  return [...SIDEBAR_SECTIONS, ...EXPERT_SECTIONS, ...GROUP_SECTIONS].flatMap((section) =>
     section.items.flatMap((item) => (item.kind === "group" ? item.children : [item])),
   );
 }
