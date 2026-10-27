@@ -331,6 +331,44 @@ describe("payload com a transação em `deposit`/`withdraw` (bravabet365)", () =
     expect(claim?.args.p_provider_event_id).toBe("user.login:9b1f6a52-3c1e-4d55-9a3e-2f7c1b0d8e41");
   });
 
+  it("grava a landing_url como origem e o inviter como afiliado no cadastro", async () => {
+    const { sb, ops } = setup(false);
+    await processWebhookEvent(
+      sb,
+      TENANT,
+      "cadastro",
+      brava("user.registered", {
+        inviter: "afiliado@email.com",
+        tracking: {
+          utm_source: "betleads",
+          utm_medium: "sms",
+          landing_url: "https://bravabet365.com/?utm_source=betleads&utm_medium=sms",
+        },
+      }),
+    );
+    const insert = ops.find((o) => o.table === "players" && o.op === "insert");
+    expect(insert?.payload).toMatchObject({
+      origem: "https://bravabet365.com/?utm_source=betleads&utm_medium=sms",
+      utm_source: "betleads",
+      affiliate_id: "afiliado@email.com",
+    });
+  });
+
+  it("ignora inviter e landing_url vazios", async () => {
+    const { sb, ops } = setup(false);
+    await processWebhookEvent(
+      sb,
+      TENANT,
+      "cadastro",
+      brava("user.registered", {
+        inviter: "",
+        tracking: { utm_source: "", landing_url: "" },
+      }),
+    );
+    const insert = ops.find((o) => o.table === "players" && o.op === "insert");
+    expect(insert?.payload).toMatchObject({ origem: null, affiliate_id: null });
+  });
+
   it("salva nascimento e saldos do usuário e usa occurred_at no login", async () => {
     const { sb, ops } = setup(true);
     await processWebhookEvent(sb, TENANT, "login", brava("user.login"));

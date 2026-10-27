@@ -121,6 +121,9 @@ export async function processWebhookEvent(
         data.affiliate_id,
         data.axioAffId,
         data.axio_aff_id,
+        // bravabet365: quem indicou o jogador vem em `inviter`.
+        data.inviter,
+        userEnvelope ? payload.inviter : undefined,
       ) ?? null;
 
     const expertNome = await lookupExpertName(sb as unknown as SupabaseLike, tenantId, affiliateId);
@@ -163,6 +166,7 @@ export async function processWebhookEvent(
     const origem =
       firstString(
         tracking.landing_page,
+        tracking.landing_url,
         tracking.referer,
         data.origem,
         utm.utm_source,
