@@ -8,7 +8,7 @@
 
 **Tech Stack:** Supabase Postgres (plpgsql, pg_cron), TanStack Start (createServerFn + zod), React + react-query, recharts via `src/components/ui/chart.tsx`, Vitest + PGlite.
 
-**Spec:** `docs/superpowers/specs/2026-10-23-area-expert-design.md` (seções 6 e 7; regra de afiliado = opção B, só depósitos depois do cadastro)
+**Spec:** `docs/superpowers/specs/2026-10-23-area-expert-design.md` (seções 6, 7 e 7.1; regra de afiliado = opção B, só depósitos depois do cadastro; 7.1 = perfil de rendimento para gestores, extrato para comissão por fora sobre o total depositado)
 
 ## Decisões que este plano toma
 
@@ -44,6 +44,7 @@
 3. **Recalcular duas vezes a mesma faixa, ou uma faixa que cruza a meia-noite de São Paulo:** o resultado é idêntico e sem duplicatas. Os depósitos das 00:30 de São Paulo caem no dia certo. Teste nas Tasks 1 e 2.
 4. **Expert desativado ou excluído:** o crédito histórico continua no ranking enquanto o expert existe (desativado aparece com o badge "Inativo"). Expert excluído some do ranking, e os créditos dele saem pela FK em cascata. Teste na Task 2.
 5. **Expert de acesso total numa casa com 35 mil leads:** "Entraram em risco" traz no máximo 20 leads, ordenados por total depositado, sem varrer a casa inteira na tela. Teste na Task 4.
+$LINE
 
 ---
 
@@ -58,7 +59,7 @@
 - Produces (SQL):
   - `expert_settings(tenant_id uuid PK → tenants ON DELETE CASCADE, click_window_hours integer NOT NULL DEFAULT 72 CHECK (click_window_hours BETWEEN 1 AND 720), updated_at timestamptz NOT NULL DEFAULT now())`.
   - `expert_deposit_credits`:
-    - colunas: `deposit_id uuid PRIMARY KEY → deposits ON DELETE CASCADE`, `tenant_id`, `player_id → players ON DELETE CASCADE`, `expert_id → experts ON DELETE CASCADE`, `via text NOT NULL CHECK (via IN ('clique','afiliado'))`, `valor numeric NOT NULL`, `deposit_at timestamptz NOT NULL`, `link_dispatch_id uuid NULL`, `click_at timestamptz NULL`, `is_ftd boolean NOT NULL`, `is_reativacao boolean NOT NULL`, `rule_version integer NOT NULL DEFAULT 1`, `computed_at timestamptz NOT NULL DEFAULT now()`;
+    - colunas: `deposit_id uuid PRIMARY KEY → deposits ON DELETE CASCADE`, `tenant_id`, `player_id → players ON DELETE CASCADE`, `expert_id → experts ON DELETE CASCADE`, `via text NOT NULL CHECK (via IN ('clique','afiliado'))`, `valor numeric NOT NULL`, `deposit_at timestamptz NOT NULL`, `link_dispatch_id uuid NULL`, `click_at timestamptz NULL`, `is_ftd boolean NOT NULL`, `is_reativacao boolean NOT NULL`, `click_window_hours integer NOT NULL` (a janela usada no cálculo), `rule_version integer NOT NULL DEFAULT 1`, `computed_at timestamptz NOT NULL DEFAULT now()`;
     - índices `(tenant_id, expert_id, deposit_at desc)` e `(tenant_id, deposit_at desc)`.
   - `refresh_expert_credits(_tenant uuid, _from timestamptz, _to timestamptz) RETURNS integer`:
     - apaga os créditos da casa com `deposit_at` em `[_from, _to)` e reinsere, devolvendo quantos inseriu;
@@ -287,7 +288,116 @@
 
 ---
 
-### Task 7: Verificação e produção
+### Task 7: Perfil de rendimento para a equipe e link rastreado na ficha da casa
+
+**Files:**
+- Create: `src/lib/expert-link-core.server.ts` (o núcleo compartilhado de geração de link, extraído de `generateExpertLinkFor`)
+- Modify: `src/lib/expert-links.functions.ts` (passa a usar o núcleo, com o mesmo comportamento)
+- Create: `src/lib/team-expert.functions.ts`
+- Modify: `src/lib/experts-admin.functions.ts` (vincular/desvincular equipe; `ExpertAcesso` ganha `"equipe"`; `removeExpertAccessFor` só apaga linha de `user_roles` com `role='expert'`)
+- Modify: `src/routes/experts.tsx` (ação "Vincular a alguém da equipe"; badge "Equipe ({Admin|Gestor|Membro})"), `src/routes/players.$playerId.tsx` (cartão de link rastreado)
+- Create: `src/components/players/team-tracked-link-card.tsx`
+- Test: `src/lib/team-expert.functions.test.ts`, `src/lib/experts-admin.functions.test.ts` (acrescentar)
+
+**Interfaces:**
+- Consumes: `createTrackedLinkForRecipient`, `DestinationNotAllowedError`, `ShortenerUnavailableError` (`shortio.server.ts`); `assertTenantCanSendExternally`; `HOUSE_MEMBER_ROLES` (`src/lib/house-member-roles.ts`); `resolveOperationalTenantForRequest`.
+- Produces:
+  - `createExpertLinkCore(input: { tenantId: string; expertId: string; playerId: string; url: string; oferta: string }): Promise<{ id: string; sentUrl: string; shortened: boolean }>`:
+    - faz a validação de URL e oferta, `assertTenantCanSendExternally`, o link, o insert em `expert_links` e a compensação;
+    - mantém as mensagens pt-BR atuais;
+    - `generateExpertLinkFor` fica `requireExpertContext` → `loadVisibleLead` → `createExpertLinkCore`.
+  - `linkExpertToTeamMember({ expertId: uuid; userId: uuid })` (admin):
+    - o usuário precisa ter papel `admin`, `gestor` ou `member` nesta casa. Senão: "Escolha alguém da equipe desta casa.";
+    - o expert não pode ter `user_id`. Senão: "Este perfil já está vinculado.";
+    - o usuário não pode ter outro perfil nesta casa. Senão: "Esta pessoa já tem um perfil de rendimento.";
+    - grava `experts.user_id` e a auditoria `expert.team_linked`.
+  - `listTeamMembersForLinking()` (admin) → `{ userId; email; papel: "admin" | "gestor" | "member" }[]`: só membros sem perfil.
+  - `ExpertAcesso` ganha `"equipe"`: tem `user_id`, mas o papel do usuário na casa não é `expert`. `ExpertAdminRow` ganha `papelEquipe: "admin" | "gestor" | "member" | null`.
+  - `getMyTeamExpertProfile()` → `{ expertId: string; nome: string } | null`: perfil ativo do usuário logado na casa atual, só para quem tem papel da equipe.
+  - `generateTeamTrackedLink({ playerId: uuid; url: string; oferta: string })` → `{ id; sentUrl; shortened }`:
+    - guard: casa via `resolveOperationalTenantForRequest`, papel do usuário em `HOUSE_MEMBER_ROLES`, perfil ativo vinculado. Sem perfil: "Você não tem um perfil de rendimento nesta casa.";
+    - jogador da casa (`players.tenant_id`). Senão: "Jogador não encontrado.";
+    - então `createExpertLinkCore`.
+  - Cartão **"Link rastreado (seu rendimento)"** na ficha do jogador da casa, só quando `getMyTeamExpertProfile()` não é nulo:
+    - campos URL e oferta, "Gerar link", "Copiar";
+    - um botão "Abrir no WhatsApp" com o link já no texto (`normalizeBrazilianPhone`, sem modelos).
+
+- [ ] **Step 1: Write the failing tests**
+  - `team-expert.functions.test.ts`:
+    - `it("gestor with a linked active profile generates a link credited to that profile")` (asserta `sourceId` = `expertId`, `source_type 'expert'`)
+    - `it("member without a profile is refused with the pt-BR message")`
+    - `it("expert role users cannot use the team path")`
+    - `it("player of another house is 'Jogador não encontrado.'")`
+    - `it("inactive profile is treated as no profile")`
+  - `experts-admin.functions.test.ts`:
+    - `it("link refuses a user outside the house team and a user who already has a profile")`
+    - `it("acesso is 'equipe' with papelEquipe for team-linked profiles")`
+    - `it("removing access of a team-linked profile clears user_id and keeps the user's gestor role")`
+  - O teste existente de `generateExpertLinkFor` continua verde, sem mudança.
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+  Run: `npx vitest run src/lib/team-expert.functions.test.ts src/lib/experts-admin.functions.test.ts src/lib/expert-links.functions.test.ts`
+  Expected: FAIL nos novos
+
+- [ ] **Step 3: Implement** (server, depois UI)
+
+- [ ] **Step 4: Verify**: os testes acima passam; `npm run typecheck`, `npx eslint` nos arquivos tocados, `npm run build`
+
+- [ ] **Step 5: Commit** (`feat(expert): team performance profiles and tracked links from the house player page`)
+
+---
+
+### Task 8: Extrato de créditos (base da comissão) e proteção do histórico
+
+**Files:**
+- Modify: `src/lib/expert-metrics.functions.ts`
+- Modify: `src/lib/experts-admin.functions.ts` (`deleteExpertFor`)
+- Modify: `src/routes/experts.$expertId.tsx` (cartão "Extrato de créditos")
+- Test: `src/lib/expert-metrics.functions.test.ts`, `src/lib/experts-admin.functions.test.ts` (acrescentar)
+
+**Interfaces:**
+- Consumes: `expert_deposit_credits` (Task 1), `expert_links`, `periodRange` (Task 3).
+- Produces:
+  - `export type ExpertCreditRow = { depositId: string; depositAt: string; leadNome: string; valor: number; via: "clique" | "afiliado"; oferta: string | null; clickAt: string | null; isFtd: boolean; isReativacao: boolean }`
+  - `listExpertCredits({ expertId: uuid; period: PeriodKey; page: int ≥ 0 })` (admin) → `{ rows: ExpertCreditRow[]; total: number; somaValor: number }`:
+    - 100 por página, ordenado por `deposit_at` desc;
+    - `oferta` vem de `expert_links` pelo `link_dispatch_id`;
+    - `somaValor` é o total do período inteiro, não da página.
+  - `exportExpertCreditsCsv({ expertId: uuid; period: PeriodKey })` (admin) → `{ filename: string; csv: string }`:
+    - todas as linhas do período;
+    - separador `;`, BOM UTF-8, valores com vírgula decimal, datas `dd/mm/aaaa hh:mm` em São Paulo;
+    - cabeçalho exato: `Data;Lead;Valor;Origem;Oferta;Clique em;Primeiro depósito;Reativação`;
+    - Origem "Clique" ou "Afiliado"; Sim/Não nas duas últimas colunas;
+    - última linha `Total;;{soma};;;;;`;
+    - `filename` = `extrato-{slug do nome}-{aaaa-mm-dd}-a-{aaaa-mm-dd}.csv`.
+  - `deleteExpertFor`: se o expert tem qualquer linha em `expert_deposit_credits` → "Este perfil tem créditos registrados. Desative em vez de excluir, para manter o histórico."
+  - Cartão **"Extrato de créditos"** no detalhe:
+    - tabela paginada com as colunas do CSV;
+    - total do período no topo ("Total depositado creditado: R$ X");
+    - botão "Exportar CSV", que baixa o arquivo no navegador.
+
+- [ ] **Step 1: Write the failing tests**
+  - `it("credits list is scoped to the expert and period, paginated by 100, with somaValor of the whole period")`
+  - `it("csv has the exact header, ';' separator, BOM, comma decimals, São Paulo dates and a Total line")`
+  - `it("csv escapes lead names containing ';' or quotes")`
+  - `it("credits endpoints refuse non-admin and experts of another house")`
+  - `it("delete is refused when the expert has credits")`
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+  Run: `npx vitest run src/lib/expert-metrics.functions.test.ts src/lib/experts-admin.functions.test.ts`
+  Expected: FAIL nos novos
+
+- [ ] **Step 3: Implement**
+
+- [ ] **Step 4: Verify**: testes passam; `npm run typecheck`, `npx eslint` nos arquivos tocados, `npm run build`
+
+- [ ] **Step 5: Commit** (`feat(expert): credit statement with CSV export and history protection`)
+
+---
+
+### Task 9: Verificação e produção
 
 - [ ] **Step 1:** `npm run typecheck && npm run lint && npm test && npm run build`. Tudo passa; registrar a saída.
 - [ ] **Step 2:** Com autorização explícita da usuária, aplicar em produção, nesta ordem: `20261027100000_expert_lead_sheet.sql` (fase 2, pendente), `20261028100000_expert_credits.sql` e `20261028100100_expert_metrics.sql`. Registrar cada uma em `schema_migrations`. Depois:
