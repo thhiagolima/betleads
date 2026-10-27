@@ -154,27 +154,6 @@ async function seed() {
   `);
 }
 
-async function asRole(
-  role: "postgres" | "anon" | "authenticated" | "service_role",
-  claims: Record<string, unknown> | undefined,
-  sql: string,
-) {
-  await db.query("BEGIN");
-  try {
-    if (claims !== undefined) {
-      await db.query(`select set_config('request.jwt.claims', $1, true)`, [
-        JSON.stringify(claims),
-      ]);
-    }
-    if (role !== "postgres") {
-      await db.exec(`SET LOCAL ROLE ${role}`);
-    }
-    return await db.query(sql);
-  } finally {
-    await db.query("ROLLBACK");
-  }
-}
-
 function isoDay(value: string | Date): string {
   return (value instanceof Date ? value.toISOString() : value).slice(0, 10);
 }
@@ -188,6 +167,11 @@ async function usageRows(tenants: string[], from: string, to: string) {
   return rows;
 }
 
+// All `it` cases below share one db and its rows: nothing is rolled back
+// between cases, so a row inserted for TENANT_A in an earlier case (e.g. the
+// 2026-05-10 usage row or the 2026-03-01 paid invoice in the
+// finance_betleads_usage/fees cases above) is still present and can shift
+// what a later finance_betleads_since assertion for TENANT_A expects.
 beforeAll(async () => {
   db = new PGlite();
   await db.exec(SCHEMA);
@@ -284,6 +268,19 @@ describe("finance_betleads_since", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].tenant_id).toBe(TENANT_A);
     expect(isoDay(rows[0].since)).toBe("2026-03-01");
+  });
+
+  it("a house whose only invoice is canceled and has no usage rows has no row", async () => {
+    await db.query(`
+      insert into public.billing_invoices (tenant_id, period_start, amount_cents, status) values
+        ('${TENANT_B}', '2026-04-01', 400000, 'canceled')
+    `);
+
+    const { rows } = await db.query<{ tenant_id: string; since: string | Date }>(
+      `select * from public.finance_betleads_since(array['${TENANT_B}']::uuid[])`,
+    );
+
+    expect(rows).toHaveLength(0);
   });
 });
 

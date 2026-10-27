@@ -78,7 +78,9 @@ grant execute on function public.finance_betleads_fees(uuid[], date, date) to se
 -- Earliest Sao Paulo date among a house's usage ledger rows and its
 -- invoices' period_start: how far back the dashboard can show Betleads cost
 -- for that house. A house with neither has no row (there is nothing to show
--- a "since" date for).
+-- a "since" date for). Only open/paid invoices count, same as
+-- finance_betleads_fees, so a canceled invoice (which never happened) never
+-- anchors "since".
 create or replace function public.finance_betleads_since(_tenants uuid[])
 returns table (
   tenant_id uuid,
@@ -97,7 +99,7 @@ as $$
     union all
     select bi.period_start as d
     from public.billing_invoices bi
-    where bi.tenant_id = t.id
+    where bi.tenant_id = t.id and bi.status in ('open', 'paid')
   ) d on true
   group by t.id
 $$;
