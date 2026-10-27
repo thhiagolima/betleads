@@ -43,21 +43,13 @@ export const getLinkTrackingOverview = createServerFn({ method: "GET" })
     const tenantId = await resolveOperationalTenantId(context.supabase);
     const db = context.supabase as any;
     const since = new Date(Date.now() - 30 * 86400000).toISOString();
-    // Aggregated in the database (migration 20261021121000): ~226k dispatches and
-    // ~1.1M click snapshots a month are too many to sum row by row here.
-    const [overview, { data: lastSync }] = await Promise.all([
-      db.rpc("link_tracking_overview", { _tenant: tenantId, _since: since }),
-      db
-        .from("link_tracking_sync_runs")
-        .select("started_at,finished_at,status,links_processed,error")
-        .eq("tenant_id", tenantId)
-        .order("started_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-    ]);
+    // Aggregated in the database (migration 20261031100000): ~226k dispatches a
+    // month are too many to sum row by row here. Clicks are the sends clicked on
+    // our own redirect, so they need no Short.io sync.
+    const overview = await db.rpc("link_tracking_overview", { _tenant: tenantId, _since: since });
     if (overview.error) throw new Error(overview.error.message);
     const { rows, sent, clicks } = overviewFromRows((overview.data ?? []) as OverviewRow[]);
-    return { since, sent, clicks, rows, lastSync: lastSync ?? null };
+    return { since, sent, clicks, rows };
   });
 
 export const getPlayerLinkHistory = createServerFn({ method: "GET" })
@@ -75,22 +67,25 @@ export const getPlayerLinkHistory = createServerFn({ method: "GET" })
       .order("sent_at", { ascending: false })
       .limit(30);
     if (error) throw new Error(error.message);
-    const ids = Array.from(new Set((rows ?? []).map((r: any) => r.tracked_link_id)));
-    const { data: snaps } = ids.length
+    // Human clicks on our own redirect, recorded the moment they happen and in
+    // every house. Short.io snapshots depend on a background sync, count bots
+    // and lag behind.
+    const ids = (rows ?? []).map((r: any) => r.id);
+    const { data: events, error: eventsError } = ids.length
       ? await db
-          .from("link_click_snapshots")
-          .select("tracked_link_id,clicks")
-          .in("tracked_link_id", ids)
-      : { data: [] };
+          .from("click_events")
+          .select("link_dispatch_id")
+          .eq("tenant_id", tenantId)
+          .eq("is_human", true)
+          .in("link_dispatch_id", ids)
+      : { data: [], error: null };
+    if (eventsError) throw new Error(eventsError.message);
     const clicks = new Map<string, number>();
-    for (const s of snaps ?? [])
-      clicks.set(
-        s.tracked_link_id,
-        Math.max(clicks.get(s.tracked_link_id) ?? 0, Number(s.clicks ?? 0)),
-      );
+    for (const e of events ?? [])
+      clicks.set(e.link_dispatch_id, (clicks.get(e.link_dispatch_id) ?? 0) + 1);
     return (rows ?? []).map((row: any) => ({
       ...row,
-      clicks: clicks.get(row.tracked_link_id) ?? 0,
+      clicks: clicks.get(row.id) ?? 0,
     }));
   });
 

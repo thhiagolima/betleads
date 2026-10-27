@@ -3,7 +3,6 @@ import { useQuery } from "@tanstack/react-query";
 import { HomeCard, KpiCard, MetricRow } from "@/components/home/home-cards";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
-import { useUpdatedAgo } from "@/hooks/use-updated-ago";
 import { DEMO_EMPTY_STATE_TEXT } from "@/lib/demo-tenant";
 import { num } from "@/lib/format";
 import { getLinkTrackingOverview } from "@/lib/shortio.functions";
@@ -13,13 +12,8 @@ function pct(value: number) {
   return `${(value * 100).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
 }
 
-const syncStatusLabels: Record<string, string> = {
-  completed: "leitura concluída",
-  running: "leitura em andamento",
-  failed: "leitura falhou",
-};
-
-/** Links curtos: envios e cliques dos últimos 30 dias (agregados no banco). */
+/** Links curtos: envios e envios clicados dos últimos 30 dias (agregados no
+ * banco a partir dos cliques no nosso redirect, em tempo real). */
 export function LinksOverview() {
   const isDemo = useIsDemoTenant();
   const overview = useQuery({
@@ -27,9 +21,6 @@ export function LinksOverview() {
     queryFn: () => getLinkTrackingOverview(),
   });
   const data = overview.data;
-  const lastSync = data?.lastSync;
-  const syncTs = lastSync?.finished_at ? Date.parse(lastSync.finished_at) : undefined;
-  const syncAgo = useUpdatedAgo(Number.isFinite(syncTs) ? syncTs : undefined);
   const ctr = data?.sent ? data.clicks / data.sent : 0;
 
   return (
@@ -40,24 +31,19 @@ export function LinksOverview() {
         ) : (
           <>
             <KpiCard title="Links enviados" value={num(data?.sent)} detail="últimos 30 dias" />
-            <KpiCard title="Cliques" value={num(data?.clicks)} detail="últimos 30 dias" />
-            <KpiCard title="Taxa de clique" value={pct(ctr)} detail="cliques ÷ links enviados" />
+            <KpiCard
+              title="Cliques"
+              value={num(data?.clicks)}
+              detail="envios clicados, últimos 30 dias"
+            />
+            <KpiCard
+              title="Taxa de clique"
+              value={pct(ctr)}
+              detail="envios clicados ÷ links enviados"
+            />
           </>
         )}
       </div>
-
-      <p className="text-meta text-muted-foreground">
-        {lastSync ? (
-          <>
-            {syncTs ? `Atualizado ${syncAgo} · ` : ""}
-            {num(lastSync.links_processed)} links lidos ·{" "}
-            {syncStatusLabels[lastSync.status ?? ""] ?? "leitura sem estado"}
-            {lastSync.error ? ` · ${lastSync.error}` : ""}
-          </>
-        ) : (
-          "A leitura de cliques ainda não rodou para esta casa."
-        )}
-      </p>
 
       <HomeCard className="p-4 sm:p-5">
         <h2 className="text-section font-semibold">Por canal e origem</h2>
