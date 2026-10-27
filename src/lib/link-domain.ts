@@ -1,13 +1,9 @@
 // Pure helpers for swapping a house's hand-written-link domain (journeys/templates).
 // No server imports: this module is client-safe, same as house-config.ts.
 
-import { normalizeHostname } from "./house-config";
+import { normalizeHostname, stripWww } from "./house-config";
 
 const URL_RE = /\bhttps?:\/\/([^\s/?#"'<>()]+)/gi;
-
-function stripWww(host: string): string {
-  return host.startsWith("www.") ? host.slice(4) : host;
-}
 
 /** Strips trailing characters that can't be part of a hostname/port (e.g. a
  * comma or period glued onto the URL by surrounding prose), so they stay
@@ -75,8 +71,7 @@ export function countSubdomainLinks(text: string, from: string): number {
   for (const match of matches) {
     const { core } = splitTrailingPunctuation(match[1]);
     const { host } = splitHostPort(core);
-    const lowerHost = host.toLowerCase();
-    const bareHost = lowerHost.startsWith("www.") ? lowerHost.slice(4) : lowerHost;
+    const bareHost = stripWww(host.toLowerCase());
     if (bareHost !== from && bareHost.endsWith(`.${from}`)) {
       count += 1;
     }
