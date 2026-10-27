@@ -42,9 +42,9 @@
 1. **Dois experts com clique no mesmo lead antes do mesmo depósito:** só o clique mais recente dentro da janela leva o crédito, e o depósito aparece uma vez só no ranking. Teste na Task 1.
 2. **Clique fora da janela, clique de robô, clique antes do envio ou link para outro lead:** não geram crédito por clique. Cai para afiliado, se houver. Teste na Task 1.
 3. **Recalcular duas vezes a mesma faixa, ou uma faixa que cruza a meia-noite de São Paulo:** o resultado é idêntico e sem duplicatas. Os depósitos das 00:30 de São Paulo caem no dia certo. Teste nas Tasks 1 e 2.
-4. **Expert desativado ou excluído:** o crédito histórico continua no ranking enquanto o expert existe (desativado aparece com o badge "Inativo"). Expert excluído some do ranking, e os créditos dele saem pela FK em cascata. Teste na Task 2.
+4. **Expert desativado ou excluído:** o crédito histórico continua no ranking enquanto o expert existe (desativado aparece com o badge "Inativo"). Um perfil com créditos não pode ser excluído (Task 8), e um sem créditos some do ranking. Teste nas Tasks 2 e 8.
 5. **Expert de acesso total numa casa com 35 mil leads:** "Entraram em risco" traz no máximo 20 leads, ordenados por total depositado, sem varrer a casa inteira na tela. Teste na Task 4.
-$LINE
+6. **Gestor com perfil vinculado:** gera o link na ficha da casa e o crédito vai para o perfil dele. O acesso de gestor não muda. Desvincular não remove o papel de gestor. Teste na Task 7.
 
 ---
 
