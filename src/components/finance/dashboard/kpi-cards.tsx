@@ -1,8 +1,7 @@
 // KPI cards of the Financeiro painel (spec §5.3): three highlighted (Lucro
 // líquido, ROI, Anúncios) and three supporting (Net, FTDs, Custo por FTD),
 // each with its variation vs the compared window. ROI varies in percentage
-// points; the cost-shaped cards (Anúncios, Custo por FTD) invert the color,
-// the same rule as group-totals.tsx.
+// points; the cost-shaped cards (Anúncios, Custo por FTD) invert the color.
 import {
   formatBRL,
   formatInt,

@@ -668,6 +668,165 @@ describe("group and all scopes", () => {
   });
 });
 
+// Ported from the retired getGroupOverview tests (finance.functions.test.ts):
+// the cost-month rule's preset/compare edge cases, per-house values and the
+// pending-today goal rule, now against the dashboard's group scope.
+describe("group scope: cost-month rule and goals (ported from the group overview)", () => {
+  const g1 = { kind: "group" as const, groupId: G1 };
+  const row = (dashboard: { tenants: Array<{ id: string }> }, id: string) =>
+    dashboard.tenants.find((tenant) => tenant.id === id) as Awaited<
+      ReturnType<typeof getFinanceDashboardFor>
+    >["tenants"][number];
+
+  it("a whole calendar month puts other costs in each house's row; one finance_days call spans both windows", async () => {
+    financeDayRows.push(
+      complete(HOUSE_A, "2026-09-10", 1000, 100),
+      complete(HOUSE_A, "2026-08-10", 400, 100),
+    );
+    fake.admin
+      .rows("tenant_finance_other_costs")
+      .push(
+        otherCost("c1", HOUSE_A, "2026-09-01", "CRM", 100),
+        otherCost("c2", HOUSE_A, "2026-09-01", "SMS", 50),
+        otherCost("c3", HOUSE_B, "2026-09-01", "CRM", 25),
+        otherCost("c4", HOUSE_A, "2026-08-01", "CRM", 40),
+      );
+
+    const full = await getFinanceDashboardFor(ctxFor(G1_MANAGER), {
+      scope: g1,
+      range: { from: "2026-09-01", to: "2026-09-30" },
+      compare: "previous",
+      preset: "custom",
+    });
+    // One call covers both windows (and the 12-month chart).
+    expect(financeDaysCalls).toHaveLength(1);
+    expect(financeDaysCalls[0]._tenants).toEqual([HOUSE_A, HOUSE_B]);
+    expect(String(financeDaysCalls[0]._from) <= "2026-08-01").toBe(true);
+    expect(financeDaysCalls[0]._to).toBe("2026-09-30");
+    const a = row(full, HOUSE_A);
+    expect(a.current.otherCosts).toBe(150);
+    expect(a.current.cashResult).toBe(1000 - 100 - 150);
+    expect(a.previous.otherCosts).toBe(40);
+    expect(a.previous.cashResult).toBe(400 - 100 - 40);
+    expect(row(full, HOUSE_B).current.otherCosts).toBe(25);
+
+    const partial = await getFinanceDashboardFor(ctxFor(G1_MANAGER), {
+      scope: g1,
+      range: { from: "2026-09-01", to: "2026-09-29" },
+      compare: "previous",
+      preset: "custom",
+    });
+    expect(row(partial, HOUSE_A).current.otherCosts).toBeNull();
+  });
+
+  it("Mês preset in progress includes the month's other costs; the same window as Personalizado does not", async () => {
+    financeDayRows.push(
+      complete(HOUSE_A, "2026-10-05", 1000, 100),
+      complete(HOUSE_A, "2026-09-05", 500, 100),
+    );
+    fake.admin
+      .rows("tenant_finance_other_costs")
+      .push(
+        otherCost("c1", HOUSE_A, "2026-10-01", "CRM", 40),
+        otherCost("c2", HOUSE_A, "2026-09-01", "CRM", 150),
+        otherCost("c3", HOUSE_B, "2026-10-01", "SMS", 10),
+      );
+
+    const month = await getFinanceDashboardFor(ctxFor(G1_MANAGER), { scope: g1, ...monthToDate });
+    expect(month.compareRange).toEqual({ from: "2026-09-01", to: "2026-09-24" });
+    const a = row(month, HOUSE_A);
+    expect(a.current.otherCosts).toBe(40);
+    expect(a.previous.otherCosts).toBe(150);
+    expect(month.totals.current.otherCosts).toBe(50);
+    expect(month.totals.previous.otherCosts).toBe(150);
+
+    const custom = await getFinanceDashboardFor(ctxFor(G1_MANAGER), {
+      scope: g1,
+      ...monthToDate,
+      preset: "custom",
+    });
+    expect(row(custom, HOUSE_A).current.otherCosts).toBeNull();
+    expect(custom.totals.current.otherCosts).toBeNull();
+    expect(custom.totals.previous.otherCosts).toBeNull();
+  });
+
+  it("Mês preset with a week-shifted comparison leaves other costs out of the comparison", async () => {
+    fake.admin
+      .rows("tenant_finance_other_costs")
+      .push(
+        otherCost("c1", HOUSE_A, "2026-10-01", "CRM", 40),
+        otherCost("c2", HOUSE_A, "2026-09-01", "CRM", 150),
+      );
+    const dashboard = await getFinanceDashboardFor(ctxFor(G1_MANAGER), {
+      scope: g1,
+      ...monthToDate,
+      compare: "last_week",
+    });
+    expect(dashboard.compareRange).toEqual({ from: "2026-09-24", to: "2026-10-17" });
+    expect(row(dashboard, HOUSE_A).current.otherCosts).toBe(40);
+    expect(row(dashboard, HOUSE_A).previous.otherCosts).toBeNull();
+    expect(dashboard.totals.previous.otherCosts).toBeNull();
+  });
+
+  it("Mês preset is not trusted for a range that is not month-to-date", async () => {
+    fake.admin
+      .rows("tenant_finance_other_costs")
+      .push(otherCost("c1", HOUSE_A, "2026-10-01", "CRM", 40));
+    const dashboard = await getFinanceDashboardFor(ctxFor(G1_MANAGER), {
+      scope: g1,
+      range: { from: "2026-10-05", to: "2026-10-24" },
+      compare: "previous",
+      preset: "month",
+    });
+    expect(row(dashboard, HOUSE_A).current.otherCosts).toBeNull();
+    expect(dashboard.totals.current.otherCosts).toBeNull();
+  });
+
+  it("Ontem compared with the same weekday last week", async () => {
+    const dashboard = await getFinanceDashboardFor(ctxFor(SUPER), {
+      scope: g1,
+      range: { from: "2026-10-23", to: "2026-10-23" },
+      compare: "same_weekday_last_week",
+      preset: "yesterday",
+    });
+    expect(dashboard.compareRange).toEqual({ from: "2026-10-16", to: "2026-10-16" });
+  });
+
+  it("a pending today neither counts as pending nor grays a goal", async () => {
+    financeDayRows.push(
+      complete(HOUSE_A, "2026-10-23", 300, 100),
+      dayRow(HOUSE_A, "2026-10-24", { deposit_amount: 50 }),
+      complete(HOUSE_B, "2026-10-23", 300, 100),
+      dayRow(HOUSE_B, "2026-10-24", { deposit_amount: 50 }),
+    );
+    goalDayRows.push(
+      ...["2026-10-23", "2026-10-24"].map((date) => ({
+        tenant_id: HOUSE_A,
+        metric_date: date,
+        metric: "cash_result",
+        direction: "gte",
+        daily_value: 150,
+      })),
+    );
+
+    const dashboard = await getFinanceDashboardFor(ctxFor(SUPER), {
+      scope: g1,
+      range: { from: "2026-10-23", to: "2026-10-24" },
+      compare: "previous",
+      preset: "custom",
+    });
+
+    const a = row(dashboard, HOUSE_A);
+    expect(a.current.pendingDays).toBe(0);
+    expect(a.pendingDates).toEqual([]);
+    expect(a.current.cashResult).toBe(200);
+    expect(a.goals).toEqual([
+      { metric: "cash_result", direction: "gte", target: 150, value: 200, status: "green" },
+    ]);
+    expect(dashboard.totals.current.pendingDays).toBe(0);
+  });
+});
+
 describe("permissions", () => {
   it("group manager cannot read a house outside their groups", async () => {
     await expect(

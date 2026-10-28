@@ -1,6 +1,6 @@
-// Period + compare chips for the group panel (spec §6). Controlled: the
-// caller (routes/grupo.tsx) owns the GroupPeriod state and passes it back to
-// the server fn getGroupOverview. "Mesmo dia da semana passada" only makes
+// Period + compare chips of the finance dashboard (spec §5.1, §6). Controlled:
+// the caller (FinanceDashboardView) owns the GroupPeriod state and passes it
+// to the server fn getFinanceDashboard. "Mesmo dia da semana passada" only makes
 // sense for a one-day window, so it is hidden otherwise. With `monthPicker`
 // (Financeiro painel, spec §5.1) a month input follows the chips: the current
 // month is the "Mês" preset (compared with the previous month up to the same

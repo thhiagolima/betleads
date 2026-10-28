@@ -1,6 +1,6 @@
 // Grupos de casas: financial close of a house (month view, manual entries
-// including retroactive ones, other costs, rates, viewer grants, goals) and
-// the group overview/scoreboard. Spec:
+// including retroactive ones, other costs, rates, viewer grants, goals). The
+// group/house dashboard lives in finance-dashboard.functions.ts. Spec:
 // docs/superpowers/specs/2026-10-24-grupos-de-casas-design.md (sections 5-7).
 //
 // Every permission decision is taken by the SQL helpers (finance_can_* and
@@ -11,7 +11,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { compareRange, round2, summarize } from "@/lib/finance/calc";
+import { round2, summarize } from "@/lib/finance/calc";
 import {
   FIXED_COST_CATEGORIES,
   categoryKey,
@@ -23,9 +23,6 @@ import {
   GOAL_METRICS,
   clampToToday,
   can,
-  costMonthsFor,
-  dateRange,
-  compareMode,
   db,
   evaluateGoals,
   fetchBetleadsFees,
@@ -33,26 +30,18 @@ import {
   fetchBetleadsUsage,
   fetchFinanceDays,
   fetchGoalDays,
-  inRange,
   isoDate,
   num,
   numOrNull,
-  periodPreset,
   requirePermission,
   toFinanceDay,
   todaySaoPaulo,
   type OtherCostRow,
 } from "@/lib/finance/finance-data.server";
-import type {
-  CompareMode,
-  DateRange,
-  GoalDirection,
-  GoalMetric,
-  PeriodPreset,
-} from "@/lib/finance/types";
+import type { GoalDirection, GoalMetric } from "@/lib/finance/types";
 import { assertTenantNotDemo } from "@/lib/tenant-access.server";
 import { auditTenant } from "@/lib/tenant-audit.server";
-import { listTenantMembers, managedGroupIds } from "@/lib/tenants.functions";
+import { listTenantMembers } from "@/lib/tenants.functions";
 import { dbUuid } from "@/lib/zod-helpers";
 
 type ServerContext = { userId: string };
@@ -84,8 +73,6 @@ const DEFAULT_MOVEMENT_FEE_PCT = 2.7;
 const MAX_MONEY = 999_999_999_999.99;
 
 // ─── Small helpers ──────────────────────────────────────────────────────────
-
-const byNome = <T extends { nome: string }>(a: T, b: T) => a.nome.localeCompare(b.nome, "pt-BR");
 
 function lastDayOfMonth(firstDay: string) {
   const [y, m] = firstDay.split("-").map(Number);
@@ -692,7 +679,7 @@ export type TenantGoalCurrent = {
  * the most recent `tenant_goals` row with `valid_from <= today`, per metric.
  * A metric with no row at all comes back with `dailyValue: null` ("sem
  * meta"). Read-only — added for this task because neither
- * `getTenantFinanceMonth` nor `getGroupOverview` exposes the raw goal value
+ * `getTenantFinanceMonth` nor the finance dashboard exposes the raw goal value
  * outside of a date range's evaluation.
  */
 export async function getTenantGoalsFor(
@@ -731,163 +718,4 @@ export const getTenantGoals = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => tenantIdInput.parse(data))
   .handler(async ({ data, context }) =>
     getTenantGoalsFor(context as unknown as ServerContext, data),
-  );
-
-// ─── Group overview ─────────────────────────────────────────────────────────
-
-const overviewInput = z.object({
-  groupId: dbUuid(),
-  range: dateRange,
-  compare: compareMode,
-  preset: periodPreset,
-});
-
-type OverviewInput = {
-  groupId: string;
-  range: DateRange;
-  compare: CompareMode;
-  preset: PeriodPreset;
-};
-
-/**
- * Scoreboard of a group the caller manages (super admin: any group). One
- * finance_days call covers both windows; days after today are left out.
- * Other costs enter a window's result only for the "Mês" preset or a range
- * that is exactly a calendar month. Group totals are summarize() over every house's days, so ratios
- * (ROI, cost per unit) come from the sums, never from averaging houses.
- */
-export async function getGroupOverviewFor(ctx: ServerContext, data: OverviewInput) {
-  const managed = await managedGroupIds(ctx.userId);
-  if (!managed.includes(data.groupId)) throw new Error("Sem permissão");
-
-  const { data: group, error: groupErr } = await db()
-    .from<TenantLite>("tenant_groups")
-    .select("id,nome")
-    .eq("id", data.groupId)
-    .maybeSingle();
-  if (groupErr) throw new Error(groupErr.message);
-  if (!group) throw new Error("Grupo não encontrado");
-
-  const { data: links, error: linksErr } = await db()
-    .from<Array<{ tenant_id: string }>>("tenant_group_tenants")
-    .select("tenant_id")
-    .eq("group_id", data.groupId);
-  if (linksErr) throw new Error(linksErr.message);
-  const linkedIds = (links ?? []).map((link) => link.tenant_id);
-
-  let tenants: TenantLite[] = [];
-  if (linkedIds.length) {
-    const { data: tenantRows, error } = await db()
-      .from<TenantLite[]>("tenants")
-      .select("id,nome")
-      .in("id", linkedIds);
-    if (error) throw new Error(error.message);
-    tenants = [...(tenantRows ?? [])].sort(byNome);
-  }
-  const tenantIds = tenants.map((tenant) => tenant.id);
-
-  const today = todaySaoPaulo();
-  const previousRange = compareRange(data.range, data.compare, data.preset);
-  const current = clampToToday(data.range, today);
-  const previous = clampToToday(previousRange, today);
-  const windows = [current, previous].filter((range): range is DateRange => range !== null);
-  const span =
-    windows.length && tenantIds.length
-      ? {
-          from: windows.map((range) => range.from).sort()[0],
-          to: windows
-            .map((range) => range.to)
-            .sort()
-            .at(-1) as string,
-        }
-      : null;
-
-  const { current: currentCostMonth, previous: previousCostMonth } = costMonthsFor(
-    data.range,
-    data.compare,
-    data.preset,
-  );
-  const costMonths = [currentCostMonth, previousCostMonth].filter(
-    (month): month is string => month !== null,
-  );
-
-  const [dayRows, goalRows, costRows] = await Promise.all([
-    span ? fetchFinanceDays(tenantIds, span) : Promise.resolve([]),
-    current && tenantIds.length ? fetchGoalDays(tenantIds, current) : Promise.resolve([]),
-    costMonths.length && tenantIds.length
-      ? db()
-          .from<OtherCostRow[]>("tenant_finance_other_costs")
-          .select("id,tenant_id,month,descricao,valor")
-          .in("tenant_id", tenantIds)
-          .in("month", costMonths)
-          .then((res) => {
-            if (res.error) throw new Error(res.error.message);
-            return res.data ?? [];
-          })
-      : Promise.resolve([] as OtherCostRow[]),
-  ]);
-
-  const days = dayRows.map((row) => ({ tenantId: row.tenant_id, day: toFinanceDay(row) }));
-  const otherCostsFor = (tenantIdsToSum: string[], month: string | null) =>
-    month === null
-      ? null
-      : round2(
-          costRows
-            .filter((row) => tenantIdsToSum.includes(row.tenant_id) && row.month === month)
-            .reduce((total, row) => total + num(row.valor), 0),
-        );
-  const windowDays = (window: DateRange | null, tenantId?: string) =>
-    days
-      .filter((entry) => (tenantId ? entry.tenantId === tenantId : true))
-      .filter((entry) => inRange(entry.day.date, window))
-      .map((entry) => entry.day)
-      .sort((a, b) => a.date.localeCompare(b.date));
-
-  const rows = tenants.map((tenant) => {
-    const currentSummary = summarize(
-      windowDays(current, tenant.id),
-      otherCostsFor([tenant.id], currentCostMonth),
-      today,
-    );
-    const previousSummary = summarize(
-      windowDays(previous, tenant.id),
-      otherCostsFor([tenant.id], previousCostMonth),
-      today,
-    );
-    return {
-      id: tenant.id,
-      nome: tenant.nome,
-      current: currentSummary,
-      previous: previousSummary,
-      goals: current
-        ? evaluateGoals(
-            goalRows.filter((row) => row.tenant_id === tenant.id),
-            currentSummary,
-            current,
-            today,
-          )
-        : [],
-    };
-  });
-
-  const totalOtherCurrent = otherCostsFor(tenantIds, currentCostMonth);
-  const totalOtherPrevious = otherCostsFor(tenantIds, previousCostMonth);
-
-  return {
-    group: { id: group.id, nome: group.nome },
-    range: data.range,
-    compareRange: previousRange,
-    totals: {
-      current: summarize(windowDays(current), totalOtherCurrent, today),
-      previous: summarize(windowDays(previous), totalOtherPrevious, today),
-    },
-    tenants: rows,
-  };
-}
-
-export const getGroupOverview = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => overviewInput.parse(data))
-  .handler(async ({ data, context }) =>
-    getGroupOverviewFor(context as unknown as ServerContext, data),
   );
