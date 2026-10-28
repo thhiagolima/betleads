@@ -1,5 +1,5 @@
 // Per-expert metrics and daily series — SQL tests for
-// supabase/migrations/20261103100100_expert_metrics.sql
+// supabase/migrations/20261104100100_expert_metrics.sql
 //
 // Runs the expert migrations (phases 1, 2 and the Task 1 credits migration)
 // plus the new one inside an in-memory Postgres (PGlite), reusing the
@@ -26,8 +26,8 @@ const MIGRATIONS = [
   "20261025100000_add_expert_app_role.sql",
   "20261025100100_expert_model.sql",
   "20261027100000_expert_lead_sheet.sql",
-  "20261103100000_expert_credits.sql",
-  "20261103100100_expert_metrics.sql",
+  "20261104100000_expert_credits.sql",
+  "20261104100100_expert_metrics.sql",
 ];
 
 const SCHEMA = `
