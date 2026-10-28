@@ -14,3 +14,11 @@ export const expertDetailQueryKey = (expertId: string, period: string) => [
   expertId,
   period,
 ];
+// Fase 3, Task 8: extrato de créditos, paginado — a página também entra na
+// chave porque cada página é uma busca diferente no servidor.
+export const expertCreditsQueryKey = (expertId: string, period: string, page: number) => [
+  "expert-credits",
+  expertId,
+  period,
+  page,
+];

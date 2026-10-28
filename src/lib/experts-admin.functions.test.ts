@@ -322,6 +322,24 @@ describe("experts admin server functions", () => {
     );
   });
 
+  it("delete is refused when the expert has credits", async () => {
+    addExpert();
+    fake.admin.rows("expert_deposit_credits").push({
+      deposit_id: "d1",
+      tenant_id: TENANT,
+      player_id: "p1",
+      expert_id: EXPERT_ID,
+      via: "clique",
+      valor: 100,
+      deposit_at: "2026-10-20T00:00:00Z",
+    });
+    fake.admin.onRpc("delete_expert", () => ({ data: null, error: null }));
+
+    await expect(deleteExpertFor(ctxFor(ADMIN), { expertId: EXPERT_ID })).rejects.toThrow(
+      "Este perfil tem créditos registrados. Desative em vez de excluir, para manter o histórico.",
+    );
+  });
+
   it("writes refuse demo houses", async () => {
     fake.admin.rows("tenants")[0].is_demo = true;
     addExpert();

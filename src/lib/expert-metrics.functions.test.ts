@@ -28,8 +28,10 @@ vi.mock("@/lib/expert-access.server", async () => {
 import { createFakeDb } from "@/lib/sms-bulk.test-support";
 import { __resetDemoTenantCacheForTests } from "@/lib/tenant-access.server";
 import {
+  exportExpertCreditsCsvFor,
   getExpertDashboardFor,
   getExpertDetailFor,
+  listExpertCreditsFor,
   listExpertsRankingFor,
   saveExpertSettingsFor,
   type ExpertMetrics,
@@ -88,6 +90,26 @@ function addExpert(id: string, overrides: Record<string, unknown> = {}) {
     assumir_prazo_dias: 3,
     user_id: null,
     created_at: "2026-10-01T00:00:00Z",
+    ...overrides,
+  });
+}
+
+function addCredit(id: string, expertId: string, overrides: Record<string, unknown> = {}) {
+  fake.admin.rows("expert_deposit_credits").push({
+    deposit_id: id,
+    tenant_id: TENANT,
+    player_id: PLAYER,
+    expert_id: expertId,
+    via: "clique",
+    valor: 10,
+    deposit_at: "2026-10-23T00:00:00Z",
+    link_dispatch_id: null,
+    click_at: null,
+    is_ftd: false,
+    is_reativacao: false,
+    click_window_hours: 72,
+    rule_version: 1,
+    computed_at: "2026-10-23T00:00:00Z",
     ...overrides,
   });
 }
@@ -353,5 +375,143 @@ describe("saveExpertSettingsFor", () => {
     await expect(
       saveExpertSettingsFor(ctxFor(ADMIN), { clickWindowHours: 48 }),
     ).rejects.toThrow();
+  });
+});
+
+describe("listExpertCreditsFor / exportExpertCreditsCsvFor (Task 8)", () => {
+  beforeEach(() => {
+    addExpert(ME, { nome: "Ana" });
+    addExpert(OTHER_EXPERT, { nome: "Bruno" });
+    fake.admin.rows("players").push({ id: PLAYER, tenant_id: TENANT, nome: "Jogador 1" });
+    vi.setSystemTime(new Date("2026-10-24T12:00:00Z"));
+  });
+
+  it("credits list is scoped to the expert and period, paginated by 100, with somaValor of the whole period", async () => {
+    for (let i = 0; i < 150; i++) {
+      addCredit(`d-${i}`, ME, { deposit_at: "2026-10-23T00:00:00Z", valor: 10 });
+    }
+    // Outro expert, mesma casa: não deve entrar na lista nem na soma.
+    addCredit("d-other-expert", OTHER_EXPERT, { valor: 999 });
+    // Fora do período (90+ dias atrás): não deve entrar.
+    addCredit("d-old", ME, { deposit_at: "2025-01-01T00:00:00Z", valor: 999 });
+
+    const page0 = await listExpertCreditsFor(ctxFor(ADMIN), { expertId: ME, period: "30" });
+    expect(page0.rows).toHaveLength(100);
+    expect(page0.total).toBe(150);
+    expect(page0.somaValor).toBe(1500);
+    expect(page0.rows.every((r) => r.leadNome === "Jogador 1")).toBe(true);
+
+    const page1 = await listExpertCreditsFor(ctxFor(ADMIN), { expertId: ME, period: "30", page: 1 });
+    expect(page1.rows).toHaveLength(50);
+    expect(page1.total).toBe(150);
+    expect(page1.somaValor).toBe(1500);
+  });
+
+  it("maps oferta from expert_links by link_dispatch_id, same tenant", async () => {
+    addCredit("d-1", ME, {
+      link_dispatch_id: "disp-1",
+      click_at: "2026-10-22T23:00:00Z",
+      is_ftd: true,
+      is_reativacao: false,
+      via: "clique",
+      valor: 50,
+    });
+    fake.admin.rows("expert_links").push({
+      id: "link-1",
+      tenant_id: TENANT,
+      expert_id: ME,
+      player_id: PLAYER,
+      link_dispatch_id: "disp-1",
+      oferta: "Oferta A",
+      original_url: "https://x",
+      sent_url: "https://x",
+      shortened: true,
+      created_at: "2026-10-22T00:00:00Z",
+    });
+
+    const result = await listExpertCreditsFor(ctxFor(ADMIN), { expertId: ME, period: "30" });
+
+    expect(result.rows).toEqual([
+      {
+        depositId: "d-1",
+        depositAt: "2026-10-23T00:00:00Z",
+        leadNome: "Jogador 1",
+        valor: 50,
+        via: "clique",
+        oferta: "Oferta A",
+        clickAt: "2026-10-22T23:00:00Z",
+        isFtd: true,
+        isReativacao: false,
+      },
+    ]);
+  });
+
+  it("csv has the exact header, ';' separator, BOM, comma decimals, São Paulo dates and a Total line", async () => {
+    addCredit("d-1", ME, {
+      deposit_at: "2026-10-23T15:30:00Z", // 12:30 em São Paulo
+      click_at: "2026-10-23T14:00:00Z", // 11:00 em São Paulo
+      valor: 1234.5,
+      via: "afiliado",
+      is_ftd: true,
+      is_reativacao: true,
+    });
+
+    const result = await exportExpertCreditsCsvFor(ctxFor(ADMIN), { expertId: ME, period: "30" });
+
+    expect(result.csv.startsWith("﻿")).toBe(true);
+    const lines = result.csv.slice(1).split("\n");
+    expect(lines[0]).toBe(
+      "Data;Lead;Valor;Origem;Oferta;Clique em;Primeiro depósito;Reativação",
+    );
+    expect(lines[1]).toBe("23/10/2026 12:30;Jogador 1;1234,50;Afiliado;;23/10/2026 11:00;Sim;Sim");
+    expect(lines[2]).toBe("Total;;1234,50;;;;;");
+    expect(result.filename).toBe("extrato-ana-2026-09-25-a-2026-10-24.csv");
+  });
+
+  it("csv escapes lead names containing ';' or quotes", async () => {
+    fake.admin.rows("players")[0].nome = 'Lead "Esperto"; Silva';
+    addCredit("d-1", ME, { deposit_at: "2026-10-23T03:00:00Z", valor: 10 }); // 00:00 em São Paulo
+
+    const result = await exportExpertCreditsCsvFor(ctxFor(ADMIN), { expertId: ME, period: "30" });
+    const lines = result.csv.slice(1).split("\n");
+
+    expect(lines[1]).toBe(
+      '23/10/2026 00:00;"Lead ""Esperto""; Silva";10,00;Clique;;;Não;Não',
+    );
+  });
+
+  it("credits endpoints refuse non-admin and experts of another house", async () => {
+    await expect(
+      listExpertCreditsFor(ctxFor(GESTOR, { admin: false }), { expertId: ME }),
+    ).rejects.toThrow("Apenas o admin da casa gerencia experts.");
+    await expect(
+      exportExpertCreditsCsvFor(ctxFor(GESTOR, { admin: false }), { expertId: ME }),
+    ).rejects.toThrow("Apenas o admin da casa gerencia experts.");
+
+    fake.admin.rows("tenants").push({
+      id: OTHER_TENANT,
+      nome: "Outra",
+      status: "active",
+      is_demo: false,
+    });
+    const EXPERT_OF_OTHER_HOUSE = "00000000-0000-4000-8000-0000000000e9";
+    fake.admin.rows("experts").push({
+      id: EXPERT_OF_OTHER_HOUSE,
+      tenant_id: OTHER_TENANT,
+      nome: "De outra casa",
+      tipo: "total",
+      ativo: true,
+      envio_modo: "livre",
+      teto_mensal: null,
+      assumir_prazo_dias: 3,
+      user_id: null,
+      created_at: "2026-10-01T00:00:00Z",
+    });
+    await expect(
+      listExpertCreditsFor(ctxFor(ADMIN), { expertId: EXPERT_OF_OTHER_HOUSE }),
+    ).rejects.toThrow("Expert não encontrado.");
+    await expect(
+      exportExpertCreditsCsvFor(ctxFor(ADMIN), { expertId: EXPERT_OF_OTHER_HOUSE }),
+    ).rejects.toThrow("Expert não encontrado.");
   });
 });

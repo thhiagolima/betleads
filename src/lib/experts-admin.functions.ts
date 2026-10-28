@@ -689,6 +689,22 @@ export async function deleteExpertFor(ctx: ServerContext, data: z.input<typeof e
   const tenantId = await requireExpertAdminWriteTenant(ctx);
   const expert = await loadExpert(tenantId, input.expertId);
 
+  // Fase 3, Task 8: um perfil com crédito registrado (base da comissão) não
+  // pode ser excluído, só desativado — para não apagar o histórico de
+  // comissão (global-constraints.md). Checagem por `count` (head: true), sem
+  // carregar as linhas.
+  const { count: creditsCount, error: creditsErr } = await db()
+    .from("expert_deposit_credits")
+    .select("deposit_id", { count: "exact", head: true })
+    .eq("tenant_id", tenantId)
+    .eq("expert_id", expert.id);
+  if (creditsErr) throw new Error(creditsErr.message);
+  if ((creditsCount ?? 0) > 0) {
+    throw new Error(
+      "Este perfil tem créditos registrados. Desative em vez de excluir, para manter o histórico.",
+    );
+  }
+
   const { error } = await db().rpc("delete_expert", {
     _tenant: tenantId,
     _expert_id: expert.id,
