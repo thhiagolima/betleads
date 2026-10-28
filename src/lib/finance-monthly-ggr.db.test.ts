@@ -1,4 +1,4 @@
-// SQL test for supabase/migrations/20261104100000_finance_monthly_ggr.sql:
+// SQL test for supabase/migrations/20261106100000_finance_monthly_ggr.sql:
 // tenant_finance_monthly_ggr (one accumulated GGR per house x month, valid
 // up to valid_through inside that month), its checks and RLS. Same stub
 // schema as tenant-finance.db.test.ts, on top of the groups and finance
@@ -14,7 +14,7 @@ const migration = (name: string) =>
   readFileSync(resolve(__dirname, "../..", "supabase/migrations", name), "utf8");
 const MIGRATION_GROUPS = migration("20261101100000_tenant_groups.sql");
 const MIGRATION_FINANCE = migration("20261101100100_tenant_finance.sql");
-const MIGRATION_MONTHLY_GGR = migration("20261104100000_finance_monthly_ggr.sql");
+const MIGRATION_MONTHLY_GGR = migration("20261106100000_finance_monthly_ggr.sql");
 
 const TENANT_A = "00000000-0000-4000-8000-00000000b0a1";
 const TENANT_B = "00000000-0000-4000-8000-00000000b0a2";
