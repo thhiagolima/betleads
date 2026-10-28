@@ -516,6 +516,38 @@ describe("refresh_expert_credits — attribution", () => {
     expect(await credit(inRange)).toBeUndefined();
   });
 
+  it("a deposit whose created_at moved into or out of the range keeps exactly one correct credit", async () => {
+    const player = await newPlayer(TENANT_A, { affiliate: "AFF-1" });
+    const dep = await deposit(TENANT_A, player, "2026-04-20T12:00:00Z");
+    await refresh(TENANT_A, "2026-04-15T00:00:00Z", "2026-04-25T00:00:00Z");
+    expect(new Date((await credit(dep))!.deposit_at).toISOString()).toBe("2026-04-20T12:00:00.000Z");
+
+    // Outside the range → into it: the stored credit (deposit_at 04-20) is
+    // outside [04-01, 04-10) but must be replaced, not collide.
+    await db.query(`update public.deposits set created_at = '2026-04-05T12:00:00Z' where id = $1`, [
+      dep,
+    ]);
+    expect(await refresh(TENANT_A, "2026-04-01T00:00:00Z", "2026-04-10T00:00:00Z")).toBe(1);
+    const moved = await db.query<{ deposit_at: string }>(
+      `select deposit_at from public.expert_deposit_credits where deposit_id = $1`,
+      [dep],
+    );
+    expect(moved.rows).toHaveLength(1);
+    expect(new Date(moved.rows[0].deposit_at).toISOString()).toBe("2026-04-05T12:00:00.000Z");
+
+    // Inside the range → out of it: refreshing the old range drops the
+    // stale credit, refreshing the new one recreates it once.
+    await db.query(`update public.deposits set created_at = '2026-04-28T12:00:00Z' where id = $1`, [
+      dep,
+    ]);
+    expect(await refresh(TENANT_A, "2026-04-01T00:00:00Z", "2026-04-10T00:00:00Z")).toBe(0);
+    expect(await credit(dep)).toBeUndefined();
+    expect(await refresh(TENANT_A, "2026-04-25T00:00:00Z", "2026-05-01T00:00:00Z")).toBe(1);
+    const back = await credit(dep);
+    expect(back?.expert_id).toBe(expert1);
+    expect(new Date(back!.deposit_at).toISOString()).toBe("2026-04-28T12:00:00.000Z");
+  });
+
   it("deposit at 00:30 São Paulo falls in that São Paulo day range", async () => {
     const player = await newPlayer(TENANT_A, { affiliate: "AFF-1" });
     // 00:30 BRT on 2026-10-20 is 03:30 UTC.

@@ -7,7 +7,9 @@
 --   and clicks always precede the deposit), so recomputing any date range at
 --   any time yields the same rows.
 -- * refresh_expert_credits(tenant, from, to): delete + reinsert the house's
---   credits with deposit_at in [from, to). Rule (rule_version 1):
+--   credits with deposit_at in [from, to), plus those of deposits whose
+--   created_at is now in that range (created_at can be re-upserted by the
+--   sync scripts); the insert upserts on deposit_id. Rule (rule_version 1):
 --     1. clique: the latest human click (occurred_at desc, id desc) on a
 --        link_dispatches row with source_type 'expert', send_status 'sent',
 --        sent to the depositing player, with occurred_at in
@@ -117,8 +119,16 @@ begin
   v_sleeping := coalesce(
     (select g.sleeping_after_days from public.gamification_settings g where g.tenant_id = _tenant), 7);
 
+  -- Also the deposits whose created_at moved into the range since their
+  -- credit was stored (the sync scripts re-upsert created_at): their old row
+  -- has a deposit_at outside the range and would collide on deposit_id.
   delete from public.expert_deposit_credits
-  where tenant_id = _tenant and deposit_at >= _from and deposit_at < _to;
+  where tenant_id = _tenant
+    and ((deposit_at >= _from and deposit_at < _to)
+         or deposit_id in (
+           select d.id from public.deposits d
+           where d.tenant_id = _tenant and d.created_at >= _from and d.created_at < _to
+         ));
 
   insert into public.expert_deposit_credits (
     deposit_id, tenant_id, player_id, expert_id, via, valor, deposit_at,
@@ -129,6 +139,7 @@ begin
     select d.id, d.player_id, d.valor, d.created_at, p.affiliate_id, p.ftd_em,
            (select max(pd.created_at) from public.deposits pd
             where pd.tenant_id = _tenant and pd.player_id = d.player_id and pd.status = 'aprovado'
+              and pd.created_at <= d.created_at
               and (pd.created_at, pd.id) < (d.created_at, d.id)) prev_at
     from public.deposits d
     join public.players p on p.id = d.player_id and p.tenant_id = _tenant
@@ -157,6 +168,7 @@ begin
         and ld.source_type = 'expert'
         and ld.send_status = 'sent'
         and ld.sent_at is not null
+        and ld.sent_at <= dp.created_at
         and c.is_human
         and c.occurred_at >= greatest(ld.sent_at, dp.created_at - make_interval(hours => v_window))
         and c.occurred_at <= dp.created_at
@@ -180,7 +192,21 @@ begin
          (a.prev_at is not null and a.created_at - a.prev_at >= make_interval(days => v_sleeping)),
          v_window, 1, now()
   from attributed a
-  where a.expert_id is not null;
+  where a.expert_id is not null
+  on conflict (deposit_id) do update set
+    tenant_id = excluded.tenant_id,
+    player_id = excluded.player_id,
+    expert_id = excluded.expert_id,
+    via = excluded.via,
+    valor = excluded.valor,
+    deposit_at = excluded.deposit_at,
+    link_dispatch_id = excluded.link_dispatch_id,
+    click_at = excluded.click_at,
+    is_ftd = excluded.is_ftd,
+    is_reativacao = excluded.is_reativacao,
+    click_window_hours = excluded.click_window_hours,
+    rule_version = excluded.rule_version,
+    computed_at = excluded.computed_at;
 
   get diagnostics v_rows = row_count;
   return v_rows;
@@ -242,11 +268,12 @@ begin
       '*/10 * * * *',
       $cron$set statement_timeout = '300s'; select public.refresh_expert_credits_recent(2);$cron$
     );
-    -- Late imports: the last 8 days once a day, 03:30 BRT.
+    -- Late imports: the last 8 days once a day, 03:35 BRT (off the */10
+    -- minutes, or it would always lose the try-lock to the recent run).
     perform cron.schedule(
       'betleads-expert-credits-week',
-      '30 6 * * *',
-      $cron$set statement_timeout = '300s'; select public.refresh_expert_credits_recent(8);$cron$
+      '35 6 * * *',
+      $cron$set statement_timeout = '900s'; select public.refresh_expert_credits_recent(8);$cron$
     );
   end if;
 end $$;
