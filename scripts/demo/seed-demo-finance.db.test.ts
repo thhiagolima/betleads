@@ -23,11 +23,31 @@ async function financeDaily() {
 }
 
 async function otherCosts() {
-  const { rows } = await db.query<{ descricao: string; valor: string }>(
-    `select descricao, valor::text as valor from public.tenant_finance_other_costs
+  const { rows } = await db.query<{ descricao: string; categoria: string | null; valor: string }>(
+    `select descricao, categoria, valor::text as valor from public.tenant_finance_other_costs
       where tenant_id = $1 order by descricao`,
     [DEMO],
   );
+  return rows;
+}
+
+// Mirrors src/lib/finance/categories.ts' BETLEADS_COST_PATTERN: the real
+// check the finance dashboard applies to flag a cost as a duplicated
+// Betleads charge.
+const BETLEADS_COST_PATTERN = /\b(sms|betleads|mensalidade|voz|e-?mail|crm)\b/i;
+
+async function betleadsUsage() {
+  const { rows } = await db.query<{ metric_date: string; amount: string }>(
+    `select metric_date::text as metric_date, amount::text as amount
+       from public.finance_betleads_usage($1::uuid[], (current_date - 400), current_date)
+      order by metric_date`,
+    [[DEMO]],
+  );
+  return rows;
+}
+
+async function walletIntegrity() {
+  const { rows } = await db.query<{ tenant_id: string }>(`select tenant_id from public.billing_wallet_integrity()`);
   return rows;
 }
 
@@ -56,14 +76,74 @@ describe("seedDemoFinance", () => {
     await seedDemoFinance(db, { demoTenantId: DEMO, days: DAYS });
     const firstDaily = await financeDaily();
     const firstCosts = await otherCosts();
+    const firstUsage = await betleadsUsage();
 
     await seedDemoFinance(db, { demoTenantId: DEMO, days: DAYS });
     const secondDaily = await financeDaily();
     const secondCosts = await otherCosts();
+    const secondUsage = await betleadsUsage();
 
     expect(secondDaily).toEqual(firstDaily);
     expect(secondCosts).toEqual(firstCosts);
+    expect(secondUsage).toEqual(firstUsage);
     expect(firstDaily).toHaveLength(DAYS);
+    expect(firstUsage).toHaveLength(DAYS);
+  });
+
+  it("seeds a Betleads usage ledger row for every day, keeping the wallet consistent", async () => {
+    const usage = await betleadsUsage();
+    expect(usage).toHaveLength(DAYS);
+    // uniform(80, 200, ...): every day's net cost falls in that range.
+    for (const row of usage) expect(Number(row.amount)).toBeGreaterThan(0);
+    for (const row of usage) expect(Number(row.amount)).toBeLessThan(200);
+
+    const integrity = await walletIntegrity();
+    expect(integrity).toEqual([]);
+
+    const { rows: wallet } = await db.query<{ balance: string }>(
+      `select balance::text as balance from public.tenant_wallets where tenant_id = $1`,
+      [DEMO],
+    );
+    expect(Number(wallet[0].balance)).toBeGreaterThanOrEqual(0);
+  });
+
+  it("seeds one paid invoice per seeded month, amount_cents 400000, period_start on the 1st", async () => {
+    const { rows: invoices } = await db.query<{
+      period_start: string;
+      status: string;
+      amount_cents: number;
+    }>(
+      `select period_start::text as period_start, status, amount_cents
+         from public.billing_invoices where tenant_id = $1 and manual_note = '__demo_seed__'
+        order by period_start`,
+      [DEMO],
+    );
+    expect(invoices.length).toBeGreaterThan(0);
+    for (const inv of invoices) {
+      expect(inv.status).toBe("paid");
+      expect(inv.amount_cents).toBe(400000);
+      expect(inv.period_start.endsWith("-01")).toBe(true);
+    }
+  });
+
+  it("no seeded other cost looks like a duplicated Betleads charge", async () => {
+    const costs = await otherCosts();
+    expect(costs.length).toBeGreaterThan(0);
+    for (const cost of costs) {
+      expect(BETLEADS_COST_PATTERN.test(cost.descricao)).toBe(false);
+      if (cost.categoria) expect(BETLEADS_COST_PATTERN.test(cost.categoria)).toBe(false);
+    }
+  });
+
+  it("removes a previous seed's CRM/SMS other costs", async () => {
+    await db.query(
+      `insert into public.tenant_finance_other_costs (id, tenant_id, month, descricao, valor, created_by)
+       values (gen_random_uuid(), $1, date_trunc('month', current_date)::date, 'CRM', 1500, null)`,
+      [DEMO],
+    );
+    await seedDemoFinance(db, { demoTenantId: DEMO, days: DAYS });
+    const costs = await otherCosts();
+    expect(costs.some((c) => c.descricao === "CRM")).toBe(false);
   });
 
   it("only the most recent day is pending (no GGR); every earlier day has one", async () => {
@@ -147,10 +227,9 @@ describe("seedDemoFinance", () => {
     expect(Number(costGoal.daily_value)).toBe(90);
 
     const costs = await otherCosts();
-    expect(costs).toEqual([
-      { descricao: "CRM", valor: "1500.00" },
-      { descricao: "SMS", valor: "800.00" },
-    ]);
+    expect(costs.map((c) => c.descricao).sort()).toEqual(["Equipe de atendimento", "Influenciador X"]);
+    expect(costs.map((c) => c.categoria).sort()).toEqual(["Afiliados e influenciadores", "Equipe"]);
+    for (const cost of costs) expect(Number(cost.valor)).toBeGreaterThan(0);
   });
 
   it("demoUserIds become managers of the demo group", async () => {
