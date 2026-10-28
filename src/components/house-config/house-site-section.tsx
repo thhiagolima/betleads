@@ -16,6 +16,10 @@ import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import { getHouseConfig, saveHouseSite, saveQuickLinks } from "@/lib/house-config.functions";
 import { normalizeSiteUrl, suggestedQuickLinks } from "@/lib/house-config";
+import { normalizeLinkDomain } from "@/lib/link-domain";
+import { hasLinkDomainWork, type LinkDomainPreview } from "@/lib/link-domain-plan";
+import { previewLinkDomainChange } from "@/lib/link-domain.functions";
+import { LinkDomainDialog } from "@/components/house-config/link-domain-dialog";
 import {
   HOUSE_CONFIG_QUERY_KEY,
   invalidateHouseConfigQueries,
@@ -90,6 +94,7 @@ export function HouseSiteSection({
   const getConfig = useServerFn(getHouseConfig);
   const saveSiteFn = useServerFn(saveHouseSite);
   const saveLinksFn = useServerFn(saveQuickLinks);
+  const previewLinkDomainFn = useServerFn(previewLinkDomainChange);
 
   const query = useQuery({ queryKey: HOUSE_CONFIG_QUERY_KEY, queryFn: () => getConfig() });
   const config = query.data;
@@ -98,6 +103,14 @@ export function HouseSiteSection({
   const [siteUrl, setSiteUrl] = useState("");
   const [links, setLinks] = useState<QuickLinkDraft[]>([]);
   const [initialized, setInitialized] = useState(false);
+
+  const [linkDomainDialogOpen, setLinkDomainDialogOpen] = useState(false);
+  const [linkDomainAutoPreview, setLinkDomainAutoPreview] = useState<LinkDomainPreview | null>(null);
+
+  function closeLinkDomainDialog(next: boolean) {
+    setLinkDomainDialogOpen(next);
+    if (!next) setLinkDomainAutoPreview(null);
+  }
 
   useEffect(() => {
     if (!config || initialized) return;
@@ -115,9 +128,27 @@ export function HouseSiteSection({
 
   const saveSite = useMutation({
     mutationFn: () => saveSiteFn({ data: { siteUrl } }),
-    onSuccess: () => {
+    onSuccess: async (result) => {
       toast.success("URL da casa salva");
       refresh();
+
+      // The URL is already saved at this point — a failure previewing the
+      // link-domain change below is not shown as an error, just logged.
+      if (!result.previousSiteUrl) return;
+      const prevHost = normalizeLinkDomain(result.previousSiteUrl);
+      const nextHost = normalizeLinkDomain(result.siteUrl);
+      if (!prevHost.ok || !nextHost.ok || prevHost.domain === nextHost.domain) return;
+      try {
+        const preview = (await previewLinkDomainFn({
+          data: { fromDomain: prevHost.domain, toDomain: nextHost.domain },
+        })) as unknown as LinkDomainPreview;
+        if (hasLinkDomainWork(preview)) {
+          setLinkDomainAutoPreview(preview);
+          setLinkDomainDialogOpen(true);
+        }
+      } catch (error) {
+        console.warn("Falha ao pré-visualizar troca de domínio nos links após salvar a URL da casa", error);
+      }
     },
     onError: (error: Error) => toast.error(error.message),
   });
@@ -199,6 +230,19 @@ export function HouseSiteSection({
               </Button>
             </DemoDisabledTooltip>
           )}
+          {canEdit && (
+            <DemoDisabledTooltip active={isDemo}>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={isDemo}
+                onClick={() => setLinkDomainDialogOpen(true)}
+              >
+                Trocar domínio nos links
+              </Button>
+            </DemoDisabledTooltip>
+          )}
         </div>
       </div>
 
@@ -261,7 +305,24 @@ export function HouseSiteSection({
     </div>
   );
 
-  if (variant === "wizard") return content;
+  const currentSiteHost = config?.siteUrl ? normalizeLinkDomain(config.siteUrl) : null;
+  const linkDomainDialog = (
+    <LinkDomainDialog
+      open={linkDomainDialogOpen}
+      onOpenChange={closeLinkDomainDialog}
+      initialTo={currentSiteHost?.ok ? currentSiteHost.domain : undefined}
+      initialPreview={linkDomainAutoPreview ?? undefined}
+    />
+  );
+
+  if (variant === "wizard") {
+    return (
+      <>
+        {content}
+        {linkDomainDialog}
+      </>
+    );
+  }
 
   return (
     <DataCard
@@ -270,6 +331,7 @@ export function HouseSiteSection({
       icon={<Home className="h-4 w-4" />}
     >
       {content}
+      {linkDomainDialog}
     </DataCard>
   );
 }
