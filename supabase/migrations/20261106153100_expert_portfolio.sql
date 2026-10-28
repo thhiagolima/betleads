@@ -20,10 +20,15 @@
 --   desde least(primeiro link, primeiro crédito) da pessoa para o lead. Sem
 --   link nem crédito, nada. Nunca devolve notas, links ou contatos de outra
 --   pessoa, nem quem recebeu o crédito.
+--   Each source and the merged result use FETCH FIRST ... WITH TIES on at, so
+--   a page may hold more than `limit` items but never splits a timestamp:
+--   the next page is before = at of the last item.
 --   Depósito: status 'creditado' (detalhe "clique em dd/mm hh:mi" em São
 --   Paulo, ou "afiliado"), 'outra_pessoa' ("contou para outro membro da
 --   equipe") ou 'nao_creditado', com o primeiro motivo que se aplicar,
 --   pelos dados da data do depósito:
+--     0. sem crédito e criado há menos de 15 minutos: status 'pendente',
+--        "aguardando cálculo (até 10 min)" (o cron ainda não passou);
 --     1. "antes do seu cadastro" (antes de experts.created_at);
 --     2. "perfil desativado na data" (em ou depois de desativado_em);
 --     3. "ID de afiliado não era seu na data": o lead tem affiliate_id, o
@@ -203,7 +208,7 @@ as $$
       and l.tenant_id = _tenant and l.player_id = _player and l.expert_id = _expert
       and l.created_at < coalesce(_before, 'infinity')
     order by l.created_at desc
-    limit _limit
+    fetch first _limit rows with ties
   ),
   cte_clicks as (
     select cl.occurred_at at, 'clique'::text kind, 'Clique no link'::text titulo,
@@ -214,6 +219,7 @@ as $$
     left join lateral (
       select l.oferta from public.expert_links l
       where l.tenant_id = _tenant and l.player_id = _player and l.link_dispatch_id = ld.id
+      order by l.created_at, l.id
       limit 1
     ) ol on true
     where s.since is not null
@@ -225,7 +231,7 @@ as $$
       and cl.is_human
       and cl.occurred_at < coalesce(_before, 'infinity')
     order by cl.occurred_at desc
-    limit _limit
+    fetch first _limit rows with ties
   ),
   cte_contacts as (
     select ct.created_at at, 'contato'::text kind,
@@ -243,7 +249,7 @@ as $$
       and ct.tenant_id = _tenant and ct.player_id = _player and ct.expert_id = _expert
       and ct.created_at < coalesce(_before, 'infinity')
     order by ct.created_at desc
-    limit _limit
+    fetch first _limit rows with ties
   ),
   cte_deps as (
     select d.id, d.created_at, d.valor
@@ -253,8 +259,8 @@ as $$
       and d.tenant_id = _tenant and d.player_id = _player and d.status = 'aprovado'
       and d.created_at >= s.since
       and d.created_at < coalesce(_before, 'infinity')
-    order by d.created_at desc, d.id desc
-    limit _limit
+    order by d.created_at desc
+    fetch first _limit rows with ties
   ),
   cte_deposits as (
     select d.created_at at, 'deposito'::text kind, 'Depósito aprovado'::text titulo,
@@ -263,6 +269,7 @@ as $$
                then 'clique em ' || to_char(c.click_at at time zone 'America/Sao_Paulo', 'DD/MM HH24:MI')
              when c.expert_id = _expert then 'afiliado'
              when c.expert_id is not null then 'contou para outro membro da equipe'
+             when d.created_at > now() - interval '15 minutes' then 'aguardando cálculo (até 10 min)'
              when d.created_at < e.created_at then 'antes do seu cadastro'
              when e.desativado_em is not null and d.created_at >= e.desativado_em
                then 'perfil desativado na data'
@@ -297,6 +304,7 @@ as $$
            case
              when c.expert_id = _expert then 'creditado'
              when c.expert_id is not null then 'outra_pessoa'
+             when d.created_at > now() - interval '15 minutes' then 'pendente'
              else 'nao_creditado'
            end status
     from cte_deps d
@@ -315,15 +323,21 @@ as $$
       where c.expert_id is null
     ) w on true
   )
-  select t.at, t.kind, t.titulo, t.detalhe, t.valor, t.status
+  select p.at, p.kind, p.titulo, p.detalhe, p.valor, p.status
   from (
-    select * from cte_links
-    union all select * from cte_clicks
-    union all select * from cte_contacts
-    union all select * from cte_deposits
-  ) t
-  order by t.at desc, t.kind
-  limit _limit;
+    select t.*
+    from (
+      select * from cte_links
+      union all select * from cte_clicks
+      union all select * from cte_contacts
+      union all select * from cte_deposits
+    ) t
+    -- With ties: a page never ends in the middle of a timestamp, so the
+    -- next page can use _before = at of the last item.
+    order by t.at desc
+    fetch first _limit rows with ties
+  ) p
+  order by p.at desc, p.kind;
 $$;
 
 revoke all on function public.expert_lead_timeline(uuid, uuid, uuid, timestamptz, integer)

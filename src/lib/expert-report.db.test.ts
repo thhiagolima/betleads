@@ -715,6 +715,24 @@ describe("expert_portfolio", () => {
 
 describe("expert_lead_timeline", () => {
   /**
+   * Walks the timeline with _before = at of the last item of each page. A
+   * page may exceed the limit only by items tied with its last timestamp.
+   */
+  async function walkPages(tenant: string, expert: string, lead: string, limit: number) {
+    const seen: string[] = [];
+    let before: string | null = null;
+    for (;;) {
+      const page = await timeline(tenant, expert, lead, before, limit);
+      if (page.length === 0) break;
+      const lastAt = iso(page[page.length - 1].at);
+      for (const extra of page.slice(limit)) expect(iso(extra.at)).toBe(lastAt);
+      seen.push(...page.map((r) => `${iso(r.at)} ${r.kind}`));
+      before = page[page.length - 1].at;
+    }
+    return seen;
+  }
+
+  /**
    * House with a 24 h window. Expert X registered 2026-02-01, owns AFF-X
    * from 2026-03-01 and is deactivated on 2026-06-01; Y is another expert.
    */
@@ -857,17 +875,51 @@ describe("expert_lead_timeline", () => {
 
     const full = await timeline(tenant, x, lead);
     expect(full).toHaveLength(5);
+    expect(await walkPages(tenant, x, lead, 2)).toEqual(full.map((r) => `${iso(r.at)} ${r.kind}`));
+  });
 
-    const seen: string[] = [];
-    let before: string | null = null;
-    for (;;) {
-      const page = await timeline(tenant, x, lead, before, 2);
-      if (page.length === 0) break;
-      expect(page.length).toBeLessThanOrEqual(2);
-      seen.push(...page.map((r) => `${iso(r.at)} ${r.kind}`));
-      before = page[page.length - 1].at;
-    }
-    expect(seen).toEqual(full.map((r) => `${iso(r.at)} ${r.kind}`));
+  it("timeline never splits a timestamp across pages", async () => {
+    const { tenant, x } = await timelineHouse();
+    const lead = await newPlayer(tenant);
+    await contact(tenant, x, lead, "2026-03-31T12:00:00Z");
+    // A link, its click and the deposit all at the same instant.
+    const ld = await sendLink(tenant, x, lead, "2026-04-01T10:00:00Z");
+    await click(tenant, ld, "2026-04-01T10:00:00Z");
+    await deposit(tenant, lead, "2026-04-01T10:00:00Z");
+    await deposit(tenant, lead, "2026-04-05T11:00:00Z");
+    await refresh(tenant);
+
+    // limit 2 would cut after the first of the three tied items: the page
+    // carries all three instead.
+    const first = await timeline(tenant, x, lead, null, 2);
+    expect(first.map((r) => `${iso(r.at)} ${r.kind}`)).toEqual([
+      "2026-04-05T11:00:00.000Z deposito",
+      "2026-04-01T10:00:00.000Z clique",
+      "2026-04-01T10:00:00.000Z deposito",
+      "2026-04-01T10:00:00.000Z link",
+    ]);
+
+    const full = await timeline(tenant, x, lead);
+    expect(full).toHaveLength(5);
+    expect(await walkPages(tenant, x, lead, 2)).toEqual(full.map((r) => `${iso(r.at)} ${r.kind}`));
+  });
+
+  it("timeline shows a deposit not yet computed as pendente", async () => {
+    const { tenant } = await timelineHouse();
+    const z = await newExpert(tenant, "Expert Z");
+    const lead = await newPlayer(tenant);
+    await sendLink(tenant, z, lead, "2026-04-01T10:00:00Z");
+    await deposit(tenant, lead, "2026-04-02T10:00:00Z", { valor: 5 });
+    await refresh(tenant);
+    // Arrives after the last cron run.
+    await deposit(tenant, lead, new Date(Date.now() - 60_000).toISOString(), { valor: 9 });
+
+    const t = await timeline(tenant, z, lead);
+    expect(t.map((r) => [r.kind, r.status, r.detalhe])).toEqual([
+      ["deposito", "pendente", "aguardando cálculo (até 10 min)"],
+      ["deposito", "nao_creditado", "sem clique seu nas 24h anteriores"],
+      ["link", null, "Bônus 100%"],
+    ]);
   });
 });
 
