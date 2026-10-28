@@ -3,7 +3,7 @@
 // link-domain-plan.ts) and applies an already-computed change via the
 // `apply_link_domain_change` RPC (Task 3's migration). No RLS write path
 // exists for these tables from here — callers must already have checked
-// `requireHouseAdmin` before calling `applyLinkDomainChange`.
+// `requireHouseAdmin` before calling `applyLinkDomainChangeRpc`.
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import type { LinkDomainSources } from "@/lib/link-domain-plan";
 
@@ -267,12 +267,12 @@ export type ApplyLinkDomainResult = {
 
 const ITEM_NOT_FOUND_MESSAGE = "Algum item não foi encontrado nesta casa. Abra a prévia de novo.";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- the RPC isn't in the generated Supabase types, same pattern as shortio.server.ts / meta.functions.ts.
 export async function applyLinkDomainChangeRpc(
   tenantId: string,
   actorId: string,
   payload: Record<string, unknown>,
 ): Promise<ApplyLinkDomainResult> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the RPC isn't in the generated Supabase types, same pattern as shortio.server.ts / meta.functions.ts.
   const { data, error } = await (supabaseAdmin as any).rpc("apply_link_domain_change", {
     _tenant: tenantId,
     _actor: actorId,

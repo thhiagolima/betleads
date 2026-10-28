@@ -59,6 +59,17 @@ export type LinkDomainPreview = {
   };
 };
 
+// The client never needs `update`/`previous` (whole config/template content,
+// doubled for email) — it only renders key/kind/id/title/detail/replacements/
+// sample/blockedReason/segmentWarning, and `applyLinkDomainChange` recomputes
+// the full preview server-side from the item keys. `previewLinkDomainChange`
+// strips these two fields before returning, so the client-facing type omits
+// them entirely instead of typing them as always-absent.
+export type ClientLinkDomainItem = Omit<LinkDomainItem, "update" | "previous">;
+export type ClientLinkDomainPreview = Omit<LinkDomainPreview, "items"> & {
+  items: ClientLinkDomainItem[];
+};
+
 const SMS_TEMPLATE_LIMIT = 480;
 const JOURNEY_SMS_LIMIT = 1600;
 const SUBJECT_LIMIT = 255;
@@ -314,7 +325,9 @@ export function planLinkDomainChange(
         kind: "journey_step",
         id: step.id,
         title: step.journeyName,
-        detail: `Etapa ${step.position + 1} · ${step.stepType === "sms" ? "SMS" : "E-mail"}`,
+        detail: `Etapa ${step.position + 1} · ${step.stepType === "sms" ? "SMS" : "E-mail"}${
+          step.label ? ` · ${step.label}` : ""
+        }`,
         replacements: swap.replacements,
         sample: swap.sample ?? { before: "", after: "" },
         blockedReason: swap.blockedReason,
@@ -453,6 +466,9 @@ export function planLinkDomainChange(
   };
 }
 
-export function hasLinkDomainWork(preview: LinkDomainPreview): boolean {
+// Accepts either the full preview or the client-facing one (minus
+// `update`/`previous`) — this check only looks at `items.length` and
+// `trackingHosts`, present identically on both.
+export function hasLinkDomainWork(preview: { items: unknown[]; trackingHosts: unknown }): boolean {
   return preview.items.length > 0 || preview.trackingHosts !== null;
 }

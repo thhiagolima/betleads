@@ -32,8 +32,14 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { invalidateHouseConfigQueries } from "@/components/house-config/house-config-query";
-import { hasLinkDomainWork, type LinkDomainItem, type LinkDomainItemKind, type LinkDomainPreview } from "@/lib/link-domain-plan";
+import {
+  hasLinkDomainWork,
+  type ClientLinkDomainItem,
+  type ClientLinkDomainPreview,
+  type LinkDomainItemKind,
+} from "@/lib/link-domain-plan";
 import { applyLinkDomainChange, previewLinkDomainChange } from "@/lib/link-domain.functions";
+import type { ApplyLinkDomainResult } from "@/lib/link-domain.server";
 
 const KIND_LABELS: Record<LinkDomainItemKind, string> = {
   journey_step: "Jornadas",
@@ -44,11 +50,11 @@ const KIND_LABELS: Record<LinkDomainItemKind, string> = {
 
 const KIND_ORDER: LinkDomainItemKind[] = ["journey_step", "sms_template", "email_template", "quick_link"];
 
-export type LinkDomainItemGroup = { kind: LinkDomainItemKind; label: string; items: LinkDomainItem[] };
+export type LinkDomainItemGroup = { kind: LinkDomainItemKind; label: string; items: ClientLinkDomainItem[] };
 
 /** Groups the preview's items by kind, in display order, dropping empty
  * groups. Pure — exported for unit tests. */
-export function groupLinkDomainItems(items: LinkDomainItem[]): LinkDomainItemGroup[] {
+export function groupLinkDomainItems(items: ClientLinkDomainItem[]): LinkDomainItemGroup[] {
   return KIND_ORDER.map((kind) => ({
     kind,
     label: KIND_LABELS[kind],
@@ -58,7 +64,7 @@ export function groupLinkDomainItems(items: LinkDomainItem[]): LinkDomainItemGro
 
 /** All non-blocked items, pre-checked — the dialog's default selection.
  * Pure — exported for unit tests. */
-export function initialSelection(preview: LinkDomainPreview): Set<string> {
+export function initialSelection(preview: ClientLinkDomainPreview): Set<string> {
   return new Set(preview.items.filter((item) => item.blockedReason === null).map((item) => item.key));
 }
 
@@ -66,7 +72,7 @@ export function initialSelection(preview: LinkDomainPreview): Set<string> {
  * items plus the tracking-hosts change when its checkbox is on. Pure —
  * exported for unit tests. */
 export function countSelectedForApply(
-  preview: LinkDomainPreview,
+  preview: ClientLinkDomainPreview,
   selected: Set<string>,
   trackingChecked: boolean,
 ): number {
@@ -79,7 +85,7 @@ export function countSelectedForApply(
  * `renderToStaticMarkup` can't capture server-side — see the test file for
  * why this component's JSX-level logic is tested through these pure
  * helpers instead of a full render). */
-export function outOfScopeIsEmpty(preview: LinkDomainPreview): boolean {
+export function outOfScopeIsEmpty(preview: ClientLinkDomainPreview): boolean {
   const { scheduledCampaigns, legacyFlows, subdomainLinks } = preview.outOfScope;
   return scheduledCampaigns.length === 0 && legacyFlows.length === 0 && subdomainLinks === 0;
 }
@@ -88,6 +94,36 @@ export function outOfScopeIsEmpty(preview: LinkDomainPreview): boolean {
  * crosses into another segment. Pure — exported for unit tests. */
 export function formatSegmentWarning(warning: { before: number; after: number }): string {
   return `Passa de ${warning.before} para ${warning.after} partes de SMS (rastreio desligado).`;
+}
+
+function pluralPart(count: number, singular: string, plural: string): string | null {
+  if (count <= 0) return null;
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+/** Joins pt-BR parts with ", " and a final " e " before the last one
+ * ("a, b e c" / "a e b" / "a"). */
+function joinPtBr(parts: string[]): string {
+  if (parts.length <= 1) return parts[0] ?? "";
+  return `${parts.slice(0, -1).join(", ")} e ${parts[parts.length - 1]}`;
+}
+
+/** The toast description shown on a successful apply, built from the RPC's
+ * actual counts — e.g. "3 etapas de jornada, 2 templates de SMS, 1 template
+ * de e-mail, 1 URL rápida e a lista do rastreio". Zero-count parts are
+ * omitted; singular/plural follows each count. Pure — exported for unit
+ * tests. */
+export function formatApplyResultToast(result: ApplyLinkDomainResult): string {
+  const parts = [
+    pluralPart(result.journey_steps, "etapa de jornada", "etapas de jornada"),
+    pluralPart(result.sms_templates, "template de SMS", "templates de SMS"),
+    pluralPart(result.email_templates, "template de e-mail", "templates de e-mail"),
+    pluralPart(result.quick_links, "URL rápida", "URLs rápidas"),
+  ].filter((part): part is string => part !== null);
+  if (result.tracking_hosts) {
+    parts.push("a lista do rastreio");
+  }
+  return joinPtBr(parts);
 }
 
 export function LinkDomainDialog({
@@ -101,7 +137,7 @@ export function LinkDomainDialog({
   onOpenChange: (open: boolean) => void;
   initialFrom?: string;
   initialTo?: string;
-  initialPreview?: LinkDomainPreview;
+  initialPreview?: ClientLinkDomainPreview;
 }) {
   const qc = useQueryClient();
   const previewFn = useServerFn(previewLinkDomainChange);
@@ -110,7 +146,7 @@ export function LinkDomainDialog({
   const [step, setStep] = useState<"input" | "preview">(initialPreview ? "preview" : "input");
   const [fromInput, setFromInput] = useState(initialFrom ?? "");
   const [toInput, setToInput] = useState(initialTo ?? "");
-  const [preview, setPreview] = useState<LinkDomainPreview | null>(initialPreview ?? null);
+  const [preview, setPreview] = useState<ClientLinkDomainPreview | null>(initialPreview ?? null);
   const [selected, setSelected] = useState<Set<string>>(initialPreview ? initialSelection(initialPreview) : new Set());
   const [trackingChecked, setTrackingChecked] = useState(initialPreview ? initialPreview.trackingHosts !== null : true);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -139,7 +175,7 @@ export function LinkDomainDialog({
   const previewMutation = useMutation({
     mutationFn: () => previewFn({ data: { fromDomain: fromInput, toDomain: toInput } }),
     onSuccess: (result) => {
-      const typed = result as unknown as LinkDomainPreview;
+      const typed = result as unknown as ClientLinkDomainPreview;
       setPreview(typed);
       setSelected(initialSelection(typed));
       setTrackingChecked(typed.trackingHosts !== null);
@@ -160,14 +196,23 @@ export function LinkDomainDialog({
         },
       });
     },
-    onSuccess: () => {
-      toast.success("Domínio trocado nos links");
+    onSuccess: (result) => {
+      const description = formatApplyResultToast(result);
+      toast.success("Domínio trocado nos links", description ? { description } : undefined);
       invalidateHouseConfigQueries(qc);
       setConfirmOpen(false);
       onOpenChange(false);
     },
     onError: (error: Error) => toast.error(error.message),
   });
+
+  function goBackToInput() {
+    if (preview) {
+      setFromInput((prev) => (prev ? prev : preview.from));
+      setToInput((prev) => (prev ? prev : preview.to));
+    }
+    setStep("input");
+  }
 
   function toggleItem(key: string) {
     setSelected((prev) => {
@@ -298,9 +343,19 @@ export function LinkDomainDialog({
               </Button>
             )}
             {step === "preview" && (
-              <Button type="button" disabled={count === 0 || applyMutation.isPending} onClick={() => setConfirmOpen(true)}>
-                {`Trocar ${count} itens`}
-              </Button>
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={applyMutation.isPending}
+                  onClick={goBackToInput}
+                >
+                  Voltar
+                </Button>
+                <Button type="button" disabled={count === 0 || applyMutation.isPending} onClick={() => setConfirmOpen(true)}>
+                  {`Trocar ${count} itens`}
+                </Button>
+              </>
             )}
           </DialogFooter>
         </DialogContent>

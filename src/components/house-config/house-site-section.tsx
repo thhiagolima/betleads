@@ -17,7 +17,7 @@ import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import { getHouseConfig, saveHouseSite, saveQuickLinks } from "@/lib/house-config.functions";
 import { normalizeSiteUrl, suggestedQuickLinks } from "@/lib/house-config";
 import { normalizeLinkDomain } from "@/lib/link-domain";
-import { hasLinkDomainWork, type LinkDomainPreview } from "@/lib/link-domain-plan";
+import { hasLinkDomainWork, type ClientLinkDomainPreview } from "@/lib/link-domain-plan";
 import { previewLinkDomainChange } from "@/lib/link-domain.functions";
 import { LinkDomainDialog } from "@/components/house-config/link-domain-dialog";
 import {
@@ -105,7 +105,7 @@ export function HouseSiteSection({
   const [initialized, setInitialized] = useState(false);
 
   const [linkDomainDialogOpen, setLinkDomainDialogOpen] = useState(false);
-  const [linkDomainAutoPreview, setLinkDomainAutoPreview] = useState<LinkDomainPreview | null>(null);
+  const [linkDomainAutoPreview, setLinkDomainAutoPreview] = useState<ClientLinkDomainPreview | null>(null);
 
   function closeLinkDomainDialog(next: boolean) {
     setLinkDomainDialogOpen(next);
@@ -141,7 +141,7 @@ export function HouseSiteSection({
       try {
         const preview = (await previewLinkDomainFn({
           data: { fromDomain: prevHost.domain, toDomain: nextHost.domain },
-        })) as unknown as LinkDomainPreview;
+        })) as unknown as ClientLinkDomainPreview;
         if (hasLinkDomainWork(preview)) {
           setLinkDomainAutoPreview(preview);
           setLinkDomainDialogOpen(true);

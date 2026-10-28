@@ -4,26 +4,25 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import type { Json } from "@/integrations/supabase/types";
 import { requireHouseAdmin } from "@/lib/house-config.functions";
 import { invalidateHouseLinks } from "@/lib/house-links.server";
-import { planLinkDomainChange, type LinkDomainItem, type LinkDomainPreview } from "@/lib/link-domain-plan";
+import { planLinkDomainChange, type ClientLinkDomainPreview, type LinkDomainPreview } from "@/lib/link-domain-plan";
 import { applyLinkDomainChangeRpc, loadLinkDomainSources, type ApplyLinkDomainResult } from "@/lib/link-domain.server";
 
-// `LinkDomainItem.update`/`previous` are typed `Record<string, unknown>` in
-// link-domain-plan.ts (Task 2) — fine for the pure planner, but TanStack's
-// server-fn return-type check rejects any `unknown` in a handler's return
-// value (it can't prove it's serializable). The actual values are always
-// plain JSON (string-swapped config/content/path), so this just re-labels
-// the same shape with `Json` instead of `unknown`, same convention as
-// `CampaignDraftPayload` in campaign-drafts.functions.ts.
-type SerializableLinkDomainItem = Omit<LinkDomainItem, "update" | "previous"> & {
-  update: Record<string, Json>;
-  previous: Record<string, Json>;
-};
-type SerializableLinkDomainPreview = Omit<LinkDomainPreview, "items"> & {
-  items: SerializableLinkDomainItem[];
-};
+// The preview's `update`/`previous` fields hold the full new/old
+// config/template content (the whole email HTML, twice, per item) — useful
+// for `buildApplyPayload` below, but the client only renders
+// key/kind/id/title/detail/replacements/sample/blockedReason/segmentWarning.
+// `stripClientFields` drops `update`/`previous` before the preview crosses
+// the wire, so `previewLinkDomainChange` never sends that weight to the
+// browser; `applyLinkDomainChange` recomputes the full preview server-side
+// from `itemKeys`, so nothing else needs them back.
+function stripClientFields(preview: LinkDomainPreview): ClientLinkDomainPreview {
+  return {
+    ...preview,
+    items: preview.items.map(({ update, previous, ...rest }) => rest),
+  };
+}
 
 // ============ Pure helpers (exported for unit tests) ============
 
@@ -56,6 +55,15 @@ export function buildApplyPayload(
 ): ApplyPayload {
   const selectedKeys = new Set(itemKeys);
   const selectedItems = preview.items.filter((item) => selectedKeys.has(item.key));
+
+  // A selected key that isn't in the recomputed preview means the item
+  // changed (or disappeared) since the client last fetched it — e.g. it was
+  // edited, deleted, or no longer matches `from`/`to`. Silently dropping it
+  // would apply a smaller change than the one the person confirmed, so this
+  // fails the same way a now-blocked item does.
+  if (selectedItems.length !== selectedKeys.size) {
+    throw new Error(BLOCKED_SELECTED_MESSAGE);
+  }
 
   const blocked = selectedItems.find((item) => item.blockedReason !== null);
   if (blocked) {
@@ -125,12 +133,12 @@ const previewInput = z.object({
 export const previewLinkDomainChange = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((v: unknown) => previewInput.parse(v))
-  .handler(async ({ data, context }): Promise<SerializableLinkDomainPreview> => {
+  .handler(async ({ data, context }): Promise<ClientLinkDomainPreview> => {
     const tenantId = await requireHouseAdmin(context);
     const sources = await loadLinkDomainSources(tenantId);
     const result = planLinkDomainChange(sources, data.fromDomain, data.toDomain);
     if (!result.ok) throw new Error(result.error);
-    return result.preview as unknown as SerializableLinkDomainPreview;
+    return stripClientFields(result.preview);
   });
 
 const applyInput = z.object({

@@ -80,6 +80,46 @@ describe("planLinkDomainChange", () => {
     expect(item.previous.config).toEqual(config);
   });
 
+  it("etapa com label: detail usa 'Etapa N · <canal> · <label>'", () => {
+    const smsConfig = { content: "A https://casa-antiga.com/a" };
+    const emailConfig = {
+      template_snapshot: { subject: "Promo https://casa-antiga.com/a" },
+    };
+    const result = planLinkDomainChange(
+      sources({
+        journeySteps: [
+          {
+            id: "step1",
+            journeyId: "j1",
+            journeyName: "Jornada X",
+            journeyStatus: "active",
+            position: 2,
+            stepType: "sms",
+            label: "Lembrete de saque",
+            config: smsConfig,
+          },
+          {
+            id: "step2",
+            journeyId: "j1",
+            journeyName: "Jornada X",
+            journeyStatus: "active",
+            position: 0,
+            stepType: "email",
+            label: "Boas-vindas",
+            config: emailConfig,
+          },
+        ],
+      }),
+      "casa-antiga.com",
+      "casa-nova.com",
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected ok");
+    const [emailItem, smsItem] = result.preview.items;
+    expect(emailItem.detail).toBe("Etapa 1 · E-mail · Boas-vindas");
+    expect(smsItem.detail).toBe("Etapa 3 · SMS · Lembrete de saque");
+  });
+
   it("etapa de e-mail: troca template_snapshot.subject e body_html", () => {
     const config = {
       template_snapshot: {

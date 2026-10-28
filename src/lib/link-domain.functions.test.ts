@@ -114,6 +114,18 @@ describe("buildApplyPayload", () => {
     );
   });
 
+  it("lança erro em pt-BR quando uma key selecionada não existe mais na prévia recomputada", () => {
+    const p = preview({
+      items: [item({ key: "sms_template:s1", kind: "sms_template", id: "s1" })],
+    });
+
+    // "sms_template:s2" was selected by the client from an older preview but
+    // isn't in this (recomputed) one anymore — e.g. the template changed.
+    expect(() => buildApplyPayload(p, ["sms_template:s1", "sms_template:s2"], false)).toThrow(
+      "Algum item mudou desde a prévia e não cabe mais. Abra a prévia de novo.",
+    );
+  });
+
   it("lança erro em pt-BR quando nada foi selecionado e não há rastreio", () => {
     expect(() => buildApplyPayload(preview(), [], false)).toThrow("Nada selecionado para trocar.");
   });

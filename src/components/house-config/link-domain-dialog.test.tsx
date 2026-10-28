@@ -19,12 +19,14 @@ vi.mock("@/lib/link-domain.functions", () => ({
 
 import {
   countSelectedForApply,
+  formatApplyResultToast,
   formatSegmentWarning,
   groupLinkDomainItems,
   initialSelection,
   outOfScopeIsEmpty,
 } from "./link-domain-dialog";
 import type { LinkDomainItem, LinkDomainPreview } from "@/lib/link-domain-plan";
+import type { ApplyLinkDomainResult } from "@/lib/link-domain.server";
 
 // This repo's component tests (domain-detail.test.tsx, onboarding-gate.test.tsx)
 // render plain-HTML components with `renderToStaticMarkup`, since there's no
@@ -164,5 +166,54 @@ describe("passo 2 — grupos, item bloqueado e contador (via helpers puros)", ()
     // Mirrors the dialog's `isEmpty` condition for "Nenhum link com {from} encontrado.".
     expect(p.items.length === 0 && p.trackingHosts === null).toBe(true);
     expect(outOfScopeIsEmpty(p)).toBe(true);
+  });
+});
+
+function applyResult(overrides: Partial<ApplyLinkDomainResult> = {}): ApplyLinkDomainResult {
+  return {
+    journey_steps: 0,
+    sms_templates: 0,
+    email_templates: 0,
+    quick_links: 0,
+    tracking_hosts: false,
+    ...overrides,
+  };
+}
+
+describe("formatApplyResultToast", () => {
+  it("monta a frase em pt-BR com todos os tipos, no plural, e a lista do rastreio por último", () => {
+    const result = applyResult({
+      journey_steps: 3,
+      sms_templates: 2,
+      email_templates: 1,
+      quick_links: 1,
+      tracking_hosts: true,
+    });
+
+    expect(formatApplyResultToast(result)).toBe(
+      "3 etapas de jornada, 2 templates de SMS, 1 template de e-mail, 1 URL rápida e a lista do rastreio",
+    );
+  });
+
+  it("usa singular quando a contagem é 1", () => {
+    const result = applyResult({ journey_steps: 1, sms_templates: 1, email_templates: 1, quick_links: 1 });
+
+    expect(formatApplyResultToast(result)).toBe(
+      "1 etapa de jornada, 1 template de SMS, 1 template de e-mail e 1 URL rápida",
+    );
+  });
+
+  it("omite partes com contagem zero", () => {
+    const result = applyResult({ sms_templates: 2 });
+    expect(formatApplyResultToast(result)).toBe("2 templates de SMS");
+  });
+
+  it("junta só rastreio com 'e' quando é o único item junto de outro", () => {
+    const result = applyResult({ quick_links: 1, tracking_hosts: true });
+    expect(formatApplyResultToast(result)).toBe("1 URL rápida e a lista do rastreio");
+  });
+
+  it("retorna string vazia quando todas as contagens são zero", () => {
+    expect(formatApplyResultToast(applyResult())).toBe("");
   });
 });
