@@ -103,9 +103,13 @@ function firstMatchRange(text: string, from: string): { start: number; end: numb
 }
 
 /** Builds a ~80-char window around the first replaced occurrence, showing
- * the text before and after the swap. Returns null when `from` isn't found
- * in `original` (nothing to sample). */
-function sampleWindow(original: string, replaced: string, from: string): { before: string; after: string } | null {
+ * the text before and after the swap. The window always starts before the
+ * first match, so it contains that match's whole host — `after` is derived
+ * by re-running the swap on just the `before` window (rather than slicing
+ * the fully-replaced string with a whole-field length delta, which would be
+ * thrown off by any other occurrences elsewhere in the same field). Returns
+ * null when `from` isn't found in `original` (nothing to sample). */
+function sampleWindow(original: string, from: string, to: string): { before: string; after: string } | null {
   const range = firstMatchRange(original, from);
   if (!range) {
     return null;
@@ -113,18 +117,17 @@ function sampleWindow(original: string, replaced: string, from: string): { befor
   const windowStart = Math.max(0, range.start - SAMPLE_WINDOW);
   const windowEnd = Math.min(original.length, range.end + SAMPLE_WINDOW);
   const before = original.slice(windowStart, windowEnd);
-  const lengthDiff = replaced.length - original.length;
-  const after = replaced.slice(windowStart, Math.max(windowStart, windowEnd + lengthDiff));
+  const after = replaceLinkDomain(before, from, to).text;
   return { before, after };
 }
 
 function firstSample(
   candidates: { before: string; after: string }[],
   original: string,
-  replaced: string,
   from: string,
+  to: string,
 ): void {
-  const sample = sampleWindow(original, replaced, from);
+  const sample = sampleWindow(original, from, to);
   if (sample) {
     candidates.push(sample);
   }
@@ -188,7 +191,7 @@ function swapJourneyStepConfig(
     const { text: replaced, count } = replaceLinkDomain(original, from, to);
     if (count > 0) {
       replacements += count;
-      firstSample(samples, original, replaced, from);
+      firstSample(samples, original, from, to);
     }
     if (limit !== null && replaced.length > limit && blockedReason === null) {
       blockedReason = limitMessageText ?? limitMessage(limit);
@@ -337,7 +340,7 @@ export function planLinkDomainChange(
       title: template.name,
       detail: null,
       replacements: count,
-      sample: sampleWindow(template.content, newContent, from) ?? { before: "", after: "" },
+      sample: sampleWindow(template.content, from, to) ?? { before: "", after: "" },
       blockedReason: newContent.length > SMS_TEMPLATE_LIMIT ? limitMessage(SMS_TEMPLATE_LIMIT) : null,
       segmentWarning: null,
       update: { content: newContent },
@@ -356,10 +359,10 @@ export function planLinkDomainChange(
       continue;
     }
     const sample =
-      sampleWindow(template.subject, subjectR.text, from) ??
-      (template.preheader !== null ? sampleWindow(template.preheader, preheaderR.text, from) : null) ??
-      sampleWindow(template.body_html, bodyHtmlR.text, from) ??
-      sampleWindow(template.body_text, bodyTextR.text, from) ?? { before: "", after: "" };
+      sampleWindow(template.subject, from, to) ??
+      (template.preheader !== null ? sampleWindow(template.preheader, from, to) : null) ??
+      sampleWindow(template.body_html, from, to) ??
+      sampleWindow(template.body_text, from, to) ?? { before: "", after: "" };
     emailItems.push({
       key: `email_template:${template.id}`,
       kind: "email_template",
@@ -398,7 +401,7 @@ export function planLinkDomainChange(
       title: quickLink.label,
       detail: null,
       replacements: count,
-      sample: sampleWindow(quickLink.path, newPath, from) ?? { before: "", after: "" },
+      sample: sampleWindow(quickLink.path, from, to) ?? { before: "", after: "" },
       blockedReason: newPath.length > QUICK_LINK_LIMIT ? "O link passaria de 500 caracteres." : null,
       segmentWarning: null,
       update: { path: newPath },

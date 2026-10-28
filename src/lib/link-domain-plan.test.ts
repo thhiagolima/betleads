@@ -160,6 +160,38 @@ describe("planLinkDomainChange", () => {
     expect(item.blockedReason).toBe("O texto passaria de 480 caracteres.");
   });
 
+  it("sample.after não é distorcido por uma segunda ocorrência fora da janela", () => {
+    // Two old-host URLs in the same field: the first sits inside the ~80-char
+    // sample window, the second is ~100 chars further away, outside it.
+    // Before the fix, `after` was sliced from the fully-replaced field using
+    // a length delta computed over *both* replacements, so content from
+    // outside the window (the second URL's delta) leaked into `after`.
+    const prefix = "Confira "; // 8 chars
+    const url1 = "https://casa-antiga.com/a"; // 25 chars, starts at index 8
+    const filler = "x".repeat(100); // pushes the second URL well outside the window
+    const url2 = "https://casa-antiga.com/b"; // 25 chars, far outside the window
+    const suffix = " fim.";
+    const content = `${prefix}${url1}${filler}${url2}${suffix}`;
+    const to = "casa-nova-dominio-beeem-longo.com.br"; // 36 chars (21 longer than "casa-antiga.com")
+
+    const result = planLinkDomainChange(sources({ smsTemplates: [{ id: "tpl1", name: "Template 1", content }] }), "casa-antiga.com", to);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected ok");
+    const item = result.preview.items[0];
+
+    // Window = match (scheme+host, i.e. "https://casa-antiga.com" — the regex
+    // match stops before the path) ± 40 chars, so it captures url1's full
+    // "/a" path plus 38 filler x's, but none of url2.
+    const expectedBefore = `${prefix}${url1}${"x".repeat(38)}`;
+    const expectedAfter = `${prefix}https://${to}/a${"x".repeat(38)}`;
+    expect(item.sample.before).toBe(expectedBefore);
+    expect(item.sample.after).toBe(expectedAfter);
+    // The buggy formula (global length delta applied to the window slice)
+    // would have produced 59 trailing x's instead of 38 — assert against it
+    // explicitly so a regression is unambiguous.
+    expect(item.sample.after).not.toBe(`${prefix}https://${to}/a${"x".repeat(59)}`);
+  });
+
   it("SMS de jornada acima de 1600 fica bloqueado", () => {
     const content = `${"x".repeat(1570)} https://casa-antiga.com`; // 1570 + 1 + 23 = 1594 chars
     expect(content.length).toBe(1594);
