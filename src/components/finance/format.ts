@@ -5,6 +5,9 @@
 
 const NA = "n.a.";
 
+/** The GGR value as the platforms' "GGR PAINEL" names it ("Taxa de GGR (x%)" stays as is). */
+export const GGR_COLUMN_LABEL = "GGR (Perdas na casa)";
+
 /** toLocaleString("pt-BR", {style:"currency"}) puts a NBSP after "R$"; normalize to a plain space. */
 function stripNbsp(value: string) {
   return value.replace(/[\u00a0\u202f]/g, " ");

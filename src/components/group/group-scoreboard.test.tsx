@@ -163,3 +163,15 @@ describe("GroupScoreboard", () => {
     expect(sortScoreboardRows(withNull, "costPerFtd", "asc").at(-1)?.id).toBe("d");
   });
 });
+
+describe("GroupScoreboard GGR column", () => {
+  it("labels the GGR column as Perdas na casa", () => {
+    const html = renderToStaticMarkup(
+      <GroupScoreboard
+        rows={[{ id: "a", nome: "Casa A", current: summary(), previous: summary(), goals: [] }]}
+        defaultMoreColumns
+      />,
+    );
+    expect(html).toContain("GGR (Perdas na casa)");
+  });
+});

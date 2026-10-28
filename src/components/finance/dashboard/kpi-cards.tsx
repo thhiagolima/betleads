@@ -83,6 +83,9 @@ function Variation({
 export const NO_OTHER_COSTS_NOTE =
   "Resultado sem outros custos e mensalidade do mês (só entram em mês fechado).";
 
+/** Rule 6 of the GGR do mês: the window holds only part of a month whose GGR came as a total. */
+export const GGR_ESTIMATED_NOTE = "GGR estimado a partir do total do mês.";
+
 export function KpiCards({
   current,
   previous,
@@ -123,6 +126,11 @@ export function KpiCards({
       {current.otherCosts === null && (
         <p data-note="no-other-costs" className="text-xs text-muted-foreground">
           {NO_OTHER_COSTS_NOTE}
+        </p>
+      )}
+      {current.ggrEstimated && (
+        <p data-note="ggr-estimated" className="text-xs text-muted-foreground">
+          {GGR_ESTIMATED_NOTE}
         </p>
       )}
     </div>
