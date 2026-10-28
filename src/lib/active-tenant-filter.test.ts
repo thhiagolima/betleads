@@ -5,15 +5,15 @@ import { activeTenantFilter, tenantReads } from "@/lib/active-tenant-filter";
 function fakeClient(currentTenant: string | null, rpcError = false) {
   const eq = vi.fn();
   const builder = {
-    select: vi.fn(() => {
-      const query = { eq: eq.mockImplementation(() => query), order: vi.fn(() => query) };
+    select: vi.fn((_columns?: string) => {
+      const query = { eq: eq.mockImplementation(() => query), order: vi.fn((_column?: string) => query) };
       return query;
     }),
     update: vi.fn(),
   };
   const sb = {
     rpc: vi.fn(async () => (rpcError ? { data: null, error: new Error("x") } : { data: currentTenant, error: null })),
-    from: vi.fn(() => builder),
+    from: vi.fn((_table: string) => builder),
   };
   return { sb, builder, eq };
 }
