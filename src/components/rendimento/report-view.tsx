@@ -33,6 +33,7 @@ import {
 import { ReportCards } from "@/components/rendimento/report-cards";
 import { ReportChart } from "@/components/rendimento/report-chart";
 import { ReportFunnel } from "@/components/rendimento/report-funnel";
+import { updatedLabel } from "@/components/rendimento/updated-label";
 import { useActiveTenant } from "@/hooks/use-active-tenant";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import { exportExpertCreditsCsv } from "@/lib/expert-metrics.functions";
@@ -47,15 +48,6 @@ import {
 // Exportada para a "Regras de crédito" dialog (expert-settings-dialog.tsx)
 // invalidar o relatório depois de salvar a janela de clique.
 export const REPORT_QUERY_KEY = "rendimento-report";
-
-/** Instante ISO -> "hh:mm" no fuso de São Paulo. */
-function timeLabel(iso: string): string {
-  return new Date(iso).toLocaleTimeString("pt-BR", {
-    timeZone: "America/Sao_Paulo",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
 
 /** "Editar" e "Desativar"/"Ativar" do admin, com os diálogos da tela Experts. */
 function AdminActions({ expertId }: { expertId: string }) {
@@ -200,7 +192,7 @@ export function ReportView({ expertId }: { expertId?: string }) {
               <span aria-hidden="true">·</span>
               <span>
                 {report.atualizadoEm
-                  ? `Atualizado às ${timeLabel(report.atualizadoEm)}`
+                  ? updatedLabel(report.atualizadoEm)
                   : "Os créditos são calculados a cada 10 minutos."}
               </span>
             </span>

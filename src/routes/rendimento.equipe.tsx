@@ -19,6 +19,7 @@ import { actionErrorMessage } from "@/components/expert/sheet-format";
 import { ExpertSettingsDialog } from "@/components/experts/expert-settings-dialog";
 import { downloadCsv } from "@/components/rendimento/download-csv";
 import { TeamRanking, TEAM_REPORT_QUERY_KEY } from "@/components/rendimento/team-ranking";
+import { updatedLabel } from "@/components/rendimento/updated-label";
 import { useActiveTenant } from "@/hooks/use-active-tenant";
 import { exportTeamReportCsv, getTeamReport } from "@/lib/expert-report.functions";
 import { DEFAULT_REPORT_PERIOD, EXPERT_PERIODS, type PeriodKey } from "@/lib/expert-period";
@@ -33,15 +34,6 @@ function RendimentoEquipeRoute() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const isDetailRoute = pathname.replace(/\/+$/, "") !== "/rendimento/equipe";
   return isDetailRoute ? <Outlet /> : <RendimentoEquipePage />;
-}
-
-/** Instante ISO -> "hh:mm" no fuso de São Paulo. */
-function timeLabel(iso: string): string {
-  return new Date(iso).toLocaleTimeString("pt-BR", {
-    timeZone: "America/Sao_Paulo",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 function pctLabel(fraction: number | null): string | null {
@@ -97,7 +89,7 @@ function RendimentoEquipePage() {
       <PageHeader
         subtitle={
           report?.atualizadoEm
-            ? `Atualizado às ${timeLabel(report.atualizadoEm)}`
+            ? updatedLabel(report.atualizadoEm)
             : "Os créditos são calculados a cada 10 minutos."
         }
         actions={
