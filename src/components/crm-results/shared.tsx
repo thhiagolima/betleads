@@ -122,20 +122,24 @@ export function EmptyCard({ children }: { children: React.ReactNode }) {
 }
 
 /** Hoje / Ontem / 7 / 30 / 90 dias, with the Início period picker look. */
-export function CentralPeriodPicker({
+export function CentralPeriodPicker<K extends string = PeriodKey>({
   value,
   onChange,
+  periods,
 }: {
-  value: PeriodKey;
-  onChange: (value: PeriodKey) => void;
+  value: K;
+  onChange: (value: K) => void;
+  /** Presets; default `PERIODS` da Central (as telas do expert somam meses). */
+  periods?: readonly { key: K; label: string }[];
 }) {
+  const items = (periods ?? PERIODS) as readonly { key: K; label: string }[];
   return (
     <div
       role="group"
       aria-label="Período"
       className="flex w-fit max-w-full gap-0.5 overflow-x-auto rounded-xl border border-border bg-card p-[3px] [scrollbar-width:none]"
     >
-      {PERIODS.map((item) => (
+      {items.map((item) => (
         <button
           key={item.key}
           type="button"

@@ -270,6 +270,7 @@ export const ROUTE_META: Record<string, RouteMeta> = {
   "/inteligencia": { section: "IA", title: "Assistente IA" },
   "/treino-ia": { section: "IA", title: "Configurar IA" },
   "/experts": { section: "Jogadores", title: "Experts" },
+  "/experts/$expertId": { section: "Jogadores", title: "Expert" },
   "/expert": { section: "Expert", title: "Início" },
   // The generated route tree's `FileRoutesByFullPath` keeps the trailing
   // slash for a nested index route ("/expert/" is `expert.index.tsx`'s

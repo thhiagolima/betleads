@@ -47,6 +47,7 @@ import { Route as ConfiguracoesCasaRouteImport } from './routes/configuracoes_.c
 import { Route as ExpertIndexRouteImport } from './routes/expert.index'
 import { Route as ExpertLeadsRouteImport } from './routes/expert.leads'
 import { Route as ExpertModelosRouteImport } from './routes/expert.modelos'
+import { Route as ExpertsExpertIdRouteImport } from './routes/experts.$expertId'
 import { Route as GrupoCasaRouteImport } from './routes/grupo_.casa'
 import { Route as GrupoMetasRouteImport } from './routes/grupo_.metas'
 import { Route as GrupoPessoasRouteImport } from './routes/grupo_.pessoas'
@@ -284,6 +285,11 @@ const ExpertModelosRoute = ExpertModelosRouteImport.update({
   id: '/expert/modelos',
   path: '/expert/modelos',
   getParentRoute: () => rootRouteImport,
+} as any)
+const ExpertsExpertIdRoute = ExpertsExpertIdRouteImport.update({
+  id: '/$expertId',
+  path: '/$expertId',
+  getParentRoute: () => ExpertsRoute,
 } as any)
 const GrupoCasaRoute = GrupoCasaRouteImport.update({
   id: '/grupo_/casa',
@@ -556,7 +562,7 @@ export interface FileRoutesByFullPath {
   '/creditos-sms': typeof CreditosSmsRoute
   '/email': typeof EmailRoute
   '/eventos': typeof EventosRoute
-  '/experts': typeof ExpertsRoute
+  '/experts': typeof ExpertsRouteWithChildren
   '/financeiro': typeof FinanceiroRoute
   '/gamificacao': typeof GamificacaoRoute
   '/grupo': typeof GrupoRoute
@@ -583,6 +589,7 @@ export interface FileRoutesByFullPath {
   '/configuracoes/casa': typeof ConfiguracoesCasaRoute
   '/expert/leads': typeof ExpertLeadsRouteWithChildren
   '/expert/modelos': typeof ExpertModelosRoute
+  '/experts/$expertId': typeof ExpertsExpertIdRoute
   '/grupo/casa': typeof GrupoCasaRoute
   '/grupo/metas': typeof GrupoMetasRoute
   '/grupo/pessoas': typeof GrupoPessoasRoute
@@ -643,7 +650,7 @@ export interface FileRoutesByTo {
   '/creditos-sms': typeof CreditosSmsRoute
   '/email': typeof EmailRoute
   '/eventos': typeof EventosRoute
-  '/experts': typeof ExpertsRoute
+  '/experts': typeof ExpertsRouteWithChildren
   '/financeiro': typeof FinanceiroRoute
   '/gamificacao': typeof GamificacaoRoute
   '/grupo': typeof GrupoRoute
@@ -670,6 +677,7 @@ export interface FileRoutesByTo {
   '/configuracoes/casa': typeof ConfiguracoesCasaRoute
   '/expert/leads': typeof ExpertLeadsRouteWithChildren
   '/expert/modelos': typeof ExpertModelosRoute
+  '/experts/$expertId': typeof ExpertsExpertIdRoute
   '/grupo/casa': typeof GrupoCasaRoute
   '/grupo/metas': typeof GrupoMetasRoute
   '/grupo/pessoas': typeof GrupoPessoasRoute
@@ -731,7 +739,7 @@ export interface FileRoutesById {
   '/creditos-sms': typeof CreditosSmsRoute
   '/email': typeof EmailRoute
   '/eventos': typeof EventosRoute
-  '/experts': typeof ExpertsRoute
+  '/experts': typeof ExpertsRouteWithChildren
   '/financeiro': typeof FinanceiroRoute
   '/gamificacao': typeof GamificacaoRoute
   '/grupo': typeof GrupoRoute
@@ -758,6 +766,7 @@ export interface FileRoutesById {
   '/configuracoes_/casa': typeof ConfiguracoesCasaRoute
   '/expert/leads': typeof ExpertLeadsRouteWithChildren
   '/expert/modelos': typeof ExpertModelosRoute
+  '/experts/$expertId': typeof ExpertsExpertIdRoute
   '/grupo_/casa': typeof GrupoCasaRoute
   '/grupo_/metas': typeof GrupoMetasRoute
   '/grupo_/pessoas': typeof GrupoPessoasRoute
@@ -847,6 +856,7 @@ export interface FileRouteTypes {
     | '/configuracoes/casa'
     | '/expert/leads'
     | '/expert/modelos'
+    | '/experts/$expertId'
     | '/grupo/casa'
     | '/grupo/metas'
     | '/grupo/pessoas'
@@ -934,6 +944,7 @@ export interface FileRouteTypes {
     | '/configuracoes/casa'
     | '/expert/leads'
     | '/expert/modelos'
+    | '/experts/$expertId'
     | '/grupo/casa'
     | '/grupo/metas'
     | '/grupo/pessoas'
@@ -1021,6 +1032,7 @@ export interface FileRouteTypes {
     | '/configuracoes_/casa'
     | '/expert/leads'
     | '/expert/modelos'
+    | '/experts/$expertId'
     | '/grupo_/casa'
     | '/grupo_/metas'
     | '/grupo_/pessoas'
@@ -1082,7 +1094,7 @@ export interface RootRouteChildren {
   CreditosSmsRoute: typeof CreditosSmsRoute
   EmailRoute: typeof EmailRoute
   EventosRoute: typeof EventosRoute
-  ExpertsRoute: typeof ExpertsRoute
+  ExpertsRoute: typeof ExpertsRouteWithChildren
   FinanceiroRoute: typeof FinanceiroRoute
   GamificacaoRoute: typeof GamificacaoRoute
   GrupoRoute: typeof GrupoRoute
@@ -1414,6 +1426,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/expert/modelos'
       preLoaderRoute: typeof ExpertModelosRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/experts/$expertId': {
+      id: '/experts/$expertId'
+      path: '/$expertId'
+      fullPath: '/experts/$expertId'
+      preLoaderRoute: typeof ExpertsExpertIdRouteImport
+      parentRoute: typeof ExpertsRoute
     }
     '/grupo_/casa': {
       id: '/grupo_/casa'
@@ -1777,6 +1796,17 @@ const CampanhasRouteWithChildren = CampanhasRoute._addFileChildren(
   CampanhasRouteChildren,
 )
 
+interface ExpertsRouteChildren {
+  ExpertsExpertIdRoute: typeof ExpertsExpertIdRoute
+}
+
+const ExpertsRouteChildren: ExpertsRouteChildren = {
+  ExpertsExpertIdRoute: ExpertsExpertIdRoute,
+}
+
+const ExpertsRouteWithChildren =
+  ExpertsRoute._addFileChildren(ExpertsRouteChildren)
+
 interface JornadasRouteChildren {
   JornadasJourneyIdRoute: typeof JornadasJourneyIdRoute
   JornadasNovaRoute: typeof JornadasNovaRoute
@@ -1847,7 +1877,7 @@ const rootRouteChildren: RootRouteChildren = {
   CreditosSmsRoute: CreditosSmsRoute,
   EmailRoute: EmailRoute,
   EventosRoute: EventosRoute,
-  ExpertsRoute: ExpertsRoute,
+  ExpertsRoute: ExpertsRouteWithChildren,
   FinanceiroRoute: FinanceiroRoute,
   GamificacaoRoute: GamificacaoRoute,
   GrupoRoute: GrupoRoute,

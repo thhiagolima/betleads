@@ -26,6 +26,7 @@ import { IdentityIcon } from "@/components/identity/identity-badge";
 import { CHANNEL_IDENTITY, EVENT_IDENTITY, LEVEL_IDENTITY } from "@/components/identity/identity";
 import { SituationText } from "@/components/players/situation-text";
 import { PlayerJourneysCard } from "@/components/players/player-journeys-card";
+import { TeamTrackedLinkCard } from "@/components/players/team-tracked-link-card";
 import { copyToClipboard, openCampaignWithAudience } from "@/components/players/campaign-audience";
 import {
   alertTypeLabel,
@@ -284,6 +285,12 @@ function PlayerDetailPage() {
           )}
         </Section>
       </div>
+
+      <TeamTrackedLinkCard
+        playerId={playerId}
+        telefone={p.telefone}
+        onGenerated={() => void qc.invalidateQueries({ queryKey: ["player-links", playerId] })}
+      />
 
       <PlayerJourneysCard playerId={playerId} />
 

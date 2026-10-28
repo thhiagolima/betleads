@@ -25,7 +25,9 @@ import { createFakeDb } from "@/lib/sms-bulk.test-support";
 import {
   claimExpertLeadFor,
   completeExpertFollowupFor,
+  listExpertClickedNoDepositFor,
   listExpertFollowupsDueFor,
+  listExpertLeadsEnteredRiskFor,
   logExpertContactFor,
   releaseExpertLeadFor,
   scheduleExpertFollowupFor,
@@ -399,5 +401,315 @@ describe("releaseExpertLeadFor", () => {
       _expert_id: ME,
       _player_id: PLAYER,
     });
+  });
+});
+
+function seedRiskPlayer(
+  id: string,
+  opts: {
+    affiliateId?: string | null;
+    totalDepositado?: number;
+    ultimoDeposito?: string | null;
+    ftdEm?: string | null;
+  } = {},
+) {
+  fake.admin.rows("players").push({
+    id,
+    tenant_id: TENANT,
+    nome: `Jogador ${id.slice(-1)}`,
+    affiliate_id: opts.affiliateId === undefined ? "AFF1" : opts.affiliateId,
+    total_depositado: opts.totalDepositado ?? 0,
+    ultimo_deposito: opts.ultimoDeposito ?? null,
+    ftd_em: opts.ftdEm ?? null,
+    created_at: "2026-10-01T00:00:00Z",
+  });
+}
+
+describe("listExpertLeadsEnteredRiskFor", () => {
+  const NOW = new Date("2026-10-27T12:00:00.000Z");
+  const daysAgo = (n: number) => new Date(NOW.getTime() - n * 86_400_000).toISOString();
+
+  beforeEach(() => {
+    vi.setSystemTime(NOW);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("entered-risk lists only leads that became dormant in the last 7 days, max 20, by total depositado", async () => {
+    // Dentro da janela [now-14d, now-7d] (sleeping_after_days=7, default).
+    seedRiskPlayer(PLAYER, { ultimoDeposito: daysAgo(8), totalDepositado: 100 });
+    seedRiskPlayer(PLAYER_2, { ultimoDeposito: daysAgo(10), totalDepositado: 500 });
+    // Fora da janela: ainda ativo/esfriando (não virou "Dormindo").
+    seedRiskPlayer(PLAYER_3, { ultimoDeposito: daysAgo(3), totalDepositado: 999 });
+    // Fora da janela: já estava dormindo há mais de 7 dias extras (não é "entrou" agora).
+    seedRiskPlayer(PLAYER_4, { ultimoDeposito: daysAgo(20), totalDepositado: 999 });
+    // Nunca houve ultimo_deposito seguinte: usa ftd_em, também dentro da janela.
+    const PLAYER_5 = "00000000-0000-4000-8000-0000000000b5";
+    seedRiskPlayer(PLAYER_5, { ftdEm: daysAgo(9), totalDepositado: 50 });
+
+    const result = await listExpertLeadsEnteredRiskFor(CTX);
+
+    expect(result).toEqual([
+      { playerId: PLAYER_2, nome: "Jogador 2", diasSemDepositar: 10, totalDepositado: 500 },
+      { playerId: PLAYER, nome: "Jogador 1", diasSemDepositar: 8, totalDepositado: 100 },
+      { playerId: PLAYER_5, nome: "Jogador 5", diasSemDepositar: 9, totalDepositado: 50 },
+    ]);
+  });
+
+  it("caps at 20, keeping the highest total depositado", async () => {
+    for (let i = 0; i < 25; i++) {
+      seedRiskPlayer(`00000000-0000-4000-8000-00000000${String(1000 + i).padStart(4, "0")}`, {
+        ultimoDeposito: daysAgo(8),
+        totalDepositado: i,
+      });
+    }
+
+    const result = await listExpertLeadsEnteredRiskFor(CTX);
+    expect(result).toHaveLength(20);
+    expect(result[0].totalDepositado).toBe(24);
+    expect(result.at(-1)?.totalDepositado).toBe(5);
+  });
+
+  it("entered-risk for restricted expert only includes own affiliate leads", async () => {
+    mockRequireExpertContext.mockResolvedValue({ ...EXPERT, tipo: "restrito" });
+    seedRiskPlayer(PLAYER, {
+      affiliateId: "AFF1",
+      ultimoDeposito: daysAgo(8),
+      totalDepositado: 100,
+    });
+    seedRiskPlayer(PLAYER_2, {
+      affiliateId: "OUTRO",
+      ultimoDeposito: daysAgo(8),
+      totalDepositado: 200,
+    });
+    seedRiskPlayer(PLAYER_3, {
+      affiliateId: null,
+      ultimoDeposito: daysAgo(8),
+      totalDepositado: 300,
+    });
+
+    const result = await listExpertLeadsEnteredRiskFor(CTX);
+
+    expect(result.map((r) => r.playerId)).toEqual([PLAYER]);
+  });
+
+  it("restricted expert with no affiliate ids returns empty without querying", async () => {
+    mockRequireExpertContext.mockResolvedValue({ ...EXPERT, tipo: "restrito", affiliateIds: [] });
+    seedRiskPlayer(PLAYER, { ultimoDeposito: daysAgo(8), totalDepositado: 100 });
+
+    expect(await listExpertLeadsEnteredRiskFor(CTX)).toEqual([]);
+  });
+});
+
+function seedClickScenario(opts: {
+  dispatchId: string;
+  playerId: string;
+  sourceType?: string;
+  sourceId?: string;
+  isHuman?: boolean;
+  occurredAt: string;
+  sentAt?: string;
+  sendStatus?: string;
+  oferta?: string;
+}) {
+  fake.admin.rows("link_dispatches").push({
+    id: opts.dispatchId,
+    tenant_id: TENANT,
+    recipient_player_id: opts.playerId,
+    source_type: opts.sourceType ?? "expert",
+    source_id: opts.sourceId ?? ME,
+    send_status: opts.sendStatus ?? "sent",
+    sent_at: opts.sentAt ?? opts.occurredAt,
+    created_at: "2026-10-01T00:00:00Z",
+  });
+  fake.admin.rows("click_events").push({
+    id: `click-${opts.dispatchId}`,
+    tenant_id: TENANT,
+    link_dispatch_id: opts.dispatchId,
+    is_human: opts.isHuman ?? true,
+    occurred_at: opts.occurredAt,
+  });
+  if (opts.oferta) {
+    fake.admin.rows("expert_links").push({
+      id: `link-${opts.dispatchId}`,
+      tenant_id: TENANT,
+      expert_id: ME,
+      link_dispatch_id: opts.dispatchId,
+      oferta: opts.oferta,
+    });
+  }
+}
+
+describe("listExpertClickedNoDepositFor", () => {
+  const NOW = new Date("2026-10-27T12:00:00.000Z");
+  const hoursAgo = (n: number) => new Date(NOW.getTime() - n * 60 * 60 * 1000).toISOString();
+
+  beforeEach(() => {
+    vi.setSystemTime(NOW);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("clicked-no-deposit excludes leads that deposited after the click and bot clicks", async () => {
+    seedPlayer(PLAYER);
+    seedPlayer(PLAYER_2);
+    seedPlayer(PLAYER_3);
+
+    seedClickScenario({
+      dispatchId: "d1",
+      playerId: PLAYER,
+      occurredAt: hoursAgo(1),
+      oferta: "Bônus 100%",
+    });
+    seedClickScenario({ dispatchId: "d2", playerId: PLAYER_2, occurredAt: hoursAgo(2) });
+    fake.admin.rows("deposits").push({
+      id: "dep1",
+      tenant_id: TENANT,
+      player_id: PLAYER_2,
+      status: "aprovado",
+      created_at: hoursAgo(1), // depois do clique (há 2h) -> exclui
+    });
+    // Clique de bot: nunca entra.
+    seedClickScenario({
+      dispatchId: "d3",
+      playerId: PLAYER_3,
+      isHuman: false,
+      occurredAt: hoursAgo(1),
+    });
+
+    const result = await listExpertClickedNoDepositFor(CTX);
+
+    expect(result).toEqual([
+      { playerId: PLAYER, nome: "Jogador 1", clicadoEm: hoursAgo(1), oferta: "Bônus 100%" },
+    ]);
+  });
+
+  it("clicked-no-deposit only uses the caller's dispatches", async () => {
+    seedPlayer(PLAYER);
+    seedPlayer(PLAYER_2);
+
+    seedClickScenario({ dispatchId: "d1", playerId: PLAYER, occurredAt: hoursAgo(1) });
+    // Dispatch de outro expert: mesmo source_type, source_id diferente -> fora.
+    seedClickScenario({
+      dispatchId: "d2",
+      playerId: PLAYER_2,
+      sourceId: OTHER_EXPERT,
+      occurredAt: hoursAgo(1),
+    });
+    // Dispatch de outra origem (campanha), nunca do expert -> fora.
+    seedClickScenario({
+      dispatchId: "d3",
+      playerId: PLAYER_2,
+      sourceType: "campaign",
+      sourceId: "any",
+      occurredAt: hoursAgo(1),
+    });
+
+    const result = await listExpertClickedNoDepositFor(CTX);
+
+    expect(result.map((r) => r.playerId)).toEqual([PLAYER]);
+  });
+
+  it("ignores clicks older than 24h and re-checks restrito visibility", async () => {
+    mockRequireExpertContext.mockResolvedValue({ ...EXPERT, tipo: "restrito" });
+    seedPlayer(PLAYER, "AFF1");
+    seedPlayer(PLAYER_2, "OUTRO"); // não é mais afiliado do expert
+
+    seedClickScenario({ dispatchId: "d1", playerId: PLAYER, occurredAt: hoursAgo(1) });
+    seedClickScenario({ dispatchId: "d2", playerId: PLAYER_2, occurredAt: hoursAgo(1) });
+    seedClickScenario({ dispatchId: "d3", playerId: PLAYER, occurredAt: hoursAgo(25) }); // fora da janela
+
+    const result = await listExpertClickedNoDepositFor(CTX);
+    expect(result.map((r) => r.playerId)).toEqual([PLAYER]);
+  });
+
+  it("a house with more than 500 non-expert clicks in 24h still returns the expert's leads", async () => {
+    seedPlayer(PLAYER);
+    seedPlayer(PLAYER_2);
+    // The expert's clicks are the oldest of the day.
+    seedClickScenario({ dispatchId: "mine-1", playerId: PLAYER, occurredAt: hoursAgo(23) });
+    seedClickScenario({
+      dispatchId: "mine-2",
+      playerId: PLAYER_2,
+      occurredAt: hoursAgo(22),
+      sentAt: hoursAgo(24 * 20), // sent 20 days ago, clicked today
+    });
+    for (let i = 0; i < 600; i++) {
+      seedClickScenario({
+        dispatchId: `camp-${i}`,
+        playerId: PLAYER_3,
+        sourceType: "campaign",
+        sourceId: "camp",
+        occurredAt: hoursAgo(1 + (i % 20) / 100),
+      });
+    }
+    // An old approved deposit (before the click) does not exclude the lead.
+    fake.admin.rows("deposits").push({
+      id: "dep-old",
+      tenant_id: TENANT,
+      player_id: PLAYER,
+      status: "aprovado",
+      created_at: hoursAgo(48),
+    });
+
+    const result = await listExpertClickedNoDepositFor(CTX);
+
+    expect(result.map((r) => r.playerId)).toEqual([PLAYER_2, PLAYER]);
+  });
+
+  it("ignores links sent more than 30 days ago and failed sends", async () => {
+    seedPlayer(PLAYER);
+    seedPlayer(PLAYER_2);
+    seedClickScenario({
+      dispatchId: "old",
+      playerId: PLAYER,
+      occurredAt: hoursAgo(1),
+      sentAt: hoursAgo(24 * 31),
+    });
+    seedClickScenario({
+      dispatchId: "failed",
+      playerId: PLAYER_2,
+      occurredAt: hoursAgo(1),
+      sendStatus: "failed",
+    });
+
+    expect(await listExpertClickedNoDepositFor(CTX)).toEqual([]);
+  });
+
+  it("keeps .in() lists to at most 100 ids and caps the result at 20, newest first", async () => {
+    const players: string[] = [];
+    for (let i = 0; i < 150; i++) {
+      const id = `00000000-0000-4000-8000-${String(1000 + i).padStart(12, "0")}`;
+      players.push(id);
+      seedPlayer(id);
+      seedClickScenario({ dispatchId: `d-${i}`, playerId: id, occurredAt: hoursAgo(20 - i / 10) });
+    }
+    const inSizes: number[] = [];
+    const client = fake.admin.client as unknown as { from: (t: string) => unknown };
+    const originalFrom = client.from.bind(client);
+    const spy = vi.spyOn(client, "from").mockImplementation((table: string) => {
+      const builder = originalFrom(table) as { in: (c: string, v: unknown[]) => unknown };
+      const originalIn = builder.in.bind(builder);
+      builder.in = (col: string, values: unknown[]) => {
+        inSizes.push(values.length);
+        return originalIn(col, values);
+      };
+      return builder;
+    });
+
+    try {
+      const result = await listExpertClickedNoDepositFor(CTX);
+      expect(result).toHaveLength(20);
+      expect(result[0].playerId).toBe(players[149]);
+      expect(result.map((r) => r.clicadoEm)).toEqual(
+        [...result.map((r) => r.clicadoEm)].sort().reverse(),
+      );
+    } finally {
+      spy.mockRestore();
+    }
+    expect(inSizes.length).toBeGreaterThan(0);
+    expect(Math.max(...inSizes)).toBeLessThanOrEqual(100);
   });
 });
