@@ -2,6 +2,11 @@
 // Adaptador único de e-mail do CRM.
 
 import { transportErrorKind, type ProviderErrorKind } from "./rate-limit/transport-errors";
+import {
+  ProviderAccountUnavailableError,
+  resolveInfobipAccount,
+  type InfobipAccount,
+} from "./provider-accounts.server";
 
 export type InfobipEmailInput = {
   to: string;
@@ -11,6 +16,8 @@ export type InfobipEmailInput = {
   subject: string;
   html: string;
   idempotencyKey?: string;
+  /** Casa remetente: escolhe a conta Infobip. Sem casa (e-mails da plataforma), a conta padrão. */
+  tenantId?: string | null;
 };
 
 export type InfobipEmailResult = {
@@ -23,11 +30,12 @@ export type InfobipEmailResult = {
   alreadySent?: boolean;
   /** Set when there is no provider response (B1): whether the e-mail may have been accepted. */
   errorKind?: ProviderErrorKind | null;
+  /** Conta de provedor usada; null quando nenhuma conta foi usada. */
+  providerAccountId?: string | null;
 };
 
-function endpoint(): string | null {
-  const baseUrl = process.env.INFOBIP_BASE_URL?.trim().replace(/\/$/, "");
-  return baseUrl ? `${baseUrl}/email/3/send` : null;
+function endpoint(account: InfobipAccount): string | null {
+  return account.baseUrl ? `${account.baseUrl}/email/3/send` : null;
 }
 
 function notifyUrl(correlationId: string): string | null {
@@ -51,9 +59,25 @@ function parseBody(text: string, contentType: string | null): unknown {
 
 /** Sends one email through Infobip's documented multipart HTTP endpoint. */
 export async function callInfobipEmail(input: InfobipEmailInput): Promise<InfobipEmailResult> {
-  const url = endpoint();
-  const apiKey = process.env.INFOBIP_API_KEY?.trim();
   const idempotencyKey = input.idempotencyKey || crypto.randomUUID();
+  let account: InfobipAccount;
+  try {
+    account = await resolveInfobipAccount(input.tenantId, "email");
+  } catch (error) {
+    if (!(error instanceof ProviderAccountUnavailableError)) throw error;
+    return {
+      ok: false,
+      status: 0,
+      body: { error: error.message },
+      idempotencyKey,
+      temporary: false,
+      errorKind: "misconfigured",
+      providerAccountId: null,
+    };
+  }
+  const providerAccountId = account.id;
+  const url = endpoint(account);
+  const apiKey = account.apiKey;
   if (!url || !apiKey) {
     return {
       ok: false,
@@ -62,6 +86,7 @@ export async function callInfobipEmail(input: InfobipEmailInput): Promise<Infobi
       idempotencyKey,
       temporary: false,
       errorKind: "misconfigured",
+      providerAccountId,
     };
   }
 
@@ -97,6 +122,7 @@ export async function callInfobipEmail(input: InfobipEmailInput): Promise<Infobi
       body,
       idempotencyKey,
       temporary: response.status === 429 || response.status >= 500,
+      providerAccountId,
     };
   } catch (error) {
     return {
@@ -106,6 +132,7 @@ export async function callInfobipEmail(input: InfobipEmailInput): Promise<Infobi
       idempotencyKey,
       temporary: true,
       errorKind: transportErrorKind(error),
+      providerAccountId,
     };
   }
 }

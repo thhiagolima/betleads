@@ -4,11 +4,12 @@ import { createServerFn } from "@tanstack/react-start";
 import { dbUuid } from "@/lib/zod-helpers";
 import { z } from "zod";
 import { assertSuperAdmin, tenantChannelHealth } from "@/lib/provider-governance.server";
+import { envInfobipAccount, infobipConfigured } from "@/lib/provider-accounts.server";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import {
   EmailDomainNotVerifiedError,
-  emailBillingColumns,
+  emailSendLogColumns,
   resolveSender,
   sendInfobipEmail,
   STALE_SENDER_MESSAGE,
@@ -74,9 +75,7 @@ export function summarizeProviderError(
 export const getEmailProviderStatus = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async () => {
-    const health = tenantChannelHealth(
-      Boolean(process.env.INFOBIP_BASE_URL && process.env.INFOBIP_API_KEY),
-    );
+    const health = tenantChannelHealth(infobipConfigured(envInfobipAccount()));
     return { ...health, configured: health.available };
   });
 
@@ -173,7 +172,7 @@ export const sendTestEmail = createServerFn({ method: "POST" })
         error: result.ok ? null : JSON.stringify(result.body).slice(0, 1000),
         sent_at: result.ok ? new Date().toISOString() : null,
         player_id: playerId,
-        ...emailBillingColumns(result),
+        ...emailSendLogColumns(result),
         provider_response: {
           status: result.status,
           body: result.body,
@@ -1096,7 +1095,7 @@ export async function runCampaignSend(campaignId: string) {
         player_id: p.id,
         campaign_id: campaignId,
         tenant_id: camp.tenant_id,
-        ...emailBillingColumns(r),
+        ...emailSendLogColumns(r),
         provider_response: {
           status: (r as any).status,
           body: r.body,
@@ -1129,7 +1128,7 @@ export async function runCampaignSend(campaignId: string) {
         player_id: p.id,
         campaign_id: campaignId,
         tenant_id: camp.tenant_id,
-        ...(r ? emailBillingColumns(r) : {}),
+        ...(r ? emailSendLogColumns(r) : {}),
         provider_response: { error: String((err as any)?.message ?? err) } as never,
       });
     }

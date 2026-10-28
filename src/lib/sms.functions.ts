@@ -69,10 +69,14 @@ import {
 import { countSmsSegments } from "./sms-segments";
 import { cancelSmsCampaignRow, resumePausedSmsCampaign } from "./sms-campaign-dispatch.server";
 import { externalListBlockedVariables, externalListVariablesError } from "./campaign-external-list";
+import {
+  envShortBrasilAccount,
+  ProviderAccountUnavailableError,
+  resolveSmsAccount,
+  shortBrasilConfigured,
+  type ShortBrasilAccount,
+} from "./provider-accounts.server";
 
-const DEFAULT_SHORT_BRASIL_SINGLE_URL = "http://lp01-short.painelsms.com/bot/single-sms.php";
-const DEFAULT_SHORT_BRASIL_BULK_URL = "http://lp01-short.painelsms.com/bot/bulk-sms.php";
-const DEFAULT_SHORTCODE_MESSAGES_URL = "https://api.shortcode.com.br/messages";
 // Mantém a tentativa abaixo do timeout de uma server function. Sem isso, uma
 // conexão TCP bloqueada pelo provedor pode deixar o envio preso indefinidamente.
 const SHORT_BRASIL_REQUEST_TIMEOUT_MS = 8_000;
@@ -129,24 +133,21 @@ function campaignUnresolvedSummary(resolution: RecipientResolution) {
   };
 }
 
-function shortBrasilSingleUrl(): string {
-  return process.env.SHORT_BRASIL_SMS_SINGLE_URL ?? DEFAULT_SHORT_BRASIL_SINGLE_URL;
-}
-
-export function shortBrasilBulkUrl(): string {
-  return process.env.SHORT_BRASIL_SMS_BULK_URL ?? DEFAULT_SHORT_BRASIL_BULK_URL;
-}
-
-function shortcodeMessagesUrl(): string {
-  return process.env.SHORTCODE_SMS_URL ?? DEFAULT_SHORTCODE_MESSAGES_URL;
-}
-
-function cleanCredential(raw: string | undefined): string {
-  return (raw ?? "")
-    .replace(/[\u200B-\u200D\uFEFF]/g, "")
-    .trim()
-    .replace(/^['"]+|['"]+$/g, "")
-    .trim();
+/**
+ * Conta SMS da casa (provider-accounts.server.ts). Uma conta da casa
+ * indispon\u00EDvel vira falha `misconfigured`: nada \u00E9 enviado e n\u00E3o h\u00E1 fallback
+ * para a conta padr\u00E3o.
+ */
+async function smsAccountFor(
+  tenantId: string | null,
+): Promise<{ account: ShortBrasilAccount } | { account: null; error: string }> {
+  try {
+    return { account: await resolveSmsAccount(tenantId) };
+  } catch (error) {
+    if (!(error instanceof ProviderAccountUnavailableError)) throw error;
+    console.error("SMS provider account unavailable", { tenantId, error: error.message });
+    return { account: null, error: error.message };
+  }
 }
 
 /** Fingerprint curto e irreversivel so pra confirmar nos logs quais credenciais
@@ -193,17 +194,6 @@ export function renderSmsVariables(
     if (value !== undefined && value !== null) vars[key] = String(value);
   }
   return renderTemplate(content, vars, house);
-}
-
-export function shortBrasilCredentials(): { usuario: string; chave: string } {
-  return {
-    usuario: cleanCredential(process.env.SHORT_BRASIL_SMS_USUARIO),
-    chave: cleanCredential(process.env.SHORT_BRASIL_SMS_CHAVE),
-  };
-}
-
-export function shortcodeToken(): string {
-  return cleanCredential(process.env.SHORTCODE_SMS_TOKEN);
 }
 
 async function shortBrasilFetch(url: string, init: RequestInit): Promise<Response> {
@@ -261,12 +251,26 @@ async function callShortBrasil(
       idempotencyKey: "",
       errorKind: null as ProviderErrorKind | null,
       demoBlocked: true as const,
+      providerAccountId: null as string | null,
     };
   }
-  const token = shortcodeToken();
-  const { usuario, chave } = shortBrasilCredentials();
+  const resolved = await smsAccountFor(tenantId);
+  if (!resolved.account) {
+    return {
+      ok: false as const,
+      status: 0,
+      body: { error: resolved.error },
+      idempotencyKey: "",
+      errorKind: "misconfigured" as ProviderErrorKind,
+      providerAccountId: null as string | null,
+    };
+  }
+  const account = resolved.account;
+  const providerAccountId = account.id as string | null;
+  const token = account.shortcodeToken;
+  const { usuario, chave } = account;
   if (!token && (!usuario || !chave)) {
-    console.error("SMS Short Brasil credentials missing");
+    console.error("SMS Short Brasil credentials missing", { providerAccountId });
     return {
       ok: false as const,
       status: 0,
@@ -274,6 +278,7 @@ async function callShortBrasil(
         error:
           "SHORTCODE_SMS_TOKEN ou SHORT_BRASIL_SMS_USUARIO/SHORT_BRASIL_SMS_CHAVE nao configurados",
       },
+      providerAccountId,
       idempotencyKey: "",
       errorKind: "misconfigured" as ProviderErrorKind,
     };
@@ -296,7 +301,7 @@ async function callShortBrasil(
         api: token ? "shortcode-v1" : "short-brasil-legacy",
         attempt,
       });
-      res = await shortBrasilFetch(token ? shortcodeMessagesUrl() : shortBrasilSingleUrl(), {
+      res = await shortBrasilFetch(token ? account.shortcodeUrl : account.singleUrl, {
         method: "POST",
         headers: token
           ? {
@@ -329,6 +334,7 @@ async function callShortBrasil(
         body: { error: err instanceof Error ? err.message : String(err), attempts: attempt },
         idempotencyKey,
         errorKind: errorKind as ProviderErrorKind,
+        providerAccountId,
       };
     }
     if (res.status >= 500 && res.status <= 599 && attempt < maxAttempts) {
@@ -371,6 +377,7 @@ async function callShortBrasil(
     body,
     idempotencyKey,
     errorKind: null as ProviderErrorKind | null,
+    providerAccountId,
   };
 }
 
@@ -398,8 +405,13 @@ export async function callShortBrasilSmsBulk(args: {
   if (blocked) {
     return { ok: false, status: 0, body: { error: blocked }, idempotencyKey: "", dispatchId: null };
   }
-  const token = shortcodeToken();
-  const { usuario, chave } = shortBrasilCredentials();
+  const resolved = await smsAccountFor(args.tenantId);
+  if (!resolved.account) {
+    return { ok: false, status: 0, body: { error: resolved.error }, idempotencyKey: "", dispatchId: null };
+  }
+  const account = resolved.account;
+  const token = account.shortcodeToken;
+  const { usuario, chave } = account;
   if (!token && (!usuario || !chave)) {
     return {
       ok: false,
@@ -433,7 +445,7 @@ export async function callShortBrasilSmsBulk(args: {
   while (true) {
     attempt++;
     try {
-      res = await shortBrasilFetch(token ? shortcodeMessagesUrl() : shortBrasilBulkUrl(), {
+      res = await shortBrasilFetch(token ? account.shortcodeUrl : account.bulkUrl, {
         method: "POST",
         headers: token
           ? {
@@ -520,6 +532,8 @@ async function logSend(row: {
   tenant_id?: string | null;
   /** Units reserved from the wallet for this send (Task 6 adds the column). */
   billed_units?: number | null;
+  /** Conta de provedor que fez o envio; null quando nenhuma conta foi usada. */
+  provider_account_id?: string | null;
 }) {
   const { data, error } = await supabaseAdmin
     .from("sms_send_logs")
@@ -542,6 +556,7 @@ async function logSend(row: {
       flow_lead_id: row.flow_lead_id ?? null,
       ...(row.tenant_id ? { tenant_id: row.tenant_id } : {}),
       billed_units: row.billed_units ?? null,
+      provider_account_id: row.provider_account_id ?? null,
     })
     .select("id")
     .single();
@@ -959,6 +974,7 @@ export async function sendSmsInternal(args: {
     flow_lead_id: args.flowLeadId,
     tenant_id: billingTenantId ?? args.tenantId ?? null,
     billed_units: creditReserved ? billedUnits : null,
+    provider_account_id: r.providerAccountId,
   });
   if (messageLogId && trackedDispatchIds.length > 0) {
     const { error: dispatchLogError } = await (supabaseAdmin as any)
@@ -994,12 +1010,7 @@ export async function sendSmsInternal(args: {
 export const smsProviderStatus = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async () => {
-    const health = tenantChannelHealth(
-      Boolean(
-        process.env.SHORTCODE_SMS_TOKEN ||
-        (process.env.SHORT_BRASIL_SMS_USUARIO && process.env.SHORT_BRASIL_SMS_CHAVE),
-      ),
-    );
+    const health = tenantChannelHealth(shortBrasilConfigured(envShortBrasilAccount()));
     return { ...health, configured: health.available };
   });
 

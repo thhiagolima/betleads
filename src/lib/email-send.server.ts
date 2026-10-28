@@ -231,6 +231,7 @@ export async function sendInfobipEmail(input: SendEmailInput): Promise<SendEmail
   try {
     result = await callInfobipEmail({
       ...input,
+      tenantId,
       html: shieldDarkEmailHtml(
         absolutizeEmailUrls(sanitizeEmailHtml(prepared?.content ?? augmentedHtml), getEmailBaseUrl()),
       ),
@@ -258,11 +259,14 @@ export async function sendInfobipEmail(input: SendEmailInput): Promise<SendEmail
   };
 }
 
-/** email_send_logs billing columns for a sendInfobipEmail result. */
-export function emailBillingColumns(result: Pick<SendEmailResult, "billing">) {
+/** email_send_logs billing and provider-account columns for a sendInfobipEmail result. */
+export function emailSendLogColumns(
+  result: Pick<SendEmailResult, "billing" | "providerAccountId">,
+) {
   return {
     billing_reference_id: result.billing?.referenceId ?? null,
     billed_amount: result.billing ? result.billing.amount : null,
+    provider_account_id: result.providerAccountId ?? null,
   };
 }
 

@@ -58,13 +58,16 @@ import {
   refundSmsCredit,
   reserveSmsCreditForDelivery,
   sendSmsInternal,
-  shortBrasilBulkUrl,
-  shortBrasilCredentials,
-  shortcodeToken,
   summarizeProviderError,
   toShortBrasilCell,
 } from "./sms.functions";
 import { countSmsSegments } from "./sms-segments";
+import {
+  envShortBrasilAccount,
+  ProviderAccountUnavailableError,
+  resolveSmsAccount,
+  type ShortBrasilAccount,
+} from "./provider-accounts.server";
 
 /** Items per HTTP request. The provider accepts 5000; 500 limits the blast radius. */
 export const SMS_BULK_CHUNK_SIZE = 500;
@@ -143,10 +146,11 @@ function groupBy<T>(items: T[], keyOf: (item: T) => string): Map<string, T[]> {
 }
 
 /** Short Brasil bulk needs the legacy usuario/chave; the Bearer API stays on the single path. */
-export function smsBulkTransport(): "short-brasil-bulk" | "single" | "misconfigured" {
-  if (shortcodeToken()) return "single";
-  const { usuario, chave } = shortBrasilCredentials();
-  return usuario && chave ? "short-brasil-bulk" : "misconfigured";
+export function smsBulkTransport(
+  account: ShortBrasilAccount = envShortBrasilAccount(),
+): "short-brasil-bulk" | "single" | "misconfigured" {
+  if (account.shortcodeToken) return "single";
+  return account.usuario && account.chave ? "short-brasil-bulk" : "misconfigured";
 }
 
 type Prepared = {
@@ -178,6 +182,8 @@ type LogRow = {
   tenant_id: string;
   /** Units reserved from the wallet for this send; null when nothing was billed. */
   billed_units?: number | null;
+  /** Conta de provedor do envio; só nas linhas que de fato vão ao provedor. */
+  provider_account_id?: string | null;
 };
 
 const db = () => supabaseAdmin as any; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -244,8 +250,12 @@ type ProviderCall =
  * before the request, and a DemoTenantBlockedError/TenantBillingLockedError
  * propagates (nothing sent).
  */
-async function postBulk(tenantIds: readonly string[], payload: unknown): Promise<ProviderCall> {
-  const { usuario, chave } = shortBrasilCredentials();
+async function postBulk(
+  account: ShortBrasilAccount,
+  tenantIds: readonly string[],
+  payload: unknown,
+): Promise<ProviderCall> {
+  const { usuario, chave } = account;
   let attempt = 0;
   while (true) {
     attempt++;
@@ -253,7 +263,7 @@ async function postBulk(tenantIds: readonly string[], payload: unknown): Promise
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), SMS_BULK_REQUEST_TIMEOUT_MS);
     try {
-      const res = await fetch(shortBrasilBulkUrl(), {
+      const res = await fetch(account.bulkUrl, {
         method: "POST",
         headers: { Accept: "application/json", "Content-Type": "application/json", usuario, chave },
         body: JSON.stringify(payload),
@@ -341,7 +351,10 @@ function loteId(body: unknown): string | null {
  * Sends one chunk that already has logs written ahead and credits reserved.
  * Returns the outcome per prepared item (same order).
  */
-async function sendChunk(chunk: Prepared[]): Promise<{
+async function sendChunk(
+  account: ShortBrasilAccount,
+  chunk: Prepared[],
+): Promise<{
   outcomes: Array<Omit<SmsBatchOutcome, "deliveryKey">>;
   lote: string | null;
 }> {
@@ -410,7 +423,7 @@ async function sendChunk(chunk: Prepared[]): Promise<{
   const sendStartedAt = new Date();
   let call: ProviderCall;
   try {
-    call = await postBulk(chunk.map((p) => p.item.tenantId), payload);
+    call = await postBulk(account, chunk.map((p) => p.item.tenantId), payload);
   } catch (error) {
     if (!isSendBlockedError(error)) throw error;
     // Only reachable if a tenant turned demo or got billing-locked after
@@ -631,7 +644,50 @@ export async function sendSmsBatch(items: SmsBatchItem[]): Promise<SmsBatchResul
     return result(rest.lotes, rest.httpCalls);
   }
 
-  const transport = smsBulkTransport();
+  // Provedores por casa: cada lote sai por UMA conta. Itens de casas com
+  // contas diferentes viram um lote por conta; a casa cuja conta está
+  // indisponível falha como misconfigured (sem fallback para a conta padrão).
+  const accountOf = new Map<string, ShortBrasilAccount | { unavailable: string }>();
+  for (const tenantId of new Set(items.map((i) => i.tenantId))) {
+    try {
+      accountOf.set(tenantId, await resolveSmsAccount(tenantId));
+    } catch (error) {
+      if (!(error instanceof ProviderAccountUnavailableError)) throw error;
+      accountOf.set(tenantId, { unavailable: error.message });
+    }
+  }
+  const byAccount = new Map<string, Array<{ item: SmsBatchItem; index: number }>>();
+  items.forEach((item, index) => {
+    const resolved = accountOf.get(item.tenantId)!;
+    if ("unavailable" in resolved) {
+      outcomes[index] = {
+        deliveryKey: item.deliveryKey,
+        status: "failed",
+        ok: false,
+        retryable: true,
+        errorKind: "misconfigured",
+        error: resolved.unavailable,
+      };
+      return;
+    }
+    byAccount.set(resolved.id, [...(byAccount.get(resolved.id) ?? []), { item, index }]);
+  });
+  if (byAccount.size !== 1 || byAccount.values().next().value!.length !== items.length) {
+    const lotes: string[] = [];
+    let httpCalls = 0;
+    for (const group of byAccount.values()) {
+      const rest = await sendSmsBatch(group.map((g) => g.item));
+      rest.outcomes.forEach((outcome, j) => {
+        outcomes[group[j].index] = outcome;
+      });
+      lotes.push(...rest.lotes);
+      httpCalls += rest.httpCalls;
+    }
+    return result(lotes, httpCalls);
+  }
+  const account = accountOf.get(items[0].tenantId) as ShortBrasilAccount;
+
+  const transport = smsBulkTransport(account);
   if (transport === "misconfigured") {
     items.forEach((item, i) => {
       outcomes[i] = {
@@ -891,6 +947,7 @@ export async function sendSmsBatch(items: SmsBatchItem[]): Promise<SmsBatchResul
             trigger_name: p.item.triggerName ?? null,
             tenant_id: p.item.tenantId,
             billed_units: p.billedUnits,
+            provider_account_id: account.id,
           }),
         ),
       );
@@ -912,7 +969,7 @@ export async function sendSmsBatch(items: SmsBatchItem[]): Promise<SmsBatchResul
       continue;
     }
     httpCalls++;
-    const sent = await sendChunk(chunk);
+    const sent = await sendChunk(account, chunk);
     if (sent.lote) lotes.push(sent.lote);
     chunk.forEach((p, k) => {
       outcomes[p.index] = { deliveryKey: p.item.deliveryKey, logId: p.logId, ...sent.outcomes[k] };

@@ -510,6 +510,7 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
         provider_status_code: result.status,
         error_message: result.ok ? null : JSON.stringify(result.body).slice(0, 1000),
         billing_reference_id: result.billing?.referenceId ?? null,
+        provider_account_id: result.providerAccountId ?? null,
       } as never);
       if (historyInsertError) logCallHistoryInsertError("queue", historyInsertError, result);
       await supabaseAdmin

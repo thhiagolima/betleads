@@ -39,6 +39,11 @@ import { Route as SmsWebhookRoute } from "@/routes/api/public/sms-webhook";
 import { assertTenantNotDemoForSend } from "@/lib/tenant-access.server";
 import { BILLING_LOCKED_TEXT, TenantBillingLockedError } from "@/lib/billing/billing-locked-error";
 import { __resetShortenerDomainCacheForTests } from "./shortio.server";
+import {
+  __resetProviderAccountsCacheForTests,
+  DEFAULT_SHORT_BRASIL_ACCOUNT_ID,
+} from "./provider-accounts.server";
+import { encryptProviderCredentials } from "./secret-box.server";
 
 const TENANT = "00000000-0000-4000-8000-000000000001";
 const CAMPAIGN = "11111111-1111-4111-8111-111111111111";
@@ -418,6 +423,82 @@ describe("sendSmsBatch (ENV-10, Short Brasil bulk)", () => {
     const r = await sendSmsBatch([item(1)]);
     expect(r.outcomes[0]).toMatchObject({ status: "failed", retryable: false });
     expect(credits.charged()).toBe(0);
+  });
+
+  describe("per-house SMS accounts", () => {
+    const OTHER = "00000000-0000-4000-8000-0000000000aa";
+    const OWN_ACCOUNT = "55555555-5555-4555-8555-555555555555";
+
+    async function giveOtherHouseOwnAccount(status = "active") {
+      vi.stubEnv("PROVIDER_CREDENTIALS_ENCRYPTION_KEY", "k".repeat(40));
+      fake.db.rows("provider_accounts").push({
+        id: OWN_ACCOUNT,
+        provider: "short_brasil",
+        label: "Short Brasil casa AA",
+        channels: ["sms"],
+        credentials_source: "db",
+        credentials_encrypted: await encryptProviderCredentials({ usuario: "own-user", chave: "own-key" }),
+        config: { bulk_url: "https://own.example.test/bot/bulk-sms.php" },
+        status,
+      });
+      fake.db.rows("tenant_channel_providers").push({
+        tenant_id: OTHER,
+        channel: "sms",
+        provider_account_id: OWN_ACCOUNT,
+      });
+      __resetProviderAccountsCacheForTests();
+    }
+
+    const bulkRequests = () =>
+      vi
+        .mocked(fetch)
+        .mock.calls.filter(([url]) => String(url).includes("bulk-sms.php"))
+        .map(([url, init]) => ({
+          url: String(url),
+          usuario: (init?.headers as Record<string, string>).usuario,
+          parceiroIds: (JSON.parse(String(init?.body)) as SmsBody).bulk.map((b) => b.parceiroId),
+        }));
+
+    afterEach(() => __resetProviderAccountsCacheForTests());
+
+    it("houses on different accounts go out in separate requests, each with its own credentials", async () => {
+      settings("block");
+      await giveOtherHouseOwnAccount();
+      const other = { tenantId: OTHER, linkTrackingEnabled: false };
+      const r = await sendSmsBatch([item(1), item(2, other), item(3), item(4, other)]);
+
+      expect(r.outcomes.map((o) => o.status)).toEqual(["accepted", "accepted", "accepted", "accepted"]);
+      expect(bulkRequests()).toEqual([
+        {
+          url: "http://lp01-short.painelsms.com/bot/bulk-sms.php",
+          usuario: "user",
+          parceiroIds: [key(1), key(3)],
+        },
+        {
+          url: "https://own.example.test/bot/bulk-sms.php",
+          usuario: "own-user",
+          parceiroIds: [key(2), key(4)],
+        },
+      ]);
+      expect(logFor(key(1))[0].provider_account_id).toBe(DEFAULT_SHORT_BRASIL_ACCOUNT_ID);
+      expect(logFor(key(2))[0].provider_account_id).toBe(OWN_ACCOUNT);
+    });
+
+    it("a house whose own account is disabled fails retryable, never via the platform account", async () => {
+      settings("block");
+      await giveOtherHouseOwnAccount("disabled");
+      const r = await sendSmsBatch([item(1), item(2, { tenantId: OTHER, linkTrackingEnabled: false })]);
+
+      expect(r.outcomes[0]).toMatchObject({ status: "accepted" });
+      expect(r.outcomes[1]).toMatchObject({
+        status: "failed",
+        retryable: true,
+        errorKind: "misconfigured",
+      });
+      expect(bulkRequests().map((b) => b.parceiroIds)).toEqual([[key(1)]]);
+      expect(logFor(key(2))).toHaveLength(0);
+      expect(credits.charged()).toBe(1);
+    });
   });
 
   it("missing credentials: nothing logged, charged or sent", async () => {

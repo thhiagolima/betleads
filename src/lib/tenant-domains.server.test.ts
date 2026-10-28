@@ -216,6 +216,10 @@ import {
   removeTenantDomain,
   setDefaultTenantDomain,
 } from "./tenant-domains.server";
+import { DEFAULT_INFOBIP_ACCOUNT_ID } from "./provider-accounts.server";
+
+/** A house without its own e-mail account uses the platform Infobip account. */
+const DEFAULT_INFOBIP = expect.objectContaining({ id: DEFAULT_INFOBIP_ACCOUNT_ID });
 
 const TENANT_A = "00000000-0000-4000-8000-00000000000a";
 const TENANT_B = "00000000-0000-4000-8000-00000000000b";
@@ -375,8 +379,8 @@ describe("addTenantDomain", () => {
       userId: USER_ID,
     });
 
-    expect(mocks.createInfobipDomain).toHaveBeenCalledWith("mail.example.com");
-    expect(mocks.requestInfobipVerification).toHaveBeenCalledWith("mail.example.com");
+    expect(mocks.createInfobipDomain).toHaveBeenCalledWith("mail.example.com", DEFAULT_INFOBIP);
+    expect(mocks.requestInfobipVerification).toHaveBeenCalledWith("mail.example.com", DEFAULT_INFOBIP);
     expect(mocks.callOrder).toEqual(["create", "verify"]);
     expect(result.status).toBe("pending");
     expect(result.kind).toBe("email");
@@ -514,7 +518,7 @@ describe("addTenantDomain", () => {
       userId: USER_ID,
     });
 
-    expect(mocks.getInfobipDomain).toHaveBeenCalledWith("mail.example.com");
+    expect(mocks.getInfobipDomain).toHaveBeenCalledWith("mail.example.com", DEFAULT_INFOBIP);
     expect(result.id).toBe("dom-1");
     expect(result.removed_at).toBeNull();
     expect(result.provider_domain_id).toBe("infobip-adopted");
@@ -576,7 +580,7 @@ describe("addTenantDomain: same hostname as shortener and e-mail", () => {
       userId: USER_ID,
     });
 
-    expect(mocks.createInfobipDomain).toHaveBeenCalledWith("bravabet365.online");
+    expect(mocks.createInfobipDomain).toHaveBeenCalledWith("bravabet365.online", DEFAULT_INFOBIP);
     expect(mocks.getShortioDomain).not.toHaveBeenCalled();
     expect(result.id).not.toBe("short-1");
     expect(result.kind).toBe("email");
@@ -918,7 +922,7 @@ describe("purgeTenantDomain", () => {
 
     await purgeTenantDomain("dom-1");
 
-    expect(mocks.deleteInfobipDomain).toHaveBeenCalledWith("mail.example.com");
+    expect(mocks.deleteInfobipDomain).toHaveBeenCalledWith("mail.example.com", DEFAULT_INFOBIP);
   });
 
   it("refuses to purge a reserved platform domain", async () => {

@@ -1,7 +1,7 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import {
   EmailDomainNotVerifiedError,
-  emailBillingColumns,
+  emailSendLogColumns,
   resolveSender,
   sendInfobipEmail,
 } from "./email-send.server";
@@ -891,7 +891,7 @@ async function deliverStep(
         subject: renderTemplate(template.subject, vars, house),
         status: "sent",
         sent_at: new Date().toISOString(),
-        ...emailBillingColumns(result),
+        ...emailSendLogColumns(result),
         provider_response: {
           journey_execution_id: run.id,
           provider: "infobip",
@@ -988,6 +988,7 @@ async function deliverStep(
         provider_status_code: result.status,
         to_phone: to,
         billing_reference_id: result.billing?.referenceId ?? null,
+        provider_account_id: result.providerAccountId ?? null,
       });
       if (historyInsertError) logCallHistoryInsertError("journey", historyInsertError, result);
     }

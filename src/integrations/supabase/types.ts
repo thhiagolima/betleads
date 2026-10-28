@@ -1198,6 +1198,7 @@ export type Database = {
           billed_amount: number | null
           billed_blocks: number | null
           billing_reference_id: string | null
+          provider_account_id: string | null
           billing_settled_at: string | null
           call_queue_id: string | null
           created_at: string
@@ -1222,6 +1223,7 @@ export type Database = {
           billed_amount?: number | null
           billed_blocks?: number | null
           billing_reference_id?: string | null
+          provider_account_id?: string | null
           billing_settled_at?: string | null
           call_queue_id?: string | null
           created_at?: string
@@ -1246,6 +1248,7 @@ export type Database = {
           billed_amount?: number | null
           billed_blocks?: number | null
           billing_reference_id?: string | null
+          provider_account_id?: string | null
           billing_settled_at?: string | null
           call_queue_id?: string | null
           created_at?: string
@@ -2569,6 +2572,7 @@ export type Database = {
           automation_id: string | null
           billed_amount: number | null
           billing_reference_id: string | null
+          provider_account_id: string | null
           block_index: number | null
           campaign_id: string | null
           created_at: string
@@ -2589,6 +2593,7 @@ export type Database = {
           automation_id?: string | null
           billed_amount?: number | null
           billing_reference_id?: string | null
+          provider_account_id?: string | null
           block_index?: number | null
           campaign_id?: string | null
           created_at?: string
@@ -2609,6 +2614,7 @@ export type Database = {
           automation_id?: string | null
           billed_amount?: number | null
           billing_reference_id?: string | null
+          provider_account_id?: string | null
           block_index?: number | null
           campaign_id?: string | null
           created_at?: string
@@ -6210,6 +6216,7 @@ export type Database = {
       sms_send_logs: {
         Row: {
           billed_units: number | null
+          provider_account_id: string | null
           content: string
           created_at: string
           delivered_at: string | null
@@ -6233,6 +6240,7 @@ export type Database = {
         }
         Insert: {
           billed_units?: number | null
+          provider_account_id?: string | null
           content: string
           created_at?: string
           delivered_at?: string | null
@@ -6256,6 +6264,7 @@ export type Database = {
         }
         Update: {
           billed_units?: number | null
+          provider_account_id?: string | null
           content?: string
           created_at?: string
           delivered_at?: string | null

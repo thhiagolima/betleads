@@ -13,6 +13,14 @@ vi.mock("./billing/wallet.server", () => ({
   refundForDelivery: vi.fn(async () => undefined),
 }));
 
+// Per-house account resolution has its own coverage
+// (provider-accounts.server.test.ts); here every house uses the platform
+// account built from the env, without a database read.
+vi.mock("./provider-accounts.server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./provider-accounts.server")>();
+  return { ...actual, resolveInfobipAccount: vi.fn(async () => actual.envInfobipAccount()) };
+});
+
 import { callInfobipEmail } from "./infobip-email.server";
 import { callInfobipVoice, normalizeE164BR } from "./infobip-voice.server";
 

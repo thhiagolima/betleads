@@ -4,7 +4,7 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import {
   EmailDomainNotVerifiedError,
-  emailBillingColumns,
+  emailSendLogColumns,
   resolveSender,
   sendInfobipEmail,
 } from "./email-send.server";
@@ -862,7 +862,7 @@ export async function runEmailFlowDispatcher({
       block_index: plan.blockIdx,
       step_label: computeEmailStepLabel(plan.blocks, plan.blockIdx),
       tenant_id: plan.lead.tenant_id,
-      ...emailBillingColumns(result),
+      ...emailSendLogColumns(result),
       provider_response: {
         status: result.status,
         body: result.body,
