@@ -18,6 +18,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { VariationTag } from "@/components/rendimento/report-cards";
+import { CLIQUE_DEPOSITO_DEFINICAO } from "@/components/rendimento/report-funnel";
 import type { TeamReportRow } from "@/lib/expert-report.functions";
 import { brl, num } from "@/lib/format";
 
@@ -90,9 +91,10 @@ function compareRows(a: TeamReportRow, b: TeamReportRow, key: SortKey): number {
   return va - vb;
 }
 
-function pctLabel(fraction: number | null): string {
+/** Fração -> "12,5%", exibida no máximo 100% (ver `CLIQUE_DEPOSITO_DEFINICAO`). */
+export function pctLabel(fraction: number | null): string {
   if (fraction === null) return "—";
-  const value = (fraction * 100).toLocaleString("pt-BR", {
+  const value = Math.min(100, fraction * 100).toLocaleString("pt-BR", {
     minimumFractionDigits: 1,
     maximumFractionDigits: 1,
   });
@@ -197,7 +199,10 @@ export function TeamRanking({ rows }: { rows: TeamReportRow[] }) {
                   <TableCell className="text-right tabular-nums">
                     {num(row.reativados)}
                   </TableCell>
-                  <TableCell className="text-right tabular-nums">
+                  <TableCell
+                    className="text-right tabular-nums"
+                    title={CLIQUE_DEPOSITO_DEFINICAO}
+                  >
                     {pctLabel(row.cliqueDeposito)}
                   </TableCell>
                   <TableCell className="text-right tabular-nums">

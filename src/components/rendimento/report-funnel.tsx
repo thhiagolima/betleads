@@ -5,15 +5,26 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { ReportBlock } from "@/lib/expert-report.functions";
 import { num } from "@/lib/format";
 
-/** Percentual inteiro pt-BR de `part / base`; null sem base. */
+/**
+ * Definição de "Clique→depósito" (funil e ranking da equipe). Os dois lados
+ * são contados no período e o depósito pode vir de um clique anterior a ele,
+ * então a razão pode passar de 100%: a tela limita a 100%, os dados não.
+ */
+export const CLIQUE_DEPOSITO_DEFINICAO =
+  "Leads que depositaram por clique no período ÷ leads que clicaram no período";
+
+/** Percentual inteiro pt-BR de `part / base`, exibido no máximo 100%; null sem base. */
 function share(part: number, base: number): string | null {
   if (base <= 0) return null;
-  return `${Math.round((part / base) * 100).toLocaleString("pt-BR")}%`;
+  return `${Math.min(100, Math.round((part / base) * 100)).toLocaleString("pt-BR")}%`;
 }
 
-function Step({ label, value }: { label: string; value: number }) {
+function Step({ label, value, title }: { label: string; value: number; title?: string }) {
   return (
-    <li className="flex items-baseline justify-between gap-3 rounded-lg border border-border/70 bg-card px-4 py-3">
+    <li
+      className="flex items-baseline justify-between gap-3 rounded-lg border border-border/70 bg-card px-4 py-3"
+      title={title}
+    >
       <span className="text-body text-muted-foreground">{label}</span>
       <span className="text-lg font-semibold tabular-nums">{num(value)}</span>
     </li>
@@ -48,6 +59,7 @@ export function ReportFunnel({
                 : `Depositaram em até ${janelaHoras}h`
             }
             value={current.leadsDepositaramClique}
+            title={CLIQUE_DEPOSITO_DEFINICAO}
           />
         </ol>
         <p className="flex items-baseline justify-between gap-3 px-4 text-body">

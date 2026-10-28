@@ -4,7 +4,8 @@ import { describe, expect, it } from "vitest";
 import type { ReportBlock } from "@/lib/expert-report.functions";
 
 import { ReportCards, VariationTag } from "./report-cards";
-import { ReportFunnel } from "./report-funnel";
+import { CLIQUE_DEPOSITO_DEFINICAO, ReportFunnel } from "./report-funnel";
+import { pctLabel } from "./team-ranking";
 
 const block: ReportBlock = {
   depositado: 1500,
@@ -98,6 +99,7 @@ describe("VariationTag", () => {
     expect(down).toContain("text-danger");
     expect(renderToStaticMarkup(<VariationTag value={null} />)).toContain("—");
   });
+
 });
 
 describe("ReportFunnel", () => {
@@ -109,6 +111,18 @@ describe("ReportFunnel", () => {
     expect(html).toContain("Contatos registrados");
   });
 
+  it("caps the displayed shares at 100% and explains the click→deposit share", () => {
+    const html = renderToStaticMarkup(
+      <ReportFunnel
+        current={{ ...block, leadsComLink: 2, leadsClicaram: 3, leadsDepositaramClique: 5 }}
+        janelaHoras={72}
+      />,
+    );
+    expect(html).toContain("Leads que clicaram (100%)");
+    expect(html).toContain("Depositaram em até 72h (100% dos que clicaram)");
+    expect(html).toContain(`title="${CLIQUE_DEPOSITO_DEFINICAO}"`);
+  });
+
   it("omits the share when there is no base", () => {
     const html = renderToStaticMarkup(
       <ReportFunnel
@@ -118,5 +132,13 @@ describe("ReportFunnel", () => {
     );
     expect(html).toContain("Leads que clicaram<");
     expect(html).toContain("Depositaram em até 48h<");
+  });
+});
+
+describe("team ranking pctLabel", () => {
+  it("formats the fraction and caps the display at 100%", () => {
+    expect(pctLabel(0.4)).toBe("40,0%");
+    expect(pctLabel(1.5)).toBe("100,0%");
+    expect(pctLabel(null)).toBe("—");
   });
 });
