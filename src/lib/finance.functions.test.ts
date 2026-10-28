@@ -1,5 +1,6 @@
 // Grupos de casas, Task 5: financial month of a house, manual entries
-// (retroactive included), rates, viewer grants, goals and the group overview.
+// (retroactive included), rates, viewer grants, goals (the group overview tests moved to
+// finance-dashboard.functions.test.ts with the dashboard that replaced it).
 // Uses the in-memory createFakeDb stand-in for supabaseAdmin. The permission
 // helpers are a small model of the SQL in 20261101100100_tenant_finance.sql;
 // finance_days / finance_goal_days return fixed rows filtered by tenant/window.
@@ -15,9 +16,9 @@ vi.mock("@/integrations/supabase/client.server", async () => {
 });
 
 import {
-  getGroupOverviewFor,
   getTenantFinanceMonthFor,
   saveFinanceDaysFor,
+  saveOtherCostFor,
   setFinanceRatesFor,
   setFinanceViewerFor,
   setTenantGoalFor,
@@ -51,6 +52,9 @@ const ctxFor = (userId: string) => ({ userId }) as Ctx;
 type Row = Record<string, unknown>;
 let financeDayRows: Row[];
 let goalDayRows: Row[];
+let usageRows: Row[];
+let feeRows: Row[];
+let sinceRows: Row[];
 let financeDaysCalls: Row[];
 
 function dayRow(tenantId: string, date: string, overrides: Row = {}): Row {
@@ -93,6 +97,9 @@ beforeEach(() => {
   fake.admin.reset();
   financeDayRows = [];
   goalDayRows = [];
+  usageRows = [];
+  feeRows = [];
+  sinceRows = [];
   financeDaysCalls = [];
   (fake.admin.client as unknown as Record<string, unknown>).auth = {
     admin: { listUsers: async () => ({ data: { users: authUsers }, error: null }) },
@@ -146,6 +153,25 @@ beforeEach(() => {
   });
   fake.admin.onRpc("finance_goal_days", (args) => ({
     data: goalDayRows.filter((row) => inWindow(row, args)),
+    error: null,
+  }));
+  const ofTenants = (row: Row, args: Row) =>
+    (args._tenants as string[]).includes(String(row.tenant_id));
+  fake.admin.onRpc("finance_betleads_usage", (args) => ({
+    data: usageRows.filter((row) => inWindow(row, args)),
+    error: null,
+  }));
+  fake.admin.onRpc("finance_betleads_fees", (args) => ({
+    data: feeRows.filter(
+      (row) =>
+        ofTenants(row, args) &&
+        String(row.month) >= String(args._from_month) &&
+        String(row.month) <= String(args._to_month),
+    ),
+    error: null,
+  }));
+  fake.admin.onRpc("finance_betleads_since", (args) => ({
+    data: sinceRows.filter((row) => ofTenants(row, args)),
     error: null,
   }));
 
@@ -234,7 +260,9 @@ describe("house financial month", () => {
       { _tenants: [HOUSE_A], _from: "2026-10-01", _to: "2026-10-24" },
     ]);
     expect(month.days.map((d) => d.date)).toEqual(["2026-10-01", "2026-10-02"]);
-    expect(month.otherCosts).toEqual([{ id: "c1", descricao: "CRM", valor: 30 }]);
+    expect(month.otherCosts).toEqual([
+      { id: "c1", descricao: "CRM", valor: 30, categoria: "Outros", suspectedBetleads: false },
+    ]);
     expect(month.summary.otherCosts).toBe(30);
     expect(month.summary.pendingDays).toBe(1);
     expect(month.rates.current).toEqual({
@@ -260,6 +288,236 @@ describe("house financial month", () => {
     expect(month.rates.current).toEqual({ ggrFeePct: 16, movementFeePct: 2.7, validFrom: null });
     expect(month.permissions.canEditValues).toBe(true);
     expect(month.permissions.canManageGoals).toBe(false);
+  });
+});
+
+describe("house financial month: Betleads cost and categories", () => {
+  it("month summary deducts the month's Betleads usage and fee", async () => {
+    financeDayRows.push(
+      dayRow(HOUSE_A, "2026-10-05", { deposit_amount: 1000, ad_spend: 100, ggr: 0 }),
+    );
+    usageRows.push(
+      { tenant_id: HOUSE_A, metric_date: "2026-10-05", amount: 10 },
+      { tenant_id: HOUSE_A, metric_date: "2026-10-12", amount: 5 },
+      { tenant_id: HOUSE_B, metric_date: "2026-10-05", amount: 999 },
+    );
+    feeRows.push(
+      { tenant_id: HOUSE_A, month: "2026-10-01", amount: 300 },
+      { tenant_id: HOUSE_A, month: "2026-09-01", amount: 200 },
+    );
+
+    const month = await getTenantFinanceMonthFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-10",
+    });
+    expect(month.summary.betleadsUsage).toBe(15);
+    expect(month.summary.betleadsFee).toBe(300);
+    expect(month.summary.cashResult).toBe(1000 - 100 - 15 - 300);
+  });
+
+  it("a month with no invoice has fee 0, not null", async () => {
+    const month = await getTenantFinanceMonthFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-10",
+    });
+    expect(month.summary.betleadsFee).toBe(0);
+    expect(month.summary.betleadsUsage).toBe(0);
+  });
+
+  it("other costs return categoria (null -> Outros) and suspectedBetleads only from the since month on", async () => {
+    sinceRows.push({ tenant_id: HOUSE_A, since: "2026-10-10" });
+    fake.admin.rows("tenant_finance_other_costs").push(
+      {
+        id: "c1",
+        tenant_id: HOUSE_A,
+        month: "2026-10-01",
+        descricao: "SMS",
+        valor: 30,
+        categoria: null,
+      },
+      {
+        id: "c2",
+        tenant_id: HOUSE_A,
+        month: "2026-10-01",
+        descricao: "Aluguel",
+        valor: 20,
+        categoria: "Equipe",
+      },
+      {
+        id: "c3",
+        tenant_id: HOUSE_A,
+        month: "2026-09-01",
+        descricao: "SMS",
+        valor: 99,
+        categoria: null,
+      },
+    );
+
+    const october = await getTenantFinanceMonthFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-10",
+    });
+    expect(october.otherCosts).toEqual([
+      { id: "c1", descricao: "SMS", valor: 30, categoria: "Outros", suspectedBetleads: true },
+      { id: "c2", descricao: "Aluguel", valor: 20, categoria: "Equipe", suspectedBetleads: false },
+    ]);
+
+    // September is before the since month: the manual SMS cost is not flagged.
+    const september = await getTenantFinanceMonthFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-09",
+    });
+    expect(september.otherCosts).toEqual([
+      { id: "c3", descricao: "SMS", valor: 99, categoria: "Outros", suspectedBetleads: false },
+    ]);
+  });
+
+  it("returns betleadsSince (null when the house has no consumption yet)", async () => {
+    const none = await getTenantFinanceMonthFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-10",
+    });
+    expect(none.betleadsSince).toBeNull();
+
+    sinceRows.push({ tenant_id: HOUSE_A, since: "2026-10-10" });
+    const september = await getTenantFinanceMonthFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-09",
+    });
+    expect(september.betleadsSince).toBe("2026-10-10");
+  });
+
+  it("a house without since never flags suspectedBetleads", async () => {
+    fake.admin
+      .rows("tenant_finance_other_costs")
+      .push({
+        id: "c1",
+        tenant_id: HOUSE_A,
+        month: "2026-10-01",
+        descricao: "SMS",
+        valor: 30,
+        categoria: null,
+      });
+    const month = await getTenantFinanceMonthFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-10",
+    });
+    expect(month.otherCosts).toEqual([
+      { id: "c1", descricao: "SMS", valor: 30, categoria: "Outros", suspectedBetleads: false },
+    ]);
+  });
+
+  it("categories lists fixed first then the house's own, sorted pt-BR", async () => {
+    fake.admin.rows("tenant_finance_other_costs").push(
+      {
+        id: "c1",
+        tenant_id: HOUSE_A,
+        month: "2026-10-01",
+        descricao: "Agência",
+        valor: 10,
+        categoria: "Marketing",
+      },
+      {
+        id: "c2",
+        tenant_id: HOUSE_A,
+        month: "2026-09-01",
+        descricao: "Old",
+        valor: 5,
+        categoria: "Suporte",
+      },
+      {
+        id: "c3",
+        tenant_id: HOUSE_A,
+        month: "2026-08-01",
+        descricao: "x",
+        valor: 1,
+        categoria: null,
+      },
+    );
+    const month = await getTenantFinanceMonthFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-10",
+    });
+    expect(month.categories).toEqual([
+      "Afiliados e influenciadores",
+      "Equipe",
+      "Ferramentas",
+      "Impostos",
+      "Outros",
+      "Marketing",
+      "Suporte",
+    ]);
+  });
+
+  it("saveOtherCost stores a new category and it shows in categories next month", async () => {
+    await saveOtherCostFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-10",
+      descricao: "Consultoria",
+      valor: 200,
+      categoria: "Consultoria Jurídica",
+    });
+    const month = await getTenantFinanceMonthFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-11",
+    });
+    expect(month.categories).toContain("Consultoria Jurídica");
+  });
+
+  it("saveOtherCost stores categoria via categoryLabel; Outros stores null; missing keeps, explicit null clears", async () => {
+    const created = await saveOtherCostFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-10",
+      descricao: "Agência",
+      valor: 100,
+      categoria: "  Marketing   Digital  ",
+    });
+    expect(
+      fake.admin.rows("tenant_finance_other_costs").find((r) => r.id === created.id)?.categoria,
+    ).toBe("Marketing Digital");
+
+    const outros = await saveOtherCostFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-10",
+      descricao: "X",
+      valor: 1,
+      categoria: "outros",
+    });
+    expect(
+      fake.admin.rows("tenant_finance_other_costs").find((r) => r.id === outros.id)?.categoria,
+    ).toBeNull();
+
+    // Missing categoria on update keeps the stored value.
+    await saveOtherCostFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      id: created.id,
+      month: "2026-10",
+      descricao: "Agência",
+      valor: 150,
+    });
+    expect(
+      fake.admin.rows("tenant_finance_other_costs").find((r) => r.id === created.id)?.categoria,
+    ).toBe("Marketing Digital");
+
+    // Explicit null clears it.
+    await saveOtherCostFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      id: created.id,
+      month: "2026-10",
+      descricao: "Agência",
+      valor: 150,
+      categoria: null,
+    });
+    expect(
+      fake.admin.rows("tenant_finance_other_costs").find((r) => r.id === created.id)?.categoria,
+    ).toBeNull();
+
+    const audit = fake.admin
+      .rows("tenant_audit_logs")
+      .filter((a) => a.action === "finance.other_cost_saved");
+    expect(audit.at(-1)).toMatchObject({
+      after_data: expect.objectContaining({ categoria: null }),
+    });
   });
 });
 
@@ -394,212 +652,6 @@ describe("viewer grants", () => {
     expect(fake.admin.rows("tenant_audit_logs")).toEqual([
       expect.objectContaining({ action: "finance.viewer_changed", entity_id: MEMBER_A }),
     ]);
-  });
-});
-
-describe("group overview", () => {
-  it("overview: otherCosts only for full calendar month", async () => {
-    financeDayRows.push(
-      dayRow(HOUSE_A, "2026-09-10", { deposit_amount: 1000, ad_spend: 100, ggr: 0 }),
-      dayRow(HOUSE_A, "2026-08-10", { deposit_amount: 400, ad_spend: 100, ggr: 0 }),
-    );
-    fake.admin
-      .rows("tenant_finance_other_costs")
-      .push(
-        { id: "c1", tenant_id: HOUSE_A, month: "2026-09-01", descricao: "CRM", valor: 100 },
-        { id: "c2", tenant_id: HOUSE_A, month: "2026-09-01", descricao: "SMS", valor: 50 },
-        { id: "c3", tenant_id: HOUSE_B, month: "2026-09-01", descricao: "CRM", valor: 25 },
-        { id: "c4", tenant_id: HOUSE_C, month: "2026-09-01", descricao: "CRM", valor: 999 },
-        { id: "c5", tenant_id: HOUSE_A, month: "2026-08-01", descricao: "CRM", valor: 40 },
-      );
-
-    const full = await getGroupOverviewFor(ctxFor(G1_MANAGER), {
-      groupId: G1,
-      range: { from: "2026-09-01", to: "2026-09-30" },
-      compare: "previous",
-      preset: "custom",
-    });
-    expect(financeDaysCalls).toHaveLength(1);
-    expect(financeDaysCalls[0]).toEqual({
-      _tenants: [HOUSE_A, HOUSE_B],
-      _from: "2026-08-01",
-      _to: "2026-09-30",
-    });
-    // A custom range that is exactly a calendar month compares with the
-    // whole previous month, whose other costs then count too.
-    expect(full.compareRange).toEqual({ from: "2026-08-01", to: "2026-08-31" });
-    const a = full.tenants.find((t) => t.id === HOUSE_A)!;
-    expect(a.current.otherCosts).toBe(150);
-    expect(a.current.cashResult).toBe(1000 - 100 - 150);
-    expect(a.previous.otherCosts).toBe(40);
-    expect(a.previous.cashResult).toBe(400 - 100 - 40);
-    expect(full.tenants.find((t) => t.id === HOUSE_B)!.current.otherCosts).toBe(25);
-    expect(full.totals.current.otherCosts).toBe(175);
-    expect(full.totals.previous.otherCosts).toBe(40);
-
-    const partial = await getGroupOverviewFor(ctxFor(G1_MANAGER), {
-      groupId: G1,
-      range: { from: "2026-09-01", to: "2026-09-29" },
-      compare: "previous",
-      preset: "custom",
-    });
-    expect(partial.tenants.find((t) => t.id === HOUSE_A)!.current.otherCosts).toBeNull();
-    expect(partial.totals.current.otherCosts).toBeNull();
-  });
-
-  it("overview: Mês preset in progress includes the month's other costs", async () => {
-    financeDayRows.push(
-      dayRow(HOUSE_A, "2026-10-05", { deposit_amount: 1000, ad_spend: 100, ggr: 0 }),
-      dayRow(HOUSE_A, "2026-09-05", { deposit_amount: 500, ad_spend: 100, ggr: 0 }),
-    );
-    fake.admin
-      .rows("tenant_finance_other_costs")
-      .push(
-        { id: "c1", tenant_id: HOUSE_A, month: "2026-10-01", descricao: "CRM", valor: 40 },
-        { id: "c2", tenant_id: HOUSE_A, month: "2026-09-01", descricao: "CRM", valor: 150 },
-        { id: "c3", tenant_id: HOUSE_B, month: "2026-10-01", descricao: "SMS", valor: 10 },
-      );
-
-    const month = await getGroupOverviewFor(ctxFor(G1_MANAGER), {
-      groupId: G1,
-      range: { from: "2026-10-01", to: "2026-10-24" },
-      compare: "previous",
-      preset: "month",
-    });
-    expect(month.compareRange).toEqual({ from: "2026-09-01", to: "2026-09-24" });
-    const a = month.tenants.find((t) => t.id === HOUSE_A)!;
-    expect(a.current.otherCosts).toBe(40);
-    expect(a.current.cashResult).toBe(1000 - 100 - 40);
-    expect(a.previous.otherCosts).toBe(150);
-    expect(a.previous.cashResult).toBe(500 - 100 - 150);
-    expect(month.totals.current.otherCosts).toBe(50);
-    expect(month.totals.previous.otherCosts).toBe(150);
-
-    // The same window picked as "Personalizado" is not a closed month.
-    const custom = await getGroupOverviewFor(ctxFor(G1_MANAGER), {
-      groupId: G1,
-      range: { from: "2026-10-01", to: "2026-10-24" },
-      compare: "previous",
-      preset: "custom",
-    });
-    expect(custom.tenants.find((t) => t.id === HOUSE_A)!.current.otherCosts).toBeNull();
-    expect(custom.totals.current.otherCosts).toBeNull();
-    expect(custom.totals.previous.otherCosts).toBeNull();
-  });
-
-  it("overview: Mês preset with a week-shifted comparison leaves other costs out of it", async () => {
-    fake.admin
-      .rows("tenant_finance_other_costs")
-      .push(
-        { id: "c1", tenant_id: HOUSE_A, month: "2026-10-01", descricao: "CRM", valor: 40 },
-        { id: "c2", tenant_id: HOUSE_A, month: "2026-09-01", descricao: "CRM", valor: 150 },
-      );
-    const overview = await getGroupOverviewFor(ctxFor(G1_MANAGER), {
-      groupId: G1,
-      range: { from: "2026-10-01", to: "2026-10-24" },
-      compare: "last_week",
-      preset: "month",
-    });
-    expect(overview.compareRange).toEqual({ from: "2026-09-24", to: "2026-10-17" });
-    const a = overview.tenants.find((t) => t.id === HOUSE_A)!;
-    expect(a.current.otherCosts).toBe(40);
-    expect(a.previous.otherCosts).toBeNull();
-    expect(overview.totals.previous.otherCosts).toBeNull();
-  });
-
-  it("overview: Mês preset is not trusted for a range that is not month-to-date", async () => {
-    fake.admin
-      .rows("tenant_finance_other_costs")
-      .push({ id: "c1", tenant_id: HOUSE_A, month: "2026-10-01", descricao: "CRM", valor: 40 });
-    const overview = await getGroupOverviewFor(ctxFor(G1_MANAGER), {
-      groupId: G1,
-      range: { from: "2026-10-05", to: "2026-10-24" },
-      compare: "previous",
-      preset: "month",
-    });
-    expect(overview.tenants.find((t) => t.id === HOUSE_A)!.current.otherCosts).toBeNull();
-    expect(overview.totals.current.otherCosts).toBeNull();
-  });
-
-  it("overview: group manager of G1 cannot read G2", async () => {
-    await expect(
-      getGroupOverviewFor(ctxFor(G1_MANAGER), {
-        groupId: G2,
-        range: { from: "2026-10-01", to: "2026-10-24" },
-        compare: "previous",
-        preset: "month",
-      }),
-    ).rejects.toThrow("Sem permissão");
-    expect(financeDaysCalls).toHaveLength(0);
-  });
-
-  it("overview totals recompute roi from sums", async () => {
-    financeDayRows.push(
-      // A: result 300 - 100 = 200 on 100 of ads -> ROI 2.
-      dayRow(HOUSE_A, "2026-10-23", { deposit_amount: 300, ad_spend: 100, ggr: 0 }),
-      // B: result 300 - 300 = 0 on 300 of ads -> ROI 0.
-      dayRow(HOUSE_B, "2026-10-23", { deposit_amount: 300, ad_spend: 300, ggr: 0 }),
-    );
-    goalDayRows.push({
-      tenant_id: HOUSE_A,
-      metric_date: "2026-10-23",
-      metric: "roi",
-      direction: "gte",
-      daily_value: 0,
-    });
-
-    const overview = await getGroupOverviewFor(ctxFor(SUPER), {
-      groupId: G1,
-      range: { from: "2026-10-23", to: "2026-10-23" },
-      compare: "same_weekday_last_week",
-      preset: "yesterday",
-    });
-
-    expect(overview.group).toEqual({ id: G1, nome: "Grupo 1" });
-    const a = overview.tenants.find((t) => t.id === HOUSE_A)!;
-    const b = overview.tenants.find((t) => t.id === HOUSE_B)!;
-    expect(a.current.roi).toBe(2);
-    expect(b.current.roi).toBe(0);
-    // Σresult / Σads = 200 / 400, not the mean of 2 and 0.
-    expect(overview.totals.current.roi).toBe(0.5);
-    expect(a.goals).toEqual([
-      { metric: "roi", direction: "gte", target: 0, value: 2, status: "green" },
-    ]);
-    expect(b.goals).toEqual([]);
-    expect(overview.compareRange).toEqual({ from: "2026-10-16", to: "2026-10-16" });
-  });
-
-  it("overview: a pending today neither counts as pending nor grays a goal", async () => {
-    financeDayRows.push(
-      dayRow(HOUSE_A, "2026-10-23", { deposit_amount: 300, ad_spend: 100, ggr: 0 }),
-      dayRow(HOUSE_A, "2026-10-24", { deposit_amount: 50 }),
-      dayRow(HOUSE_B, "2026-10-23", { deposit_amount: 300, ad_spend: 100, ggr: 0 }),
-      dayRow(HOUSE_B, "2026-10-24", { deposit_amount: 50 }),
-    );
-    goalDayRows.push(
-      ...["2026-10-23", "2026-10-24"].map((date) => ({
-        tenant_id: HOUSE_A,
-        metric_date: date,
-        metric: "cash_result",
-        direction: "gte",
-        daily_value: 150,
-      })),
-    );
-
-    const overview = await getGroupOverviewFor(ctxFor(SUPER), {
-      groupId: G1,
-      range: { from: "2026-10-23", to: "2026-10-24" },
-      compare: "previous",
-      preset: "custom",
-    });
-
-    const a = overview.tenants.find((t) => t.id === HOUSE_A)!;
-    expect(a.current.pendingDays).toBe(0);
-    expect(a.current.cashResult).toBe(200);
-    expect(a.goals).toEqual([
-      { metric: "cash_result", direction: "gte", target: 150, value: 200, status: "green" },
-    ]);
-    expect(overview.totals.current.pendingDays).toBe(0);
   });
 });
 

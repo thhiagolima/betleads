@@ -23,12 +23,50 @@ async function financeDaily() {
 }
 
 async function otherCosts() {
-  const { rows } = await db.query<{ descricao: string; valor: string }>(
-    `select descricao, valor::text as valor from public.tenant_finance_other_costs
+  const { rows } = await db.query<{ descricao: string; categoria: string | null; valor: string }>(
+    `select descricao, categoria, valor::text as valor from public.tenant_finance_other_costs
       where tenant_id = $1 order by descricao`,
     [DEMO],
   );
   return rows;
+}
+
+// Mirrors src/lib/finance/categories.ts' BETLEADS_COST_PATTERN: the real
+// check the finance dashboard applies to flag a cost as a duplicated
+// Betleads charge.
+const BETLEADS_COST_PATTERN = /\b(sms|betleads|mensalidade|voz|e-?mail|crm)\b/i;
+
+async function betleadsUsage() {
+  const { rows } = await db.query<{ metric_date: string; amount: string }>(
+    `select metric_date::text as metric_date, amount::text as amount
+       from public.finance_betleads_usage($1::uuid[], (current_date - 400), current_date)
+      order by metric_date`,
+    [[DEMO]],
+  );
+  return rows;
+}
+
+async function walletIntegrity() {
+  const { rows } = await db.query<{ tenant_id: string }>(`select tenant_id from public.billing_wallet_integrity()`);
+  return rows;
+}
+
+async function betleadsFees(fromMonth: string, toMonth: string) {
+  const { rows } = await db.query<{ month: string; amount: string }>(
+    `select month::text as month, amount::text as amount
+       from public.finance_betleads_fees($1::uuid[], $2::date, $3::date)
+      order by month`,
+    [[DEMO], fromMonth, toMonth],
+  );
+  return rows;
+}
+
+async function invoiceCount() {
+  const { rows } = await db.query<{ n: number }>(
+    `select count(*)::int as n from public.billing_invoices where tenant_id = $1`,
+    [DEMO],
+  );
+  return rows[0].n;
 }
 
 beforeAll(async () => {
@@ -56,14 +94,122 @@ describe("seedDemoFinance", () => {
     await seedDemoFinance(db, { demoTenantId: DEMO, days: DAYS });
     const firstDaily = await financeDaily();
     const firstCosts = await otherCosts();
+    const firstUsage = await betleadsUsage();
 
     await seedDemoFinance(db, { demoTenantId: DEMO, days: DAYS });
     const secondDaily = await financeDaily();
     const secondCosts = await otherCosts();
+    const secondUsage = await betleadsUsage();
 
     expect(secondDaily).toEqual(firstDaily);
     expect(secondCosts).toEqual(firstCosts);
+    expect(secondUsage).toEqual(firstUsage);
     expect(firstDaily).toHaveLength(DAYS);
+    expect(firstUsage).toHaveLength(DAYS);
+  });
+
+  it("seeds a Betleads usage ledger row for every day, keeping the wallet consistent", async () => {
+    const usage = await betleadsUsage();
+    expect(usage).toHaveLength(DAYS);
+    // uniform(80, 200, ...): every day's net cost falls in that range.
+    for (const row of usage) expect(Number(row.amount)).toBeGreaterThan(0);
+    for (const row of usage) expect(Number(row.amount)).toBeLessThan(200);
+
+    const integrity = await walletIntegrity();
+    expect(integrity).toEqual([]);
+
+    const { rows: wallet } = await db.query<{ balance: string }>(
+      `select balance::text as balance from public.tenant_wallets where tenant_id = $1`,
+      [DEMO],
+    );
+    expect(Number(wallet[0].balance)).toBeGreaterThanOrEqual(0);
+  });
+
+  // Every `__demo_seed__` invoice (the ones this function controls) is a
+  // paid 400000-cent invoice dated the 1st. Fix round 1: a month the
+  // `tenants_billing_plano` trigger already billed (through its own, not
+  // `__demo_seed__`, invoice) is deliberately skipped — see the
+  // finance_betleads_fees test below for the no-double-billing guarantee.
+  it("seeds one paid invoice per seeded month not already billed by the trigger, amount_cents 400000, period_start on the 1st", async () => {
+    const { rows: invoices } = await db.query<{
+      period_start: string;
+      status: string;
+      amount_cents: number;
+    }>(
+      `select period_start::text as period_start, status, amount_cents
+         from public.billing_invoices where tenant_id = $1 and manual_note = '__demo_seed__'
+        order by period_start`,
+      [DEMO],
+    );
+    for (const inv of invoices) {
+      expect(inv.status).toBe("paid");
+      expect(inv.amount_cents).toBe(400000);
+      expect(inv.period_start.endsWith("-01")).toBe(true);
+    }
+
+    // Every seeded month is billed exactly once, by either the seed's own
+    // invoice or some other (the trigger's).
+    const { rows: months } = await db.query<{ month: string }>(
+      `select distinct date_trunc('month', metric_date)::date::text as month
+         from public.tenant_daily_metrics where tenant_id = $1`,
+      [DEMO],
+    );
+    expect(months.length).toBeGreaterThan(0);
+    for (const { month } of months) {
+      const { rows: billed } = await db.query<{ n: number }>(
+        `select count(*)::int as n from public.billing_invoices
+          where tenant_id = $1 and status in ('open', 'paid')
+            and date_trunc('month', period_start)::date = $2::date`,
+        [DEMO, month],
+      );
+      expect(billed[0].n).toBe(1);
+    }
+  });
+
+  // Fix round 1: the `tenants_billing_plano` trigger (fired by the demo
+  // tenant insert in beforeAll, through the real trigger path — not
+  // bypassed here) already issued its own `open`, upfront, 400000-cent
+  // invoice for the month of billing_today() (= today, since no test clock
+  // is set). finance_betleads_fees must still show exactly R$ 4000 for that
+  // month (not R$ 8000 from double-counting both invoices), and for every
+  // other seeded month.
+  it("finance_betleads_fees is exactly 4000 per seeded month, including the trigger's own invoice month", async () => {
+    const { rows: range } = await db.query<{ first_month: string; current_month: string }>(
+      `select date_trunc('month', min(metric_date))::date::text as first_month,
+              date_trunc('month', current_date)::date::text as current_month
+         from public.tenant_daily_metrics where tenant_id = $1`,
+      [DEMO],
+    );
+    const fees = await betleadsFees(range[0].first_month, range[0].current_month);
+    expect(fees.length).toBeGreaterThan(0);
+    for (const fee of fees) expect(Number(fee.amount)).toBe(4000);
+  });
+
+  it("seeding twice does not change the demo house's total invoice count", async () => {
+    const before = await invoiceCount();
+    await seedDemoFinance(db, { demoTenantId: DEMO, days: DAYS });
+    const after = await invoiceCount();
+    expect(after).toBe(before);
+  });
+
+  it("no seeded other cost looks like a duplicated Betleads charge", async () => {
+    const costs = await otherCosts();
+    expect(costs.length).toBeGreaterThan(0);
+    for (const cost of costs) {
+      expect(BETLEADS_COST_PATTERN.test(cost.descricao)).toBe(false);
+      if (cost.categoria) expect(BETLEADS_COST_PATTERN.test(cost.categoria)).toBe(false);
+    }
+  });
+
+  it("removes a previous seed's CRM/SMS other costs", async () => {
+    await db.query(
+      `insert into public.tenant_finance_other_costs (id, tenant_id, month, descricao, valor, created_by)
+       values (gen_random_uuid(), $1, date_trunc('month', current_date)::date, 'CRM', 1500, null)`,
+      [DEMO],
+    );
+    await seedDemoFinance(db, { demoTenantId: DEMO, days: DAYS });
+    const costs = await otherCosts();
+    expect(costs.some((c) => c.descricao === "CRM")).toBe(false);
   });
 
   it("only the most recent day is pending (no GGR); every earlier day has one", async () => {
@@ -147,10 +293,9 @@ describe("seedDemoFinance", () => {
     expect(Number(costGoal.daily_value)).toBe(90);
 
     const costs = await otherCosts();
-    expect(costs).toEqual([
-      { descricao: "CRM", valor: "1500.00" },
-      { descricao: "SMS", valor: "800.00" },
-    ]);
+    expect(costs.map((c) => c.descricao).sort()).toEqual(["Equipe de atendimento", "Influenciador X"]);
+    expect(costs.map((c) => c.categoria).sort()).toEqual(["Afiliados e influenciadores", "Equipe"]);
+    for (const cost of costs) expect(Number(cost.valor)).toBeGreaterThan(0);
   });
 
   it("demoUserIds become managers of the demo group", async () => {

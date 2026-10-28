@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   ACCOUNT_LINKS,
   EXPERT_MOBILE_TABS,
+  GROUP_SECTIONS,
   ROUTE_META,
   activeMobileTab,
   activeNavKey,
@@ -175,6 +176,14 @@ describe("visible sections", () => {
     expect(financeLinks("member", false, true)).toContain("/financeiro");
     expect(financeLinks(null, false, true)).toContain("/financeiro");
     expect(financeLinks("super_admin", true, false)).toContain("/financeiro");
+  });
+});
+
+describe("group menu", () => {
+  it("names the /grupo page \"Financeiro do grupo\" in the menu and the header", () => {
+    const first = GROUP_SECTIONS[0].items[0];
+    expect(first).toMatchObject({ kind: "link", to: "/grupo", title: "Financeiro do grupo" });
+    expect(ROUTE_META["/grupo"].title).toBe("Financeiro do grupo");
   });
 });
 
