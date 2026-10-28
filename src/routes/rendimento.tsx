@@ -1,11 +1,11 @@
-// "Meu rendimento" (Relatório de rendimento, Task 5): relatório do perfil de
-// equipe vinculado ao usuário logado na casa ativa. Rotas filhas
-// (/rendimento/equipe e /rendimento/equipe/$expertId) renderizam só o
-// próprio <Outlet />, no padrão de `expert.leads.tsx`. Placeholder; o
-// conteúdo vem na Task 6.
+// "Meu rendimento" (Relatório de rendimento, Tasks 5 e 6): relatório do
+// perfil de equipe vinculado ao usuário logado na casa ativa (`ReportView`
+// sem `expertId`). Rotas filhas (/rendimento/equipe e
+// /rendimento/equipe/$expertId) renderizam só o próprio <Outlet />, no padrão
+// de `expert.leads.tsx`.
 import { Outlet, createFileRoute, useRouterState } from "@tanstack/react-router";
 
-import { Page, PageHeader } from "@/components/ui-premium/page-header";
+import { ReportView } from "@/components/rendimento/report-view";
 
 export const Route = createFileRoute("/rendimento")({
   component: RendimentoRoute,
@@ -14,13 +14,5 @@ export const Route = createFileRoute("/rendimento")({
 function RendimentoRoute() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const isChildRoute = pathname.replace(/\/+$/, "") !== "/rendimento";
-  return isChildRoute ? <Outlet /> : <MeuRendimentoPage />;
-}
-
-function MeuRendimentoPage() {
-  return (
-    <Page>
-      <PageHeader />
-    </Page>
-  );
+  return isChildRoute ? <Outlet /> : <ReportView />;
 }

@@ -30,6 +30,7 @@ import {
 } from "@/lib/expert-metrics.functions";
 import type { PeriodKey } from "@/lib/expert-period";
 import { brl } from "@/lib/format";
+import { downloadCsv } from "@/components/rendimento/download-csv";
 
 const CREDITS_PAGE_SIZE = 100;
 
@@ -50,33 +51,13 @@ const VIA_LABEL: Record<ExpertCreditRow["via"], string> = {
   afiliado: "Afiliado",
 };
 
-function downloadCsv(filename: string, csv: string) {
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  // Revoga depois de um pequeno atraso: o Firefox pode cancelar o download
-  // se a URL do objeto for revogada antes de a leitura do blob começar.
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
 /**
  * Cartão "Extrato de créditos": base da comissão paga por fora do sistema.
  * Tabela paginada (100 por página), total do período no topo e exportação
  * em CSV — o período vem do seletor da página que a monta. Sem `expertId`,
  * o extrato é do próprio usuário logado.
  */
-export function CreditStatement({
-  expertId,
-  period,
-}: {
-  expertId?: string;
-  period: PeriodKey;
-}) {
+export function CreditStatement({ expertId, period }: { expertId?: string; period: PeriodKey }) {
   const [page, setPage] = useState(0);
   const { data: switcher } = useActiveTenant();
   const tenantId = switcher?.activeTenantId ?? null;
