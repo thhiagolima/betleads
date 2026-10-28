@@ -35,15 +35,26 @@ export function defaultValidThrough(month: string, today: string): string {
   return yesterday;
 }
 
+/** pt-BR with a decimal comma: "-340,24", "1.497,15" (dots only as thousands groups). */
+const PT_BR_DECIMAL = /^-?(\d+|\d{1,3}(\.\d{3})+),\d{1,2}$/;
+/** Thousands groups without decimals: "1.000", "12.345.678". */
+const DOT_THOUSANDS = /^-?\d{1,3}(\.\d{3})+$/;
+/** Plain number, optional decimal dot with 1–2 digits: "1497.15", "-12.5". */
+const DOT_DECIMAL = /^-?\d+(\.\d{1,2})?$/;
+
 /**
- * The typed value as a number: "" → null (clears the total), "1497.15",
- * "-12,5" and "1.497,15" (pt-BR) are accepted; anything else is NaN.
+ * The typed value as a number: "" → null (clears the total). Accepts
+ * "-340,24", "1.497,15", "1.000" (= 1000), "12.345.678" and "1497.15";
+ * anything ambiguous ("1,497.15", two commas, a dot after the comma,
+ * "1497.151") is NaN, shown as "Valor inválido".
  */
 export function parseGgrInput(value: string): number | null {
   const trimmed = value.trim();
   if (trimmed === "") return null;
-  const normalized = trimmed.includes(",") ? trimmed.replace(/\./g, "").replace(",", ".") : trimmed;
-  return /^-?\d+(\.\d+)?$/.test(normalized) ? Number(normalized) : Number.NaN;
+  if (PT_BR_DECIMAL.test(trimmed)) return Number(trimmed.replace(/\./g, "").replace(",", "."));
+  if (DOT_THOUSANDS.test(trimmed)) return Number(trimmed.replace(/\./g, ""));
+  if (DOT_DECIMAL.test(trimmed)) return Number(trimmed);
+  return Number.NaN;
 }
 
 /** Same rules as the server (setMonthlyGgr); null when the form can be saved. */

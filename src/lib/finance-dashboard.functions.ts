@@ -409,13 +409,10 @@ export async function getFinanceDashboardFor(
 
   const rows: DashboardTenantRow[] = tenants.map((tenant) => {
     const currentSummary = summarizeWindow(current, costMonths.current, tenant.id);
-    const pendingDates = [
-      ...new Set(
-        windowDays(current, tenant.id)
-          .filter((day) => day.pending && day.date < today)
-          .map((day) => day.date),
-      ),
-    ];
+    const pendingDays = windowDays(current, tenant.id).filter(
+      (day) => day.pending && day.date < today,
+    );
+    const pendingDates = [...new Set(pendingDays.map((day) => day.date))];
     return {
       id: tenant.id,
       nome: tenant.nome,
@@ -425,7 +422,7 @@ export async function getFinanceDashboardFor(
         ? evaluateGoals(goalRowsByTenant.get(tenant.id) ?? [], currentSummary, current, today)
         : [],
       pendingDates,
-      ggrUpdatedThrough: monthlyGgrPendingThrough(pendingDates, allocationsOf(tenant.id)),
+      ggrUpdatedThrough: monthlyGgrPendingThrough(pendingDays, allocationsOf(tenant.id)),
     };
   });
 

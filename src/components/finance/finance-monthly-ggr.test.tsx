@@ -7,6 +7,7 @@ import {
   monthlyGgrFormError,
   MonthlyGgrFields,
   monthlyGgrStatus,
+  parseGgrInput,
 } from "./finance-monthly-ggr";
 
 // No jsdom: the form is a presentational piece plus pure helpers (default
@@ -19,6 +20,26 @@ describe("GGR do mês", () => {
     // A past month: its last day.
     expect(defaultValidThrough("2026-09", "2026-10-24")).toBe("2026-09-30");
     expect(defaultValidThrough("2026-02", "2026-10-24")).toBe("2026-02-28");
+  });
+
+  it("parses pt-BR and dotted values without guessing", () => {
+    expect(parseGgrInput("1.000")).toBe(1000);
+    expect(parseGgrInput("1.497")).toBe(1497);
+    expect(parseGgrInput("12.345.678")).toBe(12345678);
+    expect(parseGgrInput("1.497,15")).toBe(1497.15);
+    expect(parseGgrInput("1497.15")).toBe(1497.15);
+    expect(parseGgrInput("-340,24")).toBe(-340.24);
+    expect(parseGgrInput("1.5")).toBe(1.5);
+    expect(parseGgrInput("  ")).toBeNull();
+    for (const bad of ["1,497.15", "1,2,3", "1,49.7", "1497.151", "12.34.5", "abc"]) {
+      expect(parseGgrInput(bad)).toBeNaN();
+    }
+    expect(
+      monthlyGgrFormError(
+        { month: "2026-10", ggr: "1,497.15", validThrough: "2026-10-23" },
+        "2026-10-24",
+      ),
+    ).toBe("Valor inválido");
   });
 
   it("validates the value and the date", () => {

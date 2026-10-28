@@ -211,23 +211,23 @@ export function hasPartialGgrEstimate(
 }
 
 /**
- * When every pending date lies after the `validThrough` of its month's
- * monthly GGR total, the pending days come from that total being out of
- * date: returns the `validThrough` of the earliest pending date's month.
- * Otherwise (or with nothing pending) null.
+ * When every pending day lies after the `validThrough` of its month's
+ * monthly GGR total and has Anúncios filled, the pending days come only from
+ * that total being out of date: returns the `validThrough` of the earliest
+ * pending day's month. Otherwise (or with nothing pending) null.
  */
 export function monthlyGgrPendingThrough(
-  pendingDates: string[],
+  pendingDays: Array<{ date: string; adSpend: number | null }>,
   allocations: GgrAllocation[],
 ): string | null {
-  if (!pendingDates.length) return null;
+  if (!pendingDays.length) return null;
   const byMonth = new Map(allocations.map((a) => [a.month.slice(0, 7), a.validThrough]));
-  const explained = pendingDates.every((date) => {
+  const explained = pendingDays.every(({ date, adSpend }) => {
     const validThrough = byMonth.get(date.slice(0, 7));
-    return validThrough !== undefined && date > validThrough;
+    return adSpend !== null && validThrough !== undefined && date > validThrough;
   });
   if (!explained) return null;
-  const first = [...pendingDates].sort()[0];
+  const first = pendingDays.map((day) => day.date).sort()[0];
   return byMonth.get(first.slice(0, 7)) ?? null;
 }
 
