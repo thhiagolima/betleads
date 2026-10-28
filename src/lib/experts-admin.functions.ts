@@ -127,6 +127,32 @@ export function expertAcesso(
   return "ativo";
 }
 
+/**
+ * `ExpertDbRow` + o que cada chamador já calculou (afiliados, contagem de
+ * leads, acesso/e-mail) -> `ExpertAdminRow`. Único lugar que faz esse
+ * mapeamento, para a tela de lista (`listExpertsFor`) e o detalhe do admin
+ * (`getExpertDetailFor`, Fase 3 Task 3) nunca divergirem.
+ */
+export function buildExpertAdminRow(
+  row: ExpertDbRow,
+  extras: { affiliateIds: string[]; leads: number; acesso: ExpertAcesso; email: string | null },
+): ExpertAdminRow {
+  return {
+    id: row.id,
+    nome: row.nome,
+    tipo: row.tipo,
+    ativo: row.ativo,
+    envioModo: row.envio_modo,
+    tetoMensal: row.teto_mensal === null ? null : Number(row.teto_mensal),
+    assumirPrazoDias: row.assumir_prazo_dias,
+    affiliateIds: extras.affiliateIds,
+    leads: extras.leads,
+    acesso: extras.acesso,
+    email: extras.email,
+    createdAt: row.created_at,
+  };
+}
+
 export async function countExpertLeads(
   tenantId: string,
   tipo: ExpertTipo,
@@ -183,20 +209,12 @@ export async function listExpertsFor(ctx: ServerContext): Promise<ExpertAdminRow
         countExpertLeads(tenantId, row.tipo, affiliateIds),
         authUserOf(row.user_id),
       ]);
-      return {
-        id: row.id,
-        nome: row.nome,
-        tipo: row.tipo,
-        ativo: row.ativo,
-        envioModo: row.envio_modo,
-        tetoMensal: row.teto_mensal === null ? null : Number(row.teto_mensal),
-        assumirPrazoDias: row.assumir_prazo_dias,
+      return buildExpertAdminRow(row, {
         affiliateIds,
         leads,
         acesso: expertAcesso(row, user?.last_sign_in_at),
         email: user?.email ?? null,
-        createdAt: row.created_at,
-      };
+      });
     }),
   );
 }

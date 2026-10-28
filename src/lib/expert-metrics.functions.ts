@@ -20,6 +20,7 @@ import { requireExpertContext, type ExpertTipo } from "@/lib/expert-access.serve
 import { DEFAULT_EXPERT_PERIOD, periodRange, type PeriodKey } from "@/lib/expert-period";
 import {
   authUserOf,
+  buildExpertAdminRow,
   countExpertLeads,
   expertAcesso,
   loadExpert,
@@ -257,20 +258,12 @@ async function loadExpertAdminRow(tenantId: string, expertId: string): Promise<E
     authUserOf(row.user_id),
   ]);
 
-  return {
-    id: row.id,
-    nome: row.nome,
-    tipo: row.tipo,
-    ativo: row.ativo,
-    envioModo: row.envio_modo,
-    tetoMensal: row.teto_mensal === null ? null : Number(row.teto_mensal),
-    assumirPrazoDias: row.assumir_prazo_dias,
+  return buildExpertAdminRow(row, {
     affiliateIds,
     leads,
     acesso: expertAcesso(row, user?.last_sign_in_at),
     email: user?.email ?? null,
-    createdAt: row.created_at,
-  };
+  });
 }
 
 async function namesByPlayerId(tenantId: string, playerIds: string[]): Promise<Map<string, string>> {
