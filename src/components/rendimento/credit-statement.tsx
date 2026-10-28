@@ -55,9 +55,18 @@ const VIA_LABEL: Record<ExpertCreditRow["via"], string> = {
  * Cartão "Extrato de créditos": base da comissão paga por fora do sistema.
  * Tabela paginada (100 por página), total do período no topo e exportação
  * em CSV — o período vem do seletor da página que a monta. Sem `expertId`,
- * o extrato é do próprio usuário logado.
+ * o extrato é do próprio usuário logado. `showExport={false}` esconde o botão
+ * de CSV quando a página já o oferece no cabeçalho (relatório de rendimento).
  */
-export function CreditStatement({ expertId, period }: { expertId?: string; period: PeriodKey }) {
+export function CreditStatement({
+  expertId,
+  period,
+  showExport = true,
+}: {
+  expertId?: string;
+  period: PeriodKey;
+  showExport?: boolean;
+}) {
   const [page, setPage] = useState(0);
   const { data: switcher } = useActiveTenant();
   const tenantId = switcher?.activeTenantId ?? null;
@@ -93,14 +102,16 @@ export function CreditStatement({ expertId, period }: { expertId?: string; perio
             Total depositado creditado: <span className="font-medium">{brl(somaValor)}</span>
           </p>
         </div>
-        <Button
-          variant="outline"
-          onClick={() => exportMutation.mutate()}
-          disabled={exportMutation.isPending}
-        >
-          <Download className="mr-2 h-4 w-4" />
-          {exportMutation.isPending ? "Exportando…" : "Exportar CSV"}
-        </Button>
+        {showExport && (
+          <Button
+            variant="outline"
+            onClick={() => exportMutation.mutate()}
+            disabled={exportMutation.isPending}
+          >
+            <Download className="mr-2 h-4 w-4" />
+            {exportMutation.isPending ? "Exportando…" : "Exportar CSV"}
+          </Button>
+        )}
       </CardHeader>
       <CardContent className="space-y-3">
         {creditsQuery.isLoading ? (

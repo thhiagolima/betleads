@@ -52,6 +52,42 @@ describe("ReportCards", () => {
   });
 });
 
+describe("ReportCards in an empty period", () => {
+  it("still renders the four cards with zeros and — variations", () => {
+    const zero: ReportBlock = {
+      depositado: 0,
+      depositadoClique: 0,
+      depositadoAfiliado: 0,
+      ftds: 0,
+      valorFtd: 0,
+      redepositos: 0,
+      valorRedeposito: 0,
+      ticketRedeposito: null,
+      reativados: 0,
+      depositantes: 0,
+      links: 0,
+      leadsComLink: 0,
+      leadsClicaram: 0,
+      leadsDepositaramClique: 0,
+      contatos: 0,
+    };
+    const html = renderToStaticMarkup(
+      <ReportCards
+        current={zero}
+        variacao={{ depositado: null, ftds: null, redepositos: null, reativados: null }}
+      />,
+    );
+    for (const title of ["Depositado creditado", "FTDs", "Redepósitos", "Reativados"]) {
+      expect(html).toContain(title);
+    }
+    expect(html).toContain('<p class="text-kpi tabular-nums">R$ 0,00</p>');
+    expect(html.match(/<p class="text-kpi tabular-nums">0<\/p>/g)).toHaveLength(3);
+    expect(html.match(/—<span class="sr-only"> sem base no período anterior/g)).toHaveLength(4);
+    expect(html).not.toContain("▲");
+    expect(html).not.toContain("▼");
+  });
+});
+
 describe("VariationTag", () => {
   it("is green ▲ for growth, red ▼ for a drop and — without a base", () => {
     const up = renderToStaticMarkup(<VariationTag value={12.5} />);

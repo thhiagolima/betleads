@@ -186,8 +186,6 @@ export function ReportView({ expertId }: { expertId?: string }) {
   }
 
   const report = reportQuery.data;
-  const semCredito = !!report && report.current.ftds + report.current.redepositos === 0;
-
   return (
     <Page>
       <PageHeader
@@ -223,11 +221,7 @@ export function ReportView({ expertId }: { expertId?: string }) {
             <h2 id="rendimento-resultado" className="text-lg font-semibold">
               Resultado do período
             </h2>
-            {semCredito ? (
-              <MessageCard>Nenhum crédito neste período.</MessageCard>
-            ) : (
-              <ReportCards current={report.current} variacao={report.variacao} />
-            )}
+            <ReportCards current={report.current} variacao={report.variacao} />
           </section>
 
           <div className="grid gap-4 lg:grid-cols-3">
@@ -242,7 +236,7 @@ export function ReportView({ expertId }: { expertId?: string }) {
       )}
 
       {/* `key`: o extrato volta à primeira página quando o período muda. */}
-      <CreditStatement key={period} expertId={expertId} period={period} />
+      <CreditStatement key={period} expertId={expertId} period={period} showExport={false} />
 
       <PortfolioTable expertId={expertId} period={period} onOpenLead={setOpenLead} />
 
