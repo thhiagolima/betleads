@@ -51,6 +51,24 @@ async function walletIntegrity() {
   return rows;
 }
 
+async function betleadsFees(fromMonth: string, toMonth: string) {
+  const { rows } = await db.query<{ month: string; amount: string }>(
+    `select month::text as month, amount::text as amount
+       from public.finance_betleads_fees($1::uuid[], $2::date, $3::date)
+      order by month`,
+    [[DEMO], fromMonth, toMonth],
+  );
+  return rows;
+}
+
+async function invoiceCount() {
+  const { rows } = await db.query<{ n: number }>(
+    `select count(*)::int as n from public.billing_invoices where tenant_id = $1`,
+    [DEMO],
+  );
+  return rows[0].n;
+}
+
 beforeAll(async () => {
   ({ db } = await createMigratedDb());
   await db.query(
@@ -107,7 +125,12 @@ describe("seedDemoFinance", () => {
     expect(Number(wallet[0].balance)).toBeGreaterThanOrEqual(0);
   });
 
-  it("seeds one paid invoice per seeded month, amount_cents 400000, period_start on the 1st", async () => {
+  // Every `__demo_seed__` invoice (the ones this function controls) is a
+  // paid 400000-cent invoice dated the 1st. Fix round 1: a month the
+  // `tenants_billing_plano` trigger already billed (through its own, not
+  // `__demo_seed__`, invoice) is deliberately skipped — see the
+  // finance_betleads_fees test below for the no-double-billing guarantee.
+  it("seeds one paid invoice per seeded month not already billed by the trigger, amount_cents 400000, period_start on the 1st", async () => {
     const { rows: invoices } = await db.query<{
       period_start: string;
       status: string;
@@ -118,12 +141,55 @@ describe("seedDemoFinance", () => {
         order by period_start`,
       [DEMO],
     );
-    expect(invoices.length).toBeGreaterThan(0);
     for (const inv of invoices) {
       expect(inv.status).toBe("paid");
       expect(inv.amount_cents).toBe(400000);
       expect(inv.period_start.endsWith("-01")).toBe(true);
     }
+
+    // Every seeded month is billed exactly once, by either the seed's own
+    // invoice or some other (the trigger's).
+    const { rows: months } = await db.query<{ month: string }>(
+      `select distinct date_trunc('month', metric_date)::date::text as month
+         from public.tenant_daily_metrics where tenant_id = $1`,
+      [DEMO],
+    );
+    expect(months.length).toBeGreaterThan(0);
+    for (const { month } of months) {
+      const { rows: billed } = await db.query<{ n: number }>(
+        `select count(*)::int as n from public.billing_invoices
+          where tenant_id = $1 and status in ('open', 'paid')
+            and date_trunc('month', period_start)::date = $2::date`,
+        [DEMO, month],
+      );
+      expect(billed[0].n).toBe(1);
+    }
+  });
+
+  // Fix round 1: the `tenants_billing_plano` trigger (fired by the demo
+  // tenant insert in beforeAll, through the real trigger path — not
+  // bypassed here) already issued its own `open`, upfront, 400000-cent
+  // invoice for the month of billing_today() (= today, since no test clock
+  // is set). finance_betleads_fees must still show exactly R$ 4000 for that
+  // month (not R$ 8000 from double-counting both invoices), and for every
+  // other seeded month.
+  it("finance_betleads_fees is exactly 4000 per seeded month, including the trigger's own invoice month", async () => {
+    const { rows: range } = await db.query<{ first_month: string; current_month: string }>(
+      `select date_trunc('month', min(metric_date))::date::text as first_month,
+              date_trunc('month', current_date)::date::text as current_month
+         from public.tenant_daily_metrics where tenant_id = $1`,
+      [DEMO],
+    );
+    const fees = await betleadsFees(range[0].first_month, range[0].current_month);
+    expect(fees.length).toBeGreaterThan(0);
+    for (const fee of fees) expect(Number(fee.amount)).toBe(4000);
+  });
+
+  it("seeding twice does not change the demo house's total invoice count", async () => {
+    const before = await invoiceCount();
+    await seedDemoFinance(db, { demoTenantId: DEMO, days: DAYS });
+    const after = await invoiceCount();
+    expect(after).toBe(before);
   });
 
   it("no seeded other cost looks like a duplicated Betleads charge", async () => {

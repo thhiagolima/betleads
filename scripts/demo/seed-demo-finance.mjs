@@ -266,8 +266,18 @@ async function seedBetleadsUsage(client, { demoTenantId, seed, sorted, firstDate
  * One `paid` invoice per seeded month (Task 8): amount_cents 400000,
  * period_start the 1st, due dates equal to period_start (prepaid monthly
  * plan fee). Rebuilt from scratch on every run (marked `manual_note =
- * '__demo_seed__'` so the delete never touches the real tenant_billing
+ * '__demo_seed__'` so the delete never touches the real `tenants_billing_plano`
  * trigger's own invoice for the demo tenant, which has no such marker).
+ *
+ * Fix round 1: the trigger issues its OWN `open`, upfront invoice (also
+ * 400000 cents) for whatever month `billing_today()` falls in — usually the
+ * month of the most recent seeded day. `finance_betleads_fees` sums every
+ * open/paid invoice per month with no manual_note filter, so seeding a
+ * second invoice for that same month would double the fee the dashboard
+ * shows (R$ 8000 instead of R$ 4000). So before inserting, check whether the
+ * demo house already has ANY other open/paid invoice (not ours) whose
+ * period_start falls in that month, and skip the month if so — never
+ * touching that other invoice.
  */
 async function seedBetleadsInvoices(client, { demoTenantId, seed, months }) {
   await client.query(
@@ -277,6 +287,18 @@ async function seedBetleadsInvoices(client, { demoTenantId, seed, months }) {
   for (const month of months) {
     const periodStart = `${month}-01`;
     const periodEnd = lastDayOfMonth(month);
+
+    const { rows: others } = await client.query(
+      `select 1 from public.billing_invoices
+        where tenant_id = $1
+          and status in ('open', 'paid')
+          and (manual_note is distinct from '__demo_seed__')
+          and period_start >= $2 and period_start <= $3
+        limit 1`,
+      [demoTenantId, periodStart, periodEnd],
+    );
+    if (others.length) continue;
+
     await client.query(
       `insert into public.billing_invoices
          (id, tenant_id, period_start, period_end, cycle_due_date, due_date,
