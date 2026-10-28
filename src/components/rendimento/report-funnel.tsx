@@ -1,0 +1,72 @@
+// Relatório de rendimento, bloco 2 ("Do contato ao depósito", spec §4): links
+// gerados → leads que clicaram → depositaram por clique dentro da janela, e os
+// contatos registrados. Puramente apresentacional.
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import type { ReportBlock } from "@/lib/expert-report.functions";
+import { num } from "@/lib/format";
+
+/**
+ * Definição de "Clique→depósito" (funil e ranking da equipe). Os dois lados
+ * são contados no período e o depósito pode vir de um clique anterior a ele,
+ * então a razão pode passar de 100%: a tela limita a 100%, os dados não.
+ */
+export const CLIQUE_DEPOSITO_DEFINICAO =
+  "Leads que depositaram por clique no período ÷ leads que clicaram no período";
+
+/** Percentual inteiro pt-BR de `part / base`, exibido no máximo 100%; null sem base. */
+function share(part: number, base: number): string | null {
+  if (base <= 0) return null;
+  return `${Math.min(100, Math.round((part / base) * 100)).toLocaleString("pt-BR")}%`;
+}
+
+function Step({ label, value, title }: { label: string; value: number; title?: string }) {
+  return (
+    <li
+      className="flex items-baseline justify-between gap-3 rounded-lg border border-border/70 bg-card px-4 py-3"
+      title={title}
+    >
+      <span className="text-body text-muted-foreground">{label}</span>
+      <span className="text-lg font-semibold tabular-nums">{num(value)}</span>
+    </li>
+  );
+}
+
+export function ReportFunnel({
+  current,
+  janelaHoras,
+}: {
+  current: ReportBlock;
+  janelaHoras: number;
+}) {
+  const clicaramPct = share(current.leadsClicaram, current.leadsComLink);
+  const depositaramPct = share(current.leadsDepositaramClique, current.leadsClicaram);
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Do contato ao depósito</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <ol className="space-y-2">
+          <Step label="Links gerados" value={current.links} />
+          <Step
+            label={clicaramPct ? `Leads que clicaram (${clicaramPct})` : "Leads que clicaram"}
+            value={current.leadsClicaram}
+          />
+          <Step
+            label={
+              depositaramPct
+                ? `Depositaram em até ${janelaHoras}h (${depositaramPct} dos que clicaram)`
+                : `Depositaram em até ${janelaHoras}h`
+            }
+            value={current.leadsDepositaramClique}
+            title={CLIQUE_DEPOSITO_DEFINICAO}
+          />
+        </ol>
+        <p className="flex items-baseline justify-between gap-3 px-4 text-body">
+          <span className="text-muted-foreground">Contatos registrados</span>
+          <span className="font-semibold tabular-nums">{num(current.contatos)}</span>
+        </p>
+      </CardContent>
+    </Card>
+  );
+}

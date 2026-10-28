@@ -11,6 +11,8 @@ export type TenantOption = {
   role: ShellRole;
   is_demo?: boolean;
   can_view_finance?: boolean;
+  /** Papel na casa (HOUSE_MEMBER_ROLES) + perfil de rendimento ativo vinculado a este usuário ali. */
+  has_team_profile?: boolean;
 };
 
 /**

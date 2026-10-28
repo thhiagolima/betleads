@@ -17,6 +17,6 @@ export function useShellNav() {
     isSuperAdmin,
     sections: isGroupPath(pathname)
       ? GROUP_SECTIONS
-      : visibleSections(role, isSuperAdmin, active?.can_view_finance),
+      : visibleSections(role, isSuperAdmin, active?.can_view_finance, active?.has_team_profile),
   };
 }

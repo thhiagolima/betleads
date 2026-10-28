@@ -4,7 +4,8 @@
 // período, cartões de métricas (`ExpertMetricCards`), gráfico de depositado
 // por dia, a lista "Para chamar hoje" (retornos, entraram em risco, clicaram
 // e não depositaram) e o total de leads visíveis com um botão para a
-// listagem (/expert/leads).
+// listagem (/expert/leads). Relatório de rendimento, Task 6: atalho "Ver
+// relatório completo" para /expert/rendimento.
 import { useState } from "react";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -338,6 +339,12 @@ function ExpertHomePage() {
             Depósitos contam para você quando o lead clica no seu link e deposita em até{" "}
             {dashboardQuery.data.janelaHoras}h, ou quando chega pelo seu ID de afiliado.
           </p>
+          <Button asChild variant="outline" className="w-fit gap-2">
+            <Link to="/expert/rendimento">
+              Ver relatório completo
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          </Button>
         </>
       )}
 

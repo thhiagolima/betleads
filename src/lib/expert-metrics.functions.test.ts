@@ -29,12 +29,10 @@ import { createFakeDb } from "@/lib/sms-bulk.test-support";
 import { __resetDemoTenantCacheForTests } from "@/lib/tenant-access.server";
 import {
   exportExpertCreditsCsvFor,
+  getExpertClickWindowHoursFor,
   getExpertDashboardFor,
-  getExpertDetailFor,
   listExpertCreditsFor,
-  listExpertsRankingFor,
   saveExpertSettingsFor,
-  type ExpertMetrics,
 } from "./expert-metrics.functions";
 
 const TENANT = "00000000-0000-4000-8000-00000000a0a0";
@@ -45,7 +43,7 @@ const ME = "00000000-0000-4000-8000-0000000000e1";
 const OTHER_EXPERT = "00000000-0000-4000-8000-0000000000e2";
 const PLAYER = "00000000-0000-4000-8000-0000000000b1";
 
-type Ctx = Parameters<typeof listExpertsRankingFor>[0];
+type Ctx = Parameters<typeof getExpertClickWindowHoursFor>[0];
 
 /** The caller's own (JWT) client: active tenant + per-tenant admin check. */
 function ctxFor(userId: string, opts: { admin?: boolean } = {}): Ctx {
@@ -185,183 +183,20 @@ describe("getExpertDashboardFor", () => {
   });
 });
 
-describe("listExpertsRankingFor", () => {
+describe("getExpertClickWindowHoursFor", () => {
   it("refuses non-admin", async () => {
-    await expect(listExpertsRankingFor(ctxFor(GESTOR, { admin: false }), {})).rejects.toThrow(
-      "Apenas o admin da casa gerencia experts.",
-    );
+    await expect(
+      getExpertClickWindowHoursFor(ctxFor(GESTOR, { admin: false })),
+    ).rejects.toThrow("Apenas o admin da casa gerencia experts.");
   });
 
-  it("is sorted by depositado desc and maps snake_case to camelCase", async () => {
-    addExpert(ME, { nome: "Ana", tipo: "total", ativo: true });
-    addExpert(OTHER_EXPERT, { nome: "Bruno", tipo: "restrito", ativo: false });
-    fake.admin.onRpc("expert_metrics", () => ({
-      data: [
-        metricsRow(ME, {
-          depositado: 100,
-          depositado_clique: 60,
-          depositado_afiliado: 40,
-          depositos: 2,
-          depositantes: 2,
-          reativacoes: 1,
-          ftds: 1,
-          links: 3,
-          cliques: 5,
-          contatos: 4,
-        }),
-        metricsRow(OTHER_EXPERT, { depositado: 500 }),
-      ],
-      error: null,
-    }));
+  it("returns the house's configured window, 72 by default", async () => {
+    const defaultResult = await getExpertClickWindowHoursFor(ctxFor(ADMIN));
+    expect(defaultResult).toEqual({ janelaHoras: 72 });
 
-    const result = await listExpertsRankingFor(ctxFor(ADMIN), {});
-
-    expect(result.rows.map((r) => r.nome)).toEqual(["Bruno", "Ana"]);
-    const ana = result.rows.find((r) => r.nome === "Ana") as ExpertMetrics & {
-      nome: string;
-      tipo: string;
-      ativo: boolean;
-    };
-    expect(ana).toMatchObject({
-      expertId: ME,
-      tipo: "total",
-      ativo: true,
-      depositado: 100,
-      depositadoClique: 60,
-      depositadoAfiliado: 40,
-      depositos: 2,
-      depositantes: 2,
-      reativacoes: 1,
-      ftds: 1,
-      links: 3,
-      cliques: 5,
-      contatos: 4,
-    });
-  });
-
-  it("zero-fills an expert with no activity in the period", async () => {
-    addExpert(ME, { nome: "Ana" });
-    const result = await listExpertsRankingFor(ctxFor(ADMIN), {});
-    expect(result.rows).toEqual([
-      expect.objectContaining({ expertId: ME, depositado: 0, cliques: 0, contatos: 0 }),
-    ]);
-  });
-});
-
-describe("getExpertDetailFor", () => {
-  function seedCommon() {
-    addExpert(ME, { nome: "Ana", tipo: "total" });
-    addExpert(OTHER_EXPERT, { nome: "Bruno", tipo: "total" });
-    fake.admin.rows("players").push({ id: PLAYER, tenant_id: TENANT, nome: "Jogador 1" });
-  }
-
-  it("detail of an expert from another house is 'Expert não encontrado.'", async () => {
-    fake.admin.rows("tenants").push({
-      id: OTHER_TENANT,
-      nome: "Outra",
-      status: "active",
-      is_demo: false,
-    });
-    fake.admin.rows("experts").push({
-      id: OTHER_EXPERT,
-      tenant_id: OTHER_TENANT,
-      nome: "De outra casa",
-      tipo: "total",
-      ativo: true,
-      envio_modo: "livre",
-      teto_mensal: null,
-      assumir_prazo_dias: 3,
-      user_id: null,
-      created_at: "2026-10-01T00:00:00Z",
-    });
-
-    await expect(getExpertDetailFor(ctxFor(ADMIN), { expertId: OTHER_EXPERT })).rejects.toThrow(
-      "Expert não encontrado.",
-    );
-  });
-
-  it("lists only that expert's links, contacts and active claims", async () => {
-    seedCommon();
-    vi.setSystemTime(new Date("2026-10-24T12:00:00Z"));
-
-    fake.admin.rows("expert_links").push(
-      {
-        id: "link-mine",
-        tenant_id: TENANT,
-        expert_id: ME,
-        player_id: PLAYER,
-        link_dispatch_id: "disp-1",
-        oferta: "Oferta A",
-        original_url: "https://x",
-        sent_url: "https://x",
-        shortened: true,
-        created_at: "2026-10-23T00:00:00Z",
-      },
-      {
-        id: "link-other",
-        tenant_id: TENANT,
-        expert_id: OTHER_EXPERT,
-        player_id: PLAYER,
-        link_dispatch_id: null,
-        oferta: "Oferta B",
-        original_url: "https://y",
-        sent_url: "https://y",
-        shortened: true,
-        created_at: "2026-10-23T00:00:00Z",
-      },
-    );
-    fake.admin.rows("link_dispatches").push({
-      id: "disp-1",
-      first_party_first_clicked_at: "2026-10-23T01:00:00Z",
-    });
-    fake.admin.rows("expert_lead_contacts").push(
-      {
-        id: "c-mine",
-        tenant_id: TENANT,
-        expert_id: ME,
-        player_id: PLAYER,
-        resultado: "chamei",
-        created_at: "2026-10-23T00:00:00Z",
-      },
-      {
-        id: "c-other",
-        tenant_id: TENANT,
-        expert_id: OTHER_EXPERT,
-        player_id: PLAYER,
-        resultado: "respondeu",
-        created_at: "2026-10-23T00:00:00Z",
-      },
-    );
-    fake.admin.rows("expert_lead_claims").push(
-      { tenant_id: TENANT, expert_id: ME, player_id: PLAYER, expires_at: "2026-10-26T00:00:00Z" },
-      {
-        tenant_id: TENANT,
-        expert_id: OTHER_EXPERT,
-        player_id: PLAYER,
-        expires_at: "2026-10-26T00:00:00Z",
-      },
-      // Expired claim of mine: must not show up.
-      { tenant_id: TENANT, expert_id: ME, player_id: PLAYER, expires_at: "2026-10-20T00:00:00Z" },
-    );
-
-    const result = await getExpertDetailFor(ctxFor(ADMIN), { expertId: ME });
-
-    expect(result.expert).toMatchObject({ id: ME, nome: "Ana" });
-    expect(result.links).toEqual([
-      {
-        id: "link-mine",
-        oferta: "Oferta A",
-        leadNome: "Jogador 1",
-        createdAt: "2026-10-23T00:00:00Z",
-        clicado: true,
-      },
-    ]);
-    expect(result.contatos).toEqual([
-      { leadNome: "Jogador 1", resultado: "chamei", createdAt: "2026-10-23T00:00:00Z" },
-    ]);
-    expect(result.assumidos).toEqual([
-      { leadNome: "Jogador 1", expiresAt: "2026-10-26T00:00:00Z" },
-    ]);
+    fake.admin.rows("expert_settings").push({ tenant_id: TENANT, click_window_hours: 48 });
+    const configuredResult = await getExpertClickWindowHoursFor(ctxFor(ADMIN));
+    expect(configuredResult).toEqual({ janelaHoras: 48 });
   });
 });
 
@@ -517,6 +352,37 @@ describe("listExpertCreditsFor / exportExpertCreditsCsvFor (Task 8)", () => {
     const lines = result.csv.slice(1).split("\n");
 
     expect(lines[1]).toBe('23/10/2026 00:00;"Lead ""Esperto""; Silva";10,00;Clique;;;Não;Não');
+  });
+
+  it("listExpertCredits without expertId serves the caller's own statement; with expertId requires admin", async () => {
+    addCredit("d-mine", ME, { valor: 10 });
+    addCredit("d-other", OTHER_EXPERT, { valor: 999 });
+
+    // Expert (requireExpertContext → ME): o próprio extrato, sem expertId.
+    const own = await listExpertCreditsFor(EXPERT_CTX, { period: "30" });
+    expect(own.rows.map((r) => r.depositId)).toEqual(["d-mine"]);
+    expect(own.somaValor).toBe(10);
+    const ownCsv = await exportExpertCreditsCsvFor(EXPERT_CTX, { period: "30" });
+    expect(ownCsv.filename).toBe("extrato-eu-2026-09-25-a-2026-10-24.csv");
+    expect(ownCsv.csv.slice(1).split("\n").at(-1)).toBe("Total;;10,00;;;;;");
+
+    // Com expertId, mesmo o próprio, o expert cai na recusa de admin (a
+    // recusa confere o acesso real de expert: `resolveExpertContext`).
+    fake.admin.rows("user_roles").push({ user_id: "u1", tenant_id: TENANT, role: "expert" });
+    fake.admin.rows("experts").find((e) => e.id === ME)!.user_id = "u1";
+    await expect(listExpertCreditsFor(EXPERT_CTX, { expertId: ME })).rejects.toThrow(
+      "Apenas o admin da casa gerencia experts.",
+    );
+    await expect(exportExpertCreditsCsvFor(EXPERT_CTX, { expertId: OTHER_EXPERT })).rejects.toThrow(
+      "Apenas o admin da casa gerencia experts.",
+    );
+
+    // Admin com expertId: o extrato do perfil pedido.
+    const asAdmin = await listExpertCreditsFor(ctxFor(ADMIN), {
+      expertId: OTHER_EXPERT,
+      period: "30",
+    });
+    expect(asAdmin.rows.map((r) => r.depositId)).toEqual(["d-other"]);
   });
 
   it("credits endpoints refuse non-admin and experts of another house", async () => {

@@ -15,7 +15,11 @@ import {
   type BillingRole,
 } from "@/lib/billing/billing-view";
 import { cancelOpenInvoiceCharges } from "@/lib/billing/invoices.server";
-import { EXPERT_MEMBER_GUARD, HOUSE_MEMBER_ROLES } from "@/lib/house-member-roles";
+import {
+  EXPERT_MEMBER_GUARD,
+  HOUSE_MEMBER_ROLES,
+  isHouseMemberRole,
+} from "@/lib/house-member-roles";
 import { assertTenantNotDemo, isBillingEnforcementEnabled } from "@/lib/tenant-access.server";
 import { auditTenant } from "@/lib/tenant-audit.server";
 import { dbUuid } from "@/lib/zod-helpers";
@@ -598,12 +602,32 @@ export async function getTenantSwitcherFor(ctx: ServerContext) {
   if (tenantsErr) throw new Error(tenantsErr.message);
 
   const roleByTenant = new Map(roles.map((membership) => [membership.tenant_id, membership.role]));
+  // `has_team_profile`: this user has a house role (HOUSE_MEMBER_ROLES) in
+  // that house AND an active profile (`experts.ativo`) linked to them
+  // there — one query for every house of the switcher. A super admin's
+  // forced "super_admin" role (below) never satisfies the role side, so
+  // this stays false for them unless `roleByTenant` also has a real
+  // membership (normally it doesn't).
+  const optionTenantIds = (tenants ?? []).map((tenant) => tenant.id);
+  let activeProfileTenantIds = new Set<string>();
+  if (optionTenantIds.length > 0) {
+    const { data: activeProfiles, error: profilesErr } = await db()
+      .from<{ tenant_id: string }[]>("experts")
+      .select("tenant_id")
+      .eq("user_id", ctx.userId)
+      .eq("ativo", true)
+      .in("tenant_id", optionTenantIds);
+    if (profilesErr) throw new Error(profilesErr.message);
+    activeProfileTenantIds = new Set((activeProfiles ?? []).map((row) => row.tenant_id));
+  }
   const options = (tenants ?? []).map((tenant) => ({
     id: tenant.id,
     nome: tenant.nome,
     slug: tenant.slug,
     role: superAdmin ? "super_admin" : (roleByTenant.get(tenant.id) ?? "member"),
     is_demo: tenant.is_demo === true,
+    has_team_profile:
+      isHouseMemberRole(roleByTenant.get(tenant.id)) && activeProfileTenantIds.has(tenant.id),
   }));
   // The switcher is on every page: a failing finance/group lookup must only
   // hide those entries, never break navigation. A super admin sees every
