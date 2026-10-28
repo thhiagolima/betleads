@@ -15,6 +15,29 @@ export function valueToScope(value: string): DashboardScope {
   return { kind: "all" };
 }
 
+type ScopeOption = { id: string; nome: string };
+
+/**
+ * The picker's options plus the current scope when it is not among them
+ * (the demo house or an inactive house picked from elsewhere), labeled with
+ * the dashboard's label, so the Select never shows a blank value. Without a
+ * label yet, the options are returned as they are.
+ */
+export function withCurrentScope<T extends { groups: ScopeOption[]; tenants: ScopeOption[] }>(
+  options: T,
+  scope: DashboardScope,
+  label: string | undefined,
+): T {
+  if (!label) return options;
+  if (scope.kind === "tenant" && !options.tenants.some((t) => t.id === scope.tenantId)) {
+    return { ...options, tenants: [...options.tenants, { id: scope.tenantId, nome: label }] };
+  }
+  if (scope.kind === "group" && !options.groups.some((g) => g.id === scope.groupId)) {
+    return { ...options, groups: [...options.groups, { id: scope.groupId, nome: label }] };
+  }
+  return options;
+}
+
 /**
  * What a click on a house row (Lucro por casa, placar) does:
  * - "open": call the caller's onOpenTenant (e.g. /grupo → /grupo/casa). Only

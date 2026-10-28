@@ -20,6 +20,8 @@ import {
   type FinanceDashboard,
 } from "@/lib/finance-dashboard.functions";
 
+import { FINANCE_DASHBOARD_QUERY_KEY } from "@/components/finance/query-keys";
+
 import { CostBreakdown } from "./cost-breakdown";
 import { KpiCards } from "./kpi-cards";
 import { PendingBanner } from "./pending-banner";
@@ -131,7 +133,7 @@ export function FinanceDashboardView({
 
   const getDashboard = useServerFn(getFinanceDashboard);
   const query = useQuery({
-    queryKey: ["finance-dashboard", scope, period],
+    queryKey: [...FINANCE_DASHBOARD_QUERY_KEY, scope, period],
     queryFn: () =>
       getDashboard({
         data: { scope, range: period.range, compare: period.compare, preset: period.preset },
@@ -141,7 +143,17 @@ export function FinanceDashboardView({
 
   return (
     <div className="space-y-4">
-      {canPickScope && <ScopePicker value={scope} onChange={setScope} />}
+      {canPickScope && (
+        <ScopePicker
+          value={scope}
+          currentLabel={
+            query.data && scopeToValue(query.data.scope) === scopeToValue(scope)
+              ? query.data.label
+              : undefined
+          }
+          onChange={setScope}
+        />
+      )}
       <GroupPeriodBar value={period} onChange={setPeriod} monthPicker />
       {query.isError ? (
         <p className="text-sm text-destructive">

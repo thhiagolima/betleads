@@ -16,13 +16,16 @@ import {
 } from "@/components/ui/select";
 import { listDashboardScopes, type DashboardScope } from "@/lib/finance-dashboard.functions";
 
-import { scopeToValue, valueToScope } from "./scope";
+import { scopeToValue, valueToScope, withCurrentScope } from "./scope";
 
 export function ScopePicker({
   value,
+  currentLabel,
   onChange,
 }: {
   value: DashboardScope;
+  /** The dashboard's label of `value`, shown when `value` is not in the list. */
+  currentLabel?: string;
   onChange: (next: DashboardScope) => void;
 }) {
   const listScopes = useServerFn(listDashboardScopes);
@@ -31,8 +34,11 @@ export function ScopePicker({
     queryFn: () => listScopes(),
     staleTime: 5 * 60_000,
   });
-  const groups = query.data?.groups ?? [];
-  const tenants = query.data?.tenants ?? [];
+  const { groups, tenants } = withCurrentScope(
+    { groups: query.data?.groups ?? [], tenants: query.data?.tenants ?? [] },
+    value,
+    currentLabel,
+  );
 
   return (
     <div className="flex items-center gap-2 text-sm">
