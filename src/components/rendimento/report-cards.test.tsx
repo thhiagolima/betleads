@@ -100,6 +100,14 @@ describe("VariationTag", () => {
     expect(renderToStaticMarkup(<VariationTag value={null} />)).toContain("—");
   });
 
+  it("is a neutral 0,0% without arrow for no change", () => {
+    const zero = renderToStaticMarkup(<VariationTag value={0} />);
+    expect(zero).toContain("0,0%");
+    expect(zero).toContain("text-muted-foreground");
+    expect(zero).not.toContain("▲");
+    expect(zero).not.toContain("▼");
+    expect(zero).not.toContain("text-success");
+  });
 });
 
 describe("ReportFunnel", () => {

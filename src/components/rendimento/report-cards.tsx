@@ -15,12 +15,19 @@ export type ReportVariacao = {
 const pct = (value: number) =>
   value.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
-/** "▲ 12,5%" (verde) / "▼ 3,0%" (vermelho), ou "—" sem base no período anterior. `value` já em percentual. */
+/** "▲ 12,5%" (verde) / "▼ 3,0%" (vermelho), "0,0%" neutro sem variação, ou "—" sem base no período anterior. `value` já em percentual. */
 export function VariationTag({ value }: { value: number | null }) {
   if (value === null) {
     return (
       <span className="text-xs font-medium text-muted-foreground">
         —<span className="sr-only"> sem base no período anterior</span>
+      </span>
+    );
+  }
+  if (value === 0) {
+    return (
+      <span className="text-xs font-medium text-muted-foreground">
+        {pct(0)}%<span className="sr-only"> em relação ao período anterior</span>
       </span>
     );
   }
