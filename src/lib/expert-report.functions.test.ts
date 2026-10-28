@@ -11,7 +11,22 @@ const fake = vi.hoisted(() => ({
 vi.mock("@/integrations/supabase/client.server", async () => {
   const { createFakeDb } = await import("@/lib/sms-bulk.test-support");
   fake.admin = createFakeDb();
-  return { supabaseAdmin: fake.admin.client };
+  return {
+    supabaseAdmin: {
+      ...fake.admin.client,
+      // Only `getTeamReportFor` (via `listExpertsFor`) reads auth users, for
+      // the one linked expert (ME/EXPERT_USER); unlinked profiles (OTHER)
+      // never call this.
+      auth: {
+        admin: {
+          getUserById: async (id: string) =>
+            id === EXPERT_USER
+              ? { data: { user: { id, email: "ana@casa.com", last_sign_in_at: null } }, error: null }
+              : { data: { user: null }, error: { message: "User not found" } },
+        },
+      },
+    },
+  };
 });
 
 import { createFakeDb } from "@/lib/sms-bulk.test-support";
@@ -20,8 +35,10 @@ import { __resetDemoTenantCacheForTests } from "@/lib/tenant-access.server";
 import type { ServerContext } from "./expert-report-subject.server";
 import {
   exportExpertPortfolioCsvFor,
+  exportTeamReportCsvFor,
   getExpertLeadTimelineFor,
   getExpertReportFor,
+  getTeamReportFor,
   listExpertPortfolioFor,
 } from "./expert-report.functions";
 
@@ -212,6 +229,11 @@ beforeEach(async () => {
   fake.admin.onRpc("expert_report_daily", () => ({ data: [], error: null }));
   fake.admin.onRpc("expert_portfolio", () => ({ data: [], error: null }));
   fake.admin.onRpc("expert_last_computed_at", () => ({ data: null, error: null }));
+  fake.admin.onRpc("expert_team_report", () => ({ data: [], error: null }));
+  fake.admin.onRpc("house_deposit_totals", () => ({
+    data: [{ depositado: 0, ftds: 0 }],
+    error: null,
+  }));
 });
 
 afterEach(() => {
@@ -553,5 +575,130 @@ describe("getExpertLeadTimelineFor", () => {
     await expect(
       getExpertLeadTimelineFor(ctxFor(EXPERT_USER), { playerId: PLAYER, expertId: OTHER }),
     ).rejects.toThrow("Apenas o admin da casa gerencia experts.");
+  });
+});
+
+describe("getTeamReportFor / exportTeamReportCsvFor", () => {
+  function teamRow(overrides: Record<string, unknown> = {}) {
+    return {
+      expert_id: ME,
+      depositado: 0,
+      ftds: 0,
+      redepositos: 0,
+      reativados: 0,
+      leads_clicaram: 0,
+      leads_depositaram_clique: 0,
+      depositos: 0,
+      ...overrides,
+    };
+  }
+
+  it("team report refuses non-admin", async () => {
+    await expect(
+      getTeamReportFor(ctxFor(EXPERT_USER), { period: "mes_atual" }),
+    ).rejects.toThrow("Apenas o admin da casa gerencia experts.");
+  });
+
+  it("team report computes house shares and handles zero house totals", async () => {
+    fake.admin.onRpc("expert_team_report", (args) => {
+      const current = args._from === CURRENT_FROM;
+      return {
+        data: [
+          teamRow(
+            current
+              ? {
+                  depositado: "300",
+                  ftds: 3,
+                  redepositos: 2,
+                  reativados: 1,
+                  leads_clicaram: 10,
+                  leads_depositaram_clique: 4,
+                  depositos: 6,
+                }
+              : { depositado: "100", ftds: 1, redepositos: 5 },
+          ),
+          teamRow({ expert_id: OTHER }),
+        ],
+        error: null,
+      };
+    });
+    fake.admin.onRpc("house_deposit_totals", () => ({
+      data: [{ depositado: "0", ftds: 0 }],
+      error: null,
+    }));
+
+    const zeroHouse = await getTeamReportFor(ctxFor(ADMIN, { admin: true }), {
+      period: "mes_atual",
+    });
+
+    expect(zeroHouse.totais).toEqual({
+      creditado: 300,
+      pctCasaDepositado: null, // casa sem depósito: sem divisão por zero
+      ftds: 3,
+      pctCasaFtds: null,
+      redepositos: 2,
+      reativados: 1,
+    });
+    // Ordenado por creditado desc.
+    expect(zeroHouse.rows.map((r) => r.expertId)).toEqual([ME, OTHER]);
+    expect(zeroHouse.rows[0]).toMatchObject({
+      expertId: ME,
+      nome: "Ana Souza",
+      tipoLabel: "Expert total",
+      ativo: true,
+      creditado: 300,
+      variacao: 200, // (300-100)/100 * 100
+      ftds: 3,
+      redepositos: 2,
+      reativados: 1,
+      cliqueDeposito: 0.4, // 4/10
+      ticket: 50, // 300/6
+    });
+    expect(zeroHouse.rows[1]).toMatchObject({
+      expertId: OTHER,
+      nome: "Bruno",
+      creditado: 0,
+      variacao: null, // sem base (0 nos dois períodos)
+      cliqueDeposito: null, // sem cliques
+      ticket: null, // sem depósito
+    });
+
+    fake.admin.onRpc("house_deposit_totals", () => ({
+      data: [{ depositado: "1000", ftds: 10 }],
+      error: null,
+    }));
+    const withHouse = await getTeamReportFor(ctxFor(ADMIN, { admin: true }), {
+      period: "mes_atual",
+    });
+    expect(withHouse.totais.pctCasaDepositado).toBeCloseTo(0.3, 6);
+    expect(withHouse.totais.pctCasaFtds).toBeCloseTo(0.3, 6);
+  });
+
+  it("team csv header is exact", async () => {
+    fake.admin.onRpc("expert_team_report", () => ({
+      data: [
+        teamRow({
+          depositado: "123.40",
+          ftds: 1,
+          redepositos: 2,
+          leads_clicaram: 4,
+          leads_depositaram_clique: 2,
+          depositos: 3,
+        }),
+      ],
+      error: null,
+    }));
+
+    const result = await exportTeamReportCsvFor(ctxFor(ADMIN, { admin: true }), {
+      period: "mes_atual",
+    });
+
+    expect(result.csv.startsWith("﻿")).toBe(true);
+    const lines = result.csv.slice(1).split("\n");
+    expect(lines[0]).toBe(
+      "Pessoa;Tipo;Creditado;Variação;FTD;Redepósitos;Reativados;Clique→depósito;Ticket médio",
+    );
+    expect(lines[1]).toBe("Ana Souza;Expert total;123,40;0,0%;1;2;0;50,0%;41,13");
+    expect(result.filename).toBe("equipe-2026-10-01-a-2026-10-24.csv");
   });
 });

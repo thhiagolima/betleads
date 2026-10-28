@@ -56,7 +56,8 @@ const PAPEL_LABEL: Record<HouseMemberRole, string> = {
   member: "Membro",
 };
 
-function tipoLabelOf(tipo: ExpertTipo, papelEquipe: HouseMemberRole | null): string {
+/** "Expert restrito"/"Expert total", ou "Equipe ({papel})" para um perfil vinculado. Usado também pelo relatório da equipe (`getTeamReportFor`). */
+export function tipoLabelOf(tipo: ExpertTipo, papelEquipe: HouseMemberRole | null): string {
   return papelEquipe ? `Equipe (${PAPEL_LABEL[papelEquipe]})` : TIPO_LABEL[tipo];
 }
 

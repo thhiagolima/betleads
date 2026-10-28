@@ -1,16 +1,19 @@
-// Server functions do relatório de rendimento de uma pessoa (spec
-// 2026-10-28-relatorio-rendimento-design.md §4, §6, §7): resultado do
-// período com a comparação, série diária, top leads, carteira (+ CSV) e o
-// histórico do lead com a pessoa.
+// Server functions do relatório de rendimento de uma pessoa e da equipe
+// (spec 2026-10-28-relatorio-rendimento-design.md §4, §5, §6, §7): resultado
+// do período com a comparação, série diária, top leads, carteira (+ CSV), o
+// histórico do lead com a pessoa, e o ranking da equipe para o admin (+ CSV).
 //
-// Acesso: `resolveReportSubject` — sem `expertId`, o próprio usuário
-// (expert ou perfil da equipe); com `expertId`, só o admin da casa. A mesma
-// função monta o relatório para a pessoa e para o admin.
+// Acesso do relatório individual: `resolveReportSubject` — sem `expertId`, o
+// próprio usuário (expert ou perfil da equipe); com `expertId`, só o admin
+// da casa. A mesma função monta o relatório para a pessoa e para o admin.
+// O relatório da equipe (`getTeamReportFor`) é sempre do admin
+// (`requireExpertAdminTenant`): não há visão própria dele.
 //
 // Consomem as funções SQL `expert_report`, `expert_report_daily`,
-// `expert_portfolio`, `expert_lead_timeline` e `expert_last_computed_at`
-// (migrations 20261106153000/20261106153100), todas service_role e fora dos
-// tipos gerados do Supabase → `(supabaseAdmin as any)`.
+// `expert_portfolio`, `expert_lead_timeline`, `expert_team_report`,
+// `house_deposit_totals` e `expert_last_computed_at` (migrations
+// 20261106153000/20261106153100), todas service_role e fora dos tipos
+// gerados do Supabase → `(supabaseAdmin as any)`.
 
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -33,9 +36,11 @@ import {
 } from "@/lib/expert-period";
 import {
   resolveReportSubject,
+  tipoLabelOf,
   type ReportSubject,
   type ServerContext,
 } from "@/lib/expert-report-subject.server";
+import { listExpertsFor, requireExpertAdminTenant } from "@/lib/experts-admin.functions";
 import { brtDayKey } from "@/lib/tz";
 import { dbUuid } from "@/lib/zod-helpers";
 
@@ -526,4 +531,219 @@ export async function getExpertLeadTimelineFor(
   const nextBefore = items.length >= TIMELINE_LIMIT ? items[items.length - 1].at : null;
 
   return { resumo, items, nextBefore };
+}
+
+// ---------------------------------------------------------- team report (spec §5)
+
+export type TeamReportRow = {
+  expertId: string;
+  nome: string;
+  tipoLabel: string;
+  ativo: boolean;
+  creditado: number;
+  variacao: number | null;
+  ftds: number;
+  redepositos: number;
+  reativados: number;
+  /** Fração 0–1 (leads_depositaram_clique / leads_clicaram), null sem cliques. */
+  cliqueDeposito: number | null;
+  /** depositado / depositos (todos os depósitos creditados, não só redepósito). Null sem depósito. */
+  ticket: number | null;
+};
+
+export type TeamReportResult = {
+  totais: {
+    creditado: number;
+    pctCasaDepositado: number | null;
+    ftds: number;
+    pctCasaFtds: number | null;
+    redepositos: number;
+    reativados: number;
+  };
+  rows: TeamReportRow[];
+  janelaHoras: number;
+  atualizadoEm: string | null;
+};
+
+type TeamReportDbRow = {
+  expert_id: string;
+  depositado: number | string;
+  ftds: number;
+  redepositos: number;
+  reativados: number;
+  leads_clicaram: number;
+  leads_depositaram_clique: number;
+  depositos: number;
+};
+
+type HouseTotalsDbRow = { depositado: number | string; ftds: number };
+
+async function fetchTeamReport(
+  tenantId: string,
+  range: { from: string; to: string },
+): Promise<TeamReportDbRow[]> {
+  const { data, error } = await db().rpc("expert_team_report", {
+    _tenant: tenantId,
+    _from: range.from,
+    _to: range.to,
+  });
+  if (error) throw new Error(error.message);
+  return (data ?? []) as TeamReportDbRow[];
+}
+
+async function fetchHouseDepositTotals(
+  tenantId: string,
+  range: { from: string; to: string },
+): Promise<{ depositado: number; ftds: number }> {
+  const { data, error } = await db().rpc("house_deposit_totals", {
+    _tenant: tenantId,
+    _from: range.from,
+    _to: range.to,
+  });
+  if (error) throw new Error(error.message);
+  const row = ((data ?? []) as HouseTotalsDbRow[])[0];
+  return { depositado: Number(row?.depositado ?? 0), ftds: Number(row?.ftds ?? 0) };
+}
+
+const teamReportInput = z.object({ period: periodKeySchema });
+
+export const getTeamReport = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => teamReportInput.parse(data))
+  .handler(async ({ data, context }) =>
+    getTeamReportFor(context as unknown as ServerContext, data),
+  );
+
+/** Rendimento da equipe (admin), spec §5: topo com fatia da casa + ranking. */
+export async function getTeamReportFor(
+  ctx: ServerContext,
+  data: z.input<typeof teamReportInput>,
+): Promise<TeamReportResult> {
+  const input = teamReportInput.parse(data);
+  const tenantId = await requireExpertAdminTenant(ctx);
+  const ranges = comparisonRange(input.period, new Date());
+
+  const [experts, currentRows, previousRows, houseTotals, janelaHoras, atualizadoEm] =
+    await Promise.all([
+      listExpertsFor(ctx),
+      fetchTeamReport(tenantId, ranges.current),
+      fetchTeamReport(tenantId, ranges.previous),
+      fetchHouseDepositTotals(tenantId, ranges.current),
+      getClickWindowHours(tenantId),
+      fetchLastComputedAt(tenantId),
+    ]);
+
+  const currentByExpert = new Map(currentRows.map((r) => [r.expert_id, r]));
+  const previousByExpert = new Map(previousRows.map((r) => [r.expert_id, r]));
+
+  const rows: TeamReportRow[] = experts
+    .map((expert): TeamReportRow => {
+      const current = currentByExpert.get(expert.id);
+      const previous = previousByExpert.get(expert.id);
+      const creditado = Number(current?.depositado ?? 0);
+      const previousCreditado = Number(previous?.depositado ?? 0);
+      const leadsClicaram = Number(current?.leads_clicaram ?? 0);
+      const leadsDepositaramClique = Number(current?.leads_depositaram_clique ?? 0);
+      const depositos = Number(current?.depositos ?? 0);
+      return {
+        expertId: expert.id,
+        nome: expert.nome,
+        tipoLabel: tipoLabelOf(expert.tipo, expert.papelEquipe),
+        ativo: expert.ativo,
+        creditado,
+        variacao: variationPct(creditado, previousCreditado),
+        ftds: Number(current?.ftds ?? 0),
+        redepositos: Number(current?.redepositos ?? 0),
+        reativados: Number(current?.reativados ?? 0),
+        cliqueDeposito: leadsClicaram > 0 ? leadsDepositaramClique / leadsClicaram : null,
+        ticket: depositos > 0 ? creditado / depositos : null,
+      };
+    })
+    .sort((a, b) => b.creditado - a.creditado);
+
+  const totaisCreditado = rows.reduce((sum, row) => sum + row.creditado, 0);
+  const totaisFtds = rows.reduce((sum, row) => sum + row.ftds, 0);
+  const totaisRedepositos = rows.reduce((sum, row) => sum + row.redepositos, 0);
+  const totaisReativados = rows.reduce((sum, row) => sum + row.reativados, 0);
+
+  return {
+    totais: {
+      creditado: totaisCreditado,
+      pctCasaDepositado:
+        houseTotals.depositado > 0 ? totaisCreditado / houseTotals.depositado : null,
+      ftds: totaisFtds,
+      pctCasaFtds: houseTotals.ftds > 0 ? totaisFtds / houseTotals.ftds : null,
+      redepositos: totaisRedepositos,
+      reativados: totaisReativados,
+    },
+    rows,
+    janelaHoras,
+    atualizadoEm,
+  };
+}
+
+const TEAM_REPORT_CSV_HEADER = [
+  "Pessoa",
+  "Tipo",
+  "Creditado",
+  "Variação",
+  "FTD",
+  "Redepósitos",
+  "Reativados",
+  "Clique→depósito",
+  "Ticket médio",
+];
+
+/** Percentual pt-BR de 1 casa decimal com "%", "" quando null. `pct` já em percentual (não fração). */
+function teamReportCsvPct(pct: number | null): string {
+  return pct === null ? "" : `${pct.toFixed(1).replace(".", ",")}%`;
+}
+
+/** Como `teamReportCsvPct`, mas recebe uma fração 0–1 (ex.: `cliqueDeposito`). */
+function teamReportCsvFraction(fraction: number | null): string {
+  return fraction === null ? "" : teamReportCsvPct(Math.round(fraction * 1000) / 10);
+}
+
+export const exportTeamReportCsv = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => teamReportInput.parse(data))
+  .handler(async ({ data, context }) =>
+    exportTeamReportCsvFor(context as unknown as ServerContext, data),
+  );
+
+export async function exportTeamReportCsvFor(
+  ctx: ServerContext,
+  data: z.input<typeof teamReportInput>,
+): Promise<{ filename: string; csv: string }> {
+  const input = teamReportInput.parse(data);
+  const report = await getTeamReportFor(ctx, input);
+  const range = periodRange(input.period, new Date());
+
+  const lines = [TEAM_REPORT_CSV_HEADER.join(";")];
+  for (const row of report.rows) {
+    lines.push(
+      [
+        row.nome,
+        row.tipoLabel,
+        brValor(row.creditado),
+        teamReportCsvPct(row.variacao),
+        String(row.ftds),
+        String(row.redepositos),
+        String(row.reativados),
+        teamReportCsvFraction(row.cliqueDeposito),
+        row.ticket === null ? "" : brValor(row.ticket),
+      ]
+        .map(creditsCsvCell)
+        .join(";"),
+    );
+  }
+
+  const fromDay = brtDayKey(new Date(range.from));
+  // `to` é exclusivo e pode ser "agora": o dia do último instante incluído
+  // é 1ms antes (mesma regra do extrato e da carteira).
+  const toDay = brtDayKey(new Date(new Date(range.to).getTime() - 1));
+  const filename = `equipe-${fromDay}-a-${toDay}.csv`;
+
+  // BOM UTF-8 para o Excel (pt-BR) abrir os acentos corretamente.
+  return { filename, csv: "﻿" + lines.join("\n") };
 }
