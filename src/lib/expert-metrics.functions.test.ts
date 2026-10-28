@@ -519,6 +519,37 @@ describe("listExpertCreditsFor / exportExpertCreditsCsvFor (Task 8)", () => {
     expect(lines[1]).toBe('23/10/2026 00:00;"Lead ""Esperto""; Silva";10,00;Clique;;;Não;Não');
   });
 
+  it("listExpertCredits without expertId serves the caller's own statement; with expertId requires admin", async () => {
+    addCredit("d-mine", ME, { valor: 10 });
+    addCredit("d-other", OTHER_EXPERT, { valor: 999 });
+
+    // Expert (requireExpertContext → ME): o próprio extrato, sem expertId.
+    const own = await listExpertCreditsFor(EXPERT_CTX, { period: "30" });
+    expect(own.rows.map((r) => r.depositId)).toEqual(["d-mine"]);
+    expect(own.somaValor).toBe(10);
+    const ownCsv = await exportExpertCreditsCsvFor(EXPERT_CTX, { period: "30" });
+    expect(ownCsv.filename).toBe("extrato-eu-2026-09-25-a-2026-10-24.csv");
+    expect(ownCsv.csv.slice(1).split("\n").at(-1)).toBe("Total;;10,00;;;;;");
+
+    // Com expertId, mesmo o próprio, o expert cai na recusa de admin (a
+    // recusa confere o acesso real de expert: `resolveExpertContext`).
+    fake.admin.rows("user_roles").push({ user_id: "u1", tenant_id: TENANT, role: "expert" });
+    fake.admin.rows("experts").find((e) => e.id === ME)!.user_id = "u1";
+    await expect(listExpertCreditsFor(EXPERT_CTX, { expertId: ME })).rejects.toThrow(
+      "Apenas o admin da casa gerencia experts.",
+    );
+    await expect(exportExpertCreditsCsvFor(EXPERT_CTX, { expertId: OTHER_EXPERT })).rejects.toThrow(
+      "Apenas o admin da casa gerencia experts.",
+    );
+
+    // Admin com expertId: o extrato do perfil pedido.
+    const asAdmin = await listExpertCreditsFor(ctxFor(ADMIN), {
+      expertId: OTHER_EXPERT,
+      period: "30",
+    });
+    expect(asAdmin.rows.map((r) => r.depositId)).toEqual(["d-other"]);
+  });
+
   it("credits endpoints refuse non-admin and experts of another house", async () => {
     await expect(
       listExpertCreditsFor(ctxFor(GESTOR, { admin: false }), { expertId: ME }),

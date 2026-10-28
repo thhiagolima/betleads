@@ -11,7 +11,9 @@
 // Guards: `requireExpertContext` para o próprio expert (dashboard);
 // `requireExpertAdminTenant` (exportado de `experts-admin.functions.ts`,
 // mesma cadeia `resolveOperationalTenantForRequest` + `requireTenantAdmin`)
-// para o admin (ranking, detalhe, config).
+// para o admin (ranking, detalhe, config). O extrato e o CSV dele resolvem o
+// dono por `resolveReportSubject` (relatório de rendimento): sem `expertId`,
+// o próprio usuário; com `expertId`, só o admin.
 
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -20,6 +22,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { requireExpertContext, type ExpertTipo } from "@/lib/expert-access.server";
 import { DEFAULT_EXPERT_PERIOD, periodRange, type PeriodKey } from "@/lib/expert-period";
+import { resolveReportSubject } from "@/lib/expert-report-subject.server";
 import {
   authUserOf,
   buildExpertAdminRow,
@@ -159,7 +162,7 @@ async function fetchExpertMetricsDaily(
 }
 
 /** `expert_settings.click_window_hours` da casa, 72 (o default do SQL) se não configurada. */
-async function getClickWindowHours(tenantId: string): Promise<number> {
+export async function getClickWindowHours(tenantId: string): Promise<number> {
   const { data, error } = await db()
     .from("expert_settings")
     .select("click_window_hours")
@@ -603,8 +606,10 @@ async function fetchAllCredits(
   return out;
 }
 
+// Sem `expertId`: o extrato do próprio usuário (expert ou perfil da equipe);
+// com `expertId`: só o admin da casa (`resolveReportSubject`).
 const listCreditsInput = z.object({
-  expertId: dbUuid(),
+  expertId: dbUuid().optional(),
   period: periodKeySchema.optional(),
   page: z.number().int().min(0).optional(),
 });
@@ -621,21 +626,20 @@ export async function listExpertCreditsFor(
   data: z.input<typeof listCreditsInput>,
 ): Promise<{ rows: ExpertCreditRow[]; total: number; somaValor: number }> {
   const input = listCreditsInput.parse(data);
-  const tenantId = await requireExpertAdminTenant(ctx);
-  // `loadExpert` filtra por tenant_id: expert de outra casa cai em "Expert
-  // não encontrado.", igual ao detalhe do admin (getExpertDetailFor).
-  await loadExpert(tenantId, input.expertId);
+  // Com `expertId`, `loadExpert` (dentro do sujeito) filtra por tenant_id:
+  // expert de outra casa cai em "Expert não encontrado.".
+  const { tenantId, expertId } = await resolveReportSubject(ctx, input.expertId);
   const period = input.period ?? DEFAULT_EXPERT_PERIOD;
   const { from, to } = periodRange(period, new Date());
   const page = input.page ?? 0;
   const offset = page * CREDIT_PAGE_SIZE;
 
   const [{ data: rowsData, error, count }, somaValor] = await Promise.all([
-    creditsBaseQuery(tenantId, input.expertId, from, to, CREDIT_COLUMNS, { count: "exact" })
+    creditsBaseQuery(tenantId, expertId, from, to, CREDIT_COLUMNS, { count: "exact" })
       .order("deposit_at", { ascending: false })
       .order("deposit_id", { ascending: false })
       .range(offset, offset + CREDIT_PAGE_SIZE - 1),
-    sumCreditsValor(tenantId, input.expertId, from, to),
+    sumCreditsValor(tenantId, expertId, from, to),
   ]);
   if (error) throw new Error(error.message);
 
@@ -644,7 +648,7 @@ export async function listExpertCreditsFor(
 }
 
 /** Texto seguro para nome de arquivo: minúsculas, sem acento, só [a-z0-9-]. */
-function slugify(value: string): string {
+export function slugify(value: string): string {
   const slug = value
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "")
@@ -655,7 +659,7 @@ function slugify(value: string): string {
 }
 
 /** Instante ISO -> "dd/mm/aaaa hh:mm" em São Paulo, sem vírgula (para o CSV). */
-function formatBrtDateTimeCsv(iso: string): string {
+export function formatBrtDateTimeCsv(iso: string): string {
   const parts = new Intl.DateTimeFormat("pt-BR", {
     timeZone: "America/Sao_Paulo",
     day: "2-digit",
@@ -670,12 +674,15 @@ function formatBrtDateTimeCsv(iso: string): string {
 }
 
 /** Número -> texto com vírgula decimal ("1234,50"), sem separador de milhar. */
-function brValor(value: number): string {
+export function brValor(value: number): string {
   return value.toFixed(2).replace(".", ",");
 }
 
-/** Célula do CSV do extrato: separador ";", então só ";"/aspas/quebra de linha exigem aspas. */
-function creditsCsvCell(value: unknown): string {
+/**
+ * Célula do CSV do extrato (e da carteira do relatório de rendimento):
+ * separador ";", então só ";"/aspas/quebra de linha exigem aspas.
+ */
+export function creditsCsvCell(value: unknown): string {
   const text = neutralizeCsvFormula(value);
   return /[;"\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
@@ -691,7 +698,10 @@ const CREDITS_CSV_HEADER = [
   "Reativação",
 ];
 
-const exportCreditsCsvInput = z.object({ expertId: dbUuid(), period: periodKeySchema.optional() });
+const exportCreditsCsvInput = z.object({
+  expertId: dbUuid().optional(),
+  period: periodKeySchema.optional(),
+});
 
 export const exportExpertCreditsCsv = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -705,12 +715,12 @@ export async function exportExpertCreditsCsvFor(
   data: z.input<typeof exportCreditsCsvInput>,
 ): Promise<{ filename: string; csv: string }> {
   const input = exportCreditsCsvInput.parse(data);
-  const tenantId = await requireExpertAdminTenant(ctx);
-  const expert = await loadExpert(tenantId, input.expertId);
+  const subject = await resolveReportSubject(ctx, input.expertId);
+  const { tenantId, expertId } = subject;
   const period = input.period ?? DEFAULT_EXPERT_PERIOD;
   const { from, to } = periodRange(period, new Date());
 
-  const dbRows = await fetchAllCredits(tenantId, input.expertId, from, to);
+  const dbRows = await fetchAllCredits(tenantId, expertId, from, to);
   const rows = await mapCreditRows(tenantId, dbRows);
 
   const lines = [CREDITS_CSV_HEADER.join(";")];
@@ -738,7 +748,7 @@ export async function exportExpertCreditsCsvFor(
   // `to` é exclusivo e pode ser "agora" (não um limite de dia): o dia do
   // último instante incluído é 1ms antes.
   const toDay = brtDayKey(new Date(new Date(to).getTime() - 1));
-  const filename = `extrato-${slugify(expert.nome)}-${fromDay}-a-${toDay}.csv`;
+  const filename = `extrato-${slugify(subject.nome)}-${fromDay}-a-${toDay}.csv`;
 
   // BOM UTF-8 para o Excel (pt-BR) abrir os acentos corretamente.
   return { filename, csv: "﻿" + lines.join("\n") };

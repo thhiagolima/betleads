@@ -86,7 +86,7 @@ export type ExpertDbRow = {
 const EXPERT_COLUMNS =
   "id,tenant_id,nome,tipo,ativo,envio_modo,teto_mensal,assumir_prazo_dias,user_id,ja_vinculado,created_at";
 
-const NOT_ADMIN_MESSAGE = "Apenas o admin da casa gerencia experts.";
+export const NOT_ADMIN_MESSAGE = "Apenas o admin da casa gerencia experts.";
 const EXPERT_NOT_FOUND = "Expert não encontrado.";
 const EXPERT_ALREADY_LINKED =
   "Este expert já tem acesso. Remova o acesso antes de convidar outra pessoa.";

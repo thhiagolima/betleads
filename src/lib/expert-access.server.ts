@@ -23,6 +23,8 @@ export type ExpertContext = {
   affiliateIds: string[];
 };
 
+export const EXPERT_ACCESS_NOT_FOUND = "Acesso de expert não encontrado ou desativado.";
+
 export class ExpertAccessError extends Error {
   constructor(message: string) {
     super(message);
@@ -121,7 +123,7 @@ export async function requireExpertContext(
   requestedTenantId?: string | null,
 ): Promise<ExpertContext> {
   const ctx = await resolveExpertContext(userId, requestedTenantId);
-  if (!ctx) throw new ExpertAccessError("Acesso de expert não encontrado ou desativado.");
+  if (!ctx) throw new ExpertAccessError(EXPERT_ACCESS_NOT_FOUND);
 
   try {
     await assertTenantCanOperate(ctx.tenantId);
