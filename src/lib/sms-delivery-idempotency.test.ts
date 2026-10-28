@@ -278,6 +278,39 @@ describe("SMS delivery idempotency (ENV-02)", () => {
     expect(result).toMatchObject({ ok: false, status: 0, errorKind: "not_sent" });
   }, 10_000);
 
+  describe("Short Brasil refusals with HTTP 200 (incident 27-28/10/2026)", () => {
+    const refusal = (body: Row) => vi.fn(async () => Response.json(body, { status: 200 }));
+    beforeEach(() => {
+      delete process.env.SHORTCODE_SMS_TOKEN;
+      vi.stubEnv("SHORT_BRASIL_SMS_USUARIO", "user");
+      vi.stubEnv("SHORT_BRASIL_SMS_CHAVE", "key");
+    });
+
+    it("status 5 'Saldo insuficiente' is an account refusal: not sent, refunded", async () => {
+      vi.stubGlobal("fetch", refusal({ status: 5, statusDetalhe: "Saldo insuficiente" }));
+      const result = await send();
+      expect(result).toMatchObject({ ok: false, status: 200 });
+      expect(charged()).toBe(0);
+      expect(state.smsLogs[0]).toMatchObject({ status: "error", error: "Short Brasil: saldo insuficiente" });
+    });
+
+    it("an unknown status without a message id is a refusal, never a silent success", async () => {
+      vi.stubGlobal("fetch", refusal({ status: 7, statusDetalhe: "Algo novo" }));
+      const result = await send();
+      expect(result.ok).toBe(false);
+      expect(charged()).toBe(0);
+      expect(state.smsLogs[0]).toMatchObject({ status: "error" });
+    });
+
+    it("an accepted message (id, no status) is still sent and charged", async () => {
+      vi.stubGlobal("fetch", refusal({ id: "msg-1", parceiroId: KEY }));
+      const result = await send();
+      expect(result.ok).toBe(true);
+      expect(charged()).toBe(1);
+      expect(state.smsLogs[0]).toMatchObject({ status: "sent", provider_message_id: "msg-1" });
+    });
+  });
+
   it("B1: missing credentials are reported as misconfigured without calling the provider", async () => {
     delete process.env.SHORTCODE_SMS_TOKEN;
     vi.stubEnv("SHORT_BRASIL_SMS_USUARIO", "");

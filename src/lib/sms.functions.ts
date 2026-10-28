@@ -26,6 +26,8 @@ import type { Json } from "@/integrations/supabase/types";
 import { isChannelRevoked } from "./consent.server";
 import { requireBrazilianPhone } from "./phone-normalization";
 import {
+  isShortBrasilRefusal,
+  isUnknownShortBrasilRefusal,
   smsProviderAccountReason,
   transportErrorKind,
   type ProviderErrorKind,
@@ -35,6 +37,7 @@ import {
   noteSmsProviderSuccess,
   readSmsBreaker,
   reportSmsProviderAccountFailure,
+  reportUnknownSmsProviderRefusal,
   smsSuspendedMessage,
 } from "./sms-provider-breaker.server";
 import type { LinkTrackingContext } from "./shortio.server";
@@ -227,8 +230,8 @@ export function getShortBrasilAppStatus(body: unknown): number | null {
 }
 
 function isShortBrasilApplicationError(body: unknown): boolean {
-  const status = getShortBrasilAppStatus(body);
-  return status === 101 || status === 303 || status === 404 || status === 505;
+  if (isUnknownShortBrasilRefusal(body)) reportUnknownSmsProviderRefusal(body);
+  return isShortBrasilRefusal(body);
 }
 
 function shortcodeResponseFailed(body: unknown): boolean {
@@ -605,7 +608,7 @@ export function summarizeProviderError(status: number, body: unknown): string {
     if (appStatus === 101) return "Short Brasil: erro de autenticacao";
     if (appStatus === 303) return "Short Brasil: erro de requisicao";
     if (appStatus === 404) return "Short Brasil: transacao nao encontrada";
-    if (appStatus === 505) return "Short Brasil: saldo insuficiente";
+    if (appStatus === 5 || appStatus === 505) return "Short Brasil: saldo insuficiente";
     const msg =
       (typeof b.statusDetalhe === "string" && b.statusDetalhe) ||
       (typeof b.detalhe === "string" && b.detalhe) ||
