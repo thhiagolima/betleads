@@ -142,9 +142,10 @@ function formatPctNoTrailingZeros(pct: number): string {
 }
 
 /**
- * Cost breakdown shown next to the period summary: the automatic lines
+ * Cost breakdown shown next to the period summary: the computed lines
  * (Anúncios, Taxa de GGR, Taxa de movimentação, Betleads) plus one line per
- * manually entered cost category. Sorted by amount descending; a line with
+ * manually entered cost category. Only Betleads is `auto` (the "automático"
+ * tag): Anúncios is typed in and the fees follow it. Sorted by amount descending; a line with
  * amount 0 and no previous amount (0 or null) is dropped as noise.
  */
 export function costBreakdown(
@@ -163,21 +164,21 @@ export function costBreakdown(
       label: "Anúncios",
       amount: current.adSpend,
       previous: previous?.adSpend ?? null,
-      auto: true,
+      auto: false,
     },
     {
       key: "ggr_fee",
       label: ggrLabel,
       amount: current.ggrFee,
       previous: previous?.ggrFee ?? null,
-      auto: true,
+      auto: false,
     },
     {
       key: "movement_fee",
       label: "Taxa de movimentação",
       amount: current.movementFee,
       previous: previous?.movementFee ?? null,
-      auto: true,
+      auto: false,
     },
     {
       key: "betleads",

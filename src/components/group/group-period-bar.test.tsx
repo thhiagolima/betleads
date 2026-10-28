@@ -9,20 +9,37 @@ const october = {
   compare: "previous" as const,
 };
 
+// 2026-10-27 15:00 in São Paulo (UTC-3).
+const NOW = new Date("2026-10-27T18:00:00Z");
+
 describe("GroupPeriodBar month picker", () => {
+  it("the current month is the Mês preset, compared up to the same day", () => {
+    expect(monthPeriod("2026-10", NOW)).toEqual({
+      preset: "month",
+      range: { from: "2026-10-01", to: "2026-10-27" },
+      compare: "previous",
+    });
+  });
+
+  it("a past month stays the whole month even when picked from the current one", () => {
+    expect(monthPeriod("2026-09", NOW)?.range).toEqual({ from: "2026-09-01", to: "2026-09-30" });
+    expect(monthPeriod("2026-09", NOW)?.preset).toBe("custom");
+  });
+
   it("a picked month is the whole calendar month compared with the previous one", () => {
-    expect(monthPeriod("2026-09")).toEqual({
+    expect(monthPeriod("2026-09", NOW)).toEqual({
       preset: "custom",
       range: { from: "2026-09-01", to: "2026-09-30" },
       compare: "previous",
     });
-    expect(monthPeriod("2028-02")?.range.to).toBe("2028-02-29");
-    expect(monthPeriod("")).toBeNull();
+    expect(monthPeriod("2028-02", NOW)?.range.to).toBe("2028-02-29");
+    expect(monthPeriod("", NOW)).toBeNull();
   });
 
   it("shows the month for the Mês preset or a whole month, empty otherwise", () => {
     expect(monthInputValue(october)).toBe("2026-10");
-    expect(monthInputValue(monthPeriod("2026-09") ?? october)).toBe("2026-09");
+    expect(monthInputValue(monthPeriod("2026-10", NOW) ?? october)).toBe("2026-10");
+    expect(monthInputValue(monthPeriod("2026-09", NOW) ?? october)).toBe("2026-09");
     expect(
       monthInputValue({
         ...october,

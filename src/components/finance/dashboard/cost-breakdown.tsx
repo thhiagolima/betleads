@@ -1,10 +1,8 @@
 // "Para onde foi o dinheiro" (spec §5.5): one row per CostLine, in the order
 // the server sends (largest first), with a bar proportional to the largest
 // line, the amount and the variation vs the compared window. Every line is a
-// cost, so a rise is red. Amounts come rounded from costBreakdown().
-//
-// costBreakdown() sets `auto` on every computed line (Anúncios and the fees
-// too); the "automático" tag of the spec and mockup is Betleads only.
+// cost, so a rise is red. Amounts come rounded from costBreakdown(), which
+// sets `auto` only on the Betleads line (the "automático" tag, spec §7).
 import { formatBRL, formatPct } from "@/components/finance/format";
 import { pctChange } from "@/lib/finance/calc";
 import type { CostLine } from "@/lib/finance/types";
@@ -39,7 +37,7 @@ export function CostBreakdown({ costs }: { costs: CostLine[] }) {
               >
                 <td className="py-2 pr-3">
                   {line.label}
-                  {line.key === "betleads" && (
+                  {line.auto && (
                     <span className="ml-2 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-300">
                       automático
                     </span>

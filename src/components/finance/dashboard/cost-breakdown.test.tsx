@@ -5,11 +5,10 @@ import type { CostLine } from "@/lib/finance/types";
 
 import { CostBreakdown } from "./cost-breakdown";
 
-// costBreakdown() (calc.ts) marks every computed line auto: true (Anúncios and
-// the fees too); the badge is the spec's "automático" tag on Betleads only.
+// costBreakdown() (calc.ts) sets auto: true only on the Betleads line.
 const costs: CostLine[] = [
-  { key: "ad_spend", label: "Anúncios", amount: 44100, previous: 31300, auto: true },
-  { key: "ggr_fee", label: "Taxa de GGR (16%)", amount: 22050, previous: 20100, auto: true },
+  { key: "ad_spend", label: "Anúncios", amount: 44100, previous: 31300, auto: false },
+  { key: "ggr_fee", label: "Taxa de GGR (16%)", amount: 22050, previous: 20100, auto: false },
   { key: "betleads", label: "Betleads", amount: 5200, previous: 5000, auto: true },
   { key: "category:Equipe", label: "Equipe", amount: 1200, previous: null, auto: false },
 ];

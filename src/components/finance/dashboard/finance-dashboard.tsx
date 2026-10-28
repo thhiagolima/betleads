@@ -3,7 +3,7 @@
 // change it with "Ver:") and the period (month picker on), and reads
 // getFinanceDashboard. Group/all scope adds "Lucro por casa" right after the
 // cards, as in the mockup, and the goal scoreboard at the bottom.
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState, type ReactNode } from "react";
 
@@ -120,6 +120,7 @@ export function FinanceDashboardView({
       getDashboard({
         data: { scope, range: period.range, compare: period.compare, preset: period.preset },
       }),
+    placeholderData: keepPreviousData,
   });
 
   return (

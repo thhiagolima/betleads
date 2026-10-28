@@ -357,6 +357,8 @@ describe("costBreakdown", () => {
     const betleadsLine = lines.find((l) => l.key === "betleads");
     expect(betleadsLine?.label).toBe("Betleads");
     expect(betleadsLine?.auto).toBe(true);
+    // Only the Betleads line is "automático"; Anúncios and the fees are not.
+    expect(lines.filter((l) => l.auto).map((l) => l.key)).toEqual(["betleads"]);
     expect(betleadsLine?.amount).toBe(10);
     // Ferramentas (0, no previous) is dropped.
     expect(lines.some((l) => l.key === "category:Ferramentas")).toBe(false);

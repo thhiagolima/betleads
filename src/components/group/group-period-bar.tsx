@@ -2,9 +2,10 @@
 // caller (routes/grupo.tsx) owns the GroupPeriod state and passes it back to
 // the server fn getGroupOverview. "Mesmo dia da semana passada" only makes
 // sense for a one-day window, so it is hidden otherwise. With `monthPicker`
-// (Financeiro painel, spec §5.1) a month input follows the chips: a picked
-// month is the whole calendar month compared with the previous one, so other
-// costs and the plan fee enter both windows (the server clamps `to` to today).
+// (Financeiro painel, spec §5.1) a month input follows the chips: the current
+// month is the "Mês" preset (compared with the previous month up to the same
+// day); a past month is the whole calendar month compared with the previous
+// one, so other costs and the plan fee enter both windows.
 import {
   DashboardDateRangePicker,
   rangeToKey,
@@ -43,10 +44,14 @@ export function defaultGroupPeriod(): GroupPeriod {
   return { preset: "month", range: presetRange("month", new Date()), compare: "previous" };
 }
 
-/** The whole calendar month of a "YYYY-MM" input value; null when cleared. */
-export function monthPeriod(month: string): GroupPeriod | null {
+/** The period of a "YYYY-MM" input value; null when cleared. */
+export function monthPeriod(month: string, now: Date = new Date()): GroupPeriod | null {
   const match = /^(\d{4})-(\d{2})$/.exec(month);
   if (!match) return null;
+  const current = presetRange("month", now);
+  if (current.from.startsWith(month)) {
+    return { preset: "month", range: current, compare: "previous" };
+  }
   const lastDay = new Date(Date.UTC(Number(match[1]), Number(match[2]), 0)).getUTCDate();
   return {
     preset: "custom",
