@@ -255,7 +255,7 @@ function ExpertDetailPage() {
         subtitle={
           <span className="inline-flex flex-wrap items-center gap-2">
             <Badge variant="secondary">{TIPO_LABEL[expert.tipo]}</Badge>
-            {acessoBadge(expert.acesso)}
+            {acessoBadge(expert.acesso, expert.papelEquipe)}
           </span>
         }
         actions={

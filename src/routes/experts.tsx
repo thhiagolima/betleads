@@ -13,6 +13,11 @@
 // `expert.leads.tsx`, this route renders only its own list at the exact
 // "/experts" path and defers to <Outlet /> under the child path so the list
 // doesn't render underneath the detail.
+//
+// Fase 3, Task 7: a profile without user can be linked to someone of the
+// house team ("Vincular a alguém da equipe") as a performance profile; such
+// rows show "Equipe (Gestor)" etc. and "Desvincular" instead of "Remover
+// acesso" (the person keeps their own role).
 import { useState } from "react";
 import { Link, Outlet, createFileRoute, useRouterState } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -55,6 +60,7 @@ import {
 import { ExpertFormDialog } from "@/components/experts/expert-form-dialog";
 import { ExpertInviteDialog } from "@/components/experts/expert-invite-dialog";
 import { ExpertSettingsDialog } from "@/components/experts/expert-settings-dialog";
+import { ExpertTeamLinkDialog } from "@/components/experts/expert-team-link-dialog";
 
 export const Route = createFileRoute("/experts")({
   component: ExpertsRoute,
@@ -128,6 +134,7 @@ function ExpertsPage() {
   const [editingExpert, setEditingExpert] = useState<ExpertAdminRow | null>(null);
   const [prefillAffiliateId, setPrefillAffiliateId] = useState<string | null>(null);
   const [inviteExpertRow, setInviteExpertRow] = useState<ExpertAdminRow | null>(null);
+  const [teamLinkExpertRow, setTeamLinkExpertRow] = useState<ExpertAdminRow | null>(null);
 
   function refresh() {
     qc.invalidateQueries({ queryKey: EXPERTS_QUERY_KEY });
@@ -135,9 +142,10 @@ function ExpertsPage() {
   }
 
   const removeAccess = useMutation({
-    mutationFn: (expertId: string) => removeAccessFn({ data: { expertId } }),
-    onSuccess: () => {
-      toast.success("Acesso removido");
+    mutationFn: (vars: { expertId: string; equipe: boolean }) =>
+      removeAccessFn({ data: { expertId: vars.expertId } }),
+    onSuccess: (_data, vars) => {
+      toast.success(vars.equipe ? "Perfil desvinculado" : "Acesso removido");
       refresh();
     },
     onError: (error: Error) => toast.error(error.message),
@@ -245,7 +253,7 @@ function ExpertsPage() {
                     </div>
                   </TableCell>
                   <TableCell>{expert.leads}</TableCell>
-                  <TableCell>{acessoBadge(expert.acesso)}</TableCell>
+                  <TableCell>{acessoBadge(expert.acesso, expert.papelEquipe)}</TableCell>
                   <TableCell className="text-right">{brl(metrics.depositado)}</TableCell>
                   <TableCell className="text-right">{brl(metrics.depositadoClique)}</TableCell>
                   <TableCell className="text-right">{brl(metrics.depositadoAfiliado)}</TableCell>
@@ -278,7 +286,43 @@ function ExpertsPage() {
                         </DemoDisabledTooltip>
                       )}
 
-                      {expert.acesso !== "sem_acesso" && (
+                      {expert.acesso === "sem_acesso" && (
+                        <DemoDisabledTooltip active={isDemo}>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={isDemo}
+                            onClick={() => setTeamLinkExpertRow(expert)}
+                          >
+                            Vincular a alguém da equipe
+                          </Button>
+                        </DemoDisabledTooltip>
+                      )}
+
+                      {expert.acesso === "equipe" && (
+                        <DemoDisabledTooltip active={isDemo}>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={isDemo || removeAccess.isPending}
+                            onClick={async () => {
+                              const confirmed = await requestConfirmation({
+                                title: `Desvincular o perfil ${expert.nome}?`,
+                                description:
+                                  "O perfil deixa de medir o rendimento dessa pessoa. O acesso dela à casa não muda, e o histórico do perfil continua.",
+                                confirmLabel: "Desvincular",
+                                destructive: true,
+                              });
+                              if (confirmed)
+                                removeAccess.mutate({ expertId: expert.id, equipe: true });
+                            }}
+                          >
+                            Desvincular
+                          </Button>
+                        </DemoDisabledTooltip>
+                      )}
+
+                      {expert.acesso !== "sem_acesso" && expert.acesso !== "equipe" && (
                         <DemoDisabledTooltip active={isDemo}>
                           <Button
                             size="sm"
@@ -292,7 +336,8 @@ function ExpertsPage() {
                                 confirmLabel: "Remover acesso",
                                 destructive: true,
                               });
-                              if (confirmed) removeAccess.mutate(expert.id);
+                              if (confirmed)
+                                removeAccess.mutate({ expertId: expert.id, equipe: false });
                             }}
                           >
                             Remover acesso
@@ -401,6 +446,12 @@ function ExpertsPage() {
         onOpenChange={(open) => !open && setInviteExpertRow(null)}
         expertId={inviteExpertRow?.id ?? null}
         expertNome={inviteExpertRow?.nome ?? ""}
+      />
+      <ExpertTeamLinkDialog
+        open={!!teamLinkExpertRow}
+        onOpenChange={(open) => !open && setTeamLinkExpertRow(null)}
+        expertId={teamLinkExpertRow?.id ?? null}
+        expertNome={teamLinkExpertRow?.nome ?? ""}
       />
       <ExpertSettingsDialog
         open={settingsOpen}

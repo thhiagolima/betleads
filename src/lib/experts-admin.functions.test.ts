@@ -45,7 +45,10 @@ import { __resetDemoTenantCacheForTests } from "./tenant-access.server";
 import {
   deleteExpertFor,
   inviteExpertFor,
+  linkExpertToTeamMemberFor,
   listExpertsFor,
+  listTeamMembersForLinkingFor,
+  removeExpertAccessFor,
   saveExpertFor,
   setExpertActiveFor,
 } from "./experts-admin.functions";
@@ -333,5 +336,111 @@ describe("experts admin server functions", () => {
       /demonstra/i,
     );
     expect(fake.admin.rows("experts")[0].ativo).toBe(true);
+  });
+
+  describe("team performance profiles", () => {
+    const MEMBER = "00000000-0000-4000-8000-0000000000a4";
+    const OUTSIDER = "00000000-0000-4000-8000-0000000000a6";
+    const OTHER_TENANT = "00000000-0000-4000-8000-00000000b0b0";
+    const EXPERT_USER = "00000000-0000-4000-8000-0000000000a7";
+    const OTHER_PROFILE = "00000000-0000-4000-8000-0000000000e2";
+
+    it("link refuses a user outside the house team and a user who already has a profile", async () => {
+      addExpert();
+      fake.admin
+        .rows("user_roles")
+        .push(
+          { id: "r1", user_id: GESTOR, tenant_id: TENANT, role: "gestor" },
+          { id: "r2", user_id: MEMBER, tenant_id: TENANT, role: "member" },
+          { id: "r3", user_id: EXPERT_USER, tenant_id: TENANT, role: "expert" },
+          { id: "r4", user_id: OUTSIDER, tenant_id: OTHER_TENANT, role: "gestor" },
+        );
+      fake.authUsers.push(
+        { id: GESTOR, email: "gestor@casa.com" },
+        { id: MEMBER, email: "membro@casa.com" },
+      );
+      // MEMBER already has a performance profile in this house.
+      addExpert({ id: OTHER_PROFILE, nome: "Outro perfil", user_id: MEMBER });
+
+      // Outside this house's team: a gestor of another house, and an expert.
+      for (const userId of [OUTSIDER, EXPERT_USER]) {
+        await expect(
+          linkExpertToTeamMemberFor(ctxFor(ADMIN), { expertId: EXPERT_ID, userId }),
+        ).rejects.toThrow("Escolha alguém da equipe desta casa.");
+      }
+      await expect(
+        linkExpertToTeamMemberFor(ctxFor(ADMIN), { expertId: EXPERT_ID, userId: MEMBER }),
+      ).rejects.toThrow("Esta pessoa já tem um perfil de rendimento.");
+      await expect(
+        linkExpertToTeamMemberFor(ctxFor(ADMIN), { expertId: OTHER_PROFILE, userId: GESTOR }),
+      ).rejects.toThrow("Este perfil já está vinculado.");
+      expect(fake.admin.rows("experts")[0].user_id).toBeNull();
+      expect(fake.admin.rows("tenant_audit_logs")).toEqual([]);
+
+      // Only team members without a profile are offered for linking.
+      await expect(listTeamMembersForLinkingFor(ctxFor(ADMIN))).resolves.toEqual([
+        { userId: GESTOR, email: "gestor@casa.com", papel: "gestor" },
+      ]);
+
+      await expect(
+        linkExpertToTeamMemberFor(ctxFor(ADMIN), { expertId: EXPERT_ID, userId: GESTOR }),
+      ).resolves.toEqual({ ok: true });
+      expect(fake.admin.rows("experts")[0].user_id).toBe(GESTOR);
+      expect(fake.admin.rows("tenant_audit_logs").map((r) => r.action)).toEqual([
+        "expert.team_linked",
+      ]);
+      // Linking never touches the person's role.
+      expect(fake.admin.rows("user_roles").map((r) => r.role)).toEqual([
+        "gestor",
+        "member",
+        "expert",
+        "gestor",
+      ]);
+      await expect(
+        linkExpertToTeamMemberFor(ctxFor(GESTOR, { admin: false }), {
+          expertId: EXPERT_ID,
+          userId: GESTOR,
+        }),
+      ).rejects.toThrow("Apenas o admin da casa gerencia experts.");
+    });
+
+    it("acesso is 'equipe' with papelEquipe for team-linked profiles", async () => {
+      addExpert({ user_id: GESTOR });
+      addExpert({ id: OTHER_PROFILE, nome: "Expert de verdade", user_id: "u-expert" });
+      fake.admin
+        .rows("user_roles")
+        .push(
+          { id: "r1", user_id: GESTOR, tenant_id: TENANT, role: "gestor" },
+          { id: "r2", user_id: "u-expert", tenant_id: TENANT, role: "expert" },
+        );
+      fake.authUsers.push(
+        { id: GESTOR, email: "gestor@casa.com", last_sign_in_at: "2026-10-20T00:00:00Z" },
+        { id: "u-expert", email: "e@casa.com", last_sign_in_at: "2026-10-20T00:00:00Z" },
+      );
+
+      const rows = await listExpertsFor(ctxFor(ADMIN));
+      const team = rows.find((r) => r.id === EXPERT_ID);
+      const expert = rows.find((r) => r.id === OTHER_PROFILE);
+      expect(team).toMatchObject({
+        acesso: "equipe",
+        papelEquipe: "gestor",
+        email: "gestor@casa.com",
+      });
+      expect(expert).toMatchObject({ acesso: "ativo", papelEquipe: null });
+    });
+
+    it("removing access of a team-linked profile clears user_id and keeps the user's gestor role", async () => {
+      addExpert({ user_id: GESTOR });
+      fake.admin
+        .rows("user_roles")
+        .push({ id: "r1", user_id: GESTOR, tenant_id: TENANT, role: "gestor" });
+
+      await removeExpertAccessFor(ctxFor(ADMIN), { expertId: EXPERT_ID });
+
+      expect(fake.admin.rows("experts")[0].user_id).toBeNull();
+      expect(fake.admin.rows("user_roles")).toEqual([
+        expect.objectContaining({ user_id: GESTOR, tenant_id: TENANT, role: "gestor" }),
+      ]);
+    });
   });
 });

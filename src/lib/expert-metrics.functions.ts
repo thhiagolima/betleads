@@ -22,7 +22,8 @@ import {
   authUserOf,
   buildExpertAdminRow,
   countExpertLeads,
-  expertAcesso,
+  expertAccessFields,
+  houseRolesOf,
   loadExpert,
   requireExpertAdminTenant,
   type ExpertAdminRow,
@@ -253,15 +254,17 @@ async function loadExpertAdminRow(tenantId: string, expertId: string): Promise<E
     .map((r) => r.affiliate_id)
     .sort();
 
-  const [leads, user] = await Promise.all([
+  const [leads, user, roles] = await Promise.all([
     countExpertLeads(tenantId, row.tipo, affiliateIds),
     authUserOf(row.user_id),
+    houseRolesOf(tenantId, [row.user_id]),
   ]);
+  const houseRole = row.user_id ? roles.get(row.user_id) : null;
 
   return buildExpertAdminRow(row, {
     affiliateIds,
     leads,
-    acesso: expertAcesso(row, user?.last_sign_in_at),
+    ...expertAccessFields(row, user?.last_sign_in_at, houseRole),
     email: user?.email ?? null,
   });
 }

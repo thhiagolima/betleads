@@ -10,8 +10,23 @@ export const TIPO_LABEL: Record<ExpertAdminRow["tipo"], string> = {
   total: "Acesso total",
 };
 
-export function acessoBadge(acesso: ExpertAcesso) {
+export const PAPEL_EQUIPE_LABEL: Record<NonNullable<ExpertAdminRow["papelEquipe"]>, string> = {
+  admin: "Admin",
+  gestor: "Gestor",
+  member: "Membro",
+};
+
+export function acessoBadge(
+  acesso: ExpertAcesso,
+  papelEquipe: ExpertAdminRow["papelEquipe"] = null,
+) {
   switch (acesso) {
+    case "equipe":
+      return (
+        <Badge variant="secondary">
+          {papelEquipe ? `Equipe (${PAPEL_EQUIPE_LABEL[papelEquipe]})` : "Equipe"}
+        </Badge>
+      );
     case "sem_acesso":
       return <Badge variant="outline">Sem acesso</Badge>;
     case "convite_pendente":
