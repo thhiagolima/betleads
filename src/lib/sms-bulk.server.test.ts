@@ -385,6 +385,41 @@ describe("sendSmsBatch (ENV-10, Short Brasil bulk)", () => {
     expect(credits.charged()).toBe(1);
   });
 
+  it("status 5 'Saldo insuficiente' (incident 27-28/10/2026): request-level and per item are provider_account", async () => {
+    settings("block");
+    const reports: Array<Record<string, unknown>> = [];
+    fake.db.onRpc("provider_breaker_report_failure", (args) => {
+      reports.push(args);
+      return { data: [{ state: "open", opened: true, open_count: 1, alert_due: false }], error: null };
+    });
+    smsBehaviour = () => Response.json({ status: 5, statusDetalhe: "Saldo insuficiente" });
+    const whole = await sendSmsBatch([item(1)]);
+    expect(whole.outcomes[0]).toMatchObject({ status: "failed", retryable: true, errorKind: "provider_account" });
+    expect(reports[0]).toMatchObject({ p_reason: "no_balance" });
+
+    smsBehaviour = (body) =>
+      Response.json({
+        id: "lote-5",
+        bulk: body.bulk.map((b, i) =>
+          i === 0
+            ? { id: "msg-2", parceiroId: b.parceiroId }
+            : { parceiroId: b.parceiroId, status: 5, statusDetalhe: "Saldo insuficiente" },
+        ),
+      });
+    const perItem = await sendSmsBatch([item(2), item(3)]);
+    expect(perItem.outcomes[0]).toMatchObject({ status: "accepted", ok: true });
+    expect(perItem.outcomes[1]).toMatchObject({ status: "failed", retryable: true, errorKind: "provider_account" });
+    expect(credits.charged()).toBe(1);
+  });
+
+  it("an unknown request-level code without an id is a final rejection, not outcome unknown", async () => {
+    settings("block");
+    smsBehaviour = () => Response.json({ status: 7, statusDetalhe: "Algo novo" });
+    const r = await sendSmsBatch([item(1)]);
+    expect(r.outcomes[0]).toMatchObject({ status: "failed", retryable: false });
+    expect(credits.charged()).toBe(0);
+  });
+
   it("missing credentials: nothing logged, charged or sent", async () => {
     vi.stubEnv("SHORT_BRASIL_SMS_USUARIO", "");
     const r = await sendSmsBatch([item(1)]);

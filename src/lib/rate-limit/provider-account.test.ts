@@ -7,7 +7,11 @@ import {
   ProviderSendError,
   classifyProviderFailure,
 } from "./provider-errors.server";
-import { smsProviderAccountReason } from "./transport-errors";
+import {
+  isShortBrasilRefusal,
+  isUnknownShortBrasilRefusal,
+  smsProviderAccountReason,
+} from "./transport-errors";
 
 describe("smsProviderAccountReason", () => {
   it("101 and 505 in the body are account errors, even with HTTP 200", () => {
@@ -15,6 +19,11 @@ describe("smsProviderAccountReason", () => {
     expect(smsProviderAccountReason(200, { status: "505", statusDetalhe: "Saldo insuficiente" })).toBe(
       "no_balance",
     );
+  });
+
+  it("status 5 'Saldo insuficiente' (incident 27-28/10/2026) is no_balance", () => {
+    expect(smsProviderAccountReason(200, { status: 5, statusDetalhe: "Saldo insuficiente" })).toBe("no_balance");
+    expect(smsProviderAccountReason(200, { status: "5" })).toBe("no_balance");
   });
 
   it("HTTP 401/402/403 from the provider are account errors", () => {
@@ -29,6 +38,25 @@ describe("smsProviderAccountReason", () => {
     expect(smsProviderAccountReason(400, { message: "numero invalido" })).toBeNull();
     expect(smsProviderAccountReason(422, [{ status: "rejected", reason: "invalid number" }])).toBeNull();
     expect(smsProviderAccountReason(503, null)).toBeNull();
+  });
+});
+
+describe("isShortBrasilRefusal", () => {
+  it("an accepted message has an id and no status", () => {
+    expect(isShortBrasilRefusal({ id: "0000237800004695", parceiroId: "k" })).toBe(false);
+    expect(isShortBrasilRefusal(null)).toBe(false);
+  });
+
+  it("known codes are refusals, with or without an id", () => {
+    for (const status of [5, 101, 303, 404, 505]) expect(isShortBrasilRefusal({ status })).toBe(true);
+    expect(isShortBrasilRefusal({ status: "5", statusDetalhe: "Saldo insuficiente" })).toBe(true);
+  });
+
+  it("an unknown code is a refusal only without an id", () => {
+    expect(isShortBrasilRefusal({ status: 7 })).toBe(true);
+    expect(isUnknownShortBrasilRefusal({ status: 7 })).toBe(true);
+    expect(isShortBrasilRefusal({ status: 7, id: "msg-1" })).toBe(false);
+    expect(isUnknownShortBrasilRefusal({ status: 5 })).toBe(false);
   });
 });
 
