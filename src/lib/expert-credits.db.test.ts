@@ -188,12 +188,52 @@ async function newExpert(tenant: string, nome: string, affiliates: string[]) {
   await db.query(`update public.experts set created_at = '2025-01-01T00:00:00Z' where id = $1`, [
     rows[0].id,
   ]);
-  await db.query(
-    `update public.expert_affiliates set created_at = '2025-01-01T00:00:00Z' where expert_id = $1`,
-    [rows[0].id],
-  );
+  await setAffiliateSince(rows[0].id, "2025-01-01T00:00:00Z");
   return rows[0].id;
 }
+
+/** Backdates when the expert's current affiliate ids were linked. */
+async function setAffiliateSince(expertId: string, at: string) {
+  await db.query(`update public.expert_affiliates set created_at = $2 where expert_id = $1`, [
+    expertId,
+    at,
+  ]);
+  await db.query(
+    `update public.expert_affiliate_history set valid_from = $2
+     where expert_id = $1 and valid_to is null`,
+    [expertId, at],
+  );
+}
+
+async function resave(
+  tenant: string,
+  expertId: string,
+  nome: string,
+  affiliates: string[],
+  teto: number | null = null,
+) {
+  await db.query(`select save_expert($1, $2, $3, 'total', $4, 'livre', $5, 1)`, [
+    tenant,
+    expertId,
+    nome,
+    affiliates,
+    teto,
+  ]);
+}
+
+type HistoryRow = { expert_id: string; valid_from: string; valid_to: string | null };
+
+async function history(tenant: string, affiliate: string): Promise<HistoryRow[]> {
+  const { rows } = await db.query<HistoryRow>(
+    `select expert_id, valid_from, valid_to from public.expert_affiliate_history
+     where tenant_id = $1 and affiliate_id = $2 order by valid_from`,
+    [tenant, affiliate],
+  );
+  return rows;
+}
+
+const plusMs = (at: string | Date, ms: number) =>
+  new Date(new Date(at).getTime() + ms).toISOString();
 
 async function newPlayer(tenant: string, opts: { affiliate?: string; ftdEm?: string } = {}) {
   const { rows } = await db.query<{ id: string }>(
@@ -380,15 +420,12 @@ describe("refresh_expert_credits — attribution", () => {
     for (const dep of [d1, d2, d3, d4, d5]) expect(await credit(dep)).toBeUndefined();
   });
 
-  it("falls back to the affiliate expert only for deposits after greatest(expert, affiliate) created_at", async () => {
+  it("falls back to the affiliate expert only for deposits after the expert was created and the id was linked", async () => {
     const expert = await newExpert(TENANT_A, "Expert Afiliado", ["AFF-LATE"]);
     await db.query(`update public.experts set created_at = '2026-08-01T00:00:00Z' where id = $1`, [
       expert,
     ]);
-    await db.query(
-      `update public.expert_affiliates set created_at = '2026-08-10T00:00:00Z' where expert_id = $1`,
-      [expert],
-    );
+    await setAffiliateSince(expert, "2026-08-10T00:00:00Z");
     // Affiliate id padded with spaces: matched after btrim.
     const player = await newPlayer(TENANT_A, { affiliate: "  AFF-LATE " });
     const beforeExpert = await deposit(TENANT_A, player, "2026-07-20T00:00:00Z");
@@ -520,7 +557,9 @@ describe("refresh_expert_credits — attribution", () => {
     const player = await newPlayer(TENANT_A, { affiliate: "AFF-1" });
     const dep = await deposit(TENANT_A, player, "2026-04-20T12:00:00Z");
     await refresh(TENANT_A, "2026-04-15T00:00:00Z", "2026-04-25T00:00:00Z");
-    expect(new Date((await credit(dep))!.deposit_at).toISOString()).toBe("2026-04-20T12:00:00.000Z");
+    expect(new Date((await credit(dep))!.deposit_at).toISOString()).toBe(
+      "2026-04-20T12:00:00.000Z",
+    );
 
     // Outside the range → into it: the stored credit (deposit_at 04-20) is
     // outside [04-01, 04-10) but must be replaced, not collide.
@@ -568,6 +607,186 @@ describe("refresh_expert_credits — attribution", () => {
     expect(await credit(dep)).toBeUndefined();
     await dayRange("2026-10-20");
     expect((await credit(dep))?.expert_id).toBe(expert1);
+  });
+});
+
+describe("affiliate history (save_expert diff)", () => {
+  it("re-saving an expert (e.g. teto change) keeps its affiliate credits after refresh", async () => {
+    const expert = await newExpert(TENANT_A, "Expert Resave", ["AFF-RS", "AFF-RS2"]);
+    const player = await newPlayer(TENANT_A, { affiliate: "AFF-RS" });
+    const dep = await deposit(TENANT_A, player, "2026-09-15T12:00:00Z");
+    await refresh(TENANT_A);
+    expect(await credit(dep)).toMatchObject({ expert_id: expert, via: "afiliado" });
+
+    const affiliateRows = async () =>
+      (
+        await db.query(
+          `select id, affiliate_id, created_at from public.expert_affiliates
+           where expert_id = $1 order by affiliate_id`,
+          [expert],
+        )
+      ).rows;
+    const before = await affiliateRows();
+    await resave(TENANT_A, expert, "Expert Resave", ["AFF-RS", "AFF-RS2"], 500);
+    await resave(TENANT_A, expert, "Expert Resave Novo Nome", [" AFF-RS ", "AFF-RS2"], 500);
+
+    expect(await affiliateRows()).toEqual(before);
+    expect(await history(TENANT_A, "AFF-RS")).toEqual([
+      { expert_id: expert, valid_from: new Date("2025-01-01T00:00:00Z"), valid_to: null },
+    ]);
+
+    await refresh(TENANT_A);
+    expect(await credit(dep)).toMatchObject({ expert_id: expert, via: "afiliado" });
+  });
+
+  it("moving an affiliate id from A to B keeps A's earlier credits and credits B only after the move", async () => {
+    const expertA = await newExpert(TENANT_A, "Expert Mover A", ["AFF-MV", "AFF-MV-KEEP"]);
+    const expertB = await newExpert(TENANT_A, "Expert Mover B", []);
+    const player = await newPlayer(TENANT_A, { affiliate: "AFF-MV" });
+    const old = await deposit(TENANT_A, player, "2026-09-01T12:00:00Z");
+
+    // The id cannot be given to B while A still owns it.
+    await expect(resave(TENANT_A, expertB, "Expert Mover B", ["AFF-MV"])).rejects.toThrow(
+      /affiliate_taken:AFF-MV/,
+    );
+    await resave(TENANT_A, expertA, "Expert Mover A", ["AFF-MV-KEEP"]);
+    await resave(TENANT_A, expertB, "Expert Mover B", ["AFF-MV"]);
+
+    const rows = await history(TENANT_A, "AFF-MV");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({ expert_id: expertA });
+    expect(rows[1]).toMatchObject({ expert_id: expertB, valid_to: null });
+    // Two saves: A's row closes when A drops the id, B's opens when B gets it.
+    const removedAt = new Date(rows[0].valid_to!).toISOString();
+    const movedAt = new Date(rows[1].valid_from).toISOString();
+    expect(movedAt >= removedAt).toBe(true);
+    // The untouched id of A kept its open row.
+    expect(await history(TENANT_A, "AFF-MV-KEEP")).toEqual([
+      { expert_id: expertA, valid_from: new Date("2025-01-01T00:00:00Z"), valid_to: null },
+    ]);
+
+    const justBefore = await deposit(TENANT_A, player, plusMs(removedAt, -1000));
+    const atMove = await deposit(TENANT_A, player, movedAt);
+    const after = await deposit(TENANT_A, player, plusMs(movedAt, 60_000));
+
+    await refresh(TENANT_A);
+
+    expect(await credit(old)).toMatchObject({ expert_id: expertA, via: "afiliado" });
+    expect(await credit(justBefore)).toMatchObject({ expert_id: expertA, via: "afiliado" });
+    expect(await credit(atMove)).toMatchObject({ expert_id: expertB, via: "afiliado" });
+    expect(await credit(after)).toMatchObject({ expert_id: expertB, via: "afiliado" });
+  });
+
+  it("removing an id stops new affiliate credits but keeps past ones", async () => {
+    const expert = await newExpert(TENANT_A, "Expert Remove Id", ["AFF-RM"]);
+    const player = await newPlayer(TENANT_A, { affiliate: "AFF-RM" });
+    const past = await deposit(TENANT_A, player, "2026-09-02T12:00:00Z");
+
+    await resave(TENANT_A, expert, "Expert Remove Id", []);
+    const rows = await history(TENANT_A, "AFF-RM");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].valid_to).not.toBeNull();
+    const removedAt = new Date(rows[0].valid_to!).toISOString();
+    const afterRemoval = await deposit(TENANT_A, player, plusMs(removedAt, 60_000));
+
+    await refresh(TENANT_A);
+
+    expect(await credit(past)).toMatchObject({ expert_id: expert, via: "afiliado" });
+    expect(await credit(afterRemoval)).toBeUndefined();
+    const { rows: links } = await db.query(
+      `select 1 from public.expert_affiliates where affiliate_id = 'AFF-RM'`,
+    );
+    expect(links).toHaveLength(0);
+  });
+
+  it("every expert_affiliates row has exactly one open history row", async () => {
+    const { rows } = await db.query<{ missing: number }>(
+      `select count(*)::int as missing from public.expert_affiliates ea
+       where not exists (
+         select 1 from public.expert_affiliate_history h
+         where h.tenant_id = ea.tenant_id and h.affiliate_id = ea.affiliate_id
+           and h.expert_id = ea.expert_id and h.valid_to is null)`,
+    );
+    expect(rows[0].missing).toBe(0);
+  });
+});
+
+describe("deactivated profiles", () => {
+  it("no click or affiliate credit for deposits at or after desativado_em", async () => {
+    const off = await newExpert(TENANT_A, "Expert Desativado", ["AFF-OFF"]);
+    const other = await newExpert(TENANT_A, "Expert Ativo Clique", []);
+    await db.query(
+      `update public.experts set ativo = false, desativado_em = '2026-09-10T00:00:00Z' where id = $1`,
+      [off],
+    );
+
+    const player = await newPlayer(TENANT_A, { affiliate: "AFF-OFF" });
+    const before = await deposit(TENANT_A, player, "2026-09-05T00:00:00Z");
+    const atDeactivation = await deposit(TENANT_A, player, "2026-09-10T00:00:00Z");
+    const afterAff = await deposit(TENANT_A, player, "2026-09-12T00:00:00Z");
+
+    // Latest click is of the deactivated expert: skipped, the earlier click
+    // of an active expert in the window wins instead.
+    const p2 = await newPlayer(TENANT_A);
+    const ldOther = await dispatch(TENANT_A, other, p2, "2026-09-14T00:00:00Z");
+    await click(TENANT_A, ldOther, "2026-09-14T01:00:00Z");
+    const ldOff = await dispatch(TENANT_A, off, p2, "2026-09-14T00:00:00Z");
+    await click(TENANT_A, ldOff, "2026-09-14T02:00:00Z");
+    const viaClick = await deposit(TENANT_A, p2, "2026-09-14T03:00:00Z");
+
+    // A deposit before the deactivation still credits its click.
+    const p3 = await newPlayer(TENANT_A);
+    const ldEarly = await dispatch(TENANT_A, off, p3, "2026-09-08T00:00:00Z");
+    await click(TENANT_A, ldEarly, "2026-09-08T01:00:00Z");
+    const earlyClick = await deposit(TENANT_A, p3, "2026-09-08T02:00:00Z");
+
+    await refresh(TENANT_A);
+
+    expect(await credit(before)).toMatchObject({ expert_id: off, via: "afiliado" });
+    expect(await credit(atDeactivation)).toBeUndefined();
+    expect(await credit(afterAff)).toBeUndefined();
+    expect(await credit(viaClick)).toMatchObject({ expert_id: other, via: "clique" });
+    expect(await credit(earlyClick)).toMatchObject({ expert_id: off, via: "clique" });
+
+    // Reactivated (desativado_em cleared): a later refresh credits again.
+    await db.query(`update public.experts set ativo = true, desativado_em = null where id = $1`, [
+      off,
+    ]);
+    await refresh(TENANT_A);
+    expect(await credit(afterAff)).toMatchObject({ expert_id: off, via: "afiliado" });
+  });
+
+  it("no inactive profile is left without desativado_em by the migration", async () => {
+    const { rows } = await db.query<{ n: number }>(
+      `select count(*)::int as n from public.experts where not ativo and desativado_em is null`,
+    );
+    expect(rows[0].n).toBe(0);
+  });
+});
+
+describe("delete_expert", () => {
+  it("refuses a profile with credits (expert_has_credits) and the FK does not cascade", async () => {
+    const expert = await newExpert(TENANT_A, "Expert Com Credito", ["AFF-DELC"]);
+    const player = await newPlayer(TENANT_A, { affiliate: "AFF-DELC" });
+    const dep = await deposit(TENANT_A, player, "2026-09-03T00:00:00Z");
+    await refresh(TENANT_A);
+    expect((await credit(dep))?.expert_id).toBe(expert);
+
+    await expect(
+      db.query(`select public.delete_expert($1, $2)`, [TENANT_A, expert]),
+    ).rejects.toThrow(/expert_has_credits/);
+    await expect(db.query(`delete from public.experts where id = $1`, [expert])).rejects.toThrow(
+      /foreign key/,
+    );
+    expect((await credit(dep))?.expert_id).toBe(expert);
+  });
+
+  it("deletes a profile without credits, with its affiliate ids and history", async () => {
+    const expert = await newExpert(TENANT_A, "Expert Sem Credito", ["AFF-DELN"]);
+    await db.query(`select public.delete_expert($1, $2)`, [TENANT_A, expert]);
+    const { rows } = await db.query(`select 1 from public.experts where id = $1`, [expert]);
+    expect(rows).toHaveLength(0);
+    expect(await history(TENANT_A, "AFF-DELN")).toEqual([]);
   });
 });
 
@@ -619,15 +838,16 @@ describe("access to expert tables", () => {
     "expert_message_templates",
     "expert_deposit_credits",
     "expert_settings",
+    "expert_affiliate_history",
   ];
 
   async function asUser<T>(uid: string, fn: () => Promise<T>): Promise<T> {
     await db.query("BEGIN");
     try {
-      await db.query(`select set_config('test.uid', $1, true), set_config('test.tenant', $2, true)`, [
-        uid,
-        TENANT_A,
-      ]);
+      await db.query(
+        `select set_config('test.uid', $1, true), set_config('test.tenant', $2, true)`,
+        [uid, TENANT_A],
+      );
       await db.exec("SET LOCAL ROLE authenticated");
       return await fn();
     } finally {

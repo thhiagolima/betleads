@@ -16,10 +16,24 @@
 --        [greatest(sent_at, deposit - window), deposit]. The expert is
 --        source_id (non-uuid values ignored), and must be an expert of the
 --        same house;
---     2. otherwise afiliado: the house's expert_affiliates row whose
---        affiliate_id = btrim(players.affiliate_id), only for deposits at or
---        after greatest(experts.created_at, expert_affiliates.created_at);
+--     2. otherwise afiliado: the expert whose expert_affiliate_history row
+--        for btrim(players.affiliate_id) in this house covers the deposit
+--        time (valid_from <= deposit < valid_to, or still open), and only
+--        for deposits at or after experts.created_at;
 --     3. otherwise no credit.
+--   An expert gets no credit (click or affiliate) for deposits at or after
+--   experts.desativado_em (set while the profile is deactivated): a click
+--   of a deactivated expert is skipped, the next eligible click or the
+--   affiliate fallback applies.
+-- * expert_affiliate_history: who owned each affiliate id of the house and
+--   when (one open row per current expert_affiliates row). save_expert is
+--   redefined here to apply only the diff of the affiliate ids (untouched
+--   ids keep their row and created_at; removed ids close their history row,
+--   added ids open one), so editing a profile or moving an id between
+--   experts never rewrites who earned the past deposits. delete_expert
+--   closes the history too, and refuses a profile with credits
+--   ('expert_has_credits'): expert_deposit_credits.expert_id is ON DELETE
+--   NO ACTION, the credits are the commission history.
 --   is_ftd: no earlier approved deposit of the player and players.ftd_em
 --   null or at most 10 minutes before the deposit (same test as
 --   refresh_crm_results_day). is_reativacao: the gap since the previous
@@ -31,6 +45,266 @@
 --   (managed_tenant_ids()); everything else goes through service_role.
 
 begin;
+
+-- 0a. experts.desativado_em ----------------------------------------------------
+--     Set by setExpertActive(false), cleared on reactivation. Profiles that
+--     are already inactive take their last update as the deactivation time
+--     (updated_at only moves forward after the deactivation, so this never
+--     withholds credit from deposits made while the profile was active).
+
+alter table public.experts
+  add column if not exists desativado_em timestamptz;
+
+update public.experts
+set desativado_em = updated_at
+where not ativo and desativado_em is null;
+
+-- 0b. expert_affiliate_history ---------------------------------------------------
+
+create table if not exists public.expert_affiliate_history (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references public.tenants(id) on delete cascade,
+  affiliate_id text not null,
+  expert_id uuid not null references public.experts(id) on delete cascade,
+  valid_from timestamptz not null,
+  valid_to timestamptz,
+  check (valid_to is null or valid_to > valid_from)
+);
+
+create index if not exists expert_affiliate_history_lookup_idx
+  on public.expert_affiliate_history (tenant_id, affiliate_id, valid_from);
+-- At most one current owner per affiliate id of a house (as expert_affiliates).
+create unique index if not exists expert_affiliate_history_open_uniq
+  on public.expert_affiliate_history (tenant_id, affiliate_id)
+  where valid_to is null;
+
+alter table public.expert_affiliate_history enable row level security;
+
+drop policy if exists expert_affiliate_history_manager_select on public.expert_affiliate_history;
+create policy expert_affiliate_history_manager_select on public.expert_affiliate_history
+  as permissive for select to authenticated
+  using ((select public.is_super_admin()) or tenant_id = any ((select public.managed_tenant_ids())::uuid[]));
+
+grant select on public.expert_affiliate_history to authenticated;
+grant all on public.expert_affiliate_history to service_role;
+revoke all on public.expert_affiliate_history from anon;
+revoke insert, update, delete, truncate on public.expert_affiliate_history from authenticated;
+
+-- Backfill: one open row per current expert_affiliates row.
+insert into public.expert_affiliate_history (tenant_id, affiliate_id, expert_id, valid_from)
+select ea.tenant_id, ea.affiliate_id, ea.expert_id, ea.created_at
+from public.expert_affiliates ea
+where not exists (
+  select 1 from public.expert_affiliate_history h
+  where h.tenant_id = ea.tenant_id and h.affiliate_id = ea.affiliate_id and h.valid_to is null
+);
+
+-- 0c. save_expert / delete_expert (phase 1, 20261025100100) redefined ---------
+--     Same signatures, error codes and players.expert label sync.
+
+create or replace function public.save_expert(
+  _tenant uuid,
+  _expert_id uuid,
+  _nome text,
+  _tipo text,
+  _affiliate_ids text[],
+  _envio_modo text,
+  _teto_mensal numeric,
+  _assumir_prazo_dias integer
+) returns uuid
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_expert_id uuid;
+  v_old_nome text;
+  v_expert_tenant uuid;
+  v_ids text[];
+  v_taken text;
+begin
+  _nome := btrim(_nome);
+  if _nome is null or _nome = '' then
+    raise exception 'expert_nome_required';
+  end if;
+
+  select array_agg(distinct btrim(v))
+  into v_ids
+  from unnest(coalesce(_affiliate_ids, array[]::text[])) as v
+  where btrim(v) <> '';
+  v_ids := coalesce(v_ids, array[]::text[]);
+
+  if _expert_id is null then
+    insert into public.experts (tenant_id, nome, tipo, envio_modo, teto_mensal, assumir_prazo_dias)
+    values (_tenant, _nome, _tipo, _envio_modo, _teto_mensal, _assumir_prazo_dias)
+    returning id into v_expert_id;
+    v_old_nome := _nome;
+  else
+    select nome, tenant_id
+    into v_old_nome, v_expert_tenant
+    from public.experts
+    where id = _expert_id
+    for update;
+
+    if v_expert_tenant is null or v_expert_tenant <> _tenant then
+      raise exception 'expert_not_found';
+    end if;
+
+    update public.experts
+    set nome = _nome,
+        tipo = _tipo,
+        envio_modo = _envio_modo,
+        teto_mensal = _teto_mensal,
+        assumir_prazo_dias = _assumir_prazo_dias,
+        updated_at = now()
+    where id = _expert_id;
+
+    v_expert_id := _expert_id;
+  end if;
+
+  select affiliate_id
+  into v_taken
+  from public.expert_affiliates
+  where tenant_id = _tenant
+    and expert_id <> v_expert_id
+    and affiliate_id = any(v_ids)
+  limit 1;
+
+  if v_taken is not null then
+    raise exception 'affiliate_taken:%', v_taken;
+  end if;
+
+  -- Removed ids: close their history row (a row opened in this same
+  -- transaction would have no length, so it is dropped instead), then
+  -- delete them. Untouched ids are left alone.
+  delete from public.expert_affiliate_history h
+  where h.tenant_id = _tenant
+    and h.expert_id = v_expert_id
+    and h.valid_to is null
+    and h.valid_from >= now()
+    and not (h.affiliate_id = any(v_ids));
+
+  update public.expert_affiliate_history h
+  set valid_to = now()
+  where h.tenant_id = _tenant
+    and h.expert_id = v_expert_id
+    and h.valid_to is null
+    and not (h.affiliate_id = any(v_ids));
+
+  delete from public.expert_affiliates
+  where expert_id = v_expert_id
+    and not (affiliate_id = any(v_ids));
+
+  -- Added ids: insert them and open their history row.
+  with added as (
+    insert into public.expert_affiliates (tenant_id, expert_id, affiliate_id)
+    select _tenant, v_expert_id, x
+    from unnest(v_ids) as x
+    where not exists (
+      select 1 from public.expert_affiliates ea
+      where ea.expert_id = v_expert_id and ea.affiliate_id = x
+    )
+    returning affiliate_id
+  )
+  insert into public.expert_affiliate_history (tenant_id, affiliate_id, expert_id, valid_from)
+  select _tenant, a.affiliate_id, v_expert_id, now()
+  from added a;
+
+  update public.players
+  set expert = _nome
+  where tenant_id = _tenant
+    and btrim(affiliate_id) = any(v_ids);
+
+  update public.players
+  set expert = null
+  where tenant_id = _tenant
+    and expert in (v_old_nome, _nome)
+    -- coalesce: a null affiliate_id makes the comparison NULL, and
+    -- "not NULL" would keep a stale label.
+    and not coalesce(btrim(affiliate_id) = any(v_ids), false);
+
+  return v_expert_id;
+end;
+$$;
+
+revoke all on function public.save_expert(uuid, uuid, text, text, text[], text, numeric, integer)
+  from public, anon, authenticated;
+grant execute on function public.save_expert(uuid, uuid, text, text, text[], text, numeric, integer)
+  to service_role;
+
+create or replace function public.delete_expert(_tenant uuid, _expert_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_user_id uuid;
+  v_nome text;
+begin
+  select user_id, nome
+  into v_user_id, v_nome
+  from public.experts
+  where id = _expert_id and tenant_id = _tenant
+  for update;
+
+  if not found then
+    return;
+  end if;
+
+  if v_user_id is not null then
+    raise exception 'expert_has_user';
+  end if;
+
+  -- The credits are the commission history: deactivate instead.
+  if exists (
+    select 1 from public.expert_deposit_credits c
+    where c.tenant_id = _tenant and c.expert_id = _expert_id
+  ) then
+    raise exception 'expert_has_credits';
+  end if;
+
+  -- By affiliate id, and by name too (unique per house): a player labelled
+  -- with this expert but with a null/other affiliate_id is cleared as well.
+  update public.players p
+  set expert = null
+  where p.tenant_id = _tenant
+    and (
+      p.expert = v_nome
+      or coalesce(
+        btrim(p.affiliate_id) in (
+          select affiliate_id from public.expert_affiliates where expert_id = _expert_id
+        ),
+        false
+      )
+    );
+
+  update public.expert_affiliate_history
+  set valid_to = now()
+  where tenant_id = _tenant and expert_id = _expert_id and valid_to is null
+    and valid_from < now();
+
+  -- expert_affiliates and expert_affiliate_history rows of this expert
+  -- cascade-delete with it.
+  delete from public.experts where id = _expert_id and tenant_id = _tenant;
+end;
+$$;
+
+revoke all on function public.delete_expert(uuid, uuid) from public, anon, authenticated;
+grant execute on function public.delete_expert(uuid, uuid) to service_role;
+
+-- 0d. Expert click lookups ---------------------------------------------------------
+--     refresh_expert_credits looks up, per deposit, the expert links sent
+--     to that player (same literals as its click lateral); the "clicked
+--     without deposit" list looks up the expert's own links.
+
+create index if not exists link_dispatches_expert_recipient_idx
+  on public.link_dispatches (tenant_id, recipient_player_id, sent_at)
+  where source_type = 'expert' and send_status = 'sent';
+
+create index if not exists link_dispatches_expert_source_idx
+  on public.link_dispatches (tenant_id, source_id, sent_at)
+  where source_type = 'expert' and send_status = 'sent';
 
 -- 1. expert_settings ---------------------------------------------------------
 
@@ -63,7 +337,8 @@ create table if not exists public.expert_deposit_credits (
   deposit_id uuid primary key references public.deposits(id) on delete cascade,
   tenant_id uuid not null references public.tenants(id) on delete cascade,
   player_id uuid not null references public.players(id) on delete cascade,
-  expert_id uuid not null references public.experts(id) on delete cascade,
+  -- No cascade: a profile with credits cannot be deleted (delete_expert).
+  expert_id uuid not null references public.experts(id),
   via text not null check (via in ('clique', 'afiliado')),
   valor numeric not null,
   deposit_at timestamptz not null,
@@ -172,17 +447,22 @@ begin
         and c.is_human
         and c.occurred_at >= greatest(ld.sent_at, dp.created_at - make_interval(hours => v_window))
         and c.occurred_at <= dp.created_at
+        and (e.desativado_em is null or dp.created_at < e.desativado_em)
       order by c.occurred_at desc, c.id desc
       limit 1
     ) clk on true
     left join lateral (
-      select ea.expert_id
-      from public.expert_affiliates ea
-      join public.experts e on e.id = ea.expert_id and e.tenant_id = _tenant
+      select h.expert_id
+      from public.expert_affiliate_history h
+      join public.experts e on e.id = h.expert_id and e.tenant_id = _tenant
       where clk.expert_id is null
-        and ea.tenant_id = _tenant
-        and ea.affiliate_id = btrim(dp.affiliate_id)
-        and dp.created_at >= greatest(e.created_at, ea.created_at)
+        and h.tenant_id = _tenant
+        and h.affiliate_id = btrim(dp.affiliate_id)
+        and h.valid_from <= dp.created_at
+        and (h.valid_to is null or dp.created_at < h.valid_to)
+        and dp.created_at >= e.created_at
+        and (e.desativado_em is null or dp.created_at < e.desativado_em)
+      order by h.valid_from desc
       limit 1
     ) aff on true
   )

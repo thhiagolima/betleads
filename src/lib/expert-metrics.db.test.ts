@@ -163,6 +163,19 @@ async function newExpert(tenant: string, nome: string, affiliates: string[] = []
   return rows[0].id;
 }
 
+/** Links the expert's current affiliate ids long before the test deposits. */
+async function backdateAffiliates(expert: string) {
+  await db.query(
+    `update public.expert_affiliates set created_at = '2025-01-01T00:00:00Z' where expert_id = $1`,
+    [expert],
+  );
+  await db.query(
+    `update public.expert_affiliate_history set valid_from = '2025-01-01T00:00:00Z'
+     where expert_id = $1 and valid_to is null`,
+    [expert],
+  );
+}
+
 async function newPlayer(tenant: string, opts: { affiliate?: string; ftdEm?: string } = {}) {
   const { rows } = await db.query<{ id: string }>(
     `insert into public.players (tenant_id, affiliate_id, ftd_em) values ($1, $2, $3) returning id`,
@@ -292,10 +305,7 @@ describe("expert_metrics", () => {
     await db.query(`update public.experts set created_at = '2025-01-01T00:00:00Z' where id = $1`, [
       expert,
     ]);
-    await db.query(
-      `update public.expert_affiliates set created_at = '2025-01-01T00:00:00Z' where expert_id = $1`,
-      [expert],
-    );
+    await backdateAffiliates(expert);
 
     // Player A: clicks + two deposits (first FTD, second not).
     const playerA = await newPlayer(TENANT_A);
@@ -363,36 +373,34 @@ describe("expert_metrics", () => {
     await click(TENANT_A, ld, "2026-06-12T01:00:00Z", false); // inside, but bot
     await click(TENANT_A, ld, "2026-06-20T00:00:00Z"); // after
 
-    const row = await metricsFor(
-      TENANT_A,
-      expert,
-      "2026-06-05T00:00:00Z",
-      "2026-06-15T00:00:00Z",
-    );
+    const row = await metricsFor(TENANT_A, expert, "2026-06-05T00:00:00Z", "2026-06-15T00:00:00Z");
     expect(row).toMatchObject({ links: 1, contatos: 1, cliques: 1 });
   });
 
-  it("a deleted expert disappears together with its credits", async () => {
+  it("an expert with credits cannot be deleted; without credits it disappears from the metrics", async () => {
     const expert = await newExpert(TENANT_A, "Expert Removido", ["AFF-DEL"]);
     await db.query(`update public.experts set created_at = '2025-01-01T00:00:00Z' where id = $1`, [
       expert,
     ]);
-    await db.query(
-      `update public.expert_affiliates set created_at = '2025-01-01T00:00:00Z' where expert_id = $1`,
-      [expert],
-    );
+    await backdateAffiliates(expert);
     const player = await newPlayer(TENANT_A, { affiliate: "AFF-DEL" });
     await deposit(TENANT_A, player, "2026-07-01T00:00:00Z", { valor: 500 });
     await refreshCredits(TENANT_A);
     expect(await metricsFor(TENANT_A, expert)).toBeDefined();
 
-    await db.query(`delete from public.experts where id = $1`, [expert]);
+    // The credits are the commission history: no cascade, delete_expert refuses.
+    await expect(db.query(`delete from public.experts where id = $1`, [expert])).rejects.toThrow(
+      /foreign key/,
+    );
+    await expect(
+      db.query(`select public.delete_expert($1, $2)`, [TENANT_A, expert]),
+    ).rejects.toThrow(/expert_has_credits/);
+    expect(await metricsFor(TENANT_A, expert)).toBeDefined();
 
-    expect(await metricsFor(TENANT_A, expert)).toBeUndefined();
-    const { rows } = await db.query(`select 1 from public.expert_deposit_credits where expert_id = $1`, [
-      expert,
-    ]);
-    expect(rows).toHaveLength(0);
+    const empty = await newExpert(TENANT_A, "Expert Sem Creditos");
+    expect(await metricsFor(TENANT_A, empty)).toBeDefined();
+    await db.query(`select public.delete_expert($1, $2)`, [TENANT_A, empty]);
+    expect(await metricsFor(TENANT_A, empty)).toBeUndefined();
   });
 
   it("authenticated cannot execute the metric functions", async () => {
@@ -406,9 +414,9 @@ describe("expert_metrics", () => {
       }
     }
 
-    await expect(
-      asAuthenticated(`select public.expert_metrics($1, now(), now())`),
-    ).rejects.toThrow(/permission denied/);
+    await expect(asAuthenticated(`select public.expert_metrics($1, now(), now())`)).rejects.toThrow(
+      /permission denied/,
+    );
     await expect(
       asAuthenticated(`select public.expert_metrics_daily($1, $1, now(), now())`),
     ).rejects.toThrow(/permission denied/);
@@ -421,10 +429,7 @@ describe("expert_metrics_daily", () => {
     await db.query(`update public.experts set created_at = '2025-01-01T00:00:00Z' where id = $1`, [
       expert,
     ]);
-    await db.query(
-      `update public.expert_affiliates set created_at = '2025-01-01T00:00:00Z' where expert_id = $1`,
-      [expert],
-    );
+    await backdateAffiliates(expert);
     const player = await newPlayer(TENANT_A, { affiliate: "AFF-SERIE" });
     // 00:30 BRT on 2026-08-02 is 03:30 UTC; falls on the 08-02 São Paulo day.
     await deposit(TENANT_A, player, "2026-08-02T03:30:00Z", { valor: 70 });

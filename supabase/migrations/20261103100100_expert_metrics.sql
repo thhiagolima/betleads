@@ -13,7 +13,9 @@
 --       occurred_at no período;
 --     - contatos: linhas de expert_lead_contacts criadas no período.
 --   Como a base da consulta é a tabela experts, um expert excluído some
---   junto com seus créditos/links/contatos (todos ON DELETE CASCADE).
+--   das métricas. Um perfil com créditos não pode ser excluído
+--   (expert_deposit_credits.expert_id sem cascade, delete_expert recusa);
+--   links e contatos de um perfil sem créditos saem com ele (CASCADE).
 -- * expert_metrics_daily(tenant, expert, from, to): uma linha por dia em
 --   São Paulo cobrindo [from, to), preenchendo com zeros os dias sem
 --   movimento (generate_series), com depositado/depositado_clique/
