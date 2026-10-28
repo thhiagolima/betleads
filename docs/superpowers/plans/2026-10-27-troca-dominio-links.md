@@ -37,7 +37,7 @@
 
 - Create `src/lib/link-domain.ts` — pure: normalização, `replaceLinkDomain`, `countSubdomainLinks`. Client+server safe.
 - Create `src/lib/link-domain-plan.ts` — pure: tipos de fonte/prévia e `planLinkDomainChange`.
-- Create `supabase/migrations/20261103100000_apply_link_domain_change.sql` — RPC.
+- Create `supabase/migrations/20261104100000_apply_link_domain_change.sql` — RPC.
 - Create `src/lib/link-domain.server.ts` — `loadLinkDomainSources(tenantId)` (supabaseAdmin).
 - Create `src/lib/link-domain.functions.ts` — `previewLinkDomainChange`, `applyLinkDomainChange`.
 - Modify `src/lib/house-links.server.ts` — export `invalidateHouseLinks(tenantId)`.
@@ -221,7 +221,7 @@ Normaliza com `normalizeLinkDomain` (erro → `{ok:false}` com a mensagem dela).
 ### Task 3: RPC transacional `apply_link_domain_change`
 
 **Files:**
-- Create: `supabase/migrations/20261103100000_apply_link_domain_change.sql`
+- Create: `supabase/migrations/20261104100000_apply_link_domain_change.sql`
 - Test: `src/lib/link-domain.db.test.ts` (PGlite, mesmo padrão de `src/lib/house-config.db.test.ts`: schema mínimo com `tenants`, `journeys(id, tenant_id, status)`, `journey_steps(id, tenant_id, journey_id, config jsonb)`, `sms_templates(id, tenant_id, content, version)` + trigger de version simples, `email_templates`, `tenant_quick_links`, `shortio_settings(tenant_id, allowed_destination_hosts text[])`, `tenant_audit_logs`)
 
 **Interfaces:**
@@ -360,4 +360,4 @@ it("mostra mensagem de vazio quando não há trabalho", () => {});
 - [ ] **Step 4: Manual** — rodar o app, casa demo bloqueada; numa casa de teste local: criar template SMS com `https://casa-antiga.com/x`, abrir a ferramenta, conferir prévia, aplicar, conferir audit log.
 - [ ] **Step 5: Commit** (se houver ajustes) — `chore(links): fixes from final verification`
 
-Migration `20261103100000_apply_link_domain_change.sql` **não** é aplicada em produção por este plano — requer ok explícito (memória: escritas em prod precisam de aprovação).
+Migration `20261104100000_apply_link_domain_change.sql` **não** é aplicada em produção por este plano — requer ok explícito (memória: escritas em prod precisam de aprovação).

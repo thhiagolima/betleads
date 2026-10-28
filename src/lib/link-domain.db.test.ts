@@ -1,5 +1,5 @@
 // Transactional RPC for Task 3 of "Trocar domínio nos links" —
-// SQL tests for supabase/migrations/20261103100000_apply_link_domain_change.sql
+// SQL tests for supabase/migrations/20261104100000_apply_link_domain_change.sql
 //
 // Runs the migration inside an in-memory Postgres (PGlite) against a minimal
 // schema (tenants, journeys, journey_steps, sms_templates, email_templates,
@@ -16,7 +16,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const root = resolve(__dirname, "../..");
 const MIGRATION = readFileSync(
-  resolve(root, "supabase/migrations/20261103100000_apply_link_domain_change.sql"),
+  resolve(root, "supabase/migrations/20261104100000_apply_link_domain_change.sql"),
   "utf8",
 );
 
