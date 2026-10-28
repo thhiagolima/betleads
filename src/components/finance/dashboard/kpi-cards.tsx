@@ -79,6 +79,10 @@ function Variation({
   );
 }
 
+/** Spec §5: other costs and the plan fee only enter a closed month. */
+export const NO_OTHER_COSTS_NOTE =
+  "Resultado sem outros custos e mensalidade do mês (só entram em mês fechado).";
+
 export function KpiCards({
   current,
   previous,
@@ -90,30 +94,37 @@ export function KpiCards({
   houseCount?: number;
 }) {
   return (
-    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-      {KPIS.map((kpi) => {
-        const value = kpi.pick(current);
-        const label =
-          kpi.key === "cashResult" && houseCount !== undefined && houseCount > 1
-            ? `${kpi.label} (${houseCount} casas)`
-            : kpi.label;
-        return (
-          <div
-            key={kpi.key}
-            data-kpi={kpi.key}
-            className={cn(
-              "rounded-lg border p-3",
-              kpi.highlight ? "border-primary/50 bg-primary/5" : "border-border/40",
-            )}
-          >
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
-            <p className={cn("font-semibold", kpi.highlight ? "text-2xl" : "text-xl")}>
-              {formatValue(kpi.format, value)}
-            </p>
-            <Variation kpi={kpi} current={value} previous={kpi.pick(previous)} />
-          </div>
-        );
-      })}
+    <div className="space-y-2">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        {KPIS.map((kpi) => {
+          const value = kpi.pick(current);
+          const label =
+            kpi.key === "cashResult" && houseCount !== undefined && houseCount > 1
+              ? `${kpi.label} (${houseCount} casas)`
+              : kpi.label;
+          return (
+            <div
+              key={kpi.key}
+              data-kpi={kpi.key}
+              className={cn(
+                "rounded-lg border p-3",
+                kpi.highlight ? "border-primary/50 bg-primary/5" : "border-border/40",
+              )}
+            >
+              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
+              <p className={cn("font-semibold", kpi.highlight ? "text-2xl" : "text-xl")}>
+                {formatValue(kpi.format, value)}
+              </p>
+              <Variation kpi={kpi} current={value} previous={kpi.pick(previous)} />
+            </div>
+          );
+        })}
+      </div>
+      {current.otherCosts === null && (
+        <p data-note="no-other-costs" className="text-xs text-muted-foreground">
+          {NO_OTHER_COSTS_NOTE}
+        </p>
+      )}
     </div>
   );
 }

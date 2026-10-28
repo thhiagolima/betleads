@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  betleadsMissingNote,
   betleadsUsageNote,
   formatBRL,
   formatPct,
@@ -54,17 +55,24 @@ describe("monthLabel", () => {
   });
 });
 
+describe("betleadsMissingNote", () => {
+  it("is the chart's and the Lançamentos grid's shared wording", () => {
+    expect(betleadsMissingNote(null)).toBe("Sem dado de custo Betleads");
+    expect(betleadsMissingNote("2026-10-10")).toBe("Sem dado de custo Betleads antes de out/2026");
+  });
+});
+
 describe("betleadsUsageNote", () => {
   it("says there is no consumption data when the house never had any", () => {
-    expect(betleadsUsageNote("2026-10", null)).toBe("sem dado de consumo");
+    expect(betleadsUsageNote("2026-10", null)).toBe("Sem dado de custo Betleads");
   });
 
   it("names the since month for a month before it", () => {
     expect(betleadsUsageNote("2026-09", "2026-10-10")).toBe(
-      "sem dado de consumo antes de out/2026",
+      "Sem dado de custo Betleads antes de out/2026",
     );
     expect(betleadsUsageNote("2025-12", "2026-01-03")).toBe(
-      "sem dado de consumo antes de jan/2026",
+      "Sem dado de custo Betleads antes de jan/2026",
     );
   });
 

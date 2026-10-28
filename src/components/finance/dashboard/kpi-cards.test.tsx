@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { KpiCards } from "./kpi-cards";
+import { KpiCards, NO_OTHER_COSTS_NOTE } from "./kpi-cards";
 import { summary } from "./test-fixtures";
 
 // No jsdom/testing-library in this repo: assert on the static markup. Each
@@ -15,6 +15,23 @@ function card(html: string, key: string) {
 }
 
 describe("KpiCards", () => {
+  it("notes the result has no other costs when the window is not a closed month", () => {
+    const open = renderToStaticMarkup(
+      <KpiCards current={summary({ otherCosts: null })} previous={summary()} />,
+    );
+    expect(open).toContain(
+      "Resultado sem outros custos e mensalidade do mês (só entram em mês fechado).",
+    );
+    expect(NO_OTHER_COSTS_NOTE).toBe(
+      "Resultado sem outros custos e mensalidade do mês (só entram em mês fechado).",
+    );
+
+    const closed = renderToStaticMarkup(
+      <KpiCards current={summary({ otherCosts: 0 })} previous={summary()} />,
+    );
+    expect(closed).not.toContain("só entram em mês fechado");
+  });
+
   it("shows ▲ green when profit rises and red ▲ when ad spend rises", () => {
     const html = renderToStaticMarkup(
       <KpiCards

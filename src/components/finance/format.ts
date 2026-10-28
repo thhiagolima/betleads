@@ -62,14 +62,23 @@ export function monthLabel(month: string, withYear = false) {
 }
 
 /**
- * Note under the month's Betleads cost (spec §7.2): Betleads usage is only
- * known from `betleadsSince` (first day with consumption) on, so a month
- * before it — or any month of a house that never had consumption — shows
- * that the zero means "no data". `month` is "YYYY-MM".
+ * The "no Betleads data" note (spec §7.2), the same wording in the 12-month
+ * chart and the Lançamentos grid: "Sem dado de custo Betleads antes de
+ * out/2026", or "Sem dado de custo Betleads" for a scope with no data at all.
+ */
+export function betleadsMissingNote(betleadsSince: string | null): string {
+  return betleadsSince === null
+    ? "Sem dado de custo Betleads"
+    : `Sem dado de custo Betleads antes de ${monthLabel(betleadsSince.slice(0, 7), true)}`;
+}
+
+/**
+ * Note under the month's Betleads cost: Betleads cost is only known from
+ * `betleadsSince` (first day with data) on, so a month before it — or any
+ * month of a house that never had data — shows that the zero means "no
+ * data". `month` is "YYYY-MM".
  */
 export function betleadsUsageNote(month: string, betleadsSince: string | null): string | null {
-  if (betleadsSince === null) return "sem dado de consumo";
-  const sinceMonth = betleadsSince.slice(0, 7);
-  if (month >= sinceMonth) return null;
-  return `sem dado de consumo antes de ${monthLabel(sinceMonth, true)}`;
+  if (betleadsSince !== null && month >= betleadsSince.slice(0, 7)) return null;
+  return betleadsMissingNote(betleadsSince);
 }

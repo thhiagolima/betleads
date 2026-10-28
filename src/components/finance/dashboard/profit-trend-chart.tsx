@@ -17,7 +17,12 @@ import {
   YAxis,
 } from "recharts";
 
-import { formatBRL, formatRatio, monthLabel } from "@/components/finance/format";
+import {
+  betleadsMissingNote,
+  formatBRL,
+  formatRatio,
+  monthLabel,
+} from "@/components/finance/format";
 import {
   CHART_COLORS,
   CHART_SERIES,
@@ -156,11 +161,7 @@ export function ProfitTrendChart({
         </ResponsiveContainer>
       </div>
       {missing && (
-        <p className="text-xs text-muted-foreground">
-          {betleadsSince
-            ? `Sem dado de custo Betleads antes de ${monthLabel(betleadsSince.slice(0, 7), true)}`
-            : "Sem dado de custo Betleads nestes meses"}
-        </p>
+        <p className="text-xs text-muted-foreground">{betleadsMissingNote(betleadsSince)}</p>
       )}
     </div>
   );
