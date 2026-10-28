@@ -54,7 +54,7 @@ export type ExpertAdminRow = {
   createdAt: string;
 };
 
-type ExpertDbRow = {
+export type ExpertDbRow = {
   id: string;
   tenant_id: string;
   nome: string;
@@ -89,7 +89,7 @@ const ROLE_LABELS: Record<string, string> = {
 const db = () => supabaseAdmin as any;
 
 /** The house this request acts on, refused unless the caller administers it. */
-async function requireExpertAdminTenant(ctx: ServerContext) {
+export async function requireExpertAdminTenant(ctx: ServerContext) {
   const tenantId = await resolveOperationalTenantForRequest(
     ctx.supabase,
     ctx.userId,
@@ -104,7 +104,7 @@ async function requireExpertAdminWriteTenant(ctx: ServerContext) {
   return tenantId;
 }
 
-async function loadExpert(tenantId: string, expertId: string): Promise<ExpertDbRow> {
+export async function loadExpert(tenantId: string, expertId: string): Promise<ExpertDbRow> {
   const { data, error } = await db()
     .from("experts")
     .select(EXPERT_COLUMNS)
@@ -127,7 +127,11 @@ export function expertAcesso(
   return "ativo";
 }
 
-async function countExpertLeads(tenantId: string, tipo: ExpertTipo, affiliateIds: string[]) {
+export async function countExpertLeads(
+  tenantId: string,
+  tipo: ExpertTipo,
+  affiliateIds: string[],
+) {
   if (tipo === "restrito" && affiliateIds.length === 0) return 0;
   let query = db()
     .from("players")
@@ -139,7 +143,7 @@ async function countExpertLeads(tenantId: string, tipo: ExpertTipo, affiliateIds
   return Number(count ?? 0);
 }
 
-async function authUserOf(userId: string | null) {
+export async function authUserOf(userId: string | null) {
   if (!userId) return null;
   const { data, error } = await supabaseAdmin.auth.admin.getUserById(userId);
   if (error) {
