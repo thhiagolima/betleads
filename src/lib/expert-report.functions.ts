@@ -40,7 +40,12 @@ import {
   type ReportSubject,
   type ServerContext,
 } from "@/lib/expert-report-subject.server";
-import { listExpertsFor, requireExpertAdminTenant } from "@/lib/experts-admin.functions";
+import type { ExpertTipo } from "@/lib/expert-access.server";
+import {
+  expertAccessFields,
+  houseRolesOf,
+  requireExpertAdminTenant,
+} from "@/lib/experts-admin.functions";
 import { brtDayKey } from "@/lib/tz";
 import { dbUuid } from "@/lib/zod-helpers";
 
@@ -605,6 +610,46 @@ async function fetchHouseDepositTotals(
   return { depositado: Number(row?.depositado ?? 0), ftds: Number(row?.ftds ?? 0) };
 }
 
+type TeamExpert = { id: string; nome: string; ativo: boolean; tipoLabel: string };
+
+/**
+ * Os perfis da casa (inclusive inativos), por nome, com o rótulo de tipo:
+ * uma leitura de experts + uma de user_roles dos vinculados. Sem contagem de
+ * leads nem usuário de auth (o ranking não usa).
+ */
+async function listTeamExperts(tenantId: string): Promise<TeamExpert[]> {
+  const { data, error } = await db()
+    .from("experts")
+    .select("id,nome,tipo,ativo,user_id")
+    .eq("tenant_id", tenantId)
+    .order("nome");
+  if (error) throw new Error(error.message);
+  const rows = (data ?? []) as Array<{
+    id: string;
+    nome: string;
+    tipo: ExpertTipo;
+    ativo: boolean;
+    user_id: string | null;
+  }>;
+  const roles = await houseRolesOf(
+    tenantId,
+    rows.map((row) => row.user_id),
+  );
+  return rows.map((row) => {
+    const { papelEquipe } = expertAccessFields(
+      row,
+      null,
+      row.user_id ? roles.get(row.user_id) : null,
+    );
+    return {
+      id: row.id,
+      nome: row.nome,
+      ativo: row.ativo,
+      tipoLabel: tipoLabelOf(row.tipo, papelEquipe),
+    };
+  });
+}
+
 const teamReportInput = z.object({ period: periodKeySchema });
 
 export const getTeamReport = createServerFn({ method: "GET" })
@@ -625,7 +670,7 @@ export async function getTeamReportFor(
 
   const [experts, currentRows, previousRows, houseTotals, janelaHoras, atualizadoEm] =
     await Promise.all([
-      listExpertsFor(ctx),
+      listTeamExperts(tenantId),
       fetchTeamReport(tenantId, ranges.current),
       fetchTeamReport(tenantId, ranges.previous),
       fetchHouseDepositTotals(tenantId, ranges.current),
@@ -648,7 +693,7 @@ export async function getTeamReportFor(
       return {
         expertId: expert.id,
         nome: expert.nome,
-        tipoLabel: tipoLabelOf(expert.tipo, expert.papelEquipe),
+        tipoLabel: expert.tipoLabel,
         ativo: expert.ativo,
         creditado,
         variacao: variationPct(creditado, previousCreditado),

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const fake = vi.hoisted(() => ({
   admin: null as unknown as ReturnType<typeof createFakeDb>,
+  authCalls: 0,
 }));
 
 vi.mock("@/integrations/supabase/client.server", async () => {
@@ -14,13 +15,12 @@ vi.mock("@/integrations/supabase/client.server", async () => {
   return {
     supabaseAdmin: {
       ...fake.admin.client,
-      // Only `getTeamReportFor` (via `listExpertsFor`) reads auth users, for
-      // the one linked expert (ME/EXPERT_USER); unlinked profiles (OTHER)
-      // never call this.
+      // The report never needs auth users; counted so the team report can
+      // assert it does not read them.
       auth: {
         admin: {
           getUserById: async (id: string) =>
-            id === EXPERT_USER
+            ++fake.authCalls && id === EXPERT_USER
               ? { data: { user: { id, email: "ana@casa.com", last_sign_in_at: null } }, error: null }
               : { data: { user: null }, error: { message: "User not found" } },
         },
@@ -672,6 +672,39 @@ describe("getTeamReportFor / exportTeamReportCsvFor", () => {
     });
     expect(withHouse.totais.pctCasaDepositado).toBeCloseTo(0.3, 6);
     expect(withHouse.totais.pctCasaFtds).toBeCloseTo(0.3, 6);
+  });
+
+  it("team report labels team profiles by house role without reading auth users", async () => {
+    const GESTOR = "00000000-0000-4000-8000-0000000000a7";
+    const TEAM_PROFILE = "00000000-0000-4000-8000-0000000000e3";
+    fake.admin
+      .rows("user_roles")
+      .push({ id: "r-gestor", user_id: GESTOR, tenant_id: TENANT, role: "gestor" });
+    fake.admin.rows("experts").push({
+      id: TEAM_PROFILE,
+      tenant_id: TENANT,
+      nome: "Carla",
+      tipo: "restrito",
+      ativo: false,
+      envio_modo: "livre",
+      teto_mensal: null,
+      assumir_prazo_dias: 3,
+      user_id: GESTOR,
+      ja_vinculado: true,
+      created_at: "2026-01-01T00:00:00Z",
+    });
+    fake.authCalls = 0;
+
+    const report = await getTeamReportFor(ctxFor(ADMIN, { admin: true }), {
+      period: "mes_atual",
+    });
+
+    expect(report.rows.map((r) => [r.nome, r.tipoLabel, r.ativo])).toEqual([
+      ["Ana Souza", "Expert total", true],
+      ["Bruno", "Expert total", true],
+      ["Carla", "Equipe (Gestor)", false],
+    ]);
+    expect(fake.authCalls).toBe(0);
   });
 
   it("team csv header is exact", async () => {
