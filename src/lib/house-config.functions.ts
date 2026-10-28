@@ -34,6 +34,7 @@ import {
   type TenantDomain,
 } from "@/lib/tenant-domains.server";
 import { renderDnsInstructionsEmail, sendPlatformEmail } from "@/lib/platform-email.server";
+import { invalidateHouseLinks } from "@/lib/house-links.server";
 
 // ============ Pure helpers (exported for unit tests) ============
 
@@ -473,7 +474,7 @@ export const getHouseDomainUsages = createServerFn({ method: "GET" })
 
 // ============ Writes: site + quick links ============
 
-async function requireHouseAdmin(context: { supabase: unknown; userId: string }) {
+export async function requireHouseAdmin(context: { supabase: unknown; userId: string }) {
   const tenantId = await resolveOperationalTenantId(
     context.supabase as Parameters<typeof resolveOperationalTenantId>[0],
   );
@@ -494,12 +495,21 @@ export const saveHouseSite = createServerFn({ method: "POST" })
     const normalized = normalizeSiteUrl(data.siteUrl);
     if (!normalized.ok) throw new Error(normalized.error);
 
+    const { data: before, error: beforeErr } = await supabaseAdmin
+      .from("tenants")
+      .select("site_url")
+      .eq("id", tenantId)
+      .single();
+    if (beforeErr) throw new Error(beforeErr.message);
+
     const { error } = await supabaseAdmin
       .from("tenants")
       .update({ site_url: normalized.url })
       .eq("id", tenantId);
     if (error) throw new Error(error.message);
-    return { siteUrl: normalized.url };
+
+    invalidateHouseLinks(tenantId);
+    return { siteUrl: normalized.url, previousSiteUrl: (before as { site_url: string | null }).site_url };
   });
 
 const quickLinkInput = z.object({

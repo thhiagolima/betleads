@@ -16,6 +16,14 @@ export function __resetHouseLinksCacheForTests() {
   houseLinksCache.clear();
 }
 
+/** Drops a tenant's cached house links so the next read picks up a change
+ * made outside `loadHouseLinks` (e.g. `saveHouseSite`, the link-domain
+ * change) instead of serving a stale value for up to
+ * `HOUSE_LINKS_CACHE_TTL_MS`. */
+export function invalidateHouseLinks(tenantId: string): void {
+  houseLinksCache.delete(tenantId);
+}
+
 const LEGACY_HOUSE: HouseLinks = { siteUrl: null, quickLinks: {} };
 
 /** `{siteUrl: null, quickLinks: {}}` for a tenant with no house URL — quick
