@@ -79,11 +79,12 @@ export type ExpertDbRow = {
   teto_mensal: number | string | null;
   assumir_prazo_dias: number;
   user_id: string | null;
+  ja_vinculado: boolean;
   created_at: string;
 };
 
 const EXPERT_COLUMNS =
-  "id,tenant_id,nome,tipo,ativo,envio_modo,teto_mensal,assumir_prazo_dias,user_id,created_at";
+  "id,tenant_id,nome,tipo,ativo,envio_modo,teto_mensal,assumir_prazo_dias,user_id,ja_vinculado,created_at";
 
 const NOT_ADMIN_MESSAGE = "Apenas o admin da casa gerencia experts.";
 const EXPERT_NOT_FOUND = "Expert não encontrado.";
@@ -138,10 +139,18 @@ async function expertHasCredits(tenantId: string, expertId: string): Promise<boo
 
 /**
  * Os créditos de um perfil são a base da comissão de quem os gerou: um
- * perfil que já tem créditos não passa para outra pessoa (convite ou
- * vínculo), senão o histórico dela iria junto.
+ * perfil já vinculado antes (`ja_vinculado`) com créditos não passa para
+ * outra pessoa (convite ou vínculo), senão o histórico dela iria junto. O
+ * primeiro vínculo de um perfil nunca vinculado sempre funciona, mesmo com
+ * créditos: é o fluxo normal (admin cria o perfil com IDs de afiliado, o
+ * cron credita os depósitos, só depois a pessoa é convidada/vinculada).
  */
-async function assertProfileHasNoCredits(tenantId: string, expertId: string) {
+async function assertProfileHasNoCredits(
+  tenantId: string,
+  expertId: string,
+  jaVinculado: boolean,
+) {
+  if (!jaVinculado) return;
   if (await expertHasCredits(tenantId, expertId)) throw new Error(PROFILE_HAS_OTHER_CREDITS);
 }
 
@@ -424,7 +433,7 @@ export async function inviteExpertFor(ctx: ServerContext, data: z.input<typeof i
   const expert = await loadExpert(tenantId, input.expertId);
   if (expert.user_id) throw new Error(EXPERT_ALREADY_LINKED);
   // Before the lookup/invite: a refused profile never sends an e-mail.
-  await assertProfileHasNoCredits(tenantId, expert.id);
+  await assertProfileHasNoCredits(tenantId, expert.id, expert.ja_vinculado);
 
   const email = input.email.toLowerCase();
   // An invite is only sent for an e-mail with no auth user yet, and such a
@@ -473,7 +482,7 @@ export async function inviteExpertFor(ctx: ServerContext, data: z.input<typeof i
   // both pass the check above, and only one may win.
   const { data: linked, error: linkErr } = await db()
     .from("experts")
-    .update({ user_id: userId })
+    .update({ user_id: userId, ja_vinculado: true })
     .eq("id", expert.id)
     .eq("tenant_id", tenantId)
     .is("user_id", null)
@@ -584,7 +593,7 @@ export async function linkExpertToTeamMemberFor(
 
   const expert = await loadExpert(tenantId, input.expertId);
   if (expert.user_id) throw new Error(PROFILE_ALREADY_LINKED);
-  await assertProfileHasNoCredits(tenantId, expert.id);
+  await assertProfileHasNoCredits(tenantId, expert.id, expert.ja_vinculado);
 
   const { data: owned, error: ownedErr } = await db()
     .from("experts")
@@ -600,7 +609,7 @@ export async function linkExpertToTeamMemberFor(
   // same person in this house.
   const { data: linked, error: linkErr } = await db()
     .from("experts")
-    .update({ user_id: input.userId })
+    .update({ user_id: input.userId, ja_vinculado: true })
     .eq("id", expert.id)
     .eq("tenant_id", tenantId)
     .is("user_id", null)

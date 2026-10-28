@@ -762,6 +762,32 @@ describe("deactivated profiles", () => {
     );
     expect(rows[0].n).toBe(0);
   });
+
+  it("ja_vinculado defaults to false and the migration backfills true for profiles with a user_id", async () => {
+    const neverLinked = await newExpert(TENANT_A, "Nunca Vinculado", ["AFF-JV1"]);
+    const { rows: fresh } = await db.query<{ ja_vinculado: boolean }>(
+      `select ja_vinculado from public.experts where id = $1`,
+      [neverLinked],
+    );
+    expect(fresh[0].ja_vinculado).toBe(false);
+
+    // Simulates a profile that already had user_id before this migration ran:
+    // the backfill (`update ... where user_id is not null`) must catch it.
+    const { rows: authUser } = await db.query<{ id: string }>(
+      `insert into auth.users (id) values (gen_random_uuid()) returning id`,
+    );
+    const linkedBefore = await newExpert(TENANT_A, "Ja Vinculado Antes", ["AFF-JV2"]);
+    await db.query(`update public.experts set user_id = $2, ja_vinculado = false where id = $1`, [
+      linkedBefore,
+      authUser[0].id,
+    ]);
+    await db.query(`update public.experts set ja_vinculado = true where user_id is not null`);
+    const { rows: backfilled } = await db.query<{ ja_vinculado: boolean }>(
+      `select ja_vinculado from public.experts where id = $1`,
+      [linkedBefore],
+    );
+    expect(backfilled[0].ja_vinculado).toBe(true);
+  });
 });
 
 describe("delete_expert", () => {

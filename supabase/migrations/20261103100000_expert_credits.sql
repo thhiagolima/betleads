@@ -59,6 +59,23 @@ update public.experts
 set desativado_em = updated_at
 where not ativo and desativado_em is null;
 
+-- 0a2. experts.ja_vinculado -------------------------------------------------
+--      Tracks whether the profile was ever linked to a person. The first
+--      link to a never-linked profile always succeeds even with credits
+--      (the normal flow: admin creates the profile with affiliate ids, the
+--      cron credits deposits, only then the intended person is invited or
+--      linked); once linked, credits can no longer move to someone else.
+--      Set alongside user_id by inviteExpertFor/linkExpertToTeamMemberFor
+--      (experts-admin.functions.ts) and never cleared by
+--      removeExpertAccessFor.
+
+alter table public.experts
+  add column if not exists ja_vinculado boolean not null default false;
+
+update public.experts
+set ja_vinculado = true
+where user_id is not null;
+
 -- 0b. expert_affiliate_history ---------------------------------------------------
 
 create table if not exists public.expert_affiliate_history (

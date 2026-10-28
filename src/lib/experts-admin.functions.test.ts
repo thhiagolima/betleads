@@ -380,17 +380,53 @@ describe("experts admin server functions", () => {
     }
   });
 
-  it("invite and team link refuse a profile that already has credits", async () => {
-    addExpert();
+  function pushCredit(expertId: string) {
     fake.admin.rows("expert_deposit_credits").push({
-      deposit_id: "d1",
+      deposit_id: `d-${expertId}`,
       tenant_id: TENANT,
       player_id: "p1",
-      expert_id: EXPERT_ID,
+      expert_id: expertId,
       via: "afiliado",
       valor: 100,
       deposit_at: "2026-10-20T00:00:00Z",
     });
+  }
+
+  it("first invite of a never-linked profile with credits succeeds (normal flow)", async () => {
+    // Admin creates the profile with affiliate ids, the cron credits
+    // deposits, only then the intended person is invited: ja_vinculado is
+    // still false, so this must not be refused.
+    addExpert({ ja_vinculado: false });
+    pushCredit(EXPERT_ID);
+
+    await expect(
+      inviteExpertFor(ctxFor(ADMIN), { expertId: EXPERT_ID, email: "novo@casa.com" }),
+    ).resolves.toMatchObject({ ok: true });
+    expect(fake.admin.rows("experts")[0]).toMatchObject({
+      user_id: fake.authUsers[0]?.id,
+      ja_vinculado: true,
+    });
+  });
+
+  it("first team link of a never-linked profile with credits succeeds (normal flow)", async () => {
+    addExpert({ ja_vinculado: false });
+    pushCredit(EXPERT_ID);
+    fake.admin
+      .rows("user_roles")
+      .push({ id: "r1", user_id: GESTOR, tenant_id: TENANT, role: "gestor" });
+
+    await expect(
+      linkExpertToTeamMemberFor(ctxFor(ADMIN), { expertId: EXPERT_ID, userId: GESTOR }),
+    ).resolves.toEqual({ ok: true });
+    expect(fake.admin.rows("experts")[0]).toMatchObject({
+      user_id: GESTOR,
+      ja_vinculado: true,
+    });
+  });
+
+  it("invite and team link refuse a previously-linked profile that has credits", async () => {
+    addExpert({ ja_vinculado: true });
+    pushCredit(EXPERT_ID);
     fake.admin
       .rows("user_roles")
       .push({ id: "r1", user_id: GESTOR, tenant_id: TENANT, role: "gestor" });
@@ -414,6 +450,48 @@ describe("experts admin server functions", () => {
     await expect(
       linkExpertToTeamMemberFor(ctxFor(ADMIN), { expertId: EXPERT_ID, userId: GESTOR }),
     ).resolves.toEqual({ ok: true });
+  });
+
+  it("removing access keeps ja_vinculado, so linking another person is refused when credits remain", async () => {
+    addExpert({ ja_vinculado: true, user_id: GESTOR });
+    pushCredit(EXPERT_ID);
+    fake.admin
+      .rows("user_roles")
+      .push(
+        { id: "r1", user_id: GESTOR, tenant_id: TENANT, role: "expert" },
+        { id: "r2", user_id: ADMIN, tenant_id: TENANT, role: "admin" },
+      );
+    const MEMBER = "00000000-0000-4000-8000-0000000000a5";
+    fake.admin
+      .rows("user_roles")
+      .push({ id: "r3", user_id: MEMBER, tenant_id: TENANT, role: "member" });
+
+    await removeExpertAccessFor(ctxFor(ADMIN), { expertId: EXPERT_ID });
+    expect(fake.admin.rows("experts")[0]).toMatchObject({
+      user_id: null,
+      ja_vinculado: true,
+    });
+
+    await expect(
+      linkExpertToTeamMemberFor(ctxFor(ADMIN), { expertId: EXPERT_ID, userId: MEMBER }),
+    ).rejects.toThrow(
+      "Este perfil já tem créditos de outra pessoa. Crie um perfil novo para quem vai entrar.",
+    );
+  });
+
+  it("a previously-linked profile without credits can be linked again", async () => {
+    addExpert({ ja_vinculado: true });
+    fake.admin
+      .rows("user_roles")
+      .push({ id: "r1", user_id: GESTOR, tenant_id: TENANT, role: "gestor" });
+
+    await expect(
+      linkExpertToTeamMemberFor(ctxFor(ADMIN), { expertId: EXPERT_ID, userId: GESTOR }),
+    ).resolves.toEqual({ ok: true });
+    expect(fake.admin.rows("experts")[0]).toMatchObject({
+      user_id: GESTOR,
+      ja_vinculado: true,
+    });
   });
 
   it("writes refuse demo houses", async () => {
