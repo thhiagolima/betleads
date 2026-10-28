@@ -443,9 +443,10 @@ export async function listExpertLeadsEnteredRiskFor(
 //
 // "Para chamar hoje" #2: leads com clique humano num link do próprio expert
 // nas últimas 24h, que não depositaram (aprovado) depois desse clique. Busca
-// primeiro em click_events (já limitado pelas últimas 24h + humano), depois
-// restringe aos dispatches do próprio expert — nunca o inverso, que varreria
-// todos os dispatches da casa.
+// primeiro os dispatches do próprio expert enviados nos últimos 30 dias
+// (índice parcial link_dispatches_expert_source_idx), depois os cliques
+// humanos das últimas 24h nesses dispatches — nunca os cliques da casa toda,
+// que numa casa movimentada esconderiam os do expert atrás de um limite.
 
 export type ExpertLeadClickedNoDeposit = {
   playerId: string;
@@ -460,8 +461,33 @@ type ApprovedDepositRow = { player_id: string; created_at: string };
 type ExpertLinkOfertaRow = { link_dispatch_id: string | null; oferta: string };
 
 const CLICK_WINDOW_MS = 24 * 60 * 60 * 1000;
-const CLICK_EVENTS_QUERY_LIMIT = 500;
+// Um clique das últimas 24h num link enviado há mais tempo que isso fica de
+// fora (raro: o link do expert é gerado na hora de chamar o lead).
+const DISPATCH_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
+const DISPATCH_PAGE_SIZE = 1000;
+// Listas de ids em .in() ficam curtas na URL do PostgREST.
+const IN_CHUNK_SIZE = 100;
 const CLICKED_NO_DEPOSIT_LIMIT = 20;
+
+function chunk<T>(items: readonly T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+/** Roda `query` para cada pedaço de `ids` e junta as linhas. */
+async function selectInChunks<T>(
+  ids: readonly string[],
+  query: (part: string[]) => PromiseLike<{ data: unknown; error: { message: string } | null }>,
+): Promise<T[]> {
+  const results = await Promise.all(chunk(ids, IN_CHUNK_SIZE).map((part) => query(part)));
+  const rows: T[] = [];
+  for (const { data, error } of results) {
+    if (error) throw new Error(error.message);
+    rows.push(...((data ?? []) as T[]));
+  }
+  return rows;
+}
 
 export const listExpertClickedNoDeposit = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -473,39 +499,48 @@ export async function listExpertClickedNoDepositFor(
   ctx: ServerContext,
 ): Promise<ExpertLeadClickedNoDeposit[]> {
   const expert = await requireExpertContext(ctx.userId, ctx.activeTenantId);
-  const sinceIso = new Date(Date.now() - CLICK_WINDOW_MS).toISOString();
+  const nowMs = Date.now();
+  const sinceIso = new Date(nowMs - CLICK_WINDOW_MS).toISOString();
+  const sentSinceIso = new Date(nowMs - DISPATCH_LOOKBACK_MS).toISOString();
 
-  const { data: clickRows, error: clickError } = await db()
-    .from("click_events")
-    .select("link_dispatch_id,occurred_at")
-    .eq("tenant_id", expert.tenantId)
-    .eq("is_human", true)
-    .gte("occurred_at", sinceIso)
-    .order("occurred_at", { ascending: false })
-    .limit(CLICK_EVENTS_QUERY_LIMIT);
-  if (clickError) throw new Error(clickError.message);
-
-  const clicks = (clickRows ?? []) as ClickEventRow[];
-  if (clicks.length === 0) return [];
-
-  const dispatchIds = Array.from(new Set(clicks.map((c) => c.link_dispatch_id)));
-  const { data: dispatchRows, error: dispatchError } = await db()
-    .from("link_dispatches")
-    .select("id,recipient_player_id")
-    .eq("tenant_id", expert.tenantId)
-    .eq("source_type", "expert")
-    .eq("source_id", expert.expertId)
-    .in("id", dispatchIds);
-  if (dispatchError) throw new Error(dispatchError.message);
-
-  const playerIdByDispatch = new Map(
-    ((dispatchRows ?? []) as LinkDispatchRow[])
-      .filter((d) => d.recipient_player_id)
-      .map((d) => [d.id, d.recipient_player_id as string] as const),
-  );
+  // 1. Os links do expert enviados nos últimos 30 dias, paginados.
+  const playerIdByDispatch = new Map<string, string>();
+  for (let offset = 0; ; offset += DISPATCH_PAGE_SIZE) {
+    const { data, error } = await db()
+      .from("link_dispatches")
+      .select("id,recipient_player_id")
+      .eq("tenant_id", expert.tenantId)
+      .eq("source_type", "expert")
+      .eq("source_id", expert.expertId)
+      .eq("send_status", "sent")
+      .gte("sent_at", sentSinceIso)
+      .order("sent_at", { ascending: false })
+      .order("id", { ascending: true })
+      .range(offset, offset + DISPATCH_PAGE_SIZE - 1);
+    if (error) throw new Error(error.message);
+    const page = (data ?? []) as LinkDispatchRow[];
+    for (const d of page) {
+      if (d.recipient_player_id) playerIdByDispatch.set(d.id, d.recipient_player_id);
+    }
+    if (page.length < DISPATCH_PAGE_SIZE) break;
+  }
   if (playerIdByDispatch.size === 0) return [];
 
-  // Clique mais recente por lead: `clicks` já vem em ordem decrescente, então
+  // 2. Cliques humanos das últimas 24h nesses links.
+  const clicks = (
+    await selectInChunks<ClickEventRow>(Array.from(playerIdByDispatch.keys()), (part) =>
+      db()
+        .from("click_events")
+        .select("link_dispatch_id,occurred_at")
+        .eq("tenant_id", expert.tenantId)
+        .eq("is_human", true)
+        .gte("occurred_at", sinceIso)
+        .in("link_dispatch_id", part),
+    )
+  ).sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : a.occurred_at > b.occurred_at ? -1 : 0));
+  if (clicks.length === 0) return [];
+
+  // Clique mais recente por lead: `clicks` está em ordem decrescente, então
   // a primeira ocorrência de cada player_id é o clique mais recente.
   const latestByPlayer = new Map<string, { dispatchId: string; clicadoEm: string }>();
   for (const click of clicks) {
@@ -522,41 +557,45 @@ export async function listExpertClickedNoDepositFor(
   const usedDispatchIds = Array.from(
     new Set(Array.from(latestByPlayer.values()).map((v) => v.dispatchId)),
   );
+  // Só importam depósitos a partir do clique mais antigo considerado.
+  const oldestClickIso = clicks[clicks.length - 1].occurred_at;
 
-  const [depositsRes, playersRes, linksRes] = await Promise.all([
-    db()
-      .from("deposits")
-      .select("player_id,created_at")
-      .eq("tenant_id", expert.tenantId)
-      .eq("status", "aprovado")
-      .in("player_id", playerIds),
-    db()
-      .from("players")
-      .select("id,nome,affiliate_id")
-      .eq("tenant_id", expert.tenantId)
-      .in("id", playerIds),
-    db()
-      .from("expert_links")
-      .select("link_dispatch_id,oferta")
-      .eq("tenant_id", expert.tenantId)
-      .eq("expert_id", expert.expertId)
-      .in("link_dispatch_id", usedDispatchIds),
+  const [deposits, players, links] = await Promise.all([
+    selectInChunks<ApprovedDepositRow>(playerIds, (part) =>
+      db()
+        .from("deposits")
+        .select("player_id,created_at")
+        .eq("tenant_id", expert.tenantId)
+        .eq("status", "aprovado")
+        .gte("created_at", oldestClickIso)
+        .in("player_id", part),
+    ),
+    selectInChunks<PlayerRow>(playerIds, (part) =>
+      db()
+        .from("players")
+        .select("id,nome,affiliate_id")
+        .eq("tenant_id", expert.tenantId)
+        .in("id", part),
+    ),
+    selectInChunks<ExpertLinkOfertaRow>(usedDispatchIds, (part) =>
+      db()
+        .from("expert_links")
+        .select("link_dispatch_id,oferta")
+        .eq("tenant_id", expert.tenantId)
+        .eq("expert_id", expert.expertId)
+        .in("link_dispatch_id", part),
+    ),
   ]);
-  if (depositsRes.error) throw new Error(depositsRes.error.message);
-  if (playersRes.error) throw new Error(playersRes.error.message);
-  if (linksRes.error) throw new Error(linksRes.error.message);
 
   const depositedAfterClick = new Set<string>();
-  for (const deposit of (depositsRes.data ?? []) as ApprovedDepositRow[]) {
+  for (const deposit of deposits) {
     const click = latestByPlayer.get(deposit.player_id);
     if (click && deposit.created_at >= click.clicadoEm) depositedAfterClick.add(deposit.player_id);
   }
 
-  const playersById = new Map(
-    ((playersRes.data ?? []) as PlayerRow[]).map((p) => [p.id, p] as const),
-  );
+  const playersById = new Map(players.map((p) => [p.id, p] as const));
   const ofertaByDispatch = new Map(
-    ((linksRes.data ?? []) as ExpertLinkOfertaRow[])
+    links
       .filter((l): l is ExpertLinkOfertaRow & { link_dispatch_id: string } => !!l.link_dispatch_id)
       .map((l) => [l.link_dispatch_id, l.oferta] as const),
   );
