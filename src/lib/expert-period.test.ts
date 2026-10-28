@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_EXPERT_PERIOD, periodRange } from "./expert-period";
+import { DEFAULT_EXPERT_PERIOD, EXPERT_PERIODS, periodRange } from "./expert-period";
 
 describe("periodRange", () => {
   it("hoje starts at 00:00 São Paulo", () => {
@@ -27,6 +27,52 @@ describe("periodRange", () => {
     // Em São Paulo "agora" ainda é dia 23, então ontem é o dia 22 inteiro.
     expect(from).toBe("2026-10-22T03:00:00.000Z");
     expect(to).toBe("2026-10-23T03:00:00.000Z");
+  });
+
+  it("mes_atual and mes_anterior at Oct 31 23:30 São Paulo (already Nov 1 in UTC)", () => {
+    const now = new Date("2026-11-01T02:30:00Z"); // 23:30 de 31/10 em São Paulo
+
+    expect(periodRange("mes_atual", now)).toEqual({
+      from: "2026-10-01T03:00:00.000Z",
+      to: now.toISOString(),
+    });
+    expect(periodRange("mes_anterior", now)).toEqual({
+      from: "2026-09-01T03:00:00.000Z",
+      to: "2026-10-01T03:00:00.000Z",
+    });
+  });
+
+  it("mes_atual and mes_anterior at Nov 1 00:10 São Paulo", () => {
+    const now = new Date("2026-11-01T03:10:00Z"); // 00:10 de 01/11 em São Paulo
+
+    expect(periodRange("mes_atual", now)).toEqual({
+      from: "2026-11-01T03:00:00.000Z",
+      to: now.toISOString(),
+    });
+    expect(periodRange("mes_anterior", now)).toEqual({
+      from: "2026-10-01T03:00:00.000Z",
+      to: "2026-11-01T03:00:00.000Z",
+    });
+  });
+
+  it("mes_anterior in January is the whole December of the previous year", () => {
+    const now = new Date("2027-01-15T12:00:00Z");
+    expect(periodRange("mes_anterior", now)).toEqual({
+      from: "2026-12-01T03:00:00.000Z",
+      to: "2027-01-01T03:00:00.000Z",
+    });
+  });
+
+  it("expert pickers list the Central presets plus the calendar months", () => {
+    expect(EXPERT_PERIODS.map((p) => p.label)).toEqual([
+      "Hoje",
+      "Ontem",
+      "7 dias",
+      "30 dias",
+      "90 dias",
+      "Este mês",
+      "Mês passado",
+    ]);
   });
 
   it("default period is 30 days", () => {

@@ -154,7 +154,18 @@ describe("getExpertDashboardFor", () => {
     }));
     fake.admin.onRpc("expert_metrics_daily", (args) => {
       expect(args._expert_id).toBe(ME);
-      return { data: [{ dia: "2026-10-24", depositado: 100, depositado_clique: 0, depositado_afiliado: 0, cliques: 3 }], error: null };
+      return {
+        data: [
+          {
+            dia: "2026-10-24",
+            depositado: 100,
+            depositado_clique: 0,
+            depositado_afiliado: 0,
+            cliques: 3,
+          },
+        ],
+        error: null,
+      };
     });
 
     const result = await getExpertDashboardFor(EXPERT_CTX, {});
@@ -264,9 +275,9 @@ describe("getExpertDetailFor", () => {
       created_at: "2026-10-01T00:00:00Z",
     });
 
-    await expect(
-      getExpertDetailFor(ctxFor(ADMIN), { expertId: OTHER_EXPERT }),
-    ).rejects.toThrow("Expert não encontrado.");
+    await expect(getExpertDetailFor(ctxFor(ADMIN), { expertId: OTHER_EXPERT })).rejects.toThrow(
+      "Expert não encontrado.",
+    );
   });
 
   it("lists only that expert's links, contacts and active claims", async () => {
@@ -337,12 +348,20 @@ describe("getExpertDetailFor", () => {
 
     expect(result.expert).toMatchObject({ id: ME, nome: "Ana" });
     expect(result.links).toEqual([
-      { id: "link-mine", oferta: "Oferta A", leadNome: "Jogador 1", createdAt: "2026-10-23T00:00:00Z", clicado: true },
+      {
+        id: "link-mine",
+        oferta: "Oferta A",
+        leadNome: "Jogador 1",
+        createdAt: "2026-10-23T00:00:00Z",
+        clicado: true,
+      },
     ]);
     expect(result.contatos).toEqual([
       { leadNome: "Jogador 1", resultado: "chamei", createdAt: "2026-10-23T00:00:00Z" },
     ]);
-    expect(result.assumidos).toEqual([{ leadNome: "Jogador 1", expiresAt: "2026-10-26T00:00:00Z" }]);
+    expect(result.assumidos).toEqual([
+      { leadNome: "Jogador 1", expiresAt: "2026-10-26T00:00:00Z" },
+    ]);
   });
 });
 
@@ -372,9 +391,7 @@ describe("saveExpertSettingsFor", () => {
     fake.admin.rows("tenants")[0].is_demo = true;
     __resetDemoTenantCacheForTests();
 
-    await expect(
-      saveExpertSettingsFor(ctxFor(ADMIN), { clickWindowHours: 48 }),
-    ).rejects.toThrow();
+    await expect(saveExpertSettingsFor(ctxFor(ADMIN), { clickWindowHours: 48 })).rejects.toThrow();
   });
 });
 
@@ -401,7 +418,11 @@ describe("listExpertCreditsFor / exportExpertCreditsCsvFor (Task 8)", () => {
     expect(page0.somaValor).toBe(1500);
     expect(page0.rows.every((r) => r.leadNome === "Jogador 1")).toBe(true);
 
-    const page1 = await listExpertCreditsFor(ctxFor(ADMIN), { expertId: ME, period: "30", page: 1 });
+    const page1 = await listExpertCreditsFor(ctxFor(ADMIN), {
+      expertId: ME,
+      period: "30",
+      page: 1,
+    });
     expect(page1.rows).toHaveLength(50);
     expect(page1.total).toBe(150);
     expect(page1.somaValor).toBe(1500);
@@ -460,12 +481,32 @@ describe("listExpertCreditsFor / exportExpertCreditsCsvFor (Task 8)", () => {
 
     expect(result.csv.startsWith("﻿")).toBe(true);
     const lines = result.csv.slice(1).split("\n");
-    expect(lines[0]).toBe(
-      "Data;Lead;Valor;Origem;Oferta;Clique em;Primeiro depósito;Reativação",
-    );
+    expect(lines[0]).toBe("Data;Lead;Valor;Origem;Oferta;Clique em;Primeiro depósito;Reativação");
     expect(lines[1]).toBe("23/10/2026 12:30;Jogador 1;1234,50;Afiliado;;23/10/2026 11:00;Sim;Sim");
     expect(lines[2]).toBe("Total;;1234,50;;;;;");
     expect(result.filename).toBe("extrato-ana-2026-09-25-a-2026-10-24.csv");
+  });
+
+  it("statement and csv follow the calendar month periods", async () => {
+    addCredit("d-sep", ME, { deposit_at: "2026-09-30T23:00:00Z", valor: 10 }); // 30/09 20:00 SP
+    addCredit("d-oct-start", ME, { deposit_at: "2026-10-01T03:00:00Z", valor: 20 }); // 01/10 00:00 SP
+    addCredit("d-oct", ME, { deposit_at: "2026-10-23T15:30:00Z", valor: 30 });
+
+    const lastMonth = await exportExpertCreditsCsvFor(ctxFor(ADMIN), {
+      expertId: ME,
+      period: "mes_anterior",
+    });
+    expect(lastMonth.filename).toBe("extrato-ana-2026-09-01-a-2026-09-30.csv");
+    expect(lastMonth.csv.slice(1).split("\n").at(-1)).toBe("Total;;10,00;;;;;");
+
+    const thisMonth = await listExpertCreditsFor(ctxFor(ADMIN), {
+      expertId: ME,
+      period: "mes_atual",
+    });
+    expect(thisMonth.rows.map((r) => r.depositAt).sort()).toEqual([
+      "2026-10-01T03:00:00Z",
+      "2026-10-23T15:30:00Z",
+    ]);
   });
 
   it("csv escapes lead names containing ';' or quotes", async () => {
@@ -475,9 +516,7 @@ describe("listExpertCreditsFor / exportExpertCreditsCsvFor (Task 8)", () => {
     const result = await exportExpertCreditsCsvFor(ctxFor(ADMIN), { expertId: ME, period: "30" });
     const lines = result.csv.slice(1).split("\n");
 
-    expect(lines[1]).toBe(
-      '23/10/2026 00:00;"Lead ""Esperto""; Silva";10,00;Clique;;;Não;Não',
-    );
+    expect(lines[1]).toBe('23/10/2026 00:00;"Lead ""Esperto""; Silva";10,00;Clique;;;Não;Não');
   });
 
   it("credits endpoints refuse non-admin and experts of another house", async () => {

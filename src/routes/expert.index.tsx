@@ -16,16 +16,17 @@ import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart";
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from "@/components/ui/chart";
 import { Page, PageHeader } from "@/components/ui-premium/page-header";
 import { CentralPeriodPicker } from "@/components/crm-results/shared";
 import { actionErrorMessage, formatDueDate } from "@/components/expert/sheet-format";
 import { ExpertMetricCards } from "@/components/expert/expert-metric-cards";
-import {
-  CHART_COLORS,
-  chartAxisProps,
-  chartGridProps,
-} from "@/lib/chart-theme";
+import { CHART_COLORS, chartAxisProps, chartGridProps } from "@/lib/chart-theme";
 import { expertAccessErrorMessage } from "@/lib/expert-access-message";
 import {
   completeExpertFollowup,
@@ -38,7 +39,7 @@ import {
 } from "@/lib/expert-lead-actions.functions";
 import { getExpertHome } from "@/lib/expert-leads.functions";
 import { getExpertDashboard } from "@/lib/expert-metrics.functions";
-import { DEFAULT_EXPERT_PERIOD, type PeriodKey } from "@/lib/expert-period";
+import { DEFAULT_EXPERT_PERIOD, EXPERT_PERIODS, type PeriodKey } from "@/lib/expert-period";
 import { brl, num } from "@/lib/format";
 
 const FOLLOWUPS_DUE_QUERY_KEY = ["expert-followups-due"];
@@ -306,9 +307,7 @@ function ExpertHomePage() {
       <Page>
         <PageHeader />
         <Card>
-          <CardContent className="py-12 text-center text-muted-foreground">
-            Carregando…
-          </CardContent>
+          <CardContent className="py-12 text-center text-muted-foreground">Carregando…</CardContent>
         </Card>
       </Page>
     );
@@ -326,7 +325,9 @@ function ExpertHomePage() {
             <span>{tenantNome}</span>
           </span>
         }
-        actions={<CentralPeriodPicker value={period} onChange={setPeriod} />}
+        actions={
+          <CentralPeriodPicker value={period} onChange={setPeriod} periods={EXPERT_PERIODS} />
+        }
       />
 
       {dashboardQuery.data && (

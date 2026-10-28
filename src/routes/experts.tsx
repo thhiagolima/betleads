@@ -50,7 +50,7 @@ import {
 import type { ExpertAdminRow } from "@/lib/experts-admin.functions";
 import { acessoBadge, TIPO_LABEL } from "@/components/experts/expert-badges";
 import { listExpertsRanking, type ExpertMetrics } from "@/lib/expert-metrics.functions";
-import { DEFAULT_EXPERT_PERIOD, type PeriodKey } from "@/lib/expert-period";
+import { DEFAULT_EXPERT_PERIOD, EXPERT_PERIODS, type PeriodKey } from "@/lib/expert-period";
 import { brl, num } from "@/lib/format";
 import {
   EXPERTS_QUERY_KEY,
@@ -187,7 +187,7 @@ function ExpertsPage() {
         subtitle="Cadastre quem acompanha os leads da casa, por ID de afiliado ou com acesso total."
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <CentralPeriodPicker value={period} onChange={setPeriod} />
+            <CentralPeriodPicker value={period} onChange={setPeriod} periods={EXPERT_PERIODS} />
             <Button variant="outline" className="gap-2" onClick={() => setSettingsOpen(true)}>
               <Settings className="h-4 w-4" />
               Regras de crédito
@@ -253,7 +253,9 @@ function ExpertsPage() {
                     </div>
                   </TableCell>
                   <TableCell>{expert.leads}</TableCell>
-                  <TableCell>{acessoBadge(expert.acesso, expert.papelEquipe, expert.ativo)}</TableCell>
+                  <TableCell>
+                    {acessoBadge(expert.acesso, expert.papelEquipe, expert.ativo)}
+                  </TableCell>
                   <TableCell className="text-right">{brl(metrics.depositado)}</TableCell>
                   <TableCell className="text-right">{brl(metrics.depositadoClique)}</TableCell>
                   <TableCell className="text-right">{brl(metrics.depositadoAfiliado)}</TableCell>
@@ -426,9 +428,7 @@ function ExpertsPage() {
               </div>
             ))}
             {unassigned.length === 0 && (
-              <p className="text-sm text-muted-foreground">
-                Nenhum ID de afiliado sem expert.
-              </p>
+              <p className="text-sm text-muted-foreground">Nenhum ID de afiliado sem expert.</p>
             )}
           </div>
         </CardContent>

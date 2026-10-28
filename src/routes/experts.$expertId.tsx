@@ -43,7 +43,7 @@ import {
   listExpertCredits,
   type ExpertCreditRow,
 } from "@/lib/expert-metrics.functions";
-import { DEFAULT_EXPERT_PERIOD, type PeriodKey } from "@/lib/expert-period";
+import { DEFAULT_EXPERT_PERIOD, EXPERT_PERIODS, type PeriodKey } from "@/lib/expert-period";
 import { brl } from "@/lib/format";
 import { expertCreditsQueryKey, expertDetailQueryKey } from "@/components/experts/experts-query";
 import { ExpertFormDialog } from "@/components/experts/expert-form-dialog";
@@ -102,7 +102,9 @@ function DailyChart({
             <XAxis dataKey="dia" {...chartAxisProps} />
             <YAxis {...chartAxisProps} width={80} tickFormatter={(value) => brl(Number(value))} />
             <ChartTooltip
-              content={<ChartTooltipContent formatter={(value) => brl(Number(value))} labelKey="dia" />}
+              content={
+                <ChartTooltipContent formatter={(value) => brl(Number(value))} labelKey="dia" />
+              }
             />
             <ChartLegend content={<ChartLegendContent />} />
             <Bar
@@ -378,7 +380,11 @@ function ExpertDetailPage() {
         <PageHeader />
         <Card>
           <CardContent className="space-y-3 py-12 text-center text-muted-foreground">
-            <p>{detailQuery.error instanceof Error ? detailQuery.error.message : "Expert não encontrado."}</p>
+            <p>
+              {detailQuery.error instanceof Error
+                ? detailQuery.error.message
+                : "Expert não encontrado."}
+            </p>
             <Button asChild variant="outline">
               <Link to="/experts">Voltar para Experts</Link>
             </Button>
@@ -413,7 +419,7 @@ function ExpertDetailPage() {
         }
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <CentralPeriodPicker value={period} onChange={setPeriod} />
+            <CentralPeriodPicker value={period} onChange={setPeriod} periods={EXPERT_PERIODS} />
             <Button variant="outline" onClick={() => setEditOpen(true)}>
               Editar
             </Button>

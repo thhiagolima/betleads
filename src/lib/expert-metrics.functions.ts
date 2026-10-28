@@ -46,10 +46,18 @@ type ServerContext = {
   activeTenantId?: string | null;
 };
 
-// As mesmas chaves de `PERIODS` (crm-results/search.ts via expert-period.ts),
-// repetidas aqui como tupla porque o zod precisa de um literal, não de um
-// array computado.
-const PERIOD_KEYS: [PeriodKey, ...PeriodKey[]] = ["hoje", "ontem", "7", "30", "90"];
+// As chaves de `EXPERT_PERIODS` (expert-period.ts: os presets da Central mais
+// "Este mês" e "Mês passado"), repetidas aqui como tupla porque o zod precisa
+// de um literal, não de um array computado.
+const PERIOD_KEYS: [PeriodKey, ...PeriodKey[]] = [
+  "hoje",
+  "ontem",
+  "7",
+  "30",
+  "90",
+  "mes_atual",
+  "mes_anterior",
+];
 const periodKeySchema = z.enum(PERIOD_KEYS);
 
 // Tabelas/RPCs do expert ainda fora dos tipos gerados (ver cabeçalho).
@@ -125,7 +133,11 @@ function mapMetricsRow(row: MetricsDbRow): ExpertMetrics {
 }
 
 async function fetchExpertMetrics(tenantId: string, from: string, to: string) {
-  const { data, error } = await db().rpc("expert_metrics", { _tenant: tenantId, _from: from, _to: to });
+  const { data, error } = await db().rpc("expert_metrics", {
+    _tenant: tenantId,
+    _from: from,
+    _to: to,
+  });
   if (error) throw new Error(error.message);
   return (data ?? []) as MetricsDbRow[];
 }
@@ -272,7 +284,10 @@ async function loadExpertAdminRow(tenantId: string, expertId: string): Promise<E
   });
 }
 
-async function namesByPlayerId(tenantId: string, playerIds: string[]): Promise<Map<string, string>> {
+async function namesByPlayerId(
+  tenantId: string,
+  playerIds: string[],
+): Promise<Map<string, string>> {
   if (playerIds.length === 0) return new Map();
   const { data, error } = await db()
     .from("players")
@@ -313,7 +328,10 @@ async function loadExpertLinks(tenantId: string, expertId: string): Promise<Expe
     new Set(rows.map((r) => r.link_dispatch_id).filter((id): id is string => Boolean(id))),
   );
   const [nomeById, { data: dispatches, error: dispatchesErr }] = await Promise.all([
-    namesByPlayerId(tenantId, rows.map((r) => r.player_id)),
+    namesByPlayerId(
+      tenantId,
+      rows.map((r) => r.player_id),
+    ),
     dispatchIds.length > 0
       ? db().from("link_dispatches").select("id,first_party_first_clicked_at").in("id", dispatchIds)
       : Promise.resolve({ data: [] as unknown[], error: null }),
@@ -349,7 +367,10 @@ async function loadExpertContacts(tenantId: string, expertId: string): Promise<E
   const rows = (data ?? []) as Array<{ resultado: string; player_id: string; created_at: string }>;
   if (rows.length === 0) return [];
 
-  const nomeById = await namesByPlayerId(tenantId, rows.map((r) => r.player_id));
+  const nomeById = await namesByPlayerId(
+    tenantId,
+    rows.map((r) => r.player_id),
+  );
   return rows.map((r) => ({
     leadNome: nomeById.get(r.player_id) ?? "",
     resultado: r.resultado,
@@ -370,7 +391,10 @@ async function loadActiveClaims(tenantId: string, expertId: string): Promise<Exp
   const rows = (data ?? []) as Array<{ player_id: string; expires_at: string }>;
   if (rows.length === 0) return [];
 
-  const nomeById = await namesByPlayerId(tenantId, rows.map((r) => r.player_id));
+  const nomeById = await namesByPlayerId(
+    tenantId,
+    rows.map((r) => r.player_id),
+  );
   return rows.map((r) => ({
     leadNome: nomeById.get(r.player_id) ?? "",
     expiresAt: r.expires_at,
@@ -515,7 +539,10 @@ async function mapCreditRows(tenantId: string, rows: CreditDbRow[]): Promise<Exp
     new Set(rows.map((r) => r.link_dispatch_id).filter((id): id is string => Boolean(id))),
   );
   const [nomeById, ofertaByDispatch] = await Promise.all([
-    namesByPlayerId(tenantId, rows.map((r) => r.player_id)),
+    namesByPlayerId(
+      tenantId,
+      rows.map((r) => r.player_id),
+    ),
     ofertaByDispatchId(tenantId, dispatchIds),
   ]);
   return rows.map((r) => ({
@@ -524,7 +551,7 @@ async function mapCreditRows(tenantId: string, rows: CreditDbRow[]): Promise<Exp
     leadNome: nomeById.get(r.player_id) ?? "",
     valor: Number(r.valor),
     via: r.via,
-    oferta: r.link_dispatch_id ? ofertaByDispatch.get(r.link_dispatch_id) ?? null : null,
+    oferta: r.link_dispatch_id ? (ofertaByDispatch.get(r.link_dispatch_id) ?? null) : null,
     clickAt: r.click_at,
     isFtd: r.is_ftd,
     isReativacao: r.is_reativacao,
