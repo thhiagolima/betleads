@@ -15,6 +15,7 @@ vi.mock("@/integrations/supabase/client.server", async () => {
 });
 
 import { getFinanceDashboardFor, listDashboardScopesFor } from "./finance-dashboard.functions";
+import { getTenantFinanceMonthFor } from "./finance.functions";
 import { createFakeDb } from "./sms-bulk.test-support";
 
 const SUPER = "00000000-0000-4000-8000-0000000000aa";
@@ -141,6 +142,37 @@ beforeEach(() => {
           .map((m) => m.group_id),
     error: null,
   }));
+  // Permission RPCs needed by getTenantFinanceMonthFor (the "tenant scope
+  // month total equals the month view total" test calls it directly).
+  fake.admin.onRpc("finance_can_edit_values", ({ _user: u, _tenant: t }) => ({
+    data: isSuper(u) || hasRole(u, t, "admin"),
+    error: null,
+  }));
+  fake.admin.onRpc("finance_can_edit_rates", ({ _user: u, _tenant: t }) => ({
+    data: isSuper(u) || hasRole(u, t, "admin") || isGroupManager(u, t),
+    error: null,
+  }));
+  fake.admin.onRpc("finance_can_manage_viewers", ({ _user: u, _tenant: t }) => ({
+    data: isSuper(u) || hasRole(u, t, "admin") || isGroupManager(u, t),
+    error: null,
+  }));
+  fake.admin.onRpc("finance_can_manage_goals", ({ _user: u, _tenant: t }) => ({
+    data: isSuper(u) || isGroupManager(u, t),
+    error: null,
+  }));
+  (fake.admin.client as unknown as Record<string, unknown>).auth = {
+    admin: {
+      listUsers: async () => ({
+        data: {
+          users: [
+            { id: ADMIN_A, email: "admin.a@example.com" },
+            { id: GESTOR_A, email: "gestor.a@example.com" },
+          ],
+        },
+        error: null,
+      }),
+    },
+  };
   const ofTenants = (row: Row, args: Row) =>
     (args._tenants as string[]).includes(String(row.tenant_id));
   const inWindow = (row: Row, args: Row) =>
@@ -430,6 +462,51 @@ describe("tenant scope", () => {
     expect(dashboard.costs.find((line) => line.key === "ggr_fee")?.label).toBe(
       "Taxa de GGR (12,5%)",
     );
+  });
+});
+
+describe("tenant scope month total equals the month view total", () => {
+  it("dashboard cashResult matches the month view's, for a closed past month and the in-progress current month", async () => {
+    financeDayRows.push(
+      complete(HOUSE_A, "2026-08-15", 1000, 100),
+      complete(HOUSE_A, "2026-10-10", 2000, 200),
+    );
+    fake.admin
+      .rows("tenant_finance_other_costs")
+      .push(
+        otherCost("c1", HOUSE_A, "2026-08-01", "CRM", 50),
+        otherCost("c2", HOUSE_A, "2026-10-01", "CRM", 80),
+      );
+    usageRows.push(
+      { tenant_id: HOUSE_A, metric_date: "2026-08-10", amount: 20 },
+      { tenant_id: HOUSE_A, metric_date: "2026-10-05", amount: 15 },
+    );
+    feeRows.push(
+      { tenant_id: HOUSE_A, month: "2026-08-01", amount: 300 },
+      { tenant_id: HOUSE_A, month: "2026-10-01", amount: 400 },
+    );
+
+    const augustDashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      range: { from: "2026-08-01", to: "2026-08-31" },
+      compare: "previous",
+      preset: "custom",
+    });
+    const augustMonth = await getTenantFinanceMonthFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-08",
+    });
+    expect(augustDashboard.totals.current.cashResult).toBe(augustMonth.summary.cashResult);
+
+    const octoberDashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      ...monthToDate,
+    });
+    const octoberMonth = await getTenantFinanceMonthFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-10",
+    });
+    expect(octoberDashboard.totals.current.cashResult).toBe(octoberMonth.summary.cashResult);
   });
 });
 

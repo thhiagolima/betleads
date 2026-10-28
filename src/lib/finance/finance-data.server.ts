@@ -32,6 +32,7 @@ type QueryBuilder<T = unknown> = PromiseLike<DbResult<T>> & {
   select: (columns?: string) => QueryBuilder<T>;
   eq: (column: string, value: unknown) => QueryBuilder<T>;
   in: (column: string, values: unknown[]) => QueryBuilder<T>;
+  not: (column: string, operator: string, value: unknown) => QueryBuilder<T>;
   order: (column: string, options?: unknown) => QueryBuilder<T>;
   maybeSingle: () => Promise<DbResult<T>>;
   single: () => Promise<DbResult<T>>;
@@ -72,6 +73,7 @@ export type OtherCostRow = {
   month: string;
   descricao: string;
   valor: number | string;
+  categoria: string | null;
 };
 export type BetleadsUsageRow = { tenant_id: string; metric_date: string; amount: number | string };
 export type BetleadsFeeRow = { tenant_id: string; month: string; amount: number | string };

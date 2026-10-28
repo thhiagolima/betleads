@@ -18,6 +18,7 @@ import {
   getGroupOverviewFor,
   getTenantFinanceMonthFor,
   saveFinanceDaysFor,
+  saveOtherCostFor,
   setFinanceRatesFor,
   setFinanceViewerFor,
   setTenantGoalFor,
@@ -51,6 +52,9 @@ const ctxFor = (userId: string) => ({ userId }) as Ctx;
 type Row = Record<string, unknown>;
 let financeDayRows: Row[];
 let goalDayRows: Row[];
+let usageRows: Row[];
+let feeRows: Row[];
+let sinceRows: Row[];
 let financeDaysCalls: Row[];
 
 function dayRow(tenantId: string, date: string, overrides: Row = {}): Row {
@@ -93,6 +97,9 @@ beforeEach(() => {
   fake.admin.reset();
   financeDayRows = [];
   goalDayRows = [];
+  usageRows = [];
+  feeRows = [];
+  sinceRows = [];
   financeDaysCalls = [];
   (fake.admin.client as unknown as Record<string, unknown>).auth = {
     admin: { listUsers: async () => ({ data: { users: authUsers }, error: null }) },
@@ -146,6 +153,25 @@ beforeEach(() => {
   });
   fake.admin.onRpc("finance_goal_days", (args) => ({
     data: goalDayRows.filter((row) => inWindow(row, args)),
+    error: null,
+  }));
+  const ofTenants = (row: Row, args: Row) =>
+    (args._tenants as string[]).includes(String(row.tenant_id));
+  fake.admin.onRpc("finance_betleads_usage", (args) => ({
+    data: usageRows.filter((row) => inWindow(row, args)),
+    error: null,
+  }));
+  fake.admin.onRpc("finance_betleads_fees", (args) => ({
+    data: feeRows.filter(
+      (row) =>
+        ofTenants(row, args) &&
+        String(row.month) >= String(args._from_month) &&
+        String(row.month) <= String(args._to_month),
+    ),
+    error: null,
+  }));
+  fake.admin.onRpc("finance_betleads_since", (args) => ({
+    data: sinceRows.filter((row) => ofTenants(row, args)),
     error: null,
   }));
 
@@ -234,7 +260,9 @@ describe("house financial month", () => {
       { _tenants: [HOUSE_A], _from: "2026-10-01", _to: "2026-10-24" },
     ]);
     expect(month.days.map((d) => d.date)).toEqual(["2026-10-01", "2026-10-02"]);
-    expect(month.otherCosts).toEqual([{ id: "c1", descricao: "CRM", valor: 30 }]);
+    expect(month.otherCosts).toEqual([
+      { id: "c1", descricao: "CRM", valor: 30, categoria: "Outros", suspectedBetleads: false },
+    ]);
     expect(month.summary.otherCosts).toBe(30);
     expect(month.summary.pendingDays).toBe(1);
     expect(month.rates.current).toEqual({
@@ -260,6 +288,221 @@ describe("house financial month", () => {
     expect(month.rates.current).toEqual({ ggrFeePct: 16, movementFeePct: 2.7, validFrom: null });
     expect(month.permissions.canEditValues).toBe(true);
     expect(month.permissions.canManageGoals).toBe(false);
+  });
+});
+
+describe("house financial month: Betleads cost and categories", () => {
+  it("month summary deducts the month's Betleads usage and fee", async () => {
+    financeDayRows.push(
+      dayRow(HOUSE_A, "2026-10-05", { deposit_amount: 1000, ad_spend: 100, ggr: 0 }),
+    );
+    usageRows.push(
+      { tenant_id: HOUSE_A, metric_date: "2026-10-05", amount: 10 },
+      { tenant_id: HOUSE_A, metric_date: "2026-10-12", amount: 5 },
+      { tenant_id: HOUSE_B, metric_date: "2026-10-05", amount: 999 },
+    );
+    feeRows.push(
+      { tenant_id: HOUSE_A, month: "2026-10-01", amount: 300 },
+      { tenant_id: HOUSE_A, month: "2026-09-01", amount: 200 },
+    );
+
+    const month = await getTenantFinanceMonthFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-10",
+    });
+    expect(month.summary.betleadsUsage).toBe(15);
+    expect(month.summary.betleadsFee).toBe(300);
+    expect(month.summary.cashResult).toBe(1000 - 100 - 15 - 300);
+  });
+
+  it("a month with no invoice has fee 0, not null", async () => {
+    const month = await getTenantFinanceMonthFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-10",
+    });
+    expect(month.summary.betleadsFee).toBe(0);
+    expect(month.summary.betleadsUsage).toBe(0);
+  });
+
+  it("other costs return categoria (null -> Outros) and suspectedBetleads only from the since month on", async () => {
+    sinceRows.push({ tenant_id: HOUSE_A, since: "2026-10-10" });
+    fake.admin.rows("tenant_finance_other_costs").push(
+      {
+        id: "c1",
+        tenant_id: HOUSE_A,
+        month: "2026-10-01",
+        descricao: "SMS",
+        valor: 30,
+        categoria: null,
+      },
+      {
+        id: "c2",
+        tenant_id: HOUSE_A,
+        month: "2026-10-01",
+        descricao: "Aluguel",
+        valor: 20,
+        categoria: "Equipe",
+      },
+      {
+        id: "c3",
+        tenant_id: HOUSE_A,
+        month: "2026-09-01",
+        descricao: "SMS",
+        valor: 99,
+        categoria: null,
+      },
+    );
+
+    const october = await getTenantFinanceMonthFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-10",
+    });
+    expect(october.otherCosts).toEqual([
+      { id: "c1", descricao: "SMS", valor: 30, categoria: "Outros", suspectedBetleads: true },
+      { id: "c2", descricao: "Aluguel", valor: 20, categoria: "Equipe", suspectedBetleads: false },
+    ]);
+
+    // September is before the since month: the manual SMS cost is not flagged.
+    const september = await getTenantFinanceMonthFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-09",
+    });
+    expect(september.otherCosts).toEqual([
+      { id: "c3", descricao: "SMS", valor: 99, categoria: "Outros", suspectedBetleads: false },
+    ]);
+  });
+
+  it("a house without since never flags suspectedBetleads", async () => {
+    fake.admin
+      .rows("tenant_finance_other_costs")
+      .push({
+        id: "c1",
+        tenant_id: HOUSE_A,
+        month: "2026-10-01",
+        descricao: "SMS",
+        valor: 30,
+        categoria: null,
+      });
+    const month = await getTenantFinanceMonthFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-10",
+    });
+    expect(month.otherCosts).toEqual([
+      { id: "c1", descricao: "SMS", valor: 30, categoria: "Outros", suspectedBetleads: false },
+    ]);
+  });
+
+  it("categories lists fixed first then the house's own, sorted pt-BR", async () => {
+    fake.admin.rows("tenant_finance_other_costs").push(
+      {
+        id: "c1",
+        tenant_id: HOUSE_A,
+        month: "2026-10-01",
+        descricao: "Agência",
+        valor: 10,
+        categoria: "Marketing",
+      },
+      {
+        id: "c2",
+        tenant_id: HOUSE_A,
+        month: "2026-09-01",
+        descricao: "Old",
+        valor: 5,
+        categoria: "Suporte",
+      },
+      {
+        id: "c3",
+        tenant_id: HOUSE_A,
+        month: "2026-08-01",
+        descricao: "x",
+        valor: 1,
+        categoria: null,
+      },
+    );
+    const month = await getTenantFinanceMonthFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-10",
+    });
+    expect(month.categories).toEqual([
+      "Afiliados e influenciadores",
+      "Equipe",
+      "Ferramentas",
+      "Impostos",
+      "Outros",
+      "Marketing",
+      "Suporte",
+    ]);
+  });
+
+  it("saveOtherCost stores a new category and it shows in categories next month", async () => {
+    await saveOtherCostFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-10",
+      descricao: "Consultoria",
+      valor: 200,
+      categoria: "Consultoria Jurídica",
+    });
+    const month = await getTenantFinanceMonthFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-11",
+    });
+    expect(month.categories).toContain("Consultoria Jurídica");
+  });
+
+  it("saveOtherCost stores categoria via categoryLabel; Outros stores null; missing keeps, explicit null clears", async () => {
+    const created = await saveOtherCostFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-10",
+      descricao: "Agência",
+      valor: 100,
+      categoria: "  Marketing   Digital  ",
+    });
+    expect(
+      fake.admin.rows("tenant_finance_other_costs").find((r) => r.id === created.id)?.categoria,
+    ).toBe("Marketing Digital");
+
+    const outros = await saveOtherCostFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-10",
+      descricao: "X",
+      valor: 1,
+      categoria: "outros",
+    });
+    expect(
+      fake.admin.rows("tenant_finance_other_costs").find((r) => r.id === outros.id)?.categoria,
+    ).toBeNull();
+
+    // Missing categoria on update keeps the stored value.
+    await saveOtherCostFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      id: created.id,
+      month: "2026-10",
+      descricao: "Agência",
+      valor: 150,
+    });
+    expect(
+      fake.admin.rows("tenant_finance_other_costs").find((r) => r.id === created.id)?.categoria,
+    ).toBe("Marketing Digital");
+
+    // Explicit null clears it.
+    await saveOtherCostFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      id: created.id,
+      month: "2026-10",
+      descricao: "Agência",
+      valor: 150,
+      categoria: null,
+    });
+    expect(
+      fake.admin.rows("tenant_finance_other_costs").find((r) => r.id === created.id)?.categoria,
+    ).toBeNull();
+
+    const audit = fake.admin
+      .rows("tenant_audit_logs")
+      .filter((a) => a.action === "finance.other_cost_saved");
+    expect(audit.at(-1)).toMatchObject({
+      after_data: expect.objectContaining({ categoria: null }),
+    });
   });
 });
 

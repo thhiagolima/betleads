@@ -13,6 +13,13 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { compareRange, round2, summarize } from "@/lib/finance/calc";
 import {
+  FIXED_COST_CATEGORIES,
+  categoryKey,
+  categoryLabel,
+  looksLikeBetleadsCost,
+  mergeCategories,
+} from "@/lib/finance/categories";
+import {
   GOAL_METRICS,
   clampToToday,
   can,
@@ -21,6 +28,9 @@ import {
   compareMode,
   db,
   evaluateGoals,
+  fetchBetleadsFees,
+  fetchBetleadsSince,
+  fetchBetleadsUsage,
   fetchFinanceDays,
   fetchGoalDays,
   inRange,
@@ -82,6 +92,8 @@ function lastDayOfMonth(firstDay: string) {
   return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
 }
 
+const monthStartOf = (date: string) => `${date.slice(0, 7)}-01`;
+
 /**
  * A rate/goal change starts today or later (spec §10, "o passado não é
  * recalculado"); defaults to today.
@@ -139,34 +151,57 @@ export async function getTenantFinanceMonthFor(
   // Future days of the current month do not appear; a future month is empty.
   const range = clampToToday({ from: monthStart, to: lastDayOfMonth(monthStart) }, today);
 
-  const [dayRows, goalRows, costsRes, ratesRes] = await Promise.all([
-    range ? fetchFinanceDays([tenantId], range) : Promise.resolve([]),
-    range ? fetchGoalDays([tenantId], range) : Promise.resolve([]),
-    db()
-      .from<OtherCostRow[]>("tenant_finance_other_costs")
-      .select("id,tenant_id,month,descricao,valor")
-      .eq("tenant_id", tenantId)
-      .eq("month", monthStart)
-      .order("created_at", { ascending: true }),
-    db()
-      .from<RateRow[]>("tenant_finance_rates")
-      .select("tenant_id,valid_from,ggr_fee_pct,movement_fee_pct")
-      .eq("tenant_id", tenantId)
-      .order("valid_from", { ascending: false }),
-  ]);
+  const [dayRows, goalRows, costsRes, ratesRes, usageRows, feeRows, sinceRows, usedCategoriesRes] =
+    await Promise.all([
+      range ? fetchFinanceDays([tenantId], range) : Promise.resolve([]),
+      range ? fetchGoalDays([tenantId], range) : Promise.resolve([]),
+      db()
+        .from<OtherCostRow[]>("tenant_finance_other_costs")
+        .select("id,tenant_id,month,descricao,valor,categoria")
+        .eq("tenant_id", tenantId)
+        .eq("month", monthStart)
+        .order("created_at", { ascending: true }),
+      db()
+        .from<RateRow[]>("tenant_finance_rates")
+        .select("tenant_id,valid_from,ggr_fee_pct,movement_fee_pct")
+        .eq("tenant_id", tenantId)
+        .order("valid_from", { ascending: false }),
+      range ? fetchBetleadsUsage([tenantId], range) : Promise.resolve([]),
+      fetchBetleadsFees([tenantId], monthStart, monthStart),
+      fetchBetleadsSince([tenantId]),
+      db()
+        .from<Array<{ categoria: string | null }>>("tenant_finance_other_costs")
+        .select("categoria")
+        .eq("tenant_id", tenantId)
+        .not("categoria", "is", null),
+    ]);
   if (costsRes.error) throw new Error(costsRes.error.message);
   if (ratesRes.error) throw new Error(ratesRes.error.message);
+  if (usedCategoriesRes.error) throw new Error(usedCategoriesRes.error.message);
 
   const days = dayRows.map(toFinanceDay).sort((a, b) => a.date.localeCompare(b.date));
+  const since = sinceRows[0]?.since ?? null;
   const otherCosts = (costsRes.data ?? []).map((row) => ({
     id: row.id,
     descricao: row.descricao,
     valor: num(row.valor),
+    categoria: categoryLabel(row.categoria),
+    suspectedBetleads:
+      looksLikeBetleadsCost(row.descricao, row.categoria) &&
+      since !== null &&
+      monthStart >= monthStartOf(since),
   }));
+  const betleadsUsage = round2(usageRows.reduce((total, row) => total + num(row.amount), 0));
+  const betleadsFee = round2(feeRows.reduce((total, row) => total + num(row.amount), 0));
   const summary = summarize(
     days,
     round2(otherCosts.reduce((total, cost) => total + cost.valor, 0)),
     today,
+    { usage: betleadsUsage, fee: betleadsFee },
+  );
+  const categories = mergeCategories(
+    FIXED_COST_CATEGORIES,
+    (usedCategoriesRes.data ?? []).map((row) => categoryLabel(row.categoria)),
   );
 
   const history = [...(ratesRes.data ?? [])]
@@ -190,6 +225,7 @@ export async function getTenantFinanceMonthFor(
     days,
     summary,
     otherCosts,
+    categories,
     rates: {
       current: {
         ggrFeePct: current.ggrFeePct,
@@ -343,12 +379,13 @@ const saveOtherCostInput = z.object({
   month: yearMonth,
   descricao: z.string().trim().min(1).max(200),
   valor: money.nonnegative(),
+  categoria: z.string().trim().min(1).max(60).nullable().optional(),
 });
 
 async function getOtherCost(tenantId: string, id: string) {
   const { data, error } = await db()
     .from<OtherCostRow>("tenant_finance_other_costs")
-    .select("id,tenant_id,month,descricao,valor")
+    .select("id,tenant_id,month,descricao,valor,categoria")
     .eq("id", id)
     .eq("tenant_id", tenantId)
     .maybeSingle();
@@ -364,16 +401,31 @@ export async function saveOtherCostFor(
   await requirePermission("finance_can_edit_values", ctx.userId, data.tenantId);
   await assertTenantNotDemo(data.tenantId);
 
+  let before: OtherCostRow | null = null;
+  if (data.id) {
+    before = await getOtherCost(data.tenantId, data.id);
+  }
+
+  // A missing/undefined categoria keeps the stored value (null for a new
+  // row); an explicit value is normalized through categoryLabel, and
+  // "Outros" (case/locale-insensitive) is stored as null.
+  const categoriaInput = data.categoria === undefined ? undefined : categoryLabel(data.categoria);
+  const categoria =
+    categoriaInput === undefined
+      ? (before?.categoria ?? null)
+      : categoryKey(categoriaInput) === categoryKey("Outros")
+        ? null
+        : categoriaInput;
+
   const values = {
     month: `${data.month}-01`,
     descricao: data.descricao,
     valor: round2(data.valor),
+    categoria,
   };
   let id: string;
-  let before: OtherCostRow | null = null;
 
   if (data.id) {
-    before = await getOtherCost(data.tenantId, data.id);
     const { error } = await db()
       .from("tenant_finance_other_costs")
       .update({ ...values, updated_at: new Date().toISOString() })

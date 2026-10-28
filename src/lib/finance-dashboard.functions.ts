@@ -48,7 +48,6 @@ import { dbUuid } from "@/lib/zod-helpers";
 
 type ServerContext = { userId: string };
 type TenantLite = { id: string; nome: string };
-type CategorizedCostRow = OtherCostRow & { categoria: string | null };
 
 export type DashboardScope =
   { kind: "tenant"; tenantId: string } | { kind: "group"; groupId: string } | { kind: "all" };
@@ -188,7 +187,7 @@ async function resolveScope(
 async function fetchOtherCosts(tenantIds: string[], months: string[]) {
   if (!tenantIds.length || !months.length) return [];
   const { data, error } = await db()
-    .from<CategorizedCostRow[]>("tenant_finance_other_costs")
+    .from<OtherCostRow[]>("tenant_finance_other_costs")
     .select("id,tenant_id,month,descricao,valor,categoria")
     .in("tenant_id", tenantIds)
     .in("month", months)
@@ -350,7 +349,7 @@ export async function getFinanceDashboardFor(
   // Categories merge by name across houses (spec §6); the first label seen
   // (current month first, oldest entry first) is the one displayed.
   const labels = new Map<string, string>();
-  const categoryOf = (row: CategorizedCostRow) => {
+  const categoryOf = (row: OtherCostRow) => {
     const label = categoryLabel(row.categoria);
     const key = categoryKey(label);
     if (!labels.has(key)) labels.set(key, label);
