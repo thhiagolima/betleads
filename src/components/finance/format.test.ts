@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { formatBRL, formatPct, formatPp, formatRatio } from "./format";
+import {
+  betleadsMissingNote,
+  betleadsUsageNote,
+  formatBRL,
+  formatPct,
+  formatPp,
+  formatRatio,
+  monthLabel,
+} from "./format";
 
 describe("formatBRL", () => {
   it("formats money with two decimals and no NBSP", () => {
@@ -37,5 +45,39 @@ describe("formatPp", () => {
 
   it("formats null as n.a.", () => {
     expect(formatPp(null)).toBe("n.a.");
+  });
+});
+
+describe("monthLabel", () => {
+  it("names the month in pt-BR, with the year on request", () => {
+    expect(monthLabel("2026-10")).toBe("out");
+    expect(monthLabel("2026-02", true)).toBe("fev/2026");
+  });
+});
+
+describe("betleadsMissingNote", () => {
+  it("is the chart's and the Lançamentos grid's shared wording", () => {
+    expect(betleadsMissingNote(null)).toBe("Sem dado de custo Betleads");
+    expect(betleadsMissingNote("2026-10-10")).toBe("Sem dado de custo Betleads antes de out/2026");
+  });
+});
+
+describe("betleadsUsageNote", () => {
+  it("says there is no consumption data when the house never had any", () => {
+    expect(betleadsUsageNote("2026-10", null)).toBe("Sem dado de custo Betleads");
+  });
+
+  it("names the since month for a month before it", () => {
+    expect(betleadsUsageNote("2026-09", "2026-10-10")).toBe(
+      "Sem dado de custo Betleads antes de out/2026",
+    );
+    expect(betleadsUsageNote("2025-12", "2026-01-03")).toBe(
+      "Sem dado de custo Betleads antes de jan/2026",
+    );
+  });
+
+  it("is null from the since month on", () => {
+    expect(betleadsUsageNote("2026-10", "2026-10-10")).toBeNull();
+    expect(betleadsUsageNote("2026-11", "2026-10-10")).toBeNull();
   });
 });

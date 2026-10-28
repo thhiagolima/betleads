@@ -1,6 +1,6 @@
 // Grupos de casas: financial close of a house (month view, manual entries
-// including retroactive ones, other costs, rates, viewer grants, goals) and
-// the group overview/scoreboard. Spec:
+// including retroactive ones, other costs, rates, viewer grants, goals). The
+// group/house dashboard lives in finance-dashboard.functions.ts. Spec:
 // docs/superpowers/specs/2026-10-24-grupos-de-casas-design.md (sections 5-7).
 //
 // Every permission decision is taken by the SQL helpers (finance_can_* and
@@ -11,85 +11,46 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { round2, summarize } from "@/lib/finance/calc";
 import {
-  compareRange,
-  computeDay,
-  evaluateGoal,
-  isWholeMonth,
-  presetRange,
-  round2,
-  summarize,
-} from "@/lib/finance/calc";
-import type {
-  CompareMode,
-  DateRange,
-  FinanceDay,
-  GoalDay,
-  GoalDirection,
-  GoalEvaluation,
-  GoalMetric,
-  PeriodPreset,
-  PeriodSummary,
-} from "@/lib/finance/types";
+  FIXED_COST_CATEGORIES,
+  categoryKey,
+  categoryLabel,
+  looksLikeBetleadsCost,
+  mergeCategories,
+} from "@/lib/finance/categories";
+import {
+  GOAL_METRICS,
+  clampToToday,
+  can,
+  db,
+  evaluateGoals,
+  fetchBetleadsFees,
+  fetchBetleadsSince,
+  fetchBetleadsUsage,
+  fetchFinanceDays,
+  fetchGoalDays,
+  isoDate,
+  num,
+  numOrNull,
+  requirePermission,
+  toFinanceDay,
+  todaySaoPaulo,
+  type OtherCostRow,
+} from "@/lib/finance/finance-data.server";
+import type { GoalDirection, GoalMetric } from "@/lib/finance/types";
 import { assertTenantNotDemo } from "@/lib/tenant-access.server";
 import { auditTenant } from "@/lib/tenant-audit.server";
-import { listTenantMembers, managedGroupIds } from "@/lib/tenants.functions";
+import { listTenantMembers } from "@/lib/tenants.functions";
 import { dbUuid } from "@/lib/zod-helpers";
 
-type DbError = { message: string; code?: string };
-type DbResult<T = unknown> = { data: T | null; error: DbError | null };
-type QueryBuilder<T = unknown> = PromiseLike<DbResult<T>> & {
-  select: (columns?: string) => QueryBuilder<T>;
-  eq: (column: string, value: unknown) => QueryBuilder<T>;
-  in: (column: string, values: unknown[]) => QueryBuilder<T>;
-  order: (column: string, options?: unknown) => QueryBuilder<T>;
-  maybeSingle: () => Promise<DbResult<T>>;
-  single: () => Promise<DbResult<T>>;
-  insert: (values: unknown) => QueryBuilder<T>;
-  update: (values: unknown) => QueryBuilder<T>;
-  upsert: (values: unknown, options?: unknown) => QueryBuilder<T>;
-  delete: () => QueryBuilder<T>;
-};
-type LooseDb = {
-  rpc: <T = unknown>(fn: string, args?: Record<string, unknown>) => Promise<DbResult<T>>;
-  from: <T = unknown>(table: string) => QueryBuilder<T>;
-};
 type ServerContext = { userId: string };
 
-type FinanceDayRow = {
-  tenant_id: string;
-  metric_date: string;
-  registrations: number | string | null;
-  ftds: number | string | null;
-  ftd_deposit_amount: number | string | null;
-  deposit_amount: number | string | null;
-  withdrawal_amount: number | string | null;
-  ad_spend: number | string | null;
-  ad_spend_suggested: number | string | null;
-  ggr: number | string | null;
-  ggr_fee_pct: number | string;
-  movement_fee_pct: number | string;
-};
-type GoalDayRow = {
-  tenant_id: string;
-  metric_date: string;
-  metric: GoalMetric;
-  direction: GoalDirection;
-  daily_value: number | string;
-};
 type DailyRow = {
   tenant_id: string;
   metric_date: string;
   ad_spend: number | string | null;
   ggr: number | string | null;
-};
-type OtherCostRow = {
-  id: string;
-  tenant_id: string;
-  month: string;
-  descricao: string;
-  valor: number | string;
 };
 type RateRow = {
   tenant_id: string;
@@ -106,49 +67,19 @@ type GoalRow = {
 };
 type TenantLite = { id: string; nome: string };
 
-const db = () => supabaseAdmin as unknown as LooseDb;
-
 /** Spreadsheet defaults when a house has no rate row (same as finance_days in SQL). */
 const DEFAULT_GGR_FEE_PCT = 16;
 const DEFAULT_MOVEMENT_FEE_PCT = 2.7;
 const MAX_MONEY = 999_999_999_999.99;
-const MAX_RANGE_DAYS = 366;
-
-const GOAL_METRICS = [
-  "registrations",
-  "ftds",
-  "deposits",
-  "net",
-  "cash_result",
-  "cost_per_registration",
-  "cost_per_ftd",
-  "roi",
-] as const satisfies readonly GoalMetric[];
 
 // ─── Small helpers ──────────────────────────────────────────────────────────
-
-const num = (value: number | string | null | undefined) => Number(value ?? 0);
-const numOrNull = (value: number | string | null | undefined) =>
-  value === null || value === undefined ? null : Number(value);
-
-const byNome = <T extends { nome: string }>(a: T, b: T) => a.nome.localeCompare(b.nome, "pt-BR");
-
-/** "YYYY-MM-DD" of today in São Paulo. */
-const todaySaoPaulo = () => presetRange("today", new Date()).from;
-
-function isRealDate(value: string) {
-  const date = new Date(`${value}T00:00:00Z`);
-  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
-}
 
 function lastDayOfMonth(firstDay: string) {
   const [y, m] = firstDay.split("-").map(Number);
   return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
 }
 
-function daysInclusive(range: DateRange) {
-  return (Date.parse(range.to) - Date.parse(range.from)) / 86_400_000 + 1;
-}
+const monthStartOf = (date: string) => `${date.slice(0, 7)}-01`;
 
 /**
  * A rate/goal change starts today or later (spec §10, "o passado não é
@@ -160,90 +91,6 @@ function notInThePast(validFrom: string | undefined) {
     throw new Error("A data de início não pode ser no passado");
   }
   return validFrom ?? today;
-}
-
-/** The range cut at today (São Paulo); null when it starts in the future. */
-function clampToToday(range: DateRange, today: string): DateRange | null {
-  if (range.from > today) return null;
-  return { from: range.from, to: range.to > today ? today : range.to };
-}
-
-const inRange = (date: string, range: DateRange | null) =>
-  !!range && date >= range.from && date <= range.to;
-
-async function can(fn: string, userId: string, tenantId: string) {
-  const { data, error } = await db().rpc<boolean>(fn, { _user: userId, _tenant: tenantId });
-  if (error) throw new Error(error.message);
-  return data === true;
-}
-
-async function requirePermission(fn: string, userId: string, tenantId: string) {
-  if (!(await can(fn, userId, tenantId))) throw new Error("Sem permissão");
-}
-
-function toFinanceDay(row: FinanceDayRow): FinanceDay {
-  return computeDay({
-    date: row.metric_date,
-    registrations: num(row.registrations),
-    ftds: num(row.ftds),
-    ftdDepositAmount: num(row.ftd_deposit_amount),
-    depositAmount: num(row.deposit_amount),
-    withdrawalAmount: num(row.withdrawal_amount),
-    adSpend: numOrNull(row.ad_spend),
-    adSpendSuggested: numOrNull(row.ad_spend_suggested),
-    ggr: numOrNull(row.ggr),
-    // Stored and consumed as percent numbers (16 = 16%), see computeDay.
-    ggrFeePct: num(row.ggr_fee_pct),
-    movementFeePct: num(row.movement_fee_pct),
-  });
-}
-
-async function fetchFinanceDays(tenantIds: string[], range: DateRange) {
-  const { data, error } = await db().rpc<FinanceDayRow[]>("finance_days", {
-    _tenants: tenantIds,
-    _from: range.from,
-    _to: range.to,
-  });
-  if (error) throw new Error(error.message);
-  return data ?? [];
-}
-
-async function fetchGoalDays(tenantIds: string[], range: DateRange) {
-  const { data, error } = await db().rpc<GoalDayRow[]>("finance_goal_days", {
-    _tenants: tenantIds,
-    _from: range.from,
-    _to: range.to,
-  });
-  if (error) throw new Error(error.message);
-  return data ?? [];
-}
-
-/**
- * One evaluation per metric with a goal, over exactly the goal days inside
- * `range` (evaluateGoal sums every goal day it is given).
- */
-function evaluateGoals(
-  goalRows: GoalDayRow[],
-  summary: PeriodSummary,
-  range: DateRange,
-  today: string,
-): GoalEvaluation[] {
-  const byMetric = new Map<GoalMetric, GoalDay[]>();
-  for (const row of goalRows) {
-    if (!inRange(row.metric_date, range)) continue;
-    const list = byMetric.get(row.metric) ?? [];
-    list.push({
-      date: row.metric_date,
-      metric: row.metric,
-      direction: row.direction,
-      dailyValue: num(row.daily_value),
-    });
-    byMetric.set(row.metric, list);
-  }
-  return GOAL_METRICS.map((metric) => {
-    const goalDays = byMetric.get(metric);
-    return goalDays ? evaluateGoal(goalDays, summary, range, today) : null;
-  }).filter((goal): goal is GoalEvaluation => goal !== null);
 }
 
 async function getTenantLite(tenantId: string) {
@@ -259,10 +106,6 @@ async function getTenantLite(tenantId: string) {
 
 // ─── Input schemas ──────────────────────────────────────────────────────────
 
-const isoDate = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, "Data inválida")
-  .refine(isRealDate, "Data inválida");
 const yearMonth = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "Mês inválido");
 const money = z.number().finite().min(-MAX_MONEY).max(MAX_MONEY);
 const percent = z.number().finite().min(0).max(100);
@@ -295,34 +138,57 @@ export async function getTenantFinanceMonthFor(
   // Future days of the current month do not appear; a future month is empty.
   const range = clampToToday({ from: monthStart, to: lastDayOfMonth(monthStart) }, today);
 
-  const [dayRows, goalRows, costsRes, ratesRes] = await Promise.all([
-    range ? fetchFinanceDays([tenantId], range) : Promise.resolve([]),
-    range ? fetchGoalDays([tenantId], range) : Promise.resolve([]),
-    db()
-      .from<OtherCostRow[]>("tenant_finance_other_costs")
-      .select("id,tenant_id,month,descricao,valor")
-      .eq("tenant_id", tenantId)
-      .eq("month", monthStart)
-      .order("created_at", { ascending: true }),
-    db()
-      .from<RateRow[]>("tenant_finance_rates")
-      .select("tenant_id,valid_from,ggr_fee_pct,movement_fee_pct")
-      .eq("tenant_id", tenantId)
-      .order("valid_from", { ascending: false }),
-  ]);
+  const [dayRows, goalRows, costsRes, ratesRes, usageRows, feeRows, sinceRows, usedCategoriesRes] =
+    await Promise.all([
+      range ? fetchFinanceDays([tenantId], range) : Promise.resolve([]),
+      range ? fetchGoalDays([tenantId], range) : Promise.resolve([]),
+      db()
+        .from<OtherCostRow[]>("tenant_finance_other_costs")
+        .select("id,tenant_id,month,descricao,valor,categoria")
+        .eq("tenant_id", tenantId)
+        .eq("month", monthStart)
+        .order("created_at", { ascending: true }),
+      db()
+        .from<RateRow[]>("tenant_finance_rates")
+        .select("tenant_id,valid_from,ggr_fee_pct,movement_fee_pct")
+        .eq("tenant_id", tenantId)
+        .order("valid_from", { ascending: false }),
+      range ? fetchBetleadsUsage([tenantId], range) : Promise.resolve([]),
+      fetchBetleadsFees([tenantId], monthStart, monthStart),
+      fetchBetleadsSince([tenantId]),
+      db()
+        .from<Array<{ categoria: string | null }>>("tenant_finance_other_costs")
+        .select("categoria")
+        .eq("tenant_id", tenantId)
+        .not("categoria", "is", null),
+    ]);
   if (costsRes.error) throw new Error(costsRes.error.message);
   if (ratesRes.error) throw new Error(ratesRes.error.message);
+  if (usedCategoriesRes.error) throw new Error(usedCategoriesRes.error.message);
 
   const days = dayRows.map(toFinanceDay).sort((a, b) => a.date.localeCompare(b.date));
+  const since = sinceRows[0]?.since ?? null;
   const otherCosts = (costsRes.data ?? []).map((row) => ({
     id: row.id,
     descricao: row.descricao,
     valor: num(row.valor),
+    categoria: categoryLabel(row.categoria),
+    suspectedBetleads:
+      looksLikeBetleadsCost(row.descricao, row.categoria) &&
+      since !== null &&
+      monthStart >= monthStartOf(since),
   }));
+  const betleadsUsage = round2(usageRows.reduce((total, row) => total + num(row.amount), 0));
+  const betleadsFee = round2(feeRows.reduce((total, row) => total + num(row.amount), 0));
   const summary = summarize(
     days,
     round2(otherCosts.reduce((total, cost) => total + cost.valor, 0)),
     today,
+    { usage: betleadsUsage, fee: betleadsFee },
+  );
+  const categories = mergeCategories(
+    FIXED_COST_CATEGORIES,
+    (usedCategoriesRes.data ?? []).map((row) => categoryLabel(row.categoria)),
   );
 
   const history = [...(ratesRes.data ?? [])]
@@ -346,6 +212,9 @@ export async function getTenantFinanceMonthFor(
     days,
     summary,
     otherCosts,
+    categories,
+    /** First day with Betleads consumption (spec §7.2): months before it have no usage data. */
+    betleadsSince: since,
     rates: {
       current: {
         ggrFeePct: current.ggrFeePct,
@@ -499,12 +368,13 @@ const saveOtherCostInput = z.object({
   month: yearMonth,
   descricao: z.string().trim().min(1).max(200),
   valor: money.nonnegative(),
+  categoria: z.string().trim().min(1).max(60).nullable().optional(),
 });
 
 async function getOtherCost(tenantId: string, id: string) {
   const { data, error } = await db()
     .from<OtherCostRow>("tenant_finance_other_costs")
-    .select("id,tenant_id,month,descricao,valor")
+    .select("id,tenant_id,month,descricao,valor,categoria")
     .eq("id", id)
     .eq("tenant_id", tenantId)
     .maybeSingle();
@@ -520,16 +390,31 @@ export async function saveOtherCostFor(
   await requirePermission("finance_can_edit_values", ctx.userId, data.tenantId);
   await assertTenantNotDemo(data.tenantId);
 
+  let before: OtherCostRow | null = null;
+  if (data.id) {
+    before = await getOtherCost(data.tenantId, data.id);
+  }
+
+  // A missing/undefined categoria keeps the stored value (null for a new
+  // row); an explicit value is normalized through categoryLabel, and
+  // "Outros" (case/locale-insensitive) is stored as null.
+  const categoriaInput = data.categoria === undefined ? undefined : categoryLabel(data.categoria);
+  const categoria =
+    categoriaInput === undefined
+      ? (before?.categoria ?? null)
+      : categoryKey(categoriaInput) === categoryKey("Outros")
+        ? null
+        : categoriaInput;
+
   const values = {
     month: `${data.month}-01`,
     descricao: data.descricao,
     valor: round2(data.valor),
+    categoria,
   };
   let id: string;
-  let before: OtherCostRow | null = null;
 
   if (data.id) {
-    before = await getOtherCost(data.tenantId, data.id);
     const { error } = await db()
       .from("tenant_finance_other_costs")
       .update({ ...values, updated_at: new Date().toISOString() })
@@ -796,7 +681,7 @@ export type TenantGoalCurrent = {
  * the most recent `tenant_goals` row with `valid_from <= today`, per metric.
  * A metric with no row at all comes back with `dailyValue: null` ("sem
  * meta"). Read-only — added for this task because neither
- * `getTenantFinanceMonth` nor `getGroupOverview` exposes the raw goal value
+ * `getTenantFinanceMonth` nor the finance dashboard exposes the raw goal value
  * outside of a date range's evaluation.
  */
 export async function getTenantGoalsFor(
@@ -835,178 +720,4 @@ export const getTenantGoals = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => tenantIdInput.parse(data))
   .handler(async ({ data, context }) =>
     getTenantGoalsFor(context as unknown as ServerContext, data),
-  );
-
-// ─── Group overview ─────────────────────────────────────────────────────────
-
-const dateRange = z
-  .object({ from: isoDate, to: isoDate })
-  .refine((range) => range.from <= range.to, "Período inválido")
-  .refine((range) => daysInclusive(range) <= MAX_RANGE_DAYS, "Período longo demais");
-
-const overviewInput = z.object({
-  groupId: dbUuid(),
-  range: dateRange,
-  compare: z.enum(["previous", "same_weekday_last_week", "last_week"]),
-  preset: z.enum(["today", "yesterday", "7d", "month", "custom"]),
-});
-
-type OverviewInput = {
-  groupId: string;
-  range: DateRange;
-  compare: CompareMode;
-  preset: PeriodPreset;
-};
-
-/**
- * Scoreboard of a group the caller manages (super admin: any group). One
- * finance_days call covers both windows; days after today are left out.
- * Other costs enter a window's result only for the "Mês" preset or a range
- * that is exactly a calendar month. Group totals are summarize() over every house's days, so ratios
- * (ROI, cost per unit) come from the sums, never from averaging houses.
- */
-export async function getGroupOverviewFor(ctx: ServerContext, data: OverviewInput) {
-  const managed = await managedGroupIds(ctx.userId);
-  if (!managed.includes(data.groupId)) throw new Error("Sem permissão");
-
-  const { data: group, error: groupErr } = await db()
-    .from<TenantLite>("tenant_groups")
-    .select("id,nome")
-    .eq("id", data.groupId)
-    .maybeSingle();
-  if (groupErr) throw new Error(groupErr.message);
-  if (!group) throw new Error("Grupo não encontrado");
-
-  const { data: links, error: linksErr } = await db()
-    .from<Array<{ tenant_id: string }>>("tenant_group_tenants")
-    .select("tenant_id")
-    .eq("group_id", data.groupId);
-  if (linksErr) throw new Error(linksErr.message);
-  const linkedIds = (links ?? []).map((link) => link.tenant_id);
-
-  let tenants: TenantLite[] = [];
-  if (linkedIds.length) {
-    const { data: tenantRows, error } = await db()
-      .from<TenantLite[]>("tenants")
-      .select("id,nome")
-      .in("id", linkedIds);
-    if (error) throw new Error(error.message);
-    tenants = [...(tenantRows ?? [])].sort(byNome);
-  }
-  const tenantIds = tenants.map((tenant) => tenant.id);
-
-  const today = todaySaoPaulo();
-  const previousRange = compareRange(data.range, data.compare, data.preset);
-  const current = clampToToday(data.range, today);
-  const previous = clampToToday(previousRange, today);
-  const windows = [current, previous].filter((range): range is DateRange => range !== null);
-  const span =
-    windows.length && tenantIds.length
-      ? {
-          from: windows.map((range) => range.from).sort()[0],
-          to: windows
-            .map((range) => range.to)
-            .sort()
-            .at(-1) as string,
-        }
-      : null;
-
-  // Spec §5: other costs enter a window's result only for a closed calendar
-  // month: a range covering exactly one month, or the "Mês" preset (also
-  // while in progress). The preset is only trusted when the range really is
-  // a month-to-date window, and its comparison window counts only for
-  // "previous" (the previous month to the same day), never a 7-day shift.
-  const monthToDate =
-    data.preset === "month" &&
-    data.range.from.endsWith("-01") &&
-    data.range.to.slice(0, 7) === data.range.from.slice(0, 7);
-  const monthOf = (range: DateRange) => `${range.from.slice(0, 7)}-01`;
-  const currentCostMonth = monthToDate || isWholeMonth(data.range) ? monthOf(data.range) : null;
-  const previousCostMonth =
-    (monthToDate && data.compare === "previous") || isWholeMonth(previousRange)
-      ? monthOf(previousRange)
-      : null;
-  const costMonths = [currentCostMonth, previousCostMonth].filter(
-    (month): month is string => month !== null,
-  );
-
-  const [dayRows, goalRows, costRows] = await Promise.all([
-    span ? fetchFinanceDays(tenantIds, span) : Promise.resolve([]),
-    current && tenantIds.length ? fetchGoalDays(tenantIds, current) : Promise.resolve([]),
-    costMonths.length && tenantIds.length
-      ? db()
-          .from<OtherCostRow[]>("tenant_finance_other_costs")
-          .select("id,tenant_id,month,descricao,valor")
-          .in("tenant_id", tenantIds)
-          .in("month", costMonths)
-          .then((res) => {
-            if (res.error) throw new Error(res.error.message);
-            return res.data ?? [];
-          })
-      : Promise.resolve([] as OtherCostRow[]),
-  ]);
-
-  const days = dayRows.map((row) => ({ tenantId: row.tenant_id, day: toFinanceDay(row) }));
-  const otherCostsFor = (tenantIdsToSum: string[], month: string | null) =>
-    month === null
-      ? null
-      : round2(
-          costRows
-            .filter((row) => tenantIdsToSum.includes(row.tenant_id) && row.month === month)
-            .reduce((total, row) => total + num(row.valor), 0),
-        );
-  const windowDays = (window: DateRange | null, tenantId?: string) =>
-    days
-      .filter((entry) => (tenantId ? entry.tenantId === tenantId : true))
-      .filter((entry) => inRange(entry.day.date, window))
-      .map((entry) => entry.day)
-      .sort((a, b) => a.date.localeCompare(b.date));
-
-  const rows = tenants.map((tenant) => {
-    const currentSummary = summarize(
-      windowDays(current, tenant.id),
-      otherCostsFor([tenant.id], currentCostMonth),
-      today,
-    );
-    const previousSummary = summarize(
-      windowDays(previous, tenant.id),
-      otherCostsFor([tenant.id], previousCostMonth),
-      today,
-    );
-    return {
-      id: tenant.id,
-      nome: tenant.nome,
-      current: currentSummary,
-      previous: previousSummary,
-      goals: current
-        ? evaluateGoals(
-            goalRows.filter((row) => row.tenant_id === tenant.id),
-            currentSummary,
-            current,
-            today,
-          )
-        : [],
-    };
-  });
-
-  const totalOtherCurrent = otherCostsFor(tenantIds, currentCostMonth);
-  const totalOtherPrevious = otherCostsFor(tenantIds, previousCostMonth);
-
-  return {
-    group: { id: group.id, nome: group.nome },
-    range: data.range,
-    compareRange: previousRange,
-    totals: {
-      current: summarize(windowDays(current), totalOtherCurrent, today),
-      previous: summarize(windowDays(previous), totalOtherPrevious, today),
-    },
-    tenants: rows,
-  };
-}
-
-export const getGroupOverview = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => overviewInput.parse(data))
-  .handler(async ({ data, context }) =>
-    getGroupOverviewFor(context as unknown as ServerContext, data),
   );
