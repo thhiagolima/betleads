@@ -92,6 +92,10 @@ const EXPERT_ALREADY_LINKED =
 const NOT_TEAM_MEMBER = "Escolha alguém da equipe desta casa.";
 const PROFILE_ALREADY_LINKED = "Este perfil já está vinculado.";
 const USER_ALREADY_HAS_PROFILE = "Esta pessoa já tem um perfil de rendimento.";
+const PROFILE_HAS_OTHER_CREDITS =
+  "Este perfil já tem créditos de outra pessoa. Crie um perfil novo para quem vai entrar.";
+const PROFILE_HAS_CREDITS =
+  "Este perfil tem créditos registrados. Desative em vez de excluir, para manter o histórico.";
 const DEMO_USER_EXPERT_MESSAGE =
   "Este e-mail pertence a um usuário de demonstração e não pode ser expert.";
 
@@ -120,6 +124,25 @@ async function requireExpertAdminWriteTenant(ctx: ServerContext) {
   const tenantId = await requireExpertAdminTenant(ctx);
   await assertTenantNotDemo(tenantId);
   return tenantId;
+}
+
+async function expertHasCredits(tenantId: string, expertId: string): Promise<boolean> {
+  const { count, error } = await db()
+    .from("expert_deposit_credits")
+    .select("deposit_id", { count: "exact", head: true })
+    .eq("tenant_id", tenantId)
+    .eq("expert_id", expertId);
+  if (error) throw new Error(error.message);
+  return (count ?? 0) > 0;
+}
+
+/**
+ * Os créditos de um perfil são a base da comissão de quem os gerou: um
+ * perfil que já tem créditos não passa para outra pessoa (convite ou
+ * vínculo), senão o histórico dela iria junto.
+ */
+async function assertProfileHasNoCredits(tenantId: string, expertId: string) {
+  if (await expertHasCredits(tenantId, expertId)) throw new Error(PROFILE_HAS_OTHER_CREDITS);
 }
 
 export async function loadExpert(tenantId: string, expertId: string): Promise<ExpertDbRow> {
@@ -184,11 +207,7 @@ export function buildExpertAdminRow(
   };
 }
 
-export async function countExpertLeads(
-  tenantId: string,
-  tipo: ExpertTipo,
-  affiliateIds: string[],
-) {
+export async function countExpertLeads(tenantId: string, tipo: ExpertTipo, affiliateIds: string[]) {
   if (tipo === "restrito" && affiliateIds.length === 0) return 0;
   let query = db()
     .from("players")
@@ -257,7 +276,10 @@ export async function listExpertsFor(ctx: ServerContext): Promise<ExpertAdminRow
   if (error) throw new Error(error.message);
   if (linksErr) throw new Error(linksErr.message);
   const expertRows = (experts ?? []) as ExpertDbRow[];
-  const roles = await houseRolesOf(tenantId, expertRows.map((row) => row.user_id));
+  const roles = await houseRolesOf(
+    tenantId,
+    expertRows.map((row) => row.user_id),
+  );
 
   const idsByExpert = new Map<string, string[]>();
   for (const link of (links ?? []) as Array<{ expert_id: string; affiliate_id: string }>) {
@@ -401,6 +423,8 @@ export async function inviteExpertFor(ctx: ServerContext, data: z.input<typeof i
   const tenantId = await requireExpertAdminWriteTenant(ctx);
   const expert = await loadExpert(tenantId, input.expertId);
   if (expert.user_id) throw new Error(EXPERT_ALREADY_LINKED);
+  // Before the lookup/invite: a refused profile never sends an e-mail.
+  await assertProfileHasNoCredits(tenantId, expert.id);
 
   const email = input.email.toLowerCase();
   // An invite is only sent for an e-mail with no auth user yet, and such a
@@ -560,6 +584,7 @@ export async function linkExpertToTeamMemberFor(
 
   const expert = await loadExpert(tenantId, input.expertId);
   if (expert.user_id) throw new Error(PROFILE_ALREADY_LINKED);
+  await assertProfileHasNoCredits(tenantId, expert.id);
 
   const { data: owned, error: ownedErr } = await db()
     .from("experts")
@@ -660,9 +685,16 @@ export async function setExpertActiveFor(ctx: ServerContext, data: z.input<typeo
   const tenantId = await requireExpertAdminWriteTenant(ctx);
   const expert = await loadExpert(tenantId, input.expertId);
 
+  // desativado_em: depósitos a partir dele não geram crédito para o perfil
+  // (refresh_expert_credits). Desativar um perfil já inativo mantém a data
+  // original; reativar limpa.
+  const patch: { ativo: boolean; desativado_em?: string | null } = { ativo: input.ativo };
+  if (input.ativo) patch.desativado_em = null;
+  else if (expert.ativo) patch.desativado_em = new Date().toISOString();
+
   const { error } = await db()
     .from("experts")
-    .update({ ativo: input.ativo })
+    .update(patch)
     .eq("id", expert.id)
     .eq("tenant_id", tenantId);
   if (error) throw new Error(error.message);
@@ -674,7 +706,7 @@ export async function setExpertActiveFor(ctx: ServerContext, data: z.input<typeo
     entityType: "expert",
     entityId: expert.id,
     before: expert,
-    after: { ...expert, ativo: input.ativo },
+    after: { ...expert, ...patch },
   });
   return { ok: true };
 }
@@ -689,21 +721,10 @@ export async function deleteExpertFor(ctx: ServerContext, data: z.input<typeof e
   const tenantId = await requireExpertAdminWriteTenant(ctx);
   const expert = await loadExpert(tenantId, input.expertId);
 
-  // Fase 3, Task 8: um perfil com crédito registrado (base da comissão) não
-  // pode ser excluído, só desativado — para não apagar o histórico de
-  // comissão (global-constraints.md). Checagem por `count` (head: true), sem
-  // carregar as linhas.
-  const { count: creditsCount, error: creditsErr } = await db()
-    .from("expert_deposit_credits")
-    .select("deposit_id", { count: "exact", head: true })
-    .eq("tenant_id", tenantId)
-    .eq("expert_id", expert.id);
-  if (creditsErr) throw new Error(creditsErr.message);
-  if ((creditsCount ?? 0) > 0) {
-    throw new Error(
-      "Este perfil tem créditos registrados. Desative em vez de excluir, para manter o histórico.",
-    );
-  }
+  // Fase 3: um perfil com crédito registrado (base da comissão) não pode ser
+  // excluído, só desativado — para não apagar o histórico de comissão. O
+  // delete_expert também recusa ('expert_has_credits') e a FK não cascateia.
+  if (await expertHasCredits(tenantId, expert.id)) throw new Error(PROFILE_HAS_CREDITS);
 
   const { error } = await db().rpc("delete_expert", {
     _tenant: tenantId,
@@ -712,6 +733,9 @@ export async function deleteExpertFor(ctx: ServerContext, data: z.input<typeof e
   if (error) {
     if ((error.message ?? "").includes("expert_has_user")) {
       throw new Error("Remova o acesso do expert antes de excluir.");
+    }
+    if ((error.message ?? "").includes("expert_has_credits")) {
+      throw new Error(PROFILE_HAS_CREDITS);
     }
     throw new Error(error.message);
   }

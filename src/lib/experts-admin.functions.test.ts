@@ -340,6 +340,82 @@ describe("experts admin server functions", () => {
     );
   });
 
+  it("delete maps expert_has_credits from delete_expert (credit stored after the check)", async () => {
+    addExpert();
+    fake.admin.onRpc("delete_expert", () => ({
+      data: null,
+      error: { message: "expert_has_credits", code: "P0001" } as never,
+    }));
+    await expect(deleteExpertFor(ctxFor(ADMIN), { expertId: EXPERT_ID })).rejects.toThrow(
+      "Este perfil tem créditos registrados. Desative em vez de excluir, para manter o histórico.",
+    );
+    expect(fake.admin.rows("tenant_audit_logs")).toEqual([]);
+  });
+
+  it("deactivation sets desativado_em once, reactivation clears it", async () => {
+    addExpert();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2026-10-20T10:00:00.000Z"));
+      await setExpertActiveFor(ctxFor(ADMIN), { expertId: EXPERT_ID, ativo: false });
+      expect(fake.admin.rows("experts")[0]).toMatchObject({
+        ativo: false,
+        desativado_em: "2026-10-20T10:00:00.000Z",
+      });
+
+      // Deactivating again keeps the original cutoff.
+      vi.setSystemTime(new Date("2026-10-22T10:00:00.000Z"));
+      await setExpertActiveFor(ctxFor(ADMIN), { expertId: EXPERT_ID, ativo: false });
+      expect(fake.admin.rows("experts")[0].desativado_em).toBe("2026-10-20T10:00:00.000Z");
+
+      await setExpertActiveFor(ctxFor(ADMIN), { expertId: EXPERT_ID, ativo: true });
+      expect(fake.admin.rows("experts")[0]).toMatchObject({ ativo: true, desativado_em: null });
+      expect(fake.admin.rows("tenant_audit_logs").map((r) => r.action)).toEqual([
+        "expert.deactivated",
+        "expert.deactivated",
+        "expert.activated",
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("invite and team link refuse a profile that already has credits", async () => {
+    addExpert();
+    fake.admin.rows("expert_deposit_credits").push({
+      deposit_id: "d1",
+      tenant_id: TENANT,
+      player_id: "p1",
+      expert_id: EXPERT_ID,
+      via: "afiliado",
+      valor: 100,
+      deposit_at: "2026-10-20T00:00:00Z",
+    });
+    fake.admin
+      .rows("user_roles")
+      .push({ id: "r1", user_id: GESTOR, tenant_id: TENANT, role: "gestor" });
+    const message =
+      "Este perfil já tem créditos de outra pessoa. Crie um perfil novo para quem vai entrar.";
+
+    await expect(
+      inviteExpertFor(ctxFor(ADMIN), { expertId: EXPERT_ID, email: "novo@casa.com" }),
+    ).rejects.toThrow(message);
+    await expect(
+      linkExpertToTeamMemberFor(ctxFor(ADMIN), { expertId: EXPERT_ID, userId: GESTOR }),
+    ).rejects.toThrow(message);
+
+    expect(fake.invited).toEqual([]);
+    expect(fake.admin.rows("experts")[0].user_id).toBeNull();
+    expect(fake.admin.rows("user_roles").map((r) => r.role)).toEqual(["gestor"]);
+    expect(fake.admin.rows("tenant_audit_logs")).toEqual([]);
+
+    // A profile of the same house without credits is still linkable.
+    fake.admin.rows("expert_deposit_credits")[0].expert_id = "outro-perfil";
+    await expect(
+      linkExpertToTeamMemberFor(ctxFor(ADMIN), { expertId: EXPERT_ID, userId: GESTOR }),
+    ).resolves.toEqual({ ok: true });
+  });
+
   it("writes refuse demo houses", async () => {
     fake.admin.rows("tenants")[0].is_demo = true;
     addExpert();
