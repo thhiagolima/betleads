@@ -52,3 +52,24 @@ export function formatPp(value: number | null | undefined): string {
   });
   return `${value < 0 ? "-" : "+"}${stripNbsp(points)} p.p.`;
 }
+
+const MONTHS = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+
+/** "2026-10" → "out" (chart axis) or "out/2026" (tooltip, notes). */
+export function monthLabel(month: string, withYear = false) {
+  const name = MONTHS[Number(month.slice(5, 7)) - 1] ?? month;
+  return withYear ? `${name}/${month.slice(0, 4)}` : name;
+}
+
+/**
+ * Note under the month's Betleads cost (spec §7.2): Betleads usage is only
+ * known from `betleadsSince` (first day with consumption) on, so a month
+ * before it — or any month of a house that never had consumption — shows
+ * that the zero means "no data". `month` is "YYYY-MM".
+ */
+export function betleadsUsageNote(month: string, betleadsSince: string | null): string | null {
+  if (betleadsSince === null) return "sem dado de consumo";
+  const sinceMonth = betleadsSince.slice(0, 7);
+  if (month >= sinceMonth) return null;
+  return `sem dado de consumo antes de ${monthLabel(sinceMonth, true)}`;
+}

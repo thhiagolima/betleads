@@ -7,6 +7,9 @@ export const FIXED_COST_CATEGORIES: readonly string[] = [
   "Outros",
 ];
 
+/** Longest category name the server accepts (saveOtherCost: z.string().max(60)). */
+export const MAX_CATEGORY_LENGTH = 60;
+
 /** A cost category's display label: trimmed, with internal spaces collapsed; "Outros" when empty/null. */
 export function categoryLabel(categoria: string | null): string {
   const trimmed = (categoria ?? "").trim().replace(/\s+/g, " ");
@@ -54,7 +57,7 @@ export function betleadsHint(descricao: string, categoria: string | null): strin
 /**
  * Categories matching the typed text (all of them when empty, in the given
  * order: fixed first, then the house's), plus the typed name as a new
- * category when no existing one has that name.
+ * category when no existing one has that name and it fits MAX_CATEGORY_LENGTH.
  */
 export function categoryChoices(
   categories: string[],
@@ -65,5 +68,5 @@ export function categoryChoices(
   const key = categoryKey(typed);
   const options = categories.filter((label) => categoryKey(label).includes(key));
   const exists = categories.some((label) => categoryKey(label) === key);
-  return { options, newName: exists ? null : typed };
+  return { options, newName: exists || typed.length > MAX_CATEGORY_LENGTH ? null : typed };
 }

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  MAX_CATEGORY_LENGTH,
+  categoryChoices,
   categoryKey,
   categoryLabel,
   FIXED_COST_CATEGORIES,
@@ -48,5 +50,14 @@ describe("looksLikeBetleadsCost", () => {
 
   it("matches on category", () => {
     expect(looksLikeBetleadsCost("x", "Mensalidade")).toBe(true);
+  });
+});
+
+describe("categoryChoices", () => {
+  it("offers a new name only up to the 60 characters the server accepts", () => {
+    expect(MAX_CATEGORY_LENGTH).toBe(60);
+    const sixty = "a".repeat(60);
+    expect(categoryChoices([], sixty).newName).toBe(sixty);
+    expect(categoryChoices([], "a".repeat(61)).newName).toBeNull();
   });
 });

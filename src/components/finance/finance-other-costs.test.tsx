@@ -43,6 +43,18 @@ describe("FinanceOtherCosts", () => {
     expect(categoryChoices(categories, "equipe")).toEqual({ options: ["Equipe"], newName: null });
   });
 
+  it("the category search is capped at 60 characters", () => {
+    const html = renderToStaticMarkup(
+      <CategoryCommand
+        categories={categories}
+        search=""
+        onSearchChange={() => {}}
+        onSelect={() => {}}
+      />,
+    );
+    expect(html).toContain('maxLength="60"');
+  });
+
   it('a suspected Betleads cost shows "parece duplicado com o custo Betleads automático" and a remove button', () => {
     const html = renderToStaticMarkup(
       <DuplicateBetleadsNote canRemove disabled={false} onRemove={() => {}} />,

@@ -372,6 +372,21 @@ describe("house financial month: Betleads cost and categories", () => {
     ]);
   });
 
+  it("returns betleadsSince (null when the house has no consumption yet)", async () => {
+    const none = await getTenantFinanceMonthFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-10",
+    });
+    expect(none.betleadsSince).toBeNull();
+
+    sinceRows.push({ tenant_id: HOUSE_A, since: "2026-10-10" });
+    const september = await getTenantFinanceMonthFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-09",
+    });
+    expect(september.betleadsSince).toBe("2026-10-10");
+  });
+
   it("a house without since never flags suspectedBetleads", async () => {
     fake.admin
       .rows("tenant_finance_other_costs")

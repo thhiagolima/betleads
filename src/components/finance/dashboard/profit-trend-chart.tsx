@@ -17,7 +17,7 @@ import {
   YAxis,
 } from "recharts";
 
-import { formatBRL, formatRatio } from "@/components/finance/format";
+import { formatBRL, formatRatio, monthLabel } from "@/components/finance/format";
 import {
   CHART_COLORS,
   CHART_SERIES,
@@ -28,15 +28,8 @@ import {
 } from "@/lib/chart-theme";
 import type { MonthPoint } from "@/lib/finance/types";
 
-const MONTHS = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
 const MAX_NAMED_HOUSES = 4;
 const OTHERS_KEY = "__outras";
-
-/** "2026-10" → "out" (axis) or "out/2026" (tooltip, note). */
-export function monthLabel(month: string, withYear = false) {
-  const name = MONTHS[Number(month.slice(5, 7)) - 1] ?? month;
-  return withYear ? `${name}/${month.slice(0, 4)}` : name;
-}
 
 type Series = { key: string; name: string; color: string };
 

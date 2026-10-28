@@ -12,7 +12,12 @@ import { toast } from "sonner";
 import { formatBRL } from "@/components/finance/format";
 import { currentMonth, financeMonthQueryKey } from "@/components/finance/finance-month-grid";
 import { deleteOtherCost, getTenantFinanceMonth, saveOtherCost } from "@/lib/finance.functions";
-import { betleadsHint, categoryChoices, categoryKey } from "@/lib/finance/categories";
+import {
+  MAX_CATEGORY_LENGTH,
+  betleadsHint,
+  categoryChoices,
+  categoryKey,
+} from "@/lib/finance/categories";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import { Button } from "@/components/ui/button";
@@ -57,6 +62,7 @@ export function CategoryCommand({
     <Command shouldFilter={false}>
       <CommandInput
         placeholder="Buscar ou criar categoria"
+        maxLength={MAX_CATEGORY_LENGTH}
         value={search}
         onValueChange={onSearchChange}
       />

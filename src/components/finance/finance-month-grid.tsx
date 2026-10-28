@@ -9,7 +9,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
-import { formatBRL, formatRatio } from "@/components/finance/format";
+import { betleadsUsageNote, formatBRL, formatRatio } from "@/components/finance/format";
 import { num } from "@/lib/format";
 import { averageFilledAdSpend, presetRange } from "@/lib/finance/calc";
 import type { FinanceDay } from "@/lib/finance/types";
@@ -34,11 +34,8 @@ export function currentMonth() {
   return presetRange("today", new Date()).from.slice(0, 7);
 }
 
-export const financeMonthQueryKey = (tenantId: string, month: string) => [
-  "finance-month",
-  tenantId,
-  month,
-] as const;
+export const financeMonthQueryKey = (tenantId: string, month: string) =>
+  ["finance-month", tenantId, month] as const;
 
 type Edits = Record<string, { adSpend?: string; ggr?: string }>;
 type EditableField = "adSpend" | "ggr";
@@ -154,6 +151,7 @@ export function FinanceMonthView({
   }
 
   const { days, summary } = data;
+  const betleadsNote = betleadsUsageNote(month, data.betleadsSince);
 
   return (
     <div className="space-y-4">
@@ -212,7 +210,11 @@ export function FinanceMonthView({
                 key={day.date}
                 ref={day.date === focusDate ? focusRowRef : undefined}
                 data-date={day.date}
-                className={cn(day.date === focusDate && "ring-2 ring-inset ring-primary")}
+                // Cell backgrounds (MANUAL_CELL) hide a row ring, so the
+                // focused row also tints every cell.
+                className={cn(
+                  day.date === focusDate && "ring-2 ring-inset ring-primary [&>td]:bg-primary/10",
+                )}
               >
                 <TableCell>{day.date.slice(8, 10)}</TableCell>
                 <TableCell className={MANUAL_CELL}>
@@ -302,9 +304,7 @@ export function FinanceMonthView({
             </TableRow>
             <TableRow>
               <TableCell className="text-muted-foreground">MÉDIA DIÁRIA</TableCell>
-              <TableCell className={MANUAL_CELL}>
-                {formatBRL(averageFilledAdSpend(days))}
-              </TableCell>
+              <TableCell className={MANUAL_CELL}>{formatBRL(averageFilledAdSpend(days))}</TableCell>
               <TableCell colSpan={9} />
               <TableCell>{formatBRL(summary.avgDailyCashResult)}</TableCell>
               <TableCell />
@@ -333,6 +333,7 @@ export function FinanceMonthView({
           <p className="font-medium">
             {formatBRL(summary.betleadsUsage + (summary.betleadsFee ?? 0))}
           </p>
+          {betleadsNote && <p className="text-xs text-muted-foreground">{betleadsNote}</p>}
         </div>
         <div>
           <p className="text-xs uppercase tracking-wide text-muted-foreground">Resultado do mês</p>

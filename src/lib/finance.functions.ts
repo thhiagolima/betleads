@@ -213,6 +213,8 @@ export async function getTenantFinanceMonthFor(
     summary,
     otherCosts,
     categories,
+    /** First day with Betleads consumption (spec §7.2): months before it have no usage data. */
+    betleadsSince: since,
     rates: {
       current: {
         ggrFeePct: current.ggrFeePct,
