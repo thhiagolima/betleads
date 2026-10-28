@@ -3,22 +3,11 @@
 // invalidate the same cache entries after a mutation.
 export const EXPERTS_QUERY_KEY = ["experts-admin"];
 export const UNASSIGNED_AFFILIATES_QUERY_KEY = ["experts-unassigned-affiliates"];
-// Fase 3, Task 6: ranking (lista) e detalhe do admin. O detalhe inclui o
-// expertId e o período porque cada combinação é uma busca diferente no
-// servidor; a settings dialog invalida o prefixo "experts-ranking" inteiro
-// depois de salvar a janela de clique, já que ela muda a métrica de todos os
-// períodos em cache.
+// Fase 3, Task 6: ranking (lista) do admin; a settings dialog invalida o
+// prefixo "experts-ranking" inteiro depois de salvar a janela de clique, já
+// que ela muda a métrica de todos os períodos em cache. O detalhe por
+// expert (que vivia aqui, Task 6/8) foi substituído pelo relatório de
+// rendimento (Relatório de rendimento, Task 5) —
+// `/rendimento/equipe/$expertId` tem sua própria query key em
+// `@/components/rendimento/credit-statement`.
 export const EXPERTS_RANKING_QUERY_KEY = ["experts-ranking"];
-export const expertDetailQueryKey = (expertId: string, period: string) => [
-  "expert-detail",
-  expertId,
-  period,
-];
-// Fase 3, Task 8: extrato de créditos, paginado — a página também entra na
-// chave porque cada página é uma busca diferente no servidor.
-export const expertCreditsQueryKey = (expertId: string, period: string, page: number) => [
-  "expert-credits",
-  expertId,
-  period,
-  page,
-];

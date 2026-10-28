@@ -30,7 +30,6 @@ import { __resetDemoTenantCacheForTests } from "@/lib/tenant-access.server";
 import {
   exportExpertCreditsCsvFor,
   getExpertDashboardFor,
-  getExpertDetailFor,
   listExpertCreditsFor,
   listExpertsRankingFor,
   saveExpertSettingsFor,
@@ -244,123 +243,6 @@ describe("listExpertsRankingFor", () => {
     const result = await listExpertsRankingFor(ctxFor(ADMIN), {});
     expect(result.rows).toEqual([
       expect.objectContaining({ expertId: ME, depositado: 0, cliques: 0, contatos: 0 }),
-    ]);
-  });
-});
-
-describe("getExpertDetailFor", () => {
-  function seedCommon() {
-    addExpert(ME, { nome: "Ana", tipo: "total" });
-    addExpert(OTHER_EXPERT, { nome: "Bruno", tipo: "total" });
-    fake.admin.rows("players").push({ id: PLAYER, tenant_id: TENANT, nome: "Jogador 1" });
-  }
-
-  it("detail of an expert from another house is 'Expert não encontrado.'", async () => {
-    fake.admin.rows("tenants").push({
-      id: OTHER_TENANT,
-      nome: "Outra",
-      status: "active",
-      is_demo: false,
-    });
-    fake.admin.rows("experts").push({
-      id: OTHER_EXPERT,
-      tenant_id: OTHER_TENANT,
-      nome: "De outra casa",
-      tipo: "total",
-      ativo: true,
-      envio_modo: "livre",
-      teto_mensal: null,
-      assumir_prazo_dias: 3,
-      user_id: null,
-      created_at: "2026-10-01T00:00:00Z",
-    });
-
-    await expect(getExpertDetailFor(ctxFor(ADMIN), { expertId: OTHER_EXPERT })).rejects.toThrow(
-      "Expert não encontrado.",
-    );
-  });
-
-  it("lists only that expert's links, contacts and active claims", async () => {
-    seedCommon();
-    vi.setSystemTime(new Date("2026-10-24T12:00:00Z"));
-
-    fake.admin.rows("expert_links").push(
-      {
-        id: "link-mine",
-        tenant_id: TENANT,
-        expert_id: ME,
-        player_id: PLAYER,
-        link_dispatch_id: "disp-1",
-        oferta: "Oferta A",
-        original_url: "https://x",
-        sent_url: "https://x",
-        shortened: true,
-        created_at: "2026-10-23T00:00:00Z",
-      },
-      {
-        id: "link-other",
-        tenant_id: TENANT,
-        expert_id: OTHER_EXPERT,
-        player_id: PLAYER,
-        link_dispatch_id: null,
-        oferta: "Oferta B",
-        original_url: "https://y",
-        sent_url: "https://y",
-        shortened: true,
-        created_at: "2026-10-23T00:00:00Z",
-      },
-    );
-    fake.admin.rows("link_dispatches").push({
-      id: "disp-1",
-      first_party_first_clicked_at: "2026-10-23T01:00:00Z",
-    });
-    fake.admin.rows("expert_lead_contacts").push(
-      {
-        id: "c-mine",
-        tenant_id: TENANT,
-        expert_id: ME,
-        player_id: PLAYER,
-        resultado: "chamei",
-        created_at: "2026-10-23T00:00:00Z",
-      },
-      {
-        id: "c-other",
-        tenant_id: TENANT,
-        expert_id: OTHER_EXPERT,
-        player_id: PLAYER,
-        resultado: "respondeu",
-        created_at: "2026-10-23T00:00:00Z",
-      },
-    );
-    fake.admin.rows("expert_lead_claims").push(
-      { tenant_id: TENANT, expert_id: ME, player_id: PLAYER, expires_at: "2026-10-26T00:00:00Z" },
-      {
-        tenant_id: TENANT,
-        expert_id: OTHER_EXPERT,
-        player_id: PLAYER,
-        expires_at: "2026-10-26T00:00:00Z",
-      },
-      // Expired claim of mine: must not show up.
-      { tenant_id: TENANT, expert_id: ME, player_id: PLAYER, expires_at: "2026-10-20T00:00:00Z" },
-    );
-
-    const result = await getExpertDetailFor(ctxFor(ADMIN), { expertId: ME });
-
-    expect(result.expert).toMatchObject({ id: ME, nome: "Ana" });
-    expect(result.links).toEqual([
-      {
-        id: "link-mine",
-        oferta: "Oferta A",
-        leadNome: "Jogador 1",
-        createdAt: "2026-10-23T00:00:00Z",
-        clicado: true,
-      },
-    ]);
-    expect(result.contatos).toEqual([
-      { leadNome: "Jogador 1", resultado: "chamei", createdAt: "2026-10-23T00:00:00Z" },
-    ]);
-    expect(result.assumidos).toEqual([
-      { leadNome: "Jogador 1", expiresAt: "2026-10-26T00:00:00Z" },
     ]);
   });
 });

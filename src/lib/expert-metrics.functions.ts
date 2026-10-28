@@ -1,9 +1,11 @@
 // Server functions de painel e ranking da Área do Expert (Fase 3, Task 3):
-// dashboard do próprio expert, ranking e detalhe (admin), e a configuração
-// da janela de clique. Task 8 acrescenta o extrato de créditos (base da
-// comissão paga por fora do sistema) e o CSV do período. Consomem as
-// funções SQL da Task 2
-// (`expert_metrics`/`expert_metrics_daily`) e da Task 1
+// dashboard do próprio expert, ranking (admin) e a configuração da janela
+// de clique. Task 8 acrescenta o extrato de créditos (base da comissão
+// paga por fora do sistema) e o CSV do período. O detalhe por expert
+// (`getExpertDetail`/`getExpertDetailFor`) foi removido no Relatório de
+// rendimento (Task 5): a tela que o usava (/experts/$expertId) agora
+// redireciona para /rendimento/equipe/$expertId. Consomem as funções SQL
+// da Task 2 (`expert_metrics`/`expert_metrics_daily`) e da Task 1
 // (`expert_settings`/`refresh_expert_credits`), todas service_role, e ainda
 // fora dos tipos gerados do Supabase → `(supabaseAdmin as any)`, como em
 // `expert-access.server.ts`.
@@ -11,9 +13,9 @@
 // Guards: `requireExpertContext` para o próprio expert (dashboard);
 // `requireExpertAdminTenant` (exportado de `experts-admin.functions.ts`,
 // mesma cadeia `resolveOperationalTenantForRequest` + `requireTenantAdmin`)
-// para o admin (ranking, detalhe, config). O extrato e o CSV dele resolvem o
-// dono por `resolveReportSubject` (relatório de rendimento): sem `expertId`,
-// o próprio usuário; com `expertId`, só o admin.
+// para o admin (ranking, config). O extrato e o CSV dele resolvem o dono
+// por `resolveReportSubject` (relatório de rendimento): sem `expertId`, o
+// próprio usuário; com `expertId`, só o admin.
 
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -23,16 +25,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { requireExpertContext, type ExpertTipo } from "@/lib/expert-access.server";
 import { DEFAULT_EXPERT_PERIOD, periodRange, type PeriodKey } from "@/lib/expert-period";
 import { resolveReportSubject } from "@/lib/expert-report-subject.server";
-import {
-  authUserOf,
-  buildExpertAdminRow,
-  countExpertLeads,
-  expertAccessFields,
-  houseRolesOf,
-  loadExpert,
-  requireExpertAdminTenant,
-  type ExpertAdminRow,
-} from "@/lib/experts-admin.functions";
+import { requireExpertAdminTenant } from "@/lib/experts-admin.functions";
 import { neutralizeCsvFormula } from "@/lib/csv-safe";
 import { brtDayKey, brtDayStart } from "@/lib/tz";
 import { assertTenantNotDemo } from "@/lib/tenant-access.server";
@@ -257,35 +250,7 @@ export async function listExpertsRankingFor(
   return { rows, janelaHoras };
 }
 
-// ---------------------------------------------------------- admin: detail
-
-async function loadExpertAdminRow(tenantId: string, expertId: string): Promise<ExpertAdminRow> {
-  const row = await loadExpert(tenantId, expertId);
-
-  const { data: affRows, error: affErr } = await db()
-    .from("expert_affiliates")
-    .select("affiliate_id")
-    .eq("tenant_id", tenantId)
-    .eq("expert_id", expertId);
-  if (affErr) throw new Error(affErr.message);
-  const affiliateIds = ((affRows ?? []) as Array<{ affiliate_id: string }>)
-    .map((r) => r.affiliate_id)
-    .sort();
-
-  const [leads, user, roles] = await Promise.all([
-    countExpertLeads(tenantId, row.tipo, affiliateIds),
-    authUserOf(row.user_id),
-    houseRolesOf(tenantId, [row.user_id]),
-  ]);
-  const houseRole = row.user_id ? roles.get(row.user_id) : null;
-
-  return buildExpertAdminRow(row, {
-    affiliateIds,
-    leads,
-    ...expertAccessFields(row, user?.last_sign_in_at, houseRole),
-    email: user?.email ?? null,
-  });
-}
+// ---------------------------------------------------------- shared: player names
 
 async function namesByPlayerId(
   tenantId: string,
@@ -299,166 +264,6 @@ async function namesByPlayerId(
     .in("id", playerIds);
   if (error) throw new Error(error.message);
   return new Map(((data ?? []) as Array<{ id: string; nome: string }>).map((p) => [p.id, p.nome]));
-}
-
-type ExpertLinkRow = {
-  id: string;
-  oferta: string;
-  leadNome: string;
-  createdAt: string;
-  clicado: boolean;
-};
-
-async function loadExpertLinks(tenantId: string, expertId: string): Promise<ExpertLinkRow[]> {
-  const { data, error } = await db()
-    .from("expert_links")
-    .select("id,oferta,player_id,link_dispatch_id,created_at")
-    .eq("tenant_id", tenantId)
-    .eq("expert_id", expertId)
-    .order("created_at", { ascending: false })
-    .limit(20);
-  if (error) throw new Error(error.message);
-  const rows = (data ?? []) as Array<{
-    id: string;
-    oferta: string;
-    player_id: string;
-    link_dispatch_id: string | null;
-    created_at: string;
-  }>;
-  if (rows.length === 0) return [];
-
-  const dispatchIds = Array.from(
-    new Set(rows.map((r) => r.link_dispatch_id).filter((id): id is string => Boolean(id))),
-  );
-  const [nomeById, { data: dispatches, error: dispatchesErr }] = await Promise.all([
-    namesByPlayerId(
-      tenantId,
-      rows.map((r) => r.player_id),
-    ),
-    dispatchIds.length > 0
-      ? db().from("link_dispatches").select("id,first_party_first_clicked_at").in("id", dispatchIds)
-      : Promise.resolve({ data: [] as unknown[], error: null }),
-  ]);
-  if (dispatchesErr) throw new Error(dispatchesErr.message);
-
-  const clickedById = new Map(
-    ((dispatches ?? []) as Array<{ id: string; first_party_first_clicked_at: string | null }>).map(
-      (d) => [d.id, d.first_party_first_clicked_at != null],
-    ),
-  );
-
-  return rows.map((r) => ({
-    id: r.id,
-    oferta: r.oferta,
-    leadNome: nomeById.get(r.player_id) ?? "",
-    createdAt: r.created_at,
-    clicado: r.link_dispatch_id ? (clickedById.get(r.link_dispatch_id) ?? false) : false,
-  }));
-}
-
-type ExpertContactRow = { leadNome: string; resultado: string; createdAt: string };
-
-async function loadExpertContacts(tenantId: string, expertId: string): Promise<ExpertContactRow[]> {
-  const { data, error } = await db()
-    .from("expert_lead_contacts")
-    .select("resultado,player_id,created_at")
-    .eq("tenant_id", tenantId)
-    .eq("expert_id", expertId)
-    .order("created_at", { ascending: false })
-    .limit(20);
-  if (error) throw new Error(error.message);
-  const rows = (data ?? []) as Array<{ resultado: string; player_id: string; created_at: string }>;
-  if (rows.length === 0) return [];
-
-  const nomeById = await namesByPlayerId(
-    tenantId,
-    rows.map((r) => r.player_id),
-  );
-  return rows.map((r) => ({
-    leadNome: nomeById.get(r.player_id) ?? "",
-    resultado: r.resultado,
-    createdAt: r.created_at,
-  }));
-}
-
-type ExpertClaimRow = { leadNome: string; expiresAt: string };
-
-async function loadActiveClaims(tenantId: string, expertId: string): Promise<ExpertClaimRow[]> {
-  const { data, error } = await db()
-    .from("expert_lead_claims")
-    .select("player_id,expires_at")
-    .eq("tenant_id", tenantId)
-    .eq("expert_id", expertId)
-    .gt("expires_at", new Date().toISOString());
-  if (error) throw new Error(error.message);
-  const rows = (data ?? []) as Array<{ player_id: string; expires_at: string }>;
-  if (rows.length === 0) return [];
-
-  const nomeById = await namesByPlayerId(
-    tenantId,
-    rows.map((r) => r.player_id),
-  );
-  return rows.map((r) => ({
-    leadNome: nomeById.get(r.player_id) ?? "",
-    expiresAt: r.expires_at,
-  }));
-}
-
-const expertDetailInput = z.object({ expertId: dbUuid(), period: periodKeySchema.optional() });
-
-export const getExpertDetail = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => expertDetailInput.parse(data))
-  .handler(async ({ data, context }) =>
-    getExpertDetailFor(context as unknown as ServerContext, data),
-  );
-
-export async function getExpertDetailFor(
-  ctx: ServerContext,
-  data: z.input<typeof expertDetailInput>,
-): Promise<{
-  expert: ExpertAdminRow;
-  metrics: ExpertMetrics;
-  serie: {
-    dia: string;
-    depositado: number;
-    depositadoClique: number;
-    depositadoAfiliado: number;
-    cliques: number;
-  }[];
-  links: ExpertLinkRow[];
-  contatos: ExpertContactRow[];
-  assumidos: ExpertClaimRow[];
-}> {
-  const input = expertDetailInput.parse(data);
-  const period = input.period ?? DEFAULT_EXPERT_PERIOD;
-  const tenantId = await requireExpertAdminTenant(ctx);
-
-  // `loadExpert` (via `loadExpertAdminRow`) já filtra por tenant_id: um
-  // expert de outra casa cai no mesmo "Expert não encontrado." do admin de
-  // experts, sem checagem extra aqui.
-  const expert = await loadExpertAdminRow(tenantId, input.expertId);
-  const { from, to } = periodRange(period, new Date());
-
-  const [metricsRows, dailyRows, links, contatos, assumidos] = await Promise.all([
-    fetchExpertMetrics(tenantId, from, to),
-    fetchExpertMetricsDaily(tenantId, input.expertId, from, to),
-    loadExpertLinks(tenantId, input.expertId),
-    loadExpertContacts(tenantId, input.expertId),
-    loadActiveClaims(tenantId, input.expertId),
-  ]);
-
-  const metricsRow = metricsRows.find((r) => r.expert_id === input.expertId);
-  const metrics = metricsRow ? mapMetricsRow(metricsRow) : zeroMetrics(input.expertId);
-  const serie = dailyRows.map((r) => ({
-    dia: r.dia,
-    depositado: Number(r.depositado),
-    depositadoClique: Number(r.depositado_clique),
-    depositadoAfiliado: Number(r.depositado_afiliado),
-    cliques: Number(r.cliques),
-  }));
-
-  return { expert, metrics, serie, links, contatos, assumidos };
 }
 
 // ---------------------------------------------------------- admin: credit statement (Task 8)

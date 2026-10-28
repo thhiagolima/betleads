@@ -22,6 +22,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatBrtDateTime } from "@/components/expert/sheet-format";
+import { useActiveTenant } from "@/hooks/use-active-tenant";
 import {
   exportExpertCreditsCsv,
   listExpertCredits,
@@ -32,8 +33,16 @@ import { brl } from "@/lib/format";
 
 const CREDITS_PAGE_SIZE = 100;
 
-function creditStatementQueryKey(expertId: string | undefined, period: PeriodKey, page: number) {
-  return ["rendimento-credit-statement", expertId ?? "self", period, page];
+// A casa ativa entra na chave (controller ruling, Task 5 fix round 1): o
+// mesmo usuário pode ter o extrato de casas diferentes em cache ao trocar
+// de casa no switcher, então a chave sem o tenant colidiria entre elas.
+function creditStatementQueryKey(
+  tenantId: string | null,
+  expertId: string | undefined,
+  period: PeriodKey,
+  page: number,
+) {
+  return ["rendimento-credit-statement", tenantId, expertId ?? "self", period, page];
 }
 
 const VIA_LABEL: Record<ExpertCreditRow["via"], string> = {
@@ -69,11 +78,14 @@ export function CreditStatement({
   period: PeriodKey;
 }) {
   const [page, setPage] = useState(0);
+  const { data: switcher } = useActiveTenant();
+  const tenantId = switcher?.activeTenantId ?? null;
 
   const listFn = useServerFn(listExpertCredits);
   const creditsQuery = useQuery({
-    queryKey: creditStatementQueryKey(expertId, period, page),
+    queryKey: creditStatementQueryKey(tenantId, expertId, period, page),
     queryFn: () => listFn({ data: { expertId, period, page } }),
+    enabled: !!tenantId,
   });
 
   const exportFn = useServerFn(exportExpertCreditsCsv);

@@ -186,8 +186,8 @@ export function expertAcesso(
 /**
  * `ExpertDbRow` + o que cada chamador já calculou (afiliados, contagem de
  * leads, acesso/e-mail) -> `ExpertAdminRow`. Único lugar que faz esse
- * mapeamento, para a tela de lista (`listExpertsFor`) e o detalhe do admin
- * (`getExpertDetailFor`, Fase 3 Task 3) nunca divergirem.
+ * mapeamento, para a tela de lista (`listExpertsFor`) não divergir de
+ * outros chamadores.
  */
 export function buildExpertAdminRow(
   row: ExpertDbRow,
