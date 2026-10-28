@@ -211,6 +211,16 @@ export function PortfolioTable({
   const rows = portfolioQuery.data?.rows ?? [];
   const total = portfolioQuery.data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const loadedTotal = portfolioQuery.data ? total : null;
+
+  // O total pode cair entre uma página e outra (créditos recalculados): fora
+  // do fim, volta para a última página válida (ou a primeira, quando a
+  // página pedida já veio vazia e sem total).
+  useEffect(() => {
+    if (loadedTotal === null) return;
+    const lastPage = Math.max(0, Math.ceil(loadedTotal / PAGE_SIZE) - 1);
+    if (page > lastPage) setPageState({ key: filtersKey, page: lastPage });
+  }, [loadedTotal, page, filtersKey]);
 
   return (
     <Card>
