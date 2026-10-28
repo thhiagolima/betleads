@@ -10,6 +10,10 @@ import { Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import { betleadsUsageNote, formatBRL, formatRatio } from "@/components/finance/format";
+import {
+  financeMonthQueryKey,
+  invalidateFinanceAfterSave,
+} from "@/components/finance/query-keys";
 import { num } from "@/lib/format";
 import { averageFilledAdSpend, presetRange } from "@/lib/finance/calc";
 import type { FinanceDay } from "@/lib/finance/types";
@@ -34,8 +38,6 @@ export function currentMonth() {
   return presetRange("today", new Date()).from.slice(0, 7);
 }
 
-export const financeMonthQueryKey = (tenantId: string, month: string) =>
-  ["finance-month", tenantId, month] as const;
 
 type Edits = Record<string, { adSpend?: string; ggr?: string }>;
 type EditableField = "adSpend" | "ggr";
@@ -133,7 +135,7 @@ export function FinanceMonthView({
     onSuccess: () => {
       toast.success("Alterações salvas");
       setEdits({});
-      qc.invalidateQueries({ queryKey: financeMonthQueryKey(tenantId, month) });
+      void invalidateFinanceAfterSave(qc, tenantId, month);
     },
     onError: (error: Error) => toast.error(error.message),
   });

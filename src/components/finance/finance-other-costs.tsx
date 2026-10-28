@@ -10,7 +10,11 @@ import { Check, ChevronsUpDown, Info, Pencil, Plus, Trash2, X } from "lucide-rea
 import { toast } from "sonner";
 
 import { formatBRL } from "@/components/finance/format";
-import { currentMonth, financeMonthQueryKey } from "@/components/finance/finance-month-grid";
+import { currentMonth } from "@/components/finance/finance-month-grid";
+import {
+  financeMonthQueryKey,
+  invalidateFinanceAfterSave,
+} from "@/components/finance/query-keys";
 import { deleteOtherCost, getTenantFinanceMonth, saveOtherCost } from "@/lib/finance.functions";
 import {
   MAX_CATEGORY_LENGTH,
@@ -217,7 +221,7 @@ export function FinanceOtherCosts({ tenantId }: { tenantId: string }) {
 
   useEffect(() => resetForm(), [tenantId, month]);
 
-  const refresh = () => qc.invalidateQueries({ queryKey: financeMonthQueryKey(tenantId, month) });
+  const refresh = () => invalidateFinanceAfterSave(qc, tenantId, month);
 
   const save = useMutation({
     mutationFn: () =>
