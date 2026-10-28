@@ -1,5 +1,5 @@
 // Per-deposit expert credit — SQL tests for
-// supabase/migrations/20261104100000_expert_credits.sql
+// supabase/migrations/20261105143000_expert_credits.sql
 //
 // Runs the expert migrations of phases 1 and 2 plus the new one inside an
 // in-memory Postgres (PGlite) against a minimal schema (same approach as
@@ -23,7 +23,7 @@ const MIGRATIONS = [
   "20261025100000_add_expert_app_role.sql",
   "20261025100100_expert_model.sql",
   "20261027100000_expert_lead_sheet.sql",
-  "20261104100000_expert_credits.sql",
+  "20261105143000_expert_credits.sql",
 ];
 
 const SCHEMA = `

@@ -24,7 +24,7 @@
 ## Global Constraints
 
 - Todo texto de interface e mensagem de erro em pt-BR.
-- Migrations com timestamp ≥ `20261104100000` (renumeradas depois do merge: `20261103100000` virou `finance_dashboard` no main). A última existente é `20261102100000_allow_multiple_tenant_admins.sql`; a `20261027100000_expert_lead_sheet.sql` (fase 2) **ainda não foi aplicada em produção**; a aplicação em produção segue a ordem.
+- Migrations com timestamp ≥ `20261105143000` (renumeradas depois do merge: `20261103100000` virou `finance_dashboard` no main). A última existente é `20261102100000_allow_multiple_tenant_admins.sql`; a `20261027100000_expert_lead_sheet.sql` (fase 2) **ainda não foi aplicada em produção**; a aplicação em produção segue a ordem.
 - Funções SQL novas: `SECURITY DEFINER`, `SET search_path = public, pg_temp`, só para service_role. Tabelas novas: RLS ligada e escrita revogada de `anon` e `authenticated`.
 - Dias e períodos no fuso `America/Sao_Paulo`, como `refresh_crm_results_day` (`(_day::timestamp at time zone 'America/Sao_Paulo')`).
 - Depósito aprovado = `deposits.status = 'aprovado'`. O momento do depósito é `deposits.created_at` (convenção de todo o SQL do CRM).
@@ -51,7 +51,7 @@
 ### Task 1: Tabela de créditos, regra de atribuição e cron
 
 **Files:**
-- Create: `supabase/migrations/20261104100000_expert_credits.sql`
+- Create: `supabase/migrations/20261105143000_expert_credits.sql`
 - Test: `src/lib/expert-credits.db.test.ts`
 
 **Interfaces:**
@@ -111,7 +111,7 @@
 ### Task 2: Funções de métricas por expert
 
 **Files:**
-- Create: `supabase/migrations/20261104100100_expert_metrics.sql`
+- Create: `supabase/migrations/20261105143100_expert_metrics.sql`
 - Test: `src/lib/expert-metrics.db.test.ts`
 
 **Interfaces:**
@@ -400,7 +400,7 @@
 ### Task 9: Verificação e produção
 
 - [ ] **Step 1:** `npm run typecheck && npm run lint && npm test && npm run build`. Tudo passa; registrar a saída.
-- [ ] **Step 2:** Com autorização explícita da usuária, aplicar em produção, nesta ordem: `20261027100000_expert_lead_sheet.sql` (fase 2, pendente), `20261104100000_expert_credits.sql` e `20261104100100_expert_metrics.sql`. Registrar cada uma em `schema_migrations`. Depois:
+- [ ] **Step 2:** Com autorização explícita da usuária, aplicar em produção, nesta ordem: `20261027100000_expert_lead_sheet.sql` (fase 2, pendente), `20261105143000_expert_credits.sql` e `20261105143100_expert_metrics.sql`. Registrar cada uma em `schema_migrations`. Depois:
   - rodar `select public.refresh_expert_credits_recent(8)` uma vez;
   - verificar, só leitura, os jobs no `cron.job`, a contagem de créditos por casa e uma amostra de `expert_metrics` na casa que tiver experts.
 - [ ] **Step 3:** Merge em `main` e push, com autorização da usuária.

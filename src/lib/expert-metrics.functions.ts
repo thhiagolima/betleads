@@ -750,7 +750,7 @@ const RECENT_REFRESH_DAYS = 8;
 
 /**
  * Faixa dos últimos `RECENT_REFRESH_DAYS` dias (São Paulo), o mesmo cálculo
- * de `refresh_expert_credits_recent(8)` (migration 20261104100000) — mas
+ * de `refresh_expert_credits_recent(8)` (migration 20261105143000) — mas
  * disparada aqui para uma casa só, via `refresh_expert_credits`.
  */
 function recentRefreshRange(now: Date): { from: string; to: string } {
