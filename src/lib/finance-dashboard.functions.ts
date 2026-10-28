@@ -31,6 +31,8 @@ import {
   requirePermission,
   todaySaoPaulo,
   toFinanceDay,
+  type BetleadsUsageRow,
+  type GoalDayRow,
   type OtherCostRow,
 } from "@/lib/finance/finance-data.server";
 import type {
@@ -184,16 +186,58 @@ async function resolveScope(
   return { label: ALL_LABEL, tenants: await activeRealTenants() };
 }
 
+const OTHER_COSTS_PAGE = 1000;
+
+/**
+ * Other costs of the given houses and months, oldest entry first. Paged, since
+ * PostgREST returns at most 1000 rows per request without an error.
+ */
 async function fetchOtherCosts(tenantIds: string[], months: string[]) {
   if (!tenantIds.length || !months.length) return [];
-  const { data, error } = await db()
-    .from<OtherCostRow[]>("tenant_finance_other_costs")
-    .select("id,tenant_id,month,descricao,valor,categoria")
-    .in("tenant_id", tenantIds)
-    .in("month", months)
-    .order("created_at", { ascending: true });
-  if (error) throw new Error(error.message);
-  return data ?? [];
+  const rows: OtherCostRow[] = [];
+  for (let offset = 0; ; offset += OTHER_COSTS_PAGE) {
+    const { data, error } = await db()
+      .from<OtherCostRow[]>("tenant_finance_other_costs")
+      .select("id,tenant_id,month,descricao,valor,categoria")
+      .in("tenant_id", tenantIds)
+      .in("month", months)
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(offset, offset + OTHER_COSTS_PAGE - 1);
+    if (error) throw new Error(error.message);
+    const page = data ?? [];
+    rows.push(...page);
+    if (page.length < OTHER_COSTS_PAGE) return rows;
+  }
+}
+
+/** "YYYY-MM-01" of every month the window touches, oldest first. */
+function monthsOfWindow(window: DateRange): string[] {
+  const months: string[] = [];
+  const last = monthStartOf(window.to);
+  for (let month = monthStartOf(window.from); month <= last; month = addMonths(month, 1)) {
+    months.push(month);
+  }
+  return months;
+}
+
+const ALL_TENANTS = "*";
+const bucketKey = (tenantId: string, month: string) => `${tenantId}|${month}`;
+
+/** Pushes `item` under its house and month, and under every house (ALL_TENANTS) of that month. */
+function addToBuckets<T>(buckets: Map<string, T[]>, tenantId: string, month: string, item: T) {
+  for (const key of [bucketKey(tenantId, month), bucketKey(ALL_TENANTS, month)]) {
+    const list = buckets.get(key);
+    if (list) list.push(item);
+    else buckets.set(key, [item]);
+  }
+}
+
+/** Adds `amount` under its house and month, and under every house (ALL_TENANTS) of that month. */
+function addToSums(sums: Map<string, number>, tenantId: string, month: string, amount: number) {
+  for (const key of [bucketKey(tenantId, month), bucketKey(ALL_TENANTS, month)]) {
+    sums.set(key, (sums.get(key) ?? 0) + amount);
+  }
 }
 
 /**
@@ -250,45 +294,60 @@ export async function getFinanceDashboardFor(
     tenantIds.length ? fetchBetleadsSince(tenantIds) : Promise.resolve([]),
   ]);
 
+  // Days, usage, other costs and fees are indexed once by house and month
+  // (and by month for every house), so each window reads only its months.
   const allDays: FinanceDay[] = [];
-  const daysByTenant = new Map<string, FinanceDay[]>();
+  const dayBuckets = new Map<string, FinanceDay[]>();
   for (const row of dayRows) {
     const day = toFinanceDay(row);
     allDays.push(day);
-    const list = daysByTenant.get(row.tenant_id) ?? [];
-    list.push(day);
-    daysByTenant.set(row.tenant_id, list);
+    addToBuckets(dayBuckets, row.tenant_id, monthStartOf(day.date), day);
+  }
+  const usageBuckets = new Map<string, BetleadsUsageRow[]>();
+  for (const row of usageRows) {
+    addToBuckets(usageBuckets, row.tenant_id, monthStartOf(row.metric_date), row);
+  }
+  const costSums = new Map<string, number>();
+  for (const row of costRows) addToSums(costSums, row.tenant_id, row.month, num(row.valor));
+  const feeSums = new Map<string, number>();
+  for (const row of feeRows) addToSums(feeSums, row.tenant_id, row.month, num(row.amount));
+  const goalRowsByTenant = new Map<string, GoalDayRow[]>();
+  for (const row of goalRows) {
+    const list = goalRowsByTenant.get(row.tenant_id);
+    if (list) list.push(row);
+    else goalRowsByTenant.set(row.tenant_id, [row]);
   }
 
-  /** Every house of the scope when `tenantId` is omitted. */
+  /** The window's entries of one house, or of every house when `tenantId` is omitted. */
+  const inWindow = <T>(
+    buckets: Map<string, T[]>,
+    window: DateRange | null,
+    dateOf: (item: T) => string,
+    tenantId?: string,
+  ): T[] =>
+    window
+      ? monthsOfWindow(window).flatMap((month) =>
+          (buckets.get(bucketKey(tenantId ?? ALL_TENANTS, month)) ?? []).filter((item) =>
+            inRange(dateOf(item), window),
+          ),
+        )
+      : [];
   const windowDays = (window: DateRange | null, tenantId?: string): FinanceDay[] =>
-    (tenantId ? (daysByTenant.get(tenantId) ?? []) : allDays)
-      .filter((day) => inRange(day.date, window))
-      .sort((a, b) => a.date.localeCompare(b.date));
+    inWindow(dayBuckets, window, (day) => day.date, tenantId).sort((a, b) =>
+      a.date.localeCompare(b.date),
+    );
+  const monthSum = (sums: Map<string, number>, month: string | null, tenantId?: string) =>
+    month === null ? null : round2(sums.get(bucketKey(tenantId ?? ALL_TENANTS, month)) ?? 0);
   const otherCostsFor = (month: string | null, tenantId?: string) =>
-    month === null
-      ? null
-      : round2(
-          costRows
-            .filter((row) => row.month === month && (!tenantId || row.tenant_id === tenantId))
-            .reduce((total, row) => total + num(row.valor), 0),
-        );
+    monthSum(costSums, month, tenantId);
   const usageFor = (window: DateRange | null, tenantId?: string) =>
     round2(
-      usageRows
-        .filter(
-          (row) => inRange(row.metric_date, window) && (!tenantId || row.tenant_id === tenantId),
-        )
-        .reduce((total, row) => total + num(row.amount), 0),
+      inWindow(usageBuckets, window, (row) => row.metric_date, tenantId).reduce(
+        (total, row) => total + num(row.amount),
+        0,
+      ),
     );
-  const feeFor = (month: string | null, tenantId?: string) =>
-    month === null
-      ? null
-      : round2(
-          feeRows
-            .filter((row) => row.month === month && (!tenantId || row.tenant_id === tenantId))
-            .reduce((total, row) => total + num(row.amount), 0),
-        );
+  const feeFor = (month: string | null, tenantId?: string) => monthSum(feeSums, month, tenantId);
   const summarizeWindow = (window: DateRange | null, costMonth: string | null, tenantId?: string) =>
     summarize(windowDays(window, tenantId), otherCostsFor(costMonth, tenantId), today, {
       usage: usageFor(window, tenantId),
@@ -304,7 +363,7 @@ export async function getFinanceDashboardFor(
       previous: summarizeWindow(previous, costMonths.previous, tenant.id),
       goals: current
         ? evaluateGoals(
-            goalRows.filter((row) => row.tenant_id === tenant.id),
+            goalRowsByTenant.get(tenant.id) ?? [],
             currentSummary,
             current,
             today,
@@ -366,6 +425,11 @@ export async function getFinanceDashboardFor(
   };
   const currentCategories = costMonths.current ? categoriesFor(costMonths.current) : {};
   const previousCategories = costMonths.previous ? categoriesFor(costMonths.previous) : null;
+  // A category that dropped to zero this month still shows, with its
+  // variation: the current month lists the union of both months' categories.
+  if (costMonths.current && previousCategories) {
+    for (const label of Object.keys(previousCategories)) currentCategories[label] ??= 0;
+  }
 
   // Tenant scope labels the GGR fee with the house's rate on range.to (or
   // the last day shown, when range.to is after today).

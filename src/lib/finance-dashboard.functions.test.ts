@@ -16,6 +16,7 @@ vi.mock("@/integrations/supabase/client.server", async () => {
 
 import { getFinanceDashboardFor, listDashboardScopesFor } from "./finance-dashboard.functions";
 import { getTenantFinanceMonthFor } from "./finance.functions";
+import { planRpcChunks } from "./finance/finance-data.server";
 import { createFakeDb } from "./sms-bulk.test-support";
 
 const SUPER = "00000000-0000-4000-8000-0000000000aa";
@@ -35,6 +36,7 @@ type Ctx = Parameters<typeof getFinanceDashboardFor>[0];
 const ctxFor = (userId: string) => ({ userId }) as Ctx;
 
 type Row = Record<string, unknown>;
+const PGRST_MAX_ROWS = 1000;
 let financeDayRows: Row[];
 let goalDayRows: Row[];
 let usageRows: Row[];
@@ -173,6 +175,9 @@ beforeEach(() => {
       }),
     },
   };
+  // PostgREST returns at most 1000 rows per RPC call and drops the rest
+  // without an error; the fake does the same.
+  const capped = (rows: Row[]) => rows.slice(0, PGRST_MAX_ROWS);
   const ofTenants = (row: Row, args: Row) =>
     (args._tenants as string[]).includes(String(row.tenant_id));
   const inWindow = (row: Row, args: Row) =>
@@ -181,27 +186,29 @@ beforeEach(() => {
     String(row.metric_date) <= String(args._to);
   fake.admin.onRpc("finance_days", (args) => {
     financeDaysCalls.push(args);
-    return { data: financeDayRows.filter((row) => inWindow(row, args)), error: null };
+    return { data: capped(financeDayRows.filter((row) => inWindow(row, args))), error: null };
   });
   fake.admin.onRpc("finance_goal_days", (args) => ({
-    data: goalDayRows.filter((row) => inWindow(row, args)),
+    data: capped(goalDayRows.filter((row) => inWindow(row, args))),
     error: null,
   }));
   fake.admin.onRpc("finance_betleads_usage", (args) => ({
-    data: usageRows.filter((row) => inWindow(row, args)),
+    data: capped(usageRows.filter((row) => inWindow(row, args))),
     error: null,
   }));
   fake.admin.onRpc("finance_betleads_fees", (args) => ({
-    data: feeRows.filter(
-      (row) =>
-        ofTenants(row, args) &&
-        String(row.month) >= String(args._from_month) &&
-        String(row.month) <= String(args._to_month),
+    data: capped(
+      feeRows.filter(
+        (row) =>
+          ofTenants(row, args) &&
+          String(row.month) >= String(args._from_month) &&
+          String(row.month) <= String(args._to_month),
+      ),
     ),
     error: null,
   }));
   fake.admin.onRpc("finance_betleads_since", (args) => ({
-    data: sinceRows.filter((row) => ofTenants(row, args)),
+    data: capped(sinceRows.filter((row) => ofTenants(row, args))),
     error: null,
   }));
 
@@ -550,6 +557,9 @@ describe("group and all scopes", () => {
     expect(a.current.cashResult).toBe(190);
     expect(b.current.cashResult).toBe(-20);
     expect(b.pendingDates).toEqual(["2026-10-22"]);
+    // Row-level ROI: each house's own result over its own complete Anúncios.
+    expect(a.current.roi).toBe(190 / 100);
+    expect(b.current.roi).toBe(-20 / 300);
     expect(dashboard.totals.current.cashResult).toBe(170);
     expect(dashboard.totals.current.betleadsUsage).toBe(30);
     // Σresult / Σads = 170 / 400, not the mean of the houses.
@@ -622,6 +632,25 @@ describe("group and all scopes", () => {
     ]);
   });
 
+  it("a category that drops to zero this month still shows with its variation", async () => {
+    fake.admin
+      .rows("tenant_finance_other_costs")
+      .push(
+        otherCost("c1", HOUSE_A, "2026-10-01", "João", 100, "Equipe"),
+        otherCost("c2", HOUSE_B, "2026-09-01", "Agência", 70, "Marketing"),
+      );
+
+    const dashboard = await getFinanceDashboardFor(ctxFor(G1_MANAGER), {
+      scope: { kind: "group", groupId: G1 },
+      ...monthToDate,
+    });
+
+    expect(dashboard.costs.filter((line) => !line.auto)).toEqual([
+      { key: "category:Equipe", label: "Equipe", amount: 100, previous: null, auto: false },
+      { key: "category:Marketing", label: "Marketing", amount: 0, previous: 70, auto: false },
+    ]);
+  });
+
   it("all scope excludes demo and inactive houses", async () => {
     financeDayRows.push(
       complete(HOUSE_A, "2026-10-23", 300, 100),
@@ -638,7 +667,11 @@ describe("group and all scopes", () => {
     expect(dashboard.label).toBe("Todas as casas");
     expect(dashboard.tenants.map((row) => row.id)).toEqual([HOUSE_A, HOUSE_B, HOUSE_C]);
     expect(dashboard.totals.current.cashResult).toBe(600);
-    expect(financeDaysCalls[0]._tenants).toEqual([HOUSE_A, HOUSE_B, HOUSE_C]);
+    expect(financeDaysCalls.flatMap((call) => call._tenants as string[]).sort()).toEqual([
+      HOUSE_A,
+      HOUSE_B,
+      HOUSE_C,
+    ]);
   });
 
   it("empty group and all-with-no-houses return zeros and empty arrays", async () => {
@@ -905,5 +938,186 @@ describe("listDashboardScopes", () => {
     });
 
     await expect(listDashboardScopesFor(ctxFor(G1_MANAGER))).rejects.toThrow("Sem permissão");
+  });
+});
+
+/** Every "YYYY-MM-DD" from `from` to `to`, inclusive. */
+function eachDay(from: string, to: string): string[] {
+  const days: string[] = [];
+  const last = Date.parse(`${to}T00:00:00Z`);
+  for (let t = Date.parse(`${from}T00:00:00Z`); t <= last; t += 86_400_000) {
+    days.push(new Date(t).toISOString().slice(0, 10));
+  }
+  return days;
+}
+
+describe("PostgREST 1000-row cap", () => {
+  const EXTRA_D = "00000000-0000-4000-8000-000000000105";
+  const EXTRA_E = "00000000-0000-4000-8000-000000000106";
+  const G_BIG = "00000000-0000-4000-8000-00000000e001";
+  const HOUSES = [HOUSE_A, HOUSE_B, HOUSE_C, EXTRA_D, EXTRA_E];
+  const ALL_METRICS = [
+    "registrations",
+    "ftds",
+    "deposits",
+    "net",
+    "cash_result",
+    "cost_per_registration",
+    "cost_per_ftd",
+    "roi",
+  ];
+
+  it("5 houses over ~13 months + comparison: totals, rows, months and goals are complete", async () => {
+    fake.admin.rows("tenants").push(
+      { id: EXTRA_D, nome: "Casa D", status: "active", is_demo: false },
+      { id: EXTRA_E, nome: "Casa E", status: "active", is_demo: false },
+    );
+    fake.admin.rows("tenant_groups").push({ id: G_BIG, nome: "Grupo Grande", is_demo: false });
+    fake.admin
+      .rows("tenant_group_tenants")
+      .push(...HOUSES.map((tenantId) => ({ group_id: G_BIG, tenant_id: tenantId })));
+
+    // Current: the last 30 days; previous: the 30 days before; the series
+    // reaches back to 2025-11-01, so ~360 finance_days rows per house are
+    // read (and the fixture has ~395 per house).
+    const range = { from: "2026-09-25", to: "2026-10-24" };
+    const span = eachDay("2025-09-25", "2026-10-24");
+    for (const tenantId of HOUSES) {
+      for (const date of span) {
+        financeDayRows.push(complete(tenantId, date, 10, 1));
+        usageRows.push({ tenant_id: tenantId, metric_date: date, amount: 1 });
+      }
+      for (const date of eachDay(range.from, range.to)) {
+        for (const metric of ALL_METRICS) {
+          goalDayRows.push({
+            tenant_id: tenantId,
+            metric_date: date,
+            metric,
+            direction: "gte",
+            daily_value: 1,
+          });
+        }
+      }
+    }
+    expect(financeDayRows.length).toBeGreaterThanOrEqual(5 * 395);
+
+    const dashboard = await getFinanceDashboardFor(ctxFor(SUPER), {
+      scope: { kind: "group", groupId: G_BIG },
+      range,
+      compare: "previous",
+      preset: "custom",
+    });
+
+    // Each day: 10 deposited - 1 of ads - 1 of Betleads usage = 8.
+    expect(dashboard.tenants).toHaveLength(5);
+    expect(dashboard.totals.current.days).toBe(5 * 30);
+    expect(dashboard.totals.current.cashResult).toBe(5 * 30 * 8);
+    expect(dashboard.totals.current.betleadsUsage).toBe(5 * 30);
+    expect(dashboard.totals.previous.cashResult).toBe(5 * 30 * 8);
+    for (const row of dashboard.tenants) {
+      expect(row.current.cashResult).toBe(30 * 8);
+      expect(row.previous.cashResult).toBe(30 * 8);
+      expect(row.goals).toHaveLength(ALL_METRICS.length);
+      expect(row.goals.find((goal) => goal.metric === "deposits")?.target).toBe(30);
+    }
+    // November 2025 (30 days) is the oldest point; every month has every house.
+    expect(dashboard.months[0]).toMatchObject({ month: "2025-11", cashResult: 5 * 30 * 8 });
+    expect(dashboard.months[0].byTenant).toEqual(
+      Object.fromEntries(HOUSES.map((tenantId) => [tenantId, 30 * 8])),
+    );
+    // Every call stays under the cap.
+    for (const call of financeDaysCalls) {
+      const days = eachDay(String(call._from), String(call._to)).length;
+      expect((call._tenants as string[]).length * days).toBeLessThanOrEqual(900);
+    }
+  });
+
+  it("one house with a year of goals (8 metrics a day) is split by date", async () => {
+    const range = { from: "2025-10-25", to: "2026-10-24" };
+    for (const date of eachDay(range.from, range.to)) {
+      financeDayRows.push(complete(HOUSE_A, date, 10, 1));
+      for (const metric of ALL_METRICS) {
+        goalDayRows.push({
+          tenant_id: HOUSE_A,
+          metric_date: date,
+          metric,
+          direction: "gte",
+          daily_value: 1,
+        });
+      }
+    }
+    expect(goalDayRows.length).toBeGreaterThan(PGRST_MAX_ROWS);
+
+    const dashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      range,
+      compare: "previous",
+      preset: "custom",
+    });
+
+    expect(dashboard.totals.current.days).toBe(365);
+    expect(dashboard.totals.current.cashResult).toBe(365 * 9);
+    const [row] = dashboard.tenants;
+    expect(row.goals).toHaveLength(ALL_METRICS.length);
+    // Every goal day was read: the targets sum the whole year.
+    expect(row.goals.find((goal) => goal.metric === "deposits")?.target).toBe(365);
+    expect(row.goals.find((goal) => goal.metric === "registrations")?.target).toBe(365);
+  });
+});
+
+describe("planRpcChunks", () => {
+  it("one call for a single house month; houses batched under 900 rows; long ranges split by date", () => {
+    expect(planRpcChunks(["a"], { from: "2026-10-01", to: "2026-10-31" }, 8)).toEqual([
+      { tenantIds: ["a"], range: { from: "2026-10-01", to: "2026-10-31" } },
+    ]);
+    const houses = ["a", "b", "c", "d", "e"];
+    const year = planRpcChunks(houses, { from: "2025-10-25", to: "2026-10-24" }, 1);
+    expect(year.map((part) => part.tenantIds)).toEqual([["a", "b"], ["c", "d"], ["e"]]);
+    const goals = planRpcChunks(["a"], { from: "2025-10-25", to: "2026-10-24" }, 8);
+    // floor(900 / 8) = 112 days per call.
+    expect(goals.map((part) => part.range)).toEqual([
+      { from: "2025-10-25", to: "2026-02-13" },
+      { from: "2026-02-14", to: "2026-06-05" },
+      { from: "2026-06-06", to: "2026-09-25" },
+      { from: "2026-09-26", to: "2026-10-24" },
+    ]);
+    expect(planRpcChunks([], { from: "2026-10-01", to: "2026-10-31" }, 1)).toEqual([]);
+  });
+});
+
+describe("other costs paging", () => {
+  it("reads every other cost of the month past one page", async () => {
+    for (let index = 0; index < 2100; index++) {
+      fake.admin
+        .rows("tenant_finance_other_costs")
+        .push(otherCost(`p${index}`, HOUSE_A, "2026-10-01", "Item", 1, "Equipe"));
+    }
+    const dashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      ...monthToDate,
+    });
+    expect(dashboard.totals.current.otherCosts).toBe(2100);
+  });
+});
+
+describe("fetch span", () => {
+  it("a comparison window before the 12-month series is still fetched", async () => {
+    // A ~10-month range: its previous window reaches back to early 2025,
+    // well before the series' first month (2025-11).
+    const range = { from: "2026-01-01", to: "2026-10-24" };
+    financeDayRows.push(complete(HOUSE_A, "2025-04-10", 500, 100));
+
+    const dashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      range,
+      compare: "previous",
+      preset: "custom",
+    });
+
+    expect(dashboard.months[0].month).toBe("2025-11");
+    expect(dashboard.compareRange.from <= "2025-04-10").toBe(true);
+    const fetchedFrom = financeDaysCalls.map((call) => String(call._from)).sort()[0];
+    expect(fetchedFrom).toBe(dashboard.compareRange.from);
+    expect(dashboard.totals.previous.cashResult).toBe(400);
   });
 });

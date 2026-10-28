@@ -34,6 +34,7 @@ type QueryBuilder<T = unknown> = PromiseLike<DbResult<T>> & {
   in: (column: string, values: unknown[]) => QueryBuilder<T>;
   not: (column: string, operator: string, value: unknown) => QueryBuilder<T>;
   order: (column: string, options?: unknown) => QueryBuilder<T>;
+  range: (from: number, to: number) => QueryBuilder<T>;
   maybeSingle: () => Promise<DbResult<T>>;
   single: () => Promise<DbResult<T>>;
   insert: (values: unknown) => QueryBuilder<T>;
@@ -156,43 +157,109 @@ async function rpcRows<T>(fn: string, args: Record<string, unknown>) {
   return data ?? [];
 }
 
-export function fetchFinanceDays(tenantIds: string[], range: DateRange) {
-  return rpcRows<FinanceDayRow>("finance_days", {
-    _tenants: tenantIds,
-    _from: range.from,
-    _to: range.to,
-  });
+/**
+ * PostgREST caps an RPC response at 1000 rows and drops the rest without an
+ * error, so every call is planned to return at most this many rows.
+ */
+export const RPC_ROW_BUDGET = 900;
+
+const addDays = (date: string, delta: number) =>
+  new Date(Date.parse(`${date}T00:00:00Z`) + delta * 86_400_000).toISOString().slice(0, 10);
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
 }
 
+/**
+ * Splits houses × days into calls of at most RPC_ROW_BUDGET rows, given the
+ * most rows the function returns per house and day: first the date range
+ * (only when one house alone overflows), then the houses.
+ */
+export function planRpcChunks(
+  tenantIds: string[],
+  range: DateRange,
+  rowsPerHouseDay: number,
+): Array<{ tenantIds: string[]; range: DateRange }> {
+  if (!tenantIds.length) return [];
+  const windowDays = Math.max(
+    1,
+    Math.min(daysInclusive(range), Math.floor(RPC_ROW_BUDGET / rowsPerHouseDay)),
+  );
+  const windows: DateRange[] = [];
+  for (let from = range.from; from <= range.to; from = addDays(from, windowDays)) {
+    const to = addDays(from, windowDays - 1);
+    windows.push({ from, to: to > range.to ? range.to : to });
+  }
+  const housesPerCall = Math.max(1, Math.floor(RPC_ROW_BUDGET / (windowDays * rowsPerHouseDay)));
+  const houseChunks = chunk(tenantIds, housesPerCall);
+  return windows.flatMap((window) => houseChunks.map((ids) => ({ tenantIds: ids, range: window })));
+}
+
+/** One (tenants, from, to) RPC split per planRpcChunks; calls run in parallel. */
+async function rpcRowsByDay<T>(
+  fn: string,
+  tenantIds: string[],
+  range: DateRange,
+  rowsPerHouseDay: number,
+): Promise<T[]> {
+  const parts = await Promise.all(
+    planRpcChunks(tenantIds, range, rowsPerHouseDay).map((part) =>
+      rpcRows<T>(fn, { _tenants: part.tenantIds, _from: part.range.from, _to: part.range.to }),
+    ),
+  );
+  return parts.flat();
+}
+
+/** One row per house and day. */
+export function fetchFinanceDays(tenantIds: string[], range: DateRange) {
+  return rpcRowsByDay<FinanceDayRow>("finance_days", tenantIds, range, 1);
+}
+
+/** Up to one row per house, day and goal metric. */
 export function fetchGoalDays(tenantIds: string[], range: DateRange) {
-  return rpcRows<GoalDayRow>("finance_goal_days", {
-    _tenants: tenantIds,
-    _from: range.from,
-    _to: range.to,
-  });
+  return rpcRowsByDay<GoalDayRow>("finance_goal_days", tenantIds, range, GOAL_METRICS.length);
 }
 
 /** Wallet usage (SMS, voz, e-mail) per house and São Paulo day; a day may be negative. */
 export function fetchBetleadsUsage(tenantIds: string[], range: DateRange) {
-  return rpcRows<BetleadsUsageRow>("finance_betleads_usage", {
-    _tenants: tenantIds,
-    _from: range.from,
-    _to: range.to,
-  });
+  return rpcRowsByDay<BetleadsUsageRow>("finance_betleads_usage", tenantIds, range, 1);
 }
 
+const monthsInclusive = (fromMonth: string, toMonth: string) =>
+  (Number(toMonth.slice(0, 4)) - Number(fromMonth.slice(0, 4))) * 12 +
+  (Number(toMonth.slice(5, 7)) - Number(fromMonth.slice(5, 7))) +
+  1;
+
 /** Plan fee per house and month ("YYYY-MM-01"), both month bounds inclusive. */
-export function fetchBetleadsFees(tenantIds: string[], fromMonth: string, toMonth: string) {
-  return rpcRows<BetleadsFeeRow>("finance_betleads_fees", {
-    _tenants: tenantIds,
-    _from_month: fromMonth,
-    _to_month: toMonth,
-  });
+export async function fetchBetleadsFees(tenantIds: string[], fromMonth: string, toMonth: string) {
+  const housesPerCall = Math.max(
+    1,
+    Math.floor(RPC_ROW_BUDGET / Math.max(1, monthsInclusive(fromMonth, toMonth))),
+  );
+  const parts = await Promise.all(
+    chunk(tenantIds, housesPerCall).map((ids) =>
+      rpcRows<BetleadsFeeRow>("finance_betleads_fees", {
+        _tenants: ids,
+        _from_month: fromMonth,
+        _to_month: toMonth,
+      }),
+    ),
+  );
+  return parts.flat();
 }
 
 /** First date with Betleads data per house; a house with none has no row. */
-export function fetchBetleadsSince(tenantIds: string[]) {
-  return rpcRows<BetleadsSinceRow>("finance_betleads_since", { _tenants: tenantIds });
+export async function fetchBetleadsSince(tenantIds: string[]) {
+  const parts = await Promise.all(
+    chunk(tenantIds, RPC_ROW_BUDGET).map((ids) =>
+      rpcRows<BetleadsSinceRow>("finance_betleads_since", { _tenants: ids }),
+    ),
+  );
+  return parts.flat();
 }
 
 // ─── Goals ──────────────────────────────────────────────────────────────────
