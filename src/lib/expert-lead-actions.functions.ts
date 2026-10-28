@@ -19,6 +19,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { ExpertAccessError, requireExpertContext } from "@/lib/expert-access.server";
 import { isExpertAffiliate, loadVisibleLead } from "@/lib/expert-lead-access.server";
 import { CONTATO_RESULTADOS, type ContatoResultado } from "@/lib/expert-lead-labels";
+import { daysWithoutDeposit, situationSettingsFromRow } from "@/lib/player-situation";
 import { brtDayKey } from "@/lib/tz";
 import { dbUuid } from "@/lib/zod-helpers";
 
@@ -338,4 +339,284 @@ export async function releaseExpertLeadFor(
   if (error) throw new Error(error.message);
 
   return { ok: true };
+}
+
+// ------------------------------------------------------------- entered risk (Fase 3, Task 4)
+//
+// "Para chamar hoje" #1: leads que viraram "Dormindo" (player-situation.ts)
+// nos últimos 7 dias, i.e. cujo último depósito (ultimo_deposito, ou ftd_em
+// quando nunca houve um depósito seguinte) caiu entre
+// now-(sleeping_after_days+7) e now-sleeping_after_days dias atrás. Consulta
+// limitada por faixa de data dos dois lados + .limit em cada metade, nunca
+// uma varredura da casa inteira.
+
+export type ExpertLeadEnteredRisk = {
+  playerId: string;
+  nome: string;
+  diasSemDepositar: number;
+  totalDepositado: number;
+};
+
+type RiskPlayerRow = {
+  id: string;
+  nome: string;
+  affiliate_id: string | null;
+  total_depositado: number | string | null;
+  ultimo_deposito: string | null;
+  ftd_em: string | null;
+};
+
+const RISK_COLUMNS = "id,nome,affiliate_id,total_depositado,ultimo_deposito,ftd_em";
+const ENTERED_RISK_LIMIT = 20;
+const DAY_MS = 86_400_000;
+
+export const listExpertLeadsEnteredRisk = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) =>
+    listExpertLeadsEnteredRiskFor(context as unknown as ServerContext),
+  );
+
+export async function listExpertLeadsEnteredRiskFor(
+  ctx: ServerContext,
+): Promise<ExpertLeadEnteredRisk[]> {
+  const expert = await requireExpertContext(ctx.userId, ctx.activeTenantId);
+  // Restrito sem nenhum affiliate_id vinculado nunca teria lead visível;
+  // evita uma consulta `.in("affiliate_id", [])` sem sentido.
+  if (expert.tipo === "restrito" && expert.affiliateIds.length === 0) return [];
+
+  const { data: settingsRow, error: settingsError } = await db()
+    .from("gamification_settings")
+    .select("cooling_after_days,sleeping_after_days")
+    .eq("tenant_id", expert.tenantId)
+    .maybeSingle();
+  if (settingsError) throw new Error(settingsError.message);
+  const settings = situationSettingsFromRow(settingsRow);
+
+  const now = Date.now();
+  const lowerIso = new Date(now - (settings.sleepingAfterDays + 7) * DAY_MS).toISOString();
+  const upperIso = new Date(now - settings.sleepingAfterDays * DAY_MS).toISOString();
+
+  const scoped = () => {
+    const query = db().from("players").select(RISK_COLUMNS).eq("tenant_id", expert.tenantId);
+    return expert.tipo === "restrito" ? query.in("affiliate_id", expert.affiliateIds) : query;
+  };
+
+  const [withLastDeposit, withOnlyFtd] = await Promise.all([
+    scoped()
+      .not("ultimo_deposito", "is", null)
+      .gte("ultimo_deposito", lowerIso)
+      .lte("ultimo_deposito", upperIso)
+      .order("total_depositado", { ascending: false })
+      .limit(ENTERED_RISK_LIMIT),
+    scoped()
+      .is("ultimo_deposito", null)
+      .gte("ftd_em", lowerIso)
+      .lte("ftd_em", upperIso)
+      .order("total_depositado", { ascending: false })
+      .limit(ENTERED_RISK_LIMIT),
+  ]);
+  if (withLastDeposit.error) throw new Error(withLastDeposit.error.message);
+  if (withOnlyFtd.error) throw new Error(withOnlyFtd.error.message);
+
+  const rows = [
+    ...((withLastDeposit.data ?? []) as RiskPlayerRow[]),
+    ...((withOnlyFtd.data ?? []) as RiskPlayerRow[]),
+  ].filter(
+    // Refiltro de trim igual ao de loadVisibleLead: o .in() acima compara
+    // affiliate_id ao pé da letra, sem tirar espaços nas pontas.
+    (row) => expert.tipo !== "restrito" || isExpertAffiliate(expert, row.affiliate_id),
+  );
+
+  return rows
+    .sort((a, b) => Number(b.total_depositado ?? 0) - Number(a.total_depositado ?? 0))
+    .slice(0, ENTERED_RISK_LIMIT)
+    .map((row) => ({
+      playerId: row.id,
+      nome: row.nome,
+      diasSemDepositar:
+        daysWithoutDeposit({ ultimo_deposito: row.ultimo_deposito, ftd_em: row.ftd_em }, now) ?? 0,
+      totalDepositado: Number(row.total_depositado ?? 0),
+    }));
+}
+
+// ------------------------------------------------------------- clicked, no deposit (Fase 3, Task 4)
+//
+// "Para chamar hoje" #2: leads com clique humano num link do próprio expert
+// nas últimas 24h, que não depositaram (aprovado) depois desse clique. Busca
+// primeiro os dispatches do próprio expert enviados nos últimos 30 dias
+// (índice parcial link_dispatches_expert_source_idx), depois os cliques
+// humanos das últimas 24h nesses dispatches — nunca os cliques da casa toda,
+// que numa casa movimentada esconderiam os do expert atrás de um limite.
+
+export type ExpertLeadClickedNoDeposit = {
+  playerId: string;
+  nome: string;
+  clicadoEm: string;
+  oferta: string | null;
+};
+
+type ClickEventRow = { link_dispatch_id: string; occurred_at: string };
+type LinkDispatchRow = { id: string; recipient_player_id: string | null };
+type ApprovedDepositRow = { player_id: string; created_at: string };
+type ExpertLinkOfertaRow = { link_dispatch_id: string | null; oferta: string };
+
+const CLICK_WINDOW_MS = 24 * 60 * 60 * 1000;
+// Um clique das últimas 24h num link enviado há mais tempo que isso fica de
+// fora (raro: o link do expert é gerado na hora de chamar o lead).
+const DISPATCH_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
+const DISPATCH_PAGE_SIZE = 1000;
+// Listas de ids em .in() ficam curtas na URL do PostgREST.
+const IN_CHUNK_SIZE = 100;
+const CLICKED_NO_DEPOSIT_LIMIT = 20;
+
+function chunk<T>(items: readonly T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+/** Roda `query` para cada pedaço de `ids` e junta as linhas. */
+async function selectInChunks<T>(
+  ids: readonly string[],
+  query: (part: string[]) => PromiseLike<{ data: unknown; error: { message: string } | null }>,
+): Promise<T[]> {
+  const results = await Promise.all(chunk(ids, IN_CHUNK_SIZE).map((part) => query(part)));
+  const rows: T[] = [];
+  for (const { data, error } of results) {
+    if (error) throw new Error(error.message);
+    rows.push(...((data ?? []) as T[]));
+  }
+  return rows;
+}
+
+export const listExpertClickedNoDeposit = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) =>
+    listExpertClickedNoDepositFor(context as unknown as ServerContext),
+  );
+
+export async function listExpertClickedNoDepositFor(
+  ctx: ServerContext,
+): Promise<ExpertLeadClickedNoDeposit[]> {
+  const expert = await requireExpertContext(ctx.userId, ctx.activeTenantId);
+  const nowMs = Date.now();
+  const sinceIso = new Date(nowMs - CLICK_WINDOW_MS).toISOString();
+  const sentSinceIso = new Date(nowMs - DISPATCH_LOOKBACK_MS).toISOString();
+
+  // 1. Os links do expert enviados nos últimos 30 dias, paginados.
+  const playerIdByDispatch = new Map<string, string>();
+  for (let offset = 0; ; offset += DISPATCH_PAGE_SIZE) {
+    const { data, error } = await db()
+      .from("link_dispatches")
+      .select("id,recipient_player_id")
+      .eq("tenant_id", expert.tenantId)
+      .eq("source_type", "expert")
+      .eq("source_id", expert.expertId)
+      .eq("send_status", "sent")
+      .gte("sent_at", sentSinceIso)
+      .order("sent_at", { ascending: false })
+      .order("id", { ascending: true })
+      .range(offset, offset + DISPATCH_PAGE_SIZE - 1);
+    if (error) throw new Error(error.message);
+    const page = (data ?? []) as LinkDispatchRow[];
+    for (const d of page) {
+      if (d.recipient_player_id) playerIdByDispatch.set(d.id, d.recipient_player_id);
+    }
+    if (page.length < DISPATCH_PAGE_SIZE) break;
+  }
+  if (playerIdByDispatch.size === 0) return [];
+
+  // 2. Cliques humanos das últimas 24h nesses links.
+  const clicks = (
+    await selectInChunks<ClickEventRow>(Array.from(playerIdByDispatch.keys()), (part) =>
+      db()
+        .from("click_events")
+        .select("link_dispatch_id,occurred_at")
+        .eq("tenant_id", expert.tenantId)
+        .eq("is_human", true)
+        .gte("occurred_at", sinceIso)
+        .in("link_dispatch_id", part),
+    )
+  ).sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : a.occurred_at > b.occurred_at ? -1 : 0));
+  if (clicks.length === 0) return [];
+
+  // Clique mais recente por lead: `clicks` está em ordem decrescente, então
+  // a primeira ocorrência de cada player_id é o clique mais recente.
+  const latestByPlayer = new Map<string, { dispatchId: string; clicadoEm: string }>();
+  for (const click of clicks) {
+    const playerId = playerIdByDispatch.get(click.link_dispatch_id);
+    if (!playerId || latestByPlayer.has(playerId)) continue;
+    latestByPlayer.set(playerId, {
+      dispatchId: click.link_dispatch_id,
+      clicadoEm: click.occurred_at,
+    });
+  }
+  if (latestByPlayer.size === 0) return [];
+
+  const playerIds = Array.from(latestByPlayer.keys());
+  const usedDispatchIds = Array.from(
+    new Set(Array.from(latestByPlayer.values()).map((v) => v.dispatchId)),
+  );
+  // Só importam depósitos a partir do clique mais antigo considerado.
+  const oldestClickIso = clicks[clicks.length - 1].occurred_at;
+
+  const [deposits, players, links] = await Promise.all([
+    selectInChunks<ApprovedDepositRow>(playerIds, (part) =>
+      db()
+        .from("deposits")
+        .select("player_id,created_at")
+        .eq("tenant_id", expert.tenantId)
+        .eq("status", "aprovado")
+        .gte("created_at", oldestClickIso)
+        .in("player_id", part),
+    ),
+    selectInChunks<PlayerRow>(playerIds, (part) =>
+      db()
+        .from("players")
+        .select("id,nome,affiliate_id")
+        .eq("tenant_id", expert.tenantId)
+        .in("id", part),
+    ),
+    selectInChunks<ExpertLinkOfertaRow>(usedDispatchIds, (part) =>
+      db()
+        .from("expert_links")
+        .select("link_dispatch_id,oferta")
+        .eq("tenant_id", expert.tenantId)
+        .eq("expert_id", expert.expertId)
+        .in("link_dispatch_id", part),
+    ),
+  ]);
+
+  const depositedAfterClick = new Set<string>();
+  for (const deposit of deposits) {
+    const click = latestByPlayer.get(deposit.player_id);
+    if (click && deposit.created_at >= click.clicadoEm) depositedAfterClick.add(deposit.player_id);
+  }
+
+  const playersById = new Map(players.map((p) => [p.id, p] as const));
+  const ofertaByDispatch = new Map(
+    links
+      .filter((l): l is ExpertLinkOfertaRow & { link_dispatch_id: string } => !!l.link_dispatch_id)
+      .map((l) => [l.link_dispatch_id, l.oferta] as const),
+  );
+
+  return playerIds
+    .filter((playerId) => !depositedAfterClick.has(playerId))
+    .map((playerId) => ({ playerId, player: playersById.get(playerId) }))
+    .filter(
+      (entry): entry is { playerId: string; player: PlayerRow } =>
+        !!entry.player &&
+        // Reverifica o alcance do restrito: o lead pode ter deixado de ser
+        // dele desde que clicou no link.
+        (expert.tipo !== "restrito" || isExpertAffiliate(expert, entry.player.affiliate_id)),
+    )
+    .map((entry) => ({ ...entry, click: latestByPlayer.get(entry.playerId)! }))
+    .sort((a, b) => (a.click.clicadoEm < b.click.clicadoEm ? 1 : -1))
+    .slice(0, CLICKED_NO_DEPOSIT_LIMIT)
+    .map((entry) => ({
+      playerId: entry.playerId,
+      nome: entry.player.nome,
+      clicadoEm: entry.click.clicadoEm,
+      oferta: ofertaByDispatch.get(entry.click.dispatchId) ?? null,
+    }));
 }

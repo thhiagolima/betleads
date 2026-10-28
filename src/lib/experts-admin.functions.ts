@@ -1,6 +1,10 @@
 // Server functions do admin da casa para configurar experts (Área do Expert,
 // Fase 1, Task 6): listar, salvar, convidar, remover acesso, ativar/
-// desativar e excluir.
+// desativar e excluir. Fase 3, Task 7: o perfil também pode ser vinculado a
+// alguém da equipe (admin, gestor, membro) como "perfil de rendimento". Isso
+// só grava `experts.user_id`: nenhum papel é criado nem mudado, e
+// `expert_tenant_ids()` exige `user_roles.role = 'expert'`, então o vínculo
+// não dá acesso de expert a ninguém.
 //
 // Guard comum: casa operacional do pedido → `requireTenantAdmin`. As escritas
 // também passam por `assertTenantNotDemo` e só então usam `supabaseAdmin`
@@ -16,6 +20,11 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import type { ExpertTipo } from "@/lib/expert-access.server";
+import {
+  HOUSE_MEMBER_ROLES,
+  isHouseMemberRole,
+  type HouseMemberRole,
+} from "@/lib/house-member-roles";
 import {
   assertTenantNotDemo,
   requireTenantAdmin,
@@ -36,7 +45,11 @@ type ServerContext = {
   activeTenantId?: string | null;
 };
 
-export type ExpertAcesso = "sem_acesso" | "convite_pendente" | "ativo" | "inativo";
+/**
+ * `equipe`: perfil de rendimento vinculado a alguém da equipe (tem
+ * `user_id`, mas o papel dessa pessoa na casa não é `expert`).
+ */
+export type ExpertAcesso = "sem_acesso" | "convite_pendente" | "ativo" | "inativo" | "equipe";
 export type ExpertEnvioModo = "livre" | "aprovacao";
 
 export type ExpertAdminRow = {
@@ -50,11 +63,13 @@ export type ExpertAdminRow = {
   affiliateIds: string[];
   leads: number;
   acesso: ExpertAcesso;
+  /** Papel na casa de quem tem o perfil vinculado, quando `acesso = 'equipe'`. */
+  papelEquipe: HouseMemberRole | null;
   email: string | null;
   createdAt: string;
 };
 
-type ExpertDbRow = {
+export type ExpertDbRow = {
   id: string;
   tenant_id: string;
   nome: string;
@@ -64,16 +79,24 @@ type ExpertDbRow = {
   teto_mensal: number | string | null;
   assumir_prazo_dias: number;
   user_id: string | null;
+  ja_vinculado: boolean;
   created_at: string;
 };
 
 const EXPERT_COLUMNS =
-  "id,tenant_id,nome,tipo,ativo,envio_modo,teto_mensal,assumir_prazo_dias,user_id,created_at";
+  "id,tenant_id,nome,tipo,ativo,envio_modo,teto_mensal,assumir_prazo_dias,user_id,ja_vinculado,created_at";
 
 const NOT_ADMIN_MESSAGE = "Apenas o admin da casa gerencia experts.";
 const EXPERT_NOT_FOUND = "Expert não encontrado.";
 const EXPERT_ALREADY_LINKED =
   "Este expert já tem acesso. Remova o acesso antes de convidar outra pessoa.";
+const NOT_TEAM_MEMBER = "Escolha alguém da equipe desta casa.";
+const PROFILE_ALREADY_LINKED = "Este perfil já está vinculado.";
+const USER_ALREADY_HAS_PROFILE = "Esta pessoa já tem um perfil de rendimento.";
+const PROFILE_HAS_OTHER_CREDITS =
+  "Este perfil já tem créditos de outra pessoa. Crie um perfil novo para quem vai entrar.";
+const PROFILE_HAS_CREDITS =
+  "Este perfil tem créditos registrados. Desative em vez de excluir, para manter o histórico.";
 const DEMO_USER_EXPERT_MESSAGE =
   "Este e-mail pertence a um usuário de demonstração e não pode ser expert.";
 
@@ -89,7 +112,7 @@ const ROLE_LABELS: Record<string, string> = {
 const db = () => supabaseAdmin as any;
 
 /** The house this request acts on, refused unless the caller administers it. */
-async function requireExpertAdminTenant(ctx: ServerContext) {
+export async function requireExpertAdminTenant(ctx: ServerContext) {
   const tenantId = await resolveOperationalTenantForRequest(
     ctx.supabase,
     ctx.userId,
@@ -104,7 +127,34 @@ async function requireExpertAdminWriteTenant(ctx: ServerContext) {
   return tenantId;
 }
 
-async function loadExpert(tenantId: string, expertId: string): Promise<ExpertDbRow> {
+async function expertHasCredits(tenantId: string, expertId: string): Promise<boolean> {
+  const { count, error } = await db()
+    .from("expert_deposit_credits")
+    .select("deposit_id", { count: "exact", head: true })
+    .eq("tenant_id", tenantId)
+    .eq("expert_id", expertId);
+  if (error) throw new Error(error.message);
+  return (count ?? 0) > 0;
+}
+
+/**
+ * Os créditos de um perfil são a base da comissão de quem os gerou: um
+ * perfil já vinculado antes (`ja_vinculado`) com créditos não passa para
+ * outra pessoa (convite ou vínculo), senão o histórico dela iria junto. O
+ * primeiro vínculo de um perfil nunca vinculado sempre funciona, mesmo com
+ * créditos: é o fluxo normal (admin cria o perfil com IDs de afiliado, o
+ * cron credita os depósitos, só depois a pessoa é convidada/vinculada).
+ */
+async function assertProfileHasNoCredits(
+  tenantId: string,
+  expertId: string,
+  jaVinculado: boolean,
+) {
+  if (!jaVinculado) return;
+  if (await expertHasCredits(tenantId, expertId)) throw new Error(PROFILE_HAS_OTHER_CREDITS);
+}
+
+export async function loadExpert(tenantId: string, expertId: string): Promise<ExpertDbRow> {
   const { data, error } = await db()
     .from("experts")
     .select(EXPERT_COLUMNS)
@@ -116,18 +166,57 @@ async function loadExpert(tenantId: string, expertId: string): Promise<ExpertDbR
   return data as ExpertDbRow;
 }
 
-/** Ordem da spec: sem usuário → inativo → nunca entrou → ativo. */
+/**
+ * Ordem da spec: sem usuário → equipe (a pessoa é admin, gestor ou membro
+ * desta casa, não expert) → inativo → nunca entrou → ativo. `houseRole` é o
+ * papel do `user_id` nesta casa (`houseRolesOf`), ou null se não houver.
+ */
 export function expertAcesso(
   row: { user_id: string | null; ativo: boolean },
   lastSignInAt: string | null | undefined,
+  houseRole: string | null | undefined,
 ): ExpertAcesso {
   if (!row.user_id) return "sem_acesso";
+  if (isHouseMemberRole(houseRole)) return "equipe";
   if (!row.ativo) return "inativo";
   if (!lastSignInAt) return "convite_pendente";
   return "ativo";
 }
 
-async function countExpertLeads(tenantId: string, tipo: ExpertTipo, affiliateIds: string[]) {
+/**
+ * `ExpertDbRow` + o que cada chamador já calculou (afiliados, contagem de
+ * leads, acesso/e-mail) -> `ExpertAdminRow`. Único lugar que faz esse
+ * mapeamento, para a tela de lista (`listExpertsFor`) e o detalhe do admin
+ * (`getExpertDetailFor`, Fase 3 Task 3) nunca divergirem.
+ */
+export function buildExpertAdminRow(
+  row: ExpertDbRow,
+  extras: {
+    affiliateIds: string[];
+    leads: number;
+    acesso: ExpertAcesso;
+    papelEquipe: HouseMemberRole | null;
+    email: string | null;
+  },
+): ExpertAdminRow {
+  return {
+    id: row.id,
+    nome: row.nome,
+    tipo: row.tipo,
+    ativo: row.ativo,
+    envioModo: row.envio_modo,
+    tetoMensal: row.teto_mensal === null ? null : Number(row.teto_mensal),
+    assumirPrazoDias: row.assumir_prazo_dias,
+    affiliateIds: extras.affiliateIds,
+    leads: extras.leads,
+    acesso: extras.acesso,
+    papelEquipe: extras.papelEquipe,
+    email: extras.email,
+    createdAt: row.created_at,
+  };
+}
+
+export async function countExpertLeads(tenantId: string, tipo: ExpertTipo, affiliateIds: string[]) {
   if (tipo === "restrito" && affiliateIds.length === 0) return 0;
   let query = db()
     .from("players")
@@ -139,7 +228,38 @@ async function countExpertLeads(tenantId: string, tipo: ExpertTipo, affiliateIds
   return Number(count ?? 0);
 }
 
-async function authUserOf(userId: string | null) {
+/** user_id → papel nesta casa (um papel por pessoa por casa). */
+export async function houseRolesOf(
+  tenantId: string,
+  userIds: Array<string | null>,
+): Promise<Map<string, string>> {
+  const ids = Array.from(new Set(userIds.filter((id): id is string => !!id)));
+  if (ids.length === 0) return new Map();
+  const { data, error } = await db()
+    .from("user_roles")
+    .select("user_id,role")
+    .eq("tenant_id", tenantId)
+    .in("user_id", ids);
+  if (error) throw new Error(error.message);
+  return new Map(
+    ((data ?? []) as Array<{ user_id: string; role: string }>).map((r) => [r.user_id, r.role]),
+  );
+}
+
+/** `acesso` + `papelEquipe` de um perfil, dado o papel do `user_id` na casa. */
+export function expertAccessFields(
+  row: { user_id: string | null; ativo: boolean },
+  lastSignInAt: string | null | undefined,
+  houseRole: string | null | undefined,
+): { acesso: ExpertAcesso; papelEquipe: HouseMemberRole | null } {
+  const acesso = expertAcesso(row, lastSignInAt, houseRole);
+  return {
+    acesso,
+    papelEquipe: row.user_id && isHouseMemberRole(houseRole) ? houseRole : null,
+  };
+}
+
+export async function authUserOf(userId: string | null) {
   if (!userId) return null;
   const { data, error } = await supabaseAdmin.auth.admin.getUserById(userId);
   if (error) {
@@ -164,6 +284,11 @@ export async function listExpertsFor(ctx: ServerContext): Promise<ExpertAdminRow
   ]);
   if (error) throw new Error(error.message);
   if (linksErr) throw new Error(linksErr.message);
+  const expertRows = (experts ?? []) as ExpertDbRow[];
+  const roles = await houseRolesOf(
+    tenantId,
+    expertRows.map((row) => row.user_id),
+  );
 
   const idsByExpert = new Map<string, string[]>();
   for (const link of (links ?? []) as Array<{ expert_id: string; affiliate_id: string }>) {
@@ -173,26 +298,22 @@ export async function listExpertsFor(ctx: ServerContext): Promise<ExpertAdminRow
   }
 
   return Promise.all(
-    ((experts ?? []) as ExpertDbRow[]).map(async (row) => {
+    expertRows.map(async (row) => {
       const affiliateIds = (idsByExpert.get(row.id) ?? []).sort();
       const [leads, user] = await Promise.all([
         countExpertLeads(tenantId, row.tipo, affiliateIds),
         authUserOf(row.user_id),
       ]);
-      return {
-        id: row.id,
-        nome: row.nome,
-        tipo: row.tipo,
-        ativo: row.ativo,
-        envioModo: row.envio_modo,
-        tetoMensal: row.teto_mensal === null ? null : Number(row.teto_mensal),
-        assumirPrazoDias: row.assumir_prazo_dias,
+      return buildExpertAdminRow(row, {
         affiliateIds,
         leads,
-        acesso: expertAcesso(row, user?.last_sign_in_at),
+        ...expertAccessFields(
+          row,
+          user?.last_sign_in_at,
+          row.user_id ? roles.get(row.user_id) : null,
+        ),
         email: user?.email ?? null,
-        createdAt: row.created_at,
-      };
+      });
     }),
   );
 }
@@ -311,6 +432,8 @@ export async function inviteExpertFor(ctx: ServerContext, data: z.input<typeof i
   const tenantId = await requireExpertAdminWriteTenant(ctx);
   const expert = await loadExpert(tenantId, input.expertId);
   if (expert.user_id) throw new Error(EXPERT_ALREADY_LINKED);
+  // Before the lookup/invite: a refused profile never sends an e-mail.
+  await assertProfileHasNoCredits(tenantId, expert.id, expert.ja_vinculado);
 
   const email = input.email.toLowerCase();
   // An invite is only sent for an e-mail with no auth user yet, and such a
@@ -359,7 +482,7 @@ export async function inviteExpertFor(ctx: ServerContext, data: z.input<typeof i
   // both pass the check above, and only one may win.
   const { data: linked, error: linkErr } = await db()
     .from("experts")
-    .update({ user_id: userId })
+    .update({ user_id: userId, ja_vinculado: true })
     .eq("id", expert.id)
     .eq("tenant_id", tenantId)
     .is("user_id", null)
@@ -436,6 +559,125 @@ export async function removeExpertAccessFor(
   return { ok: true };
 }
 
+// ---------------------------------------------------------- team profile
+
+const linkTeamInput = z.object({ expertId: dbUuid(), userId: dbUuid() });
+
+export const linkExpertToTeamMember = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => linkTeamInput.parse(data))
+  .handler(async ({ data, context }) =>
+    linkExpertToTeamMemberFor(context as unknown as ServerContext, data),
+  );
+
+/**
+ * Vincula um perfil sem usuário a alguém da equipe desta casa (perfil de
+ * rendimento). Só grava `experts.user_id`: o papel da pessoa não muda.
+ */
+export async function linkExpertToTeamMemberFor(
+  ctx: ServerContext,
+  data: z.input<typeof linkTeamInput>,
+) {
+  const input = linkTeamInput.parse(data);
+  const tenantId = await requireExpertAdminWriteTenant(ctx);
+
+  const { data: roleRows, error: roleErr } = await db()
+    .from("user_roles")
+    .select("role")
+    .eq("tenant_id", tenantId)
+    .eq("user_id", input.userId)
+    .in("role", [...HOUSE_MEMBER_ROLES]);
+  if (roleErr) throw new Error(roleErr.message);
+  const role = ((roleRows ?? []) as Array<{ role: string }>)[0]?.role;
+  if (!isHouseMemberRole(role)) throw new Error(NOT_TEAM_MEMBER);
+
+  const expert = await loadExpert(tenantId, input.expertId);
+  if (expert.user_id) throw new Error(PROFILE_ALREADY_LINKED);
+  await assertProfileHasNoCredits(tenantId, expert.id, expert.ja_vinculado);
+
+  const { data: owned, error: ownedErr } = await db()
+    .from("experts")
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .eq("user_id", input.userId)
+    .limit(1);
+  if (ownedErr) throw new Error(ownedErr.message);
+  if (((owned ?? []) as unknown[]).length > 0) throw new Error(USER_ALREADY_HAS_PROFILE);
+
+  // Only while still unlinked: a concurrent invite/link may have won. The
+  // unique index experts_tenant_user_uniq refuses a second profile of the
+  // same person in this house.
+  const { data: linked, error: linkErr } = await db()
+    .from("experts")
+    .update({ user_id: input.userId, ja_vinculado: true })
+    .eq("id", expert.id)
+    .eq("tenant_id", tenantId)
+    .is("user_id", null)
+    .select("id");
+  if (linkErr) {
+    if (linkErr.code === "23505") throw new Error(USER_ALREADY_HAS_PROFILE);
+    throw new Error(linkErr.message);
+  }
+  if (((linked ?? []) as unknown[]).length === 0) throw new Error(PROFILE_ALREADY_LINKED);
+
+  await auditTenant({
+    tenantId,
+    actorUserId: ctx.userId,
+    action: "expert.team_linked",
+    entityType: "expert",
+    entityId: expert.id,
+    before: expert,
+    after: { ...expert, user_id: input.userId },
+    metadata: { papel: role },
+  });
+  return { ok: true };
+}
+
+export type TeamMemberForLinking = { userId: string; email: string; papel: HouseMemberRole };
+
+export const listTeamMembersForLinking = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) =>
+    listTeamMembersForLinkingFor(context as unknown as ServerContext),
+  );
+
+/** Equipe desta casa (admin, gestor, membro) que ainda não tem perfil aqui. */
+export async function listTeamMembersForLinkingFor(
+  ctx: ServerContext,
+): Promise<TeamMemberForLinking[]> {
+  const tenantId = await requireExpertAdminTenant(ctx);
+
+  const [{ data: roleRows, error: roleErr }, { data: linkedRows, error: linkedErr }] =
+    await Promise.all([
+      db()
+        .from("user_roles")
+        .select("user_id,role")
+        .eq("tenant_id", tenantId)
+        .in("role", [...HOUSE_MEMBER_ROLES]),
+      db().from("experts").select("user_id").eq("tenant_id", tenantId).not("user_id", "is", null),
+    ]);
+  if (roleErr) throw new Error(roleErr.message);
+  if (linkedErr) throw new Error(linkedErr.message);
+
+  const withProfile = new Set(
+    ((linkedRows ?? []) as Array<{ user_id: string | null }>).map((r) => r.user_id),
+  );
+  const members = ((roleRows ?? []) as Array<{ user_id: string; role: string }>).filter(
+    (r): r is { user_id: string; role: HouseMemberRole } =>
+      !withProfile.has(r.user_id) && isHouseMemberRole(r.role),
+  );
+
+  const rows = await Promise.all(
+    members.map(async (member) => {
+      const user = await authUserOf(member.user_id);
+      return user?.email ? { userId: member.user_id, email: user.email, papel: member.role } : null;
+    }),
+  );
+  return rows
+    .filter((row): row is TeamMemberForLinking => row !== null)
+    .sort((a, b) => a.email.localeCompare(b.email));
+}
+
 // ---------------------------------------------------------------- status
 
 const setActiveInput = z.object({ expertId: dbUuid(), ativo: z.boolean() });
@@ -452,9 +694,16 @@ export async function setExpertActiveFor(ctx: ServerContext, data: z.input<typeo
   const tenantId = await requireExpertAdminWriteTenant(ctx);
   const expert = await loadExpert(tenantId, input.expertId);
 
+  // desativado_em: depósitos a partir dele não geram crédito para o perfil
+  // (refresh_expert_credits). Desativar um perfil já inativo mantém a data
+  // original; reativar limpa.
+  const patch: { ativo: boolean; desativado_em?: string | null } = { ativo: input.ativo };
+  if (input.ativo) patch.desativado_em = null;
+  else if (expert.ativo) patch.desativado_em = new Date().toISOString();
+
   const { error } = await db()
     .from("experts")
-    .update({ ativo: input.ativo })
+    .update(patch)
     .eq("id", expert.id)
     .eq("tenant_id", tenantId);
   if (error) throw new Error(error.message);
@@ -466,7 +715,7 @@ export async function setExpertActiveFor(ctx: ServerContext, data: z.input<typeo
     entityType: "expert",
     entityId: expert.id,
     before: expert,
-    after: { ...expert, ativo: input.ativo },
+    after: { ...expert, ...patch },
   });
   return { ok: true };
 }
@@ -481,6 +730,11 @@ export async function deleteExpertFor(ctx: ServerContext, data: z.input<typeof e
   const tenantId = await requireExpertAdminWriteTenant(ctx);
   const expert = await loadExpert(tenantId, input.expertId);
 
+  // Fase 3: um perfil com crédito registrado (base da comissão) não pode ser
+  // excluído, só desativado — para não apagar o histórico de comissão. O
+  // delete_expert também recusa ('expert_has_credits') e a FK não cascateia.
+  if (await expertHasCredits(tenantId, expert.id)) throw new Error(PROFILE_HAS_CREDITS);
+
   const { error } = await db().rpc("delete_expert", {
     _tenant: tenantId,
     _expert_id: expert.id,
@@ -488,6 +742,9 @@ export async function deleteExpertFor(ctx: ServerContext, data: z.input<typeof e
   if (error) {
     if ((error.message ?? "").includes("expert_has_user")) {
       throw new Error("Remova o acesso do expert antes de excluir.");
+    }
+    if ((error.message ?? "").includes("expert_has_credits")) {
+      throw new Error(PROFILE_HAS_CREDITS);
     }
     throw new Error(error.message);
   }

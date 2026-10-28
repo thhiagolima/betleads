@@ -125,18 +125,50 @@ function appStatusOf(body: unknown): number | null {
   return null;
 }
 
+// Incident 27-28/10/2026: the provider answered `{"status":5,"statusDetalhe":
+// "Saldo insuficiente"}` for 12h; 5 was not listed, so 4,702 refusals were
+// logged as sent and billed.
+const SHORT_BRASIL_NO_BALANCE_CODES = new Set([5, 505]);
+const SHORT_BRASIL_KNOWN_ERROR_CODES = new Set([5, 101, 303, 404, 505]);
+
+function hasProviderMessageId(body: unknown): boolean {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return false;
+  const id = (body as Record<string, unknown>).id;
+  return (typeof id === "string" && id.length > 0) || typeof id === "number";
+}
+
+/**
+ * Short Brasil answers HTTP 200 even when it refuses a message: the refusal
+ * carries a numeric `status` and no message `id` (an accepted message has an
+ * `id` and no `status`). A code we do not know is still a refusal when there
+ * is no id — never a silent success.
+ */
+export function isShortBrasilRefusal(body: unknown): boolean {
+  const app = appStatusOf(body);
+  if (app === null) return false;
+  if (SHORT_BRASIL_KNOWN_ERROR_CODES.has(app)) return true;
+  return !hasProviderMessageId(body);
+}
+
+/** A refusal with a code outside the known list (worth an alert). */
+export function isUnknownShortBrasilRefusal(body: unknown): boolean {
+  const app = appStatusOf(body);
+  return app !== null && !SHORT_BRASIL_KNOWN_ERROR_CODES.has(app) && isShortBrasilRefusal(body);
+}
+
 /**
  * Account-level refusal of an SMS provider answer (HTTP status + parsed body),
  * or null when the answer is about the lead / not a refusal. Incident
  * 15/10/2026: Short Brasil answered `{"status":101}` (auth) for a route with
- * no balance, so 101 and 505 are treated alike.
+ * no balance, so 101 and 5/505 are treated alike.
  */
 export function smsProviderAccountReason(
   httpStatus: number,
   body: unknown,
 ): ProviderAccountReason | null {
   const app = appStatusOf(body);
-  if (app === 505 || httpStatus === 402) return "no_balance";
+  if ((app !== null && SHORT_BRASIL_NO_BALANCE_CODES.has(app)) || httpStatus === 402)
+    return "no_balance";
   if (app === 101 || httpStatus === 401 || httpStatus === 403) return "auth";
   return null;
 }
