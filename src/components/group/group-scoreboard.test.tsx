@@ -29,6 +29,8 @@ function summary(overrides: Partial<ScoreboardRow["current"]> = {}) {
     costPerRegistration: null,
     costPerFtd: null,
     avgDailyCashResult: null,
+    betleadsUsage: 0,
+    betleadsFee: null,
     ...overrides,
   };
 }
@@ -133,9 +135,27 @@ describe("GroupScoreboard", () => {
 
   it("always sorts rows with a null value last, in either direction", () => {
     const withNull: ScoreboardRow[] = [
-      { id: "a", nome: "Sorte Alta", current: summary({ costPerFtd: 90 }), previous: summary(), goals: [] },
-      { id: "b", nome: "Pixreals", current: summary({ costPerFtd: 60 }), previous: summary(), goals: [] },
-      { id: "d", nome: "Casa Sem Custo", current: summary({ costPerFtd: null }), previous: summary(), goals: [] },
+      {
+        id: "a",
+        nome: "Sorte Alta",
+        current: summary({ costPerFtd: 90 }),
+        previous: summary(),
+        goals: [],
+      },
+      {
+        id: "b",
+        nome: "Pixreals",
+        current: summary({ costPerFtd: 60 }),
+        previous: summary(),
+        goals: [],
+      },
+      {
+        id: "d",
+        nome: "Casa Sem Custo",
+        current: summary({ costPerFtd: null }),
+        previous: summary(),
+        goals: [],
+      },
     ];
 
     expect(sortScoreboardRows(withNull, "costPerFtd", "desc").at(-1)?.id).toBe("d");

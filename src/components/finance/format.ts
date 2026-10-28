@@ -52,3 +52,33 @@ export function formatPp(value: number | null | undefined): string {
   });
   return `${value < 0 ? "-" : "+"}${stripNbsp(points)} p.p.`;
 }
+
+const MONTHS = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+
+/** "2026-10" → "out" (chart axis) or "out/2026" (tooltip, notes). */
+export function monthLabel(month: string, withYear = false) {
+  const name = MONTHS[Number(month.slice(5, 7)) - 1] ?? month;
+  return withYear ? `${name}/${month.slice(0, 4)}` : name;
+}
+
+/**
+ * The "no Betleads data" note (spec §7.2), the same wording in the 12-month
+ * chart and the Lançamentos grid: "Sem dado de custo Betleads antes de
+ * out/2026", or "Sem dado de custo Betleads" for a scope with no data at all.
+ */
+export function betleadsMissingNote(betleadsSince: string | null): string {
+  return betleadsSince === null
+    ? "Sem dado de custo Betleads"
+    : `Sem dado de custo Betleads antes de ${monthLabel(betleadsSince.slice(0, 7), true)}`;
+}
+
+/**
+ * Note under the month's Betleads cost: Betleads cost is only known from
+ * `betleadsSince` (first day with data) on, so a month before it — or any
+ * month of a house that never had data — shows that the zero means "no
+ * data". `month` is "YYYY-MM".
+ */
+export function betleadsUsageNote(month: string, betleadsSince: string | null): string | null {
+  if (betleadsSince !== null && month >= betleadsSince.slice(0, 7)) return null;
+  return betleadsMissingNote(betleadsSince);
+}

@@ -163,7 +163,7 @@ export const ACCOUNT_LINKS: NavLink[] = [
 
 /** Menu shown instead of SIDEBAR_SECTIONS while on a /grupo* route (Task 7, spec §4/§6). */
 export const GROUP_SECTIONS: NavSection[] = [
-  { items: [link("Painel do grupo", "/grupo", Trophy)] },
+  { items: [link("Financeiro do grupo", "/grupo", Trophy)] },
   {
     label: "Grupo",
     items: [
@@ -288,7 +288,7 @@ export const ROUTE_META: Record<string, RouteMeta> = {
   "/tenants": { section: "Conta", title: "Conta e equipe" },
   "/admin": { section: "Administração", title: "Visão da plataforma" },
   "/grupos": { section: "Administração", title: "Grupos" },
-  "/grupo": { section: "Grupo", title: "Painel do grupo" },
+  "/grupo": { section: "Grupo", title: "Financeiro do grupo" },
   "/grupo/casa": { section: "Grupo", title: "Financeiro da casa" },
   "/grupo/metas": { section: "Grupo", title: "Metas do grupo" },
   "/grupo/pessoas": { section: "Grupo", title: "Pessoas do grupo" },
