@@ -154,6 +154,29 @@ export function describeBreakerReason(reason: string | null): string {
   return "conta recusada";
 }
 
+const UNKNOWN_REFUSAL_ALERT_MS = 10 * 60_000;
+let lastUnknownRefusalAlertAt = 0;
+
+/**
+ * The provider refused a message with a code we do not classify. The send is
+ * already treated as failed (refunded); this only makes the new code visible,
+ * at most once per instance every 10 minutes. Never throws.
+ */
+export function reportUnknownSmsProviderRefusal(body: unknown, now = Date.now()) {
+  if (now - lastUnknownRefusalAlertAt < UNKNOWN_REFUSAL_ALERT_MS) return;
+  lastUnknownRefusalAlertAt = now;
+  const b = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+  try {
+    captureServerMessage("Short Brasil recusou SMS com código desconhecido", "warning", {
+      job: SMS_PROVIDER_JOB,
+      tags: { provider_status: String(b.status ?? "") },
+      extra: { status_detalhe: String(b.statusDetalhe ?? "").slice(0, 300) },
+    });
+  } catch {
+    // observability must never break a send
+  }
+}
+
 function alertOpen(snapshot: BreakerSnapshot, firstTime: boolean) {
   captureServerMessage(
     firstTime

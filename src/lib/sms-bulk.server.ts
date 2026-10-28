@@ -35,6 +35,8 @@ import { captureServerException } from "./observability/sentry.server";
 import { normalizeConsentSubject } from "./consent.server";
 import { requireBrazilianPhone } from "./phone-normalization";
 import {
+  isShortBrasilRefusal,
+  isUnknownShortBrasilRefusal,
   smsProviderAccountReason,
   transportErrorKind,
   type ProviderErrorKind,
@@ -42,6 +44,7 @@ import {
 import {
   noteSmsProviderSuccess,
   reportSmsProviderAccountFailure,
+  reportUnknownSmsProviderRefusal,
 } from "./sms-provider-breaker.server";
 import { findAcceptedDeliveryKeys, type CampaignDb } from "./campaign-recipients.server";
 import {
@@ -288,11 +291,9 @@ type BulkMapping = {
   accepted: Map<string, string>;
   /** parceiroId -> reason, entries of this chunk explicitly reported as errors. */
   rejected: Map<string, string>;
-  /** parceiroIds rejected with an ACCOUNT code (101/505): retryable, not the lead's fault. */
+  /** parceiroIds rejected with an ACCOUNT code (101/5/505): retryable, not the lead's fault. */
   accountRejected: Set<string>;
 };
-
-const ITEM_ERROR_CODES = new Set([101, 303, 404, 505]);
 
 /**
  * Maps the bulk response to the keys that were sent in this chunk.
@@ -316,14 +317,12 @@ function mapBulkResponse(body: unknown, sentKeys: Set<string>): BulkMapping | nu
     if (!parceiroId || !sentKeys.has(parceiroId)) continue;
     const id = typeof e.id === "string" || typeof e.id === "number" ? String(e.id) : "";
     const appStatus = getShortBrasilAppStatus(e);
-    const explicitError =
-      (appStatus !== null && ITEM_ERROR_CODES.has(appStatus)) ||
-      e.error !== undefined ||
-      e.erro !== undefined;
+    const explicitError = isShortBrasilRefusal(e) || e.error !== undefined || e.erro !== undefined;
     if (explicitError) {
       const detail = e.statusDetalhe ?? e.detalhe ?? e.error ?? e.erro ?? appStatus;
       mapping.rejected.set(parceiroId, `Short Brasil recusou a mensagem: ${String(detail)}`);
-      if (appStatus === 101 || appStatus === 505) mapping.accountRejected.add(parceiroId);
+      if (smsProviderAccountReason(200, e)) mapping.accountRejected.add(parceiroId);
+      else if (isUnknownShortBrasilRefusal(e)) reportUnknownSmsProviderRefusal(e);
     } else if (id) {
       mapping.accepted.set(parceiroId, id);
     }
@@ -425,7 +424,6 @@ async function sendChunk(chunk: Prepared[]): Promise<{
     return wholeChunkFailed(`Sem resposta do provedor: ${call.error}`, true, "not_sent");
   }
 
-  const appStatus = getShortBrasilAppStatus(call.body);
   const mapping = mapBulkResponse(call.body, new Set(chunk.map((p) => p.item.deliveryKey)));
   if (!mapping) {
     // A request-level answer with an application code was not processed.
@@ -440,7 +438,8 @@ async function sendChunk(chunk: Prepared[]): Promise<{
     if (call.status === 429) {
       return wholeChunkFailed(summarizeProviderError(call.status, call.body), true, null);
     }
-    if (appStatus === 303 || appStatus === 404 || (call.status >= 400 && call.status < 500)) {
+    if (isShortBrasilRefusal(call.body) || (call.status >= 400 && call.status < 500)) {
+      if (isUnknownShortBrasilRefusal(call.body)) reportUnknownSmsProviderRefusal(call.body);
       return wholeChunkFailed(summarizeProviderError(call.status, call.body), false, null);
     }
     // 5xx, a 2xx we cannot read, or a bulk[] that echoes none of our
