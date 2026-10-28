@@ -1,6 +1,6 @@
 # Relatório de rendimento (expert e equipe) — desenho
 
-Data: 2026-10-28 · Status: rascunho para aprovação
+Data: 2026-10-28 · Status: aprovado (2026-10-28)
 Base: Área do Expert, fases 1–3, em produção (`main` d055404). Spec original: `docs/superpowers/specs/2026-10-23-area-expert-design.md` (seções 6, 7 e 7.1).
 
 ## 1. Intenção e porquê
