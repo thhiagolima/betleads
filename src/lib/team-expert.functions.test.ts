@@ -205,6 +205,25 @@ describe("team performance profile", () => {
     expect(fake.admin.rows("expert_links")).toHaveLength(0);
   });
 
+  it("a team member of another house is refused in this house and nothing is written", async () => {
+    // Gestor (with an active profile) of OTHER_TENANT; the request resolves TENANT.
+    addRole(GESTOR, "gestor", OTHER_TENANT);
+    addProfile({ tenant_id: OTHER_TENANT });
+
+    await expect(getMyTeamExpertProfileFor(ctxFor(GESTOR))).resolves.toBeNull();
+    await expect(
+      generateTeamTrackedLinkFor(ctxFor(GESTOR), {
+        playerId: PLAYER,
+        url: URL_OK,
+        oferta: "Volta 50",
+      }),
+    ).rejects.toThrow(NO_PROFILE);
+    expect(mockAssertCanSend).not.toHaveBeenCalled();
+    expect(mockCreateLink).not.toHaveBeenCalled();
+    expect(fake.admin.rows("expert_links")).toHaveLength(0);
+    expect(fake.admin.rows("link_dispatches")).toHaveLength(0);
+  });
+
   it("inactive profile is treated as no profile", async () => {
     addRole(GESTOR, "gestor");
     addProfile({ ativo: false });

@@ -253,7 +253,7 @@ function ExpertsPage() {
                     </div>
                   </TableCell>
                   <TableCell>{expert.leads}</TableCell>
-                  <TableCell>{acessoBadge(expert.acesso, expert.papelEquipe)}</TableCell>
+                  <TableCell>{acessoBadge(expert.acesso, expert.papelEquipe, expert.ativo)}</TableCell>
                   <TableCell className="text-right">{brl(metrics.depositado)}</TableCell>
                   <TableCell className="text-right">{brl(metrics.depositadoClique)}</TableCell>
                   <TableCell className="text-right">{brl(metrics.depositadoAfiliado)}</TableCell>

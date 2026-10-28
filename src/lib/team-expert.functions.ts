@@ -21,6 +21,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { createExpertLinkCore, type ExpertLinkCoreResult } from "@/lib/expert-link-core.server";
 import { HOUSE_MEMBER_ROLES } from "@/lib/house-member-roles";
 import { resolveOperationalTenantForRequest } from "@/lib/tenant-access.server";
+import { dbUuid } from "@/lib/zod-helpers";
 
 type DbResult<T = unknown> = { data: T | null; error: { message: string } | null };
 type ServerContext = {
@@ -84,7 +85,7 @@ export async function getMyTeamExpertProfileFor(
 }
 
 const generateInput = z.object({
-  playerId: z.string().uuid(),
+  playerId: dbUuid(),
   url: z.string(),
   oferta: z.string(),
 });

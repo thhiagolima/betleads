@@ -15,10 +15,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { HomeCard } from "@/components/home/home-cards";
+import { useActiveTenant } from "@/hooks/use-active-tenant";
 import { normalizeBrazilianPhone } from "@/lib/phone-normalization";
 import { generateTeamTrackedLink, getMyTeamExpertProfile } from "@/lib/team-expert.functions";
-
-const TEAM_EXPERT_PROFILE_QUERY_KEY = ["team-expert-profile"];
 
 type GeneratedLink = { id: string; sentUrl: string; shortened: boolean };
 
@@ -32,9 +31,14 @@ export function TeamTrackedLinkCard({
   onGenerated?: () => void;
 }) {
   const getProfileFn = useServerFn(getMyTeamExpertProfile);
+  // The profile belongs to the house chosen in the header: keyed by it, so
+  // switching houses never reuses the previous house's answer.
+  const tenant = useActiveTenant();
+  const tenantId = tenant.data?.activeTenantId ?? null;
   const profileQuery = useQuery({
-    queryKey: TEAM_EXPERT_PROFILE_QUERY_KEY,
+    queryKey: ["team-expert-profile", tenantId],
     queryFn: () => getProfileFn(),
+    enabled: !!tenantId,
     staleTime: 5 * 60_000,
   });
 

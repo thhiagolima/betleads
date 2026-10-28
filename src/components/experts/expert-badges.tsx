@@ -16,16 +16,24 @@ export const PAPEL_EQUIPE_LABEL: Record<NonNullable<ExpertAdminRow["papelEquipe"
   member: "Membro",
 };
 
+/**
+ * `ativo` only matters for `equipe`: a team profile has no "inativo" acesso
+ * of its own, so an inactive one gets the usual Inativo badge alongside.
+ */
 export function acessoBadge(
   acesso: ExpertAcesso,
   papelEquipe: ExpertAdminRow["papelEquipe"] = null,
+  ativo = true,
 ) {
   switch (acesso) {
     case "equipe":
       return (
-        <Badge variant="secondary">
-          {papelEquipe ? `Equipe (${PAPEL_EQUIPE_LABEL[papelEquipe]})` : "Equipe"}
-        </Badge>
+        <span className="inline-flex flex-wrap items-center gap-1">
+          <Badge variant="secondary">
+            {papelEquipe ? `Equipe (${PAPEL_EQUIPE_LABEL[papelEquipe]})` : "Equipe"}
+          </Badge>
+          {!ativo && <Badge variant="destructive">Inativo</Badge>}
+        </span>
       );
     case "sem_acesso":
       return <Badge variant="outline">Sem acesso</Badge>;
