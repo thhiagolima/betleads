@@ -47,20 +47,25 @@ set search_path = public, pg_temp
 as $$
   with
   cte_clicked as (
-    -- Driven by the period's clicks of the house (click_events
-    -- (tenant_id, occurred_at desc, link_dispatch_id)), then the dispatch by
-    -- primary key, instead of every historical dispatch of the experts.
+    -- Driven by the experts' own dispatches (link_dispatches_expert_source_idx
+    -- (tenant_id, source_id, sent_at) where source_type 'expert' / 'sent'),
+    -- then their clicks of the period (click_events_dispatch_time_idx
+    -- (link_dispatch_id, occurred_at desc)), instead of every click of the
+    -- house in the period.
     select ld.source_id, count(distinct ld.recipient_player_id) leads
-    from public.click_events cl
-    join public.link_dispatches ld on ld.id = cl.link_dispatch_id
-    where cl.tenant_id = _tenant
-      and cl.occurred_at >= _from and cl.occurred_at < _to
-      and cl.is_human
-      and ld.tenant_id = _tenant
+    from public.link_dispatches ld
+    where ld.tenant_id = _tenant
       and ld.source_type = 'expert'
       and ld.send_status = 'sent'
       and ld.source_id = any (array(select x::text from unnest(_experts) x))
       and ld.recipient_player_id is not null
+      and exists (
+        select 1 from public.click_events cl
+        where cl.link_dispatch_id = ld.id
+          and cl.tenant_id = _tenant
+          and cl.occurred_at >= _from and cl.occurred_at < _to
+          and cl.is_human
+      )
     group by ld.source_id
   ),
   cte_converted as (
