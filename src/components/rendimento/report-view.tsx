@@ -33,6 +33,7 @@ import {
 import { ReportCards } from "@/components/rendimento/report-cards";
 import { ReportChart } from "@/components/rendimento/report-chart";
 import { ReportFunnel } from "@/components/rendimento/report-funnel";
+import { TEAM_REPORT_QUERY_KEY } from "@/components/rendimento/team-ranking";
 import { updatedLabel } from "@/components/rendimento/updated-label";
 import { useActiveTenant } from "@/hooks/use-active-tenant";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
@@ -78,6 +79,8 @@ function AdminActions({ expertId }: { expertId: string }) {
       toast.success(ativo ? "Expert ativado" : "Expert desativado");
       qc.invalidateQueries({ queryKey: EXPERTS_QUERY_KEY });
       qc.invalidateQueries({ queryKey: [REPORT_QUERY_KEY] });
+      // O ranking da equipe mostra o status ativo/inativo.
+      qc.invalidateQueries({ queryKey: [TEAM_REPORT_QUERY_KEY] });
     },
     onError: (error: Error) => toast.error(error.message),
   });
