@@ -11,7 +11,14 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { compareRange, costBreakdown, round2, summarize } from "@/lib/finance/calc";
+import {
+  compareRange,
+  costBreakdown,
+  hasPartialGgrEstimate,
+  monthlyGgrPendingThrough,
+  round2,
+  summarize,
+} from "@/lib/finance/calc";
 import { categoryKey, categoryLabel, looksLikeBetleadsCost } from "@/lib/finance/categories";
 import {
   clampToToday,
@@ -25,12 +32,14 @@ import {
   fetchBetleadsUsage,
   fetchFinanceDays,
   fetchGoalDays,
+  fetchMonthlyGgr,
+  financeDaysWithMonthlyGgr,
   inRange,
   num,
   periodPreset,
   requirePermission,
   todaySaoPaulo,
-  toFinanceDay,
+  toMonthlyGgr,
   type BetleadsUsageRow,
   type GoalDayRow,
   type OtherCostRow,
@@ -41,6 +50,7 @@ import type {
   DateRange,
   FinanceDay,
   GoalEvaluation,
+  MonthlyGgr,
   MonthPoint,
   PeriodPreset,
   PeriodSummary,
@@ -69,6 +79,11 @@ export type DashboardTenantRow = {
   goals: GoalEvaluation[];
   /** Past dates in the current window missing GGR or Anúncios (today left out). */
   pendingDates: string[];
+  /**
+   * When every pending date comes after the "atualizado até" of its month's
+   * GGR do mês, that date (the pending banner asks to update it); else null.
+   */
+  ggrUpdatedThrough: string | null;
 };
 
 export type FinanceDashboard = {
@@ -283,25 +298,58 @@ export async function getFinanceDashboardFor(
   ].sort();
   const feeMonths = tenantIds.length ? allCostMonths : [];
 
-  const [dayRows, goalRows, costRows, usageRows, feeRows, sinceRows] = await Promise.all([
-    span ? fetchFinanceDays(tenantIds, span) : Promise.resolve([]),
-    current && tenantIds.length ? fetchGoalDays(tenantIds, current) : Promise.resolve([]),
-    fetchOtherCosts(tenantIds, allCostMonths),
-    span ? fetchBetleadsUsage(tenantIds, span) : Promise.resolve([]),
-    feeMonths.length
-      ? fetchBetleadsFees(tenantIds, feeMonths[0], feeMonths.at(-1) as string)
-      : Promise.resolve([]),
-    tenantIds.length ? fetchBetleadsSince(tenantIds) : Promise.resolve([]),
-  ]);
+  const [dayRows, goalRows, costRows, usageRows, feeRows, sinceRows, monthlyRows] =
+    await Promise.all([
+      span ? fetchFinanceDays(tenantIds, span) : Promise.resolve([]),
+      current && tenantIds.length ? fetchGoalDays(tenantIds, current) : Promise.resolve([]),
+      fetchOtherCosts(tenantIds, allCostMonths),
+      span ? fetchBetleadsUsage(tenantIds, span) : Promise.resolve([]),
+      feeMonths.length
+        ? fetchBetleadsFees(tenantIds, feeMonths[0], feeMonths.at(-1) as string)
+        : Promise.resolve([]),
+      tenantIds.length ? fetchBetleadsSince(tenantIds) : Promise.resolve([]),
+      span
+        ? fetchMonthlyGgr(tenantIds, monthStartOf(span.from), monthStartOf(span.to))
+        : Promise.resolve([]),
+    ]);
+
+  // A monthly GGR total is split over its month's days from the 1st, so when
+  // the span starts mid-month the houses with a total for that month also
+  // need the days before span.from (only for the allocation: windows never
+  // reach them).
+  const firstMonth = span ? monthStartOf(span.from) : null;
+  const partialMonthTenants =
+    span && firstMonth !== span.from
+      ? monthlyRows.filter((row) => row.month === firstMonth).map((row) => row.tenant_id)
+      : [];
+  const leadingDayRows =
+    span && firstMonth && partialMonthTenants.length
+      ? await fetchFinanceDays(partialMonthTenants, {
+          from: firstMonth,
+          to: new Date(Date.parse(`${span.from}T00:00:00Z`) - 86_400_000)
+            .toISOString()
+            .slice(0, 10),
+        })
+      : [];
+
+  const allocationsByTenant = new Map<string, MonthlyGgr[]>();
+  for (const row of monthlyRows) {
+    const list = allocationsByTenant.get(row.tenant_id) ?? [];
+    list.push(toMonthlyGgr(row));
+    allocationsByTenant.set(row.tenant_id, list);
+  }
+  const allAllocations = monthlyRows.map(toMonthlyGgr);
 
   // Days, usage, other costs and fees are indexed once by house and month
   // (and by month for every house), so each window reads only its months.
   const allDays: FinanceDay[] = [];
   const dayBuckets = new Map<string, FinanceDay[]>();
-  for (const row of dayRows) {
-    const day = toFinanceDay(row);
+  for (const { tenantId, day } of financeDaysWithMonthlyGgr(
+    [...leadingDayRows, ...dayRows],
+    monthlyRows,
+  )) {
     allDays.push(day);
-    addToBuckets(dayBuckets, row.tenant_id, monthStartOf(day.date), day);
+    addToBuckets(dayBuckets, tenantId, monthStartOf(day.date), day);
   }
   const usageBuckets = new Map<string, BetleadsUsageRow[]>();
   for (const row of usageRows) {
@@ -348,14 +396,26 @@ export async function getFinanceDashboardFor(
       ),
     );
   const feeFor = (month: string | null, tenantId?: string) => monthSum(feeSums, month, tenantId);
+  const allocationsOf = (tenantId?: string) =>
+    tenantId === undefined ? allAllocations : (allocationsByTenant.get(tenantId) ?? []);
   const summarizeWindow = (window: DateRange | null, costMonth: string | null, tenantId?: string) =>
-    summarize(windowDays(window, tenantId), otherCostsFor(costMonth, tenantId), today, {
-      usage: usageFor(window, tenantId),
-      fee: feeFor(costMonth, tenantId),
-    });
+    summarize(
+      windowDays(window, tenantId),
+      otherCostsFor(costMonth, tenantId),
+      today,
+      { usage: usageFor(window, tenantId), fee: feeFor(costMonth, tenantId) },
+      { ggrEstimated: hasPartialGgrEstimate(window, allocationsOf(tenantId)) },
+    );
 
   const rows: DashboardTenantRow[] = tenants.map((tenant) => {
     const currentSummary = summarizeWindow(current, costMonths.current, tenant.id);
+    const pendingDates = [
+      ...new Set(
+        windowDays(current, tenant.id)
+          .filter((day) => day.pending && day.date < today)
+          .map((day) => day.date),
+      ),
+    ];
     return {
       id: tenant.id,
       nome: tenant.nome,
@@ -364,13 +424,8 @@ export async function getFinanceDashboardFor(
       goals: current
         ? evaluateGoals(goalRowsByTenant.get(tenant.id) ?? [], currentSummary, current, today)
         : [],
-      pendingDates: [
-        ...new Set(
-          windowDays(current, tenant.id)
-            .filter((day) => day.pending && day.date < today)
-            .map((day) => day.date),
-        ),
-      ],
+      pendingDates,
+      ggrUpdatedThrough: monthlyGgrPendingThrough(pendingDates, allocationsOf(tenant.id)),
     };
   });
 

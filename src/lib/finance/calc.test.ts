@@ -788,9 +788,7 @@ describe("monthlyGgrPendingThrough", () => {
   const allocations = [{ month: "2026-10-01", validThrough: "2026-10-20" }];
 
   it("returns validThrough when every pending date is after the month's validThrough", () => {
-    expect(monthlyGgrPendingThrough(["2026-10-21", "2026-10-23"], allocations)).toBe(
-      "2026-10-20",
-    );
+    expect(monthlyGgrPendingThrough(["2026-10-21", "2026-10-23"], allocations)).toBe("2026-10-20");
   });
 
   it("is null when a pending date is not explained by a monthly total", () => {

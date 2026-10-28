@@ -21,6 +21,8 @@ import {
   saveOtherCostFor,
   setFinanceRatesFor,
   setFinanceViewerFor,
+  setMonthlyGgrFor,
+  setMonthlyGgrInput,
   setTenantGoalFor,
 } from "./finance.functions";
 import { createFakeDb } from "./sms-bulk.test-support";
@@ -388,16 +390,14 @@ describe("house financial month: Betleads cost and categories", () => {
   });
 
   it("a house without since never flags suspectedBetleads", async () => {
-    fake.admin
-      .rows("tenant_finance_other_costs")
-      .push({
-        id: "c1",
-        tenant_id: HOUSE_A,
-        month: "2026-10-01",
-        descricao: "SMS",
-        valor: 30,
-        categoria: null,
-      });
+    fake.admin.rows("tenant_finance_other_costs").push({
+      id: "c1",
+      tenant_id: HOUSE_A,
+      month: "2026-10-01",
+      descricao: "SMS",
+      valor: 30,
+      categoria: null,
+    });
     const month = await getTenantFinanceMonthFor(ctxFor(ADMIN_A), {
       tenantId: HOUSE_A,
       month: "2026-10",
@@ -695,5 +695,200 @@ describe("validFrom is never in the past", () => {
       dailyValue: 10,
     });
     expect(res.validFrom).toBe("2026-10-24");
+  });
+});
+
+describe("GGR do mês (monthly accumulated total)", () => {
+  const monthly = (tenantId: string, month: string, ggr: number, validThrough: string) => ({
+    tenant_id: tenantId,
+    month,
+    ggr,
+    valid_through: validThrough,
+  });
+
+  it("month view allocates the total up to validThrough, ignores stored daily GGR and leaves later days pending", async () => {
+    financeDayRows.push(
+      dayRow(HOUSE_A, "2026-10-01", {
+        deposit_amount: 300,
+        ad_spend: 0,
+        ggr: 999,
+        ggr_fee_pct: 17,
+      }),
+      dayRow(HOUSE_A, "2026-10-02", {
+        deposit_amount: 100,
+        ad_spend: 0,
+        ggr: 999,
+        ggr_fee_pct: 17,
+      }),
+      dayRow(HOUSE_A, "2026-10-03", {
+        deposit_amount: 100,
+        ad_spend: 0,
+        ggr: 999,
+        ggr_fee_pct: 17,
+      }),
+    );
+    fake.admin
+      .rows("tenant_finance_monthly_ggr")
+      .push(
+        monthly(HOUSE_A, "2026-10-01", 1000, "2026-10-02"),
+        monthly(HOUSE_A, "2026-09-01", 5, "2026-09-30"),
+        monthly(HOUSE_B, "2026-10-01", 77, "2026-10-20"),
+      );
+
+    const month = await getTenantFinanceMonthFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-10",
+    });
+
+    expect(month.monthlyGgr).toEqual({ ggr: 1000, validThrough: "2026-10-02" });
+    expect(month.days.map((d) => [d.date, d.ggr, d.ggrEstimated, d.pending])).toEqual([
+      ["2026-10-01", 750, true, false],
+      ["2026-10-02", 250, true, false],
+      ["2026-10-03", null, false, true],
+    ]);
+    expect(month.summary.ggr).toBe(1000);
+    expect(month.summary.ggrFee).toBe(170);
+  });
+
+  it("month view without a monthly total keeps the daily GGR", async () => {
+    financeDayRows.push(dayRow(HOUSE_A, "2026-10-01", { ad_spend: 0, ggr: 12 }));
+    const month = await getTenantFinanceMonthFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-10",
+    });
+    expect(month.monthlyGgr).toBeNull();
+    expect(month.days[0]).toMatchObject({ ggr: 12, ggrEstimated: false });
+  });
+
+  it("setMonthlyGgr saves, overwrites and clears, auditing before/after", async () => {
+    await setMonthlyGgrFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-10",
+      ggr: 1497.151,
+      validThrough: "2026-10-23",
+    });
+    expect(fake.admin.rows("tenant_finance_monthly_ggr")).toEqual([
+      expect.objectContaining({
+        tenant_id: HOUSE_A,
+        month: "2026-10-01",
+        ggr: 1497.15,
+        valid_through: "2026-10-23",
+        updated_by: ADMIN_A,
+      }),
+    ]);
+
+    await setMonthlyGgrFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-10",
+      ggr: 1600,
+      validThrough: "2026-10-24",
+    });
+    expect(fake.admin.rows("tenant_finance_monthly_ggr")).toEqual([
+      expect.objectContaining({ ggr: 1600, valid_through: "2026-10-24" }),
+    ]);
+
+    await setMonthlyGgrFor(ctxFor(ADMIN_A), { tenantId: HOUSE_A, month: "2026-10", ggr: null });
+    expect(fake.admin.rows("tenant_finance_monthly_ggr")).toHaveLength(0);
+
+    const audit = fake.admin
+      .rows("tenant_audit_logs")
+      .filter((row) => row.action === "finance.month_ggr_updated");
+    expect(audit).toHaveLength(3);
+    expect(audit[0]).toMatchObject({
+      tenant_id: HOUSE_A,
+      actor_user_id: ADMIN_A,
+      entity_id: "2026-10",
+      before_data: null,
+      after_data: { month: "2026-10-01", ggr: 1497.15, valid_through: "2026-10-23" },
+    });
+    expect(audit[1]).toMatchObject({
+      before_data: { month: "2026-10-01", ggr: 1497.15, valid_through: "2026-10-23" },
+      after_data: { month: "2026-10-01", ggr: 1600, valid_through: "2026-10-24" },
+    });
+    expect(audit[2]).toMatchObject({
+      before_data: { month: "2026-10-01", ggr: 1600, valid_through: "2026-10-24" },
+      after_data: null,
+    });
+  });
+
+  it("setMonthlyGgr: clearing a month without a total changes nothing", async () => {
+    const result = await setMonthlyGgrFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-09",
+      ggr: null,
+    });
+    expect(result).toEqual({ changed: false });
+    expect(fake.admin.rows("tenant_audit_logs")).toHaveLength(0);
+  });
+
+  it("setMonthlyGgr requires finance_can_edit_values", async () => {
+    for (const user of [G1_MANAGER, GESTOR_A, MEMBER_A]) {
+      await expect(
+        setMonthlyGgrFor(ctxFor(user), {
+          tenantId: HOUSE_A,
+          month: "2026-10",
+          ggr: 10,
+          validThrough: "2026-10-23",
+        }),
+      ).rejects.toThrow("Sem permissão");
+    }
+    expect(fake.admin.rows("tenant_finance_monthly_ggr")).toHaveLength(0);
+  });
+
+  it("setMonthlyGgr refuses the demo house", async () => {
+    await expect(
+      setMonthlyGgrFor(ctxFor(SUPER), {
+        tenantId: DEMO,
+        month: "2026-10",
+        ggr: 10,
+        validThrough: "2026-10-23",
+      }),
+    ).rejects.toMatchObject({ code: "DEMO_ACTION_BLOCKED" });
+    expect(fake.admin.rows("tenant_finance_monthly_ggr")).toHaveLength(0);
+  });
+
+  it("setMonthlyGgr: validThrough must be inside the month and not after today", async () => {
+    await expect(
+      setMonthlyGgrFor(ctxFor(ADMIN_A), {
+        tenantId: HOUSE_A,
+        month: "2026-10",
+        ggr: 10,
+        validThrough: "2026-09-30",
+      }),
+    ).rejects.toThrow("A data deve estar dentro do mês");
+    await expect(
+      setMonthlyGgrFor(ctxFor(ADMIN_A), {
+        tenantId: HOUSE_A,
+        month: "2026-10",
+        ggr: 10,
+        validThrough: "2026-10-25",
+      }),
+    ).rejects.toThrow("Data futura não permitida");
+    await expect(
+      setMonthlyGgrFor(ctxFor(ADMIN_A), {
+        tenantId: HOUSE_A,
+        month: "2026-11",
+        ggr: 10,
+        validThrough: "2026-11-01",
+      }),
+    ).rejects.toThrow("Data futura não permitida");
+    expect(fake.admin.rows("tenant_finance_monthly_ggr")).toHaveLength(0);
+  });
+
+  it("setMonthlyGgrInput requires validThrough when ggr is set", () => {
+    expect(() =>
+      setMonthlyGgrInput.parse({ tenantId: HOUSE_A, month: "2026-10", ggr: 10 }),
+    ).toThrow("Informe a data");
+    expect(
+      setMonthlyGgrInput.parse({ tenantId: HOUSE_A, month: "2026-10", ggr: null }),
+    ).toMatchObject({ ggr: null });
+    expect(
+      setMonthlyGgrInput.parse({
+        tenantId: HOUSE_A,
+        month: "2026-10",
+        ggr: -5,
+        validThrough: "2026-10-01",
+      }),
+    ).toMatchObject({ ggr: -5 });
   });
 });

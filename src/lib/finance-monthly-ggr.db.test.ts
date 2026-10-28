@@ -124,9 +124,7 @@ async function asRole(
   await db.query("BEGIN");
   try {
     if (claims !== undefined) {
-      await db.query(`select set_config('request.jwt.claims', $1, true)`, [
-        JSON.stringify(claims),
-      ]);
+      await db.query(`select set_config('request.jwt.claims', $1, true)`, [JSON.stringify(claims)]);
     }
     await db.exec(`SET LOCAL ROLE ${role}`);
     return await db.query(sql);
