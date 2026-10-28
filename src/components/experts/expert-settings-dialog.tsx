@@ -41,15 +41,19 @@ export function ExpertSettingsDialog({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  janelaHoras: number;
+  /** A janela salva da casa; `null` enquanto o ranking ainda carrega. */
+  janelaHoras: number | null;
   onSaved?: (janelaHoras: number) => void;
 }) {
   const qc = useQueryClient();
   const saveFn = useServerFn(saveExpertSettings);
-  const [value, setValue] = useState(String(janelaHoras));
+  const loading = janelaHoras === null;
+  const [value, setValue] = useState(loading ? "" : String(janelaHoras));
 
+  // Semeia o campo com o valor salvo ao abrir e quando ele termina de
+  // carregar: nunca com um padrão que, salvo, sobrescreveria a janela real.
   useEffect(() => {
-    if (open) setValue(String(janelaHoras));
+    if (open && janelaHoras !== null) setValue(String(janelaHoras));
   }, [open, janelaHoras]);
 
   const save = useMutation({
@@ -63,7 +67,7 @@ export function ExpertSettingsDialog({
     onError: (error: Error) => toast.error(error.message),
   });
 
-  const error = janelaError(value);
+  const error = loading ? null : janelaError(value);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -78,6 +82,8 @@ export function ExpertSettingsDialog({
             id="janela-clique"
             inputMode="numeric"
             value={value}
+            placeholder={loading ? "Carregando…" : undefined}
+            disabled={loading}
             onChange={(event) => setValue(event.target.value)}
           />
           <p className="text-xs text-muted-foreground">
@@ -91,10 +97,10 @@ export function ExpertSettingsDialog({
             Cancelar
           </Button>
           <Button
-            disabled={!!error || save.isPending}
+            disabled={loading || !!error || save.isPending}
             onClick={() => {
               const parsed = Number(value.trim());
-              if (!error) save.mutate(parsed);
+              if (!loading && !error) save.mutate(parsed);
             }}
           >
             Salvar

@@ -117,7 +117,8 @@ function ExpertsPage() {
 
   const experts = expertsQuery.data ?? [];
   const unassigned = unassignedQuery.data ?? [];
-  const janelaHoras = rankingQuery.data?.janelaHoras ?? 72;
+  // null até o ranking carregar: o diálogo não salva um padrão por cima da janela real.
+  const janelaHoras = rankingQuery.data?.janelaHoras ?? null;
 
   const metricsByExpert = new Map(
     (rankingQuery.data?.rows ?? []).map((row) => [row.expertId, row]),
