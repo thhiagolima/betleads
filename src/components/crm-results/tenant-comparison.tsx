@@ -101,7 +101,7 @@ const GROUPS: Array<{ title: string; metrics: Metric[] }> = [
     metrics: [
       {
         label: "Jogadores recuperados",
-        hint: "Parados há 2+ dias que voltaram até 3 dias após um SMS, com ou sem clique.",
+        hint: "Parados há 2+ dias (ou cadastrados há 2+ dias sem depositar) que depositaram até 3 dias após um SMS, com ou sem clique.",
         raw: (row) => row.influencedPlayers,
         format: count,
         better: "high",

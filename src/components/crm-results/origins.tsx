@@ -48,7 +48,7 @@ const COLUMNS: Array<{ key: SortKey; label: string; info?: string; align?: "left
   {
     key: "influencedPlayers",
     label: "Recuperados (visão ampla)",
-    info: "Parados há 2+ dias que voltaram até 3 dias após um SMS, com ou sem clique. Não some com o Recuperado pelo CRM.",
+    info: "Parados há 2+ dias (ou cadastrados há 2+ dias sem depositar) que depositaram até 3 dias após um SMS, com ou sem clique. Não some com o Recuperado pelo CRM.",
   },
 ];
 

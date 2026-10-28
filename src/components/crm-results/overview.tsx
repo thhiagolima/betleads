@@ -169,8 +169,9 @@ export function Overview({
               <InfoTip text="Retornos, não pessoas: quem parou e voltou duas vezes no período conta duas. O valor é só o depósito de retorno. Voltar depois do SMS não prova que foi por causa dele; o efeito real está no Teste de controle." />
             </p>
             <p className="text-xs text-muted-foreground">
-              Parados há 2+ dias que voltaram a depositar até 3 dias depois de um SMS, com ou sem
-              clique. Inclui boa parte do Recuperado pelo CRM: não some os dois.
+              Parados há 2+ dias (ou cadastrados há 2+ dias sem depositar) que depositaram até 3
+              dias depois de um SMS, com ou sem clique. Inclui boa parte do Recuperado pelo CRM: não
+              some os dois.
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap gap-6 tabular-nums">
