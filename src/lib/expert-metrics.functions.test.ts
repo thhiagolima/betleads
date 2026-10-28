@@ -29,11 +29,10 @@ import { createFakeDb } from "@/lib/sms-bulk.test-support";
 import { __resetDemoTenantCacheForTests } from "@/lib/tenant-access.server";
 import {
   exportExpertCreditsCsvFor,
+  getExpertClickWindowHoursFor,
   getExpertDashboardFor,
   listExpertCreditsFor,
-  listExpertsRankingFor,
   saveExpertSettingsFor,
-  type ExpertMetrics,
 } from "./expert-metrics.functions";
 
 const TENANT = "00000000-0000-4000-8000-00000000a0a0";
@@ -44,7 +43,7 @@ const ME = "00000000-0000-4000-8000-0000000000e1";
 const OTHER_EXPERT = "00000000-0000-4000-8000-0000000000e2";
 const PLAYER = "00000000-0000-4000-8000-0000000000b1";
 
-type Ctx = Parameters<typeof listExpertsRankingFor>[0];
+type Ctx = Parameters<typeof getExpertClickWindowHoursFor>[0];
 
 /** The caller's own (JWT) client: active tenant + per-tenant admin check. */
 function ctxFor(userId: string, opts: { admin?: boolean } = {}): Ctx {
@@ -184,66 +183,20 @@ describe("getExpertDashboardFor", () => {
   });
 });
 
-describe("listExpertsRankingFor", () => {
+describe("getExpertClickWindowHoursFor", () => {
   it("refuses non-admin", async () => {
-    await expect(listExpertsRankingFor(ctxFor(GESTOR, { admin: false }), {})).rejects.toThrow(
-      "Apenas o admin da casa gerencia experts.",
-    );
+    await expect(
+      getExpertClickWindowHoursFor(ctxFor(GESTOR, { admin: false })),
+    ).rejects.toThrow("Apenas o admin da casa gerencia experts.");
   });
 
-  it("is sorted by depositado desc and maps snake_case to camelCase", async () => {
-    addExpert(ME, { nome: "Ana", tipo: "total", ativo: true });
-    addExpert(OTHER_EXPERT, { nome: "Bruno", tipo: "restrito", ativo: false });
-    fake.admin.onRpc("expert_metrics", () => ({
-      data: [
-        metricsRow(ME, {
-          depositado: 100,
-          depositado_clique: 60,
-          depositado_afiliado: 40,
-          depositos: 2,
-          depositantes: 2,
-          reativacoes: 1,
-          ftds: 1,
-          links: 3,
-          cliques: 5,
-          contatos: 4,
-        }),
-        metricsRow(OTHER_EXPERT, { depositado: 500 }),
-      ],
-      error: null,
-    }));
+  it("returns the house's configured window, 72 by default", async () => {
+    const defaultResult = await getExpertClickWindowHoursFor(ctxFor(ADMIN));
+    expect(defaultResult).toEqual({ janelaHoras: 72 });
 
-    const result = await listExpertsRankingFor(ctxFor(ADMIN), {});
-
-    expect(result.rows.map((r) => r.nome)).toEqual(["Bruno", "Ana"]);
-    const ana = result.rows.find((r) => r.nome === "Ana") as ExpertMetrics & {
-      nome: string;
-      tipo: string;
-      ativo: boolean;
-    };
-    expect(ana).toMatchObject({
-      expertId: ME,
-      tipo: "total",
-      ativo: true,
-      depositado: 100,
-      depositadoClique: 60,
-      depositadoAfiliado: 40,
-      depositos: 2,
-      depositantes: 2,
-      reativacoes: 1,
-      ftds: 1,
-      links: 3,
-      cliques: 5,
-      contatos: 4,
-    });
-  });
-
-  it("zero-fills an expert with no activity in the period", async () => {
-    addExpert(ME, { nome: "Ana" });
-    const result = await listExpertsRankingFor(ctxFor(ADMIN), {});
-    expect(result.rows).toEqual([
-      expect.objectContaining({ expertId: ME, depositado: 0, cliques: 0, contatos: 0 }),
-    ]);
+    fake.admin.rows("expert_settings").push({ tenant_id: TENANT, click_window_hours: 48 });
+    const configuredResult = await getExpertClickWindowHoursFor(ctxFor(ADMIN));
+    expect(configuredResult).toEqual({ janelaHoras: 48 });
   });
 });
 

@@ -44,7 +44,9 @@ import {
   setExpertActive,
 } from "@/lib/experts-admin.functions";
 
-const REPORT_QUERY_KEY = "rendimento-report";
+// Exportada para a "Regras de crédito" dialog (expert-settings-dialog.tsx)
+// invalidar o relatório depois de salvar a janela de clique.
+export const REPORT_QUERY_KEY = "rendimento-report";
 
 /** Instante ISO -> "hh:mm" no fuso de São Paulo. */
 function timeLabel(iso: string): string {

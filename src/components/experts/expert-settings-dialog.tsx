@@ -18,7 +18,9 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { saveExpertSettings } from "@/lib/expert-metrics.functions";
-import { EXPERTS_RANKING_QUERY_KEY } from "@/components/experts/experts-query";
+import { EXPERT_CLICK_WINDOW_QUERY_KEY } from "@/components/experts/experts-query";
+import { REPORT_QUERY_KEY } from "@/components/rendimento/report-view";
+import { TEAM_REPORT_QUERY_KEY } from "@/components/rendimento/team-ranking";
 
 const JANELA_MIN = 1;
 const JANELA_MAX = 720;
@@ -61,7 +63,12 @@ export function ExpertSettingsDialog({
     onSuccess: (result) => {
       toast.success("Janela de clique atualizada.");
       onSaved?.(result.clickWindowHours);
-      void qc.invalidateQueries({ queryKey: EXPERTS_RANKING_QUERY_KEY });
+      // A janela afeta "clique→depósito" nos dois relatórios (o individual
+      // e o da equipe) e a tela Experts, que a usa só para preencher esta
+      // dialog: invalida os três, não só quem abriu o diálogo.
+      void qc.invalidateQueries({ queryKey: [REPORT_QUERY_KEY] });
+      void qc.invalidateQueries({ queryKey: [TEAM_REPORT_QUERY_KEY] });
+      void qc.invalidateQueries({ queryKey: EXPERT_CLICK_WINDOW_QUERY_KEY });
       onOpenChange(false);
     },
     onError: (error: Error) => toast.error(error.message),

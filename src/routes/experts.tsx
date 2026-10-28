@@ -4,20 +4,21 @@
 // goes through the Task 6 server functions — no direct Supabase writes from
 // the browser.
 //
-// Fase 3, Task 6: a period picker and a "Regras de crédito" button (the
-// click-window settings dialog) were added; the table now also shows the
-// ranking metrics from `listExpertsRanking`, merged by expert id onto the
-// rows from `listExperts` (which still drives access/affiliate data and the
-// existing actions), sorted by "Depositado". The expert's name links to its
-// detail page (/experts/$expertId), a child route — like
-// `expert.leads.tsx`, this route renders only its own list at the exact
-// "/experts" path and defers to <Outlet /> under the child path so the list
-// doesn't render underneath the detail.
-//
 // Fase 3, Task 7: a profile without user can be linked to someone of the
 // house team ("Vincular a alguém da equipe") as a performance profile; such
 // rows show "Equipe (Gestor)" etc. and "Desvincular" instead of "Remover
 // acesso" (the person keeps their own role).
+//
+// Relatório de rendimento, Task 7: this screen went back to cadastro e
+// configuração only — the period picker and the ranking metrics columns
+// (`listExpertsRanking`, Fase 3 Task 6) moved to "Rendimento da equipe"
+// (/rendimento/equipe), which also shows the "Regras de crédito" shortcut.
+// The expert's name now links to the person's report
+// (/rendimento/equipe/$expertId) instead of the old /experts/$expertId
+// (kept only as a redirect to there). Like `expert.leads.tsx`, this route
+// renders only its own list at the exact "/experts" path and defers to
+// <Outlet /> under the child path so the list doesn't render underneath the
+// detail.
 import { useState } from "react";
 import { Link, Outlet, createFileRoute, useRouterState } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -38,7 +39,6 @@ import {
 import { Page, PageHeader } from "@/components/ui-premium/page-header";
 import { requestConfirmation } from "@/components/system-dialog-host";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
-import { CentralPeriodPicker } from "@/components/crm-results/shared";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import {
   deleteExpert,
@@ -48,13 +48,11 @@ import {
   setExpertActive,
 } from "@/lib/experts-admin.functions";
 import type { ExpertAdminRow } from "@/lib/experts-admin.functions";
+import { getExpertClickWindowHours } from "@/lib/expert-metrics.functions";
 import { acessoBadge, TIPO_LABEL } from "@/components/experts/expert-badges";
-import { listExpertsRanking, type ExpertMetrics } from "@/lib/expert-metrics.functions";
-import { DEFAULT_EXPERT_PERIOD, EXPERT_PERIODS, type PeriodKey } from "@/lib/expert-period";
-import { brl, num } from "@/lib/format";
 import {
+  EXPERT_CLICK_WINDOW_QUERY_KEY,
   EXPERTS_QUERY_KEY,
-  EXPERTS_RANKING_QUERY_KEY,
   UNASSIGNED_AFFILIATES_QUERY_KEY,
 } from "@/components/experts/experts-query";
 import { ExpertFormDialog } from "@/components/experts/expert-form-dialog";
@@ -73,31 +71,14 @@ function ExpertsRoute() {
   return isDetailRoute ? <Outlet /> : <ExpertsPage />;
 }
 
-function zeroMetrics(expertId: string): ExpertMetrics {
-  return {
-    expertId,
-    depositado: 0,
-    depositadoClique: 0,
-    depositadoAfiliado: 0,
-    depositos: 0,
-    depositantes: 0,
-    reativacoes: 0,
-    ftds: 0,
-    links: 0,
-    cliques: 0,
-    contatos: 0,
-  };
-}
-
 function ExpertsPage() {
   const isDemo = useIsDemoTenant();
   const qc = useQueryClient();
-  const [period, setPeriod] = useState<PeriodKey>(DEFAULT_EXPERT_PERIOD);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const listExpertsFn = useServerFn(listExperts);
   const listUnassignedFn = useServerFn(listUnassignedAffiliates);
-  const listRankingFn = useServerFn(listExpertsRanking);
+  const clickWindowFn = useServerFn(getExpertClickWindowHours);
   const removeAccessFn = useServerFn(removeExpertAccess);
   const setActiveFn = useServerFn(setExpertActive);
   const deleteExpertFn = useServerFn(deleteExpert);
@@ -110,26 +91,15 @@ function ExpertsPage() {
     queryKey: UNASSIGNED_AFFILIATES_QUERY_KEY,
     queryFn: () => listUnassignedFn(),
   });
-  const rankingQuery = useQuery({
-    queryKey: [...EXPERTS_RANKING_QUERY_KEY, period],
-    queryFn: () => listRankingFn({ data: { period } }),
+  const clickWindowQuery = useQuery({
+    queryKey: EXPERT_CLICK_WINDOW_QUERY_KEY,
+    queryFn: () => clickWindowFn(),
   });
 
   const experts = expertsQuery.data ?? [];
   const unassigned = unassignedQuery.data ?? [];
-  // null até o ranking carregar: o diálogo não salva um padrão por cima da janela real.
-  const janelaHoras = rankingQuery.data?.janelaHoras ?? null;
-
-  const metricsByExpert = new Map(
-    (rankingQuery.data?.rows ?? []).map((row) => [row.expertId, row]),
-  );
-
-  const rows = experts
-    .map((expert) => ({
-      expert,
-      metrics: metricsByExpert.get(expert.id) ?? zeroMetrics(expert.id),
-    }))
-    .sort((a, b) => b.metrics.depositado - a.metrics.depositado);
+  // null até carregar: o diálogo não salva um padrão por cima da janela real.
+  const janelaHoras = clickWindowQuery.data?.janelaHoras ?? null;
 
   const [formOpen, setFormOpen] = useState(false);
   const [editingExpert, setEditingExpert] = useState<ExpertAdminRow | null>(null);
@@ -188,7 +158,6 @@ function ExpertsPage() {
         subtitle="Cadastre quem acompanha os leads da casa, por ID de afiliado ou com acesso total."
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <CentralPeriodPicker value={period} onChange={setPeriod} periods={EXPERT_PERIODS} />
             <Button variant="outline" className="gap-2" onClick={() => setSettingsOpen(true)}>
               <Settings className="h-4 w-4" />
               Regras de crédito
@@ -216,21 +185,15 @@ function ExpertsPage() {
                 <TableHead>IDs de afiliado</TableHead>
                 <TableHead>Leads</TableHead>
                 <TableHead>Acesso</TableHead>
-                <TableHead className="text-right">Depositado</TableHead>
-                <TableHead className="text-right">Por clique</TableHead>
-                <TableHead className="text-right">Por afiliado</TableHead>
-                <TableHead className="text-right">Reativações</TableHead>
-                <TableHead className="text-right">FTD</TableHead>
-                <TableHead className="text-right">Cliques</TableHead>
                 <TableHead className="text-right">Ações</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map(({ expert, metrics }) => (
+              {experts.map((expert) => (
                 <TableRow key={expert.id}>
                   <TableCell className="font-medium">
                     <Link
-                      to="/experts/$expertId"
+                      to="/rendimento/equipe/$expertId"
                       params={{ expertId: expert.id }}
                       className="hover:underline"
                     >
@@ -257,12 +220,6 @@ function ExpertsPage() {
                   <TableCell>
                     {acessoBadge(expert.acesso, expert.papelEquipe, expert.ativo)}
                   </TableCell>
-                  <TableCell className="text-right">{brl(metrics.depositado)}</TableCell>
-                  <TableCell className="text-right">{brl(metrics.depositadoClique)}</TableCell>
-                  <TableCell className="text-right">{brl(metrics.depositadoAfiliado)}</TableCell>
-                  <TableCell className="text-right">{num(metrics.reativacoes)}</TableCell>
-                  <TableCell className="text-right">{num(metrics.ftds)}</TableCell>
-                  <TableCell className="text-right">{num(metrics.cliques)}</TableCell>
                   <TableCell className="text-right">
                     <div className="flex flex-wrap items-center justify-end gap-2">
                       <DemoDisabledTooltip active={isDemo}>
@@ -389,7 +346,7 @@ function ExpertsPage() {
               ))}
               {experts.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={12} className="py-8 text-center text-muted-foreground">
+                  <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
                     Nenhum expert cadastrado.
                   </TableCell>
                 </TableRow>

@@ -1,11 +1,13 @@
-// Server functions de painel e ranking da Área do Expert (Fase 3, Task 3):
-// dashboard do próprio expert, ranking (admin) e a configuração da janela
-// de clique. Task 8 acrescenta o extrato de créditos (base da comissão
-// paga por fora do sistema) e o CSV do período. O detalhe por expert
-// (`getExpertDetail`/`getExpertDetailFor`) foi removido no Relatório de
-// rendimento (Task 5): a tela que o usava (/experts/$expertId) agora
-// redireciona para /rendimento/equipe/$expertId. Consomem as funções SQL
-// da Task 2 (`expert_metrics`/`expert_metrics_daily`) e da Task 1
+// Server functions de painel da Área do Expert (Fase 3, Task 3): dashboard
+// do próprio expert e a configuração da janela de clique. Task 8 acrescenta
+// o extrato de créditos (base da comissão paga por fora do sistema) e o CSV
+// do período. O detalhe por expert (`getExpertDetail`/`getExpertDetailFor`)
+// foi removido no Relatório de rendimento (Task 5): a tela que o usava
+// (/experts/$expertId) agora redireciona para /rendimento/equipe/$expertId.
+// O ranking do admin (`listExpertsRanking`/`listExpertsRankingFor`) foi
+// removido no Relatório de rendimento (Task 7): virou `getTeamReport`
+// (`expert-report.functions.ts`), atrás de /rendimento/equipe. Consomem as
+// funções SQL da Task 2 (`expert_metrics`/`expert_metrics_daily`) e da Task 1
 // (`expert_settings`/`refresh_expert_credits`), todas service_role, e ainda
 // fora dos tipos gerados do Supabase → `(supabaseAdmin as any)`, como em
 // `expert-access.server.ts`.
@@ -13,7 +15,7 @@
 // Guards: `requireExpertContext` para o próprio expert (dashboard);
 // `requireExpertAdminTenant` (exportado de `experts-admin.functions.ts`,
 // mesma cadeia `resolveOperationalTenantForRequest` + `requireTenantAdmin`)
-// para o admin (ranking, config). O extrato e o CSV dele resolvem o dono
+// para o admin (janela de clique). O extrato e o CSV dele resolvem o dono
 // por `resolveReportSubject` (relatório de rendimento): sem `expertId`, o
 // próprio usuário; com `expertId`, só o admin.
 
@@ -22,7 +24,7 @@ import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { requireExpertContext, type ExpertTipo } from "@/lib/expert-access.server";
+import { requireExpertContext } from "@/lib/expert-access.server";
 import { DEFAULT_EXPERT_PERIOD, periodRange, type PeriodKey } from "@/lib/expert-period";
 import { resolveReportSubject } from "@/lib/expert-report-subject.server";
 import { requireExpertAdminTenant } from "@/lib/experts-admin.functions";
@@ -165,6 +167,24 @@ export async function getClickWindowHours(tenantId: string): Promise<number> {
   return (data as { click_window_hours?: number } | null)?.click_window_hours ?? 72;
 }
 
+// Relatório de rendimento, Task 7: a tela Experts (configuração) precisa da
+// janela salva para abrir a "Regras de crédito" dialog já preenchida, sem
+// mais depender do ranking (`listExpertsRanking`, removido — o ranking agora
+// vive em /rendimento/equipe). As telas de relatório pegam a janela de
+// `getExpertReport`/`getTeamReport`, que já a devolvem.
+export const getExpertClickWindowHours = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) =>
+    getExpertClickWindowHoursFor(context as unknown as ServerContext),
+  );
+
+export async function getExpertClickWindowHoursFor(
+  ctx: ServerContext,
+): Promise<{ janelaHoras: number }> {
+  const tenantId = await requireExpertAdminTenant(ctx);
+  return { janelaHoras: await getClickWindowHours(tenantId) };
+}
+
 // ---------------------------------------------------------- expert dashboard
 
 const periodInput = z.object({ period: periodKeySchema.optional() });
@@ -204,50 +224,6 @@ export async function getExpertDashboardFor(
   }));
 
   return { metrics, serie, janelaHoras };
-}
-
-// ---------------------------------------------------------- admin: ranking
-
-export const listExpertsRanking = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => periodInput.parse(data ?? {}))
-  .handler(async ({ data, context }) =>
-    listExpertsRankingFor(context as unknown as ServerContext, data),
-  );
-
-export async function listExpertsRankingFor(
-  ctx: ServerContext,
-  data: z.input<typeof periodInput>,
-): Promise<{
-  rows: (ExpertMetrics & { nome: string; tipo: ExpertTipo; ativo: boolean })[];
-  janelaHoras: number;
-}> {
-  const input = periodInput.parse(data ?? {});
-  const period = input.period ?? DEFAULT_EXPERT_PERIOD;
-  const tenantId = await requireExpertAdminTenant(ctx);
-  const { from, to } = periodRange(period, new Date());
-
-  const [{ data: expertsRows, error: expertsErr }, metricsRows, janelaHoras] = await Promise.all([
-    db().from("experts").select("id,nome,tipo,ativo").eq("tenant_id", tenantId),
-    fetchExpertMetrics(tenantId, from, to),
-    getClickWindowHours(tenantId),
-  ]);
-  if (expertsErr) throw new Error(expertsErr.message);
-
-  const metricsByExpert = new Map(metricsRows.map((r) => [r.expert_id, mapMetricsRow(r)]));
-
-  const rows = (
-    (expertsRows ?? []) as Array<{ id: string; nome: string; tipo: ExpertTipo; ativo: boolean }>
-  )
-    .map((e) => ({
-      ...(metricsByExpert.get(e.id) ?? zeroMetrics(e.id)),
-      nome: e.nome,
-      tipo: e.tipo,
-      ativo: e.ativo,
-    }))
-    .sort((a, b) => b.depositado - a.depositado);
-
-  return { rows, janelaHoras };
 }
 
 // ---------------------------------------------------------- shared: player names
