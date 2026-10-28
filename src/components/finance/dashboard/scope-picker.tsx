@@ -1,6 +1,6 @@
 // Super admin's "Ver:" picker (spec §4): "Todas as casas", then each group,
 // then each house, from listDashboardScopes. A scope is encoded as a Select
-// value ("all", "group:<id>", "tenant:<id>").
+// value ("all", "group:<id>", "tenant:<id>") by ./scope.
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 
@@ -16,17 +16,7 @@ import {
 } from "@/components/ui/select";
 import { listDashboardScopes, type DashboardScope } from "@/lib/finance-dashboard.functions";
 
-export function scopeToValue(scope: DashboardScope): string {
-  if (scope.kind === "tenant") return `tenant:${scope.tenantId}`;
-  if (scope.kind === "group") return `group:${scope.groupId}`;
-  return "all";
-}
-
-export function valueToScope(value: string): DashboardScope {
-  if (value.startsWith("tenant:")) return { kind: "tenant", tenantId: value.slice(7) };
-  if (value.startsWith("group:")) return { kind: "group", groupId: value.slice(6) };
-  return { kind: "all" };
-}
+import { scopeToValue, valueToScope } from "./scope";
 
 export function ScopePicker({
   value,

@@ -24,7 +24,8 @@ import { CostBreakdown } from "./cost-breakdown";
 import { KpiCards } from "./kpi-cards";
 import { PendingBanner } from "./pending-banner";
 import { ProfitTrendChart } from "./profit-trend-chart";
-import { ScopePicker, scopeToValue } from "./scope-picker";
+import { scopeToValue, tenantClickAction } from "./scope";
+import { ScopePicker } from "./scope-picker";
 import { TenantProfitTable } from "./tenant-profit-table";
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
@@ -113,6 +114,21 @@ export function FinanceDashboardView({
     setScope(initialScope);
   }
 
+  // A house row opens the caller's page, or moves the super admin's picker to
+  // that house (see tenantClickAction).
+  const clickAction = tenantClickAction({
+    scope,
+    initialScope,
+    canPickScope,
+    hasOnOpenTenant: !!onOpenTenant,
+  });
+  const openTenant =
+    clickAction === "open"
+      ? onOpenTenant
+      : clickAction === "switch"
+        ? (tenantId: string) => setScope({ kind: "tenant", tenantId })
+        : undefined;
+
   const getDashboard = useServerFn(getFinanceDashboard);
   const query = useQuery({
     queryKey: ["finance-dashboard", scope, period],
@@ -136,7 +152,7 @@ export function FinanceDashboardView({
       ) : (
         <DashboardBody
           dashboard={query.data}
-          onOpenTenant={onOpenTenant}
+          onOpenTenant={openTenant}
           // "Lançar agora" opens the caller's own grid, so it only applies
           // while the scope is still the one the caller passed in.
           onLaunchPending={scopeToValue(scope) === initialKey ? onLaunchPending : undefined}
