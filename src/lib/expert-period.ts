@@ -72,3 +72,81 @@ export function periodRange(key: PeriodKey, now: Date): { from: string; to: stri
     }
   }
 }
+
+/** Período padrão das telas de relatório (global-constraints.md): este mês. */
+export const DEFAULT_REPORT_PERIOD: PeriodKey = "mes_atual";
+
+type IsoRange = { from: string; to: string };
+
+/**
+ * Limites do período anterior, de mesma duração que `current` e terminando
+ * no mesmo ponto relativo (spec `2026-10-28-relatorio-rendimento-design.md`
+ * §4, bloco 1):
+ * - "hoje"/"ontem"/"7"/"30"/"90": desloca `current` em N dias (N = 1 para
+ *   hoje e ontem, N = o tamanho do período para 7/30/90). Sem DST no
+ *   Brasil, deslocar em dias corridos preserva o horário do dia.
+ * - "mes_atual": do dia 1º do mês anterior até o mesmo dia e hora de
+ *   `now`; se o mês anterior for mais curto, o limite vai até o fim dele
+ *   (ou seja, até o início deste mês).
+ * - "mes_anterior": o mês inteiro anterior ao mês anterior.
+ */
+function previousRange(key: PeriodKey, now: Date, current: IsoRange): IsoRange {
+  switch (key) {
+    case "hoje":
+    case "ontem":
+    case "7":
+    case "30":
+    case "90": {
+      const days = key === "hoje" || key === "ontem" ? 1 : Number(key);
+      const shift = days * DAY_MS;
+      return {
+        from: new Date(new Date(current.from).getTime() - shift).toISOString(),
+        to: new Date(new Date(current.to).getTime() - shift).toISOString(),
+      };
+    }
+    case "mes_atual": {
+      const thisMonthStart = brtMonthStart(now);
+      const todayStart = brtDayStart(now);
+      const prevMonthStart = brtMonthStart(new Date(thisMonthStart.getTime() - DAY_MS));
+      const dayOfMonth = Math.round((todayStart.getTime() - thisMonthStart.getTime()) / DAY_MS) + 1;
+      const daysInPrevMonth = Math.round((thisMonthStart.getTime() - prevMonthStart.getTime()) / DAY_MS);
+      const elapsedMs = now.getTime() - todayStart.getTime();
+      const to =
+        dayOfMonth <= daysInPrevMonth
+          ? new Date(prevMonthStart.getTime() + (dayOfMonth - 1) * DAY_MS + elapsedMs)
+          : thisMonthStart;
+      return { from: prevMonthStart.toISOString(), to: to.toISOString() };
+    }
+    case "mes_anterior": {
+      const lastMonthStart = parseBrtDayStart(current.from.slice(0, 10));
+      const monthBeforeLastStart = brtMonthStart(new Date(lastMonthStart.getTime() - DAY_MS));
+      return { from: monthBeforeLastStart.toISOString(), to: lastMonthStart.toISOString() };
+    }
+    default: {
+      const unknown: never = key;
+      throw new Error(`previousRange: período desconhecido "${String(unknown)}".`);
+    }
+  }
+}
+
+/**
+ * Pares `de`/`até` do período atual e do período anterior de mesma
+ * duração, para comparação (spec §4, bloco 1). `current` é igual a
+ * `periodRange(key, now)`.
+ */
+export function comparisonRange(
+  key: PeriodKey,
+  now: Date,
+): { current: IsoRange; previous: IsoRange } {
+  const current = periodRange(key, now);
+  return { current, previous: previousRange(key, now, current) };
+}
+
+/**
+ * Variação percentual de `current` em relação a `previous`, arredondada a
+ * 1 casa decimal. Devolve `null` quando não há base (`previous === 0`).
+ */
+export function variationPct(current: number, previous: number): number | null {
+  if (previous === 0) return null;
+  return Math.round(((current - previous) / previous) * 1000) / 10;
+}
