@@ -29,6 +29,11 @@
 --   pelos dados da data do depósito:
 --     0. sem crédito e criado há menos de 15 minutos: status 'pendente',
 --        "aguardando cálculo (até 10 min)" (o cron ainda não passou);
+--     0b. sem crédito mas a regra o daria a esta pessoa (clique elegível
+--        dela, ou o histórico de afiliado cobre o affiliate_id do lead na
+--        data e o depósito é de experts.created_at em diante; nos dois casos
+--        antes de desativado_em ou sem desativação): status 'pendente',
+--        "ainda não calculado" (ex.: importação tardia fora do recálculo);
 --     1. "antes do seu cadastro" (antes de experts.created_at);
 --     2. "perfil desativado na data" (em ou depois de desativado_em);
 --     3. "ID de afiliado não era seu na data": o lead tem affiliate_id, o
@@ -270,33 +275,14 @@ as $$
              when c.expert_id = _expert then 'afiliado'
              when c.expert_id is not null then 'contou para outro membro da equipe'
              when d.created_at > now() - interval '15 minutes' then 'aguardando cálculo (até 10 min)'
+             -- The rule would credit it to this person but it was never
+             -- computed (late import older than the recompute window, ...):
+             -- no reason is given for a deposit that is not settled.
+             when el.pendente then 'ainda não calculado'
              when d.created_at < e.created_at then 'antes do seu cadastro'
              when e.desativado_em is not null and d.created_at >= e.desativado_em
                then 'perfil desativado na data'
-             when ld.affiliate_id is not null
-                  and not exists (
-                    select 1 from public.expert_affiliate_history h
-                    where h.tenant_id = _tenant
-                      and h.affiliate_id = ld.affiliate_id
-                      and h.expert_id = _expert
-                      and h.valid_from <= d.created_at
-                      and (h.valid_to is null or d.created_at < h.valid_to)
-                  )
-                  and not exists (
-                    select 1
-                    from public.link_dispatches x
-                    join public.click_events xc on xc.link_dispatch_id = x.id and xc.tenant_id = _tenant
-                    where x.tenant_id = _tenant
-                      and x.recipient_player_id = _player
-                      and x.source_type = 'expert'
-                      and x.send_status = 'sent'
-                      and x.source_id = _expert::text
-                      and x.sent_at is not null
-                      and x.sent_at <= d.created_at
-                      and xc.is_human
-                      and xc.occurred_at >= greatest(x.sent_at, d.created_at - make_interval(hours => w.hours))
-                      and xc.occurred_at <= d.created_at
-                  )
+             when ld.affiliate_id is not null and not el.has_affiliate and not el.has_click
                then 'ID de afiliado não era seu na data'
              else 'sem clique seu nas ' || w.hours || 'h anteriores'
            end detalhe,
@@ -305,6 +291,7 @@ as $$
              when c.expert_id = _expert then 'creditado'
              when c.expert_id is not null then 'outra_pessoa'
              when d.created_at > now() - interval '15 minutes' then 'pendente'
+             when el.pendente then 'pendente'
              else 'nao_creditado'
            end status
     from cte_deps d
@@ -322,6 +309,44 @@ as $$
              ) hours
       where c.expert_id is null
     ) w on true
+    -- Same predicates as refresh_expert_credits: an eligible human click of
+    -- this person (expert dispatch for this lead, sent at or before the
+    -- deposit, click in [greatest(sent_at, deposit - window), deposit]) or
+    -- the affiliate history giving the lead's affiliate id to this person at
+    -- the deposit time (only from experts.created_at on); neither applies at
+    -- or after desativado_em.
+    left join lateral (
+      select k.has_click, k.has_affiliate,
+             (k.has_click or (k.has_affiliate and d.created_at >= e.created_at))
+               and (e.desativado_em is null or d.created_at < e.desativado_em) pendente
+      from (
+        select
+          exists (
+            select 1
+            from public.link_dispatches x
+            join public.click_events xc on xc.link_dispatch_id = x.id and xc.tenant_id = _tenant
+            where x.tenant_id = _tenant
+              and x.recipient_player_id = _player
+              and x.source_type = 'expert'
+              and x.send_status = 'sent'
+              and x.source_id = _expert::text
+              and x.sent_at is not null
+              and x.sent_at <= d.created_at
+              and xc.is_human
+              and xc.occurred_at >= greatest(x.sent_at, d.created_at - make_interval(hours => w.hours))
+              and xc.occurred_at <= d.created_at
+          ) has_click,
+          (ld.affiliate_id is not null and exists (
+            select 1 from public.expert_affiliate_history h
+            where h.tenant_id = _tenant
+              and h.affiliate_id = ld.affiliate_id
+              and h.expert_id = _expert
+              and h.valid_from <= d.created_at
+              and (h.valid_to is null or d.created_at < h.valid_to)
+          )) has_affiliate
+      ) k
+      where c.expert_id is null
+    ) el on true
   )
   select p.at, p.kind, p.titulo, p.detalhe, p.valor, p.status
   from (

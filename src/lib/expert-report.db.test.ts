@@ -921,6 +921,47 @@ describe("expert_lead_timeline", () => {
       ["link", null, "Bônus 100%"],
     ]);
   });
+
+  it("timeline never gives a reason for an old deposit the rule would credit but was never computed", async () => {
+    const { tenant, x } = await timelineHouse();
+    // Clicked lead and AFF-X lead, with links opening the relationship.
+    const clicked = await newPlayer(tenant);
+    const ldc = await sendLink(tenant, x, clicked, "2026-04-01T10:00:00Z");
+    await click(tenant, ldc, "2026-04-01T10:30:00Z");
+    const aff = await newPlayer(tenant, { affiliate: "AFF-X" });
+    await sendLink(tenant, x, aff, "2026-01-10T10:00:00Z");
+    // Clicked after X's deactivation: ineligible.
+    const late = await newPlayer(tenant);
+    const ldl = await sendLink(tenant, x, late, "2026-05-30T10:00:00Z");
+    await click(tenant, ldl, "2026-06-02T10:00:00Z");
+    await refresh(tenant);
+
+    // Late imports, older than any recompute: no credit rows for them.
+    await deposit(tenant, clicked, "2026-04-01T11:00:00Z", { valor: 10 }); // eligible click
+    await deposit(tenant, clicked, "2026-04-20T11:00:00Z", { valor: 11 }); // outside the window
+    await deposit(tenant, aff, "2026-04-15T12:00:00Z", { valor: 12 }); // affiliate covers it
+    await deposit(tenant, aff, "2026-02-15T12:00:00Z", { valor: 13 }); // affiliate not yet X's
+    await deposit(tenant, aff, "2026-01-15T12:00:00Z", { valor: 14 }); // before X's registration
+    await deposit(tenant, late, "2026-06-02T11:00:00Z", { valor: 15 }); // after deactivation
+
+    const deps = async (lead: string) =>
+      (await timeline(tenant, x, lead))
+        .filter((r) => r.kind === "deposito")
+        .map((r) => [iso(r.at), r.status, r.detalhe]);
+
+    expect(await deps(clicked)).toEqual([
+      ["2026-04-20T11:00:00.000Z", "nao_creditado", "sem clique seu nas 24h anteriores"],
+      ["2026-04-01T11:00:00.000Z", "pendente", "ainda não calculado"],
+    ]);
+    expect(await deps(aff)).toEqual([
+      ["2026-04-15T12:00:00.000Z", "pendente", "ainda não calculado"],
+      ["2026-02-15T12:00:00.000Z", "nao_creditado", "ID de afiliado não era seu na data"],
+      ["2026-01-15T12:00:00.000Z", "nao_creditado", "antes do seu cadastro"],
+    ]);
+    expect(await deps(late)).toEqual([
+      ["2026-06-02T11:00:00.000Z", "nao_creditado", "perfil desativado na data"],
+    ]);
+  });
 });
 
 describe("access", () => {
