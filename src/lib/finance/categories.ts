@@ -45,3 +45,25 @@ export function looksLikeBetleadsCost(descricao: string, categoria: string | nul
     (categoria !== null && BETLEADS_COST_PATTERN.test(categoria))
   );
 }
+
+/** The warning shown while typing a cost that looks like a Betleads charge (spec §7.3). */
+export function betleadsHint(descricao: string, categoria: string | null): string | null {
+  return looksLikeBetleadsCost(descricao, categoria) ? "o custo Betleads já entra sozinho" : null;
+}
+
+/**
+ * Categories matching the typed text (all of them when empty, in the given
+ * order: fixed first, then the house's), plus the typed name as a new
+ * category when no existing one has that name.
+ */
+export function categoryChoices(
+  categories: string[],
+  search: string,
+): { options: string[]; newName: string | null } {
+  const typed = search.trim().replace(/\s+/g, " ");
+  if (typed === "") return { options: categories, newName: null };
+  const key = categoryKey(typed);
+  const options = categories.filter((label) => categoryKey(label).includes(key));
+  const exists = categories.some((label) => categoryKey(label) === key);
+  return { options, newName: exists ? null : typed };
+}

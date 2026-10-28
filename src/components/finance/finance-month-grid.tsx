@@ -3,7 +3,7 @@
 // single saveFinanceDays call), computed columns "pendente" until both
 // manual fields of the day are confirmed. Reused read-only by Task 7
 // (/grupo/casa) with `readOnly`.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Sparkles } from "lucide-react";
@@ -18,6 +18,7 @@ import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 import {
   Table,
   TableBody,
@@ -48,6 +49,9 @@ function parseMoney(value: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+/** Background of the typed columns (Anúncios, GGR), apart from the CRM ones (spec §9). */
+const MANUAL_CELL = "bg-primary/5";
+
 function PendingCell() {
   return <span className="text-xs italic text-muted-foreground">pendente</span>;
 }
@@ -55,17 +59,30 @@ function PendingCell() {
 export function FinanceMonthView({
   tenantId,
   readOnly = false,
+  initialMonth,
+  focusDate,
 }: {
   tenantId: string;
   readOnly?: boolean;
+  /** "YYYY-MM" to open on (default: the current month). */
+  initialMonth?: string;
+  /** "YYYY-MM-DD" whose row is scrolled into view and ringed ("Lançar agora"). */
+  focusDate?: string;
 }) {
   const isDemo = useIsDemoTenant();
   const qc = useQueryClient();
   const getMonth = useServerFn(getTenantFinanceMonth);
   const saveDaysFn = useServerFn(saveFinanceDays);
 
-  const [month, setMonth] = useState(currentMonth);
+  const [month, setMonth] = useState(() => initialMonth ?? currentMonth());
   const [edits, setEdits] = useState<Edits>({});
+
+  // A new initialMonth from the caller (the URL) replaces the picked month.
+  const [seenInitialMonth, setSeenInitialMonth] = useState(initialMonth);
+  if (initialMonth !== seenInitialMonth) {
+    setSeenInitialMonth(initialMonth);
+    if (initialMonth) setMonth(initialMonth);
+  }
 
   const query = useQuery({
     queryKey: financeMonthQueryKey(tenantId, month),
@@ -78,6 +95,16 @@ export function FinanceMonthView({
   }, [tenantId, month]);
 
   const data = query.data;
+
+  // Scroll the focused day into view once its row is rendered (once per date).
+  const focusRowRef = useRef<HTMLTableRowElement | null>(null);
+  const scrolledFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!focusDate || scrolledFor.current === focusDate || !focusRowRef.current) return;
+    scrolledFor.current = focusDate;
+    focusRowRef.current.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [focusDate, data]);
+
   const canEditValues = !readOnly && data?.permissions.canEditValues === true;
   const hasEdits = Object.keys(edits).length > 0;
 
@@ -158,7 +185,7 @@ export function FinanceMonthView({
           <TableHeader>
             <TableRow>
               <TableHead>Data</TableHead>
-              <TableHead>Anúncios</TableHead>
+              <TableHead className={MANUAL_CELL}>Anúncios</TableHead>
               <TableHead>Cadastros</TableHead>
               <TableHead>Custo/cadastro</TableHead>
               <TableHead>FTDs</TableHead>
@@ -167,7 +194,7 @@ export function FinanceMonthView({
               <TableHead>Depósitos totais</TableHead>
               <TableHead>Saques</TableHead>
               <TableHead>Net bruto</TableHead>
-              <TableHead>GGR</TableHead>
+              <TableHead className={MANUAL_CELL}>GGR</TableHead>
               <TableHead>Resultado caixa</TableHead>
               <TableHead>ROI caixa</TableHead>
             </TableRow>
@@ -181,9 +208,14 @@ export function FinanceMonthView({
               </TableRow>
             )}
             {days.map((day) => (
-              <TableRow key={day.date}>
+              <TableRow
+                key={day.date}
+                ref={day.date === focusDate ? focusRowRef : undefined}
+                data-date={day.date}
+                className={cn(day.date === focusDate && "ring-2 ring-inset ring-primary")}
+              >
                 <TableCell>{day.date.slice(8, 10)}</TableCell>
-                <TableCell>
+                <TableCell className={MANUAL_CELL}>
                   {canEditValues ? (
                     <div className="flex items-center gap-1">
                       <Input
@@ -230,7 +262,7 @@ export function FinanceMonthView({
                 <TableCell>{formatBRL(day.depositAmount)}</TableCell>
                 <TableCell>{formatBRL(day.withdrawalAmount)}</TableCell>
                 <TableCell>{day.pending ? <PendingCell /> : formatBRL(day.net)}</TableCell>
-                <TableCell>
+                <TableCell className={MANUAL_CELL}>
                   {canEditValues ? (
                     <Input
                       type="number"
@@ -255,7 +287,7 @@ export function FinanceMonthView({
           <TableFooter>
             <TableRow>
               <TableCell className="font-semibold">TOTAL</TableCell>
-              <TableCell>{formatBRL(summary.adSpend)}</TableCell>
+              <TableCell className={MANUAL_CELL}>{formatBRL(summary.adSpend)}</TableCell>
               <TableCell>{num(summary.registrations)}</TableCell>
               <TableCell>{formatBRL(summary.costPerRegistration)}</TableCell>
               <TableCell>{num(summary.ftds)}</TableCell>
@@ -264,13 +296,13 @@ export function FinanceMonthView({
               <TableCell>{formatBRL(summary.depositAmount)}</TableCell>
               <TableCell>{formatBRL(summary.withdrawalAmount)}</TableCell>
               <TableCell>{formatBRL(summary.net)}</TableCell>
-              <TableCell>{formatBRL(summary.ggr)}</TableCell>
+              <TableCell className={MANUAL_CELL}>{formatBRL(summary.ggr)}</TableCell>
               <TableCell>{formatBRL(summary.cashResult)}</TableCell>
               <TableCell>{formatRatio(summary.roi)}</TableCell>
             </TableRow>
             <TableRow>
               <TableCell className="text-muted-foreground">MÉDIA DIÁRIA</TableCell>
-              <TableCell>
+              <TableCell className={MANUAL_CELL}>
                 {formatBRL(averageFilledAdSpend(days))}
               </TableCell>
               <TableCell colSpan={9} />
@@ -281,7 +313,7 @@ export function FinanceMonthView({
         </Table>
       </div>
 
-      <div className="grid gap-2 rounded-lg border border-border/40 bg-background/30 p-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-2 rounded-lg border border-border/40 bg-background/30 p-4 text-sm sm:grid-cols-2 lg:grid-cols-5">
         <div>
           <p className="text-xs uppercase tracking-wide text-muted-foreground">
             Taxa de movimentação
@@ -295,6 +327,12 @@ export function FinanceMonthView({
         <div>
           <p className="text-xs uppercase tracking-wide text-muted-foreground">Outros custos</p>
           <p className="font-medium">{formatBRL(summary.otherCosts)}</p>
+        </div>
+        <div>
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">Betleads</p>
+          <p className="font-medium">
+            {formatBRL(summary.betleadsUsage + (summary.betleadsFee ?? 0))}
+          </p>
         </div>
         <div>
           <p className="text-xs uppercase tracking-wide text-muted-foreground">Resultado do mês</p>

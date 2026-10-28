@@ -137,7 +137,9 @@ export function FinanceDashboardView({
         <DashboardBody
           dashboard={query.data}
           onOpenTenant={onOpenTenant}
-          onLaunchPending={onLaunchPending}
+          // "Lançar agora" opens the caller's own grid, so it only applies
+          // while the scope is still the one the caller passed in.
+          onLaunchPending={scopeToValue(scope) === initialKey ? onLaunchPending : undefined}
         />
       )}
     </div>
