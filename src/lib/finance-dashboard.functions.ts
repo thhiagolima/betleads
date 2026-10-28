@@ -362,12 +362,7 @@ export async function getFinanceDashboardFor(
       current: currentSummary,
       previous: summarizeWindow(previous, costMonths.previous, tenant.id),
       goals: current
-        ? evaluateGoals(
-            goalRowsByTenant.get(tenant.id) ?? [],
-            currentSummary,
-            current,
-            today,
-          )
+        ? evaluateGoals(goalRowsByTenant.get(tenant.id) ?? [], currentSummary, current, today)
         : [],
       pendingDates: [
         ...new Set(

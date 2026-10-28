@@ -11,10 +11,7 @@ import { toast } from "sonner";
 
 import { formatBRL } from "@/components/finance/format";
 import { currentMonth } from "@/components/finance/finance-month-grid";
-import {
-  financeMonthQueryKey,
-  invalidateFinanceAfterSave,
-} from "@/components/finance/query-keys";
+import { financeMonthQueryKey, invalidateFinanceAfterSave } from "@/components/finance/query-keys";
 import { deleteOtherCost, getTenantFinanceMonth, saveOtherCost } from "@/lib/finance.functions";
 import {
   MAX_CATEGORY_LENGTH,

@@ -10,10 +10,7 @@ import { Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import { betleadsUsageNote, formatBRL, formatRatio } from "@/components/finance/format";
-import {
-  financeMonthQueryKey,
-  invalidateFinanceAfterSave,
-} from "@/components/finance/query-keys";
+import { financeMonthQueryKey, invalidateFinanceAfterSave } from "@/components/finance/query-keys";
 import { num } from "@/lib/format";
 import { averageFilledAdSpend, presetRange } from "@/lib/finance/calc";
 import type { FinanceDay } from "@/lib/finance/types";
@@ -37,7 +34,6 @@ import {
 export function currentMonth() {
   return presetRange("today", new Date()).from.slice(0, 7);
 }
-
 
 type Edits = Record<string, { adSpend?: string; ggr?: string }>;
 type EditableField = "adSpend" | "ggr";

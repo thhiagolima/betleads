@@ -968,10 +968,12 @@ describe("PostgREST 1000-row cap", () => {
   ];
 
   it("5 houses over ~13 months + comparison: totals, rows, months and goals are complete", async () => {
-    fake.admin.rows("tenants").push(
-      { id: EXTRA_D, nome: "Casa D", status: "active", is_demo: false },
-      { id: EXTRA_E, nome: "Casa E", status: "active", is_demo: false },
-    );
+    fake.admin
+      .rows("tenants")
+      .push(
+        { id: EXTRA_D, nome: "Casa D", status: "active", is_demo: false },
+        { id: EXTRA_E, nome: "Casa E", status: "active", is_demo: false },
+      );
     fake.admin.rows("tenant_groups").push({ id: G_BIG, nome: "Grupo Grande", is_demo: false });
     fake.admin
       .rows("tenant_group_tenants")
