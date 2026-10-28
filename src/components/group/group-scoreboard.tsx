@@ -7,7 +7,14 @@
 // "meta X" caption.
 import { useMemo, useState } from "react";
 
-import { formatBRL, formatInt, formatPct, formatPp, formatRatio } from "@/components/finance/format";
+import {
+  formatBRL,
+  formatInt,
+  formatPct,
+  formatPp,
+  formatRatio,
+  GGR_COLUMN_LABEL,
+} from "@/components/finance/format";
 import { pctChange, ppChange } from "@/lib/finance/calc";
 import type { GoalEvaluation, GoalMetric, GoalStatus, PeriodSummary } from "@/lib/finance/types";
 import { cn } from "@/lib/utils";
@@ -51,7 +58,7 @@ const CORE_COLUMNS: ColumnDef[] = [
 
 const EXTRA_COLUMNS: ColumnDef[] = [
   { key: "registrations", label: "Cadastros", goalMetric: "registrations", format: "int", pick: (s) => s.registrations },
-  { key: "ggr", label: "GGR", format: "money", pick: (s) => s.ggr },
+  { key: "ggr", label: GGR_COLUMN_LABEL, format: "money", pick: (s) => s.ggr },
 ];
 
 const ALL_COLUMNS = [...CORE_COLUMNS, ...EXTRA_COLUMNS];
@@ -117,11 +124,14 @@ function VariationLabel({
 export function GroupScoreboard({
   rows,
   onRowClick,
+  defaultMoreColumns = false,
 }: {
   rows: ScoreboardRow[];
   onRowClick?: (tenantId: string) => void;
+  /** Start with "mais colunas" open (Cadastros, GGR). */
+  defaultMoreColumns?: boolean;
 }) {
-  const [moreColumns, setMoreColumns] = useState(false);
+  const [moreColumns, setMoreColumns] = useState(defaultMoreColumns);
   const [sort, setSort] = useState<{ column: ScoreboardColumnKey; direction: "asc" | "desc" } | null>(
     null,
   );

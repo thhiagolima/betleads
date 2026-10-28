@@ -336,6 +336,7 @@ async function executeCallBlock(progress: any, block: any, player: any): Promise
     error_message: result.ok ? null : JSON.stringify(result.body).slice(0, 1000),
     rendered_text: renderedText,
     billing_reference_id: result.billing?.referenceId ?? null,
+    provider_account_id: result.providerAccountId ?? null,
   } as any);
   if (historyInsertError) logCallHistoryInsertError("call_flow", historyInsertError, result);
 

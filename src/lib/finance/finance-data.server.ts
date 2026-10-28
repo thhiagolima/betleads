@@ -8,6 +8,7 @@ import { z } from "zod";
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import {
+  allocateMonthlyGgr,
   compareRange,
   computeDay,
   evaluateGoal,
@@ -18,10 +19,12 @@ import type {
   CompareMode,
   DateRange,
   FinanceDay,
+  FinanceDayInput,
   GoalDay,
   GoalDirection,
   GoalEvaluation,
   GoalMetric,
+  MonthlyGgr,
   PeriodPreset,
   PeriodSummary,
 } from "@/lib/finance/types";
@@ -32,6 +35,8 @@ type QueryBuilder<T = unknown> = PromiseLike<DbResult<T>> & {
   select: (columns?: string) => QueryBuilder<T>;
   eq: (column: string, value: unknown) => QueryBuilder<T>;
   in: (column: string, values: unknown[]) => QueryBuilder<T>;
+  gte: (column: string, value: unknown) => QueryBuilder<T>;
+  lte: (column: string, value: unknown) => QueryBuilder<T>;
   not: (column: string, operator: string, value: unknown) => QueryBuilder<T>;
   order: (column: string, options?: unknown) => QueryBuilder<T>;
   range: (from: number, to: number) => QueryBuilder<T>;
@@ -79,6 +84,12 @@ export type OtherCostRow = {
 export type BetleadsUsageRow = { tenant_id: string; metric_date: string; amount: number | string };
 export type BetleadsFeeRow = { tenant_id: string; month: string; amount: number | string };
 export type BetleadsSinceRow = { tenant_id: string; since: string };
+export type MonthlyGgrRow = {
+  tenant_id: string;
+  month: string;
+  ggr: number | string;
+  valid_through: string;
+};
 
 export const db = () => supabaseAdmin as unknown as LooseDb;
 
@@ -132,8 +143,8 @@ export async function requirePermission(fn: string, userId: string, tenantId: st
   if (!(await can(fn, userId, tenantId))) throw new Error("Sem permissão");
 }
 
-export function toFinanceDay(row: FinanceDayRow): FinanceDay {
-  return computeDay({
+function toFinanceDayInput(row: FinanceDayRow): FinanceDayInput {
+  return {
     date: row.metric_date,
     registrations: num(row.registrations),
     ftds: num(row.ftds),
@@ -146,7 +157,47 @@ export function toFinanceDay(row: FinanceDayRow): FinanceDay {
     // Stored and consumed as percent numbers (16 = 16%), see computeDay.
     ggrFeePct: num(row.ggr_fee_pct),
     movementFeePct: num(row.movement_fee_pct),
-  });
+  };
+}
+
+export function toFinanceDay(row: FinanceDayRow): FinanceDay {
+  return computeDay(toFinanceDayInput(row));
+}
+
+export const toMonthlyGgr = (row: MonthlyGgrRow): MonthlyGgr => ({
+  month: row.month,
+  ggr: num(row.ggr),
+  validThrough: row.valid_through,
+});
+
+/**
+ * The one path from finance_days rows to FinanceDay, shared by the month view
+ * and the dashboard so both apply a month's accumulated GGR the same way:
+ * each house × month with a tenant_finance_monthly_ggr row has its GGR
+ * replaced by allocateMonthlyGgr before computeDay. For an exact split the
+ * rows must hold every day of that month up to valid_through.
+ */
+export function financeDaysWithMonthlyGgr(
+  dayRows: FinanceDayRow[],
+  monthlyRows: MonthlyGgrRow[],
+): Array<{ tenantId: string; day: FinanceDay }> {
+  const key = (tenantId: string, month: string) => `${tenantId}|${month.slice(0, 7)}`;
+  const monthlyByKey = new Map(
+    monthlyRows.map((row) => [key(row.tenant_id, row.month), toMonthlyGgr(row)]),
+  );
+  const groups = new Map<string, { tenantId: string; inputs: FinanceDayInput[] }>();
+  for (const row of dayRows) {
+    const groupKey = key(row.tenant_id, row.metric_date);
+    const group = groups.get(groupKey);
+    if (group) group.inputs.push(toFinanceDayInput(row));
+    else groups.set(groupKey, { tenantId: row.tenant_id, inputs: [toFinanceDayInput(row)] });
+  }
+  return [...groups.entries()].flatMap(([groupKey, group]) =>
+    allocateMonthlyGgr(group.inputs, monthlyByKey.get(groupKey) ?? null).map((input) => ({
+      tenantId: group.tenantId,
+      day: computeDay(input),
+    })),
+  );
 }
 
 // ─── RPCs ───────────────────────────────────────────────────────────────────
@@ -258,6 +309,33 @@ export async function fetchBetleadsSince(tenantIds: string[]) {
     chunk(tenantIds, RPC_ROW_BUDGET).map((ids) =>
       rpcRows<BetleadsSinceRow>("finance_betleads_since", { _tenants: ids }),
     ),
+  );
+  return parts.flat();
+}
+
+const MONTHLY_GGR_COLUMNS = "tenant_id,month,ggr,valid_through";
+
+/**
+ * The houses' monthly GGR totals for months fromMonth..toMonth ("YYYY-MM-01",
+ * both inclusive): at most one row per house and month, houses batched so a
+ * response stays under PostgREST's 1000-row cap.
+ */
+export async function fetchMonthlyGgr(tenantIds: string[], fromMonth: string, toMonth: string) {
+  const housesPerCall = Math.max(
+    1,
+    Math.floor(RPC_ROW_BUDGET / Math.max(1, monthsInclusive(fromMonth, toMonth))),
+  );
+  const parts = await Promise.all(
+    chunk(tenantIds, housesPerCall).map(async (ids) => {
+      const { data, error } = await db()
+        .from<MonthlyGgrRow[]>("tenant_finance_monthly_ggr")
+        .select(MONTHLY_GGR_COLUMNS)
+        .in("tenant_id", ids)
+        .gte("month", fromMonth)
+        .lte("month", toMonth);
+      if (error) throw new Error(error.message);
+      return data ?? [];
+    }),
   );
   return parts.flat();
 }

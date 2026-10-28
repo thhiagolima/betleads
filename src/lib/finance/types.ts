@@ -24,9 +24,15 @@ export type FinanceDayInput = {
   ggr: number | null;
   ggrFeePct: number;
   movementFeePct: number;
+  /** True when `ggr` was allocated from the month's accumulated total (allocateMonthlyGgr); absent = false. */
+  ggrEstimated?: boolean;
 };
 
+/** A house's accumulated GGR ("Perdas na casa") for one month, valid up to `validThrough`. */
+export type MonthlyGgr = { month: string /* "YYYY-MM-01" */; ggr: number; validThrough: string };
+
 export type FinanceDay = FinanceDayInput & {
+  ggrEstimated: boolean;
   pending: boolean;
   net: number | null;
   ggrFee: number | null;
@@ -63,6 +69,11 @@ export type PeriodSummary = {
   betleadsUsage: number;
   /** Plan fee for the window's closed month; null when the window is not a closed month. */
   betleadsFee: number | null;
+  /**
+   * True when the window holds some but not all of the days a monthly GGR
+   * total was allocated to (its GGR is an estimate); see hasPartialGgrEstimate.
+   */
+  ggrEstimated: boolean;
 };
 
 /** The Betleads cost for a window, passed into summarize() by the caller. */

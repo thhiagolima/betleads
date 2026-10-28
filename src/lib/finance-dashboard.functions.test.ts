@@ -515,6 +515,143 @@ describe("tenant scope month total equals the month view total", () => {
     });
     expect(octoberDashboard.totals.current.cashResult).toBe(octoberMonth.summary.cashResult);
   });
+
+  it("also matches for months with a monthly GGR total (closed and in progress)", async () => {
+    const day = (date: string, deposit: number, ggr: number | null) =>
+      dayRow(HOUSE_A, date, {
+        deposit_amount: deposit,
+        ad_spend: 10,
+        ggr,
+        ggr_fee_pct: 17,
+        movement_fee_pct: 2.7,
+      });
+    financeDayRows.push(
+      day("2026-09-01", 333.33, 999),
+      day("2026-09-15", 100, 999),
+      day("2026-09-30", 0, null),
+      day("2026-10-01", 120.5, 5),
+      day("2026-10-10", 80.25, 5),
+      day("2026-10-20", 0, 5),
+      day("2026-10-22", 50, 5),
+    );
+    fake.admin
+      .rows("tenant_finance_monthly_ggr")
+      .push(
+        { tenant_id: HOUSE_A, month: "2026-09-01", ggr: 1497.15, valid_through: "2026-09-30" },
+        { tenant_id: HOUSE_A, month: "2026-10-01", ggr: -321.07, valid_through: "2026-10-20" },
+      );
+
+    const septemberDashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      range: { from: "2026-09-01", to: "2026-09-30" },
+      compare: "previous",
+      preset: "custom",
+    });
+    const septemberMonth = await getTenantFinanceMonthFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-09",
+    });
+    expect(septemberMonth.summary.ggr).toBe(1497.15);
+    expect(septemberDashboard.totals.current.ggr).toBe(1497.15);
+    expect(septemberDashboard.totals.current.cashResult).toBe(septemberMonth.summary.cashResult);
+    expect(septemberDashboard.totals.current.ggrEstimated).toBe(false);
+
+    const octoberDashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      ...monthToDate,
+    });
+    const octoberMonth = await getTenantFinanceMonthFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-10",
+    });
+    expect(octoberMonth.summary.ggr).toBe(-321.07);
+    expect(octoberDashboard.totals.current.ggr).toBe(-321.07);
+    expect(octoberDashboard.totals.current.cashResult).toBe(octoberMonth.summary.cashResult);
+    // The months series reads the same days.
+    expect(octoberDashboard.months.at(-1)?.cashResult).toBe(octoberMonth.summary.cashResult);
+    expect(octoberDashboard.months.at(-2)?.cashResult).toBe(septemberMonth.summary.cashResult);
+  });
+});
+
+describe("monthly GGR total in the dashboard", () => {
+  beforeEach(() => {
+    financeDayRows.push(
+      complete(HOUSE_A, "2026-10-01", 100, 10),
+      complete(HOUSE_A, "2026-10-19", 100, 10),
+      complete(HOUSE_A, "2026-10-20", 200, 10),
+      complete(HOUSE_A, "2026-10-21", 100, 10),
+      complete(HOUSE_A, "2026-10-22", 100, 10),
+      complete(HOUSE_A, "2026-10-23", 100, 10),
+      complete(HOUSE_B, "2026-10-20", 100, 10),
+    );
+    fake.admin
+      .rows("tenant_finance_monthly_ggr")
+      .push({ tenant_id: HOUSE_A, month: "2026-10-01", ggr: 400, valid_through: "2026-10-20" });
+  });
+
+  it("a window with part of the allocated days is flagged as estimated; later days are pending", async () => {
+    const dashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      ...last7Days,
+    });
+    // 400 split 100/100/200 over 01, 19, 20: the window (18..24) holds 19 and 20.
+    expect(dashboard.totals.current.ggr).toBe(300);
+    expect(dashboard.totals.current.ggrEstimated).toBe(true);
+    expect(dashboard.tenants[0].current.ggrEstimated).toBe(true);
+    expect(dashboard.tenants[0].pendingDates).toEqual(["2026-10-21", "2026-10-22", "2026-10-23"]);
+    expect(dashboard.tenants[0].ggrUpdatedThrough).toBe("2026-10-20");
+
+    const monthDashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      ...monthToDate,
+    });
+    expect(monthDashboard.totals.current.ggr).toBe(400);
+    expect(monthDashboard.totals.current.ggrEstimated).toBe(false);
+  });
+
+  it("group scope: only the house with the total is estimated; others keep daily GGR", async () => {
+    const dashboard = await getFinanceDashboardFor(ctxFor(G1_MANAGER), {
+      scope: { kind: "group", groupId: G1 },
+      ...last7Days,
+    });
+    const [a, b] = dashboard.tenants;
+    expect(a.id).toBe(HOUSE_A);
+    expect(a.current.ggrEstimated).toBe(true);
+    expect(b.current.ggrEstimated).toBe(false);
+    expect(b.ggrUpdatedThrough).toBeNull();
+    expect(dashboard.totals.current.ggrEstimated).toBe(true);
+  });
+
+  it("pending days not explained by the total keep ggrUpdatedThrough null", async () => {
+    financeDayRows.push(dayRow(HOUSE_A, "2026-10-18", { deposit_amount: 10 })); // no Anúncios
+    const dashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      ...last7Days,
+    });
+    expect(dashboard.tenants[0].pendingDates[0]).toBe("2026-10-18");
+    expect(dashboard.tenants[0].ggrUpdatedThrough).toBeNull();
+  });
+
+  it("allocates over the whole month even when the fetch span starts mid-month", async () => {
+    // Previous window of this ~10-month range starts on 2025-03-10.
+    financeDayRows.push(
+      complete(HOUSE_A, "2025-03-01", 100, 0),
+      complete(HOUSE_A, "2025-03-20", 100, 0),
+    );
+    fake.admin
+      .rows("tenant_finance_monthly_ggr")
+      .push({ tenant_id: HOUSE_A, month: "2025-03-01", ggr: 1000, valid_through: "2025-03-31" });
+
+    const dashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      range: { from: "2026-01-01", to: "2026-10-24" },
+      compare: "previous",
+      preset: "custom",
+    });
+    expect(dashboard.compareRange.from).toBe("2025-03-10");
+    expect(dashboard.totals.previous.ggr).toBe(500);
+    expect(dashboard.totals.previous.ggrEstimated).toBe(true);
+  });
 });
 
 describe("group and all scopes", () => {

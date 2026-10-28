@@ -29,6 +29,7 @@ import {
   getInfobipDomain,
   requestInfobipVerification,
 } from "@/lib/domain-providers/infobip-domains.server";
+import { resolveInfobipAccount } from "@/lib/provider-accounts.server";
 
 export type TenantDomain = {
   id: string;
@@ -241,20 +242,22 @@ export async function addTenantDomain(input: {
         }
       }
     } else {
+      // The domain lives in the house's e-mail account (default: platform).
+      const account = await resolveInfobipAccount(input.tenantId, "email");
       try {
-        provider = await createInfobipDomain(hostname);
+        provider = await createInfobipDomain(hostname, account);
       } catch (err) {
         if (err instanceof DomainProviderError && err.code === "ALREADY_EXISTS") {
           // Only reactivating this tenant's own removed row may adopt the
           // domain that already exists in the central Infobip account.
           if (!existing) throw rejectUnownedProviderDomain(err, input.tenantId, input.kind, hostname);
-          provider = await getInfobipDomain(hostname);
+          provider = await getInfobipDomain(hostname, account);
         } else {
           throw err;
         }
       }
       try {
-        await requestInfobipVerification(hostname);
+        await requestInfobipVerification(hostname, account);
       } catch (err) {
         createVerifyError = toAdminProviderMessage(err, `verify request for ${hostname}`);
       }
@@ -332,10 +335,11 @@ export async function refreshTenantDomain(
         provider = await getShortioDomain(providerIdToStore, row.hostname);
       }
     } else {
+      const account = await resolveInfobipAccount(row.tenant_id, "email");
       if (opts?.requestVerify) {
-        await requestInfobipVerification(row.hostname);
+        await requestInfobipVerification(row.hostname, account);
       }
-      provider = await getInfobipDomain(row.hostname);
+      provider = await getInfobipDomain(row.hostname, account);
       providerIdToStore = provider.providerDomainId;
     }
   } catch (err) {
@@ -563,7 +567,7 @@ export async function purgeTenantDomain(domainId: string): Promise<void> {
         await deleteShortioDomain(row.provider_domain_id);
       }
     } else {
-      await deleteInfobipDomain(row.hostname);
+      await deleteInfobipDomain(row.hostname, await resolveInfobipAccount(row.tenant_id, "email"));
     }
   } catch (err) {
     throw new Error(toAdminProviderMessage(err, `purge ${row.kind} domain ${row.hostname}`));

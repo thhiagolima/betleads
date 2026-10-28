@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { firstPendingDate, PendingBanner } from "./pending-banner";
+import { firstPendingDate, PendingBanner, tenantPendingText } from "./pending-banner";
 
 // No jsdom: "Lançar agora" calls onLaunchPending(firstPendingDate(dates)),
 // and firstPendingDate is exercised directly here.
@@ -88,5 +88,36 @@ describe("PendingBanner", () => {
     );
 
     expect(html).toBe("");
+  });
+
+  it("asks to update the month's GGR when the pending days come from its 'atualizado até'", () => {
+    const html = renderToStaticMarkup(
+      <PendingBanner
+        scopeKind="tenant"
+        tenants={[
+          {
+            id: "a",
+            nome: "Pixreals",
+            pendingDates: ["2026-10-21", "2026-10-22"],
+            ggrUpdatedThrough: "2026-10-20",
+          },
+        ]}
+        duplicateBetleadsCosts={0}
+        onLaunchPending={() => {}}
+      />,
+    );
+    expect(html).toContain("GGR atualizado até 20/10 — atualize para fechar o lucro.");
+    expect(html).not.toContain("Faltam");
+    expect(html).toContain("Lançar agora");
+
+    expect(tenantPendingText(["2026-10-21"], "2026-10-20")).toBe(
+      "GGR atualizado até 20/10 — atualize para fechar o lucro.",
+    );
+    expect(tenantPendingText(["2026-10-07"], null)).toBe(
+      "Falta 1 dia de lançamento (7). O lucro está incompleto.",
+    );
+    expect(tenantPendingText(["2026-10-07", "2026-10-08"], undefined)).toBe(
+      "Faltam 2 dias de lançamento (7, 8). O lucro está incompleto.",
+    );
   });
 });

@@ -7,6 +7,12 @@ import type { Json } from "@/integrations/supabase/types";
 import { resolveOperationalTenantId } from "@/lib/tenant-access.server";
 import { assertSuperAdmin } from "@/lib/provider-governance.server";
 import { smsSuspendedMessage } from "@/lib/sms-provider-breaker.server";
+import {
+  envInfobipAccount,
+  envShortBrasilAccount,
+  infobipConfigured,
+  shortBrasilConfigured,
+} from "@/lib/provider-accounts.server";
 
 const channelSchema = z.enum(["sms", "email", "voice"]);
 export type ObservabilityChannel = z.infer<typeof channelSchema>;
@@ -147,13 +153,8 @@ export function summarizeChannelDelivery(channel: ObservabilityChannel, rows: St
 }
 
 function providerConfigured(channel: ObservabilityChannel) {
-  if (channel === "sms") {
-    return Boolean(
-      process.env.SHORTCODE_SMS_TOKEN ||
-      (process.env.SHORT_BRASIL_SMS_USUARIO && process.env.SHORT_BRASIL_SMS_CHAVE),
-    );
-  }
-  return Boolean(process.env.INFOBIP_BASE_URL && process.env.INFOBIP_API_KEY);
+  if (channel === "sms") return shortBrasilConfigured(envShortBrasilAccount());
+  return infobipConfigured(envInfobipAccount());
 }
 
 async function auditOperation(args: {

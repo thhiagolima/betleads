@@ -1,20 +1,33 @@
 // Month grid of the house's financial close (spec §5): one row per day, CRM
 // columns always filled, Anúncios/GGR manual (batch-edited and saved with a
 // single saveFinanceDays call), computed columns "pendente" until both
-// manual fields of the day are confirmed. Reused read-only by Task 7
-// (/grupo/casa) with `readOnly`.
+// manual fields of the day are confirmed. A month with a "GGR do mês" total
+// (finance-monthly-ggr.tsx) shows the allocated daily GGR read-only. Reused
+// read-only by Task 7 (/grupo/casa) with `readOnly`.
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
-import { betleadsUsageNote, formatBRL, formatRatio } from "@/components/finance/format";
+import {
+  betleadsUsageNote,
+  formatBRL,
+  formatRatio,
+  GGR_COLUMN_LABEL,
+} from "@/components/finance/format";
+import {
+  defaultValidThrough,
+  MONTHLY_GGR_COLUMN_NOTE,
+  MonthlyGgrFields,
+  parseGgrInput,
+  type MonthlyGgrFormValue,
+} from "@/components/finance/finance-monthly-ggr";
 import { financeMonthQueryKey, invalidateFinanceAfterSave } from "@/components/finance/query-keys";
 import { num } from "@/lib/format";
 import { averageFilledAdSpend, presetRange } from "@/lib/finance/calc";
 import type { FinanceDay } from "@/lib/finance/types";
-import { getTenantFinanceMonth, saveFinanceDays } from "@/lib/finance.functions";
+import { getTenantFinanceMonth, saveFinanceDays, setMonthlyGgr } from "@/lib/finance.functions";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import { Button } from "@/components/ui/button";
@@ -44,6 +57,11 @@ function parseMoney(value: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+/** "YYYY-MM-DD" of today in São Paulo, the same day boundary as the server. */
+function todaySaoPaulo() {
+  return presetRange("today", new Date()).from;
+}
+
 /** Background of the typed columns (Anúncios, GGR), apart from the CRM ones (spec §9). */
 const MANUAL_CELL = "bg-primary/5";
 
@@ -68,6 +86,7 @@ export function FinanceMonthView({
   const qc = useQueryClient();
   const getMonth = useServerFn(getTenantFinanceMonth);
   const saveDaysFn = useServerFn(saveFinanceDays);
+  const setMonthlyGgrFn = useServerFn(setMonthlyGgr);
 
   const [month, setMonth] = useState(() => initialMonth ?? currentMonth());
   const [edits, setEdits] = useState<Edits>({});
@@ -90,6 +109,21 @@ export function FinanceMonthView({
   }, [tenantId, month]);
 
   const data = query.data;
+
+  // The "GGR do mês" form follows the loaded month (its saved total, or empty
+  // with "atualizado até" = yesterday clamped into the month).
+  const [ggrForm, setGgrForm] = useState<MonthlyGgrFormValue>({ ggr: "", validThrough: "" });
+  const savedMonthlyGgr = data?.monthlyGgr ?? null;
+  const savedGgrKey = `${tenantId}|${month}|${savedMonthlyGgr?.ggr ?? ""}|${savedMonthlyGgr?.validThrough ?? ""}`;
+  useEffect(() => {
+    setGgrForm(
+      savedMonthlyGgr
+        ? { ggr: String(savedMonthlyGgr.ggr), validThrough: savedMonthlyGgr.validThrough }
+        : { ggr: "", validThrough: defaultValidThrough(month, todaySaoPaulo()) },
+    );
+    // savedGgrKey stands for savedMonthlyGgr (a new object on every fetch).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [savedGgrKey]);
 
   // Scroll the focused day into view once its row is rendered (once per date).
   const focusRowRef = useRef<HTMLTableRowElement | null>(null);
@@ -136,6 +170,25 @@ export function FinanceMonthView({
     onError: (error: Error) => toast.error(error.message),
   });
 
+  const saveMonthlyGgr = useMutation({
+    mutationFn: () => {
+      const ggr = parseGgrInput(ggrForm.ggr);
+      return setMonthlyGgrFn({
+        data: {
+          tenantId,
+          month,
+          ggr,
+          validThrough: ggr === null ? undefined : ggrForm.validThrough,
+        },
+      });
+    },
+    onSuccess: () => {
+      toast.success("GGR do mês salvo");
+      void invalidateFinanceAfterSave(qc, tenantId, month);
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+
   if (query.isError) {
     return (
       <p className="text-sm text-destructive">
@@ -150,6 +203,9 @@ export function FinanceMonthView({
 
   const { days, summary } = data;
   const betleadsNote = betleadsUsageNote(month, data.betleadsSince);
+  // With a month total the daily GGR is the allocated estimate, read-only.
+  const usingMonthlyGgr = data.monthlyGgr !== null;
+  const canEditDailyGgr = canEditValues && !usingMonthlyGgr;
 
   return (
     <div className="space-y-4">
@@ -176,6 +232,20 @@ export function FinanceMonthView({
         )}
       </div>
 
+      {month <= currentMonth() && (
+        <MonthlyGgrFields
+          value={ggrForm}
+          month={month}
+          today={todaySaoPaulo()}
+          current={data.monthlyGgr}
+          canEdit={canEditValues}
+          disabled={isDemo}
+          saving={saveMonthlyGgr.isPending}
+          onChange={setGgrForm}
+          onSave={() => saveMonthlyGgr.mutate()}
+        />
+      )}
+
       <div className="overflow-x-auto rounded-lg border border-border/40">
         <Table>
           <TableHeader>
@@ -190,7 +260,14 @@ export function FinanceMonthView({
               <TableHead>Depósitos totais</TableHead>
               <TableHead>Saques</TableHead>
               <TableHead>Net bruto</TableHead>
-              <TableHead className={MANUAL_CELL}>GGR</TableHead>
+              <TableHead className={MANUAL_CELL}>
+                {GGR_COLUMN_LABEL}
+                {usingMonthlyGgr && (
+                  <span className="block text-[10px] font-normal italic text-muted-foreground">
+                    {MONTHLY_GGR_COLUMN_NOTE}
+                  </span>
+                )}
+              </TableHead>
               <TableHead>Resultado caixa</TableHead>
               <TableHead>ROI caixa</TableHead>
             </TableRow>
@@ -263,7 +340,7 @@ export function FinanceMonthView({
                 <TableCell>{formatBRL(day.withdrawalAmount)}</TableCell>
                 <TableCell>{day.pending ? <PendingCell /> : formatBRL(day.net)}</TableCell>
                 <TableCell className={MANUAL_CELL}>
-                  {canEditValues ? (
+                  {canEditDailyGgr ? (
                     <Input
                       type="number"
                       step="0.01"
@@ -275,6 +352,10 @@ export function FinanceMonthView({
                     />
                   ) : day.ggr === null ? (
                     <PendingCell />
+                  ) : day.ggrEstimated ? (
+                    <span className="italic" title="Estimado a partir do total do mês">
+                      {formatBRL(day.ggr)}
+                    </span>
                   ) : (
                     formatBRL(day.ggr)
                   )}

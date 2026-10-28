@@ -10,6 +10,7 @@ import type {
   GoalEvaluation,
   GoalMetric,
   GoalStatus,
+  MonthlyGgr,
   PeriodPreset,
   PeriodSummary,
 } from "./types";
@@ -60,6 +61,7 @@ export function computeDay(d: FinanceDayInput): FinanceDay {
 
   return {
     ...d,
+    ggrEstimated: d.ggrEstimated ?? false,
     pending,
     net,
     ggrFee,
@@ -83,6 +85,7 @@ export function summarize(
   otherCosts: number | null,
   today?: string,
   betleads?: BetleadsCost,
+  options?: { ggrEstimated?: boolean },
 ): PeriodSummary {
   const completeDays = days.filter((d) => !d.pending);
   const pendingDates = new Set(days.filter((d) => d.pending).map((d) => d.date));
@@ -133,7 +136,99 @@ export function summarize(
     avgDailyCashResult,
     betleadsUsage,
     betleadsFee,
+    ggrEstimated: options?.ggrEstimated ?? false,
   };
+}
+
+/**
+ * Spreads a month's accumulated GGR ("Perdas na casa") over its days from the
+ * 1st to `validThrough`, proportionally to each day's net
+ * max(deposits − withdrawals, 0) (equally when every weight is 0). Each share
+ * is rounded with round2 and the remainder goes to the last allocated day, so
+ * the allocated days sum exactly to the total (negative totals included).
+ * Those days get `ggrEstimated: true`; the month's days after `validThrough`
+ * get GGR null (pending), whatever was typed for them. Days of other months
+ * are returned as given. Without a monthly total every day comes back with
+ * `ggrEstimated: false`.
+ */
+export function allocateMonthlyGgr(
+  days: FinanceDayInput[],
+  monthly: MonthlyGgr | null,
+): FinanceDayInput[] {
+  if (!monthly) return days.map((d) => ({ ...d, ggrEstimated: false }));
+
+  const monthKey = monthly.month.slice(0, 7);
+  const inMonth = (d: FinanceDayInput) => d.date.slice(0, 7) === monthKey;
+  const allocated = days
+    .filter((d) => inMonth(d) && d.date <= monthly.validThrough)
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  const weights = allocated.map((d) => Math.max(d.depositAmount - d.withdrawalAmount, 0));
+  const totalWeight = weights.reduce((total, w) => total + w, 0);
+  const shares = new Map<string, number>();
+  let assigned = 0;
+  allocated.forEach((d, index) => {
+    const isLast = index === allocated.length - 1;
+    const share = isLast
+      ? round2(monthly.ggr - assigned)
+      : round2(
+          totalWeight > 0
+            ? (monthly.ggr * weights[index]) / totalWeight
+            : monthly.ggr / allocated.length,
+        );
+    assigned = round2(assigned + share);
+    shares.set(d.date, share);
+  });
+
+  return days.map((d) => {
+    if (!inMonth(d)) return { ...d, ggrEstimated: false };
+    const share = shares.get(d.date);
+    return share === undefined
+      ? { ...d, ggr: null, ggrEstimated: false }
+      : { ...d, ggr: share, ggrEstimated: true };
+  });
+}
+
+/** The days [month, validThrough] a monthly GGR total was allocated to. */
+type GgrAllocation = Pick<MonthlyGgr, "month" | "validThrough">;
+
+/**
+ * True when `window` holds some but not all of an allocation's days: its GGR
+ * is then only an estimate of that part of the month ("GGR estimado a partir
+ * do total do mês"). A window holding every allocated day sums to the typed
+ * total exactly, so it is not flagged.
+ */
+export function hasPartialGgrEstimate(
+  window: DateRange | null,
+  allocations: GgrAllocation[],
+): boolean {
+  if (!window) return false;
+  return allocations.some((a) => {
+    const overlaps = window.from <= a.validThrough && window.to >= a.month;
+    const holdsAll = window.from <= a.month && window.to >= a.validThrough;
+    return overlaps && !holdsAll;
+  });
+}
+
+/**
+ * When every pending day lies after the `validThrough` of its month's
+ * monthly GGR total and has Anúncios filled, the pending days come only from
+ * that total being out of date: returns the `validThrough` of the earliest
+ * pending day's month. Otherwise (or with nothing pending) null.
+ */
+export function monthlyGgrPendingThrough(
+  pendingDays: Array<{ date: string; adSpend: number | null }>,
+  allocations: GgrAllocation[],
+): string | null {
+  if (!pendingDays.length) return null;
+  const byMonth = new Map(allocations.map((a) => [a.month.slice(0, 7), a.validThrough]));
+  const explained = pendingDays.every(({ date, adSpend }) => {
+    const validThrough = byMonth.get(date.slice(0, 7));
+    return adSpend !== null && validThrough !== undefined && date > validThrough;
+  });
+  if (!explained) return null;
+  const first = pendingDays.map((day) => day.date).sort()[0];
+  return byMonth.get(first.slice(0, 7)) ?? null;
 }
 
 /** A percent without trailing zeros, pt-BR style: 16 -> "16%", 2.7 -> "2,7%". */

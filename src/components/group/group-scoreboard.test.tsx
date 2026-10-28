@@ -31,6 +31,7 @@ function summary(overrides: Partial<ScoreboardRow["current"]> = {}) {
     avgDailyCashResult: null,
     betleadsUsage: 0,
     betleadsFee: null,
+    ggrEstimated: false,
     ...overrides,
   };
 }
@@ -160,5 +161,17 @@ describe("GroupScoreboard", () => {
 
     expect(sortScoreboardRows(withNull, "costPerFtd", "desc").at(-1)?.id).toBe("d");
     expect(sortScoreboardRows(withNull, "costPerFtd", "asc").at(-1)?.id).toBe("d");
+  });
+});
+
+describe("GroupScoreboard GGR column", () => {
+  it("labels the GGR column as Perdas na casa", () => {
+    const html = renderToStaticMarkup(
+      <GroupScoreboard
+        rows={[{ id: "a", nome: "Casa A", current: summary(), previous: summary(), goals: [] }]}
+        defaultMoreColumns
+      />,
+    );
+    expect(html).toContain("GGR (Perdas na casa)");
   });
 });

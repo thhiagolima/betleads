@@ -7,7 +7,13 @@ import { AlertTriangle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 
-type PendingTenant = { id: string; nome: string; pendingDates: string[] };
+type PendingTenant = {
+  id: string;
+  nome: string;
+  pendingDates: string[];
+  /** Set when the pending dates come from the GGR do mês being out of date. */
+  ggrUpdatedThrough?: string | null;
+};
 
 /** The earliest pending date, the one "Lançar agora" opens; null when none. */
 export function firstPendingDate(dates: string[]): string | null {
@@ -23,6 +29,19 @@ function datesLabel(dates: string[]) {
       oneMonth ? String(Number(date.slice(8, 10))) : `${date.slice(8, 10)}/${date.slice(5, 7)}`,
     )
     .join(", ");
+}
+
+/**
+ * The tenant-scope line: "GGR atualizado até DD/MM — …" when the pending
+ * days come from the month's GGR total being out of date, else the missing
+ * days.
+ */
+export function tenantPendingText(dates: string[], ggrUpdatedThrough?: string | null) {
+  if (ggrUpdatedThrough) {
+    const ddmm = `${ggrUpdatedThrough.slice(8, 10)}/${ggrUpdatedThrough.slice(5, 7)}`;
+    return `GGR atualizado até ${ddmm} — atualize para fechar o lucro.`;
+  }
+  return `${dates.length === 1 ? "Falta 1 dia" : `Faltam ${dates.length} dias`} de lançamento (${datesLabel(dates)}). O lucro está incompleto.`;
 }
 
 export function PendingBanner({
@@ -49,10 +68,7 @@ export function PendingBanner({
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400" aria-hidden />
           {scopeKind === "tenant" ? (
-            <span>
-              {dates.length === 1 ? "Falta 1 dia" : `Faltam ${dates.length} dias`} de lançamento (
-              {datesLabel(dates)}). O lucro está incompleto.
-            </span>
+            <span>{tenantPendingText(dates, pendingTenants[0]?.ggrUpdatedThrough)}</span>
           ) : (
             <span>
               Casas com dias faltando:{" "}

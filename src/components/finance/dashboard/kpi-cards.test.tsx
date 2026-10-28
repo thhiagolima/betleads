@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { KpiCards, NO_OTHER_COSTS_NOTE } from "./kpi-cards";
+import { GGR_ESTIMATED_NOTE, KpiCards, NO_OTHER_COSTS_NOTE } from "./kpi-cards";
 import { summary } from "./test-fixtures";
 
 // No jsdom/testing-library in this repo: assert on the static markup. Each
@@ -97,5 +97,16 @@ describe("KpiCards", () => {
     );
 
     expect(html).toContain("Lucro líquido (5 casas)");
+  });
+
+  it("notes an estimated GGR under the cards", () => {
+    expect(GGR_ESTIMATED_NOTE).toBe("GGR estimado a partir do total do mês.");
+    const estimated = renderToStaticMarkup(
+      <KpiCards current={summary({ ggrEstimated: true })} previous={summary()} />,
+    );
+    expect(estimated).toContain("GGR estimado a partir do total do mês.");
+
+    const exact = renderToStaticMarkup(<KpiCards current={summary()} previous={summary()} />);
+    expect(exact).not.toContain("GGR estimado");
   });
 });

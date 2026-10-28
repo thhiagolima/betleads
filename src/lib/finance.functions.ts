@@ -30,12 +30,15 @@ import {
   fetchBetleadsUsage,
   fetchFinanceDays,
   fetchGoalDays,
+  fetchMonthlyGgr,
+  financeDaysWithMonthlyGgr,
   isoDate,
   num,
   numOrNull,
   requirePermission,
-  toFinanceDay,
+  toMonthlyGgr,
   todaySaoPaulo,
+  type MonthlyGgrRow,
   type OtherCostRow,
 } from "@/lib/finance/finance-data.server";
 import type { GoalDirection, GoalMetric } from "@/lib/finance/types";
@@ -138,35 +141,51 @@ export async function getTenantFinanceMonthFor(
   // Future days of the current month do not appear; a future month is empty.
   const range = clampToToday({ from: monthStart, to: lastDayOfMonth(monthStart) }, today);
 
-  const [dayRows, goalRows, costsRes, ratesRes, usageRows, feeRows, sinceRows, usedCategoriesRes] =
-    await Promise.all([
-      range ? fetchFinanceDays([tenantId], range) : Promise.resolve([]),
-      range ? fetchGoalDays([tenantId], range) : Promise.resolve([]),
-      db()
-        .from<OtherCostRow[]>("tenant_finance_other_costs")
-        .select("id,tenant_id,month,descricao,valor,categoria")
-        .eq("tenant_id", tenantId)
-        .eq("month", monthStart)
-        .order("created_at", { ascending: true }),
-      db()
-        .from<RateRow[]>("tenant_finance_rates")
-        .select("tenant_id,valid_from,ggr_fee_pct,movement_fee_pct")
-        .eq("tenant_id", tenantId)
-        .order("valid_from", { ascending: false }),
-      range ? fetchBetleadsUsage([tenantId], range) : Promise.resolve([]),
-      fetchBetleadsFees([tenantId], monthStart, monthStart),
-      fetchBetleadsSince([tenantId]),
-      db()
-        .from<Array<{ categoria: string | null }>>("tenant_finance_other_costs")
-        .select("categoria")
-        .eq("tenant_id", tenantId)
-        .not("categoria", "is", null),
-    ]);
+  const [
+    dayRows,
+    goalRows,
+    costsRes,
+    ratesRes,
+    usageRows,
+    feeRows,
+    sinceRows,
+    usedCategoriesRes,
+    monthlyRows,
+  ] = await Promise.all([
+    range ? fetchFinanceDays([tenantId], range) : Promise.resolve([]),
+    range ? fetchGoalDays([tenantId], range) : Promise.resolve([]),
+    db()
+      .from<OtherCostRow[]>("tenant_finance_other_costs")
+      .select("id,tenant_id,month,descricao,valor,categoria")
+      .eq("tenant_id", tenantId)
+      .eq("month", monthStart)
+      .order("created_at", { ascending: true }),
+    db()
+      .from<RateRow[]>("tenant_finance_rates")
+      .select("tenant_id,valid_from,ggr_fee_pct,movement_fee_pct")
+      .eq("tenant_id", tenantId)
+      .order("valid_from", { ascending: false }),
+    range ? fetchBetleadsUsage([tenantId], range) : Promise.resolve([]),
+    fetchBetleadsFees([tenantId], monthStart, monthStart),
+    fetchBetleadsSince([tenantId]),
+    db()
+      .from<Array<{ categoria: string | null }>>("tenant_finance_other_costs")
+      .select("categoria")
+      .eq("tenant_id", tenantId)
+      .not("categoria", "is", null),
+    fetchMonthlyGgr([tenantId], monthStart, monthStart),
+  ]);
   if (costsRes.error) throw new Error(costsRes.error.message);
   if (ratesRes.error) throw new Error(ratesRes.error.message);
   if (usedCategoriesRes.error) throw new Error(usedCategoriesRes.error.message);
 
-  const days = dayRows.map(toFinanceDay).sort((a, b) => a.date.localeCompare(b.date));
+  const days = financeDaysWithMonthlyGgr(dayRows, monthlyRows)
+    .map(({ day }) => day)
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const monthlyRow = monthlyRows.find((row) => row.month === monthStart);
+  const monthlyGgr = monthlyRow
+    ? { ggr: toMonthlyGgr(monthlyRow).ggr, validThrough: monthlyRow.valid_through }
+    : null;
   const since = sinceRows[0]?.since ?? null;
   const otherCosts = (costsRes.data ?? []).map((row) => ({
     id: row.id,
@@ -211,6 +230,8 @@ export async function getTenantFinanceMonthFor(
     tenant,
     days,
     summary,
+    /** The month's accumulated GGR ("GGR do mês"); null when the month uses daily GGR. */
+    monthlyGgr,
     otherCosts,
     categories,
     /** First day with Betleads consumption (spec §7.2): months before it have no usage data. */
@@ -358,6 +379,101 @@ export const saveFinanceDays = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => saveDaysInput.parse(data))
   .handler(async ({ data, context }) =>
     saveFinanceDaysFor(context as unknown as ServerContext, data),
+  );
+
+// ─── Monthly accumulated GGR ────────────────────────────────────────────────
+
+export const setMonthlyGgrInput = z
+  .object({
+    tenantId: dbUuid(),
+    month: yearMonth,
+    /** null removes the month's total: the month goes back to daily GGR. */
+    ggr: money.nullable(),
+    validThrough: isoDate.optional(),
+  })
+  .refine((input) => input.ggr === null || input.validThrough !== undefined, {
+    message: "Informe a data de atualização",
+    path: ["validThrough"],
+  });
+
+/**
+ * Saves (overwrites) or clears a house's accumulated GGR ("Perdas na casa")
+ * for a month. `validThrough` must be inside the month and not after today.
+ * Audited when something changed.
+ */
+export async function setMonthlyGgrFor(
+  ctx: ServerContext,
+  data: z.infer<typeof setMonthlyGgrInput>,
+) {
+  await requirePermission("finance_can_edit_values", ctx.userId, data.tenantId);
+  await assertTenantNotDemo(data.tenantId);
+
+  const monthStart = `${data.month}-01`;
+  if (data.ggr !== null) {
+    const validThrough = data.validThrough as string;
+    if (validThrough < monthStart || validThrough > lastDayOfMonth(monthStart)) {
+      throw new Error("A data deve estar dentro do mês");
+    }
+    if (validThrough > todaySaoPaulo()) throw new Error("Data futura não permitida");
+  }
+
+  const { data: existing, error: readErr } = await db()
+    .from<MonthlyGgrRow>("tenant_finance_monthly_ggr")
+    .select("tenant_id,month,ggr,valid_through")
+    .eq("tenant_id", data.tenantId)
+    .eq("month", monthStart)
+    .maybeSingle();
+  if (readErr) throw new Error(readErr.message);
+
+  const before = existing
+    ? { month: monthStart, ggr: num(existing.ggr), valid_through: existing.valid_through }
+    : null;
+  const after =
+    data.ggr === null
+      ? null
+      : { month: monthStart, ggr: round2(data.ggr), valid_through: data.validThrough as string };
+  const changed = before?.ggr !== after?.ggr || before?.valid_through !== after?.valid_through;
+  if (!changed) return { changed: false };
+
+  if (after) {
+    const { error } = await db()
+      .from("tenant_finance_monthly_ggr")
+      .upsert(
+        {
+          tenant_id: data.tenantId,
+          ...after,
+          updated_by: ctx.userId,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "tenant_id,month" },
+      );
+    if (error) throw new Error(error.message);
+  } else {
+    const { error } = await db()
+      .from("tenant_finance_monthly_ggr")
+      .delete()
+      .eq("tenant_id", data.tenantId)
+      .eq("month", monthStart);
+    if (error) throw new Error(error.message);
+  }
+
+  await auditTenant({
+    tenantId: data.tenantId,
+    actorUserId: ctx.userId,
+    action: "finance.month_ggr_updated",
+    entityType: "tenant_finance_monthly_ggr",
+    entityId: data.month,
+    before,
+    after,
+  });
+  return { changed: true };
+}
+
+export const setMonthlyGgr = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => setMonthlyGgrInput.parse(data))
+  .handler(async ({ data, context }) =>
+    setMonthlyGgrFor(context as unknown as ServerContext, data),
   );
 
 // ─── Other costs of the month ───────────────────────────────────────────────

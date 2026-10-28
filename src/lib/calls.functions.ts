@@ -828,6 +828,7 @@ export const dispatchCallQueueItem = createServerFn({ method: "POST" })
       to_phone: to,
       tenant_id: tenantId,
       billing_reference_id: result.billing?.referenceId ?? null,
+      provider_account_id: result.providerAccountId ?? null,
     } as any);
     if (historyInsertError) logCallHistoryInsertError("manual", historyInsertError, result);
 
