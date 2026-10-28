@@ -31,6 +31,7 @@ function summary(overrides: Partial<ScoreboardRow["current"]> = {}) {
     avgDailyCashResult: null,
     betleadsUsage: 0,
     betleadsFee: null,
+    ggrEstimated: false,
     ...overrides,
   };
 }

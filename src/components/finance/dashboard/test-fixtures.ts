@@ -24,6 +24,7 @@ export function summary(overrides: Partial<PeriodSummary> = {}): PeriodSummary {
     avgDailyCashResult: null,
     betleadsUsage: 0,
     betleadsFee: null,
+    ggrEstimated: false,
     ...overrides,
   };
 }
