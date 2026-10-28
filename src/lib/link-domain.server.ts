@@ -9,6 +9,38 @@ import type { LinkDomainSources } from "@/lib/link-domain-plan";
 
 const ACTIVE_JOURNEY_STATUSES = ["draft", "active", "paused"] as const;
 
+// PostgREST caps any single response at 1000 rows regardless of how many
+// rows actually match — without pagination, a tenant with >1000
+// sms_templates (or journey_steps, etc.) would get a preview that silently
+// omits the tail of the table, and `applyLinkDomainChange` would then
+// re-plan and apply from that same truncated set. `fetchAllRows` pages
+// through with `.range()` until a short page comes back, same pattern as
+// `settleStaleVoiceReservations` in infobip-voice-reconciliation.server.ts.
+const PAGE_SIZE = 1000;
+
+/** Exported for unit tests (link-domain.server.test.ts) — no Supabase
+ * import needed to exercise the paging loop, just a fake `queryPage`.
+ * `queryPage`'s `data` is typed `unknown` (not `T[] | null`) so a real
+ * Supabase query builder — whose resolved row type is always wider/more
+ * specific than our narrow `T` (e.g. the DB's `Json`/full status enum vs.
+ * our `Record<string, unknown>`/`"sms" | "email"`) — can be passed in
+ * directly without the caller needing an `as` cast on every query. */
+export async function fetchAllRows<T>(
+  queryPage: (fromIdx: number, toIdx: number) => PromiseLike<{ data: unknown; error: { message: string } | null }>,
+): Promise<T[]> {
+  const rows: T[] = [];
+  for (let page = 0; ; page += 1) {
+    const from = page * PAGE_SIZE;
+    const to = from + PAGE_SIZE - 1;
+    const { data, error } = await queryPage(from, to);
+    if (error) throw new Error(error.message);
+    const batch = (data ?? []) as T[];
+    rows.push(...batch);
+    if (batch.length < PAGE_SIZE) break;
+  }
+  return rows;
+}
+
 type JourneyRow = { id: string; name: string; status: string };
 type JourneyStepRow = {
   id: string;
@@ -35,72 +67,103 @@ type SmsFlowStepRow = { flow_id: string; content: string | null };
 
 export async function loadLinkDomainSources(tenantId: string): Promise<LinkDomainSources> {
   const [
-    journeysRes,
-    smsTemplatesRes,
-    emailTemplatesRes,
-    quickLinksRes,
+    journeys,
+    smsTemplatesRows,
+    emailTemplatesRows,
+    quickLinksRows,
     trackingRes,
-    smsCampaignsRes,
-    emailCampaignsRes,
-    smsFlowsRes,
+    smsCampaignsRows,
+    emailCampaignsRows,
+    smsFlows,
   ] = await Promise.all([
-    supabaseAdmin
-      .from("journeys")
-      .select("id,name,status")
-      .eq("tenant_id", tenantId)
-      .in("status", ACTIVE_JOURNEY_STATUSES),
-    supabaseAdmin
-      .from("sms_templates")
-      .select("id,name,content")
-      .eq("tenant_id", tenantId)
-      .eq("is_active", true),
-    supabaseAdmin
-      .from("email_templates")
-      .select("id,name,subject,preheader,body_html,body_text")
-      .eq("tenant_id", tenantId)
-      .neq("lifecycle_status", "archived"),
-    supabaseAdmin.from("tenant_quick_links").select("id,label,path").eq("tenant_id", tenantId),
+    fetchAllRows<JourneyRow>((from, to) =>
+      supabaseAdmin
+        .from("journeys")
+        .select("id,name,status")
+        .eq("tenant_id", tenantId)
+        .in("status", ACTIVE_JOURNEY_STATUSES)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+    fetchAllRows<SmsTemplateRow>((from, to) =>
+      supabaseAdmin
+        .from("sms_templates")
+        .select("id,name,content")
+        .eq("tenant_id", tenantId)
+        .eq("is_active", true)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+    fetchAllRows<EmailTemplateRow>((from, to) =>
+      supabaseAdmin
+        .from("email_templates")
+        .select("id,name,subject,preheader,body_html,body_text")
+        .eq("tenant_id", tenantId)
+        .neq("lifecycle_status", "archived")
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+    fetchAllRows<QuickLinkRow>((from, to) =>
+      supabaseAdmin
+        .from("tenant_quick_links")
+        .select("id,label,path")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
     supabaseAdmin
       .from("shortio_settings")
       .select("allowed_destination_hosts")
       .eq("tenant_id", tenantId)
       .maybeSingle(),
-    supabaseAdmin
-      .from("sms_campaigns")
-      .select("id,name,content")
-      .eq("tenant_id", tenantId)
-      .eq("status", "agendada"),
-    supabaseAdmin
-      .from("email_campaigns")
-      .select("id,name,template_snapshot")
-      .eq("tenant_id", tenantId)
-      .eq("status", "agendada"),
-    supabaseAdmin.from("sms_flows").select("id,name").eq("tenant_id", tenantId).eq("is_active", true),
+    fetchAllRows<SmsCampaignRow>((from, to) =>
+      supabaseAdmin
+        .from("sms_campaigns")
+        .select("id,name,content")
+        .eq("tenant_id", tenantId)
+        .eq("status", "agendada")
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+    fetchAllRows<EmailCampaignRow>((from, to) =>
+      supabaseAdmin
+        .from("email_campaigns")
+        .select("id,name,template_snapshot")
+        .eq("tenant_id", tenantId)
+        .eq("status", "agendada")
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+    fetchAllRows<SmsFlowRow>((from, to) =>
+      supabaseAdmin
+        .from("sms_flows")
+        .select("id,name")
+        .eq("tenant_id", tenantId)
+        .eq("is_active", true)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
   ]);
 
-  if (journeysRes.error) throw new Error(journeysRes.error.message);
-  if (smsTemplatesRes.error) throw new Error(smsTemplatesRes.error.message);
-  if (emailTemplatesRes.error) throw new Error(emailTemplatesRes.error.message);
-  if (quickLinksRes.error) throw new Error(quickLinksRes.error.message);
   if (trackingRes.error) throw new Error(trackingRes.error.message);
-  if (smsCampaignsRes.error) throw new Error(smsCampaignsRes.error.message);
-  if (emailCampaignsRes.error) throw new Error(emailCampaignsRes.error.message);
-  if (smsFlowsRes.error) throw new Error(smsFlowsRes.error.message);
 
-  const journeys = (journeysRes.data ?? []) as JourneyRow[];
   const journeyById = new Map(journeys.map((j) => [j.id, j]));
 
   let journeySteps: LinkDomainSources["journeySteps"] = [];
   if (journeys.length > 0) {
-    const { data: stepRows, error: stepsErr } = await supabaseAdmin
-      .from("journey_steps")
-      .select("id,journey_id,position,step_type,label,config")
-      .eq("tenant_id", tenantId)
-      .in("journey_id", Array.from(journeyById.keys()))
-      .in("step_type", ["sms", "email"]);
-    if (stepsErr) throw new Error(stepsErr.message);
+    const journeyIds = Array.from(journeyById.keys());
+    const stepRows = await fetchAllRows<JourneyStepRow>((from, to) =>
+      supabaseAdmin
+        .from("journey_steps")
+        .select("id,journey_id,position,step_type,label,config")
+        .eq("tenant_id", tenantId)
+        .in("journey_id", journeyIds)
+        .in("step_type", ["sms", "email"])
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
 
-    journeySteps = ((stepRows ?? []) as JourneyStepRow[])
+    journeySteps = stepRows
       .map((step) => {
         const journey = journeyById.get(step.journey_id);
         if (!journey) return null;
@@ -118,13 +181,13 @@ export async function loadLinkDomainSources(tenantId: string): Promise<LinkDomai
       .filter((s): s is LinkDomainSources["journeySteps"][number] => s !== null);
   }
 
-  const smsTemplates = ((smsTemplatesRes.data ?? []) as SmsTemplateRow[]).map((t) => ({
+  const smsTemplates = smsTemplatesRows.map((t) => ({
     id: t.id,
     name: t.name,
     content: t.content,
   }));
 
-  const emailTemplates = ((emailTemplatesRes.data ?? []) as EmailTemplateRow[]).map((t) => ({
+  const emailTemplates = emailTemplatesRows.map((t) => ({
     id: t.id,
     name: t.name,
     subject: t.subject,
@@ -133,7 +196,7 @@ export async function loadLinkDomainSources(tenantId: string): Promise<LinkDomai
     body_text: t.body_text,
   }));
 
-  const quickLinks = ((quickLinksRes.data ?? []) as QuickLinkRow[]).map((q) => ({
+  const quickLinks = quickLinksRows.map((q) => ({
     id: q.id,
     label: q.label,
     path: q.path,
@@ -142,13 +205,13 @@ export async function loadLinkDomainSources(tenantId: string): Promise<LinkDomai
   const trackingRow = trackingRes.data as { allowed_destination_hosts: string[] } | null;
   const trackingHosts = trackingRow ? trackingRow.allowed_destination_hosts ?? [] : null;
 
-  const scheduledSmsCampaigns = ((smsCampaignsRes.data ?? []) as SmsCampaignRow[]).map((c) => ({
+  const scheduledSmsCampaigns = smsCampaignsRows.map((c) => ({
     id: c.id,
     name: c.name,
     channel: "sms" as const,
     text: c.content,
   }));
-  const scheduledEmailCampaigns = ((emailCampaignsRes.data ?? []) as EmailCampaignRow[]).map((c) => ({
+  const scheduledEmailCampaigns = emailCampaignsRows.map((c) => ({
     id: c.id,
     name: c.name,
     channel: "email" as const,
@@ -156,21 +219,21 @@ export async function loadLinkDomainSources(tenantId: string): Promise<LinkDomai
   }));
   const scheduledCampaigns = [...scheduledSmsCampaigns, ...scheduledEmailCampaigns];
 
-  const smsFlows = (smsFlowsRes.data ?? []) as SmsFlowRow[];
   let activeLegacyFlows: LinkDomainSources["activeLegacyFlows"] = [];
   if (smsFlows.length > 0) {
-    const { data: flowStepRows, error: flowStepsErr } = await supabaseAdmin
-      .from("sms_flow_steps")
-      .select("flow_id,content")
-      .eq("tenant_id", tenantId)
-      .in(
-        "flow_id",
-        smsFlows.map((f) => f.id),
-      );
-    if (flowStepsErr) throw new Error(flowStepsErr.message);
+    const flowIds = smsFlows.map((f) => f.id);
+    const flowStepRows = await fetchAllRows<SmsFlowStepRow>((from, to) =>
+      supabaseAdmin
+        .from("sms_flow_steps")
+        .select("flow_id,content")
+        .eq("tenant_id", tenantId)
+        .in("flow_id", flowIds)
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
 
     const textByFlow = new Map<string, string[]>();
-    for (const step of (flowStepRows ?? []) as SmsFlowStepRow[]) {
+    for (const step of flowStepRows) {
       if (!step.content) continue;
       const list = textByFlow.get(step.flow_id) ?? [];
       list.push(step.content);
