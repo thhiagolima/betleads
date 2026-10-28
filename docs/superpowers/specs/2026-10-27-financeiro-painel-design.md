@@ -1,7 +1,7 @@
 # Redesign do Financeiro — painel de resultado — design
 
 Data: 2026-10-27
-Status: rascunho para aprovação
+Status: implementado (branch feat/financeiro-painel)
 Base: o financeiro e o painel do grupo descritos em `2026-10-24-grupos-de-casas-design.md`, já no main.
 Mockup aprovado: `.superpowers/brainstorm/28046-1793138051/content/financeiro-painel-v1.html`.
 
