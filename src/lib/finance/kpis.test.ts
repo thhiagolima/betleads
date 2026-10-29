@@ -85,7 +85,7 @@ describe("computeKpis divides correctly", () => {
       net: 300,
     });
     const activity = activityWith({ depositCount: 4 });
-    const kpis = computeKpis(summary, activity, [], 1);
+    const kpis = computeKpis(summary, activity, [], 1, 0);
 
     expect(kpis.ticketMedio).toBe(250);
     expect(kpis.registrationToFtd).toBe(0.25);
@@ -110,7 +110,7 @@ describe("computeKpis divides correctly", () => {
       adImpressions: 1000,
       adClicks: 50,
     });
-    const kpis = computeKpis(summary, activity, [], 1);
+    const kpis = computeKpis(summary, activity, [], 1, 100);
 
     expect(kpis.saqueMedio).toBe(100);
     expect(kpis.withdrawalShare).toBe(0.2);
@@ -125,7 +125,7 @@ describe("computeKpis divides correctly", () => {
   it("depositorsPerDay divides by the number of days", () => {
     const summary = summaryWith({});
     const activity = activityWith({ depositorCount: 30 });
-    expect(computeKpis(summary, activity, [], 3).depositorsPerDay).toBe(10);
+    expect(computeKpis(summary, activity, [], 3, 0).depositorsPerDay).toBe(10);
   });
 });
 
@@ -133,7 +133,7 @@ describe("zero divisors give null, never Infinity or NaN", () => {
   it("every ratio with a 0 denominator is null", () => {
     const summary = summaryWith({});
     const activity = activityWith({});
-    const kpis = computeKpis(summary, activity, [], 0);
+    const kpis = computeKpis(summary, activity, [], 0, 0);
 
     expect(kpis.margin).toBeNull();
     expect(kpis.ticketMedio).toBeNull();
@@ -157,7 +157,7 @@ describe("zero divisors give null, never Infinity or NaN", () => {
   it("cpm, ctr and costPerClick are null with 0 impressions, even with clicks and spend", () => {
     const summary = summaryWith({ adSpend: 500 });
     const activity = activityWith({ adImpressions: 0, adClicks: 10 });
-    const kpis = computeKpis(summary, activity, [], 1);
+    const kpis = computeKpis(summary, activity, [], 1, 500);
 
     expect(kpis.cpm).toBeNull();
     expect(kpis.ctr).toBeNull();
@@ -167,7 +167,7 @@ describe("zero divisors give null, never Infinity or NaN", () => {
   it("costPerClick is null when impressions exist but clicks are 0", () => {
     const summary = summaryWith({ adSpend: 500 });
     const activity = activityWith({ adImpressions: 1000, adClicks: 0 });
-    const kpis = computeKpis(summary, activity, [], 1);
+    const kpis = computeKpis(summary, activity, [], 1, 500);
 
     expect(kpis.cpm).toBeCloseTo(500, 6);
     expect(kpis.ctr).toBe(0);
@@ -181,7 +181,7 @@ describe("crm returns use send cost and are null with zero cost", () => {
     const activity = activityWith({ crmDirectRevenue: 300, crmInfluencedRevenue: 150 });
     const sends = [usage("sms", 1000, 100), usage("voice_30s", 10, 50)];
 
-    const kpis = computeKpis(summary, activity, sends, 1);
+    const kpis = computeKpis(summary, activity, sends, 1, 0);
     expect(kpis.sendCost).toBe(150);
     expect(kpis.crmDirectReturn).toBe(2);
     expect(kpis.crmInfluencedReturn).toBe(1);
@@ -191,7 +191,7 @@ describe("crm returns use send cost and are null with zero cost", () => {
     const summary = summaryWith({});
     const activity = activityWith({ crmDirectRevenue: 300, crmInfluencedRevenue: 150 });
 
-    const kpis = computeKpis(summary, activity, [], 1);
+    const kpis = computeKpis(summary, activity, [], 1, 0);
     expect(kpis.sendCost).toBe(0);
     expect(kpis.crmDirectReturn).toBeNull();
     expect(kpis.crmInfluencedReturn).toBeNull();
@@ -328,5 +328,85 @@ describe("waterfall ends at cashResult and omits Mensalidade when fee is null", 
     const steps = waterfallSteps(summary, 0, { Equipe: 0 });
     expect(steps.some((s) => s.key === "withdrawals")).toBe(false);
     expect(steps.some((s) => s.key === "category:Equipe")).toBe(false);
+  });
+});
+
+describe("final review fixes", () => {
+  it("CPM and Custo por clique divide the Meta spend, not the Anúncios total", () => {
+    // Anúncios (typed, may include other networks) 900; Meta spend 300.
+    const summary = summaryWith({ adSpend: 900 });
+    const activity = activityWith({ adImpressions: 1000, adClicks: 50 });
+    const kpis = computeKpis(summary, activity, [], 1, 300);
+
+    expect(kpis.cpm).toBeCloseTo(300, 6); // (300 / 1000) * 1000
+    expect(kpis.costPerClick).toBeCloseTo(6, 6); // 300 / 50
+    expect(kpis.ctr).toBeCloseTo(0.05, 6);
+  });
+
+  it("sendCostIncomplete flags any channel with units missing their provider cost", () => {
+    const summary = summaryWith({});
+    const activity = activityWith({});
+    expect(computeKpis(summary, activity, [usage("sms", 10, 1)], 1, 0).sendCostIncomplete).toBe(
+      false,
+    );
+    expect(
+      computeKpis(summary, activity, [usage("sms", 10, 1), usage("voice_30s", 5, 0, 5)], 1, 0)
+        .sendCostIncomplete,
+    ).toBe(true);
+    expect(computeKpis(summary, activity, [], 1, 0).sendCostIncomplete).toBe(false);
+  });
+
+  it("margin is n.a. when the net is zero or negative", () => {
+    const activity = activityWith({});
+    // Both negative would otherwise read as a positive 50% margin.
+    expect(
+      computeKpis(summaryWith({ net: -200, cashResult: -100 }), activity, [], 1, 0).margin,
+    ).toBeNull();
+    expect(computeKpis(summaryWith({ net: 0, cashResult: -100 }), activity, [], 1, 0).margin).toBe(
+      null,
+    );
+    expect(computeKpis(summaryWith({ net: 200, cashResult: -100 }), activity, [], 1, 0).margin).toBe(
+      -0.5,
+    );
+  });
+
+  it("a negative fee (e.g. a negative GGR fee) goes up, and the total still equals cashResult", () => {
+    const summary = summaryWith({
+      depositAmount: 1000,
+      net: 1000,
+      ggrFee: -160,
+      cashResult: 1160,
+    });
+    const steps = waterfallSteps(summary, 0, {});
+    expect(steps.find((s) => s.key === "ggr_fee")).toMatchObject({
+      kind: "up",
+      start: 1000,
+      end: 1160,
+    });
+    expect(steps.at(-1)?.end).toBe(summary.cashResult);
+  });
+
+  it('labels the Envios step "Envios (parcial)" when a provider cost is missing', () => {
+    const summary = summaryWith({
+      depositAmount: 1000,
+      net: 1000,
+      betleadsUsage: 20,
+      cashResult: 980,
+    });
+    expect(
+      waterfallSteps(summary, 20, {}, { sendCostIncomplete: true }).find((s) => s.key === "sends")
+        ?.label,
+    ).toBe("Envios (parcial)");
+    expect(waterfallSteps(summary, 20, {}).find((s) => s.key === "sends")?.label).toBe("Envios");
+
+    // Every unit without cost (R$ 0): the step still shows, never a silent R$ 0.
+    const zero = summaryWith({ depositAmount: 1000, net: 1000, cashResult: 1000 });
+    const steps = waterfallSteps(zero, 0, {}, { sendCostIncomplete: true });
+    expect(steps.find((s) => s.key === "sends")).toMatchObject({
+      label: "Envios (parcial)",
+      start: 1000,
+      end: 1000,
+    });
+    expect(steps.at(-1)?.end).toBe(1000);
   });
 });

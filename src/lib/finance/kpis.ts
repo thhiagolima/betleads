@@ -85,24 +85,40 @@ export function sendLines(current: SendUsage[], previous: SendUsage[] | null): S
   });
 }
 
-/** Pure KPIs for the period: the ratios of §... none of them ever Infinity/NaN. */
+/** True when some send has units without a registered provider cost (its amount is partial). */
+export function hasMissingSendCost(sends: SendUsage[] | undefined): boolean {
+  return (sends ?? []).some((usage) => usage.missingCostUnits > 0);
+}
+
+/** Lucro líquido ÷ net; n.a. (null) when the net is zero or negative. */
+export function marginOf(cashResult: number, net: number): number | null {
+  return net > 0 ? cashResult / net : null;
+}
+
+/**
+ * Pure KPIs for the period: the ratios of §... none of them ever Infinity/NaN.
+ * `metaSpend` is the Meta spend (Σ adSpendSuggested) over the same houses and
+ * days as `activity`: CPM and Custo por clique divide it, not Anúncios (which
+ * may hold other networks the Meta impressions/clicks do not cover).
+ */
 export function computeKpis(
   summary: PeriodSummary,
   activity: DayActivity,
   sends: SendUsage[],
   days: number,
+  metaSpend: number,
 ): FinanceKpis {
   const sendCost = round2(sends.reduce((total, usage) => total + usage.amount, 0));
 
   const hasImpressions = activity.adImpressions > 0;
-  const cpm = hasImpressions ? (summary.adSpend / activity.adImpressions) * 1000 : null;
+  const cpm = hasImpressions ? (metaSpend / activity.adImpressions) * 1000 : null;
   const ctr = hasImpressions ? ratio(activity.adClicks, activity.adImpressions) : null;
-  const costPerClick = hasImpressions ? ratio(summary.adSpend, activity.adClicks) : null;
+  const costPerClick = hasImpressions ? ratio(metaSpend, activity.adClicks) : null;
 
   return {
     depositCount: activity.depositCount,
     withdrawalCount: activity.withdrawalCount,
-    margin: ratio(summary.cashResult, summary.net),
+    margin: marginOf(summary.cashResult, summary.net),
     ticketMedio: ratio(summary.depositAmount, activity.depositCount),
     saqueMedio: ratio(summary.withdrawalAmount, activity.withdrawalCount),
     depositorsPerDay: days === 0 ? null : activity.depositorCount / days,
@@ -115,6 +131,7 @@ export function computeKpis(
     ctr,
     costPerClick,
     sendCost,
+    sendCostIncomplete: hasMissingSendCost(sends),
     crmDirectRevenue: activity.crmDirectRevenue,
     crmInfluencedRevenue: activity.crmInfluencedRevenue,
     crmDirectReturn: ratio(activity.crmDirectRevenue, sendCost),
@@ -130,22 +147,26 @@ export function computeKpis(
  * `end` equals `summary.cashResult` when `sendCost` and `categories` are the
  * same figures that produced it (betleadsUsage and otherCosts); when the
  * categories do not add up to `summary.otherCosts`, one "Outros custos" step
- * (down, or up when they exceed it) carries the residual.
+ * (down, or up when they exceed it) carries the residual. A negative cost
+ * (e.g. a negative GGR fee) raises the result, so its step is "up". With
+ * `sendCostIncomplete` (some sends without a registered provider cost) the
+ * Envios step reads "Envios (parcial)" and shows even at R$ 0.
  */
 export function waterfallSteps(
   summary: PeriodSummary,
   sendCost: number,
   categories: Record<string, number>,
+  options: { sendCostIncomplete?: boolean } = {},
 ): WaterfallStep[] {
   const steps: WaterfallStep[] = [];
   let running = summary.depositAmount;
   steps.push({ key: "deposits", label: "Depósitos", kind: "start", start: 0, end: running });
 
-  const down = (key: string, label: string, amount: number) => {
-    if (amount === 0) return;
+  const down = (key: string, label: string, amount: number, keepZero = false) => {
+    if (amount === 0 && !keepZero) return;
     const start = running;
     running = round2(running - amount);
-    steps.push({ key, label, kind: "down", start, end: running });
+    steps.push({ key, label, kind: amount < 0 ? "up" : "down", start, end: running });
   };
 
   down("withdrawals", "Saques", summary.withdrawalAmount);
@@ -155,7 +176,8 @@ export function waterfallSteps(
   down("ggr_fee", "Taxa de GGR", summary.ggrFee);
   down("movement_fee", "Taxa de movimentação", summary.movementFee);
   down("ad_spend", "Anúncios", summary.adSpend);
-  down("sends", "Envios", sendCost);
+  if (options.sendCostIncomplete) down("sends", "Envios (parcial)", sendCost, true);
+  else down("sends", "Envios", sendCost);
   if (summary.betleadsFee !== null) {
     down("fee", "Mensalidade", summary.betleadsFee);
   }

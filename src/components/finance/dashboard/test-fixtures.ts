@@ -47,6 +47,7 @@ export function kpis(overrides: Partial<FinanceKpis> = {}): FinanceKpis {
     ctr: null,
     costPerClick: null,
     sendCost: 0,
+    sendCostIncomplete: false,
     crmDirectRevenue: 0,
     crmInfluencedRevenue: 0,
     crmDirectReturn: null,

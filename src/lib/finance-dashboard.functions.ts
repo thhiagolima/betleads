@@ -20,7 +20,14 @@ import {
   summarize,
 } from "@/lib/finance/calc";
 import { categoryKey, categoryLabel, looksLikeBetleadsCost } from "@/lib/finance/categories";
-import { computeKpis, sendLines, sumActivity, waterfallSteps } from "@/lib/finance/kpis";
+import {
+  computeKpis,
+  hasMissingSendCost,
+  marginOf,
+  sendLines,
+  sumActivity,
+  waterfallSteps,
+} from "@/lib/finance/kpis";
 import {
   OTHER_COST_COLUMNS,
   clampToToday,
@@ -97,7 +104,7 @@ export type DashboardTenantRow = {
    * GGR do mês, that date (the pending banner asks to update it); else null.
    */
   ggrUpdatedThrough: string | null;
-  /** Lucro líquido ÷ net of the current window; null when net is 0. */
+  /** Lucro líquido ÷ net of the current window; null when net is 0 or negative. */
   margin: number | null;
   /** Envios of the current window (= current.betleadsUsage). */
   sendCost: number;
@@ -463,6 +470,9 @@ export async function getFinanceDashboardFor(
     sendUsageTotal(sendsFor(window, tenantId));
   const activityFor = (window: DateRange | null) =>
     sumActivity(inWindow(activityBuckets, window, (row) => row.metric_date).map(toDayActivity));
+  /** Σ Meta spend (adSpendSuggested) of the scope's days in the window: CPM / CPC divide it. */
+  const metaSpendFor = (window: DateRange | null) =>
+    round2(windowDays(window).reduce((total, day) => total + (day.adSpendSuggested ?? 0), 0));
   const feeFor = (month: string | null, tenantId?: string) => monthSum(feeSums, month, tenantId);
   const allocationsOf = (tenantId?: string) =>
     tenantId === undefined ? allAllocations : (allocationsByTenant.get(tenantId) ?? []);
@@ -492,7 +502,7 @@ export async function getFinanceDashboardFor(
       exempt: exemptByTenant.get(tenant.id) ?? false,
       pendingDates,
       ggrUpdatedThrough: monthlyGgrPendingThrough(pendingDays, allocationsOf(tenant.id)),
-      margin: currentSummary.net === 0 ? null : currentSummary.cashResult / currentSummary.net,
+      margin: marginOf(currentSummary.cashResult, currentSummary.net),
       sendCost: currentSummary.betleadsUsage,
     };
   });
@@ -545,9 +555,12 @@ export async function getFinanceDashboardFor(
   const currentCategories = current ? categoriesFor(current) : {};
   // The waterfall's categories: exactly the scope's other costs that entered
   // totals.current (costRows only hold the scope's houses).
-  const waterfall = waterfallSteps(totals.current, totals.current.betleadsUsage, {
-    ...currentCategories,
-  });
+  const waterfall = waterfallSteps(
+    totals.current,
+    totals.current.betleadsUsage,
+    { ...currentCategories },
+    { sendCostIncomplete: hasMissingSendCost(sendsFor(current)) },
+  );
   const previousCategories = previous ? categoriesFor(previous) : null;
   // A category that dropped to zero this window still shows, with its
   // variation: the current window lists the union of both windows' categories.
@@ -602,12 +615,14 @@ export async function getFinanceDashboardFor(
         activityFor(current),
         sendsFor(current),
         daysOf(current),
+        metaSpendFor(current),
       ),
       previous: computeKpis(
         totals.previous,
         activityFor(previous),
         sendsFor(previous),
         daysOf(previous),
+        metaSpendFor(previous),
       ),
     },
     waterfall,

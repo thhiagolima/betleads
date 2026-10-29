@@ -647,13 +647,22 @@ describe("sends, activity and KPIs", () => {
 
   it("kpis come from activity of the window", async () => {
     financeDayRows.push(
+      // Anúncios 100 + 50; of it, Meta spend 60 + 30 (CPM and CPC use the Meta spend).
       dayRow(HOUSE_A, "2026-10-20", {
         deposit_amount: 1000,
         withdrawal_amount: 200,
         ad_spend: 100,
+        ad_spend_suggested: 60,
         ggr: 0,
       }),
-      dayRow(HOUSE_A, "2026-10-21", { deposit_amount: 500, ad_spend: 50, ggr: 0 }),
+      dayRow(HOUSE_A, "2026-10-21", {
+        deposit_amount: 500,
+        ad_spend: 50,
+        ad_spend_suggested: "30",
+        ggr: 0,
+      }),
+      // Another house's Meta spend stays out.
+      dayRow(HOUSE_B, "2026-10-20", { ad_spend_suggested: 999 }),
       dayRow(HOUSE_A, "2026-10-15", { deposit_amount: 300, ad_spend: 0, ggr: 0 }),
     );
     usageRows.push({ tenant_id: HOUSE_A, metric_date: "2026-10-20", units: 100, amount: 10 });
@@ -694,9 +703,9 @@ describe("sends, activity and KPIs", () => {
     expect(current.depositorsPerDay).toBe(14 / 7);
     expect(current.pixConversion).toBe(15 / 30);
     expect(current.withdrawalShare).toBe(200 / 1500);
-    expect(current.cpm).toBe((150 / 3000) * 1000);
+    expect(current.cpm).toBe((90 / 3000) * 1000);
     expect(current.ctr).toBe(30 / 3000);
-    expect(current.costPerClick).toBe(150 / 30);
+    expect(current.costPerClick).toBe(90 / 30);
     expect(current.sendCost).toBe(10);
     expect(current.crmDirectRevenue).toBe(40);
     expect(current.crmDirectReturn).toBe(4);
@@ -810,6 +819,52 @@ describe("sends, activity and KPIs", () => {
     });
     expect(week.waterfall.at(-1)?.end).toBeCloseTo(week.totals.current.cashResult, 2);
     expect(week.waterfall.some((step) => step.key.startsWith("category:"))).toBe(false);
+  });
+
+  it("a send without provider cost marks Envios partial (kpis and waterfall label)", async () => {
+    financeDayRows.push(dayRow(HOUSE_A, "2026-10-20", { deposit_amount: 100, ad_spend: 0, ggr: 0 }));
+    usageRows.push(
+      { tenant_id: HOUSE_A, metric_date: "2026-10-20", item: "sms", units: 10, amount: 0.8 },
+      {
+        tenant_id: HOUSE_A,
+        metric_date: "2026-10-20",
+        item: "voice_30s",
+        units: 4,
+        amount: 0,
+        missing_cost_units: 4,
+      },
+      // Previous window: complete.
+      { tenant_id: HOUSE_A, metric_date: "2026-10-15", item: "sms", units: 6, amount: 0.48 },
+    );
+
+    const dashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      ...last7Days,
+    });
+    expect(dashboard.kpis.current.sendCostIncomplete).toBe(true);
+    expect(dashboard.kpis.previous.sendCostIncomplete).toBe(false);
+    expect(dashboard.waterfall.find((step) => step.key === "sends")?.label).toBe(
+      "Envios (parcial)",
+    );
+    expect(dashboard.waterfall.at(-1)?.end).toBeCloseTo(dashboard.totals.current.cashResult, 2);
+  });
+
+  it("a house margin is n.a. when its net is zero or negative", async () => {
+    financeDayRows.push(
+      dayRow(HOUSE_A, "2026-10-20", {
+        deposit_amount: 100,
+        withdrawal_amount: 300,
+        ad_spend: 0,
+        ggr: 0,
+      }),
+    );
+    const dashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      ...last7Days,
+    });
+    expect(dashboard.totals.current.net).toBe(-200);
+    expect(dashboard.tenants[0].margin).toBeNull();
+    expect(dashboard.kpis.current.margin).toBeNull();
   });
 
   it("exemptHouse is true only for the tenant scope of an exempt house", async () => {

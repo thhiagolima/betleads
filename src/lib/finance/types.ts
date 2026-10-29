@@ -130,7 +130,7 @@ export type SendLine = {
 export type FinanceKpis = {
   depositCount: number; // Σ DayActivity.depositCount
   withdrawalCount: number; // Σ DayActivity.withdrawalCount
-  margin: number | null; // cashResult / net
+  margin: number | null; // cashResult / net; null when net <= 0
   ticketMedio: number | null; // depositAmount / depositCount
   saqueMedio: number | null; // withdrawalAmount / withdrawalCount
   depositorsPerDay: number | null; // Σ depositorCount / days
@@ -139,10 +139,12 @@ export type FinanceKpis = {
   registrationToFtd: number | null; // ftds / registrations
   ftdMedio: number | null; // ftdDepositAmount / ftds
   ggrShareOfDeposits: number | null; // ggr / depositAmount
-  cpm: number | null;
+  cpm: number | null; // Meta spend (adSpendSuggested) per 1000 impressions
   ctr: number | null;
-  costPerClick: number | null; // only when adImpressions > 0, else null
+  costPerClick: number | null; // Meta spend / clicks; only when adImpressions > 0, else null
   sendCost: number; // Σ SendUsage.amount
+  /** Some sends have no provider cost registered: sendCost (and the CRM returns) are partial. */
+  sendCostIncomplete: boolean;
   crmDirectRevenue: number;
   crmInfluencedRevenue: number;
   crmDirectReturn: number | null; // crmDirectRevenue / sendCost
