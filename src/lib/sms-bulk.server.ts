@@ -61,7 +61,7 @@ import {
   summarizeProviderError,
   toShortBrasilCell,
 } from "./sms.functions";
-import { countSmsSegments } from "./sms-segments";
+import { countSmsSegments, toGsm7Text } from "./sms-segments";
 import {
   envShortBrasilAccount,
   ProviderAccountUnavailableError,
@@ -864,7 +864,8 @@ export async function sendSmsBatch(items: SmsBatchItem[]): Promise<SmsBatchResul
     CREDIT_CONCURRENCY,
     async ({ c, k }) => {
       const link = links[k];
-      const content = link.ok ? link.content : c.item.content;
+      // GSM-7 form: one accent would switch the whole SMS to UCS-2 (see toGsm7Text).
+      const content = toGsm7Text(link.ok ? link.content : c.item.content);
       const dispatchIds = link.ok ? link.links.map((l) => l.dispatchId) : [];
       // Segments counted on the FINAL content (post-link), never the template text.
       const billedUnits = Math.max(1, countSmsSegments(content).segments);

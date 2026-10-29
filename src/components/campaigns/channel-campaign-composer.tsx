@@ -63,7 +63,7 @@ import {
 } from "@/lib/email.functions";
 import { brl, num } from "@/lib/format";
 import { getBillingPrices } from "@/lib/billing/billing.functions";
-import { countSmsSegments } from "@/lib/sms-segments";
+import { countSmsSegments, toGsm7Text } from "@/lib/sms-segments";
 import { unknownMessageVariables } from "@/lib/message-variables";
 import { listJourneyVoiceAssets } from "@/lib/journey-voice-assets.functions";
 import {
@@ -430,7 +430,7 @@ export function ChannelCampaignComposer({
   });
   const smsPreview = channel === "sms" ? smsRecipientPreview.data : undefined;
   const sendableRecipients = smsPreview ? smsPreview.resolved : recipients;
-  const smsSegmentInfo = countSmsSegments(smsContent);
+  const smsSegmentInfo = countSmsSegments(toGsm7Text(smsContent));
   const parts = smsSegmentInfo.segments;
   const cost = channel === "sms" ? sendableRecipients * parts : recipients;
   const smsCostBrl = smsPrice == null ? null : parts * smsPrice.unitPrice;

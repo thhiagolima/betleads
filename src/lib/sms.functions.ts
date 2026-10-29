@@ -66,7 +66,7 @@ import {
   reserveForDelivery,
   refundForDelivery,
 } from "./billing/wallet.server";
-import { countSmsSegments } from "./sms-segments";
+import { countSmsSegments, toGsm7Text } from "./sms-segments";
 import { cancelSmsCampaignRow, resumePausedSmsCampaign } from "./sms-campaign-dispatch.server";
 import { externalListBlockedVariables, externalListVariablesError } from "./campaign-external-list";
 import {
@@ -875,6 +875,9 @@ export async function sendSmsInternal(args: {
     preparedContent = prepared.content;
     trackedDispatchIds = prepared.links.map((link) => link.dispatchId);
   }
+  // One accent (a lead named "João") would switch the whole SMS to UCS-2 and
+  // multiply the segments billed; send the GSM-7 form instead.
+  preparedContent = toGsm7Text(preparedContent);
   let billingReferenceId: string = crypto.randomUUID();
   let creditReserved = false;
   // Segments are counted on the FINAL content actually sent (after

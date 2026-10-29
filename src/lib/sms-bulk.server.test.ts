@@ -783,9 +783,9 @@ describe("sendSmsBatch (ENV-10, Short Brasil bulk)", () => {
     });
 
     it("UCS-2 content (forced by a non-GSM-7 character) reserves 1 segment at 70 units, 2 at 71", async () => {
-      // 'ã' is not in the GSM-7 alphabet (only 'à' is) -> forces UCS-2.
-      const ucs70 = "ã" + "a".repeat(69); // 70 units -> 1 segment
-      const ucs71 = "ã" + "a".repeat(70); // 71 units -> ceil(71/67) = 2 segments
+      // An emoji has no GSM-7 form (accents are rewritten by toGsm7Text) -> forces UCS-2.
+      const ucs70 = "😀" + "a".repeat(68); // 70 UTF-16 units -> 1 segment
+      const ucs71 = "😀" + "a".repeat(69); // 71 UTF-16 units -> ceil(71/67) = 2 segments
       const r1 = await sendSmsBatch([item(1, { content: ucs70, linkTrackingEnabled: false })]);
       expect(r1.outcomes[0].status).toBe("accepted");
       expect(credits.charged()).toBe(1);
@@ -793,6 +793,13 @@ describe("sendSmsBatch (ENV-10, Short Brasil bulk)", () => {
       const r2 = await sendSmsBatch([item(2, { content: ucs71, linkTrackingEnabled: false })]);
       expect(r2.outcomes[0].status).toBe("accepted");
       expect(credits.charged()).toBe(3); // 1 (first item) + 2 (this one)
+    });
+
+    it("an accented name does not force UCS-2: billed as one GSM-7 segment", async () => {
+      const content = "João, saque pago! Sua mare de sorte esta em alta: aproveite e redeposite agora em https://bmkt.click/n3K1mk Para sair, responda SAIR.";
+      const r = await sendSmsBatch([item(1, { content, linkTrackingEnabled: false })]);
+      expect(r.outcomes[0].status).toBe("accepted");
+      expect(credits.charged()).toBe(1);
     });
 
     it("insufficient balance for a multi-segment item fails with 'Saldo insuficiente', nothing sent", async () => {

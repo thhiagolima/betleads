@@ -1,5 +1,5 @@
 // GSM-7 alphabet and segment counter for SMS billing.
-// Pure function used by SMS send path (server) and SMS composer (browser).
+// Pure functions used by SMS send path (server) and SMS composer (browser).
 
 // GSM-7 basic alphabet (3GPP TS 23.038 default alphabet, 0x00–0x7F minus 0x1B escape)
 // Explicitly lists all single-byte characters (no character ranges)
@@ -57,4 +57,50 @@ export function countSmsSegments(text: string): SmsSegmentInfo {
   }
 
   return { encoding, units, segments };
+}
+
+// Typographic punctuation editors and phone keyboards insert, mapped to the
+// plain GSM-7 equivalent.
+const GSM7_LOOKALIKES: Record<string, string> = {
+  "‘": "'",
+  "’": "'",
+  "“": '"',
+  "”": '"',
+  "–": "-",
+  "—": "-",
+  "…": "...",
+  "\u00a0": " ",
+  "ª": "a",
+  "º": "o",
+};
+
+function isGsm7Char(char: string): boolean {
+  return GSM7_BASIC.has(char) || GSM7_EXTENSION.has(char);
+}
+
+/**
+ * Rewrites characters outside GSM-7 into their closest GSM-7 form so a single
+ * accent (a lead named "João", a template with "não") does not switch the
+ * whole SMS to UCS-2, which cuts the segment from 160 to 70 characters and
+ * multiplies the cost. Accents that GSM-7 has (é, à, ü, Ç…) are kept; the rest
+ * lose the diacritic (ã→a, ç→c, í→i). Anything with no GSM-7 form (emoji)
+ * is left untouched and still sends as UCS-2.
+ */
+export function toGsm7Text(text: string): string {
+  if (!text) return text;
+  let out = "";
+  for (const char of text) {
+    if (isGsm7Char(char)) {
+      out += char;
+      continue;
+    }
+    const lookalike = GSM7_LOOKALIKES[char];
+    if (lookalike !== undefined) {
+      out += lookalike;
+      continue;
+    }
+    const stripped = char.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    out += stripped && [...stripped].every(isGsm7Char) ? stripped : char;
+  }
+  return out;
 }

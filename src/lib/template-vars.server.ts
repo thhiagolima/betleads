@@ -112,14 +112,18 @@ export function buildPlayerVariables(
  * mensagens com lacunas vazias enganosas — EXCETO um `{link_*}` desconhecido
  * quando `house.siteUrl` existe: cai para a URL do site da casa em vez de
  * vazar a chave literal (uma URL rápida apagada, por exemplo). Sem `house`
- * ou com `siteUrl: null`, o comportamento é idêntico ao legado. */
+ * ou com `siteUrl: null`, o comportamento é idêntico ao legado.
+ * `{{token}}` (chaves duplas, comum em modelos copiados de outras ferramentas)
+ * é tratado como `{token}`: antes a chave externa sobrava no texto enviado
+ * ("{JOAO DA SILVA}, saque pago!") e, no SMS, cada chave conta 2 caracteres. */
 export function renderTemplate(
   content: string | null | undefined,
   vars: Record<string, string>,
   house?: HouseLinks | null,
 ): string {
   if (!content) return "";
-  return content.replace(/\{(\w+)\}/g, (m, key: string) => {
+  return content.replace(/\{\{(\w+)\}\}|\{(\w+)\}/g, (m, doubleKey?: string, singleKey?: string) => {
+    const key = (doubleKey ?? singleKey)!;
     if (vars[key] != null) return vars[key];
     if (house?.siteUrl && key.startsWith("link_")) {
       const quickKey = key.slice("link_".length);
