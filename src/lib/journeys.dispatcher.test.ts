@@ -346,7 +346,7 @@ describe("runJourneyDispatcher", () => {
     });
   });
 
-  it("house wallet refusal (errorKind insufficient_balance): the step is skipped (saldo_insuficiente), the journey advances, no retry, no attempt consumed, the house is alerted (PG3 Task 7)", async () => {
+  it("house wallet refusal (errorKind insufficient_balance): the step waits on the same position for 15 min, no attempt consumed, the house is alerted", async () => {
     seed(["e1"]);
     sms.sendSmsInternal.mockResolvedValue({
       ok: false,
@@ -354,21 +354,27 @@ describe("runJourneyDispatcher", () => {
       error: "Saldo insuficiente",
       errorKind: "insufficient_balance",
     });
+    const before = Date.now();
     const result = await runJourneyDispatcher(1000);
-    expect(result).toMatchObject({ failed: 0, rescheduled: 0, skippedNoBalance: 1 });
+    expect(result).toMatchObject({ failed: 0, rescheduled: 0, deferredNoBalance: 1 });
     const row = enrollment("e1");
-    // Next step, due now: not a retry of the same step.
+    // Same step, later: never skipped to the next one.
     expect(row).toMatchObject({
-      status: "active",
-      current_position: 1,
-      attempts: 0,
+      status: "waiting",
+      current_position: 0,
+      attempts: 1,
       claimed_by: null,
     });
-    expect(Date.parse(String(row.next_run_at))).toBeLessThanOrEqual(Date.now());
-    expect(fake.tables.journey_step_executions[0]).toMatchObject({ status: "skipped" });
+    expect(Date.parse(String(row.next_run_at))).toBeGreaterThanOrEqual(
+      before + 15 * 60_000 - 1_000,
+    );
+    expect(fake.tables.journey_step_executions[0]).toMatchObject({
+      status: "retrying",
+      provider: "wallet",
+    });
     expect(fake.tables.dispatch_pause_state).toHaveLength(0);
     expect(fake.tables.journey_events.at(-1)).toMatchObject({
-      event_type: "step_skipped",
+      event_type: "step_deferred",
       detail: expect.objectContaining({
         channel: "sms",
         step_position: 0,
@@ -379,7 +385,7 @@ describe("runJourneyDispatcher", () => {
     expect(alerts.notifyNoBalance).toHaveBeenCalledWith(TENANT);
   });
 
-  it("a house without balance is not retried: a second run does not resend the skipped step", async () => {
+  it("after a recharge the held step is sent (it was not lost)", async () => {
     seed(["e1"]);
     sms.sendSmsInternal.mockResolvedValue({
       ok: false,
@@ -389,14 +395,36 @@ describe("runJourneyDispatcher", () => {
     });
     await runJourneyDispatcher(1000);
     seedClaimAgain();
-    sms.sendSmsInternal.mockClear();
+    sms.sendSmsInternal.mockReset();
+    sms.sendSmsInternal.mockResolvedValue({ ok: true, status: 200, response: "{}" });
     await runJourneyDispatcher(1000);
-    // Position 1 does not exist: the journey ends instead of re-sending step 0.
-    expect(sms.sendSmsInternal).not.toHaveBeenCalled();
-    expect(enrollment("e1")).toMatchObject({ status: "completed" });
+    expect(sms.sendSmsInternal).toHaveBeenCalledTimes(1);
+    // Step 0 sent on this run: the enrollment moves past it.
+    expect(enrollment("e1")).toMatchObject({ current_position: 1, attempts: 0 });
   });
 
-  it("an alert failure never breaks the skip", async () => {
+  it("one wallet refusal holds the house's other items in the same run without calling the wallet again", async () => {
+    // One item at a time, so the refusal is seen before the next item starts.
+    vi.stubEnv("JOURNEYS_DISPATCH_CONCURRENCY", "1");
+    seed(["e1", "e2"]);
+    sms.sendSmsInternal.mockResolvedValue({
+      ok: false,
+      status: 402,
+      error: "Saldo insuficiente",
+      errorKind: "insufficient_balance",
+    });
+    const result = await runJourneyDispatcher(1000);
+    expect(sms.sendSmsInternal).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ claimed: 2, failed: 0, deferredNoBalance: 2 });
+    for (const id of ["e1", "e2"]) {
+      expect(enrollment(id)).toMatchObject({ status: "waiting", current_position: 0, attempts: 1 });
+    }
+    // Only the refused item reserved an execution.
+    expect(fake.tables.journey_step_executions).toHaveLength(1);
+    expect(alerts.notifyNoBalance).toHaveBeenCalledTimes(1);
+  });
+
+  it("an alert failure never breaks the hold", async () => {
     seed(["e1"]);
     alerts.notifyNoBalance.mockRejectedValueOnce(new Error("alert down"));
     vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -407,8 +435,8 @@ describe("runJourneyDispatcher", () => {
       errorKind: "insufficient_balance",
     });
     const result = await runJourneyDispatcher(1000);
-    expect(result).toMatchObject({ failed: 0, skippedNoBalance: 1 });
-    expect(enrollment("e1")).toMatchObject({ current_position: 1, attempts: 0 });
+    expect(result).toMatchObject({ failed: 0, deferredNoBalance: 1 });
+    expect(enrollment("e1")).toMatchObject({ status: "waiting", current_position: 0, attempts: 1 });
   });
 
   it("caps consecutive no-cost defers: the 11th 429 in a row consumes an attempt", async () => {
@@ -745,12 +773,12 @@ describe("runJourneyDispatcher", () => {
     });
     const result = await runJourneyDispatcher(1000);
     signed.mockRestore();
-    // PG3 Task 7: same skip-and-advance as SMS and e-mail.
+    // Same hold-on-the-same-step as SMS and e-mail.
     expect(result).toMatchObject({ failed: 0, outcomeUnknown: 0, rescheduled: 0 });
-    expect(result).toMatchObject({ skippedNoBalance: 1 });
-    expect(enrollment("e1")).toMatchObject({ current_position: 1, attempts: 0 });
+    expect(result).toMatchObject({ deferredNoBalance: 1 });
+    expect(enrollment("e1")).toMatchObject({ status: "waiting", current_position: 0, attempts: 1 });
     expect(fake.tables.journey_events.at(-1)).toMatchObject({
-      event_type: "step_skipped",
+      event_type: "step_deferred",
       detail: expect.objectContaining({ channel: "voice", reason: "saldo_insuficiente" }),
     });
     expect(fake.tables.call_history ?? []).toEqual([]);
@@ -1131,7 +1159,7 @@ describe("runJourneyDispatcher email step", () => {
       }),
     ]);
   });
-  it("email step without balance: skipped (saldo_insuficiente), no log row, the journey advances (PG3 Task 7)", async () => {
+  it("email step without balance: held on the same step (saldo_insuficiente), no log row", async () => {
     seed(["e1"]);
     fake.tables.journey_steps[0] = {
       id: "step-0",
@@ -1164,11 +1192,11 @@ describe("runJourneyDispatcher email step", () => {
     });
 
     const result = await runJourneyDispatcher(1000);
-    expect(result).toMatchObject({ processed: 0, failed: 0, skippedNoBalance: 1 });
+    expect(result).toMatchObject({ processed: 0, failed: 0, deferredNoBalance: 1 });
     expect(fake.tables.email_send_logs).toEqual([]);
-    expect(enrollment("e1")).toMatchObject({ current_position: 1, attempts: 0 });
+    expect(enrollment("e1")).toMatchObject({ status: "waiting", current_position: 0, attempts: 1 });
     expect(fake.tables.journey_events.at(-1)).toMatchObject({
-      event_type: "step_skipped",
+      event_type: "step_deferred",
       detail: expect.objectContaining({ channel: "email", reason: "saldo_insuficiente" }),
     });
     expect(alerts.notifyNoBalance).toHaveBeenCalledWith(TENANT);
