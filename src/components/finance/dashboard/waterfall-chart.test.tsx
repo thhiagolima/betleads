@@ -3,50 +3,83 @@ import { describe, expect, it } from "vitest";
 
 import type { WaterfallStep } from "@/lib/finance/types";
 
-import { NO_FEE_NOTE, WaterfallChart, waterfallBars } from "./waterfall-chart";
+import { NO_FEE_NOTE, WaterfallChart, waterfallBars, waterfallZeroPct } from "./waterfall-chart";
 
 const steps: WaterfallStep[] = [
   { key: "deposits", label: "Depósitos", kind: "start", start: 0, end: 1000 },
   { key: "withdrawals", label: "Saques", kind: "down", start: 1000, end: 600 },
   { key: "net", label: "Net", kind: "subtotal", start: 600, end: 600 },
-  { key: "ggr_fee", label: "Taxa de GGR", kind: "down", start: 600, end: 500 },
+  { key: "movement_fee", label: "Taxa de movimentação", kind: "down", start: 600, end: 500 },
   { key: "ad_spend", label: "Anúncios", kind: "down", start: 500, end: -100 },
   { key: "other_costs", label: "Outros custos", kind: "up", start: -100, end: -50 },
   { key: "profit", label: "Lucro líquido", kind: "total", start: -50, end: -50 },
 ];
 
 describe("waterfallBars", () => {
-  it("waterfall chart data keeps the step order", () => {
-    expect(waterfallBars(steps).map((bar) => bar.key)).toEqual(steps.map((step) => step.key));
-    expect(waterfallBars(steps).map((bar) => bar.label)).toEqual(steps.map((step) => step.label));
+  it("keeps the step order and shortens long labels to one line", () => {
+    const bars = waterfallBars(steps);
+    expect(bars.map((bar) => bar.key)).toEqual(steps.map((step) => step.key));
+    expect(bars.map((bar) => bar.label)).toEqual([
+      "Depósitos",
+      "Saques",
+      "Net",
+      "Taxa de mov.",
+      "Anúncios",
+      "Outros custos",
+      "Lucro líquido",
+    ]);
   });
 
-  it("puts a transparent base under each step and the step's size on top", () => {
+  it("floats each column from its start to its end on a 0–100% vertical scale", () => {
+    // Domain −100 … 1000 (1100 wide): zero sits at 100/1100 of the height.
     const bars = waterfallBars(steps);
-    const pick = (key: string) => bars.find((bar) => bar.key === key);
+    const pick = (key: string) => bars.find((bar) => bar.key === key)!;
+    const pct = (value: number) => ((value + 100) / 1100) * 100;
+
+    expect(waterfallZeroPct(steps)).toBeCloseTo(pct(0));
 
     // Start, subtotal and total grow from zero.
-    expect(pick("deposits")).toMatchObject({ base: 0, value: 1000, amount: 1000 });
-    expect(pick("net")).toMatchObject({ base: 0, value: 600, amount: 600 });
-    // A down step floats between its end and start; its amount is negative.
-    expect(pick("withdrawals")).toMatchObject({ base: 600, value: 400, amount: -400 });
-    expect(pick("ggr_fee")).toMatchObject({ base: 500, value: 100, amount: -100 });
-    // Crossing zero: the bar spans from the (negative) end up to the start.
-    expect(pick("ad_spend")).toMatchObject({ base: -100, value: 600, amount: -600 });
-    expect(pick("other_costs")).toMatchObject({ base: -100, value: 50, amount: 50 });
-    // A negative total hangs below zero.
-    expect(pick("profit")).toMatchObject({ base: -50, value: 50, amount: -50 });
+    expect(pick("deposits").bottomPct).toBeCloseTo(pct(0));
+    expect(pick("deposits").heightPct).toBeCloseTo((1000 / 1100) * 100);
+    expect(pick("deposits").amount).toBe(1000);
+    expect(pick("net").bottomPct).toBeCloseTo(pct(0));
+    expect(pick("net").heightPct).toBeCloseTo((600 / 1100) * 100);
+
+    // A down step floats between its end and its start.
+    expect(pick("withdrawals").bottomPct).toBeCloseTo(pct(600));
+    expect(pick("withdrawals").heightPct).toBeCloseTo((400 / 1100) * 100);
+    expect(pick("withdrawals").amount).toBe(-400);
+
+    // Crossing zero: from the negative end up to the start; label still above.
+    expect(pick("ad_spend").bottomPct).toBeCloseTo(pct(-100));
+    expect(pick("ad_spend").heightPct).toBeCloseTo((600 / 1100) * 100);
+    expect(pick("ad_spend").labelBelow).toBe(false);
+
+    // A negative total hangs below zero and its label goes under it.
+    expect(pick("profit").bottomPct).toBeCloseTo(pct(-50));
+    expect(pick("profit").heightPct).toBeCloseTo((50 / 1100) * 100);
+    expect(pick("profit").labelBelow).toBe(true);
+    expect(pick("deposits").labelBelow).toBe(false);
   });
 
-  it("colors down red, up green, start/subtotal neutral and the total by sign", () => {
+  it("puts zero at the bottom when nothing goes below it", () => {
+    const positive: WaterfallStep[] = [
+      { key: "deposits", label: "Depósitos", kind: "start", start: 0, end: 200 },
+      { key: "profit", label: "Lucro líquido", kind: "total", start: 50, end: 50 },
+    ];
+    expect(waterfallZeroPct(positive)).toBe(0);
+    expect(waterfallBars(positive)[1]).toMatchObject({ bottomPct: 0, heightPct: 25 });
+  });
+
+  it("colors entradas blue-gray, saídas red, subtotal slate and the total by sign", () => {
     const tones = Object.fromEntries(waterfallBars(steps).map((bar) => [bar.key, bar.tone]));
     expect(tones).toEqual({
-      deposits: "neutral",
+      deposits: "in",
       withdrawals: "down",
-      net: "neutral",
-      ggr_fee: "down",
+      net: "subtotal",
+      movement_fee: "down",
       ad_spend: "down",
-      other_costs: "up",
+      other_costs: "in",
       profit: "negative",
     });
 
@@ -60,6 +93,19 @@ describe("waterfallBars", () => {
 describe("WaterfallChart", () => {
   it("renders an empty state with no steps", () => {
     expect(renderToStaticMarkup(<WaterfallChart steps={[]} />)).toContain("Sem dados no período.");
+  });
+
+  it("renders the columns, the legend and the note about hidden steps", () => {
+    const html = renderToStaticMarkup(<WaterfallChart steps={steps} />);
+    expect(html).toContain("Taxa de mov.");
+    expect(html).not.toContain("Taxa de movimentação<");
+    expect(html).toContain("Entradas");
+    expect(html).toContain("Saídas e custos");
+    expect(html).toContain("Subtotal");
+    expect(html).toContain("Passos sem valor no período não aparecem.");
+    expect(html).toContain("border-dashed");
+    expect(html).toContain("overflow-x-auto");
+    expect(html).toContain("-R$ 400");
   });
 
   it("notes the result has no mensalidade outside a closed month", () => {
