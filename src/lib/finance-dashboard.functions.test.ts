@@ -39,7 +39,10 @@ type Row = Record<string, unknown>;
 const PGRST_MAX_ROWS = 1000;
 let financeDayRows: Row[];
 let goalDayRows: Row[];
+/** finance_send_usage rows; `item` defaults to "sms", `units` to 1, `missing_cost_units` to 0. */
 let usageRows: Row[];
+/** finance_activity_days rows (one per house and day); missing columns are 0. */
+let activityRows: Row[];
 let feeRows: Row[];
 let sinceRows: Row[];
 /** Houses billing_tenant_exempt reports as exempt (finance_tenants_exempt). */
@@ -119,6 +122,7 @@ beforeEach(() => {
   financeDayRows = [];
   goalDayRows = [];
   usageRows = [];
+  activityRows = [];
   feeRows = [];
   sinceRows = [];
   exemptTenants = new Set();
@@ -195,8 +199,16 @@ beforeEach(() => {
     data: capped(goalDayRows.filter((row) => inWindow(row, args))),
     error: null,
   }));
-  fake.admin.onRpc("finance_betleads_usage", (args) => ({
-    data: capped(usageRows.filter((row) => inWindow(row, args))),
+  fake.admin.onRpc("finance_send_usage", (args) => ({
+    data: capped(
+      usageRows
+        .filter((row) => inWindow(row, args))
+        .map((row) => ({ item: "sms", units: 1, missing_cost_units: 0, ...row })),
+    ),
+    error: null,
+  }));
+  fake.admin.onRpc("finance_activity_days", (args) => ({
+    data: capped(activityRows.filter((row) => inWindow(row, args))),
     error: null,
   }));
   fake.admin.onRpc("finance_betleads_fees", (args) => ({
@@ -484,6 +496,8 @@ describe("months", () => {
       month: "2025-11",
       cashResult: 200,
       adSpend: 100,
+      net: 300,
+      depositAmount: 300,
       roi: 2,
       incomplete: false,
       inProgress: false,
@@ -494,6 +508,8 @@ describe("months", () => {
       month: "2026-09",
       cashResult: 500 - 100 - 50 - 10 - 40,
       adSpend: 100,
+      net: 500,
+      depositAmount: 500,
       roi: 3,
       incomplete: false,
       inProgress: false,
@@ -559,6 +575,284 @@ describe("tenant scope", () => {
   });
 });
 
+const activity = (tenantId: string, date: string, overrides: Row = {}): Row => ({
+  tenant_id: tenantId,
+  metric_date: date,
+  deposit_count: 0,
+  depositor_count: 0,
+  withdrawal_count: 0,
+  generated_pix_count: 0,
+  crm_sent: 0,
+  crm_clicks: 0,
+  crm_direct_conversions: 0,
+  crm_direct_revenue: 0,
+  crm_influenced_revenue: 0,
+  ad_impressions: 0,
+  ad_clicks: 0,
+  ...overrides,
+});
+
+describe("sends, activity and KPIs", () => {
+  it("dashboard returns send lines per channel and envios equals summary.betleadsUsage", async () => {
+    usageRows.push(
+      { tenant_id: HOUSE_A, metric_date: "2026-10-20", item: "sms", units: 10, amount: 0.8 },
+      { tenant_id: HOUSE_A, metric_date: "2026-10-21", item: "email", units: 3, amount: 0.0012 },
+      { tenant_id: HOUSE_A, metric_date: "2026-10-21", item: "voice_30s", units: 4, amount: 0.136 },
+      { tenant_id: HOUSE_A, metric_date: "2026-10-22", item: "sms", units: 5, amount: 0.4 },
+      // Previous window (2026-10-11..17).
+      { tenant_id: HOUSE_A, metric_date: "2026-10-15", item: "sms", units: 6, amount: 0.48 },
+      // Another house: only in the group scope.
+      { tenant_id: HOUSE_B, metric_date: "2026-10-20", item: "sms", units: 100, amount: 8 },
+    );
+
+    const dashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      ...last7Days,
+    });
+
+    expect(dashboard.sends.map((line) => [line.item, line.units, line.amount])).toEqual([
+      ["sms", 15, 1.2],
+      ["voice_30s", 4, 0.14],
+      ["email", 3, 0],
+    ]);
+    expect(dashboard.sends[0]).toMatchObject({
+      label: "SMS",
+      unitCost: 0.08,
+      previousAmount: 0.48,
+    });
+    expect(dashboard.sends[1].previousAmount).toBeNull();
+    const envios = dashboard.sends.reduce((total, line) => total + line.amount, 0);
+    expect(envios).toBeCloseTo(dashboard.totals.current.betleadsUsage, 10);
+    expect(dashboard.totals.current.betleadsUsage).toBe(1.34);
+    expect(dashboard.costs.find((line) => line.key === "sends")?.amount).toBe(1.34);
+    expect(dashboard.kpis.current.sendCost).toBe(1.34);
+    expect(dashboard.tenants[0].sendCost).toBe(1.34);
+
+    const group = await getFinanceDashboardFor(ctxFor(G1_MANAGER), {
+      scope: { kind: "group", groupId: G1 },
+      ...last7Days,
+    });
+    expect(group.sends[0]).toMatchObject({ item: "sms", units: 115, amount: 9.2 });
+    expect(group.totals.current.betleadsUsage).toBe(9.34);
+    expect(group.tenants.map((row) => [row.nome, row.sendCost])).toEqual([
+      ["Casa A", 1.34],
+      ["Casa B", 8],
+    ]);
+  });
+
+  it("kpis come from activity of the window", async () => {
+    financeDayRows.push(
+      dayRow(HOUSE_A, "2026-10-20", {
+        deposit_amount: 1000,
+        withdrawal_amount: 200,
+        ad_spend: 100,
+        ggr: 0,
+      }),
+      dayRow(HOUSE_A, "2026-10-21", { deposit_amount: 500, ad_spend: 50, ggr: 0 }),
+      dayRow(HOUSE_A, "2026-10-15", { deposit_amount: 300, ad_spend: 0, ggr: 0 }),
+    );
+    usageRows.push({ tenant_id: HOUSE_A, metric_date: "2026-10-20", units: 100, amount: 10 });
+    activityRows.push(
+      activity(HOUSE_A, "2026-10-20", {
+        deposit_count: 10,
+        depositor_count: 7,
+        withdrawal_count: 2,
+        generated_pix_count: 20,
+        crm_direct_revenue: 40,
+        crm_influenced_revenue: "100",
+        ad_impressions: 2000,
+        ad_clicks: 30,
+      }),
+      activity(HOUSE_A, "2026-10-21", {
+        deposit_count: 5,
+        depositor_count: 7,
+        generated_pix_count: 10,
+        ad_impressions: 1000,
+        ad_clicks: 0,
+      }),
+      // Previous window (2026-10-11..17).
+      activity(HOUSE_A, "2026-10-15", { deposit_count: 3, depositor_count: 3 }),
+      // Outside both windows.
+      activity(HOUSE_A, "2026-10-05", { deposit_count: 1000, depositor_count: 1000 }),
+      // Another house.
+      activity(HOUSE_B, "2026-10-20", { deposit_count: 1000 }),
+    );
+
+    const dashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      ...last7Days,
+    });
+
+    const { current, previous } = dashboard.kpis;
+    expect(current.ticketMedio).toBe(1500 / 15);
+    expect(current.saqueMedio).toBe(100);
+    expect(current.depositorsPerDay).toBe(14 / 7);
+    expect(current.pixConversion).toBe(15 / 30);
+    expect(current.withdrawalShare).toBe(200 / 1500);
+    expect(current.cpm).toBe((150 / 3000) * 1000);
+    expect(current.ctr).toBe(30 / 3000);
+    expect(current.costPerClick).toBe(150 / 30);
+    expect(current.sendCost).toBe(10);
+    expect(current.crmDirectRevenue).toBe(40);
+    expect(current.crmDirectReturn).toBe(4);
+    expect(current.crmInfluencedReturn).toBe(10);
+    // cashResult 1300 - 150 - 10 = 1140 over net 1300.
+    expect(current.margin).toBe(1140 / 1300);
+    expect(dashboard.tenants[0].margin).toBe(1140 / 1300);
+
+    expect(previous.ticketMedio).toBe(100);
+    expect(previous.depositorsPerDay).toBe(3 / 7);
+    expect(previous.pixConversion).toBeNull();
+    expect(previous.crmDirectReturn).toBeNull();
+    expect(previous.cpm).toBeNull();
+  });
+
+  it("roiReference is the previous month cut at the same day while in progress", async () => {
+    financeDayRows.push(
+      complete(HOUSE_A, "2026-09-10", 1000, 100),
+      // After the cut (the 24th): left out of the reference.
+      complete(HOUSE_A, "2026-09-28", 5000, 100),
+      complete(HOUSE_A, "2026-07-10", 700, 100),
+    );
+    fake.admin
+      .rows("tenant_finance_other_costs")
+      .push(otherCost("c1", HOUSE_A, "2026-09-01", "Equipe", 50, "Equipe"));
+
+    const week = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      ...last7Days,
+    });
+    expect(week.roiReference.range).toEqual({ from: "2026-09-01", to: "2026-09-24" });
+    expect(week.roiReference.roi).toBe((1000 - 100 - 50) / 100);
+
+    // A past month: the whole previous month.
+    const august = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      range: { from: "2026-08-01", to: "2026-08-31" },
+      compare: "previous",
+      preset: "custom",
+    });
+    expect(august.roiReference.range).toEqual({ from: "2026-07-01", to: "2026-07-31" });
+    expect(august.roiReference.roi).toBe(6);
+  });
+
+  it("waterfall total equals totals.current.cashResult", async () => {
+    financeDayRows.push(
+      dayRow(HOUSE_A, "2026-10-10", {
+        deposit_amount: 1000.33,
+        withdrawal_amount: 200.17,
+        ad_spend: 100.11,
+        ggr: 300.07,
+        ggr_fee_pct: 17,
+        movement_fee_pct: 2.7,
+      }),
+      dayRow(HOUSE_B, "2026-10-11", {
+        deposit_amount: 500,
+        withdrawal_amount: 50,
+        ad_spend: 20,
+        ggr: 40,
+        ggr_fee_pct: 16,
+        movement_fee_pct: 2.7,
+      }),
+    );
+    fake.admin.rows("tenant_finance_other_costs").push(
+      otherCost("c1", HOUSE_A, "2026-10-01", "Equipe", 33.33, "Equipe"),
+      otherCost("c2", HOUSE_A, "2026-10-01", "Aluguel", 66.67, "Aluguel"),
+      otherCost("c3", HOUSE_A, "2026-10-01", "Diversos", 10.01),
+      otherCost("c4", HOUSE_B, "2026-10-01", "Equipe", 70, "Equipe"),
+      // Another month: never in the waterfall.
+      otherCost("c5", HOUSE_A, "2026-09-01", "Infra", 999, "Infra"),
+    );
+    usageRows.push(
+      { tenant_id: HOUSE_A, metric_date: "2026-10-10", item: "sms", units: 3, amount: 0.177 },
+      { tenant_id: HOUSE_A, metric_date: "2026-10-10", item: "voice_30s", units: 3, amount: 0.102 },
+      { tenant_id: HOUSE_B, metric_date: "2026-10-11", item: "email", units: 3, amount: 0.0012 },
+    );
+    feeRows.push(
+      { tenant_id: HOUSE_A, month: "2026-10-01", amount: 400 },
+      { tenant_id: HOUSE_B, month: "2026-10-01", amount: 300 },
+    );
+
+    const house = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      ...monthToDate,
+    });
+    const houseTotal = house.waterfall.at(-1);
+    expect(houseTotal).toMatchObject({ key: "profit", kind: "total" });
+    expect(houseTotal?.end).toBeCloseTo(house.totals.current.cashResult, 2);
+    expect(house.waterfall[0]).toMatchObject({ key: "deposits", end: 1000.33 });
+    // Only the house's own other costs of the window, by category.
+    expect(
+      house.waterfall.filter((step) => step.key.startsWith("category:")).map((s) => s.label),
+    ).toEqual(["Equipe", "Aluguel", "Outros"]);
+    expect(house.waterfall.some((step) => step.key === "other_costs")).toBe(false);
+    expect(house.waterfall.find((step) => step.key === "fee")).toMatchObject({
+      start: expect.any(Number),
+    });
+
+    const group = await getFinanceDashboardFor(ctxFor(G1_MANAGER), {
+      scope: { kind: "group", groupId: G1 },
+      ...monthToDate,
+    });
+    expect(group.waterfall.at(-1)?.end).toBeCloseTo(group.totals.current.cashResult, 2);
+    const equipe = group.waterfall.find((step) => step.key === "category:Equipe");
+    expect(equipe && round(equipe.start - equipe.end)).toBe(103.33);
+
+    // A 7-day window has no other costs: no category steps.
+    const week = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      ...last7Days,
+    });
+    expect(week.waterfall.at(-1)?.end).toBeCloseTo(week.totals.current.cashResult, 2);
+    expect(week.waterfall.some((step) => step.key.startsWith("category:"))).toBe(false);
+  });
+
+  it("exemptHouse is true only for the tenant scope of an exempt house", async () => {
+    exemptTenants.add(HOUSE_A);
+    const house = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      ...last7Days,
+    });
+    expect(house.exemptHouse).toBe(true);
+
+    const group = await getFinanceDashboardFor(ctxFor(G1_MANAGER), {
+      scope: { kind: "group", groupId: G1 },
+      ...last7Days,
+    });
+    expect(group.exemptHouse).toBe(false);
+
+    exemptTenants.clear();
+    const paying = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      ...last7Days,
+    });
+    expect(paying.exemptHouse).toBe(false);
+  });
+
+  it("months carry net and deposits", async () => {
+    financeDayRows.push(
+      dayRow(HOUSE_A, "2026-09-10", {
+        deposit_amount: 800,
+        withdrawal_amount: 300,
+        ad_spend: 0,
+        ggr: 0,
+      }),
+    );
+    const dashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      ...monthToDate,
+    });
+    expect(dashboard.months.at(-2)).toMatchObject({
+      month: "2026-09",
+      net: 500,
+      depositAmount: 800,
+    });
+    expect(dashboard.months.at(-1)).toMatchObject({ net: 0, depositAmount: 0 });
+  });
+});
+
+const round = (value: number) => Math.round(value * 100) / 100;
+
 describe("tenant scope month total equals the month view total", () => {
   it("dashboard cashResult matches the month view's, for a closed past month and the in-progress current month", async () => {
     financeDayRows.push(
@@ -573,7 +867,11 @@ describe("tenant scope month total equals the month view total", () => {
       );
     usageRows.push(
       { tenant_id: HOUSE_A, metric_date: "2026-08-10", amount: 20 },
+      { tenant_id: HOUSE_A, metric_date: "2026-08-10", item: "voice_30s", units: 7, amount: 0.238 },
+      { tenant_id: HOUSE_A, metric_date: "2026-08-11", item: "email", units: 9, amount: 0.0036 },
       { tenant_id: HOUSE_A, metric_date: "2026-10-05", amount: 15 },
+      { tenant_id: HOUSE_A, metric_date: "2026-10-06", item: "voice_30s", units: 5, amount: 0.17 },
+      { tenant_id: HOUSE_A, metric_date: "2026-10-07", item: "voice_30s", units: 1, amount: 0.034 },
     );
     feeRows.push(
       { tenant_id: HOUSE_A, month: "2026-08-01", amount: 300 },
@@ -601,6 +899,14 @@ describe("tenant scope month total equals the month view total", () => {
       month: "2026-10",
     });
     expect(octoberDashboard.totals.current.cashResult).toBe(octoberMonth.summary.cashResult);
+    // The channels are the same on both screens.
+    expect(octoberDashboard.sends).toEqual(
+      octoberMonth.monthSends.map((line) => ({
+        ...line,
+        previousAmount: octoberDashboard.sends.find((d) => d.item === line.item)?.previousAmount,
+      })),
+    );
+    expect(augustDashboard.waterfall.at(-1)?.end).toBeCloseTo(augustMonth.summary.cashResult, 2);
   });
 
   it("also matches for months with a monthly GGR total (closed and in progress)", async () => {
@@ -1214,7 +1520,13 @@ describe("PostgREST 1000-row cap", () => {
     for (const tenantId of HOUSES) {
       for (const date of span) {
         financeDayRows.push(complete(tenantId, date, 10, 1));
-        usageRows.push({ tenant_id: tenantId, metric_date: date, amount: 1 });
+        // Three channels a day (≤ 3 send rows per house-day) adding up to 1.
+        usageRows.push(
+          { tenant_id: tenantId, metric_date: date, item: "sms", units: 5, amount: 0.5 },
+          { tenant_id: tenantId, metric_date: date, item: "voice_30s", units: 3, amount: 0.3 },
+          { tenant_id: tenantId, metric_date: date, item: "email", units: 2, amount: 0.2 },
+        );
+        activityRows.push(activity(tenantId, date, { deposit_count: 2, depositor_count: 1 }));
       }
       for (const date of eachDay(range.from, range.to)) {
         for (const metric of ALL_METRICS) {
@@ -1243,6 +1555,15 @@ describe("PostgREST 1000-row cap", () => {
     expect(dashboard.totals.current.cashResult).toBe(5 * 30 * 8);
     expect(dashboard.totals.current.betleadsUsage).toBe(5 * 30);
     expect(dashboard.totals.previous.cashResult).toBe(5 * 30 * 8);
+    // Every send and activity row of both windows was read.
+    expect(dashboard.sends.map((line) => [line.item, line.units, line.amount])).toEqual([
+      ["sms", 5 * 30 * 5, 5 * 30 * 0.5],
+      ["voice_30s", 5 * 30 * 3, 5 * 30 * 0.3],
+      ["email", 5 * 30 * 2, 5 * 30 * 0.2],
+    ]);
+    expect(dashboard.kpis.current.ticketMedio).toBe(5);
+    expect(dashboard.kpis.current.depositorsPerDay).toBe(5);
+    expect(dashboard.kpis.previous.ticketMedio).toBe(5);
     for (const row of dashboard.tenants) {
       expect(row.current.cashResult).toBe(30 * 8);
       expect(row.previous.cashResult).toBe(30 * 8);

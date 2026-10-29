@@ -1,5 +1,13 @@
 import { round2 } from "./calc";
-import type { DayActivity, FinanceKpis, PeriodSummary, SendItem, SendLine, SendUsage, WaterfallStep } from "./types";
+import type {
+  DayActivity,
+  FinanceKpis,
+  PeriodSummary,
+  SendItem,
+  SendLine,
+  SendUsage,
+  WaterfallStep,
+} from "./types";
 
 const SEND_ITEM_ORDER: SendItem[] = ["sms", "voice_30s", "email"];
 
@@ -62,7 +70,7 @@ export function sendLines(current: SendUsage[], previous: SendUsage[] | null): S
         units: usage.units,
         amount: usage.amount,
         unitCost: usage.units > 0 && !missingCost ? round2(usage.amount / usage.units) : null,
-        previousAmount: previous === null ? null : previousByItem.get(item) ?? null,
+        previousAmount: previous === null ? null : (previousByItem.get(item) ?? null),
         missingCost,
       },
     ];
@@ -110,7 +118,9 @@ export function computeKpis(
  * has no closed-month fee) and one down step per other-cost category, ending
  * at Lucro líquido (total). Zero-amount down steps are omitted; the total's
  * `end` equals `summary.cashResult` when `sendCost` and `categories` are the
- * same figures that produced it (betleadsUsage and otherCosts).
+ * same figures that produced it (betleadsUsage and otherCosts); when the
+ * categories do not add up to `summary.otherCosts`, one "Outros custos" step
+ * (down, or up when they exceed it) carries the residual.
  */
 export function waterfallSteps(
   summary: PeriodSummary,
@@ -139,11 +149,34 @@ export function waterfallSteps(
   if (summary.betleadsFee !== null) {
     down("fee", "Mensalidade", summary.betleadsFee);
   }
+  let categorized = 0;
   for (const [name, amount] of Object.entries(categories)) {
     down(`category:${name}`, name, amount);
+    categorized += amount;
   }
 
-  steps.push({ key: "profit", label: "Lucro líquido", kind: "total", start: running, end: running });
+  // Whatever the categories leave of otherCosts (or exceed it by) is one
+  // reconciling step, so the total always ends at cashResult.
+  const residual = round2((summary.otherCosts ?? 0) - categorized);
+  if (Math.abs(residual) > 0.005) {
+    const start = running;
+    running = round2(running - residual);
+    steps.push({
+      key: "other_costs",
+      label: "Outros custos",
+      kind: residual > 0 ? "down" : "up",
+      start,
+      end: running,
+    });
+  }
+
+  steps.push({
+    key: "profit",
+    label: "Lucro líquido",
+    kind: "total",
+    start: running,
+    end: running,
+  });
 
   return steps;
 }

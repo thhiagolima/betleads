@@ -12,6 +12,7 @@ import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { round2, summarize } from "@/lib/finance/calc";
+import { sendLines } from "@/lib/finance/kpis";
 import {
   FIXED_COST_CATEGORIES,
   categoryKey,
@@ -27,7 +28,8 @@ import {
   evaluateGoals,
   fetchBetleadsFees,
   fetchBetleadsSince,
-  fetchBetleadsUsage,
+  fetchActivityDays,
+  fetchSendUsage,
   fetchTenantsExempt,
   fetchFinanceDays,
   fetchGoalDays,
@@ -37,12 +39,15 @@ import {
   num,
   numOrNull,
   requirePermission,
+  sendUsageTotal,
+  sumSendUsage,
+  toDayActivity,
   toMonthlyGgr,
   todaySaoPaulo,
   type MonthlyGgrRow,
   type OtherCostRow,
 } from "@/lib/finance/finance-data.server";
-import type { GoalDirection, GoalMetric } from "@/lib/finance/types";
+import type { DayActivity, GoalDirection, GoalMetric, SendUsage } from "@/lib/finance/types";
 import { assertTenantNotDemo } from "@/lib/tenant-access.server";
 import { auditTenant } from "@/lib/tenant-audit.server";
 import { listTenantMembers } from "@/lib/tenants.functions";
@@ -147,7 +152,8 @@ export async function getTenantFinanceMonthFor(
     goalRows,
     costsRes,
     ratesRes,
-    usageRows,
+    sendRows,
+    activityRows,
     feeRows,
     sinceRows,
     usedCategoriesRes,
@@ -167,7 +173,8 @@ export async function getTenantFinanceMonthFor(
       .select("tenant_id,valid_from,ggr_fee_pct,movement_fee_pct")
       .eq("tenant_id", tenantId)
       .order("valid_from", { ascending: false }),
-    range ? fetchBetleadsUsage([tenantId], range) : Promise.resolve([]),
+    range ? fetchSendUsage([tenantId], range) : Promise.resolve([]),
+    range ? fetchActivityDays([tenantId], range) : Promise.resolve([]),
     fetchBetleadsFees([tenantId], monthStart, monthStart),
     fetchBetleadsSince([tenantId]),
     db()
@@ -200,7 +207,22 @@ export async function getTenantFinanceMonthFor(
       since !== null &&
       monthStart >= monthStartOf(since),
   }));
-  const betleadsUsage = round2(usageRows.reduce((total, row) => total + num(row.amount), 0));
+  // Envios: the per-channel sums of the month, added up (the dashboard
+  // derives its Envios the same way, so both screens show the same total).
+  const monthSendUsage = sumSendUsage(sendRows);
+  const betleadsUsage = sendUsageTotal(monthSendUsage);
+  const sendRowsByDay = new Map<string, typeof sendRows>();
+  for (const row of sendRows) {
+    sendRowsByDay.set(row.metric_date, [...(sendRowsByDay.get(row.metric_date) ?? []), row]);
+  }
+  const sendsByDay: Record<string, SendUsage[]> = Object.fromEntries(
+    [...sendRowsByDay.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, rows]) => [date, sumSendUsage(rows)]),
+  );
+  const activityByDay: Record<string, DayActivity> = Object.fromEntries(
+    activityRows.map((row) => [row.metric_date, toDayActivity(row)]),
+  );
   const betleadsFee = round2(feeRows.reduce((total, row) => total + num(row.amount), 0));
   const summary = summarize(
     days,
@@ -237,6 +259,12 @@ export async function getTenantFinanceMonthFor(
     monthlyGgr,
     otherCosts,
     categories,
+    /** Sends of each day by channel ("YYYY-MM-DD" → one entry per channel used that day). */
+    sendsByDay,
+    /** Activity (counts, CRM, Meta) of each day of the month up to today. */
+    activityByDay,
+    /** One line per channel for the month (no comparison: previousAmount is null). */
+    monthSends: sendLines(monthSendUsage, null),
     /** First day with Betleads consumption (spec §7.2): months before it have no usage data. */
     betleadsSince: since,
     /** The house is exempt now: its Betleads cost is the provider cost ("Custo de envio (provedor)"). */

@@ -54,7 +54,10 @@ const ctxFor = (userId: string) => ({ userId }) as Ctx;
 type Row = Record<string, unknown>;
 let financeDayRows: Row[];
 let goalDayRows: Row[];
+/** finance_send_usage rows; `item` defaults to "sms", `units` to 1, `missing_cost_units` to 0. */
 let usageRows: Row[];
+/** finance_activity_days rows (one per house and day); missing columns are 0. */
+let activityRows: Row[];
 let feeRows: Row[];
 let sinceRows: Row[];
 let financeDaysCalls: Row[];
@@ -100,6 +103,7 @@ beforeEach(() => {
   financeDayRows = [];
   goalDayRows = [];
   usageRows = [];
+  activityRows = [];
   feeRows = [];
   sinceRows = [];
   financeDaysCalls = [];
@@ -159,8 +163,18 @@ beforeEach(() => {
   }));
   const ofTenants = (row: Row, args: Row) =>
     (args._tenants as string[]).includes(String(row.tenant_id));
-  fake.admin.onRpc("finance_betleads_usage", (args) => ({
-    data: usageRows.filter((row) => inWindow(row, args)),
+  // PostgREST returns at most 1000 rows per RPC call and drops the rest.
+  const capped = (rows: Row[]) => rows.slice(0, 1000);
+  fake.admin.onRpc("finance_send_usage", (args) => ({
+    data: capped(
+      usageRows
+        .filter((row) => inWindow(row, args))
+        .map((row) => ({ item: "sms", units: 1, missing_cost_units: 0, ...row })),
+    ),
+    error: null,
+  }));
+  fake.admin.onRpc("finance_activity_days", (args) => ({
+    data: capped(activityRows.filter((row) => inWindow(row, args))),
     error: null,
   }));
   fake.admin.onRpc("finance_betleads_fees", (args) => ({
@@ -319,6 +333,118 @@ describe("house financial month: Betleads cost and categories", () => {
     expect(month.summary.betleadsUsage).toBe(15);
     expect(month.summary.betleadsFee).toBe(300);
     expect(month.summary.cashResult).toBe(1000 - 100 - 15 - 300);
+  });
+
+  it("month view exposes sends and activity by day", async () => {
+    financeDayRows.push(
+      dayRow(HOUSE_A, "2026-10-05", { deposit_amount: 1000, ad_spend: 100, ggr: 0 }),
+    );
+    usageRows.push(
+      { tenant_id: HOUSE_A, metric_date: "2026-10-05", item: "sms", units: 100, amount: 8 },
+      {
+        tenant_id: HOUSE_A,
+        metric_date: "2026-10-05",
+        item: "voice_30s",
+        units: 10,
+        amount: 0.34,
+      },
+      { tenant_id: HOUSE_A, metric_date: "2026-10-12", item: "sms", units: 50, amount: 4 },
+      {
+        tenant_id: HOUSE_A,
+        metric_date: "2026-10-12",
+        item: "email",
+        units: 7,
+        amount: 0,
+        missing_cost_units: 7,
+      },
+      { tenant_id: HOUSE_B, metric_date: "2026-10-05", item: "sms", units: 9, amount: 999 },
+      // Previous month: outside the month view.
+      { tenant_id: HOUSE_A, metric_date: "2026-09-30", item: "sms", units: 1, amount: 50 },
+    );
+    activityRows.push(
+      {
+        tenant_id: HOUSE_A,
+        metric_date: "2026-10-05",
+        deposit_count: 4,
+        depositor_count: 3,
+        withdrawal_count: 1,
+        generated_pix_count: 8,
+        crm_sent: 100,
+        crm_clicks: 12,
+        crm_direct_conversions: 2,
+        crm_direct_revenue: "150.5",
+        crm_influenced_revenue: 300,
+        ad_impressions: 1000,
+        ad_clicks: 20,
+      },
+      { tenant_id: HOUSE_B, metric_date: "2026-10-05", deposit_count: 99 },
+    );
+
+    const month = await getTenantFinanceMonthFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-10",
+    });
+
+    expect(month.sendsByDay).toEqual({
+      "2026-10-05": [
+        { item: "sms", units: 100, amount: 8, missingCostUnits: 0 },
+        { item: "voice_30s", units: 10, amount: 0.34, missingCostUnits: 0 },
+      ],
+      "2026-10-12": [
+        { item: "sms", units: 50, amount: 4, missingCostUnits: 0 },
+        { item: "email", units: 7, amount: 0, missingCostUnits: 7 },
+      ],
+    });
+    expect(month.activityByDay).toEqual({
+      "2026-10-05": {
+        depositCount: 4,
+        depositorCount: 3,
+        withdrawalCount: 1,
+        generatedPixCount: 8,
+        crmSent: 100,
+        crmClicks: 12,
+        crmDirectConversions: 2,
+        crmDirectRevenue: 150.5,
+        crmInfluencedRevenue: 300,
+        adImpressions: 1000,
+        adClicks: 20,
+      },
+    });
+    expect(month.monthSends).toEqual([
+      {
+        item: "sms",
+        label: "SMS",
+        unitLabel: "envios",
+        units: 150,
+        amount: 12,
+        unitCost: 0.08,
+        previousAmount: null,
+        missingCost: false,
+      },
+      {
+        item: "voice_30s",
+        label: "Voz",
+        unitLabel: "blocos de 30 s",
+        units: 10,
+        amount: 0.34,
+        unitCost: 0.03,
+        previousAmount: null,
+        missingCost: false,
+      },
+      {
+        item: "email",
+        label: "E-mail",
+        unitLabel: "e-mails",
+        units: 7,
+        amount: 0,
+        unitCost: null,
+        previousAmount: null,
+        missingCost: true,
+      },
+    ]);
+    // Envios in the summary is the sum of the channels.
+    expect(month.summary.betleadsUsage).toBe(12.34);
+    expect(month.summary.cashResult).toBe(1000 - 100 - 12.34);
   });
 
   it("a month with no invoice has fee 0, not null", async () => {

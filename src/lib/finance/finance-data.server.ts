@@ -14,10 +14,12 @@ import {
   evaluateGoal,
   isWholeMonth,
   presetRange,
+  round2,
 } from "@/lib/finance/calc";
 import type {
   CompareMode,
   DateRange,
+  DayActivity,
   FinanceDay,
   FinanceDayInput,
   GoalDay,
@@ -27,6 +29,8 @@ import type {
   MonthlyGgr,
   PeriodPreset,
   PeriodSummary,
+  SendItem,
+  SendUsage,
 } from "@/lib/finance/types";
 
 type DbError = { message: string; code?: string };
@@ -81,7 +85,29 @@ export type OtherCostRow = {
   valor: number | string;
   categoria: string | null;
 };
-export type BetleadsUsageRow = { tenant_id: string; metric_date: string; amount: number | string };
+export type SendUsageRow = {
+  tenant_id: string;
+  metric_date: string;
+  item: SendItem;
+  units: number | string;
+  amount: number | string;
+  missing_cost_units: number | string;
+};
+export type ActivityDayRow = {
+  tenant_id: string;
+  metric_date: string;
+  deposit_count: number | string | null;
+  depositor_count: number | string | null;
+  withdrawal_count: number | string | null;
+  generated_pix_count: number | string | null;
+  crm_sent: number | string | null;
+  crm_clicks: number | string | null;
+  crm_direct_conversions: number | string | null;
+  crm_direct_revenue: number | string | null;
+  crm_influenced_revenue: number | string | null;
+  ad_impressions: number | string | null;
+  ad_clicks: number | string | null;
+};
 export type BetleadsFeeRow = { tenant_id: string; month: string; amount: number | string };
 export type BetleadsSinceRow = { tenant_id: string; since: string };
 export type TenantExemptRow = { tenant_id: string; exempt: boolean };
@@ -276,9 +302,61 @@ export function fetchGoalDays(tenantIds: string[], range: DateRange) {
   return rpcRowsByDay<GoalDayRow>("finance_goal_days", tenantIds, range, GOAL_METRICS.length);
 }
 
-/** Wallet usage (SMS, voz, e-mail) per house and São Paulo day; a day may be negative. */
-export function fetchBetleadsUsage(tenantIds: string[], range: DateRange) {
-  return rpcRowsByDay<BetleadsUsageRow>("finance_betleads_usage", tenantIds, range, 1);
+/** Wallet usage per house, São Paulo day and channel: up to 3 rows (sms, voice_30s, email) a house-day. */
+export function fetchSendUsage(tenantIds: string[], range: DateRange) {
+  return rpcRowsByDay<SendUsageRow>("finance_send_usage", tenantIds, range, 3);
+}
+
+/** Daily activity (counts, CRM, Meta): one row per house and day. */
+export function fetchActivityDays(tenantIds: string[], range: DateRange) {
+  return rpcRowsByDay<ActivityDayRow>("finance_activity_days", tenantIds, range, 1);
+}
+
+const SEND_ITEMS: SendItem[] = ["sms", "voice_30s", "email"];
+
+/**
+ * Send rows summed per channel, ordered SMS, Voz, E-mail; each amount is rounded
+ * to cents once, after the sum. The Envios cost of a window is the sum of
+ * these amounts (sendUsageTotal), so the channels always add up to it.
+ */
+export function sumSendUsage(rows: SendUsageRow[]): SendUsage[] {
+  const byItem = new Map<SendItem, SendUsage>();
+  for (const row of rows) {
+    const usage = byItem.get(row.item) ?? {
+      item: row.item,
+      units: 0,
+      amount: 0,
+      missingCostUnits: 0,
+    };
+    usage.units += num(row.units);
+    usage.amount += num(row.amount);
+    usage.missingCostUnits += num(row.missing_cost_units);
+    byItem.set(row.item, usage);
+  }
+  return SEND_ITEMS.flatMap((item) => {
+    const usage = byItem.get(item);
+    return usage ? [{ ...usage, amount: round2(usage.amount) }] : [];
+  });
+}
+
+/** The Envios cost: Σ amount of the per-channel usage. */
+export const sendUsageTotal = (usage: SendUsage[]) =>
+  round2(usage.reduce((total, line) => total + line.amount, 0));
+
+export function toDayActivity(row: ActivityDayRow): DayActivity {
+  return {
+    depositCount: num(row.deposit_count),
+    depositorCount: num(row.depositor_count),
+    withdrawalCount: num(row.withdrawal_count),
+    generatedPixCount: num(row.generated_pix_count),
+    crmSent: num(row.crm_sent),
+    crmClicks: num(row.crm_clicks),
+    crmDirectConversions: num(row.crm_direct_conversions),
+    crmDirectRevenue: num(row.crm_direct_revenue),
+    crmInfluencedRevenue: num(row.crm_influenced_revenue),
+    adImpressions: num(row.ad_impressions),
+    adClicks: num(row.ad_clicks),
+  };
 }
 
 const monthsInclusive = (fromMonth: string, toMonth: string) =>
@@ -316,7 +394,7 @@ export async function fetchBetleadsSince(tenantIds: string[]) {
 
 /**
  * Whether each house is exempt now (billing_tenant_exempt): its Betleads cost
- * is the provider cost (finance_betleads_usage) and is labelled as such.
+ * is the provider cost (finance_send_usage) and is labelled as such.
  */
 export async function fetchTenantsExempt(tenantIds: string[]): Promise<Map<string, boolean>> {
   const parts = await Promise.all(

@@ -47,7 +47,12 @@ function activityWith(overrides: Partial<DayActivity>): DayActivity {
   };
 }
 
-function usage(item: SendUsage["item"], units: number, amount: number, missingCostUnits = 0): SendUsage {
+function usage(
+  item: SendUsage["item"],
+  units: number,
+  amount: number,
+  missingCostUnits = 0,
+): SendUsage {
   return { item, units, amount, missingCostUnits };
 }
 
@@ -193,11 +198,7 @@ describe("crm returns use send cost and are null with zero cost", () => {
 
 describe("sendLines orders channels, computes unit cost and flags missing provider cost", () => {
   it("orders SMS, Voz, E-mail regardless of input order", () => {
-    const current = [
-      usage("email", 100, 50),
-      usage("sms", 1000, 100),
-      usage("voice_30s", 20, 40),
-    ];
+    const current = [usage("email", 100, 50), usage("sms", 1000, 100), usage("voice_30s", 20, 40)];
     const lines = sendLines(current, null);
 
     expect(lines.map((l) => l.item)).toEqual(["sms", "voice_30s", "email"]);
@@ -274,6 +275,45 @@ describe("waterfall ends at cashResult and omits Mensalidade when fee is null", 
     });
     const steps = waterfallSteps(summary, 0, {});
     expect(steps.some((s) => s.key === "fee")).toBe(false);
+  });
+
+  it("adds an Outros custos step for the residual when categories do not add up to otherCosts", () => {
+    const summary = summaryWith({
+      depositAmount: 1000,
+      net: 1000,
+      otherCosts: 150,
+      cashResult: 850,
+    });
+
+    const short = waterfallSteps(summary, 0, { Equipe: 100 });
+    expect(short.find((s) => s.key === "other_costs")).toEqual({
+      key: "other_costs",
+      label: "Outros custos",
+      kind: "down",
+      start: 900,
+      end: 850,
+    });
+    expect(short.at(-1)?.end).toBe(850);
+
+    // Categories above otherCosts: the residual goes back up.
+    const over = waterfallSteps(summary, 0, { Equipe: 100, Aluguel: 80 });
+    expect(over.find((s) => s.key === "other_costs")).toMatchObject({
+      kind: "up",
+      start: 820,
+      end: 850,
+    });
+    expect(over.at(-1)?.end).toBe(850);
+
+    // No other costs at all (otherCosts null) with no categories: no step.
+    const none = waterfallSteps(summaryWith({ depositAmount: 10, cashResult: 10 }), 0, {});
+    expect(none.some((s) => s.key === "other_costs")).toBe(false);
+  });
+
+  it("no residual step when categories add up within half a cent", () => {
+    const summary = summaryWith({ depositAmount: 1000, otherCosts: 100.01, cashResult: 899.99 });
+    const steps = waterfallSteps(summary, 0, { Equipe: 33.34, Aluguel: 66.67 });
+    expect(steps.some((s) => s.key === "other_costs")).toBe(false);
+    expect(steps.at(-1)?.end).toBe(899.99);
   });
 
   it("omits zero-amount down steps", () => {

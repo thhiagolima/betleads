@@ -159,6 +159,8 @@ export type MonthPoint = {
   month: string; // "YYYY-MM"
   cashResult: number;
   adSpend: number;
+  net: number; // depósitos − saques
+  depositAmount: number;
   roi: number | null;
   incomplete: boolean; // pendingDays > 0 or pendingToday
   inProgress: boolean; // the current month

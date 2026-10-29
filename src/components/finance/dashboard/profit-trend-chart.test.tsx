@@ -10,6 +10,8 @@ const point = (month: string, betleadsMissing: boolean): MonthPoint => ({
   month,
   cashResult: 100,
   adSpend: 10,
+  net: 200,
+  depositAmount: 300,
   roi: 10,
   incomplete: false,
   inProgress: false,
