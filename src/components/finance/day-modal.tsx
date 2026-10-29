@@ -296,7 +296,9 @@ export function DayModalContent({
               {!readOnly && onEditCosts && (
                 <button
                   type="button"
-                  className="text-[11px] text-primary underline-offset-2 hover:underline"
+                  className="text-[11px] text-primary underline-offset-2 hover:underline disabled:pointer-events-none disabled:opacity-50"
+                  // A save in flight (e.g. before a move) must finish first.
+                  disabled={saving}
                   onClick={onEditCosts}
                 >
                   Editar em Outros custos
@@ -337,7 +339,7 @@ export function DayModalContent({
               type="button"
               variant="outline"
               size="sm"
-              disabled={neighbors.prev === null}
+              disabled={saving || neighbors.prev === null}
               onClick={onPrev}
             >
               <ChevronLeft className="h-4 w-4" />
@@ -347,7 +349,7 @@ export function DayModalContent({
               type="button"
               variant="outline"
               size="sm"
-              disabled={neighbors.next === null}
+              disabled={saving || neighbors.next === null}
               onClick={onNext}
             >
               Próximo dia

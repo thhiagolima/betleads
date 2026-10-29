@@ -88,6 +88,18 @@ describe("DayModalContent", () => {
     expect(html).not.toContain("Editar em Outros custos");
   });
 
+  it("a pending save disables both nav buttons and the Outros custos link", () => {
+    const html = renderToStaticMarkup(
+      <DayModalContent
+        {...props({ saving: true, onEditCosts: () => {} })}
+        neighbors={{ prev: "2026-10-27", next: "2026-10-29" }}
+      />,
+    );
+    expect(buttonTag(html, "Dia anterior")).toMatch(/ disabled=""/);
+    expect(buttonTag(html, "Próximo dia")).toMatch(/ disabled=""/);
+    expect(buttonTag(html, "Editar em Outros custos")).toMatch(/ disabled=""/);
+  });
+
   it("links the day's costs to Outros custos when editable", () => {
     const html = renderToStaticMarkup(<DayModalContent {...props({ onEditCosts: () => {} })} />);
     expect(html).toContain("Editar em Outros custos");
