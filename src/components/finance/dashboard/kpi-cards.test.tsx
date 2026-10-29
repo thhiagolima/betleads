@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { GGR_ESTIMATED_NOTE, KpiCards, NO_OTHER_COSTS_NOTE } from "./kpi-cards";
+import { GGR_ESTIMATED_NOTE, KpiCards, NO_FEE_NOTE } from "./kpi-cards";
 import { summary } from "./test-fixtures";
 
 // No jsdom/testing-library in this repo: assert on the static markup. Each
@@ -15,21 +15,19 @@ function card(html: string, key: string) {
 }
 
 describe("KpiCards", () => {
-  it("notes the result has no other costs when the window is not a closed month", () => {
+  it("notes the result has no mensalidade when the window is not a closed month", () => {
     const open = renderToStaticMarkup(
-      <KpiCards current={summary({ otherCosts: null })} previous={summary()} />,
+      <KpiCards current={summary({ betleadsFee: null, otherCosts: 50 })} previous={summary()} />,
     );
-    expect(open).toContain(
-      "Resultado sem outros custos e mensalidade do mês (só entram em mês fechado).",
-    );
-    expect(NO_OTHER_COSTS_NOTE).toBe(
-      "Resultado sem outros custos e mensalidade do mês (só entram em mês fechado).",
-    );
+    expect(open).toContain("Resultado sem a mensalidade do mês (entra no fechamento do mês).");
+    expect(NO_FEE_NOTE).toBe("Resultado sem a mensalidade do mês (entra no fechamento do mês).");
+    // Other costs enter any window by date: no note about them.
+    expect(open).not.toContain("outros custos");
 
     const closed = renderToStaticMarkup(
-      <KpiCards current={summary({ otherCosts: 0 })} previous={summary()} />,
+      <KpiCards current={summary({ betleadsFee: 0 })} previous={summary()} />,
     );
-    expect(closed).not.toContain("só entram em mês fechado");
+    expect(closed).not.toContain("entra no fechamento do mês");
   });
 
   it("shows ▲ green when profit rises and red ▲ when ad spend rises", () => {

@@ -2,7 +2,7 @@
 // (finance.functions.ts) and the finance dashboard
 // (finance-dashboard.functions.ts): the service-role client, permission
 // checks, the finance_days / finance_goal_days / Betleads cost RPCs and the
-// cost-month rule. Permission decisions stay in the SQL helpers
+// plan-fee month rule. Permission decisions stay in the SQL helpers
 // (finance_can_*, group_ids_managed_by, is_super_admin).
 import { z } from "zod";
 
@@ -80,11 +80,20 @@ export type GoalDayRow = {
 export type OtherCostRow = {
   id: string;
   tenant_id: string;
+  /** First day of cost_date's month (kept for compatibility). */
   month: string;
+  /** "YYYY-MM-DD": the cost enters every window that contains this day. */
+  cost_date: string;
   descricao: string;
   valor: number | string;
   categoria: string | null;
+  repeat_monthly: boolean;
+  /** Repeating series (its first row's id); null for a cost that never repeated. */
+  series_id: string | null;
 };
+
+export const OTHER_COST_COLUMNS =
+  "id,tenant_id,month,cost_date,descricao,valor,categoria,repeat_monthly,series_id";
 export type SendUsageRow = {
   tenant_id: string;
   metric_date: string;
@@ -461,11 +470,12 @@ export function evaluateGoals(
   }).filter((goal): goal is GoalEvaluation => goal !== null);
 }
 
-// ─── Cost months ────────────────────────────────────────────────────────────
+// ─── Fee months ─────────────────────────────────────────────────────────────
 
 /**
- * The month ("YYYY-MM-01") whose other costs and plan fee enter each window,
- * or null when that window is not a closed month.
+ * The month ("YYYY-MM-01") whose plan fee (Mensalidade) enters each window,
+ * or null when that window is not a closed month. Other costs do not use
+ * this: they enter any window that contains their cost_date (spec §3.5).
  */
 export function costMonthsFor(
   range: DateRange,
@@ -473,8 +483,8 @@ export function costMonthsFor(
   preset: PeriodPreset,
 ): { current: string | null; previous: string | null } {
   const previousRange = compareRange(range, compare, preset);
-  // Spec §5: other costs enter a window's result only for a closed calendar
-  // month: a range covering exactly one month, or the "Mês" preset (also
+  // Spec §4.3: the plan fee enters a window's result only for a closed
+  // calendar month: a range covering exactly one month, or the "Mês" preset (also
   // while in progress). The preset is only trusted when the range really is
   // a month-to-date window, and its comparison window counts only for
   // "previous" (the previous month to the same day), never a 7-day shift.

@@ -16,7 +16,7 @@ export function summary(overrides: Partial<PeriodSummary> = {}): PeriodSummary {
     net: 0,
     ggrFee: 0,
     movementFee: 0,
-    otherCosts: null,
+    otherCosts: 0,
     cashResult: 0,
     roi: null,
     costPerRegistration: null,

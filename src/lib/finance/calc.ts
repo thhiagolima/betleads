@@ -71,7 +71,7 @@ export function computeDay(d: FinanceDayInput): FinanceDay {
  */
 export function summarize(
   days: FinanceDay[],
-  otherCosts: number | null,
+  otherCosts: number,
   today?: string,
   betleads?: BetleadsCost,
   options?: { ggrEstimated?: boolean },
@@ -95,7 +95,7 @@ export function summarize(
 
   const betleadsUsage = betleads?.usage ?? 0;
   const betleadsFee = betleads?.fee ?? null;
-  const cashResult = round2(rawCashResult - (otherCosts ?? 0) - betleadsUsage - (betleadsFee ?? 0));
+  const cashResult = round2(rawCashResult - otherCosts - betleadsUsage - (betleadsFee ?? 0));
   const roi = adSpend === 0 ? null : cashResult / adSpend;
   const costPerRegistration = registrations === 0 ? null : adSpend / registrations;
   const costPerFtd = ftds === 0 ? null : adSpend / ftds;

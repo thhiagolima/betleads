@@ -89,9 +89,8 @@ function Variation({
   );
 }
 
-/** Spec §5: other costs and the plan fee only enter a closed month. */
-export const NO_OTHER_COSTS_NOTE =
-  "Resultado sem outros custos e mensalidade do mês (só entram em mês fechado).";
+/** Spec §4.3: the plan fee only enters a closed month (other costs enter by date). */
+export const NO_FEE_NOTE = "Resultado sem a mensalidade do mês (entra no fechamento do mês).";
 
 /** Rule 6 of the GGR do mês: the window holds only part of a month whose GGR came as a total. */
 export const GGR_ESTIMATED_NOTE = "GGR estimado a partir do total do mês.";
@@ -138,9 +137,9 @@ export function KpiCards({
       <div data-kpi-row="support" className="grid grid-cols-1 gap-2 sm:grid-cols-3 lg:grid-cols-5">
         {KPIS.filter((kpi) => !kpi.highlight).map(renderCard)}
       </div>
-      {current.otherCosts === null && (
-        <p data-note="no-other-costs" className="text-xs text-muted-foreground">
-          {NO_OTHER_COSTS_NOTE}
+      {current.betleadsFee === null && (
+        <p data-note="no-fee" className="text-xs text-muted-foreground">
+          {NO_FEE_NOTE}
         </p>
       )}
       {current.ggrEstimated && (

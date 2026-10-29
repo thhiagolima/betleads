@@ -23,10 +23,13 @@ const DEMO_GROUP_NAME = "Grupo Demo";
 // Betleads charge (see BETLEADS_COST_PATTERN below) — the whole point is to
 // show costs that are NOT the Betleads line, which is seeded separately
 // (seedBetleadsCost) from real wallet/invoice data.
+// Each is dated the 5th of its month; "Equipe" repeats every month (one
+// series across all months, as "Repetir todo mês" would leave it).
 const OTHER_COST_TEMPLATES = [
-  { key: "afiliados", descricao: "Influenciador X", categoria: "Afiliados e influenciadores", min: 900, max: 2200 },
-  { key: "equipe", descricao: "Equipe de atendimento", categoria: "Equipe", min: 1800, max: 3500 },
+  { key: "afiliados", descricao: "Influenciador X", categoria: "Afiliados e influenciadores", min: 900, max: 2200, repeat: false },
+  { key: "equipe", descricao: "Equipe de atendimento", categoria: "Equipe", min: 1800, max: 3500, repeat: true },
 ];
+const OTHER_COST_DAY = "05";
 
 // Mirrors src/lib/finance/categories.ts' looksLikeBetleadsCost: a .mjs demo
 // script can't import that .ts module directly, so the pattern is kept here
@@ -173,7 +176,7 @@ export async function seedDemoFinance(client, { demoTenantId, days = 365, seed =
   );
 
   const months = monthsOf(sorted);
-  await seedOtherCosts(client, { demoTenantId, seed, months });
+  await seedOtherCosts(client, { demoTenantId, seed, months, sorted });
   await seedBetleadsUsage(client, { demoTenantId, seed, sorted, firstDate });
   await seedBetleadsInvoices(client, { demoTenantId, seed, months });
 
@@ -183,9 +186,12 @@ export async function seedDemoFinance(client, { demoTenantId, days = 365, seed =
 /**
  * Categorized "other costs" for every seeded month (Task 8): purges any
  * pre-Task-8 cost (whole-tenant, any month) that now reads as a duplicated
- * Betleads charge, then (re)writes the fixed templates per month.
+ * Betleads charge, then (re)writes the fixed templates per month, dated the
+ * 5th — or the month's last seeded day when that is earlier, so no cost is
+ * dated after the data. A repeating template keeps one series id for every
+ * month and every reseed, so its latest row is always the newest month.
  */
-async function seedOtherCosts(client, { demoTenantId, seed, months }) {
+async function seedOtherCosts(client, { demoTenantId, seed, months, sorted }) {
   const { rows: existing } = await client.query(
     `select id, descricao, categoria from public.tenant_finance_other_costs where tenant_id = $1`,
     [demoTenantId],
@@ -198,6 +204,9 @@ async function seedOtherCosts(client, { demoTenantId, seed, months }) {
 
   for (const month of months) {
     const monthStart = `${month}-01`;
+    const lastSeeded = sorted.filter((m) => m.metric_date.startsWith(month)).at(-1).metric_date;
+    const fifth = `${month}-${OTHER_COST_DAY}`;
+    const costDate = lastSeeded < fifth ? lastSeeded : fifth;
     await client.query(
       `delete from public.tenant_finance_other_costs
         where tenant_id = $1 and month = $2 and descricao = any($3::text[])`,
@@ -206,9 +215,20 @@ async function seedOtherCosts(client, { demoTenantId, seed, months }) {
     for (const tpl of OTHER_COST_TEMPLATES) {
       const valor = round2(uniform(tpl.min, tpl.max, `${seed}:other_cost:${tpl.key}:${month}`));
       await client.query(
-        `insert into public.tenant_finance_other_costs (id, tenant_id, month, descricao, categoria, valor, created_by)
-         values ($1, $2, $3, $4, $5, $6, null)`,
-        [seededUuid(`${seed}:other_cost:${tpl.descricao}:${month}`), demoTenantId, monthStart, tpl.descricao, tpl.categoria, valor],
+        `insert into public.tenant_finance_other_costs
+           (id, tenant_id, month, cost_date, descricao, categoria, valor, repeat_monthly, series_id, created_by)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, null)`,
+        [
+          seededUuid(`${seed}:other_cost:${tpl.descricao}:${month}`),
+          demoTenantId,
+          monthStart,
+          costDate,
+          tpl.descricao,
+          tpl.categoria,
+          valor,
+          tpl.repeat,
+          tpl.repeat ? seededUuid(`${seed}:other_cost_series:${tpl.key}`) : null,
+        ],
       );
     }
   }

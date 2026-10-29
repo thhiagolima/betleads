@@ -60,7 +60,8 @@ export type PeriodSummary = {
   net: number;
   ggrFee: number;
   movementFee: number;
-  otherCosts: number | null;
+  /** Other costs dated inside the window (0 when none). */
+  otherCosts: number;
   cashResult: number;
   roi: number | null;
   costPerRegistration: number | null;

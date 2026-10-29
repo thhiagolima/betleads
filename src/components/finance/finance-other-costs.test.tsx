@@ -3,7 +3,15 @@ import { describe, expect, it } from "vitest";
 
 import { betleadsHint, categoryChoices, FIXED_COST_CATEGORIES } from "@/lib/finance/categories";
 
-import { CategoryCommand, DuplicateBetleadsNote } from "./finance-other-costs";
+import {
+  CategoryCommand,
+  CostDateLabel,
+  CostDateRepeatFields,
+  DuplicateBetleadsNote,
+  costDateBounds,
+  defaultCostDate,
+  isCostDateAllowed,
+} from "./finance-other-costs";
 
 // No jsdom: the combobox list, the duplicate note and the typing hint are
 // presentational pieces / pure helpers exercised directly here.
@@ -76,5 +84,74 @@ describe("FinanceOtherCosts", () => {
     );
     expect(betleadsHint("Designer", "Equipe")).toBeNull();
     expect(betleadsHint("", "Outros")).toBeNull();
+  });
+
+  it("the date defaults to today inside the current month and to the last day of a past month", () => {
+    expect(defaultCostDate("2026-10", "2026-10-24")).toBe("2026-10-24");
+    expect(defaultCostDate("2026-09", "2026-10-24")).toBe("2026-09-30");
+    expect(defaultCostDate("2026-02", "2026-10-24")).toBe("2026-02-28");
+    // A future month has no allowed day.
+    expect(defaultCostDate("2026-11", "2026-10-24")).toBeNull();
+  });
+
+  it("the date stays inside the viewed month and not after today", () => {
+    expect(costDateBounds("2026-10", "2026-10-24")).toEqual({
+      min: "2026-10-01",
+      max: "2026-10-24",
+    });
+    expect(costDateBounds("2026-09", "2026-10-24")).toEqual({
+      min: "2026-09-01",
+      max: "2026-09-30",
+    });
+    expect(costDateBounds("2026-11", "2026-10-24")).toBeNull();
+    expect(isCostDateAllowed("2026-10-24", "2026-10", "2026-10-24")).toBe(true);
+    expect(isCostDateAllowed("2026-10-25", "2026-10", "2026-10-24")).toBe(false);
+    expect(isCostDateAllowed("2026-09-30", "2026-10", "2026-10-24")).toBe(false);
+    expect(isCostDateAllowed("", "2026-10", "2026-10-24")).toBe(false);
+  });
+
+  it('the form has a date field (min/max) and a "Repetir todo mês" toggle, off by default', () => {
+    const html = renderToStaticMarkup(
+      <CostDateRepeatFields
+        month="2026-10"
+        today="2026-10-24"
+        costDate="2026-10-24"
+        repeatMonthly={false}
+        disabled={false}
+        onCostDateChange={() => {}}
+        onRepeatChange={() => {}}
+      />,
+    );
+    expect(html).toContain('type="date"');
+    expect(html).toContain('min="2026-10-01"');
+    expect(html).toContain('max="2026-10-24"');
+    expect(html).toContain('value="2026-10-24"');
+    expect(html).toContain("Repetir todo mês");
+    expect(html).toContain('aria-checked="false"');
+
+    const on = renderToStaticMarkup(
+      <CostDateRepeatFields
+        month="2026-10"
+        today="2026-10-24"
+        costDate="2026-10-05"
+        repeatMonthly
+        disabled={false}
+        onCostDateChange={() => {}}
+        onRepeatChange={() => {}}
+      />,
+    );
+    expect(on).toContain('aria-checked="true"');
+  });
+
+  it("the Data column shows dd/mm and marks a repeating cost", () => {
+    const once = renderToStaticMarkup(
+      <CostDateLabel costDate="2026-10-05" repeatMonthly={false} />,
+    );
+    expect(once).toContain("05/10");
+    expect(once).not.toContain("todo mês");
+
+    const monthly = renderToStaticMarkup(<CostDateLabel costDate="2026-10-05" repeatMonthly />);
+    expect(monthly).toContain("05/10");
+    expect(monthly).toContain("todo mês");
   });
 });

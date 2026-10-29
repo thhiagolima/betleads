@@ -22,6 +22,7 @@ import {
 } from "@/lib/finance/categories";
 import {
   GOAL_METRICS,
+  OTHER_COST_COLUMNS,
   clampToToday,
   can,
   db,
@@ -35,6 +36,7 @@ import {
   fetchGoalDays,
   fetchMonthlyGgr,
   financeDaysWithMonthlyGgr,
+  inRange,
   isoDate,
   num,
   numOrNull,
@@ -164,9 +166,11 @@ export async function getTenantFinanceMonthFor(
     range ? fetchGoalDays([tenantId], range) : Promise.resolve([]),
     db()
       .from<OtherCostRow[]>("tenant_finance_other_costs")
-      .select("id,tenant_id,month,descricao,valor,categoria")
+      .select(OTHER_COST_COLUMNS)
       .eq("tenant_id", tenantId)
-      .eq("month", monthStart)
+      .gte("cost_date", monthStart)
+      .lte("cost_date", lastDayOfMonth(monthStart))
+      .order("cost_date", { ascending: true })
       .order("created_at", { ascending: true }),
     db()
       .from<RateRow[]>("tenant_finance_rates")
@@ -202,6 +206,9 @@ export async function getTenantFinanceMonthFor(
     descricao: row.descricao,
     valor: num(row.valor),
     categoria: categoryLabel(row.categoria),
+    /** "YYYY-MM-DD" inside the month. */
+    costDate: row.cost_date,
+    repeatMonthly: row.repeat_monthly === true,
     suspectedBetleads:
       looksLikeBetleadsCost(row.descricao, row.categoria) &&
       since !== null &&
@@ -224,9 +231,14 @@ export async function getTenantFinanceMonthFor(
     activityRows.map((row) => [row.metric_date, toDayActivity(row)]),
   );
   const betleadsFee = round2(feeRows.reduce((total, row) => total + num(row.amount), 0));
+  // Other costs enter by date, as on the dashboard: those up to today.
   const summary = summarize(
     days,
-    round2(otherCosts.reduce((total, cost) => total + cost.valor, 0)),
+    round2(
+      otherCosts
+        .filter((cost) => inRange(cost.costDate, range))
+        .reduce((total, cost) => total + cost.valor, 0),
+    ),
     today,
     { usage: betleadsUsage, fee: betleadsFee },
   );
@@ -509,21 +521,26 @@ export const setMonthlyGgr = createServerFn({ method: "POST" })
     setMonthlyGgrFor(context as unknown as ServerContext, data),
   );
 
-// ─── Other costs of the month ───────────────────────────────────────────────
+// ─── Other costs ────────────────────────────────────────────────────────────
 
-const saveOtherCostInput = z.object({
+export const saveOtherCostInput = z.object({
   tenantId: dbUuid(),
   id: dbUuid().optional(),
-  month: yearMonth,
+  /** The day of the cost (today or earlier, São Paulo). */
+  costDate: isoDate,
+  /** "Repetir todo mês": copied into each new month on the same day. */
+  repeatMonthly: z.boolean().default(false),
   descricao: z.string().trim().min(1).max(200),
   valor: money.nonnegative(),
   categoria: z.string().trim().min(1).max(60).nullable().optional(),
 });
 
+const UNIQUE_VIOLATION = "23505";
+
 async function getOtherCost(tenantId: string, id: string) {
   const { data, error } = await db()
     .from<OtherCostRow>("tenant_finance_other_costs")
-    .select("id,tenant_id,month,descricao,valor,categoria")
+    .select(OTHER_COST_COLUMNS)
     .eq("id", id)
     .eq("tenant_id", tenantId)
     .maybeSingle();
@@ -532,12 +549,19 @@ async function getOtherCost(tenantId: string, id: string) {
   return { ...data, valor: num(data.valor) };
 }
 
+/**
+ * Creates or edits an other cost dated `costDate` (not in the future). A new
+ * cost with repeatMonthly starts a series (series_id = its id); turning
+ * repeat on for a cost without a series starts one from it.
+ */
 export async function saveOtherCostFor(
   ctx: ServerContext,
-  data: z.infer<typeof saveOtherCostInput>,
+  data: z.input<typeof saveOtherCostInput>,
 ) {
   await requirePermission("finance_can_edit_values", ctx.userId, data.tenantId);
   await assertTenantNotDemo(data.tenantId);
+  if (data.costDate > todaySaoPaulo()) throw new Error("Data futura não permitida");
+  const repeatMonthly = data.repeatMonthly ?? false;
 
   let before: OtherCostRow | null = null;
   if (data.id) {
@@ -555,13 +579,22 @@ export async function saveOtherCostFor(
         ? null
         : categoriaInput;
 
+  const id = data.id ?? crypto.randomUUID();
   const values = {
-    month: `${data.month}-01`,
+    month: monthStartOf(data.costDate),
+    cost_date: data.costDate,
     descricao: data.descricao,
     valor: round2(data.valor),
     categoria,
+    repeat_monthly: repeatMonthly,
+    series_id: before?.series_id ?? (repeatMonthly ? id : null),
   };
-  let id: string;
+  const failed = (error: { message: string; code?: string }) =>
+    new Error(
+      error.code === UNIQUE_VIOLATION
+        ? "Esse custo recorrente já tem um lançamento nesse mês"
+        : error.message,
+    );
 
   if (data.id) {
     const { error } = await db()
@@ -569,17 +602,15 @@ export async function saveOtherCostFor(
       .update({ ...values, updated_at: new Date().toISOString() })
       .eq("id", data.id)
       .eq("tenant_id", data.tenantId);
-    if (error) throw new Error(error.message);
-    id = data.id;
+    if (error) throw failed(error);
   } else {
     const { data: created, error } = await db()
       .from<{ id: string }>("tenant_finance_other_costs")
-      .insert({ tenant_id: data.tenantId, ...values, created_by: ctx.userId })
+      .insert({ id, tenant_id: data.tenantId, ...values, created_by: ctx.userId })
       .select("id")
       .single();
-    if (error) throw new Error(error.message);
+    if (error) throw failed(error);
     if (!created) throw new Error("Falha ao salvar custo");
-    id = created.id;
   }
 
   await auditTenant({
@@ -617,6 +648,29 @@ export async function deleteOtherCostFor(
     .eq("id", data.id)
     .eq("tenant_id", data.tenantId);
   if (error) throw new Error(error.message);
+
+  // The daily copy (finance_materialize_recurring_costs) repeats a series'
+  // newest row: removing that row must not bring it back the next morning,
+  // so the row now newest stops repeating.
+  if (before.series_id) {
+    const { data: rest, error: restError } = await db()
+      .from<OtherCostRow[]>("tenant_finance_other_costs")
+      .select(OTHER_COST_COLUMNS)
+      .eq("tenant_id", data.tenantId)
+      .eq("series_id", before.series_id)
+      .order("cost_date", { ascending: false })
+      .range(0, 0);
+    if (restError) throw new Error(restError.message);
+    const newest = rest?.[0];
+    if (newest && newest.cost_date < before.cost_date && newest.repeat_monthly) {
+      const { error: stopError } = await db()
+        .from("tenant_finance_other_costs")
+        .update({ repeat_monthly: false, updated_at: new Date().toISOString() })
+        .eq("id", newest.id)
+        .eq("tenant_id", data.tenantId);
+      if (stopError) throw new Error(stopError.message);
+    }
+  }
 
   await auditTenant({
     tenantId: data.tenantId,

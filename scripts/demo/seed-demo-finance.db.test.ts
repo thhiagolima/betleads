@@ -201,6 +201,38 @@ describe("seedDemoFinance", () => {
     }
   });
 
+  it("other costs are dated the 5th (the month's last seeded day when earlier) and Equipe repeats as one series", async () => {
+    await seedDemoFinance(db, { demoTenantId: DEMO, days: DAYS });
+    const { rows } = await db.query<{
+      descricao: string;
+      cost_date: string;
+      expected: string;
+      repeat_monthly: boolean;
+      series_id: string | null;
+    }>(
+      `select c.descricao, c.cost_date::text as cost_date, c.repeat_monthly, c.series_id,
+              least(c.month + 4, (select max(m.metric_date) from public.tenant_daily_metrics m
+                                   where m.tenant_id = c.tenant_id
+                                     and date_trunc('month', m.metric_date)::date = c.month))::text as expected
+         from public.tenant_finance_other_costs c
+        where c.tenant_id = $1
+        order by c.cost_date, c.descricao`,
+      [DEMO],
+    );
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) expect(row.cost_date).toBe(row.expected);
+    const equipe = rows.filter((row) => row.descricao === "Equipe de atendimento");
+    const others = rows.filter((row) => row.descricao !== "Equipe de atendimento");
+    expect(equipe.every((row) => row.repeat_monthly && row.series_id !== null)).toBe(true);
+    expect(new Set(equipe.map((row) => row.series_id)).size).toBe(1);
+    expect(others.every((row) => !row.repeat_monthly && row.series_id === null)).toBe(true);
+    // The latest Equipe is already in the current month: nothing to copy.
+    const { rows: made } = await db.query<{ n: number }>(
+      `select public.finance_materialize_recurring_costs(current_date) as n`,
+    );
+    expect(made[0].n).toBe(0);
+  });
+
   it("removes a previous seed's CRM/SMS other costs", async () => {
     await db.query(
       `insert into public.tenant_finance_other_costs (id, tenant_id, month, descricao, valor, created_by)

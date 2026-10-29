@@ -157,7 +157,7 @@ export function waterfallSteps(
 
   // Whatever the categories leave of otherCosts (or exceed it by) is one
   // reconciling step, so the total always ends at cashResult.
-  const residual = round2((summary.otherCosts ?? 0) - categorized);
+  const residual = round2(summary.otherCosts - categorized);
   if (Math.abs(residual) > 0.005) {
     const start = running;
     running = round2(running - residual);

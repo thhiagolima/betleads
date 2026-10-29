@@ -16,9 +16,11 @@ vi.mock("@/integrations/supabase/client.server", async () => {
 });
 
 import {
+  deleteOtherCostFor,
   getTenantFinanceMonthFor,
   saveFinanceDaysFor,
   saveOtherCostFor,
+  saveOtherCostInput,
   setFinanceRatesFor,
   setFinanceViewerFor,
   setMonthlyGgrFor,
@@ -240,8 +242,22 @@ describe("house financial month", () => {
     fake.admin
       .rows("tenant_finance_other_costs")
       .push(
-        { id: "c1", tenant_id: HOUSE_A, month: "2026-10-01", descricao: "CRM", valor: 30 },
-        { id: "c2", tenant_id: HOUSE_A, month: "2026-09-01", descricao: "SMS", valor: 99 },
+        {
+          id: "c1",
+          tenant_id: HOUSE_A,
+          month: "2026-10-01",
+          cost_date: "2026-10-01",
+          descricao: "CRM",
+          valor: 30,
+        },
+        {
+          id: "c2",
+          tenant_id: HOUSE_A,
+          month: "2026-09-01",
+          cost_date: "2026-09-01",
+          descricao: "SMS",
+          valor: 99,
+        },
       );
     fake.admin
       .rows("tenant_finance_rates")
@@ -281,7 +297,15 @@ describe("house financial month", () => {
     ]);
     expect(month.days.map((d) => d.date)).toEqual(["2026-10-01", "2026-10-02"]);
     expect(month.otherCosts).toEqual([
-      { id: "c1", descricao: "CRM", valor: 30, categoria: "Outros", suspectedBetleads: false },
+      {
+        id: "c1",
+        descricao: "CRM",
+        valor: 30,
+        categoria: "Outros",
+        suspectedBetleads: false,
+        costDate: "2026-10-01",
+        repeatMonthly: false,
+      },
     ]);
     expect(month.summary.otherCosts).toBe(30);
     expect(month.summary.pendingDays).toBe(1);
@@ -463,6 +487,7 @@ describe("house financial month: Betleads cost and categories", () => {
         id: "c1",
         tenant_id: HOUSE_A,
         month: "2026-10-01",
+        cost_date: "2026-10-01",
         descricao: "SMS",
         valor: 30,
         categoria: null,
@@ -471,6 +496,7 @@ describe("house financial month: Betleads cost and categories", () => {
         id: "c2",
         tenant_id: HOUSE_A,
         month: "2026-10-01",
+        cost_date: "2026-10-01",
         descricao: "Aluguel",
         valor: 20,
         categoria: "Equipe",
@@ -479,6 +505,7 @@ describe("house financial month: Betleads cost and categories", () => {
         id: "c3",
         tenant_id: HOUSE_A,
         month: "2026-09-01",
+        cost_date: "2026-09-01",
         descricao: "SMS",
         valor: 99,
         categoria: null,
@@ -490,8 +517,24 @@ describe("house financial month: Betleads cost and categories", () => {
       month: "2026-10",
     });
     expect(october.otherCosts).toEqual([
-      { id: "c1", descricao: "SMS", valor: 30, categoria: "Outros", suspectedBetleads: true },
-      { id: "c2", descricao: "Aluguel", valor: 20, categoria: "Equipe", suspectedBetleads: false },
+      {
+        id: "c1",
+        descricao: "SMS",
+        valor: 30,
+        categoria: "Outros",
+        suspectedBetleads: true,
+        costDate: "2026-10-01",
+        repeatMonthly: false,
+      },
+      {
+        id: "c2",
+        descricao: "Aluguel",
+        valor: 20,
+        categoria: "Equipe",
+        suspectedBetleads: false,
+        costDate: "2026-10-01",
+        repeatMonthly: false,
+      },
     ]);
 
     // September is before the since month: the manual SMS cost is not flagged.
@@ -500,7 +543,15 @@ describe("house financial month: Betleads cost and categories", () => {
       month: "2026-09",
     });
     expect(september.otherCosts).toEqual([
-      { id: "c3", descricao: "SMS", valor: 99, categoria: "Outros", suspectedBetleads: false },
+      {
+        id: "c3",
+        descricao: "SMS",
+        valor: 99,
+        categoria: "Outros",
+        suspectedBetleads: false,
+        costDate: "2026-09-01",
+        repeatMonthly: false,
+      },
     ]);
   });
 
@@ -524,6 +575,7 @@ describe("house financial month: Betleads cost and categories", () => {
       id: "c1",
       tenant_id: HOUSE_A,
       month: "2026-10-01",
+      cost_date: "2026-10-01",
       descricao: "SMS",
       valor: 30,
       categoria: null,
@@ -533,7 +585,15 @@ describe("house financial month: Betleads cost and categories", () => {
       month: "2026-10",
     });
     expect(month.otherCosts).toEqual([
-      { id: "c1", descricao: "SMS", valor: 30, categoria: "Outros", suspectedBetleads: false },
+      {
+        id: "c1",
+        descricao: "SMS",
+        valor: 30,
+        categoria: "Outros",
+        suspectedBetleads: false,
+        costDate: "2026-10-01",
+        repeatMonthly: false,
+      },
     ]);
   });
 
@@ -543,6 +603,7 @@ describe("house financial month: Betleads cost and categories", () => {
         id: "c1",
         tenant_id: HOUSE_A,
         month: "2026-10-01",
+        cost_date: "2026-10-01",
         descricao: "Agência",
         valor: 10,
         categoria: "Marketing",
@@ -551,6 +612,7 @@ describe("house financial month: Betleads cost and categories", () => {
         id: "c2",
         tenant_id: HOUSE_A,
         month: "2026-09-01",
+        cost_date: "2026-09-01",
         descricao: "Old",
         valor: 5,
         categoria: "Suporte",
@@ -559,6 +621,7 @@ describe("house financial month: Betleads cost and categories", () => {
         id: "c3",
         tenant_id: HOUSE_A,
         month: "2026-08-01",
+        cost_date: "2026-08-01",
         descricao: "x",
         valor: 1,
         categoria: null,
@@ -582,7 +645,7 @@ describe("house financial month: Betleads cost and categories", () => {
   it("saveOtherCost stores a new category and it shows in categories next month", async () => {
     await saveOtherCostFor(ctxFor(ADMIN_A), {
       tenantId: HOUSE_A,
-      month: "2026-10",
+      costDate: "2026-10-05",
       descricao: "Consultoria",
       valor: 200,
       categoria: "Consultoria Jurídica",
@@ -597,7 +660,7 @@ describe("house financial month: Betleads cost and categories", () => {
   it("saveOtherCost stores categoria via categoryLabel; Outros stores null; missing keeps, explicit null clears", async () => {
     const created = await saveOtherCostFor(ctxFor(ADMIN_A), {
       tenantId: HOUSE_A,
-      month: "2026-10",
+      costDate: "2026-10-05",
       descricao: "Agência",
       valor: 100,
       categoria: "  Marketing   Digital  ",
@@ -608,7 +671,7 @@ describe("house financial month: Betleads cost and categories", () => {
 
     const outros = await saveOtherCostFor(ctxFor(ADMIN_A), {
       tenantId: HOUSE_A,
-      month: "2026-10",
+      costDate: "2026-10-05",
       descricao: "X",
       valor: 1,
       categoria: "outros",
@@ -621,7 +684,7 @@ describe("house financial month: Betleads cost and categories", () => {
     await saveOtherCostFor(ctxFor(ADMIN_A), {
       tenantId: HOUSE_A,
       id: created.id,
-      month: "2026-10",
+      costDate: "2026-10-05",
       descricao: "Agência",
       valor: 150,
     });
@@ -633,7 +696,7 @@ describe("house financial month: Betleads cost and categories", () => {
     await saveOtherCostFor(ctxFor(ADMIN_A), {
       tenantId: HOUSE_A,
       id: created.id,
-      month: "2026-10",
+      costDate: "2026-10-05",
       descricao: "Agência",
       valor: 150,
       categoria: null,
@@ -648,6 +711,119 @@ describe("house financial month: Betleads cost and categories", () => {
     expect(audit.at(-1)).toMatchObject({
       after_data: expect.objectContaining({ categoria: null }),
     });
+  });
+
+  it("saveOtherCost requires costDate and rejects future dates", async () => {
+    expect(() =>
+      saveOtherCostInput.parse({ tenantId: HOUSE_A, descricao: "X", valor: 1 }),
+    ).toThrow();
+    // month is no longer accepted in place of costDate.
+    expect(() =>
+      saveOtherCostInput.parse({ tenantId: HOUSE_A, month: "2026-10", descricao: "X", valor: 1 }),
+    ).toThrow();
+    expect(
+      saveOtherCostInput.parse({
+        tenantId: HOUSE_A,
+        costDate: "2026-10-24",
+        descricao: "X",
+        valor: 1,
+      }),
+    ).toMatchObject({ costDate: "2026-10-24", repeatMonthly: false });
+
+    await expect(
+      saveOtherCostFor(ctxFor(ADMIN_A), {
+        tenantId: HOUSE_A,
+        costDate: "2026-10-25",
+        descricao: "Amanhã",
+        valor: 10,
+        repeatMonthly: false,
+      }),
+    ).rejects.toThrow("Data futura não permitida");
+    expect(fake.admin.rows("tenant_finance_other_costs")).toHaveLength(0);
+
+    // Today (São Paulo) is allowed; month follows the date.
+    const { id } = await saveOtherCostFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      costDate: "2026-10-24",
+      descricao: "Hoje",
+      valor: 10,
+      repeatMonthly: false,
+    });
+    expect(fake.admin.rows("tenant_finance_other_costs").find((r) => r.id === id)).toMatchObject({
+      month: "2026-10-01",
+      cost_date: "2026-10-24",
+      repeat_monthly: false,
+      series_id: null,
+    });
+  });
+
+  it("saveOtherCost with repeatMonthly starts a series (series_id = id); edit keeps date and series", async () => {
+    const { id } = await saveOtherCostFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      costDate: "2026-10-05",
+      descricao: "Equipe",
+      valor: 1500,
+      categoria: "Equipe",
+      repeatMonthly: true,
+    });
+    const stored = () => fake.admin.rows("tenant_finance_other_costs").find((r) => r.id === id);
+    expect(stored()).toMatchObject({
+      cost_date: "2026-10-05",
+      repeat_monthly: true,
+      series_id: id,
+    });
+
+    // Turning repeat off keeps the series (it simply stops there).
+    await saveOtherCostFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      id,
+      costDate: "2026-10-05",
+      descricao: "Equipe",
+      valor: 1600,
+      repeatMonthly: false,
+    });
+    expect(stored()).toMatchObject({
+      cost_date: "2026-10-05",
+      month: "2026-10-01",
+      valor: 1600,
+      repeat_monthly: false,
+      series_id: id,
+    });
+
+    const month = await getTenantFinanceMonthFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-10",
+    });
+    expect(month.otherCosts).toEqual([
+      expect.objectContaining({ id, costDate: "2026-10-05", repeatMonthly: false, valor: 1600 }),
+    ]);
+  });
+
+  it("removing the newest row of a series stops the repeat on the one before it", async () => {
+    const series = "00000000-0000-4000-8000-00000000f001";
+    const row = (id: string, costDate: string) => ({
+      id,
+      tenant_id: HOUSE_A,
+      month: `${costDate.slice(0, 7)}-01`,
+      cost_date: costDate,
+      descricao: "Equipe",
+      valor: 100,
+      categoria: "Equipe",
+      repeat_monthly: true,
+      series_id: series,
+    });
+    fake.admin
+      .rows("tenant_finance_other_costs")
+      .push(row(series, "2026-08-05"), row("s2", "2026-09-05"), row("s3", "2026-10-05"));
+    const stored = (id: string) =>
+      fake.admin.rows("tenant_finance_other_costs").find((r) => r.id === id);
+
+    // An older row: the series goes on.
+    await deleteOtherCostFor(ctxFor(ADMIN_A), { tenantId: HOUSE_A, id: "s2" });
+    expect(stored("s3")?.repeat_monthly).toBe(true);
+
+    await deleteOtherCostFor(ctxFor(ADMIN_A), { tenantId: HOUSE_A, id: "s3" });
+    expect(stored(series)?.repeat_monthly).toBe(false);
   });
 });
 

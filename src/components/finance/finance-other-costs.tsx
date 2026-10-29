@@ -1,18 +1,21 @@
-// "Outros custos do mês" (spec §5, §7.3, §8): rows of description, category
-// and value that enter the month's result but not any single day's. The
-// category is a fixed set plus the ones the house typed before; a cost that
+// "Outros custos" (spec §5, §7.3, §8; dated in docs/ESCOPO_AUDITORIA_FINANCEIRO
+// _2026-10-29.md §3.5): rows of date, description, category and value; each
+// enters every period that contains its date. "Repetir todo mês" copies a
+// cost into each new month on the same day (finance_materialize_recurring_costs).
+// The category is a fixed set plus the ones the house typed before; a cost that
 // looks like a Betleads charge gets a typing hint, and an already-launched one
 // in a month with automatic Betleads cost is flagged as a probable duplicate.
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { Check, ChevronsUpDown, Info, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Check, ChevronsUpDown, Info, Pencil, Plus, Repeat, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { formatBRL } from "@/components/finance/format";
 import { currentMonth } from "@/components/finance/finance-month-grid";
 import { financeMonthQueryKey, invalidateFinanceAfterSave } from "@/components/finance/query-keys";
 import { deleteOtherCost, getTenantFinanceMonth, saveOtherCost } from "@/lib/finance.functions";
+import { presetRange } from "@/lib/finance/calc";
 import {
   MAX_CATEGORY_LENGTH,
   betleadsHint,
@@ -32,6 +35,7 @@ import {
 } from "@/components/ui/command";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Switch } from "@/components/ui/switch";
 import {
   Table,
   TableBody,
@@ -43,6 +47,100 @@ import {
 import { cn } from "@/lib/utils";
 
 const DEFAULT_CATEGORY = "Outros";
+
+/** "YYYY-MM-DD" of today in São Paulo, the same day boundary as the server. */
+const todaySaoPaulo = () => presetRange("today", new Date()).from;
+
+function lastDayOf(month: string) {
+  const [y, m] = month.split("-").map(Number);
+  return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+}
+
+/** The days a cost of `month` ("YYYY-MM") may be dated: inside the month, up to today; null for a future month. */
+export function costDateBounds(month: string, today: string): { min: string; max: string } | null {
+  const min = `${month}-01`;
+  if (min > today) return null;
+  const last = lastDayOf(month);
+  return { min, max: last < today ? last : today };
+}
+
+/** Today when it is in `month`, else the month's last day; null for a future month. */
+export function defaultCostDate(month: string, today: string): string | null {
+  return costDateBounds(month, today)?.max ?? null;
+}
+
+export function isCostDateAllowed(date: string, month: string, today: string): boolean {
+  const bounds = costDateBounds(month, today);
+  return !!bounds && /^\d{4}-\d{2}-\d{2}$/.test(date) && date >= bounds.min && date <= bounds.max;
+}
+
+const ddmm = (date: string) => `${date.slice(8, 10)}/${date.slice(5, 7)}`;
+
+/** The Data cell: "dd/mm", and "todo mês" when the cost repeats. */
+export function CostDateLabel({
+  costDate,
+  repeatMonthly,
+}: {
+  costDate: string;
+  repeatMonthly: boolean;
+}) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      {ddmm(costDate)}
+      {repeatMonthly && (
+        <span className="inline-flex items-center gap-1 rounded-md border border-border/60 px-1.5 py-0.5 text-[11px] text-muted-foreground">
+          <Repeat className="h-3 w-3" />
+          todo mês
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** Data (inside the viewed month, not after today) and "Repetir todo mês". */
+export function CostDateRepeatFields({
+  month,
+  today,
+  costDate,
+  repeatMonthly,
+  disabled,
+  onCostDateChange,
+  onRepeatChange,
+}: {
+  month: string;
+  today: string;
+  costDate: string;
+  repeatMonthly: boolean;
+  disabled: boolean;
+  onCostDateChange: (value: string) => void;
+  onRepeatChange: (value: boolean) => void;
+}) {
+  const bounds = costDateBounds(month, today);
+  return (
+    <>
+      <div className="w-40">
+        <Input
+          type="date"
+          aria-label="Data"
+          min={bounds?.min}
+          max={bounds?.max}
+          value={costDate}
+          onChange={(e) => onCostDateChange(e.target.value)}
+          disabled={disabled || !bounds}
+        />
+      </div>
+      <label className="flex h-9 items-center gap-2 text-sm">
+        <Switch
+          checked={repeatMonthly}
+          onCheckedChange={onRepeatChange}
+          disabled={disabled}
+          aria-label="Repetir todo mês"
+        />
+        Repetir todo mês
+      </label>
+    </>
+  );
+}
 
 /** The list inside the Categoria combobox. Filtering is ours (cmdk's is off). */
 export function CategoryCommand({
@@ -196,19 +294,32 @@ export function FinanceOtherCosts({ tenantId }: { tenantId: string }) {
   const [descricao, setDescricao] = useState("");
   const [categoria, setCategoria] = useState(DEFAULT_CATEGORY);
   const [valor, setValor] = useState("");
+  const [costDate, setCostDate] = useState(() => defaultCostDate(month, todaySaoPaulo()) ?? "");
+  const [repeatMonthly, setRepeatMonthly] = useState(false);
 
   const resetForm = () => {
     setEditingId(null);
     setDescricao("");
     setCategoria(DEFAULT_CATEGORY);
     setValor("");
+    setCostDate(defaultCostDate(month, todaySaoPaulo()) ?? "");
+    setRepeatMonthly(false);
   };
 
-  const startEdit = (cost: { id: string; descricao: string; categoria: string; valor: number }) => {
+  const startEdit = (cost: {
+    id: string;
+    descricao: string;
+    categoria: string;
+    valor: number;
+    costDate: string;
+    repeatMonthly: boolean;
+  }) => {
     setEditingId(cost.id);
     setDescricao(cost.descricao);
     setCategoria(cost.categoria);
     setValor(String(cost.valor));
+    setCostDate(cost.costDate);
+    setRepeatMonthly(cost.repeatMonthly);
   };
 
   const query = useQuery({
@@ -225,7 +336,8 @@ export function FinanceOtherCosts({ tenantId }: { tenantId: string }) {
       saveFn({
         data: {
           tenantId,
-          month,
+          costDate,
+          repeatMonthly,
           descricao,
           categoria,
           valor: Number(valor),
@@ -258,6 +370,8 @@ export function FinanceOtherCosts({ tenantId }: { tenantId: string }) {
   const { otherCosts, categories } = query.data;
   const total = otherCosts.reduce((sum, cost) => sum + cost.valor, 0);
   const hint = descricao.trim() ? betleadsHint(descricao, categoria) : null;
+  const today = todaySaoPaulo();
+  const dateAllowed = isCostDateAllowed(costDate, month, today);
 
   return (
     <div className="space-y-4">
@@ -271,6 +385,7 @@ export function FinanceOtherCosts({ tenantId }: { tenantId: string }) {
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead>Data</TableHead>
               <TableHead>Descrição</TableHead>
               <TableHead>Categoria</TableHead>
               <TableHead>Valor</TableHead>
@@ -280,6 +395,9 @@ export function FinanceOtherCosts({ tenantId }: { tenantId: string }) {
           <TableBody>
             {otherCosts.map((cost) => (
               <TableRow key={cost.id}>
+                <TableCell className="whitespace-nowrap">
+                  <CostDateLabel costDate={cost.costDate} repeatMonthly={cost.repeatMonthly} />
+                </TableCell>
                 <TableCell className="min-w-[180px]">
                   {cost.descricao}
                   {cost.suspectedBetleads && (
@@ -328,7 +446,7 @@ export function FinanceOtherCosts({ tenantId }: { tenantId: string }) {
             {otherCosts.length === 0 && (
               <TableRow>
                 <TableCell
-                  colSpan={canEdit ? 4 : 3}
+                  colSpan={canEdit ? 5 : 4}
                   className="py-6 text-center text-sm text-muted-foreground"
                 >
                   Nenhum custo lançado neste mês.
@@ -347,6 +465,15 @@ export function FinanceOtherCosts({ tenantId }: { tenantId: string }) {
       {canEdit && (
         <div className="space-y-2 rounded-lg border border-border/40 bg-background/30 p-3">
           <div className="flex flex-wrap items-end gap-2">
+            <CostDateRepeatFields
+              month={month}
+              today={today}
+              costDate={costDate}
+              repeatMonthly={repeatMonthly}
+              disabled={isDemo}
+              onCostDateChange={setCostDate}
+              onRepeatChange={setRepeatMonthly}
+            />
             <div className="min-w-[160px] flex-1">
               <Input
                 placeholder="Descrição (ex.: Designer, Afiliado X)"
@@ -377,7 +504,7 @@ export function FinanceOtherCosts({ tenantId }: { tenantId: string }) {
             <DemoDisabledTooltip active={isDemo}>
               <Button
                 type="button"
-                disabled={isDemo || !descricao.trim() || !valor || save.isPending}
+                disabled={isDemo || !descricao.trim() || !valor || !dateAllowed || save.isPending}
                 onClick={() => save.mutate()}
                 className="gap-2"
               >

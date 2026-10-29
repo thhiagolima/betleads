@@ -200,7 +200,7 @@ describe("summarize", () => {
       }),
     ];
 
-    const summary = summarize(days, null);
+    const summary = summarize(days, 0);
     expect(summary.pendingDays).toBe(1);
     expect(summary.ftds).toBe(3);
     // Every day counts; the pending 10-02 (no GGR) counts as GGR 0:
@@ -246,13 +246,13 @@ describe("summarize", () => {
       });
     const days = [day("2026-10-23", 500), day("2026-10-24", null)];
 
-    const withToday = summarize(days, null, "2026-10-24");
+    const withToday = summarize(days, 0, "2026-10-24");
     expect(withToday.pendingDays).toBe(0);
     expect(withToday.pendingToday).toBe(true);
     // Resultado sums every day, today included (10-23: 616, 10-24: 696).
     expect(withToday.cashResult).toBeCloseTo(1312, 2);
 
-    const withoutToday = summarize(days, null);
+    const withoutToday = summarize(days, 0);
     expect(withoutToday.pendingDays).toBe(1);
     expect(withoutToday.pendingToday).toBe(false);
 
@@ -266,7 +266,7 @@ describe("summarize", () => {
     expect(goal?.status).toBe("green");
     expect(goal?.target).toBe(1200);
 
-    const onlyToday = evaluateGoal([goalDays[1]], summarize([days[1]], null, "2026-10-24"), {
+    const onlyToday = evaluateGoal([goalDays[1]], summarize([days[1]], 0, "2026-10-24"), {
       from: "2026-10-24",
       to: "2026-10-24",
     });
@@ -297,16 +297,15 @@ describe("summarize", () => {
       pendingDay("2026-10-24"),
       pendingDay("2026-10-24"),
     ];
-    expect(summarize(days, null, "2026-10-24").pendingDays).toBe(2);
+    expect(summarize(days, 0, "2026-10-24").pendingDays).toBe(2);
   });
 
-  it("other costs only reduce the period result when provided", () => {
+  it("other costs reduce the period result and nothing else", () => {
     const days = rows.slice(0, 3).map((row) => computeDay(toInput(row)));
-    const withoutCosts = summarize(days, null);
-    const withZeroCosts = summarize(days, 0);
+    const withoutCosts = summarize(days, 0);
     const withCosts = summarize(days, 100);
 
-    expect(withoutCosts.cashResult).toBe(withZeroCosts.cashResult);
+    expect(withoutCosts.otherCosts).toBe(0);
     expect(withCosts.cashResult).toBeCloseTo(withoutCosts.cashResult - 100, 2);
     expect(withCosts.net).toBe(withoutCosts.net);
     expect(withCosts.ggrFee).toBe(withoutCosts.ggrFee);
@@ -364,7 +363,7 @@ describe("summarize", () => {
         movementFeePct: 0,
       }),
     ];
-    const summary = summarize(days, null);
+    const summary = summarize(days, 0);
     expect(summary.roi).toBeNull();
     expect(pctChange(-50, -100)).toBeCloseTo(0.5, 6);
   });
@@ -385,7 +384,7 @@ describe("costBreakdown", () => {
     net: 0,
     ggrFee: 0,
     movementFee: 0,
-    otherCosts: null,
+    otherCosts: 0,
     cashResult: 0,
     roi: null,
     costPerRegistration: null,
@@ -508,7 +507,7 @@ describe("goals", () => {
     net: 0,
     ggrFee: 0,
     movementFee: 0,
-    otherCosts: null,
+    otherCosts: 0,
     cashResult: 0,
     roi: null,
     costPerRegistration: null,
@@ -604,7 +603,7 @@ describe("metricValue, isSumMetric", () => {
       net: 80,
       ggrFee: 1,
       movementFee: 2,
-      otherCosts: null,
+      otherCosts: 0,
       cashResult: 50,
       roi: 0.5,
       costPerRegistration: 6,
@@ -834,7 +833,7 @@ describe("allocateMonthlyGgr", () => {
       ggr: 1497.15,
       validThrough: "2026-10-03",
     }).map(computeDay);
-    const summary = summarize(out, null);
+    const summary = summarize(out, 0);
     expect(summary.ggr).toBe(1497.15);
     expect(Math.abs(summary.ggrFee - 254.52)).toBeLessThanOrEqual(0.02);
     expect(out.every((d) => d.ggrEstimated)).toBe(true);
@@ -852,7 +851,7 @@ describe("allocateMonthlyGgr", () => {
     expect(out[1].ggrFee).toBe(0);
     expect(out[1].cashResult).toBe(300);
 
-    const summary = summarize(out, null, "2026-10-05");
+    const summary = summarize(out, 0, "2026-10-05");
     expect(summary.pendingDays).toBe(1);
     expect(summary.ggr).toBe(50);
     // 10-01: 100 − 17% of 50 = 91,50; 10-02: 300.
@@ -880,10 +879,8 @@ describe("hasPartialGgrEstimate", () => {
   });
 
   it("summarize carries the flag (false by default)", () => {
-    expect(summarize([], null).ggrEstimated).toBe(false);
-    expect(summarize([], null, undefined, undefined, { ggrEstimated: true }).ggrEstimated).toBe(
-      true,
-    );
+    expect(summarize([], 0).ggrEstimated).toBe(false);
+    expect(summarize([], 0, undefined, undefined, { ggrEstimated: true }).ggrEstimated).toBe(true);
   });
 });
 

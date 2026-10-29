@@ -22,6 +22,7 @@ import {
 import { categoryKey, categoryLabel, looksLikeBetleadsCost } from "@/lib/finance/categories";
 import { computeKpis, sendLines, sumActivity, waterfallSteps } from "@/lib/finance/kpis";
 import {
+  OTHER_COST_COLUMNS,
   clampToToday,
   compareMode,
   costMonthsFor,
@@ -232,18 +233,20 @@ async function resolveScope(
 const OTHER_COSTS_PAGE = 1000;
 
 /**
- * Other costs of the given houses and months, oldest entry first. Paged, since
- * PostgREST returns at most 1000 rows per request without an error.
+ * Other costs of the given houses dated inside `span`, oldest entry first.
+ * Paged, since PostgREST returns at most 1000 rows per request without an
+ * error.
  */
-async function fetchOtherCosts(tenantIds: string[], months: string[]) {
-  if (!tenantIds.length || !months.length) return [];
+async function fetchOtherCosts(tenantIds: string[], span: DateRange | null) {
+  if (!tenantIds.length || !span) return [];
   const rows: OtherCostRow[] = [];
   for (let offset = 0; ; offset += OTHER_COSTS_PAGE) {
     const { data, error } = await db()
       .from<OtherCostRow[]>("tenant_finance_other_costs")
-      .select("id,tenant_id,month,descricao,valor,categoria")
+      .select(OTHER_COST_COLUMNS)
       .in("tenant_id", tenantIds)
-      .in("month", months)
+      .gte("cost_date", span.from)
+      .lte("cost_date", span.to)
       .order("created_at", { ascending: true })
       .order("id", { ascending: true })
       .range(offset, offset + OTHER_COSTS_PAGE - 1);
@@ -291,8 +294,9 @@ function addToSums(sums: Map<string, number>, tenantId: string, month: string, a
  * Dashboard of a house, a group or every house. One call per data source
  * (finance_days, goals, other costs, Betleads usage, fees, since) covers the
  * current and comparison windows and the 12-month series; days after today
- * are left out. Other costs and the plan fee enter a window only for a closed
- * month (costMonthsFor); Betleads usage enters any window, per day.
+ * are left out. Other costs enter any window that contains their cost_date;
+ * the plan fee only a closed month (costMonthsFor); Betleads usage enters any
+ * window, per day.
  */
 export async function getFinanceDashboardFor(
   ctx: ServerContext,
@@ -306,7 +310,7 @@ export async function getFinanceDashboardFor(
   const previousRange = compareRange(data.range, data.compare, data.preset);
   const current = clampToToday(data.range, today);
   const previous = clampToToday(previousRange, today);
-  const costMonths = costMonthsFor(data.range, data.compare, data.preset);
+  const feeMonths = costMonthsFor(data.range, data.compare, data.preset);
 
   const lastMonth = monthStartOf(data.range.to);
   const seriesMonths = tenantIds.length
@@ -332,14 +336,15 @@ export async function getFinanceDashboardFor(
 
   const span = tenantIds.length ? spanOf([current, previous, seriesSpan]) : null;
   const activitySpan = tenantIds.length ? spanOf([current, previous]) : null;
-  const allCostMonths = [
-    ...new Set(
-      [...seriesMonths, costMonths.current, costMonths.previous].filter(
-        (month): month is string => month !== null,
-      ),
-    ),
-  ].sort();
-  const feeMonths = tenantIds.length ? allCostMonths : [];
+  const allFeeMonths = tenantIds.length
+    ? [
+        ...new Set(
+          [...seriesMonths, feeMonths.current, feeMonths.previous].filter(
+            (month): month is string => month !== null,
+          ),
+        ),
+      ].sort()
+    : [];
 
   const [
     dayRows,
@@ -354,11 +359,11 @@ export async function getFinanceDashboardFor(
   ] = await Promise.all([
     span ? fetchFinanceDays(tenantIds, span) : Promise.resolve([]),
     current && tenantIds.length ? fetchGoalDays(tenantIds, current) : Promise.resolve([]),
-    fetchOtherCosts(tenantIds, allCostMonths),
+    fetchOtherCosts(tenantIds, span),
     span ? fetchSendUsage(tenantIds, span) : Promise.resolve([]),
     activitySpan ? fetchActivityDays(tenantIds, activitySpan) : Promise.resolve([]),
-    feeMonths.length
-      ? fetchBetleadsFees(tenantIds, feeMonths[0], feeMonths.at(-1) as string)
+    allFeeMonths.length
+      ? fetchBetleadsFees(tenantIds, allFeeMonths[0], allFeeMonths.at(-1) as string)
       : Promise.resolve([]),
     tenantIds.length ? fetchBetleadsSince(tenantIds) : Promise.resolve([]),
     span
@@ -413,8 +418,10 @@ export async function getFinanceDashboardFor(
   for (const row of activityRows) {
     addToBuckets(activityBuckets, row.tenant_id, monthStartOf(row.metric_date), row);
   }
-  const costSums = new Map<string, number>();
-  for (const row of costRows) addToSums(costSums, row.tenant_id, row.month, num(row.valor));
+  const costBuckets = new Map<string, OtherCostRow[]>();
+  for (const row of costRows) {
+    addToBuckets(costBuckets, row.tenant_id, monthStartOf(row.cost_date), row);
+  }
   const feeSums = new Map<string, number>();
   for (const row of feeRows) addToSums(feeSums, row.tenant_id, row.month, num(row.amount));
   const goalRowsByTenant = new Map<string, GoalDayRow[]>();
@@ -444,8 +451,11 @@ export async function getFinanceDashboardFor(
     );
   const monthSum = (sums: Map<string, number>, month: string | null, tenantId?: string) =>
     month === null ? null : round2(sums.get(bucketKey(tenantId ?? ALL_TENANTS, month)) ?? 0);
-  const otherCostsFor = (month: string | null, tenantId?: string) =>
-    monthSum(costSums, month, tenantId);
+  /** The window's other costs (dated inside it), oldest entry first. */
+  const costsIn = (window: DateRange | null, tenantId?: string) =>
+    inWindow(costBuckets, window, (row) => row.cost_date, tenantId);
+  const otherCostsFor = (window: DateRange | null, tenantId?: string) =>
+    round2(costsIn(window, tenantId).reduce((total, row) => total + num(row.valor), 0));
   /** The window's sends summed per channel (the month view sums them the same way). */
   const sendsFor = (window: DateRange | null, tenantId?: string) =>
     sumSendUsage(inWindow(sendBuckets, window, (row) => row.metric_date, tenantId));
@@ -456,17 +466,17 @@ export async function getFinanceDashboardFor(
   const feeFor = (month: string | null, tenantId?: string) => monthSum(feeSums, month, tenantId);
   const allocationsOf = (tenantId?: string) =>
     tenantId === undefined ? allAllocations : (allocationsByTenant.get(tenantId) ?? []);
-  const summarizeWindow = (window: DateRange | null, costMonth: string | null, tenantId?: string) =>
+  const summarizeWindow = (window: DateRange | null, feeMonth: string | null, tenantId?: string) =>
     summarize(
       windowDays(window, tenantId),
-      otherCostsFor(costMonth, tenantId),
+      otherCostsFor(window, tenantId),
       today,
-      { usage: usageFor(window, tenantId), fee: feeFor(costMonth, tenantId) },
+      { usage: usageFor(window, tenantId), fee: feeFor(feeMonth, tenantId) },
       { ggrEstimated: hasPartialGgrEstimate(window, allocationsOf(tenantId)) },
     );
 
   const rows: DashboardTenantRow[] = tenants.map((tenant) => {
-    const currentSummary = summarizeWindow(current, costMonths.current, tenant.id);
+    const currentSummary = summarizeWindow(current, feeMonths.current, tenant.id);
     const pendingDays = windowDays(current, tenant.id).filter(
       (day) => day.pending && day.date < today,
     );
@@ -475,7 +485,7 @@ export async function getFinanceDashboardFor(
       id: tenant.id,
       nome: tenant.nome,
       current: currentSummary,
-      previous: summarizeWindow(previous, costMonths.previous, tenant.id),
+      previous: summarizeWindow(previous, feeMonths.previous, tenant.id),
       goals: current
         ? evaluateGoals(goalRowsByTenant.get(tenant.id) ?? [], currentSummary, current)
         : [],
@@ -488,8 +498,8 @@ export async function getFinanceDashboardFor(
   });
 
   const totals = {
-    current: summarizeWindow(current, costMonths.current),
-    previous: summarizeWindow(previous, costMonths.previous),
+    current: summarizeWindow(current, feeMonths.current),
+    previous: summarizeWindow(previous, feeMonths.previous),
   };
 
   const sinceByTenant = new Map(sinceRows.map((row) => [row.tenant_id, row.since]));
@@ -524,25 +534,24 @@ export async function getFinanceDashboardFor(
     if (!labels.has(key)) labels.set(key, label);
     return labels.get(key) as string;
   };
-  const categoriesFor = (month: string) => {
+  const categoriesFor = (window: DateRange) => {
     const totalsByLabel: Record<string, number> = {};
-    for (const row of costRows) {
-      if (row.month !== month) continue;
+    for (const row of costsIn(window)) {
       const label = categoryOf(row);
       totalsByLabel[label] = round2((totalsByLabel[label] ?? 0) + num(row.valor));
     }
     return totalsByLabel;
   };
-  const currentCategories = costMonths.current ? categoriesFor(costMonths.current) : {};
+  const currentCategories = current ? categoriesFor(current) : {};
   // The waterfall's categories: exactly the scope's other costs that entered
   // totals.current (costRows only hold the scope's houses).
   const waterfall = waterfallSteps(totals.current, totals.current.betleadsUsage, {
     ...currentCategories,
   });
-  const previousCategories = costMonths.previous ? categoriesFor(costMonths.previous) : null;
-  // A category that dropped to zero this month still shows, with its
-  // variation: the current month lists the union of both months' categories.
-  if (costMonths.current && previousCategories) {
+  const previousCategories = previous ? categoriesFor(previous) : null;
+  // A category that dropped to zero this window still shows, with its
+  // variation: the current window lists the union of both windows' categories.
+  if (current && previousCategories) {
     for (const label of Object.keys(previousCategories)) currentCategories[label] ??= 0;
   }
 
@@ -566,17 +575,14 @@ export async function getFinanceDashboardFor(
 
   // Spec §7.3: a manual cost that looks like a Betleads charge is flagged only
   // from the month the house has Betleads data on; before it, it is the only data.
-  const duplicateBetleadsCosts = costMonths.current
-    ? costRows.filter((row) => {
-        const since = sinceByTenant.get(row.tenant_id);
-        return (
-          row.month === costMonths.current &&
-          since !== undefined &&
-          row.month >= monthStartOf(since) &&
-          looksLikeBetleadsCost(row.descricao, row.categoria)
-        );
-      }).length
-    : 0;
+  const duplicateBetleadsCosts = costsIn(current).filter((row) => {
+    const since = sinceByTenant.get(row.tenant_id);
+    return (
+      since !== undefined &&
+      row.month >= monthStartOf(since) &&
+      looksLikeBetleadsCost(row.descricao, row.categoria)
+    );
+  }).length;
 
   return {
     scope: data.scope,
