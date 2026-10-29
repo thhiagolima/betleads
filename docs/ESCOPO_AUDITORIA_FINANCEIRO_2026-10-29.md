@@ -1,7 +1,7 @@
 # Financeiro — auditoria e escopo do redesign do painel
 
 **Data:** 29/10/2026
-**Status:** Proposto (decisões da §4 tomadas em 29/10)
+**Status:** Implementado (branch feat/financeiro-redesign; decisões da §4 tomadas em 29/10)
 **Base:** o que está no `main` em `b831d56`: painel de resultado, GGR do mês, custo do provedor para casas isentas, dias sempre calculados e cards de depósitos e saques. Os specs de origem são `superpowers/specs/2026-10-24-grupos-de-casas-design.md` e `superpowers/specs/2026-10-27-financeiro-painel-design.md`.
 
 ## 1. Por que este documento
