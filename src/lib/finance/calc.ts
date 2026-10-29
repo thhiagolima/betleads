@@ -331,10 +331,6 @@ export function isSumMetric(m: GoalMetric): boolean {
   );
 }
 
-export function dependsOnManual(m: GoalMetric): boolean {
-  return !(m === "registrations" || m === "ftds" || m === "deposits");
-}
-
 function goalStatusForBand(direction: GoalDirection, target: number, value: number): GoalStatus {
   if (target <= 0) {
     if (direction === "gte") return value >= target ? "green" : "red";

@@ -333,9 +333,13 @@ export function FinanceMonthView({
                   )}
                 </TableCell>
                 <TableCell>{num(day.registrations)}</TableCell>
-                <TableCell>{formatBRL(day.costPerRegistration)}</TableCell>
+                <TableCell>
+                  {day.adSpend === null ? <PendingCell /> : formatBRL(day.costPerRegistration)}
+                </TableCell>
                 <TableCell>{num(day.ftds)}</TableCell>
-                <TableCell>{formatBRL(day.costPerFtd)}</TableCell>
+                <TableCell>
+                  {day.adSpend === null ? <PendingCell /> : formatBRL(day.costPerFtd)}
+                </TableCell>
                 <TableCell>{formatBRL(day.ftdDepositAmount)}</TableCell>
                 <TableCell>{formatBRL(day.depositAmount)}</TableCell>
                 <TableCell>{formatBRL(day.withdrawalAmount)}</TableCell>

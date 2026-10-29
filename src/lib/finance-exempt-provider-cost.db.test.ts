@@ -21,7 +21,11 @@ const MIGRATION_DASHBOARD = readFileSync(
   "utf8",
 );
 const MIGRATION_EXEMPT = readFileSync(
-  resolve(__dirname, "../..", "supabase/migrations/20261112100000_finance_exempt_provider_cost.sql"),
+  resolve(
+    __dirname,
+    "../..",
+    "supabase/migrations/20261112100000_finance_exempt_provider_cost.sql",
+  ),
   "utf8",
 );
 
@@ -100,7 +104,11 @@ function isoDay(value: string | Date): string {
 }
 
 async function usageRows(tenants: string[], from: string, to: string) {
-  const { rows } = await db.query<{ tenant_id: string; metric_date: string | Date; amount: string }>(
+  const { rows } = await db.query<{
+    tenant_id: string;
+    metric_date: string | Date;
+    amount: string;
+  }>(
     `select * from public.finance_betleads_usage(array[${tenants
       .map((t) => `'${t}'`)
       .join(",")}]::uuid[], '${from}', '${to}') order by tenant_id, metric_date`,
@@ -144,6 +152,11 @@ describe("finance_betleads_usage for an exempt house", () => {
 
     const rows = await usageRows([EXEMPT], "2026-10-05", "2026-10-05");
     // 2026-10-06T02:30Z is still 2026-10-05 in São Paulo: +10 x 0,50 = 5,00.
+    expect(rows).toEqual([{ tenant_id: EXEMPT, date: "2026-10-05", amount: 8.54 }]);
+  });
+
+  it("a tenant listed twice is counted once", async () => {
+    const rows = await usageRows([EXEMPT, EXEMPT], "2026-10-05", "2026-10-05");
     expect(rows).toEqual([{ tenant_id: EXEMPT, date: "2026-10-05", amount: 8.54 }]);
   });
 

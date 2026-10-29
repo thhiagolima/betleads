@@ -7,7 +7,6 @@ import {
   compareRange,
   computeDay,
   costBreakdown,
-  dependsOnManual,
   evaluateGoal,
   hasPartialGgrEstimate,
   isSumMetric,
@@ -584,7 +583,7 @@ describe("goals", () => {
   });
 });
 
-describe("metricValue, isSumMetric, dependsOnManual", () => {
+describe("metricValue, isSumMetric", () => {
   it("maps metrics to summary fields", () => {
     const summary: PeriodSummary = {
       days: 1,
@@ -630,17 +629,6 @@ describe("metricValue, isSumMetric, dependsOnManual", () => {
     expect(isSumMetric("cost_per_registration")).toBe(false);
     expect(isSumMetric("cost_per_ftd")).toBe(false);
     expect(isSumMetric("roi")).toBe(false);
-  });
-
-  it("dependsOnManual is false only for registrations, ftds and deposits", () => {
-    expect(dependsOnManual("registrations")).toBe(false);
-    expect(dependsOnManual("ftds")).toBe(false);
-    expect(dependsOnManual("deposits")).toBe(false);
-    expect(dependsOnManual("net")).toBe(true);
-    expect(dependsOnManual("cash_result")).toBe(true);
-    expect(dependsOnManual("cost_per_registration")).toBe(true);
-    expect(dependsOnManual("cost_per_ftd")).toBe(true);
-    expect(dependsOnManual("roi")).toBe(true);
   });
 });
 

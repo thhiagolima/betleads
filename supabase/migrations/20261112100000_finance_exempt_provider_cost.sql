@@ -28,8 +28,9 @@ stable security definer
 set search_path = public
 as $$
   with houses as (
+    -- distinct: a tenant listed twice must not double its rows in the join.
     select t.id, public.billing_tenant_exempt(t.id) as exempt
-    from unnest(_tenants) as t(id)
+    from (select distinct unnest(_tenants) as id) t
   )
   select
     wl.tenant_id,
