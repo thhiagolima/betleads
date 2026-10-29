@@ -27,7 +27,7 @@ import { FINANCE_DASHBOARD_QUERY_KEY } from "@/components/finance/query-keys";
 
 import { KpiBlocks } from "./kpi-blocks";
 import { PendingBanner } from "./pending-banner";
-import { ProfitTrendChart } from "./profit-trend-chart";
+import { ProfitTrendChart, trendChartTitle, type TrendMetric } from "./profit-trend-chart";
 import { ResultBand } from "./result-band";
 import { scopeToValue, tenantClickAction } from "./scope";
 import { ScopePicker } from "./scope-picker";
@@ -57,6 +57,8 @@ function DashboardBody({
 }) {
   const multi = dashboard.scope.kind !== "tenant";
   const { totals, tenants, kpis } = dashboard;
+  // The 12-month chart's metric: its card title follows it.
+  const [trendMetric, setTrendMetric] = useState<TrendMetric>("cashResult");
 
   return (
     // One TooltipProvider for every TermTooltip of the painel.
@@ -88,14 +90,14 @@ function DashboardBody({
           exemptHouse={dashboard.exemptHouse}
           betleadsNote={sendsBetleadsNote(dashboard.range.from, dashboard.betleadsSince)}
         />
-        <Section
-          title={multi ? "Últimos 12 meses (lucro líquido empilhado por casa)" : "Últimos 12 meses"}
-        >
+        <Section title={trendChartTitle(multi, trendMetric)}>
           <ProfitTrendChart
             months={dashboard.months}
             tenants={tenants}
             stacked={multi}
             betleadsSince={dashboard.betleadsSince}
+            metric={trendMetric}
+            onMetricChange={setTrendMetric}
           />
         </Section>
         {multi && (

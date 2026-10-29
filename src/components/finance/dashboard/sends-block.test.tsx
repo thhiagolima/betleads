@@ -176,9 +176,7 @@ describe("SendsBlock with a partial Envios", () => {
 
 describe("SendCostAmount", () => {
   it("R$ X alone, R$ X + the missing-cost text, or only the text at R$ 0", () => {
-    expect(renderToStaticMarkup(<SendCostAmount amount={7} incomplete={false} />)).toBe(
-      "R$ 7,00",
-    );
+    expect(renderToStaticMarkup(<SendCostAmount amount={7} incomplete={false} />)).toBe("R$ 7,00");
     const partial = renderToStaticMarkup(<SendCostAmount amount={7} incomplete />);
     expect(partial).toContain("R$ 7,00");
     expect(partial).toContain("+ custo do provedor não cadastrado");

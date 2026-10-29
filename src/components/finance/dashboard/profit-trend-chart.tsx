@@ -46,6 +46,16 @@ const METRICS: { key: TrendMetric; label: string }[] = [
   { key: "depositAmount", label: "Depósitos" },
 ];
 
+/**
+ * The chart card's title: "(lucro líquido empilhado por casa)" only while the
+ * bars are the profit stacked by house (group/all scope, Lucro líquido).
+ */
+export function trendChartTitle(stacked: boolean, metric: TrendMetric): string {
+  return stacked && metric === "cashResult"
+    ? "Últimos 12 meses (lucro líquido empilhado por casa)"
+    : "Últimos 12 meses";
+}
+
 /** The month's value for the picked metric. */
 export function trendValue(point: MonthPoint, metric: TrendMetric): number {
   return point[metric];
@@ -98,6 +108,8 @@ export function ProfitTrendChart({
   tenants,
   stacked,
   betleadsSince,
+  metric: controlledMetric,
+  onMetricChange,
 }: {
   months: MonthPoint[];
   /** Houses of the scope, sorted by name (dashboard.tenants). */
@@ -105,8 +117,16 @@ export function ProfitTrendChart({
   /** Group/all scope: bars stacked by house. */
   stacked: boolean;
   betleadsSince: string | null;
+  /** Controlled metric (the caller's title follows it); uncontrolled when omitted. */
+  metric?: TrendMetric;
+  onMetricChange?: (metric: TrendMetric) => void;
 }) {
-  const [metric, setMetric] = useState<TrendMetric>("cashResult");
+  const [ownMetric, setOwnMetric] = useState<TrendMetric>("cashResult");
+  const metric = controlledMetric ?? ownMetric;
+  const setMetric = (next: TrendMetric) => {
+    setOwnMetric(next);
+    onMetricChange?.(next);
+  };
 
   if (!months.length) {
     return (

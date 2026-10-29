@@ -38,10 +38,10 @@ const rows: TenantProfitRow[] = [
 ];
 
 describe("TenantProfitTable", () => {
-  it("renders Casa, Lucro, Margem, ROI, Anúncios, Envios and Δ lucro, n.a. for nulls", () => {
+  it("renders Casa, Lucro líquido, Margem, ROI, Anúncios, Envios and Δ lucro, n.a. for nulls", () => {
     const html = renderToStaticMarkup(<TenantProfitTable rows={rows} />);
 
-    const headers = ["Casa", "Lucro", "Margem", "ROI", "Anúncios", "Envios", "Δ lucro"];
+    const headers = ["Casa", "Lucro líquido", "Margem", "ROI", "Anúncios", "Envios", "Δ lucro"];
     const positions = headers.map((header) => html.indexOf(`>${header}</button>`));
     expect(positions.every((position) => position > -1)).toBe(true);
     expect([...positions].sort((a, b) => a - b)).toEqual(positions);

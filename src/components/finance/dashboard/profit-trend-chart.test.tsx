@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { betleadsMissingNote } from "@/components/finance/format";
 import type { MonthPoint } from "@/lib/finance/types";
 
-import { ProfitTrendChart, trendValue } from "./profit-trend-chart";
+import { ProfitTrendChart, trendChartTitle, trendValue } from "./profit-trend-chart";
 
 const point = (month: string, betleadsMissing: boolean): MonthPoint => ({
   month,
@@ -58,5 +58,30 @@ describe("ProfitTrendChart metric toggle", () => {
     expect(trendValue(p, "cashResult")).toBe(100);
     expect(trendValue(p, "net")).toBe(200);
     expect(trendValue(p, "depositAmount")).toBe(300);
+  });
+});
+
+describe("12-month chart title follows the metric toggle", () => {
+  it("only says the profit is stacked by house while Lucro líquido is shown", () => {
+    expect(trendChartTitle(true, "cashResult")).toBe(
+      "Últimos 12 meses (lucro líquido empilhado por casa)",
+    );
+    expect(trendChartTitle(true, "net")).toBe("Últimos 12 meses");
+    expect(trendChartTitle(true, "depositAmount")).toBe("Últimos 12 meses");
+    expect(trendChartTitle(false, "cashResult")).toBe("Últimos 12 meses");
+  });
+
+  it("a controlled metric is the pressed one", () => {
+    const html = renderToStaticMarkup(
+      <ProfitTrendChart
+        months={[point("2026-10", false)]}
+        tenants={[]}
+        stacked
+        betleadsSince={null}
+        metric="net"
+        onMetricChange={() => {}}
+      />,
+    );
+    expect(html).toMatch(/aria-pressed="true"[^>]*>Net<\/button>/);
   });
 });

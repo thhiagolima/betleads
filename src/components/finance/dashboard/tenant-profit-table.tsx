@@ -1,10 +1,11 @@
 // "Lucro por casa" (spec §6, §3.2.5): one row per house of a group or of
-// "Todas as casas", with Lucro, Margem, ROI, Anúncios, Envios and the profit
+// "Todas as casas", with Lucro líquido, Margem, ROI, Anúncios, Envios and the profit
 // variation. Sortable by
 // header (desc first, asc on the second click, nulls always last); a row
 // click opens the house's painel.
 import { useMemo, useState } from "react";
 
+import { FINANCE_TERMS } from "@/components/finance/definitions";
 import { formatBRL, formatPct, formatRatio } from "@/components/finance/format";
 import { pctChange } from "@/lib/finance/calc";
 import type { PeriodSummary } from "@/lib/finance/types";
@@ -26,7 +27,7 @@ export type TenantProfitColumn =
 
 const COLUMNS: { key: TenantProfitColumn; label: string }[] = [
   { key: "nome", label: "Casa" },
-  { key: "cashResult", label: "Lucro" },
+  { key: "cashResult", label: FINANCE_TERMS.cashResult.label },
   { key: "margin", label: "Margem" },
   { key: "roi", label: "ROI" },
   { key: "adSpend", label: "Anúncios" },
