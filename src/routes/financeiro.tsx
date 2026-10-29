@@ -1,9 +1,9 @@
 // House "Financeiro" page (spec §4, §5, §9): Painel (default) with the
-// result dashboard, Lançamentos (month grid with CRM columns and manual
-// Anúncios/GGR), other costs of the month and rates/viewer settings. Visible
+// result dashboard, Lançamentos (list of days; a day opens its modal with CRM
+// numbers and the manual Anúncios/GGR), other costs and rates/viewer settings. Visible
 // to anyone with `can_view_finance` (admin, group manager, super admin, or
 // a gestor the admin released) — the server double-checks on every call.
-// The open tab, and the month/day "Lançar agora" lands on, live in the URL.
+// The open tab, and the month and open day (`dia`), live in the URL.
 import { createFileRoute } from "@tanstack/react-router";
 import { Wallet } from "lucide-react";
 
@@ -78,6 +78,16 @@ function FinanceiroPage() {
             tenantId={active.id}
             initialMonth={search.month}
             focusDate={search.dia}
+            onDayChange={(dia) =>
+              void navigate({
+                search: (prev) => ({
+                  ...prev,
+                  month: dia ? dia.slice(0, 7) : prev.month,
+                  dia: dia ?? undefined,
+                }),
+                replace: true,
+              })
+            }
           />
         </TabsContent>
 

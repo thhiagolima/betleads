@@ -12,7 +12,7 @@ import { Check, ChevronsUpDown, Info, Pencil, Plus, Repeat, Trash2, X } from "lu
 import { toast } from "sonner";
 
 import { formatBRL } from "@/components/finance/format";
-import { currentMonth } from "@/components/finance/finance-month-grid";
+import { currentMonth } from "@/components/finance/day-entry";
 import { financeMonthQueryKey, invalidateFinanceAfterSave } from "@/components/finance/query-keys";
 import { deleteOtherCost, getTenantFinanceMonth, saveOtherCost } from "@/lib/finance.functions";
 import { presetRange } from "@/lib/finance/calc";
@@ -247,7 +247,7 @@ export function CategoryCommand({
   );
 }
 
-function CategoryCombobox({
+export function CategoryCombobox({
   categories,
   value,
   onChange,

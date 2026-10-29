@@ -1,6 +1,6 @@
 // URL search of the Financeiro pages (/financeiro and /grupo/casa): which tab
-// is open and, for "Lançar agora", the month and day the Lançamentos grid
-// opens on (spec §4, §5.2).
+// is open, the month Lançamentos shows and the day whose modal is open
+// ("Lançar agora" lands there; spec §4, §5.2 and the 10-29 audit §3.4).
 
 export const FINANCE_TABS = ["painel", "lancamentos", "outros-custos", "configuracoes"] as const;
 export type FinanceTab = (typeof FINANCE_TABS)[number];

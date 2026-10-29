@@ -88,6 +88,16 @@ function GrupoCasaPage() {
             readOnly
             initialMonth={search.month}
             focusDate={search.dia}
+            onDayChange={(dia) =>
+              void navigate({
+                search: (prev) => ({
+                  ...prev,
+                  month: dia ? dia.slice(0, 7) : prev.month,
+                  dia: dia ?? undefined,
+                }),
+                replace: true,
+              })
+            }
           />
         </TabsContent>
       </Tabs>

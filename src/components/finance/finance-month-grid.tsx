@@ -1,88 +1,52 @@
-// Month grid of the house's financial close (spec §5): one row per day, CRM
-// columns always filled, Anúncios/GGR manual (batch-edited and saved with a
-// single saveFinanceDays call). A missing manual field shows "pendente" in its
-// cell, while the computed columns always show their numbers (computeDay
-// counts a missing Anúncios or GGR as 0). A month with a "GGR do mês" total
-// (finance-monthly-ggr.tsx) shows the allocated daily GGR read-only. Reused
-// read-only by Task 7 (/grupo/casa) with `readOnly`.
-import { useEffect, useRef, useState } from "react";
+// Lançamentos of the house's financial close (spec §5;
+// docs/ESCOPO_AUDITORIA_FINANCEIRO_2026-10-29.md §3.4): the "GGR do mês"
+// block, the list of days (day-list.tsx) whose rows open the day modal
+// (day-modal.tsx, where Anúncios, GGR and the day's other costs are typed and
+// saved one day at a time), the "Usar gasto da Meta nos dias vazios" shortcut
+// and the month summary. `dia` in the URL opens the modal on that day.
+// Reused read-only by /grupo/casa with `readOnly`; the demo house is
+// read-only too.
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
-import {
-  betleadsUsageNote,
-  formatBRL,
-  formatRatio,
-  GGR_COLUMN_LABEL,
-} from "@/components/finance/format";
+import { betleadsUsageNote, formatBRL } from "@/components/finance/format";
 import { FINANCE_TERMS } from "@/components/finance/definitions";
+import { currentMonth, metaFillEntries, todaySaoPaulo } from "@/components/finance/day-entry";
+import { DayList } from "@/components/finance/day-list";
+import { DayModal } from "@/components/finance/day-modal";
 import {
   defaultValidThrough,
-  MONTHLY_GGR_COLUMN_NOTE,
   MonthlyGgrFields,
   parseGgrInput,
   type MonthlyGgrFormValue,
 } from "@/components/finance/finance-monthly-ggr";
 import { financeMonthQueryKey, invalidateFinanceAfterSave } from "@/components/finance/query-keys";
-import { num } from "@/lib/format";
-import { averageFilledAdSpend, presetRange } from "@/lib/finance/calc";
-import type { FinanceDay } from "@/lib/finance/types";
 import { getTenantFinanceMonth, saveFinanceDays, setMonthlyGgr } from "@/lib/finance.functions";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableFooter,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 
-/** "YYYY-MM" of the current month in São Paulo, the same day boundary as the server. */
-export function currentMonth() {
-  return presetRange("today", new Date()).from.slice(0, 7);
-}
-
-type Edits = Record<string, { adSpend?: string; ggr?: string }>;
-type EditableField = "adSpend" | "ggr";
-
-function parseMoney(value: string): number | null {
-  if (value.trim() === "") return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-/** "YYYY-MM-DD" of today in São Paulo, the same day boundary as the server. */
-function todaySaoPaulo() {
-  return presetRange("today", new Date()).from;
-}
-
-/** Background of the typed columns (Anúncios, GGR), apart from the CRM ones (spec §9). */
-const MANUAL_CELL = "bg-primary/5";
-
-function PendingCell() {
-  return <span className="text-xs italic text-muted-foreground">pendente</span>;
-}
+export { currentMonth };
 
 export function FinanceMonthView({
   tenantId,
   readOnly = false,
   initialMonth,
   focusDate,
+  onDayChange,
 }: {
   tenantId: string;
   readOnly?: boolean;
   /** "YYYY-MM" to open on (default: the current month). */
   initialMonth?: string;
-  /** "YYYY-MM-DD" whose row is scrolled into view and ringed ("Lançar agora"). */
+  /** "YYYY-MM-DD" whose day modal opens ("Lançar agora", `dia` in the URL). */
   focusDate?: string;
+  /** The open day changed (null = modal closed), so the caller can keep `dia` in the URL. */
+  onDayChange?: (date: string | null) => void;
 }) {
   const isDemo = useIsDemoTenant();
   const qc = useQueryClient();
@@ -91,7 +55,7 @@ export function FinanceMonthView({
   const setMonthlyGgrFn = useServerFn(setMonthlyGgr);
 
   const [month, setMonth] = useState(() => initialMonth ?? currentMonth());
-  const [edits, setEdits] = useState<Edits>({});
+  const [openDate, setOpenDate] = useState<string | null>(focusDate ?? null);
 
   // A new initialMonth from the caller (the URL) replaces the picked month.
   const [seenInitialMonth, setSeenInitialMonth] = useState(initialMonth);
@@ -99,16 +63,22 @@ export function FinanceMonthView({
     setSeenInitialMonth(initialMonth);
     if (initialMonth) setMonth(initialMonth);
   }
+  // A new `dia` from the caller opens (or, cleared, closes) the day modal.
+  const [seenFocusDate, setSeenFocusDate] = useState(focusDate);
+  if (focusDate !== seenFocusDate) {
+    setSeenFocusDate(focusDate);
+    setOpenDate(focusDate ?? null);
+  }
+
+  const openDay = (date: string | null) => {
+    setOpenDate(date);
+    onDayChange?.(date);
+  };
 
   const query = useQuery({
     queryKey: financeMonthQueryKey(tenantId, month),
     queryFn: () => getMonth({ data: { tenantId, month } }),
   });
-
-  // A new month starts clean: don't carry edits from the previous one across.
-  useEffect(() => {
-    setEdits({});
-  }, [tenantId, month]);
 
   const data = query.data;
 
@@ -127,46 +97,18 @@ export function FinanceMonthView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [savedGgrKey]);
 
-  // Scroll the focused day into view once its row is rendered (once per date).
-  const focusRowRef = useRef<HTMLTableRowElement | null>(null);
-  const scrolledFor = useRef<string | null>(null);
-  useEffect(() => {
-    if (!focusDate || scrolledFor.current === focusDate || !focusRowRef.current) return;
-    scrolledFor.current = focusDate;
-    focusRowRef.current.scrollIntoView({ block: "center", behavior: "smooth" });
-  }, [focusDate, data]);
-
   const canEditValues = !readOnly && data?.permissions.canEditValues === true;
-  const hasEdits = Object.keys(edits).length > 0;
+  const metaEntries = data ? metaFillEntries(data.days) : [];
 
-  const setEdit = (date: string, field: EditableField, value: string) =>
-    setEdits((prev) => ({ ...prev, [date]: { ...prev[date], [field]: value } }));
-
-  const effectiveAdSpend = (day: FinanceDay) =>
-    edits[day.date]?.adSpend ?? (day.adSpend === null ? "" : String(day.adSpend));
-  const effectiveGgr = (day: FinanceDay) =>
-    edits[day.date]?.ggr ?? (day.ggr === null ? "" : String(day.ggr));
-
-  const applyMetaSuggestion = (day: FinanceDay) => {
-    if (day.adSpendSuggested === null) return;
-    setEdit(day.date, "adSpend", String(day.adSpendSuggested));
-  };
-
-  const save = useMutation({
-    mutationFn: () => {
-      const entries = Object.entries(edits)
-        .map(([date, fields]) => {
-          const entry: { date: string; adSpend?: number | null; ggr?: number | null } = { date };
-          if (fields.adSpend !== undefined) entry.adSpend = parseMoney(fields.adSpend);
-          if (fields.ggr !== undefined) entry.ggr = parseMoney(fields.ggr);
-          return entry;
-        })
-        .filter((entry) => entry.adSpend !== undefined || entry.ggr !== undefined);
-      return saveDaysFn({ data: { tenantId, entries } });
-    },
+  // "Usar gasto da Meta nos dias vazios": every empty day with a suggestion, one save.
+  const fillFromMeta = useMutation({
+    mutationFn: () => saveDaysFn({ data: { tenantId, entries: metaEntries } }),
     onSuccess: () => {
-      toast.success("Alterações salvas");
-      setEdits({});
+      toast.success(
+        metaEntries.length === 1
+          ? "Gasto da Meta lançado em 1 dia"
+          : `Gasto da Meta lançado em ${metaEntries.length} dias`,
+      );
       void invalidateFinanceAfterSave(qc, tenantId, month);
     },
     onError: (error: Error) => toast.error(error.message),
@@ -205,9 +147,6 @@ export function FinanceMonthView({
 
   const { days, summary } = data;
   const betleadsNote = betleadsUsageNote(month, data.betleadsSince);
-  // With a month total the daily GGR is the allocated estimate, read-only.
-  const usingMonthlyGgr = data.monthlyGgr !== null;
-  const canEditDailyGgr = canEditValues && !usingMonthlyGgr;
 
   return (
     <div className="space-y-4">
@@ -216,7 +155,10 @@ export function FinanceMonthView({
           <Input
             type="month"
             value={month}
-            onChange={(e) => setMonth(e.target.value)}
+            onChange={(e) => {
+              setMonth(e.target.value);
+              if (openDate) openDay(null);
+            }}
             className="w-44"
           />
           {summary.pendingDays > 0 && (
@@ -225,10 +167,16 @@ export function FinanceMonthView({
             </span>
           )}
         </div>
-        {canEditValues && (
+        {canEditValues && metaEntries.length > 0 && (
           <DemoDisabledTooltip active={isDemo}>
-            <Button disabled={isDemo || !hasEdits || save.isPending} onClick={() => save.mutate()}>
-              {save.isPending ? "Salvando…" : "Salvar alterações"}
+            <Button
+              variant="outline"
+              className="gap-2"
+              disabled={isDemo || fillFromMeta.isPending}
+              onClick={() => fillFromMeta.mutate()}
+            >
+              <Sparkles className="h-4 w-4" />
+              Usar gasto da Meta nos dias vazios
             </Button>
           </DemoDisabledTooltip>
         )}
@@ -248,155 +196,23 @@ export function FinanceMonthView({
         />
       )}
 
-      <div className="overflow-x-auto rounded-lg border border-border/40">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Data</TableHead>
-              <TableHead className={MANUAL_CELL}>Anúncios</TableHead>
-              <TableHead>Cadastros</TableHead>
-              <TableHead>Custo/cadastro</TableHead>
-              <TableHead>FTDs</TableHead>
-              <TableHead>Custo/FTD</TableHead>
-              <TableHead>Depósitos FTD</TableHead>
-              <TableHead>Depósitos totais</TableHead>
-              <TableHead>Saques</TableHead>
-              <TableHead>{FINANCE_TERMS.net.label}</TableHead>
-              <TableHead className={MANUAL_CELL}>
-                {GGR_COLUMN_LABEL}
-                {usingMonthlyGgr && (
-                  <span className="block text-[10px] font-normal italic text-muted-foreground">
-                    {MONTHLY_GGR_COLUMN_NOTE}
-                  </span>
-                )}
-              </TableHead>
-              <TableHead>{FINANCE_TERMS.cashResult.label}</TableHead>
-              <TableHead>ROI caixa</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {days.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={13} className="py-8 text-center text-sm text-muted-foreground">
-                  Nenhum dia neste mês ainda.
-                </TableCell>
-              </TableRow>
-            )}
-            {days.map((day) => (
-              <TableRow
-                key={day.date}
-                ref={day.date === focusDate ? focusRowRef : undefined}
-                data-date={day.date}
-                // Cell backgrounds (MANUAL_CELL) hide a row ring, so the
-                // focused row also tints every cell.
-                className={cn(
-                  day.date === focusDate && "ring-2 ring-inset ring-primary [&>td]:bg-primary/10",
-                )}
-              >
-                <TableCell>{day.date.slice(8, 10)}</TableCell>
-                <TableCell className={MANUAL_CELL}>
-                  {canEditValues ? (
-                    <div className="flex items-center gap-1">
-                      <Input
-                        type="number"
-                        step="0.01"
-                        inputMode="decimal"
-                        value={effectiveAdSpend(day)}
-                        placeholder={
-                          day.adSpend === null && day.adSpendSuggested !== null
-                            ? String(day.adSpendSuggested)
-                            : undefined
-                        }
-                        onChange={(e) => setEdit(day.date, "adSpend", e.target.value)}
-                        disabled={isDemo}
-                        className="h-8 w-28"
-                      />
-                      {day.adSpend === null &&
-                        day.adSpendSuggested !== null &&
-                        effectiveAdSpend(day) === "" && (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8"
-                            title="Usar valor da Meta"
-                            disabled={isDemo}
-                            onClick={() => applyMetaSuggestion(day)}
-                          >
-                            <Sparkles className="h-3.5 w-3.5" />
-                          </Button>
-                        )}
-                    </div>
-                  ) : day.adSpend === null ? (
-                    <PendingCell />
-                  ) : (
-                    formatBRL(day.adSpend)
-                  )}
-                </TableCell>
-                <TableCell>{num(day.registrations)}</TableCell>
-                <TableCell>
-                  {day.adSpend === null ? <PendingCell /> : formatBRL(day.costPerRegistration)}
-                </TableCell>
-                <TableCell>{num(day.ftds)}</TableCell>
-                <TableCell>
-                  {day.adSpend === null ? <PendingCell /> : formatBRL(day.costPerFtd)}
-                </TableCell>
-                <TableCell>{formatBRL(day.ftdDepositAmount)}</TableCell>
-                <TableCell>{formatBRL(day.depositAmount)}</TableCell>
-                <TableCell>{formatBRL(day.withdrawalAmount)}</TableCell>
-                <TableCell>{formatBRL(day.net)}</TableCell>
-                <TableCell className={MANUAL_CELL}>
-                  {canEditDailyGgr ? (
-                    <Input
-                      type="number"
-                      step="0.01"
-                      inputMode="decimal"
-                      value={effectiveGgr(day)}
-                      onChange={(e) => setEdit(day.date, "ggr", e.target.value)}
-                      disabled={isDemo}
-                      className="h-8 w-28"
-                    />
-                  ) : day.ggr === null ? (
-                    <PendingCell />
-                  ) : day.ggrEstimated ? (
-                    <span className="italic" title="Estimado a partir do total do mês">
-                      {formatBRL(day.ggr)}
-                    </span>
-                  ) : (
-                    formatBRL(day.ggr)
-                  )}
-                </TableCell>
-                <TableCell>{formatBRL(day.cashResult)}</TableCell>
-                <TableCell>{formatRatio(day.roi)}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-          <TableFooter>
-            <TableRow>
-              <TableCell className="font-semibold">TOTAL</TableCell>
-              <TableCell className={MANUAL_CELL}>{formatBRL(summary.adSpend)}</TableCell>
-              <TableCell>{num(summary.registrations)}</TableCell>
-              <TableCell>{formatBRL(summary.costPerRegistration)}</TableCell>
-              <TableCell>{num(summary.ftds)}</TableCell>
-              <TableCell>{formatBRL(summary.costPerFtd)}</TableCell>
-              <TableCell>{formatBRL(summary.ftdDepositAmount)}</TableCell>
-              <TableCell>{formatBRL(summary.depositAmount)}</TableCell>
-              <TableCell>{formatBRL(summary.withdrawalAmount)}</TableCell>
-              <TableCell>{formatBRL(summary.net)}</TableCell>
-              <TableCell className={MANUAL_CELL}>{formatBRL(summary.ggr)}</TableCell>
-              <TableCell>{formatBRL(summary.cashResult)}</TableCell>
-              <TableCell>{formatRatio(summary.roi)}</TableCell>
-            </TableRow>
-            <TableRow>
-              <TableCell className="text-muted-foreground">MÉDIA DIÁRIA</TableCell>
-              <TableCell className={MANUAL_CELL}>{formatBRL(averageFilledAdSpend(days))}</TableCell>
-              <TableCell colSpan={9} />
-              <TableCell>{formatBRL(summary.avgDailyCashResult)}</TableCell>
-              <TableCell />
-            </TableRow>
-          </TableFooter>
-        </Table>
-      </div>
+      <DayList
+        days={days}
+        sendsByDay={data.sendsByDay}
+        otherCosts={data.otherCosts}
+        onOpen={openDay}
+        focusDate={focusDate}
+      />
+
+      <DayModal
+        tenantId={tenantId}
+        month={month}
+        date={openDate}
+        data={data}
+        // The demo house is read-only here: values without inputs.
+        readOnly={!canEditValues || isDemo}
+        onDateChange={openDay}
+      />
 
       <div className="grid gap-2 rounded-lg border border-border/40 bg-background/30 p-4 text-sm sm:grid-cols-2 lg:grid-cols-5">
         <div>
