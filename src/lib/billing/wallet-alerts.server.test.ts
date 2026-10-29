@@ -89,6 +89,8 @@ beforeEach(() => {
   callInfobipEmail.mockResolvedValue({ ok: true, status: 200, idempotencyKey: "k" });
   seedUsers();
   resetNoBalanceAlertMemo();
+  // P0.5: no house is short on runway unless a test says so.
+  fake.admin.onRpc("billing_runway_alert_candidates", () => ({ data: [], error: null }));
 });
 
 afterEach(() => {
@@ -222,6 +224,109 @@ describe("sendLowBalanceAlerts", () => {
       error: { message: "timeout" },
     }));
     await expect(sendLowBalanceAlerts({ now: INSIDE_WINDOW })).rejects.toThrow("timeout");
+  });
+});
+
+describe("runway alert (P0.5: balance that lasts less than 24 h at the current pace)", () => {
+  function runwayRpc(
+    rows: Array<{
+      tenant_id: string;
+      tenant_name: string;
+      balance: number;
+      spend_24h: number;
+      runway_hours: number;
+    }>,
+  ) {
+    const rpc = vi.fn(() => ({ data: rows, error: null }));
+    fake.admin.onRpc("billing_runway_alert_candidates", rpc);
+    return rpc;
+  }
+
+  it("warns a house above its threshold that runs out within 24 h, and skips its threshold e-mail", async () => {
+    // betgreen on 29/10: R$ 552 of balance, R$ 1.090 spent in 24 h.
+    const rpc = runwayRpc([
+      {
+        tenant_id: HOUSE_A,
+        tenant_name: "Casa A",
+        balance: 552,
+        spend_24h: 1090.32,
+        runway_hours: 12.2,
+      },
+    ]);
+    candidatesRpc([
+      { tenant_id: HOUSE_A, tenant_name: "Casa A", balance: 552, low_balance_threshold: 1000 },
+    ]);
+    const claim = vi.fn(() => ({ data: true, error: null }));
+    fake.admin.onRpc("billing_claim_wallet_alert", claim);
+
+    await expect(sendLowBalanceAlerts({ now: INSIDE_WINDOW })).resolves.toBe(1);
+
+    expect(rpc).toHaveBeenCalledWith({ _after: null, _limit: 500, _hours: 24 });
+    expect(claim).toHaveBeenCalledTimes(1);
+    expect(claim).toHaveBeenCalledWith({
+      _tenant: HOUSE_A,
+      _kind: "low_runway",
+      _interval: "24 hours",
+    });
+    const sent = callInfobipEmail.mock.calls[0][0];
+    expect(sent.subject).toBe("Seu saldo na BetLeads dura cerca de 12 horas");
+    expect(sent.html).toContain("R$ 1.090,32");
+    expect(sent.html).toContain("R$ 552,00");
+    expect(sent.html).toContain("as jornadas ficam pausadas");
+    expect(sent.idempotencyKey).toMatch(/^wallet-alert:low_runway:/);
+    expect(callInfobipEmail.mock.calls.map((call) => call[0].to).sort()).toEqual([
+      "admin@casa-a.com",
+      "gestor@casa-a.com",
+    ]);
+  });
+
+  it("under 6 h the alert is urgent and may repeat every 6 h", async () => {
+    runwayRpc([
+      { tenant_id: HOUSE_B, tenant_name: "Casa B", balance: 50, spend_24h: 480, runway_hours: 2.5 },
+    ]);
+    candidatesRpc([]);
+    const claim = vi.fn(() => ({ data: true, error: null }));
+    fake.admin.onRpc("billing_claim_wallet_alert", claim);
+
+    await expect(sendLowBalanceAlerts({ now: INSIDE_WINDOW })).resolves.toBe(1);
+    expect(claim).toHaveBeenCalledWith({
+      _tenant: HOUSE_B,
+      _kind: "low_runway_urgent",
+      _interval: "6 hours",
+    });
+    expect(callInfobipEmail.mock.calls[0][0].subject).toBe(
+      "Seu saldo na BetLeads dura cerca de 3 horas",
+    );
+  });
+
+  it("a house already warned within the interval still skips the threshold e-mail", async () => {
+    runwayRpc([
+      { tenant_id: HOUSE_A, tenant_name: "Casa A", balance: 100, spend_24h: 400, runway_hours: 6 },
+    ]);
+    candidatesRpc([
+      { tenant_id: HOUSE_A, tenant_name: "Casa A", balance: 100, low_balance_threshold: 200 },
+    ]);
+    const claim = vi.fn(() => ({ data: false, error: null }));
+    fake.admin.onRpc("billing_claim_wallet_alert", claim);
+
+    await expect(sendLowBalanceAlerts({ now: INSIDE_WINDOW })).resolves.toBe(0);
+    expect(claim).toHaveBeenCalledTimes(1);
+    expect(callInfobipEmail).not.toHaveBeenCalled();
+  });
+
+  it("a runway query failure never blocks the threshold alert", async () => {
+    fake.admin.onRpc("billing_runway_alert_candidates", () => ({
+      data: null,
+      error: { message: "function does not exist" },
+    }));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    candidatesRpc([
+      { tenant_id: HOUSE_B, tenant_name: "Casa B", balance: 5, low_balance_threshold: 200 },
+    ]);
+    fake.admin.onRpc("billing_claim_wallet_alert", () => ({ data: true, error: null }));
+
+    await expect(sendLowBalanceAlerts({ now: INSIDE_WINDOW })).resolves.toBe(1);
+    expect(callInfobipEmail.mock.calls[0][0].subject).toBe("Saldo baixo na BetLeads: R$ 5,00");
   });
 });
 

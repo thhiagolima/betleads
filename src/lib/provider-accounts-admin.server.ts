@@ -45,7 +45,7 @@ const CREDENTIAL_KEYS = {
 /** Non-secret config fields per provider. */
 const CONFIG_KEYS = {
   short_brasil: ["shortcode_url", "single_url", "bulk_url"],
-  infobip: ["base_url", "voice_from"],
+  infobip: ["base_url", "voice_from", "sms_from"],
 } as const;
 
 type AccountRow = {
@@ -230,13 +230,7 @@ export async function adminSaveProviderAccountFor(
   const supported = SUPPORTED_CHANNELS[data.provider];
   const channels = [...new Set(data.channels)];
   const unsupported = channels.filter((c) => !supported.includes(c));
-  if (unsupported.length) {
-    throw new Error(
-      data.provider === "infobip" && unsupported.includes("sms")
-        ? "SMS pela Infobip ainda não é suportado."
-        : "A Short Brasil só atende SMS.",
-    );
-  }
+  if (unsupported.length) throw new Error("A Short Brasil só atende SMS.");
 
   const config: Record<string, string> = {};
   for (const key of CONFIG_KEYS[data.provider]) {

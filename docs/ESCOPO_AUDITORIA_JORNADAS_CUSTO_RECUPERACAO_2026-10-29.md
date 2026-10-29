@@ -227,6 +227,17 @@ Critério de ordem:
   - O editor mostra o campo com o padrão já preenchido.
 - **Aceite:** um jogador cadastrado há 30 dias sem FTD não entra em "Cadastrou e não
   depositou" com o padrão.
+- **Status: implementado no branch `fix/journeys-p0-event-age`** (falta deploy):
+  - `eventMaxAgeHours` e `eventYoungEnough` (`journey-policy.ts`), com padrões de 168h para
+    cadastro, 72h para primeiro depósito e 24h para saque. `trigger_config.max_event_age_hours`
+    sobrescreve o padrão, e `0` desliga o limite. PIX continua com o seu `expire_hours`.
+  - Aplicado no scanner (`matchJourneyScanPlayer` e `financialOccurrences`), que atende os
+    três caminhos de entrada: scanner completo, webhook e cruzamento.
+  - **Só vale para a entrada.** A verificação antes de cada etapa (`matchFinancialTrigger`)
+    não mudou, então quem já está na jornada não é cortado quando o evento envelhece.
+  - Editor: o campo "Só entra quem… nas últimas (horas)" aparece para os três gatilhos.
+  - **Não mexe nas matrículas já abertas** (por exemplo, a base importada da betgreen). Elas
+    terminam pelo limite de repetições do P0.2b.
 
 #### P0.4 Carga do histórico só com confirmação explícita
 - **Hoje:** uma jornada de evento sem `start_after` matricula todo o histórico, e o
@@ -247,6 +258,25 @@ Critério de ordem:
   tela da casa.
 - **Aceite:** a betgreen com R$ 742 e gasto de R$ 960 por dia recebe o alerta de menos de
   24h.
+- **Caso real (29/10, 16h):** a betgreen tinha R$ 552 de saldo e R$ 1.090 de gasto em 24h,
+  cerca de 12 horas de autonomia, e nenhum alerta, porque o saldo estava acima de R$ 200.
+- **Status: implementado no branch `fix/wallet-runway-alert`** (falta aplicar a migração e
+  fazer o deploy):
+  - Migração `20261115100000_billing_runway_alert_candidates.sql`, **só aditiva**: a função
+    `billing_runway_alert_candidates(_after, _limit, _hours)` calcula o gasto líquido em 24h
+    (reservas menos estornos do `wallet_ledger`) e a autonomia, com os mesmos filtros do
+    alerta de limite.
+  - `sendLowBalanceAlerts` roda primeiro a varredura por autonomia:
+    - abaixo de 24h, e-mail `low_runway` "Seu saldo na BetLeads dura cerca de N horas", uma
+      vez a cada 24h;
+    - abaixo de 6h, `low_runway_urgent`, a cada 6h.
+    A casa coberta por essa varredura não recebe também o e-mail de limite. Se a varredura
+    falhar (por exemplo, função ainda não criada), o alerta de limite continua normal.
+  - Corrigido o texto do e-mail de "Saldo insuficiente", que ainda dizia que as jornadas
+    "pulam" envios.
+  - **Ainda não feito:** o aviso de autonomia na tela da casa (`walletBalanceNotice`), que
+    precisaria do gasto em 24h no `wallet_summary`. O e-mail continua restrito à janela de
+    08h às 20h, como os demais alertas de billing.
 
 ### P1 — Controle de leads e de custo para a casa
 

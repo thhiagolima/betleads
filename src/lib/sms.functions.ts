@@ -76,8 +76,10 @@ import {
   ProviderAccountUnavailableError,
   resolveSmsAccount,
   type ShortBrasilAccount,
+  type SmsAccount,
 } from "./provider-accounts.server";
 import { smsBreakerKeyForTenant } from "./sms-account-gates.server";
+import { postInfobipSms } from "./infobip-sms.server";
 
 // Mantém a tentativa abaixo do timeout de uma server function. Sem isso, uma
 // conexão TCP bloqueada pelo provedor pode deixar o envio preso indefinidamente.
@@ -142,7 +144,7 @@ function campaignUnresolvedSummary(resolution: RecipientResolution) {
  */
 async function smsAccountFor(
   tenantId: string | null,
-): Promise<{ account: ShortBrasilAccount } | { account: null; error: string }> {
+): Promise<{ account: SmsAccount } | { account: null; error: string }> {
   try {
     return { account: await resolveSmsAccount(tenantId) };
   } catch (error) {
@@ -234,7 +236,12 @@ function shortcodeResponseFailed(body: unknown): boolean {
   });
 }
 
-async function callShortBrasil(
+/**
+ * Sends one SMS through the house's SMS account: Short Brasil or Infobip
+ * (provider-accounts.server.ts). Guard, account resolution and the shape of
+ * the result are the same for both.
+ */
+async function callSmsProvider(
   tenantId: string | null,
   to: string,
   content: string,
@@ -267,12 +274,17 @@ async function callShortBrasil(
       providerAccountId: null as string | null,
     };
   }
-  return postShortBrasilSingle(
-    resolved.account,
-    to,
-    renderSmsVariables(content, variables),
-    idempotencyKey,
-  );
+  const message = renderSmsVariables(content, variables);
+  if (resolved.account.provider === "infobip") {
+    return {
+      ...(await postInfobipSms(resolved.account, to, message, idempotencyKey)),
+      provider: "infobip" as const,
+    };
+  }
+  return {
+    ...(await postShortBrasilSingle(resolved.account, to, message, idempotencyKey)),
+    provider: "short-brasil" as const,
+  };
 }
 
 /**
@@ -428,6 +440,15 @@ export async function callShortBrasilSmsBulk(args: {
     return { ok: false, status: 0, body: { error: resolved.error }, idempotencyKey: "", dispatchId: null };
   }
   const account = resolved.account;
+  if (account.provider !== "short_brasil") {
+    return {
+      ok: false,
+      status: 0,
+      body: { error: "Envio em lote só existe na Short Brasil" },
+      idempotencyKey: "",
+      dispatchId: null,
+    };
+  }
   const token = account.shortcodeToken;
   const { usuario, chave } = account;
   if (!token && (!usuario || !chave)) {
@@ -552,6 +573,8 @@ async function logSend(row: {
   billed_units?: number | null;
   /** Conta de provedor que fez o envio; null quando nenhuma conta foi usada. */
   provider_account_id?: string | null;
+  /** Default: short-brasil (the platform SMS account). */
+  provider?: "short-brasil" | "infobip";
 }) {
   const { data, error } = await supabaseAdmin
     .from("sms_send_logs")
@@ -559,7 +582,7 @@ async function logSend(row: {
       to_phone: row.to,
       content: row.content,
       status: row.status,
-      provider: "short-brasil",
+      provider: row.provider ?? "short-brasil",
       provider_response: (row.provider_response ?? {}) as Json,
       error: row.error,
       idempotency_key: row.idempotency_key || null,
@@ -938,15 +961,26 @@ export async function sendSmsInternal(args: {
   }
 
   const sendStartedAt = new Date();
-  const r = await callShortBrasil(
+  const r = await callSmsProvider(
     billingTenantId,
     normalized,
     preparedContent,
     undefined,
     deliveryKey,
   );
-  const providerMessageId = r.ok ? extractProviderMessageId(r.body) : null;
-  const errorSummary = r.ok ? null : summarizeProviderError(r.status, r.body);
+  // The Infobip adapter reports its own message id, refusal reason and account
+  // verdict; the Short Brasil fields are read from its body.
+  const viaInfobip = "provider" in r && r.provider === "infobip";
+  const providerMessageId = r.ok
+    ? viaInfobip
+      ? r.providerMessageId
+      : extractProviderMessageId(r.body)
+    : null;
+  const errorSummary = r.ok
+    ? null
+    : viaInfobip
+      ? r.errorSummary
+      : summarizeProviderError(r.status, r.body);
   // A demo block from the transport guard is final: never "pending"/retried.
   const demoBlockedAtTransport = "demoBlocked" in r && r.demoBlocked === true;
   const isTemporary =
@@ -956,7 +990,9 @@ export async function sendSmsInternal(args: {
   // houses on that account without consuming attempts.
   const accountReason =
     !r.ok && r.errorKind === null && r.status > 0
-      ? smsProviderAccountReason(r.status, r.body)
+      ? viaInfobip
+        ? r.accountReason
+        : smsProviderAccountReason(r.status, r.body)
       : null;
   const breakerKey = smsBreakerKey(r.providerAccountId);
   if (accountReason) {
@@ -1003,6 +1039,7 @@ export async function sendSmsInternal(args: {
     tenant_id: billingTenantId ?? args.tenantId ?? null,
     billed_units: creditReserved ? billedUnits : null,
     provider_account_id: r.providerAccountId,
+    provider: viaInfobip ? "infobip" : "short-brasil",
   }).catch((logError: unknown) => {
     if (!r.ok) throw logError;
     captureServerException(logError, {

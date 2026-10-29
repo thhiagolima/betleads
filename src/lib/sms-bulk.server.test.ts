@@ -499,6 +499,57 @@ describe("sendSmsBatch (ENV-10, Short Brasil bulk)", () => {
       expect(logFor(key(2))).toHaveLength(0);
       expect(credits.charged()).toBe(1);
     });
+
+    it("a house on an Infobip account sends each SMS through Infobip, logged as infobip", async () => {
+      settings("block");
+      vi.stubEnv("PROVIDER_CREDENTIALS_ENCRYPTION_KEY", "k".repeat(40));
+      fake.db.rows("provider_accounts").push({
+        id: OWN_ACCOUNT,
+        provider: "infobip",
+        label: "Infobip casa AA",
+        channels: ["sms"],
+        credentials_source: "db",
+        credentials_encrypted: await encryptProviderCredentials({ api_key: "own-infobip-key" }),
+        config: { base_url: "https://own.api.infobip.test", sms_from: "CasaAA" },
+        status: "active",
+      });
+      fake.db
+        .rows("tenant_channel_providers")
+        .push({ tenant_id: OTHER, channel: "sms", provider_account_id: OWN_ACCOUNT });
+      __resetProviderAccountsCacheForTests();
+      const shortBrasil = vi.mocked(fetch).getMockImplementation()!;
+      vi.mocked(fetch).mockImplementation(async (url, init) => {
+        if (!String(url).includes("/sms/2/text/advanced")) return shortBrasil(url, init);
+        const body = JSON.parse(String(init?.body));
+        const messageId = body.messages[0].destinations[0].messageId;
+        return Response.json({
+          bulkId: "b-1",
+          messages: [{ messageId, status: { groupId: 1, groupName: "PENDING" } }],
+        });
+      });
+
+      const other = { tenantId: OTHER, linkTrackingEnabled: false };
+      const r = await sendSmsBatch([item(1), item(2, other)]);
+
+      expect(r.outcomes.map((o) => o.status)).toEqual(["accepted", "accepted"]);
+      const infobipCalls = vi
+        .mocked(fetch)
+        .mock.calls.filter(([url]) => String(url).includes("/sms/2/text/advanced"));
+      expect(infobipCalls).toHaveLength(1);
+      const [url, init] = infobipCalls[0];
+      expect(String(url)).toBe("https://own.api.infobip.test/sms/2/text/advanced");
+      expect((init?.headers as Record<string, string>).Authorization).toBe("App own-infobip-key");
+      expect(JSON.parse(String(init?.body)).messages[0].from).toBe("CasaAA");
+      // The platform house still went through the Short Brasil bulk request.
+      expect(bulkRequests().map((b) => b.parceiroIds)).toEqual([[key(1)]]);
+      expect(logFor(key(2))[0]).toMatchObject({
+        provider: "infobip",
+        provider_account_id: OWN_ACCOUNT,
+        provider_message_id: key(2),
+        status: "sent",
+      });
+      expect(credits.charged()).toBe(2);
+    });
   });
 
   it("missing credentials: nothing logged, charged or sent", async () => {

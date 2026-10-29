@@ -13,13 +13,13 @@ export const PROVIDER_CHANNEL_LABEL: Record<ProviderChannelName, string> = {
 
 export const PROVIDER_LABEL = { short_brasil: "Short Brasil", infobip: "Infobip" } as const;
 
-/** Channels each provider can serve today (Infobip SMS is Fase 4). */
+/** Channels each provider can serve. */
 export const SUPPORTED_CHANNELS: Record<
   "short_brasil" | "infobip",
   readonly ProviderChannelName[]
 > = {
   short_brasil: ["sms"],
-  infobip: ["email", "voice"],
+  infobip: ["sms", "email", "voice"],
 };
 
 const optionalText = z
@@ -41,6 +41,7 @@ export const saveProviderAccountInput = z.object({
       shortcode_url: optionalText,
       single_url: optionalText,
       bulk_url: optionalText,
+      sms_from: optionalText,
     })
     .prefault({}),
   /** Only the fields being set; an empty/absent field keeps the stored value. */

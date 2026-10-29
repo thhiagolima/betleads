@@ -49,6 +49,20 @@ precisar.
   (migration `20261108100000_provider_accounts.sql`). Sem mudança de
   comportamento enquanto nenhuma casa tiver linha em `tenant_channel_providers`.
   O bulk de SMS já agrupa por conta.
+- **Fase 4: implementada** (SMS pela Infobip, sem migration):
+  - Uma conta Infobip pode atender SMS (Admin → Integrações), com remetente
+    opcional (`config.sms_from`: número ou nome aprovado na Infobip).
+  - `src/lib/infobip-sms.server.ts`: `POST /sms/2/text/advanced`, uma mensagem
+    por requisição; nossa chave de entrega vai como `messageId` e
+    `callbackData`. Recusa por falta de crédito ou 401/403 é recusa de conta
+    (abre o breaker daquela conta); número recusado é falha só do lead.
+  - O envio individual (`sendSmsInternal`) escolhe o adaptador pela conta da
+    casa e grava `provider = 'infobip'`. Contas Infobip nunca usam o lote da
+    Short Brasil: campanhas e o bulk vão pelo envio individual.
+  - Relatório de entrega: `/api/public/infobip/sms/events?token=…`
+    (`INFOBIP_SMS_CALLBACK_TOKEN`, senão `INFOBIP_VOICE_CALLBACK_TOKEN`), casa
+    pelo `provider_message_id` e leva entregue/falhou aos links rastreados. A
+    auditoria de callbacks atrasados cobre os dois provedores.
 - **Fase 3: implementada** (Admin → Integrações, abaixo das contas padrão):
   - **Contas de provedor**: criar/editar (credenciais só de escrita, cifradas;
     campo em branco mantém o valor), ativar/desativar (as duas contas padrão
@@ -108,7 +122,7 @@ precisar.
    config da casa, auditoria em `tenant_audit_logs`. Ao trocar a conta de e-mail
    de uma casa, chamar `refreshTenantDomain` dos domínios dela (migra na hora e
    mostra os DNS novos) e avisar que eles voltam a `pending`.
-4. **Infobip SMS.** Novo adapter.
+4. **Infobip SMS.** Novo adapter, callback de entrega e liberação no admin.
 
 ## Riscos conhecidos
 

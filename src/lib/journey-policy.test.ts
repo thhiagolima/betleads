@@ -4,6 +4,8 @@ import {
   audienceMatches,
   activationTriggerConfig,
   defaultEntryScope,
+  eventMaxAgeHours,
+  eventYoungEnough,
   inactivityUpperBoundHours,
   journeyEntryKey,
   nextJourneyWindowOpen,
@@ -110,6 +112,31 @@ describe("pix expiry (D-6)", () => {
     expect(pixExpiryHours({ expire_hours: 24 })).toBe(24);
     expect(pixExpiryHours({ expire_hours: 0 })).toBeNull();
     expect(pixExpiryHours({ expire_hours: "bad" })).toBe(72);
+  });
+});
+
+describe("entry event max age (P0.3)", () => {
+  it("defaults per trigger; other triggers have no limit", () => {
+    expect(eventMaxAgeHours("cadastrados_sem_deposito", {})).toBe(168);
+    expect(eventMaxAgeHours("primeiro_deposito", {})).toBe(72);
+    expect(eventMaxAgeHours("saque_pago", {})).toBe(24);
+    expect(eventMaxAgeHours("inactivity", {})).toBeNull();
+    expect(eventMaxAgeHours("pix_gerado_nao_pago", {})).toBeNull();
+  });
+
+  it("max_event_age_hours overrides; 0 disables; invalid keeps the default", () => {
+    expect(eventMaxAgeHours("saque_pago", { max_event_age_hours: 6 })).toBe(6);
+    expect(eventMaxAgeHours("saque_pago", { max_event_age_hours: 0 })).toBeNull();
+    expect(eventMaxAgeHours("saque_pago", { max_event_age_hours: "bad" })).toBe(24);
+  });
+
+  it("eventYoungEnough compares the event time against the max age", () => {
+    const now = Date.parse("2026-10-29T12:00:00.000Z");
+    const hoursAgo = (h: number) => now - h * 3600_000;
+    expect(eventYoungEnough("cadastrados_sem_deposito", {}, hoursAgo(167), now)).toBe(true);
+    expect(eventYoungEnough("cadastrados_sem_deposito", {}, hoursAgo(169), now)).toBe(false);
+    expect(eventYoungEnough("inactivity", {}, hoursAgo(10_000), now)).toBe(true);
+    expect(eventYoungEnough("cadastrados_sem_deposito", {}, Number.NaN, now)).toBe(false);
   });
 });
 

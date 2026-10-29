@@ -68,6 +68,7 @@ import {
   ProviderAccountUnavailableError,
   resolveSmsAccount,
   type ShortBrasilAccount,
+  type SmsAccount,
 } from "./provider-accounts.server";
 
 /** Items per HTTP request. The provider accepts 5000; 500 limits the blast radius. */
@@ -146,11 +147,14 @@ function groupBy<T>(items: T[], keyOf: (item: T) => string): Map<string, T[]> {
   return groups;
 }
 
-/** Short Brasil bulk needs the legacy usuario/chave; the Bearer API stays on the single path. */
+/**
+ * Short Brasil bulk needs the legacy usuario/chave; the Bearer API and every
+ * Infobip account stay on the single path (one request per recipient).
+ */
 export function smsBulkTransport(
-  account: ShortBrasilAccount = envShortBrasilAccount(),
+  account: SmsAccount = envShortBrasilAccount(),
 ): "short-brasil-bulk" | "single" | "misconfigured" {
-  if (account.shortcodeToken) return "single";
+  if (account.provider === "infobip" || account.shortcodeToken) return "single";
   return account.usuario && account.chave ? "short-brasil-bulk" : "misconfigured";
 }
 
@@ -654,7 +658,7 @@ export async function sendSmsBatch(items: SmsBatchItem[]): Promise<SmsBatchResul
   // Provedores por casa: cada lote sai por UMA conta. Itens de casas com
   // contas diferentes viram um lote por conta; a casa cuja conta está
   // indisponível falha como misconfigured (sem fallback para a conta padrão).
-  const accountOf = new Map<string, ShortBrasilAccount | { unavailable: string }>();
+  const accountOf = new Map<string, SmsAccount | { unavailable: string }>();
   for (const tenantId of new Set(items.map((i) => i.tenantId))) {
     try {
       accountOf.set(tenantId, await resolveSmsAccount(tenantId));
@@ -692,7 +696,7 @@ export async function sendSmsBatch(items: SmsBatchItem[]): Promise<SmsBatchResul
     }
     return result(lotes, httpCalls);
   }
-  const account = accountOf.get(items[0].tenantId) as ShortBrasilAccount;
+  const account = accountOf.get(items[0].tenantId) as SmsAccount;
 
   const transport = smsBulkTransport(account);
   if (transport === "misconfigured") {
@@ -741,6 +745,8 @@ export async function sendSmsBatch(items: SmsBatchItem[]): Promise<SmsBatchResul
     );
     return result([], 0);
   }
+  // smsBulkTransport only picks the bulk path for a Short Brasil account.
+  if (account.provider !== "short_brasil") throw new Error("SMS bulk sem conta Short Brasil");
 
   // 0. Tenant status (throws -> nothing done).
   for (const tenantId of new Set(items.map((i) => i.tenantId))) {

@@ -176,8 +176,13 @@ describe("resolveChannelAccount", () => {
       ProviderAccountUnavailableError,
     );
 
-    // Infobip SMS is not supported yet (Fase 4).
-    await expect(resolveSmsAccount(OTHER_TENANT)).rejects.toThrow(/ainda não é suportado/);
+    // Fase 4: an Infobip account also sends SMS.
+    expect(await resolveSmsAccount(OTHER_TENANT)).toMatchObject({
+      id: OWN_INFOBIP,
+      provider: "infobip",
+      apiKey: "own-key",
+      smsFrom: "",
+    });
 
     __resetProviderAccountsCacheForTests();
     state.tables.provider_accounts = [await ownInfobipAccount({ channels: ["email"] })];
