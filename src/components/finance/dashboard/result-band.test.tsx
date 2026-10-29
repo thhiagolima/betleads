@@ -38,7 +38,8 @@ describe("ResultBand", () => {
     expect(profit).toContain("Lucro líquido");
     expect(profit).toContain("▲ 15,0%");
     expect(profit).toContain("text-emerald-400");
-    expect(profit).toContain("text-[40px]");
+    expect(profit).toContain("xl:text-[40px]");
+    expect(profit).toContain("whitespace-nowrap");
     expect(profit).toContain("bg-emerald-500/");
 
     const margin = card(html, "margin");
@@ -49,7 +50,8 @@ describe("ResultBand", () => {
     const ads = card(html, "adSpend");
     expect(ads).toContain("Anúncios");
     expect(ads).toContain("R$ 1.000,00");
-    expect(ads).toContain("text-[30px]");
+    expect(ads).toContain("text-[22px]");
+    expect(ads).toContain("xl:text-[30px]");
     expect(html).not.toContain("n.a.");
   });
 
@@ -64,12 +66,15 @@ describe("ResultBand", () => {
       />,
     );
 
-    expect(card(html, "roi")).toContain("mês anterior: n.a.");
+    expect(card(html, "roi")).toContain("mês anterior: —");
+    // The previous period has data but no comparable profit: no fallback text.
+    expect(card(html, "cashResult")).not.toContain("Sem período anterior para comparar");
     expect(card(html, "adSpend")).toContain("▲ 20,0%");
     expect(card(html, "adSpend")).toContain("text-rose-400");
     expect(card(html, "cashResult")).toContain("Lucro líquido (3 casas)");
     expect(card(html, "cashResult")).toContain("bg-rose-500/");
-    expect(html).toContain("lg:grid-cols-[1.6fr_1fr_1fr_1fr]");
+    expect(html).toContain("xl:grid-cols-[1.6fr_1fr_1fr_1fr]");
+    expect(card(html, "cashResult")).toContain("sm:col-span-2");
   });
 
   it("hides variations without a previous period and gives the reasons", () => {
@@ -85,7 +90,7 @@ describe("ResultBand", () => {
     expect(html).not.toContain("n.a.");
     expect(html).not.toContain("▲");
     expect(html).not.toContain("▼");
-    expect(card(html, "cashResult")).toContain("Sem mês anterior para comparar");
+    expect(card(html, "cashResult")).toContain("Sem período anterior para comparar");
     const roi = card(html, "roi");
     expect(roi).toContain("—");
     expect(roi).toContain("Sem anúncios no período");

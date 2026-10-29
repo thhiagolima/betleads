@@ -35,7 +35,7 @@ export function periodHasData(period: PeriodSummary): boolean {
     period.registrations,
     period.ftds,
     period.cashResult,
-  ].some((value) => value !== 0);
+  ].some((value) => value !== null && value !== 0);
 }
 
 /**
@@ -70,17 +70,40 @@ export function formatMultiple(value: number): string {
 export function pendingTitle(dates: string[]): string {
   const months = [...new Set([...dates].sort().map((date) => date.slice(0, 7)))].map(monthName);
   const count = dates.length === 1 ? "1 dia" : `${dates.length} dias`;
-  return `${count} de ${months.join(" e ")} sem anúncios ou GGR lançados.`;
+  const list =
+    months.length > 1
+      ? `${months.slice(0, -1).join(", ")} e ${months[months.length - 1]}`
+      : months[0];
+  return `${count} de ${list} sem anúncios ou GGR lançados.`;
 }
 
 const ddmm = (date: string) => `${date.slice(8, 10)}/${date.slice(5, 7)}`;
 
-/** "outubro de 2026" for a window from a month's first day; dates otherwise. */
-export function periodLabel(range: DateRange): string {
-  if (range.from.endsWith("-01") && range.from.slice(0, 7) === range.to.slice(0, 7)) {
+/** Local "YYYY-MM-DD" of a date. */
+function isoDay(date: Date) {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+/** Last day of the month of a "YYYY-MM-DD". */
+function monthEnd(date: string) {
+  const last = new Date(Date.UTC(Number(date.slice(0, 4)), Number(date.slice(5, 7)), 0));
+  return last.toISOString().slice(0, 10);
+}
+
+/**
+ * "outubro de 2026" for a window from a month's first day to its end (or to
+ * today, the month in progress); one day is its date; anything else, dates.
+ */
+export function periodLabel(range: DateRange, today: string = isoDay(new Date())): string {
+  if (range.from === range.to) return `${ddmm(range.from)}/${range.from.slice(0, 4)}`;
+  if (
+    range.from.endsWith("-01") &&
+    range.from.slice(0, 7) === range.to.slice(0, 7) &&
+    (range.to === monthEnd(range.from) || range.to === today)
+  ) {
     return `${monthName(range.from)} de ${range.from.slice(0, 4)}`;
   }
-  if (range.from === range.to) return `${ddmm(range.from)}/${range.from.slice(0, 4)}`;
   return `${ddmm(range.from)} a ${ddmm(range.to)}/${range.to.slice(0, 4)}`;
 }
 

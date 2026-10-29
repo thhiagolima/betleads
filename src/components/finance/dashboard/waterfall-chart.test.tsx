@@ -71,6 +71,20 @@ describe("waterfallBars", () => {
     expect(waterfallBars(positive)[1]).toMatchObject({ bottomPct: 0, heightPct: 25 });
   });
 
+  it("an all-negative waterfall puts zero at the top and every label below", () => {
+    const negative: WaterfallStep[] = [
+      { key: "ad_spend", label: "Anúncios", kind: "down", start: 0, end: -300 },
+      { key: "sends", label: "Envios", kind: "down", start: -300, end: -400 },
+      { key: "profit", label: "Lucro líquido", kind: "total", start: -400, end: -400 },
+    ];
+    expect(waterfallZeroPct(negative)).toBe(100);
+    const bars = waterfallBars(negative);
+    expect(bars.every((bar) => bar.labelBelow)).toBe(true);
+    expect(bars[2].tone).toBe("negative");
+    expect(bars[0]).toMatchObject({ bottomPct: 25, heightPct: 75 });
+    expect(bars[2]).toMatchObject({ bottomPct: 0, heightPct: 100 });
+  });
+
   it("colors entradas blue-gray, saídas red, subtotal slate and the total by sign", () => {
     const tones = Object.fromEntries(waterfallBars(steps).map((bar) => [bar.key, bar.tone]));
     expect(tones).toEqual({
@@ -105,6 +119,9 @@ describe("WaterfallChart", () => {
     expect(html).toContain("Passos sem valor no período não aparecem.");
     expect(html).toContain("border-dashed");
     expect(html).toContain("overflow-x-auto");
+    expect(html).toContain("w-max min-w-full");
+    expect(html).toContain("minmax(88px, 1fr)");
+    expect(html).toContain('aria-label="Saques: -R$ 400,00"');
     expect(html).toContain("-R$ 400");
   });
 

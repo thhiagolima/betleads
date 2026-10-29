@@ -38,6 +38,10 @@ describe("periodHasData", () => {
     expect(periodHasData(summary({ adSpend: 5 }))).toBe(true);
     expect(periodHasData(summary({ registrations: 1 }))).toBe(true);
     expect(periodHasData(summary({ cashResult: -3 }))).toBe(true);
+    // A null field counts as no data.
+    expect(periodHasData(summary({ ggr: null as unknown as number, depositAmount: 0 }))).toBe(
+      false,
+    );
   });
 });
 
@@ -84,15 +88,25 @@ describe("pendingTitle", () => {
     expect(pendingTitle(["2026-09-30", "2026-10-01"])).toBe(
       "2 dias de setembro e outubro sem anúncios ou GGR lançados.",
     );
+    expect(pendingTitle(["2026-07-30", "2026-08-01", "2026-09-02"])).toBe(
+      "3 dias de julho, agosto e setembro sem anúncios ou GGR lançados.",
+    );
   });
 });
 
 describe("periodLabel", () => {
   it("names a month window by its month and other windows by their dates", () => {
-    expect(periodLabel({ from: "2026-10-01", to: "2026-10-31" })).toBe("outubro de 2026");
-    expect(periodLabel({ from: "2026-10-01", to: "2026-10-28" })).toBe("outubro de 2026");
-    expect(periodLabel({ from: "2026-10-22", to: "2026-10-28" })).toBe("22/10 a 28/10/2026");
-    expect(periodLabel({ from: "2026-10-28", to: "2026-10-28" })).toBe("28/10/2026");
+    const today = "2026-10-29";
+    expect(periodLabel({ from: "2026-10-01", to: "2026-10-31" }, today)).toBe("outubro de 2026");
+    expect(periodLabel({ from: "2026-09-01", to: "2026-09-30" }, today)).toBe("setembro de 2026");
+    // The current month up to today.
+    expect(periodLabel({ from: "2026-10-01", to: "2026-10-29" }, today)).toBe("outubro de 2026");
+    // Part of a month that does not reach its end nor today.
+    expect(periodLabel({ from: "2026-10-01", to: "2026-10-15" }, today)).toBe("01/10 a 15/10/2026");
+    expect(periodLabel({ from: "2026-10-22", to: "2026-10-28" }, today)).toBe("22/10 a 28/10/2026");
+    // One day is always a date, even the 1st.
+    expect(periodLabel({ from: "2026-10-28", to: "2026-10-28" }, today)).toBe("28/10/2026");
+    expect(periodLabel({ from: "2026-10-01", to: "2026-10-01" }, today)).toBe("01/10/2026");
     expect(monthName("2026-03")).toBe("março");
   });
 });

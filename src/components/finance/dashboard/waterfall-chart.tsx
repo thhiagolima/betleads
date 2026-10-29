@@ -5,7 +5,8 @@
 // (waterfallBars); the value sits above the column, or under it when the
 // column hangs below zero. Entradas are blue-gray, saídas red, the subtotal
 // slate and the total green or red by sign. On a phone the columns keep a
-// minimum width and scroll sideways inside the card.
+// minimum width (88px) and scroll sideways inside the card; the zero line
+// and the axis span every column while scrolling.
 import { formatBRL } from "@/components/finance/format";
 import type { WaterfallStep } from "@/lib/finance/types";
 import { cn } from "@/lib/utils";
@@ -126,12 +127,12 @@ export function WaterfallChart({
   }
   const bars = waterfallBars(steps);
   const zeroPct = waterfallZeroPct(steps);
-  const columns = { gridTemplateColumns: `repeat(${bars.length}, minmax(72px, 1fr))` };
+  const columns = { gridTemplateColumns: `repeat(${bars.length}, minmax(88px, 1fr))` };
 
   return (
     <div className="space-y-4">
       <div className="overflow-x-auto">
-        <div style={{ minWidth: bars.length * 72 }}>
+        <div className="w-max min-w-full">
           <div className="relative h-[260px] border-b border-border/70 py-7">
             <div className="relative h-full">
               <div
@@ -144,6 +145,8 @@ export function WaterfallChart({
                   <div key={bar.key} className="relative h-full">
                     <div
                       data-step={bar.key}
+                      role="img"
+                      aria-label={`${bar.fullLabel}: ${formatBRL(bar.amount)}`}
                       title={`${bar.fullLabel}: ${formatBRL(bar.amount)}`}
                       className={cn("absolute inset-x-[18%] rounded-md", TONE_BAR[bar.tone])}
                       style={{
@@ -167,7 +170,10 @@ export function WaterfallChart({
               </div>
             </div>
           </div>
-          <div className="grid gap-3 pt-3 text-center text-[13px] sm:gap-[18px]" style={columns}>
+          <div
+            className="grid gap-3 pt-3 text-center text-xs sm:gap-[18px] sm:text-[13px]"
+            style={columns}
+          >
             {bars.map((bar) => (
               <span
                 key={bar.key}

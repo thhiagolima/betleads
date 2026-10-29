@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
 import { periodHasData } from "./display";
 import { hasVariation, Variation } from "./variation";
 
-export const NO_COMPARE_TEXT = "Sem mês anterior para comparar";
+export const NO_COMPARE_TEXT = "Sem período anterior para comparar";
 
 const signClass = (value: number | null) =>
   value === null || value === 0 ? undefined : value < 0 ? "text-rose-400" : "text-emerald-400";
@@ -36,7 +36,7 @@ function ResultCard({
   term?: TermKey;
   value: string;
   valueClassName?: string;
-  meta: ReactNode;
+  meta?: ReactNode;
   main?: boolean;
   tint?: "positive" | "negative";
 }) {
@@ -45,7 +45,7 @@ function ResultCard({
       data-result={id}
       className={cn(
         "min-w-0 rounded-[14px] border border-border bg-card/80 px-5 py-[18px]",
-        main && "col-span-2 lg:col-span-1",
+        main && "sm:col-span-2 xl:col-span-1",
         tint === "negative" && "border-rose-500/30 bg-rose-500/[0.06]",
         tint === "positive" && "border-emerald-500/30 bg-emerald-500/[0.06]",
       )}
@@ -56,14 +56,14 @@ function ResultCard({
       </p>
       <p
         className={cn(
-          "mt-2.5 font-bold leading-tight tracking-tight tabular-nums",
-          main ? "text-[32px] sm:text-[40px]" : "text-[26px] sm:text-[30px]",
+          "mt-2.5 whitespace-nowrap font-bold leading-tight tracking-tight tabular-nums",
+          main ? "text-[30px] xl:text-[40px]" : "text-[22px] xl:text-[30px]",
           valueClassName,
         )}
       >
         {value}
       </p>
-      <div className="mt-2 text-xs text-muted-foreground/80">{meta}</div>
+      {meta && <div className="mt-2 text-xs text-muted-foreground/80">{meta}</div>}
     </div>
   );
 }
@@ -94,7 +94,7 @@ export function ResultBand({
       previous={previous.cashResult}
       hasPrevious={hasPrevious}
     />
-  ) : (
+  ) : hasPrevious ? null : (
     NO_COMPARE_TEXT
   );
 
@@ -107,12 +107,12 @@ export function ResultBand({
     />
   ) : current.adSpend === 0 && current.pendingDays > 0 ? (
     "Nenhum dia lançado"
-  ) : (
+  ) : hasPrevious ? null : (
     NO_COMPARE_TEXT
   );
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-[1.6fr_1fr_1fr_1fr]">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-[1.6fr_1fr_1fr_1fr]">
       <ResultCard
         id="cashResult"
         main
@@ -142,7 +142,7 @@ export function ResultBand({
         meta={
           current.roi === null
             ? "Sem anúncios no período"
-            : `mês anterior: ${formatRatio(roiReference.roi)}`
+            : `mês anterior: ${roiReference.roi === null ? "—" : formatRatio(roiReference.roi)}`
         }
       />
       <ResultCard id="adSpend" label="Anúncios" value={formatBRL(current.adSpend)} meta={adsMeta} />
