@@ -12,6 +12,7 @@ import {
 } from "@/components/finance/format";
 import { FINANCE_TERMS, type TermKey } from "@/components/finance/definitions";
 import { TermTooltip } from "@/components/finance/term-tooltip";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { pctChange, ppChange } from "@/lib/finance/calc";
 import type { PeriodSummary } from "@/lib/finance/types";
 import { cn } from "@/lib/utils";
@@ -151,23 +152,28 @@ export function KpiCards({
   };
 
   return (
-    <div className="space-y-2">
-      <div data-kpi-row="highlight" className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-        {KPIS.filter((kpi) => kpi.highlight).map(renderCard)}
+    <TooltipProvider delayDuration={150}>
+      <div className="space-y-2">
+        <div data-kpi-row="highlight" className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          {KPIS.filter((kpi) => kpi.highlight).map(renderCard)}
+        </div>
+        <div
+          data-kpi-row="support"
+          className="grid grid-cols-1 gap-2 sm:grid-cols-3 lg:grid-cols-5"
+        >
+          {KPIS.filter((kpi) => !kpi.highlight).map(renderCard)}
+        </div>
+        {current.betleadsFee === null && (
+          <p data-note="no-fee" className="text-xs text-muted-foreground">
+            {NO_FEE_NOTE}
+          </p>
+        )}
+        {current.ggrEstimated && (
+          <p data-note="ggr-estimated" className="text-xs text-muted-foreground">
+            {GGR_ESTIMATED_NOTE}
+          </p>
+        )}
       </div>
-      <div data-kpi-row="support" className="grid grid-cols-1 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-        {KPIS.filter((kpi) => !kpi.highlight).map(renderCard)}
-      </div>
-      {current.betleadsFee === null && (
-        <p data-note="no-fee" className="text-xs text-muted-foreground">
-          {NO_FEE_NOTE}
-        </p>
-      )}
-      {current.ggrEstimated && (
-        <p data-note="ggr-estimated" className="text-xs text-muted-foreground">
-          {GGR_ESTIMATED_NOTE}
-        </p>
-      )}
-    </div>
+    </TooltipProvider>
   );
 }

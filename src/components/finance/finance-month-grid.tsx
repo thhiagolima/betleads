@@ -401,7 +401,7 @@ export function FinanceMonthView({
       <div className="grid gap-2 rounded-lg border border-border/40 bg-background/30 p-4 text-sm sm:grid-cols-2 lg:grid-cols-5">
         <div>
           <p className="text-xs uppercase tracking-wide text-muted-foreground">
-            Taxa de movimentação
+            {FINANCE_TERMS.movementFee.label}
           </p>
           <p className="font-medium">{formatBRL(summary.movementFee)}</p>
         </div>

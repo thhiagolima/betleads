@@ -186,4 +186,38 @@ describe("GroupScoreboard one name per number", () => {
     expect(html).toContain("Lucro líquido");
     expect(html).not.toContain("Resultado");
   });
+
+  it("labels the net column with the full FINANCE_TERMS label, with a title and a tooltip", () => {
+    const html = renderToStaticMarkup(
+      <GroupScoreboard
+        rows={[{ id: "a", nome: "Casa A", current: summary(), previous: summary(), goals: [] }]}
+      />,
+    );
+    expect(html).toContain("Net (depósitos − saques)");
+    expect(html).toContain('title="Net (depósitos − saques)"');
+    // One "Como calculamos" tooltip trigger per header that maps to a term
+    // (net, cashResult, roi here; registrations/ggr only show with "mais
+    // colunas"): never a <button> nested inside the sort <button>.
+    expect(html.match(/aria-label="Como calculamos"/g)).toHaveLength(3);
+    expect(html).not.toContain("<button><button");
+  });
+
+  it("labels the ROI column with the full FINANCE_TERMS label and a tooltip", () => {
+    const html = renderToStaticMarkup(
+      <GroupScoreboard
+        rows={[{ id: "a", nome: "Casa A", current: summary(), previous: summary(), goals: [] }]}
+      />,
+    );
+    expect(html).toContain("Retorno (ROI)");
+  });
+
+  it("shows the GGR column's tooltip under mais colunas", () => {
+    const html = renderToStaticMarkup(
+      <GroupScoreboard
+        rows={[{ id: "a", nome: "Casa A", current: summary(), previous: summary(), goals: [] }]}
+        defaultMoreColumns
+      />,
+    );
+    expect(html.match(/aria-label="Como calculamos"/g)).toHaveLength(4);
+  });
 });
